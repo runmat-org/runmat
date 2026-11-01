@@ -72,7 +72,7 @@ pub(crate) async fn publish_locked(
 }
 
 fn validate_budget(request: &WorkspacePublicationRequest) -> io::Result<()> {
-    if !cfg!(unix) {
+    if !cfg!(any(unix, windows)) {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "native durable workspace publication requires directory synchronization",

@@ -6,7 +6,10 @@ use std::{
 };
 
 pub(crate) fn read(path: &Path, maximum: u64) -> io::Result<Vec<u8>> {
-    let mut input = fs::File::open(path)?;
+    read_opened(fs::File::open(path)?, maximum)
+}
+
+pub(crate) fn read_opened(mut input: fs::File, maximum: u64) -> io::Result<Vec<u8>> {
     let metadata = input.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(

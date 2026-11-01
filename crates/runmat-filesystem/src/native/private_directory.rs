@@ -1,6 +1,19 @@
 //! Consumer-requested private directory creation with explicit ancestor retention.
-use std::{fs, io, path::Path};
+#[cfg(not(windows))]
+use std::fs;
+use std::{io, path::Path};
 
+#[cfg(windows)]
+pub(super) fn create_durable(path: &Path) -> io::Result<()> {
+    let path = std::path::absolute(path)?;
+    super::private_windows::directory::open(
+        &path,
+        super::private_windows::directory::Mode::CreateMissingDurable,
+    )?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
 pub(super) fn create_durable(path: &Path) -> io::Result<()> {
     let mut missing = Vec::new();
     let mut ancestor = path;
@@ -37,13 +50,14 @@ pub(super) fn create_durable(path: &Path) -> io::Result<()> {
             Err(error) => return Err(error),
         }
         make_private(&directory)?;
-        fs::File::open(&directory)?.sync_all()?;
-        fs::File::open(directory.parent().expect("validated ancestor"))?.sync_all()?;
+        super::directory_sync::sync(&directory)?;
+        super::directory_sync::sync(directory.parent().expect("validated ancestor"))?;
     }
     make_private(path)?;
-    fs::File::open(path)?.sync_all()
+    super::directory_sync::sync(path)
 }
 
+#[cfg(not(windows))]
 fn make_private(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {

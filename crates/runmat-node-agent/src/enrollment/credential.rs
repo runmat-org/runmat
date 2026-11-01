@@ -69,8 +69,11 @@ impl CredentialStore {
             .parent()
             .ok_or_else(|| AgentError::UnsafeCredential("missing parent".to_string()))?;
         #[cfg(windows)]
-        let _directory =
-            runmat_filesystem::NativeFsProvider.create_owner_private_directory(parent)?;
+        let _directory = {
+            let provider = runmat_filesystem::NativeFsProvider;
+            provider.create_private_directory_durable(parent)?;
+            provider.open_owner_private_directory(parent)?
+        };
         #[cfg(windows)]
         match std::fs::symlink_metadata(&self.path) {
             Ok(_) => verify_private_file(&self.path)?,
@@ -186,13 +189,7 @@ fn verify_private_file(path: &Path) -> AgentResult<()> {
     }
 }
 
-#[cfg(unix)]
 fn sync_directory(path: &Path) -> AgentResult<()> {
-    std::fs::File::open(path)?.sync_all()?;
-    Ok(())
-}
-
-#[cfg(windows)]
-fn sync_directory(_: &Path) -> AgentResult<()> {
+    runmat_filesystem::NativeFsProvider.synchronize_directory(path)?;
     Ok(())
 }

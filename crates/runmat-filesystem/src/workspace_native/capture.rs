@@ -105,15 +105,45 @@ pub(super) fn revision(
     files: &[WorkspaceFile],
 ) -> io::Result<WorkspaceRevision> {
     let mut hash = Sha256::new();
-    hash.update(b"runmat-workspace-native-v1");
-    hash.update(serde_json::to_vec(&(&excluded, directories)).map_err(io::Error::other)?);
+    // Revisions describe the authorized tree, not the host spelling of path
+    // separators. Length-delimited components conserve literal filename bytes
+    // without replacing characters or allocating a second serialized inventory.
+    hash.update(b"runmat-workspace-native-v2");
+    hash.update((excluded.len() as u64).to_le_bytes());
+    for path in excluded {
+        hash_path(&mut hash, path)?;
+    }
+    hash.update((directories.len() as u64).to_le_bytes());
+    for (path, readonly) in directories {
+        hash_path(&mut hash, path)?;
+        hash.update([u8::from(*readonly)]);
+    }
+    hash.update((files.len() as u64).to_le_bytes());
     for file in files {
-        let value = serde_json::to_vec(&(&file.path, &file.version, file.readonly))
-            .map_err(io::Error::other)?;
-        hash.update((value.len() as u64).to_le_bytes());
-        hash.update(value);
+        hash_path(&mut hash, &file.path)?;
+        hash.update((file.version.len() as u64).to_le_bytes());
+        hash.update(file.version.as_bytes());
+        hash.update([u8::from(file.readonly)]);
     }
     Ok(WorkspaceRevision(hash.finalize().into()))
+}
+
+fn hash_path(hash: &mut Sha256, path: &Path) -> io::Result<()> {
+    let components = path.components();
+    hash.update((components.clone().count() as u64).to_le_bytes());
+    for component in components {
+        let Component::Normal(name) = component else {
+            return Err(invalid(
+                "workspace revision path is not confined and relative",
+            ));
+        };
+        let name = name
+            .to_str()
+            .ok_or_else(|| invalid("workspace revision paths must be UTF-8"))?;
+        hash.update((name.len() as u64).to_le_bytes());
+        hash.update(name.as_bytes());
+    }
+    Ok(())
 }
 
 pub(super) fn hex(bytes: &[u8]) -> String {

@@ -59,7 +59,11 @@ fn inspection_bounds_directory_metadata_even_without_file_contents() {
         fs::create_dir(root.path().join(format!("directory{ordinal}"))).unwrap();
     }
     assert!(inspection::inspect_admitted(root.path(), request(0, 100), 128).is_err());
-    let plan = inspection::inspect_admitted(root.path(), request(0, 100), 4096).unwrap();
+    // Path storage/capacity differs across hosts. Use the structural admission
+    // quote rather than assuming a POSIX-sized directory inventory fits 4KiB.
+    let inventory = inspection::inspect(root.path(), request(0, 100)).unwrap();
+    let required = super::super::admission::capture(&inventory, u64::MAX).unwrap();
+    let plan = inspection::inspect_admitted(root.path(), request(0, 100), required).unwrap();
     assert_eq!(plan.directories.len(), 25);
     assert!(plan.files.is_empty());
 }

@@ -17,7 +17,7 @@ pub(crate) fn transition_execution(
     work: &ExecutionWorkId,
     command: ExecutionLeaseCommand,
 ) -> io::Result<ExecutionLeaseOutcome> {
-    if !cfg!(unix) {
+    if !cfg!(any(unix, windows)) {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "native durable execution authority requires directory synchronization",

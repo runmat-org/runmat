@@ -4,7 +4,7 @@ mod admission;
 use crate::{FsProvider, NativeFsProvider, SandboxFsProvider};
 use std::{sync::mpsc, time::Duration};
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn immutable_evidence_synchronizes_relative_and_absolute_workspace_roots() {
     // Keep process-wide cwd unchanged: both names identify this owned directory.
@@ -83,6 +83,35 @@ fn a_replaced_root_cannot_redirect_an_existing_scope() {
         io::ErrorKind::PermissionDenied
     );
     assert!(!root.join("new-record").exists());
+    assert_eq!(std::fs::read(original.join("record")).unwrap(), b"original");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_scope_retains_the_mount_until_physical_retirement() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("root");
+    let original = parent.path().join("original-root");
+    std::fs::create_dir(&root).unwrap();
+    let scope = NativeFsProvider
+        .workspace_access(&root, true, 1 << 20)
+        .unwrap();
+    scope
+        .atomic_create_new(Path::new("record"), b"original", 1 << 20)
+        .unwrap();
+    // Windows retains the namespace through its opened directory/journal
+    // handles; unlike Unix, replacement is refused before it can redirect IO.
+    assert!(std::fs::rename(&root, &original).is_err());
+    assert!(!original.exists());
+    assert_eq!(
+        scope.read(Path::new("record"), 1 << 20).unwrap(),
+        b"original"
+    );
+    drop(scope);
+    // Prove that the refusal was tied to the live owner, not a permanently
+    // inaccessible fixture. Retirement releases the physical namespace.
+    std::fs::rename(&root, &original).unwrap();
+    assert!(!root.exists());
     assert_eq!(std::fs::read(original.join("record")).unwrap(), b"original");
 }
 

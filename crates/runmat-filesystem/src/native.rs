@@ -18,9 +18,13 @@ use url::Url;
 
 mod atomic_create;
 mod atomic_replace;
+pub(crate) mod directory_sync;
 mod private_directory;
+pub(crate) mod rename;
 #[cfg(windows)]
 mod private_windows;
+#[cfg(windows)]
+pub(crate) mod windows_identity;
 #[path = "native/staged.rs"]
 pub(crate) mod staged;
 #[path = "native/mapped.rs"]
@@ -30,6 +34,13 @@ mod mapped;
 pub struct NativeFsProvider;
 
 impl NativeFsProvider {
+    /// Flush directory-entry changes without creating the directory or changing
+    /// its permissions. Unsupported platforms/filesystems return an error;
+    /// callers must not infer durable publication from atomic visibility alone.
+    pub fn synchronize_directory(&self, path: &Path) -> io::Result<()> {
+        directory_sync::sync(path)
+    }
+
     /// Windows owner/SYSTEM file protection applied atomically at CREATE_NEW.
     /// This does not authenticate ownership of the containing namespace.
     #[cfg(windows)]
@@ -97,9 +108,9 @@ impl NativeFsProvider {
     }
 
     /// Publish a complete private native file without replacing an existing winner.
-    /// Unix staging files are mode0600 before any bytes are written or made visible;
-    /// other platforms inherit the caller's private directory permissions. Existing
-    /// content reads are bounded and Unix files with broader permissions reject.
+    /// Unix staging files are mode0600; Windows files receive an owner/SYSTEM
+    /// ACL before any bytes are written or made visible. Existing content is
+    /// read from the same opened handle whose private permissions are validated.
     pub fn atomic_create_private_new(
         &self,
         path: &Path,
@@ -294,7 +305,7 @@ impl FsProvider for NativeFsProvider {
     }
 
     async fn rename_replace(&self, from: &Path, to: &Path) -> io::Result<()> {
-        fs::rename(from, to)
+        rename::replace(from, to)
     }
 
     async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {

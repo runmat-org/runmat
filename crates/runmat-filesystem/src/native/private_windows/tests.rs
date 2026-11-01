@@ -59,6 +59,17 @@ fn creation_is_owner_private_and_world_readable_keys_are_rejected() {
     let state = directory.path().join("state");
     let guard = directory::open(&state, directory::Mode::CreateMissing).unwrap();
     verify(&guard, PrivateObject::Directory).unwrap();
+    let nested = state.join("jobs/attempt");
+    crate::NativeFsProvider
+        .create_private_directory_durable(&nested)
+        .unwrap();
+    crate::NativeFsProvider
+        .create_private_directory_durable(&nested)
+        .unwrap();
+    for path in [state.join("jobs"), nested] {
+        let handle = directory::open(&path, directory::Mode::Existing).unwrap();
+        verify(&handle, PrivateObject::Directory).unwrap();
+    }
     let secret_path = state.join("empty-credential-fixture");
     let file = create_file_new(&secret_path).unwrap();
     verify_file(&file).unwrap();
@@ -82,4 +93,31 @@ fn creation_is_owner_private_and_world_readable_keys_are_rejected() {
         0
     );
     assert!(directory::open(&state, directory::Mode::Existing).is_err());
+    assert!(crate::NativeFsProvider
+        .create_private_directory_durable(&state)
+        .is_err());
+}
+
+#[test]
+fn private_publication_conserves_the_validated_winner_and_its_acl() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("state/jobs/credential");
+    let provider = crate::NativeFsProvider;
+    assert!(matches!(
+        provider
+            .atomic_create_private_new(&path, b"original", 8)
+            .unwrap(),
+        crate::AtomicCreateResult::Published {
+            durability: crate::PublicationDurability::Durable
+        }
+    ));
+    verify_file(&open_file(&path).unwrap()).unwrap();
+    assert!(matches!(
+        provider.atomic_create_private_new(&path, b"replacement", 8).unwrap(),
+        crate::AtomicCreateResult::Existing(bytes) if bytes == b"original"
+    ));
+    assert!(provider
+        .atomic_create_private_new(&path, b"replacement", 7)
+        .is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"original");
 }

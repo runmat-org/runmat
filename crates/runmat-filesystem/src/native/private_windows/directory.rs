@@ -10,10 +10,19 @@ use windows_sys::Win32::Storage::FileSystem::{
 pub(in crate::native) enum Mode {
     Existing,
     CreateMissing,
+    CreateMissingDurable,
 }
 
 pub(in crate::native) fn open(path: &Path, mode: Mode) -> io::Result<File> {
     check_chain(path, mode)?;
+    let file = open_leaf(path)?;
+    if matches!(mode, Mode::CreateMissingDurable) {
+        crate::native::directory_sync::sync(path)?;
+    }
+    Ok(file)
+}
+
+fn open_leaf(path: &Path) -> io::Result<File> {
     let encoded = wide(path.as_os_str())?;
     // SAFETY: valid path. Keep a leaf handle without delete sharing through
     // credential load/publication. This is deliberately not an ancestry lock.
@@ -62,7 +71,8 @@ pub(super) fn check_chain(path: &Path, mode: Mode) -> io::Result<()> {
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) => check_observed_directory(&metadata)?,
             Err(error)
-                if matches!(mode, Mode::CreateMissing) && error.kind() == ErrorKind::NotFound =>
+                if matches!(mode, Mode::CreateMissing | Mode::CreateMissingDurable)
+                    && error.kind() == ErrorKind::NotFound =>
             {
                 let descriptor = descriptor(PrivateObject::Directory)?;
                 let attributes = attributes(&descriptor);
@@ -76,6 +86,16 @@ pub(super) fn check_chain(path: &Path, mode: Mode) -> io::Result<()> {
                     }
                 }
                 check_observed_directory(&std::fs::symlink_metadata(&current)?)?;
+                // Validate a race winner too; never repair a foreign ACL.
+                let _guard = open_leaf(&current)?;
+                if matches!(mode, Mode::CreateMissingDurable) {
+                    crate::native::directory_sync::sync(&current)?;
+                    crate::native::directory_sync::sync(
+                        current
+                            .parent()
+                            .ok_or_else(|| invalid("directory needs a parent"))?,
+                    )?;
+                }
             }
             Err(error) => return Err(error),
         }

@@ -482,7 +482,12 @@ impl FsProvider for SandboxFsProvider {
     }
 
     async fn rename_replace(&self, from: &Path, to: &Path) -> io::Result<()> {
-        fs::rename(self.resolve(from), self.resolve(to))
+        let _guard = crate::workspace_native::guard(&self.root, true)?;
+        let source = self.resolve(from);
+        let destination = self.resolve(to);
+        crate::workspace_native::protected(&self.root, &source)?;
+        crate::workspace_native::protected(&self.root, &destination)?;
+        crate::native::rename::replace(&source, &destination)
     }
 
     async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {

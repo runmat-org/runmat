@@ -75,7 +75,7 @@ pub(crate) struct NativeAccess {
     writable: bool,
     maximum_resident_bytes: u64,
     present: bool,
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     root_handle: Option<std::fs::File>,
     operation: std::sync::Mutex<()>,
     _guard: Option<crate::workspace_native::Guard>,
@@ -118,6 +118,15 @@ impl NativeAccess {
         } else {
             None
         };
+        #[cfg(windows)]
+        let root_handle = if present {
+            Some(crate::native::windows_identity::open(
+                &root,
+                crate::native::windows_identity::Kind::Directory,
+            )?)
+        } else {
+            None
+        };
         let guard = if present {
             crate::workspace_native::guard_admitted(&root, true, maximum_resident_bytes)?
         } else {
@@ -128,7 +137,7 @@ impl NativeAccess {
             writable,
             maximum_resident_bytes,
             present,
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             root_handle,
             operation: std::sync::Mutex::new(()),
             _guard: guard,
@@ -168,6 +177,21 @@ impl NativeAccess {
                 .ok_or_else(|| io::Error::other("workspace root handle absent"))?
                 .metadata()?;
             if (admitted.dev(), admitted.ino()) != (metadata.dev(), metadata.ino()) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "workspace root identity changed",
+                ));
+            }
+        }
+        #[cfg(windows)]
+        {
+            use crate::native::windows_identity::{self, Kind};
+            let admitted = self
+                .root_handle
+                .as_ref()
+                .ok_or_else(|| io::Error::other("workspace root handle absent"))?;
+            let current = windows_identity::open(&self.root, Kind::Directory)?;
+            if !windows_identity::same(admitted, &current)? {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     "workspace root identity changed",
@@ -284,7 +308,7 @@ impl WorkspaceAccess for NativeAccess {
         self.access(true, || std::fs::remove_dir(self.path(path, true)?))
     }
     fn immutable_batch(&self) -> io::Result<Box<dyn ImmutableBatch + '_>> {
-        if !cfg!(unix) {
+        if !cfg!(any(unix, windows)) {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "durable immutable workspace batches require directory synchronization",
@@ -293,7 +317,7 @@ impl WorkspaceAccess for NativeAccess {
         Ok(Box::new(immutable_batch::NativeImmutableBatch::new(self)))
     }
     fn synchronize_immutable(&self, relative: &Path) -> io::Result<()> {
-        if !cfg!(unix) {
+        if !cfg!(any(unix, windows)) {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "durable immutable workspace synchronization requires directory synchronization",
@@ -308,7 +332,11 @@ impl WorkspaceAccess for NativeAccess {
                     "immutable synchronization requires a regular file",
                 ));
             }
-            std::fs::File::open(&path)?.sync_all()?;
+            #[cfg(windows)]
+            let file = std::fs::OpenOptions::new().write(true).open(&path)?;
+            #[cfg(not(windows))]
+            let file = std::fs::File::open(&path)?;
+            file.sync_all()?;
             let directory = path.parent().ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "immutable file has no parent")
             })?;

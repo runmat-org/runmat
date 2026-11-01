@@ -12,9 +12,11 @@ fn ownership_is_exclusive_and_drop_reuses_the_original_file() {
     drop(first);
     assert!(path.exists());
     let second = ExclusiveFileLock::try_acquire(&path).unwrap().unwrap();
-    assert_eq!(std::fs::read(&path).unwrap(), original);
     assert!(ExclusiveFileLock::try_acquire(&path).unwrap().is_none());
     drop(second);
+    // Windows byte-range locks also exclude ordinary readers. Inspect the
+    // conserved legacy bytes after releasing ownership, not through its lock.
+    assert_eq!(std::fs::read(&path).unwrap(), original);
     assert!(ExclusiveFileLock::try_acquire(&path).unwrap().is_some());
 }
 

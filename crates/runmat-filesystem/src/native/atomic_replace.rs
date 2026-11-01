@@ -3,7 +3,7 @@ use crate::{AtomicReplaceOutcome, PublicationDurability};
 use std::{fs, io, io::Write, path::Path};
 
 pub(super) fn publish(path: &Path, bytes: &[u8]) -> io::Result<AtomicReplaceOutcome> {
-    publish_with_directory_sync(path, bytes, |parent| fs::File::open(parent)?.sync_all())
+    publish_with_directory_sync(path, bytes, super::directory_sync::sync)
 }
 
 fn publish_with_directory_sync(

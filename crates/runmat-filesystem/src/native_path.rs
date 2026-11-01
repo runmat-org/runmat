@@ -111,13 +111,14 @@ pub fn capture_native_path(
     intent: NativePathIntent,
 ) -> io::Result<Option<CapturedNativePath>> {
     let (provider, cwd) = current_provider_with_current_dir()?;
+    let namespace = provider.path_namespace();
     let requested = requested.as_ref();
-    let absolute = if requested.is_absolute() {
+    let absolute = if namespace.is_absolute(requested) {
         requested.to_path_buf()
     } else {
         cwd.join(requested)
     };
-    if !absolute.is_absolute() {
+    if !namespace.is_absolute(&absolute) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "native path capture requires an absolute effective working directory",

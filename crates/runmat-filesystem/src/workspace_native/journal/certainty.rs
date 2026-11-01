@@ -28,7 +28,12 @@ impl std::error::Error for UncertainCommit {
 
 pub(in crate::workspace_native) fn confirm(directory: &Path, record: &Record) -> io::Result<()> {
     let confirmed = (|| {
-        fs::File::open(directory.join("commit.json"))?.sync_all()?;
+        // Windows FlushFileBuffers requires a writable handle. Opening the
+        // existing record for synchronization must never create or truncate it.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(directory.join("commit.json"))?
+            .sync_all()?;
         sync_journal_directories(directory)
     })();
     confirmed.map_err(|cause| {

@@ -107,6 +107,9 @@ impl ImmutableBatch for NativeImmutableBatch<'_> {
                 .map(|entry| &entry.staged)
                 .chain(&self.existing)
             {
+                #[cfg(windows)]
+                let file = fs::OpenOptions::new().write(true).open(path)?;
+                #[cfg(not(windows))]
                 let file = fs::File::open(path)?;
                 send_to_device(&file)?;
                 last = Some(file);
@@ -371,7 +374,7 @@ fn sync_exposing_directories<'a>(
             if !synced.insert(effective.to_path_buf()) {
                 break;
             }
-            fs::File::open(effective)?.sync_all()?;
+            crate::native::directory_sync::sync(effective)?;
             if Some(path) == boundary || path.as_os_str().is_empty() {
                 break;
             }

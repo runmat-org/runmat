@@ -9,14 +9,23 @@ pub(super) fn publish(
     maximum_existing_bytes: Option<u64>,
     private: bool,
 ) -> io::Result<AtomicCreateResult> {
-    #[cfg(not(unix))]
-    let _ = private;
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             "atomic publication path has no parent directory",
         )
     })?;
+    #[cfg(windows)]
+    let _directory_guard = if private {
+        Some(super::private_windows::directory::open(
+            &std::path::absolute(parent)?,
+            super::private_windows::directory::Mode::CreateMissingDurable,
+        )?)
+    } else {
+        fs::create_dir_all(parent)?;
+        None
+    };
+    #[cfg(not(windows))]
     fs::create_dir_all(parent)?;
 
     let file_name = path
@@ -30,14 +39,7 @@ pub(super) fn publish(
             std::process::id(),
             Uuid::new_v4()
         ));
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        if private {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        match options.open(&candidate) {
+        match create_staged(&candidate, private) {
             Ok(mut file) => {
                 if let Err(error) =
                     std::io::Write::write_all(&mut file, bytes).and_then(|()| file.sync_all())
@@ -61,8 +63,7 @@ pub(super) fn publish(
 
     let publication = match fs::hard_link(&staged, path) {
         Ok(()) => {
-            let durability = match fs::File::open(parent).and_then(|directory| directory.sync_all())
-            {
+            let durability = match super::directory_sync::sync(parent) {
                 Ok(()) => PublicationDurability::Durable,
                 Err(error)
                     if matches!(
@@ -90,19 +91,14 @@ pub(super) fn publish(
                     "atomic publication target is not a regular file",
                 ));
             }
-            #[cfg(unix)]
-            if private {
-                use std::os::unix::fs::PermissionsExt as _;
-                if metadata.permissions().mode() & 0o777 != 0o600 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::PermissionDenied,
-                        "private atomic publication target must be mode0600",
-                    ));
-                }
-            }
+            let mut input = open_existing(path, private)?;
             let existing = match maximum_existing_bytes {
-                Some(maximum) => crate::workspace_access::file::read(path, maximum)?,
-                None => fs::read(path)?,
+                Some(maximum) => crate::workspace_access::file::read_opened(input, maximum)?,
+                None => {
+                    let mut bytes = Vec::new();
+                    std::io::Read::read_to_end(&mut input, &mut bytes)?;
+                    bytes
+                }
             };
             Ok(AtomicCreateResult::Existing(existing))
         })(),
@@ -110,6 +106,68 @@ pub(super) fn publish(
     };
     let _ = fs::remove_file(&staged);
     publication
+}
+
+fn create_staged(path: &Path, private: bool) -> io::Result<fs::File> {
+    #[cfg(windows)]
+    if private {
+        return super::private_windows::create_file_new(path);
+    }
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    #[cfg(not(any(unix, windows)))]
+    if private {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "native private publication is unavailable on this platform",
+        ));
+    }
+    options.open(path)
+}
+
+fn open_existing(path: &Path, private: bool) -> io::Result<fs::File> {
+    #[cfg(windows)]
+    if private {
+        return super::private_windows::open_file(path);
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "atomic publication target is not a regular file",
+        ));
+    }
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o777 != 0o600 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "private atomic publication target must be mode0600",
+            ));
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    if private {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "native private publication is unavailable on this platform",
+        ));
+    }
+    Ok(file)
 }
 
 #[cfg(test)]

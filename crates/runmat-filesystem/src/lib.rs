@@ -2229,21 +2229,20 @@ mod tests {
     #[test]
     fn atomic_publication_uses_only_the_installed_provider() {
         let _guard = test_lock();
-        let host = tempfile::tempdir().unwrap();
-        let logical_path = host.path().join("same-logical-path");
-        std::fs::write(&logical_path, b"host").unwrap();
+        // A relative name is valid in both namespaces; an OS drive prefix is
+        // deliberately not a portable memory-filesystem path on Windows.
+        let host = tempfile::NamedTempFile::new_in(std::env::current_dir().unwrap()).unwrap();
+        let logical_path = Path::new(host.path().file_name().unwrap());
+        std::fs::write(host.path(), b"host").unwrap();
         let memory = Arc::new(MemoryFsProvider::new());
         let provider: Arc<dyn FsProvider> = memory.clone();
         let _provider_guard = replace_provider(provider);
 
-        let outcome = atomic_create_new(&logical_path, b"provider").unwrap();
+        let outcome = atomic_create_new(logical_path, b"provider").unwrap();
 
         assert!(matches!(outcome, AtomicCreateResult::Published { .. }));
-        assert_eq!(
-            memory.read_project_path(&logical_path).unwrap(),
-            b"provider"
-        );
-        assert_eq!(std::fs::read(logical_path).unwrap(), b"host");
+        assert_eq!(memory.read_project_path(logical_path).unwrap(), b"provider");
+        assert_eq!(std::fs::read(host.path()).unwrap(), b"host");
     }
 
     #[test]

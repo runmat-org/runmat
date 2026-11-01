@@ -25,6 +25,17 @@ impl WritableHandle {
                 ));
             }
         }
+        #[cfg(windows)]
+        {
+            use crate::native::windows_identity::{self, Kind};
+            let current = windows_identity::open(&self.path, Kind::File)?;
+            if !windows_identity::same(&self.file, &current)? {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "file was replaced after this handle opened; reopen it before writing",
+                ));
+            }
+        }
         Ok(guard)
     }
 }
