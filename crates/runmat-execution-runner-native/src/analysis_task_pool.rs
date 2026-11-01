@@ -16,7 +16,7 @@ use runmat_execution_artifact::{
 };
 use runmat_execution_runner::{AttemptSuccess, TaskExecutionEvidence, TaskSubmission};
 
-use crate::analysis_task::{prepare_analysis_task, AnalysisTaskPolicy};
+use crate::analysis_task::{analysis_task_id, prepare_analysis_task, AnalysisTaskPolicy};
 use crate::{
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver,
@@ -92,6 +92,11 @@ pub(crate) trait AnalysisTaskPool: CacheImport {
         &self,
     ) -> std::collections::BTreeSet<runmat_execution::security::ExecutionTrustTier> {
         crate::program_host::local_trust()
+    }
+    /// A portable recovery closure can outlive its original scheduler. Only a
+    /// retained, committed scheduler record may restore a physical dependency edge.
+    fn retained_committed_tasks(&self, _candidates: &BTreeSet<TaskId>) -> BTreeSet<TaskId> {
+        BTreeSet::new()
     }
     fn register_program(&mut self, program: &PreparedAnalysisProgram) -> NativeExecutionResult<()>;
     fn register_result_objects(
@@ -260,7 +265,7 @@ pub(crate) async fn execute_analysis_task_batch(
                 .map(|dep| dep.identity)
                 .collect::<Vec<_>>();
             AnalysisTaskIdentity::new(task.host.workload.identity, dependencies)
-                .map(|identity| TaskId::derive(&[identity.digest().bytes()]))
+                .map(analysis_task_id)
                 .map_err(protocol)
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?;

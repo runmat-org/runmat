@@ -50,6 +50,10 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
         crate::remote::pool_tasks::admitted_trust()
     }
 
+    fn retained_committed_tasks(&self, candidates: &BTreeSet<TaskId>) -> BTreeSet<TaskId> {
+        self.pool.retained_committed_task_ids(candidates)
+    }
+
     fn scope_id(&self) -> ExecutionScopeId {
         self.pool.scope_id()
     }

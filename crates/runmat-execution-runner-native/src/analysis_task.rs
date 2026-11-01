@@ -99,12 +99,16 @@ pub(crate) fn prepare_analysis_task(
     .map_err(protocol)?;
     let identity = AnalysisTaskIdentity::new(host.workload.identity, dependency_identities)
         .map_err(protocol)?;
-    if submission.request.id != TaskId::derive(&[identity.digest().bytes()]) {
+    if submission.request.id != analysis_task_id(identity) {
         return Err(NativeExecutionError::Protocol(
             "analysis task identity does not converge".into(),
         ));
     }
     Ok((submission, identity))
+}
+
+pub(crate) fn analysis_task_id(identity: AnalysisTaskIdentity) -> TaskId {
+    TaskId::derive(&[identity.digest().bytes()])
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

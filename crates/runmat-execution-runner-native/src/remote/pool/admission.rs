@@ -402,19 +402,22 @@ impl RemotePoolDriver {
                     .expect("task clock bindings poisoned")
                     .get(&registration.task_id)
                     .copied();
-                if intervals
-                    .insert(
-                        registration.task_id,
-                        observed.map_or(
+                match (observed, intervals.get(&registration.task_id)) {
+                    (
+                        Some(owner),
+                        Some(super::timing::TaskWallInterval::ObservedPending(existing)),
+                    ) if owner == *existing => {}
+                    (None, None) => {
+                        intervals.insert(
+                            registration.task_id,
                             super::timing::TaskWallInterval::Started(started),
-                            super::timing::TaskWallInterval::ObservedPending,
-                        ),
-                    )
-                    .is_some()
-                {
-                    return Err(NativeExecutionError::Protocol(
-                        "remote task wall interval already exists".into(),
-                    ));
+                        );
+                    }
+                    _ => {
+                        return Err(NativeExecutionError::Protocol(
+                            "remote task wall interval differs from admission authority".into(),
+                        ));
+                    }
                 }
             }
         }

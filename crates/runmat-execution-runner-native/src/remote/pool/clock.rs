@@ -41,23 +41,42 @@ impl RemotePoolDriver {
         };
         // Serialize only original-start registration, not the waves themselves.
         let _admission = self.wave_admission.lock().await;
+        // Snapshot scheduler identity before taking any timing lock. A task
+        // already known to the driver is never eligible for a replacement
+        // clock start merely because its original interval is missing.
+        let already_admitted = {
+            let driver = self.driver.lock().expect("remote driver poisoned");
+            planned_tasks
+                .iter()
+                .map(|task| driver.task_record(*task).is_ok())
+                .collect::<Vec<_>>()
+        };
         let (new_tasks, observed_wave) = {
             let _clock_state = self.clock_state.lock().expect("clock state poisoned");
             let starts = self.clock_starts.lock().expect("clock starts poisoned");
             let ends = self.clock_ends.lock().expect("clock ends poisoned");
-            let assigned = self
-                .task_clocks
-                .lock()
-                .expect("task clock bindings poisoned");
             let intervals = self
                 .task_wall_intervals
                 .lock()
                 .expect("task wall intervals poisoned");
+            let assigned = self
+                .task_clocks
+                .lock()
+                .expect("task clock bindings poisoned");
             let waves = self.wave_clocks.lock().expect("wave clocks poisoned");
             let certified = self
                 .certified_waves
                 .lock()
                 .expect("certified waves poisoned");
+            if planned_tasks
+                .iter()
+                .zip(&already_admitted)
+                .any(|(task, known)| {
+                    intervals.get(task).is_none() && (*known || assigned.contains_key(task))
+                })
+            {
+                return Err(protocol("admitted task lacks its original wall authority"));
+            }
             if let Some(id) = waves.get(&wave) {
                 let start = starts
                     .get(id)
@@ -90,8 +109,11 @@ impl RemotePoolDriver {
             let mut pending_tasks = Vec::new();
             let mut pending_owner = None;
             let mut needs_release = false;
-            for task in planned_tasks {
+            for (task, already_admitted) in planned_tasks.iter().zip(already_admitted) {
                 match intervals.get(task) {
+                    None if already_admitted || assigned.contains_key(task) => {
+                        return Err(protocol("admitted task lacks its original wall authority"))
+                    }
                     None => new_tasks.push(*task),
                     Some(super::timing::TaskWallInterval::ObservedPending(owner))
                         if assigned.get(task) == Some(owner)
@@ -223,6 +245,12 @@ impl RemotePoolDriver {
                 "remote wave start differs from its original pinned owner",
             ));
         }
+        // Completion and admission acquire these in the same order. The outer
+        // clock-state guard serializes signed start/wave metadata separately.
+        let mut intervals = self
+            .task_wall_intervals
+            .lock()
+            .expect("remote task wall intervals poisoned");
         let mut assigned = self
             .task_clocks
             .lock()
@@ -232,7 +260,17 @@ impl RemotePoolDriver {
             .lock()
             .expect("clock launch barrier poisoned");
         if tasks.iter().all(|task| assigned.get(task) == Some(&id)) {
-            return Ok(());
+            return tasks
+                .iter()
+                .all(|task| {
+                    matches!(
+                        intervals.get(task),
+                        Some(super::timing::TaskWallInterval::ObservedPending(owner))
+                            if *owner == id
+                    )
+                })
+                .then_some(())
+                .ok_or_else(|| protocol("restored wave lost its original wall interval"));
         }
         if assigned.values().any(|prior| *prior == id) {
             return Err(protocol(
@@ -245,9 +283,15 @@ impl RemotePoolDriver {
         {
             return Err(protocol("remote wave repeats an original clock owner"));
         }
+        if tasks.iter().any(|task| intervals.contains_key(task)) {
+            return Err(protocol(
+                "remote wave task already has original wall authority",
+            ));
+        }
         for task in tasks {
             assigned.insert(*task, id);
             barrier.insert(*task);
+            intervals.insert(*task, super::timing::TaskWallInterval::ObservedPending(id));
         }
         Ok(())
     }
@@ -399,14 +443,14 @@ impl RemotePoolDriver {
         let _clock_state = self.clock_state.lock().expect("clock state poisoned");
         let mut starts = self.clock_starts.lock().expect("clock starts poisoned");
         let mut ends = self.clock_ends.lock().expect("clock ends poisoned");
-        let mut assigned = self
-            .task_clocks
-            .lock()
-            .expect("task clock bindings poisoned");
         let intervals = self
             .task_wall_intervals
             .lock()
             .expect("task wall intervals poisoned");
+        let mut assigned = self
+            .task_clocks
+            .lock()
+            .expect("task clock bindings poisoned");
         let mut certified = Vec::with_capacity(entries.len());
         for entry in entries {
             let start = starts

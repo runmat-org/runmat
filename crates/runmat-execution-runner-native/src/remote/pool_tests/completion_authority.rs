@@ -723,7 +723,7 @@ async fn original_terminal_loss_diagnostic_survives_remote_delivery() {
     let diagnostic = {
         let driver = fixture.pool.driver.lock().unwrap();
         let task = driver.task_record(fixture.attempt.task_id).unwrap();
-        terminal_failure(&driver, task)
+        terminal_failure(&driver, task, false)
     };
     assert_eq!(diagnostic, Some(message.into()));
     let snapshot = fixture.pool.snapshot();

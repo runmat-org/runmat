@@ -162,6 +162,24 @@ async fn restoration_reproves_software_without_releasing_original_physical_autho
         snapshot.tasks[&task.request.id].state,
         runmat_execution::state::TaskState::Indeterminate
     );
+    // A directly restored pool has no authenticated original worker owner.
+    // It cannot await a Server certificate, so its original waiter fails
+    // closed instead of remaining pending indefinitely.
+    assert!(!restored
+        .completions
+        .lock()
+        .unwrap()
+        .contains_key(&task.request.id));
+    let completion = restored
+        .restored_completions
+        .lock()
+        .unwrap()
+        .remove(&task.request.id)
+        .unwrap();
+    assert!(matches!(
+        completion.wait().await,
+        Err(crate::NativeProgramFailure::WorkerLost(_))
+    ));
 }
 
 #[tokio::test]
@@ -766,6 +784,17 @@ async fn restored_waiter_can_attach_before_or_after_authoritative_completion() {
             .await
             .unwrap();
         original_wave.arm(&[task_id]).unwrap();
+        let original_owner = *pool
+            .task_clocks
+            .lock()
+            .unwrap()
+            .get(&task_id)
+            .expect("armed task clock owner");
+        assert!(matches!(
+            pool.task_wall_intervals.lock().unwrap().get(&task_id),
+            Some(super::super::timing::TaskWallInterval::ObservedPending(owner))
+                if *owner == original_owner
+        ));
         let _original_waiter = pool.submit(task.clone(), program.clone()).unwrap();
         original_wave.checkpoint().await.unwrap();
         let checkpoint = pool.capture_checkpoint(1).unwrap();
@@ -782,6 +811,31 @@ async fn restored_waiter_can_attach_before_or_after_authoritative_completion() {
                 .bytes,
         );
         drop(original_wave);
+        if !complete_first {
+            let missing = RemotePoolDriver::restore_checkpoint(
+                checkpoint.clone(),
+                authority(&checkpoint),
+                Arc::clone(&bundle),
+                |_| panic!("no objects"),
+            )
+            .unwrap();
+            assert!(matches!(
+                missing.task_wall_intervals.lock().unwrap().remove(&task_id),
+                Some(super::super::timing::TaskWallInterval::ObservedPending(owner))
+                    if owner == original_owner
+            ));
+            let (missing_sender, mut missing_commands) = tokio::sync::mpsc::channel(1);
+            missing.install_clock_commands(missing_sender).unwrap();
+            let missing_wave = RemoteWaveIdentity::new(missing.scope_id, &[task_id]).unwrap();
+            assert!(matches!(
+                missing.begin_clock_wave(missing_wave, &[task_id]).await,
+                Err(NativeExecutionError::Protocol(_))
+            ));
+            assert!(matches!(
+                missing_commands.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ));
+        }
         drop(pool);
         let restored = RemotePoolDriver::restore_checkpoint(
             checkpoint.clone(),
@@ -791,6 +845,11 @@ async fn restored_waiter_can_attach_before_or_after_authoritative_completion() {
         )
         .unwrap();
         restored.install_clock_commands(clock_sender).unwrap();
+        assert!(matches!(
+            restored.task_wall_intervals.lock().unwrap().get(&task_id),
+            Some(super::super::timing::TaskWallInterval::ObservedPending(owner))
+                if *owner == original_owner
+        ));
         let mut resumed_wave = RemoteObservedWave::begin(Arc::clone(&restored), &[task_id])
             .await
             .unwrap();

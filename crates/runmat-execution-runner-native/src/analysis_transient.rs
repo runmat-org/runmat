@@ -14,7 +14,7 @@ use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::TaskId;
 
 use crate::analysis_sequence::StructuralSequenceExecutionPolicy;
-use crate::analysis_task::{prepare_analysis_task, AnalysisTaskPolicy};
+use crate::analysis_task::{analysis_task_id, prepare_analysis_task, AnalysisTaskPolicy};
 use crate::analysis_task_pool::{
     begin_analysis_batch, configure_local_analysis, planned_resource_attempt, AnalysisTaskPool,
     ExecutedAnalysisTask, LocalAnalysisTaskPool, RemoteAnalysisTaskPool,
@@ -166,8 +166,19 @@ pub(crate) async fn execute_structural_transient_with_pool(
         }
         None => StructuralTransientSequenceCoordinator::new(preparation).map_err(protocol)?,
     };
+    let restored_blocks = coordinator.completed_block_task_identities();
+    let candidates = restored_blocks
+        .iter()
+        .map(|identity| analysis_task_id(*identity))
+        .collect::<BTreeSet<_>>();
+    let retained = if candidates.is_empty() {
+        BTreeSet::new()
+    } else {
+        pool.retained_committed_tasks(&candidates)
+    };
     let mut live_block_tasks = initial_live_tasks;
     live_block_tasks.push((scope_identity, scope_task_id));
+    live_block_tasks.extend(restored_retained_tasks(restored_blocks, &retained));
     while coordinator.has_remaining_blocks() {
         let prepared = coordinator.prepare_next_block().map_err(protocol)?;
         let logical_dependencies = coordinator.next_block_dependency_identities();
@@ -244,7 +255,7 @@ async fn execute_task(
     let expected_identity =
         AnalysisTaskIdentity::new(host.workload.identity, dependency_identities.clone())
             .map_err(protocol)?;
-    let expected_task_id = TaskId::derive(&[expected_identity.digest().bytes()]);
+    let expected_task_id = analysis_task_id(expected_identity);
     let admission = begin_analysis_batch(pool, &[expected_task_id]).await?;
     pool.register_program(program)?;
     let resources = resource_plan
@@ -311,6 +322,19 @@ async fn execute_task(
     Ok((executed.response, identity, task_id, planned_attempt))
 }
 
+fn restored_retained_tasks(
+    identities: &[AnalysisTaskIdentity],
+    retained: &BTreeSet<TaskId>,
+) -> Vec<(AnalysisTaskIdentity, TaskId)> {
+    identities
+        .iter()
+        .filter_map(|identity| {
+            let id = analysis_task_id(*identity);
+            retained.contains(&id).then_some((*identity, id))
+        })
+        .collect()
+}
+
 fn matching_live_dependencies(
     logical: &[AnalysisTaskIdentity],
     live: impl IntoIterator<Item = (AnalysisTaskIdentity, TaskId)>,
@@ -330,7 +354,8 @@ mod tests {
 
     use runmat_execution::Digest;
 
-    use super::matching_live_dependencies;
+    use super::{matching_live_dependencies, restored_retained_tasks};
+    use crate::analysis_task::analysis_task_id;
     use runmat_analysis_fea::execution::{
         AnalysisTaskIdentity, AnalysisWorkKind, AnalysisWorkloadIdentity, ConstraintPlanIdentity,
         DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
@@ -373,21 +398,25 @@ mod tests {
     }
 
     #[test]
-    fn replacement_uses_only_dependencies_live_in_the_current_scheduler() {
+    fn replacement_uses_only_retained_committed_or_current_scheduler_dependencies() {
         let durable = task("durable");
         let current = task("current");
         let unrelated = task("unrelated");
         let current_task = TaskId::derive(&[b"current"]);
-        assert!(matching_live_dependencies(&[durable], []).is_empty());
+        let durable_task = analysis_task_id(durable);
+        // Cold externalized prefixes retain semantic state but no old scheduler edge.
+        assert!(restored_retained_tasks(&[durable], &BTreeSet::new()).is_empty());
+        let restored = restored_retained_tasks(&[durable], &BTreeSet::from([durable_task]));
+        assert_eq!(restored, vec![(durable, durable_task)]);
         assert_eq!(
             matching_live_dependencies(
                 &[durable, current],
-                [
+                restored.into_iter().chain([
                     (current, current_task),
-                    (unrelated, TaskId::derive(&[b"other"]))
-                ],
+                    (unrelated, TaskId::derive(&[b"other"])),
+                ]),
             ),
-            BTreeSet::from([current_task])
+            BTreeSet::from([durable_task, current_task])
         );
     }
 }

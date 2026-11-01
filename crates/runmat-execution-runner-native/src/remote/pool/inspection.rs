@@ -2,8 +2,30 @@
 use super::RemotePoolDriver;
 use crate::{NativeExecutionError, NativeExecutionResult};
 use runmat_execution::TaskId;
+use std::collections::BTreeSet;
 
 impl RemotePoolDriver {
+    /// Query only authenticated retained scheduler metadata under its owner lock.
+    /// This is generic task state, independent of any FEA producer identity.
+    pub(crate) fn retained_committed_task_ids(
+        &self,
+        candidates: &BTreeSet<TaskId>,
+    ) -> BTreeSet<TaskId> {
+        let driver = self.driver.lock().expect("remote driver poisoned");
+        candidates
+            .iter()
+            .copied()
+            .filter(|id| {
+                driver.task_record(*id).is_ok_and(|task| {
+                    task.submission.request.scope_id == self.scope_id
+                        && task.submission.request.pool_id == self.pool_id
+                        && task.state == runmat_execution::state::TaskState::Succeeded
+                        && task.committed.is_some()
+                })
+            })
+            .collect()
+    }
+
     /// Original admitted task/history captured under the driver lock, without a pool copy.
     pub fn task_execution_evidence(
         &self,

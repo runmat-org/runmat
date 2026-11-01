@@ -421,15 +421,10 @@ impl RemotePoolDriver {
                 return;
             }
         };
-        // A remote Cancel acknowledgement proves delivery of a request, not
-        // that an active Graph worker has retired its foreign host or private
-        // staging. Only its eventual attempt report may close the Graph
-        // attempt. Direct may report delivery immediately, but that ordinary
-        // Cancelled report still cannot certify physical retirement.
-        let graph_attempt = matches!(
-            &request.task.callable.program,
-            runmat_execution::ProgramCallable::GraphTarget { .. }
-        );
+        // A remote Cancel acknowledgement proves delivery, not retirement of
+        // the attempt's runtime, foreign host or private staging. Both Direct
+        // and Graph attempts close through their eventual authenticated owner
+        // report, never through this control acknowledgement.
         if let Some(source) = self
             .attempt_cancellation
             .lock()
@@ -480,12 +475,6 @@ impl RemotePoolDriver {
                     }
                     return;
                 }
-            }
-            if !graph_attempt {
-                this.apply_report(BackendReport::for_request(
-                    &request,
-                    AttemptReport::Cancelled,
-                ));
             }
             guard.1 = true;
         });

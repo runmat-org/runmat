@@ -887,11 +887,10 @@ fn authored_thermal_outer_root_matrix_replays_after_preexecution_driver_replacem
 
 #[test]
 fn authored_thermal_prefix_survives_driver_loss_after_its_commit() {
-    for (index, case) in thermal::Case::matrix().enumerate() {
-        let result = run_actual_driver_replacement_with_observer(
+    for case in thermal::Case::matrix() {
+        let result = run_actual_driver_replacement_with_interruption(
             ExactStudyFamily::ThermalPrestress(case),
             ReplacementInterruption::AnalysisCommitted,
-            index == 0,
         );
         assert!(result.is_some());
     }
@@ -1266,7 +1265,11 @@ async fn actual_driver_replacement_case(
         .await
         .expect("first worker process tree retired");
     if let Some(clock) = &clock {
-        clock.assert_worker_started_after_barrier(&fixture.run_key);
+        if interruption == ReplacementInterruption::ReplayableExecutionStart {
+            clock.assert_preexecution_worker_not_admitted();
+        } else {
+            clock.assert_worker_started_after_barrier(&fixture.run_key);
+        }
     }
     control.record_retired_worker(
         1,
@@ -1486,7 +1489,7 @@ async fn actual_driver_replacement_case(
                 authority: driver_authority(3, third_relay.http_base()),
                 endpoint_identity_file: identity_path,
                 ready_v1: false,
-                clock_parent: None,
+                clock_parent: clock.as_ref().map(|clock| clock.parent(3)),
             },
             control.clone(),
         );

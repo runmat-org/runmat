@@ -234,7 +234,7 @@ impl RemotePoolDriver {
                     } else {
                         None
                     };
-                    terminal_failure(&driver, task).map(|message| {
+                    self.terminal_failure(&driver, task).map(|message| {
                         Err(report_failure(
                             &terminal_report,
                             task.state,
@@ -304,13 +304,36 @@ impl RemotePoolDriver {
         }
     }
 
+    fn terminal_failure(&self, driver: &Driver, task: &TaskRecord) -> Option<String> {
+        // Only a retained, authenticated original worker owner makes the
+        // old-fence retirement pending. A direct cold restore without that
+        // owner cannot obtain the certificate and must report WorkerLost.
+        let has_original_owner = task.state == TaskState::Indeterminate
+            && task.active_attempt.is_some_and(|attempt_id| {
+                driver
+                    .snapshot_ref()
+                    .attempts
+                    .get(&attempt_id)
+                    .is_some_and(|attempt| {
+                        self.original_owners
+                            .lock()
+                            .expect("original owners poisoned")
+                            .get(&attempt.request.worker_id)
+                            .is_some_and(|owner| {
+                                owner.driver_fencing_token == attempt.request.driver_fence
+                            })
+                    })
+            });
+        terminal_failure(driver, task, has_original_owner)
+    }
+
     pub(super) fn resolve_non_success_terminals(&self) {
         let terminal = {
             let driver = self.driver.lock().expect("remote driver poisoned");
             driver
                 .task_records()
                 .filter_map(|task| {
-                    terminal_failure(&driver, task)
+                    self.terminal_failure(&driver, task)
                         .map(|message| (task.id(), state_failure(task.state, message)))
                 })
                 .collect::<Vec<_>>()
@@ -447,8 +470,33 @@ fn state_failure(state: TaskState, message: String) -> NativeProgramFailure {
     }
 }
 
-fn terminal_failure(driver: &Driver, task: &TaskRecord) -> Option<String> {
+fn terminal_failure(
+    driver: &Driver,
+    task: &TaskRecord,
+    has_original_owner: bool,
+) -> Option<String> {
     let task_id = task.id();
+    // Reconciliation records an old-fence attempt as provisionally
+    // Indeterminate before the replacement driver checks its original worker
+    // retirement certificate. Do not consume the restored completion waiter
+    // at the restore-time tick; the certificate must first resolve that exact
+    // attempt to a retry, cancellation, failure, or genuinely unknown result.
+    let snapshot = driver.snapshot_ref();
+    if has_original_owner
+        && task.state == TaskState::Indeterminate
+        && task.active_attempt.is_some_and(|attempt_id| {
+            snapshot.attempts.get(&attempt_id).is_some_and(|attempt| {
+                attempt.request.task_id == task_id
+                    && attempt.request.driver_fence < snapshot.driver_fence
+                    && attempt
+                        .unverified_retirement
+                        .as_ref()
+                        .is_some_and(|record| record.retired_at_driver_millis.is_none())
+            })
+        })
+    {
+        return None;
+    }
     let message = match task.state {
         TaskState::Failed => "remote task failed",
         TaskState::Indeterminate => "remote worker was lost",

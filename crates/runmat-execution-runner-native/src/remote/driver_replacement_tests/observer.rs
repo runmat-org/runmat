@@ -50,7 +50,7 @@ impl ClockControl {
         let signer = EndpointIdentitySigner::from_secret(NODE_SECRET).unwrap();
         let domain_nonce = [61; 16];
         let mut parents = BTreeMap::new();
-        for fence in [1_u64, 2] {
+        for fence in [1_u64, 2, 3] {
             let request_directory = root.join(format!("clock-request-{fence}"));
             let receipt_directory = root.join(format!("clock-receipt-{fence}"));
             std::fs::create_dir(&request_directory).unwrap();
@@ -203,7 +203,7 @@ impl ClockControl {
         authority: &DriverAuthority,
         request: ClockDriverHeartbeatRequestV1,
     ) -> runmat_execution_transport_native::TransportResult<ClockDriverHeartbeatResponseV1> {
-        if authority.run_id != RUN_ID || !(1..=2).contains(&authority.fencing_token) {
+        if authority.run_id != RUN_ID || !(1..=3).contains(&authority.fencing_token) {
             return Err(unavailable("foreign clock run or driver fence"));
         }
         let mut state = self.state.lock().unwrap();
@@ -347,6 +347,21 @@ impl ClockControl {
             let tick = runmat_process_host::clock::observe_monotonic().unwrap();
             self.state.lock().unwrap().predispatch_checkpoint_ticks = Some(tick.ticks);
         }
+    }
+
+    pub(super) fn assert_preexecution_worker_not_admitted(&self) {
+        assert!(
+            self.state
+                .lock()
+                .unwrap()
+                .predispatch_checkpoint_ticks
+                .is_none(),
+            "preexecution replacement unexpectedly acknowledged a checkpoint"
+        );
+        assert!(
+            !self.worker_admitted(),
+            "preexecution replacement admitted a first-generation worker attempt"
+        );
     }
 
     pub(super) fn assert_worker_started_after_barrier(&self, run_key: &RunKeyMaterial) {
