@@ -137,6 +137,35 @@ def validate_groups(actual: set[str]) -> None:
         raise SystemExit("invalid workspace test groups: " + "; ".join(details))
 
 
+# The vendored solver retains upstream integrations, but RunMat depends on its
+# pure-Rust core with default features disabled. --all-features would instead
+# enable every external BLAS backend and Python/Julia binding simultaneously.
+PACKAGE_TEST_FEATURE_PROFILES = {"runmat-clarabel": ((), ("serde",))}
+
+
+def test_commands(group: str, include_extended: bool) -> list[list[str]]:
+    packages = GROUPS[group]
+    common = ["cargo", "test", "--all-targets", "--no-fail-fast"]
+    ordinary = [package for package in packages if package not in PACKAGE_TEST_FEATURE_PROFILES]
+    commands = [
+        [*common, "--all-features", *(argument for package in ordinary for argument in ("--package", package))]
+    ] if ordinary else []
+    for package in packages:
+        for features in PACKAGE_TEST_FEATURE_PROFILES.get(package, ()):
+            command = [*common, "--no-default-features", "--package", package]
+            if features:
+                command.extend(("--features", ",".join(features)))
+            commands.append(command)
+    if not include_extended:
+        filters = EXTENDED_TEST_FILTERS.get(group, ())
+        if filters:
+            for command in commands:
+                command.append("--")
+                for test_filter in filters:
+                    command.extend(("--skip", test_filter))
+    return commands
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("group", nargs="?", choices=GROUPS)
@@ -160,21 +189,12 @@ def main() -> int:
         print(f"{sum(map(len, GROUPS.values()))} workspace packages assigned across {len(GROUPS)} groups")
         return 0
 
-    command = [
-        "cargo",
-        "test",
-        "--all-targets",
-        "--all-features",
-        "--no-fail-fast",
-        *(argument for package in GROUPS[args.group] for argument in ("--package", package)),
-    ]
-    if not args.include_extended:
-        filters = EXTENDED_TEST_FILTERS.get(args.group, ())
-        if filters:
-            command.append("--")
-            for test_filter in filters:
-                command.extend(("--skip", test_filter))
-    return subprocess.run(command, cwd=repo_root).returncode
+    failure = 0
+    for command in test_commands(args.group, args.include_extended):
+        code = subprocess.run(command, cwd=repo_root).returncode
+        if code and not failure:
+            failure = code
+    return failure
 
 
 if __name__ == "__main__":

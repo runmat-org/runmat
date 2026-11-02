@@ -241,12 +241,18 @@ jobs:
 
       - name: Clippy
         if: matrix.task == 'quality'
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        # Strict workspace lints apply to first-party crates. Clarabel retains
+        # upstream source and optional external integrations; its pure-Rust
+        # profiles are compiled below and exercised by the runtime test group.
+        run: cargo clippy --workspace --exclude runmat-clarabel --all-targets --all-features -- -D warnings
 
 
       - name: Check
         if: matrix.task == 'quality'
-        run: cargo check --all-targets --all-features
+        run: |
+          cargo check --workspace --exclude runmat-clarabel --all-targets --all-features
+          cargo check -p runmat-clarabel --all-targets --no-default-features
+          cargo check -p runmat-clarabel --all-targets --no-default-features --features serde
       - name: Test (Linux)
         if: matrix.task == 'test' && runner.os == 'Linux'
         env:
