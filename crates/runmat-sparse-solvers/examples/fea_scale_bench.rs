@@ -12,8 +12,14 @@
 //!   block Lanczos).
 //!
 //! Work runs on an admitted pool of `<threads>` workers. Run through `gate bench` for timings.
+//! Peak RSS is process-lifetime evidence; unavailable platform metrics are JSON null.
 
 use std::time::Instant;
+
+#[path = "support/memory_report.rs"]
+mod memory_report;
+
+use memory_report::peak_rss_gib;
 
 use runmat_sparse_solvers::control::SolveControl;
 use runmat_sparse_solvers::direct::{
@@ -26,20 +32,6 @@ use runmat_sparse_solvers::par;
 use runmat_sparse_solvers::precond::{rigid_body_modes, Amg, AmgOptions, Ilu0};
 use runmat_sparse_solvers::testutil::{elasticity::elasticity3d, poisson3d};
 use runmat_sparse_solvers::{BsrMatrix, CsrMatrix, Preconditioner, TripletBuilder};
-
-fn peak_rss_gib() -> f64 {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-    let max = unsafe {
-        libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr());
-        usage.assume_init().ru_maxrss as u64
-    };
-    let bytes = if cfg!(target_os = "macos") {
-        max
-    } else {
-        max * 1024
-    };
-    bytes as f64 / (1u64 << 30) as f64
-}
 
 /// Median wall time of `repeats` runs of `work`.
 fn median_seconds(repeats: usize, mut work: impl FnMut()) -> f64 {

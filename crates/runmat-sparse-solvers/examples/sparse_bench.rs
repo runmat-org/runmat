@@ -1,7 +1,13 @@
 //! Scaling benchmark: `sparse_bench <poisson|elasticity> <grid> <threads> <direct|amg|both> [nd|amd]`.
 //! Prints one JSON object per measured phase. Run through `gate bench` for clean timings.
+//! Peak RSS is process-lifetime evidence; unavailable platform metrics are JSON null.
 
 use std::time::Instant;
+
+#[path = "support/memory_report.rs"]
+mod memory_report;
+
+use memory_report::peak_rss_gib;
 
 use runmat_sparse_solvers::control::SolveControl;
 use runmat_sparse_solvers::direct::{
@@ -13,20 +19,6 @@ use runmat_sparse_solvers::par;
 use runmat_sparse_solvers::precond::{rigid_body_modes, Amg, AmgOptions};
 use runmat_sparse_solvers::testutil::{elasticity::elasticity3d, poisson3d};
 use runmat_sparse_solvers::CsrMatrix;
-
-fn peak_rss_bytes() -> u64 {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-    unsafe {
-        libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr());
-        // macOS reports bytes, Linux kilobytes.
-        let max = usage.assume_init().ru_maxrss as u64;
-        if cfg!(target_os = "macos") {
-            max
-        } else {
-            max * 1024
-        }
-    }
-}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -122,7 +114,7 @@ fn main() {
                 e.flops / 1e9,
                 e.flops / 1e9 / factor,
                 relative(&x),
-                peak_rss_bytes() as f64 / (1u64 << 30) as f64
+                peak_rss_gib()
             );
         }
         if mode == "amg" || mode == "both" {
@@ -161,7 +153,7 @@ fn main() {
                 amg.statistics().level_rows,
                 amg.statistics().operator_complexity,
                 relative(&x),
-                peak_rss_bytes() as f64 / (1u64 << 30) as f64
+                peak_rss_gib()
             );
         }
     });

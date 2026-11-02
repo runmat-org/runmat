@@ -3,7 +3,12 @@
 //! Run with `cargo run --release -p runmat-analysis-fea --example tet10_stiffness_cost -- 64 3`.
 //! Peak RSS includes process startup and is not an isolated per-element allocation measure.
 
-use std::{env, error::Error, hint::black_box, mem::MaybeUninit, time::Instant};
+use std::{env, error::Error, hint::black_box, time::Instant};
+
+#[path = "../support/process_memory.rs"]
+mod process_memory;
+
+use process_memory::process_peak_rss_bytes;
 
 use runmat_analysis_fea::assembly::elements::solid::{
     tetrahedron10_global_stiffness_matrix, SolidMaterial, Tetrahedron10ElementGeometry,
@@ -66,26 +71,6 @@ fn run_case(
         expected_checksum.expect("positive repetition count")
     );
     Ok(())
-}
-
-#[cfg(unix)]
-fn process_peak_rss_bytes() -> Option<u64> {
-    let mut usage = MaybeUninit::<libc::rusage>::uninit();
-    // getrusage writes the complete structure before it is read below.
-    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } != 0 {
-        return None;
-    }
-    let raw = u64::try_from(unsafe { usage.assume_init() }.ru_maxrss).ok()?;
-    if cfg!(target_os = "macos") {
-        Some(raw)
-    } else {
-        raw.checked_mul(1024)
-    }
-}
-
-#[cfg(not(unix))]
-fn process_peak_rss_bytes() -> Option<u64> {
-    None
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
