@@ -18,7 +18,10 @@ pub(super) async fn verify(
             original.call.clone(),
             DurableJobOptions {
                 idempotency_key: Some("original-live-prefix".into()),
-                retention_millis: runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
+                // Preserve the record across the independent observation windows,
+                // paged reads and cold supervisor restart below. This witness
+                // checks retained output, not minimum-retention garbage collection.
+                retention_millis: 5 * 60_000,
                 resources: ResourceRequest {
                     cpu_millicores: config.worker_cpu_millicores,
                     memory_bytes: config.worker_memory_bytes,
