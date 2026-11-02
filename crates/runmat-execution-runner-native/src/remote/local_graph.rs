@@ -232,12 +232,15 @@ async fn run_owned_attempt(
         Some(inventory),
         Some(maximum_wall_millis),
     )?;
-    let completion = driver.submit_graph(LocalGraphSubmission {
-        task_id,
-        request,
-        retry: RetryPolicy::Never,
-        task: None,
-    })?;
+    let completion = driver.submit_graph_with_control(
+        LocalGraphSubmission {
+            task_id,
+            request,
+            retry: RetryPolicy::Never,
+            task: None,
+        },
+        None,
+    )?;
     let mut cancel_sent = false;
     loop {
         if let Some(result) = completion.try_value() {

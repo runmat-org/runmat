@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use runmat_execution_transport_native::control::{NodeControlPlane, NodeHeartbeat};
 
-use super::{CredentialStore, NodeCredential};
+use super::{NodeCredential, OwnedCredentialStore};
 use crate::AgentResult;
 
 pub async fn rotate(
     control: Arc<dyn NodeControlPlane>,
-    store: &CredentialStore,
+    store: &mut OwnedCredentialStore,
     credential: &mut NodeCredential,
     mut heartbeat: NodeHeartbeat,
 ) -> AgentResult<()> {

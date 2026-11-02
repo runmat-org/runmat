@@ -409,7 +409,11 @@ async fn execute_parfor_tasks(
                 program: program.clone(),
             })
             .map_err(execution_error)?;
-        match context.runtime.execution().spawn_on(&future, Some(pool)) {
+        match context
+            .runtime
+            .execution()
+            .spawn_in_context(&future, Some(pool), &context.runtime)
+        {
             Ok(task) => tasks.push(task),
             Err(error) => {
                 // The service already owns the deferred call even though it

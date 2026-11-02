@@ -578,6 +578,30 @@ pub struct AttemptRecord {
     pub cancellation_escalation: Option<CancellationEscalation>,
 }
 
+impl AttemptRecord {
+    /// Original provider evidence that the assignment never started. This does not erase
+    /// preflight resource charges, and logical rejection alone is not proof.
+    pub fn certifies_not_started(&self) -> bool {
+        let Some(terminal) = &self.terminal else {
+            return false;
+        };
+        match terminal.disposition {
+            super::AttemptDisposition::Succeeded => false,
+            super::AttemptDisposition::CertifiedNotStarted => {
+                terminal.validate_against(self).is_ok()
+            }
+            _ => {
+                self.unverified_retirement.is_none()
+                    && terminal.execution.as_ref().is_some_and(|observation| {
+                        observation.validate_against(&self.request).is_ok()
+                            && observation.termination
+                                == super::AttemptExecutionTermination::NotStarted
+                    })
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

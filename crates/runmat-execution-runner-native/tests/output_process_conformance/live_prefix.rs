@@ -1,7 +1,6 @@
 //! Read original bounded writes while live, then kill their publisher and reopen cold.
 use super::*;
 use runmat_execution::console::*;
-use runmat_execution_runner::AttemptDisposition;
 
 pub(super) async fn verify(
     service: &NativeExecutionService,
@@ -90,7 +89,7 @@ pub(super) async fn verify(
         loop {
             let attached = client.attach(job.id, 0, 0).await.unwrap();
             let history = attached.execution.unwrap();
-            if history.attempts[0].terminal.is_some() {
+            if history.attempts[0].unverified_retirement.is_some() {
                 break history;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -104,11 +103,19 @@ pub(super) async fn verify(
         lost.task.state,
         runmat_execution::state::TaskState::Indeterminate
     );
-    let terminal = lost.attempts[0].terminal.as_ref().unwrap();
-    assert_eq!(terminal.disposition, AttemptDisposition::Lost);
-    assert!(terminal.resources.is_none());
-    assert!(terminal.execution.is_none());
-    let prefix = terminal.console.as_ref().unwrap();
+    let attempt = &lost.attempts[0];
+    assert_eq!(attempt.request.id, attempt_id);
+    // Publisher loss is not proof that its complete process tree retired.
+    // Preserve uncertainty and original observations instead of certifying a
+    // terminal attempt or fabricating zero consumption.
+    assert!(attempt.terminal.is_none());
+    let uncertainty = attempt.unverified_retirement.as_ref().unwrap();
+    assert!(!uncertainty.diagnostic.is_empty());
+    assert!(uncertainty.retired_at_driver_millis.is_none());
+    assert!(uncertainty.resources.is_none());
+    assert!(uncertainty.execution.is_none());
+    assert!(lost.resource_aggregate(1).is_err());
+    let prefix = uncertainty.console.as_ref().unwrap();
     assert_eq!(prefix.completion(), ConsoleCompletion::Interrupted);
     assert!(prefix.source_receipt().is_none());
     assert_eq!(prefix.records().len(), 3);
@@ -133,10 +140,21 @@ pub(super) async fn verify(
     let cold = LocalSupervisorClient::for_current_executable().unwrap();
     cold.connect_or_start().await.unwrap();
     assert_eq!(collect(&cold, &job, attempt_id, budget).await, live);
-    assert_eq!(
-        cold.attach(job.id, 0, 0).await.unwrap().execution.unwrap(),
-        lost
-    );
+    let reopened = cold.attach(job.id, 0, 0).await.unwrap().execution.unwrap();
+    reopened.validate().unwrap();
+    assert!(reopened.resource_aggregate(1).is_err());
+    let runmat_execution_runner::TaskExecutionEvidence {
+        task,
+        attempts,
+        driver_fence,
+        observed_at_driver_millis,
+    } = reopened;
+    assert_eq!(task, lost.task);
+    assert_eq!(attempts, lost.attempts);
+    assert_eq!(driver_fence, lost.driver_fence);
+    // The unretired attempt keeps the durable clock active across reopening;
+    // inspection time advances, but original attempt evidence cannot change.
+    assert!(observed_at_driver_millis >= lost.observed_at_driver_millis);
     println!("original live UTF-8/control prefix survives abrupt publisher exit and cold supervisor restart");
 }
 

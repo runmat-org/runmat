@@ -48,6 +48,15 @@ pub enum SupervisorCommand {
         cursor: runmat_execution::console::ConsoleCursor,
         budget: runmat_execution::console::ConsoleReadBudget,
     },
+    RawOutputPage {
+        handle: runmat_execution::JobHandle,
+        attempt_id: runmat_execution::identity::AttemptId,
+        cursor: super::RawProcessOutputCursor,
+    },
+    RawOutputAttempt {
+        handle: runmat_execution::JobHandle,
+        ordinal: u32,
+    },
     Cancel {
         job_id: JobId,
     },
@@ -82,6 +91,13 @@ pub enum SupervisorResponse {
     ConsolePage {
         attempt_id: runmat_execution::identity::AttemptId,
         page: Option<Box<runmat_execution::console::ConsolePage>>,
+    },
+    RawOutputPage {
+        attempt_id: runmat_execution::identity::AttemptId,
+        page: Option<Box<super::RawProcessOutputPage>>,
+    },
+    RawOutputAttempt {
+        lookup: super::RawProcessOutputLookup,
     },
     Cancelled {
         record: LocalJobRecord,

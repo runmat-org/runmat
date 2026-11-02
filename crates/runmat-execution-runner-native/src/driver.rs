@@ -240,12 +240,40 @@ impl LocalDriver {
         Ok(())
     }
 
-    pub(crate) fn submit(
+    pub(crate) fn submit_with_control(
         self: &Arc<Self>,
         submission: LocalProgramSubmission,
+        owner: Option<runmat_runtime::context::host_allocation::HostControlAllocationOwner>,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
+        self.ensure_no_graph_quarantine()?;
         let (task, recipe, artifact) = self.local_program_submission(submission)?;
-        self.submit_task(task, recipe, artifact)
+        let registration = self.prepare_task(task, recipe, artifact)?;
+        self.publish_controlled_registration(registration, owner)
+    }
+
+    fn publish_controlled_registration(
+        self: &Arc<Self>,
+        registration: (TaskSubmission, Arc<TaskCompletion>),
+        owner: Option<runmat_runtime::context::host_allocation::HostControlAllocationOwner>,
+    ) -> NativeExecutionResult<Arc<TaskCompletion>> {
+        let registration = Self::with_control_owner(registration, owner)?;
+        self.publish_submissions(vec![registration])?
+            .pop()
+            .ok_or_else(|| {
+                NativeExecutionError::Protocol("controlled admission returned no completion".into())
+            })
+    }
+
+    fn with_control_owner(
+        mut registration: (TaskSubmission, Arc<TaskCompletion>),
+        owner: Option<runmat_runtime::context::host_allocation::HostControlAllocationOwner>,
+    ) -> NativeExecutionResult<(TaskSubmission, Arc<TaskCompletion>)> {
+        Arc::get_mut(&mut registration.1)
+            .ok_or_else(|| {
+                NativeExecutionError::Protocol("unpublished completion was already shared".into())
+            })?
+            .install_raw_control_owner(owner)?;
+        Ok(registration)
     }
 
     fn local_program_submission(
@@ -280,6 +308,8 @@ impl LocalDriver {
             )
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let accelerator_requirements = recipe.accelerators.clone();
+        let scratch_bytes =
+            crate::process_output::RawOutputBudget::local_scratch_bytes(1024 * 1024, console)?;
         let request = TaskRequest {
             id: task_id,
             scope_id: self.scope_id,
@@ -296,7 +326,7 @@ impl LocalDriver {
             resources: ResourceRequest {
                 cpu_millicores: 1000,
                 memory_bytes,
-                scratch_bytes: 1024 * 1024,
+                scratch_bytes,
                 max_wall_millis: 24 * 60 * 60 * 1000,
                 max_artifact_bytes: u64::from(self.config.max_message_bytes),
                 max_egress_bytes: 0,
@@ -316,19 +346,6 @@ impl LocalDriver {
             recipe,
             artifact,
         ))
-    }
-
-    pub(crate) fn submit_task(
-        self: &Arc<Self>,
-        submission: TaskSubmission,
-        recipe: ProgramBuildRecipe,
-        artifact: ProgramArtifact,
-    ) -> NativeExecutionResult<Arc<TaskCompletion>> {
-        self.submit_tasks(vec![(submission, recipe, artifact)])?
-            .pop()
-            .ok_or_else(|| {
-                NativeExecutionError::Protocol("local task admission returned no completion".into())
-            })
     }
 
     /// Atomically admits a topologically ordered batch before dispatching any task.
@@ -375,20 +392,23 @@ impl LocalDriver {
 
     /// Same staged registration and atomic publication owner as submit_workers,
     /// without building a redundant request/argument copy for local producers.
-    pub(crate) fn submit_local_workers(
+
+    pub(crate) fn submit_local_workers_with_control(
         self: &Arc<Self>,
         tasks: Vec<LocalWorkerSubmission>,
+        owner: Option<runmat_runtime::context::host_allocation::HostControlAllocationOwner>,
     ) -> NativeExecutionResult<Vec<Arc<TaskCompletion>>> {
         self.ensure_no_graph_quarantine()?;
         let mut prepared = Vec::with_capacity(tasks.len());
         for task in tasks {
-            prepared.push(match task {
+            let registration = match task {
                 LocalWorkerSubmission::Direct(task) => {
                     let (task, recipe, artifact) = self.local_program_submission(*task)?;
                     self.prepare_task(task, recipe, artifact)?
                 }
                 LocalWorkerSubmission::Graph(graph) => self.prepare_graph(*graph)?,
-            });
+            };
+            prepared.push(Self::with_control_owner(registration, owner.clone())?);
         }
         self.publish_submissions(prepared)
     }
@@ -419,25 +439,14 @@ impl LocalDriver {
         self.publish_submissions(prepared)
     }
 
-    pub(crate) fn submit_graph(
+    pub(crate) fn submit_graph_with_control(
         self: &Arc<Self>,
         graph: LocalGraphSubmission,
+        owner: Option<runmat_runtime::context::host_allocation::HostControlAllocationOwner>,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
-        self.submit_graphs(vec![graph])?.pop().ok_or_else(|| {
-            NativeExecutionError::Protocol("local Graph admission returned no completion".into())
-        })
-    }
-    /// Stage the whole selected callback wave before any dispatch.
-    pub(crate) fn submit_graphs(
-        self: &Arc<Self>,
-        graphs: Vec<LocalGraphSubmission>,
-    ) -> NativeExecutionResult<Vec<Arc<TaskCompletion>>> {
         self.ensure_no_graph_quarantine()?;
-        let mut prepared = Vec::with_capacity(graphs.len());
-        for graph in graphs {
-            prepared.push(self.prepare_graph(graph)?);
-        }
-        self.publish_submissions(prepared)
+        let registration = self.prepare_graph(graph)?;
+        self.publish_controlled_registration(registration, owner)
     }
 
     fn prepare_graph(
@@ -493,7 +502,8 @@ impl LocalDriver {
         let memory_bytes = selected
             .input_allocation_floor_bytes(serialized_length)
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        let scratch_bytes = stored.length.max(1024 * 1024);
+        let materialized_scratch_bytes =
+            crate::attempt_scratch::materialized_bytes(admitted.selected_bundles())?;
         let recipe = &selected.recipe;
         let artifact_id = stored.id;
         let response_authority = admitted
@@ -501,6 +511,13 @@ impl LocalDriver {
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let invocation_context = selected.context.clone();
         let invocation_controls = selected.invocation_controls.clone().unwrap_or_default();
+        let scratch_bytes = crate::process_output::RawOutputBudget::local_scratch_bytes(
+            stored
+                .length
+                .max(1024 * 1024)
+                .max(materialized_scratch_bytes),
+            invocation_controls.console,
+        )?;
         let requested_outputs = selected.requested_outputs;
         let required_capabilities =
             crate::graph_submission::required_capabilities(selected.schema_version)?;
@@ -546,6 +563,11 @@ impl LocalDriver {
             }
         };
         let request = &submission.request;
+        crate::process_output::RawOutputBudget::from_grant(
+            request.resources.scratch_bytes,
+            materialized_scratch_bytes,
+            request.console,
+        )?;
         if let Some(inventory) = &self.remote_graph_inventory {
             if request.resources.cpu_millicores > inventory.cpu_millicores
                 || request.resources.memory_bytes > inventory.memory_bytes
@@ -576,19 +598,22 @@ impl LocalDriver {
         recipe
             .validate_resource_request(&request.resources)
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        let completion = Arc::new(TaskCompletion::new_graph(
-            stored,
-            request.program_artifact_id().ok_or_else(|| {
+        let completion = Arc::new(TaskCompletion::new_graph(GraphAttemptAuthority {
+            artifact_id: stored.id,
+            stored_digest: stored.digest,
+            stored_length: stored.length,
+            request_artifact_id: request.program_artifact_id().ok_or_else(|| {
                 NativeExecutionError::Protocol(
                     "Graph task lacks its authenticated source artifact identity".into(),
                 )
             })?,
-            invocation_context,
+            context: invocation_context,
             requested_outputs,
             callable,
-            response_authority,
+            response: response_authority,
             invocation_controls,
-        ));
+            materialized_scratch_bytes,
+        }));
         Ok((submission, completion))
     }
 

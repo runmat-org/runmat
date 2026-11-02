@@ -201,6 +201,81 @@ impl LocalSupervisorClient {
         }
     }
 
+    pub async fn raw_output_attempt(
+        &self,
+        handle: runmat_execution::JobHandle,
+        ordinal: u32,
+    ) -> NativeExecutionResult<super::RawProcessOutputLookup> {
+        if ordinal == 0 || ordinal > u32::from(u16::MAX) + 1 {
+            return Err(NativeExecutionError::Protocol(
+                "raw output ordinal exceeds the attempt inventory".into(),
+            ));
+        }
+        self.connect_or_start().await?;
+        match self
+            .request(SupervisorCommand::RawOutputAttempt {
+                handle: handle.clone(),
+                ordinal,
+            })
+            .await?
+        {
+            SupervisorResponse::RawOutputAttempt { lookup }
+                if lookup.handle == handle
+                    && lookup.ordinal == ordinal
+                    && lookup
+                        .attempt
+                        .as_ref()
+                        .is_none_or(|attempt| u32::from(attempt.ordinal) == ordinal) =>
+            {
+                Ok(lookup)
+            }
+            response => unexpected(response),
+        }
+    }
+
+    pub async fn raw_output_page(
+        &self,
+        handle: runmat_execution::JobHandle,
+        attempt_id: runmat_execution::identity::AttemptId,
+        cursor: super::RawProcessOutputCursor,
+    ) -> NativeExecutionResult<Option<super::RawProcessOutputPage>> {
+        self.connect_or_start().await?;
+        match self
+            .request(SupervisorCommand::RawOutputPage {
+                handle,
+                attempt_id,
+                cursor,
+            })
+            .await?
+        {
+            SupervisorResponse::RawOutputPage {
+                attempt_id: received,
+                page,
+            } if received == attempt_id => {
+                let Some(page) = page else { return Ok(None) };
+                if page.attempt_id != attempt_id
+                    || page.stdout.as_slice().len() > crate::process_output::OUTPUT_PAGE_BYTES
+                    || page.stderr.as_slice().len() > crate::process_output::OUTPUT_PAGE_BYTES
+                    || cursor
+                        .stdout
+                        .checked_add(page.stdout.as_slice().len() as u64)
+                        != Some(page.next.stdout)
+                    || cursor
+                        .stderr
+                        .checked_add(page.stderr.as_slice().len() as u64)
+                        != Some(page.next.stderr)
+                {
+                    return Err(NativeExecutionError::Protocol(
+                        "raw output response differs from requested attempt, cursor or page bound"
+                            .into(),
+                    ));
+                }
+                Ok(Some(*page))
+            }
+            response => unexpected(response),
+        }
+    }
+
     pub async fn cancel(&self, job_id: JobId) -> NativeExecutionResult<LocalJobRecord> {
         self.connect_or_start().await?;
         match self.request(SupervisorCommand::Cancel { job_id }).await? {

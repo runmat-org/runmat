@@ -23,8 +23,9 @@ fn script_route_and_request_futures_keep_bounded_inline_state() {
             ScriptInvocation {
                 script: PathBuf::from(path),
                 args: Vec::new(),
+                function: None,
                 emit_bytecode_path: None,
-                fea_json: false,
+                json: false,
                 execution: ExecutionTargetArgs::default(),
             },
             &cli,

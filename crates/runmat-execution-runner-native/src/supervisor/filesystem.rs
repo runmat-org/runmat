@@ -8,12 +8,12 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 
 const MAX_PERSISTED_JSON_BYTES: u64 = 64 * 1024 * 1024;
 
-pub(super) fn atomic_json(path: &Path, value: &impl Serialize) -> NativeExecutionResult<()> {
+pub(crate) fn atomic_json(path: &Path, value: &impl Serialize) -> NativeExecutionResult<()> {
     let bytes = runmat_canonical_codec::encode_json_bounded(value, MAX_PERSISTED_JSON_BYTES)?;
     atomic_write(path, &bytes)
 }
 
-pub(super) fn immutable_json(path: &Path, value: &impl Serialize) -> NativeExecutionResult<()> {
+pub(crate) fn immutable_json(path: &Path, value: &impl Serialize) -> NativeExecutionResult<()> {
     use runmat_filesystem::{AtomicCreateResult, NativeFsProvider, PublicationDurability};
     let bytes = runmat_canonical_codec::encode_json_bounded(value, MAX_PERSISTED_JSON_BYTES)?;
     secure_directory(path.parent().ok_or_else(|| {
@@ -67,7 +67,7 @@ pub(super) fn read_optional_json<T: DeserializeOwned>(
     read_optional_json_bounded(path, MAX_PERSISTED_JSON_BYTES)
 }
 
-pub(super) fn read_optional_json_bounded<T: DeserializeOwned>(
+pub(crate) fn read_optional_json_bounded<T: DeserializeOwned>(
     path: &Path,
     maximum_bytes: u64,
 ) -> NativeExecutionResult<Option<T>> {
@@ -102,7 +102,7 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> NativeExecutionResult<(
     Ok(())
 }
 
-pub(super) fn secure_directory(path: &Path) -> NativeExecutionResult<()> {
+pub(crate) fn secure_directory(path: &Path) -> NativeExecutionResult<()> {
     runmat_filesystem::NativeFsProvider
         .create_private_directory_durable(path)
         .map_err(io_error)

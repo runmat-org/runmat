@@ -8,10 +8,13 @@ use runmat_plot::gui::host_loop::{NativeGraphicsHost, WindowOpenPort};
 use crate::cli::{Cli, Commands};
 
 pub(super) fn applies(cli: &Cli) -> bool {
-    matches!(
-        cli.command,
-        None | Some(Commands::Run { .. } | Commands::Repl { .. })
-    ) && cli.emit_bytecode.is_none()
+    let local = match &cli.command {
+        None => cli.execution.cluster.is_none(),
+        Some(Commands::Run { execution, .. }) => execution.cluster.is_none(),
+        Some(Commands::Repl { .. }) => true,
+        _ => false,
+    };
+    local && cli.emit_bytecode.is_none()
 }
 
 struct LaneExit(WindowOpenPort);

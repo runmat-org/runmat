@@ -5,6 +5,7 @@ fn original_node_owner_durably_starts_ends_and_confirms_one_observation() {
     let root = tempfile::tempdir().unwrap();
     let signer = EndpointIdentitySigner::from_secret([37; 32]).unwrap();
     let credential = NodeCredential {
+        server_endpoint: crate::config::ServerEndpoint::parse("http://127.0.0.1:1").unwrap(),
         node_id: "node-one".into(),
         cluster_id: "cluster-one".into(),
         org_id: "org-one".into(),

@@ -22,14 +22,14 @@ impl ConsoleReadPlan {
 fn load(plan: &ConsoleReadPlan) -> NativeExecutionResult<Option<(PathBuf, Head)>> {
     let root = &plan.root;
     let Some(original): Option<Header> =
-        read_optional_json_bounded(&root.join("original.json"), HEAD_BYTES)?
+        read_optional_json_bounded(&root.join("original.json"), CONSOLE_HEAD_BYTES)?
     else {
         return Ok(None);
     };
     if original != plan.original {
         return Err(invalid("console journal differs from original assignment"));
     }
-    let head: Head = read_optional_json_bounded(&root.join("head.json"), HEAD_BYTES)?
+    let head: Head = read_optional_json_bounded(&root.join("head.json"), CONSOLE_HEAD_BYTES)?
         .ok_or_else(|| invalid("console journal publication head is absent"))?;
     if head.inventory.limits != original.limits
         || head.inventory.record_count > u64::from(original.limits.max_records)

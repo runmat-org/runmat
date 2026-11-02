@@ -3,12 +3,23 @@ use super::super::GraphAttemptAuthority;
 use super::*;
 
 pub(crate) struct ProcessOwner<'a> {
+    pub(crate) attempt: &'a AttemptRequest,
     pub(crate) config: &'a crate::NativeExecutionConfig,
     pub(crate) artifacts: &'a crate::local_store::ArtifactStore,
     pub(crate) objects: &'a crate::FilesystemObjectStore,
     pub(crate) graph_quarantine: &'a std::sync::Mutex<Vec<GraphProcessQuarantine>>,
 }
-pub(crate) trait OwnedProcessControl: Send + Sync {
+pub(crate) trait OwnedProcessControl:
+    crate::process_output::OutputDrainControl + Send + Sync
+{
+    fn begin_raw_output(
+        &self,
+        attempt: &AttemptRequest,
+        materialized: u64,
+    ) -> Result<
+        std::sync::Mutex<crate::process_output::RawOutputJournal>,
+        std::sync::Arc<crate::RawOutputError>,
+    >;
     fn is_cancelled(&self) -> bool;
     fn cancellation_reason(&self) -> Option<runmat_execution::CancellationReason>;
     fn record_progress(&self, progress: crate::protocol::ProgramProgress);
@@ -36,9 +47,52 @@ pub(super) struct LocalControl<'a> {
     pub(super) driver: &'a LocalDriver,
     pub(super) completion: &'a TaskCompletion,
 }
+impl crate::process_output::OutputDrainControl for LocalControl<'_> {
+    fn raw_output_changed(&self) {
+        self.completion.raw_output_changed();
+    }
+
+    fn stop_for_raw_output(&self, error: std::sync::Arc<crate::RawOutputError>) {
+        self.completion.stop_for_raw_output(error);
+    }
+
+    fn raw_output_failure(&self) -> Option<std::sync::Arc<crate::RawOutputError>> {
+        self.completion.raw_output_failure()
+    }
+}
 impl OwnedProcessControl for LocalControl<'_> {
+    fn begin_raw_output(
+        &self,
+        attempt: &AttemptRequest,
+        materialized: u64,
+    ) -> Result<
+        std::sync::Mutex<crate::process_output::RawOutputJournal>,
+        std::sync::Arc<crate::RawOutputError>,
+    > {
+        let root = self
+            .driver
+            .config
+            .store_root
+            .join("raw-output")
+            .join(attempt.id.to_string());
+        let journal =
+            crate::process_output::RawOutputJournal::for_attempt(root, attempt, materialized)
+                .map_err(std::sync::Arc::new)
+                .inspect_err(|error| {
+                    self.completion
+                        .stop_for_raw_output(std::sync::Arc::clone(error))
+                })?;
+        self.completion
+            .register_raw_output(journal.reader_ref())
+            .map_err(std::sync::Arc::new)
+            .inspect_err(|error| {
+                self.completion
+                    .stop_for_raw_output(std::sync::Arc::clone(error))
+            })?;
+        Ok(std::sync::Mutex::new(journal))
+    }
     fn is_cancelled(&self) -> bool {
-        self.completion.is_cancelled()
+        self.completion.should_stop()
     }
     fn cancellation_reason(&self) -> Option<runmat_execution::CancellationReason> {
         self.completion.cancellation_reason()
@@ -142,6 +196,9 @@ pub(super) async fn run_process(
         .as_ref()
         .map(|scratch| scratch.path().to_path_buf());
     let mut command = HostCommand::new(&driver.config.executable);
+    let listener = runmat_process_host::ipc::private_control::PrivateControlListener::bind()
+        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+    command.stdio = runmat_process_host::StdioPolicy::PrivateControl(listener.endpoint().clone());
     command.arguments = driver.config.worker_arguments.clone();
     command.environment_policy = EnvironmentPolicy::Inherit;
     if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
@@ -217,24 +274,110 @@ pub(super) async fn run_process(
         },
         None => AttemptChild::Direct(child),
     };
+    let materialized = match &request {
+        WorkerLaunchRequest::StagedGraph(_) => completion
+            .graph_authority()
+            .map(|authority| authority.materialized_scratch_bytes),
+        _ => Some(0),
+    };
+    let mut raw_journal = None;
+    let mut output_pipes = None;
+    let setup_error = match materialized {
+        None => Some(TransferFailure::Infrastructure(
+            "Graph raw output lacks its admitted materialization authority".into(),
+        )),
+        Some(materialized) => match completion.begin_raw_output(driver.attempt, materialized) {
+            Err(error) => {
+                completion.stop_for_raw_output(std::sync::Arc::clone(&error));
+                Some(TransferFailure::Infrastructure(error.to_string()))
+            }
+            Ok(journal) => {
+                raw_journal = Some(journal);
+                match child.take_application_output() {
+                    Ok(pipes) => {
+                        output_pipes = Some(pipes);
+                        None
+                    }
+                    Err(error) => {
+                        let mut failure = std::sync::Arc::new(crate::RawOutputError::Io(
+                            std::io::Error::other(error),
+                        ));
+                        if let Some(journal) = raw_journal.as_ref() {
+                            let mut journal = journal.lock().expect("raw output journal poisoned");
+                            if let Err(cleanup) = journal.fail_open_streams() {
+                                failure = std::sync::Arc::new(crate::RawOutputError::Cleanup {
+                                    primary: failure,
+                                    cleanup: Box::new(cleanup),
+                                });
+                            }
+                        }
+                        completion.stop_for_raw_output(std::sync::Arc::clone(&failure));
+                        completion.raw_output_changed();
+                        Some(TransferFailure::Infrastructure(failure.to_string()))
+                    }
+                }
+            }
+        },
+    };
+    let output_lifetime = crate::process_output::OutputDrainLifetime::default();
+    let owner = async {
+        let result = async {
     let mut child_retired = false;
     let mut child_preserved_reason = None;
     let outcome = async {
+    if let Some(error) = setup_error {
+        return Err(error);
+    }
     if completion.is_cancelled() {
         return Err(TransferFailure::Cancelled);
     }
     let stderr = child.captured_stderr();
-    let stdio = child
-        .take_stdio()
-        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-    let mut reader = BufReader::new(MeteredIo::new(stdio.stdout, meters.received.clone()));
-    let mut writer = MeteredIo::new(stdio.stdin, meters.sent.clone());
+    // Application stdout/stderr require a caller-owned drain before this
+    // bootstrap is qualified; neither stream is a control transport.
+    let accept = tokio::time::timeout(Duration::from_secs(30), listener.accept());
+    tokio::pin!(accept);
+    let control = loop {
+        tokio::select! {
+            connected = &mut accept => break connected
+                .map_err(|_| TransferFailure::Infrastructure(
+                    "native worker private control bootstrap exceeded its deadline".into(),
+                ))?
+                .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                if completion.is_cancelled() {
+                    return Err(TransferFailure::Cancelled);
+                }
+            }
+        }
+    };
+    if completion.is_cancelled() {
+        return Err(TransferFailure::Cancelled);
+    }
+    let mut reader = BufReader::new(MeteredIo::new(control.reader, meters.received.clone()));
+    let mut writer = MeteredIo::new(control.writer, meters.sent.clone());
     let limits = FrameLimits {
         max_message_bytes: driver.config.max_message_bytes,
     };
-    write_payload(&mut writer, &payload, limits)
-        .await
-        .map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
+    {
+        let write = write_payload(&mut writer, &payload, limits);
+        tokio::pin!(write);
+        loop {
+            tokio::select! {
+                result = &mut write => {
+                    result.map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
+                    break;
+                }
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                    if completion.is_cancelled() {
+                        return Err(TransferFailure::Cancelled);
+                    }
+                }
+            }
+        }
+    }
+    if completion.is_cancelled() {
+        return Err(TransferFailure::Cancelled);
+    }
     let mut last_progress_sequence = 0;
     let mut graph_cancel_sent_at = None;
     let response = loop {
@@ -310,9 +453,23 @@ pub(super) async fn run_process(
                         result,
                     })
                     .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-                    write_payload(&mut writer, &payload, limits)
-                        .await
-                        .map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
+                    {
+                        let write = write_payload(&mut writer, &payload, limits);
+                        tokio::pin!(write);
+                        loop {
+                            tokio::select! {
+                                result = &mut write => {
+                                    result.map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
+                                    break;
+                                }
+                                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                                    if completion.is_cancelled() {
+                                        return Err(TransferFailure::Cancelled);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 WorkerProcessMessage::Console { record } => {
                     let receiver = console_receiver
@@ -364,9 +521,8 @@ pub(super) async fn run_process(
         }
     };
     if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
-        // This is a one-shot Graph child. Its control read may already have
-        // entered Tokio's blocking stdin path; close our only writer after
-        // the terminal frame so that read observes EOF before child wait.
+        // This is a one-shot Graph child. Close our private request writer
+        // after the terminal frame so the worker observes EOF before wait.
         // No cancellation or collective command is legal after completion.
         drop(writer);
         match tokio::time::timeout(Duration::from_secs(5), child.wait_and_retire_tree()).await {
@@ -441,7 +597,7 @@ pub(super) async fn run_process(
             .validate_response(&response),
     }
     .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-    if graph_cancel_sent_at.is_some() || completion.is_cancelled() {
+    if graph_cancel_sent_at.is_some() || completion.cancellation_reason().is_some() {
         return Err(TransferFailure::Cancelled);
     }
     Ok(response)
@@ -525,6 +681,84 @@ pub(super) async fn run_process(
                     retryable: true,
                 });
             return Err(TransferFailure::RetirementUnverified(message));
+        }
+    }
+    outcome
+        }
+        .await;
+        output_lifetime.finish();
+        result
+    };
+    let drain = async {
+        match raw_journal.as_ref() {
+            Some(journal) if output_pipes.is_some() => {
+                crate::process_output::drain_pipes(
+                    output_pipes,
+                    journal,
+                    completion,
+                    &output_lifetime,
+                )
+                .await
+            }
+            _ => Ok(()),
+        }
+    };
+    let (outcome, drain_result) = tokio::join!(owner, drain);
+    let retirement_result = if *retirement == LocalRetirementEvidence::FullTreeRetired {
+        raw_journal.as_ref().map(|journal| {
+            journal
+                .lock()
+                .expect("raw output journal poisoned")
+                .mark_retired()
+        })
+    } else {
+        None
+    };
+    let retirement_error = retirement_result.and_then(Result::err);
+    let has_retirement_cleanup_error = retirement_error.is_some();
+    let raw_error = match (drain_result.err(), retirement_error) {
+        (Some(primary), Some(cleanup)) => {
+            Some(std::sync::Arc::new(crate::RawOutputError::Cleanup {
+                primary,
+                cleanup: Box::new(cleanup),
+            }))
+        }
+        (None, Some(cleanup)) => Some(match completion.raw_output_failure() {
+            Some(primary) => std::sync::Arc::new(crate::RawOutputError::Cleanup {
+                primary,
+                cleanup: Box::new(cleanup),
+            }),
+            None => std::sync::Arc::new(cleanup),
+        }),
+        (Some(primary), None) => Some(primary),
+        (None, None) => None,
+    };
+    if let Some(error) = raw_error {
+        completion.stop_for_raw_output(std::sync::Arc::clone(&error));
+        if matches!(
+            &outcome,
+            Ok(WorkerResponse::Success { .. })
+                | Ok(WorkerResponse::ExternalizedSuccess { .. })
+                | Ok(WorkerResponse::GraphSuccess { .. })
+                | Ok(WorkerResponse::SpmdSuccess { .. })
+                | Err(TransferFailure::Cancelled)
+        ) {
+            return Err(TransferFailure::Infrastructure(error.to_string()));
+        }
+        if has_retirement_cleanup_error {
+            return match outcome {
+                Err(TransferFailure::Infrastructure(message)) => {
+                    Err(TransferFailure::Infrastructure(format!(
+                        "{message}; output cleanup also failed: {error}"
+                    )))
+                }
+                Err(TransferFailure::RetirementUnverified(message)) => {
+                    Err(TransferFailure::RetirementUnverified(format!(
+                        "{message}; output cleanup also failed: {error}"
+                    )))
+                }
+                other => other,
+            };
         }
     }
     outcome

@@ -2,10 +2,10 @@
 use crate::process_provider::ProcessControl;
 use crate::{NativeExecutionError, NativeExecutionResult};
 use runmat_execution_runner::AttemptRequest;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Mutex,
+    Arc, Mutex,
 };
 
 #[derive(Default)]
@@ -15,6 +15,10 @@ pub(super) struct DurableControl {
     reason: Mutex<Option<runmat_execution::CancellationReason>>,
     progress: Mutex<Option<crate::protocol::ProgramProgress>>,
     console: Option<Mutex<super::console_journal::ConsoleJournal>>,
+    raw_identity: Option<crate::process_output::RawOutputIdentity>,
+    raw_root: Option<PathBuf>,
+    raw_started: AtomicBool,
+    raw_failure: Mutex<Option<Arc<crate::RawOutputError>>>,
 }
 impl DurableControl {
     pub(super) fn for_attempt(
@@ -24,6 +28,14 @@ impl DurableControl {
         Ok(Self {
             console: super::console_journal::ConsoleJournal::create(attempt, lease)?
                 .map(Mutex::new),
+            raw_identity: Some(crate::process_output::RawOutputIdentity::for_attempt(
+                &attempt.request,
+            )?),
+            raw_root: Some(
+                attempt
+                    .job_directory
+                    .join(format!("{}.output", attempt.request.id)),
+            ),
             ..Default::default()
         })
     }
@@ -46,7 +58,59 @@ impl DurableControl {
             .clone()
     }
 }
+impl crate::process_output::OutputDrainControl for DurableControl {
+    fn raw_output_changed(&self) {
+        // Detached callers discover durable committed pages through the
+        // authenticated supervisor API, not an in-process caller mailbox.
+    }
+    fn stop_for_raw_output(&self, error: Arc<crate::RawOutputError>) {
+        self.raw_failure
+            .lock()
+            .expect("durable raw output poisoned")
+            .get_or_insert(error);
+    }
+    fn raw_output_failure(&self) -> Option<Arc<crate::RawOutputError>> {
+        self.raw_failure
+            .lock()
+            .expect("durable raw output poisoned")
+            .clone()
+    }
+}
 impl ProcessControl for DurableControl {
+    fn begin_raw_output(
+        &self,
+        attempt: &AttemptRequest,
+        materialized: u64,
+    ) -> Result<Mutex<crate::process_output::RawOutputJournal>, Arc<crate::RawOutputError>> {
+        let identity =
+            crate::process_output::RawOutputIdentity::for_attempt(attempt).map_err(Arc::new)?;
+        if self.raw_identity.as_ref() != Some(&identity) {
+            return Err(Arc::new(crate::RawOutputError::Invalid(
+                "output writer differs from the leased original attempt",
+            )));
+        }
+        if self
+            .raw_started
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(Arc::new(crate::RawOutputError::Invalid(
+                "original attempt already started its output writer",
+            )));
+        }
+        let root = self.raw_root.as_ref().ok_or_else(|| {
+            Arc::new(crate::RawOutputError::Invalid(
+                "output writer has no leased directory",
+            ))
+        })?;
+        let journal = crate::process_output::RawOutputJournal::for_attempt(
+            root.clone(),
+            attempt,
+            materialized,
+        )
+        .map_err(Arc::new)?;
+        Ok(Mutex::new(journal))
+    }
     fn cancellation_reason(&self) -> Option<runmat_execution::CancellationReason> {
         *self.reason.lock().expect("durable control poisoned")
     }

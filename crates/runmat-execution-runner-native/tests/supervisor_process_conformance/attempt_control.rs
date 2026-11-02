@@ -20,8 +20,11 @@ struct Ready {
 
 pub(super) async fn blocked_worker() {
     use runmat_process_host::ipc::{read_payload, FrameLimits};
+    let mut control = runmat_process_host::ipc::private_control::connect_host()
+        .await
+        .expect("original attempt private control connection");
     let payload = read_payload(
-        &mut tokio::io::stdin(),
+        &mut control.reader,
         FrameLimits {
             max_message_bytes: 64 * 1024 * 1024,
         },

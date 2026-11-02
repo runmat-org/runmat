@@ -20,7 +20,7 @@ use crate::console::ConsoleStream;
 use crate::context::host_allocation::{
     host_allocation_runtime_error, HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
 };
-use crate::context::{RuntimeConsoleScope, RuntimeContext};
+use crate::context::{ProcessConsoleDecoder, RuntimeConsoleScope, RuntimeContext};
 use crate::RuntimeError;
 
 #[derive(Clone, Default)]
@@ -72,8 +72,8 @@ impl HostOutput {
         let streams = ApplicationOutput {
             stdout: Some(pipes.stdout),
             stderr: Some(pipes.stderr),
-            stdout_tail: Utf8Tail::default(),
-            stderr_tail: Utf8Tail::default(),
+            stdout_tail: ProcessConsoleDecoder::default(),
+            stderr_tail: ProcessConsoleDecoder::default(),
             stderr_diagnostics: pipes.stderr_diagnostics,
             failed: false,
         };
@@ -126,17 +126,11 @@ pub(super) enum Completion {
     EndOfStreams,
 }
 
-#[derive(Default)]
-struct Utf8Tail {
-    bytes: [u8; 3],
-    len: usize,
-}
-
 struct ApplicationOutput {
     stdout: Option<tokio::process::ChildStdout>,
     stderr: Option<tokio::process::ChildStderr>,
-    stdout_tail: Utf8Tail,
-    stderr_tail: Utf8Tail,
+    stdout_tail: ProcessConsoleDecoder,
+    stderr_tail: ProcessConsoleDecoder,
     stderr_diagnostics: runmat_process_host::ProcessOutputCaptureWriter,
     failed: bool,
 }
@@ -229,7 +223,7 @@ impl ApplicationOutput {
 
 fn poll_stream<R: AsyncRead + Unpin>(
     reader: &mut Option<R>,
-    tail: &mut Utf8Tail,
+    tail: &mut ProcessConsoleDecoder,
     mut diagnostics: Option<&mut runmat_process_host::ProcessOutputCaptureWriter>,
     stream: ConsoleStream,
     context: &mut Context<'_>,
@@ -238,10 +232,8 @@ fn poll_stream<R: AsyncRead + Unpin>(
     let Some(pipe) = reader.as_mut() else {
         return Ok(false);
     };
-    let mut buffer = [0u8; 8192 + 3];
-    let prefix = tail.len;
-    buffer[..prefix].copy_from_slice(&tail.bytes[..prefix]);
-    let mut read = ReadBuf::new(&mut buffer[prefix..]);
+    let mut buffer = [0u8; 8192];
+    let mut read = ReadBuf::new(&mut buffer);
     match Pin::new(pipe).poll_read(context, &mut read) {
         Poll::Pending => return Ok(false),
         Poll::Ready(Err(error)) => {
@@ -270,91 +262,16 @@ fn poll_stream<R: AsyncRead + Unpin>(
         }
     }
     let eof = count == 0;
-    tail.len = 0;
-    publish_utf8(
-        &buffer[..prefix + count],
-        eof,
-        tail,
-        |text| -> Result<(), RuntimeError> {
-            match runtime {
-                Some(scope) => scope.record(stream, text),
-                None => crate::context::with_original_scope(None, || {
-                    crate::console::record_console_output(stream, text)
-                }),
-            }
-        },
-    )?;
+    tail.decode(read.filled(), eof, |text| -> Result<(), RuntimeError> {
+        match runtime {
+            Some(scope) => scope.record(stream, text),
+            None => crate::context::with_original_scope(None, || {
+                crate::console::record_console_output(stream, text)
+            }),
+        }
+    })?;
     if eof {
         *reader = None;
     }
     Ok(true)
-}
-
-fn publish_utf8<E>(
-    mut bytes: &[u8],
-    eof: bool,
-    tail: &mut Utf8Tail,
-    mut emit: impl FnMut(&str) -> Result<(), E>,
-) -> Result<(), E> {
-    while !bytes.is_empty() {
-        match std::str::from_utf8(bytes) {
-            Ok(text) => {
-                emit(text)?;
-                return Ok(());
-            }
-            Err(error) => {
-                let (valid, rest) = bytes.split_at(error.valid_up_to());
-                if !valid.is_empty() {
-                    // The UTF-8 validator established this exact prefix.
-                    emit(std::str::from_utf8(valid).expect("validated UTF-8 prefix"))?;
-                }
-                if let Some(invalid) = error.error_len() {
-                    emit("\u{fffd}")?;
-                    bytes = &rest[invalid..];
-                } else {
-                    if eof {
-                        emit("\u{fffd}")?;
-                    } else {
-                        tail.bytes[..rest.len()].copy_from_slice(rest);
-                        tail.len = rest.len();
-                    }
-                    return Ok(());
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn split_utf8_and_invalid_bytes_follow_streaming_lossy_text_semantics() {
-        for bytes in [
-            b"before\xe2\x82\xac\xf0\x9f\x98\x80after".as_slice(),
-            b"bad\xff\xe2\x82",
-        ] {
-            for split in 0..=bytes.len() {
-                let mut tail = Utf8Tail::default();
-                let mut text = String::new();
-                publish_utf8(&bytes[..split], false, &mut tail, |part| {
-                    text.push_str(part);
-                    Ok::<_, ()>(())
-                })
-                .unwrap();
-                let mut rest = tail.bytes[..tail.len].to_vec();
-                rest.extend_from_slice(&bytes[split..]);
-                tail.len = 0;
-                publish_utf8(&rest, true, &mut tail, |part| {
-                    text.push_str(part);
-                    Ok::<_, ()>(())
-                })
-                .unwrap();
-                assert_eq!(text, String::from_utf8_lossy(bytes), "split={split}");
-                assert_eq!(tail.len, 0);
-            }
-        }
-    }
 }

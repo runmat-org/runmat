@@ -8,8 +8,11 @@ use std::path::Path;
 pub(super) const WORKER_MARKER: &str = "--original-output-blocked-worker";
 
 pub(super) async fn blocked_worker() {
+    let mut control = runmat_process_host::ipc::private_control::connect_host()
+        .await
+        .expect("original worker private control connection");
     let bytes = runmat_process_host::ipc::read_payload(
-        &mut tokio::io::stdin(),
+        &mut control.reader,
         runmat_process_host::ipc::FrameLimits {
             max_message_bytes: 64 * 1024 * 1024,
         },
@@ -49,7 +52,7 @@ pub(super) async fn blocked_worker() {
     };
     let message = runmat_execution_runner_native::WorkerProcessMessage::Console { record };
     runmat_process_host::ipc::write_payload(
-        &mut tokio::io::stdout(),
+        &mut control.writer,
         &serde_json::to_vec(&message).unwrap(),
         runmat_process_host::ipc::FrameLimits {
             max_message_bytes: 64 * 1024 * 1024,
@@ -91,19 +94,15 @@ pub(super) async fn verify(original: &NativeExecutionConfig) {
     service
         .cancel(&Value::Task(task.clone().into()), CancellationReason::Quota)
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            match service
-                .begin_await_in_context(Value::Future(future.clone().into()), &original.runtime)
-            {
-                Ok(AwaitAction::Pending(_)) => tokio::time::sleep(Duration::from_millis(10)).await,
-                Err(ExecutionServiceError::Cancelled) => break,
-                other => panic!("original running cancellation returned {other:?}"),
-            }
-        }
-    })
-    .await
-    .expect("original cancellation did not observe worker termination");
+    assert!(matches!(
+        await_in_context(
+            &service,
+            Value::Future(future.clone().into()),
+            &original.runtime,
+        )
+        .await,
+        Err(ExecutionServiceError::Cancelled)
+    ));
     let bytes = std::fs::read(root.join("checkpoints/driver.json")).unwrap();
     let cold: DriverSnapshot = serde_json::from_slice(&bytes).unwrap();
     cold.validate().unwrap();

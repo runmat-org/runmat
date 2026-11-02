@@ -71,6 +71,7 @@ pub(in crate::service) fn submit(
     calls: Vec<DeferredCall>,
     pool: &PoolHandle,
     cancellation: runmat_execution::cancellation::CancellationToken,
+    owner: Option<runmat_runtime::context::host_allocation::HostControlAllocationOwner>,
 ) -> Result<Vec<TaskHandle>, ExecutionServiceError> {
     if cancellation.is_cancelled() {
         return Err(ExecutionServiceError::Cancelled);
@@ -196,7 +197,7 @@ pub(in crate::service) fn submit(
     }
     let completions = service
         .driver
-        .submit_local_workers(submissions)
+        .submit_local_workers_with_control(submissions, owner)
         .map_err(|error| ExecutionServiceError::Infrastructure(error.to_string()))?;
     // The canonical atomic publisher returns one completion for each submitted
     // task. There is no fallible handoff between publication and installation.
@@ -222,13 +223,7 @@ pub(in crate::service) fn submit(
             .zip(receipts)
             .zip(&mut guards)
         {
-            let running = match receipt {
-                Some(receipt) => RunningCompletion::Graph {
-                    completion: Arc::clone(&completion),
-                    receipt,
-                },
-                None => RunningCompletion::Direct(Arc::clone(&completion)),
-            };
+            let running = RunningCompletion::new(Arc::clone(&completion), receipt);
             // If any reservation was cancelled, no handle is returned for the
             // wave: every accepted task must therefore enter owned retirement.
             let cancelled = wave_cancelled;

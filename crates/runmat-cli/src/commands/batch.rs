@@ -1,6 +1,4 @@
-use std::io::Write;
 use std::path::Path;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use runmat_execution_runner_native::supervisor::{
@@ -15,6 +13,8 @@ use runmat_process_host::{HostCommand, StdioPolicy};
 
 use crate::cli::BatchCommand;
 use crate::presentation;
+
+mod attach;
 
 pub async fn execute(command: BatchCommand) -> Result<()> {
     let client = LocalSupervisorClient::for_current_executable()?;
@@ -94,7 +94,7 @@ pub async fn execute(command: BatchCommand) -> Result<()> {
             }
         }
         BatchCommand::Attach { job_id, no_follow } => {
-            attach(&client, job_id, no_follow).await?;
+            attach::run(&client, job_id, no_follow).await?;
         }
         BatchCommand::Cancel { job_id, json } => {
             let record = client.cancel(job_id).await?;
@@ -224,41 +224,6 @@ async fn run_script_driver(
     match command.spawn().await {
         Ok(mut child) => child.wait().await.map_err(|error| error.to_string()),
         Err(error) => Err(error.to_string()),
-    }
-}
-
-async fn attach(
-    client: &LocalSupervisorClient,
-    job_id: runmat_execution::JobId,
-    no_follow: bool,
-) -> Result<()> {
-    let mut stdout_offset = 0;
-    let mut stderr_offset = 0;
-    loop {
-        let attachment = client.attach(job_id, stdout_offset, stderr_offset).await?;
-        std::io::stdout().write_all(&attachment.stdout)?;
-        std::io::stdout().flush()?;
-        std::io::stderr().write_all(&attachment.stderr)?;
-        std::io::stderr().flush()?;
-        stdout_offset = attachment.next_stdout_offset;
-        stderr_offset = attachment.next_stderr_offset;
-        if no_follow || attachment.record.state.is_terminal() {
-            if attachment.record.state.is_terminal() {
-                eprintln!(
-                    "{} {}",
-                    presentation::stderr().heading("Job"),
-                    state_name(attachment.record.state)
-                );
-            }
-            return Ok(());
-        }
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
-            _ = tokio::signal::ctrl_c() => {
-                eprintln!("{}", presentation::stderr().muted("Detached; the batch job is still running."));
-                return Ok(());
-            }
-        }
     }
 }
 

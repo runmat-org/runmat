@@ -256,15 +256,19 @@ impl DurableScheduler {
         &self,
         job_id: JobId,
     ) -> NativeExecutionResult<Option<TaskExecutionEvidence>> {
-        self.routes
-            .iter()
-            .find(|(_, job)| **job == job_id)
-            .map(|(task, _)| {
+        self.task_for_job(job_id)
+            .map(|task| {
                 self.driver
-                    .task_execution_evidence(*task)
+                    .task_execution_evidence(task)
                     .map_err(Into::into)
             })
             .transpose()
+    }
+
+    pub(super) fn task_for_job(&self, job_id: JobId) -> Option<TaskId> {
+        self.routes
+            .iter()
+            .find_map(|(task, job)| (*job == job_id).then_some(*task))
     }
 
     fn ensure_published(&mut self) -> NativeExecutionResult<()> {

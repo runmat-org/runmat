@@ -4,9 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AgentError, AgentResult};
 
+mod pending;
+pub use pending::{PendingRegistration, RegistrationPreparation, RegistrationTarget};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NodeCredential {
+    pub server_endpoint: crate::config::ServerEndpoint,
     pub node_id: String,
     pub cluster_id: String,
     pub org_id: String,
@@ -23,11 +27,52 @@ pub struct CredentialStore {
     path: PathBuf,
 }
 
+/// The unique local writer for node credentials and registration state.
+/// The stable kernel lease also fences a second foreground/service agent.
+pub struct OwnedCredentialStore {
+    store: CredentialStore,
+    _state_owner: runmat_filesystem::ExclusiveFileLock,
+}
+
+impl OwnedCredentialStore {
+    pub fn load(&self) -> AgentResult<NodeCredential> {
+        self.store.load()
+    }
+
+    pub fn store(&mut self, credential: &NodeCredential) -> AgentResult<()> {
+        self.store.persist(credential)
+    }
+}
+
 impl CredentialStore {
     pub fn new(state_directory: &Path) -> Self {
         Self {
             path: state_directory.join("credential.json"),
         }
+    }
+
+    pub fn claim(self) -> AgentResult<OwnedCredentialStore> {
+        let directory = self.path.parent().ok_or_else(|| {
+            AgentError::UnsafeCredential("node state requires a dedicated directory".into())
+        })?;
+        if !directory.is_absolute() || directory.parent().is_none() {
+            return Err(AgentError::UnsafeCredential(
+                "node state requires an absolute non-root directory".into(),
+            ));
+        }
+        runmat_filesystem::NativeFsProvider.create_private_directory_durable(directory)?;
+        let owner =
+            runmat_filesystem::ExclusiveFileLock::try_acquire(&directory.join("agent.lock"))?
+                .ok_or_else(|| {
+                    AgentError::Configuration(
+                        "node state is already owned by another running agent or registration"
+                            .into(),
+                    )
+                })?;
+        Ok(OwnedCredentialStore {
+            store: self,
+            _state_owner: owner,
+        })
     }
 
     pub fn load(&self) -> AgentResult<NodeCredential> {
@@ -62,7 +107,7 @@ impl CredentialStore {
         Ok(credential)
     }
 
-    pub fn store(&self, credential: &NodeCredential) -> AgentResult<()> {
+    fn persist(&self, credential: &NodeCredential) -> AgentResult<()> {
         validate(credential)?;
         let parent = self
             .path
@@ -119,12 +164,22 @@ fn validate(value: &NodeCredential) -> AgentResult<()> {
             "credential record is malformed".to_string(),
         ));
     }
-    let secret = decode_secret(&value.identity_secret)?;
+    validate_signing_identity(
+        &value.identity_secret,
+        &value.identity_public_key,
+        &value.identity_fingerprint,
+    )
+}
+
+fn validate_signing_identity(
+    secret: &str,
+    public_key: &[u8],
+    fingerprint: &str,
+) -> AgentResult<()> {
+    let secret = decode_secret(secret)?;
     let signer = runmat_execution::security::EndpointIdentitySigner::from_secret(secret)
         .map_err(|error| AgentError::UnsafeCredential(error.to_string()))?;
-    if signer.public_key().as_slice() != value.identity_public_key
-        || signer.fingerprint() != value.identity_fingerprint
-    {
+    if signer.public_key().as_slice() != public_key || signer.fingerprint() != fingerprint {
         return Err(AgentError::UnsafeCredential(
             "credential signing identity does not match its public key".to_string(),
         ));

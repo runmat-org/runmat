@@ -28,10 +28,12 @@ runmat-process-host = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-server-client = { workspace = true }
 runmat-core = { workspace = true, default-features = false }
+runmat-canonical-codec = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8.1"
 windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
+axum = "0.7"
 tempfile = "3.12"

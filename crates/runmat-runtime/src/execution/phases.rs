@@ -74,7 +74,11 @@ where
                     Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
                     Poll::Ready(Ok(value)) => {
                         let next = this.next.take().expect("unconstructed next phase");
-                        start_next(this.phase, next, value);
+                        // A caught factory/destructor panic must not repoll a
+                        // completed predecessor or a partially advanced phase.
+                        *this.finished = true;
+                        start_next(this.phase.as_mut(), next, value);
+                        *this.finished = false;
                         // Both first-child polling and cold construction have
                         // returned. Continue without another scheduler turn.
                         continue;

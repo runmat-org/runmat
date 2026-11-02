@@ -908,17 +908,16 @@ impl RuntimeExecutionServices for BrowserExecutionService {
     fn release_callback_batch(&self, tasks: &[TaskHandle]) -> Result<(), ExecutionServiceError> {
         self.release_callbacks(tasks)
     }
-    fn wait_task_change(
-        &self,
-        task: &TaskHandle,
-    ) -> runmat_runtime::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
-        self.wait_callback(task)
-    }
-    fn wait_pending(
-        &self,
+    fn wait_pending<'a>(
+        &'a self,
         value: &Value,
-    ) -> Option<runmat_runtime::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>>>
-    {
+        runtime: &'a runmat_runtime::context::RuntimeContext,
+    ) -> Result<
+        Option<
+            runmat_runtime::execution::AdmittedExecutionSupervisor<'a, (), ExecutionServiceError>,
+        >,
+        ExecutionServiceError,
+    > {
         let waiting = (|| {
             let future = self
                 .future_for_value(value.clone())?
@@ -943,12 +942,17 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                     )
                 })
         })();
-        Some(Box::pin(async move {
-            if let Some(waiting) = waiting? {
-                waiting.await?;
-            }
-            Ok(())
-        }))
+        Ok(Some(
+            runmat_runtime::execution::admit_execution_supervisor_with(
+                runtime,
+                move || async move {
+                    if let Some(waiting) = waiting? {
+                        waiting.await?;
+                    }
+                    Ok(())
+                },
+            )?,
+        ))
     }
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError> {
         let requested_outputs = u16::try_from(call.invocation.requested_outputs())
@@ -1640,7 +1644,8 @@ mod tests {
 
     #[wasm_bindgen_test(async)]
     async fn serial_fallback_schedules_through_the_portable_driver() {
-        let service = BrowserExecutionService::new(None).unwrap();
+        let service = Rc::new(BrowserExecutionService::new(None).unwrap());
+        let runtime = runmat_runtime::context::RuntimeContext::new(service.clone());
         assert_eq!(service.capabilities.max_workers, 1);
         assert!(!service.capabilities.has_worker_isolation());
         assert!(
@@ -1656,14 +1661,25 @@ mod tests {
             AwaitAction::Pending(_)
         ));
         let value = Value::Task(task.into());
-        let first = service.wait_pending(&value).expect("actual task event");
-        let second = service.wait_pending(&value).expect("shared task event");
+        let first = service
+            .wait_pending(&value, &runtime)
+            .unwrap()
+            .expect("actual task event");
+        let second = service
+            .wait_pending(&value, &runtime)
+            .unwrap()
+            .expect("shared task event");
         let (first, second) = futures::join!(first, second);
         first.unwrap();
         second.unwrap();
         assert!(service.begin_await(value.clone()).is_err());
         // A later fetch observes the stored outcome, not a consumed event.
-        service.wait_pending(&value).unwrap().await.unwrap();
+        service
+            .wait_pending(&value, &runtime)
+            .unwrap()
+            .unwrap()
+            .await
+            .unwrap();
         assert!(service.begin_await(value).is_err());
     }
 

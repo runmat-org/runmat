@@ -43,6 +43,7 @@ pub async fn run_linked_native_target_test(
 #[derive(Clone, Copy, Debug)]
 pub struct NativeTargetTestRunLimits {
     pub max_image_bytes: u64,
+    pub max_stdout_bytes: usize,
     pub max_stderr_bytes: usize,
 }
 
@@ -50,6 +51,7 @@ impl Default for NativeTargetTestRunLimits {
     fn default() -> Self {
         Self {
             max_image_bytes: 1024 * 1024 * 1024,
+            max_stdout_bytes: 64 * 1024,
             max_stderr_bytes: 64 * 1024,
         }
     }
@@ -73,19 +75,27 @@ pub enum NativeTargetTestCompletion {
         kind: NativeTargetTestHostFailure,
         diagnostic: String,
     },
+    /// Preserve the receiver/host outcome without certifying process retirement.
+    RetirementUnverified {
+        original: Box<NativeTargetTestCompletion>,
+        diagnostic: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeTargetTestProcessReport {
     pub completion: NativeTargetTestCompletion,
-    /// Bounded console/diagnostic capture, separate from the protocol stream.
-    pub stderr: String,
+    /// Original bounded application bytes, never control framing or an
+    /// attribution to an individual test. Prefixes retain their completion state.
+    pub stdout: runmat_process_host::ProcessOutputSnapshot,
+    pub stderr: runmat_process_host::ProcessOutputSnapshot,
 }
 
 impl NativeTargetTestProcessReport {
     pub fn terminal_disposition(&self) -> TerminalDisposition {
         match &self.completion {
             NativeTargetTestCompletion::Receiver(result) => result.terminal_disposition(),
+            NativeTargetTestCompletion::RetirementUnverified { .. } => TerminalDisposition::Crashed,
             NativeTargetTestCompletion::HostFailure { kind, .. } => match kind {
                 NativeTargetTestHostFailure::Timeout => TerminalDisposition::TimedOut,
                 NativeTargetTestHostFailure::Process => TerminalDisposition::Crashed,

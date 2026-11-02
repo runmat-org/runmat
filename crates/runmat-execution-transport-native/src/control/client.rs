@@ -17,6 +17,7 @@ pub struct NodeInventory {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnrollmentRequest {
     pub token: String,
+    pub credential: String,
     pub identity_fingerprint: String,
     pub identity_public_key: Vec<u8>,
     pub inventory: NodeInventory,

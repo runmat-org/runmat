@@ -138,6 +138,9 @@ pub struct SpmdRankResult {
     pub outputs: Vec<Option<runmat_execution::SpmdOutputValue>>,
 }
 
+/// Rank results retain the exact parent-control backing until caller decoding ends.
+pub type SpmdGangResults = crate::context::host_allocation::HostControlVec<SpmdRankResult>;
+
 /// How an execution backend runs one compiler-owned SPMD gang.
 ///
 /// Program capture and SPMD placement are independent capabilities: a browser
@@ -230,12 +233,15 @@ pub trait RuntimeExecutionServices {
     fn current_pool(&self) -> Result<Option<PoolSnapshot>, ExecutionServiceError>;
     fn ensure_pool(&self, request: PoolRequest) -> Result<PoolSnapshot, ExecutionServiceError>;
     fn close_pool(&self, pool: &PoolHandle) -> Result<(), ExecutionServiceError>;
-    fn execute_spmd_gang(
-        &self,
+    fn execute_spmd_gang<'a>(
+        &'a self,
         _call: SpmdGangCall,
-    ) -> crate::context::RuntimeServiceFuture<Result<Vec<SpmdRankResult>, ExecutionServiceError>>
-    {
-        Box::pin(async {
+        runtime: &'a crate::context::RuntimeContext,
+    ) -> Result<
+        super::AdmittedExecutionSupervisor<'a, SpmdGangResults, ExecutionServiceError>,
+        ExecutionServiceError,
+    > {
+        super::admit_execution_supervisor_with(runtime, || async {
             Err(ExecutionServiceError::Failed(
                 "this execution backend does not provide isolated SPMD gangs".into(),
             ))
@@ -267,6 +273,15 @@ pub trait RuntimeExecutionServices {
             "worker callback batches unavailable".into(),
         ))
     }
+    fn submit_callback_batch_in_context(
+        &self,
+        calls: Vec<DeferredCall>,
+        pool: &PoolHandle,
+        cancellation: runmat_execution::cancellation::CancellationToken,
+        _runtime: &crate::context::RuntimeContext,
+    ) -> Result<Vec<TaskHandle>, ExecutionServiceError> {
+        self.submit_callback_batch(calls, pool, cancellation)
+    }
     /// Release only internal batch handles; pending cancellation keeps its
     /// exact receipt until verified physical retirement. Public Futures retain
     /// their ordinary repeated-fetch semantics.
@@ -275,27 +290,34 @@ pub trait RuntimeExecutionServices {
             "worker callback retirement unavailable".into(),
         ))
     }
-    fn wait_task_change(
-        &self,
-        _task: &TaskHandle,
-    ) -> crate::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
-        Box::pin(async {
-            Err(ExecutionServiceError::Infrastructure(
-                "worker task-change wake unavailable".into(),
-            ))
-        })
-    }
     /// Wait for progress on the exact value returned by `AwaitAction::Pending`.
     /// Event-backed adapters return a wake future. `None` preserves cooperative
     /// polling for handles whose progress is driven by their caller.
-    fn wait_pending(
-        &self,
+    /// The borrowed context owns any caller-visible output publication; it must
+    /// not be retained by the service or transferred to a process-owner thread.
+    /// A supervisor keeps cancellation cleanup in the adapter's state machine.
+    fn wait_pending<'a>(
+        &'a self,
         _value: &Value,
-    ) -> Option<crate::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>>> {
-        None
+        _runtime: &'a crate::context::RuntimeContext,
+    ) -> Result<
+        Option<super::AdmittedExecutionSupervisor<'a, (), ExecutionServiceError>>,
+        ExecutionServiceError,
+    > {
+        Ok(None)
     }
     fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError>;
     fn spawn(&self, future: &FutureHandle) -> Result<TaskHandle, ExecutionServiceError>;
+    /// Launch using the caller's explicit allocation authority. A process
+    /// adapter carries only the resulting control issuer, never the RuntimeContext.
+    fn spawn_in_context(
+        &self,
+        future: &FutureHandle,
+        pool: Option<&PoolHandle>,
+        _runtime: &crate::context::RuntimeContext,
+    ) -> Result<TaskHandle, ExecutionServiceError> {
+        self.spawn_on(future, pool)
+    }
     fn inspect_future(
         &self,
         future: &FutureHandle,

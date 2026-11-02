@@ -347,6 +347,22 @@ impl LocalSupervisor {
                     .await?
                     .map(Box::new),
             },
+            SupervisorCommand::RawOutputPage {
+                handle,
+                attempt_id,
+                cursor,
+            } => SupervisorResponse::RawOutputPage {
+                attempt_id,
+                page: self
+                    .raw_output_page(handle, attempt_id, cursor)
+                    .await?
+                    .map(Box::new),
+            },
+            SupervisorCommand::RawOutputAttempt { handle, ordinal } => {
+                SupervisorResponse::RawOutputAttempt {
+                    lookup: self.raw_output_attempt(handle, ordinal).await?,
+                }
+            }
             SupervisorCommand::CancelHandle { handle, reason } => SupervisorResponse::Cancelled {
                 record: self.cancel_handle(handle, reason).await?,
             },

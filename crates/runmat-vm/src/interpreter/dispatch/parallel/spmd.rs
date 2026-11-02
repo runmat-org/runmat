@@ -77,15 +77,19 @@ pub(super) async fn execute(
                 execution
                     .runtime
                     .execution()
-                    .execute_spmd_gang(runmat_runtime::execution::SpmdGangCall {
-                        gang: gang.clone(),
-                        region: executable.contract.id,
-                        captures: captures.clone(),
-                        requested_outputs: executable.outputs.len(),
-                        program_revision: execution.runtime.program_revision().cloned(),
-                        capabilities: executable.contract.capabilities.clone(),
-                        program,
-                    })
+                    .execute_spmd_gang(
+                        runmat_runtime::execution::SpmdGangCall {
+                            gang: gang.clone(),
+                            region: executable.contract.id,
+                            captures: captures.clone(),
+                            requested_outputs: executable.outputs.len(),
+                            program_revision: execution.runtime.program_revision().cloned(),
+                            capabilities: executable.contract.capabilities.clone(),
+                            program,
+                        },
+                        &execution.runtime,
+                    )
+                    .map_err(execution_error)?
                     .await
                     .map_err(execution_error)?
             }
@@ -161,7 +165,7 @@ async fn execute_spmd_in_process(
     labs: Vec<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
     execution: &ExecutionContext,
     current_function_name: &str,
-) -> Result<Vec<runmat_runtime::execution::SpmdRankResult>, RuntimeError> {
+) -> Result<runmat_runtime::execution::SpmdGangResults, RuntimeError> {
     let mut tasks = Vec::with_capacity(labs.len());
     for collective in labs {
         let rank = collective.context().rank;
@@ -226,7 +230,23 @@ async fn execute_spmd_in_process(
         });
     }
     let completions = futures::future::try_join_all(tasks).await?;
-    let mut results = Vec::with_capacity(completions.len());
+    let allocation_error = |error| {
+        runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+            Some(&execution.runtime),
+            "RunMat:parallel:CpuControl",
+            "SPMD rank-result control allocation",
+            error,
+        )
+    };
+    let controls = runmat_runtime::context::host_allocation::HostControlAllocationOwner::capture(
+        &execution.runtime,
+    )
+    .map_err(allocation_error)?;
+    let mut results = runmat_runtime::execution::SpmdGangResults::with_capacity(
+        completions.len(),
+        controls.as_ref(),
+    )
+    .map_err(allocation_error)?;
     for (rank, completion, runtime) in completions {
         let mut outputs = Vec::with_capacity(executable.outputs.len());
         for output in &executable.outputs {
@@ -244,7 +264,14 @@ async fn execute_spmd_in_process(
                 distributed::encode_spmd_interpreter_output(&runtime, value).await?,
             ));
         }
-        results.push(runmat_runtime::execution::SpmdRankResult { rank, outputs });
+        results
+            .try_push(runmat_runtime::execution::SpmdRankResult { rank, outputs })
+            .map_err(|_| {
+                crate::interpreter::errors::mex(
+                    "SpmdFrame",
+                    "SPMD rank-result capacity differs from its admission",
+                )
+            })?;
     }
     Ok(results)
 }

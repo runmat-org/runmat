@@ -50,6 +50,10 @@ mod portable_host;
 mod console_scope;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use console_scope::RuntimeConsoleScope;
+#[cfg(not(target_arch = "wasm32"))]
+mod process_console;
+#[cfg(not(target_arch = "wasm32"))]
+pub use process_console::ProcessConsoleDecoder;
 mod preferences;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod process_invocation;

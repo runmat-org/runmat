@@ -5,6 +5,7 @@ pub mod inventory;
 pub mod platform;
 pub mod service;
 pub mod service_install;
+mod server_api;
 
 #[cfg(windows)]
 mod windows_service;
@@ -18,6 +19,8 @@ pub use config::{AgentConfig, AgentFileConfig};
 pub enum AgentError {
     #[error("agent configuration is invalid: {0}")]
     Configuration(String),
+    #[error("agent Server endpoint is invalid: {0}")]
+    Endpoint(#[from] runmat_server_client::endpoint::ServerEndpointError),
     #[error("node is not enrolled")]
     NotEnrolled,
     #[error("node credential file is unsafe: {0}")]
@@ -32,6 +35,10 @@ pub enum AgentError {
     Io(#[from] std::io::Error),
     #[error("agent state is malformed: {0}")]
     State(#[from] serde_json::Error),
+    #[error("agent state encoding failed: {0}")]
+    Encoding(#[from] runmat_canonical_codec::CanonicalCodecError),
+    #[error("node registration is stored, but pending-state cleanup failed: {0}")]
+    RegistrationCleanup(#[source] std::io::Error),
 }
 
 pub type AgentResult<T> = Result<T, AgentError>;

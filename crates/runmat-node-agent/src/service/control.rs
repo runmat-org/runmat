@@ -4,11 +4,13 @@ use futures_util::StreamExt as _;
 
 use runmat_execution_transport_native::control::{
     AllocationRole, DriverBootstrapCredential, EnrolledNode, EnrollmentRequest, NodeAllocation,
-    NodeControlPlane, NodeHeartbeat, NodeInventory, NodeStatus, ResourceRequest, RotatedCredential,
+    NodeControlPlane, NodeHeartbeat, NodeStatus, ResourceRequest, RotatedCredential,
     WorkerBootstrapCredential,
 };
 use runmat_execution_transport_native::{TransportError, TransportResult};
 use runmat_server_client::public_api::{self, types};
+
+use crate::server_api::{inventory_to_api, map_error, to_i64, to_u64};
 
 #[derive(Clone)]
 pub struct HttpNodeControlPlane {
@@ -19,12 +21,10 @@ pub struct HttpNodeControlPlane {
 
 impl HttpNodeControlPlane {
     pub fn new(base_url: impl Into<String>) -> TransportResult<Self> {
-        let base_url = base_url.into().trim_end_matches('/').to_string();
-        if base_url.is_empty() {
-            return Err(TransportError::Unavailable(
-                "Server URL is empty".to_string(),
-            ));
-        }
+        let base_url = crate::config::ServerEndpoint::parse(&base_url.into())
+            .map_err(|error| TransportError::Unavailable(error.to_string()))?
+            .as_str()
+            .to_owned();
         Ok(Self {
             client: public_api::Client::new(&base_url),
             base_url,
@@ -40,6 +40,11 @@ impl NodeControlPlane for HttpNodeControlPlane {
             .client
             .consume_node_enrollment(&types::ConsumeEnrollmentRequest {
                 token: request.token,
+                credential: request.credential.try_into().map_err(|_| {
+                    TransportError::Unavailable(
+                        "pending node credential violates the API contract".into(),
+                    )
+                })?,
                 identity_fingerprint: request.identity_fingerprint,
                 identity_public_key: encode_bytes(&request.identity_public_key),
                 inventory: inventory_to_api(request.inventory)?,
@@ -65,9 +70,9 @@ impl NodeControlPlane for HttpNodeControlPlane {
                 &heartbeat.node_id,
                 &heartbeat.credential,
                 &types::NodeHeartbeatRequest {
-                    clock_starts: Vec::new(),
-                    clock_ends: Vec::new(),
-                    clock_release_ack_confirm_ids: Vec::new(),
+                    clock_starts: None,
+                    clock_ends: None,
+                    clock_release_ack_confirm_ids: None,
                     org_id: heartbeat.org_id,
                     credential_epoch: to_i64(heartbeat.credential_epoch, "credential epoch")?,
                     inventory: inventory_to_api(heartbeat.inventory)?,
@@ -459,23 +464,6 @@ impl NodeControlPlane for HttpNodeControlPlane {
     }
 }
 
-fn inventory_to_api(value: NodeInventory) -> TransportResult<types::ResourceInventoryBody> {
-    Ok(types::ResourceInventoryBody {
-        cpu_millicores: to_i64(value.cpu_millicores, "CPU inventory")?,
-        memory_bytes: to_i64(value.memory_bytes, "memory inventory")?,
-        scratch_bytes: to_i64(value.scratch_bytes, "scratch inventory")?,
-        accelerators: value
-            .accelerators
-            .into_iter()
-            .map(runmat_server_client::execution::accelerator_device_to_api)
-            .collect::<Result<_, _>>()
-            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
-        host: runmat_server_client::execution::execution_host_inventory_to_api(value.host)
-            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
-        capabilities: value.capabilities.into_iter().collect(),
-    })
-}
-
 fn authority_body(
     heartbeat: &NodeHeartbeat,
 ) -> TransportResult<types::RotateNodeCredentialRequest> {
@@ -520,9 +508,9 @@ fn retirement_evidence_to_api(
         )?,
         driver_fencing_token: to_i64(evidence.driver_fencing_token, "retirement driver fence")?,
         process_id: i64::from(evidence.process_id),
-        process_launch_nonce: encode_bytes(&evidence.process_launch_nonce),
+        process_launch_nonce: encoded_wire_bytes(&evidence.process_launch_nonce)?,
         retired_at_unix_millis: to_i64(evidence.retired_at_unix_millis, "retirement time")?,
-        clock_domain_nonce: encode_bytes(&evidence.clock_domain_nonce),
+        clock_domain_nonce: encoded_wire_bytes(&evidence.clock_domain_nonce)?,
         retired_monotonic_ticks: to_i64(
             evidence.retired_monotonic_ticks,
             "retired monotonic ticks",
@@ -531,14 +519,11 @@ fn retirement_evidence_to_api(
         encrypted_attempt_receipts: evidence
             .encrypted_attempt_receipts
             .iter()
-            .map(|receipt| receipt.as_str().try_into())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error: types::error::ConversionError| {
-                TransportError::MalformedFrame(error.to_string())
-            })?,
-        identity_public_key: encode_bytes(&evidence.identity_public_key),
+            .map(|receipt| receipt.as_str().to_owned())
+            .collect(),
+        identity_public_key: encoded_wire_bytes(&evidence.identity_public_key)?,
         identity_fingerprint: evidence.identity_fingerprint.clone(),
-        signature: encode_bytes(&evidence.signature),
+        signature: encoded_wire_bytes(&evidence.signature)?,
     })
 }
 
@@ -639,6 +624,16 @@ fn evidence_to_api(
     })
 }
 
+fn encoded_wire_bytes<T>(value: &[u8]) -> TransportResult<T>
+where
+    T: TryFrom<String>,
+    T::Error: std::fmt::Display,
+{
+    encode_bytes(value)
+        .try_into()
+        .map_err(|error: T::Error| TransportError::MalformedFrame(error.to_string()))
+}
+
 fn encode_bytes(value: &[u8]) -> String {
     use base64::Engine as _;
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value)
@@ -649,26 +644,6 @@ fn decode_bytes(value: &str) -> TransportResult<Vec<u8>> {
     base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(value)
         .map_err(|_| TransportError::Integrity)
-}
-
-fn to_i64(value: u64, field: &str) -> TransportResult<i64> {
-    i64::try_from(value)
-        .map_err(|_| TransportError::Unavailable(format!("{field} exceeds the wire range")))
-}
-
-fn to_u64(value: i64, field: &str) -> TransportResult<u64> {
-    u64::try_from(value).map_err(|_| TransportError::Unavailable(format!("{field} is negative")))
-}
-
-fn map_error<E: std::fmt::Debug>(error: public_api::Error<E>) -> TransportError {
-    if error
-        .status()
-        .is_some_and(|status| matches!(status.as_u16(), 401 | 403))
-    {
-        TransportError::StaleAuthority
-    } else {
-        TransportError::Unavailable(error.to_string())
-    }
 }
 
 fn map_bootstrap_error<E: std::fmt::Debug>(error: public_api::Error<E>) -> TransportError {

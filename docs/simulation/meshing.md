@@ -623,14 +623,22 @@ Operators prepare capacity with the `runmat cluster` workflow:
 ```sh
 runmat login
 runmat cluster create --name analysis-workers --queue default --json
-runmat cluster enroll <cluster-id> --json
-runmat cluster join enroll --token <single-use-token>
-runmat cluster join run
 ```
 
-The last two commands normally run on an execution node. Production deployments usually install the
-node as an operating-system service; see [Remote Execution](/docs/runtime/execution/remote) for trust,
-enrollment, service, queue, and recovery setup.
+On each execution node, sign in with an account authorized to register machines
+and join the named cluster:
+
+```sh
+runmat login
+runmat cluster join analysis-workers
+```
+
+Join runs the node in the foreground. Use `--service` to install a persistent
+operating-system service with administrative privileges. The service identity
+must have its own account credentials and use the same state directory for
+registration and execution. See [Remote Execution](/docs/runtime/execution/remote)
+for organization selection, API-key authentication, optional token bootstrap,
+trust, service, queue, and recovery setup.
 
 Placement context remains outside `MeshingRequest`. Running the same logical request locally or on
 a compatible remote pool therefore preserves the canonical mesh identity.

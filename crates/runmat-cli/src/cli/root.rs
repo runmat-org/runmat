@@ -15,7 +15,7 @@ use crate::cli::ColorMode;
 use crate::cli::TestArgs;
 use crate::cli::{
     BatchCommand, ClusterCommand, ExecutionTargetArgs, FeaCommand, JobCommand, MexArgs,
-    NativeInterfaceCommand, PackageCommand,
+    NativeInterfaceCommand, NodeArgs, PackageCommand,
 };
 
 #[derive(Parser, Clone)]
@@ -48,6 +48,8 @@ Examples:
   runmat --no-jit                          # Start REPL with interpreter only
   runmat --gc-preset low-latency           # Optimize GC for low latency
   runmat script.m                          # Execute MATLAB/Octave script
+  runmat script.m --cluster engineering --trust-identity <fingerprint>
+                                           # Execute on a trusted remote cluster
   runmat < script.m                        # Execute stdin as one script
   runmat -                                 # Explicit stdin script alias
   runmat --emit-bytecode script.m           # Emit bytecode disassembly
@@ -193,6 +195,21 @@ pub struct Cli {
 
     /// MATLAB script file to execute (alternative to subcommands)
     pub script: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub execution: ExecutionTargetArgs,
+
+    /// Emit structured JSON for a study or remote run using the filename shorthand
+    #[arg(long = "json", requires = "script")]
+    pub script_json: bool,
+
+    /// Select a declared function for remote execution using the filename shorthand
+    #[arg(long = "function", requires_all = ["script", "cluster"])]
+    pub script_function: Option<String>,
+
+    /// Positional function inputs after -- when using the filename shorthand
+    #[arg(last = true, requires = "script")]
+    pub script_args: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -240,7 +257,10 @@ pub enum Commands {
         file: PathBuf,
         #[command(flatten)]
         execution: ExecutionTargetArgs,
-        /// Emit structured JSON for .fea studies and sweeps
+        /// Select a declared function for remote execution
+        #[arg(long, requires = "cluster")]
+        function: Option<String>,
+        /// Emit structured JSON for studies, sweeps and remote runs
         #[arg(long)]
         json: bool,
         /// Positional inputs; scripts currently reject them rather than inventing argv semantics
@@ -478,7 +498,9 @@ pub enum Commands {
         #[command(subcommand)]
         cluster_command: ClusterCommand,
     },
-    /// Submit and manage durable encrypted remote jobs
+    /// Inspect or manage this machine's execution-node service
+    Node(NodeArgs),
+    /// Observe and manage durable encrypted remote jobs
     Job {
         #[command(subcommand)]
         job_command: JobCommand,
@@ -575,6 +597,70 @@ mod tests {
         AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, FeaCommand, MeshSourceUnitsArg,
     };
     use clap::Parser;
+
+    #[test]
+    fn filename_and_run_share_remote_options_and_function_inputs() {
+        for file in ["main.m", "model.fea"] {
+            let options = [
+                file,
+                "--cluster",
+                "engineering",
+                "--workers",
+                "4",
+                "--trust-identity",
+                "sha256:trusted-node",
+                "--detach",
+                "--json",
+                "--",
+                "2",
+            ];
+            let shorthand =
+                Cli::try_parse_from(["runmat"].into_iter().chain(options.iter().copied())).unwrap();
+            let explicit =
+                Cli::try_parse_from(["runmat", "run"].into_iter().chain(options.iter().copied()))
+                    .unwrap();
+            let Some(Commands::Run {
+                file: explicit_file,
+                execution,
+                function,
+                json,
+                args,
+            }) = explicit.command
+            else {
+                panic!("expected explicit run command");
+            };
+            assert_eq!(shorthand.script.as_ref(), Some(&explicit_file));
+            assert_eq!(shorthand.execution, execution);
+            assert_eq!(shorthand.script_function, function);
+            assert_eq!(shorthand.script_json, json);
+            assert_eq!(shorthand.script_args, args);
+            assert_eq!(
+                shorthand.execution.resolve().unwrap(),
+                execution.resolve().unwrap()
+            );
+        }
+        let options = [
+            "evaluate.m",
+            "--function",
+            "evaluate",
+            "--cluster",
+            "engineering",
+            "--trust-identity",
+            "sha256:trusted-node",
+            "--",
+            "case-a",
+        ];
+        let shorthand = Cli::try_parse_from(["runmat"].into_iter().chain(options)).unwrap();
+        let explicit = Cli::try_parse_from(["runmat", "run"].into_iter().chain(options)).unwrap();
+        let Some(Commands::Run { function, args, .. }) = explicit.command else {
+            panic!("expected explicit function run");
+        };
+        assert_eq!(shorthand.script_function.as_deref(), Some("evaluate"));
+        assert_eq!(shorthand.script_function, function);
+        assert_eq!(shorthand.script_args, args);
+        assert!(Cli::try_parse_from(["runmat", "evaluate.m", "--function", "evaluate"]).is_err());
+        assert!(Cli::try_parse_from(["runmat", "job", "submit", "evaluate.m"]).is_err());
+    }
 
     #[cfg(feature = "wgpu")]
     #[test]

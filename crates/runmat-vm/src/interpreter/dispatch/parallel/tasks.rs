@@ -45,7 +45,7 @@ pub(super) fn schedule_feval(
         let task = context
             .runtime
             .execution()
-            .spawn_on(&future, Some(&pool))
+            .spawn_in_context(&future, Some(&pool), &context.runtime)
             .map_err(execution_error)?;
         stack.try_push(runmat_runtime::parallel::future::wrap_task(task))?;
         return Ok(());
@@ -63,7 +63,7 @@ pub(super) fn schedule_feval(
             context
                 .runtime
                 .execution()
-                .spawn_on(&future, Some(&pool))
+                .spawn_in_context(&future, Some(&pool), &context.runtime)
                 .map_err(execution_error)?,
         );
     }
@@ -91,13 +91,13 @@ pub(super) fn spawn(
         context
             .runtime
             .execution()
-            .spawn_on(&future, Some(&pool))
+            .spawn_in_context(&future, Some(&pool), &context.runtime)
             .map_err(execution_error)?
     } else {
         context
             .runtime
             .execution()
-            .spawn(&future)
+            .spawn_in_context(&future, None, &context.runtime)
             .map_err(execution_error)?
     };
     stack.try_push(if explicit_pool {
@@ -317,7 +317,12 @@ async fn await_sequence(
             }
             AwaitAction::Completed(sequence) => return Ok(sequence),
             AwaitAction::Pending(pending) => {
-                if let Some(waiting) = context.runtime.execution().wait_pending(&pending) {
+                if let Some(waiting) = context
+                    .runtime
+                    .execution()
+                    .wait_pending(&pending, &context.runtime)
+                    .map_err(execution_error)?
+                {
                     waiting.await.map_err(execution_error)?;
                 } else {
                     yield_once(context).await?;

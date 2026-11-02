@@ -344,6 +344,12 @@ where
         (Vec::new(), accelerator_bodies)
     };
     let (client, server_url, project_id) = super::client(options.project).await?;
+    let cluster_id = runmat_server_client::execution::project_cluster_by_name(
+        client.api(),
+        &project_id,
+        &options.cluster,
+    )
+    .await?;
     let recovery_recipient = client
         .api()
         .get_project_execution_policy(project_id.as_str())
@@ -362,7 +368,7 @@ where
     let request_digest = request_digest(
         &idempotency_key,
         &revision,
-        &options.cluster,
+        cluster_id.as_str(),
         &options.queue,
         options.workers,
         &digest_accelerators,
@@ -374,7 +380,7 @@ where
             project_id.as_str(),
             &idempotency_key,
             &types::SubmitRunRequest {
-                cluster_id: options.cluster.clone(),
+                cluster_id: cluster_id.to_string(),
                 queue: options.queue,
                 request_digest,
                 recovery_recipient_fingerprint: recovery_fingerprint,

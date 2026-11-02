@@ -13,21 +13,24 @@ fn submit_local(driver: &Arc<LocalDriver>, label: &[u8]) -> (TaskId, Arc<TaskCom
     };
     let task_id = TaskId::derive(&[driver.scope_id().bytes(), label]);
     let completion = driver
-        .submit(LocalProgramSubmission {
-            console: None,
-            environment: runmat_execution::EnvironmentSnapshot::default(),
-            task_id,
-            callable: request.callable,
-            invocation_context: request.context,
-            recipe: request.recipe,
-            artifact: request.artifact,
-            inputs: request.arguments,
-            outputs: OutputContract {
-                requested_outputs: request.requested_outputs,
-                owned_work: None,
+        .submit_with_control(
+            LocalProgramSubmission {
+                console: None,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                task_id,
+                callable: request.callable,
+                invocation_context: request.context,
+                recipe: request.recipe,
+                artifact: request.artifact,
+                inputs: request.arguments,
+                outputs: OutputContract {
+                    requested_outputs: request.requested_outputs,
+                    owned_work: None,
+                },
+                retry: RetryPolicy::Never,
             },
-            retry: RetryPolicy::Never,
-        })
+            None,
+        )
         .expect("real local driver accepted test submission");
     (task_id, completion)
 }

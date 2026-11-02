@@ -18,13 +18,12 @@ use crate::allocation::{
     validate_active, validate_allocation_set, validate_offer, AllocationProcesses, DrainState,
     WorkerRetirementScope,
 };
-use crate::enrollment::{decode_secret, CredentialStore, NodeCredential};
+use crate::enrollment::{decode_secret, CredentialStore, NodeCredential, OwnedCredentialStore};
 use crate::{inventory, AgentConfig, AgentError, AgentResult};
 
 pub struct NodeAgentService {
     config: AgentConfig,
     control: Arc<dyn NodeControlPlane>,
-    store: CredentialStore,
     credential: NodeCredential,
     processes: AllocationProcesses,
     drain: DrainState,
@@ -32,6 +31,8 @@ pub struct NodeAgentService {
     launched_worker_leases: BTreeMap<String, LaunchLedgerRecord>,
     /// Live process-generation observation domain; never restored from disk.
     clock_domain_nonce: [u8; 16],
+    // Declared last: process/state fields drop before the credential writer lease.
+    store: OwnedCredentialStore,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -44,8 +45,13 @@ struct LaunchLedgerRecord {
 impl NodeAgentService {
     pub fn load(config: AgentConfig, control: Arc<dyn NodeControlPlane>) -> AgentResult<Self> {
         config.validate()?;
-        let store = CredentialStore::new(&config.state_directory);
+        let store = CredentialStore::new(&config.state_directory).claim()?;
         let credential = store.load()?;
+        if crate::config::ServerEndpoint::parse(&config.server_url)? != credential.server_endpoint {
+            return Err(AgentError::Configuration(
+                "node credential belongs to a different Server endpoint".into(),
+            ));
+        }
         let pending_release = retirement::load(
             &config.state_directory,
             &credential,
@@ -424,7 +430,7 @@ impl NodeAgentService {
         let heartbeat = self.heartbeat(inventory::collect(self.config.trust_tier)?)?;
         crate::enrollment::rotate(
             Arc::clone(&self.control),
-            &self.store,
+            &mut self.store,
             &mut self.credential,
             heartbeat,
         )

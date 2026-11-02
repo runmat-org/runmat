@@ -47,11 +47,13 @@ impl NodeControlPlane for RotationControl {
 async fn rotation_replaces_the_secret_and_epoch_in_one_atomic_store_write() {
     let directory = tempfile::tempdir().unwrap();
     let state = directory.path().join("state");
-    let store = CredentialStore::new(&state);
+    let mut store = CredentialStore::new(&state).claim().unwrap();
     let identity_secret = [17; 32];
     let signer =
         runmat_execution::security::EndpointIdentitySigner::from_secret(identity_secret).unwrap();
     let mut credential = NodeCredential {
+        server_endpoint: runmat_node_agent::config::ServerEndpoint::parse("http://127.0.0.1:1")
+            .unwrap(),
         node_id: "node".into(),
         cluster_id: "cluster".into(),
         org_id: "org".into(),
@@ -68,7 +70,7 @@ async fn rotation_replaces_the_secret_and_epoch_in_one_atomic_store_write() {
     store.store(&credential).unwrap();
     rotate(
         Arc::new(RotationControl),
-        &store,
+        &mut store,
         &mut credential,
         NodeHeartbeat {
             org_id: "org".into(),

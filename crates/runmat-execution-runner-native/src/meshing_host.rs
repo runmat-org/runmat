@@ -1,5 +1,6 @@
 //! Meshing-capable native worker seam; scheduling remains in the generic execution driver.
 
+use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,9 +15,8 @@ use runmat_meshing_execution::{
     execute_serial_stage, MeshingHostResponse, MeshingHostWorkload, MeshingProgressSink,
     MeshingStageKernel,
 };
-use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
-#[cfg(test)]
-use tokio::io::AsyncReadExt;
+use runmat_process_host::ipc::private_control::ControlFrameWriter;
+use runmat_process_host::ipc::{read_payload_blocking, FrameLimits};
 
 use crate::protocol::{ProgramProgress, WorkerProcessMessage, NATIVE_WORKER_MESSAGE_SCHEMA_V2};
 use crate::{FilesystemObjectStore, NativeExecutionError, NativeExecutionResult};
@@ -143,8 +143,19 @@ pub async fn run_meshing_worker_stdio(
     let frame_limits = FrameLimits {
         max_message_bytes: limits.max_message_bytes,
     };
-    let (mut reader, mut writer) = runmat_process_host::ipc::stdio::endpoint()?;
-    let payload = read_payload(&mut reader, frame_limits).await?;
+    let control = runmat_process_host::ipc::private_control::connect_host_blocking()
+        .map_err(runmat_process_host::ProcessHostError::Io)?;
+    let writer = ControlFrameWriter::new(control.writer, frame_limits)?;
+    // The one-shot request is read off the async executor. Return the very same
+    // private reader to the watchdog so parent EOF remains observable afterward.
+    let (reader, payload) = tokio::task::spawn_blocking(move || {
+        let mut reader = control.reader;
+        let payload = read_payload_blocking(&mut reader, frame_limits);
+        (reader, payload)
+    })
+    .await
+    .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let payload = payload?;
     let reserved: runmat_execution_artifact::ReservedProgramExecutionRequest =
         serde_json::from_slice(&payload)
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
@@ -163,11 +174,10 @@ pub async fn run_meshing_worker_stdio(
         "meshing worker CPU allocation");
     let cancellation = Arc::new(ParentConnectionCancellation::default());
     let parent_connection = Arc::clone(&cancellation);
-    // The parent keeps stdin open until this one-shot worker exits. Watch it
-    // from a detached thread: a Tokio blocking stdin read would hold runtime
-    // shutdown open and deadlock with the parent waiting for exit.
-    drop(reader);
-    let parent_watchdog = ParentDisconnectWatchdog::spawn(parent_connection)?;
+    // The parent keeps the private request channel open until this one-shot
+    // worker exits. Observe it on a detached thread, including during a
+    // non-yielding native stage.
+    let parent_watchdog = ParentDisconnectWatchdog::spawn(reader, parent_connection)?;
     let store = FilesystemObjectStore::open(object_store_root, limits.inventory.max_object_bytes)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let (progress_sender, mut progress_receiver) =
@@ -201,20 +211,12 @@ pub async fn run_meshing_worker_stdio(
         tokio::select! {
             progress = progress_receiver.recv() => {
                 if let Some(progress) = progress {
-                    write_message(
-                        &mut writer,
-                        &WorkerProcessMessage::Progress { progress },
-                        frame_limits,
-                    ).await?;
+                    write_message(&writer, &WorkerProcessMessage::Progress { progress }, frame_limits).await?;
                 }
             }
             response = &mut execution => {
                 while let Ok(progress) = progress_receiver.try_recv() {
-                    write_message(
-                        &mut writer,
-                        &WorkerProcessMessage::Progress { progress },
-                        frame_limits,
-                    ).await?;
+                    write_message(&writer, &WorkerProcessMessage::Progress { progress }, frame_limits).await?;
                 }
                 break response
                     .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
@@ -230,7 +232,7 @@ pub async fn run_meshing_worker_stdio(
         return Err(NativeExecutionError::Protocol(error));
     }
     write_message(
-        &mut writer,
+        &writer,
         &WorkerProcessMessage::Completed {
             response,
             console: None,
@@ -241,14 +243,18 @@ pub async fn run_meshing_worker_stdio(
     Ok(())
 }
 
-#[cfg(test)]
-async fn cancel_on_parent_disconnect(
-    mut reader: impl tokio::io::AsyncRead + Unpin,
+fn cancel_on_parent_disconnect(
+    mut reader: impl Read,
     cancellation: Arc<ParentConnectionCancellation>,
-) {
+    finished: &AtomicBool,
+) -> bool {
     let mut unexpected_input = [0_u8; 1];
-    let _ = reader.read(&mut unexpected_input).await;
+    let _ = reader.read(&mut unexpected_input);
+    if finished.load(Ordering::Acquire) {
+        return false;
+    }
     cancellation.cancel();
+    true
 }
 
 struct ParentDisconnectWatchdog {
@@ -256,18 +262,18 @@ struct ParentDisconnectWatchdog {
 }
 
 impl ParentDisconnectWatchdog {
-    fn spawn(cancellation: Arc<ParentConnectionCancellation>) -> NativeExecutionResult<Self> {
+    fn spawn(
+        reader: impl Read + Send + 'static,
+        cancellation: Arc<ParentConnectionCancellation>,
+    ) -> NativeExecutionResult<Self> {
         let finished = Arc::new(AtomicBool::new(false));
         let watched = Arc::clone(&finished);
         std::thread::Builder::new()
             .name("runmat-meshing-parent-watchdog".into())
             .spawn(move || {
-                let mut unexpected_input = [0_u8; 1];
-                let _ = std::io::Read::read(&mut std::io::stdin().lock(), &mut unexpected_input);
-                if watched.load(Ordering::Acquire) {
+                if !cancel_on_parent_disconnect(reader, cancellation, &watched) {
                     return;
                 }
-                cancellation.cancel();
                 std::thread::sleep(PARENT_DISCONNECT_SHUTDOWN_GRACE);
                 if watched.load(Ordering::Acquire) {
                     return;
@@ -322,13 +328,16 @@ pub(crate) fn encode_meshing_progress(
 }
 
 async fn write_message(
-    writer: &mut (impl tokio::io::AsyncWrite + Unpin),
+    writer: &ControlFrameWriter,
     message: &WorkerProcessMessage,
     limits: FrameLimits,
 ) -> NativeExecutionResult<()> {
-    let payload = serde_json::to_vec(message)
-        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    write_payload(writer, &payload, limits).await?;
+    let payload =
+        runmat_canonical_codec::encode_json_bounded(message, u64::from(limits.max_message_bytes))?;
+    writer
+        .write_owned(payload)
+        .await
+        .map_err(|error| runmat_process_host::ProcessHostError::Io(std::io::Error::other(error)))?;
     Ok(())
 }
 
@@ -365,18 +374,28 @@ pub(crate) fn admitted_cpu_threads(
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn parent_disconnect_cancels_native_meshing_work() {
-        let (parent, worker) = tokio::io::duplex(8);
+    #[test]
+    fn parent_disconnect_cancels_native_meshing_work() {
         let cancellation = Arc::new(ParentConnectionCancellation::default());
-        let watchdog = tokio::spawn(cancel_on_parent_disconnect(
-            worker,
+        let finished = AtomicBool::new(false);
+        assert!(cancel_on_parent_disconnect(
+            std::io::Cursor::new(Vec::<u8>::new()),
             Arc::clone(&cancellation),
+            &finished,
         ));
 
-        drop(parent);
-        watchdog.await.unwrap();
-
         assert!(cancellation.is_cancelled());
+    }
+
+    #[test]
+    fn completed_worker_ignores_late_parent_disconnect() {
+        let cancellation = Arc::new(ParentConnectionCancellation::default());
+        let finished = AtomicBool::new(true);
+        assert!(!cancel_on_parent_disconnect(
+            std::io::Cursor::new(Vec::<u8>::new()),
+            Arc::clone(&cancellation),
+            &finished,
+        ));
+        assert!(!cancellation.is_cancelled());
     }
 }

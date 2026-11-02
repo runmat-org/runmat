@@ -33,7 +33,10 @@ impl PendingImage {
         role: NativePairedProductRole,
         limits: NativeTargetTestRunLimits,
     ) -> NativeRunnerResult<Self> {
-        if limits.max_image_bytes == 0 || limits.max_stderr_bytes == 0 {
+        if limits.max_image_bytes == 0
+            || limits.max_stdout_bytes == 0
+            || limits.max_stderr_bytes == 0
+        {
             return Err(configuration("native test host limits must be nonzero"));
         }
         header.validate().map_err(configuration)?;

@@ -56,15 +56,16 @@ pub async fn execute_script_with_args(
     emit_bytecode_path: Option<PathBuf>,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
-    fea_json: bool,
+    json: bool,
     execution: ExecutionTargetArgs,
 ) -> Result<()> {
     execute_script_with_graphics(
         ScriptInvocation {
             script,
             args,
+            function: None,
             emit_bytecode_path,
-            fea_json,
+            json,
             execution,
         },
         cli,
@@ -77,8 +78,9 @@ pub async fn execute_script_with_args(
 pub(crate) struct ScriptInvocation {
     pub(crate) script: PathBuf,
     pub(crate) args: Vec<String>,
+    pub(crate) function: Option<String>,
     pub(crate) emit_bytecode_path: Option<PathBuf>,
-    pub(crate) fea_json: bool,
+    pub(crate) json: bool,
     pub(crate) execution: ExecutionTargetArgs,
 }
 
@@ -91,11 +93,22 @@ pub(crate) async fn execute_script_with_graphics(
     let ScriptInvocation {
         script,
         args,
+        function,
         emit_bytecode_path,
-        fea_json,
+        json,
         execution,
     } = invocation;
+    if function.is_some()
+        && (script.as_path() == Path::new("-")
+            || crate::commands::fea::source::is_fea_source_path(&script)
+            || !matches!(execution.resolve()?, ExecutionTarget::Remote(_)))
+    {
+        anyhow::bail!("--function requires remote execution of a MATLAB source file");
+    }
     if script.as_path() == Path::new("-") {
+        if !matches!(execution.resolve()?, ExecutionTarget::Local) {
+            anyhow::bail!("remote execution requires a project-owned source file, not stdin");
+        }
         return boxed_command(|| {
             execute_stdin_script_with_graphics(emit_bytecode_path, cli, config, graphics)
         })
@@ -111,11 +124,33 @@ pub(crate) async fn execute_script_with_graphics(
         if !args.is_empty() {
             anyhow::bail!(".fea files do not accept positional script arguments");
         }
-        return boxed_command(|| execute_fea_path(script, cli, config, fea_json, execution)).await;
+        return boxed_command(|| execute_fea_path(script, cli, config, json, execution)).await;
     }
 
-    if !matches!(execution.resolve()?, ExecutionTarget::Local) {
-        anyhow::bail!("remote `runmat run` execution currently requires a .fea study document");
+    if let ExecutionTarget::Remote(target) = execution.resolve()? {
+        if emit_bytecode_path.is_some() {
+            anyhow::bail!("--emit-bytecode cannot be combined with remote execution");
+        }
+        return boxed_command(|| {
+            crate::commands::job::submit::submit(
+                crate::commands::job::submit::JobSubmission {
+                    file: script,
+                    project: target.project,
+                    cluster: target.cluster,
+                    queue: target.queue,
+                    trust_identity: target.trust_identity,
+                    function,
+                    idempotency_key: target.idempotency_key,
+                    workers: target.workers,
+                    detach: target.detach,
+                    json,
+                    args,
+                },
+                cli,
+                config,
+            )
+        })
+        .await;
     }
 
     validate_local_script_arguments(&args)?;

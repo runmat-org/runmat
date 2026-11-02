@@ -114,3 +114,69 @@ fn phase_transition_preserves_pin_retirement_errors_and_abandonment() {
         assert_eq!(next_drops.get(), calls.get());
     }
 }
+
+#[test]
+fn transition_unwind_retains_predecessor_roots_and_drops_each_owner_once() {
+    struct First {
+        drops: Rc<Cell<usize>>,
+        panic_on_drop: bool,
+        _pin: PhantomPinned,
+    }
+    impl Future for First {
+        type Output = Result<(), ()>;
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Ready(Ok(()))
+        }
+    }
+    impl Drop for First {
+        fn drop(&mut self) {
+            self.drops.set(self.drops.get() + 1);
+            assert!(!self.panic_on_drop, "predecessor destructor failure");
+        }
+    }
+    struct SuccessorOwner(Rc<Cell<usize>>);
+    impl Drop for SuccessorOwner {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+    for factory_panics in [false, true] {
+        let first_drops = Rc::new(Cell::new(0));
+        let successor_drops = Rc::new(Cell::new(0));
+        let observed_first = Rc::clone(&first_drops);
+        let successor_owner = SuccessorOwner(Rc::clone(&successor_drops));
+        let mut work = Box::pin(after_result(
+            First {
+                drops: Rc::clone(&first_drops),
+                panic_on_drop: !factory_panics,
+                _pin: PhantomPinned,
+            },
+            move |()| {
+                // The factory can still consult roots held by the predecessor.
+                assert_eq!(observed_first.get(), 0);
+                assert!(!factory_panics, "successor construction failure");
+                async move {
+                    drop(successor_owner);
+                    Ok::<(), ()>(())
+                }
+            },
+        ));
+        let waker = futures::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            work.as_mut().poll(&mut context)
+        }))
+        .is_err());
+        // Pin::set retains the replacement if predecessor destruction panics;
+        // a panicking factory instead destroys its captured owner immediately.
+        assert_eq!(successor_drops.get(), usize::from(factory_panics));
+        // A caught factory/destructor panic cannot repoll a completed child.
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            work.as_mut().poll(&mut context)
+        }))
+        .is_err());
+        drop(work);
+        assert_eq!(first_drops.get(), 1);
+        assert_eq!(successor_drops.get(), 1);
+    }
+}

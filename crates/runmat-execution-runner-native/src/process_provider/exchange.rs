@@ -1,33 +1,66 @@
 use super::{NativeProcessProvider, ProcessControl, TransportMeters};
 use crate::protocol::{WorkerLaunchRequest, WorkerProcessMessage, WorkerResponse};
-use runmat_process_host::{
-    ipc::{read_payload, write_payload, FrameLimits, MeteredIo},
-    ChildProcess,
+use runmat_process_host::ipc::{
+    private_control::PrivateControlListener, read_payload, write_payload, FrameLimits, MeteredIo,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::io::BufReader;
 
 pub(super) async fn exchange(
     provider: &NativeProcessProvider<'_>,
-    child: &mut ChildProcess,
+    listener: PrivateControlListener,
     request: &WorkerLaunchRequest,
     control: &dyn ProcessControl,
     meters: &TransportMeters,
     console: &mut Option<runmat_execution::console::ConsoleTranscript>,
 ) -> Result<WorkerResponse, String> {
-    let stdio = child.take_stdio().map_err(|error| error.to_string())?;
-    let mut reader = BufReader::new(MeteredIo::new(stdio.stdout, meters.received.clone()));
-    let mut writer = MeteredIo::new(stdio.stdin, meters.sent.clone());
+    // Both application pipes are already owned by the sibling drain future.
+    let accept = tokio::time::timeout(Duration::from_secs(30), listener.accept());
+    tokio::pin!(accept);
+    let connected = loop {
+        tokio::select! {
+            connected = &mut accept => break connected
+                .map_err(|_| "native worker private control bootstrap exceeded its deadline".to_string())?
+                .map_err(|error| error.to_string())?,
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                if should_stop(control) {
+                    return Err(stop_diagnostic(control));
+                }
+            }
+        }
+    };
+    if should_stop(control) {
+        return Err(stop_diagnostic(control));
+    }
+    let mut reader = BufReader::new(MeteredIo::new(connected.reader, meters.received.clone()));
+    let mut writer = MeteredIo::new(connected.writer, meters.sent.clone());
     let limits = FrameLimits {
         max_message_bytes: provider.config.max_message_bytes,
     };
     let payload =
         runmat_canonical_codec::encode_json_bounded(request, u64::from(limits.max_message_bytes))
             .map_err(|error| error.to_string())?;
-    write_payload(&mut writer, &payload, limits)
-        .await
-        .map_err(|error| error.to_string())?;
+    {
+        let write = write_payload(&mut writer, &payload, limits);
+        tokio::pin!(write);
+        loop {
+            tokio::select! {
+                result = &mut write => {
+                    result.map_err(|error| error.to_string())?;
+                    break;
+                }
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                    if should_stop(control) {
+                        return Err(stop_diagnostic(control));
+                    }
+                }
+            }
+        }
+    }
+    if should_stop(control) {
+        return Err(stop_diagnostic(control));
+    }
     let WorkerLaunchRequest::Reserved(reserved) = request else {
         return Err("durable program provider launches reserved direct programs only".into());
     };
@@ -61,6 +94,23 @@ pub(super) async fn exchange(
     Ok(response)
 }
 
+fn stop_diagnostic(control: &dyn ProcessControl) -> String {
+    control
+        .failure()
+        .or_else(|| control.raw_output_failure().map(|error| error.to_string()))
+        .unwrap_or_else(|| {
+            if control.cancellation_reason().is_some() {
+                "execution was cancelled".into()
+            } else {
+                "execution control stopped without an authenticated cancellation reason".into()
+            }
+        })
+}
+
+fn should_stop(control: &dyn ProcessControl) -> bool {
+    control.cancellation().load(Ordering::Acquire) || control.raw_output_failure().is_some()
+}
+
 async fn read_response(
     reader: &mut (impl tokio::io::AsyncRead + Unpin),
     limits: FrameLimits,
@@ -71,10 +121,10 @@ async fn read_response(
 ) -> Result<WorkerResponse, String> {
     let mut last_progress_sequence = 0;
     loop {
-        let payload = read_payload_until_cancelled(reader, limits, control.cancellation())
+        let payload = read_payload_until_stopped(reader, limits, || should_stop(control))
             .await
             .map_err(|error| error.to_string())?
-            .ok_or_else(|| "execution was cancelled".to_string())?;
+            .ok_or_else(|| stop_diagnostic(control))?;
         match serde_json::from_slice::<WorkerProcessMessage>(&payload)
             .map_err(|error| error.to_string())?
         {
@@ -122,23 +172,20 @@ async fn read_response(
     }
 }
 
-pub(crate) async fn read_payload_until_cancelled(
+pub(crate) async fn read_payload_until_stopped(
     reader: &mut (impl tokio::io::AsyncRead + Unpin),
     limits: FrameLimits,
-    cancelled: &AtomicBool,
+    should_stop: impl Fn() -> bool,
 ) -> runmat_process_host::ProcessHostResult<Option<Vec<u8>>> {
-    // A framed read may span several pipe reads. Keep the same future alive
-    // while polling cancellation: recreating it after a timer tick discards
-    // bytes already consumed from the length-prefixed stream.
+    // Keep this one read future alive across stop ticks: a new future would
+    // discard a partial length prefix or body already consumed from the pipe.
     let read = read_payload(reader, limits);
     tokio::pin!(read);
     loop {
         tokio::select! {
             response = &mut read => return response.map(Some),
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                if cancelled.load(Ordering::Acquire) {
-                    return Ok(None);
-                }
+                if should_stop() { return Ok(None); }
             }
         }
     }

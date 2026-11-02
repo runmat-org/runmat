@@ -43,7 +43,7 @@ impl PreparedWave {
     ) -> Result<Vec<TaskHandle>, RuntimeError> {
         let tasks = runtime
             .execution()
-            .submit_callback_batch(self.calls, pool, cancellation)
+            .submit_callback_batch_in_context(self.calls, pool, cancellation, runtime)
             .map_err(|error| execution_error(runtime, error))?;
         drop(self.roots);
         Ok(tasks)
@@ -76,11 +76,21 @@ impl PendingBatch<'_> {
                         .map_err(|error| execution_error(runtime, error))?
                     {
                         AwaitAction::Completed(value) => return Ok((index, value)),
-                        AwaitAction::Pending(_) => runtime
-                            .execution()
-                            .wait_task_change(task)
-                            .await
-                            .map_err(|error| execution_error(runtime, error))?,
+                        AwaitAction::Pending(value) => {
+                            let waiting = runtime
+                                .execution()
+                                .wait_pending(&value, runtime)
+                                .map_err(|error| execution_error(runtime, error))?
+                                .ok_or_else(|| {
+                                    unavailable(
+                                        Some(runtime),
+                                        "worker task-change wake unavailable",
+                                    )
+                                })?;
+                            waiting
+                                .await
+                                .map_err(|error| execution_error(runtime, error))?;
+                        }
                         _ => {
                             return Err(unavailable(
                                 Some(runtime),

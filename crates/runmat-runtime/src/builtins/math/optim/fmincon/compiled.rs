@@ -85,6 +85,7 @@ impl Outcome {
 }
 
 mod run;
+mod algorithm;
 mod options;
 pub(in crate::builtins::math::optim) use options::prepare as prepare_options;
 pub(in crate::builtins::math::optim) struct PreparedOptions {

@@ -5,32 +5,6 @@ use uuid::Uuid;
 
 #[derive(Subcommand, Clone)]
 pub enum JobCommand {
-    /// Submit an exact encrypted program as a durable remote job
-    Submit {
-        file: PathBuf,
-        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
-        project: Option<Uuid>,
-        #[arg(long)]
-        cluster: String,
-        #[arg(long, default_value = "default")]
-        queue: String,
-        /// Pinned endpoint identity fingerprint trusted for this run
-        #[arg(long)]
-        trust_identity: String,
-        #[arg(long)]
-        function: Option<String>,
-        #[arg(long)]
-        idempotency_key: Option<String>,
-        /// Number of remote worker allocations for driver-owned scheduling
-        #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u32).range(0..=1024))]
-        workers: u32,
-        #[arg(long)]
-        detach: bool,
-        #[arg(long)]
-        json: bool,
-        #[arg(last = true)]
-        args: Vec<String>,
-    },
     /// List durable remote jobs
     List {
         #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
@@ -72,8 +46,7 @@ pub enum JobCommand {
 impl JobCommand {
     pub(crate) fn machine_output(&self) -> bool {
         match self {
-            Self::Submit { json, .. }
-            | Self::List { json, .. }
+            Self::List { json, .. }
             | Self::Show { json, .. }
             | Self::Attach { json, .. }
             | Self::Cancel { json, .. } => *json,

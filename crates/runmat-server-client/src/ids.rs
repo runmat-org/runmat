@@ -24,13 +24,32 @@ fn is_valid_suffix(suffix: &str) -> bool {
 macro_rules! prefixed_id {
     ($name:ident, $prefix:literal) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
+        #[serde(try_from = "String", into = "String")]
         pub struct $name(String);
+
+        impl TryFrom<String> for $name {
+            type Error = IdError;
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                Self::validate(&value)?;
+                Ok(Self(value))
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(value: $name) -> Self {
+                value.0
+            }
+        }
 
         impl $name {
             pub const PREFIX: &'static str = $prefix;
 
             pub fn parse(value: &str) -> Result<Self, IdError> {
+                Self::validate(value)?;
+                Ok(Self(value.to_string()))
+            }
+
+            fn validate(value: &str) -> Result<(), IdError> {
                 if !value.starts_with(Self::PREFIX) {
                     return Err(IdError::InvalidPrefix);
                 }
@@ -38,7 +57,7 @@ macro_rules! prefixed_id {
                 if !is_valid_suffix(suffix) {
                     return Err(IdError::InvalidSuffix);
                 }
-                Ok(Self(value.to_string()))
+                Ok(())
             }
 
             pub fn as_str(&self) -> &str {
@@ -82,6 +101,8 @@ macro_rules! prefixed_id {
 
 prefixed_id!(OrgId, "org_");
 prefixed_id!(ProjectId, "proj_");
+prefixed_id!(ClusterId, "cls_");
+prefixed_id!(ClusterNodeId, "node_");
 prefixed_id!(FsVersionId, "fsv_");
 prefixed_id!(SnapshotId, "snap_");
 
@@ -104,5 +125,21 @@ mod tests {
             ProjectId::parse("proj_0123456789ABCDEF0123456789abcdef"),
             Err(IdError::InvalidSuffix)
         );
+        let cluster = ClusterId::from_uuid(uuid);
+        let encoded = serde_json::to_string(&cluster).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ClusterId>(&encoded).unwrap(),
+            cluster
+        );
+        for invalid in [
+            "node_0123456789abcdef0123456789abcdef",
+            "cls_0123456789ABCDEF0123456789abcdef",
+            "cls_short",
+        ] {
+            assert!(
+                serde_json::from_value::<ClusterId>(serde_json::Value::String(invalid.into()))
+                    .is_err()
+            );
+        }
     }
 }

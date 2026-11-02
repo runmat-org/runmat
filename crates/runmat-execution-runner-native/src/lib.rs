@@ -4,6 +4,7 @@
 mod test_support;
 
 mod accelerator_placement;
+mod attempt_scratch;
 mod machine_capacity;
 pub use accelerator_placement::active_provider_resource;
 pub use machine_capacity::publication_staging_bytes;
@@ -84,6 +85,8 @@ mod metadata_identity;
 mod native_pool;
 mod program_host;
 mod process_provider;
+mod process_output;
+pub use process_output::{RawOutputError, RawOutputState};
 mod program_object_source;
 mod program_session;
 mod protocol;

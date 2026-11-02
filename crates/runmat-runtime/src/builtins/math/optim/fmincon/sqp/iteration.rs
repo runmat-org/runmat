@@ -6,6 +6,7 @@ use super::super::{
 };
 use super::{Outcome, Parameters};
 mod accepted;
+mod proposal;
 use crate::BuiltinResult;
 
 pub(in crate::builtins::math::optim::fmincon) fn minimize<

@@ -3,6 +3,7 @@ use super::*;
 use crate::builtins::math::optim::fmincon::compiled;
 use runmat_gc::GcHandle;
 mod oracle;
+mod invocation;
 mod solver;
 mod outcome;
 mod constrained;
@@ -102,18 +103,17 @@ pub(super) async fn solve(
     } else {
         Some(crate::builtins::math::optim::common::solver_timing::SolverTiming::start(c.runtime())?)
     };
-    let outcome = match solver {
-        runmat_builtins::OptimSolver::Fmincon => Outcome::constrained(
-            constrained::solve(&model, formulation, starting, options, policy, c).await?,
-        ),
-        runmat_builtins::OptimSolver::Fminunc => Outcome::unconstrained(
-            unconstrained::solve(&model, formulation, starting, options, policy, c).await?,
-        ),
-        runmat_builtins::OptimSolver::Lsqnonlin => Outcome::residual(
-            residual::solve(&model, formulation, starting, options, products, policy, c).await?,
-        ),
-        _ => return Err(policy.invalid("unsupported nonlinear model solver family")),
-    };
+    let outcome = invocation::Execution {
+        model: &model,
+        formulation,
+        starting,
+        options,
+        products,
+        policy,
+        cooperation: c,
+    }
+    .select(solver)
+    .await?;
     Ok(Solved {
         model,
         outcome,

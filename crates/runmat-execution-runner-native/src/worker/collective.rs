@@ -5,64 +5,59 @@ use std::rc::Rc;
 use runmat_execution::{
     CollectiveRequest, CollectiveResponse, CollectiveSequence, SpmdTaskContext,
 };
+use runmat_process_host::ipc::private_control::{ControlFrameWriter, ControlWriteError};
 use runmat_process_host::ipc::ParentFrames;
-use runmat_process_host::ipc::{write_payload, FrameLimits};
 use runmat_runtime::context::{RuntimeCollectiveService, RuntimeServiceFuture};
 use runmat_runtime::RuntimeError;
 use runmat_types::CollectiveId;
-use tokio::io::{BufWriter, Stdout};
 
 use crate::protocol::{CollectiveProcessResult, WorkerDriverMessage, WorkerProcessMessage};
 
 #[derive(Clone)]
-pub(super) struct StdioCollectiveChannel {
-    io: Rc<tokio::sync::Mutex<StdioCollectiveIo>>,
-    limits: FrameLimits,
+pub(super) struct WorkerControlChannel {
+    reader: Rc<tokio::sync::Mutex<ParentFrames>>,
+    writer: ControlFrameWriter,
 }
 
-struct StdioCollectiveIo {
-    /// Frames from the parent link thread, which owns the request pipe.
-    reader: ParentFrames,
-    writer: BufWriter<Stdout>,
-}
-
-impl StdioCollectiveChannel {
-    pub(super) fn new(
-        reader: ParentFrames,
-        writer: BufWriter<Stdout>,
-        limits: FrameLimits,
-    ) -> Self {
+impl WorkerControlChannel {
+    pub(super) fn new(reader: ParentFrames, writer: ControlFrameWriter) -> Self {
         Self {
-            io: Rc::new(tokio::sync::Mutex::new(StdioCollectiveIo {
-                reader,
-                writer,
-            })),
-            limits,
+            reader: Rc::new(tokio::sync::Mutex::new(reader)),
+            writer,
         }
+    }
+
+    pub(super) fn writer(&self) -> &ControlFrameWriter {
+        &self.writer
     }
 
     pub(super) async fn read_payload(
         &self,
     ) -> Result<Vec<u8>, runmat_process_host::ProcessHostError> {
-        let mut io = self.io.lock().await;
-        next_frame(&mut io.reader).await
+        let mut reader = self.reader.lock().await;
+        next_frame(&mut reader).await
     }
 
     pub(super) async fn write_payload(
         &self,
-        payload: &[u8],
+        payload: Vec<u8>,
     ) -> Result<(), runmat_process_host::ProcessHostError> {
-        let mut io = self.io.lock().await;
-        write_payload(&mut io.writer, payload, self.limits).await
+        self.writer
+            .write_owned(payload)
+            .await
+            .map_err(control_error)
     }
 
     async fn exchange(
         &self,
-        payload: &[u8],
+        payload: Vec<u8>,
     ) -> Result<Vec<u8>, runmat_process_host::ProcessHostError> {
-        let mut io = self.io.lock().await;
-        write_payload(&mut io.writer, payload, self.limits).await?;
-        next_frame(&mut io.reader).await
+        let mut reader = self.reader.lock().await;
+        self.writer
+            .write_owned(payload)
+            .await
+            .map_err(control_error)?;
+        next_frame(&mut reader).await
     }
 }
 
@@ -76,14 +71,14 @@ async fn next_frame(
     })
 }
 
-pub(super) struct StdioCollectiveService {
+pub(super) struct WorkerCollectiveService {
     context: SpmdTaskContext,
-    channel: StdioCollectiveChannel,
+    channel: WorkerControlChannel,
     sequences: RefCell<BTreeMap<CollectiveId, u64>>,
 }
 
-impl StdioCollectiveService {
-    pub(super) fn new(context: SpmdTaskContext, channel: StdioCollectiveChannel) -> Self {
+impl WorkerCollectiveService {
+    pub(super) fn new(context: SpmdTaskContext, channel: WorkerControlChannel) -> Self {
         Self {
             context,
             channel,
@@ -92,7 +87,7 @@ impl StdioCollectiveService {
     }
 }
 
-impl RuntimeCollectiveService for StdioCollectiveService {
+impl RuntimeCollectiveService for WorkerCollectiveService {
     fn context(&self) -> &SpmdTaskContext {
         &self.context
     }
@@ -130,7 +125,7 @@ impl RuntimeCollectiveService for StdioCollectiveService {
             let payload = serde_json::to_vec(&WorkerProcessMessage::CollectiveRequest { request })
                 .map_err(|failure| error(failure.to_string()))?;
             let payload = channel
-                .exchange(&payload)
+                .exchange(payload)
                 .await
                 .map_err(|failure| error(failure.to_string()))?;
             let completion: WorkerDriverMessage =
@@ -156,6 +151,10 @@ impl RuntimeCollectiveService for StdioCollectiveService {
             }
         })
     }
+}
+
+fn control_error(error: ControlWriteError) -> runmat_process_host::ProcessHostError {
+    runmat_process_host::ProcessHostError::Io(std::io::Error::other(error))
 }
 
 fn error(message: impl Into<String>) -> RuntimeError {

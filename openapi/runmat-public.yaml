@@ -8,431 +8,6 @@ info:
 servers:
 - url: https://api.runmat.com
 paths:
-  /v1/academic/activate:
-    post:
-      tags:
-      - academic::applications
-      operationId: activate_academic_offer
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ActivateAcademicRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActivateAcademicResponse'
-  /v1/academic/applications:
-    post:
-      tags:
-      - academic::applications
-      operationId: create_academic_application
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateApplicationRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApplicationResponse'
-  /v1/academic/applications/{applicationId}:
-    get:
-      tags:
-      - academic::applications
-      operationId: get_academic_application
-      parameters:
-      - name: applicationId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApplicationResponse'
-    patch:
-      tags:
-      - academic::applications
-      operationId: update_academic_application
-      parameters:
-      - name: applicationId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateApplicationRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApplicationResponse'
-  /v1/academic/applications/{applicationId}/proof:
-    get:
-      tags:
-      - academic::proof
-      operationId: list_academic_proofs
-      parameters:
-      - name: applicationId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ProofResponse'
-    post:
-      tags:
-      - academic::proof
-      operationId: upload_academic_proof
-      parameters:
-      - name: applicationId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProofResponse'
-  /v1/academic/applications/{applicationId}/proof/{proofId}:
-    delete:
-      tags:
-      - academic::proof
-      operationId: delete_academic_proof
-      parameters:
-      - name: applicationId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: proofId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '204':
-          description: ''
-  /v1/academic/applications/{applicationId}/submit:
-    post:
-      tags:
-      - academic::applications
-      operationId: submit_academic_application
-      parameters:
-      - name: applicationId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SubmitApplicationRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApplicationResponse'
-  /v1/academic/applications/{applicationId}/withdraw:
-    post:
-      tags:
-      - academic::applications
-      operationId: withdraw_academic_application
-      parameters:
-      - name: applicationId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/VersionRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApplicationResponse'
-  /v1/academic/course-allocations:
-    get:
-      tags:
-      - academic::applications
-      operationId: list_academic_course_allocations
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/CourseAllocationResponse'
-  /v1/academic/course-allocations/{allocationId}/staff:
-    get:
-      tags:
-      - academic::applications
-      operationId: list_academic_staged_staff
-      parameters:
-      - name: allocationId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/StagedStaffResponse'
-    put:
-      tags:
-      - academic::applications
-      operationId: replace_academic_staged_staff
-      parameters:
-      - name: allocationId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReplaceStagedStaffRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/StagedStaffResponse'
-  /v1/academic/courses:
-    get:
-      tags:
-      - academic::courses
-      operationId: list_academic_courses
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/CourseResponse'
-    post:
-      tags:
-      - academic::courses
-      operationId: create_academic_course
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateCourseRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CourseResponse'
-  /v1/academic/courses/{courseId}:
-    get:
-      tags:
-      - academic::courses
-      operationId: get_academic_course
-      parameters:
-      - name: courseId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CourseResponse'
-  /v1/academic/courses/{courseId}/archive:
-    post:
-      tags:
-      - academic::courses
-      operationId: archive_academic_course
-      parameters:
-      - name: courseId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CourseResponse'
-  /v1/academic/courses/{courseId}/students:
-    get:
-      tags:
-      - academic::courses
-      operationId: list_academic_course_students
-      parameters:
-      - name: courseId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CourseStudentRosterResponse'
-    post:
-      tags:
-      - academic::courses
-      operationId: invite_academic_course_students
-      parameters:
-      - name: courseId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/InviteCourseStudentsRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CourseStudentRosterResponse'
-  /v1/academic/me:
-    get:
-      tags:
-      - academic::applications
-      operationId: get_academic_me
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AcademicMeResponse'
-  /v1/admin/academic/applications/{applicationId}:
-    get:
-      tags:
-      - admin::academic::handlers
-      operationId: get_admin_academic_application
-      parameters:
-      - name: applicationId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AcademicReviewResponse'
-  /v1/admin/academic/applications/{applicationId}/decision:
-    post:
-      tags:
-      - admin::academic::handlers
-      operationId: decide_admin_academic_application
-      parameters:
-      - name: applicationId
-        in: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AcademicDecisionRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AcademicDecisionResponse'
-  /v1/admin/academic/applications/{applicationId}/proof/{proofId}/download:
-    get:
-      tags:
-      - admin::academic::handlers
-      operationId: get_admin_academic_proof_download
-      parameters:
-      - name: applicationId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: proofId
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProofDownloadResponse'
   /v1/admin/analytics/project:
     post:
       tags:
@@ -1562,6 +1137,71 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security: []
+  /v1/execution/drivers/{driverLeaseId}/workers/{allocationLeaseId}/retirement:
+    get:
+      tags:
+      - Execution
+      operationId: worker_retirement
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: originalAllocationFencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: originalDriverFencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: driverLeaseId
+        in: path
+        description: Current authenticated driver lease
+        required: true
+        schema:
+          type: string
+      - name: allocationLeaseId
+        in: path
+        description: Original worker allocation lease
+        required: true
+        schema:
+          type: string
+      - name: X-RunMat-Driver-Credential
+        in: header
+        description: Scoped driver credential
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverWorkerRetirementResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
   /v1/execution/node-enrollments/consume:
     post:
       tags:
@@ -2059,22 +1699,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security: []
-  /v1/integrations/slack/academic/actions:
-    post:
-      tags:
-      - integrations::slack_academic
-      operationId: academic_actions
-      requestBody:
-        description: ''
-        content:
-          application/octet-stream:
-            schema:
-              type: string
-              format: binary
-        required: true
-      responses:
-        '200':
-          description: ''
   /v1/integrations/slack/pricing/actions:
     post:
       tags:
@@ -2129,6 +1753,36 @@ paths:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security:
       - {}
+  /v1/me/activity:
+    post:
+      tags:
+      - referral_links
+      operationId: record_my_activity
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserActivityRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserActivityResponse'
+  /v1/me/referral-link:
+    get:
+      tags:
+      - referral_links
+      operationId: get_my_referral_link
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReferralLinkResponse'
   /v1/orgs:
     get:
       tags:
@@ -2377,6 +2031,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/clusters/by-name/{clusterName}:
+    get:
+      tags:
+      - Execution
+      operationId: get_cluster_by_name
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: clusterName
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/orgs/{orgId}/clusters/{clusterId}:
     patch:
       tags:
@@ -2521,6 +2216,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
         '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - Execution
+      operationId: register_node
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: clusterId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterNodeRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeEnrollmentResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
           description: ''
           content:
             application/json:
@@ -5082,6 +4829,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/execution/clusters/by-name/{clusterName}:
+    get:
+      tags:
+      - Execution
+      operationId: get_project_cluster_by_name
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: clusterName
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/execution/policy:
     get:
       tags:
@@ -7117,6 +6905,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/referral-links/{code}:
+    get:
+      tags:
+      - referral_links
+      operationId: resolve_referral_code
+      parameters:
+      - name: code
+        in: path
+        description: Referral code
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReferralCodeResolveResponse'
+      security:
+      - {}
   /v1/t:
     post:
       tags:
@@ -7151,323 +6960,6 @@ paths:
       - {}
 components:
   schemas:
-    AcademicApplicationStatusResponse:
-      type: string
-      enum:
-      - draft
-      - submitted
-      - needs_information
-      - approved
-      - denied
-      - withdrawn
-    AcademicCourseStatusResponse:
-      type: string
-      enum:
-      - scheduled
-      - active
-      - ended
-      - archived
-    AcademicDecisionAction:
-      type: string
-      enum:
-      - approve
-      - deny
-    AcademicDecisionRequest:
-      type: object
-      required:
-      - action
-      - expectedVersion
-      - idempotencyKey
-      properties:
-        action:
-          $ref: '#/components/schemas/AcademicDecisionAction'
-        expectedVersion:
-          type: integer
-          format: int32
-        idempotencyKey:
-          type: string
-    AcademicDecisionResponse:
-      type: object
-      required:
-      - application
-      properties:
-        application:
-          type: object
-          required:
-          - id
-          - targetOrgId
-          - role
-          - status
-          - academicEmail
-          - institution
-          - countryCode
-          - requestedDurationDays
-          - plannedCourses
-          - version
-          - createdAt
-          - updatedAt
-          properties:
-            academicEmail:
-              type: string
-            applicantMessage:
-              type: string
-              nullable: true
-            applicantNotes:
-              type: string
-              nullable: true
-            countryCode:
-              type: string
-            createdAt:
-              type: string
-              format: date-time
-            decidedAt:
-              type: string
-              format: date-time
-              nullable: true
-            decisionReasonCode:
-              type: string
-              nullable: true
-            department:
-              type: string
-              nullable: true
-            graduationYear:
-              type: integer
-              format: int32
-              nullable: true
-            id:
-              type: string
-            institution:
-              type: string
-            intendedUse:
-              type: string
-              nullable: true
-            plannedCourses:
-              type: array
-              items:
-                $ref: '#/components/schemas/PlannedCourseBody'
-            program:
-              type: string
-              nullable: true
-            requestedDurationDays:
-              type: integer
-              format: int32
-            role:
-              $ref: '#/components/schemas/AcademicRoleResponse'
-            status:
-              $ref: '#/components/schemas/AcademicApplicationStatusResponse'
-            submittedAt:
-              type: string
-              format: date-time
-              nullable: true
-            targetOrgId:
-              type: string
-            title:
-              type: string
-              nullable: true
-            updatedAt:
-              type: string
-              format: date-time
-            version:
-              type: integer
-              format: int32
-        grant:
-          allOf:
-          - $ref: '#/components/schemas/GrantResponse'
-          nullable: true
-        teachingAuthorization:
-          allOf:
-          - type: object
-            required:
-            - id
-            - startsAt
-            - endsAt
-            - maxActiveCourses
-            - maxEnrollmentPerCourse
-            - maxAggregateEnrollment
-            properties:
-              endsAt:
-                type: string
-                format: date-time
-              id:
-                type: string
-              maxActiveCourses:
-                type: integer
-                format: int32
-              maxAggregateEnrollment:
-                type: integer
-                format: int32
-              maxEnrollmentPerCourse:
-                type: integer
-                format: int32
-              setupExpiresAt:
-                type: string
-                format: date-time
-                nullable: true
-              startsAt:
-                type: string
-                format: date-time
-          nullable: true
-    AcademicGrantStatusResponse:
-      type: string
-      enum:
-      - pending_activation
-      - scheduled
-      - active
-      - expired
-      - revoked
-      - superseded
-    AcademicGrantTypeResponse:
-      type: string
-      enum:
-      - student
-      - instructor
-      - course
-    AcademicMeResponse:
-      type: object
-      required:
-      - applications
-      - activeGrants
-      - canCreateCourse
-      properties:
-        activeGrants:
-          type: array
-          items:
-            $ref: '#/components/schemas/GrantSummaryResponse'
-        applications:
-          type: array
-          items:
-            $ref: '#/components/schemas/ApplicationResponse'
-        canCreateCourse:
-          type: boolean
-        teachingAuthorization:
-          allOf:
-          - $ref: '#/components/schemas/TeachingAuthorizationResponse'
-          nullable: true
-    AcademicProofStatusResponse:
-      type: string
-      enum:
-      - uploaded
-      - quarantined
-      - accepted
-      - deleted
-    AcademicReviewResponse:
-      type: object
-      required:
-      - application
-      - proofs
-      properties:
-        application:
-          type: object
-          required:
-          - id
-          - targetOrgId
-          - role
-          - status
-          - academicEmail
-          - institution
-          - countryCode
-          - requestedDurationDays
-          - plannedCourses
-          - version
-          - createdAt
-          - updatedAt
-          properties:
-            academicEmail:
-              type: string
-            applicantMessage:
-              type: string
-              nullable: true
-            applicantNotes:
-              type: string
-              nullable: true
-            countryCode:
-              type: string
-            createdAt:
-              type: string
-              format: date-time
-            decidedAt:
-              type: string
-              format: date-time
-              nullable: true
-            decisionReasonCode:
-              type: string
-              nullable: true
-            department:
-              type: string
-              nullable: true
-            graduationYear:
-              type: integer
-              format: int32
-              nullable: true
-            id:
-              type: string
-            institution:
-              type: string
-            intendedUse:
-              type: string
-              nullable: true
-            plannedCourses:
-              type: array
-              items:
-                $ref: '#/components/schemas/PlannedCourseBody'
-            program:
-              type: string
-              nullable: true
-            requestedDurationDays:
-              type: integer
-              format: int32
-            role:
-              $ref: '#/components/schemas/AcademicRoleResponse'
-            status:
-              $ref: '#/components/schemas/AcademicApplicationStatusResponse'
-            submittedAt:
-              type: string
-              format: date-time
-              nullable: true
-            targetOrgId:
-              type: string
-            title:
-              type: string
-              nullable: true
-            updatedAt:
-              type: string
-              format: date-time
-            version:
-              type: integer
-              format: int32
-        proofs:
-          type: array
-          items:
-            type: object
-            required:
-            - id
-            - filename
-            - mimeType
-            - sizeBytes
-            - status
-            properties:
-              filename:
-                type: string
-              id:
-                type: string
-              mimeType:
-                type: string
-              sizeBytes:
-                type: integer
-                format: int64
-              status:
-                $ref: '#/components/schemas/AcademicProofStatusResponse'
-    AcademicRoleResponse:
-      type: string
-      enum:
-      - student
-      - instructor
-    AcademicStaffRoleRequest:
-      type: string
-      enum:
-      - teaching_assistant
-      - co_instructor
-      - other_staff
     AcceleratorAllocationDomainIdBody:
       type: string
     AcceleratorClassBody:
@@ -7598,35 +7090,6 @@ components:
       - provider
       - user
       - directory
-    ActivateAcademicRequest:
-      type: object
-      required:
-      - token
-      properties:
-        token:
-          type: string
-    ActivateAcademicResponse:
-      type: object
-      required:
-      - orgId
-      - role
-      - endsAt
-      - alreadyActivated
-      - allocations
-      properties:
-        allocations:
-          type: array
-          items:
-            $ref: '#/components/schemas/CourseAllocationResponse'
-        alreadyActivated:
-          type: boolean
-        endsAt:
-          type: string
-          format: date-time
-        orgId:
-          type: string
-        role:
-          $ref: '#/components/schemas/AcademicGrantTypeResponse'
     AdvisoryRequest:
       type: object
       required:
@@ -7776,128 +7239,6 @@ components:
         scanned:
           type: integer
           minimum: 0
-    ApplicationFields:
-      type: object
-      properties:
-        academicEmail:
-          type: string
-          nullable: true
-        applicantName:
-          type: string
-          nullable: true
-        applicantNotes:
-          type: string
-          nullable: true
-        countryCode:
-          type: string
-          nullable: true
-        department:
-          type: string
-          nullable: true
-        graduationYear:
-          type: integer
-          format: int32
-          nullable: true
-        institution:
-          type: string
-          nullable: true
-        intendedUse:
-          type: string
-          nullable: true
-        plannedCourses:
-          type: array
-          items:
-            $ref: '#/components/schemas/PlannedCourseBody'
-          nullable: true
-        program:
-          type: string
-          nullable: true
-        requestedDurationDays:
-          type: integer
-          format: int32
-          nullable: true
-        title:
-          type: string
-          nullable: true
-    ApplicationResponse:
-      type: object
-      required:
-      - id
-      - targetOrgId
-      - role
-      - status
-      - academicEmail
-      - institution
-      - countryCode
-      - requestedDurationDays
-      - plannedCourses
-      - version
-      - createdAt
-      - updatedAt
-      properties:
-        academicEmail:
-          type: string
-        applicantMessage:
-          type: string
-          nullable: true
-        applicantNotes:
-          type: string
-          nullable: true
-        countryCode:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-        decidedAt:
-          type: string
-          format: date-time
-          nullable: true
-        decisionReasonCode:
-          type: string
-          nullable: true
-        department:
-          type: string
-          nullable: true
-        graduationYear:
-          type: integer
-          format: int32
-          nullable: true
-        id:
-          type: string
-        institution:
-          type: string
-        intendedUse:
-          type: string
-          nullable: true
-        plannedCourses:
-          type: array
-          items:
-            $ref: '#/components/schemas/PlannedCourseBody'
-        program:
-          type: string
-          nullable: true
-        requestedDurationDays:
-          type: integer
-          format: int32
-        role:
-          $ref: '#/components/schemas/AcademicRoleResponse'
-        status:
-          $ref: '#/components/schemas/AcademicApplicationStatusResponse'
-        submittedAt:
-          type: string
-          format: date-time
-          nullable: true
-        targetOrgId:
-          type: string
-        title:
-          type: string
-          nullable: true
-        updatedAt:
-          type: string
-          format: date-time
-        version:
-          type: integer
-          format: int32
     ApprovePublicationRequest:
       type: object
       properties:
@@ -8248,15 +7589,9 @@ components:
       - orgMemberships
       - preferences
       - canCreateStandardOrg
-      - canCreateCourse
-      - academicProgramEnabled
       - feedback
       - nameSettings
       properties:
-        academicProgramEnabled:
-          type: boolean
-        canCreateCourse:
-          type: boolean
         canCreateStandardOrg:
           type: boolean
         feedback:
@@ -8347,6 +7682,161 @@ components:
       enum:
       - resume-safe
       - indeterminate
+    ClockEndBody:
+      type: object
+      required:
+      - schemaVersion
+      - owner
+      - startReceiptDigest
+      - demandChallenge
+      - endedMonotonicTicks
+      - signature
+      properties:
+        demandChallenge:
+          type: string
+        endedMonotonicTicks:
+          type: integer
+          format: int64
+          minimum: 0
+        owner:
+          $ref: '#/components/schemas/ClockOwnerBody'
+        schemaVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        signature:
+          type: string
+        startReceiptDigest:
+          type: string
+      additionalProperties: false
+    ClockEndDemandBody:
+      type: object
+      required:
+      - observationId
+      - startReceiptDigest
+      - demandChallenge
+      properties:
+        demandChallenge:
+          type: string
+        observationId:
+          type: string
+        startReceiptDigest:
+          type: string
+      additionalProperties: false
+    ClockOwnerBody:
+      type: object
+      required:
+      - orgId
+      - clusterId
+      - nodeId
+      - runId
+      - driverAllocationLeaseId
+      - driverAllocationFence
+      - driverProcessLaunchNonce
+      - observationId
+      - clockDomainNonce
+      - ticksPerSecond
+      - identityPublicKey
+      - identityFingerprint
+      properties:
+        clockDomainNonce:
+          type: string
+        clusterId:
+          type: string
+        driverAllocationFence:
+          type: integer
+          format: int64
+          minimum: 0
+        driverAllocationLeaseId:
+          type: string
+        driverProcessLaunchNonce:
+          type: string
+        identityFingerprint:
+          type: string
+        identityPublicKey:
+          type: string
+        nodeId:
+          type: string
+        observationId:
+          type: string
+        orgId:
+          type: string
+        runId:
+          type: string
+        ticksPerSecond:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    ClockReleaseEntryBody:
+      type: object
+      required:
+      - observationId
+      - startReceiptDigest
+      - endReceiptDigest
+      properties:
+        endReceiptDigest:
+          type: string
+        observationId:
+          type: string
+        startReceiptDigest:
+          type: string
+      additionalProperties: false
+    ClockReleaseManifestBody:
+      type: object
+      required:
+      - checkpointSequence
+      - checkpointArtifactId
+      - checkpointCiphertextDigest
+      - driverFence
+      - entries
+      properties:
+        checkpointArtifactId:
+          type: string
+        checkpointCiphertextDigest:
+          type: string
+        checkpointSequence:
+          type: integer
+          format: int64
+          minimum: 0
+        driverFence:
+          type: integer
+          format: int64
+          minimum: 0
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClockReleaseEntryBody'
+      additionalProperties: false
+    ClockStartBody:
+      type: object
+      required:
+      - schemaVersion
+      - owner
+      - startedMonotonicTicks
+      - signature
+      properties:
+        owner:
+          $ref: '#/components/schemas/ClockOwnerBody'
+        schemaVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        signature:
+          type: string
+        startedMonotonicTicks:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    ClockStartReservationBody:
+      type: object
+      required:
+      - observationId
+      properties:
+        observationId:
+          type: string
+      additionalProperties: false
     ClusterListResponse:
       type: object
       required:
@@ -8452,11 +7942,17 @@ components:
       type: object
       required:
       - token
+      - credential
       - identityFingerprint
       - identityPublicKey
       - inventory
       - heartbeatTtlSeconds
       properties:
+        credential:
+          type: string
+          description: Machine-generated bearer secret, retained before spending the token.
+          maxLength: 43
+          minLength: 43
         heartbeatTtlSeconds:
           type: integer
           format: int64
@@ -8472,129 +7968,6 @@ components:
         token:
           type: string
       additionalProperties: false
-    CourseAllocationResponse:
-      type: object
-      required:
-      - id
-      - name
-      - code
-      - term
-      - startsOn
-      - endsOn
-      - studentSeatLimit
-      - staffSeatLimit
-      - status
-      - setupExpiresAt
-      properties:
-        code:
-          type: string
-        courseId:
-          type: string
-          nullable: true
-        endsOn:
-          type: string
-          format: date
-        id:
-          type: string
-        name:
-          type: string
-        setupExpiresAt:
-          type: string
-          format: date-time
-        staffSeatLimit:
-          type: integer
-          format: int32
-        startsOn:
-          type: string
-          format: date
-        status:
-          type: string
-        studentSeatLimit:
-          type: integer
-          format: int32
-        term:
-          type: string
-    CourseResponse:
-      type: object
-      required:
-      - id
-      - orgId
-      - authorizationId
-      - name
-      - code
-      - term
-      - startsAt
-      - endsAt
-      - accessStartsAt
-      - accessEndsAt
-      - expectedEnrollment
-      - status
-      properties:
-        accessEndsAt:
-          type: string
-          format: date-time
-        accessStartsAt:
-          type: string
-          format: date-time
-        authorizationId:
-          type: string
-        code:
-          type: string
-        endsAt:
-          type: string
-          format: date-time
-        expectedEnrollment:
-          type: integer
-          format: int32
-        id:
-          type: string
-        name:
-          type: string
-        orgId:
-          type: string
-        orgSlug:
-          type: string
-          nullable: true
-        startsAt:
-          type: string
-          format: date-time
-        status:
-          $ref: '#/components/schemas/AcademicCourseStatusResponse'
-        term:
-          type: string
-    CourseStudentInvitationResponse:
-      type: object
-      required:
-      - email
-      - status
-      properties:
-        email:
-          type: string
-        status:
-          type: string
-    CourseStudentRosterResponse:
-      type: object
-      required:
-      - studentSeatLimit
-      - invitations
-      properties:
-        invitations:
-          type: array
-          items:
-            $ref: '#/components/schemas/CourseStudentInvitationResponse'
-        studentSeatLimit:
-          type: integer
-          format: int32
-    CreateApplicationRequest:
-      type: object
-      required:
-      - role
-      - academicEmail
-      properties:
-        academicEmail:
-          type: string
-        role:
-          $ref: '#/components/schemas/AcademicRoleResponse'
     CreateArtifactGrantRequest:
       type: object
       required:
@@ -8627,6 +8000,9 @@ components:
       properties:
         name:
           type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$
         projectId:
           type: string
           nullable: true
@@ -8635,43 +8011,6 @@ components:
           items:
             type: string
       additionalProperties: false
-    CreateCourseRequest:
-      type: object
-      required:
-      - allocationId
-      - authorizationId
-      - name
-      - code
-      - term
-      - startsAt
-      - endsAt
-      - expectedEnrollment
-      - idempotencyKey
-      properties:
-        allocationId:
-          type: string
-        authorizationId:
-          type: string
-        code:
-          type: string
-        copiedFromCourseId:
-          type: string
-          nullable: true
-        endsAt:
-          type: string
-          format: date-time
-        expectedEnrollment:
-          type: integer
-          format: int32
-        idempotencyKey:
-          type: string
-        name:
-          type: string
-        startsAt:
-          type: string
-          format: date-time
-        term:
-          type: string
     CreateEnrollmentRequest:
       type: object
       required:
@@ -8697,7 +8036,6 @@ components:
     CreatePackageRequest:
       type: object
       required:
-      - namespace
       - name
       - visibility
       properties:
@@ -8708,6 +8046,8 @@ components:
           type: string
         namespace:
           type: string
+          description: 'Optional: packages are published under the organization''s URL name. Any other value is refused.'
+          nullable: true
         visibility:
           $ref: '#/components/schemas/PackageVisibilityRequest'
       additionalProperties: false
@@ -8948,6 +8288,30 @@ components:
       required:
       - ttlSeconds
       properties:
+        clockEndDemands:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClockEndDemandBody'
+          nullable: true
+        clockLookupIds:
+          type: array
+          items:
+            type: string
+          nullable: true
+        clockObservationReleaseManifest:
+          allOf:
+          - $ref: '#/components/schemas/ClockReleaseManifestBody'
+          nullable: true
+        clockStartReceipts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClockStartBody'
+          nullable: true
+        clockStartReservations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClockStartReservationBody'
+          nullable: true
         ttlSeconds:
           type: integer
           format: int64
@@ -8962,6 +8326,33 @@ components:
       properties:
         cancellationRequested:
           type: boolean
+        clockEnds:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClockEndBody'
+          nullable: true
+        clockLatestAcceptedReleaseManifest:
+          allOf:
+          - $ref: '#/components/schemas/ClockReleaseManifestBody'
+          nullable: true
+        clockPendingEndDemands:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClockEndDemandBody'
+          nullable: true
+        clockReleaseAccepted:
+          type: boolean
+          nullable: true
+        clockReservedStartIds:
+          type: array
+          items:
+            type: string
+          nullable: true
+        clockStarts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClockStartBody'
+          nullable: true
         expiresAt:
           type: string
           format: date-time
@@ -9158,6 +8549,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DriverWorkerAllocationResponse'
+    DriverWorkerRetirementResponse:
+      type: object
+      properties:
+        evidence:
+          allOf:
+          - $ref: '#/components/schemas/WorkerTreeRetirementEvidenceV1'
+          nullable: true
     EmailChallengeResponse:
       type: object
       required:
@@ -10830,55 +10228,6 @@ components:
           type: boolean
         comment:
           type: string
-    GrantResponse:
-      type: object
-      required:
-      - id
-      - orgId
-      - grantType
-      - startsAt
-      - endsAt
-      properties:
-        endsAt:
-          type: string
-          format: date-time
-        grantType:
-          type: string
-          enum:
-          - student
-          - instructor
-          - course
-        id:
-          type: string
-        orgId:
-          type: string
-        startsAt:
-          type: string
-          format: date-time
-    GrantSummaryResponse:
-      type: object
-      required:
-      - grantId
-      - orgId
-      - grantType
-      - status
-      - startsAt
-      - endsAt
-      properties:
-        endsAt:
-          type: string
-          format: date-time
-        grantId:
-          type: string
-        grantType:
-          $ref: '#/components/schemas/AcademicGrantTypeResponse'
-        orgId:
-          type: string
-        startsAt:
-          type: string
-          format: date-time
-        status:
-          $ref: '#/components/schemas/AcademicGrantStatusResponse'
     HistoryAccessResponse:
       oneOf:
       - type: object
@@ -10914,15 +10263,6 @@ components:
           type: string
         url:
           type: string
-    InviteCourseStudentsRequest:
-      type: object
-      required:
-      - emails
-      properties:
-        emails:
-          type: array
-          items:
-            type: string
     KeyEnvelopeListResponse:
       type: object
       required:
@@ -11120,6 +10460,16 @@ components:
       - macos
       - linux
       - windows
+    NodeClockDemandBody:
+      type: object
+      required:
+      - startReceipt
+      - demandChallenge
+      properties:
+        demandChallenge:
+          type: string
+        startReceipt:
+          $ref: '#/components/schemas/ClockStartBody'
     NodeCredentialResponse:
       type: object
       required:
@@ -11173,6 +10523,21 @@ components:
       - inventory
       - heartbeatTtlSeconds
       properties:
+        clockEnds:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClockEndBody'
+          nullable: true
+        clockReleaseAckConfirmIds:
+          type: array
+          items:
+            type: string
+          nullable: true
+        clockStarts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClockStartBody'
+          nullable: true
         credentialEpoch:
           type: integer
           format: int64
@@ -11217,6 +10582,31 @@ components:
         attestationClass:
           type: string
           nullable: true
+        clockAckedEndIds:
+          type: array
+          items:
+            type: string
+          nullable: true
+        clockAckedReleaseConfirmIds:
+          type: array
+          items:
+            type: string
+          nullable: true
+        clockAckedStartIds:
+          type: array
+          items:
+            type: string
+          nullable: true
+        clockDemands:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeClockDemandBody'
+          nullable: true
+        clockOpenObserverCount:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
         clusterId:
           type: string
         credentialEpoch:
@@ -11254,6 +10644,21 @@ components:
       - draining
       - offline
       - revoked
+    OnboardingField:
+      type: string
+      description: The person's field, asked in onboarding ("What's your field?").
+      enum:
+      - structural
+      - aerospace
+      - automotive
+      - controls_signals
+      - thermal_fluids
+      - electrical
+      - data_quant
+      - research
+      - teaching
+      - student
+      - other
     OnboardingGoal:
       type: string
       enum:
@@ -11281,12 +10686,27 @@ components:
             $ref: '#/components/schemas/OnboardingGoal'
         status:
           type: string
+    OnboardingHeardFrom:
+      type: string
+      description: Where the person heard about RunMat, asked in onboarding (optional).
+      enum:
+      - search_engine
+      - ai_chat
+      - colleague_or_friend
+      - youtube
+      - linkedin
+      - x_twitter
+      - reddit
+      - hacker_news
+      - newsletter_or_article
+      - conference_or_webinar
+      - course_or_university
+      - other
     OnboardingPlanChoice:
       type: string
       enum:
       - free
       - pro
-      - academic
     OnboardingRole:
       type: string
       enum:
@@ -11315,7 +10735,6 @@ components:
       type: string
       enum:
       - standard
-      - course
     OrgListResponse:
       type: object
       required:
@@ -11686,67 +11105,6 @@ components:
             type: string
             enum:
             - paid
-      - type: object
-        required:
-        - grantType
-        - endsAt
-        - kind
-        properties:
-          endsAt:
-            type: string
-            format: date-time
-          grantType:
-            type: string
-          kind:
-            type: string
-            enum:
-            - academic
-      - type: object
-        required:
-        - grantType
-        - endedAt
-        - kind
-        properties:
-          endedAt:
-            type: string
-            format: date-time
-          grantType:
-            type: string
-          kind:
-            type: string
-            enum:
-            - lapsedAcademic
-      discriminator:
-        propertyName: kind
-    PlannedCourseBody:
-      type: object
-      required:
-      - name
-      - code
-      - term
-      - startsOn
-      - endsOn
-      - expectedEnrollment
-      - expectedStaffCount
-      properties:
-        code:
-          type: string
-        endsOn:
-          type: string
-          format: date
-        expectedEnrollment:
-          type: integer
-          format: int32
-        expectedStaffCount:
-          type: integer
-          format: int32
-        name:
-          type: string
-        startsOn:
-          type: string
-          format: date
-        term:
-          type: string
     PolicyResponse:
       type: object
       required:
@@ -12011,38 +11369,6 @@ components:
           type: string
         treeDigest:
           type: string
-    ProofDownloadResponse:
-      type: object
-      required:
-      - url
-      - expiresInSeconds
-      properties:
-        expiresInSeconds:
-          type: integer
-          format: int64
-          minimum: 0
-        url:
-          type: string
-    ProofResponse:
-      type: object
-      required:
-      - id
-      - filename
-      - mimeType
-      - sizeBytes
-      - status
-      properties:
-        filename:
-          type: string
-        id:
-          type: string
-        mimeType:
-          type: string
-        sizeBytes:
-          type: integer
-          format: int64
-        status:
-          $ref: '#/components/schemas/AcademicProofStatusResponse'
     PublicMoneyResponse:
       type: object
       required:
@@ -12207,7 +11533,6 @@ components:
       - priceTier
       - supportedCurrencies
       - chargedInLocalCurrencyAtCheckout
-      - academicProgramEnabled
       - free
       - selfServeOffers
       - enterprise
@@ -12216,8 +11541,6 @@ components:
       - coreHourPack
       - packs
       properties:
-        academicProgramEnabled:
-          type: boolean
         agentCreditPack:
           $ref: '#/components/schemas/PublicResourcePricingResponse'
         chargedInLocalCurrencyAtCheckout:
@@ -12559,6 +11882,14 @@ components:
           type: string
           format: date-time
           nullable: true
+    ReferralCodeResolveResponse:
+      type: object
+      description: Whether a referral code exists. Never identifies its owner.
+      required:
+      - valid
+      properties:
+        valid:
+          type: boolean
     ReferralInviteAcceptRequest:
       type: object
       required:
@@ -12612,6 +11943,37 @@ components:
       - duplicate
       - invalid
       - self
+    ReferralLinkResponse:
+      type: object
+      description: The signed-in user's personal referral link and campaign terms.
+      required:
+      - code
+      - url
+      - rewardCredits
+      - maxQualifiedReferrals
+      - qualifiedReferrals
+      - qualifyingRuns
+      - enabled
+      properties:
+        code:
+          type: string
+        enabled:
+          type: boolean
+        maxQualifiedReferrals:
+          type: integer
+          format: int64
+        qualifiedReferrals:
+          type: integer
+          format: int64
+        qualifyingRuns:
+          type: integer
+          format: int64
+          description: Completed runs a new user needs before the referrer is rewarded.
+        rewardCredits:
+          type: integer
+          format: int64
+        url:
+          type: string
     ReferralProgramStateResponse:
       type: object
       required:
@@ -12681,6 +12043,35 @@ components:
           type: integer
           format: int64
           minimum: 0
+      additionalProperties: false
+    RegisterNodeRequest:
+      type: object
+      required:
+      - credential
+      - identityFingerprint
+      - identityPublicKey
+      - inventory
+      - heartbeatTtlSeconds
+      properties:
+        credential:
+          type: string
+          description: |-
+            Machine-generated bearer secret, persisted privately before registration.
+            The Server stores only its domain-separated digest.
+          maxLength: 43
+          minLength: 43
+        heartbeatTtlSeconds:
+          type: integer
+          format: int64
+          maximum: 300
+          minimum: 10
+        identityFingerprint:
+          type: string
+        identityPublicKey:
+          type: string
+          description: Base64url without padding.
+        inventory:
+          $ref: '#/components/schemas/ResourceInventoryBody'
       additionalProperties: false
     RegisterRecipientKeyRequest:
       type: object
@@ -13451,15 +12842,6 @@ components:
           type: string
         version:
           type: string
-    ReplaceStagedStaffRequest:
-      type: object
-      required:
-      - staff
-      properties:
-        staff:
-          type: array
-          items:
-            $ref: '#/components/schemas/StagedStaffInputBody'
     ResizeDriverWorkersRequest:
       type: object
       required:
@@ -13749,6 +13131,10 @@ components:
           type: string
         reasonCode:
           type: string
+          nullable: true
+        reasonMessage:
+          type: string
+          description: What the person is told about `reason_code`, where there is a message.
           nullable: true
         recoveryRecipientFingerprint:
           type: string
@@ -14236,41 +13622,6 @@ components:
           uploadUrl:
             type: string
             nullable: true
-    StagedStaffInputBody:
-      type: object
-      required:
-      - email
-      - participantRole
-      properties:
-        displayName:
-          type: string
-          nullable: true
-        email:
-          type: string
-        participantRole:
-          $ref: '#/components/schemas/AcademicStaffRoleRequest'
-    StagedStaffResponse:
-      type: object
-      required:
-      - id
-      - allocationId
-      - email
-      - participantRole
-      - status
-      properties:
-        allocationId:
-          type: string
-        displayName:
-          type: string
-          nullable: true
-        email:
-          type: string
-        id:
-          type: string
-        participantRole:
-          type: string
-        status:
-          type: string
     StoreDriverArtifactRequest:
       type: object
       required:
@@ -14324,17 +13675,6 @@ components:
           minimum: 0
         kind:
           type: string
-    SubmitApplicationRequest:
-      type: object
-      required:
-      - expectedVersion
-      properties:
-        applicantName:
-          type: string
-          nullable: true
-        expectedVersion:
-          type: integer
-          format: int32
     SubmitRunRequest:
       type: object
       required:
@@ -14374,37 +13714,6 @@ components:
           - $ref: '#/components/schemas/ResourceRequestBody'
           nullable: true
       additionalProperties: false
-    TeachingAuthorizationResponse:
-      type: object
-      required:
-      - id
-      - startsAt
-      - endsAt
-      - maxActiveCourses
-      - maxEnrollmentPerCourse
-      - maxAggregateEnrollment
-      properties:
-        endsAt:
-          type: string
-          format: date-time
-        id:
-          type: string
-        maxActiveCourses:
-          type: integer
-          format: int32
-        maxAggregateEnrollment:
-          type: integer
-          format: int32
-        maxEnrollmentPerCourse:
-          type: integer
-          format: int32
-        setupExpiresAt:
-          type: string
-          format: date-time
-          nullable: true
-        startsAt:
-          type: string
-          format: date-time
     TelemetryIngestRequest:
       type: object
       required:
@@ -14572,6 +13881,10 @@ components:
           minimum: 0
         orgId:
           type: string
+        workerRetirementEvidence:
+          allOf:
+          - $ref: '#/components/schemas/WorkerTreeRetirementEvidenceV1'
+          nullable: true
       additionalProperties: false
     TrustTierBody:
       type: string
@@ -14655,16 +13968,6 @@ components:
         sourceRepository:
           type: string
           nullable: true
-    UpdateApplicationRequest:
-      allOf:
-      - $ref: '#/components/schemas/ApplicationFields'
-      - type: object
-        required:
-        - expectedVersion
-        properties:
-          expectedVersion:
-            type: integer
-            format: int32
     UpdateExecutionOrganizationPolicyRequest:
       type: object
       required:
@@ -14897,6 +14200,28 @@ components:
         windowStart:
           type: string
           format: date-time
+    UserActivityKind:
+      type: string
+      enum:
+      - run_completed
+    UserActivityRequest:
+      type: object
+      description: A product activity reported by the app, deduplicated by `runId`.
+      required:
+      - kind
+      - runId
+      properties:
+        kind:
+          $ref: '#/components/schemas/UserActivityKind'
+        runId:
+          type: string
+    UserActivityResponse:
+      type: object
+      required:
+      - recorded
+      properties:
+        recorded:
+          type: boolean
     UserFeedbackStateResponse:
       type: object
       required:
@@ -14917,10 +14242,24 @@ components:
         onboardingCompleted:
           type: boolean
           nullable: true
+        onboardingField:
+          allOf:
+          - $ref: '#/components/schemas/OnboardingField'
+          nullable: true
         onboardingGoals:
           type: array
           items:
             $ref: '#/components/schemas/OnboardingGoal'
+          nullable: true
+        onboardingHeardFrom:
+          allOf:
+          - $ref: '#/components/schemas/OnboardingHeardFrom'
+          nullable: true
+        onboardingHeardFromOther:
+          type: string
+          description: |-
+            Free text for `onboarding_heard_from = other` (trimmed, at most 200 characters). Ignored
+            for any other answer.
           nullable: true
         onboardingMatlabFamiliarity:
           allOf:
@@ -14954,10 +14293,22 @@ components:
           type: string
           format: date-time
           nullable: true
+        onboardingField:
+          allOf:
+          - $ref: '#/components/schemas/OnboardingField'
+          nullable: true
         onboardingGoals:
           type: array
           items:
             $ref: '#/components/schemas/OnboardingGoal'
+        onboardingHeardFrom:
+          allOf:
+          - $ref: '#/components/schemas/OnboardingHeardFrom'
+          nullable: true
+        onboardingHeardFromOther:
+          type: string
+          description: Free text kept with `onboarding_heard_from = other`.
+          nullable: true
         onboardingMatlabFamiliarity:
           allOf:
           - $ref: '#/components/schemas/MatlabFamiliarity'
@@ -14974,14 +14325,6 @@ components:
           allOf:
           - $ref: '#/components/schemas/OnboardingTheme'
           nullable: true
-    VersionRequest:
-      type: object
-      required:
-      - expectedVersion
-      properties:
-        expectedVersion:
-          type: integer
-          format: int32
     WebAttribution:
       type: object
       properties:
@@ -15210,6 +14553,93 @@ components:
         runKeyEnvelope:
           type: string
           description: Base64url-encoded canonical run-key envelope for this worker.
+    WorkerTreeRetirementEvidenceV1:
+      type: object
+      description: |-
+        Coarse HTTP projection of node-owned retirement. Attempt details remain in
+        run-encrypted receipts; the Server never receives their decryption key.
+      required:
+      - schemaVersion
+      - orgId
+      - clusterId
+      - nodeId
+      - runId
+      - allocationLeaseId
+      - allocationFencingToken
+      - driverFencingToken
+      - processId
+      - processLaunchNonce
+      - retiredAtUnixMillis
+      - clockDomainNonce
+      - retiredMonotonicTicks
+      - ticksPerSecond
+      - encryptedAttemptReceipts
+      - identityPublicKey
+      - identityFingerprint
+      - signature
+      properties:
+        allocationFencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        allocationLeaseId:
+          type: string
+        clockDomainNonce:
+          type: string
+          maxLength: 22
+          minLength: 22
+        clusterId:
+          type: string
+        driverFencingToken:
+          type: integer
+          format: int64
+          minimum: 0
+        encryptedAttemptReceipts:
+          type: array
+          items:
+            type: string
+        identityFingerprint:
+          type: string
+        identityPublicKey:
+          type: string
+          maxLength: 43
+          minLength: 43
+        nodeId:
+          type: string
+        orgId:
+          type: string
+        processId:
+          type: integer
+          format: int64
+          maximum: 4294967295
+          minimum: 0
+        processLaunchNonce:
+          type: string
+          maxLength: 22
+          minLength: 22
+        retiredAtUnixMillis:
+          type: integer
+          format: int64
+          minimum: 0
+        retiredMonotonicTicks:
+          type: integer
+          format: int64
+          minimum: 0
+        runId:
+          type: string
+        schemaVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        signature:
+          type: string
+          maxLength: 86
+          minLength: 86
+        ticksPerSecond:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
     crate.errors.ErrorResponse:
       type: object
       required:

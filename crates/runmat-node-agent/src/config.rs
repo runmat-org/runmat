@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AgentError, AgentResult};
 
+pub use runmat_server_client::endpoint::ServerEndpoint;
+
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
     pub state_directory: PathBuf,
@@ -30,14 +32,7 @@ impl AgentConfig {
     }
 
     pub fn validate(&self) -> AgentResult<()> {
-        if !(self.server_url.starts_with("https://")
-            || self.server_url.starts_with("http://127.0.0.1")
-            || self.server_url.starts_with("http://localhost"))
-        {
-            return Err(AgentError::Configuration(
-                "server URL must use HTTPS except on loopback".to_string(),
-            ));
-        }
+        ServerEndpoint::parse(&self.server_url)?;
         if !self.state_directory.is_absolute()
             || !self.runmat_executable.is_absolute()
             || !self.runmat_executable.is_file()

@@ -1,7 +1,7 @@
 //! Publish the scheduler's accepted terminal result together with its full history.
 //! A worker response alone cannot override cancellation, rejection or retry fences.
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::identity::ArtifactId;
@@ -10,9 +10,9 @@ use runmat_execution::{CancellationReason, Digest, ProgramCallable, ProgramInvoc
 use runmat_execution_artifact::GraphResponseAuthority;
 use runmat_execution_runner::task::AttemptRecord;
 use runmat_execution_runner::{AttemptRequest, DriverSnapshot, TaskExecutionEvidence};
+use runmat_runtime::context::host_allocation::{HostControlAllocationOwner, HostControlVec};
 
 use super::{TransferFailure, TransferResult};
-use crate::local_store::StreamedGraphArtifact;
 use crate::NativeCheckpointEvidence;
 
 const MAX_BUFFERED_PROGRESS: usize = 256;
@@ -40,6 +40,7 @@ pub(crate) struct GraphAttemptAuthority {
     pub(super) artifact_id: ArtifactId,
     pub(super) stored_digest: Digest,
     pub(super) stored_length: u64,
+    pub(super) materialized_scratch_bytes: u64,
     pub(super) context: ProgramInvocationContext,
     pub(super) requested_outputs: u16,
     pub(super) invocation_controls: runmat_execution_artifact::GraphInvocationControls,
@@ -53,6 +54,10 @@ pub(crate) struct TaskCompletion {
     progress: Mutex<VecDeque<crate::protocol::ProgramProgress>>,
     cancellation: runmat_execution::cancellation::CancellationSource,
     control_failure: Mutex<Option<String>>,
+    raw_output: Mutex<HostControlVec<crate::process_output::RawOutputReadHandle>>,
+    raw_output_wake: tokio::sync::Notify,
+    raw_output_failure: Mutex<Option<Arc<crate::process_output::RawOutputError>>>,
+    output_delivery_stop: AtomicBool,
     /// 0 idle, 1 attempt launched, 2 cancelled before any launch.
     pub(super) launch_state: AtomicU8,
     completion_order: AtomicU64,
@@ -67,33 +72,21 @@ impl TaskCompletion {
             progress: Mutex::new(VecDeque::new()),
             cancellation: runmat_execution::cancellation::CancellationSource::new(),
             control_failure: Mutex::new(None),
+            raw_output: Mutex::new(
+                HostControlVec::with_capacity(0, None).expect("empty reader inventory"),
+            ),
+            raw_output_wake: tokio::sync::Notify::new(),
+            raw_output_failure: Mutex::new(None),
+            output_delivery_stop: AtomicBool::new(false),
             launch_state: AtomicU8::new(0),
             completion_order: AtomicU64::new(NO_COMPLETION_ORDER),
             graph_authority: None,
         }
     }
 
-    pub(super) fn new_graph(
-        stored: StreamedGraphArtifact,
-        request_artifact_id: ArtifactId,
-        context: ProgramInvocationContext,
-        requested_outputs: u16,
-        callable: ProgramCallable,
-        response: GraphResponseAuthority,
-        invocation_controls: runmat_execution_artifact::GraphInvocationControls,
-    ) -> Self {
+    pub(super) fn new_graph(authority: GraphAttemptAuthority) -> Self {
         let mut completion = Self::new();
-        completion.graph_authority = Some(GraphAttemptAuthority {
-            request_artifact_id,
-            artifact_id: stored.id,
-            stored_digest: stored.digest,
-            stored_length: stored.length,
-            context,
-            requested_outputs,
-            invocation_controls,
-            callable,
-            response,
-        });
+        completion.graph_authority = Some(authority);
         completion
     }
 
@@ -128,6 +121,15 @@ impl TaskCompletion {
             })
     }
 
+    /// Inspect a failure without cloning a successful numerical payload.
+    pub(crate) fn original_failure(&self) -> Option<TransferFailure> {
+        self.value
+            .lock()
+            .expect("task completion poisoned")
+            .as_ref()
+            .and_then(|value| value.original.result.as_ref().err().cloned())
+    }
+
     pub(crate) fn verified_terminal(&self) -> Option<bool> {
         self.value
             .lock()
@@ -138,6 +140,17 @@ impl TaskCompletion {
                     value.original.result,
                     Err(TransferFailure::RetirementUnverified(_))
                 )
+            })
+    }
+
+    pub(crate) fn terminal_succeeded(&self) -> Option<bool> {
+        self.value
+            .lock()
+            .expect("task completion poisoned")
+            .as_ref()
+            .map(|value| {
+                value.original.result.is_ok()
+                    && matches!(value.checkpoint, NativeCheckpointEvidence::Durable)
             })
     }
 
@@ -238,17 +251,106 @@ impl TaskCompletion {
     }
 
     pub(crate) async fn wait_terminal(self: Arc<Self>) {
-        // Exactly one terminal publication; notify_one retains the permit if
-        // publication races the first poll. No timer or worker polling loop.
-        if self
-            .value
-            .lock()
-            .expect("task completion poisoned")
-            .is_some()
-        {
-            return;
+        loop {
+            let notified = self.terminal_wake.clone().notified_owned();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.verified_terminal().is_some() {
+                return;
+            }
+            notified.await;
         }
-        self.terminal_wake.clone().notified_owned().await;
+    }
+
+    /// Called only on an unpublished, uniquely owned completion.
+    pub(super) fn install_raw_control_owner(
+        &mut self,
+        owner: Option<HostControlAllocationOwner>,
+    ) -> Result<(), crate::RawOutputError> {
+        self.raw_output = Mutex::new(HostControlVec::with_capacity(0, owner.as_ref())?);
+        Ok(())
+    }
+
+    pub(crate) fn register_raw_output(
+        &self,
+        reader: &crate::process_output::RawOutputReader,
+    ) -> Result<(), crate::RawOutputError> {
+        let mut output = self.raw_output.lock().expect("task raw output poisoned");
+        let handle =
+            crate::process_output::RawOutputReadHandle::new(reader, output.allocation_owner())?;
+        if output.len() == output.capacity() {
+            let capacity = output
+                .capacity()
+                .checked_mul(2)
+                .unwrap_or(usize::MAX)
+                .max(1)
+                .min(usize::from(u16::MAX));
+            if capacity <= output.len() {
+                return Err(crate::RawOutputError::Invalid(
+                    "reader inventory exceeds attempt ordinals",
+                ));
+            }
+            output.reserve_capacity(capacity)?;
+        }
+        output
+            .try_push(handle)
+            .map_err(|_| crate::RawOutputError::Invalid("reader inventory capacity changed"))?;
+        drop(output);
+        self.raw_output_changed();
+        Ok(())
+    }
+
+    pub(super) fn raw_control_owner(&self) -> Option<HostControlAllocationOwner> {
+        self.raw_output
+            .lock()
+            .expect("task raw output poisoned")
+            .allocation_owner()
+            .cloned()
+    }
+
+    pub(crate) fn raw_output_reader(
+        &self,
+        index: usize,
+    ) -> Option<crate::process_output::RawOutputReadHandle> {
+        self.raw_output
+            .lock()
+            .expect("task raw output poisoned")
+            .get(index)
+            .cloned()
+    }
+
+    pub(crate) fn raw_output_changed(&self) {
+        self.raw_output_wake.notify_waiters();
+    }
+
+    pub(crate) fn raw_output_notification(&self) -> tokio::sync::futures::Notified<'_> {
+        self.raw_output_wake.notified()
+    }
+
+    pub(crate) fn stop_for_raw_output(&self, error: Arc<crate::process_output::RawOutputError>) {
+        self.raw_output_failure
+            .lock()
+            .expect("task raw output poisoned")
+            .get_or_insert(error);
+        self.raw_output_changed();
+    }
+
+    pub(crate) fn should_stop(&self) -> bool {
+        self.is_cancelled()
+            || self.raw_output_failure().is_some()
+            || self.output_delivery_stop.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn stop_for_output_delivery(&self) {
+        self.output_delivery_stop.store(true, Ordering::Release);
+        self.raw_output_changed();
+    }
+
+    pub(crate) fn raw_output_failure(&self) -> Option<Arc<crate::process_output::RawOutputError>> {
+        self.raw_output_failure
+            .lock()
+            .expect("task raw output poisoned")
+            .clone()
     }
 
     pub(super) fn complete(&self, value: CompletedTask, checkpoint: NativeCheckpointEvidence) {
@@ -260,7 +362,8 @@ impl TaskCompletion {
             });
             self.mark_completed();
             drop(result);
-            self.terminal_wake.notify_one();
+            self.terminal_wake.notify_waiters();
+            self.raw_output_changed();
         }
     }
 

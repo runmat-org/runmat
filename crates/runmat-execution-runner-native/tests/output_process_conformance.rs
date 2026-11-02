@@ -30,6 +30,8 @@ mod fixture;
 mod handles;
 #[path = "output_process_conformance/live_prefix.rs"]
 mod live_prefix;
+#[path = "output_process_conformance/publisher_exit.rs"]
+mod publisher_exit;
 #[path = "output_process_conformance/parent_loss.rs"]
 mod parent_loss;
 #[path = "output_process_conformance/portable_units.rs"]
@@ -68,13 +70,10 @@ fn main() {
                 BatchDriverInvocation::Script { .. } | BatchDriverInvocation::Graph { .. } =>
                     panic!("original output witness requires an admitted task authority"),
             };
-            tokio::select! {
-                result = execution => { result.unwrap(); },
-                _ = async { while !exit_marker.exists() { tokio::time::sleep(Duration::from_millis(10)).await; } } => {
-                    // Fixture-only abrupt original publisher loss; no completion/footer.
-                    std::process::exit(19);
-                },
-            }
+            // Abrupt publisher loss is independent of whether its numerical
+            // execution yields to the async executor.
+            let _publisher_exit = publisher_exit::Observer::start(exit_marker);
+            execution.await.unwrap();
         } else if std::env::args().any(|arg| arg == HiddenMode::LocalSupervisor.marker()) {
             let config = LocalSupervisorConfig::for_current_executable().unwrap();
             let root = config.paths.root.clone();
@@ -238,6 +237,32 @@ async fn call_source(requested_outputs: usize, source: &str) -> CapturedCall {
     }
 }
 
+async fn await_in_context(
+    service: &NativeExecutionService,
+    value: Value,
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError> {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let mut value = value;
+        loop {
+            match service.begin_await_in_context(value, runtime)? {
+                AwaitAction::Completed(result) => return Ok(result),
+                AwaitAction::Pending(pending) => {
+                    if let Some(wait) = service.wait_pending(&pending, runtime)? {
+                        wait.await?;
+                    } else {
+                        tokio::task::yield_now().await;
+                    }
+                    value = pending;
+                }
+                other => panic!("original task await returned {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("original task await did not finish")
+}
+
 async fn witness() {
     fixture::verify_unwind().await;
     let namespace = fixture::SupervisorFixture::new("original-output-authority");
@@ -255,21 +280,11 @@ async fn witness() {
         handles::reject_altered_future(&service, &future);
         let task = service.spawn(&future).unwrap();
         handles::reject_altered_task(&service, &task);
-        let value = tokio::time::timeout(Duration::from_secs(30), async {
-            loop {
-                match service
-                    .begin_await_in_context(
-                        Value::Task(task.clone().into()),
-                        &original_call.runtime,
-                    )
-                    .unwrap()
-                {
-                    AwaitAction::Pending(_) => tokio::time::sleep(Duration::from_millis(10)).await,
-                    AwaitAction::Completed(value) => break value,
-                    other => panic!("spawned original task returned {other:?}"),
-                }
-            }
-        })
+        let value = await_in_context(
+            &service,
+            Value::Task(task.clone().into()),
+            &original_call.runtime,
+        )
         .await
         .unwrap();
         assert_eq!(
@@ -325,12 +340,13 @@ async fn witness() {
                 )
                 .is_err());
         }
-        let result = service
-            .begin_await_in_context(Value::Job(job.clone().into()), &durable_original.runtime)
-            .unwrap();
-        let AwaitAction::Completed(result) = result else {
-            panic!("durable await did not complete");
-        };
+        let result = await_in_context(
+            &service,
+            Value::Job(job.clone().into()),
+            &durable_original.runtime,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             result.as_slice(),
             &vec![Value::Num(13.0), Value::Num(29.0)][..requested]

@@ -64,6 +64,12 @@ impl PartialEq for ExecutionServiceError {
 
 impl Eq for ExecutionServiceError {}
 
+impl From<RuntimeError> for ExecutionServiceError {
+    fn from(error: RuntimeError) -> Self {
+        Self::LocalizedRuntimeFailure(error.into())
+    }
+}
+
 impl ExecutionServiceError {
     /// Present invocation-local service failures in their owning session's
     /// namespace instead of the parallel service API's default namespace.

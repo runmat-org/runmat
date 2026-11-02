@@ -2,8 +2,7 @@ use std::num::NonZeroU64;
 
 use anyhow::{Context, Result};
 use runmat_server_client::auth::{
-    build_public_client, map_public_error, resolve_auth_token, resolve_public_org_id,
-    resolve_server_url, RemoteConfig,
+    build_public_client, map_public_error, resolve_auth_token, resolve_server_url, RemoteConfig,
 };
 use runmat_server_client::public_api;
 use uuid::Uuid;
@@ -12,12 +11,14 @@ use crate::cli::{ClusterStateArg, NodeStateArg};
 
 async fn client(
     org: Option<Uuid>,
+    machine_output: bool,
 ) -> Result<(public_api::Client, runmat_server_client::ids::OrgId)> {
     let mut config = RemoteConfig::load()?;
-    let org_id = resolve_public_org_id(&config, org)?;
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
-    Ok((build_public_client(&server_url, &token)?, org_id))
+    let client = build_public_client(&server_url, &token)?;
+    let org_id = super::organization::resolve(&client, &config, org, machine_output).await?;
+    Ok((client, org_id))
 }
 
 pub async fn list(
@@ -26,7 +27,7 @@ pub async fn list(
     cursor: Option<String>,
     json: bool,
 ) -> Result<()> {
-    let (client, org_id) = client(org).await?;
+    let (client, org_id) = client(org, json).await?;
     let response = client
         .list_clusters(org_id.as_str(), cursor.as_deref(), nonzero_limit(limit)?)
         .await
@@ -56,12 +57,12 @@ pub async fn create(
     queues: Vec<String>,
     json: bool,
 ) -> Result<()> {
-    let (client, org_id) = client(org).await?;
+    let (client, org_id) = client(org, json).await?;
     let cluster = client
         .create_cluster(
             org_id.as_str(),
             &public_api::types::CreateClusterRequest {
-                name,
+                name: name.try_into().context("invalid cluster name")?,
                 project_id: project_id
                     .map(|id| runmat_server_client::ids::ProjectId::from_uuid(id).to_string()),
                 queues,
@@ -84,7 +85,9 @@ pub async fn set_state(
     state: ClusterStateArg,
     json: bool,
 ) -> Result<()> {
-    let (client, org_id) = client(org).await?;
+    let (client, org_id) = client(org, json).await?;
+    let cluster_id =
+        runmat_server_client::execution::org_cluster_by_name(&client, &org_id, &cluster_id).await?;
     let state = match state {
         ClusterStateArg::Active => public_api::types::ClusterStateRequest::Active,
         ClusterStateArg::Draining => public_api::types::ClusterStateRequest::Draining,
@@ -93,7 +96,7 @@ pub async fn set_state(
     let cluster = client
         .set_cluster_state(
             org_id.as_str(),
-            &cluster_id,
+            cluster_id.as_str(),
             &public_api::types::SetClusterStateRequest { state },
         )
         .await
@@ -114,11 +117,13 @@ pub async fn enroll(
     requested_identity_fingerprint: Option<String>,
     json: bool,
 ) -> Result<()> {
-    let (client, org_id) = client(org).await?;
+    let (client, org_id) = client(org, json).await?;
+    let cluster_id =
+        runmat_server_client::execution::org_cluster_by_name(&client, &org_id, &cluster_id).await?;
     let enrollment = client
         .create_node_enrollment(
             org_id.as_str(),
-            &cluster_id,
+            cluster_id.as_str(),
             &public_api::types::CreateEnrollmentRequest {
                 requested_identity_fingerprint,
                 ttl_seconds,
@@ -145,11 +150,13 @@ pub async fn list_nodes(
     cursor: Option<String>,
     json: bool,
 ) -> Result<()> {
-    let (client, org_id) = client(org).await?;
+    let (client, org_id) = client(org, json).await?;
+    let cluster_id =
+        runmat_server_client::execution::org_cluster_by_name(&client, &org_id, &cluster_id).await?;
     let response = client
         .list_nodes(
             org_id.as_str(),
-            &cluster_id,
+            cluster_id.as_str(),
             cursor.as_deref(),
             nonzero_limit(limit)?,
         )
@@ -177,7 +184,9 @@ pub async fn set_node_state(
     state: NodeStateArg,
     json: bool,
 ) -> Result<()> {
-    let (client, org_id) = client(org).await?;
+    let (client, org_id) = client(org, json).await?;
+    let cluster_id =
+        runmat_server_client::execution::org_cluster_by_name(&client, &org_id, &cluster_id).await?;
     let state = match state {
         NodeStateArg::Active => public_api::types::NodeStateRequest::Active,
         NodeStateArg::Draining => public_api::types::NodeStateRequest::Draining,
@@ -187,7 +196,7 @@ pub async fn set_node_state(
     let node = client
         .set_node_state(
             org_id.as_str(),
-            &cluster_id,
+            cluster_id.as_str(),
             &node_id,
             &public_api::types::SetNodeStateRequest { state },
         )

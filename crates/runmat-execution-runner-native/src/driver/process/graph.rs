@@ -10,9 +10,33 @@ struct GraphControl<'a> {
     original: &'a dyn ProcessControl,
     authority: &'a GraphAttemptAuthority,
 }
+impl crate::process_output::OutputDrainControl for GraphControl<'_> {
+    fn raw_output_changed(&self) {
+        self.original.raw_output_changed();
+    }
+
+    fn stop_for_raw_output(&self, error: std::sync::Arc<crate::RawOutputError>) {
+        self.original.stop_for_raw_output(error);
+    }
+
+    fn raw_output_failure(&self) -> Option<std::sync::Arc<crate::RawOutputError>> {
+        self.original.raw_output_failure()
+    }
+}
 impl OwnedProcessControl for GraphControl<'_> {
+    fn begin_raw_output(
+        &self,
+        attempt: &AttemptRequest,
+        materialized: u64,
+    ) -> Result<
+        std::sync::Mutex<crate::process_output::RawOutputJournal>,
+        std::sync::Arc<crate::RawOutputError>,
+    > {
+        self.original.begin_raw_output(attempt, materialized)
+    }
     fn is_cancelled(&self) -> bool {
         self.original.cancellation().load(Ordering::Acquire)
+            || self.original.raw_output_failure().is_some()
     }
     fn cancellation_reason(&self) -> Option<runmat_execution::CancellationReason> {
         self.original.cancellation_reason()
@@ -67,6 +91,7 @@ pub(crate) async fn execute_attempt(
         match prepare(provider, request, original, graph) {
             Ok((launch, authority)) => {
                 let owner = ProcessOwner {
+                    attempt: request,
                     config: provider.config,
                     artifacts: provider.artifacts,
                     objects: provider.objects,
@@ -150,6 +175,9 @@ fn prepare(
         .map_err(|error| invalid(error.to_string()))?;
     crate::graph_submission::validate_scratch(&admitted, original)
         .map_err(|error| invalid(error.to_string()))?;
+    let materialized_scratch_bytes =
+        crate::attempt_scratch::materialized_bytes(admitted.selected_bundles())
+            .map_err(|error| invalid(error.to_string()))?;
     let authority = GraphAttemptAuthority {
         request_artifact_id: crate::graph_submission::primary_artifact(graph),
         artifact_id: stored.id,
@@ -158,6 +186,7 @@ fn prepare(
         context: graph.context.clone(),
         requested_outputs: graph.requested_outputs,
         invocation_controls: graph.invocation_controls.clone().unwrap_or_default(),
+        materialized_scratch_bytes,
         callable: graph
             .scheduler_callable()
             .map_err(|error| invalid(error.to_string()))?,

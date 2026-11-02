@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use clap::Args;
 use uuid::Uuid;
 
-#[derive(Args, Clone, Debug, Default)]
+#[derive(Args, Clone, Debug, Default, Eq, PartialEq)]
 pub struct ExecutionTargetArgs {
     /// Run on this remote cluster instead of the local machine
     #[arg(long)]
@@ -59,12 +59,19 @@ impl ExecutionTargetArgs {
             return Ok(ExecutionTarget::Local);
         };
         let cluster = bounded_required(cluster, "cluster")?;
-        let trust_identity = bounded_required(
-            self.trust_identity
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("remote execution requires --trust-identity"))?,
-            "trust identity",
-        )?;
+        // Read remote defaults only after selecting a remote route. A trust
+        // environment variable must not make ordinary local execution remote.
+        let trust_identity = match self.trust_identity.as_deref() {
+            Some(value) => bounded_required(value, "trust identity")?,
+            None => {
+                let value = std::env::var("RUNMAT_TRUST_IDENTITY").map_err(|error| {
+                    anyhow::anyhow!(error).context(
+                        "remote execution requires --trust-identity or RUNMAT_TRUST_IDENTITY",
+                    )
+                })?;
+                bounded_required(&value, "trust identity")?
+            }
+        };
         let queue = bounded_required(self.queue.as_deref().unwrap_or("default"), "queue")?;
         if self
             .idempotency_key

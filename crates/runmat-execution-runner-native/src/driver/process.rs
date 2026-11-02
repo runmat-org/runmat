@@ -14,7 +14,7 @@ use runmat_process_host::ipc::{
     read_payload, write_payload, FrameLimits, IpcByteCounter, MeteredIo,
 };
 use runmat_process_host::{
-    ChildProcess, ChildStdio, HostCommand, ProcessExit, ProcessHostError, ProcessHostResult,
+    ChildOutput, ChildProcess, HostCommand, ProcessExit, ProcessHostError, ProcessHostResult,
     ProcessRetirementLease, RetirementBoundChild,
 };
 use tokio::io::BufReader;
@@ -166,10 +166,10 @@ impl AttemptChild {
         }
     }
 
-    fn take_stdio(&mut self) -> ProcessHostResult<ChildStdio> {
+    fn take_application_output(&mut self) -> ProcessHostResult<ChildOutput> {
         match self {
-            Self::Direct(child) => child.take_stdio(),
-            Self::Graph(child) => child.take_stdio(),
+            Self::Direct(child) => child.take_application_output(),
+            Self::Graph(child) => child.take_application_output(),
         }
     }
 
@@ -446,21 +446,35 @@ fn launch_attempt(
         _ => None,
     };
     let owner = owned::ProcessOwner {
+        attempt: request,
         config: &driver.config,
         artifacts: &driver.artifacts,
         objects: &driver.objects,
         graph_quarantine: &driver.graph_quarantine,
     };
     let control = owned::LocalControl { driver, completion };
-    let result = runtime.block_on(owned::run_process(
-        &owner,
-        worker_request,
-        &control,
-        meters,
-        termination,
-        console,
-        retirement,
-    ));
+    let control_owner = completion.raw_control_owner();
+    let process = runmat_runtime::context::host_allocation::HostControlFuture::new(
+        control_owner.as_ref(),
+        || {
+            owned::run_process(
+                &owner,
+                worker_request,
+                &control,
+                meters,
+                termination,
+                console,
+                retirement,
+            )
+        },
+    )
+    .map_err(|error| {
+        completion.stop_for_raw_output(std::sync::Arc::new(crate::RawOutputError::HostAllocation(
+            error,
+        )));
+        TransferFailure::Infrastructure(error.to_string())
+    })?;
+    let result = runtime.block_on(process);
     if let Some((gang, rank)) = spmd_rank {
         driver.terminate_collective_rank(&gang, rank);
     }

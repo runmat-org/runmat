@@ -192,16 +192,23 @@ JIT and acceleration settings are independent. With `--no-jit`, the VM can still
 
 ## Clusters and Remote Jobs
 
-Cluster administration, enrollment, and durable encrypted jobs use the active Server, organization, and project credentials:
+Cluster administration and durable encrypted jobs use the active Server,
+organization and project credentials. Cluster names are unique within an
+organization, case-insensitive, and contain 1–63 ASCII letters, digits, hyphens
+or underscores, starting with a letter or digit. `--org` is optional with a
+selected organization or one available organization, including a scoped API
+key's organization. Interactive ambiguity prompts for a selection; unattended
+and JSON commands require an explicit context instead. Endpoint trust uses
+`--trust-identity` or `RUNMAT_TRUST_IDENTITY` and is never inferred from an
+unverified replacement identity.
 
 ```bash
 runmat cluster list
 runmat cluster create --name workstation-pool --queue default
-runmat cluster enroll CLUSTER_ID --ttl-seconds 900
-runmat cluster nodes CLUSTER_ID
-runmat cluster node-state CLUSTER_ID NODE_ID draining
+runmat cluster nodes workstation-pool
+runmat cluster node-state workstation-pool NODE_ID draining
 
-runmat job submit analysis.m --cluster CLUSTER_ID --trust-identity SHA256_FINGERPRINT --detach
+runmat analysis.m --cluster workstation-pool --trust-identity SHA256_FINGERPRINT --detach
 runmat job list
 runmat job show RUN_ID
 runmat job attach RUN_ID
@@ -212,16 +219,41 @@ runmat job recovery configure --org ORG_ID --key runmat-recovery.json
 runmat job recovery recover RUN_ID --project PROJECT_ID --key runmat-recovery.json
 ```
 
-Every cluster command and every durable job observation/mutation supports `--json`. JSON mode emits one complete stable API object or page and never includes ANSI escapes; human list mode remains stable tab-separated output. Enrollment output contains a single-use secret, so avoid shell history and logs and prefer JSON-to-secret-store automation when scripting it.
+Cluster administration and durable job observation/mutation support `--json`.
+JSON mode emits one complete API object or page without ANSI escapes; human list
+mode uses tab-separated output. The filename shorthand and explicit
+`runmat run analysis.m --cluster workstation-pool` use the same submission path.
 
-The node agent can run in the foreground for diagnosis or install its native systemd, launchd, or Windows service. Generate a dry-run plan before changing a host:
+On the machine joining the cluster, sign in with an authorized account or supply
+its API key through `RUNMAT_API_KEY`, then join by name:
 
 ```bash
-runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install --dry-run
-sudo runmat cluster join --server https://api.runmat.com --runmat /usr/local/bin/runmat service install
+runmat login
+runmat cluster join workstation-pool
 ```
 
-Service installation persists only non-secret configuration. Enrollment credentials remain in the private state directory, service removal preserves that identity for safe reinstall, and retiring a host requires revoking the node before deleting its state. See `runmat cluster join --help` for platform paths and the foreground enrollment flow.
+Join runs in the foreground by default. `--service` installs and starts the
+native systemd, launchd or Windows service instead, requiring the platform's
+administrative privileges. Perform service registration and installation as the
+same OS identity, with that identity's account credentials and selected
+organization. The running agent uses only its machine credential, not the
+account credential used to authorize registration.
+
+Local lifecycle commands live under `node`:
+
+```bash
+runmat node status
+runmat node inventory
+runmat node service print
+runmat node service install --dry-run
+runmat node run
+```
+
+Use the same `--state-directory` and OS identity as the original registration;
+system services have platform-specific state directories. Service configuration
+contains no credentials. Removing the service preserves its private machine
+identity for reinstall; revoke the node before deleting that identity. Do not
+run the foreground agent alongside its installed service.
 
 Organization recovery is optional. The CLI generates and retains the private key locally, sends only its validated public recipient to the Server policy API, and decrypts authorized terminal results or diagnostics on the custodian machine. Once configured, every new submission must carry an envelope for the exact active fingerprint. Keep rotated private keys for the full artifact-retention period. See [Remote Execution](/docs/runtime/execution/remote) for customer-node, hosted-node, browser, draining, and recovery workflows.
 
@@ -252,7 +284,7 @@ runmat test
 runmat test tests/solver --name convergence --tag fast
 runmat test --jobs 4 --isolation process --report junit
 runmat test --coverage --coverage-format lcov
-runmat test --cluster CLUSTER_ID --project PROJECT_ID --trust-identity SHA256_FINGERPRINT --max-workers 8
+runmat test --cluster workstation-pool --project PROJECT_ID --trust-identity SHA256_FINGERPRINT --max-workers 8
 ```
 
 Runtime and test dependency groups are resolved together before discovery. The default native isolation is a fresh killable process; `session` and `none` are explicit weaker modes. Reports, captured output, diagnostics, artifacts, retries, cancellation, and coverage are projections of one deterministic event/result stream. Human, JSON, JUnit, and TAP reports are supported, as are JSON, LCOV, Cobertura, and HTML coverage reports. Exact options and defaults are available from `runmat test --help`.

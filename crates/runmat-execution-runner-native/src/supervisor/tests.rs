@@ -296,6 +296,40 @@ fn exact_program_submission_round_trips_through_durable_storage() {
         .unwrap();
     let original = scheduler.history(record.handle.id).unwrap().unwrap();
     original.validate().unwrap();
+    let mut preflight = original.attempts[0].clone();
+    assert!(!preflight.certifies_not_started());
+    preflight.state = runmat_execution::state::AttemptState::Rejected;
+    preflight.terminal.as_mut().unwrap().disposition =
+        runmat_execution_runner::task::AttemptDisposition::Failed {
+            kind: runmat_execution_runner::task::AttemptFailureKind::Rejected,
+        };
+    assert!(
+        !preflight.certifies_not_started(),
+        "rejection alone cannot skip original output"
+    );
+    preflight.terminal.as_mut().unwrap().execution = Some(Box::new(
+        runmat_execution_runner::AttemptExecutionObservation {
+            attempt_id: preflight.request.id,
+            worker_id: preflight.request.worker_id,
+            wall_millis: 1,
+            termination: runmat_execution_runner::AttemptExecutionTermination::NotStarted,
+            local_ipc_sent_bytes: Some(0),
+            local_ipc_received_bytes: Some(0),
+        },
+    ));
+    assert!(preflight.certifies_not_started());
+    preflight
+        .terminal
+        .as_mut()
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .local_ipc_received_bytes = Some(1);
+    assert!(
+        !preflight.certifies_not_started(),
+        "contradictory process transport is not a no-start proof"
+    );
     let journal_before = std::fs::read(config.paths.root.join("scheduler.json")).unwrap();
     assert!(scheduler.tick_if_active().unwrap().is_empty());
     assert_eq!(
@@ -304,6 +338,29 @@ fn exact_program_submission_round_trips_through_durable_storage() {
     );
     drop(scheduler);
     drop(store);
+    let lookup = futures::executor::block_on(
+        supervisor.raw_output_attempt(record.handle.clone(), u32::from(request.ordinal)),
+    )
+    .unwrap();
+    assert_eq!(lookup.handle, record.handle);
+    let observed = lookup.attempt.unwrap();
+    assert_eq!(observed.attempt_id, request.id);
+    assert_eq!(observed.ordinal, request.ordinal);
+    assert!(observed.terminal.is_some());
+    assert!(
+        futures::executor::block_on(supervisor.raw_output_attempt(record.handle.clone(), 0))
+            .is_err()
+    );
+    let mut substituted = record.handle.clone();
+    substituted.generation += 1;
+    assert!(futures::executor::block_on(
+        supervisor.raw_output_attempt(substituted, u32::from(request.ordinal))
+    )
+    .is_err());
+    assert_eq!(
+        std::fs::read(config.paths.root.join("scheduler.json")).unwrap(),
+        journal_before
+    );
     drop(supervisor);
     let reopened = LocalSupervisor::open(config).unwrap();
     let scheduler = futures::executor::block_on(reopened.scheduler.lock());

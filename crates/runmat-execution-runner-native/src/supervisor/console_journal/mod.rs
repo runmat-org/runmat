@@ -1,6 +1,7 @@
 //! One original provider publishes immutable writes and a small atomic prefix head.
 //! The existing filesystem owns publication; the existing lease owns the writer.
 use super::filesystem::{atomic_json, immutable_json, read_optional_json_bounded};
+use crate::attempt_scratch::CONSOLE_HEAD_BYTES;
 use crate::{NativeExecutionError, NativeExecutionResult};
 use runmat_execution::{console::*, Digest};
 use runmat_execution_runner::AttemptRequest;
@@ -10,7 +11,6 @@ use std::path::{Path, PathBuf};
 mod read;
 pub(super) use read::{read_transcript, ConsoleReadPlan};
 
-const HEAD_BYTES: u64 = 4096;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Header {
@@ -41,18 +41,7 @@ pub(super) struct ConsoleJournal {
 pub(super) fn validate_reservation(
     task: &runmat_execution::task::TaskRequest,
 ) -> NativeExecutionResult<()> {
-    if let Some(limits) = task.console {
-        limits.validate().map_err(invalid)?;
-        // Logical retained JSON plus two small publication heads. Filesystem block
-        // allocation, inode cost and whole-process RSS are not measured by this bound.
-        let required =
-            limits.max_text_bytes * 6 + u64::from(limits.max_records) * 512 + HEAD_BYTES * 2;
-        if required > task.resources.scratch_bytes {
-            return Err(invalid(
-                "original console journal exceeds task scratch reservation",
-            ));
-        }
-    }
+    crate::attempt_scratch::remaining_bytes(task.resources.scratch_bytes, 0, task.console)?;
     Ok(())
 }
 

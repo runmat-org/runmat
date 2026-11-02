@@ -23,10 +23,16 @@ fn reject(command: Command, error: &ExecutionServiceError) {
         Command::InspectKind { response, .. } => {
             let _ = response.send(Err(error.clone()));
         }
+        Command::RawOutputAttempt { response, .. } => {
+            let _ = response.send(Err(error.clone()));
+        }
+        Command::RawOutputPage { response, .. } => {
+            let _ = response.send(Err(error.clone()));
+        }
         Command::Cancel { response, .. } => {
             let _ = response.send(Err(error.clone()));
         }
-        Command::ExpiredGraphReceipts { response, .. } => {
+        Command::ExpiredJobReceipts { response, .. } => {
             let _ = response.send(Err(error.clone()));
         }
     }
@@ -47,10 +53,27 @@ mod tests {
                 "original supervisor profile executable mismatch".into(),
             )),
         ] {
+            if matches!(&original, ExecutionServiceError::LocalizedRuntimeFailure(_)) {
+                use std::error::Error as _;
+                let diagnostic = original.clone().into_runtime_error();
+                let mut source = diagnostic.source();
+                let mut found_original = false;
+                while let Some(cause) = source {
+                    if cause
+                        .downcast_ref::<crate::NativeExecutionError>()
+                        .is_some()
+                    {
+                        found_original = true;
+                        break;
+                    }
+                    source = cause.source();
+                }
+                assert!(found_original, "startup error must retain its typed cause");
+            }
             let (commands, receiver) = mpsc::channel();
             let (response, queued) = mpsc::channel();
             commands
-                .send(Command::ExpiredGraphReceipts {
+                .send(Command::ExpiredJobReceipts {
                     candidates: Vec::new(),
                     response,
                 })
@@ -71,10 +94,22 @@ mod tests {
             assert_eq!(bridge.try_response(&handle), Err(original.clone()));
             assert_eq!(bridge.workload_kind(handle.clone()), Err(original.clone()));
             assert_eq!(
+                bridge.raw_output_attempt(handle.clone(), 1),
+                Err(original.clone())
+            );
+            assert_eq!(
+                bridge.raw_output_page(
+                    handle.clone(),
+                    runmat_execution::identity::AttemptId::derive(&[b"startup-output"]),
+                    Default::default()
+                ),
+                Err(original.clone())
+            );
+            assert_eq!(
                 bridge.cancel(handle, CancellationReason::User),
                 Err(original.clone())
             );
-            assert_eq!(bridge.expired_graph_receipts(Vec::new()), Err(original));
+            assert_eq!(bridge.expired_job_receipts(Vec::new()), Err(original));
             drop(bridge);
             worker.join().unwrap();
         }

@@ -11,50 +11,14 @@ use runmat_server_client::auth::{
 };
 use runmat_server_client::execution::ExecutionClient;
 
-use crate::cli::{Cli, JobCommand};
+use crate::cli::JobCommand;
 
 pub async fn execute_recovery(command: crate::cli::JobRecoveryCommand) -> Result<()> {
     recovery::execute(command).await
 }
 
-pub async fn execute(
-    command: JobCommand,
-    cli: &Cli,
-    config: &runmat_config::runtime::RunMatRuntimeConfig,
-) -> Result<()> {
+pub async fn execute(command: JobCommand) -> Result<()> {
     match command {
-        JobCommand::Submit {
-            file,
-            project,
-            cluster,
-            queue,
-            trust_identity,
-            function,
-            idempotency_key,
-            workers,
-            detach,
-            json,
-            args,
-        } => {
-            submit::submit(
-                submit::JobSubmission {
-                    file,
-                    project,
-                    cluster,
-                    queue,
-                    trust_identity,
-                    function,
-                    idempotency_key,
-                    workers,
-                    detach,
-                    json,
-                    args,
-                },
-                cli,
-                config,
-            )
-            .await
-        }
         JobCommand::List {
             project,
             limit,

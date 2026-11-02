@@ -14,6 +14,9 @@ mod aligned;
 mod checkpoint;
 mod collection_allocator;
 mod control_error;
+mod control_owner;
+mod control_future;
+mod control_vec;
 mod frame_collection;
 mod owner;
 mod plan;
@@ -37,6 +40,9 @@ pub use collection_allocator::{
 pub(crate) use collection_allocator::{OperationPermitGate, OperationPermitGateError};
 pub use control_error::host_allocation_runtime_error;
 pub(crate) use control_error::HostAllocationDisposition;
+pub use control_future::HostControlFuture;
+pub use control_owner::HostControlAllocationOwner;
+pub use control_vec::{HostControlIntoIter, HostControlVec};
 pub use frame_collection::{
     collection_block_retained_bytes, frame_hash_table_retained_bytes, FrameCollectionGate,
     FrameCollectionPermit,

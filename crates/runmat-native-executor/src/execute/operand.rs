@@ -459,7 +459,7 @@ pub(super) fn evaluate_rvalue(
             let task = state
                 .runtime
                 .execution()
-                .spawn(&future)
+                .spawn_in_context(&future, None, &state.runtime)
                 .map_err(execution_service_error)?;
             Ok(vec![state
                 .arena

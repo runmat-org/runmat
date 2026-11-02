@@ -72,8 +72,8 @@ pub enum ClusterCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Enroll this machine or run it as a cluster execution node
-    Join(NodeJoinArgs),
+    /// Register this machine using its signed-in account and start a cluster node
+    Join(ClusterJoinArgs),
 }
 
 impl ClusterCommand {
@@ -85,13 +85,37 @@ impl ClusterCommand {
             | Self::Enroll { json, .. }
             | Self::Nodes { json, .. }
             | Self::NodeState { json, .. } => *json,
-            Self::Join(args) => args.command.machine_output(),
+            Self::Join(_) => false,
         }
     }
 }
 
 #[derive(Args, Clone)]
-pub struct NodeJoinArgs {
+pub struct NodeArgs {
+    #[command(flatten)]
+    pub options: NodeOptions,
+    #[command(subcommand)]
+    pub command: NodeCommand,
+}
+
+#[derive(Args, Clone)]
+pub struct ClusterJoinArgs {
+    /// Cluster name in the selected organization
+    pub cluster: String,
+    #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
+    pub org: Option<Uuid>,
+    /// Install and start an operating-system service
+    #[arg(long, conflicts_with = "foreground")]
+    pub service: bool,
+    /// Run in this terminal (the default)
+    #[arg(long)]
+    pub foreground: bool,
+    #[command(flatten)]
+    pub options: NodeOptions,
+}
+
+#[derive(Args, Clone)]
+pub struct NodeOptions {
     /// Load the canonical execution-node JSON configuration
     #[arg(long, env = "RUNMAT_NODE_AGENT_CONFIG")]
     pub node_config: Option<PathBuf>,
@@ -107,12 +131,12 @@ pub struct NodeJoinArgs {
     /// Execution trust tier advertised by this node
     #[arg(long, value_enum)]
     pub trust_tier: Option<NodeTrustTier>,
-    #[command(subcommand)]
-    pub command: NodeJoinCommand,
 }
 
 #[derive(Subcommand, Clone)]
-pub enum NodeJoinCommand {
+pub enum NodeCommand {
+    /// Show the registered machine identity without revealing its credentials
+    Status,
     /// Enroll this machine with a single-use token
     Enroll {
         #[arg(
@@ -142,11 +166,12 @@ pub enum NodeJoinCommand {
     WindowsServiceRun,
 }
 
-impl NodeJoinCommand {
-    fn machine_output(&self) -> bool {
+impl NodeCommand {
+    pub(crate) fn machine_output(&self) -> bool {
         matches!(
             self,
-            Self::Inventory
+            Self::Status
+                | Self::Inventory
                 | Self::Service {
                     command: NodeServiceCommand::Print
                         | NodeServiceCommand::Install { dry_run: true }

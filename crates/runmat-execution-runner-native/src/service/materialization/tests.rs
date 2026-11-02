@@ -106,7 +106,7 @@ fn fixture() -> (Mutex<State>, FutureHandle) {
         next_materialization: 0,
         futures,
         tasks: HashMap::new(),
-        graph_jobs: HashMap::new(),
+        durable_jobs: HashMap::new(),
         cancelling_graphs: Vec::new(),
         pool_generation: 1,
         pool_open: true,
@@ -159,6 +159,74 @@ fn materialization_runs_outside_lock_and_keeps_the_entire_invocation_rooted() {
         state.lock().unwrap().futures.get(&future.id),
         Some(FutureState::Deferred(_))
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn durable_replay_retains_one_cache_and_exposes_its_values_to_alias_inspection() {
+    use crate::durable::SubmittedJob;
+    use crate::service::job_receipt::JobResultAuthority;
+    use crate::supervisor::JobSubmissionDisposition;
+    use runmat_execution::{JobHandle, JobId, RunId};
+    use runmat_runtime::execution::{RootedValueSequence, RuntimeExecutionServices};
+
+    let (_temporary, service) = service_fixture();
+    let handle = JobHandle {
+        id: JobId::derive(&[b"durable-cache-owner"]),
+        run_id: RunId::derive(&[b"durable-cache-owner"]),
+        generation: 1,
+        outputs: OutputContract {
+            requested_outputs: 1,
+            owned_work: None,
+        },
+    };
+    let submitted = |disposition| SubmittedJob {
+        handle: handle.clone(),
+        retain_until_unix_millis: u64::MAX,
+        disposition,
+    };
+    let first = service
+        .retain_durable_receipt(
+            submitted(JobSubmissionDisposition::Created),
+            JobResultAuthority::Direct,
+        )
+        .unwrap();
+    *first.terminal.borrow_mut() = Some(RootedValueSequence::new(
+        runmat_value::ValueSequence::single(Value::Num(73.0)).unwrap(),
+    ));
+    let replay = service
+        .retain_durable_receipt(
+            submitted(JobSubmissionDisposition::Duplicate),
+            JobResultAuthority::Direct,
+        )
+        .unwrap();
+    assert!(Rc::ptr_eq(&first, &replay));
+    let mut observed = Vec::new();
+    assert_eq!(
+        service.visit_retained_values(&mut |value| {
+            observed.push(value.clone());
+            Some(())
+        }),
+        Some(())
+    );
+    assert_eq!(observed, vec![Value::Num(73.0)]);
+    let active_publication = first.terminal.borrow_mut();
+    assert_eq!(service.visit_retained_values(&mut |_| Some(())), None);
+    drop(active_publication);
+
+    let mut changed = submitted(JobSubmissionDisposition::Duplicate);
+    changed.handle.generation += 1;
+    assert!(matches!(
+        service.retain_durable_receipt(changed, JobResultAuthority::Direct),
+        Err(ExecutionServiceError::ForeignScope)
+    ));
+    let mut changed = submitted(JobSubmissionDisposition::Duplicate);
+    changed.retain_until_unix_millis -= 1;
+    assert!(matches!(
+        service.retain_durable_receipt(changed, JobResultAuthority::Direct),
+        Err(ExecutionServiceError::ForeignScope)
+    ));
+    assert_eq!(service.state.lock().unwrap().durable_jobs.len(), 1);
 }
 
 #[test]

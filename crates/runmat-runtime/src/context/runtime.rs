@@ -507,6 +507,23 @@ impl RuntimeContext {
         &self.services
     }
 
+    /// Publish application-pipe text using this caller's console and allocation
+    /// authority. Process owners pass bytes to the caller; they must not retain
+    /// a context in an execution service or publish from its worker thread.
+    pub fn record_process_console(
+        &self,
+        stream: crate::console::ConsoleStream,
+        text: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        super::with_original_scope(Some(self), || {
+            crate::console::record_console_output(stream, text)
+        })?;
+        if let Some(host) = self.service_ports().host() {
+            host.check_execution()?;
+        }
+        Ok(())
+    }
+
     /// This restricted view can publish console text, not dispatch source or
     /// foreign calls. Removing its foreign edge must not invalidate the actual
     /// command's device-route evidence as a service reconfiguration would.

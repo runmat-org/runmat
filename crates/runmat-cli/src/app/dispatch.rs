@@ -24,6 +24,16 @@ pub(crate) async fn dispatch_with_graphics(
     let command = cli.command.clone();
     let mut script_path = cli.script.clone();
     let mut emit_bytecode = cli.emit_bytecode.clone();
+    if command.is_some()
+        && (cli.execution != crate::cli::ExecutionTargetArgs::default()
+            || cli.script_json
+            || cli.script_function.is_some()
+            || !cli.script_args.is_empty())
+    {
+        anyhow::bail!(
+            "place execution options after the subcommand, or use the filename shorthand"
+        );
+    }
     if command.is_none() && script_path.is_none() {
         if let Some(path) = emit_bytecode.clone() {
             let is_matlab = path
@@ -38,6 +48,13 @@ pub(crate) async fn dispatch_with_graphics(
         }
     }
 
+    if command.is_none()
+        && script_path.is_none()
+        && !matches!(cli.execution.resolve()?, crate::cli::ExecutionTarget::Local)
+    {
+        anyhow::bail!("remote execution requires a project-owned source file");
+    }
+
     // A command's asynchronous state belongs to that command, not every caller's
     // session-stack frame. Keep polling/drop on this lane; no task is spawned.
     match (command, script_path) {
@@ -49,10 +66,11 @@ pub(crate) async fn dispatch_with_graphics(
                 script::execute_script_with_graphics(
                     script::ScriptInvocation {
                         script: script_path,
-                        args: vec![],
+                        args: cli.script_args.clone(),
+                        function: cli.script_function.clone(),
                         emit_bytecode_path: emit_bytecode,
-                        fea_json: false,
-                        execution: crate::cli::ExecutionTargetArgs::default(),
+                        json: cli.script_json,
+                        execution: cli.execution.clone(),
                     },
                     cli,
                     config,
@@ -93,6 +111,7 @@ async fn execute_command(
         Commands::Run {
             file,
             execution,
+            function,
             json,
             args,
         } => {
@@ -101,8 +120,9 @@ async fn execute_command(
                     script::ScriptInvocation {
                         script: file,
                         args,
+                        function,
                         emit_bytecode_path: cli.emit_bytecode.clone(),
-                        fea_json: json,
+                        json,
                         execution,
                     },
                     cli,
@@ -272,9 +292,8 @@ async fn execute_command(
         Commands::Cluster { cluster_command } => {
             boxed_command(|| remote::execute_cluster_command(cluster_command)).await
         }
-        Commands::Job { job_command } => {
-            boxed_command(|| job::execute(job_command, cli, config)).await
-        }
+        Commands::Node(args) => boxed_command(|| remote::execute_node_command(args)).await,
+        Commands::Job { job_command } => boxed_command(|| job::execute(job_command)).await,
         Commands::RecoveryKey { command } => boxed_command(|| job::execute_recovery(command)).await,
         Commands::Remote { remote_command } => {
             boxed_command(|| remote::execute_remote_command(remote_command, cli, config)).await

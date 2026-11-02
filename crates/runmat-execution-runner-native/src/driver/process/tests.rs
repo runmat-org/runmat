@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
 use super::*;
-use crate::process_provider::exchange::read_payload_until_cancelled;
+use crate::process_provider::exchange::read_payload_until_stopped;
 use runmat_execution_runner::AttemptExecutionTermination;
 use runmat_process_host::ipc::FrameLimits;
 
@@ -21,12 +21,13 @@ async fn cancellation_polling_preserves_a_fragmented_frame() {
         }
     });
 
-    let received = read_payload_until_cancelled(
+    let cancelled = AtomicBool::new(false);
+    let received = read_payload_until_stopped(
         &mut reader,
         FrameLimits {
             max_message_bytes: 1024,
         },
-        &AtomicBool::new(false),
+        || cancelled.load(std::sync::atomic::Ordering::Acquire),
     )
     .await
     .unwrap()

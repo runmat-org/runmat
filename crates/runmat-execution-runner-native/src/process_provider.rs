@@ -11,7 +11,17 @@ pub(crate) const NATIVE_MESHING_SUBTASK_CACHE_ROOT_ENV: &str =
     "RUNMAT_EXECUTION_MESHING_SUBTASK_CACHE_ROOT";
 pub(crate) type TransferResult = Result<AttemptSuccess, String>;
 
-pub(crate) trait ProcessControl: Send + Sync {
+pub(crate) trait ProcessControl:
+    crate::process_output::OutputDrainControl + Send + Sync
+{
+    fn begin_raw_output(
+        &self,
+        attempt: &AttemptRequest,
+        materialized: u64,
+    ) -> Result<
+        std::sync::Mutex<crate::process_output::RawOutputJournal>,
+        std::sync::Arc<crate::RawOutputError>,
+    >;
     fn cancellation(&self) -> &AtomicBool;
     /// Present only for an authenticated scheduler/user cancellation, not a
     /// failed control channel. Existing non-Graph providers need no wire change.
@@ -89,6 +99,7 @@ pub(crate) async fn execute_attempt(
             Ok(program) => {
                 run_process(
                     provider,
+                    request,
                     program,
                     control,
                     &meters,
@@ -305,6 +316,7 @@ fn prepare_program(
 
 async fn run_process(
     provider: &NativeProcessProvider<'_>,
+    attempt: &AttemptRequest,
     request: WorkerLaunchRequest,
     control: &dyn ProcessControl,
     meters: &TransportMeters,
@@ -316,6 +328,9 @@ async fn run_process(
         return Err("execution was cancelled before process launch".into());
     }
     let mut command = HostCommand::new(&provider.config.executable);
+    let listener = runmat_process_host::ipc::private_control::PrivateControlListener::bind()
+        .map_err(|error| error.to_string())?;
+    command.stdio = runmat_process_host::StdioPolicy::PrivateControl(listener.endpoint().clone());
     command.arguments = provider.config.worker_arguments.clone();
     command.environment_policy = EnvironmentPolicy::Inherit;
     command.environment.insert(
@@ -338,9 +353,72 @@ async fn run_process(
     *termination = AttemptExecutionTermination::Unconfirmed;
     *retirement = LocalRetirementEvidence::Unconfirmed;
     let mut child = command.spawn().await.map_err(|error| error.to_string())?;
+    let journal = match control.begin_raw_output(attempt, 0) {
+        Ok(journal) => journal,
+        Err(error) => {
+            control.stop_for_raw_output(std::sync::Arc::clone(&error));
+            return retire_output_setup_failure(
+                &mut child,
+                termination,
+                retirement,
+                error.to_string(),
+            )
+            .await;
+        }
+    };
+    let pipes = match child.take_application_output() {
+        Ok(pipes) => pipes,
+        Err(error) => {
+            let mut failure =
+                std::sync::Arc::new(crate::RawOutputError::Io(std::io::Error::other(error)));
+            {
+                let mut journal = journal.lock().expect("raw output journal poisoned");
+                if let Err(cleanup) = journal.fail_open_streams() {
+                    failure = std::sync::Arc::new(crate::RawOutputError::Cleanup {
+                        primary: failure,
+                        cleanup: Box::new(cleanup),
+                    });
+                }
+            }
+            control.stop_for_raw_output(std::sync::Arc::clone(&failure));
+            control.raw_output_changed();
+            let result = retire_output_setup_failure(
+                &mut child,
+                termination,
+                retirement,
+                failure.to_string(),
+            )
+            .await;
+            if *retirement == LocalRetirementEvidence::FullTreeRetired {
+                if let Err(cleanup) = journal
+                    .lock()
+                    .expect("raw output journal poisoned")
+                    .mark_retired()
+                {
+                    let combined = crate::RawOutputError::Cleanup {
+                        primary: failure,
+                        cleanup: Box::new(cleanup),
+                    };
+                    return Err(format!(
+                        "{}; {combined}",
+                        result
+                            .as_ref()
+                            .err()
+                            .expect("setup failure remains an error")
+                    ));
+                }
+            }
+            return result;
+        }
+    };
+    let output_lifetime = crate::process_output::OutputDrainLifetime::default();
+    let owner = async {
+        let result = async {
     let stderr = child.captured_stderr();
-    let response =
-        exchange::exchange(provider, &mut child, &request, control, meters, console).await;
+    let response = exchange::exchange(
+        provider, listener, &request, control, meters, console,
+    )
+    .await;
     let exit = if response.is_err() {
         stop_and_wait(&mut child).await
     } else {
@@ -383,6 +461,11 @@ async fn run_process(
             format!("{error}; worker stderr: {stderr}")
         }
     })?;
+    if let Some(error) = control.raw_output_failure() {
+        if !matches!(&response, WorkerResponse::Failure { .. } | WorkerResponse::RuntimeFailure { .. }) {
+            return Err(error.to_string());
+        }
+    }
     if control.cancellation().load(Ordering::Acquire) {
         return Err("execution was cancelled".into());
     }
@@ -393,6 +476,84 @@ async fn run_process(
         ));
     }
     Ok(response)
+        }
+        .await;
+        output_lifetime.finish();
+        result
+    };
+    let drain =
+        crate::process_output::drain_pipes(Some(pipes), &journal, control, &output_lifetime);
+    let (result, drain_result) = tokio::join!(owner, drain);
+    let retirement_result = if *retirement == LocalRetirementEvidence::FullTreeRetired {
+        Some(
+            journal
+                .lock()
+                .expect("raw output journal poisoned")
+                .mark_retired(),
+        )
+    } else {
+        None
+    };
+    let retirement_error = retirement_result.and_then(Result::err);
+    let has_retirement_cleanup_error = retirement_error.is_some();
+    let raw_error = match (drain_result.err(), retirement_error) {
+        (Some(primary), Some(cleanup)) => {
+            Some(std::sync::Arc::new(crate::RawOutputError::Cleanup {
+                primary,
+                cleanup: Box::new(cleanup),
+            }))
+        }
+        (None, Some(cleanup)) => Some(match control.raw_output_failure() {
+            Some(primary) => std::sync::Arc::new(crate::RawOutputError::Cleanup {
+                primary,
+                cleanup: Box::new(cleanup),
+            }),
+            None => std::sync::Arc::new(cleanup),
+        }),
+        (Some(primary), None) => Some(primary),
+        (None, None) => None,
+    };
+    if let Some(error) = raw_error {
+        control.stop_for_raw_output(std::sync::Arc::clone(&error));
+        if result.as_ref().is_ok_and(|response| {
+            !matches!(
+                response,
+                WorkerResponse::Failure { .. } | WorkerResponse::RuntimeFailure { .. }
+            )
+        }) || result
+            .as_ref()
+            .err()
+            .is_some_and(|message| message == "execution was cancelled")
+        {
+            return Err(error.to_string());
+        }
+        if has_retirement_cleanup_error {
+            return result
+                .map_err(|message| format!("{message}; output cleanup also failed: {error}"));
+        }
+    }
+    result
+}
+
+async fn retire_output_setup_failure(
+    child: &mut ChildProcess,
+    termination: &mut AttemptExecutionTermination,
+    retirement: &mut LocalRetirementEvidence,
+    error: String,
+) -> Result<WorkerResponse, String> {
+    match stop_and_wait(child).await {
+        Ok(exit) => {
+            *retirement = LocalRetirementEvidence::FullTreeRetired;
+            *termination = AttemptExecutionTermination::ProcessExited {
+                code: exit.code,
+                success: exit.success,
+            };
+            Err(error)
+        }
+        Err(retirement_error) => Err(format!(
+            "{error}; output setup process-tree retirement unverified: {retirement_error}"
+        )),
+    }
 }
 
 async fn stop_and_wait(child: &mut ChildProcess) -> Result<ProcessExit, String> {
@@ -417,7 +578,8 @@ async fn wait_or_cancel(
             tokio::select! {
                 exit = &mut wait => break Some(exit.map_err(|error| error.to_string())?),
                 _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                    if control.cancellation().load(Ordering::Acquire) { break None; }
+                    if control.cancellation().load(Ordering::Acquire)
+                        || control.raw_output_failure().is_some() { break None; }
                 }
             }
         }

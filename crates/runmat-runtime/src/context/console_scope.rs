@@ -12,13 +12,7 @@ impl RuntimeConsoleScope {
     }
 
     pub(crate) fn record(&self, stream: ConsoleStream, text: &str) -> Result<(), RuntimeError> {
-        super::with_original_scope(Some(&self.context), || {
-            crate::console::record_console_output(stream, text)
-        })?;
-        if let Some(host) = self.context.service_ports().host() {
-            host.check_execution()?;
-        }
-        Ok(())
+        self.context.record_process_console(stream, text)
     }
 }
 

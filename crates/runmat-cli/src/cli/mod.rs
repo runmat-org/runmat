@@ -14,8 +14,8 @@ mod value_types;
 
 pub use batch::BatchCommand;
 pub use cluster::{
-    ClusterCommand, ClusterStateArg, NodeJoinArgs, NodeJoinCommand, NodeServiceCommand,
-    NodeStateArg, NodeTrustTier,
+    ClusterCommand, ClusterJoinArgs, ClusterStateArg, NodeArgs, NodeCommand, NodeOptions,
+    NodeServiceCommand, NodeStateArg, NodeTrustTier,
 };
 pub use execution_target::{ExecutionTarget, ExecutionTargetArgs, RemoteExecutionTarget};
 pub use fea::{FeaCommand, FeaRootArgs};

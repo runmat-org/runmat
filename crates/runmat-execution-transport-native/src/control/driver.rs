@@ -258,10 +258,10 @@ impl DriverControlPlane for HttpDriverControlPlane {
                 &authority.credential,
                 &types::DriverHeartbeatRequest {
                     ttl_seconds: to_i64(ttl_seconds)?,
-                    clock_start_receipts: Vec::new(),
-                    clock_start_reservations: Vec::new(),
-                    clock_end_demands: Vec::new(),
-                    clock_lookup_ids: Vec::new(),
+                    clock_start_receipts: None,
+                    clock_start_reservations: None,
+                    clock_end_demands: None,
+                    clock_lookup_ids: None,
                     clock_observation_release_manifest: None,
                 },
             )

@@ -228,7 +228,7 @@ pub fn stderr() -> StreamStyles {
 }
 
 pub fn cli_output_mode(cli: &Cli) -> OutputMode {
-    if cli.generate_config || cli.emit_bytecode.is_some() {
+    if cli.generate_config || cli.emit_bytecode.is_some() || cli.script_json {
         return OutputMode::Machine;
     }
     match cli.command.as_ref() {
@@ -252,6 +252,7 @@ pub fn cli_output_mode(cli: &Cli) -> OutputMode {
         Some(Commands::Cluster { cluster_command }) if cluster_command.machine_output() => {
             OutputMode::Machine
         }
+        Some(Commands::Node(args)) if args.command.machine_output() => OutputMode::Machine,
         Some(Commands::Job { job_command }) if job_command.machine_output() => OutputMode::Machine,
         Some(Commands::RecoveryKey { command }) if command.machine_output() => OutputMode::Machine,
         Some(Commands::NativeInterface { command }) if command.machine_output() => {

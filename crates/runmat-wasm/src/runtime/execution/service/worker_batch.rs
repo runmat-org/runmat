@@ -157,37 +157,6 @@ impl BrowserExecutionService {
         }
     }
 
-    pub(super) fn wait_callback(
-        &self,
-        task: &TaskHandle,
-    ) -> runmat_runtime::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
-        let selected = (|| {
-            let snapshot = self.inspect_task(task)?;
-            if matches!(
-                snapshot.state,
-                ExecutionHandleState::Finished
-                    | ExecutionHandleState::Failed
-                    | ExecutionHandleState::Cancelled
-            ) {
-                return Ok(None);
-            }
-            self.callback_waiters
-                .borrow()
-                .get(&task.id)
-                .map(|s| s.receiver.clone())
-                .map(Some)
-                .ok_or_else(|| {
-                    ExecutionServiceError::Infrastructure("task has no completion event".into())
-                })
-        })();
-        Box::pin(async move {
-            if let Some(receiver) = selected? {
-                receiver.await?;
-            }
-            Ok(())
-        })
-    }
-
     pub(super) fn submit_selected_callbacks(
         &self,
         calls: Vec<DeferredCall>,

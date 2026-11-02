@@ -9,12 +9,12 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 mod collective;
 mod console;
 
-/// One bounded stdio frame between a native worker and its parent.
+/// One bounded private control frame between a native worker and its parent.
 const WORKER_MAX_MESSAGE_BYTES: u32 = 64 * 1024 * 1024;
 
 enum WorkerExecutionOutcome {
     Completed {
-        // Ordinary stdio transport control; Value backing keeps its own owners.
+        // Transport metadata only; Value backing keeps its own owners.
         response: Box<WorkerResponse>,
         console: Option<runmat_execution::console::ConsoleReceipt>,
     },
@@ -25,19 +25,18 @@ enum WorkerExecutionOutcome {
 }
 
 pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
-    // The endpoint also selects binary standard streams; its async reader is replaced by the
-    // parent link, which owns the request pipe on its own thread.
-    let (_unused_reader, writer) = runmat_process_host::ipc::stdio::endpoint()
-        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let control = runmat_process_host::ipc::private_control::connect_host_blocking()
+        .map_err(runmat_process_host::ProcessHostError::Io)?;
     let limits = FrameLimits {
         max_message_bytes: WORKER_MAX_MESSAGE_BYTES,
     };
     // Parent loss (the request pipe closing before this worker publishes its terminal frame)
     // ends the worker at once, even while a non-yielding solve holds the executor.
     let (parent, frames) =
-        runmat_process_host::ipc::WorkerParentLink::start(std::io::stdin(), limits)
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    let channel = collective::StdioCollectiveChannel::new(frames, writer, limits);
+        runmat_process_host::ipc::WorkerParentLink::start(control.reader, limits)?;
+    let writer =
+        runmat_process_host::ipc::private_control::ControlFrameWriter::new(control.writer, limits)?;
+    let channel = collective::WorkerControlChannel::new(frames, writer);
     let payload = channel.read_payload().await?;
     // The parent assigns this runnable child to its JobObject before writing
     // the first request. No RunMat provider or foreign helper is initialized
@@ -68,7 +67,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
             WorkerLaunchRequest::Reserved(reserved) => reserved.into_parts().0,
             WorkerLaunchRequest::StagedGraph(_) => unreachable!("SPMD request uses Direct wire"),
         };
-        let service = collective::StdioCollectiveService::new(task, channel.clone());
+        let service = collective::WorkerCollectiveService::new(task, channel.clone());
         Ok(WorkerExecutionOutcome::Completed {
             response: Box::new(
                 crate::test_workload::execute_host_program_request_with_collective(
@@ -99,7 +98,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
             // lifecycle callback refused retirement. The parent will observe
             // the missing/fatal frame and kill and reap this child.
             if let Ok(payload) = payload {
-                let _ = channel.write_payload(&payload).await;
+                let _ = channel.write_payload(payload).await;
             }
             return std::future::pending().await;
         }
@@ -112,13 +111,13 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
     .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     // The parent may close the request pipe as soon as it reads the terminal frame.
     parent.disarm();
-    channel.write_payload(&payload).await?;
+    channel.write_payload(payload).await?;
     Ok(())
 }
 
 async fn execute_launch(
     request: WorkerLaunchRequest,
-    channel: collective::StdioCollectiveChannel,
+    channel: collective::WorkerControlChannel,
 ) -> NativeExecutionResult<WorkerExecutionOutcome> {
     match request {
         WorkerLaunchRequest::Direct(direct) => match *direct {
@@ -127,11 +126,12 @@ async fn execute_launch(
                 console: None,
             }),
             WorkerRequest::Graph(_) => Err(NativeExecutionError::Protocol(
-                "Graph stdio requests require a verified staged artifact reference".into(),
+                "Graph worker requests require a verified staged artifact reference".into(),
             )),
         },
         WorkerLaunchRequest::Reserved(reserved) => {
-            let (response, console) = console::execute_reserved(*reserved).await?;
+            let (response, console) =
+                console::execute_reserved(*reserved, channel.writer().clone()).await?;
             Ok(WorkerExecutionOutcome::Completed {
                 response: Box::new(response),
                 console,
@@ -145,7 +145,7 @@ async fn execute_launch(
 
 async fn execute_staged_graph(
     reference: StagedGraphWorkerReference,
-    channel: collective::StdioCollectiveChannel,
+    channel: collective::WorkerControlChannel,
 ) -> NativeExecutionResult<WorkerExecutionOutcome> {
     let attempt_id = reference.assignment.attempt_id;
     reference
@@ -164,6 +164,7 @@ async fn execute_staged_graph(
             .invocation_controls
             .as_ref()
             .and_then(|controls| controls.console),
+        channel.writer().clone(),
     )?;
     if request.project_runtime_policy.is_some() {
         let policy = runmat_core::cluster_settings::validate_graph_policy(&request)

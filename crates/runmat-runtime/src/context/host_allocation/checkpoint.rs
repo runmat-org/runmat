@@ -37,7 +37,7 @@ impl AllocationOwnerState {
         Ok(())
     }
 
-    fn check_parallel(
+    pub(super) fn check_parallel(
         &self,
         parallel: &dyn RuntimeParallelService,
     ) -> Result<(), HostAllocationError> {

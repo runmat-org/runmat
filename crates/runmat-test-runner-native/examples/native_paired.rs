@@ -337,6 +337,15 @@ async fn main() -> Result<()> {
             },
         };
         let report = run_compiled_native_target_test(&product, &request, limits).await?;
+        ensure!(
+            [&report.stdout, &report.stderr].iter().all(|stream| {
+                stream.completion == runmat_process_host::ProcessOutputCompletion::EndOfStream
+                    && !stream.truncated
+            }),
+            "paired witness did not retain complete application output: stdout {}; stderr {}",
+            report.stdout,
+            report.stderr
+        );
         let NativeTargetTestCompletion::Receiver(result) = &report.completion else {
             bail!("no receiver result: {report:?}");
         };

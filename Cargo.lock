@@ -8742,6 +8742,7 @@ version = "0.6.2"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum 0.7.9",
  "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
@@ -8749,6 +8750,7 @@ dependencies = [
  "rand 0.8.6",
  "reqwest 0.12.28",
  "runmat-accelerate-api",
+ "runmat-canonical-codec",
  "runmat-core",
  "runmat-execution",
  "runmat-execution-artifact",

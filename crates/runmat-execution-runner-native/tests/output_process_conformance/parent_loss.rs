@@ -3,9 +3,16 @@ use super::*;
 use runmat_execution::console::{ConsoleLimits, ConsoleStream};
 use runmat_execution_runner_native::WorkerProcessMessage;
 use runmat_process_host::{
-    ipc::{read_payload, write_payload, FrameLimits},
-    HostCommand,
+    ipc::{private_control::PrivateControlListener, read_payload, write_payload, FrameLimits},
+    HostCommand, StdioPolicy,
 };
+use tokio::io::AsyncReadExt;
+
+async fn collect_output(mut reader: impl tokio::io::AsyncRead + Unpin) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).await.unwrap();
+    bytes
+}
 
 pub(super) async fn verify(config: &NativeExecutionConfig) {
     // The production launch for a placed Direct program: its exact reservation and console
@@ -38,10 +45,18 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     let mut command = HostCommand::new(&config.executable);
     command.arguments = config.worker_arguments.clone();
     command.max_stderr_bytes = config.max_stderr_bytes;
+    let listener = PrivateControlListener::bind().unwrap();
+    command.stdio = StdioPolicy::PrivateControl(listener.endpoint().clone());
     let mut child = command.spawn().await.unwrap();
-    let stdio = child.take_stdio().unwrap();
-    let mut reader = stdio.stdout;
-    let mut writer = stdio.stdin;
+    let output = child.take_application_output().unwrap();
+    let stdout = tokio::spawn(collect_output(output.stdout));
+    let stderr = tokio::spawn(collect_output(output.stderr));
+    let control = tokio::time::timeout(Duration::from_secs(30), listener.accept())
+        .await
+        .expect("worker private control connection")
+        .unwrap();
+    let mut reader = control.reader;
+    let mut writer = control.writer;
     let limits = FrameLimits {
         max_message_bytes: config.max_message_bytes,
     };
@@ -71,8 +86,10 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     };
     assert!(!exit.success);
     assert_eq!(exit.code, Some(1));
+    let stdout = stdout.await.unwrap();
+    let stderr = stderr.await.unwrap();
     println!(
-        "non-yielding original worker streamed its prefix and exited {:?} after parent loss",
-        dropped.elapsed()
+        "non-yielding original worker streamed its prefix and exited {:?} after parent loss; raw stdout={} bytes, stderr={} bytes",
+        dropped.elapsed(), stdout.len(), stderr.len()
     );
 }

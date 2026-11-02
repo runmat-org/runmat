@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use runmat_execution::resource::Capability;
 use runmat_execution::{
-    Digest, OutputContract, ProgramCallable, ProgramFunctionId, ProgramInvocationContext,
-    ProgramRevision,
+    identity::ArtifactId, Digest, OutputContract, ProgramCallable, ProgramFunctionId,
+    ProgramInvocationContext, ProgramRevision,
 };
 use runmat_execution_artifact::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 
@@ -28,7 +28,9 @@ async fn run_process(
     let mut termination = runmat_execution_runner::AttemptExecutionTermination::NotStarted;
     let mut console = None;
     let mut retirement = super::super::LocalRetirementEvidence::NotStarted;
+    let attempt = super::preflight::admit(driver, ArtifactId::derive(&[b"launcher-attempt"]));
     let owner = super::super::owned::ProcessOwner {
+        attempt: &attempt,
         config: &driver.config,
         artifacts: &driver.artifacts,
         objects: &driver.objects,
@@ -52,8 +54,19 @@ fn shell_driver(script: &str) -> (tempfile::TempDir, Arc<LocalDriver>) {
     let scope = crate::config::fresh_scope_id(b"process-outcome-test", 1);
     let driver = LocalDriver::new(
         crate::NativeExecutionConfig {
-            executable: "/bin/sh".into(),
-            worker_arguments: vec!["-c".into(), script.into()],
+            executable: if script == "private-control-exit" {
+                std::env::current_exe().expect("test executable")
+            } else {
+                "/bin/sh".into()
+            },
+            worker_arguments: if script == "private-control-exit" {
+                vec![
+                    "--exact".into(),
+                    "driver::process::tests::launcher::fake_private_worker_exit".into(),
+                ]
+            } else {
+                vec!["-c".into(), script.into()]
+            },
             max_workers: 1,
             max_message_bytes: 64 * 1024,
             max_object_bytes: 64 * 1024,
@@ -129,7 +142,7 @@ fn request() -> WorkerRequest {
 
 #[tokio::test]
 async fn dispatched_worker_exit_is_typed_as_worker_loss() {
-    let (_temporary, driver) = shell_driver("dd bs=1 count=1 >/dev/null 2>&1; exit 42");
+    let (_temporary, driver) = shell_driver("private-control-exit");
     let completion = TaskCompletion::new();
     let failure = run_process(
         &driver,
@@ -139,6 +152,23 @@ async fn dispatched_worker_exit_is_typed_as_worker_loss() {
     .await
     .expect_err("worker exit must fail");
     assert!(matches!(failure, TransferFailure::WorkerLost(_)));
+}
+
+#[test]
+fn fake_private_worker_exit() {
+    if std::env::var_os("RUNMAT_PRIVATE_CONTROL_ENDPOINT").is_none() {
+        return;
+    }
+    let mut control = runmat_process_host::ipc::private_control::connect_host_blocking()
+        .expect("test worker private channel");
+    let _request = runmat_process_host::ipc::read_payload_blocking(
+        &mut control.reader,
+        runmat_process_host::ipc::FrameLimits {
+            max_message_bytes: 64 * 1024,
+        },
+    )
+    .expect("test worker request");
+    std::process::exit(42);
 }
 
 #[tokio::test]

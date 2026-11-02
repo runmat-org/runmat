@@ -1087,6 +1087,95 @@ fn trace_scratch_growth_claims_exact_live_bytes_and_revokes_new_growth() {
 }
 
 #[test]
+fn control_backing_keeps_exact_claim_through_iteration_and_owner_cancellation() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<HostControlAllocationOwner>();
+    let ledger = ManagedHostEffectLedger::new_with_epoch(4_096, 7);
+    let cancellation = CancellationSource::new();
+    let runtime = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    )
+    .with_cancellation_token(cancellation.token());
+    let owner = HostControlAllocationOwner::capture(&runtime)
+        .unwrap()
+        .unwrap();
+    let owner = std::thread::spawn(move || {
+        // No RuntimeContext or thread-affine service crosses this boundary.
+        let claim = owner.claim(19).unwrap();
+        drop(claim);
+        owner
+    })
+    .join()
+    .unwrap();
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    owner.checkpoint(&runtime).unwrap();
+    struct PendingControl {
+        ledger: ManagedHostEffectLedger,
+        _bytes: [u8; 8],
+    }
+    impl std::future::Future for PendingControl {
+        type Output = ();
+        fn poll(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<()> {
+            std::task::Poll::Pending
+        }
+    }
+    impl Drop for PendingControl {
+        fn drop(&mut self) {
+            assert!(self.ledger.snapshot().live_claimed_bytes > 0);
+        }
+    }
+    let control = HostControlFuture::new(Some(&owner), || PendingControl {
+        ledger: ledger.clone(),
+        _bytes: [7; 8],
+    })
+    .unwrap();
+    assert_eq!(
+        ledger.snapshot().live_claimed_bytes,
+        (std::mem::size_of::<PendingControl>()
+            + crate::context::host_effect::owned_output_claim_metadata_bytes()) as u64
+    );
+    drop(control);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    let mut values = HostControlVec::<u64>::with_capacity(2, Some(&owner)).unwrap();
+    values.try_push(13).unwrap();
+    values.try_push(29).unwrap();
+    assert_eq!(values.try_push(41), Err(41));
+    let header = crate::context::host_effect::owned_output_claim_metadata_bytes();
+    assert_eq!(ledger.snapshot().live_claimed_bytes, (16 + header) as u64);
+    values.reserve_capacity(4).unwrap();
+    values.try_push(41).unwrap();
+    let charged = 32 + header;
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged as u64);
+    assert_eq!(
+        ledger.snapshot().peak_claimed_bytes,
+        (16 + 32 + 2 * header) as u64
+    );
+    let mut iteration = values.into_iter();
+    assert_eq!(iteration.next(), Some(13));
+    cancellation.cancel(CancellationReason::User);
+    assert!(matches!(
+        HostControlFuture::<PendingControl>::new(Some(&owner), || {
+            panic!("revoked owner cannot construct a process supervisor")
+        }),
+        Err(HostAllocationError::Cancelled)
+    ));
+    assert!(matches!(
+        owner.claim(1),
+        Err(HostAllocationError::Cancelled)
+    ));
+    drop(owner);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged as u64);
+    assert_eq!(iteration.next(), Some(29));
+    assert_eq!(iteration.next(), Some(41));
+    drop(iteration);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+}
+
+#[test]
 fn admitted_collection_blocks_survive_retirement_without_new_growth() {
     use allocator_api2::alloc::Allocator;
     use std::alloc::Layout;

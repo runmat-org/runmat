@@ -82,7 +82,10 @@ fn unreadable_program_preserves_known_prelaunch_consumption() {
     assert_eq!(resources.resources.usage.relay_bytes, 0);
 }
 
-fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runner::AttemptRequest {
+pub(super) fn admit(
+    driver: &LocalDriver,
+    artifact_id: ArtifactId,
+) -> runmat_execution_runner::AttemptRequest {
     let task = TaskRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
@@ -110,7 +113,7 @@ fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runn
         resources: ResourceRequest {
             cpu_millicores: 1000,
             memory_bytes: runmat_process_host::ipc::WORKER_PARENT_MONITOR_STACK_BYTES + 1024,
-            scratch_bytes: 1024,
+            scratch_bytes: 1024 * 1024,
             max_wall_millis: 10000,
             max_artifact_bytes: 1024,
             max_egress_bytes: 0,
@@ -252,7 +255,28 @@ async fn shared_provider_preserves_prelaunch_cancellation_in_an_existing_runtime
         LocalDriver::new(config, ExecutionScopeId::derive(&[b"cancel-preflight"])).unwrap();
     let request = admit(&driver, ArtifactId::derive(&[b"missing-program"]));
     struct CancelledControl(std::sync::atomic::AtomicBool);
+    impl crate::process_output::OutputDrainControl for CancelledControl {
+        fn raw_output_changed(&self) {
+            panic!("prelaunch cancellation cannot publish raw output")
+        }
+        fn stop_for_raw_output(&self, _: std::sync::Arc<crate::RawOutputError>) {
+            panic!("prelaunch cancellation cannot launch an output owner")
+        }
+        fn raw_output_failure(&self) -> Option<std::sync::Arc<crate::RawOutputError>> {
+            None
+        }
+    }
     impl crate::process_provider::ProcessControl for CancelledControl {
+        fn begin_raw_output(
+            &self,
+            _: &runmat_execution_runner::AttemptRequest,
+            _: u64,
+        ) -> Result<
+            std::sync::Mutex<crate::process_output::RawOutputJournal>,
+            std::sync::Arc<crate::RawOutputError>,
+        > {
+            panic!("prelaunch cancellation cannot begin raw output")
+        }
         fn cancellation(&self) -> &std::sync::atomic::AtomicBool {
             &self.0
         }

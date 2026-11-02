@@ -85,31 +85,14 @@ pub(super) async fn solve(
         budget: Budget::new(limit),
         constraint_extents: Some((problem.inequalities, problem.equalities)),
     };
-    let numerical = match controls.algorithm {
-        OptimAlgorithm::InteriorPoint => {
-            super::super::interior_point::minimize(
-                problem.x,
-                &geometry,
-                &parameters,
-                &mut evaluator,
-            )
-            .await?
-        }
-        OptimAlgorithm::Sqp => {
-            super::super::sqp::minimize(problem.x, &geometry, &parameters, &mut evaluator).await?
-        }
-        OptimAlgorithm::ActiveSet => {
-            super::super::sqp::minimize_with(
-                problem.x,
-                &geometry,
-                &parameters,
-                &mut evaluator,
-                super::super::sqp::Strategy::WorkingSet,
-            )
-            .await?
-        }
-        _ => unreachable!("implemented modeled algorithm"),
-    };
+    let numerical = super::algorithm::select(
+        controls.algorithm,
+        problem.x,
+        &geometry,
+        &parameters,
+        &mut evaluator,
+    )
+    .await?;
     drop(evaluator);
     Ok(Outcome {
         numerical,

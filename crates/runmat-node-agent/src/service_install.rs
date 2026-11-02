@@ -283,7 +283,7 @@ fn linux_install_plan(config_content: String, agent_executable: &Path) -> AgentR
     let executable = systemd_quote(agent_executable)?;
     let config = systemd_quote(&config_path)?;
     let unit = format!(
-        "[Unit]\nDescription=RunMat execution node agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} cluster join --node-config {config} run\nRestart=on-failure\nRestartSec=5s\nNoNewPrivileges=true\nPrivateTmp=true\nProtectHome=true\nProtectSystem=strict\nReadWritePaths=/var/lib/runmat/node-agent\nLockPersonality=true\nRestrictSUIDSGID=true\n\n[Install]\nWantedBy=multi-user.target\n"
+        "[Unit]\nDescription=RunMat execution node agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} node --node-config {config} run\nRestart=on-failure\nRestartSec=5s\nNoNewPrivileges=true\nPrivateTmp=true\nProtectHome=true\nProtectSystem=strict\nReadWritePaths=/var/lib/runmat/node-agent\nLockPersonality=true\nRestrictSUIDSGID=true\n\n[Install]\nWantedBy=multi-user.target\n"
     );
     Ok(ServicePlan {
         platform: "systemd",
@@ -328,7 +328,7 @@ fn macos_install_plan(config_content: String, agent_executable: &Path) -> AgentR
     let executable = xml_escape(&path_text(agent_executable)?);
     let config = xml_escape(&path_text(&config_path)?);
     let plist = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>com.runmat.node-agent</string>\n  <key>ProgramArguments</key>\n  <array><string>{executable}</string><string>cluster</string><string>join</string><string>--node-config</string><string>{config}</string><string>run</string></array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n  <key>ProcessType</key><string>Background</string>\n</dict>\n</plist>\n"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>com.runmat.node-agent</string>\n  <key>ProgramArguments</key>\n  <array><string>{executable}</string><string>node</string><string>--node-config</string><string>{config}</string><string>run</string></array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n  <key>ProcessType</key><string>Background</string>\n</dict>\n</plist>\n"
     );
     Ok(ServicePlan {
         platform: "launchd",
@@ -389,7 +389,7 @@ fn windows_install_plan(
 ) -> AgentResult<ServicePlan> {
     let config_path = windows_config_path()?;
     let binary_path = format!(
-        "\"{}\" cluster join --node-config \"{}\" windows-service-run",
+        "\"{}\" node --node-config \"{}\" windows-service-run",
         path_text(agent_executable)?,
         path_text(&config_path)?
     );

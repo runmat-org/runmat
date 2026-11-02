@@ -213,6 +213,7 @@ pub(super) use batch::{release as release_callback_batch, submit as submit_callb
 pub(super) fn spawn(
     service: &NativeExecutionService,
     future: &FutureHandle,
+    owner: Option<runmat_runtime::context::host_allocation::HostControlAllocationOwner>,
 ) -> Result<TaskHandle, ExecutionServiceError> {
     service.validate_scope(future.scope_id)?;
     let (reservation_id, call) = reserve(&service.state, future)?;
@@ -270,30 +271,36 @@ pub(super) fn spawn(
             } = *prepared;
             service
                 .driver
-                .submit(LocalProgramSubmission {
-                    task_id,
-                    callable,
-                    invocation_context,
-                    recipe,
-                    artifact,
-                    inputs,
-                    outputs: future.outputs.clone(),
-                    retry: call.retry,
-                    environment: call.environment.clone(),
-                    console: call.console,
-                })
+                .submit_with_control(
+                    LocalProgramSubmission {
+                        task_id,
+                        callable,
+                        invocation_context,
+                        recipe,
+                        artifact,
+                        inputs,
+                        outputs: future.outputs.clone(),
+                        retry: call.retry,
+                        environment: call.environment.clone(),
+                        console: call.console,
+                    },
+                    owner,
+                )
                 .map(|completion| (completion, None))
         }
         PreparedSubmission::Graph(prepared) => {
             let PreparedGraphSubmission { request, receipt } = *prepared;
             service
                 .driver
-                .submit_graph(LocalGraphSubmission {
-                    task_id,
-                    request,
-                    retry: call.retry,
-                    task: None,
-                })
+                .submit_graph_with_control(
+                    LocalGraphSubmission {
+                        task_id,
+                        request,
+                        retry: call.retry,
+                        task: None,
+                    },
+                    owner,
+                )
                 .map(|completion| (completion, Some(receipt)))
         }
     };
@@ -334,13 +341,7 @@ pub(super) fn spawn(
             let retired = state.futures.insert(future.id, FutureState::Cancelled);
             (false, retired)
         } else {
-            let running = match graph_receipt {
-                Some(receipt) => RunningCompletion::Graph {
-                    completion: Arc::clone(&completion),
-                    receipt,
-                },
-                None => RunningCompletion::Direct(Arc::clone(&completion)),
-            };
+            let running = RunningCompletion::new(Arc::clone(&completion), graph_receipt);
             let retired = state
                 .futures
                 .insert(future.id, FutureState::Running(running));

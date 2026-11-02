@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum NativeExecutionError {
+    #[error("native process output failed: {0}")]
+    ProcessOutput(#[source] std::sync::Arc<crate::RawOutputError>),
     #[error("native execution was cancelled")]
     Cancelled,
     #[error("native task {task_id} was cancelled: {cancellation:?}; quiescence={quiescence:?}")]
@@ -45,3 +47,9 @@ pub enum NativeExecutionError {
 }
 
 pub type NativeExecutionResult<T> = Result<T, NativeExecutionError>;
+
+impl From<crate::RawOutputError> for NativeExecutionError {
+    fn from(error: crate::RawOutputError) -> Self {
+        Self::ProcessOutput(std::sync::Arc::new(error))
+    }
+}

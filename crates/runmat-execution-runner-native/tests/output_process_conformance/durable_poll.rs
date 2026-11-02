@@ -28,8 +28,9 @@ pub(super) async fn verify(service: &NativeExecutionService, config: &NativeExec
         )
         .unwrap();
     let started = std::time::Instant::now();
-    let AwaitAction::Pending(Value::Job(retained)) =
-        service.begin_await(Value::Job(job.clone().into())).unwrap()
+    let AwaitAction::Pending(Value::Job(retained)) = service
+        .begin_await_in_context(Value::Job(job.clone().into()), &original.runtime)
+        .unwrap()
     else {
         panic!("live original job did not yield pending");
     };
@@ -40,10 +41,22 @@ pub(super) async fn verify(service: &NativeExecutionService, config: &NativeExec
         .unwrap();
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            match service.begin_await(Value::Job(job.clone().into())) {
+            match service.begin_await_in_context(Value::Job(job.clone().into()), &original.runtime)
+            {
                 Ok(AwaitAction::Pending(Value::Job(retained))) => {
                     assert_eq!(retained.as_ref(), &job);
-                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    if let Some(wait) = service
+                        .wait_pending(&Value::Job(retained), &original.runtime)
+                        .unwrap()
+                    {
+                        match wait.await {
+                            Ok(()) => {}
+                            Err(ExecutionServiceError::Cancelled) => break,
+                            Err(error) => panic!("original pending job wait returned {error:?}"),
+                        }
+                    } else {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
                 }
                 Err(ExecutionServiceError::Cancelled) => break,
                 other => panic!("original pending job cancellation returned {other:?}"),

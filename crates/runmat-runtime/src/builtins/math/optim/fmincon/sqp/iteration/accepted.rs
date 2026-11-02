@@ -74,46 +74,15 @@ pub(super) async fn run_view(
                 parameters.optimality.min(parameters.feasibility),
                 |domain| domain.controls.inner_tolerance,
             );
-            let proposed = match strategy {
-                super::super::Strategy::Conic => {
-                    subproblem::regular(
-                        hessian,
-                        gradient,
-                        constraints,
-                        subproblem_tolerance,
-                        owner,
-                        evaluator.cooperation,
-                    )
-                    .await?
-                }
-                super::super::Strategy::WorkingSet => {
-                    if let Some(domain) = &evaluator.semi_infinite {
-                        let limits = domain
-                            .controls
-                            .pivots(gradient.len(), constraints, evaluator.cooperation)
-                            .await?;
-                        super::super::super::active_set::solve_with_limits(
-                            hessian,
-                            gradient,
-                            constraints,
-                            limits,
-                            owner,
-                            evaluator.cooperation,
-                        )
-                        .await?
-                    } else {
-                        super::super::super::active_set::solve(
-                            hessian,
-                            gradient,
-                            constraints,
-                            subproblem_tolerance,
-                            owner,
-                            evaluator.cooperation,
-                        )
-                        .await?
-                    }
-                }
-            };
+            let proposed = super::proposal::solve(
+                hessian,
+                gradient,
+                constraints,
+                subproblem_tolerance,
+                evaluator,
+                strategy,
+            )
+            .await?;
             let mut elastic = false;
             let step = match proposed {
                 subproblem::Result::Step(step) => step,

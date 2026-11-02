@@ -4,57 +4,89 @@ RunMat uses the same frozen package graph, portable execution artifacts, value c
 
 ## Before You Start
 
-Sign in with `runmat auth login` and select a Server project in `runmat.toml` or with the command's `--project` option. Resolve and lock the project before submitting production work:
+Sign in with `runmat login` and select a Server project in `runmat.toml` or with the command's `--project` option. Resolve and lock the project before submitting production work:
 
 ```bash
 runmat package resolve
 runmat package fetch --locked
 ```
 
+Credentials belong to the complete Server endpoint, including its port and base
+path. Signing in to one endpoint does not authorize another endpoint on the same
+host. Endpoints require HTTPS; local development may use HTTP on loopback.
+
 Remote execution freezes the selected source closure and dependency identities. Workers do not resolve Git branches, fetch packages, or receive registry credentials.
 
-## Create a Cluster and Enroll a Customer Node
+## Create a Cluster and Join a Customer Node
 
-Organization administrators create a cluster and mint a short-lived, single-use enrollment:
+An organization administrator creates a named cluster:
 
 ```bash
 runmat cluster create --name workstation-pool --queue default
-runmat cluster enroll CLUSTER_ID --ttl-seconds 900
 ```
 
-Transfer the enrollment secret through the organization's secret-delivery channel. Install a verified RunMat executable for the server's OS/architecture (the same executable runs the worker); no separate worker daemon download is required:
+Names are unique within an organization and canonicalized to lowercase. They
+contain 1–63 ASCII letters, digits, hyphens or underscores, starting with a letter
+or digit. Commands resolve the name to a stable cluster ID before scheduling;
+they do not choose the first partial or cross-organization match. `--org` is
+optional when an organization is selected in the CLI configuration or the
+credentials authorize exactly one organization. When several organizations are
+available, interactive commands ask which to use; unattended or JSON-output
+commands require an explicit selection.
+
+Install a verified RunMat executable for the node's OS/architecture (the same
+executable runs the worker); no separate worker daemon download is required:
 
 ```bash
 sudo install -m 0755 /path/to/verified/runmat /usr/local/bin/runmat
 /usr/local/bin/runmat --version
 ```
 
-On Linux with systemd, use `/var/lib/runmat/node-agent` below. On macOS use `/Library/Application Support/RunMat/node-agent` instead. Enrollment and service installation **must use the same state directory and OS identity**. A user's foreground enrollment does not enroll the system service. In an interactive Bash/Zsh shell, read the token without echo or shell-history exposure:
+On that machine, sign in with an authorized account or supply an API key through
+`RUNMAT_API_KEY`, then join the cluster:
 
 ```bash
-sudo -v
-read -r -s NODE_ENROLLMENT_SECRET
-printf '%s' "$NODE_ENROLLMENT_SECRET" | sudo /usr/local/bin/runmat cluster join \
-  --server https://api.runmat.com \
-  --state-directory /var/lib/runmat/node-agent \
-  --runmat /usr/local/bin/runmat enroll --token-stdin
-unset NODE_ENROLLMENT_SECRET
+runmat login
+runmat cluster join workstation-pool
 ```
 
-The shell's built-in `printf` passes the secret over stdin, not in the worker's process arguments or environment. Use a non-traced shell (no `set -x`); `sudo -v` authenticates before stdin carries the secret. Do not place the secret in a service file, shell profile, image, or log. Existing `--token` and `RUNMAT_NODE_ENROLLMENT_TOKEN` remain available for managed secret injection.
+Join runs the node in the foreground. Use `--service` to install and start the
+OS service instead; this requires administrative privileges. Registration and
+service installation **must use the same state directory and OS identity**, with
+that identity's account credentials and selected organization. A user's
+foreground registration does not register the system service. Linux system
+services use `/var/lib/runmat/node-agent`; macOS uses
+`/Library/Application Support/RunMat/node-agent`.
+
+The account authorizes registration but is not stored in the agent's state.
+The machine retains its own signing identity and node credential before use.
+Retrying an interrupted registration uses that original identity rather than
+creating another node. A registered state directory cannot be redirected to
+another Server, organization or cluster.
 
 Inspect the native service plan before installing it:
 
 ```bash
-sudo /usr/local/bin/runmat cluster join --server https://api.runmat.com --state-directory /var/lib/runmat/node-agent --runmat /usr/local/bin/runmat service install --dry-run
-sudo /usr/local/bin/runmat cluster join --server https://api.runmat.com --state-directory /var/lib/runmat/node-agent --runmat /usr/local/bin/runmat service install
+sudo /usr/local/bin/runmat node --server https://api.runmat.com --state-directory /var/lib/runmat/node-agent --runmat /usr/local/bin/runmat service install --dry-run
+sudo /usr/local/bin/runmat node --server https://api.runmat.com --state-directory /var/lib/runmat/node-agent --runmat /usr/local/bin/runmat service install
 ```
 
 The agent uses systemd on Linux, launchd on macOS, and the Windows Service Control Manager on Windows. Installation persists non-secret startup configuration only. The enrolled node credential remains in the agent's private state directory and survives service removal so a service can be repaired without creating a second node identity.
 
-For foreground diagnosis instead of installing a service, use the same server, executable and state-directory flags followed by `run`. Do not run the foreground agent alongside its service. Linux status: `sudo systemctl status runmat-node-agent`; macOS status: `sudo launchctl print system/com.runmat.node-agent`. `service print` prints the exact host plan; it is not a live service-status command.
+For foreground diagnosis, use `runmat node run` with the same server, executable
+and state-directory options. Do not run the foreground agent alongside its
+service. `runmat node status` prints the local registered identity, not a live
+health check. Linux service status: `sudo systemctl status runmat-node-agent`;
+macOS: `sudo launchctl print system/com.runmat.node-agent`. `node service print`
+prints the host's installation plan.
 
-Use `runmat cluster nodes CLUSTER_ID` to wait for the node to become active. Hosted-node clusters use the same submission and scheduling contract; RunMat operates enrollment and service lifecycle for those nodes.
+Use `runmat cluster nodes workstation-pool` to wait for the node to become active.
+Hosted-node clusters use the same submission and scheduling contract; RunMat
+operates registration and service lifecycle for those nodes. Optional managed
+bootstrap uses `runmat cluster enroll workstation-pool` to issue a short-lived
+token and `runmat node enroll --token-stdin` on the node. Deliver that secret
+through your organization's secret channel; never place it in service files,
+images or logs. Account-authorized join does not require a token exchange.
 
 ## Native and Accelerator Requirements
 
@@ -68,11 +100,16 @@ Device-resident values remain local to their node, process generation, worker at
 
 ## Submit Jobs and Tests
 
-Pin the endpoint identity shown for the admitted node. RunMat confirms the signed endpoint evidence before encrypting the package, program, inputs, results, detailed events, or diagnostics:
+Pin the endpoint identity shown for the admitted node using `--trust-identity`
+or `RUNMAT_TRUST_IDENTITY`. The explicit flag overrides the environment. This
+setting is a deliberate trust decision; RunMat does not trust a replacement
+fingerprint merely because the Server returns it. RunMat confirms the signed
+endpoint evidence before encrypting the package, program, inputs, results,
+detailed events or diagnostics:
 
 ```bash
-runmat job submit analysis.m \
-  --cluster CLUSTER_ID \
+runmat analysis.m \
+  --cluster workstation-pool \
   --trust-identity SHA256_FINGERPRINT \
   --detach
 
@@ -84,9 +121,9 @@ runmat job attach RUN_ID
 Omit `--detach` to wait for completion. With `--json`, a waited submission emits one terminal JSON document; a detached submission emits one run document for later lifecycle operations. RunMat does not mix submission and terminal objects on standard output. Script entrypoints accept no positional inputs. To invoke a source file's declared function with string inputs, select it explicitly:
 
 ```bash
-runmat job submit functions/evaluate_case.m \
+runmat functions/evaluate_case.m \
   --function evaluate_case \
-  --cluster CLUSTER_ID \
+  --cluster workstation-pool \
   --trust-identity SHA256_FINGERPRINT \
   -- case-a input/data.mat
 ```
@@ -97,7 +134,7 @@ Distributed tests preserve test-owned discovery, fixture grouping, retry, event,
 
 ```bash
 runmat test \
-  --cluster CLUSTER_ID \
+  --cluster workstation-pool \
   --project PROJECT_ID \
   --trust-identity SHA256_FINGERPRINT \
   --max-workers 8
@@ -156,15 +193,19 @@ Use `--diagnostic` for a diagnostic artifact. This authenticates the recipient, 
 Drain before maintenance so active leases can finish while new work is placed elsewhere:
 
 ```bash
-runmat cluster node-state CLUSTER_ID NODE_ID draining
-runmat cluster nodes CLUSTER_ID
+runmat cluster node-state workstation-pool NODE_ID draining
+runmat cluster nodes workstation-pool
 ```
 
 Wait until the node has no active allocations, stop or uninstall the service, and perform maintenance. Reactivate it only after the agent reports a healthy inventory. To permanently retire a node, revoke it through the organization administration surface before deleting its private state. Removing local state first can leave a valid orphaned credential.
 
 ## Automation and Output
 
-Every cluster command and durable job observation or mutation supports `--json`. JSON output is a single stable API object or page and never includes ANSI escapes. `NO_COLOR` and `--color=never` disable styling for human output. Avoid logging enrollment secrets, attach secrets, recovery key files, signed artifact URLs, or relay tickets.
+Cluster administration and durable job observation or mutation support `--json`.
+JSON output is a single API object or page without ANSI escapes. Join and the
+node service run until stopped unless `--service` is selected. `NO_COLOR` and
+`--color=never` disable styling for human output. Avoid logging enrollment
+secrets, attach secrets, recovery key files, signed artifact URLs or relay tickets.
 
 Use `[sources].roots` for stable project source roots so static analysis, navigation, output arity, and type/shape analysis see the same intended project closure. Runtime `addpath` remains supported for session-dynamic resolution, but a dynamically computed path cannot generally become a statically proven compilation target.
 

@@ -335,12 +335,8 @@ impl HostAllocationReceipt {
     pub(crate) fn dynamic_trace_scratch(
         runtime: &RuntimeContext,
     ) -> Result<Option<super::HostTraceScratchPermit>, HostAllocationError> {
-        match ResolvedHostAllocationPolicy::for_runtime(Some(runtime))? {
-            ResolvedHostAllocationPolicy::Unbounded => Ok(None),
-            ResolvedHostAllocationPolicy::Managed { ledger, epoch } => {
-                super::HostTraceScratchPermit::new(runtime, ledger, epoch).map(Some)
-            }
-        }
+        super::HostControlAllocationOwner::capture(runtime)
+            .map(|owner| owner.map(super::HostTraceScratchPermit::new))
     }
 
     /// Inspect the same canonical owner/finite-policy decision used by

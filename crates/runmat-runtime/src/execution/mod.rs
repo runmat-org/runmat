@@ -79,6 +79,7 @@ pub use services::{
     AdmittedCallableReentry, AwaitAction, DeferredCall, DeferredGraphCapture, DeferredGraphProgram,
     DeferredGraphSnapshot, DeferredInvocation, DeferredProgram, DeferredSelectedCodeCapture,
     DurableJobOptions, GraphResultReceipt, RestoredCallableGraph, RuntimeExecutionService,
-    RuntimeExecutionServices, SpmdExecutionMode, SpmdGangCall, SpmdRankResult, TaskRetention,
+    RuntimeExecutionServices, SpmdExecutionMode, SpmdGangCall, SpmdGangResults, SpmdRankResult,
+    TaskRetention,
 };
 pub use storable::validate_storable_value;

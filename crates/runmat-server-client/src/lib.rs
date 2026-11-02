@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod endpoint;
 pub mod execution;
 pub mod package_snapshot;
 pub mod packages;

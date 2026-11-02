@@ -8,22 +8,23 @@ use runmat_runtime::execution::ExecutionServiceError;
 use runmat_value::{SharedJobHandle, Value};
 
 use crate::supervisor::{
-    GraphBatchSubmission, JobSubmissionDisposition, LocalJobState, LocalJobWorkloadKind,
-    LocalSupervisorClient, ProgramBatchSubmission,
+    GraphBatchSubmission, JobSubmissionDisposition, LocalJobWorkloadKind, LocalSupervisorClient,
+    ProgramBatchSubmission,
 };
 
 mod startup;
+mod response;
 
 enum Command {
     Submit {
         program: Box<runmat_execution_artifact::ProgramExecutionRequest>,
         options: runmat_runtime::execution::DurableJobOptions,
-        response: mpsc::Sender<Result<JobHandle, ExecutionServiceError>>,
+        response: mpsc::Sender<Result<SubmittedJob, ExecutionServiceError>>,
     },
     SubmitGraph {
         program: Box<runmat_execution_artifact::GraphExecutionRequest>,
         options: runmat_runtime::execution::DurableJobOptions,
-        response: mpsc::Sender<Result<SubmittedGraphJob, ExecutionServiceError>>,
+        response: mpsc::Sender<Result<SubmittedJob, ExecutionServiceError>>,
     },
     /// One non-blocking inspection. No bridge command waits for task lifetime,
     /// so a long-running job never stalls submissions or cancellation.
@@ -35,12 +36,26 @@ enum Command {
         handle: SharedJobHandle,
         response: mpsc::Sender<Result<LocalJobWorkloadKind, ExecutionServiceError>>,
     },
+    RawOutputAttempt {
+        handle: SharedJobHandle,
+        ordinal: u32,
+        response:
+            mpsc::Sender<Result<crate::supervisor::RawProcessOutputLookup, ExecutionServiceError>>,
+    },
+    RawOutputPage {
+        handle: SharedJobHandle,
+        attempt_id: runmat_execution::identity::AttemptId,
+        cursor: crate::supervisor::RawProcessOutputCursor,
+        response: mpsc::Sender<
+            Result<Option<crate::supervisor::RawProcessOutputPage>, ExecutionServiceError>,
+        >,
+    },
     Cancel {
         handle: SharedJobHandle,
         reason: runmat_execution::CancellationReason,
         response: mpsc::Sender<Result<(), ExecutionServiceError>>,
     },
-    ExpiredGraphReceipts {
+    ExpiredJobReceipts {
         candidates: Vec<JobId>,
         response: mpsc::Sender<Result<Vec<JobId>, ExecutionServiceError>>,
     },
@@ -50,13 +65,13 @@ pub(crate) struct DurableJobBridge {
     commands: mpsc::Sender<Command>,
 }
 
-pub(crate) struct SubmittedGraphJob {
+pub(crate) struct SubmittedJob {
     pub handle: JobHandle,
     pub retain_until_unix_millis: u64,
     pub disposition: JobSubmissionDisposition,
 }
 
-const AWAIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+pub(crate) const AWAIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 impl DurableJobBridge {
     pub(crate) fn start() -> Result<Self, ExecutionServiceError> {
@@ -72,7 +87,7 @@ impl DurableJobBridge {
         &self,
         program: runmat_execution_artifact::ProgramExecutionRequest,
         options: runmat_runtime::execution::DurableJobOptions,
-    ) -> Result<JobHandle, ExecutionServiceError> {
+    ) -> Result<SubmittedJob, ExecutionServiceError> {
         self.request(|response| Command::Submit {
             program: Box::new(program),
             options,
@@ -84,7 +99,7 @@ impl DurableJobBridge {
         &self,
         program: runmat_execution_artifact::GraphExecutionRequest,
         options: runmat_runtime::execution::DurableJobOptions,
-    ) -> Result<SubmittedGraphJob, ExecutionServiceError> {
+    ) -> Result<SubmittedJob, ExecutionServiceError> {
         self.request(|response| Command::SubmitGraph {
             program: Box::new(program),
             options,
@@ -103,18 +118,30 @@ impl DurableJobBridge {
         })
     }
 
-    /// Blocking convenience API. The runtime await path uses `try_await_job`
-    /// and yields Pending instead.
-    pub(crate) fn await_response(
+    pub(crate) fn raw_output_attempt(
         &self,
         handle: SharedJobHandle,
-    ) -> Result<ProgramExecutionResponse, ExecutionServiceError> {
-        loop {
-            if let Some(response) = self.try_response(&handle)? {
-                return Ok(response);
-            }
-            thread::sleep(AWAIT_POLL_INTERVAL);
-        }
+        ordinal: u32,
+    ) -> Result<crate::supervisor::RawProcessOutputLookup, ExecutionServiceError> {
+        self.request(|response| Command::RawOutputAttempt {
+            handle,
+            ordinal,
+            response,
+        })
+    }
+
+    pub(crate) fn raw_output_page(
+        &self,
+        handle: SharedJobHandle,
+        attempt_id: runmat_execution::identity::AttemptId,
+        cursor: crate::supervisor::RawProcessOutputCursor,
+    ) -> Result<Option<crate::supervisor::RawProcessOutputPage>, ExecutionServiceError> {
+        self.request(|response| Command::RawOutputPage {
+            handle,
+            attempt_id,
+            cursor,
+            response,
+        })
     }
 
     pub(crate) fn workload_kind(
@@ -168,11 +195,11 @@ impl DurableJobBridge {
 
     /// Prune only after the supervisor says the job is terminal and past its
     /// exact stored retention deadline (or has already been GC'd).
-    pub(crate) fn expired_graph_receipts(
+    pub(crate) fn expired_job_receipts(
         &self,
         candidates: Vec<JobId>,
     ) -> Result<Vec<JobId>, ExecutionServiceError> {
-        self.request(|response| Command::ExpiredGraphReceipts {
+        self.request(|response| Command::ExpiredJobReceipts {
             candidates,
             response,
         })
@@ -221,7 +248,11 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
             } => {
                 let result = runtime
                     .block_on(submit_original(&client, *program, options))
-                    .map(|(record, _)| record.handle)
+                    .map(|(record, disposition)| SubmittedJob {
+                        handle: record.handle,
+                        retain_until_unix_millis: record.retain_until_unix_millis,
+                        disposition,
+                    })
                     .map_err(service_error);
                 let _ = response.send(result);
             }
@@ -232,7 +263,7 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
             } => {
                 let result = runtime
                     .block_on(submit_original_graph(&client, *program, options))
-                    .map(|(record, disposition)| SubmittedGraphJob {
+                    .map(|(record, disposition)| SubmittedJob {
                         handle: record.handle,
                         retain_until_unix_millis: record.retain_until_unix_millis,
                         disposition,
@@ -262,6 +293,31 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
                     });
                 let _ = response.send(result);
             }
+            Command::RawOutputAttempt {
+                handle,
+                ordinal,
+                response,
+            } => {
+                let result = runtime
+                    .block_on(client.raw_output_attempt(handle.into_wire_unbounded(), ordinal))
+                    .map_err(service_error);
+                let _ = response.send(result);
+            }
+            Command::RawOutputPage {
+                handle,
+                attempt_id,
+                cursor,
+                response,
+            } => {
+                let result = runtime
+                    .block_on(client.raw_output_page(
+                        handle.into_wire_unbounded(),
+                        attempt_id,
+                        cursor,
+                    ))
+                    .map_err(service_error);
+                let _ = response.send(result);
+            }
             Command::Cancel {
                 handle,
                 reason,
@@ -276,7 +332,7 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
                     .map_err(service_error);
                 let _ = response.send(result);
             }
-            Command::ExpiredGraphReceipts {
+            Command::ExpiredJobReceipts {
                 candidates,
                 response,
             } => {
@@ -316,25 +372,14 @@ async fn inspect_job(
     if &attachment.record.handle != handle.as_ref() {
         return Err(ExecutionServiceError::UnknownHandle);
     }
-    match attachment.record.state {
-        LocalJobState::Succeeded => attachment.response.map(Some).ok_or_else(|| {
-            ExecutionServiceError::Failed("durable program completed without a result".into())
-        }),
-        LocalJobState::Failed | LocalJobState::Indeterminate => Err(ExecutionServiceError::Failed(
-            attachment
-                .record
-                .message
-                .unwrap_or_else(|| "durable program failed".into()),
-        )),
-        LocalJobState::Cancelled => Err(ExecutionServiceError::Cancelled),
-        LocalJobState::Queued
-        | LocalJobState::Starting
-        | LocalJobState::Running
-        | LocalJobState::Cancelling => Ok(None),
-    }
+    response::terminal_response(
+        attachment.record.state,
+        attachment.record.message,
+        attachment.response,
+    )
 }
 
-fn decode_outputs(
+pub(crate) fn decode_outputs(
     response: ProgramExecutionResponse,
     requested: usize,
 ) -> Result<Value, ExecutionServiceError> {
@@ -368,7 +413,15 @@ fn decode_outputs(
 }
 
 fn service_error(error: crate::NativeExecutionError) -> ExecutionServiceError {
-    ExecutionServiceError::Failed(error.to_string())
+    if matches!(&error, crate::NativeExecutionError::Cancelled) {
+        return ExecutionServiceError::Cancelled;
+    }
+    runmat_runtime::runtime_error::semantic_error_with_source(
+        "RunMat:parallel:InfrastructureFailure",
+        error.to_string(),
+        error,
+    )
+    .into()
 }
 
 /// Admit the original program into the supervisor's scope; the bridge thread

@@ -18,6 +18,10 @@ use tokio::time::{timeout, Duration};
 use url::Url;
 use uuid::Uuid;
 
+mod organization;
+pub use organization::configured_public_org_id;
+
+use crate::endpoint::ServerEndpoint;
 use crate::public_api;
 
 pub const DEFAULT_SERVER_URL: &str = "https://api.runmat.com";
@@ -158,30 +162,19 @@ pub async fn execute_login(
 }
 
 pub fn resolve_server_url(config: &RemoteConfig, override_value: Option<String>) -> Result<String> {
-    if let Some(value) = override_value {
-        return Ok(value);
-    }
-    if let Ok(value) = env::var("RUNMAT_SERVER_URL") {
-        if !value.is_empty() {
-            return Ok(value);
-        }
-    }
-    if let Some(value) = &config.server_url {
-        return Ok(value.clone());
-    }
-    Ok(DEFAULT_SERVER_URL.to_string())
+    let value = override_value
+        .or_else(|| {
+            env::var("RUNMAT_SERVER_URL")
+                .ok()
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| config.server_url.clone())
+        .unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
+    Ok(ServerEndpoint::parse(&value)?.into())
 }
 
 pub fn resolve_org_id(config: &RemoteConfig, override_value: Option<Uuid>) -> Result<Uuid> {
-    if let Some(value) = override_value {
-        return Ok(value);
-    }
-    if let Ok(value) = env::var("RUNMAT_ORG_ID") {
-        if !value.is_empty() {
-            return parse_org_id_input(&value).context("Invalid RUNMAT_ORG_ID");
-        }
-    }
-    config.org_id.context(
+    organization::configured_org_uuid(config, override_value)?.context(
         "Organization id not configured. Use --org, set RUNMAT_ORG_ID, or run `runmat login --org <id>`."
     )
 }
@@ -295,6 +288,7 @@ pub async fn resolve_auth_token(config: &mut RemoteConfig, server_url: &str) -> 
 }
 
 pub fn build_public_client(server_url: &str, token: &str) -> Result<public_api::Client> {
+    let endpoint = ServerEndpoint::parse(server_url)?;
     let mut headers = HeaderMap::new();
     let mut value = HeaderValue::from_str(&format!("Bearer {token}"))
         .context("Invalid authorization header")?;
@@ -304,7 +298,10 @@ pub fn build_public_client(server_url: &str, token: &str) -> Result<public_api::
         .default_headers(headers)
         .build()
         .context("Failed to build HTTP client")?;
-    Ok(public_api::Client::new_with_client(server_url, client))
+    Ok(public_api::Client::new_with_client(
+        endpoint.as_str(),
+        client,
+    ))
 }
 
 pub fn map_public_error<T: std::fmt::Debug>(err: public_api::Error<T>) -> anyhow::Error {
@@ -316,7 +313,7 @@ fn load_token(server_url: &str, mode: CredentialStoreMode) -> Result<Option<Stri
         CredentialStoreMode::Auto => load_token_auto(server_url),
         CredentialStoreMode::Secure => load_token_keyring(server_url),
         CredentialStoreMode::File => load_token_file(server_url),
-        CredentialStoreMode::Memory => Ok(env::var(memory_token_key(server_url)).ok()),
+        CredentialStoreMode::Memory => Ok(env::var(memory_token_key(server_url)?).ok()),
     }
 }
 
@@ -325,7 +322,7 @@ fn load_refresh_token(server_url: &str, mode: CredentialStoreMode) -> Result<Opt
         CredentialStoreMode::Auto => load_refresh_token_auto(server_url),
         CredentialStoreMode::Secure => load_refresh_token_keyring(server_url),
         CredentialStoreMode::File => load_refresh_token_file(server_url),
-        CredentialStoreMode::Memory => Ok(env::var(memory_refresh_key(server_url)).ok()),
+        CredentialStoreMode::Memory => Ok(env::var(memory_refresh_key(server_url)?).ok()),
     }
 }
 
@@ -335,7 +332,7 @@ fn store_token(server_url: &str, token: &str, mode: CredentialStoreMode) -> Resu
         CredentialStoreMode::Secure => store_token_keyring(server_url, token),
         CredentialStoreMode::File => store_token_file(server_url, token),
         CredentialStoreMode::Memory => {
-            unsafe { env::set_var(memory_token_key(server_url), token) };
+            unsafe { env::set_var(memory_token_key(server_url)?, token) };
             Ok(())
         }
     }
@@ -347,7 +344,7 @@ fn store_refresh_token(server_url: &str, token: &str, mode: CredentialStoreMode)
         CredentialStoreMode::Secure => store_refresh_token_keyring(server_url, token),
         CredentialStoreMode::File => store_refresh_token_file(server_url, token),
         CredentialStoreMode::Memory => {
-            unsafe { env::set_var(memory_refresh_key(server_url), token) };
+            unsafe { env::set_var(memory_refresh_key(server_url)?, token) };
             Ok(())
         }
     }
@@ -359,7 +356,7 @@ fn clear_refresh_token(server_url: &str, mode: CredentialStoreMode) -> Result<()
         CredentialStoreMode::Secure => clear_refresh_token_keyring(server_url),
         CredentialStoreMode::File => clear_refresh_token_file(server_url),
         CredentialStoreMode::Memory => {
-            unsafe { env::remove_var(memory_refresh_key(server_url)) };
+            unsafe { env::remove_var(memory_refresh_key(server_url)?) };
             Ok(())
         }
     }
@@ -368,7 +365,7 @@ fn clear_refresh_token(server_url: &str, mode: CredentialStoreMode) -> Result<()
 fn token_file_path(server_url: &str) -> Result<PathBuf> {
     let path = config_path()?;
     let parent = path.parent().context("Missing config directory")?;
-    Ok(parent.join(format!("token-{}.json", safe_server_key(server_url))))
+    Ok(parent.join(format!("token-{}.json", server_credential_key(server_url)?)))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -559,34 +556,35 @@ fn clear_token_keyring(server_url: &str) -> Result<()> {
     }
 }
 
-fn safe_server_key(server_url: &str) -> String {
-    server_url
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-        .collect()
+fn server_credential_key(server_url: &str) -> Result<String> {
+    let endpoint = ServerEndpoint::parse(server_url)?;
+    let mut digest = Sha256::new();
+    digest.update(b"runmat.server-credential.v1\0");
+    digest.update(endpoint.as_str().as_bytes());
+    Ok(hex::encode(digest.finalize()))
 }
 
-fn memory_token_key(server_url: &str) -> String {
-    format!("RUNMAT_MEMORY_TOKEN_{}", safe_server_key(server_url))
+fn memory_token_key(server_url: &str) -> Result<String> {
+    Ok(format!(
+        "RUNMAT_MEMORY_TOKEN_{}",
+        server_credential_key(server_url)?
+    ))
 }
 
-fn memory_refresh_key(server_url: &str) -> String {
-    format!("RUNMAT_MEMORY_REFRESH_{}", safe_server_key(server_url))
+fn memory_refresh_key(server_url: &str) -> Result<String> {
+    Ok(format!(
+        "RUNMAT_MEMORY_REFRESH_{}",
+        server_credential_key(server_url)?
+    ))
 }
 
 fn keyring_entry(server_url: &str) -> Result<keyring::Entry> {
-    let account = Url::parse(server_url)
-        .ok()
-        .and_then(|url| url.host_str().map(|host| host.to_string()))
-        .unwrap_or_else(|| server_url.to_string());
+    let account = format!("server:{}:access", server_credential_key(server_url)?);
     keyring::Entry::new("runmat", &account).context("Failed to open keyring")
 }
 
 fn keyring_refresh_entry(server_url: &str) -> Result<keyring::Entry> {
-    let account = Url::parse(server_url)
-        .ok()
-        .and_then(|url| url.host_str().map(|host| format!("{host}:refresh")))
-        .unwrap_or_else(|| format!("{}:refresh", server_url));
+    let account = format!("server:{}:refresh", server_credential_key(server_url)?);
     keyring::Entry::new("runmat", &account).context("Failed to open keyring")
 }
 
@@ -952,6 +950,41 @@ async fn refresh_access_token(
 #[cfg(test)]
 mod public_id_tests {
     use super::*;
+    #[test]
+    fn credential_namespaces_use_the_complete_canonical_endpoint() {
+        let canonical = server_credential_key("https://example.com").unwrap();
+        assert_eq!(
+            canonical,
+            server_credential_key("https://EXAMPLE.com:443/").unwrap()
+        );
+        let distinct = [
+            "https://example.com:8443",
+            "https://example.com/tenant-a",
+            "https://example.com/tenant_a",
+            "https://example-com",
+            "http://localhost:3000",
+            "https://localhost:3000",
+        ]
+        .map(|url| server_credential_key(url).unwrap());
+        let keys: std::collections::HashSet<_> = distinct.iter().collect();
+        assert_eq!(keys.len(), distinct.len());
+        assert!(!keys.contains(&canonical));
+        assert_ne!(
+            memory_token_key("https://example.com").unwrap(),
+            memory_refresh_key("https://example.com").unwrap()
+        );
+        // No real keychain or process environment is read or changed here.
+        for invalid in [
+            "http://example.com",
+            "https://user:secret@example.com",
+            "https://example.com?token=value",
+            "not a URL",
+        ] {
+            assert!(server_credential_key(invalid).is_err());
+            assert!(build_public_client(invalid, "test-key").is_err());
+        }
+    }
+
     #[test]
     fn canonical_namespace_and_legacy_config_have_one_wire_identity() {
         let uuid = Uuid::from_u128(42);

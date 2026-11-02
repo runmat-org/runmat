@@ -105,24 +105,12 @@ pub(crate) fn validate_scratch_bundles(
     // selected bundle, into parent-owned attempt scratch before executing.
     // This is an input floor, not an OS filesystem quota or a prediction of
     // arbitrary foreign-code writes.
-    let bytes = bundles.iter().flatten().try_fold(0u64, |total, bundle| {
-        bundle
-            .objects
-            .iter()
-            .filter(|object| {
-                object.descriptor.namespace
-                    == runmat_execution_artifact::ObjectNamespace::ForeignArtifact
-            })
-            .try_fold(total, |sum, object| {
-                sum.checked_add(u64::try_from(object.bytes.len()).map_err(invalid)?)
-                    .ok_or_else(|| invalid("Graph materialized scratch size overflows"))
-            })
-    })?;
-    if bytes > task.request.resources.scratch_bytes {
-        return Err(invalid(
-            "original task scratch grant is below its authenticated foreign-materialization floor",
-        ));
-    }
+    let bytes = crate::attempt_scratch::materialized_bytes(bundles)?;
+    crate::attempt_scratch::remaining_bytes(
+        task.request.resources.scratch_bytes,
+        bytes,
+        task.request.console,
+    )?;
     Ok(())
 }
 fn invalid(error: impl std::fmt::Display) -> NativeExecutionError {
