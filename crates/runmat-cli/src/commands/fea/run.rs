@@ -226,6 +226,10 @@ fn print_local_sweep(
     print_fea_sweep_result(sweep_id, &case_ids, &materialized, json)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "FEA alpha execution-context structure is deferred under the approved 1.0 hardening scope"
+)]
 async fn execute_sweep_remotely(
     source: &NativeCheckedFeaSource,
     sweep: ResolvedAnalysisSweep,

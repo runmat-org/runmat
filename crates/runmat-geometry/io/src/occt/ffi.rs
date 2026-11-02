@@ -718,31 +718,6 @@ fn lock_cancel_tokens(
     })
 }
 
-#[cfg(test)]
-mod control_tests;
-
-#[cfg(test)]
-mod cancellation_tests {
-    use super::*;
-    use std::sync::Arc;
-
-    #[test]
-    fn probe_runs_outside_registry_lock_and_registration_drop_removes_it() {
-        let probe: CancellationProbe = Arc::new(|| {
-            drop(cancel_tokens().lock().unwrap());
-            true
-        });
-        let registration = OcctCancelTokenRegistration::new(Some(probe.clone()));
-        let id = registration.id();
-        assert_ne!(id, 0);
-        assert!(occt_import_cancelled(id));
-        assert_eq!(Arc::strong_count(&probe), 2);
-        drop(registration);
-        assert_eq!(Arc::strong_count(&probe), 1);
-        assert!(!occt_import_cancelled(id));
-    }
-}
-
 fn occt_validate_step_source_units(
     bytes: &[u8],
     contexts: &[bridge::OcctStepContextUnitPayload],
@@ -773,4 +748,29 @@ fn occt_validate_step_source_units(
         });
     }
     crate::source_units::verify_step_context_units(bytes, &checked, require_declared)
+}
+
+#[cfg(test)]
+mod control_tests;
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn probe_runs_outside_registry_lock_and_registration_drop_removes_it() {
+        let probe: CancellationProbe = Arc::new(|| {
+            drop(cancel_tokens().lock().unwrap());
+            true
+        });
+        let registration = OcctCancelTokenRegistration::new(Some(probe.clone()));
+        let id = registration.id();
+        assert_ne!(id, 0);
+        assert!(occt_import_cancelled(id));
+        assert_eq!(Arc::strong_count(&probe), 2);
+        drop(registration);
+        assert_eq!(Arc::strong_count(&probe), 1);
+        assert!(!occt_import_cancelled(id));
+    }
 }

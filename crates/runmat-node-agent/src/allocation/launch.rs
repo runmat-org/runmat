@@ -1,18 +1,22 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use runmat_execution_transport_native::control::DriverBootstrapCredential;
 use runmat_execution_transport_native::control::NodeAllocation;
 use runmat_execution_transport_native::control::WorkerBootstrapCredential;
 use runmat_process_host::{
-    clock::{observe_monotonic, HostMonotonicReading},
+    clock::observe_monotonic,
     environment::{EnvironmentAllowlist, EnvironmentPolicy},
     ChildLifetime, ChildProcess, HiddenMode, HostCommand, ProcessSpawnEvidence, ResourceLimits,
     StdioPolicy,
 };
 
-use super::Sandbox;
 use crate::{AgentError, AgentResult};
+
+#[path = "launch/authority.rs"]
+mod authority;
+use authority::ProcessLaunchAuthority;
+pub use authority::{AllocationLaunchContext, DriverClockScope, WorkerRetirementScope};
 
 #[derive(Default)]
 pub struct AllocationProcesses {
@@ -34,32 +38,6 @@ struct ManagedProcess {
     retirement_prepared: bool,
 }
 
-#[derive(Clone, Debug)]
-pub struct DriverClockScope {
-    pub run_id: String,
-    pub allocation_lease_id: String,
-    pub allocation_fence: u64,
-    pub process_launch_nonce: [u8; 16],
-    pub clock_domain_nonce: [u8; 16],
-    pub request_directory: PathBuf,
-    pub receipt_directory: PathBuf,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WorkerRetirementScope {
-    pub run_id: String,
-    pub allocation_lease_id: String,
-    pub allocation_fencing_token: u64,
-    pub driver_fencing_token: u64,
-    pub process_id: u32,
-    pub process_launch_nonce: [u8; 16],
-    pub clock_domain_nonce: [u8; 16],
-    pub journal_directory: PathBuf,
-    pub retired_monotonic: Option<HostMonotonicReading>,
-    pub retired_at_unix_millis: u64,
-}
-
 struct WorkerJournalLaunch {
     process_launch_nonce: [u8; 16],
     clock_domain_nonce: [u8; 16],
@@ -69,16 +47,19 @@ struct WorkerJournalLaunch {
 impl AllocationProcesses {
     pub async fn launch_worker(
         &mut self,
-        runmat_executable: &Path,
-        allocation: &NodeAllocation,
-        sandbox: &Sandbox,
-        server_url: &str,
+        context: AllocationLaunchContext<'_>,
         bootstrap: &WorkerBootstrapCredential,
         host: &runmat_execution::host::ExecutionHostInventory,
         spawn_evidence: &ProcessSpawnEvidence,
-        clock_domain_nonce: [u8; 16],
     ) -> AgentResult<u32> {
         use base64::Engine as _;
+        let AllocationLaunchContext {
+            runmat_executable,
+            allocation,
+            sandbox,
+            server_url,
+            clock_domain_nonce,
+        } = context;
 
         if self.children.contains_key(&allocation.id) {
             return Err(AgentError::AllocationRejected(
@@ -214,15 +195,15 @@ impl AllocationProcesses {
             .spawn(
                 allocation,
                 command,
-                "worker",
-                Some(bootstrap),
-                Some(spawn_evidence),
-                Some(WorkerJournalLaunch {
-                    process_launch_nonce,
-                    clock_domain_nonce,
-                    directory: journal_directory.clone(),
-                }),
-                None,
+                ProcessLaunchAuthority::Worker {
+                    bootstrap,
+                    spawn_evidence,
+                    journal: WorkerJournalLaunch {
+                        process_launch_nonce,
+                        clock_domain_nonce,
+                        directory: journal_directory.clone(),
+                    },
+                },
             )
             .await;
         if result.is_err() && !spawn_evidence.is_unverified() {
@@ -235,15 +216,18 @@ impl AllocationProcesses {
 
     pub async fn launch_driver(
         &mut self,
-        runmat_executable: &Path,
-        allocation: &NodeAllocation,
-        sandbox: &Sandbox,
-        server_url: &str,
+        context: AllocationLaunchContext<'_>,
         bootstrap: &DriverBootstrapCredential,
-        clock_domain_nonce: [u8; 16],
         node_identity_fingerprint: &str,
     ) -> AgentResult<u32> {
         use base64::Engine as _;
+        let AllocationLaunchContext {
+            runmat_executable,
+            allocation,
+            sandbox,
+            server_url,
+            clock_domain_nonce,
+        } = context;
         if self.children.contains_key(&allocation.id) {
             return Err(AgentError::AllocationRejected(
                 "allocation already has a driver".to_string(),
@@ -356,31 +340,38 @@ impl AllocationProcesses {
             request_directory,
             receipt_directory,
         };
-        self.spawn(allocation, command, "driver", None, None, None, Some(clock))
-            .await
+        self.spawn(
+            allocation,
+            command,
+            ProcessLaunchAuthority::Driver { clock },
+        )
+        .await
     }
 
     async fn spawn(
         &mut self,
         allocation: &NodeAllocation,
         command: HostCommand,
-        process_kind: &str,
-        worker: Option<&WorkerBootstrapCredential>,
-        spawn_evidence: Option<&ProcessSpawnEvidence>,
-        journal: Option<WorkerJournalLaunch>,
-        driver_clock: Option<DriverClockScope>,
+        authority: ProcessLaunchAuthority<'_>,
     ) -> AgentResult<u32> {
-        let child = match spawn_evidence {
-            Some(evidence) => command.spawn_observed(evidence).await?,
-            None => command.spawn().await?,
+        let child = match &authority {
+            ProcessLaunchAuthority::Worker { spawn_evidence, .. } => {
+                command.spawn_observed(spawn_evidence).await?
+            }
+            ProcessLaunchAuthority::Driver { .. } => command.spawn().await?,
         };
         let process_id = child.id().ok_or_else(|| {
+            let process_kind = match &authority {
+                ProcessLaunchAuthority::Worker { .. } => "worker",
+                ProcessLaunchAuthority::Driver { .. } => "driver",
+            };
             AgentError::AllocationRejected(format!("{process_kind} process has no id"))
         })?;
-        let worker_retirement =
-            worker
-                .zip(journal)
-                .map(|(bootstrap, journal)| WorkerRetirementScope {
+        let (worker_retirement, driver_clock) = match authority {
+            ProcessLaunchAuthority::Worker {
+                bootstrap, journal, ..
+            } => (
+                Some(WorkerRetirementScope {
                     run_id: bootstrap.run_id.clone(),
                     allocation_lease_id: bootstrap.allocation_lease_id.clone(),
                     allocation_fencing_token: bootstrap.allocation_fencing_token,
@@ -391,7 +382,11 @@ impl AllocationProcesses {
                     journal_directory: journal.directory,
                     retired_monotonic: None,
                     retired_at_unix_millis: 0,
-                });
+                }),
+                None,
+            ),
+            ProcessLaunchAuthority::Driver { clock } => (None, Some(clock)),
+        };
         self.children.insert(
             allocation.id.clone(),
             ManagedProcess {

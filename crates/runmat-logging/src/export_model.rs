@@ -583,7 +583,7 @@ mod tests {
         assert_eq!(span.span_id, log.span_id);
         assert_eq!(log.trace_id.len(), 16);
         assert!(log.trace_id.iter().any(|byte| *byte != 0));
-        assert_eq!(partial_result(0, true).unwrap(), true);
+        assert!(partial_result(0, true).unwrap());
         assert!(partial_result(1, true).is_err());
         assert!(partial_result(-1, false).is_err());
         let mut headers = crate::otel::StartupHeaders::default();

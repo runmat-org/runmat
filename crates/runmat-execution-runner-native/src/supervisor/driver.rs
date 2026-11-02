@@ -80,7 +80,7 @@ pub async fn execute_graph_batch(
 ) -> WorkerResponse {
     let mut request = submission.request;
     request.job_id = Some(job_id);
-    crate::worker::execute(crate::protocol::WorkerRequest::Graph(request)).await
+    crate::worker::execute(crate::protocol::WorkerRequest::graph(request)).await
 }
 
 /// A retained Graph grant uses the ordinary durable assignment/report lifecycle

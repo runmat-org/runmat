@@ -268,8 +268,7 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     model.response_spectra.clear();
     model.random_excitations.clear();
     model.frame = CoordinateFrame::Global;
-    model.materials[0].mass_density_kg_per_m3 =
-        (Some(1.0)).map(runmat_types::physical::MassDensity::new);
+    model.materials[0].mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(1.0));
     model.materials[0].fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
         dynamic_viscosity: DynamicViscosity::new(1.0),
     });

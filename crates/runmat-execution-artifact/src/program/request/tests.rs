@@ -835,6 +835,15 @@ fn borrowed_request_preserves_original_payload_wire_identity_and_cold_decode() {
     );
     response.validate_against(&borrowed).unwrap();
     response.validate_against(&cold).unwrap();
+    let argument_owner = owned.arguments.as_ptr();
+    let worker = WorkerProgramRequest::direct(owned);
+    let WorkerProgramRequest::Direct(direct) = &worker else {
+        unreachable!("Direct request constructor");
+    };
+    assert_eq!(direct.arguments.as_ptr(), argument_owner);
+    assert_eq!(serde_json::to_vec(&worker).unwrap(), bytes);
+    let cold_worker: WorkerProgramRequest = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(cold_worker, worker);
 }
 
 #[test]

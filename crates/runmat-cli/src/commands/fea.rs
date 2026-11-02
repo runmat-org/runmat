@@ -103,6 +103,10 @@ impl runmat_runtime::context::RuntimeAnalysisService for NativeAnalysisService {
 
 /// Runs a `.fea` document with this executable's public `fea run` command, then reads the
 /// authenticated publication it wrote. The study runs exactly as it does from a shell.
+#[expect(
+    clippy::result_large_err,
+    reason = "RuntimeAnalysisService requires the canonical owned RuntimeError; changing its storage belongs to runmat-runtime"
+)]
 fn run_document_through_cli(
     path: &std::path::Path,
 ) -> Result<AnalysisStudyRunData, runmat_runtime::RuntimeError> {

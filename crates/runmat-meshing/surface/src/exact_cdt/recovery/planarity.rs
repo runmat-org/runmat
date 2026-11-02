@@ -251,7 +251,7 @@ fn sampled_checkpoint(
     pslg: &ExactFacePslg,
 ) -> Result<(), ExactFaceDelaunayError> {
     *probes = probes.wrapping_add(1);
-    if *probes % 256 == 0 {
+    if (*probes).is_multiple_of(256) {
         checkpoint(cancellation, pslg)
     } else {
         Ok(())

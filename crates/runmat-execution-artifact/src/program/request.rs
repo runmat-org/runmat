@@ -45,8 +45,8 @@ pub use graph::{
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum WorkerProgramRequest {
-    Direct(ProgramExecutionRequest),
-    Graph(GraphExecutionRequest),
+    Direct(Box<ProgramExecutionRequest>),
+    Graph(Box<GraphExecutionRequest>),
 }
 
 /// The encrypted remote `program` object. Direct V7 keeps its historical
@@ -94,6 +94,14 @@ pub fn admit_remote_program_object_bytes(bytes: &[u8]) -> ArtifactResult<()> {
 }
 
 impl WorkerProgramRequest {
+    pub fn direct(request: ProgramExecutionRequest) -> Self {
+        Self::Direct(Box::new(request))
+    }
+
+    pub fn graph(request: GraphExecutionRequest) -> Self {
+        Self::Graph(Box::new(request))
+    }
+
     pub fn validate(&self) -> ArtifactResult<()> {
         match self {
             Self::Direct(request) => request.validate(),

@@ -204,7 +204,7 @@ fn prepared_program(
                 request: invocations
                     .map(|requests| requests[index].clone())
                     .unwrap_or_else(|| {
-                        WorkerProgramRequest::Direct(ProgramExecutionRequest {
+                        WorkerProgramRequest::direct(ProgramExecutionRequest {
                             console: descriptor.console,
                             environment: descriptor.environment.clone(),
                             schema_version:

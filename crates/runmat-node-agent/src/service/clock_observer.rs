@@ -91,10 +91,7 @@ fn pending<T: serde::de::DeserializeOwned>(directory: &Path) -> AgentResult<Vec<
         .into_iter()
         .take(MAX_CLOCK_HEARTBEAT_ITEMS)
         .map(|path| {
-            if !path
-                .extension()
-                .is_some_and(|extension| extension == "json")
-            {
+            if path.extension().is_none_or(|extension| extension != "json") {
                 return Err(reject("clock observation has an unknown owned filename"));
             }
             if !std::fs::symlink_metadata(&path)?.file_type().is_file() {

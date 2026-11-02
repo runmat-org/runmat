@@ -484,8 +484,65 @@ mod tests {
         assert!(plan.files.iter().all(|file| file.path.is_absolute()));
         let rendered = serde_json::to_string(&plan).unwrap();
         assert!(rendered.contains(SERVICE_NAME));
-        assert!(rendered.contains("cluster"));
-        assert!(rendered.contains("join"));
+        #[cfg(target_os = "macos")]
+        {
+            let plist = directory.path().join("node-agent.plist");
+            std::fs::write(&plist, &plan.files[1].content).unwrap();
+            let parsed = Command::new("/usr/bin/plutil")
+                .args(["-extract", "ProgramArguments", "json", "-o", "-"])
+                .arg(plist)
+                .output()
+                .unwrap();
+            assert!(parsed.status.success(), "{:?}", parsed);
+            let arguments: Vec<String> = serde_json::from_slice(&parsed.stdout).unwrap();
+            assert_eq!(
+                arguments,
+                [
+                    executable.to_str().unwrap(),
+                    "node",
+                    "--node-config",
+                    "/Library/Application Support/RunMat/node-agent.json",
+                    "run",
+                ]
+            );
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let starts: Vec<_> = plan.files[1]
+                .content
+                .lines()
+                .filter(|line| line.starts_with("ExecStart="))
+                .collect();
+            assert_eq!(
+                starts,
+                [format!(
+                    "ExecStart=\"{}\" node --node-config \"/etc/runmat/node-agent.json\" run",
+                    executable.display()
+                )]
+            );
+        }
+        #[cfg(windows)]
+        {
+            let create = &plan.commands[2];
+            assert_eq!(create.program, "sc.exe");
+            assert_eq!(
+                create.arguments,
+                [
+                    "create".to_string(),
+                    "RunMatNodeAgent".to_string(),
+                    "binPath=".to_string(),
+                    format!(
+                        "\"{}\" node --node-config \"{}\" windows-service-run",
+                        executable.display(),
+                        windows_config_path().unwrap().display()
+                    ),
+                    "start=".to_string(),
+                    "auto".to_string(),
+                    "DisplayName=".to_string(),
+                    "RunMat Execution Node Agent".to_string(),
+                ]
+            );
+        }
         assert!(rendered.contains("runmat"));
         assert!(!rendered.contains("runmat-node-agent --"));
         assert!(!rendered.contains("credential"));

@@ -9,6 +9,12 @@ use crate::{ExactFaceGeometry, ExactFacePslg};
 use runmat_geometry_core::{GeometryAllocationScope, GeometryEvaluationControl};
 use runmat_meshing_core::quality::spatial_index::SpatialEntry;
 
+type CandidateMetric<'a> = dyn Fn(
+        &ExactFaceRefinementCandidate,
+        [f64; 2],
+    ) -> Result<crate::ParametricMetricTensor, ExactFaceRefinementError>
+    + 'a;
+
 /// Selects a deterministic maximal set of refinement cavities that cannot touch through a
 /// triangle vertex. Inserting circumcenters from adjacent triangles against one stale topology
 /// can manufacture arbitrarily short edges even when every individual candidate is valid.
@@ -44,10 +50,7 @@ pub(crate) fn independent_candidate_batch_in_metric(
     pslg: &ExactFacePslg,
     minimum_candidate_separation: f64,
     control: Option<&dyn GeometryEvaluationControl>,
-    metric_at: &dyn Fn(
-        &ExactFaceRefinementCandidate,
-        [f64; 2],
-    ) -> Result<crate::ParametricMetricTensor, ExactFaceRefinementError>,
+    metric_at: &CandidateMetric<'_>,
 ) -> Result<Vec<ExactFaceRefinementCandidate>, ExactFaceRefinementError> {
     checkpoint(control, &geometry.source_face_id)?;
     let storage = control.map(GeometryAllocationScope::new);

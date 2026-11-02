@@ -79,16 +79,16 @@ pub(crate) fn resolve_into(
         );
     }
     let mut stride = 1usize;
-    for axis in 0..rank {
+    for (axis, output_stride) in strides.iter_mut().enumerate().take(rank) {
         let input_extent = extent(axis);
-        strides[axis] = 0;
+        *output_stride = 0;
         if input_extent != 1 {
             let logical_stride = match (transpose, axis) {
                 (Some(info), 0) => info.base_rows,
                 (Some(_), 1) => 1,
                 _ => stride,
             };
-            strides[axis] = u32::try_from(logical_stride)
+            *output_stride = u32::try_from(logical_stride)
                 .map_err(|_| anyhow!("fusion input stride exceeds GPU index limit"))?;
         }
         stride = stride

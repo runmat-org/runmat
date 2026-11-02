@@ -505,6 +505,16 @@ fn digest(byte: u8) -> StableDigest {
     StableDigest::from_bytes([byte; 32])
 }
 
+/// Execution ceilings the fixture evidence was produced under.
+pub const FIXTURE_CEILINGS: MeshingExecutionCeilings = MeshingExecutionCeilings {
+    maximum_memory_bytes: 1_000_000,
+    maximum_scratch_bytes: 1_000_000,
+    maximum_wall_time_ms: 10_000,
+    maximum_artifact_bytes: 1_000_000,
+    maximum_search_work: 10_000,
+    maximum_iterations: 10_000,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,13 +533,3 @@ mod tests {
             .all(|element| element.node_ids.len() == 10));
     }
 }
-
-/// Execution ceilings the fixture evidence was produced under.
-pub const FIXTURE_CEILINGS: MeshingExecutionCeilings = MeshingExecutionCeilings {
-    maximum_memory_bytes: 1_000_000,
-    maximum_scratch_bytes: 1_000_000,
-    maximum_wall_time_ms: 10_000,
-    maximum_artifact_bytes: 1_000_000,
-    maximum_search_work: 10_000,
-    maximum_iterations: 10_000,
-};

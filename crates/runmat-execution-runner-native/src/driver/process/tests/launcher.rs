@@ -125,7 +125,7 @@ fn request() -> WorkerRequest {
         b"not-executed".to_vec(),
     )
     .expect("program artifact");
-    WorkerRequest::Direct(runmat_execution_artifact::ProgramExecutionRequest {
+    WorkerRequest::direct(runmat_execution_artifact::ProgramExecutionRequest {
         schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,

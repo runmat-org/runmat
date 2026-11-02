@@ -82,6 +82,13 @@ pub(crate) struct ObservedAttempt {
     retirement: LocalRetirementEvidence,
 }
 
+/// Mutably borrowed evidence stays with its original attempt; no snapshot is copied.
+struct ProcessOutcome<'a> {
+    termination: &'a mut AttemptExecutionTermination,
+    console: &'a mut Option<runmat_execution::console::ConsoleTranscript>,
+    retirement: &'a mut LocalRetirementEvidence,
+}
+
 pub(crate) async fn execute_attempt(
     provider: &NativeProcessProvider<'_>,
     request: &AttemptRequest,
@@ -103,9 +110,11 @@ pub(crate) async fn execute_attempt(
                     program,
                     control,
                     &meters,
-                    &mut termination,
-                    &mut console,
-                    &mut retirement,
+                    ProcessOutcome {
+                        termination: &mut termination,
+                        console: &mut console,
+                        retirement: &mut retirement,
+                    },
                 )
                 .await
             }
@@ -320,10 +329,13 @@ async fn run_process(
     request: WorkerLaunchRequest,
     control: &dyn ProcessControl,
     meters: &TransportMeters,
-    termination: &mut AttemptExecutionTermination,
-    console: &mut Option<runmat_execution::console::ConsoleTranscript>,
-    retirement: &mut LocalRetirementEvidence,
+    outcome: ProcessOutcome<'_>,
 ) -> Result<WorkerResponse, String> {
+    let ProcessOutcome {
+        termination,
+        console,
+        retirement,
+    } = outcome;
     if control.cancellation().load(Ordering::Acquire) {
         return Err("execution was cancelled before process launch".into());
     }
@@ -399,13 +411,10 @@ async fn run_process(
                         primary: failure,
                         cleanup: Box::new(cleanup),
                     };
-                    return Err(format!(
-                        "{}; {combined}",
-                        result
-                            .as_ref()
-                            .err()
-                            .expect("setup failure remains an error")
-                    ));
+                    let Err(primary) = result.as_ref() else {
+                        unreachable!("setup failure remains an error");
+                    };
+                    return Err(format!("{primary}; {combined}"));
                 }
             }
             return result;

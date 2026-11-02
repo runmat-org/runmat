@@ -53,6 +53,10 @@ impl SerialGeometryMeshingError {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "FEA alpha execution-context structure is deferred under the approved 1.0 hardening scope"
+)]
 pub fn materialize_and_mesh_serial<S: CacheImport + CacheExport>(
     program: &ProgramExecutionRequest,
     store: &mut S,

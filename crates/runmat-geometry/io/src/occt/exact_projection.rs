@@ -400,7 +400,7 @@ fn record_names(
     if authored.is_empty() {
         return;
     }
-    let names = entity_names.entry(id.clone()).or_insert_with(Vec::new);
+    let names = entity_names.entry(id.clone()).or_default();
     for name in authored {
         if !names.contains(name) {
             names.push(name.clone());

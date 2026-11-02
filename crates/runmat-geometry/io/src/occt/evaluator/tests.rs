@@ -1564,7 +1564,7 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
     else {
         panic!("box mass properties must be kernel validated")
     };
-    properties.volume_m3 = properties.volume_m3 + runmat_geometry_core::physical::Volume::new(1.0);
+    properties.volume_m3 += runmat_geometry_core::physical::Volume::new(1.0);
     assert_eq!(
         OcctExactEvaluator::new(&corrupt_mass).err().unwrap().kind,
         GeometryEvaluationErrorKind::InconsistentGeometry

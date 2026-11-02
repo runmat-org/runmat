@@ -100,8 +100,7 @@ pub(crate) fn recover_validated_face_segments(
                                     / length_squared;
                                 let across = offset[0] * direction[1] - offset[1] * direction[0];
                                 !target.contains(&(*index as u32))
-                                    && along >= -1e-6
-                                    && along <= 1.0 + 1e-6
+                                    && (-1e-6..=1.0 + 1e-6).contains(&along)
                                     && across.abs() <= 1e-6 * length_squared
                             })
                             .map(|(index, vertex)| {

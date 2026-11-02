@@ -89,9 +89,10 @@ fn malformed_shader_is_not_deferred_to_device_creation() {
     );
     #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     {
-        let error = crate::backend::wgpu::shader_compilation::spirv::compile("not WGSL", None)
-            .err()
-            .expect("malformed SPIR-V preparation source rejects");
+        let Err(error) = crate::backend::wgpu::shader_compilation::spirv::compile("not WGSL", None)
+        else {
+            panic!("malformed SPIR-V preparation source rejects");
+        };
         assert!(error.chain().any(|cause| cause
             .downcast_ref::<naga::front::wgsl::ParseError>()
             .is_some()));
@@ -155,4 +156,94 @@ fn every_restricted_intrinsic_and_shape_is_legalized() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn boxed_validation_error_retains_exact_funding_and_original_cause() {
+    use runmat_execution::resource::{
+        ProviderHostMetadataAdmission, ProviderHostMetadataError, RetainedHostAllocationClaim,
+        RetainedHostViewGrant,
+    };
+    use std::error::Error as _;
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    };
+
+    #[derive(Debug)]
+    struct Admission {
+        live: Arc<AtomicU64>,
+        peak: AtomicU64,
+        limit: AtomicU64,
+    }
+    #[derive(Debug)]
+    struct Funding {
+        live: Arc<AtomicU64>,
+        bytes: u64,
+    }
+    impl Drop for Funding {
+        fn drop(&mut self) {
+            self.live.fetch_sub(self.bytes, Ordering::SeqCst);
+        }
+    }
+    impl ProviderHostMetadataAdmission for Admission {
+        fn claim_view(
+            &self,
+            _: u64,
+        ) -> Result<Box<dyn RetainedHostViewGrant>, ProviderHostMetadataError> {
+            Err(ProviderHostMetadataError::OwnerFailure)
+        }
+        fn claim_record(
+            &self,
+            bytes: u64,
+        ) -> Result<Arc<dyn RetainedHostAllocationClaim>, ProviderHostMetadataError> {
+            let previous = self
+                .live
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |live| {
+                    live.checked_add(bytes)
+                        .filter(|&next| next <= self.limit.load(Ordering::SeqCst))
+                })
+                .map_err(|_| ProviderHostMetadataError::ExceedsCapacity)?;
+            self.peak.fetch_max(previous + bytes, Ordering::SeqCst);
+            Ok(Arc::new(Funding {
+                live: self.live.clone(),
+                bytes,
+            }))
+        }
+    }
+    let bytes = std::mem::size_of::<naga::WithSpan<naga::valid::ValidationError>>() as u64;
+    let owner = Admission {
+        live: Arc::new(AtomicU64::new(0)),
+        peak: AtomicU64::new(0),
+        limit: AtomicU64::new(bytes - 1),
+    };
+    let invalid = "@compute @workgroup_size(0) fn main() {}";
+    assert!(matches!(
+        prepare(invalid, Some(&owner)),
+        Err(PreparationError::Buffer(
+            crate::wgsl::host_buffers::Error::Metadata(ProviderHostMetadataError::ExceedsCapacity)
+        ))
+    ));
+    assert_eq!(owner.live.load(Ordering::SeqCst), 0);
+    owner.limit.store(bytes, Ordering::SeqCst);
+    let Err(error) = prepare(invalid, Some(&owner)) else {
+        panic!("invalid workgroup size must fail validation");
+    };
+    assert!(matches!(&error, PreparationError::Validate(_)));
+    assert_eq!(owner.live.load(Ordering::SeqCst), bytes);
+    assert!(error
+        .source()
+        .and_then(|cause| cause.source())
+        .and_then(|cause| cause.downcast_ref::<naga::WithSpan<naga::valid::ValidationError>>())
+        .is_some());
+    drop(error);
+    assert_eq!(owner.live.load(Ordering::SeqCst), 0);
+    let valid = "fn f() -> f32 { return 1.0; }";
+    let prepared = prepare(valid, Some(&owner)).unwrap();
+    // Successful validation releases the unused failure reservation. Only the
+    // independently charged returned source remains; no phantom box is held.
+    assert_eq!(owner.live.load(Ordering::SeqCst), valid.len() as u64);
+    assert_eq!(owner.peak.load(Ordering::SeqCst), bytes);
+    drop(prepared);
+    assert_eq!(owner.live.load(Ordering::SeqCst), 0);
 }

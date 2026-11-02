@@ -281,8 +281,7 @@ impl TaskCompletion {
         if output.len() == output.capacity() {
             let capacity = output
                 .capacity()
-                .checked_mul(2)
-                .unwrap_or(usize::MAX)
+                .saturating_mul(2)
                 .max(1)
                 .min(usize::from(u16::MAX));
             if capacity <= output.len() {

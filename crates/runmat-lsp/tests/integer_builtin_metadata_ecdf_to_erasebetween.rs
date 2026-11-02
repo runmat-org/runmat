@@ -162,7 +162,8 @@ fn matlab_mode_keeps_ecdf_to_erasebetween_extension_metadata_visible() {
         );
     }
 
-    for name in ["eq"] {
+    {
+        let name = "eq";
         let builtin =
             runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(

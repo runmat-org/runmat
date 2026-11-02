@@ -240,9 +240,9 @@ impl WgpuProvider {
                     if validated_keys.contains(key) {
                         !validated
                             .as_ref()
-                            .is_some_and(|cache| cache.contains_key(*key))
+                            .is_some_and(|cache| cache.contains_key(key))
                     } else {
-                        !cache.as_ref().is_some_and(|cache| cache.contains_key(*key))
+                        !cache.as_ref().is_some_and(|cache| cache.contains_key(key))
                     }
                 })
                 .count(),
@@ -294,10 +294,10 @@ impl WgpuProvider {
                                 !preparation_key_is_warm(
                                     **key,
                                     validated_fusion_key,
-                                    cache.contains_key(*key),
+                                    cache.contains_key(key),
                                     validated
                                         .as_ref()
-                                        .is_some_and(|cache| cache.contains_key(*key)),
+                                        .is_some_and(|cache| cache.contains_key(key)),
                                 )
                             })
                             .count(),

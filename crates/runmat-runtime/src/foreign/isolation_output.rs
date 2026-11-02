@@ -224,7 +224,7 @@ impl ApplicationOutput {
 fn poll_stream<R: AsyncRead + Unpin>(
     reader: &mut Option<R>,
     tail: &mut ProcessConsoleDecoder,
-    mut diagnostics: Option<&mut runmat_process_host::ProcessOutputCaptureWriter>,
+    diagnostics: Option<&mut runmat_process_host::ProcessOutputCaptureWriter>,
     stream: ConsoleStream,
     context: &mut Context<'_>,
     runtime: Option<&RuntimeConsoleScope>,
@@ -237,7 +237,7 @@ fn poll_stream<R: AsyncRead + Unpin>(
     match Pin::new(pipe).poll_read(context, &mut read) {
         Poll::Pending => return Ok(false),
         Poll::Ready(Err(error)) => {
-            if let Some(capture) = diagnostics.as_deref_mut() {
+            if let Some(capture) = diagnostics {
                 capture.finish(Err(error.kind()));
             }
             return Err(
@@ -250,7 +250,7 @@ fn poll_stream<R: AsyncRead + Unpin>(
         Poll::Ready(Ok(())) => {}
     }
     let count = read.filled().len();
-    if let Some(capture) = diagnostics.as_deref_mut() {
+    if let Some(capture) = diagnostics {
         capture.observe(read.filled()).map_err(|source| {
             crate::build_runtime_error("foreign stderr diagnostics could not be retained")
                 .with_identifier("RunMat:Foreign:ConsoleTransport")

@@ -162,7 +162,7 @@ pub(super) async fn execute(
         return WorkerExecutionOutcome::Response(failure(&message));
     }
     let program = match program {
-        WorkerProgramRequest::Direct(program) => program,
+        WorkerProgramRequest::Direct(program) => *program,
         WorkerProgramRequest::Graph(graph) => {
             drop(progress_sender);
             let Some(graph_attempt) = graph_attempt else {
@@ -173,7 +173,7 @@ pub(super) async fn execute(
             return match super::driver::local_graph::execute_remote_attempt(
                 &graph_attempt.run_identity,
                 attempt_id,
-                graph,
+                *graph,
                 graph_attempt.resources,
                 resources,
                 graph_attempt.host,

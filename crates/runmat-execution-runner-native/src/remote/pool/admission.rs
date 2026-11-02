@@ -30,7 +30,7 @@ impl RemotePoolDriver {
                         "Direct program cannot claim a Graph transfer".into(),
                     ));
                 }
-                self.submit(submission, program)
+                self.submit(submission, *program)
             }
             WorkerProgramRequest::Graph(graph) => {
                 graph
@@ -88,7 +88,7 @@ impl RemotePoolDriver {
                 }
                 self.submit_graph_program(
                     submission,
-                    graph,
+                    *graph,
                     usize::try_from(length).map_err(|_| {
                         NativeExecutionError::Protocol(
                             "Graph length exceeds host address space".into(),
@@ -367,7 +367,7 @@ impl RemotePoolDriver {
         for registration in &registrations {
             programs.insert(
                 registration.task_id,
-                Arc::new(WorkerProgramRequest::Direct(registration.program.clone())),
+                Arc::new(WorkerProgramRequest::direct(registration.program.clone())),
             );
             progress_registry.insert(registration.task_id, Arc::clone(&registration.progress));
         }
@@ -516,7 +516,7 @@ impl RemotePoolDriver {
             .lock()
             .expect("remote driver poisoned")
             .handle(DriverCommand::Submit(Box::new(submission)))?;
-        programs.insert(task_id, Arc::new(WorkerProgramRequest::Graph(graph)));
+        programs.insert(task_id, Arc::new(WorkerProgramRequest::graph(graph)));
         self.graph_transfers
             .lock()
             .expect("remote Graph transfer registry poisoned")

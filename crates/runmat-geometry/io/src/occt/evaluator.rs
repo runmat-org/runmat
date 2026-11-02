@@ -99,7 +99,7 @@ impl OcctExactEvaluator {
                     }
                 }
             });
-            let started = loop {
+            loop {
                 match receiver.recv_timeout(Duration::from_millis(10)) {
                     Ok(result) => break result?,
                     Err(mpsc::RecvTimeoutError::Timeout) => control.checkpoint()?,
@@ -109,8 +109,7 @@ impl OcctExactEvaluator {
                         ));
                     }
                 }
-            };
-            started
+            }
         };
         let evaluator = Self {
             session_id,

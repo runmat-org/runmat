@@ -123,14 +123,8 @@ pub fn configure_otel(options: OtelOptions, headers: StartupHeaders) -> Result<(
         .map_err(|_| "OpenTelemetry startup lock poisoned")?;
     model::validate_headers(&headers)?;
     let resource = model::config_resource(&options)?;
-    let traces = options
-        .enabled
-        .then(|| options.signals.contains(&OtelSignal::Traces))
-        .unwrap_or(false);
-    let logs = options
-        .enabled
-        .then(|| options.signals.contains(&OtelSignal::Logs))
-        .unwrap_or(false);
+    let traces = options.enabled && options.signals.contains(&OtelSignal::Traces);
+    let logs = options.enabled && options.signals.contains(&OtelSignal::Logs);
     if options.enabled && (options.signals.contains(&OtelSignal::Metrics) || (!traces && !logs)) {
         return Err("OpenTelemetry supports traces and/or logs, not metrics".into());
     }

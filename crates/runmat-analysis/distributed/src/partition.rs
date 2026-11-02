@@ -59,8 +59,8 @@ pub fn partition_elements(
             let nodes = mesh.element(element);
             let mut centroid = [0.0; 3];
             for &node in &nodes[..4] {
-                for axis in 0..3 {
-                    centroid[axis] += mesh.coordinates[node as usize][axis] * 0.25;
+                for (axis, coordinate) in centroid.iter_mut().enumerate() {
+                    *coordinate += mesh.coordinates[node as usize][axis] * 0.25;
                 }
             }
             centroid
@@ -235,12 +235,12 @@ fn quality(
     }
     let mut first_part = vec![u32::MAX; mesh.node_count()];
     let mut shared = vec![false; mesh.node_count()];
-    for element in 0..parts.len() {
+    for (element, &part) in parts.iter().enumerate() {
         for &node in mesh.element(element) {
             let node = node as usize;
             if first_part[node] == u32::MAX {
-                first_part[node] = parts[element];
-            } else if first_part[node] != parts[element] {
+                first_part[node] = part;
+            } else if first_part[node] != part {
                 shared[node] = true;
             }
         }

@@ -1457,7 +1457,7 @@ async fn resolve_attempt(
     };
     let (program, graph_wire_bytes) = match (program, staged) {
         (RemoteAttemptProgram::Direct(direct), None) => {
-            (WorkerProgramRequest::Direct(*direct), None)
+            (WorkerProgramRequest::Direct(direct), None)
         }
         (RemoteAttemptProgram::GraphStaged(_), Some(staged)) => {
             let wire_bytes = usize::try_from(staged.length())
@@ -1494,7 +1494,7 @@ async fn resolve_attempt(
                 backend: runmat_execution::PoolBackend::Remote,
                 resources: scheduling.resource_assignment.clone(),
             });
-            (WorkerProgramRequest::Graph(graph), Some(wire_bytes))
+            (WorkerProgramRequest::graph(graph), Some(wire_bytes))
         }
         _ => return Err("remote attempt program form is inconsistent".into()),
     };

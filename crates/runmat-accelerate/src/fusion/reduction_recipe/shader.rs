@@ -246,7 +246,7 @@ impl Shader<'_> {
             write!(source, "struct RROutput {{ data: array<{output}>, }};\n@group(0) @binding({output_binding}) var<storage, read_write> output: RROutput;\n")?;
         }
         if !self.contract.identity {
-            write!(source, "var<workgroup> rr_tile: array<RRPartial, {wg}>;\n")?;
+            writeln!(source, "var<workgroup> rr_tile: array<RRPartial, {wg}>;")?;
         }
         write!(source, "@compute @workgroup_size({wg})\nfn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>) {{\n")?;
         let dispatch = match pass {

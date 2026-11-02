@@ -119,7 +119,9 @@ impl<'a> FaceMetricSamples<'a> {
                 .with_canonical_storage(|values, _axes| *values);
             let area = cross(du, dv);
             let scale = norm(du).powi(2) + norm(dv).powi(2);
-            if !(norm(area) > SINGULAR_PARAMETERIZATION_RATIO * scale) {
+            if norm(area).partial_cmp(&(SINGULAR_PARAMETERIZATION_RATIO * scale))
+                != Some(std::cmp::Ordering::Greater)
+            {
                 continue;
             }
             let normal = normalize(area).ok_or_else(failure)?;

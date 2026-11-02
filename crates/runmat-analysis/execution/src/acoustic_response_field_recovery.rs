@@ -46,10 +46,10 @@ pub struct PreparedAcousticResponseFieldRecovery {
 fn invalid(e: impl std::fmt::Display) -> AnalysisBridgeError {
     AnalysisBridgeError::Invalid(e.to_string())
 }
-fn input<'a>(
-    inputs: &'a [PreparedAnalysisObjects],
+fn input(
+    inputs: &[PreparedAnalysisObjects],
     kind: Kind,
-) -> AnalysisBridgeResult<&'a PreparedAnalysisObjects> {
+) -> AnalysisBridgeResult<&PreparedAnalysisObjects> {
     let mut matches = inputs.iter().filter(|input| input.manifest.kind == kind);
     match (matches.next(), matches.next()) {
         (Some(value), None) => Ok(value),

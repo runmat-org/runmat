@@ -61,7 +61,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
     let response = if let Some(task) = spmd_task {
         let request = match request {
             WorkerLaunchRequest::Direct(direct) => match *direct {
-                WorkerRequest::Direct(request) => request,
+                WorkerRequest::Direct(request) => *request,
                 WorkerRequest::Graph(_) => unreachable!("SPMD request has a Direct program"),
             },
             WorkerLaunchRequest::Reserved(reserved) => reserved.into_parts().0,
@@ -274,9 +274,9 @@ fn open_staged_graph(
 
 pub(crate) async fn execute(request: WorkerRequest) -> WorkerResponse {
     match request {
-        WorkerRequest::Direct(request) => crate::execute_host_program_request(request).await,
+        WorkerRequest::Direct(request) => crate::execute_host_program_request(*request).await,
         WorkerRequest::Graph(request) => {
-            crate::test_workload::execute_host_graph_request(request, None).await
+            crate::test_workload::execute_host_graph_request(*request, None).await
         }
     }
 }
@@ -352,7 +352,7 @@ mod tests {
         )
         .unwrap();
         artifact.executable_bytes.push(0);
-        let response = execute(WorkerRequest::Direct(
+        let response = execute(WorkerRequest::direct(
             runmat_execution_artifact::ProgramExecutionRequest {
                 schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe,

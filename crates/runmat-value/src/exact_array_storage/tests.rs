@@ -656,7 +656,7 @@ fn missing_string_elements_are_distinct_from_literal_text_and_keep_storage_owner
     let distinct =
         std::collections::HashSet::from([missing.clone(), StringElement::text("<missing>")]);
     assert_eq!(distinct.len(), 2);
-    let mut sorted = vec![
+    let mut sorted = [
         missing,
         StringElement::text("<missing>"),
         StringElement::text(""),

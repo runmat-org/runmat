@@ -896,8 +896,8 @@ impl Process<'_> {
             for (subdomain, residual) in self.subdomains.iter().zip(residuals.iter()) {
                 let mut projection = vec![0.0; modes];
                 for (slot, &dof) in subdomain.owned_dofs.iter().enumerate() {
-                    for mode in 0..modes {
-                        projection[mode] += subdomain.basis[slot * modes + mode] * residual[dof];
+                    for (mode, value) in projection.iter_mut().enumerate() {
+                        *value += subdomain.basis[slot * modes + mode] * residual[dof];
                     }
                 }
                 local.extend(projection);
@@ -978,8 +978,8 @@ impl Process<'_> {
                             continue;
                         }
                         let value = subdomain.matrix.values[entry];
-                        for mode in 0..modes {
-                            product[mode] += value * subdomain.basis_at(column, mode, target, d);
+                        for (mode, output) in product.iter_mut().enumerate() {
+                            *output += value * subdomain.basis_at(column, mode, target, d);
                         }
                     }
                     for left in 0..modes {

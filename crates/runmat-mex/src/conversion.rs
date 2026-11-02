@@ -183,7 +183,7 @@ pub(crate) fn value_to_mx_for_interface_in_context(
             MxConversionError::new("missing strings cannot cross the C Matrix character boundary")
         })?),
         Value::StringArray(value) if interface == MxBoundaryInterface::CxxData => {
-            MxArray::string(value.data().iter().cloned().collect(), value.shape.to_vec())
+            MxArray::string(value.data().to_vec(), value.shape.to_vec())
                 .map_err(MxConversionError::new)
         }
         Value::CharArray(value) => char_to_mx(value),

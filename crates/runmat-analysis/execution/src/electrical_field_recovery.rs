@@ -323,7 +323,7 @@ fn electrical_field_recovery_resource_plan_on(
     }
     let profile = profiler.finish(AnalysisNumericalObjectKind::Field)?;
     crate::thermal_execution::require_inventory(&profile, policy.inventory_limits())?;
-    let workspace: ByteCount = electrical_recovery_source_validation_workspace(&workload, &mesh)?;
+    let workspace: ByteCount = electrical_recovery_source_validation_workspace(workload, mesh)?;
     Ok(build_electrical_field_recovery_resource_plan(
         request,
         workspace,

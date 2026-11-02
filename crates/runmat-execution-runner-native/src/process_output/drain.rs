@@ -111,36 +111,6 @@ fn combine_stream_outcomes(
     first.map_or(Ok(()), Err)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn joining_streams_keeps_first_cause_and_independent_failure() {
-        let first = Arc::new(RawOutputError::Invalid("first read failed"));
-        let other = Arc::new(RawOutputError::Invalid("other publication failed"));
-        let failure = combine_stream_outcomes(
-            Some(Arc::clone(&first)),
-            [Err(Arc::clone(&first)), Err(Arc::clone(&other))],
-        )
-        .unwrap_err();
-        let RawOutputError::Streams {
-            primary,
-            other: secondary,
-        } = failure.as_ref()
-        else {
-            panic!("independent stream failure must be retained");
-        };
-        assert!(Arc::ptr_eq(primary, &first));
-        assert!(Arc::ptr_eq(secondary, &other));
-        let single =
-            combine_stream_outcomes(Some(Arc::clone(&first)), [Err(Arc::clone(&first)), Ok(())])
-                .unwrap_err();
-        assert!(Arc::ptr_eq(&single, &first));
-        assert!(combine_stream_outcomes(None, [Ok(()), Ok(())]).is_ok());
-    }
-}
-
 async fn drain_stream(
     mut pipe: impl AsyncRead + Unpin,
     stream: RawOutputStream,
@@ -213,4 +183,34 @@ async fn drain_stream(
     }
     control.raw_output_changed();
     failure.map_or(Ok(()), Err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn joining_streams_keeps_first_cause_and_independent_failure() {
+        let first = Arc::new(RawOutputError::Invalid("first read failed"));
+        let other = Arc::new(RawOutputError::Invalid("other publication failed"));
+        let failure = combine_stream_outcomes(
+            Some(Arc::clone(&first)),
+            [Err(Arc::clone(&first)), Err(Arc::clone(&other))],
+        )
+        .unwrap_err();
+        let RawOutputError::Streams {
+            primary,
+            other: secondary,
+        } = failure.as_ref()
+        else {
+            panic!("independent stream failure must be retained");
+        };
+        assert!(Arc::ptr_eq(primary, &first));
+        assert!(Arc::ptr_eq(secondary, &other));
+        let single =
+            combine_stream_outcomes(Some(Arc::clone(&first)), [Err(Arc::clone(&first)), Ok(())])
+                .unwrap_err();
+        assert!(Arc::ptr_eq(&single, &first));
+        assert!(combine_stream_outcomes(None, [Ok(()), Ok(())]).is_ok());
+    }
 }

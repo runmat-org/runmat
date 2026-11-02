@@ -1020,7 +1020,7 @@ impl RemotePoolDriver {
                 Ok((
                     *id,
                     TaskBinding {
-                        program: program.clone(),
+                        program: program.as_ref().clone(),
                         inventory: inventories.get(*id),
                     },
                 ))
@@ -1221,7 +1221,7 @@ impl RemotePoolDriver {
             inventories.bind(id, &binding.program)?;
             programs.insert(
                 id,
-                Arc::new(runmat_execution_artifact::WorkerProgramRequest::Direct(
+                Arc::new(runmat_execution_artifact::WorkerProgramRequest::direct(
                     binding.program,
                 )),
             );

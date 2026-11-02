@@ -54,12 +54,12 @@ impl ThreadCommunicator {
         let mut receivers = (0..size)
             .map(|_| (0..size).map(|_| None).collect::<Vec<_>>())
             .collect::<Vec<_>>();
-        for from in 0..size {
-            for to in 0..size {
+        for (from, outbound) in senders.iter_mut().enumerate() {
+            for (to, inbound) in receivers.iter_mut().enumerate() {
                 if from != to {
                     let (sender, receiver) = channel();
-                    senders[from][to] = Some(sender);
-                    receivers[to][from] = Some(receiver);
+                    outbound[to] = Some(sender);
+                    inbound[from] = Some(receiver);
                 }
             }
         }
@@ -342,7 +342,7 @@ impl Communicator for TcpCommunicator {
         peers: &[usize],
         sends: Vec<Vec<f64>>,
     ) -> DistributedResult<Vec<Vec<f64>>> {
-        if peers.len() != sends.len() || peers.iter().any(|&peer| peer == self.rank) {
+        if peers.len() != sends.len() || peers.contains(&self.rank) {
             return Err(DistributedError::Communication(
                 "exchange lists are inconsistent".into(),
             ));

@@ -385,7 +385,7 @@ fn map_evaluator_parameters(
             if *value > bound.end + tolerance {
                 return Err(invalid_evaluation(
                     source_face_id,
-                    &format!(
+                    format!(
                         "periodic chart coordinate {original} on axis {axis} (period {period}) has no equivalent inside the trimmed face bounds [{}, {}]",
                         bound.start, bound.end
                     ),

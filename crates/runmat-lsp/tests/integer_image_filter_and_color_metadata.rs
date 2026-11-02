@@ -17,7 +17,8 @@ fn image_filter_and_color_integer_metadata_is_public_and_honest() {
         );
         assert!(!builtin.integer_capabilities.is_empty(), "{name}");
     }
-    for name in ["imhist"] {
+    {
+        let name = "imhist";
         let builtin =
             runmat_builtins::builtin_catalog_entry_by_name(name).expect("canonical builtin");
         assert!(

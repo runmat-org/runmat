@@ -16,7 +16,7 @@ mod completion_signal;
 mod compute_pass;
 #[path = "observation/probe_ticket.rs"]
 mod probe_ticket;
-use compute_pass::EncodedMeasurement;
+use compute_pass::{EncodedMeasurement, EncoderObservation};
 pub(crate) use compute_pass::{
     ProfiledEncoder, SubmissionEncoder, TimestampCapability, MAX_QUERY_REQUESTED_BYTES,
 };
@@ -293,18 +293,22 @@ impl PendingSubmissions {
         ProfiledEncoder::new(
             emission,
             descriptor,
-            command,
-            admission,
-            (provider_prepared || !provider_active)
-                .then_some(self.timestamp)
-                .flatten(),
-            active.then(|| self.budget.clone()).flatten(),
-            #[cfg(not(target_arch = "wasm32"))]
-            (active && !self.scoped_retirement && self.prepared_direct_progress.is_none())
+            EncoderObservation {
+                command,
+                admission,
+                timestamp: (provider_prepared || !provider_active)
+                    .then_some(self.timestamp)
+                    .flatten(),
+                budget: active.then(|| self.budget.clone()).flatten(),
+                #[cfg(not(target_arch = "wasm32"))]
+                progress_port: (active
+                    && !self.scoped_retirement
+                    && self.prepared_direct_progress.is_none())
                 .then(|| self.progress_port.clone())
                 .flatten(),
-            #[cfg(not(target_arch = "wasm32"))]
-            completion_prepared,
+                #[cfg(not(target_arch = "wasm32"))]
+                completion_prepared,
+            },
         )
     }
 

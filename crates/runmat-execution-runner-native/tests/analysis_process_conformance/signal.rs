@@ -216,12 +216,12 @@ impl SignalFixture {
                 match &chunk.request {
                     runmat_execution_artifact::WorkerProgramRequest::Direct(request) => {
                         runmat_execution_runner_native::execute_host_program_request(
-                            request.clone(),
+                            request.as_ref().clone(),
                         )
                         .await
                     }
                     runmat_execution_artifact::WorkerProgramRequest::Graph(request) => {
-                        runmat_vm::execute_graph_request(request.clone()).await
+                        runmat_vm::execute_graph_request(request.as_ref().clone()).await
                     }
                 },
             ));
@@ -277,7 +277,7 @@ impl SignalFixture {
             let (record, duplicate) = match &chunk.request {
                 runmat_execution_artifact::WorkerProgramRequest::Direct(request)=>supervisor.submit_program(
                     runmat_execution_runner_native::supervisor::ProgramBatchSubmission::from_request(
-                        request.clone(),
+                        request.as_ref().clone(),
                         original_task.clone(),
                         Some(key),
                         runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
@@ -285,7 +285,7 @@ impl SignalFixture {
                 ).await.unwrap(),
                 runmat_execution_artifact::WorkerProgramRequest::Graph(request)=>supervisor.submit_graph(
                     runmat_execution_runner_native::supervisor::GraphBatchSubmission{
-                        request:request.clone(),task:Some(original_task.clone()),idempotency_key:Some(key),
+                        request:request.as_ref().clone(),task:Some(original_task.clone()),idempotency_key:Some(key),
                         retention_millis:runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
                     },
                 ).await.unwrap(),

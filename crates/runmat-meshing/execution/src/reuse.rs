@@ -240,7 +240,7 @@ fn rebind_stage_result(
         source,
         host,
         accepted.access,
-        &accepted.result_objects,
+        accepted.result_objects,
         limits,
     )?;
     if let Some(origin) = origin {

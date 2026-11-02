@@ -56,6 +56,12 @@ fn import(request: &str) -> Result<String, GeometryImportError> {
     }
 }
 /// Caller owns a NUL-terminated UTF-8 request until this call returns.
+///
+/// # Safety
+/// A non-null request must point to readable bytes through its terminating NUL,
+/// within one allocation, and remain valid and unmodified for this call. UTF-8
+/// and request contents are validated. Free the returned response exactly once
+/// using `runmat_occt_exact_free` from this same module instance.
 #[no_mangle]
 pub unsafe extern "C" fn runmat_occt_exact_import(request: *const c_char) -> *mut c_char {
     let result = if request.is_null() {
@@ -76,7 +82,13 @@ pub unsafe extern "C" fn runmat_occt_exact_import(request: *const c_char) -> *mu
         .expect("JSON contains no NUL bytes")
         .into_raw()
 }
-/// Release exactly once with the pointer returned by runmat_occt_exact_import.
+/// Release a response returned by the exact CAD import or execution ABI.
+///
+/// # Safety
+/// A non-null value must be a still-live pointer returned by
+/// `runmat_occt_exact_import` or `runmat_occt_exact_execute` from this module
+/// instance. Its original terminating NUL and allocation must be intact; it
+/// must not have been freed, and no other access may overlap this release.
 #[no_mangle]
 pub unsafe extern "C" fn runmat_occt_exact_free(value: *mut c_char) {
     if !value.is_null() {
@@ -87,6 +99,12 @@ pub unsafe extern "C" fn runmat_occt_exact_free(value: *mut c_char) {
 mod execution;
 /// Caller supplies bounded NUL-terminated UTF-8 JSON. The response is freed with
 /// runmat_occt_exact_free, just like the import ABI.
+///
+/// # Safety
+/// A non-null request must point to readable bytes through its terminating NUL,
+/// within one allocation, and remain valid and unmodified for this call. UTF-8
+/// and JSON are validated. Free the returned response exactly once using
+/// `runmat_occt_exact_free` from this same module instance.
 #[no_mangle]
 pub unsafe extern "C" fn runmat_occt_exact_execute(request: *const c_char) -> *mut c_char {
     let result = if request.is_null() {

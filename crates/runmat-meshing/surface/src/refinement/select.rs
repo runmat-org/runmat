@@ -225,7 +225,7 @@ fn shape_candidate_crowds_a_shared_curve(
                 + metric.vv * left[1] * right[1]
         };
         let length_squared = inner(along, along);
-        if !(length_squared > 0.0) {
+        if length_squared.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return false;
         }
         let t = (inner(offset, along) / length_squared).clamp(0.0, 1.0);

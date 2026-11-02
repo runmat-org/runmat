@@ -288,7 +288,7 @@ impl RemotePoolDriver {
                     )
                     .await
                     .map_err(AttemptTransferError::Route)?;
-                Ok(RemoteAttemptProgram::Direct(Box::new(direct)))
+                Ok(RemoteAttemptProgram::Direct(direct))
             }
             WorkerProgramRequest::Graph(_) => {
                 let source = self

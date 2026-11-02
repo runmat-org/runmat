@@ -69,11 +69,25 @@ pub(super) fn graph_descriptor(
     request.validate().unwrap();
     // Bind the exact authored project policy before generator admission and
     // chunk identity construction, not after the original task is granted.
-    runmat_core::cluster_settings::prepare_graph_for_cluster(
+    let request = runmat_core::cluster_settings::prepare_graph_for_cluster(
         request,
         &compilation::project_policy(),
     )
-    .unwrap()
+    .unwrap();
+    let node_owner = request.graph.nodes.as_ptr();
+    let bytes = serde_json::to_vec(&request).unwrap();
+    let worker = WorkerProgramRequest::graph(request);
+    let WorkerProgramRequest::Graph(request) = &worker else {
+        unreachable!("Graph request constructor");
+    };
+    assert_eq!(request.graph.nodes.as_ptr(), node_owner);
+    assert_eq!(serde_json::to_vec(&worker).unwrap(), bytes);
+    let cold: WorkerProgramRequest = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(cold, worker);
+    let WorkerProgramRequest::Graph(request) = worker else {
+        unreachable!("Graph request constructor");
+    };
+    *request
 }
 
 pub(super) fn capabilities(request: &WorkerProgramRequest) -> BTreeSet<Capability> {
@@ -200,7 +214,7 @@ pub(super) fn assert_frozen_capture_controls(prepared: &PreparedSignalMaterializ
         },
     )
     .unwrap();
-    demoted.program.chunks[0].request = WorkerProgramRequest::Direct(direct);
+    demoted.program.chunks[0].request = WorkerProgramRequest::direct(direct);
     assert!(
         demoted.validate().is_err(),
         "shared activation cannot be demoted to flat capture ABI"

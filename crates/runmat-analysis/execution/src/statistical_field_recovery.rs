@@ -228,10 +228,10 @@ impl DecodedStatisticalSource {
     }
 }
 
-fn unique<'a>(
-    inputs: &'a [PreparedAnalysisObjects],
+fn unique(
+    inputs: &[PreparedAnalysisObjects],
     kind: AnalysisNumericalObjectKind,
-) -> AnalysisBridgeResult<&'a PreparedAnalysisObjects> {
+) -> AnalysisBridgeResult<&PreparedAnalysisObjects> {
     let mut matching = inputs.iter().filter(|input| input.manifest.kind == kind);
     match (matching.next(), matching.next()) {
         (Some(input), None) => Ok(input),

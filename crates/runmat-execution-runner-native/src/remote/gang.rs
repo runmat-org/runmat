@@ -143,7 +143,7 @@ impl RemotePoolDriver {
             for (task_id, request) in programs {
                 catalog.insert(
                     task_id,
-                    Arc::new(runmat_execution_artifact::WorkerProgramRequest::Direct(
+                    Arc::new(runmat_execution_artifact::WorkerProgramRequest::direct(
                         request,
                     )),
                 );

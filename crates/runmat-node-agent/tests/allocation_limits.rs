@@ -6,7 +6,7 @@ use runmat_execution_transport_native::control::{
     AllocationRole, DriverBootstrapCredential, NodeAllocation, ResourceRequest,
     WorkerBootstrapCredential,
 };
-use runmat_node_agent::allocation::{AllocationProcesses, Sandbox};
+use runmat_node_agent::allocation::{AllocationLaunchContext, AllocationProcesses, Sandbox};
 
 #[tokio::test]
 async fn local_wall_limit_kills_the_owned_process_tree() {
@@ -51,12 +51,14 @@ async fn local_wall_limit_kills_the_owned_process_tree() {
     };
     processes
         .launch_driver(
-            &executable,
-            &allocation,
-            &sandbox,
-            "https://server.test",
+            AllocationLaunchContext {
+                runmat_executable: &executable,
+                allocation: &allocation,
+                sandbox: &sandbox,
+                server_url: "https://server.test",
+                clock_domain_nonce: [1; 16],
+            },
             &bootstrap,
-            [1; 16],
             "fixture-node-identity",
         )
         .await
@@ -130,17 +132,19 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
     let mut processes = AllocationProcesses::default();
     processes
         .launch_worker(
-            &executable,
-            &allocation,
-            &sandbox,
-            "https://server.test",
+            AllocationLaunchContext {
+                runmat_executable: &executable,
+                allocation: &allocation,
+                sandbox: &sandbox,
+                server_url: "https://server.test",
+                clock_domain_nonce: [3; 16],
+            },
             &bootstrap,
             &runmat_node_agent::inventory::host(
                 runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
             )
             .unwrap(),
             &runmat_process_host::ProcessSpawnEvidence::default(),
-            [3; 16],
         )
         .await
         .unwrap();

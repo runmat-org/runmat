@@ -74,8 +74,8 @@ impl ElementKernel for Conduction {
     ) -> Result<(), String> {
         let (g, _) = gradients(coordinates);
         let k = 1.0 + material as f64;
-        for axis in 0..3 {
-            result[axis] = -k
+        for (axis, value) in result.iter_mut().enumerate().take(3) {
+            *value = -k
                 * (0..4)
                     .map(|node| g[node][axis] * solution[node])
                     .sum::<f64>();

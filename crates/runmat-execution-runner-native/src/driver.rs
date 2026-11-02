@@ -392,7 +392,6 @@ impl LocalDriver {
 
     /// Same staged registration and atomic publication owner as submit_workers,
     /// without building a redundant request/argument copy for local producers.
-
     pub(crate) fn submit_local_workers_with_control(
         self: &Arc<Self>,
         tasks: Vec<LocalWorkerSubmission>,
@@ -431,7 +430,7 @@ impl LocalDriver {
                     .prepare_graph(LocalGraphSubmission {
                         task_id: submission.request.id,
                         retry: submission.request.retry,
-                        request,
+                        request: *request,
                         task: Some(submission),
                     })?,
             });

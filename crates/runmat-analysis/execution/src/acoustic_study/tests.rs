@@ -27,8 +27,7 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
         speed_of_sound_m_per_s: runmat_types::physical::SpeedOfSound::new(2.0),
         damping_ratio: runmat_types::physical::DampingRatio::new(0.0),
     });
-    model.materials[0].mass_density_kg_per_m3 =
-        (Some(3.0)).map(runmat_types::physical::MassDensity::new);
+    model.materials[0].mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(3.0));
     let face = AnalysisProjection::derive(&mesh).unwrap().boundary_faces[0].provenance[0]
         .analysis_selection_id()
         .unwrap();

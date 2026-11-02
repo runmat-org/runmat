@@ -15,8 +15,8 @@ use super::clock_observer::{
 use super::retirement::{self, PendingRetirementRecord};
 use crate::allocation::{
     prepare as prepare_sandbox, prepare_endpoint_identity, retired_encrypted_receipts,
-    validate_active, validate_allocation_set, validate_offer, AllocationProcesses, DrainState,
-    WorkerRetirementScope,
+    validate_active, validate_allocation_set, validate_offer, AllocationLaunchContext,
+    AllocationProcesses, DrainState, WorkerRetirementScope,
 };
 use crate::enrollment::{decode_secret, CredentialStore, NodeCredential, OwnedCredentialStore};
 use crate::{inventory, AgentConfig, AgentError, AgentResult};
@@ -337,12 +337,14 @@ impl NodeAgentService {
                     )?;
                     self.processes
                         .launch_driver(
-                            &self.config.runmat_executable,
-                            allocation,
-                            &sandbox,
-                            &self.config.server_url,
+                            AllocationLaunchContext {
+                                runmat_executable: &self.config.runmat_executable,
+                                allocation,
+                                sandbox: &sandbox,
+                                server_url: &self.config.server_url,
+                                clock_domain_nonce: self.clock_domain_nonce,
+                            },
                             &bootstrap,
-                            self.clock_domain_nonce,
                             &self.credential.identity_fingerprint,
                         )
                         .await
@@ -377,14 +379,16 @@ impl NodeAgentService {
                     self.persist_launch_ledger()?;
                     self.processes
                         .launch_worker(
-                            &self.config.runmat_executable,
-                            allocation,
-                            &sandbox,
-                            &self.config.server_url,
+                            AllocationLaunchContext {
+                                runmat_executable: &self.config.runmat_executable,
+                                allocation,
+                                sandbox: &sandbox,
+                                server_url: &self.config.server_url,
+                                clock_domain_nonce: self.clock_domain_nonce,
+                            },
                             &bootstrap,
                             &inventory.host,
                             &spawn_evidence,
-                            self.clock_domain_nonce,
                         )
                         .await
                 }

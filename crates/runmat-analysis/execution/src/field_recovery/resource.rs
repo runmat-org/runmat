@@ -66,6 +66,10 @@ pub fn require_structural_recovery_decode_budget(
     }
     Ok(())
 }
+#[expect(
+    clippy::too_many_arguments,
+    reason = "FEA alpha execution-context structure is deferred under the approved 1.0 hardening scope"
+)]
 pub fn build_structural_recovery_metadata_resource_plan(
     request: &FieldRecoveryRequest,
     workload: &StructuralLinearWorkload,
@@ -87,6 +91,10 @@ pub fn build_structural_recovery_metadata_resource_plan(
         local_execution,
     )
 }
+#[expect(
+    clippy::too_many_arguments,
+    reason = "FEA alpha execution-context structure is deferred under the approved 1.0 hardening scope"
+)]
 pub(super) fn build_from_refs<'a>(
     request: &FieldRecoveryRequest,
     workload: &StructuralLinearWorkload,

@@ -554,7 +554,7 @@ pub fn prepare_generator_program(
                 }
                 return Ok(PreparedGeneratorChunk {
                     plan,
-                    request: WorkerProgramRequest::Graph(request),
+                    request: WorkerProgramRequest::graph(request),
                 });
             }
             let inputs = ProgramExecutionInputs {
@@ -567,7 +567,7 @@ pub fn prepare_generator_program(
             request.validate_for_portable_host()?;
             Ok(PreparedGeneratorChunk {
                 plan,
-                request: WorkerProgramRequest::Direct(request),
+                request: WorkerProgramRequest::direct(request),
             })
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;

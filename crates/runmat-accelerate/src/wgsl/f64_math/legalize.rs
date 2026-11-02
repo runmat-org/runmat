@@ -23,8 +23,10 @@ impl std::error::Error for ParseFailure {
 
 #[derive(Debug)]
 pub(crate) struct ValidationFailure {
-    error: naga::WithSpan<naga::valid::ValidationError>,
+    // Release the exact boxed payload before its retained allocation funding.
+    error: Box<naga::WithSpan<naga::valid::ValidationError>>,
     diagnostic: String,
+    _allocation: host_buffers::Claim,
 }
 impl fmt::Display for ValidationFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -33,7 +35,7 @@ impl fmt::Display for ValidationFailure {
 }
 impl std::error::Error for ValidationFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.error)
+        Some(self.error.as_ref())
     }
 }
 
@@ -113,13 +115,26 @@ struct Edit {
     shape: Shape,
 }
 
-fn parse(source: &str) -> Result<(naga::Module, naga::valid::ModuleInfo), PreparationError> {
+fn parse(
+    source: &str,
+    metadata: Option<&dyn ProviderHostMetadataAdmission>,
+) -> Result<(naga::Module, naga::valid::ModuleInfo), PreparationError> {
     // Naga's parser/validator storage and its diagnostic output remain the
     // explicitly excluded library boundary; preserve original typed causes.
     let module = naga::front::wgsl::parse_str(source).map_err(|error| {
         let diagnostic = error.emit_to_string(source);
         PreparationError::Parse(ParseFailure { error, diagnostic })
     })?;
+    // Reserve the known failure-wrapper layout before validation can produce
+    // that payload. A refusal happens before validation, so it cannot replace
+    // an already-produced typed Naga cause. On success the unused reservation
+    // is released; on failure it follows the box until physical deallocation.
+    // Naga's own parser/validator and rendered diagnostic allocations remain
+    // the separately declared library boundary, not part of this claim.
+    let error_allocation = host_buffers::claim_bytes(
+        metadata,
+        std::mem::size_of::<naga::WithSpan<naga::valid::ValidationError>>(),
+    )?;
     let info = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::all(),
@@ -127,7 +142,11 @@ fn parse(source: &str) -> Result<(naga::Module, naga::valid::ModuleInfo), Prepar
     .validate(&module)
     .map_err(|error| {
         let diagnostic = error.emit_to_string(source);
-        PreparationError::Validate(ValidationFailure { error, diagnostic })
+        PreparationError::Validate(ValidationFailure {
+            error: Box::new(error),
+            diagnostic,
+            _allocation: error_allocation,
+        })
     })?;
     Ok((module, info))
 }
@@ -213,7 +232,7 @@ pub(crate) fn prepare(
     source: &str,
     metadata: Option<&dyn ProviderHostMetadataAdmission>,
 ) -> Result<PreparedShader, PreparationError> {
-    let (module, info) = parse(source)?;
+    let (module, info) = parse(source, metadata)?;
     let mut edits = collect(source, &module, &info, metadata)?;
     let requires_f64_math = module.types.iter().any(|(_, ty)| match ty.inner {
         naga::TypeInner::Scalar(scalar)
@@ -328,7 +347,7 @@ pub(crate) fn prepare(
     if output.len() != source_bytes {
         return Err(PreparationError::SourceSizeOverflow);
     }
-    let (module, info) = parse(output.as_str())?;
+    let (module, info) = parse(output.as_str(), metadata)?;
     if let Some(edit) = collect(output.as_str(), &module, &info, metadata)?
         .as_slice()
         .first()

@@ -582,8 +582,10 @@ mod unit_resolution_tests {
     }
     #[test]
     fn absent_step_context_cannot_be_replaced_by_a_requested_fallback_unit() {
-        let mut options = ExactCadImportOptions::default();
-        options.source_units = Some(LengthUnit::Meter);
+        let options = ExactCadImportOptions {
+            source_units: Some(LengthUnit::Meter),
+            ..Default::default()
+        };
         let source =
             b"ISO-10303-21;HEADER;FILE_SCHEMA(('AP242'));ENDSEC;DATA;ENDSEC;END-ISO-10303-21;";
         assert!(

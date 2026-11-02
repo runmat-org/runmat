@@ -243,7 +243,9 @@ async fn late_result_from_unknown_work_cannot_replace_or_collect_a_distinct_comm
     let program = {
         let programs = pool.programs.lock().unwrap();
         match programs[&task_id].as_ref() {
-            runmat_execution_artifact::WorkerProgramRequest::Direct(program) => program.clone(),
+            runmat_execution_artifact::WorkerProgramRequest::Direct(program) => {
+                program.as_ref().clone()
+            }
             _ => panic!("Direct completion fixture"),
         }
     };
@@ -421,7 +423,7 @@ async fn fixture_with_capacity(workers: u32) -> Fixture {
     pool.completions.lock().unwrap().insert(task_id, sender);
     pool.programs.lock().unwrap().insert(
         task_id,
-        Arc::new(runmat_execution_artifact::WorkerProgramRequest::Direct(
+        Arc::new(runmat_execution_artifact::WorkerProgramRequest::direct(
             program,
         )),
     );

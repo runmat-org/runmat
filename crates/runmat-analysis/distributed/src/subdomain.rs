@@ -57,14 +57,13 @@ pub fn extract_rank_inputs(
         }
     }
     let mut owner = vec![u32::MAX; nodes];
-    for element in 0..elements {
-        let part = element_parts[element];
+    for (element, &part) in element_parts.iter().enumerate() {
         for &node in mesh.element(element) {
             let node = node as usize;
             owner[node] = owner[node].min(part);
         }
     }
-    if owner.iter().any(|&part| part == u32::MAX) {
+    if owner.contains(&u32::MAX) {
         return Err(DistributedError::InvalidProblem(
             "every node must belong to at least one element".into(),
         ));
@@ -85,10 +84,10 @@ pub fn extract_rank_inputs(
     let mut interior = Vec::with_capacity(ranks);
     let mut overlap = Vec::with_capacity(ranks);
     let mut local = Vec::with_capacity(ranks);
-    for part in 0..ranks {
+    for (part, elements) in part_elements.iter().enumerate() {
         let stamp = part as u32;
         let mut interior_nodes = Vec::new();
-        for &element in &part_elements[part] {
+        for &element in elements {
             element_mark[element as usize] = stamp;
             for &node in mesh.element(element as usize) {
                 if mark[node as usize] != stamp {
@@ -150,8 +149,8 @@ pub fn extract_rank_inputs(
     // Subdomain centroids and length scales for the rigid-body coarse modes.
     let mut centroid = vec![[0.0f64; 3]; ranks];
     let mut owned_count = vec![0usize; ranks];
-    for node in 0..nodes {
-        let part = owner[node] as usize;
+    for (node, &part) in owner.iter().enumerate() {
+        let part = part as usize;
         owned_count[part] += 1;
         for axis in 0..3 {
             centroid[part][axis] += mesh.coordinates[node][axis];
@@ -168,8 +167,8 @@ pub fn extract_rank_inputs(
         }
     }
     let mut scale = vec![0.0f64; ranks];
-    for node in 0..nodes {
-        let part = owner[node] as usize;
+    for (node, &part) in owner.iter().enumerate() {
+        let part = part as usize;
         let c = centroid[part];
         let x = mesh.coordinates[node];
         let distance =

@@ -130,30 +130,28 @@ pub(super) async fn publish(args: &PackagePublishArgs) -> Result<()> {
             .context("failed to verify package publication")?
             .status;
     }
-    if status == PublicationStatus::Verified {
-        if !envelopes.is_empty() {
-            client
-                .attach_publication_key_envelopes(
-                    &args.org_id,
-                    &args.package_id,
-                    &staged.id,
-                    &AttachKeyEnvelopesRequest {
-                        envelopes: envelopes
-                            .into_iter()
-                            .map(KeyEnvelopeRequest::from)
-                            .collect(),
-                    },
-                )
-                .await
-                .context("failed to attach private package key envelopes")?;
-            // Attaching envelopes can complete the server's automatic checks.
-            // Refresh through idempotent verification, never publisher approval.
-            status = client
-                .verify_publication(&args.org_id, &args.package_id, &staged.id)
-                .await
-                .context("failed to refresh package verification after attaching key envelopes")?
-                .status;
-        }
+    if status == PublicationStatus::Verified && !envelopes.is_empty() {
+        client
+            .attach_publication_key_envelopes(
+                &args.org_id,
+                &args.package_id,
+                &staged.id,
+                &AttachKeyEnvelopesRequest {
+                    envelopes: envelopes
+                        .into_iter()
+                        .map(KeyEnvelopeRequest::from)
+                        .collect(),
+                },
+            )
+            .await
+            .context("failed to attach private package key envelopes")?;
+        // Attaching envelopes can complete the server's automatic checks.
+        // Refresh through idempotent verification, never publisher approval.
+        status = client
+            .verify_publication(&args.org_id, &args.package_id, &staged.id)
+            .await
+            .context("failed to refresh package verification after attaching key envelopes")?
+            .status;
     }
     if publication_continuation(status)? == PublicationContinuation::WaitingForApproval {
         println!("publication {} verified; waiting for approval. Ask another organization admin to review approval and outstanding checks in Settings › Packages.", staged.id);
@@ -208,6 +206,22 @@ fn hosted_package_settings_url(org_id: &str) -> Result<reqwest::Url> {
     Ok(url)
 }
 
+fn remove_retry_state(path: Option<std::path::PathBuf>) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "release finalized, but encrypted retry state could not be removed from {}",
+                path.display()
+            )
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,21 +248,5 @@ mod tests {
         assert_eq!(key, "slug");
         assert_eq!(value, "org/id &value");
         assert!(query.next().is_none());
-    }
-}
-
-fn remove_retry_state(path: Option<std::path::PathBuf>) -> Result<()> {
-    let Some(path) = path else {
-        return Ok(());
-    };
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| {
-            format!(
-                "release finalized, but encrypted retry state could not be removed from {}",
-                path.display()
-            )
-        }),
     }
 }

@@ -2,6 +2,10 @@
 use runmat_core::abi::{DiagnosticSeverity, ExecutionOutcome};
 use runmat_runtime::RuntimeError;
 
+#[expect(
+    clippy::result_large_err,
+    reason = "Preserves the canonical owned RuntimeError contract; its storage policy belongs to runmat-runtime"
+)]
 pub(super) fn complete(
     outcome: &ExecutionOutcome,
     cleanup: Result<(), RuntimeError>,

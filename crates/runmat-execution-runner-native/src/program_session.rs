@@ -196,7 +196,7 @@ impl NativeProgramSession {
                 .into_iter()
                 .map(|(program, task)| {
                     (
-                        runmat_execution_artifact::WorkerProgramRequest::Direct(program),
+                        runmat_execution_artifact::WorkerProgramRequest::direct(program),
                         task,
                     )
                 })

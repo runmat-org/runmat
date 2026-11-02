@@ -246,17 +246,34 @@ impl SubmissionEncoder for ProfiledEncoder<'_> {
     }
 }
 
+/// Captured observation ownership and optional instrumentation for one encoder.
+pub(super) struct EncoderObservation {
+    pub(super) command: Option<CommandProfilingReceipt>,
+    pub(super) admission: ProviderAdmission,
+    pub(super) timestamp: Option<TimestampCapability>,
+    pub(super) budget: Option<Arc<ProviderObservationBudget>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) progress_port: Option<Arc<dyn WgpuObservationProgress>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) completion_prepared: bool,
+}
+
 impl<'a> ProfiledEncoder<'a> {
     pub(super) fn new(
         emission: &'a WgpuEmission<'_>,
         descriptor: &wgpu::CommandEncoderDescriptor<'_>,
-        command: Option<CommandProfilingReceipt>,
-        admission: ProviderAdmission,
-        timestamp: Option<TimestampCapability>,
-        budget: Option<Arc<ProviderObservationBudget>>,
-        #[cfg(not(target_arch = "wasm32"))] progress_port: Option<Arc<dyn WgpuObservationProgress>>,
-        #[cfg(not(target_arch = "wasm32"))] completion_prepared: bool,
+        observation: EncoderObservation,
     ) -> Self {
+        let EncoderObservation {
+            command,
+            admission,
+            timestamp,
+            budget,
+            #[cfg(not(target_arch = "wasm32"))]
+            progress_port,
+            #[cfg(not(target_arch = "wasm32"))]
+            completion_prepared,
+        } = observation;
         let active = !matches!(&admission, ProviderAdmission::Absent) || command.is_some();
         #[cfg(not(target_arch = "wasm32"))]
         let provider_progress =

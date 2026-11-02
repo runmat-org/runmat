@@ -329,10 +329,8 @@ fn init_logging_impl(
 /// batch exporter's queue.
 #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
 pub fn shutdown_otel() {
-    if otel_stats().is_some() {
-        if shutdown_otel_result().is_err() {
-            native_otel::record_shutdown_failure();
-        }
+    if otel_stats().is_some() && shutdown_otel_result().is_err() {
+        native_otel::record_shutdown_failure();
     }
 }
 
@@ -811,7 +809,8 @@ mod tests {
     #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
     #[test]
     fn permanent_layer_resolves_explicit_parent_without_phantom_root_ids() {
-        struct Capture(Arc<Mutex<Vec<(Option<String>, Option<String>)>>>);
+        type CapturedContextIds = Vec<(Option<String>, Option<String>)>;
+        struct Capture(Arc<Mutex<CapturedContextIds>>);
         impl<S> Layer<S> for Capture
         where
             S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,

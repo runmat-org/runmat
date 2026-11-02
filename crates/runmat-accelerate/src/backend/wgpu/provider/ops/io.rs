@@ -1328,7 +1328,6 @@ mod tests {
             },
         ));
         assert!(futures::executor::block_on(readback.download_numeric()).is_err());
-        drop(readback);
         drop(assignment);
         drop(scope);
         let _retirement_scope = runtime.enter();

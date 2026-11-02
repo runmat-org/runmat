@@ -74,7 +74,10 @@ impl PartitionMesh {
 
     pub(crate) fn validate(&self) -> DistributedResult<()> {
         if self.nodes_per_element < 4
-            || self.element_nodes.len() % self.nodes_per_element != 0
+            || !self
+                .element_nodes
+                .len()
+                .is_multiple_of(self.nodes_per_element)
             || self.element_count() == 0
         {
             return Err(DistributedError::InvalidProblem(

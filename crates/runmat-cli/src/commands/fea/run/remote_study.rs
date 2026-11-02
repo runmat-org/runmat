@@ -1,6 +1,10 @@
 //! Remote authored study submission through the portable root shared by every family.
 use super::*;
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "FEA alpha execution-context structure is deferred under the approved 1.0 hardening scope"
+)]
 pub(super) async fn execute_study_remotely(
     source: &NativeCheckedFeaSource,
     study: ResolvedAnalysisStudy,

@@ -1013,7 +1013,7 @@ impl WgpuProvider {
         shape[dim] = target_len;
         fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
         // Each stage swaps A/B; reorder writes the opposite physical owner.
-        let final_buffer = if factors.len() % 2 == 0 {
+        let final_buffer = if factors.len().is_multiple_of(2) {
             &stage_b
         } else {
             &stage_a
@@ -1394,7 +1394,11 @@ impl WgpuProvider {
         shape[dim] = target_len;
         fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
         // Each stage swaps A/B; reorder writes the opposite physical owner.
-        let final_buffer = if digits % 2 == 0 { &stage_b } else { &stage_a };
+        let final_buffer = if digits.is_multiple_of(2) {
+            &stage_b
+        } else {
+            &stage_a
+        };
         let output_handle = self.register_existing_buffer_with_storage(
             final_buffer.clone(),
             shape,
@@ -1638,7 +1642,11 @@ impl WgpuProvider {
         shape[dim] = target_len;
         fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
         // Each stage swaps A/B; reorder writes the opposite physical owner.
-        let final_buffer = if digits % 2 == 0 { &stage_b } else { &stage_a };
+        let final_buffer = if digits.is_multiple_of(2) {
+            &stage_b
+        } else {
+            &stage_a
+        };
         let output_handle = self.register_existing_buffer_with_storage(
             final_buffer.clone(),
             shape,

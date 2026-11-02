@@ -183,7 +183,7 @@ impl StatisticalStudyObservations {
                 source_workload: ObservationWorkloadSource::VolumeMesh(self.workload_input()?),
                 mesh: Some(self.assembly_input(AnalysisNumericalObjectKind::Mesh)?),
                 accelerator_requests: Vec::new(),
-                sequence: self.source.sequence.clone(),
+                sequence: self.source.sequence,
                 step: self.source.step.clone(),
                 limits: ObservationLimits::default(),
                 program_revision: self.source.program_revision.clone(),
@@ -321,7 +321,7 @@ impl StatisticalStudyObservations {
             ObservationFieldCatalog::volume_mesh_recovery(
                 recovery.request.clone(),
                 fields.manifest.clone(),
-                self.source.sequence.clone(),
+                self.source.sequence,
                 self.source.step.clone(),
             )?,
             &self.source.step,

@@ -203,12 +203,9 @@ impl<T> PipelineCache<T> {
                     drop(admitted);
                     continue;
                 }
-                if admitted.is_err() {
+                if let Err(error) = admitted {
                     drop(guard);
-                    return Err(admitted
-                        .err()
-                        .expect("failed admission retains its original cause")
-                        .into());
+                    return Err(error.into());
                 }
                 let reserved = guard
                     .reserved
