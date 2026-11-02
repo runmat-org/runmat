@@ -183,8 +183,13 @@ async fn cancellation_is_durable_and_corrupt_metadata_recovers_indeterminate() {
     expired.retain_until_unix_millis = 1;
     {
         let store = supervisor.store.lock().await;
-        store.write_record(&expired).unwrap();
-        assert_eq!(store.gc(2, |_| Ok(true)).unwrap(), vec![record.handle.id]);
+        store.write_record(&mut expired).unwrap();
+        assert_eq!(
+            store
+                .gc(expired.retain_until_unix_millis, |_| Ok(true))
+                .unwrap(),
+            vec![record.handle.id]
+        );
     }
     assert!(!config
         .paths
@@ -435,7 +440,7 @@ fn legacy_program_workload_kind_is_checked_against_original_stored_request() {
         scope_id: runmat_execution::ExecutionScopeId::derive(&[b"round-trip-scope"]),
         pool_id: runmat_execution::PoolId::derive(&[b"round-trip-pool"]),
     });
-    let (record, created) = store.create_program(&submission, 1).unwrap();
+    let (mut record, created) = store.create_program(&submission, 1).unwrap();
     assert!(created);
     assert_eq!(
         store.record(record.handle.id).unwrap().workload_kind,
@@ -452,12 +457,12 @@ fn legacy_program_workload_kind_is_checked_against_original_stored_request() {
     );
     let mut mismatched = record.clone();
     mismatched.workload_kind = LocalJobWorkloadKind::Graph;
-    store.write_record(&mismatched).unwrap();
+    store.write_record(&mut mismatched).unwrap();
     assert!(
         store.record(record.handle.id).is_err(),
         "record cannot relabel a persisted Program as Graph"
     );
-    store.write_record(&record).unwrap();
+    store.write_record(&mut record).unwrap();
     let recovered = store
         .program_submission(record.handle.id)
         .unwrap()
@@ -716,7 +721,7 @@ async fn persisted_graph_failure_keeps_its_typed_workload_identity() {
     );
     let mut mislabeled = record.clone();
     mislabeled.workload_kind = LocalJobWorkloadKind::Program;
-    store.write_record(&mislabeled).unwrap();
+    store.write_record(&mut mislabeled).unwrap();
     assert!(
         store.record(record.handle.id).is_err(),
         "Graph failure cannot be relabeled as a Direct program response",

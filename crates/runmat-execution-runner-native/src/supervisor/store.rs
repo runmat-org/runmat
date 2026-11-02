@@ -15,8 +15,13 @@ use super::filesystem::{
 use super::model::{
     BatchSubmission, DriverCompletion, DriverMarker, GraphBatchSubmission, JobAttachment,
     LocalJobRecord, LocalJobState, LocalJobWorkloadKind, ProgramBatchSubmission,
+    MAX_RETENTION_MILLIS, MIN_RETENTION_MILLIS,
 };
 use crate::{NativeExecutionError, NativeExecutionResult};
+
+#[cfg(test)]
+#[path = "store/retention_tests.rs"]
+mod retention_tests;
 
 const ATTACH_CHUNK_BYTES: usize = 1024 * 1024;
 
@@ -306,7 +311,7 @@ impl JobStore {
             retention_millis,
         };
         atomic_json(&job_dir.join("request.json"), &request)?;
-        let record = LocalJobRecord {
+        let mut record = LocalJobRecord {
             schema_version: 1,
             handle,
             workload_kind: workload.kind(),
@@ -321,7 +326,7 @@ impl JobStore {
             exit_code: None,
             message: None,
         };
-        self.write_record(&record)?;
+        self.write_record(&mut record)?;
         Ok((record, true))
     }
 
@@ -373,7 +378,31 @@ impl JobStore {
         Ok(records)
     }
 
-    pub(super) fn write_record(&self, record: &LocalJobRecord) -> NativeExecutionResult<()> {
+    pub(super) fn write_record(&self, record: &mut LocalJobRecord) -> NativeExecutionResult<()> {
+        if record.state.is_terminal() {
+            // Read the original policy without constructing or cloning its program
+            // payload. Retention starts at terminal persistence, not submission;
+            // merely inspecting an unchanged terminal record does not renew it.
+            let request: PersistedRequest<serde::de::IgnoredAny> =
+                read_json(&self.job_dir(record.handle.id).join("request.json"))?;
+            if request.schema_version != 1
+                || request.handle != record.handle
+                || request.request_digest != record.request_digest
+                || !(MIN_RETENTION_MILLIS..=MAX_RETENTION_MILLIS)
+                    .contains(&request.retention_millis)
+            {
+                return Err(NativeExecutionError::Protocol(
+                    "terminal retention differs from the original job policy".into(),
+                ));
+            }
+            let terminal_expiry = record
+                .updated_unix_millis
+                .checked_add(request.retention_millis)
+                .ok_or_else(|| {
+                    NativeExecutionError::Protocol("terminal retention deadline overflows".into())
+                })?;
+            record.retain_until_unix_millis = record.retain_until_unix_millis.max(terminal_expiry);
+        }
         record.validate()?;
         atomic_json(&self.job_dir(record.handle.id).join("record.json"), record)
     }
@@ -504,7 +533,7 @@ impl JobStore {
                     .job_dir(job_id)
                     .join(format!("record.corrupt-{}.json", Uuid::new_v4().simple()));
                 let _ = fs::rename(self.job_dir(job_id).join("record.json"), corrupt);
-                let record = LocalJobRecord {
+                let mut record = LocalJobRecord {
                     schema_version: 1,
                     handle: request.handle,
                     workload_kind: request.workload.kind(),
@@ -521,7 +550,7 @@ impl JobStore {
                         "job metadata was corrupt; execution state is indeterminate".into(),
                     ),
                 };
-                self.write_record(&record)?;
+                self.write_record(&mut record)?;
                 Ok(record)
             }
         }

@@ -101,7 +101,7 @@ async fn saved_live_pid_without_original_lease_cannot_keep_attempt_alive() {
         let mut record = store.record(job).unwrap();
         record.state = LocalJobState::Running;
         record.driver_process_id = Some(std::process::id());
-        store.write_record(&record).unwrap();
+        store.write_record(&mut record).unwrap();
     }
     let attachment = supervisor.attach(job, 0, 0).await.unwrap();
     assert_eq!(attachment.record.state, LocalJobState::Indeterminate);
@@ -131,7 +131,7 @@ async fn escalation_routes_original_control_and_cannot_signal_a_foreign_saved_pi
     let mut record = store.record(job).unwrap();
     record.state = LocalJobState::Running;
     record.driver_process_id = unrelated.id();
-    store.write_record(&record).unwrap();
+    store.write_record(&mut record).unwrap();
     let now_millis = scheduler.driver.snapshot().now_millis;
     scheduler
         .command(DriverCommand::CancelScope {
@@ -197,7 +197,7 @@ async fn retention_cannot_unlink_an_owned_provider_inode_after_terminal_history(
     record.submitted_unix_millis = 1;
     record.updated_unix_millis = 1;
     record.retain_until_unix_millis = 1;
-    store.write_record(&record).unwrap();
+    store.write_record(&mut record).unwrap();
     assert!(store
         .gc(unix_millis(), |job| scheduler
             .job_has_provider(&store, job)

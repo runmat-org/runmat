@@ -61,13 +61,13 @@ impl LocalSupervisor {
             record.state = LocalJobState::Cancelled;
             record.updated_unix_millis = now;
             record.message = Some("cancelled before driver start".into());
-            store.write_record(&record)?;
+            store.write_record(&mut record)?;
             return Ok(record);
         }
         record.state = LocalJobState::Cancelling;
         record.driver_process_id = process_id;
         record.updated_unix_millis = now;
-        store.write_record(&record)?;
+        store.write_record(&mut record)?;
         terminate_process_tree(process_id.expect("checked above"))
             .await
             .map_err(protocol_io)?;
@@ -75,7 +75,7 @@ impl LocalSupervisor {
         record.driver_process_id = None;
         record.updated_unix_millis = unix_millis();
         record.message = Some("cancelled by user".into());
-        store.write_record(&record)?;
+        store.write_record(&mut record)?;
         Ok(record)
     }
 }

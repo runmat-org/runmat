@@ -169,7 +169,7 @@ impl LocalSupervisor {
         }
         if current != *record {
             current.updated_unix_millis = unix_millis();
-            store.write_record(&current)?;
+            store.write_record(&mut current)?;
         }
         *record = current;
         Ok(())
@@ -238,7 +238,7 @@ impl LocalSupervisor {
             LocalJobState::Cancelling
         };
         record.updated_unix_millis = unix_millis();
-        store.write_record(&record)?;
+        store.write_record(&mut record)?;
         Ok(record)
     }
 

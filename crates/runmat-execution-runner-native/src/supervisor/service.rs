@@ -164,7 +164,7 @@ impl LocalSupervisor {
                 record.exit_code = completion.exit_code;
                 record.message = completion.message;
                 record.updated_unix_millis = now;
-                store.write_record(&record)?;
+                store.write_record(&mut record)?;
                 continue;
             }
             match record.state {
@@ -177,7 +177,7 @@ impl LocalSupervisor {
                             record.state = LocalJobState::Running;
                             record.driver_process_id = Some(marker.process_id);
                             record.updated_unix_millis = now;
-                            store.write_record(&record)?;
+                            store.write_record(&mut record)?;
                         } else {
                             mark_indeterminate(
                                 &store,
@@ -205,7 +205,7 @@ impl LocalSupervisor {
                             record.message = Some("driver stopped after cancellation".into());
                             record.driver_process_id = None;
                             record.updated_unix_millis = now;
-                            store.write_record(&record)?;
+                            store.write_record(&mut record)?;
                         } else {
                             mark_indeterminate(
                                 &store,
@@ -237,7 +237,7 @@ impl LocalSupervisor {
         record.state = LocalJobState::Starting;
         record.driver_process_id = None;
         record.updated_unix_millis = unix_millis();
-        store.write_record(&record)?;
+        store.write_record(&mut record)?;
 
         let job_dir = store.job_dir(record.handle.id);
         let mut command = HostCommand::new(&self.config.execution.executable);
@@ -274,7 +274,7 @@ impl LocalSupervisor {
                 record.state = LocalJobState::Failed;
                 record.updated_unix_millis = unix_millis();
                 record.message = Some(format!("failed to launch local batch driver: {error}"));
-                store.write_record(&record)?;
+                store.write_record(&mut record)?;
                 return Ok(record);
             }
         };
@@ -290,7 +290,7 @@ impl LocalSupervisor {
         record.state = LocalJobState::Running;
         record.driver_process_id = Some(process_id);
         record.updated_unix_millis = unix_millis();
-        store.write_record(&record)?;
+        store.write_record(&mut record)?;
         Ok(record)
     }
 

@@ -353,7 +353,8 @@ impl LocalJobRecord {
             || self.workload_kind == LocalJobWorkloadKind::Legacy
             || self.handle.generation == 0
             || self.updated_unix_millis < self.submitted_unix_millis
-            || self.retain_until_unix_millis < self.updated_unix_millis
+            || self.retain_until_unix_millis < self.submitted_unix_millis
+            || self.state.is_terminal() && self.retain_until_unix_millis < self.updated_unix_millis
             || matches!(self.state, LocalJobState::Running) && self.driver_process_id.is_none()
             || !matches!(
                 self.state,

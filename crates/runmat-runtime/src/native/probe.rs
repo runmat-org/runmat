@@ -116,7 +116,9 @@ mod emitted {
 
     /// No pointers, relocations, padding, or host process state occur in this symbol.
     #[used]
-    #[no_mangle]
+    // A unit-test harness can also link the production runtime through a backend.
+    // Only the production library owns the fixed external ABI symbol name.
+    #[cfg_attr(not(test), no_mangle)]
     pub static RUNMAT_NATIVE_ABI_PROBE_V2: [u8; NATIVE_ABI_PROBE_BYTES] =
         native_abi_probe().canonical_bytes();
 
