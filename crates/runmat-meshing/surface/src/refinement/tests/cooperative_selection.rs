@@ -8,10 +8,10 @@ use runmat_geometry_core::{
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
-struct CancelDuringDomainWalk(AtomicBool, &'static str);
+struct CancelDuringDomainWalk(AtomicBool, &'static std::path::Path);
 impl GeometryEvaluationControl for CancelDuringDomainWalk {
     fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
-        if std::panic::Location::caller().file().ends_with(self.1) {
+        if std::path::Path::new(std::panic::Location::caller().file()).ends_with(self.1) {
             self.0.store(true, Ordering::Relaxed);
             Err(GeometryEvaluationError::new(
                 GeometryEvaluationErrorKind::Cancelled,
@@ -52,7 +52,10 @@ fn controlled_selection_preserves_candidates_and_cancels_inside_domain_walk() {
         )
         .unwrap()
     );
-    let control = CancelDuringDomainWalk(AtomicBool::new(false), "select/domain.rs");
+    let control = CancelDuringDomainWalk(
+        AtomicBool::new(false),
+        std::path::Path::new("select/domain.rs"),
+    );
     let failure = select_exact_face_refinement_candidates(
         &geometry,
         &pslg,
@@ -91,7 +94,10 @@ fn independent_batch_preserves_order_and_observes_cancellation() {
         independent_candidate_batch(candidates.clone(), &geometry, &pslg, 0.0, Some(&Control),)
             .unwrap()
     );
-    let control = CancelDuringDomainWalk(AtomicBool::new(false), "select/batch.rs");
+    let control = CancelDuringDomainWalk(
+        AtomicBool::new(false),
+        std::path::Path::new("select/batch.rs"),
+    );
     let failure =
         independent_candidate_batch(candidates, &geometry, &pslg, 0.0, Some(&control)).unwrap_err();
     assert!(control.0.load(Ordering::Relaxed));

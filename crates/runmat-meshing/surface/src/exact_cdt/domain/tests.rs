@@ -17,9 +17,8 @@ fn carving_observes_cancellation_during_protected_inventory_walk() {
     impl runmat_meshing_core::MeshingCancellationSignal for CancelDuringCarving {
         fn is_cancelled(&self) -> bool {
             // Ignore prerequisite validators: exercise the carving operation itself.
-            std::panic::Location::caller()
-                .file()
-                .ends_with("domain/carve.rs")
+            std::path::Path::new(std::panic::Location::caller().file())
+                .ends_with(std::path::Path::new("domain/carve.rs"))
                 && self.0.fetch_add(1, Ordering::Relaxed) >= 2
         }
     }

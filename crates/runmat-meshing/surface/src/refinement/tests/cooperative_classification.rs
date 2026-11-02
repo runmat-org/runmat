@@ -16,9 +16,8 @@ struct CancelDuringPairWalk {
 }
 impl GeometryEvaluationControl for CancelDuringPairWalk {
     fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
-        if std::panic::Location::caller()
-            .file()
-            .ends_with("encroachment/classification.rs")
+        if std::path::Path::new(std::panic::Location::caller().file())
+            .ends_with(std::path::Path::new("encroachment/classification.rs"))
             && self.probes.fetch_add(1, Ordering::Relaxed) + 1 == self.cancel_at
         {
             return Err(GeometryEvaluationError::new(

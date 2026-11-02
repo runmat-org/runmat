@@ -19,9 +19,8 @@ impl CancelDuringCandidateWalk {
 }
 impl MeshingCancellationSignal for CancelDuringCandidateWalk {
     fn is_cancelled(&self) -> bool {
-        std::panic::Location::caller()
-            .file()
-            .ends_with("insertion/candidate.rs")
+        std::path::Path::new(std::panic::Location::caller().file())
+            .ends_with(std::path::Path::new("insertion/candidate.rs"))
             && self.probes.fetch_add(1, Ordering::Relaxed) + 1 == self.cancel_at
     }
 }

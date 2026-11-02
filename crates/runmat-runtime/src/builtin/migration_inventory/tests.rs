@@ -103,9 +103,8 @@ fn compiled_inventory_preserves_runtime_registration_provenance() {
         .iter()
         .find(|constant| constant.name == "pi")
         .expect("missing pi constant registration");
-    assert!(constant
-        .source_file
-        .ends_with("builtins/constants/core/pi.rs"));
+    assert!(std::path::Path::new(&constant.source_file)
+        .ends_with(std::path::Path::new("builtins/constants/core/pi.rs")));
     assert!(constant
         .module_path
         .ends_with("builtins::constants::core::pi"));

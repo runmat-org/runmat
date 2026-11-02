@@ -10,7 +10,8 @@ impl MeshingCancellationSignal for CancelAtJoin {
     #[track_caller]
     fn is_cancelled(&self) -> bool {
         let site = std::panic::Location::caller();
-        if site.file().ends_with("surface_mesh/join.rs") {
+        if std::path::Path::new(site.file()).ends_with(std::path::Path::new("surface_mesh/join.rs"))
+        {
             // Entry, batch validation and face entry must complete first.
             self.0.fetch_add(1, Ordering::SeqCst) >= 3
         } else {

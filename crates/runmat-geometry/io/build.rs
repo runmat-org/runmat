@@ -76,6 +76,9 @@ fn build_occt_backend() {
     }
     if target_env == "msvc" {
         build.flag("/utf-8");
+        // CXX gates shared-field defaults on the reported language standard.
+        // MSVC otherwise reports pre-C++11 even with /std:c++17 selected.
+        build.flag("/Zc:__cplusplus");
         // Preserve RAII cleanup when the bridge catches C++ exceptions.
         build.flag("/EHsc");
     }

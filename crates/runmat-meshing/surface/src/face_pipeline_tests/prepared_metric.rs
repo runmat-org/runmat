@@ -4,9 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 struct Counter(AtomicU64);
 impl GeometryEvaluationControl for Counter {
     fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
-        if std::panic::Location::caller()
-            .file()
-            .ends_with("exact_metric/resolved/preparation.rs")
+        if std::path::Path::new(std::panic::Location::caller().file())
+            .ends_with(std::path::Path::new("exact_metric/resolved/preparation.rs"))
         {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
