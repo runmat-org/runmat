@@ -289,7 +289,9 @@ pub(super) async fn run_process(
         Some(materialized) => match completion.begin_raw_output(driver.attempt, materialized) {
             Err(error) => {
                 completion.stop_for_raw_output(std::sync::Arc::clone(&error));
-                Some(TransferFailure::Infrastructure(error.to_string()))
+                // This attempt's output owner has stopped. Retrying the same
+                // task cannot clear that owner or enlarge its original grant.
+                Some(TransferFailure::Execution(error.to_string()))
             }
             Ok(journal) => {
                 raw_journal = Some(journal);
@@ -313,7 +315,7 @@ pub(super) async fn run_process(
                         }
                         completion.stop_for_raw_output(std::sync::Arc::clone(&failure));
                         completion.raw_output_changed();
-                        Some(TransferFailure::Infrastructure(failure.to_string()))
+                        Some(TransferFailure::Execution(failure.to_string()))
                     }
                 }
             }
@@ -743,7 +745,7 @@ pub(super) async fn run_process(
                 | Ok(WorkerResponse::SpmdSuccess { .. })
                 | Err(TransferFailure::Cancelled)
         ) {
-            return Err(TransferFailure::Infrastructure(error.to_string()));
+            return Err(TransferFailure::Execution(error.to_string()));
         }
         if has_retirement_cleanup_error {
             return match outcome {

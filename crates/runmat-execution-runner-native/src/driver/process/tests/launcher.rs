@@ -24,11 +24,23 @@ async fn run_process(
     request: WorkerLaunchRequest,
     completion: &TaskCompletion,
 ) -> Result<WorkerResponse, TransferFailure> {
+    run_process_with_scratch(driver, request, completion, None).await
+}
+
+async fn run_process_with_scratch(
+    driver: &LocalDriver,
+    request: WorkerLaunchRequest,
+    completion: &TaskCompletion,
+    scratch_bytes: Option<u64>,
+) -> Result<WorkerResponse, TransferFailure> {
     let meters = TransportMeters::default();
     let mut termination = runmat_execution_runner::AttemptExecutionTermination::NotStarted;
     let mut console = None;
     let mut retirement = super::super::LocalRetirementEvidence::NotStarted;
-    let attempt = super::preflight::admit(driver, ArtifactId::derive(&[b"launcher-attempt"]));
+    let mut attempt = super::preflight::admit(driver, ArtifactId::derive(&[b"launcher-attempt"]));
+    if let Some(scratch_bytes) = scratch_bytes {
+        attempt.task.resources.scratch_bytes = scratch_bytes;
+    }
     let owner = super::super::owned::ProcessOwner {
         attempt: &attempt,
         config: &driver.config,
@@ -196,4 +208,24 @@ fn malformed_worker_frames_remain_infrastructure_failures() {
         "",
     );
     assert!(matches!(failure, TransferFailure::Infrastructure(_)));
+}
+
+#[tokio::test]
+async fn insufficient_output_grant_is_a_terminal_failure_not_retryable_infrastructure() {
+    let (_temporary, driver) = shell_driver("exit 0");
+    let completion = TaskCompletion::new();
+    let failure = run_process_with_scratch(
+        &driver,
+        WorkerLaunchRequest::Direct(Box::new(request())),
+        &completion,
+        Some(0),
+    )
+    .await
+    .expect_err("an empty grant cannot admit output metadata");
+    assert!(matches!(failure, TransferFailure::Execution(_)));
+    assert!(matches!(
+        completion.raw_output_failure().as_deref(),
+        Some(crate::RawOutputError::StorageLimit { maximum: 0, .. })
+    ));
+    assert_eq!(completion.cancellation_reason(), None);
 }

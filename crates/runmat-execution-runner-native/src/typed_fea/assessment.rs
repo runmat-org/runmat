@@ -150,7 +150,8 @@ fn local_pool() -> Result<
     let resources = runmat_execution::resource::ResourceRequest {
         cpu_millicores: config.worker_cpu_millicores,
         memory_bytes: config.worker_memory_bytes,
-        scratch_bytes: 0,
+        scratch_bytes: crate::process_output::RawOutputBudget::local_scratch_bytes(0, None)
+            .map_err(|error| error.to_string())?,
         max_wall_millis: 30_000,
         max_artifact_bytes: 1024 * 1024,
         max_egress_bytes: 0,
