@@ -59,8 +59,11 @@ mod clock_wire_bound_tests {
         });
         let bytes = serde_json::to_vec(&body).unwrap();
         assert!(bytes.len() < 2 * 1024 * 1024);
+        // The per-entry bound describes the release manifest, not the whole
+        // heartbeat: its independent receipt batch alone can occupy 512 KiB.
+        let manifest_bytes = serde_json::to_vec(&body["clockObservationReleaseManifest"]).unwrap();
         assert!(
-            bytes.len()
+            manifest_bytes.len()
                 <= runmat_execution::security::MAX_CLOCK_OBSERVATIONS_PER_NODE * 232 + 64 * 1024
         );
     }
