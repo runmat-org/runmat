@@ -7,7 +7,10 @@ use std::sync::{
     Arc,
 };
 
-pub const WORKER_PARENT_MONITOR_STACK_BYTES: u64 = 64 * 1024;
+// This thread frames and decodes typed control messages through host observers.
+// Reserve the standard Rust worker-stack size: a 64 KiB I/O-only stack overflows
+// on a valid debug-profile bootstrap. Admission quotes use this same constant.
+pub const WORKER_PARENT_MONITOR_STACK_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Only for a one-request worker process. EOF, input error or unexpected trailing
 /// data ends the worker root. A source loop need not yield for parent loss to act.

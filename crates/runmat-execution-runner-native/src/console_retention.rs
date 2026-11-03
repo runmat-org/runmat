@@ -608,7 +608,9 @@ mod tests {
         };
         let quote = owner.quote_delegate(controls, 4).unwrap();
         let source = controls.storage_profile().unwrap();
-        let other_inputs_environment_monitor = 17 * 1024 * 1024 + 137_000 + 64 * 1024;
+        let other_inputs_environment_monitor = 17 * 1024 * 1024
+            + 137_000
+            + runmat_process_host::ipc::WORKER_PARENT_MONITOR_STACK_BYTES;
         let old_floor = other_inputs_environment_monitor + source.minimum_memory_bytes;
         let corrected = allocation_floor(old_floor, Some(controls), Some(quote)).unwrap();
         assert_eq!(
