@@ -299,6 +299,7 @@ fn drawing() -> DrawingDocument {
             kind: TableKind::Bom {
                 view: "front".into(),
                 include_fasteners: true,
+                spec: Default::default(),
             },
             at: [0.0, 0.0],
         }],
@@ -315,17 +316,26 @@ fn d01_drawings_check_views_annotations_tables_and_title_blocks() {
         rep.diagnostics
     );
     assert_eq!(
-        rep.balloons["b1"], 2,
+        rep.balloons["b1"], "2",
         "balloon numbers follow the BOM table"
     );
     assert_eq!(rep.resolved["d1"].len(), 2);
     let tb = &rep.title_blocks["1"];
     assert_eq!(tb[0], ("Part number".to_string(), "BR-1".to_string()));
     assert_eq!(tb[1].1, "C");
+    let warnings: Vec<&str> = rep
+        .diagnostics
+        .with_code(DiagCode::DrawingReference)
+        .iter()
+        .map(|d| d.message.as_str())
+        .collect();
     assert_eq!(
-        rep.diagnostics.with_code(DiagCode::DrawingReference).len(),
-        1,
-        "`drawn_by` is missing (a warning)"
+        warnings,
+        vec![
+            "table `bom` shows `description`, which 2 item(s) do not have",
+            "title block `Drawn` reads `drawn_by`, which the drawn model does not have",
+        ],
+        "the BOM table's description column and `drawn_by` are missing (warnings)"
     );
 }
 
