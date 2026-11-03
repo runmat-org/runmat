@@ -57,6 +57,14 @@ performs n multiplications and n - 1 additions: 2n - 1 operations. A backend's
 instruction sequence does not change that reference count. An empty dot product
 has zero arithmetic operations under this convention.
 
+A direct complex dot product of length n > 0 counts six real operations per
+complex product and two per subsequent complex addition: 8n − 2. Sparse
+matrix-vector multiplication sums these row-dot counts over stored entries.
+An empty row contributes zero; an explicitly stored zero still participates in
+the row's reference arithmetic. Counts are the same for Single and Double.
+The metered CSR operator quotes its immutable row pattern once and reserves the count
+before each application. A refused reservation leaves the output unchanged.
+
 Integer arithmetic, comparisons, memory movement, communication and waiting are
 not floating-point operations and are unmetered. This deliberately leaves some
 meshing work uncharged; no arbitrary conversion weight is assigned to it.

@@ -8,6 +8,9 @@ use crate::csr::{CsrMatrix, CsrRef};
 use crate::error::SolverResult;
 use crate::scalar::Scalar;
 
+mod metered_csr;
+pub use metered_csr::MeteredCsrOperator;
+
 /// `y = A x` for a square or rectangular operator.
 pub trait LinearOperator<T: Scalar>: Sync {
     fn nrows(&self) -> usize;
