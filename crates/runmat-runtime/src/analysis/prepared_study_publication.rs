@@ -195,4 +195,4 @@ pub fn assessment_evidence_identity(report: &PublishedStudyAssessment) -> Result
 }
 
 mod failure;
-pub(super) use failure::publication_failure;
+pub(super) use failure::{publication_failure, publication_failure_at};

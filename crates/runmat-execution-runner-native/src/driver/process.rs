@@ -619,17 +619,69 @@ impl ProcessAttemptEvidence {
     }
 }
 
-fn worker_exchange_failure(error: ProcessHostError, stderr: &str) -> TransferFailure {
-    let worker_was_lost = matches!(&error, ProcessHostError::Io(_));
-    let message = if stderr.is_empty() {
-        error.to_string()
-    } else {
-        format!("{error}; worker stderr: {stderr}")
-    };
+fn worker_exchange_failure(error: &ProcessHostError) -> TransferFailure {
+    let worker_was_lost = matches!(error, ProcessHostError::Io(_));
+    let message = error.to_string();
     if worker_was_lost {
         TransferFailure::WorkerLost(message)
     } else {
         TransferFailure::Infrastructure(message)
+    }
+}
+
+/// Keep the original transport cause alive until its sibling application drain
+/// and physical owner have finished. The primary message remains available to
+/// existing cleanup diagnostics; it contains no premature stderr snapshot.
+#[derive(Default)]
+struct DeferredWorkerExchangeFailure(Option<ProcessHostError>);
+
+impl DeferredWorkerExchangeFailure {
+    fn record(&mut self, error: ProcessHostError) -> TransferFailure {
+        let failure = worker_exchange_failure(&error);
+        self.0 = Some(error);
+        failure
+    }
+
+    fn clear(&mut self) {
+        self.0 = None;
+    }
+
+    fn finish<T>(
+        self,
+        mut outcome: Result<T, TransferFailure>,
+        stderr: &runmat_process_host::child::CapturedProcessOutput,
+    ) -> Result<T, TransferFailure> {
+        let Some(_original_transport) = self.0 else {
+            return outcome;
+        };
+        let message = match &mut outcome {
+            Err(
+                TransferFailure::WorkerLost(message)
+                | TransferFailure::Infrastructure(message)
+                | TransferFailure::RetirementUnverified(message),
+            ) => message,
+            // A different primary failure keeps its existing precedence and
+            // must not acquire diagnostics attributed to the transport cause.
+            _ => return outcome,
+        };
+        use std::fmt::Write as _;
+        match stderr.take_closed_snapshot() {
+            Ok(snapshot) if !snapshot.bytes.is_empty() => {
+                // Move the original bounded prefix out of its capture. Display
+                // borrows those bytes; no text()/snapshot() payload clone or
+                // second journal reader is introduced here.
+                let _ = write!(
+                    message,
+                    "; worker stderr (observed_bytes={:?}): {snapshot}",
+                    snapshot.observed_bytes
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = write!(message, "; worker stderr capture unavailable: {error}");
+            }
+        }
+        outcome
     }
 }
 

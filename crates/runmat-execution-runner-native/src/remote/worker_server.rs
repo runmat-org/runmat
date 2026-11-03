@@ -37,6 +37,7 @@ const MAX_RETIREMENT_RECEIPTS: usize = 256;
 struct WorkerRetirementReceipt {
     attempt_id: AttemptId,
     request_digest: runmat_execution::Digest,
+    usage: Option<super::protocol::RetiredAttemptUsage>,
     // None is an exact ACK replay record in the fixed worker-session journal.
     // The charged reservation is released exactly once when this is taken.
     claim: Option<(
@@ -141,7 +142,12 @@ struct ActiveAttempt {
 }
 
 impl WorkerState {
-    fn finish_attempt(&mut self, attempt_id: AttemptId, verified: bool) -> Option<ActiveAttempt> {
+    fn finish_attempt(
+        &mut self,
+        attempt_id: AttemptId,
+        verified: bool,
+        usage: Option<super::protocol::RetiredAttemptUsage>,
+    ) -> Option<ActiveAttempt> {
         let active = self.attempts.remove(&attempt_id)?;
         if verified {
             if self.retirement_receipts.len() == MAX_RETIREMENT_RECEIPTS {
@@ -157,6 +163,7 @@ impl WorkerState {
                 self.retirement_receipts.push_back(WorkerRetirementReceipt {
                     attempt_id,
                     request_digest: active.request_digest,
+                    usage,
                     claim: Some((active.resources.clone(), active.assignment.clone())),
                 });
             } else {
@@ -1149,6 +1156,12 @@ pub(super) async fn run_worker_loop(
                             }
                         }
                     }
+                    let retired_usage = match &report {
+                        runmat_execution_runner::AttemptReport::Succeeded { result } => result
+                            .resources()
+                            .map(super::protocol::RetiredAttemptUsage::from_accounting),
+                        _ => None,
+                    };
                     if retirement_unverified {
                         // Stop admission first, but keep the active attempt
                         // present until its fatal report has had a bounded
@@ -1160,7 +1173,7 @@ pub(super) async fn run_worker_loop(
                         attempt_reply_for_task.complete_with_console(report, console);
                     }
                     let mut state = state_for_task.lock().await;
-                    let _ = state.finish_attempt(attempt_id, !retirement_unverified);
+                    let _ = state.finish_attempt(attempt_id, !retirement_unverified, retired_usage);
                     finished_sender.send_replace(true);
                     let retired_program = state.graph_programs.remove(&attempt_id);
                     if state.draining && state.attempts.is_empty() {
@@ -1218,13 +1231,13 @@ pub(super) async fn run_worker_loop(
                     && attempt.worker_id == worker.id
                     && attempt.task.pool_id == worker.pool_id;
                 let retired = if exact_scope {
-                    state.lock().await.retirement_receipts.iter().any(|receipt| {
+                    state.lock().await.retirement_receipts.iter().find(|receipt| {
                         receipt.attempt_id == attempt.id
                             && receipt.request_digest == digest
                             && receipt.claim.is_some()
-                    })
-                } else { false };
-                let outcome = if retired {
+                    }).map(|receipt| receipt.usage)
+                } else { None };
+                let outcome = if let Some(usage) = retired {
                     RemoteWorkerOutcome::PhysicalRetirement {
                         run_identity: run_identity.clone(),
                         session_id,
@@ -1233,6 +1246,7 @@ pub(super) async fn run_worker_loop(
                         pool_id: worker.pool_id,
                         attempt_id: attempt.id,
                         request_digest: digest,
+                        usage,
                     }
                 } else {
                     RemoteWorkerOutcome::RetirementUnavailable
@@ -1314,7 +1328,7 @@ pub(super) async fn run_worker_loop(
                     active.cancellation.cancel(reason);
                     if active.cooperative {
                         completion = Some(active.finished.clone());
-                    } else if let Some(active) = state.finish_attempt(attempt_id, false) {
+                    } else if let Some(active) = state.finish_attempt(attempt_id, false, None) {
                         // A control acknowledgement does not certify the
                         // process-tree owner. Quarantine this reservation.
                         state.draining = true;

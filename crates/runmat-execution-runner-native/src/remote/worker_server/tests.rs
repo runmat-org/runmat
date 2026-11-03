@@ -166,7 +166,7 @@ async fn completed_attempt_releases_its_worker_reservation_once_inner() {
         },
     );
 
-    assert!(state.finish_attempt(attempt_id, true).is_some());
+    assert!(state.finish_attempt(attempt_id, true, None).is_some());
     // Completion is not retirement ACK: retain the physical grant and its
     // exact receipt until the driver has accepted the certificate.
     assert_eq!(state.allocated.memory_bytes, 60);
@@ -185,6 +185,6 @@ async fn completed_attempt_releases_its_worker_reservation_once_inner() {
         .claim
         .take()
         .is_none());
-    assert!(state.finish_attempt(attempt_id, true).is_none());
+    assert!(state.finish_attempt(attempt_id, true, None).is_none());
     assert_eq!(state.allocated, ResourceAllocation::default());
 }

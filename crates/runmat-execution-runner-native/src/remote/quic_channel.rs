@@ -320,6 +320,7 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
                 pool_id,
                 attempt_id,
                 request_digest,
+                usage,
             } if run_identity == self.run_identity
                 && session_id == self.session_id
                 && driver_fence == self.driver_fence
@@ -328,9 +329,12 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
                 && attempt_id == request.id
                 && request_digest == expected_digest =>
             {
-                Ok(Some(super::AuthenticatedPhysicalRetirement::issue(
-                    request.clone(),
-                )))
+                Ok(Some(
+                    super::AuthenticatedPhysicalRetirement::issue_with_usage(
+                        request.clone(),
+                        usage,
+                    )?,
+                ))
             }
             RemoteWorkerOutcome::RetirementUnavailable => Ok(None),
             _ => Err(protocol(

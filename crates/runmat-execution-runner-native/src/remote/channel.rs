@@ -66,11 +66,35 @@ pub struct RemoteGraphProgramReceipt {
 /// checked against the exact scheduler request. Not a wire/deserializable type.
 pub struct AuthenticatedPhysicalRetirement {
     request: AttemptRequest,
+    usage: Option<super::protocol::RetiredAttemptUsage>,
 }
 
 impl AuthenticatedPhysicalRetirement {
     pub(crate) fn issue(request: AttemptRequest) -> Self {
-        Self { request }
+        Self {
+            request,
+            usage: None,
+        }
+    }
+
+    pub(super) fn issue_with_usage(
+        request: AttemptRequest,
+        usage: Option<super::protocol::RetiredAttemptUsage>,
+    ) -> NativeExecutionResult<Self> {
+        if let Some(usage) = usage {
+            usage
+                .accounting(&request)
+                .map_err(crate::NativeExecutionError::Protocol)?;
+        }
+        Ok(Self { request, usage })
+    }
+
+    pub(super) fn resources(
+        &self,
+    ) -> Result<Option<runmat_execution_runner::task::AttemptResourceAccounting>, String> {
+        self.usage
+            .map(|usage| usage.accounting(&self.request))
+            .transpose()
     }
 
     pub(crate) fn matches(&self, request: &AttemptRequest) -> bool {

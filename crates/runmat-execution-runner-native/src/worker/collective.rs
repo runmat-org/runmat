@@ -6,12 +6,13 @@ use runmat_execution::{
     CollectiveRequest, CollectiveResponse, CollectiveSequence, SpmdTaskContext,
 };
 use runmat_process_host::ipc::private_control::{ControlFrameWriter, ControlWriteError};
-use runmat_process_host::ipc::ParentFrames;
 use runmat_runtime::context::{RuntimeCollectiveService, RuntimeServiceFuture};
 use runmat_runtime::RuntimeError;
 use runmat_types::CollectiveId;
 
 use crate::protocol::{CollectiveProcessResult, WorkerDriverMessage, WorkerProcessMessage};
+
+type ParentFrames = tokio::sync::mpsc::Receiver<runmat_process_host::ProcessHostResult<Vec<u8>>>;
 
 #[derive(Clone)]
 pub(super) struct WorkerControlChannel {

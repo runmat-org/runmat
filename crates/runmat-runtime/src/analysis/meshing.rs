@@ -40,17 +40,101 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
 /// Resolve the same original request through the host's owned async mesher.
 pub(super) async fn resolve_study_mesh_async(
     spec: &AnalysisStudySpec,
-) -> Result<ResolvedStudyMesh, String> {
-    if spec.solver_mesh_artifact_path.is_some() {
-        return resolve_study_mesh(spec);
+    context: &crate::operations::OperationContext,
+) -> Result<ResolvedStudyMesh, crate::operations::OperationErrorEnvelope> {
+    let rejected = |message| {
+        super::operation_error(
+            super::ANALYSIS_RUN_STUDY_OPERATION,
+            super::ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            super::OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.MESHING_FAILED",
+                error_type: super::OperationErrorType::Backend,
+                retryable: false,
+                severity: super::OperationErrorSeverity::Error,
+            },
+            message,
+            std::collections::BTreeMap::new(),
+        )
+    };
+    if let Some(path) = &spec.solver_mesh_artifact_path {
+        // The caller reads and canonically validates this original input through
+        // its async provider before topology construction and numerical work.
+        return Ok(ResolvedStudyMesh {
+            artifact_path: Some(path.clone()),
+            evidence_path: spec.meshing_evidence_artifact_path.clone(),
+        });
     }
-    let Some(request) = study_meshing_request(spec)? else {
-        return resolve_study_mesh(spec);
+    let Some(request) = study_meshing_request(spec).map_err(&rejected)? else {
+        return Ok(ResolvedStudyMesh {
+            artifact_path: None,
+            evidence_path: None,
+        });
     };
     let output = crate::meshing::execute_meshing_async(&request)
         .await
-        .map_err(|error| error.to_string())?;
-    validate_and_persist_mesh(&output)
+        .map_err(|error| async_meshing_error(error, context))?;
+    super::storage::with_artifact_access(true, |_| {
+        super::fea_run_admission::FeaRunScope::check_publication_for_operation(
+            super::ANALYSIS_RUN_STUDY_OPERATION,
+            super::ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+        )?;
+        output
+            .evidence
+            .validate(&output.artifact)
+            .map_err(|error| {
+                rejected(format!(
+                    "meshing provider returned invalid evidence: {error}"
+                ))
+            })?;
+        persist_mesh_borrowed_typed(&output.artifact, &output.evidence)
+            .map_err(|error| super::study_step_execution::study_artifact_error(error, context))
+    })
+    .await
+    .map_err(|error| super::study_step_execution::study_artifact_error(error, context))?
+}
+
+fn async_meshing_error(
+    error: crate::meshing::MeshingExecutionError,
+    context: &crate::operations::OperationContext,
+) -> crate::operations::OperationErrorEnvelope {
+    use crate::meshing::MeshingExecutionError;
+    match error {
+        MeshingExecutionError::Admission(denied) => denied.into_operation_error(
+            super::ANALYSIS_RUN_STUDY_OPERATION,
+            super::ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+        ),
+        MeshingExecutionError::WithLeaseFailure { primary, lease } => {
+            super::fea_run_admission::entrypoints::merge_lease_error::<()>(
+                Err(async_meshing_error(*primary, context)),
+                Some(lease.into_operation_error(
+                    super::ANALYSIS_RUN_STUDY_OPERATION,
+                    super::ANALYSIS_RUN_STUDY_OP_VERSION,
+                    context,
+                )),
+            )
+            .expect_err("the original meshing operation failed")
+        }
+        MeshingExecutionError::Provider(message) => super::operation_error(
+            super::ANALYSIS_RUN_STUDY_OPERATION,
+            super::ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            super::OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.MESHING_FAILED",
+                error_type: if crate::interrupt::is_cancelled() {
+                    super::OperationErrorType::Cancelled
+                } else {
+                    super::OperationErrorType::Backend
+                },
+                retryable: false,
+                severity: super::OperationErrorSeverity::Error,
+            },
+            message,
+            std::collections::BTreeMap::new(),
+        ),
+    }
 }
 
 fn study_meshing_request(
@@ -119,6 +203,13 @@ pub(crate) fn persist_mesh_borrowed(
     artifact: &runmat_meshing_core::SolverMeshArtifact,
     evidence: &runmat_meshing_core::MeshingEvidence,
 ) -> Result<ResolvedStudyMesh, String> {
+    persist_mesh_borrowed_typed(artifact, evidence).map_err(|error| error.to_string())
+}
+
+fn persist_mesh_borrowed_typed(
+    artifact: &runmat_meshing_core::SolverMeshArtifact,
+    evidence: &runmat_meshing_core::MeshingEvidence,
+) -> Result<ResolvedStudyMesh, super::storage::AnalysisPublicationError> {
     let artifact_digest = encode_digest(artifact.canonical_digest.bytes());
     let root = current_fea_runtime_config()
         .artifact_root
@@ -129,7 +220,7 @@ pub(crate) fn persist_mesh_borrowed(
         })
         .unwrap_or_else(default_fea_artifact_root)
         .join("meshes");
-    let access = persistence::MeshPersistence::capture(&root)?;
+    let access = persistence::MeshPersistence::capture_typed(&root)?;
     let artifact_bytes = artifact
         .canonical_encode_with_cancellation(&MeshPersistenceCancellation)
         .map_err(|error| error.to_string())?;
@@ -141,8 +232,8 @@ pub(crate) fn persist_mesh_borrowed(
     let evidence_path = root.join(format!(
         "{artifact_digest}-{evidence_digest}.meshing-evidence.cbor"
     ));
-    access.persist(&artifact_path, &artifact_bytes)?;
-    access.persist(&evidence_path, &evidence_bytes)?;
+    access.persist_typed(&artifact_path, &artifact_bytes)?;
+    access.persist_typed(&evidence_path, &evidence_bytes)?;
     Ok(ResolvedStudyMesh {
         artifact_path: Some(artifact_path.display().to_string()),
         evidence_path: Some(evidence_path.display().to_string()),

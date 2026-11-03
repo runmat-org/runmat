@@ -10,7 +10,7 @@ use runmat_execution::{
 use runmat_execution_artifact::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 
 use super::super::{
-    worker_exchange_failure, ProcessAttemptEvidence, TransferFailure, WorkerLaunchRequest,
+    DeferredWorkerExchangeFailure, ProcessAttemptEvidence, TransferFailure, WorkerLaunchRequest,
     WorkerRequest, WorkerResponse,
 };
 use crate::driver::{LocalDriver, TaskCompletion};
@@ -215,12 +215,41 @@ async fn requested_process_termination_remains_typed_cancellation() {
 }
 
 #[test]
-fn malformed_worker_frames_remain_infrastructure_failures() {
-    let failure = worker_exchange_failure(
-        runmat_process_host::ProcessHostError::Protocol("oversized frame".into()),
-        "",
-    );
-    assert!(matches!(failure, TransferFailure::Infrastructure(_)));
+fn transport_failures_keep_stderr_observed_after_control_eof_and_original_classification() {
+    use runmat_process_host::{child::CapturedProcessOutput, ProcessHostError};
+    for error in [
+        ProcessHostError::Io(std::io::Error::from(std::io::ErrorKind::UnexpectedEof)),
+        ProcessHostError::Protocol("oversized frame".into()),
+    ] {
+        let io_failure = matches!(&error, ProcessHostError::Io(_));
+        let stderr = CapturedProcessOutput::new(b"LATE_STDERR!!".len());
+        let mut producer = stderr.begin_capture().unwrap();
+        let mut deferred = DeferredWorkerExchangeFailure::default();
+        // The original control failure is observed before its sibling drain
+        // delivers any diagnostic bytes. This is the launcher race boundary.
+        let primary = deferred.record(error);
+        assert!(!primary.to_string().contains("LATE_STDERR"));
+        producer.observe(b"LATE_STDERR!!discarded").unwrap();
+        producer.finish(Ok(()));
+        let failure = deferred.finish::<()>(Err(primary), &stderr).unwrap_err();
+        assert_eq!(
+            matches!(failure, TransferFailure::WorkerLost(_)),
+            io_failure
+        );
+        assert_eq!(
+            matches!(failure, TransferFailure::Infrastructure(_)),
+            !io_failure
+        );
+        let message = failure.to_string();
+        assert!(message.contains("LATE_STDERR!!"), "{message}");
+        assert!(message.contains("truncated=true"), "{message}");
+        assert!(message.contains("observed_bytes=Some(22)"), "{message}");
+        assert!(!message.contains("discarded"), "{message}");
+        assert_eq!(
+            stderr.completion(),
+            runmat_process_host::ProcessOutputCompletion::Transferred
+        );
+    }
 }
 
 #[tokio::test]

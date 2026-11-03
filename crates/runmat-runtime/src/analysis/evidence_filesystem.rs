@@ -3,6 +3,79 @@
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
+/// Stage mutable evidence in the already captured result transaction. The outer
+/// adapter owns the original provider's commit; this scope never escapes this
+/// synchronous call. Native callers without a captured view keep their direct
+/// filesystem route.
+pub(super) fn write_captured_evidence(
+    path: &std::path::Path,
+    bytes: Vec<u8>,
+) -> Result<(), super::storage::AnalysisPublicationError> {
+    use super::storage::AnalysisPublicationError;
+    use runmat_filesystem::workspace::{
+        WorkspaceCaptureRequest, WorkspaceEdit, WorkspacePublicationId,
+        WorkspacePublicationOutcome, WorkspacePublicationRequest,
+    };
+    let root = path
+        .parent()
+        .ok_or("Study evidence has no parent directory.")?;
+    let name = path.file_name().ok_or("Study evidence has no file name.")?;
+    let Some(provider) = super::storage::scoped_artifact_provider() else {
+        fs_create_dir_all(root).map_err(AnalysisPublicationError::from_io)?;
+        return atomic_write_bytes(&path.to_path_buf(), &bytes).map_err(Into::into);
+    };
+    let maximum = super::configuration::publication_staging_budget()?;
+    let access = provider
+        .workspace_access(root, true, maximum)
+        .map_err(AnalysisPublicationError::from_io)?;
+    access
+        .create_dir_all(std::path::Path::new("."))
+        .map_err(AnalysisPublicationError::from_io)?;
+    let revision = access
+        .capture(
+            WorkspaceCaptureRequest {
+                root: ".".into(),
+                excluded_subtrees: Vec::new(),
+                max_files: runmat_filesystem::workspace::MAX_WORKSPACE_PUBLICATION_EDITS as u32,
+                max_bytes: maximum,
+            },
+            maximum,
+        )
+        .map_err(AnalysisPublicationError::from_io)?
+        .revision;
+    let outcome = access
+        .publish(
+            WorkspacePublicationRequest {
+                id: WorkspacePublicationId::new(),
+                root: ".".into(),
+                excluded_subtrees: Vec::new(),
+                expected_revision: revision,
+                edits: vec![WorkspaceEdit::Write {
+                    path: name.into(),
+                    bytes,
+                }],
+            },
+            maximum,
+        )
+        .map_err(AnalysisPublicationError::from_io)?;
+    match outcome {
+        WorkspacePublicationOutcome::Published { .. }
+        | WorkspacePublicationOutcome::CommittedPendingRecovery { .. } => Ok(()),
+        WorkspacePublicationOutcome::DurabilityIndeterminate { receipt } => {
+            Err(AnalysisPublicationError::DurabilityIndeterminate {
+                workspace: receipt,
+                publication: None,
+            })
+        }
+        WorkspacePublicationOutcome::Conflict { .. } => {
+            Err("Study evidence changed during publication.".into())
+        }
+        WorkspacePublicationOutcome::IdReused => {
+            Err("Study evidence publication identity was reused.".into())
+        }
+    }
+}
+
 pub(super) fn atomic_write_bytes(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
     // Publication also runs in browser workers, which have no process ID.
     // Independent executions need independent staging names, not a wall clock

@@ -1,10 +1,8 @@
 //! Meshing-capable native worker seam; scheduling remains in the generic execution driver.
 
-use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
@@ -16,7 +14,7 @@ use runmat_meshing_execution::{
     MeshingStageKernel,
 };
 use runmat_process_host::ipc::private_control::ControlFrameWriter;
-use runmat_process_host::ipc::{read_payload_blocking, FrameLimits};
+use runmat_process_host::ipc::FrameLimits;
 
 use crate::protocol::{ProgramProgress, WorkerProcessMessage, NATIVE_WORKER_MESSAGE_SCHEMA_V2};
 use crate::{FilesystemObjectStore, NativeExecutionError, NativeExecutionResult};
@@ -24,20 +22,26 @@ use crate::{FilesystemObjectStore, NativeExecutionError, NativeExecutionResult};
 const MESHING_PROGRESS_MEDIA_TYPE: &str = "application/vnd.runmat.meshing-progress+cbor";
 const MESHING_PROGRESS_VALUE_SCHEMA: &str = "runmat.meshing.progress.v2";
 const PROGRESS_CHANNEL_CAPACITY: usize = 256;
-const PARENT_DISCONNECT_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
-struct ParentConnectionCancellation(AtomicBool);
+struct ParentConnectionCancellation {
+    stopped: AtomicBool,
+    lease: Option<runmat_execution::cancellation::CancellationToken>,
+}
 
 impl ParentConnectionCancellation {
     fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
+        self.stopped.store(true, Ordering::Release);
     }
 }
 
 impl MeshingCancellationSignal for ParentConnectionCancellation {
     fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.stopped.load(Ordering::Acquire)
+            || self
+                .lease
+                .as_ref()
+                .is_some_and(|token| token.is_cancelled())
     }
 }
 
@@ -143,28 +147,46 @@ pub async fn run_meshing_worker_stdio(
     let frame_limits = FrameLimits {
         max_message_bytes: limits.max_message_bytes,
     };
-    let control = runmat_process_host::ipc::private_control::connect_host_blocking()
-        .map_err(runmat_process_host::ProcessHostError::Io)?;
-    let writer = ControlFrameWriter::new(control.writer, frame_limits)?;
-    // The one-shot request is read off the async executor. Return the very same
-    // private reader to the watchdog so parent EOF remains observable afterward.
-    let (reader, payload) = tokio::task::spawn_blocking(move || {
-        let mut reader = control.reader;
-        let payload = read_payload_blocking(&mut reader, frame_limits);
-        (reader, payload)
-    })
-    .await
-    .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    let payload = payload?;
-    let reserved: runmat_execution_artifact::ReservedProgramExecutionRequest =
-        serde_json::from_slice(&payload)
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    // The decoded request owns its fields. Keep no redundant wire buffer alive
-    // across the asynchronous native stage and its numerical working storage.
-    drop(payload);
-    reserved
-        .validate()
-        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let bootstrap = crate::worker::bootstrap::PrivateWorkerBootstrap::connect(
+        frame_limits,
+        crate::worker::bootstrap::WorkerRole::Meshing,
+    )?;
+    let payload = match run_meshing_worker(&bootstrap, kernel, object_store_root, limits).await {
+        Ok(response) => runmat_canonical_codec::encode_json_bounded(
+            &WorkerProcessMessage::Completed {
+                response,
+                console: None,
+                console_scopes: Vec::new(),
+            },
+            u64::from(frame_limits.max_message_bytes),
+        )?,
+        Err(error) => bootstrap.failure_payload(error)?,
+    };
+    bootstrap.publish(payload).await
+}
+
+async fn run_meshing_worker(
+    bootstrap: &crate::worker::bootstrap::PrivateWorkerBootstrap,
+    kernel: Arc<dyn MeshingStageKernel>,
+    object_store_root: &Path,
+    limits: NativeMeshingHostLimits,
+) -> NativeExecutionResult<ProgramExecutionResponse> {
+    use crate::worker::bootstrap::AdmittedWorkerLaunch;
+    let AdmittedWorkerLaunch {
+        request: launch,
+        scope,
+        host,
+    } = bootstrap.take_launch()?;
+    // Role validation checked the exact original reservation and refused
+    // Graph/SPMD/non-meshing and unsupported console forms before effects.
+    let reserved = match launch {
+        crate::protocol::WorkerLaunchRequest::Reserved(reserved) => reserved,
+        _ => {
+            return Err(NativeExecutionError::Protocol(
+                "meshing launch retained unsupported invocation controls".into(),
+            ))
+        }
+    };
     let (request, resources) = reserved.into_parts();
     let cpu_threads = admitted_cpu_threads(resources.cpu_millicores, resources.memory_bytes)?;
     tracing::info!(target: "runmat::meshing::cpu", cpu_threads,
@@ -172,12 +194,11 @@ pub async fn run_meshing_worker_stdio(
         admitted_memory_bytes = resources.memory_bytes,
         pool_stack_bytes = if cpu_threads > 1 { cpu_threads as u64 * runmat_cpu_execution::WORKER_STACK_BYTES } else { 0 },
         "meshing worker CPU allocation");
-    let cancellation = Arc::new(ParentConnectionCancellation::default());
-    let parent_connection = Arc::clone(&cancellation);
-    // The parent keeps the private request channel open until this one-shot
-    // worker exits. Observe it on a detached thread, including during a
-    // non-yielding native stage.
-    let parent_watchdog = ParentDisconnectWatchdog::spawn(reader, parent_connection)?;
+    let scope_control = scope.as_ref().map(|scope| scope.control());
+    let cancellation = Arc::new(ParentConnectionCancellation {
+        stopped: AtomicBool::new(false),
+        lease: scope.as_ref().map(|scope| scope.cancellation_token()),
+    });
     let store = FilesystemObjectStore::open(object_store_root, limits.inventory.max_object_bytes)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let (progress_sender, mut progress_receiver) =
@@ -185,45 +206,91 @@ pub async fn run_meshing_worker_stdio(
     let progress_error = Arc::new(Mutex::new(None));
     let sink_error = Arc::clone(&progress_error);
     let execution_cancellation = Arc::clone(&cancellation);
+    // The original paid scope/provider is entered on the actual numerical
+    // thread. Retain its owner until the blocking task physically returns.
     let mut execution = tokio::task::spawn_blocking(move || {
         let mut store = store;
         let mut progress = ChannelProgress {
             sender: progress_sender,
             error: sink_error,
         };
-        runmat_cpu_execution::with_cpu_pool_cancellable(
-            cpu_threads,
-            || execution_cancellation.is_cancelled(),
-            || {
-                execute_meshing_program_request(
-                    &request,
-                    &mut store,
-                    kernel.as_ref(),
-                    execution_cancellation.as_ref(),
-                    &mut progress,
-                    limits,
-                )
-            },
-        )
-        .unwrap_or_else(|error| failure(error.to_string()))
+        let mut run = || {
+            runmat_cpu_execution::with_cpu_pool_cancellable(
+                cpu_threads,
+                || execution_cancellation.is_cancelled(),
+                || {
+                    execute_meshing_program_request(
+                        &request,
+                        &mut store,
+                        kernel.as_ref(),
+                        execution_cancellation.as_ref(),
+                        &mut progress,
+                        limits,
+                    )
+                },
+            )
+            .unwrap_or_else(|error| failure(error.to_string()))
+        };
+        match scope {
+            Some(scope) => scope
+                .run_checked_sync(run)
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string())),
+            None => Ok(match host {
+                Some(host) => host.run_sync(run),
+                None => run(),
+            }),
+        }
     });
+    let frame_limits = FrameLimits {
+        max_message_bytes: limits.max_message_bytes,
+    };
+    let mut control_error = None;
+    let mut progress_open = true;
+    let mut control_open = true;
     let response = loop {
         tokio::select! {
-            progress = progress_receiver.recv() => {
-                if let Some(progress) = progress {
-                    write_message(&writer, &WorkerProcessMessage::Progress { progress }, frame_limits).await?;
+            progress = progress_receiver.recv(), if progress_open => {
+                match progress {
+                    Some(progress) => {
+                        if control_error.is_none() {
+                            if let Err(error) = write_message(bootstrap.writer(),
+                                &WorkerProcessMessage::Progress { progress }, frame_limits).await {
+                                cancellation.cancel();
+                                control_error = Some(error);
+                            }
+                        }
+                    }
+                    None => progress_open = false,
                 }
+            }
+            // Lease renewals/denials bypass this receiver in the shared
+            // observer. A meshing stage has no other valid trailing controls.
+            control = bootstrap.read_control(), if control_open => {
+                cancellation.cancel();
+                control_open = false;
+                control_error.get_or_insert_with(|| match control {
+                    Ok(_) => NativeExecutionError::Protocol("unexpected control for a meshing attempt".into()),
+                    Err(error) => error,
+                });
             }
             response = &mut execution => {
                 while let Ok(progress) = progress_receiver.try_recv() {
-                    write_message(&writer, &WorkerProcessMessage::Progress { progress }, frame_limits).await?;
+                    if control_error.is_none() {
+                        if let Err(error) = write_message(bootstrap.writer(),
+                            &WorkerProcessMessage::Progress { progress }, frame_limits).await {
+                            cancellation.cancel();
+                            control_error = Some(error);
+                        }
+                    }
                 }
-                break response
-                    .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+                break response.map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
             }
         }
     };
-    parent_watchdog.finish();
+    // No control/lease/progress failure may detach a still-running kernel.
+    if let Some(error) = control_error {
+        return Err(error);
+    }
     if let Some(error) = progress_error
         .lock()
         .expect("meshing progress error poisoned")
@@ -231,67 +298,13 @@ pub async fn run_meshing_worker_stdio(
     {
         return Err(NativeExecutionError::Protocol(error));
     }
-    write_message(
-        &writer,
-        &WorkerProcessMessage::Completed {
-            response,
-            console: None,
-            console_scopes: Vec::new(),
-        },
-        frame_limits,
-    )
-    .await?;
-    Ok(())
-}
-
-fn cancel_on_parent_disconnect(
-    mut reader: impl Read,
-    cancellation: Arc<ParentConnectionCancellation>,
-    finished: &AtomicBool,
-) -> bool {
-    let mut unexpected_input = [0_u8; 1];
-    let _ = reader.read(&mut unexpected_input);
-    if finished.load(Ordering::Acquire) {
-        return false;
-    }
-    cancellation.cancel();
-    true
-}
-
-struct ParentDisconnectWatchdog {
-    finished: Arc<AtomicBool>,
-}
-
-impl ParentDisconnectWatchdog {
-    fn spawn(
-        reader: impl Read + Send + 'static,
-        cancellation: Arc<ParentConnectionCancellation>,
-    ) -> NativeExecutionResult<Self> {
-        let finished = Arc::new(AtomicBool::new(false));
-        let watched = Arc::clone(&finished);
-        std::thread::Builder::new()
-            .name("runmat-meshing-parent-watchdog".into())
-            .spawn(move || {
-                if !cancel_on_parent_disconnect(reader, cancellation, &watched) {
-                    return;
-                }
-                std::thread::sleep(PARENT_DISCONNECT_SHUTDOWN_GRACE);
-                if watched.load(Ordering::Acquire) {
-                    return;
-                }
-                // A native worker has no useful independent lifetime: its object store, progress
-                // stream, and terminal response all belong to the parent attempt. Cooperative
-                // cancellation gets a short grace period for normal cleanup; a kernel that is
-                // between cancellation checkpoints must not survive indefinitely as an orphan.
-                std::process::exit(1);
-            })
+    let response = response?;
+    if let Some(control) = scope_control {
+        control
+            .check()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        Ok(Self { finished })
     }
-
-    fn finish(&self) {
-        self.finished.store(true, Ordering::Release);
-    }
+    Ok(response)
 }
 
 struct ChannelProgress {
@@ -376,27 +389,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parent_disconnect_cancels_native_meshing_work() {
-        let cancellation = Arc::new(ParentConnectionCancellation::default());
-        let finished = AtomicBool::new(false);
-        assert!(cancel_on_parent_disconnect(
-            std::io::Cursor::new(Vec::<u8>::new()),
-            Arc::clone(&cancellation),
-            &finished,
-        ));
-
+    fn rejected_control_cancels_native_meshing_work() {
+        let cancellation = ParentConnectionCancellation::default();
+        cancellation.cancel();
         assert!(cancellation.is_cancelled());
     }
 
     #[test]
-    fn completed_worker_ignores_late_parent_disconnect() {
-        let cancellation = Arc::new(ParentConnectionCancellation::default());
-        let finished = AtomicBool::new(true);
-        assert!(!cancel_on_parent_disconnect(
-            std::io::Cursor::new(Vec::<u8>::new()),
-            Arc::clone(&cancellation),
-            &finished,
-        ));
+    fn inherited_lease_denial_reaches_native_kernel_cancellation() {
+        let grant = crate::fea_delegation::test_grant();
+        let scope = grant.install(&grant.assignment, &grant.resources).unwrap();
+        let cancellation = ParentConnectionCancellation {
+            stopped: AtomicBool::new(false),
+            lease: Some(scope.cancellation_token()),
+        };
         assert!(!cancellation.is_cancelled());
+        scope.deny(runmat_runtime::analysis::fea_run_admission::FeaRunDenied::LeaseExpired);
+        assert!(cancellation.is_cancelled());
     }
 }

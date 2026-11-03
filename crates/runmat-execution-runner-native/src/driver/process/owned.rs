@@ -617,6 +617,8 @@ pub(super) async fn run_process(
         },
     };
     let output_lifetime = crate::process_output::OutputDrainLifetime::default();
+    let stderr = child.captured_stderr();
+    let mut deferred_exchange = DeferredWorkerExchangeFailure::default();
     let owner = async {
         let result = async {
     let mut child_retired = false;
@@ -628,7 +630,6 @@ pub(super) async fn run_process(
     if completion.is_cancelled() {
         return Err(TransferFailure::Cancelled);
     }
-    let stderr = child.captured_stderr();
     // Application stdout/stderr require a caller-owned drain before this
     // bootstrap is qualified; neither stream is a control transport.
     let accept = tokio::time::timeout(Duration::from_secs(30), listener.accept());
@@ -661,7 +662,7 @@ pub(super) async fn run_process(
         loop {
             tokio::select! {
                 result = &mut write => {
-                    result.map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
+                    result.map_err(|error| deferred_exchange.record(error))?;
                     break;
                 }
                 _ = tokio::time::sleep(Duration::from_millis(10)) => {
@@ -686,7 +687,7 @@ pub(super) async fn run_process(
         tokio::pin!(read);
         loop { tokio::select! {
             response = &mut read => {
-                break response.map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
+                break response.map_err(|error| deferred_exchange.record(error))?;
             }
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
                 if let Some(proxy) = &fea_proxy { proxy.check().map_err(|denied| TransferFailure::Infrastructure(denied.to_string()))?; }
@@ -808,7 +809,7 @@ pub(super) async fn run_process(
                         loop {
                             tokio::select! {
                                 result = &mut write => {
-                                    result.map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
+                                    result.map_err(|error| deferred_exchange.record(error))?;
                                     break;
                                 }
                                 _ = tokio::time::sleep(Duration::from_millis(10)) => {
@@ -977,7 +978,10 @@ pub(super) async fn run_process(
                     *console_scopes = received_scopes;
                     outcome
                 }
-                Err(message) => Err(TransferFailure::Infrastructure(message)),
+                Err(message) => {
+                    deferred_exchange.clear();
+                    Err(TransferFailure::Infrastructure(message))
+                },
             }
         }
         Err(error) => match outcome {
@@ -1069,62 +1073,67 @@ pub(super) async fn run_process(
         }
     };
     let (outcome, drain_result) = tokio::join!(owner, drain);
-    let retirement_result = if *retirement == LocalRetirementEvidence::FullTreeRetired {
-        raw_journal.as_ref().map(|journal| {
-            journal
-                .lock()
-                .expect("raw output journal poisoned")
-                .mark_retired()
-        })
-    } else {
-        None
-    };
-    let retirement_error = retirement_result.and_then(Result::err);
-    let has_retirement_cleanup_error = retirement_error.is_some();
-    let raw_error = match (drain_result.err(), retirement_error) {
-        (Some(primary), Some(cleanup)) => {
-            Some(std::sync::Arc::new(crate::RawOutputError::Cleanup {
-                primary,
-                cleanup: Box::new(cleanup),
-            }))
-        }
-        (None, Some(cleanup)) => Some(match completion.raw_output_failure() {
-            Some(primary) => std::sync::Arc::new(crate::RawOutputError::Cleanup {
-                primary,
-                cleanup: Box::new(cleanup),
+    // Finish existing output/retirement precedence before attaching the final
+    // original transport diagnostic. This closure has no producer or await.
+    let outcome = (|| {
+        let retirement_result = if *retirement == LocalRetirementEvidence::FullTreeRetired {
+            raw_journal.as_ref().map(|journal| {
+                journal
+                    .lock()
+                    .expect("raw output journal poisoned")
+                    .mark_retired()
+            })
+        } else {
+            None
+        };
+        let retirement_error = retirement_result.and_then(Result::err);
+        let has_retirement_cleanup_error = retirement_error.is_some();
+        let raw_error = match (drain_result.err(), retirement_error) {
+            (Some(primary), Some(cleanup)) => {
+                Some(std::sync::Arc::new(crate::RawOutputError::Cleanup {
+                    primary,
+                    cleanup: Box::new(cleanup),
+                }))
+            }
+            (None, Some(cleanup)) => Some(match completion.raw_output_failure() {
+                Some(primary) => std::sync::Arc::new(crate::RawOutputError::Cleanup {
+                    primary,
+                    cleanup: Box::new(cleanup),
+                }),
+                None => std::sync::Arc::new(cleanup),
             }),
-            None => std::sync::Arc::new(cleanup),
-        }),
-        (Some(primary), None) => Some(primary),
-        (None, None) => None,
-    };
-    if let Some(error) = raw_error {
-        completion.stop_for_raw_output(std::sync::Arc::clone(&error));
-        if matches!(
-            &outcome,
-            Ok(WorkerResponse::Success { .. })
-                | Ok(WorkerResponse::ExternalizedSuccess { .. })
-                | Ok(WorkerResponse::GraphSuccess { .. })
-                | Ok(WorkerResponse::SpmdSuccess { .. })
-                | Err(TransferFailure::Cancelled)
-        ) {
-            return Err(TransferFailure::Execution(error.to_string()));
+            (Some(primary), None) => Some(primary),
+            (None, None) => None,
+        };
+        if let Some(error) = raw_error {
+            completion.stop_for_raw_output(std::sync::Arc::clone(&error));
+            if matches!(
+                &outcome,
+                Ok(WorkerResponse::Success { .. })
+                    | Ok(WorkerResponse::ExternalizedSuccess { .. })
+                    | Ok(WorkerResponse::GraphSuccess { .. })
+                    | Ok(WorkerResponse::SpmdSuccess { .. })
+                    | Err(TransferFailure::Cancelled)
+            ) {
+                return Err(TransferFailure::Execution(error.to_string()));
+            }
+            if has_retirement_cleanup_error {
+                return match outcome {
+                    Err(TransferFailure::Infrastructure(message)) => {
+                        Err(TransferFailure::Infrastructure(format!(
+                            "{message}; output cleanup also failed: {error}"
+                        )))
+                    }
+                    Err(TransferFailure::RetirementUnverified(message)) => {
+                        Err(TransferFailure::RetirementUnverified(format!(
+                            "{message}; output cleanup also failed: {error}"
+                        )))
+                    }
+                    other => other,
+                };
+            }
         }
-        if has_retirement_cleanup_error {
-            return match outcome {
-                Err(TransferFailure::Infrastructure(message)) => {
-                    Err(TransferFailure::Infrastructure(format!(
-                        "{message}; output cleanup also failed: {error}"
-                    )))
-                }
-                Err(TransferFailure::RetirementUnverified(message)) => {
-                    Err(TransferFailure::RetirementUnverified(format!(
-                        "{message}; output cleanup also failed: {error}"
-                    )))
-                }
-                other => other,
-            };
-        }
-    }
-    outcome
+        outcome
+    })();
+    deferred_exchange.finish(outcome, &stderr)
 }

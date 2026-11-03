@@ -222,7 +222,16 @@ pub async fn analysis_execute_study_sweep_with_step_executor(
                     }
                 }
             }
-            analysis_complete_study_sweep_op(spec, context.clone(), outcomes)
+            storage::with_artifact_access(true, |_| {
+                fea_run_admission::FeaRunScope::check_publication_for_operation(
+                    ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+                    ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+                    &context,
+                )?;
+                analysis_complete_study_sweep_op(spec, context.clone(), outcomes)
+            })
+            .await
+            .map_err(|error| study_sweep::sweep_publication_error(spec, &context, error))?
         })
         .await;
     match result {
@@ -297,26 +306,22 @@ async fn execute_admitted(
     executor: &dyn AnalysisStudyStepExecutor,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let mut prepared = prepare_study_semantics(spec, context)?;
-    let mesh = meshing::resolve_study_mesh_async(spec)
-        .await
-        .map_err(|message| {
-            operation_error(
-                ANALYSIS_RUN_STUDY_OPERATION,
-                ANALYSIS_RUN_STUDY_OP_VERSION,
-                &prepared.context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_STUDY.MESHING_FAILED",
-                    error_type: OperationErrorType::Backend,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                message,
-                BTreeMap::new(),
-            )
-        })?;
+    let mesh = meshing::resolve_study_mesh_async(spec, &prepared.context).await?;
     prepared.solver_mesh_artifact_path = mesh.artifact_path;
     prepared.meshing_evidence_artifact_path = mesh.evidence_path;
-    let mut completion = StudyStepCompletion::new(&prepared)?;
+    let sequence_identity = StudyStepCompletion::validate_sequence(&prepared)?;
+    // The topology and the first numerical input share one original mesh read
+    // when they use the same path. No provider scope survives a worker await.
+    let mut initial_mesh = match prepared.solver_mesh_artifact_path.as_deref() {
+        Some(path) => Some(load_step_mesh(path, &prepared.context).await?),
+        None => None,
+    };
+    let topology = match &initial_mesh {
+        Some(mesh) => runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()),
+        None => in_process_study_topology_digest(&prepared)?,
+    };
+    let mut completion =
+        StudyStepCompletion::with_identities(&prepared, sequence_identity, topology);
     for step in &prepared.steps {
         let path = step
             .authored_execution
@@ -324,11 +329,24 @@ async fn execute_admitted(
             .solver_mesh_artifact_path()
             .or(prepared.solver_mesh_artifact_path.as_deref())
             .map(str::to_owned);
-        let solver_mesh = path
-            .as_ref()
-            .map(|path| solver_mesh_artifact::load_solver_mesh_artifact(std::path::Path::new(path)))
-            .transpose()
-            .map_err(|e| study_sequence_contract_error(&prepared.context, e))?;
+        let solver_mesh = match path.as_deref() {
+            Some(path) => {
+                if Some(path) == prepared.solver_mesh_artifact_path.as_deref()
+                    && initial_mesh.is_some()
+                {
+                    initial_mesh.take()
+                } else {
+                    // Do not retain an unused default mesh beside a distinct
+                    // authored step input or across its worker execution.
+                    initial_mesh = None;
+                    Some(load_step_mesh(path, &prepared.context).await?)
+                }
+            }
+            None => {
+                initial_mesh = None;
+                None
+            }
+        };
         let result = executor
             .execute_step(AnalysisStudyStepRequest {
                 model: prepared.model.clone(),
@@ -343,7 +361,62 @@ async fn execute_admitted(
             .await?;
         completion.push(&prepared, step, result.run, result.resolved_solver_options)?;
     }
-    completion.finish(prepared)
+    let context = prepared.context.clone();
+    storage::with_artifact_access(true, |_| {
+        fea_run_admission::FeaRunScope::check_publication_for_operation(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &context,
+        )?;
+        completion.finish(prepared)
+    })
+    .await
+    .map_err(|error| study_artifact_error(error, &context))?
+}
+
+async fn load_step_mesh(
+    path: &str,
+    context: &OperationContext,
+) -> Result<SolverMeshArtifact, OperationErrorEnvelope> {
+    use solver_mesh_artifact::SolverMeshArtifactLoadError;
+    solver_mesh_artifact::load_solver_mesh_artifact_async(std::path::Path::new(path))
+        .await
+        .map_err(|error| match error {
+            SolverMeshArtifactLoadError::Read(error) => {
+                study_artifact_error(storage::AnalysisPublicationError::from_io(error), context)
+            }
+            SolverMeshArtifactLoadError::Invalid(error) => {
+                study_sequence_contract_error(context, error)
+            }
+        })
+}
+
+pub(super) fn study_artifact_error(
+    error: storage::AnalysisPublicationError,
+    context: &OperationContext,
+) -> OperationErrorEnvelope {
+    if matches!(error, storage::AnalysisPublicationError::Rejected { .. })
+        && crate::interrupt::is_cancelled()
+    {
+        return operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.CANCELLED",
+                error_type: OperationErrorType::Cancelled,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            error.to_string(),
+            BTreeMap::new(),
+        );
+    }
+    structural_study::publication::completion_storage_error(
+        context,
+        "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+        error,
+    )
 }
 
 /// Both synchronous and owned-step placement use this exact identity/state/publication loop.
@@ -355,6 +428,17 @@ pub(super) struct StudyStepCompletion {
 }
 impl StudyStepCompletion {
     pub(super) fn new(prepared: &PreparedStudySequence) -> Result<Self, OperationErrorEnvelope> {
+        let sequence_identity = Self::validate_sequence(prepared)?;
+        Ok(Self::with_identities(
+            prepared,
+            sequence_identity,
+            in_process_study_topology_digest(prepared)?,
+        ))
+    }
+
+    fn validate_sequence(
+        prepared: &PreparedStudySequence,
+    ) -> Result<SequenceIdentity, OperationErrorEnvelope> {
         if prepared
             .steps
             .iter()
@@ -366,13 +450,21 @@ impl StudyStepCompletion {
         }
         StudyIdentity::from_authored_digest(analysis_study_content_digest(&prepared.spec), None)
             .map_err(|e| study_sequence_contract_error(&prepared.context, e))?;
-        Ok(Self {
-            sequence_identity: SequenceIdentity::from_solver_contract(&prepared.model.sequence)
-                .map_err(|e| study_sequence_contract_error(&prepared.context, e))?,
-            topology_digest: in_process_study_topology_digest(prepared)?,
+        SequenceIdentity::from_solver_contract(&prepared.model.sequence)
+            .map_err(|e| study_sequence_contract_error(&prepared.context, e))
+    }
+
+    fn with_identities(
+        prepared: &PreparedStudySequence,
+        sequence_identity: SequenceIdentity,
+        topology_digest: runmat_execution::Digest,
+    ) -> Self {
+        Self {
+            sequence_identity,
+            topology_digest,
             completed: Vec::with_capacity(prepared.steps.len()),
             states: Vec::new(),
-        })
+        }
     }
     pub(super) fn push(
         &mut self,

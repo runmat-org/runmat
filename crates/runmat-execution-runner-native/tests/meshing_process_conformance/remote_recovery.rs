@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -17,6 +17,7 @@ struct ObservedRemoteChannel {
     hold_report: bool,
     report_ready: Arc<tokio::sync::Notify>,
     release_report: Arc<tokio::sync::Notify>,
+    retirement_available: Arc<AtomicBool>,
     transferred_objects: AtomicUsize,
     executions: AtomicUsize,
     attempt_ids: Mutex<Vec<AttemptId>>,
@@ -90,6 +91,9 @@ impl RemoteWorkerChannel for ObservedRemoteChannel {
         &self,
         request: &AttemptRequest,
     ) -> NativeExecutionResult<Option<AuthenticatedPhysicalRetirement>> {
+        if !self.retirement_available.load(Ordering::Acquire) {
+            return Ok(None);
+        }
         self.inner.authenticated_physical_retirement(request).await
     }
 
@@ -121,10 +125,21 @@ impl RemoteWorkerChannel for ObservedRemoteChannel {
 }
 
 pub(super) async fn run() {
-    tokio::task::LocalSet::new().run_until(run_inner()).await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            run_inner(RetirementDelivery::BeforeReport).await;
+            run_inner(RetirementDelivery::WithLateReport).await;
+        })
+        .await;
 }
 
-async fn run_inner() {
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RetirementDelivery {
+    BeforeReport,
+    WithLateReport,
+}
+
+async fn run_inner(delivery: RetirementDelivery) {
     const RUN_ID: &str = "remote-meshing-recovery-run";
     let (host, request, _, _, bundle) = remote_fixture(RUN_ID);
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"remote-recovery-scope"]);
@@ -163,11 +178,15 @@ async fn run_inner() {
     .await;
     let report_ready = Arc::new(tokio::sync::Notify::new());
     let release_report = Arc::new(tokio::sync::Notify::new());
+    let retirement_available = Arc::new(AtomicBool::new(
+        delivery == RetirementDelivery::BeforeReport,
+    ));
     let first = Arc::new(ObservedRemoteChannel {
         inner: Arc::clone(&first_inner),
         hold_report: true,
         report_ready: Arc::clone(&report_ready),
         release_report: Arc::clone(&release_report),
+        retirement_available: Arc::clone(&retirement_available),
         transferred_objects: AtomicUsize::new(0),
         executions: AtomicUsize::new(0),
         attempt_ids: Mutex::new(Vec::new()),
@@ -177,6 +196,7 @@ async fn run_inner() {
         hold_report: false,
         report_ready: Arc::new(tokio::sync::Notify::new()),
         release_report: Arc::new(tokio::sync::Notify::new()),
+        retirement_available: Arc::new(AtomicBool::new(true)),
         transferred_objects: AtomicUsize::new(0),
         executions: AtomicUsize::new(0),
         attempt_ids: Mutex::new(Vec::new()),
@@ -204,12 +224,54 @@ async fn run_inner() {
     register_host_invocation(&pool, &host, &request);
     let retry_submission = submission_for(scope_id, pool_id, &host, &request);
     let task_id = retry_submission.request.id;
-    let completion = pool.submit(retry_submission, request.clone()).unwrap();
+    let mut completion = Some(pool.submit(retry_submission, request.clone()).unwrap());
 
     tokio::time::timeout(Duration::from_secs(10), report_ready.notified())
         .await
         .expect("first remote attempt did not reach its held result");
     pool.remove_worker(first_worker.id, true).await.unwrap();
+    if delivery == RetirementDelivery::WithLateReport {
+        // A direct pool has no durable original-worker owner. It reports loss
+        // to its current waiter while retaining the unresolved scheduler task.
+        // Later retirement may recover that task; it cannot change the already
+        // delivered caller outcome into success.
+        let (outcome, progress) = completion.take().unwrap().wait_with_progress().await;
+        assert!(matches!(
+            outcome,
+            Err(runmat_execution_runner_native::NativeProgramFailure::WorkerLost(_))
+        ));
+        assert!(!progress.is_empty());
+        assert!(progress
+            .windows(2)
+            .all(|pair| pair[0].sequence < pair[1].sequence));
+        let unresolved = pool.snapshot();
+        assert_eq!(
+            unresolved.tasks[&task_id].state,
+            runmat_execution::state::TaskState::Indeterminate
+        );
+        assert!(unresolved.tasks[&task_id].committed.is_none());
+        // The old route cannot supply retirement during membership loss. Its
+        // original result later arrives with exact authenticated owner proof.
+        retirement_available.store(true, Ordering::Release);
+        release_report.notify_one();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let retired = pool.snapshot().attempts.values().any(|attempt| {
+                    attempt.request.worker_id == first_worker.id
+                        && attempt
+                            .unverified_retirement
+                            .as_ref()
+                            .is_some_and(|record| record.retired_at_driver_millis.is_some())
+                });
+                if retired {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("late original result did not retire with its resource accounting");
+    }
     pool.add_worker(second.clone()).await.unwrap();
 
     tokio::time::timeout(Duration::from_secs(10), async {
@@ -226,13 +288,28 @@ async fn run_inner() {
         }
     })
     .await
-    .expect("replacement remote worker did not commit the retried stage");
-    let progress = completion.drain_progress();
-    assert!(progress.len() >= 6);
-    assert!(progress
-        .windows(2)
-        .all(|pair| pair[0].sequence < pair[1].sequence));
-    let success = completion.wait().await.unwrap();
+    .unwrap_or_else(|error| {
+        panic!(
+            "replacement remote worker did not commit the retried stage: {error}; snapshot: {:#?}",
+            pool.snapshot()
+        )
+    });
+    let success = match completion {
+        Some(completion) => {
+            let (outcome, progress) = completion.wait_with_progress().await;
+            assert!(progress.len() >= 6);
+            assert!(progress
+                .windows(2)
+                .all(|pair| pair[0].sequence < pair[1].sequence));
+            outcome.unwrap()
+        }
+        None => pool.snapshot().tasks[&task_id]
+            .committed
+            .as_ref()
+            .expect("late retirement recovers the retained task")
+            .result
+            .clone(),
+    };
     let (outputs, result_objects) = success.values().expect("ordinary task result");
     let [ValuePayload::Object(remote_root)] = outputs else {
         panic!("retried remote meshing returned a non-object root")
@@ -259,6 +336,16 @@ async fn run_inner() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     let snapshot = pool.snapshot();
     assert_eq!(snapshot.tasks.get(&task_id).unwrap().attempt_count, 2);
+    for attempt in snapshot.attempts.values() {
+        let resources = attempt
+            .terminal
+            .as_ref()
+            .and_then(|terminal| terminal.resources.as_deref())
+            .expect("both original and retry retain their exact allocated usage");
+        resources.validate_against(&attempt.request).unwrap();
+        assert!(resources.resources.usage.wall_millis > 0);
+        assert!(resources.resources.usage.cpu_core_millis > 0);
+    }
     assert!(snapshot.attempts.values().any(|attempt| {
         attempt.state == runmat_execution::state::AttemptState::Lost
             && attempt

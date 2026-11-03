@@ -30,24 +30,44 @@ pub(in crate::analysis) fn publication_failure(
     context: &OperationContext,
     rejected: impl FnOnce(String) -> OperationErrorEnvelope,
 ) -> OperationErrorEnvelope {
+    publication_failure_at(
+        error,
+        crate::analysis::ANALYSIS_RUN_STUDY_OPERATION,
+        crate::analysis::ANALYSIS_RUN_STUDY_OP_VERSION,
+        "RM.FEA.RUN_STUDY.PUBLICATION_RESOURCE_LIMIT",
+        "RM.FEA.RUN_STUDY.PUBLICATION_DURABILITY_INDETERMINATE",
+        context,
+        rejected,
+    )
+}
+
+pub(in crate::analysis) fn publication_failure_at(
+    error: AnalysisPublicationError,
+    operation: &str,
+    version: &str,
+    resource_code: &'static str,
+    durability_code: &'static str,
+    context: &OperationContext,
+    rejected: impl FnOnce(String) -> OperationErrorEnvelope,
+) -> OperationErrorEnvelope {
     match error {
         AnalysisPublicationError::Rejected { message } => rejected(message),
         limited @ AnalysisPublicationError::ResourceLimit { .. } => {
             crate::operations::operation_error(
-                crate::analysis::ANALYSIS_RUN_STUDY_OPERATION, crate::analysis::ANALYSIS_RUN_STUDY_OP_VERSION,
+                operation, version,
                 context, OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_STUDY.PUBLICATION_RESOURCE_LIMIT", error_type: OperationErrorType::Capacity,
+                    error_code: resource_code, error_type: OperationErrorType::Capacity,
                     retryable: false, severity: OperationErrorSeverity::Error,
                 }, limited.to_string(), std::collections::BTreeMap::new(),
             )
         }
         uncertain @ (AnalysisPublicationError::DurabilityIndeterminate { .. } | AnalysisPublicationError::EvidenceDurabilityIndeterminate { .. }) => {
             crate::operations::operation_error(
-                crate::analysis::ANALYSIS_RUN_STUDY_OPERATION,
-                crate::analysis::ANALYSIS_RUN_STUDY_OP_VERSION,
+                operation,
+                version,
                 context,
                 OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_STUDY.PUBLICATION_DURABILITY_INDETERMINATE",
+                    error_code: durability_code,
                     error_type: OperationErrorType::Backend,
                     retryable: true,
                     severity: OperationErrorSeverity::Error,

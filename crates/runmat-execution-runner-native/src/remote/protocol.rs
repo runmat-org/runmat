@@ -17,6 +17,43 @@ use super::{RemoteAttempt, RemoteBundleReceipt};
 use super::protocol_schema::REMOTE_WORKER_PROTOCOL_V4;
 pub use super::protocol_schema::REMOTE_WORKER_PROTOCOL_VERSION;
 
+/// Fixed-size counters retained with the original worker reservation. The
+/// allocation and leased devices remain in the exact request, not a second copy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RetiredAttemptUsage {
+    pub wall_millis: u64,
+    pub artifact_bytes: u64,
+    pub egress_bytes: u64,
+    pub relay_bytes: u64,
+}
+
+impl RetiredAttemptUsage {
+    pub(super) fn from_accounting(
+        resources: &runmat_execution_runner::task::AttemptResourceAccounting,
+    ) -> Self {
+        Self {
+            wall_millis: resources.resources.usage.wall_millis,
+            artifact_bytes: resources.resources.artifact_bytes,
+            egress_bytes: resources.resources.usage.egress_bytes,
+            relay_bytes: resources.resources.usage.relay_bytes,
+        }
+    }
+
+    pub(super) fn accounting(
+        self,
+        request: &runmat_execution_runner::AttemptRequest,
+    ) -> Result<runmat_execution_runner::task::AttemptResourceAccounting, String> {
+        runmat_execution_runner::task::AttemptResourceAccounting::for_attempt(
+            request,
+            self.wall_millis,
+            self.artifact_bytes,
+            self.egress_bytes,
+            self.relay_bytes,
+        )
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RemoteWorkerRequest {
@@ -192,6 +229,7 @@ pub enum RemoteWorkerOutcome {
         pool_id: PoolId,
         attempt_id: AttemptId,
         request_digest: Digest,
+        usage: Option<RetiredAttemptUsage>,
     },
     RetirementUnavailable,
     Acknowledged,

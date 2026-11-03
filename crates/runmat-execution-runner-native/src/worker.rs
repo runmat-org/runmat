@@ -8,6 +8,7 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 
 mod collective;
 mod console;
+pub(crate) mod bootstrap;
 
 /// One bounded private control frame between a native worker and its parent.
 pub(crate) const WORKER_MAX_MESSAGE_BYTES: u32 = 64 * 1024 * 1024;
@@ -26,130 +27,31 @@ enum WorkerExecutionOutcome {
 }
 
 pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
-    let original_started_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?
-        .as_millis();
-    let control = runmat_process_host::ipc::private_control::connect_host_blocking()
-        .map_err(runmat_process_host::ProcessHostError::Io)?;
-    let limits = FrameLimits {
-        max_message_bytes: WORKER_MAX_MESSAGE_BYTES,
-    };
-    // Parent loss (the request pipe closing before this worker publishes its terminal frame)
-    // ends the worker at once, even while a non-yielding solve holds the executor.
-    let lease_observer = std::sync::Arc::new(crate::fea_delegation::LeaseObserver::default());
-    let proxy_replies = std::sync::Arc::new(crate::fea_proxy::Replies::default());
-    let replies = proxy_replies.clone();
-    let observer = lease_observer.clone();
-    let (parent, frames) = runmat_process_host::ipc::WorkerParentLink::start_with_observer(
-        control.reader,
-        limits,
-        Some(std::sync::Arc::new(move |frame| {
-            replies.observe(frame) || observer.observe(frame)
-        })),
+    let bootstrap = bootstrap::PrivateWorkerBootstrap::connect(
+        FrameLimits {
+            max_message_bytes: WORKER_MAX_MESSAGE_BYTES,
+        },
+        bootstrap::WorkerRole::Program,
     )?;
-    let writer =
-        runmat_process_host::ipc::private_control::ControlFrameWriter::new(control.writer, limits)?;
-    let channel = collective::WorkerControlChannel::new(frames, writer);
-    let payload = channel.read_payload().await?;
-    // The parent assigns this runnable child to its JobObject before writing
-    // the first request. No RunMat provider or foreign helper is initialized
-    // in the spawn-to-containment gap.
+    let payload = match run_program_worker(&bootstrap).await {
+        Ok(payload) => payload,
+        Err(error) => bootstrap.failure_payload(error)?,
+    };
+    bootstrap.publish(payload).await
+}
+
+async fn run_program_worker(
+    bootstrap: &bootstrap::PrivateWorkerBootstrap,
+) -> NativeExecutionResult<Vec<u8>> {
+    let bootstrap::AdmittedWorkerLaunch {
+        request,
+        scope: fea_scope,
+        host: independent_fea_host,
+    } = bootstrap.take_launch()?;
+    // No provider is initialized before the private parent supplied and
+    // validated its launch. Meshing uses the same bootstrap without GPU setup.
     runmat_accelerate::initialize_acceleration_provider();
-    let request: WorkerLaunchRequest = serde_json::from_slice(&payload)
-        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    let proxy_requested = request.fea_proxy();
-    let proxy_host = if proxy_requested {
-        if request.fea_grant().is_some() {
-            return Err(NativeExecutionError::Protocol(
-                "worker received both paid FEA delegation and first-root proxy".into(),
-            ));
-        }
-        let assignment = request
-            .assignment()
-            .ok_or_else(|| {
-                NativeExecutionError::Protocol("FEA proxy lacks original worker assignment".into())
-            })?
-            .clone();
-        let resources = request.resources().ok_or_else(|| {
-            NativeExecutionError::Protocol("FEA proxy lacks original worker reservation".into())
-        })?;
-        if resources.memory_bytes
-            < crate::fea_proxy::storage_bytes(0, crate::fea_proxy::StorageRole::Proxy)
-                .map_err(NativeExecutionError::Protocol)?
-        {
-            return Err(NativeExecutionError::Protocol(
-                "FEA proxy metadata exceeds worker reservation".into(),
-            ));
-        }
-        let client = crate::fea_proxy::Client::new(
-            assignment,
-            u64::from(resources.cpu_millicores),
-            channel.writer().clone(),
-            proxy_replies,
-        );
-        Some(
-            runmat_runtime::analysis::fea_run_admission::FeaRunAdmissionContext::new(
-                std::sync::Arc::new(crate::fea_proxy::WorkerAdmission(client)),
-            ),
-        )
-    } else {
-        None
-    };
-    // Only this authenticated private bootstrap accepts a parent FEA grant;
-    // the public Program request/JSON executor has no such authorization field.
-    let (request, fea_grant) = match request {
-        WorkerLaunchRequest::ReservedFeaProxy {
-            request,
-            console_budget,
-            fea_parent_admission: true,
-        } => (
-            match console_budget {
-                Some(console_budget) => WorkerLaunchRequest::ReservedConsole {
-                    request,
-                    console_budget,
-                },
-                None => WorkerLaunchRequest::Reserved(request),
-            },
-            None,
-        ),
-        WorkerLaunchRequest::ReservedFea(launch) => {
-            let (request, console_budget, fea_grant) = launch.into_parts();
-            let request = Box::new(request);
-            (
-                match console_budget {
-                    Some(console_budget) => WorkerLaunchRequest::ReservedConsole {
-                        request,
-                        console_budget,
-                    },
-                    None => WorkerLaunchRequest::Reserved(request),
-                },
-                Some(fea_grant),
-            )
-        }
-        WorkerLaunchRequest::StagedGraph(mut graph) => {
-            let grant = graph.staged_graph_v10.fea_grant.take();
-            (WorkerLaunchRequest::StagedGraph(graph), grant)
-        }
-        other => (other, None),
-    };
-    let fea_scope = if let Some(grant) = &fea_grant {
-        let assignment = request.assignment().ok_or_else(|| {
-            NativeExecutionError::Protocol("FEA grant lacks an assigned child".into())
-        })?;
-        let resources = request.resources().ok_or_else(|| {
-            NativeExecutionError::Protocol("FEA grant lacks reserved child resources".into())
-        })?;
-        let scope = grant
-            .install(assignment, resources)
-            .map_err(NativeExecutionError::Protocol)?;
-        lease_observer
-            .install(grant, &scope)
-            .map_err(NativeExecutionError::Protocol)?;
-        Some(scope)
-    } else {
-        None
-    };
+    let channel = bootstrap.channel.clone();
     let spmd_task = match &request {
         WorkerLaunchRequest::Direct(direct) => match direct.as_ref() {
             WorkerRequest::Direct(request) => match &request.context {
@@ -186,21 +88,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
     } else {
         None
     };
-    // A first FEA root inside a local callback uses the installed host's lease
-    // provider, constrained to this exact private bootstrap reservation. Its
-    // original worker wall clock is never restarted by a later FEA call.
-    let independent_fea_host = if fea_scope.is_none() {
-        request.resources().map(|resources| {
-            let deadline = u64::try_from(original_started_at)
-                .ok()
-                .and_then(|started| started.checked_add(resources.max_wall_millis))
-                .ok_or_else(|| NativeExecutionError::Protocol("worker FEA deadline overflow".into()))?;
-                let make = || runmat_runtime::analysis::fea_run_admission::FeaRunAdmissionContext::with_current_resource_bounds(u64::from(resources.cpu_millicores), deadline);
-                match &proxy_host { Some(host) => host.run_sync(make), None => make() }.map_err(|error| NativeExecutionError::Protocol(error.to_string()))
-        }).transpose()?
-    } else {
-        None
-    };
+
     let response = match &fea_scope {
         Some(scope) => scope
             .run_checked_future(execute_launch(request, channel.clone(), collective))
@@ -226,7 +114,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
         ),
         Ok(WorkerExecutionOutcome::RetirementUnverified { message, owner }) => {
             let _owner = owner;
-            parent.disarm();
+            bootstrap.disarm();
             let payload = serde_json::to_vec(
                 &crate::protocol::WorkerProcessMessage::RetirementUnverified { message },
             );
@@ -252,9 +140,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
             .check()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     }
-    parent.disarm();
-    channel.write_payload(payload).await?;
-    Ok(())
+    Ok(payload)
 }
 
 async fn execute_launch(

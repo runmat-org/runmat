@@ -11,10 +11,10 @@ use crate::operations::{
 };
 
 use super::{
-    atomic_write_bytes, fs_create_dir_all, sanitize_study_sweep_id, study_evidence_root,
-    AnalysisStudyRunData, AnalysisStudySweepData, AnalysisStudySweepFailureEntry,
-    AnalysisStudySweepFailureKind, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
-    ANALYSIS_RUN_STUDY_SWEEP_OPERATION, ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+    sanitize_study_sweep_id, study_evidence_root, AnalysisStudyRunData, AnalysisStudySweepData,
+    AnalysisStudySweepFailureEntry, AnalysisStudySweepFailureKind, AnalysisStudySweepRunEntry,
+    AnalysisStudySweepSpec, ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+    ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
 };
 
 /// One authored sweep entry after semantic preparation and numerical placement.
@@ -364,15 +364,6 @@ fn publish_sweep(
         .join("sweeps")
         .join(sanitize_study_sweep_id(&spec.sweep_id))
         .join("run.json");
-    if let Some(parent) = evidence_root.parent() {
-        fs_create_dir_all(parent).map_err(|error| {
-            artifact_error(
-                spec,
-                &context,
-                format!("failed to create study sweep evidence directory: {error}"),
-            )
-        })?;
-    }
     let payload = serde_json::json!({
         "schema_version": "fea_study_sweep_run_artifact/v1",
         "sweep_id": spec.sweep_id.clone(),
@@ -391,8 +382,8 @@ fn publish_sweep(
             format!("failed to encode study sweep evidence payload: {error}"),
         )
     })?;
-    atomic_write_bytes(&evidence_root, &payload_bytes)
-        .map_err(|error| artifact_error(spec, &context, error))?;
+    super::evidence_filesystem::write_captured_evidence(&evidence_root, payload_bytes)
+        .map_err(|error| sweep_publication_error(spec, &context, error))?;
 
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
@@ -428,5 +419,39 @@ fn artifact_error(
         },
         message,
         BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+    )
+}
+
+pub(super) fn sweep_publication_error(
+    spec: &AnalysisStudySweepSpec,
+    context: &OperationContext,
+    error: super::storage::AnalysisPublicationError,
+) -> OperationErrorEnvelope {
+    super::prepared_study_publication::publication_failure_at(
+        error,
+        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+        "RM.FEA.RUN_STUDY_SWEEP.PUBLICATION_RESOURCE_LIMIT",
+        "RM.FEA.RUN_STUDY_SWEEP.PUBLICATION_DURABILITY_INDETERMINATE",
+        context,
+        |message| {
+            if crate::interrupt::is_cancelled() {
+                operation_error(
+                    ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+                    ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+                    context,
+                    OperationErrorSpec {
+                        error_code: "RM.FEA.RUN_STUDY_SWEEP.CANCELLED",
+                        error_type: OperationErrorType::Cancelled,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    message,
+                    BTreeMap::from([("sweep_id".into(), spec.sweep_id.clone())]),
+                )
+            } else {
+                artifact_error(spec, context, message)
+            }
+        },
     )
 }

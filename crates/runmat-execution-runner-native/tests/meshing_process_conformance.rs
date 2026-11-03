@@ -1,5 +1,7 @@
 #[path = "meshing_process_conformance/attempt_lifecycle.rs"]
 mod attempt_lifecycle;
+#[path = "support/fea_admission.rs"]
+mod fea_admission_support;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -59,6 +61,22 @@ mod faceted_input;
 mod remote_recovery;
 
 struct AdmissionKernel;
+
+struct PaidAdmissionKernel;
+
+impl MeshingStageKernel for PaidAdmissionKernel {
+    fn execute(
+        &self,
+        invocation: MeshingStageInvocation<'_, '_>,
+    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        assert_eq!(
+            runmat_runtime::analysis::fea_run_admission::FeaRunScope::current_allocation(),
+            Some(1000),
+            "the original paid scope must enter the actual native kernel thread"
+        );
+        AdmissionKernel.execute(invocation)
+    }
+}
 
 impl MeshingStageKernel for AdmissionKernel {
     fn execute(
@@ -292,6 +310,10 @@ fn main() {
             run_child(AdmissionKernel, Path::new(&root));
             return;
         }
+        if mode == "--paid-child" {
+            run_child(PaidAdmissionKernel, Path::new(&root));
+            return;
+        }
         if mode == "--slow-child" {
             run_child(SlowKernel, Path::new(&root));
             return;
@@ -337,12 +359,30 @@ fn run_child(kernel: impl MeshingStageKernel + 'static, root: &Path) {
 }
 
 async fn parent() {
+    use runmat_runtime::analysis::fea_run_admission::{
+        FeaRunKind, FeaRunOutcome, FeaRunRequest, FeaRunScope,
+    };
     let directory = tempfile::tempdir().unwrap();
     let (host, request) = fixture();
-    let session = NativeProgramSession::new(config(directory.path(), "--child")).unwrap();
+    let session = NativeProgramSession::new(config(directory.path(), "--paid-child")).unwrap();
     seed_host_invocation(&mut session.object_store(), &host, &request);
     let task_submission = submission(&session, &host, &request);
-    let task = session.submit(request.clone(), task_submission).unwrap();
+    let admission = fea_admission_support::context();
+    let scope = admission
+        .run_sync(|| {
+            FeaRunScope::admit(
+                FeaRunRequest::local(
+                    FeaRunKind::MeshAndSolve,
+                    1000,
+                    Digest::sha256(b"paid-meshing-conformance"),
+                )
+                .unwrap(),
+            )
+        })
+        .unwrap();
+    let task = scope
+        .run_sync(|| session.submit(request.clone(), task_submission))
+        .unwrap();
     let success = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             if let Some(result) = task.try_result() {
@@ -353,6 +393,7 @@ async fn parent() {
     })
     .await
     .unwrap();
+    scope.settle(FeaRunOutcome::Completed).unwrap();
     let progress = task.drain_progress();
     assert!(progress.len() >= 3);
     let decoded_progress = progress

@@ -35,6 +35,19 @@ impl RemotePoolDriver {
         if !evidence.matches(request) {
             return false;
         }
+        let resources = match evidence.resources() {
+            Ok(Some(observed)) => {
+                if resources
+                    .as_ref()
+                    .is_some_and(|supplied| supplied != &observed)
+                {
+                    return false;
+                }
+                Some(observed)
+            }
+            Ok(None) => resources,
+            Err(_) => return false,
+        };
         let mut report = BackendReport::for_request(request, AttemptReport::Retired);
         report.unsuccessful_resources = resources.map(Box::new);
         // The exact original-request check and terminal report are one driver
@@ -160,6 +173,24 @@ impl RemotePoolDriver {
                         })
                 });
             if exact_original {
+                // A lost/cancelled owner's successful late result supplies its
+                // original accounting even though its values cannot be committed.
+                // Move the existing box before replacing the result disposition.
+                if matches!(authority, ReportAuthority::PhysicalRetirement(_))
+                    && report.unsuccessful_resources.is_none()
+                {
+                    if let AttemptReport::Succeeded { result } = &mut report.report {
+                        report.unsuccessful_resources = match result {
+                            runmat_execution_runner::AttemptSuccess::Values {
+                                resources, ..
+                            }
+                            | runmat_execution_runner::AttemptSuccess::Graph {
+                                resources, ..
+                            } => resources.take(),
+                            runmat_execution_runner::AttemptSuccess::Spmd { .. } => None,
+                        };
+                    }
+                }
                 report.report = match authority {
                     ReportAuthority::CertifiedNeverAdmitted(_) => {
                         AttemptReport::CertifiedNotStarted {}
