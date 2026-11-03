@@ -185,7 +185,10 @@ fn resolve_pair_target(
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     let readable = match (materialized_field_location(spec), field_domain) {
         (FieldLocation::Node, RecoveredFieldEntityDomain::Nodes) => true,
-        (FieldLocation::Element | FieldLocation::Cell, RecoveredFieldEntityDomain::VolumeElements) => true,
+        (
+            FieldLocation::Element | FieldLocation::Cell,
+            RecoveredFieldEntityDomain::VolumeElements,
+        ) => true,
         (FieldLocation::Face, RecoveredFieldEntityDomain::OrientedFaces) => {
             topology.finite_volume.is_some()
         }
@@ -203,7 +206,10 @@ fn resolve_pair_target(
         if region.entity_dimension != EntityDimension::Face
             || region.expected_topology != ExpectedTopology::BoundaryFace
         {
-            return Err(target_error(spec, "a paired reduction reads two boundary face regions"));
+            return Err(target_error(
+                spec,
+                "a paired reduction reads two boundary face regions",
+            ));
         }
         let faces = matching_faces(region, projection);
         enforce_cardinality(region.cardinality, faces.clone().count(), spec)?;
@@ -211,7 +217,10 @@ fn resolve_pair_target(
         if faces.is_empty() {
             return Err(target_error(
                 spec,
-                format!("face region `{}` selects no boundary faces", region.region_id),
+                format!(
+                    "face region `{}` selects no boundary faces",
+                    region.region_id
+                ),
             ));
         }
         selected.push(faces);
@@ -228,10 +237,7 @@ fn resolve_pair_target(
         ));
     }
     let first_count = first_faces.len();
-    let face_indices = selected_indices(
-        first_faces.iter().chain(&second_faces).copied(),
-        maximum,
-    )?;
+    let face_indices = selected_indices(first_faces.iter().chain(&second_faces).copied(), maximum)?;
     let mut face_identities = reserved(face_indices.len())?;
     face_identities.extend(
         face_indices

@@ -18,7 +18,12 @@ fn fixture() -> (RecoveredFieldArtifactEntry, Vec<RecoveredFieldPartition>) {
     let field = RecoveredField::new(
         definition.clone(),
         RecoveredFieldSample::Final,
-        AnalysisField::host_f64("temperature", definition.layout(), vec![count], vec![1.0; count]),
+        AnalysisField::host_f64(
+            "temperature",
+            definition.layout(),
+            vec![count],
+            vec![1.0; count],
+        ),
     )
     .unwrap();
     let entry = RecoveredFieldArtifactEntry {

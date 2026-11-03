@@ -377,15 +377,22 @@ fn graded_slab_solver_benchmark() {
 #[ignore = "benchmark"]
 fn startup_slab_solver_benchmark() {
     let var = |name: &str| std::env::var(name).ok();
-    let n: usize = var("RUNMAT_CFD_BENCH_N").and_then(|v| v.parse().ok()).unwrap_or(8);
-    let threads: usize = var("RUNMAT_CFD_BENCH_THREADS").and_then(|v| v.parse().ok()).unwrap_or(1);
-    let steps: usize = var("RUNMAT_CFD_BENCH_STEPS").and_then(|v| v.parse().ok()).unwrap_or(3);
+    let n: usize = var("RUNMAT_CFD_BENCH_N")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
+    let threads: usize = var("RUNMAT_CFD_BENCH_THREADS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let steps: usize = var("RUNMAT_CFD_BENCH_STEPS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3);
     let h = 1.0 / n as f64;
-    let dt: f64 = var("RUNMAT_CFD_BENCH_DT").and_then(|v| v.parse().ok()).unwrap_or(h * h / 1.6);
-    let mut f = symmetry_case_on(
-        fixture::case(n, ReferenceCase::Duct, false),
-        |target| FluidConstraintKind::Symmetry { target },
-    );
+    let dt: f64 = var("RUNMAT_CFD_BENCH_DT")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(h * h / 1.6);
+    let mut f = symmetry_case_on(fixture::case(n, ReferenceCase::Duct, false), |target| {
+        FluidConstraintKind::Symmetry { target }
+    });
     f.policy = CanonicalFluidPolicy {
         maximum_resident_bytes: Some(24_000_000_000),
         ..CanonicalFluidPolicy::default()
@@ -409,7 +416,9 @@ fn startup_slab_solver_benchmark() {
             .prepare_backward_euler(step as f64 * dt, (step + 1) as f64 * dt, previous)
             .unwrap();
         let t = std::time::Instant::now();
-        let r = runmat_cpu_execution::with_cpu_pool(threads, || interval.solve()).unwrap().unwrap();
+        let r = runmat_cpu_execution::with_cpu_pool(threads, || interval.solve())
+            .unwrap()
+            .unwrap();
         println!(
             "{{\"bench\":\"startup_slab\",\"n\":{n},\"cells\":{cells},\"threads\":{threads},\"step\":{step},\"dt\":{dt:.3e},\"solve_s\":{:.3},\"outer_iterations\":{},\"linear_iterations\":{},\"momentum_relative\":{:.3e},\"continuity_relative\":{:.3e}}}",
             t.elapsed().as_secs_f64(), r.outer_iterations, r.linear_iterations,
@@ -455,7 +464,11 @@ fn sweep_pressure_operator_against_the_exact_schur_complement() {
             state ^= state << 13;
             state ^= state >> 7;
             state ^= state << 17;
-            if state & 1 == 0 { 1.0 } else { -1.0 }
+            if state & 1 == 0 {
+                1.0
+            } else {
+                -1.0
+            }
         })
         .collect::<Vec<_>>();
     for (name, z) in [("smooth", smooth), ("rough", rough)] {
@@ -473,7 +486,11 @@ fn sweep_pressure_operator_against_the_exact_schur_complement() {
         assert!(exact / sweep < 1.0, "{name}: exact/sweep {}", exact / sweep);
         if name == "rough" {
             // On cell-scale modes the Rhie–Chow Laplacian L(rf) is SIMPLE's own operator.
-            assert!((0.6..1.05).contains(&(simple / sweep)), "simple/sweep {}", simple / sweep);
+            assert!(
+                (0.6..1.05).contains(&(simple / sweep)),
+                "simple/sweep {}",
+                simple / sweep
+            );
             assert!(exact / sweep > 0.6, "exact/sweep {}", exact / sweep);
         }
     }
@@ -498,7 +515,11 @@ fn persisted_channel_case(path: &str, inlet_speed: f64) -> fixture::Fixture {
     // `RUNMAT_CFD_BENCH_REGION=<k>` keeps the k-th volume region only (a conjugate model's
     // coolant); every face of it other than the inlet and outlet planes is then a no-slip wall.
     let region = std::env::var("RUNMAT_CFD_BENCH_REGION").ok().map(|k| {
-        let mut regions = source.elements.iter().map(|e| e.region_id.clone()).collect::<Vec<_>>();
+        let mut regions = source
+            .elements
+            .iter()
+            .map(|e| e.region_id.clone())
+            .collect::<Vec<_>>();
         regions.sort();
         regions.dedup();
         regions[k.parse::<usize>().unwrap()].clone()
@@ -558,13 +579,17 @@ fn persisted_channel_case(path: &str, inlet_speed: f64) -> fixture::Fixture {
             },
             FluidConstraint {
                 constraint_id: "walls".into(),
-                kind: FluidConstraintKind::NoSlipWall { target: target("walls", walls) },
+                kind: FluidConstraintKind::NoSlipWall {
+                    target: target("walls", walls),
+                },
             },
         ]
         .into_iter()
         .chain((!planes.is_empty()).then(|| FluidConstraint {
             constraint_id: "spanwise".into(),
-            kind: FluidConstraintKind::Symmetry { target: target("spanwise", planes) },
+            kind: FluidConstraintKind::Symmetry {
+                target: target("spanwise", planes),
+            },
         }))
         .collect(),
         operators: vec![AnalysisBoundary {
@@ -595,10 +620,18 @@ fn persisted_channel_case(path: &str, inlet_speed: f64) -> fixture::Fixture {
 fn persisted_channel_solver_benchmark() {
     let var = |name: &str| std::env::var(name).ok();
     let path = var("RUNMAT_CFD_BENCH_MESH").expect("RUNMAT_CFD_BENCH_MESH");
-    let threads: usize = var("RUNMAT_CFD_BENCH_THREADS").and_then(|v| v.parse().ok()).unwrap_or(10);
-    let steps: usize = var("RUNMAT_CFD_BENCH_STEPS").and_then(|v| v.parse().ok()).unwrap_or(2);
-    let dt: f64 = var("RUNMAT_CFD_BENCH_DT").and_then(|v| v.parse().ok()).unwrap_or(0.25);
-    let speed: f64 = var("RUNMAT_CFD_BENCH_U").and_then(|v| v.parse().ok()).unwrap_or(0.005);
+    let threads: usize = var("RUNMAT_CFD_BENCH_THREADS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+    let steps: usize = var("RUNMAT_CFD_BENCH_STEPS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2);
+    let dt: f64 = var("RUNMAT_CFD_BENCH_DT")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.25);
+    let speed: f64 = var("RUNMAT_CFD_BENCH_U")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.005);
     let mut f = persisted_channel_case(&path, speed);
     if let Some(restart) = var("RUNMAT_CFD_BENCH_RESTART").and_then(|v| v.parse().ok()) {
         f.policy.gmres_restart = restart;
@@ -618,8 +651,9 @@ fn persisted_channel_solver_benchmark() {
         reservation.verification_resident_bytes_upper_bound,
         p.momentum_jacobian.entries()
     );
-    let whole = crate::topology::FiniteVolumeTopology::reserve_mesh(&f.mesh, fixture::geometry_policy())
-        .unwrap();
+    let whole =
+        crate::topology::FiniteVolumeTopology::reserve_mesh(&f.mesh, fixture::geometry_policy())
+            .unwrap();
     println!(
         "{{\"bench\":\"persisted_preparation\",\"mesh_cells\":{},\"whole_mesh_geometry_scratch\":{},\"projection_estimate\":{}}}",
         whole.cell_count,
@@ -638,7 +672,9 @@ fn persisted_channel_solver_benchmark() {
     }
     if var("RUNMAT_CFD_BENCH_STEADY").is_some() {
         let t = std::time::Instant::now();
-        let r = runmat_cpu_execution::with_cpu_pool(threads, || p.solve()).unwrap().unwrap();
+        let r = runmat_cpu_execution::with_cpu_pool(threads, || p.solve())
+            .unwrap()
+            .unwrap();
         let gradient = channel_pressure_gradient(&p, &r);
         println!(
             "{{\"bench\":\"persisted_steady\",\"cells\":{cells},\"threads\":{threads},\"solve_s\":{:.3},\"outer_iterations\":{},\"linear_iterations\":{},\"minus_dpdx\":{gradient:.6}}}",
@@ -663,7 +699,9 @@ fn persisted_channel_solver_benchmark() {
             .prepare_backward_euler(step as f64 * dt, (step + 1) as f64 * dt, previous)
             .unwrap();
         let t = std::time::Instant::now();
-        let r = runmat_cpu_execution::with_cpu_pool(threads, || interval.solve()).unwrap().unwrap();
+        let r = runmat_cpu_execution::with_cpu_pool(threads, || interval.solve())
+            .unwrap()
+            .unwrap();
         println!(
             "{{\"bench\":\"persisted_startup\",\"cells\":{cells},\"threads\":{threads},\"step\":{step},\"solve_s\":{:.3},\"outer_iterations\":{},\"linear_iterations\":{},\"minus_dpdx\":{:.6}}}",
             t.elapsed().as_secs_f64(), r.outer_iterations, r.linear_iterations,
@@ -681,8 +719,15 @@ fn persisted_channel_solver_benchmark() {
 
 /// −dp/dx from a least-squares line through cell pressures in the middle half of the channel.
 fn channel_pressure_gradient(p: &CanonicalFluidProblem<'_>, r: &CanonicalFluidResult) -> f64 {
-    let xs = p.topology.cells.iter().map(|c| c.centroid_m[0]).collect::<Vec<_>>();
-    let (lo, hi) = xs.iter().fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
+    let xs = p
+        .topology
+        .cells
+        .iter()
+        .map(|c| c.centroid_m[0])
+        .collect::<Vec<_>>();
+    let (lo, hi) = xs
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
     let (l, h) = (lo + 0.25 * (hi - lo), lo + 0.75 * (hi - lo));
     let pairs = xs
         .iter()

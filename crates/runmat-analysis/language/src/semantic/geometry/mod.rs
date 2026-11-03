@@ -271,7 +271,10 @@ fn check_authored_names(
             .get(role)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let matches = available.iter().filter(|candidate| *candidate == name).count();
+        let matches = available
+            .iter()
+            .filter(|candidate| *candidate == name)
+            .count();
         if matches > 1 && region.cardinality == GeometryRegionCardinality::ExactlyOne {
             error(
                 declaration,

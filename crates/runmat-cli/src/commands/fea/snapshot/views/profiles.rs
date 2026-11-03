@@ -7,13 +7,13 @@ use runmat_analysis_core::{
     ObservationValueShape,
 };
 use runmat_analysis_fea::results::field::RecoveredFieldSample;
+use runmat_plot::field_volume::Reduction;
+use runmat_runtime::analysis::field_scene::volume::VolumeViewKind;
 use runmat_runtime::analysis::{
     analysis_field_page_by_run_id_op, AnalysisFieldDescriptor, AnalysisFieldLocation,
     AnalysisFieldPageValues, AnalysisFieldRequestOptions, AnalysisFieldSelection,
     AnalysisResultsData,
 };
-use runmat_plot::field_volume::Reduction;
-use runmat_runtime::analysis::field_scene::volume::VolumeViewKind;
 use runmat_runtime::operations::OperationContext;
 
 /// Field views per figure, besides the solver mesh and mode shapes.
@@ -188,18 +188,128 @@ const SIGNED: Reduction = Reduction::InstantaneousAt { phase_radians: 0.0 };
 
 /// Interior views, in priority order: the first `MAXIMUM_VOLUME_VIEWS` a run publishes.
 const VOLUME_DISPLAYS: &[VolumeDisplay] = &[
-    VolumeDisplay { id: "velocity-section", legend: "Velocity magnitude", quantities: &[Q::FluidVelocity], representation: R::Real, vector: true, kind: VolumeViewKind::Section, reduction: Reduction::Magnitude, true_extrema: true },
-    VolumeDisplay { id: "velocity-streamlines", legend: "Velocity magnitude", quantities: &[Q::FluidVelocity], representation: R::Real, vector: true, kind: VolumeViewKind::Streamlines, reduction: Reduction::Magnitude, true_extrema: true },
-    VolumeDisplay { id: "current-density-section", legend: "Current density |J|", quantities: &[Q::ElectricCurrentDensity], representation: R::Real, vector: true, kind: VolumeViewKind::Section, reduction: Reduction::Magnitude, true_extrema: true },
-    VolumeDisplay { id: "current-density-section", legend: "Current density amplitude |J|", quantities: &[Q::ElectricCurrentDensity], representation: R::Complex, vector: true, kind: VolumeViewKind::Section, reduction: Reduction::Magnitude, true_extrema: true },
-    VolumeDisplay { id: "electric-potential-section", legend: "Electric potential", quantities: &[Q::ElectricPotential], representation: R::Real, vector: false, kind: VolumeViewKind::Section, reduction: SIGNED, true_extrema: false },
-    VolumeDisplay { id: "electric-field-arrows", legend: "Electric field |E|", quantities: &[Q::ElectricField], representation: R::Real, vector: true, kind: VolumeViewKind::Glyphs, reduction: Reduction::Magnitude, true_extrema: false },
-    VolumeDisplay { id: "magnetic-flux-density-section", legend: "Magnetic flux density |B|", quantities: &[Q::MagneticFluxDensity], representation: R::Real, vector: true, kind: VolumeViewKind::Section, reduction: Reduction::Magnitude, true_extrema: true },
-    VolumeDisplay { id: "magnetic-flux-density-section", legend: "Magnetic flux density amplitude |B|", quantities: &[Q::MagneticFluxDensity], representation: R::Complex, vector: true, kind: VolumeViewKind::Section, reduction: Reduction::Magnitude, true_extrema: true },
-    VolumeDisplay { id: "sound-pressure-level-section", legend: "Sound pressure level", quantities: &[Q::AcousticPressure], representation: R::Complex, vector: false, kind: VolumeViewKind::Section, reduction: Reduction::SoundPressureLevel { reference_pa: runmat_analysis_core::SOUND_PRESSURE_LEVEL_REFERENCE_PA }, true_extrema: false },
-    VolumeDisplay { id: "acoustic-pressure-section", legend: "Acoustic pressure amplitude |p|", quantities: &[Q::AcousticPressure], representation: R::Complex, vector: false, kind: VolumeViewKind::Section, reduction: Reduction::Magnitude, true_extrema: true },
-    VolumeDisplay { id: "acoustic-pressure-instantaneous-section", legend: "Acoustic pressure at phase 0", quantities: &[Q::AcousticPressure], representation: R::Complex, vector: false, kind: VolumeViewKind::Section, reduction: SIGNED, true_extrema: false },
-    VolumeDisplay { id: "temperature-section", legend: "Temperature", quantities: &[Q::Temperature], representation: R::Real, vector: false, kind: VolumeViewKind::Section, reduction: SIGNED, true_extrema: true },
+    VolumeDisplay {
+        id: "velocity-section",
+        legend: "Velocity magnitude",
+        quantities: &[Q::FluidVelocity],
+        representation: R::Real,
+        vector: true,
+        kind: VolumeViewKind::Section,
+        reduction: Reduction::Magnitude,
+        true_extrema: true,
+    },
+    VolumeDisplay {
+        id: "velocity-streamlines",
+        legend: "Velocity magnitude",
+        quantities: &[Q::FluidVelocity],
+        representation: R::Real,
+        vector: true,
+        kind: VolumeViewKind::Streamlines,
+        reduction: Reduction::Magnitude,
+        true_extrema: true,
+    },
+    VolumeDisplay {
+        id: "current-density-section",
+        legend: "Current density |J|",
+        quantities: &[Q::ElectricCurrentDensity],
+        representation: R::Real,
+        vector: true,
+        kind: VolumeViewKind::Section,
+        reduction: Reduction::Magnitude,
+        true_extrema: true,
+    },
+    VolumeDisplay {
+        id: "current-density-section",
+        legend: "Current density amplitude |J|",
+        quantities: &[Q::ElectricCurrentDensity],
+        representation: R::Complex,
+        vector: true,
+        kind: VolumeViewKind::Section,
+        reduction: Reduction::Magnitude,
+        true_extrema: true,
+    },
+    VolumeDisplay {
+        id: "electric-potential-section",
+        legend: "Electric potential",
+        quantities: &[Q::ElectricPotential],
+        representation: R::Real,
+        vector: false,
+        kind: VolumeViewKind::Section,
+        reduction: SIGNED,
+        true_extrema: false,
+    },
+    VolumeDisplay {
+        id: "electric-field-arrows",
+        legend: "Electric field |E|",
+        quantities: &[Q::ElectricField],
+        representation: R::Real,
+        vector: true,
+        kind: VolumeViewKind::Glyphs,
+        reduction: Reduction::Magnitude,
+        true_extrema: false,
+    },
+    VolumeDisplay {
+        id: "magnetic-flux-density-section",
+        legend: "Magnetic flux density |B|",
+        quantities: &[Q::MagneticFluxDensity],
+        representation: R::Real,
+        vector: true,
+        kind: VolumeViewKind::Section,
+        reduction: Reduction::Magnitude,
+        true_extrema: true,
+    },
+    VolumeDisplay {
+        id: "magnetic-flux-density-section",
+        legend: "Magnetic flux density amplitude |B|",
+        quantities: &[Q::MagneticFluxDensity],
+        representation: R::Complex,
+        vector: true,
+        kind: VolumeViewKind::Section,
+        reduction: Reduction::Magnitude,
+        true_extrema: true,
+    },
+    VolumeDisplay {
+        id: "sound-pressure-level-section",
+        legend: "Sound pressure level",
+        quantities: &[Q::AcousticPressure],
+        representation: R::Complex,
+        vector: false,
+        kind: VolumeViewKind::Section,
+        reduction: Reduction::SoundPressureLevel {
+            reference_pa: runmat_analysis_core::SOUND_PRESSURE_LEVEL_REFERENCE_PA,
+        },
+        true_extrema: false,
+    },
+    VolumeDisplay {
+        id: "acoustic-pressure-section",
+        legend: "Acoustic pressure amplitude |p|",
+        quantities: &[Q::AcousticPressure],
+        representation: R::Complex,
+        vector: false,
+        kind: VolumeViewKind::Section,
+        reduction: Reduction::Magnitude,
+        true_extrema: true,
+    },
+    VolumeDisplay {
+        id: "acoustic-pressure-instantaneous-section",
+        legend: "Acoustic pressure at phase 0",
+        quantities: &[Q::AcousticPressure],
+        representation: R::Complex,
+        vector: false,
+        kind: VolumeViewKind::Section,
+        reduction: SIGNED,
+        true_extrema: false,
+    },
+    VolumeDisplay {
+        id: "temperature-section",
+        legend: "Temperature",
+        quantities: &[Q::Temperature],
+        representation: R::Real,
+        vector: false,
+        kind: VolumeViewKind::Section,
+        reduction: SIGNED,
+        true_extrema: true,
+    },
 ];
 
 /// A real field, or the amplitude of a harmonic one.
@@ -448,7 +558,10 @@ impl<'a> RunFields<'a> {
                 })
                 .or_insert((key, descriptor));
         }
-        by_mode.into_values().map(|(_, descriptor)| descriptor).collect()
+        by_mode
+            .into_values()
+            .map(|(_, descriptor)| descriptor)
+            .collect()
     }
 }
 
@@ -591,7 +704,9 @@ impl CaptureProfile {
                     .unit
                     .clone()
                     .filter(|unit| !unit.is_empty())
-                    .ok_or_else(|| anyhow!("published field '{}' has no unit", descriptor.field_id))?,
+                    .ok_or_else(|| {
+                        anyhow!("published field '{}' has no unit", descriptor.field_id)
+                    })?,
             };
             views.push(ViewSpec {
                 run_id: run.run_id.into(),
@@ -662,7 +777,11 @@ mod tests {
     use super::*;
     use runmat_analysis_core::{AnalysisField, AnalysisFieldLayout};
 
-    fn published(id: &str, layout: AnalysisFieldLayout, shape: Vec<usize>) -> AnalysisFieldDescriptor {
+    fn published(
+        id: &str,
+        layout: AnalysisFieldLayout,
+        shape: Vec<usize>,
+    ) -> AnalysisFieldDescriptor {
         let count = shape.iter().product();
         let mut descriptor = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
             id,
@@ -696,7 +815,12 @@ mod tests {
         let profile = CaptureProfile::from_published(&[("run", &fields)]).unwrap();
         assert_eq!(
             ids(&profile),
-            ["geometry", "temperature", "displacement", "temperature-section"]
+            [
+                "geometry",
+                "temperature",
+                "displacement",
+                "temperature-section"
+            ]
         );
         // The section draws the element values themselves.
         let section = &profile.views[3];
@@ -758,9 +882,8 @@ mod tests {
 
     #[test]
     fn modal_runs_show_geometry_and_one_shape_per_mode_only() {
-        let node_vector = |mode| {
-            AnalysisFieldLayout::vector3(Q::Displacement, FieldLocation::Node).mode(mode)
-        };
+        let node_vector =
+            |mode| AnalysisFieldLayout::vector3(Q::Displacement, FieldLocation::Node).mode(mode);
         let fields = [
             // The run-level copy of mode 1 and the stress recovered from it carry mode 1's
             // ordinal; a stress without the ordinal is still of a mass-normalized shape.
@@ -804,12 +927,24 @@ mod tests {
             })
             .collect();
         let profile = || CaptureProfile::from_published(&[("run", &fields)]).unwrap();
-        let names = |names: &[&str]| names.iter().map(|name| name.to_string()).collect::<Vec<_>>();
+        let names = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>()
+        };
         let selected = profile().select(&names(&["mode-2", "geometry"])).unwrap();
         assert_eq!(ids(&selected), ["geometry", "mode-2"]);
         assert_eq!(ids(&profile().select(&[]).unwrap()).len(), 4);
-        let refused = profile().select(&names(&["stress"])).err().unwrap().to_string();
-        assert!(refused.contains("no view 'stress'") && refused.contains("mode-3"), "{refused}");
+        let refused = profile()
+            .select(&names(&["stress"]))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            refused.contains("no view 'stress'") && refused.contains("mode-3"),
+            "{refused}"
+        );
     }
 
     #[test]
@@ -853,17 +988,29 @@ mod tests {
             .views
             .iter()
             .filter(|view| view.volume.is_some())
-            .map(|view| (view.id.as_str(), view.field.as_ref().unwrap().field_id.as_str()))
+            .map(|view| {
+                (
+                    view.id.as_str(),
+                    view.field.as_ref().unwrap().field_id.as_str(),
+                )
+            })
             .collect();
         assert_eq!(
             sections,
             [
                 ("sound-pressure-level-section", "acoustic.pressure"),
                 ("acoustic-pressure-section", "acoustic.pressure"),
-                ("acoustic-pressure-instantaneous-section", "acoustic.pressure"),
+                (
+                    "acoustic-pressure-instantaneous-section",
+                    "acoustic.pressure"
+                ),
             ]
         );
-        let level = profile.views.iter().find(|view| view.id == "sound-pressure-level-section").unwrap();
+        let level = profile
+            .views
+            .iter()
+            .find(|view| view.id == "sound-pressure-level-section")
+            .unwrap();
         assert_eq!(level.unit, "dB");
         assert!(!level.volume.unwrap().true_extrema);
     }
@@ -896,7 +1043,11 @@ mod tests {
             published("acoustic.pressure_real", node(R::Real), vec![4]),
             published("acoustic.phase", node(R::PhaseRadians), vec![4]),
             published("acoustic.pressure_magnitude", node(R::Magnitude), vec![4]),
-            published("acoustic.sound_pressure_level_db", node(R::SoundPressureLevel), vec![4]),
+            published(
+                "acoustic.sound_pressure_level_db",
+                node(R::SoundPressureLevel),
+                vec![4],
+            ),
         ];
         let profile = CaptureProfile::from_published(&[("run", &fields)]).unwrap();
         assert_eq!(

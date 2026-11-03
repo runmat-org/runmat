@@ -43,7 +43,11 @@ fn artifact(
         RecoveredFieldSample::Final,
         AnalysisField {
             field_id: "initial".into(),
-            layout: runmat_analysis_core::AnalysisFieldLayout::new(quantity, runmat_analysis_core::FieldLocation::Node, shape.clone()),
+            layout: runmat_analysis_core::AnalysisFieldLayout::new(
+                quantity,
+                runmat_analysis_core::FieldLocation::Node,
+                shape.clone(),
+            ),
             shape: if shape == ObservationValueShape::Scalar {
                 vec![4]
             } else {

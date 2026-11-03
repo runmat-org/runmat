@@ -54,10 +54,8 @@ struct ResultData {
         Vec<[f64; 3]>,
     >,
     #[serde(with = "runmat_types::physical::canonical_storage")]
-    port_intensity_w_per_m2: runmat_types::physical::Quantity<
-        runmat_types::physical::kind::AcousticIntensity,
-        Vec<f64>,
-    >,
+    port_intensity_w_per_m2:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::AcousticIntensity, Vec<f64>>,
     #[serde(with = "runmat_types::physical::canonical_storage")]
     energy_density_j_per_m3:
         runmat_types::physical::Quantity<runmat_types::physical::kind::EnergyDensity, Vec<f64>>,

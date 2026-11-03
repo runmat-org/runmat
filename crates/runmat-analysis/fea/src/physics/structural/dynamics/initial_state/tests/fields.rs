@@ -46,7 +46,10 @@ fn binding(
         RecoveredFieldSample::Final,
         AnalysisField {
             field_id: "initial".into(),
-            layout: runmat_analysis_core::AnalysisFieldLayout::vector3(quantity, runmat_analysis_core::FieldLocation::Node),
+            layout: runmat_analysis_core::AnalysisFieldLayout::vector3(
+                quantity,
+                runmat_analysis_core::FieldLocation::Node,
+            ),
             shape: vec![mesh.topology.nodes.len(), 3],
             values: AnalysisFieldValues::HostF64(values),
         },

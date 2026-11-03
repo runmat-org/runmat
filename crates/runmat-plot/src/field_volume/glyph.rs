@@ -3,7 +3,10 @@
 //! carries the exact value and its length a bounded proportion of it, so short arrows stay
 //! readable.
 
-use super::{add_scaled, cross, norm, normalize, sub, FieldTriangles, Reduction, SolvedField, TetrahedronLocator};
+use super::{
+    add_scaled, cross, norm, normalize, sub, FieldTriangles, Reduction, SolvedField,
+    TetrahedronLocator,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlyphOptions {
@@ -41,7 +44,11 @@ pub fn arrow_glyphs(
     }
     let (s, c) = phase_radians.sin_cos();
     let normal = normalize(options.normal);
-    let helper = if normal[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+    let helper = if normal[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
     let u = normalize(cross(normal, helper));
     let v = cross(normal, u);
     let (min, max) = mesh.bounds();
@@ -50,15 +57,26 @@ pub fn arrow_glyphs(
     let mut samples = Vec::new();
     for i in -steps..=steps {
         for j in -steps..=steps {
-            let point = add_scaled(add_scaled(options.origin, u, i as f64 * spacing), v, j as f64 * spacing);
-            let Some(located) = locator.locate(point) else { continue };
+            let point = add_scaled(
+                add_scaled(options.origin, u, i as f64 * spacing),
+                v,
+                j as f64 * spacing,
+            );
+            let Some(located) = locator.locate(point) else {
+                continue;
+            };
             let value = field.at(mesh, located.element, located.weights);
             let instantaneous = [0, 1, 2].map(|k| value.real[k] * c - value.imaginary[k] * s);
-            glyphs.geometric_error_m = glyphs.geometric_error_m.max(mesh.curvature_deviation(located.element));
+            glyphs.geometric_error_m = glyphs
+                .geometric_error_m
+                .max(mesh.curvature_deviation(located.element));
             samples.push((point, instantaneous, color.apply(&value)));
         }
     }
-    let largest = samples.iter().map(|(_, vector, _)| norm(*vector)).fold(0.0, f64::max);
+    let largest = samples
+        .iter()
+        .map(|(_, vector, _)| norm(*vector))
+        .fold(0.0, f64::max);
     if largest <= 0.0 {
         return glyphs;
     }
@@ -68,15 +86,33 @@ pub fn arrow_glyphs(
             continue;
         }
         let length = spacing * 0.9 * (0.35 + 0.65 * magnitude / largest);
-        push_arrow(&mut glyphs.triangles, point, normalize(vector), length, value, options.segments.max(3));
+        push_arrow(
+            &mut glyphs.triangles,
+            point,
+            normalize(vector),
+            length,
+            value,
+            options.segments.max(3),
+        );
         glyphs.arrows += 1;
     }
     glyphs
 }
 
 /// An arrow centred on `center`: a shaft and a cone head, every vertex carrying `value`.
-fn push_arrow(out: &mut FieldTriangles, center: [f64; 3], direction: [f64; 3], length: f64, value: f64, segments: usize) {
-    let helper = if direction[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+fn push_arrow(
+    out: &mut FieldTriangles,
+    center: [f64; 3],
+    direction: [f64; 3],
+    length: f64,
+    value: f64,
+    segments: usize,
+) {
+    let helper = if direction[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
     let side = normalize(cross(direction, helper));
     let up = cross(direction, side);
     let shaft_radius = length * 0.06;
@@ -102,11 +138,13 @@ fn push_arrow(out: &mut FieldTriangles, center: [f64; 3], direction: [f64; 3], l
             out.push_vertex(b1, n1, value),
             out.push_vertex(b0, n0, value),
         ];
-        out.indices.extend_from_slice(&[shaft[0], shaft[1], shaft[2], shaft[0], shaft[2], shaft[3]]);
+        out.indices
+            .extend_from_slice(&[shaft[0], shaft[1], shaft[2], shaft[0], shaft[2], shaft[3]]);
         let (h0, m0) = ring(neck, head_radius, k);
         let (h1, m1) = ring(neck, head_radius, k + 1);
         // Cone normals lean forward by the head's half angle.
-        let lean = |radial: [f64; 3]| normalize(add_scaled(radial, direction, head_radius / head_length));
+        let lean =
+            |radial: [f64; 3]| normalize(add_scaled(radial, direction, head_radius / head_length));
         let head = [
             out.push_vertex(h0, lean(m0), value),
             out.push_vertex(h1, lean(m1), value),
@@ -114,7 +152,11 @@ fn push_arrow(out: &mut FieldTriangles, center: [f64; 3], direction: [f64; 3], l
         ];
         out.indices.extend_from_slice(&head);
         let back = direction.map(|x| -x);
-        let base = [out.push_vertex(neck, back, value), out.push_vertex(h1, back, value), out.push_vertex(h0, back, value)];
+        let base = [
+            out.push_vertex(neck, back, value),
+            out.push_vertex(h1, back, value),
+            out.push_vertex(h0, back, value),
+        ];
         out.indices.extend_from_slice(&base);
     }
 }
@@ -130,7 +172,13 @@ mod tests {
         let mesh = unit_cube(TetOrder::Quadratic);
         let field = nodal(&mesh, |p| vec![p[2], 0.0, 1.0 + p[0]]);
         let locator = TetrahedronLocator::new(&mesh);
-        let options = GlyphOptions { origin: [0.5, 0.5, 0.5], normal: [0.0, 1.0, 0.0], spacing: 0.2, min_relative_magnitude: 0.0, segments: 6 };
+        let options = GlyphOptions {
+            origin: [0.5, 0.5, 0.5],
+            normal: [0.0, 1.0, 0.0],
+            spacing: 0.2,
+            min_relative_magnitude: 0.0,
+            segments: 6,
+        };
         let glyphs = arrow_glyphs(&locator, &field, Reduction::Magnitude, 0.0, &options);
         assert!(glyphs.arrows >= 16, "{}", glyphs.arrows);
         assert_eq!(glyphs.triangles.triangle_count(), glyphs.arrows * 6 * 4);
@@ -143,14 +191,25 @@ mod tests {
         for arrow in 0..glyphs.arrows {
             let first = arrow * per_arrow;
             let value = glyphs.triangles.values[first];
-            assert!(glyphs.triangles.values[first..first + per_arrow].iter().all(|v| *v == value));
+            assert!(glyphs.triangles.values[first..first + per_arrow]
+                .iter()
+                .all(|v| *v == value));
             let tip = at(first + 6);
-            let neck = [0, 1, 2].map(|a| (0..6).map(|k| at(first + 10 * k + 4)[a]).sum::<f64>() / 6.0);
+            let neck =
+                [0, 1, 2].map(|a| (0..6).map(|k| at(first + 10 * k + 4)[a]).sum::<f64>() / 6.0);
             let axis = sub(tip, neck);
             let center = add_scaled(neck, axis, -0.15 / 0.35);
             let exact = [center[2], 0.0, 1.0 + center[0]];
-            assert!((value - norm(exact)).abs() < 1e-5, "{value} vs {}", norm(exact));
-            let alignment = normalize(axis).iter().zip(normalize(exact)).map(|(a, b)| a * b).sum::<f64>();
+            assert!(
+                (value - norm(exact)).abs() < 1e-5,
+                "{value} vs {}",
+                norm(exact)
+            );
+            let alignment = normalize(axis)
+                .iter()
+                .zip(normalize(exact))
+                .map(|(a, b)| a * b)
+                .sum::<f64>();
             assert!(alignment > 1.0 - 1e-6, "{alignment}");
         }
     }

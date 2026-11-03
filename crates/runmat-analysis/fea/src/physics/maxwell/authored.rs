@@ -57,7 +57,9 @@ fn grounded_faces(
             },
             _ => {
                 return Err(MaxwellError::Unsupported(
-                    crate::admission::MAXWELL_NONELECTROMAGNETIC_CONSTRAINT.message.into(),
+                    crate::admission::MAXWELL_NONELECTROMAGNETIC_CONSTRAINT
+                        .message
+                        .into(),
                 ))
             }
         };
@@ -109,7 +111,9 @@ pub fn compile_canonical_input(
     super::geometry::spaces(&projection)?;
     let grounded_faces = grounded_faces(model, &projection)?;
     if grounded_faces.is_empty() {
-        return Err(MaxwellError::Unsupported(crate::admission::MAXWELL_FAR_FIELD.message.into()));
+        return Err(MaxwellError::Unsupported(
+            crate::admission::MAXWELL_FAR_FIELD.message.into(),
+        ));
     }
     let properties = crate::properties::compile_solid_property_map(model, mesh).map_err(invalid)?;
     let mut volumes = Vec::with_capacity(projection.elements.len());

@@ -14,8 +14,8 @@ use super::{
         Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, Displacement,
         ElectricCharge, ElectricChargeDensity, ElectricCurrent, ElectricCurrentDensity,
         ElectricPotential, Force, HeatFlux, HeatGenerationDensity, MagneticVectorPotential,
-        MassFlowRate, Moment, Power, Pressure, Rotation, Temperature, TemperatureDifference, Traction,
-        Velocity, VolumeFlowRate,
+        MassFlowRate, Moment, Power, Pressure, Rotation, Temperature, TemperatureDifference,
+        Traction, Velocity, VolumeFlowRate,
     },
 };
 

@@ -1,7 +1,7 @@
 //! Integration-point output from the retained solved temperature field.
 
-use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use super::*;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
 pub(crate) fn recover_solved_static_fields(
     assembly: &AssemblySummary,

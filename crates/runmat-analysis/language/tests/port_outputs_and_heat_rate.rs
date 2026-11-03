@@ -147,7 +147,11 @@ fn heat_generation_in_watts_is_a_total_heat_rate() {
 }"#;
     for (value, distribution, watts) in [
         ("2 W", ExcitationDistribution::PreserveResultant, true),
-        ("2e6 W/m^3", ExcitationDistribution::IntensityPerVolume, false),
+        (
+            "2e6 W/m^3",
+            ExcitationDistribution::IntensityPerVolume,
+            false,
+        ),
     ] {
         let model = format!(
             "assign material.copper to geometry.part.region.body\n    load heater {{ heat_generation on geometry.part.region.body = {value} }}\n    load_case running {{ include load.heater }}"
@@ -175,6 +179,10 @@ fn heat_generation_in_watts_is_a_total_heat_rate() {
             .iter()
             .find(|signal| signal.signal_id() == &excitation.signal_id)
             .expect("signal");
-        assert_eq!(matches!(signal, PhysicalSignal::HeatRate(_)), watts, "{value}");
+        assert_eq!(
+            matches!(signal, PhysicalSignal::HeatRate(_)),
+            watts,
+            "{value}"
+        );
     }
 }

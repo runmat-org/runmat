@@ -120,9 +120,11 @@ fn fixed_free_column_buckles_at_the_euler_load_with_converged_eigenpairs() {
         &[(WIDTH_M + 1.0, "column")],
     ));
     let model = column_model(&mesh);
-    let plan =
-        crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(&model, Some(&mesh))
-            .unwrap();
+    let plan = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+        &model,
+        Some(&mesh),
+    )
+    .unwrap();
     let topology_digest = plan.topology.discretization_digest();
     let preload = crate::run_linear_static_with_prepared_constraint_plan_and_linearization(
         &model,
@@ -151,7 +153,10 @@ fn fixed_free_column_buckles_at_the_euler_load_with_converged_eigenpairs() {
         &plan,
     )
     .unwrap();
-    assert!(summary.dof_count > 400, "the column must exercise the Lanczos path");
+    assert!(
+        summary.dof_count > 400,
+        "the column must exercise the Lanczos path"
+    );
     // The study planner's defaults: the baseline algebraic target and 256 restarts.
     let relative_tolerance = 1.0e-8;
     let solved = crate::solve::buckling::solve_eigenvalue_buckling(

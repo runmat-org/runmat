@@ -73,13 +73,7 @@ end
 
     let checked = runmat(
         &project,
-        &[
-            "check",
-            "src/main.fea",
-            "--study",
-            "response",
-            "--json",
-        ],
+        &["check", "src/main.fea", "--study", "response", "--json"],
     );
     assert!(
         checked.status.success(),
@@ -95,13 +89,7 @@ end
 
     let first = runmat(
         &project,
-        &[
-            "run",
-            "src/main.fea",
-            "--study",
-            "response",
-            "--json",
-        ],
+        &["run", "src/main.fea", "--study", "response", "--json"],
     );
     assert!(
         first.status.success(),
@@ -132,13 +120,7 @@ end
 
     let repeated = runmat(
         &project,
-        &[
-            "run",
-            "src/main.fea",
-            "--study",
-            "response",
-            "--json",
-        ],
+        &["run", "src/main.fea", "--study", "response", "--json"],
     );
     assert!(
         repeated.status.success(),
@@ -205,13 +187,7 @@ fn authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium() {
             fs::write(source_root.join("main.fea"), source).unwrap();
             let output = runmat(
                 &project,
-                &[
-                    "run",
-                    "src/main.fea",
-                    "--study",
-                    "response",
-                    "--json",
-                ],
+                &["run", "src/main.fea", "--study", "response", "--json"],
             );
             assert!(
                 output.status.success(),
@@ -336,13 +312,7 @@ fn authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium() {
             }
             let repeated = runmat(
                 &project,
-                &[
-                    "run",
-                    "src/main.fea",
-                    "--study",
-                    "response",
-                    "--json",
-                ],
+                &["run", "src/main.fea", "--study", "response", "--json"],
             );
             assert!(
                 repeated.status.success(),

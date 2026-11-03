@@ -166,7 +166,8 @@ fn altered_original_values_cannot_attach_a_valid_but_foreign_catalog() {
     let id = artifact.fields()[0].definition().field_id();
     let original = run.run.field(id).unwrap();
     let altered = AnalysisField::host_f64(
-        id, original.layout.clone(),
+        id,
+        original.layout.clone(),
         original.shape.clone(),
         vec![123.0; original.shape.iter().product()],
     );

@@ -2300,7 +2300,6 @@ fn run_identity_label(identity: &AnalysisRunIdentity) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
     use runmat_analysis_core::{
         AnalysisConstraint, AnalysisExcitation, AnalysisModelId, AnalysisSequence,
         BodyForceDensity, CoordinateFrame, ExcitationCase, ExcitationCaseActivation,
@@ -2309,6 +2308,7 @@ mod tests {
         RegionTarget, Signal, SignalApproximationEvidence, SignalId, SignalPrecision,
         SignalProvenance, SignalShape, StructuralConstraint, StructuralConstraintKind,
     };
+    use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
     fn test_run_identity() -> AnalysisRunIdentity {
         let assembly = runmat_analysis_core::StructuralFormulationRealization::new(
@@ -2919,7 +2919,11 @@ mod tests {
     fn mesh_result_figures_apply_mapped_solver_element_scalar_fields() {
         let run = simple_run_result(
             vec![AnalysisField::host_f64(
-                "structural.von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element),
+                "structural.von_mises",
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::VonMisesStress,
+                    FieldLocation::Element,
+                ),
                 vec![3],
                 vec![10.0, 20.0, 30.0],
             )],
@@ -2954,7 +2958,11 @@ mod tests {
     fn cad_reference_result_overlay_maps_fields_only_to_solver_mesh() {
         let run = simple_run_result(
             vec![AnalysisField::host_f64(
-                "structural.von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element),
+                "structural.von_mises",
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::VonMisesStress,
+                    FieldLocation::Element,
+                ),
                 vec![3],
                 vec![10.0, 20.0, 30.0],
             )],
@@ -3004,7 +3012,11 @@ mod tests {
     fn mesh_result_figures_apply_mapped_solver_node_vector_and_deformation_fields() {
         let run = simple_run_result(
             vec![AnalysisField::host_f64(
-                "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+                "structural.displacement",
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                ),
                 vec![4, 3],
                 vec![
                     1.0, 0.0, 0.0, //
@@ -3075,7 +3087,11 @@ mod tests {
     fn mesh_result_figures_report_unmapped_solver_element_fields() {
         let run = simple_run_result(
             vec![AnalysisField::host_f64(
-                "structural.von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element),
+                "structural.von_mises",
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::VonMisesStress,
+                    FieldLocation::Element,
+                ),
                 vec![3],
                 vec![10.0, 20.0, 30.0],
             )],
@@ -3275,7 +3291,15 @@ mod tests {
 
     #[test]
     fn field_topology_warning_reports_solver_mesh_mismatch() {
-        let field = AnalysisField::host_f64("structural.von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element), vec![1], vec![42.0]);
+        let field = AnalysisField::host_f64(
+            "structural.von_mises",
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![1],
+            vec![42.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 4,
@@ -3296,7 +3320,15 @@ mod tests {
 
     #[test]
     fn field_topology_warning_accepts_mapped_solver_element_fields() {
-        let field = AnalysisField::host_f64("structural.von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element), vec![2], vec![10.0, 42.0]);
+        let field = AnalysisField::host_f64(
+            "structural.von_mises",
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![2],
+            vec![10.0, 42.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 5,
@@ -3311,7 +3343,8 @@ mod tests {
     #[test]
     fn field_topology_warning_accepts_mapped_solver_node_fields() {
         let field = AnalysisField::host_f64(
-            "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3333,7 +3366,8 @@ mod tests {
     #[test]
     fn field_topology_warning_rejects_unmapped_solver_vertices() {
         let field = AnalysisField::host_f64(
-            "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3359,7 +3393,8 @@ mod tests {
     #[test]
     fn field_topology_warning_rejects_stale_solver_vertex_indices() {
         let field = AnalysisField::host_f64(
-            "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3384,7 +3419,15 @@ mod tests {
 
     #[test]
     fn field_topology_warning_rejects_unmapped_solver_triangles() {
-        let field = AnalysisField::host_f64("structural.von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element), vec![2], vec![10.0, 42.0]);
+        let field = AnalysisField::host_f64(
+            "structural.von_mises",
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![2],
+            vec![10.0, 42.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 5,
@@ -3402,7 +3445,15 @@ mod tests {
 
     #[test]
     fn scalar_overlay_projects_element_values_to_boundary_triangles() {
-        let field = AnalysisField::host_f64("structural.von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element), vec![2], vec![10.0, 42.0]);
+        let field = AnalysisField::host_f64(
+            "structural.von_mises",
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![2],
+            vec![10.0, 42.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 5,
@@ -3420,8 +3471,15 @@ mod tests {
 
     #[test]
     fn scalar_overlay_prefers_solver_element_mapping_when_counts_match() {
-        let field =
-            AnalysisField::host_f64("structural.von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element), vec![3], vec![10.0, 20.0, 30.0]);
+        let field = AnalysisField::host_f64(
+            "structural.von_mises",
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::VonMisesStress,
+                FieldLocation::Element,
+            ),
+            vec![3],
+            vec![10.0, 20.0, 30.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 5,
@@ -3441,17 +3499,38 @@ mod tests {
     fn structural_summary_figure_reports_reactions_and_metrics() {
         let fields = vec![
             AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_REACTION_FORCE, AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node),
+                FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::ReactionForce,
+                    FieldLocation::Node,
+                ),
                 vec![2, 3],
                 vec![3.0, 4.0, 0.0, 0.0, 0.0, 12.0],
             ),
             AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_REACTION_MOMENT, AnalysisFieldLayout::vector3(ObservationQuantity::ReactionMoment, FieldLocation::Node),
+                FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::ReactionMoment,
+                    FieldLocation::Node,
+                ),
                 vec![1, 3],
                 vec![0.0, 0.0, 2.0],
             ),
-            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergy, FieldLocation::Global), vec![1], vec![7.5]),
-            AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global), vec![1], vec![0.001]),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::StrainEnergy,
+                    FieldLocation::Global,
+                ),
+                vec![1],
+                vec![7.5],
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+                AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+                vec![1],
+                vec![0.001],
+            ),
         ];
 
         assert_eq!(
@@ -3480,7 +3559,8 @@ mod tests {
     #[test]
     fn scalar_overlay_projects_node_values_to_render_vertices() {
         let field = AnalysisField::host_f64(
-            "structural.nodal_von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Node),
+            "structural.nodal_von_mises",
+            AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Node),
             vec![4],
             vec![1.0, 2.0, 3.0, 4.0],
         );
@@ -3501,8 +3581,12 @@ mod tests {
 
     #[test]
     fn scalar_overlay_prefers_solver_node_mapping_when_counts_match() {
-        let field =
-            AnalysisField::host_f64("structural.nodal_von_mises", AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Node), vec![3], vec![1.0, 2.0, 3.0]);
+        let field = AnalysisField::host_f64(
+            "structural.nodal_von_mises",
+            AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Node),
+            vec![3],
+            vec![1.0, 2.0, 3.0],
+        );
         let meshes = vec![MeshCounts {
             plot_index: 0,
             vertices: 3,
@@ -3521,7 +3605,8 @@ mod tests {
     #[test]
     fn scalar_overlay_prefers_solver_node_mapping_for_vector_magnitude_when_counts_match() {
         let field = AnalysisField::host_f64(
-            "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3547,7 +3632,8 @@ mod tests {
     #[test]
     fn vector_overlay_projects_node_values_to_render_vertices() {
         let field = AnalysisField::host_f64(
-            "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![4, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3581,7 +3667,8 @@ mod tests {
     #[test]
     fn vector_overlay_prefers_solver_node_mapping_when_counts_match() {
         let field = AnalysisField::host_f64(
-            "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3614,7 +3701,8 @@ mod tests {
     #[test]
     fn deformation_overlay_projects_node_values_to_render_vertices() {
         let field = AnalysisField::host_f64(
-            "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![4, 3],
             vec![
                 1.0, 0.0, 0.0, //
@@ -3658,7 +3746,8 @@ mod tests {
     #[test]
     fn deformation_overlay_prefers_solver_node_mapping_when_counts_match() {
         let field = AnalysisField::host_f64(
-            "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3, 3],
             vec![
                 1.0, 0.0, 0.0, //

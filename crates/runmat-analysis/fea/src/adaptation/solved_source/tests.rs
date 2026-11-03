@@ -1,9 +1,9 @@
 //! Actual original static solves feed transfer, recovery, observation and shared accuracy.
-use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use super::*;
 use crate::adaptation::{StructuralAdaptationDecisionStatus, StructuralRecoveryEstimatorOptions};
 use crate::{ComputeBackend, LinearStaticSolveOptions};
 use runmat_analysis_core::*;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 mod fixture;
 use fixture::*;
@@ -61,7 +61,8 @@ fn original_both_order_static_results_retain_typed_convergence_and_scalar_observ
             .find(|f| f.field_id == crate::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT)
             .unwrap();
         *field = AnalysisField::host_f64(
-            &field.field_id, field.layout.clone(),
+            &field.field_id,
+            field.layout.clone(),
             field.shape.clone(),
             vec![0.0; field.as_host_f64().unwrap().len()],
         );
@@ -206,7 +207,8 @@ fn original_result_materialization_is_admitted_before_encoding() {
 fn shared_field_transfer_observes_cancelled_owner_before_copying_payloads() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let field = AnalysisField::host_f64(
-        crate::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT, AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+        crate::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
         vec![mesh.topology.nodes.len(), 3],
         vec![0.0; mesh.topology.nodes.len() * 3],
     );

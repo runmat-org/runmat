@@ -30,9 +30,8 @@ pub(super) fn distribute_heat_rate_sources(
     if totals.is_empty() {
         return Ok(());
     }
-    let projection = AnalysisProjection::derive(mesh).map_err(|error| {
-        AnalysisStudyCompilationError::InvalidMesh(error.to_string())
-    })?;
+    let projection = AnalysisProjection::derive(mesh)
+        .map_err(|error| AnalysisStudyCompilationError::InvalidMesh(error.to_string()))?;
     for excitation in totals {
         let failure = |reason: String| AnalysisStudyCompilationError::HeatRate {
             excitation_id: excitation.excitation_id.0.clone(),
@@ -61,7 +60,9 @@ pub(super) fn distribute_heat_rate_sources(
             .position(|signal| signal.signal_id() == &excitation.signal_id)
             .ok_or_else(|| failure("its heat-rate signal is missing".into()))?;
         let PhysicalSignal::HeatRate(signal) = &model.signals[index] else {
-            return Err(failure("a total heat generation reads a heat-rate (W) signal".into()));
+            return Err(failure(
+                "a total heat generation reads a heat-rate (W) signal".into(),
+            ));
         };
         let density = density_signal(signal, volume_m3).map_err(|reason| failure(reason.into()))?;
         // The density keeps the signal identity, so every excitation that shares the signal
@@ -121,7 +122,9 @@ fn density_signal(
         })
     };
     let representation = match &signal.representation {
-        SignalRepresentation::Constant(constant) => SignalRepresentation::Constant(value(constant)?),
+        SignalRepresentation::Constant(constant) => {
+            SignalRepresentation::Constant(value(constant)?)
+        }
         SignalRepresentation::Tabulated(table) => {
             let mut knots = Vec::with_capacity(table.knots.len());
             for knot in &table.knots {
@@ -162,7 +165,6 @@ fn density_signal(
         provenance: signal.provenance.clone(),
     })
 }
-
 
 #[cfg(test)]
 mod tests;

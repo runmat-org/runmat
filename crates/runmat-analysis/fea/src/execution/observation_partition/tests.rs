@@ -50,7 +50,8 @@ fn portable_partition_event_requires_the_exact_completed_result() {
         definition.clone(),
         sample,
         AnalysisField::host_f64(
-            "temperature.event", definition.layout(),
+            "temperature.event",
+            definition.layout(),
             vec![projection.nodes.len()],
             vec![300.0; projection.nodes.len()],
         ),

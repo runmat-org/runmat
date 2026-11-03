@@ -1,5 +1,5 @@
-use runmat_analysis_core::{ObservationQuantity, FieldLocation};
 use super::*;
+use runmat_analysis_core::{FieldLocation, ObservationQuantity};
 use runmat_canonical_codec::profile_serialized_shape;
 
 fn definition(
@@ -51,7 +51,8 @@ fn shape_profile_bounds_actual_identity_wire_for_advertised_storage_shapes() {
                     })
                     .collect();
                 let storage = AnalysisField::host_f64(
-                    definition.field_id(), definition.layout(),
+                    definition.field_id(),
+                    definition.layout(),
                     definition.storage_shape(count).unwrap(),
                     values,
                 );

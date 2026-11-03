@@ -1,5 +1,5 @@
-use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
@@ -230,7 +230,12 @@ pub(super) fn recover_modal_core(
         .map(|mode| mode.fields.clone())
         .unwrap_or_else(|| {
             vec![AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_DISPLACEMENT, AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node).mode(0),
+                FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                )
+                .mode(0),
                 mode_shape.clone(),
                 first_translation,
             )]
@@ -244,7 +249,12 @@ pub(super) fn recover_modal_core(
         .enumerate()
         .map(|(index, shape)| {
             AnalysisField::host_f64(
-                fea_modal_mode_shape_field_id(index + 1), AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node).mode(index),
+                fea_modal_mode_shape_field_id(index + 1),
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                )
+                .mode(index),
                 mode_shape.clone(),
                 shape.translations.clone(),
             )
@@ -255,7 +265,9 @@ pub(super) fn recover_modal_core(
         .enumerate()
         .map(|(index, shape)| {
             AnalysisField::host_f64(
-                format!("structural.modal.rotation.{}", index + 1), AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node).mode(index),
+                format!("structural.modal.rotation.{}", index + 1),
+                AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node)
+                    .mode(index),
                 mode_shape.clone(),
                 shape.rotations.clone(),
             )

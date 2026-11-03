@@ -79,13 +79,7 @@ fn execute_with_charge(
         }
         let output = runmat(
             &project,
-            &[
-                "run",
-                "src/main.fea",
-                "--study",
-                "response",
-                "--json",
-            ],
+            &["run", "src/main.fea", "--study", "response", "--json"],
         );
         assert!(
             output.status.success(),

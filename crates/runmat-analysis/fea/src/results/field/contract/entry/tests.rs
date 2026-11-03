@@ -1,6 +1,6 @@
-use runmat_analysis_core::{ObservationQuantity, FieldLocation};
 use super::*;
 use crate::results::field::RecoveredFieldView;
+use runmat_analysis_core::{FieldLocation, ObservationQuantity};
 use runmat_canonical_codec::profile_serialized_shape;
 
 fn definitions() -> [RecoveredFieldDefinition; 3] {
@@ -43,7 +43,8 @@ fn projected_catalog_matches_actual_nested_entries_and_preserves_entry_wire() {
         let row = std::array::from_fn(|column| {
             let definition = &definitions[column];
             let storage = AnalysisField::host_f64(
-                definition.field_id(), definition.layout(),
+                definition.field_id(),
+                definition.layout(),
                 definition.storage_shape(counts[column]).unwrap(),
                 vec![1.5; counts[column] * definition.storage_component_count().unwrap()],
             );

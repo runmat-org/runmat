@@ -95,13 +95,7 @@ fn execute(drive: Drive, quadratic: bool, size: f64, generated: bool) -> Evidenc
         let imported = fixture::prepare(&project, drive, quadratic, size, generated);
         let output = runmat(
             &project,
-            &[
-                "run",
-                "src/main.fea",
-                "--study",
-                "response",
-                "--json",
-            ],
+            &["run", "src/main.fea", "--study", "response", "--json"],
         );
         assert!(
             output.status.success(),

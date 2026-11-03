@@ -61,20 +61,25 @@ pub(super) fn profile(
     let storage_layout = crate::physics::thermal::history_fields::storage_layout;
     let layout = storage_layout(definition, terminal_step);
     let interface_fields = manifest.terminal_state_fields()?;
-    let interface_layout =
-        interface_fields.get(1).map(|entry| storage_layout(&entry.definition, terminal_step));
+    let interface_layout = interface_fields
+        .get(1)
+        .map(|entry| storage_layout(&entry.definition, terminal_step));
     let temperature =
         AnalysisField::host_f64_serialization(definition.field_id(), &layout, &shape, &values);
     let interface_values = RepeatedTemperatures(manifest.interface_node_ids.len());
     let interface_shape = [manifest.interface_node_ids.len()];
-    let interface_temperature = interface_fields.get(1).zip(interface_layout.as_ref()).map(|(entry, layout)| {
-        AnalysisField::host_f64_serialization(
-            entry.definition.field_id(),
-            layout,
-            &interface_shape,
-            &interface_values,
-        )
-    });
+    let interface_temperature =
+        interface_fields
+            .get(1)
+            .zip(interface_layout.as_ref())
+            .map(|(entry, layout)| {
+                AnalysisField::host_f64_serialization(
+                    entry.definition.field_id(),
+                    layout,
+                    &interface_shape,
+                    &interface_values,
+                )
+            });
     let payload = ThermalPayload {
         kind: "thermal",
         state: ThermalState {

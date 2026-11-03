@@ -1,5 +1,5 @@
-use runmat_analysis_core::{AnalysisFieldLayout, ComplexRepresentation};
 use super::*;
+use runmat_analysis_core::{AnalysisFieldLayout, ComplexRepresentation};
 mod observations;
 use crate::execution::{
     FieldRecoveryCost, FieldRecoveryPlan, FieldRecoveryRequirement, SequenceIdentity,
@@ -117,7 +117,13 @@ fn sample(
         )
         .unwrap(),
         coordinate,
-        AnalysisField::host_f64("pressure", AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node).representation(ComplexRepresentation::Complex), vec![1, 2], vec![1.0, 0.4]),
+        AnalysisField::host_f64(
+            "pressure",
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::Complex),
+            vec![1, 2],
+            vec![1.0, 0.4],
+        ),
     )
     .unwrap();
     let fields = RecoveredFieldArtifact::new(
@@ -287,7 +293,12 @@ fn different_definitions_cannot_publish_the_same_semantic_field_at_one_frequency
     let pressure = RecoveredField::new(
         sample.fields.fields[0].definition.clone(),
         coordinate,
-        AnalysisField::host_f64("pressure", sample.fields.fields[0].definition.layout(), vec![1, 2], vec![1.0, 0.4]),
+        AnalysisField::host_f64(
+            "pressure",
+            sample.fields.fields[0].definition.layout(),
+            vec![1, 2],
+            vec![1.0, 0.4],
+        ),
     )
     .unwrap();
     let misleading_velocity = RecoveredField::new(
@@ -301,7 +312,16 @@ fn different_definitions_cannot_publish_the_same_semantic_field_at_one_frequency
         )
         .unwrap(),
         coordinate,
-        AnalysisField::host_f64("pressure", AnalysisFieldLayout::vector3(ObservationQuantity::AcousticParticleVelocity, FieldLocation::Element).representation(ComplexRepresentation::Complex), vec![1, 3, 2], vec![0.0; 6]),
+        AnalysisField::host_f64(
+            "pressure",
+            AnalysisFieldLayout::vector3(
+                ObservationQuantity::AcousticParticleVelocity,
+                FieldLocation::Element,
+            )
+            .representation(ComplexRepresentation::Complex),
+            vec![1, 3, 2],
+            vec![0.0; 6],
+        ),
     )
     .unwrap();
     sample.fields = RecoveredFieldArtifact::new(

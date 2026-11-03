@@ -89,7 +89,8 @@ fn fixture_with_policy(
             definition.clone(),
             RecoveredFieldSample::TimeSeconds(time),
             AnalysisField::host_f64(
-                "temperature", definition.layout(),
+                "temperature",
+                definition.layout(),
                 vec![projection.nodes.len()],
                 vec![293.15; projection.nodes.len()],
             ),

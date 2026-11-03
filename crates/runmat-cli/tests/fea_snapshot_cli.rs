@@ -173,10 +173,19 @@ fn snapshot_to(project: &TempDir, directory: &str, extra: &[&str]) -> Value {
         .current_dir(project.path())
         .args(&args)
         .env_remove("RUNMAT_CONFIG")
-        .env("RUNMAT_PACKAGE_CACHE_DIR", project.path().join("package-cache"))
-        .env("RUNMAT_EXECUTION_STATE_DIR", project.path().join("execution-state"))
+        .env(
+            "RUNMAT_PACKAGE_CACHE_DIR",
+            project.path().join("package-cache"),
+        )
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            project.path().join("execution-state"),
+        )
         .env("RUNMAT_FEA_ARTIFACT_ROOT", project.path().join("artifacts"))
-        .env("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", project.path().join("study-artifacts"))
+        .env(
+            "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+            project.path().join("study-artifacts"),
+        )
         .output()
         .expect("run snapshot");
     assert!(
@@ -220,14 +229,28 @@ fn descriptor<'a>(snapshot: &'a Value, field_id: &str) -> &'a Value {
 /// legend range is the field's true extrema.
 fn check_scenes(project: &TempDir, snapshot: &Value) {
     for view in snapshot["views"].as_array().unwrap() {
-        let scene = project.path().join("out").join(view["scene"].as_str().unwrap());
+        let scene = project
+            .path()
+            .join("out")
+            .join(view["scene"].as_str().unwrap());
         let bytes = fs::metadata(&scene)
             .unwrap_or_else(|_| panic!("missing scene {}", scene.display()))
             .len();
-        assert!(bytes > 0 && bytes < 16 * 1024 * 1024, "{scene:?}: {bytes} bytes");
+        assert!(
+            bytes > 0 && bytes < 16 * 1024 * 1024,
+            "{scene:?}: {bytes} bytes"
+        );
         if let Some(extrema) = view.get("extrema") {
-            assert_eq!(view["minimum"], extrema["minimum"]["value"], "{}", view["id"]);
-            assert_eq!(view["maximum"], extrema["maximum"]["value"], "{}", view["id"]);
+            assert_eq!(
+                view["minimum"], extrema["minimum"]["value"],
+                "{}",
+                view["id"]
+            );
+            assert_eq!(
+                view["maximum"], extrema["maximum"]["value"],
+                "{}",
+                view["id"]
+            );
         }
     }
 }
@@ -309,9 +332,19 @@ fn multi_step_snapshot_captures_the_final_step_or_the_named_step() {
 
     let missing = Command::new(env!("CARGO_BIN_EXE_runmat"))
         .current_dir(project.path())
-        .args(["snapshot", "main.fea", "--out", "out/missing.json", "--step", "nope"])
+        .args([
+            "snapshot",
+            "main.fea",
+            "--out",
+            "out/missing.json",
+            "--step",
+            "nope",
+        ])
         .env("RUNMAT_FEA_ARTIFACT_ROOT", project.path().join("artifacts"))
-        .env("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", project.path().join("study-artifacts"))
+        .env(
+            "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+            project.path().join("study-artifacts"),
+        )
         .output()
         .unwrap();
     assert!(!missing.status.success());
@@ -333,16 +366,27 @@ fn structural_modal_snapshot_shows_only_mode_shapes_and_verifies() {
     }
     assert_eq!(snapshot["results"]["fields"], serde_json::json!([]));
     assert!(snapshot["results"]["modal_results"].is_null());
-    let metadata = fs::metadata(project.path().join("out/snapshot.json")).unwrap().len();
+    let metadata = fs::metadata(project.path().join("out/snapshot.json"))
+        .unwrap()
+        .len();
     assert!(metadata < 1024 * 1024, "{metadata} bytes of metadata");
     check_scenes(&project, &snapshot);
 
     let verified = Command::new(env!("CARGO_BIN_EXE_runmat"))
         .current_dir(project.path())
-        .args(["fea", "verify-snapshot", "out/snapshot.json", "--out", "out/verify.json"])
+        .args([
+            "fea",
+            "verify-snapshot",
+            "out/snapshot.json",
+            "--out",
+            "out/verify.json",
+        ])
         .env_remove("RUNMAT_CONFIG")
         .env("RUNMAT_FEA_ARTIFACT_ROOT", project.path().join("artifacts"))
-        .env("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", project.path().join("study-artifacts"))
+        .env(
+            "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+            project.path().join("study-artifacts"),
+        )
         .output()
         .unwrap();
     assert!(
@@ -355,10 +399,20 @@ fn structural_modal_snapshot_shows_only_mode_shapes_and_verifies() {
     assert_eq!(view_ids(&selected), ["mode-2"]);
     let refused = Command::new(env!("CARGO_BIN_EXE_runmat"))
         .current_dir(project.path())
-        .args(["snapshot", "main.fea", "--out", "out/refused.json", "--view", "stress"])
+        .args([
+            "snapshot",
+            "main.fea",
+            "--out",
+            "out/refused.json",
+            "--view",
+            "stress",
+        ])
         .env_remove("RUNMAT_CONFIG")
         .env("RUNMAT_FEA_ARTIFACT_ROOT", project.path().join("artifacts"))
-        .env("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", project.path().join("study-artifacts"))
+        .env(
+            "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+            project.path().join("study-artifacts"),
+        )
         .output()
         .unwrap();
     assert!(!refused.status.success());

@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 use runmat_execution::Digest;
 
 use super::*;
@@ -336,7 +336,11 @@ fn semantic_state_and_reuse_transition_bind_exact_content_and_topology() {
         source_result,
         payload: CanonicalSemanticStatePayload::Fields {
             fields: vec![AnalysisField::host_f64(
-                "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+                "structural.displacement",
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                ),
                 vec![2, 3],
                 vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
             )],
@@ -377,7 +381,8 @@ fn semantic_state_and_reuse_transition_bind_exact_content_and_topology() {
         panic!("expected field state")
     };
     fields[0] = AnalysisField::host_f64(
-        "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+        "structural.displacement",
+        AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
         vec![2, 3],
         vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
     );
@@ -472,7 +477,8 @@ fn semantic_state_round_trips_a_typed_modal_basis_and_rejects_field_substitution
     let mut substituted = state;
     substituted.payload = CanonicalSemanticStatePayload::Fields {
         fields: vec![runmat_analysis_core::AnalysisField::host_f64(
-            "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+            "structural.displacement",
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![1, 3],
             vec![0.0; 3],
         )],
@@ -517,7 +523,11 @@ fn semantic_state_rejects_unimplemented_projection_transitions() {
         source_result: SolverResultIdentity::new(workload, digest("solver-fields")).unwrap(),
         payload: CanonicalSemanticStatePayload::Fields {
             fields: vec![AnalysisField::host_f64(
-                "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+                "structural.displacement",
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                ),
                 vec![1, 3],
                 vec![0.0, 0.0, 0.0],
             )],

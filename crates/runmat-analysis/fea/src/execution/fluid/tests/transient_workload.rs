@@ -198,7 +198,10 @@ fn velocity_field(mesh: &SolverMeshArtifact, values: Vec<f64>) -> InitialFieldBi
         RecoveredFieldSample::Final,
         AnalysisField {
             field_id: "original-velocity".into(),
-            layout: runmat_analysis_core::AnalysisFieldLayout::vector3(runmat_analysis_core::ObservationQuantity::FluidVelocity, runmat_analysis_core::FieldLocation::Node),
+            layout: runmat_analysis_core::AnalysisFieldLayout::vector3(
+                runmat_analysis_core::ObservationQuantity::FluidVelocity,
+                runmat_analysis_core::FieldLocation::Node,
+            ),
             shape: vec![mesh.topology.nodes.len(), 3],
             values: AnalysisFieldValues::HostF64(values),
         },

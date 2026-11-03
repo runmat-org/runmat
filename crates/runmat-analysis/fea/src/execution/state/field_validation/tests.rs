@@ -1,13 +1,28 @@
-use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use super::*;
 use runmat_analysis_core::DeviceFieldRef;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
 #[test]
 fn portable_inventory_preserves_arbitrary_order_and_exact_id_uniqueness() {
     let fields = vec![
-        AnalysisField::host_f64("z", AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global), vec![2], vec![1.0, -1.0]),
-        AnalysisField::host_f64("a", AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global), vec![], vec![0.0]),
-        AnalysisField::host_f64(" a", AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global), vec![1, 1], vec![2.0]),
+        AnalysisField::host_f64(
+            "z",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![2],
+            vec![1.0, -1.0],
+        ),
+        AnalysisField::host_f64(
+            "a",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![],
+            vec![0.0],
+        ),
+        AnalysisField::host_f64(
+            " a",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![1, 1],
+            vec![2.0],
+        ),
     ];
     let before = fields.clone();
     validate_portable_fields(&fields).unwrap();
@@ -23,16 +38,58 @@ fn portable_inventory_preserves_arbitrary_order_and_exact_id_uniqueness() {
 #[test]
 fn single_field_and_inventory_reject_the_same_invalid_payloads() {
     for field in [
-        AnalysisField::host_f64(" \t", AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global), vec![1], vec![1.0]),
-        AnalysisField::host_f64("temperature", AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node), vec![2], vec![1.0]),
-        AnalysisField::host_f64("temperature", AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node), vec![0], vec![]),
-        AnalysisField::host_f64("temperature", AnalysisFieldLayout::components(ObservationQuantity::Temperature, FieldLocation::Node, 2), vec![usize::MAX, 2], vec![1.0]),
-        AnalysisField::host_f64("temperature", AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node), vec![1], vec![f64::NAN]),
-        AnalysisField::host_f64("temperature", AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node), vec![1], vec![f64::INFINITY]),
-        AnalysisField::host_f64("temperature", AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node), vec![1], vec![f64::NEG_INFINITY]),
+        AnalysisField::host_f64(
+            " \t",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![1],
+            vec![1.0],
+        ),
+        AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![2],
+            vec![1.0],
+        ),
+        AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![0],
+            vec![],
+        ),
+        AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::components(
+                ObservationQuantity::Temperature,
+                FieldLocation::Node,
+                2,
+            ),
+            vec![usize::MAX, 2],
+            vec![1.0],
+        ),
+        AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![1],
+            vec![f64::NAN],
+        ),
+        AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![1],
+            vec![f64::INFINITY],
+        ),
+        AnalysisField::host_f64(
+            "temperature",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node),
+            vec![1],
+            vec![f64::NEG_INFINITY],
+        ),
         AnalysisField {
             field_id: "temperature".into(),
-            layout: runmat_analysis_core::AnalysisFieldLayout::scalar(runmat_analysis_core::ObservationQuantity::Temperature, runmat_analysis_core::FieldLocation::Node),
+            layout: runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Temperature,
+                runmat_analysis_core::FieldLocation::Node,
+            ),
             shape: vec![1],
             values: AnalysisFieldValues::DeviceRef(DeviceFieldRef {
                 backend: "device".into(),

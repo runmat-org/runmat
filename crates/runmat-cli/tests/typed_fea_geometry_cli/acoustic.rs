@@ -39,13 +39,7 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
         fs::write(project.path().join("src/main.fea"), source).unwrap();
         let output = runmat(
             &project,
-            &[
-                "run",
-                "src/main.fea",
-                "--study",
-                "response",
-                "--json",
-            ],
+            &["run", "src/main.fea", "--study", "response", "--json"],
         );
         assert!(
             output.status.success(),

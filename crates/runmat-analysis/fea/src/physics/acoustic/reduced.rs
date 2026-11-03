@@ -1,5 +1,7 @@
-use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation, ComplexRepresentation};
 use runmat_analysis_core::{AnalysisField, AnalysisModel};
+use runmat_analysis_core::{
+    AnalysisFieldLayout, ComplexRepresentation, FieldLocation, ObservationQuantity,
+};
 
 use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
@@ -113,7 +115,9 @@ pub fn solve_reduced_harmonic(
             &sweep_source_imag,
         ));
         frequency_response_fields.push(AnalysisField::host_f64(
-            crate::fea_acoustic_frequency_response_field_id(*frequency_hz), AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node).representation(ComplexRepresentation::Magnitude),
+            crate::fea_acoustic_frequency_response_field_id(*frequency_hz),
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::Magnitude),
             vec![node_count],
             sweep_magnitude,
         ));
@@ -136,28 +140,45 @@ pub fn solve_reduced_harmonic(
     );
     let mut fields = vec![
         AnalysisField::host_f64(
-            FEA_FIELD_ACOUSTIC_PRESSURE_REAL, AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node),
+            FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node),
             vec![node_count],
             pressure_real,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node).representation(ComplexRepresentation::Imaginary),
+            FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::Imaginary),
             vec![node_count],
             pressure_imag,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node).representation(ComplexRepresentation::Magnitude),
+            FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::Magnitude),
             vec![node_count],
             pressure_magnitude,
         ),
-        AnalysisField::host_f64(FEA_FIELD_ACOUSTIC_PHASE, AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node).representation(ComplexRepresentation::PhaseRadians), vec![node_count], phase),
         AnalysisField::host_f64(
-            FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB, AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node).representation(ComplexRepresentation::SoundPressureLevel),
+            FEA_FIELD_ACOUSTIC_PHASE,
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::PhaseRadians),
+            vec![node_count],
+            phase,
+        ),
+        AnalysisField::host_f64(
+            FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB,
+            AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+                .representation(ComplexRepresentation::SoundPressureLevel),
             vec![node_count],
             sound_pressure_level_db,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, AnalysisFieldLayout::vector3(ObservationQuantity::AcousticParticleVelocity, FieldLocation::Node),
+            FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+            AnalysisFieldLayout::vector3(
+                ObservationQuantity::AcousticParticleVelocity,
+                FieldLocation::Node,
+            ),
             vec![node_count, 3],
             particle_velocity,
         ),

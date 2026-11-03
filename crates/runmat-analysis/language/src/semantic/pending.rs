@@ -150,12 +150,20 @@ mod tests {
         let ledger: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(ledger).expect("ledger.json"))
                 .expect("ledger.json is JSON");
-        let rows = ledger["capabilities"].as_array().expect("ledger capabilities");
+        let rows = ledger["capabilities"]
+            .as_array()
+            .expect("ledger capabilities");
         for id in ids {
-            assert!(id.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '-' || c == '_'));
+            assert!(id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '.' || c == '-' || c == '_'));
             let row = rows.iter().find(|row| row["id"] == id);
             assert!(row.is_some(), "{id} is not a ledger capability");
-            assert_eq!(row.unwrap()["status"], "pending", "{id} is not pending in the ledger");
+            assert_eq!(
+                row.unwrap()["status"],
+                "pending",
+                "{id} is not pending in the ledger"
+            );
         }
     }
 }

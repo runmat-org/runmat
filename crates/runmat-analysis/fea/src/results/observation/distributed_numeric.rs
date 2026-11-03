@@ -204,8 +204,9 @@ pub(super) fn paired_boundary_contribution(
         match observation.spec.source_location {
             FieldLocation::Node => {
                 let mut error = None;
-                projection.visit_boundary_quadrature(face, |point| {
-                    match interpolate_and_project(
+                projection.visit_boundary_quadrature(
+                    face,
+                    |point| match interpolate_and_project(
                         field,
                         &face.node_indices,
                         point.shape_values(),
@@ -221,8 +222,8 @@ pub(super) fn paired_boundary_contribution(
                             ))
                         }
                         Err(failure) => error = Some(failure),
-                    }
-                })?;
+                    },
+                )?;
                 if let Some(error) = error {
                     return Err(error);
                 }
@@ -251,7 +252,9 @@ pub(super) fn paired_boundary_contribution(
                 let mut area = 0.0;
                 projection.visit_boundary_quadrature(face, |point| area += point.area_weight_m2)?;
                 if !(area.is_finite() && area > 0.0) {
-                    return Err(ObservationError::Invalid("boundary face has no area".into()));
+                    return Err(ObservationError::Invalid(
+                        "boundary face has no area".into(),
+                    ));
                 }
                 sums[side].add(value * area);
                 measures[side].add(area);

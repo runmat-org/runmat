@@ -526,7 +526,12 @@ fn validate_persisted_run(
             .ok_or_else(|| "analysis field byte length overflow".to_string())?;
         if field.manifest.encoded_length != expected_bytes as u64
             || field_logical_identity(
-                &AnalysisField::host_f64(&field.field_id, field.template.layout.clone(), field.shape.clone(), Vec::new()),
+                &AnalysisField::host_f64(
+                    &field.field_id,
+                    field.template.layout.clone(),
+                    field.shape.clone(),
+                    Vec::new(),
+                ),
                 field.manifest.payload_digest,
             ) != field.manifest.logical_identity
         {

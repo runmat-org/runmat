@@ -73,7 +73,8 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
     let (document, topology, _) = runmat_geometry_fixtures::exact_tetrahedron();
     let host = TestHost::default().with_geometry_inspection(
         "project/geometry/tetrahedron.step",
-        GeometryInspection {preview_extent_m: None,
+        GeometryInspection {
+            preview_extent_m: None,
             unit_evidence: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
             topology_digest: SourceDigest([19; 32]),
@@ -85,12 +86,23 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
             resolved_units: None,
             // The fixture STEP authors these names; check resolves `select name` only from them.
             authored_names: BTreeMap::from([
-                ("solid".to_string(), vec!["body".to_string(), "bulk".to_string()]),
+                (
+                    "solid".to_string(),
+                    vec!["body".to_string(), "bulk".to_string()],
+                ),
                 (
                     "face".to_string(),
-                    ["support", "load_face", "hot", "left", "right", "bottom_y", "bottom_z"]
-                        .map(str::to_string)
-                        .to_vec(),
+                    [
+                        "support",
+                        "load_face",
+                        "hot",
+                        "left",
+                        "right",
+                        "bottom_y",
+                        "bottom_z",
+                    ]
+                    .map(str::to_string)
+                    .to_vec(),
                 ),
             ]),
         },

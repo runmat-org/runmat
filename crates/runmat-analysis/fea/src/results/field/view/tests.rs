@@ -35,7 +35,8 @@ fn borrowed_multipart_content_matches_owned_identity_bytes_and_reconstruction() 
         let definition = definition(shape);
         let count = RECOVERED_FIELD_PARTITION_ENTITY_COUNT + 3;
         let storage = AnalysisField::host_f64(
-            definition.field_id(), definition.layout(),
+            definition.field_id(),
+            definition.layout(),
             definition.storage_shape(count).unwrap(),
             (0..count * definition.storage_component_count().unwrap())
                 .map(|i| i as f64 - 0.25)
@@ -95,7 +96,12 @@ fn borrowed_multipart_content_matches_owned_identity_bytes_and_reconstruction() 
 fn borrowed_partition_boundary_rejects_invalid_storage_and_indices() {
     let definition = definition(ObservationValueShape::Scalar);
     let sample = RecoveredFieldSample::Final;
-    let storage = AnalysisField::host_f64(definition.field_id(), definition.layout(), vec![3], vec![1.0, 2.0, 3.0]);
+    let storage = AnalysisField::host_f64(
+        definition.field_id(),
+        definition.layout(),
+        vec![3],
+        vec![1.0, 2.0, 3.0],
+    );
     let view = RecoveredFieldView::new(&definition, sample, &storage).unwrap();
     for indices in [vec![], vec![0, 0], vec![1, 0], vec![3], vec![usize::MAX]] {
         assert!(RecoveredFieldPartition::select_view(&view, indices).is_err());

@@ -72,7 +72,8 @@ fn final_frequency_selection_preserves_coordinates_and_rejects_ambiguous_sources
                         definition.clone(),
                         sample,
                         runmat_analysis_core::AnalysisField::host_f64(
-                            definition.field_id(), definition.layout(),
+                            definition.field_id(),
+                            definition.layout(),
                             vec![projection.nodes.len()],
                             vec![7.0; projection.nodes.len()],
                         ),

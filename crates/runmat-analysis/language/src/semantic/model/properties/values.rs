@@ -179,13 +179,12 @@ pub(in crate::semantic::model) fn required_quantity(
     let expected = dimension.into();
     if !(value.value_type).is_quantity(expected) {
         use runmat_types::physical::QuantitySpec;
-        let requirement = if expected.semantic_kind()
-            == Some(runmat_types::physical::QuantityKind::Angle)
-        {
-            "quantity with an angle unit (deg or rad)"
-        } else {
-            "quantity of the required dimension"
-        };
+        let requirement =
+            if expected.semantic_kind() == Some(runmat_types::physical::QuantityKind::Angle) {
+                "quantity with an angle unit (deg or rad)"
+            } else {
+                "quantity of the required dimension"
+            };
         invalid(declaration, value, name, requirement, diagnostics);
         return None;
     }

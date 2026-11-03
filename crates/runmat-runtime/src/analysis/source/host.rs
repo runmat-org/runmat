@@ -229,7 +229,10 @@ fn lexically_normalized(path: &Path) -> PathBuf {
         match component {
             Component::CurDir => {}
             Component::ParentDir
-                if matches!(normalized.components().next_back(), Some(Component::Normal(_))) =>
+                if matches!(
+                    normalized.components().next_back(),
+                    Some(Component::Normal(_))
+                ) =>
             {
                 normalized.pop();
             }

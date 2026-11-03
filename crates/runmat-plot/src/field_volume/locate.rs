@@ -48,7 +48,15 @@ impl<'a> TetrahedronLocator<'a> {
                 }
             }
         }
-        Self { mesh, inverses, origin: min, cell, dims, buckets, last: std::cell::Cell::new(None) }
+        Self {
+            mesh,
+            inverses,
+            origin: min,
+            cell,
+            dims,
+            buckets,
+            last: std::cell::Cell::new(None),
+        }
     }
 
     pub fn mesh(&self) -> &TetMesh {
@@ -59,12 +67,16 @@ impl<'a> TetrahedronLocator<'a> {
     pub fn locate(&self, point: [f64; 3]) -> Option<Located> {
         if let Some(previous) = self.last.get() {
             if let Some(weights) = self.weights(previous, point) {
-                return Some(Located { element: previous, weights });
+                return Some(Located {
+                    element: previous,
+                    weights,
+                });
             }
         }
         let inside = (0..3).all(|a| {
             let slack = self.cell[a] * 1.0e-9;
-            point[a] >= self.origin[a] - slack && point[a] <= self.origin[a] + self.cell[a] * self.dims[a] as f64 + slack
+            point[a] >= self.origin[a] - slack
+                && point[a] <= self.origin[a] + self.cell[a] * self.dims[a] as f64 + slack
         });
         if !inside {
             return None;
@@ -73,7 +85,10 @@ impl<'a> TetrahedronLocator<'a> {
         for &element in &self.buckets[(c[0] * self.dims[1] + c[1]) * self.dims[2] + c[2]] {
             if let Some(weights) = self.weights(element as usize, point) {
                 self.last.set(Some(element as usize));
-                return Some(Located { element: element as usize, weights });
+                return Some(Located {
+                    element: element as usize,
+                    weights,
+                });
             }
         }
         None
@@ -102,11 +117,22 @@ fn cell_of(q: [f64; 3], origin: [f64; 3], cell: [f64; 3], dims: [usize; 3]) -> [
 
 /// Inverse of the 3x3 matrix whose columns are the edges from corner 0.
 fn invert_edges(p: [[f64; 3]; 4]) -> Option<[f64; 9]> {
-    let e = [0, 1, 2].map(|k| [p[k + 1][0] - p[0][0], p[k + 1][1] - p[0][1], p[k + 1][2] - p[0][2]]);
-    let m = [e[0][0], e[1][0], e[2][0], e[0][1], e[1][1], e[2][1], e[0][2], e[1][2], e[2][2]];
+    let e = [0, 1, 2].map(|k| {
+        [
+            p[k + 1][0] - p[0][0],
+            p[k + 1][1] - p[0][1],
+            p[k + 1][2] - p[0][2],
+        ]
+    });
+    let m = [
+        e[0][0], e[1][0], e[2][0], e[0][1], e[1][1], e[2][1], e[0][2], e[1][2], e[2][2],
+    ];
     let det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
         + m[2] * (m[3] * m[7] - m[4] * m[6]);
-    let scale = e.iter().map(|v| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()).product::<f64>();
+    let scale = e
+        .iter()
+        .map(|v| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
+        .product::<f64>();
     if !det.is_finite() || det.abs() <= 1.0e-12 * scale.max(f64::MIN_POSITIVE) {
         return None;
     }
@@ -134,7 +160,12 @@ mod tests {
     fn locates_interior_points_with_weights_that_rebuild_them() {
         let mesh = unit_cube(TetOrder::Linear);
         let locator = TetrahedronLocator::new(&mesh);
-        for point in [[0.2, 0.3, 0.4], [0.9, 0.1, 0.5], [0.5, 0.5, 0.5], [0.01, 0.99, 0.02]] {
+        for point in [
+            [0.2, 0.3, 0.4],
+            [0.9, 0.1, 0.5],
+            [0.5, 0.5, 0.5],
+            [0.01, 0.99, 0.02],
+        ] {
             let located = locator.locate(point).expect("inside");
             let rebuilt = mesh.point(located.element, located.weights);
             for axis in 0..3 {

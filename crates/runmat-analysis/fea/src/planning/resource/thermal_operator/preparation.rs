@@ -80,7 +80,10 @@ fn tree<T>(entries: u64) -> Result<u64, ResourcePlanningError> {
     // therefore costs at most a fifth of a leaf (eleven slots, parent link and lengths) plus its
     // share of internal-node edges: under two key widths plus two words. Repeated entries are
     // counted, so unique keys are bounded from above.
-    mul(entries, 2 * (size_of::<T>() + 2 * size_of::<usize>()) as u64)
+    mul(
+        entries,
+        2 * (size_of::<T>() + 2 * size_of::<usize>()) as u64,
+    )
 }
 fn add(left: u64, right: u64) -> Result<u64, ResourcePlanningError> {
     left.checked_add(right).ok_or_else(overflow)

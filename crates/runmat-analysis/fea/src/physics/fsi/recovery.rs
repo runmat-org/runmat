@@ -1,7 +1,7 @@
-use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use runmat_analysis_core::{
     AnalysisField, AnalysisModel, AnalysisProcedure, CfdDomain, CoupledPhysicsFamily, PhysicsFamily,
 };
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
 use crate::{
     diagnostics::FeaDiagnostic, fea_fsi_coupling_iteration_count_field_id,
@@ -121,31 +121,44 @@ pub fn couple_fluid_structure(
         accumulate_closure(&mut closure, &interface_step, &fluid_pressure);
 
         fields.push(AnalysisField::host_f64(
-            fea_fsi_fluid_velocity_field_id(step_index), AnalysisFieldLayout::vector3(ObservationQuantity::FluidVelocity, FieldLocation::Node).step(step_index),
+            fea_fsi_fluid_velocity_field_id(step_index),
+            AnalysisFieldLayout::vector3(ObservationQuantity::FluidVelocity, FieldLocation::Node)
+                .step(step_index),
             vec![topology.node_count, 3],
             fluid_velocity,
         ));
         fields.push(AnalysisField::host_f64(
-            fea_fsi_fluid_pressure_field_id(step_index), AnalysisFieldLayout::scalar(ObservationQuantity::FluidPressure, FieldLocation::Node).step(step_index),
+            fea_fsi_fluid_pressure_field_id(step_index),
+            AnalysisFieldLayout::scalar(ObservationQuantity::FluidPressure, FieldLocation::Node)
+                .step(step_index),
             vec![topology.node_count],
             fluid_pressure,
         ));
         fields.push(AnalysisField::host_f64(
-            fea_fsi_structural_displacement_field_id(step_index), AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node).step(step_index),
+            fea_fsi_structural_displacement_field_id(step_index),
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node)
+                .step(step_index),
             vec![topology.node_count, 3],
             interface_step
                 .structural_displacement
                 .into_canonical_values(),
         ));
         fields.push(AnalysisField::host_f64(
-            fea_fsi_interface_displacement_field_id(step_index), AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node).step(step_index),
+            fea_fsi_interface_displacement_field_id(step_index),
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node)
+                .step(step_index),
             vec![topology.node_count, 3],
             interface_step
                 .interface_displacement
                 .into_canonical_values(),
         ));
         fields.push(AnalysisField::host_f64(
-            fea_fsi_interface_pressure_field_id(step_index), AnalysisFieldLayout::scalar(ObservationQuantity::FluidPressure, FieldLocation::Interface).step(step_index),
+            fea_fsi_interface_pressure_field_id(step_index),
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::FluidPressure,
+                FieldLocation::Interface,
+            )
+            .step(step_index),
             vec![interface_step
                 .interface_pressure
                 .canonical_values()
@@ -160,7 +173,9 @@ pub fn couple_fluid_structure(
             .flat_map(|pressure| [-*pressure, 0.0, 0.0])
             .collect::<Vec<_>>();
         fields.push(AnalysisField::host_f64(
-            fea_fsi_interface_traction_field_id(step_index), AnalysisFieldLayout::vector3(ObservationQuantity::Traction, FieldLocation::Interface).step(step_index),
+            fea_fsi_interface_traction_field_id(step_index),
+            AnalysisFieldLayout::vector3(ObservationQuantity::Traction, FieldLocation::Interface)
+                .step(step_index),
             vec![
                 interface_step
                     .interface_pressure
@@ -179,12 +194,16 @@ pub fn couple_fluid_structure(
             .max(interface_step.two_way_interface_residual_ratio);
         closure.max_interface_residual = closure.max_interface_residual.max(residual);
         fields.push(AnalysisField::host_f64(
-            fea_fsi_interface_residual_field_id(step_index), AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global).step(step_index),
+            fea_fsi_interface_residual_field_id(step_index),
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global)
+                .step(step_index),
             vec![1],
             vec![residual],
         ));
         fields.push(AnalysisField::host_f64(
-            fea_fsi_coupling_iteration_count_field_id(step_index), AnalysisFieldLayout::scalar(ObservationQuantity::IterationCount, FieldLocation::Global).step(step_index),
+            fea_fsi_coupling_iteration_count_field_id(step_index),
+            AnalysisFieldLayout::scalar(ObservationQuantity::IterationCount, FieldLocation::Global)
+                .step(step_index),
             vec![1],
             vec![interface_step.iteration_count as f64],
         ));

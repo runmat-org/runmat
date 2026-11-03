@@ -28,8 +28,14 @@ fn runmat(temp: &TempDir, cwd: &Path, args: &[&str]) -> Output {
         .arg("--offline")
         .args(args)
         .env("RUNMAT_CONFIG", config)
-        .env("RUNMAT_PACKAGE_CACHE_DIR", temp.path().join("package-cache"))
-        .env("RUNMAT_EXECUTION_STATE_DIR", temp.path().join("execution-state"))
+        .env(
+            "RUNMAT_PACKAGE_CACHE_DIR",
+            temp.path().join("package-cache"),
+        )
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temp.path().join("execution-state"),
+        )
         .output()
         .expect("run runmat")
 }
@@ -100,7 +106,11 @@ fn every_published_example_checks_clean() {
             })
         })
         .collect::<Vec<_>>();
-    assert!(failures.is_empty(), "examples fail check:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "examples fail check:\n{}",
+        failures.join("\n")
+    );
 }
 
 fn project_with(temp: &TempDir, name: &str, source: &str) -> PathBuf {
@@ -109,7 +119,11 @@ fn project_with(temp: &TempDir, name: &str, source: &str) -> PathBuf {
     for entry in fs::read_dir(repository().join("docs/simulation/examples/geometry")).unwrap() {
         let path = entry.unwrap().path();
         if path.is_file() {
-            fs::copy(&path, project.join("geometry").join(path.file_name().unwrap())).unwrap();
+            fs::copy(
+                &path,
+                project.join("geometry").join(path.file_name().unwrap()),
+            )
+            .unwrap();
         }
     }
     fs::write(project.join(name), source).unwrap();
@@ -128,7 +142,10 @@ fn assert_check_and_run_agree(source: &str, code: &str, pending: Option<&str>) {
     let checked = runmat(&temp, &project, &["check", "study.fea", "--json"]);
     assert!(!checked.status.success(), "{checked:?}");
     let checked = json(&checked);
-    assert!(error_codes(&checked).contains(&code.to_string()), "{checked:#}");
+    assert!(
+        error_codes(&checked).contains(&code.to_string()),
+        "{checked:#}"
+    );
     let run = runmat(&temp, &project, &["run", "study.fea", "--json"]);
     assert!(!run.status.success(), "{run:?}");
     let run = json(&run);
@@ -139,7 +156,10 @@ fn assert_check_and_run_agree(source: &str, code: &str, pending: Option<&str>) {
     }
     assert!(
         !temp.path().join("artifacts").exists()
-            || fs::read_dir(temp.path().join("artifacts")).unwrap().next().is_none(),
+            || fs::read_dir(temp.path().join("artifacts"))
+                .unwrap()
+                .next()
+                .is_none(),
         "the refused run produced artifacts"
     );
 }
@@ -181,10 +201,18 @@ fn several_runnable_roots_list_the_choices_and_select_alike() {
         stderr.contains("--study bar_cooling") && stderr.contains("--sweep cooling"),
         "{stderr}"
     );
-    let unknown = runmat(&temp, &project, &["check", "study.fea", "--study", "missing", "--json"]);
+    let unknown = runmat(
+        &temp,
+        &project,
+        &["check", "study.fea", "--study", "missing", "--json"],
+    );
     assert!(!unknown.status.success());
     assert!(json(&unknown)["selection_error"].is_string());
-    let selected = runmat(&temp, &project, &["check", "study.fea", "--sweep", "cooling", "--json"]);
+    let selected = runmat(
+        &temp,
+        &project,
+        &["check", "study.fea", "--sweep", "cooling", "--json"],
+    );
     assert!(selected.status.success(), "{selected:?}");
     assert_eq!(json(&selected)["selected"]["id"], "cooling");
 }
@@ -226,7 +254,10 @@ fn only_names_authored_in_the_cad_file_resolve() {
     let text = serde_json::to_string(&json(&output)["diagnostics"]).unwrap();
     assert!(text.contains("operator_saved_face"), "{text}");
     assert!(!text.contains("left_body\\\""), "{text}");
-    assert!(text.contains("left_support"), "lists the authored face names: {text}");
+    assert!(
+        text.contains("left_support"),
+        "lists the authored face names: {text}"
+    );
 }
 
 /// A structural modal study whose assigned material has no mass_density is refused by check

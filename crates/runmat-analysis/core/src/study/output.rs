@@ -263,10 +263,18 @@ pub enum ObservationTarget {
         first: crate::RegionTarget,
         second: crate::RegionTarget,
     },
-    Point { position: Position },
-    Path { positions: Vec<Position> },
-    Connector { connector_id: String },
-    Constraint { constraint_id: String },
+    Point {
+        position: Position,
+    },
+    Path {
+        positions: Vec<Position>,
+    },
+    Connector {
+        connector_id: String,
+    },
+    Constraint {
+        constraint_id: String,
+    },
     WholeModel,
 }
 

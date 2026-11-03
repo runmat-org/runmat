@@ -137,7 +137,10 @@ fn magnetic_recovery_shape_rejects_missing_or_relabelled_native_inventory() {
 #[test]
 #[ignore]
 fn diagnostic_magnetostatic_reservation_at_scale() {
-    let n: usize = std::env::var("RM_DIAG_N").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
+    let n: usize = std::env::var("RM_DIAG_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(4);
     let mesh = mesh(ElementOrder::Tet10, n);
     let workload = MagnetostaticWorkload {
         model: authored_model(1.0),
@@ -164,8 +167,16 @@ fn diagnostic_magnetostatic_reservation_at_scale() {
     )
     .unwrap();
     let saddle = derived.plan.saddle_pattern();
-    let offsets = saddle.row_offsets().iter().map(|&v| v as usize).collect::<Vec<_>>();
-    let columns = saddle.column_indices().iter().map(|&v| v as usize).collect::<Vec<_>>();
+    let offsets = saddle
+        .row_offsets()
+        .iter()
+        .map(|&v| v as usize)
+        .collect::<Vec<_>>();
+    let columns = saddle
+        .column_indices()
+        .iter()
+        .map(|&v| v as usize)
+        .collect::<Vec<_>>();
     let estimate = runmat_sparse_solvers::direct::SymbolicFactorization::analyze_pattern::<f64>(
         saddle.rows(),
         &offsets,

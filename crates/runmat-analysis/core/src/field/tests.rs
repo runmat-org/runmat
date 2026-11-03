@@ -122,10 +122,12 @@ fn device_reference_retains_legacy_wire_shape_and_roundtrip() {
 
 #[test]
 fn layout_entity_counts_follow_declared_location_and_components() {
-    let node_vector = AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node);
+    let node_vector =
+        AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node);
     assert_eq!(node_vector.entity_count(&[4, 3]), Ok(4));
     assert!(node_vector.entity_count(&[4]).is_err());
-    let element_scalar = AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Element);
+    let element_scalar =
+        AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Element);
     assert_eq!(element_scalar.entity_count(&[2692]), Ok(2692));
     assert!(element_scalar.entity_count(&[2692, 3]).is_err());
     let points = AnalysisFieldLayout::symmetric_tensor3(
@@ -134,21 +136,30 @@ fn layout_entity_counts_follow_declared_location_and_components() {
     );
     assert_eq!(points.entity_count(&[28, 6]), Ok(28));
     assert!(points.entity_count(&[7, 4, 6]).is_err());
-    let complex = AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
-        .representation(crate::study::output::ComplexRepresentation::Complex);
+    let complex =
+        AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+            .representation(crate::study::output::ComplexRepresentation::Complex);
     assert_eq!(complex.entity_count(&[5, 2]), Ok(5));
     assert!(complex.entity_count(&[5]).is_err());
-    let modes = AnalysisFieldLayout::scalar(ObservationQuantity::ModalFrequency, FieldLocation::Mode);
+    let modes =
+        AnalysisFieldLayout::scalar(ObservationQuantity::ModalFrequency, FieldLocation::Mode);
     assert_eq!(modes.entity_count(&[6]), Ok(6));
 }
 
 #[test]
 fn layout_roundtrips_with_ordinal_and_representation() {
-    let layout = AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
-        .representation(crate::study::output::ComplexRepresentation::Magnitude)
-        .mode(2);
+    let layout =
+        AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node)
+            .representation(crate::study::output::ComplexRepresentation::Magnitude)
+            .mode(2);
     let json = serde_json::to_value(&layout).unwrap();
-    assert_eq!(json["ordinal"], serde_json::json!({ "kind": "mode", "index": 2 }));
+    assert_eq!(
+        json["ordinal"],
+        serde_json::json!({ "kind": "mode", "index": 2 })
+    );
     assert_eq!(json["representation"], "magnitude");
-    assert_eq!(serde_json::from_value::<AnalysisFieldLayout>(json).unwrap(), layout);
+    assert_eq!(
+        serde_json::from_value::<AnalysisFieldLayout>(json).unwrap(),
+        layout
+    );
 }

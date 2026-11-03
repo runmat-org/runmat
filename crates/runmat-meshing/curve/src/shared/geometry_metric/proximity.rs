@@ -597,7 +597,11 @@ mod tests {
         .unwrap();
         let load = |value: &AtomicU64| value.load(Ordering::Relaxed);
         assert_eq!(load(&control.total), 400 * 400);
-        assert!(load(&control.worst) <= 400, "work between checkpoints {}", load(&control.worst));
+        assert!(
+            load(&control.worst) <= 400,
+            "work between checkpoints {}",
+            load(&control.worst)
+        );
     }
 
     use std::sync::atomic::{AtomicU64, Ordering};

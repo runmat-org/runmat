@@ -325,7 +325,10 @@ fn diagnose_persisted_mesh_closure() {
             source.boundary_faces.len(),
             source.bounds_m,
             source.elements[0].order,
-            regions.iter().map(|r| &r.source_topology_id).collect::<Vec<_>>()
+            regions
+                .iter()
+                .map(|r| &r.source_topology_id)
+                .collect::<Vec<_>>()
         );
         let mut rows = Vec::new();
         for (index, element) in source.elements.iter().enumerate() {
@@ -378,7 +381,12 @@ fn diagnose_persisted_mesh_closure() {
             );
         }
         let all = FiniteVolumeTopology::derive(&source, FiniteVolumeProjectionPolicy::default());
-        println!(" derive all: {:?}", all.as_ref().map(|t| t.cells.len()).map_err(|e| e.to_string()));
+        println!(
+            " derive all: {:?}",
+            all.as_ref()
+                .map(|t| t.cells.len())
+                .map_err(|e| e.to_string())
+        );
         for region in &regions {
             let selected = FiniteVolumeTopology::derive_selected(
                 &source,
@@ -403,20 +411,56 @@ fn diagnose_persisted_mesh_closure() {
 fn flat_study_cells() -> [[[f64; 3]; 4]; 3] {
     [
         [
-            [0.2703240944345575, 0.014837542820181687, 0.0029361822594769246],
-            [0.27074992383287905, 0.01436665392339019, 0.0031065135267128387],
-            [0.2706811327174461, 0.013838443675568954, 0.0027213622749574897],
-            [0.2699491569348651, 0.014584541772600445, 0.0023765873696541596],
+            [
+                0.2703240944345575,
+                0.014837542820181687,
+                0.0029361822594769246,
+            ],
+            [
+                0.27074992383287905,
+                0.01436665392339019,
+                0.0031065135267128387,
+            ],
+            [
+                0.2706811327174461,
+                0.013838443675568954,
+                0.0027213622749574897,
+            ],
+            [
+                0.2699491569348651,
+                0.014584541772600445,
+                0.0023765873696541596,
+            ],
         ],
         [
-            [0.2971650907484167, -0.007463709771425251, -0.003483843067396201],
-            [0.296438346632368, -0.006850637605723358, -0.005066920317002789],
-            [0.2963943473871062, -0.006425615263212107, -0.003791464681184605],
-            [0.29718784259388153, -0.007819866439350185, -0.004709278240842538],
+            [
+                0.2971650907484167,
+                -0.007463709771425251,
+                -0.003483843067396201,
+            ],
+            [
+                0.296438346632368,
+                -0.006850637605723358,
+                -0.005066920317002789,
+            ],
+            [
+                0.2963943473871062,
+                -0.006425615263212107,
+                -0.003791464681184605,
+            ],
+            [
+                0.29718784259388153,
+                -0.007819866439350185,
+                -0.004709278240842538,
+            ],
         ],
         [
             [0.060546875, 0.576171875, 0.05],
-            [0.05089771259382207, 0.5681421237191052, 0.039730286038129455],
+            [
+                0.05089771259382207,
+                0.5681421237191052,
+                0.039730286038129455,
+            ],
             [0.05710946929066528, 0.5765492555751789, 0.03807009134139609],
             [0.052978515625, 0.566650390625, 0.05],
         ],
@@ -465,7 +509,10 @@ fn flat_study_cells_close_within_the_rounding_bound_and_keep_face_errors_detecta
         let mut divergence = 0.0;
         let mut scale = 0.0;
         for face in &fv.faces {
-            divergence += dot(subtract(face.centroid_m, centroid), face.owner_area_vector_m2) / 3.0;
+            divergence += dot(
+                subtract(face.centroid_m, centroid),
+                face.owner_area_vector_m2,
+            ) / 3.0;
             scale += geometry::divergence_term_scale(
                 face.centroid_m,
                 centroid,
@@ -473,7 +520,10 @@ fn flat_study_cells_close_within_the_rounding_bound_and_keep_face_errors_detecta
             );
         }
         let rounding = (divergence - volume).abs();
-        assert!(rounding > 1e3 * f64::EPSILON * volume, "rounding is relative to the terms");
+        assert!(
+            rounding > 1e3 * f64::EPSILON * volume,
+            "rounding is relative to the terms"
+        );
         assert!(rounding <= geometry::RELATIVE_TOLERANCE * scale);
         // One reversed face moves the sum by 2·V/4; the admitted band stays far below it.
         assert!(geometry::RELATIVE_TOLERANCE * scale < 1e-4 * volume / 2.0);

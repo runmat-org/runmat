@@ -7,8 +7,20 @@ use runmat_geometry_core::{
 /// Selector words that choose entities by a geometric test (normal, plane, box, proximity)
 /// rather than by an authored name or canonical id. Planned: geometry.select.predicate.
 const GEOMETRIC_PREDICATES: &[&str] = &[
-    "where", "normal", "by_normal", "planar", "plane", "within", "in_box", "box", "inside", "near",
-    "nearest", "at", "coordinate", "position",
+    "where",
+    "normal",
+    "by_normal",
+    "planar",
+    "plane",
+    "within",
+    "in_box",
+    "box",
+    "inside",
+    "near",
+    "nearest",
+    "at",
+    "coordinate",
+    "position",
 ];
 
 pub fn region_selector(
@@ -19,7 +31,10 @@ pub fn region_selector(
         return Err("region requires exactly one `select` command".to_string());
     }
     let words = words(commands[0])?;
-    if words.get(1).is_some_and(|kind| GEOMETRIC_PREDICATES.contains(&kind.as_str())) {
+    if words
+        .get(1)
+        .is_some_and(|kind| GEOMETRIC_PREDICATES.contains(&kind.as_str()))
+    {
         return Err(format!(
             "geometric-predicate selector `select {} ...` is not accepted yet; select a CAD-authored \
              name, a tag or a persistent id{}",

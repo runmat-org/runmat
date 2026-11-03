@@ -527,10 +527,13 @@ fn admitted_identity(
 #[ignore]
 fn diagnostic_thermal_components_at_scale() {
     use runmat_analysis_core::{
-        AnalysisBoundary, BoundaryOperator, HeatTransferCoefficient, PrescribedValue,
-        RegionTarget, Temperature,
+        AnalysisBoundary, BoundaryOperator, HeatTransferCoefficient, PrescribedValue, RegionTarget,
+        Temperature,
     };
-    let n = std::env::var("RM_DIAG_N").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+    let n = std::env::var("RM_DIAG_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
     let mesh = runmat_meshing_core::fixtures::quadratic_slab_mesh(n);
     let mut workload = crate::physics::thermal::qualification::workload();
     workload

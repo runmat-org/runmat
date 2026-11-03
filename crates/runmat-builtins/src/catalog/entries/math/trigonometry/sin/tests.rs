@@ -127,8 +127,7 @@ fn trigonometric_provider_routes_declare_suspension_and_fixed_output_errors() {
             BuiltinAsyncBehavior::MaySuspend
         };
         assert_eq!(
-            entry.contract.async_behavior,
-            expected,
+            entry.contract.async_behavior, expected,
             "{}",
             entry.identity.name
         );

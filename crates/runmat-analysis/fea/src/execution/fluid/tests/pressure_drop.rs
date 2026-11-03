@@ -8,7 +8,11 @@ use crate::results::{
 use runmat_meshing_core::{PersistentEntityId, PersistentEntityKind};
 
 fn port(name: &str) -> PersistentEntityId {
-    PersistentEntityId::new(PersistentEntityKind::Face, name.to_string(), vec!["root".into()])
+    PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        name.to_string(),
+        vec!["root".into()],
+    )
 }
 
 /// Unit channel, walls at y = 0 and 1, symmetry planes at z = 0 and 1 (plane flow), the
@@ -18,7 +22,9 @@ fn port(name: &str) -> PersistentEntityId {
 fn channel(n: usize) -> (FluidSteadyWorkload, SolverMeshArtifact, f64) {
     let mut mesh = fixtures::slab_mesh(n);
     let coordinates = |id: u64, mesh: &SolverMeshArtifact| {
-        mesh.topology.nodes[id as usize - 1].coordinates_m.canonical_value()
+        mesh.topology.nodes[id as usize - 1]
+            .coordinates_m
+            .canonical_value()
     };
     let mut faces = Vec::new();
     for face in &mesh.topology.boundary_faces {
@@ -43,8 +49,7 @@ fn channel(n: usize) -> (FluidSteadyWorkload, SolverMeshArtifact, f64) {
     let mut constraints = Vec::new();
     let mut boundaries = Vec::new();
     let (mut flow, mut inlet_area) = (0.0, 0.0);
-    for (face, (face_id, centroid, area)) in mesh.topology.boundary_faces.iter_mut().zip(&faces)
-    {
+    for (face, (face_id, centroid, area)) in mesh.topology.boundary_faces.iter_mut().zip(&faces) {
         let own = port(&format!("face-{face_id}"));
         let mut target = RegionTarget::boundary(format!("face-{face_id}"));
         target.bind_resolved_entities(vec![own.clone()]).unwrap();

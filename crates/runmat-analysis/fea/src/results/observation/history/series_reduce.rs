@@ -220,7 +220,12 @@ pub(super) fn reduce_values(
         SeriesReduction::Minimum | SeriesReduction::Maximum | SeriesReduction::AbsoluteMaximum => {
             let (values, extrema) = extrema_by_lane(history, operation, ties)?;
             Ok(SeriesReductionPayload::Values {
-                field: AnalysisField::host_f64(field_id, history.samples()[0].result.field.layout.clone(), shape, values),
+                field: AnalysisField::host_f64(
+                    field_id,
+                    history.samples()[0].result.field.layout.clone(),
+                    shape,
+                    values,
+                ),
                 extrema,
             })
         }
@@ -229,11 +234,17 @@ pub(super) fn reduce_values(
             let (maximum, maxima) = extrema_by_lane(history, SeriesReduction::Maximum, ties)?;
             Ok(SeriesReductionPayload::Envelope {
                 minimum: AnalysisField::host_f64(
-                    format!("{field_id}.minimum"), history.samples()[0].result.field.layout.clone(),
+                    format!("{field_id}.minimum"),
+                    history.samples()[0].result.field.layout.clone(),
                     shape.clone(),
                     minimum,
                 ),
-                maximum: AnalysisField::host_f64(format!("{field_id}.maximum"), history.samples()[0].result.field.layout.clone(), shape, maximum),
+                maximum: AnalysisField::host_f64(
+                    format!("{field_id}.maximum"),
+                    history.samples()[0].result.field.layout.clone(),
+                    shape,
+                    maximum,
+                ),
                 minima,
                 maxima,
             })
@@ -288,7 +299,12 @@ pub(super) fn reduce_values(
                 ));
             }
             Ok(SeriesReductionPayload::Values {
-                field: AnalysisField::host_f64(field_id, history.samples()[0].result.field.layout.clone(), shape, values),
+                field: AnalysisField::host_f64(
+                    field_id,
+                    history.samples()[0].result.field.layout.clone(),
+                    shape,
+                    values,
+                ),
                 extrema: Vec::new(),
             })
         }

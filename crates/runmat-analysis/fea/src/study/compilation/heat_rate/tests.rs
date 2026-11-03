@@ -19,7 +19,11 @@ fn heated_die() -> (AnalysisModel, SolverMeshArtifact) {
     for element in &mut topology.volume_elements {
         let x = element.node_ids[..4]
             .iter()
-            .map(|id| topology.nodes[*id as usize - 1].coordinates_m.canonical_value()[0])
+            .map(|id| {
+                topology.nodes[*id as usize - 1]
+                    .coordinates_m
+                    .canonical_value()[0]
+            })
             .sum::<f64>()
             / 4.0;
         let side = usize::from(x > 0.25);

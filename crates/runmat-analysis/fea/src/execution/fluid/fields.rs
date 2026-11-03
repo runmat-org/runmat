@@ -631,7 +631,12 @@ impl FluidResultOnSource<'_> {
                 let shape = definition
                     .storage_shape(definition.stored_entities(layout.counts))
                     .map_err(invalid)?;
-                let storage = AnalysisField::host_f64(definition.field_id(), definition.layout(), shape, values);
+                let storage = AnalysisField::host_f64(
+                    definition.field_id(),
+                    definition.layout(),
+                    shape,
+                    values,
+                );
                 fields.push(
                     RecoveredField::new(definition.clone(), sample, storage).map_err(invalid)?,
                 );

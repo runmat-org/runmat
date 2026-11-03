@@ -30,10 +30,8 @@ pub struct CanonicalAcousticResponse {
     /// ½|p_inc|²/(ρc) of the authored incident wave on incident-pressure faces, ½|p|²/(ρc) of
     /// the outgoing wave on anechoic faces, averaged over the element's port-face area; zero
     /// for elements without port faces.
-    pub element_port_intensity_w_per_m2: runmat_types::physical::Quantity<
-        runmat_types::physical::kind::AcousticIntensity,
-        Vec<f64>,
-    >,
+    pub element_port_intensity_w_per_m2:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::AcousticIntensity, Vec<f64>>,
     /// Volume average of (|p|²/(rho c²) + rho |v|²)/4, in element order.
     pub element_mean_energy_density_j_per_m3:
         runmat_types::physical::Quantity<runmat_types::physical::kind::EnergyDensity, Vec<f64>>,

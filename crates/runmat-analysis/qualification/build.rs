@@ -22,20 +22,31 @@ fn text(value: &Value) -> String {
 }
 
 fn texts(value: &Value) -> String {
-    let items: Vec<String> = value.as_array().expect("ledger string list").iter().map(text).collect();
+    let items: Vec<String> = value
+        .as_array()
+        .expect("ledger string list")
+        .iter()
+        .map(text)
+        .collect();
     format!("&[{}]", items.join(", "))
 }
 
 fn strings(value: &Value) -> Vec<&str> {
-    value.as_array().expect("ledger list").iter().map(|item| item.as_str().expect("ledger string")).collect()
+    value
+        .as_array()
+        .expect("ledger list")
+        .iter()
+        .map(|item| item.as_str().expect("ledger string"))
+        .collect()
 }
 
 fn main() {
     let path = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
         .join("../../../docs/simulation/ledger.json");
     println!("cargo:rerun-if-changed={}", path.display());
-    let ledger: Value = serde_json::from_str(&fs::read_to_string(&path).expect("docs/simulation/ledger.json"))
-        .expect("ledger.json is JSON");
+    let ledger: Value =
+        serde_json::from_str(&fs::read_to_string(&path).expect("docs/simulation/ledger.json"))
+            .expect("ledger.json is JSON");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
 
     let mut source = String::from(
@@ -43,8 +54,14 @@ fn main() {
          pub(crate) const ALL: &[&[Requirement]] = &[REQUIREMENTS];\n\
          const REQUIREMENTS: &[Requirement] = &[\n",
     );
-    for requirement in ledger["requirements"].as_array().expect("ledger requirements") {
-        let stages: Vec<String> = strings(&requirement["stages"]).iter().map(|stage| format!("Stage::{}", variant(stage))).collect();
+    for requirement in ledger["requirements"]
+        .as_array()
+        .expect("ledger requirements")
+    {
+        let stages: Vec<String> = strings(&requirement["stages"])
+            .iter()
+            .map(|stage| format!("Stage::{}", variant(stage)))
+            .collect();
         source.push_str(&format!(
             "Requirement {{ id: {}, title: {}, stages: &[{}], acceptance: {}, owners: {}, dependencies: {}, obligations: &[\n",
             text(&requirement["id"]),
@@ -87,7 +104,15 @@ fn main() {
     let mut inventory = String::from("id\tsource\tcapability\tmaps\n");
     for claim in ledger["claims"].as_array().expect("ledger claims") {
         let field = |key: &str| claim[key].as_str().expect("claim field").to_string();
-        inventory.push_str(&[field("id"), field("source"), field("capability"), field("maps")].join("\t"));
+        inventory.push_str(
+            &[
+                field("id"),
+                field("source"),
+                field("capability"),
+                field("maps"),
+            ]
+            .join("\t"),
+        );
         inventory.push('\n');
     }
     fs::write(out.join("inventory.tsv"), inventory).unwrap();

@@ -382,7 +382,9 @@ impl<'a> CanonicalFluidProblem<'a> {
                 | FluidConstraintKind::Symmetry { target }
                 | FluidConstraintKind::PressureReference { target, .. } => target,
                 FluidConstraintKind::Periodic(_) => {
-                    return Err(CanonicalFluidError::Unsupported(crate::admission::FLUID_PERIODIC.message));
+                    return Err(CanonicalFluidError::Unsupported(
+                        crate::admission::FLUID_PERIODIC.message,
+                    ));
                 }
             };
             add_entities(target.resolved_entities().len())?;
@@ -407,12 +409,8 @@ impl<'a> CanonicalFluidProblem<'a> {
         // Necessary early gate: every cell's momentum row holds at least its own block, so a
         // ceiling below this minimum rejects before the stencils are derived. The admitted
         // reservation is rederived below from the exact momentum pattern.
-        let reservation = resources::reserve_exact(
-            source,
-            topology,
-            policy,
-            topology.cells.len() as u64,
-        )?;
+        let reservation =
+            resources::reserve_exact(source, topology, policy, topology.cells.len() as u64)?;
         if constraints
             .iter()
             .any(|c| c.constraint_id.is_empty() || c.constraint_id.len() > 256)

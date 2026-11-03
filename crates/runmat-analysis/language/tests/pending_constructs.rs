@@ -99,7 +99,10 @@ fn trailing_unit_vector_reports_its_pending_id() {
 #[test]
 fn keyword_declared_name_reports_its_pending_id() {
     let body = "input load : force = 1.5 kN\n    include model.base";
-    assert_pending(&diagnostics("select result", body), "language.keyword-names");
+    assert_pending(
+        &diagnostics("select result", body),
+        "language.keyword-names",
+    );
 }
 
 #[test]
@@ -122,7 +125,9 @@ fn total_power_heat_generation_checks_clean() {
     let body = "include model.base\n    load heater {\n        heat_generation on geometry.part.region.body = 2 W\n    }";
     let messages = diagnostics("select result", body);
     assert!(
-        !messages.iter().any(|message| message.contains("heat generation")),
+        !messages
+            .iter()
+            .any(|message| message.contains("heat generation")),
         "{messages:#?}"
     );
 }

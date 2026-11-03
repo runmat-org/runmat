@@ -959,7 +959,8 @@ fn observation_history_import_reads_only_the_requested_retained_sample() {
             definition.clone(),
             coordinate,
             runmat_analysis_core::AnalysisField::host_f64(
-                definition.field_id(), definition.layout(),
+                definition.field_id(),
+                definition.layout(),
                 vec![projection.nodes.len(), 3],
                 vec![time + 1.0; projection.nodes.len() * 3],
             ),

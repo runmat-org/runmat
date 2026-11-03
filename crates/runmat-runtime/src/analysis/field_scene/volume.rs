@@ -79,9 +79,10 @@ pub fn build_volume_scene(
     solver_mesh: &str,
     request: &VolumeViewRequest,
 ) -> Result<(GeometryScene, VolumeViewError), String> {
-    let artifact =
-        super::super::solver_mesh_artifact::load_solver_mesh_artifact(std::path::Path::new(solver_mesh))
-            .map_err(|error| error.to_string())?;
+    let artifact = super::super::solver_mesh_artifact::load_solver_mesh_artifact(
+        std::path::Path::new(solver_mesh),
+    )
+    .map_err(|error| error.to_string())?;
     let mesh = tet_mesh(&artifact)?;
     let topology = super::super::render_topology_from_solver_mesh(Some(&artifact))
         .ok_or_else(|| format!("FEA run '{run_id}' has no boundary to draw"))?;
@@ -105,12 +106,28 @@ pub fn build_volume_scene(
             let surface = surface_values(&topology, &mesh, &field, request.reduction);
             drawn.extend(surface.iter().flatten().copied());
             let range = legend_range(request.range, &drawn)?;
-            chunks.push(clipped_surface(&topology, field.support, &surface, range, origin, normal)?);
-            chunks.push(triangles_chunk("section-cap", "Section", &cap.triangles, range, 1.0));
+            chunks.push(clipped_surface(
+                &topology,
+                field.support,
+                &surface,
+                range,
+                origin,
+                normal,
+            )?);
+            chunks.push(triangles_chunk(
+                "section-cap",
+                "Section",
+                &cap.triangles,
+                range,
+                1.0,
+            ));
         }
         VolumeViewKind::Streamlines | VolumeViewKind::Glyphs => {
             if field.components != 3 {
-                return Err(format!("field '{}' is not a vector field", request.field.field_id));
+                return Err(format!(
+                    "field '{}' is not a vector field",
+                    request.field.field_id
+                ));
             }
             let locator = TetrahedronLocator::new(&mesh);
             match request.kind {
@@ -123,7 +140,12 @@ pub fn build_volume_scene(
                     error.integration_error_m = Some(lines.integration_error_m);
                     error.geometric_error_m = lines.geometric_error_m;
                     error.count = lines.lines.len();
-                    drawn.extend(lines.lines.iter().flat_map(|line| line.values.iter().copied()));
+                    drawn.extend(
+                        lines
+                            .lines
+                            .iter()
+                            .flat_map(|line| line.values.iter().copied()),
+                    );
                     let range = legend_range(request.range, &drawn)?;
                     chunks.push(context_surface(&topology)?);
                     chunks.push(lines_chunk(&lines.lines, range));
@@ -148,13 +170,23 @@ pub fn build_volume_scene(
                     drawn.extend(glyphs.triangles.values.iter().copied());
                     let range = legend_range(request.range, &drawn)?;
                     chunks.push(context_surface(&topology)?);
-                    chunks.push(triangles_chunk("glyphs", "Arrows", &glyphs.triangles, range, 1.0));
+                    chunks.push(triangles_chunk(
+                        "glyphs",
+                        "Arrows",
+                        &glyphs.triangles,
+                        range,
+                        1.0,
+                    ));
                 }
             }
         }
     }
     let range = legend_range(request.range, &drawn)?;
-    let mut scene = GeometryScene::new(format!("fea:{run_id}:{}", request.field.field_id), 1, chunks);
+    let mut scene = GeometryScene::new(
+        format!("fea:{run_id}:{}", request.field.field_id),
+        1,
+        chunks,
+    );
     if request.kind == VolumeViewKind::Section {
         append_feature_edges(&mut scene, FEATURE_EDGE_CREASE_DEGREES);
     }
@@ -200,7 +232,11 @@ fn tet_mesh(artifact: &runmat_meshing_core::SolverMeshArtifact) -> Result<TetMes
         .enumerate()
         .map(|(index, node)| (node.node_id, index as u32))
         .collect();
-    let order = match topology.volume_elements.first().map(|element| element.order) {
+    let order = match topology
+        .volume_elements
+        .first()
+        .map(|element| element.order)
+    {
         Some(runmat_meshing_core::ElementOrder::Tet4) => TetOrder::Linear,
         Some(runmat_meshing_core::ElementOrder::Tet10) => TetOrder::Quadratic,
         None => return Err("the solver mesh has no volume elements".into()),
@@ -214,7 +250,11 @@ fn tet_mesh(artifact: &runmat_meshing_core::SolverMeshArtifact) -> Result<TetMes
             elements.push(*index_by_id.get(id).ok_or("element node is missing")?);
         }
     }
-    let positions = topology.nodes.iter().map(|node| node.coordinates_m.canonical_value()).collect();
+    let positions = topology
+        .nodes
+        .iter()
+        .map(|node| node.coordinates_m.canonical_value())
+        .collect();
     TetMesh::new(positions, order, elements).map_err(|error| error.to_string())
 }
 
@@ -234,13 +274,19 @@ fn load_solved_field(
         let page = analysis_field_page_by_run_id_op(
             run_id,
             selection.clone(),
-            AnalysisFieldRequestOptions { offset: Some(offset), limit: Some(PAGE) },
+            AnalysisFieldRequestOptions {
+                offset: Some(offset),
+                limit: Some(PAGE),
+            },
             OperationContext::new(None, None),
         )
         .map_err(|error| format!("{}: {}", error.error_code, error.message))?
         .data;
         if page.offset != offset {
-            return Err(format!("field '{}' page is out of order", selection.field_id));
+            return Err(format!(
+                "field '{}' page is out of order",
+                selection.field_id
+            ));
         }
         match page.values {
             AnalysisFieldPageValues::Real(values) => real.extend(values),
@@ -294,7 +340,11 @@ fn section_plane(mesh: &TetMesh) -> ([f64; 3], [f64; 3]) {
         .min_by(|a, b| (max[*a] - min[*a]).total_cmp(&(max[*b] - min[*b])))
         .unwrap_or(2);
     let mut normal = [0.0; 3];
-    normal[axis] = if VIEW_DIRECTION[axis] > 0.0 { -1.0 } else { 1.0 };
+    normal[axis] = if VIEW_DIRECTION[axis] > 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
     (origin, normal)
 }
 
@@ -313,7 +363,16 @@ fn refined_cap(
         (FieldSupport::Node, TetOrder::Linear) => 2,
     };
     loop {
-        let cap = section_cap(mesh, field, reduction, &SectionOptions { origin, normal, subdivisions });
+        let cap = section_cap(
+            mesh,
+            field,
+            reduction,
+            &SectionOptions {
+                origin,
+                normal,
+                subdivisions,
+            },
+        );
         if cap.triangles.triangle_count() <= CAP_TRIANGLE_BUDGET || subdivisions == 1 {
             return cap;
         }
@@ -335,7 +394,9 @@ fn surface_values(
             FieldSupport::Node => render
                 .vertex_volume_node_indices
                 .iter()
-                .map(|node| node.map_or(f64::NAN, |node| reduction.apply(&field.entity_value(node))))
+                .map(|node| {
+                    node.map_or(f64::NAN, |node| reduction.apply(&field.entity_value(node)))
+                })
                 .collect(),
             FieldSupport::Element => render
                 .triangle_volume_element_indices
@@ -343,7 +404,9 @@ fn surface_values(
                 .map(|element| {
                     element
                         .filter(|element| *element < mesh.element_count())
-                        .map_or(f64::NAN, |element| reduction.apply(&field.entity_value(element)))
+                        .map_or(f64::NAN, |element| {
+                            reduction.apply(&field.entity_value(element))
+                        })
                 })
                 .collect(),
         })
@@ -355,7 +418,9 @@ fn legend_range(declared: Option<(f64, f64)>, drawn: &[f64]) -> Result<(f64, f64
         return Ok(range);
     }
     let finite = drawn.iter().copied().filter(|value| value.is_finite());
-    let (min, max) = finite.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+    let (min, max) = finite.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+        (lo.min(v), hi.max(v))
+    });
     if min <= max {
         Ok((min, max))
     } else {
@@ -364,7 +429,12 @@ fn legend_range(declared: Option<(f64, f64)>, drawn: &[f64]) -> Result<(f64, f64
 }
 
 fn vertex(position: [f64; 3], normal: [f32; 3], color: [f32; 4]) -> Vertex {
-    Vertex { position: position.map(|v| v as f32), color, normal, tex_coords: [0.0, 0.0] }
+    Vertex {
+        position: position.map(|v| v as f32),
+        color,
+        normal,
+        tex_coords: [0.0, 0.0],
+    }
 }
 
 /// The boundary on the kept side of the plane, colored by the field, each triangle that crosses
@@ -402,7 +472,8 @@ fn clipped_surface(
                 }
                 if (side[k] >= 0.0) != (side[next] >= 0.0) {
                     let t = side[k] / (side[k] - side[next]);
-                    let position = [0, 1, 2].map(|a| corners[k][a] + t * (corners[next][a] - corners[k][a]));
+                    let position =
+                        [0, 1, 2].map(|a| corners[k][a] + t * (corners[next][a] - corners[k][a]));
                     let color: [f32; 4] = std::array::from_fn(|c| {
                         colors[k][c] + t as f32 * (colors[next][c] - colors[k][c])
                     });
@@ -424,7 +495,11 @@ fn clipped_surface(
         "section-surface",
         vertices,
         indices,
-        Material { albedo: Vec4::ONE, double_sided: true, ..Material::default() },
+        Material {
+            albedo: Vec4::ONE,
+            double_sided: true,
+            ..Material::default()
+        },
     );
     chunk.label = Some("Boundary".into());
     Ok(chunk)
@@ -437,8 +512,11 @@ fn context_surface(topology: &AnalysisRenderTopology) -> Result<GeometrySceneChu
     for render in &topology.meshes {
         for triangle in &render.triangles {
             let corners = triangle.map(|node| render.vertices[node as usize]);
-            let face_normal =
-                normalize(cross(sub(corners[1], corners[0]), sub(corners[2], corners[0]))).map(|v| v as f32);
+            let face_normal = normalize(cross(
+                sub(corners[1], corners[0]),
+                sub(corners[2], corners[0]),
+            ))
+            .map(|v| v as f32);
             for corner in corners {
                 vertices.push(vertex(corner, face_normal, color));
             }
@@ -478,20 +556,32 @@ fn triangles_chunk(
         .map(|((position, normal), value)| {
             let mut color = scalar_color(*value, range.0, range.1);
             color[3] = alpha;
-            Vertex { position: *position, color, normal: *normal, tex_coords: [0.0, 0.0] }
+            Vertex {
+                position: *position,
+                color,
+                normal: *normal,
+                tex_coords: [0.0, 0.0],
+            }
         })
         .collect();
     let mut chunk = GeometrySceneChunk::indexed_triangles(
         id,
         vertices,
         triangles.indices.clone(),
-        Material { albedo: Vec4::ONE, double_sided: true, ..Material::default() },
+        Material {
+            albedo: Vec4::ONE,
+            double_sided: true,
+            ..Material::default()
+        },
     );
     chunk.label = Some(label.into());
     chunk
 }
 
-fn lines_chunk(lines: &[runmat_plot::field_volume::FieldPolyline], range: (f64, f64)) -> GeometrySceneChunk {
+fn lines_chunk(
+    lines: &[runmat_plot::field_volume::FieldPolyline],
+    range: (f64, f64),
+) -> GeometrySceneChunk {
     let mut vertices = Vec::new();
     for line in lines {
         for k in 1..line.points.len() {
@@ -514,7 +604,10 @@ fn lines_chunk(lines: &[runmat_plot::field_volume::FieldPolyline], range: (f64, 
             indices: None,
             gpu_vertices: None,
             bounds: None,
-            material: Material { albedo: Vec4::ONE, ..Material::default() },
+            material: Material {
+                albedo: Vec4::ONE,
+                ..Material::default()
+            },
             draw_calls: vec![DrawCall {
                 vertex_offset: 0,
                 vertex_count,
@@ -538,7 +631,11 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 fn normalize(a: [f64; 3]) -> [f64; 3] {

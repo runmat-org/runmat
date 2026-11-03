@@ -371,19 +371,16 @@ pub fn build_scene_view(
     let field = field_id
         .map(|id| load_field(run_id, &AnalysisFieldSelection::new(id, None)))
         .transpose()?;
-    let additional_deformation = if shape_mode == "undeformed"
-        || field
-            .as_ref()
-            .is_some_and(|field| field.deforms)
-    {
-        None
-    } else {
-        load_field(
-            run_id,
-            &AnalysisFieldSelection::new("structural.displacement", None),
-        )
-        .ok()
-    };
+    let additional_deformation =
+        if shape_mode == "undeformed" || field.as_ref().is_some_and(|field| field.deforms) {
+            None
+        } else {
+            load_field(
+                run_id,
+                &AnalysisFieldSelection::new("structural.displacement", None),
+            )
+            .ok()
+        };
     let deformation = field
         .as_ref()
         .filter(|field| field.deforms)

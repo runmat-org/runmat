@@ -24,8 +24,8 @@ use super::{
     },
     distributed_numeric::{
         discrete_reaction_contribution, interpolate_values, paired_boundary_contribution,
-        reduction_operation, required_source_indices, select_values, weighted_boundary_contribution,
-        weighted_volume_contribution,
+        reduction_operation, required_source_indices, select_values,
+        weighted_boundary_contribution, weighted_volume_contribution,
     },
     extrema::{
         extrema_values, partition_selected_entities, selected_or_extrema_payload, spatial_extrema,
@@ -726,13 +726,9 @@ fn observation_partition_payload(
             face_indices,
             first_count,
             ..
-        } => paired_boundary_contribution(
-            observation,
-            field,
-            face_indices,
-            *first_count,
-            topology,
-        )?,
+        } => {
+            paired_boundary_contribution(observation, field, face_indices, *first_count, topology)?
+        }
         ObservationPartitionTarget::ConstraintGroups { indices, .. } => {
             let values = select_values(field, indices, observation)?;
             ObservationPartitionPayload::WeightedReduction {

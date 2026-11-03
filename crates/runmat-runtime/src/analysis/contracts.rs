@@ -863,8 +863,7 @@ pub fn analysis_authoring_workflow() -> Vec<String> {
         "edit <study>.fea with workspace file tools".to_string(),
         "runmat check <study>.fea [--study <id> | --sweep <id>]".to_string(),
         "runmat plan <study>.fea [--study <id> | --sweep <id>] --json".to_string(),
-        "runmat run <study>.fea [--study <id> | --sweep <id>] [--cluster <profile>]"
-            .to_string(),
+        "runmat run <study>.fea [--study <id> | --sweep <id>] [--cluster <profile>]".to_string(),
     ]
 }
 

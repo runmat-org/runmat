@@ -2649,7 +2649,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
     use crate::builtins::fea::damping::mechanical_damping_rayleigh_builtin;
     use crate::builtins::fea::values::{
         dynamic_viscosity_builtin, frequency_builtin, mass_density_builtin,
@@ -2657,6 +2656,7 @@ mod tests {
         temperature_kelvin_builtin, turbulence_intensity_builtin,
     };
     use futures::executor::block_on;
+    use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
     use runmat_analysis_fea::ComputeBackend;
     use runmat_meshing_core::CanonicalMeshingContract;
     use runmat_types::MemberAccess;
@@ -3395,7 +3395,10 @@ mod tests {
         // analysis producers publish them.
         let field = AnalysisField {
             field_id: "structural.displacement".into(),
-            layout: runmat_analysis_core::AnalysisFieldLayout::vector3(runmat_analysis_core::ObservationQuantity::Displacement, runmat_analysis_core::FieldLocation::Node),
+            layout: runmat_analysis_core::AnalysisFieldLayout::vector3(
+                runmat_analysis_core::ObservationQuantity::Displacement,
+                runmat_analysis_core::FieldLocation::Node,
+            ),
             shape: vec![3, 3],
             values: AnalysisFieldValues::HostF64(vec![
                 1.0, 10.0, 100.0, 2.0, 20.0, 200.0, 3.0, 30.0, 300.0,
@@ -3426,7 +3429,11 @@ mod tests {
         // A rank-3 tensor field keeps the same rule on every axis.
         let tensor = AnalysisField {
             field_id: "structural.stress_tensor".into(),
-            layout: runmat_analysis_core::AnalysisFieldLayout::components(runmat_analysis_core::ObservationQuantity::Stress, runmat_analysis_core::FieldLocation::Element, 4),
+            layout: runmat_analysis_core::AnalysisFieldLayout::components(
+                runmat_analysis_core::ObservationQuantity::Stress,
+                runmat_analysis_core::FieldLocation::Element,
+                4,
+            ),
             shape: vec![2, 2, 2],
             values: AnalysisFieldValues::HostF64((0..8).map(f64::from).collect()),
         };
@@ -3444,7 +3451,10 @@ mod tests {
     fn fea_field_metadata_remains_exact_in_public_objects() {
         let field = AnalysisField {
             field_id: "stress".into(),
-            layout: runmat_analysis_core::AnalysisFieldLayout::scalar(runmat_analysis_core::ObservationQuantity::Stress, runmat_analysis_core::FieldLocation::Element),
+            layout: runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Stress,
+                runmat_analysis_core::FieldLocation::Element,
+            ),
             shape: vec![u32::MAX as usize, 0],
             values: AnalysisFieldValues::HostF64(Vec::new()),
         };
@@ -3471,7 +3481,10 @@ mod tests {
 
         let device_field = AnalysisField {
             field_id: "device".into(),
-            layout: runmat_analysis_core::AnalysisFieldLayout::scalar(runmat_analysis_core::ObservationQuantity::Residual, runmat_analysis_core::FieldLocation::Global),
+            layout: runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Residual,
+                runmat_analysis_core::FieldLocation::Global,
+            ),
             shape: vec![u32::MAX as usize],
             values: AnalysisFieldValues::DeviceRef(runmat_analysis_core::DeviceFieldRef {
                 backend: "wgpu".into(),
@@ -4854,8 +4867,24 @@ mod tests {
     fn persist_synthetic_indexed_results() -> String {
         let indexed_fields = |prefix: &str| {
             vec![
-                AnalysisField::host_f64(format!("{prefix}.0"), AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global), vec![1], vec![10.0]),
-                AnalysisField::host_f64(format!("{prefix}.1"), AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global), vec![1], vec![20.0]),
+                AnalysisField::host_f64(
+                    format!("{prefix}.0"),
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Residual,
+                        FieldLocation::Global,
+                    ),
+                    vec![1],
+                    vec![10.0],
+                ),
+                AnalysisField::host_f64(
+                    format!("{prefix}.1"),
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Residual,
+                        FieldLocation::Global,
+                    ),
+                    vec![1],
+                    vec![20.0],
+                ),
             ]
         };
         let run_id = crate::analysis::storage::next_run_id();

@@ -73,11 +73,12 @@ impl AcousticAssembly {
                     }
                 })
                 .map_err(|error| AcousticHarmonicError::Topology(error.to_string()))?;
-            self.port_faces.push(super::super::assembly::AcousticPortFace {
-                face: face.clone(),
-                admittance,
-                incident: Some(pressure),
-            });
+            self.port_faces
+                .push(super::super::assembly::AcousticPortFace {
+                    face: face.clone(),
+                    admittance,
+                    incident: Some(pressure),
+                });
             self.incident_faces.push((face, admittance));
         }
         if let Some(error) = source_error {

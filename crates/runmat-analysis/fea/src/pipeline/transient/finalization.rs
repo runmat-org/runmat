@@ -1,5 +1,5 @@
-use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use super::*;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
 pub(super) struct TransientRunFinalization<'a> {
     pub(super) model: &'a AnalysisModel,
@@ -222,7 +222,12 @@ pub(super) fn finish_transient_run(
         .enumerate()
         .map(|(index, value)| {
             AnalysisField::host_f64(
-                fea_transient_kinetic_energy_field_id(index), AnalysisFieldLayout::scalar(ObservationQuantity::KineticEnergy, FieldLocation::Global).step(index),
+                fea_transient_kinetic_energy_field_id(index),
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::KineticEnergy,
+                    FieldLocation::Global,
+                )
+                .step(index),
                 vec![1],
                 vec![value],
             )
@@ -234,7 +239,12 @@ pub(super) fn finish_transient_run(
         .enumerate()
         .map(|(index, value)| {
             AnalysisField::host_f64(
-                fea_transient_strain_energy_field_id(index), AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergy, FieldLocation::Global).step(index),
+                fea_transient_strain_energy_field_id(index),
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::StrainEnergy,
+                    FieldLocation::Global,
+                )
+                .step(index),
                 vec![1],
                 vec![value],
             )
@@ -247,7 +257,9 @@ pub(super) fn finish_transient_run(
         .enumerate()
         .map(|(index, value)| {
             AnalysisField::host_f64(
-                fea_transient_residual_norm_field_id(index), AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global).step(index),
+                fea_transient_residual_norm_field_id(index),
+                AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global)
+                    .step(index),
                 vec![1],
                 vec![value],
             )
@@ -508,7 +520,12 @@ fn scalar_snapshots(
         .copied()
         .enumerate()
         .map(|(index, value)| {
-            AnalysisField::host_f64(field_id(index), layout.clone().step(index), vec![1], vec![value])
+            AnalysisField::host_f64(
+                field_id(index),
+                layout.clone().step(index),
+                vec![1],
+                vec![value],
+            )
         })
         .collect()
 }

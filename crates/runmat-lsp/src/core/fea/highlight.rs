@@ -63,8 +63,9 @@ struct Vocabulary {
 fn vocabulary() -> &'static Vocabulary {
     static VOCABULARY: OnceLock<Vocabulary> = OnceLock::new();
     VOCABULARY.get_or_init(|| {
-        let grammar: serde_json::Value = serde_json::from_str(runmat_fea_syntax::FEA_TEXTMATE_GRAMMAR)
-            .expect("runmat-fea-syntax grammar/fea.tmLanguage.json is valid JSON");
+        let grammar: serde_json::Value =
+            serde_json::from_str(runmat_fea_syntax::FEA_TEXTMATE_GRAMMAR)
+                .expect("runmat-fea-syntax grammar/fea.tmLanguage.json is valid JSON");
         let vocabulary = &grammar["vocabulary"];
         let mut words = HashMap::new();
         let mut dotted: HashMap<String, Vec<Vec<String>>> = HashMap::new();
@@ -76,7 +77,10 @@ fn vocabulary() -> &'static Vocabulary {
                 let Some(word) = word.as_str() else { continue };
                 if word.contains('.') {
                     let segments: Vec<String> = word.split('.').map(str::to_string).collect();
-                    dotted.entry(segments[0].clone()).or_default().push(segments);
+                    dotted
+                        .entry(segments[0].clone())
+                        .or_default()
+                        .push(segments);
                 } else {
                     words.entry(word.to_string()).or_insert(token_class);
                 }
@@ -173,7 +177,9 @@ pub(super) fn classify(source: &str, tokens: &[FeaToken]) -> Vec<(FeaToken, Toke
         if let Some(candidates) = vocabulary.dotted.get(word) {
             let matched = candidates.iter().find(|segments| {
                 segments.iter().enumerate().skip(1).all(|(segment, name)| {
-                    let dot = code.get(position + 2 * segment - 1).map(|&i| significant[i]);
+                    let dot = code
+                        .get(position + 2 * segment - 1)
+                        .map(|&i| significant[i]);
                     let next = code.get(position + 2 * segment).map(|&i| significant[i]);
                     let before = significant[code[position + 2 * segment - 2]];
                     matches!((dot, next), (Some(dot), Some(next))
@@ -249,14 +255,26 @@ mod tests {
         assert_eq!(class_of(source, "kg", 0), Some(unit));
         assert_eq!(class_of(source, "m", 0), Some(unit));
         assert_eq!(class_of(source, "GPa", 0), Some(unit));
-        assert_eq!(class_of(source, "mass_density", 0), Some(class(VARIABLE, DEFAULT_LIBRARY)));
+        assert_eq!(
+            class_of(source, "mass_density", 0),
+            Some(class(VARIABLE, DEFAULT_LIBRARY))
+        );
         let support = class(FUNCTION, DEFAULT_LIBRARY);
         assert_eq!(class_of(source, "structural", 0), Some(support));
         assert_eq!(class_of(source, "fixed", 1), Some(support));
         assert_eq!(class_of(source, "max", 0), Some(support));
-        assert_eq!(class_of(source, "static", 1), Some(class(NAMESPACE, DEFAULT_LIBRARY)));
-        assert_eq!(class_of(source, "node", 0), Some(class(PARAMETER, DEFAULT_LIBRARY)));
-        assert_eq!(class_of(source, "displacement", 0), Some(class(PARAMETER, DEFAULT_LIBRARY)));
+        assert_eq!(
+            class_of(source, "static", 1),
+            Some(class(NAMESPACE, DEFAULT_LIBRARY))
+        );
+        assert_eq!(
+            class_of(source, "node", 0),
+            Some(class(PARAMETER, DEFAULT_LIBRARY))
+        );
+        assert_eq!(
+            class_of(source, "displacement", 0),
+            Some(class(PARAMETER, DEFAULT_LIBRARY))
+        );
         assert_eq!(class_of(source, "steel", 0), Some(class(VARIABLE, 0)));
         assert_eq!(class_of(source, "7850", 0), Some(class(NUMBER, 0)));
     }

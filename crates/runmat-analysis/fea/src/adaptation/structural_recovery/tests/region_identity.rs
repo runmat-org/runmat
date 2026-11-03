@@ -1,6 +1,6 @@
 //! Recovery follows full canonical region occurrences, not display/source names.
-use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use super::*;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 
 fn check_layout(integration_points: bool) {
     for quadratic in [false, true] {
@@ -30,7 +30,18 @@ fn check_layout(integration_points: bool) {
                 FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS
             } else {
                 FEA_FIELD_STRUCTURAL_STRESS
-            }, if integration_points { AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::IntegrationPoint) } else { AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element) },
+            },
+            if integration_points {
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::Stress,
+                    FieldLocation::IntegrationPoint,
+                )
+            } else {
+                AnalysisFieldLayout::symmetric_tensor3(
+                    ObservationQuantity::Stress,
+                    FieldLocation::Element,
+                )
+            },
             vec![count * points, 6],
             values,
         );

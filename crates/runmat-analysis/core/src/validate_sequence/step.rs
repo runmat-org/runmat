@@ -59,8 +59,8 @@ fn validate_settings(step: &ProcedureStep) -> Result<(), AnalysisValidationError
 fn validate_family_procedure(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
     // The closed family x procedure registry is the one authority: a pending identity is
     // defined (admission reports its pending id); an absent one is not a procedure of the family.
-    let supported = crate::analysis_identity_status(step.family, step.procedure, step.solution_space)
-        .is_some();
+    let supported =
+        crate::analysis_identity_status(step.family, step.procedure, step.solution_space).is_some();
     if supported {
         Ok(())
     } else {

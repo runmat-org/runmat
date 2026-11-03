@@ -194,9 +194,10 @@ impl PreparedFluidSource {
         // The count-only gate above charged geometry scratch over the whole mesh, before the
         // cell selection was known. A coupled study derives finite volumes only on its fluid
         // cells: the admitted preparation carries that selection's scratch.
-        let selected_scratch = FiniteVolumeTopology::reserve(&source, geometry_policy, &cells.selection)
-            .map_err(invalid)?
-            .scratch_bytes as u64;
+        let selected_scratch =
+            FiniteVolumeTopology::reserve(&source, geometry_policy, &cells.selection)
+                .map_err(invalid)?
+                .scratch_bytes as u64;
         let preparation_resident_bytes = preparation_resident_bytes
             .checked_sub(geometry.scratch_bytes as u64)
             .and_then(|bytes| bytes.checked_add(selected_scratch))

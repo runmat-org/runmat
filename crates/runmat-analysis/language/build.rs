@@ -46,7 +46,15 @@ fn main() {
         .iter()
         .map(|row| {
             let mut out = serde_json::Map::new();
-            for key in ["id", "title", "kind", "area", "status", "acceptance", "docs"] {
+            for key in [
+                "id",
+                "title",
+                "kind",
+                "area",
+                "status",
+                "acceptance",
+                "docs",
+            ] {
                 if let Some(value) = row.get(key) {
                     out.insert(key.to_string(), value.clone());
                 }

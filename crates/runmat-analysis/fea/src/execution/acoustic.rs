@@ -18,7 +18,8 @@ use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 mod fields;
 pub use fields::{
-    acoustic_native_field_definitions, ACOUSTIC_INTENSITY_FIELD_ID, ACOUSTIC_PORT_INTENSITY_FIELD_ID,
+    acoustic_native_field_definitions, ACOUSTIC_INTENSITY_FIELD_ID,
+    ACOUSTIC_PORT_INTENSITY_FIELD_ID,
 };
 pub(in crate::execution) use fields::{
     native_acoustic_entity_counts, native_acoustic_field_definition, native_acoustic_field_plan,

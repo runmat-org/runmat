@@ -291,7 +291,11 @@ fn port_operation(name: &str, summary: &str, ports: [&str; 2], lowering: &str) -
         name,
         summary,
         vec![
-            parameter("analysis", OperationTypePattern::Any, OperationParameterArity::Required),
+            parameter(
+                "analysis",
+                OperationTypePattern::Any,
+                OperationParameterArity::Required,
+            ),
             parameter(ports[0], region(), OperationParameterArity::Required),
             parameter(ports[1], region(), OperationParameterArity::Required),
         ],

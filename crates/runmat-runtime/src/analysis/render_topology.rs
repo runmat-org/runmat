@@ -116,24 +116,27 @@ pub(super) fn render_topology_from_solver_mesh_at(
     }
     let regions = render_regions_from_triangle_indices(region_triangles);
 
-    Some((AnalysisRenderTopology {
-        schema_version: "analysis_render_topology/v1".to_string(),
-        source: AnalysisRenderTopologySource::AnalysisMesh,
-        volume_element_count: mesh.topology.volume_elements.len(),
-        meshes: vec![AnalysisRenderMesh {
-            mesh_id: "solver_mesh_boundary".to_string(),
-            vertices: mesh
-                .topology
-                .nodes
-                .iter()
-                .map(|node| node.coordinates_m.canonical_value())
-                .collect(),
-            triangles,
-            regions,
-            vertex_volume_node_indices: (0..mesh.topology.nodes.len()).map(Some).collect(),
-            triangle_volume_element_indices,
-        }],
-    }, dropped))
+    Some((
+        AnalysisRenderTopology {
+            schema_version: "analysis_render_topology/v1".to_string(),
+            source: AnalysisRenderTopologySource::AnalysisMesh,
+            volume_element_count: mesh.topology.volume_elements.len(),
+            meshes: vec![AnalysisRenderMesh {
+                mesh_id: "solver_mesh_boundary".to_string(),
+                vertices: mesh
+                    .topology
+                    .nodes
+                    .iter()
+                    .map(|node| node.coordinates_m.canonical_value())
+                    .collect(),
+                triangles,
+                regions,
+                vertex_volume_node_indices: (0..mesh.topology.nodes.len()).map(Some).collect(),
+                triangle_volume_element_indices,
+            }],
+        },
+        dropped,
+    ))
 }
 
 /// Whether the face's corner winding normal points into its adjacent element (towards the

@@ -39,12 +39,17 @@ pub async fn execute_check(
     let file = resolve_script_input(file)?;
     if crate::commands::fea::source::is_fea_source_path(&file) {
         if !search_paths.is_empty() {
-            anyhow::bail!("--path adds MATLAB lookup roots; .fea documents import their functions explicitly");
+            anyhow::bail!(
+                "--path adds MATLAB lookup roots; .fea documents import their functions explicitly"
+            );
         }
         return check_fea_file(file, cli, config, root, json, deny_warnings).await;
     }
     if !root.is_empty() {
-        anyhow::bail!("--study and --sweep select a root of a .fea document; {} is not one", file.display());
+        anyhow::bail!(
+            "--study and --sweep select a root of a .fea document; {} is not one",
+            file.display()
+        );
     }
     if is_matlab_file(&file) {
         return check_m_file(
@@ -110,13 +115,11 @@ async fn check_fea_file(
         Ok(None)
     };
     let selection_error = selection.as_ref().err().map(ToString::to_string);
-    let warnings = report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.severity == runmat_analysis_language::FeaDiagnosticSeverity::Warning);
-    let valid = report.status.is_valid()
-        && selection_error.is_none()
-        && !(deny_warnings && warnings);
+    let warnings = report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.severity == runmat_analysis_language::FeaDiagnosticSeverity::Warning
+    });
+    let valid =
+        report.status.is_valid() && selection_error.is_none() && !(deny_warnings && warnings);
     if json {
         // The full checked-source report (program, source index, previews, diagnostics) plus
         // the root summary and selection; `status` reflects the selection and `-D warnings`.
@@ -125,7 +128,10 @@ async fn check_fea_file(
             .as_object_mut()
             .context("FEA check report serializes as an object")?;
         object.insert("kind".into(), json!("fea"));
-        object.insert("status".into(), json!(if valid { "valid" } else { "invalid" }));
+        object.insert(
+            "status".into(),
+            json!(if valid { "valid" } else { "invalid" }),
+        );
         object.insert("studies".into(), json!(checked.program.studies.len()));
         object.insert("sweeps".into(), json!(checked.program.sweeps.len()));
         object.insert("roots".into(), json!(roots));

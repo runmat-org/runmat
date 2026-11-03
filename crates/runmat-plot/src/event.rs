@@ -804,7 +804,9 @@ impl FigureScene {
         figure.z_label = Some("Z".to_string());
         figure.set_axes_view(0, -38.0, 24.0);
         let snapshot = FigureSnapshot::capture(&figure);
-        let grid = compact_mesh::PositionGrid::for_diagonal((scene.bounds.max - scene.bounds.min).length());
+        let grid = compact_mesh::PositionGrid::for_diagonal(
+            (scene.bounds.max - scene.bounds.min).length(),
+        );
         let plots = scene
             .chunks
             .iter()

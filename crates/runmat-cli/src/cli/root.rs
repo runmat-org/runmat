@@ -685,6 +685,7 @@ mod tests {
                     .unwrap();
             let Some(Commands::Run {
                 file: explicit_file,
+                root,
                 execution,
                 function,
                 json,
@@ -698,6 +699,7 @@ mod tests {
             assert_eq!(shorthand.script_function, function);
             assert_eq!(shorthand.script_json, json);
             assert_eq!(shorthand.script_args, args);
+            assert!(root.is_empty());
             assert_eq!(
                 shorthand.execution.resolve().unwrap(),
                 execution.resolve().unwrap()

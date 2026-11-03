@@ -52,7 +52,10 @@ fn main() {
     let text = fs::read_to_string(&ledger).expect("docs/simulation/ledger.json");
     let ledger: serde_json::Value = serde_json::from_str(&text).expect("ledger.json is JSON");
     let mut rows = String::new();
-    for capability in ledger["capabilities"].as_array().expect("ledger capabilities") {
+    for capability in ledger["capabilities"]
+        .as_array()
+        .expect("ledger capabilities")
+    {
         let Some(identity) = capability.get("identity") else {
             continue;
         };
@@ -66,7 +69,11 @@ fn main() {
             "    row({}, P::{}, {}, {}),\n",
             family(identity["family"].as_str().expect("identity family")),
             procedure(identity["procedure"].as_str().expect("identity procedure")),
-            space(identity["solution_space"].as_str().expect("identity solution space")),
+            space(
+                identity["solution_space"]
+                    .as_str()
+                    .expect("identity solution space")
+            ),
             status
         ));
     }

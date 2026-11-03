@@ -25,7 +25,12 @@ pub(super) fn snapshots(
             } else {
                 vec![values.len() / components, components]
             };
-            Ok(AnalysisField::host_f64(definition.field_id().to_string(), layout, shape, values))
+            Ok(AnalysisField::host_f64(
+                definition.field_id().to_string(),
+                layout,
+                shape,
+                values,
+            ))
         })
         .collect()
 }

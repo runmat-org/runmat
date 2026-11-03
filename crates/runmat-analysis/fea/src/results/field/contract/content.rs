@@ -54,7 +54,12 @@ impl RecoveredField {
     }
 
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
-        if self.storage.layout != self.definition.layout().with_ordinal(self.storage.layout.ordinal) {
+        if self.storage.layout
+            != self
+                .definition
+                .layout()
+                .with_ordinal(self.storage.layout.ordinal)
+        {
             return Err(RecoveredFieldError::StorageLayoutMismatch);
         }
         if self.identity != self.derive_identity()? {

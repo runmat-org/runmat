@@ -36,7 +36,8 @@ fn rejects_rehashed_partitions_with_incorrect_value_counts() {
                 definition.clone(),
                 RecoveredFieldSample::Final,
                 AnalysisField::host_f64(
-                    definition.field_id(), definition.layout(),
+                    definition.field_id(),
+                    definition.layout(),
                     definition.storage_shape(3).unwrap(),
                     vec![1.0; 3 * components],
                 ),
@@ -51,7 +52,8 @@ fn rejects_rehashed_partitions_with_incorrect_value_counts() {
             for count in [0, 2 * components - 1, 2 * components + 1] {
                 let mut invalid = valid.clone();
                 invalid.storage = AnalysisField::host_f64(
-                    definition.field_id(), valid.storage.layout.clone(),
+                    definition.field_id(),
+                    valid.storage.layout.clone(),
                     valid.storage.shape.clone(),
                     vec![1.0; count],
                 );

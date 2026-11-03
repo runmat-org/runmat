@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AnalysisFieldLayout};
+use runmat_analysis_core::AnalysisFieldLayout;
 use runmat_analysis_core::{
     AnalysisField, FieldLocation, ObservationQuantity, ObservationValueShape,
 };
@@ -83,7 +83,11 @@ pub fn recover_complex_connector_force_field(
     }
     let connector_count = real.responses.len();
     let real = AnalysisField::host_f64(
-        FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE, AnalysisFieldLayout::vector3(ObservationQuantity::ConnectorForce, FieldLocation::Connector),
+        FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+        AnalysisFieldLayout::vector3(
+            ObservationQuantity::ConnectorForce,
+            FieldLocation::Connector,
+        ),
         vec![connector_count, 3],
         real.responses
             .iter()
@@ -91,7 +95,11 @@ pub fn recover_complex_connector_force_field(
             .collect(),
     );
     let imaginary = AnalysisField::host_f64(
-        FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE, AnalysisFieldLayout::vector3(ObservationQuantity::ConnectorForce, FieldLocation::Connector),
+        FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+        AnalysisFieldLayout::vector3(
+            ObservationQuantity::ConnectorForce,
+            FieldLocation::Connector,
+        ),
         vec![connector_count, 3],
         imaginary
             .responses
@@ -141,12 +149,20 @@ pub fn recover_connector_observable_fields(
         .into_iter()
         .zip([
             AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE, AnalysisFieldLayout::vector3(ObservationQuantity::ConnectorForce, FieldLocation::Connector),
+                FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::ConnectorForce,
+                    FieldLocation::Connector,
+                ),
                 vec![connector_count, 3],
                 forces,
             ),
             AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_CONNECTOR_STORED_ENERGY, AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergy, FieldLocation::Connector),
+                FEA_FIELD_STRUCTURAL_CONNECTOR_STORED_ENERGY,
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::StrainEnergy,
+                    FieldLocation::Connector,
+                ),
                 vec![connector_count],
                 energies,
             ),

@@ -33,7 +33,11 @@ pub(super) fn divergence_term_scale(
         .iter()
         .chain(&cell_centroid)
         .fold(0.0_f64, |m, v| m.max(v.abs()));
-    area_m2 * (length(super::super::element::subtract(face_centroid, cell_centroid)) + coordinate)
+    area_m2
+        * (length(super::super::element::subtract(
+            face_centroid,
+            cell_centroid,
+        )) + coordinate)
         / 3.0
 }
 

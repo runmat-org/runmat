@@ -180,6 +180,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
             sample,
             runmat_analysis_core::AnalysisField::host_f64(
                 definition.field_id(),
+                definition.layout(),
                 vec![projection.nodes.len(), 3],
                 vec![time + 1.0; projection.nodes.len() * 3],
             ),

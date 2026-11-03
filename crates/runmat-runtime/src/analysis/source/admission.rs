@@ -44,7 +44,14 @@ pub(super) fn append_admission_diagnostics(
             continue;
         };
         let issues = admit_resolved(&resolved, &[Vec::new()]);
-        push(program, root, FeaSymbolKind::Study, &id, issues, &mut diagnostics);
+        push(
+            program,
+            root,
+            FeaSymbolKind::Study,
+            &id,
+            issues,
+            &mut diagnostics,
+        );
     }
     let sweeps = program
         .sweeps
@@ -73,7 +80,14 @@ pub(super) fn append_admission_diagnostics(
             })
             .collect::<Vec<_>>();
         let issues = admit_resolved(&resolved.study, &inputs);
-        push(program, root, FeaSymbolKind::Sweep, &id, issues, &mut diagnostics);
+        push(
+            program,
+            root,
+            FeaSymbolKind::Sweep,
+            &id,
+            issues,
+            &mut diagnostics,
+        );
     }
     program.diagnostics.extend(diagnostics);
 }

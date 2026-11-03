@@ -200,8 +200,10 @@ pub(super) fn run(
         }
     }
     let temperature_snapshots = snapshots(nodal_temperatures, 0)?;
-    let interface_temperature_snapshots =
-        snapshots(interface_temperatures, crate::physics::thermal::history_fields::INTERFACE)?;
+    let interface_temperature_snapshots = snapshots(
+        interface_temperatures,
+        crate::physics::thermal::history_fields::INTERFACE,
+    )?;
     let interface_node_ids = dofs
         .second()
         .iter()

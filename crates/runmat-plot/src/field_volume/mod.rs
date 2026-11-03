@@ -43,7 +43,8 @@ impl TetOrder {
 }
 
 /// Corner pairs of the quadratic midside nodes, in their stored order after the corners.
-pub const QUADRATIC_EDGE_CORNERS: [[usize; 2]; 6] = [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
+pub const QUADRATIC_EDGE_CORNERS: [[usize; 2]; 6] =
+    [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum FieldVolumeError {
@@ -52,13 +53,21 @@ pub enum FieldVolumeError {
     #[error("element node list has {actual} entries, not a multiple of {per_element}")]
     ElementLength { per_element: usize, actual: usize },
     #[error("element {element} references node {node}, but the mesh has {nodes} nodes")]
-    NodeOutOfRange { element: usize, node: u32, nodes: usize },
+    NodeOutOfRange {
+        element: usize,
+        node: u32,
+        nodes: usize,
+    },
     #[error("node {node} has a non-finite position")]
     NonFinitePosition { node: usize },
     #[error("the field has {components} components; views draw scalars and 3-vectors")]
     Components { components: usize },
     #[error("the field has {actual} values for {expected} {support}")]
-    FieldLength { support: &'static str, expected: usize, actual: usize },
+    FieldLength {
+        support: &'static str,
+        expected: usize,
+        actual: usize,
+    },
     #[error("the field contains a non-finite value")]
     NonFinite,
 }
@@ -73,25 +82,42 @@ pub struct TetMesh {
 }
 
 impl TetMesh {
-    pub fn new(positions: Vec<[f64; 3]>, order: TetOrder, elements: Vec<u32>) -> Result<Self, FieldVolumeError> {
+    pub fn new(
+        positions: Vec<[f64; 3]>,
+        order: TetOrder,
+        elements: Vec<u32>,
+    ) -> Result<Self, FieldVolumeError> {
         let per_element = order.node_count();
         if elements.is_empty() {
             return Err(FieldVolumeError::Empty);
         }
         if elements.len() % per_element != 0 {
-            return Err(FieldVolumeError::ElementLength { per_element, actual: elements.len() });
+            return Err(FieldVolumeError::ElementLength {
+                per_element,
+                actual: elements.len(),
+            });
         }
-        if let Some(node) = positions.iter().position(|p| !p.iter().all(|c| c.is_finite())) {
+        if let Some(node) = positions
+            .iter()
+            .position(|p| !p.iter().all(|c| c.is_finite()))
+        {
             return Err(FieldVolumeError::NonFinitePosition { node });
         }
-        if let Some(index) = elements.iter().position(|&node| node as usize >= positions.len()) {
+        if let Some(index) = elements
+            .iter()
+            .position(|&node| node as usize >= positions.len())
+        {
             return Err(FieldVolumeError::NodeOutOfRange {
                 element: index / per_element,
                 node: elements[index],
                 nodes: positions.len(),
             });
         }
-        Ok(Self { positions, order, elements })
+        Ok(Self {
+            positions,
+            order,
+            elements,
+        })
     }
 
     pub fn order(&self) -> TetOrder {
@@ -139,7 +165,10 @@ impl TetMesh {
             .iter()
             .enumerate()
             .map(|(edge, [a, b])| {
-                let (a, b) = (self.positions[nodes[*a] as usize], self.positions[nodes[*b] as usize]);
+                let (a, b) = (
+                    self.positions[nodes[*a] as usize],
+                    self.positions[nodes[*b] as usize],
+                );
                 let midside = self.positions[nodes[4 + edge] as usize];
                 distance(midside, [0, 1, 2].map(|axis| 0.5 * (a[axis] + b[axis])))
             })
@@ -212,7 +241,9 @@ impl SolvedField {
     /// Checks the field against the mesh, so evaluation never indexes out of range.
     pub fn validate(&self, mesh: &TetMesh) -> Result<(), FieldVolumeError> {
         if !matches!(self.components, 1 | 3) {
-            return Err(FieldVolumeError::Components { components: self.components });
+            return Err(FieldVolumeError::Components {
+                components: self.components,
+            });
         }
         let (support, entities) = match self.support {
             FieldSupport::Node => ("nodes", mesh.node_count()),
@@ -221,7 +252,11 @@ impl SolvedField {
         let expected = entities * self.components;
         for values in std::iter::once(&self.real).chain(self.imaginary.iter()) {
             if values.len() != expected {
-                return Err(FieldVolumeError::FieldLength { support, expected, actual: values.len() });
+                return Err(FieldVolumeError::FieldLength {
+                    support,
+                    expected,
+                    actual: values.len(),
+                });
             }
             if !values.iter().all(|v| v.is_finite()) {
                 return Err(FieldVolumeError::NonFinite);
@@ -232,7 +267,10 @@ impl SolvedField {
 
     /// The stored value set of one node (nodal field) or element (element field).
     pub fn entity_value(&self, entity: usize) -> PointValue {
-        let mut value = PointValue { components: self.components, ..PointValue::default() };
+        let mut value = PointValue {
+            components: self.components,
+            ..PointValue::default()
+        };
         let start = entity * self.components;
         for component in 0..self.components {
             value.real[component] = self.real[start + component];
@@ -250,7 +288,10 @@ impl SolvedField {
     /// The field at barycentric coordinates `weights` of `element`: the element's own value for
     /// an element field; the element's basis applied to its nodal values for a nodal field.
     pub fn at(&self, mesh: &TetMesh, element: usize, weights: [f64; 4]) -> PointValue {
-        let mut value = PointValue { components: self.components, ..PointValue::default() };
+        let mut value = PointValue {
+            components: self.components,
+            ..PointValue::default()
+        };
         let mut accumulate = |entity: usize, weight: f64| {
             let start = entity * self.components;
             for component in 0..self.components {
@@ -347,7 +388,9 @@ impl Reduction {
             }
             Self::SoundPressureLevel { reference_pa } => {
                 let amplitude = Self::Magnitude.apply(value);
-                20.0 * (amplitude.max(f64::MIN_POSITIVE) / (std::f64::consts::SQRT_2 * reference_pa)).log10()
+                20.0 * (amplitude.max(f64::MIN_POSITIVE)
+                    / (std::f64::consts::SQRT_2 * reference_pa))
+                    .log10()
             }
         }
     }
@@ -414,7 +457,11 @@ pub(crate) fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 pub(crate) fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 pub(crate) fn norm(a: [f64; 3]) -> f64 {
@@ -440,9 +487,17 @@ pub(crate) mod test_support {
 
     /// A unit cube split into six tetrahedra around the main diagonal (Kuhn triangulation).
     pub fn unit_cube(order: TetOrder) -> TetMesh {
-        let mut positions: Vec<[f64; 3]> =
-            (0..8).map(|i| [(i & 1) as f64, ((i >> 1) & 1) as f64, ((i >> 2) & 1) as f64]).collect();
-        let tetrahedra: [[u32; 4]; 6] = [[0, 1, 3, 7], [0, 3, 2, 7], [0, 2, 6, 7], [0, 6, 4, 7], [0, 4, 5, 7], [0, 5, 1, 7]];
+        let mut positions: Vec<[f64; 3]> = (0..8)
+            .map(|i| [(i & 1) as f64, ((i >> 1) & 1) as f64, ((i >> 2) & 1) as f64])
+            .collect();
+        let tetrahedra: [[u32; 4]; 6] = [
+            [0, 1, 3, 7],
+            [0, 3, 2, 7],
+            [0, 2, 6, 7],
+            [0, 6, 4, 7],
+            [0, 4, 5, 7],
+            [0, 5, 1, 7],
+        ];
         let mut elements = Vec::new();
         let mut midsides = std::collections::HashMap::new();
         for tet in tetrahedra {
@@ -491,7 +546,11 @@ mod tests {
             for weights in [[0.25; 4], [0.1, 0.2, 0.3, 0.4], [0.7, 0.1, 0.1, 0.1]] {
                 let value = field.at(&mesh, element, weights);
                 let exact = f(mesh.point(element, weights));
-                assert!((value.real[0] - exact).abs() < 1e-12, "{} vs {exact}", value.real[0]);
+                assert!(
+                    (value.real[0] - exact).abs() < 1e-12,
+                    "{} vs {exact}",
+                    value.real[0]
+                );
             }
         }
     }
@@ -515,11 +574,20 @@ mod tests {
 
     #[test]
     fn phasor_reductions_follow_their_definitions() {
-        let value = PointValue { components: 1, real: [3.0, 0.0, 0.0], imaginary: [4.0, 0.0, 0.0] };
+        let value = PointValue {
+            components: 1,
+            real: [3.0, 0.0, 0.0],
+            imaginary: [4.0, 0.0, 0.0],
+        };
         assert!((Reduction::Magnitude.apply(&value) - 5.0).abs() < 1e-12);
-        let quarter = Reduction::InstantaneousAt { phase_radians: std::f64::consts::FRAC_PI_2 };
+        let quarter = Reduction::InstantaneousAt {
+            phase_radians: std::f64::consts::FRAC_PI_2,
+        };
         assert!((quarter.apply(&value) + 4.0).abs() < 1e-12);
-        let level = Reduction::SoundPressureLevel { reference_pa: 2.0e-5 }.apply(&value);
+        let level = Reduction::SoundPressureLevel {
+            reference_pa: 2.0e-5,
+        }
+        .apply(&value);
         let expected = 20.0 * (5.0 / (std::f64::consts::SQRT_2 * 2.0e-5)).log10();
         assert!((level - expected).abs() < 1e-9);
     }
@@ -529,8 +597,14 @@ mod tests {
         let mesh = unit_cube(TetOrder::Linear);
         let mut field = nodal(&mesh, |p| vec![p[0]]);
         field.real.pop();
-        assert!(matches!(field.validate(&mesh), Err(FieldVolumeError::FieldLength { .. })));
+        assert!(matches!(
+            field.validate(&mesh),
+            Err(FieldVolumeError::FieldLength { .. })
+        ));
         let field = nodal(&mesh, |p| vec![p[0], p[1]]);
-        assert!(matches!(field.validate(&mesh), Err(FieldVolumeError::Components { .. })));
+        assert!(matches!(
+            field.validate(&mesh),
+            Err(FieldVolumeError::Components { .. })
+        ));
     }
 }

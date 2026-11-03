@@ -343,7 +343,8 @@ mod tests {
         let borrowed =
             AnalysisField::host_f64_serialization("cfd.velocity", &layout, &shape, &values);
         let actual = AnalysisField::host_f64(
-            "cfd.velocity", AnalysisFieldLayout::vector3(ObservationQuantity::FluidVelocity, FieldLocation::Cell),
+            "cfd.velocity",
+            AnalysisFieldLayout::vector3(ObservationQuantity::FluidVelocity, FieldLocation::Cell),
             shape.to_vec(),
             original.iter().flatten().copied().collect(),
         );
@@ -502,7 +503,8 @@ mod tests {
                     definition.clone(),
                     RecoveredFieldSample::Final,
                     AnalysisField::host_f64(
-                        definition.field_id(), definition.layout(),
+                        definition.field_id(),
+                        definition.layout(),
                         definition.storage_shape(count).unwrap(),
                         values.next().unwrap(),
                     ),

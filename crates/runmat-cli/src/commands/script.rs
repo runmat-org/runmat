@@ -128,13 +128,13 @@ pub(crate) async fn execute_script_with_graphics(
         if !args.is_empty() {
             anyhow::bail!(".fea files do not accept positional script arguments");
         }
-        return boxed_command(|| {
-            execute_fea_path(script, fea_root, cli, config, json, execution)
-        })
-        .await;
+        return boxed_command(|| execute_fea_path(script, fea_root, cli, config, json, execution))
+            .await;
     }
     if !fea_root.is_empty() {
-        anyhow::bail!("--study and --sweep select a root of a .fea document; {script:?} is not one");
+        anyhow::bail!(
+            "--study and --sweep select a root of a .fea document; {script:?} is not one"
+        );
     }
 
     if let ExecutionTarget::Remote(target) = execution.resolve()? {

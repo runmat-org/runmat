@@ -332,7 +332,10 @@ fn reduced_nodal_and_distributed_sound_pressure_levels_agree() {
     )
     .unwrap();
     // Peaks above and below the 20 uPa reference: the second level is negative.
-    for (peak_pa, expected_db) in [(10.0, 110.969_100_130_080_56), (1.0e-5, -9.030_899_869_919_436)] {
+    for (peak_pa, expected_db) in [
+        (10.0, 110.969_100_130_080_56),
+        (1.0e-5, -9.030_899_869_919_436),
+    ] {
         let phasors = projection
             .nodes
             .iter()
@@ -362,6 +365,9 @@ fn reduced_nodal_and_distributed_sound_pressure_levels_agree() {
             (reduced - distributed).abs() < 1e-10,
             "reduced {reduced} dB vs distributed {distributed} dB at {peak_pa} Pa"
         );
-        assert!((distributed - expected_db).abs() < 1e-9, "{distributed} vs {expected_db}");
+        assert!(
+            (distributed - expected_db).abs() < 1e-9,
+            "{distributed} vs {expected_db}"
+        );
     }
 }

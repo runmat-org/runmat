@@ -115,8 +115,9 @@ fn centroid(corners: &[usize], nodes: &[[f64; 3]]) -> Option<[f64; 3]> {
 /// Solver node coordinates and each volume element's node indices, in solver order, from the
 /// run's canonical solver mesh artifact.
 pub fn solver_mesh_entities(path: &str) -> Result<(Vec<[f64; 3]>, Vec<Vec<usize>>), String> {
-    let mesh = super::super::solver_mesh_artifact::load_solver_mesh_artifact(std::path::Path::new(path))
-        .map_err(|error| error.to_string())?;
+    let mesh =
+        super::super::solver_mesh_artifact::load_solver_mesh_artifact(std::path::Path::new(path))
+            .map_err(|error| error.to_string())?;
     let index_by_id = mesh
         .topology
         .nodes
@@ -138,7 +139,12 @@ pub fn solver_mesh_entities(path: &str) -> Result<(Vec<[f64; 3]>, Vec<Vec<usize>
             element
                 .node_ids
                 .iter()
-                .map(|id| index_by_id.get(id).copied().ok_or("element node is missing"))
+                .map(|id| {
+                    index_by_id
+                        .get(id)
+                        .copied()
+                        .ok_or("element node is missing")
+                })
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;

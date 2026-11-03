@@ -45,7 +45,8 @@ impl RecoveredFieldPartition {
             count: entity_count,
         };
         let layout = definition.layout();
-        let storage = AnalysisField::host_f64_serialization(definition.field_id(), &layout, &shape, &values);
+        let storage =
+            AnalysisField::host_f64_serialization(definition.field_id(), &layout, &shape, &values);
         // Transparent digest identities always serialize to fixed-width hexadecimal strings.
         // These are profile-only placeholders; no artifact or semantic identity is published.
         let placeholder = Digest::sha256([]);

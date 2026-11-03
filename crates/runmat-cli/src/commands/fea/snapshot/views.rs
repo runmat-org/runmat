@@ -122,30 +122,32 @@ pub(super) async fn capture(
         let encode = |detail| -> Result<Encoded> {
             let (mut scene, deformation_scale, surface, volume) = match spec.volume {
                 Some(volume) => {
-                    let solver_mesh = mesh_path
-                        .as_deref()
-                        .ok_or_else(|| anyhow::anyhow!("view '{}' needs the solver mesh", spec.id))?;
+                    let solver_mesh = mesh_path.as_deref().ok_or_else(|| {
+                        anyhow::anyhow!("view '{}' needs the solver mesh", spec.id)
+                    })?;
                     let field = spec
                         .field
                         .clone()
                         .ok_or_else(|| anyhow::anyhow!("view '{}' has no field", spec.id))?;
-                    let request = runmat_runtime::analysis::field_scene::volume::VolumeViewRequest {
-                        field,
-                        kind: volume.kind,
-                        reduction: volume.reduction,
-                        range: extrema
-                            .as_ref()
-                            .filter(|_| volume.true_extrema)
-                            .map(|extrema| (extrema.minimum.value, extrema.maximum.value)),
-                        legend: spec.legend.clone(),
-                        unit: spec.unit.clone(),
-                    };
-                    let (scene, error) = runmat_runtime::analysis::field_scene::volume::build_volume_scene(
-                        run_id,
-                        solver_mesh,
-                        &request,
-                    )
-                    .map_err(anyhow::Error::msg)?;
+                    let request =
+                        runmat_runtime::analysis::field_scene::volume::VolumeViewRequest {
+                            field,
+                            kind: volume.kind,
+                            reduction: volume.reduction,
+                            range: extrema
+                                .as_ref()
+                                .filter(|_| volume.true_extrema)
+                                .map(|extrema| (extrema.minimum.value, extrema.maximum.value)),
+                            legend: spec.legend.clone(),
+                            unit: spec.unit.clone(),
+                        };
+                    let (scene, error) =
+                        runmat_runtime::analysis::field_scene::volume::build_volume_scene(
+                            run_id,
+                            solver_mesh,
+                            &request,
+                        )
+                        .map_err(anyhow::Error::msg)?;
                     (scene, 0.0, None, Some(error))
                 }
                 None => {
@@ -221,7 +223,10 @@ pub(super) async fn capture(
         } = match encode(SurfaceDetail::Full) {
             Ok(encoded) => encoded,
             Err(error) if error.to_string().contains("exceeding limit") => {
-                log::info!("snapshot view '{}': {error}; drawing corner triangles", spec.id);
+                log::info!(
+                    "snapshot view '{}': {error}; drawing corner triangles",
+                    spec.id
+                );
                 encode(SurfaceDetail::Corners)?
             }
             Err(error) => return Err(error),
@@ -264,8 +269,12 @@ pub(super) async fn capture(
                     kind: spec.kind,
                     drawn: match spec.reduction {
                         runmat_plot::field_volume::Reduction::Magnitude => "magnitude",
-                        runmat_plot::field_volume::Reduction::InstantaneousAt { .. } => "value_at_phase_0",
-                        runmat_plot::field_volume::Reduction::SoundPressureLevel { .. } => "sound_pressure_level",
+                        runmat_plot::field_volume::Reduction::InstantaneousAt { .. } => {
+                            "value_at_phase_0"
+                        }
+                        runmat_plot::field_volume::Reduction::SoundPressureLevel { .. } => {
+                            "sound_pressure_level"
+                        }
                     },
                     error,
                 }),

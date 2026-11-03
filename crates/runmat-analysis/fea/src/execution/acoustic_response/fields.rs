@@ -1,5 +1,4 @@
 //! Native real nodal pressure per retained sample, through the shared recovered-field contract.
-use runmat_analysis_core::{AnalysisFieldLayout};
 use super::*;
 use crate::{
     execution::{
@@ -12,9 +11,9 @@ use crate::{
         RecoveredFieldNumericRepresentation,
     },
 };
+use runmat_analysis_core::AnalysisFieldLayout;
 use runmat_analysis_core::{
-    AnalysisField, FieldLocation, ObservationQuantity, ObservationValueShape,
-    RecoveryPolicy,
+    AnalysisField, FieldLocation, ObservationQuantity, ObservationValueShape, RecoveryPolicy,
 };
 
 pub const ACOUSTIC_PRESSURE_FIELD_ID: &str = "acoustic.pressure";
@@ -170,12 +169,20 @@ impl AcousticResponseSolverResult {
         match self.diagnostics() {
             AcousticResponseDiagnostics::Modal { frequencies_hz, .. } => vec![
                 AnalysisField::host_f64(
-                    crate::contracts::FEA_FIELD_MODAL_FREQUENCY_HZ, AnalysisFieldLayout::scalar(ObservationQuantity::ModalFrequency, FieldLocation::Mode),
+                    crate::contracts::FEA_FIELD_MODAL_FREQUENCY_HZ,
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::ModalFrequency,
+                        FieldLocation::Mode,
+                    ),
                     vec![frequencies_hz.len()],
                     frequencies_hz.clone(),
                 ),
                 AnalysisField::host_f64(
-                    crate::contracts::FEA_FIELD_MODAL_EIGENVALUE, AnalysisFieldLayout::scalar(ObservationQuantity::Eigenvalue, FieldLocation::Mode),
+                    crate::contracts::FEA_FIELD_MODAL_EIGENVALUE,
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::Eigenvalue,
+                        FieldLocation::Mode,
+                    ),
                     vec![frequencies_hz.len()],
                     frequencies_hz
                         .iter()
@@ -192,14 +199,30 @@ impl AcousticResponseSolverResult {
                 // Energy evidence covers every accepted time point, not only retained fields.
                 let times = time_points_s.clone();
                 vec![
-                    AnalysisField::host_f64("acoustic.time_s", AnalysisFieldLayout::scalar(ObservationQuantity::Time, FieldLocation::Global), vec![times.len()], times),
                     AnalysisField::host_f64(
-                        "acoustic.energy_j", AnalysisFieldLayout::scalar(ObservationQuantity::AcousticEnergy, FieldLocation::Global),
+                        "acoustic.time_s",
+                        AnalysisFieldLayout::scalar(
+                            ObservationQuantity::Time,
+                            FieldLocation::Global,
+                        ),
+                        vec![times.len()],
+                        times,
+                    ),
+                    AnalysisField::host_f64(
+                        "acoustic.energy_j",
+                        AnalysisFieldLayout::scalar(
+                            ObservationQuantity::AcousticEnergy,
+                            FieldLocation::Global,
+                        ),
                         vec![acoustic_energy_j.len()],
                         acoustic_energy_j.clone(),
                     ),
                     AnalysisField::host_f64(
-                        "acoustic.boundary_absorbed_energy_j", AnalysisFieldLayout::scalar(ObservationQuantity::AbsorbedEnergy, FieldLocation::Global),
+                        "acoustic.boundary_absorbed_energy_j",
+                        AnalysisFieldLayout::scalar(
+                            ObservationQuantity::AbsorbedEnergy,
+                            FieldLocation::Global,
+                        ),
                         vec![boundary_absorbed_energy_j.len()],
                         boundary_absorbed_energy_j.clone(),
                     ),
@@ -215,18 +238,31 @@ impl AcousticResponseSolverResult {
         match self.diagnostics() {
             AcousticResponseDiagnostics::Modal { frequencies_hz, .. } => vec![
                 AnalysisField::host_f64(
-                    crate::contracts::FEA_FIELD_MODAL_FREQUENCY_HZ, AnalysisFieldLayout::scalar(ObservationQuantity::ModalFrequency, FieldLocation::Mode),
+                    crate::contracts::FEA_FIELD_MODAL_FREQUENCY_HZ,
+                    AnalysisFieldLayout::scalar(
+                        ObservationQuantity::ModalFrequency,
+                        FieldLocation::Mode,
+                    ),
                     vec![frequencies_hz.len()],
                     frequencies_hz.clone(),
                 ),
                 AnalysisField::host_f64(
-                    "acoustic.mode_pressure", AnalysisFieldLayout::components(ObservationQuantity::AcousticPressure, FieldLocation::Mode, nodes),
+                    "acoustic.mode_pressure",
+                    AnalysisFieldLayout::components(
+                        ObservationQuantity::AcousticPressure,
+                        FieldLocation::Mode,
+                        nodes,
+                    ),
                     vec![self.pressure_pa().len(), nodes],
                     self.pressure_pa().iter().flatten().copied().collect(),
                 ),
             ],
             AcousticResponseDiagnostics::Transient { .. } => vec![AnalysisField::host_f64(
-                ACOUSTIC_PRESSURE_FIELD_ID, AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node),
+                ACOUSTIC_PRESSURE_FIELD_ID,
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::AcousticPressure,
+                    FieldLocation::Node,
+                ),
                 vec![nodes],
                 self.pressure_pa()
                     .last()

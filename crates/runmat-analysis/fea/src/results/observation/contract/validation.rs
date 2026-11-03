@@ -262,7 +262,10 @@ pub(super) fn validate_resolved_observation(
                         FieldLocation::Element | FieldLocation::Cell,
                         RecoveredFieldEntityDomain::VolumeElements
                     )
-                    | (FieldLocation::Face, RecoveredFieldEntityDomain::OrientedFaces)
+                    | (
+                        FieldLocation::Face,
+                        RecoveredFieldEntityDomain::OrientedFaces
+                    )
             );
             let (first, second) = face_indices.split_at((*first_count).min(face_indices.len()));
             if !readable
@@ -271,7 +274,9 @@ pub(super) fn validate_resolved_observation(
                 || second.is_empty()
                 || !strictly_increasing(first)
                 || !strictly_increasing(second)
-                || first.iter().any(|index| second.binary_search(index).is_ok())
+                || first
+                    .iter()
+                    .any(|index| second.binary_search(index).is_ok())
                 || face_indices.len() != face_identities.len()
                 || !all_unique(face_identities)
             {

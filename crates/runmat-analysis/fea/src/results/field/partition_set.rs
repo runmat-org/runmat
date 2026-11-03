@@ -261,7 +261,12 @@ pub fn reconstruct_recovered_field(
     let field = RecoveredField::new(
         definition.clone(),
         sample,
-        runmat_analysis_core::AnalysisField::host_f64(definition.field_id(), definition.layout(), shape, values),
+        runmat_analysis_core::AnalysisField::host_f64(
+            definition.field_id(),
+            definition.layout(),
+            shape,
+            values,
+        ),
     )?;
     if field.identity() != expected_identity {
         return Err(RecoveredFieldError::IdentityMismatch);
