@@ -504,8 +504,8 @@ impl Driver {
                 || report.unsuccessful_resources.is_some()
                 || report.execution.is_some()
                 || report.console.is_some()
-                || !report.console_scopes.is_empty())
-            || (certified_not_started && report.delegated_console_root.is_some())
+                || !report.console_scopes.is_empty()
+                || report.delegated_console_root.is_some())
         {
             return Some("never-started certification differs from unresolved original assignment");
         }

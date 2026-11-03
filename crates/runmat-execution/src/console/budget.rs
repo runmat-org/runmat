@@ -158,6 +158,6 @@ mod metadata_tests {
         let largest_metadata = sizes.into_iter().max().unwrap() + count_growth + 2 * byte_growth;
         assert_eq!(largest_metadata, 683);
         assert_eq!(largest_metadata + 1, 684); // outer scope-array separator
-        assert!(largest_metadata + 1 <= CONSOLE_SCOPE_BYTES);
+        assert!(largest_metadata < CONSOLE_SCOPE_BYTES);
     }
 }

@@ -153,10 +153,8 @@ fn forward_frames_with_send(
         match read_payload_blocking(&mut reader, limits) {
             // A receiver that has gone away still leaves the pipe to watch for loss.
             Ok(frame) => {
-                if !observer.is_some_and(|observer| observer(&frame)) {
-                    if !send(Ok(frame)) {
-                        return armed.load(Ordering::Acquire);
-                    }
+                if !observer.is_some_and(|observer| observer(&frame)) && !send(Ok(frame)) {
+                    return armed.load(Ordering::Acquire);
                 }
             }
             Err(error) => {
