@@ -4,6 +4,7 @@ use super::*;
 pub(super) struct BoundaryProtection<'a> {
     pub nodes: &'a BTreeSet<StableDigest>,
     pub facets: &'a ProtectedFacets,
+    pub provenance: &'a DelaunayVolumeProvenance,
 }
 
 pub(super) fn visit_from_metric_contexts(
@@ -18,7 +19,9 @@ pub(super) fn visit_from_metric_contexts(
     let BoundaryProtection {
         nodes: boundary_nodes,
         facets: protected_facets,
+        provenance,
     } = protection;
+    let node_size = node_size::NodeSizeField::new(metric_request, provenance)?;
     let resolved_metrics = metrics::resolve_graded_metrics(
         topology,
         &metric_contexts,
@@ -43,10 +46,18 @@ pub(super) fn visit_from_metric_contexts(
                 "every evaluated tetrahedron must have one assigned region",
             )
         })?;
+        let corner_metrics = node_size.corner_metrics(
+            &topology.nodes,
+            tetrahedron
+                .vertex_indices
+                .map(|vertex| topology.nodes[vertex as usize]),
+            &region_id,
+        )?;
         let quality = evaluate_tetrahedron(
             topology,
             index,
             evaluation::TetrahedronEvaluationContext {
+                corner_metrics,
                 region_id,
                 incident_metric_entity_ids: context.incident_entity_ids,
                 metric,

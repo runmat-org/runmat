@@ -13,6 +13,8 @@ mod index;
 mod intersection;
 mod uniform;
 mod local;
+mod point_field;
+pub use point_field::{integrated_edge_length, intersect_metrics, SurfaceMetricSource};
 pub use local::{LocalMetricSource, MetricEntitySupport};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

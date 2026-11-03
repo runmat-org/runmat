@@ -22,6 +22,7 @@ pub(in crate::cdt) fn verify_complete_handoff(
         stream::BoundaryProtection {
             nodes: &boundary_node_identities(provenance),
             facets: &protected_facet_identities(provenance),
+            provenance,
         },
         cancellation,
         |index, reconstructed| {

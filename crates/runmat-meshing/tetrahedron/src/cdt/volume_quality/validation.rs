@@ -51,6 +51,7 @@ pub fn validate_delaunay_volume_quality(
         options,
         cancellation,
     )?;
+    let node_size = super::node_size::NodeSizeField::new(metric_request, provenance)?;
     let mut maximum_edge = 0.0_f64;
     let mut maximum_ratio = 0.0_f64;
     let mut minimum_scaled_jacobian = f64::INFINITY;
@@ -111,10 +112,17 @@ pub fn validate_delaunay_volume_quality(
             .filter(|identity| boundary_nodes.contains(identity))
             .count() as u8;
         let protected_facet_count = super::protected_facet_count(identities, &protected_facets);
+        let corner_metrics = node_size.corner_metrics(
+            &topology.nodes,
+            tetrahedron
+                .vertex_indices
+                .map(|vertex| topology.nodes[vertex as usize]),
+            &region_id,
+        )?;
         let refinement_metric_edge_length =
-            super::evaluation::volume_owned_maximum_metric_edge_length(
+            super::node_size::volume_owned_maximum_integrated_edge_length(
                 points,
-                resolved.metric,
+                corner_metrics,
                 super::protected_edge_mask(identities, &protected_facets),
             );
         let size_violation_ratio = saturated_ratio(

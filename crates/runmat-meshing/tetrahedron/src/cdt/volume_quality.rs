@@ -25,6 +25,7 @@ pub(in crate::cdt) mod joint;
 pub(in crate::cdt) use jacobian::{evaluate_tetrahedron_jacobian, PreparedJacobian};
 mod metrics;
 mod mutation;
+pub(in crate::cdt) mod node_size;
 mod stream;
 mod summary;
 use stream::visit_from_metric_contexts;
@@ -241,6 +242,7 @@ pub fn evaluate_delaunay_volume_quality(
         metric_contexts,
         &boundary_node_identities(provenance),
         &protected_facet_identities(provenance),
+        provenance,
         cancellation,
     )?;
     validate_delaunay_volume_quality(
@@ -282,6 +284,7 @@ pub(super) fn evaluate_delaunay_volume_quality_from_admitted_input(
         metric_contexts,
         &boundary_node_identities(provenance),
         &protected_facet_identities(provenance),
+        provenance,
         cancellation,
     )
 }
@@ -293,6 +296,7 @@ fn evaluate_from_metric_contexts(
     metric_contexts: MetricContexts<'_>,
     boundary_nodes: &BTreeSet<StableDigest>,
     protected_facets: &ProtectedFacets,
+    provenance: &DelaunayVolumeProvenance,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeQuality, DelaunayVolumeQualityError> {
     let mut tetrahedra = Vec::with_capacity(topology.tetrahedra.len());
@@ -304,6 +308,7 @@ fn evaluate_from_metric_contexts(
         stream::BoundaryProtection {
             nodes: boundary_nodes,
             facets: protected_facets,
+            provenance,
         },
         cancellation,
         |_, quality| {
