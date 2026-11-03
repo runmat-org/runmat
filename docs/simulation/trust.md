@@ -1,4 +1,4 @@
-# Results & Trust
+# Results and trust
 
 A run result is useful when you can inspect it, explain it, reproduce it, and judge it against the workflow's standard.
 

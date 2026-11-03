@@ -1,4 +1,4 @@
-# Types, units, and expressions
+# Types, units and expressions
 
 The checker assigns a type to every input, reference, literal, and operation before a study can be
 planned. Physical quantities carry dimensions, so a length cannot satisfy a force input merely

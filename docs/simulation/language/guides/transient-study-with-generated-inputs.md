@@ -1,4 +1,4 @@
-# Run a transient study with a generated input
+# Transient study with generated inputs
 
 Use an imported `.m` function when a time history is more naturally computed than tabulated.
 

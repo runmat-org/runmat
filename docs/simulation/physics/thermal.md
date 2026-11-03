@@ -1,4 +1,4 @@
-# Heat-transfer FEA in RunMat: steady and transient thermal analysis
+# Thermal
 
 Thermal FEA predicts temperature, heat flow, and stored thermal energy under prescribed temperature,
 heat flux, convection, and volumetric heat generation. RunMat separates thermal material ownership

@@ -1,4 +1,4 @@
-# Initial conditions for transient FEA
+# Initial conditions
 
 An initial condition defines physical state at the first time sample. It is not a boundary condition:
 it applies at $t=t_0$ and does not continue constraining the field unless a separate constraint says

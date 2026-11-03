@@ -1,4 +1,4 @@
-# Electromagnetic loads and boundaries
+# Electromagnetic loads
 
 Current density appears as source $\mathbf J_s$ in the electromagnetic weak form. Total current is
 its surface integral $I=\int_\Gamma\mathbf J\cdot\mathbf n\,d\Gamma$. The implemented

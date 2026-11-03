@@ -1,4 +1,4 @@
-# Grammar reference
+# Grammar
 
 This outline describes the source structure. Closed declaration members, procedure fields,
 operation signatures, and units are semantic grammar supplied by the typed registries.

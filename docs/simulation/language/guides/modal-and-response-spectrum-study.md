@@ -1,4 +1,4 @@
-# Build a modal response-spectrum study
+# Modal response-spectrum study
 
 Response-spectrum analysis is a two-analysis graph. The modal analysis publishes a basis; the
 response analysis consumes that exact state and a model-owned spectrum.

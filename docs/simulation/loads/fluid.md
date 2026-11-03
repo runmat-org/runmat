@@ -1,4 +1,4 @@
-# Fluid loads and boundary inputs
+# Fluid loads
 
 A positive `mass_flow` rate enters the fluid. With the outward domain normal,
 $\dot m_{\mathrm{in}}=-\int_\Gamma\rho\mathbf u\cdot\mathbf n_{\mathrm{out}}\,d\Gamma$.

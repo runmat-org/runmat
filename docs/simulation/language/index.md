@@ -112,7 +112,7 @@ realized model, executes the admitted numerical work, and publishes results and 
 - [Studies, analyses, and state](./studies-analyses-and-state)
 - [Inputs, sweeps, and cases](./inputs-sweeps-and-cases)
 - [Outputs, fields, and observations](./outputs-fields-and-observations)
-- [Execution, parallel work, and distributed work](./execution-parallel-and-distributed)
+- [Parallel and distributed execution](./execution-parallel-and-distributed)
 - [RunMat function integration](./runmat-function-integration)
 - [Diagnostics and tooling](./diagnostics-and-tooling)
 

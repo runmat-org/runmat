@@ -1,4 +1,4 @@
-# Acoustic loads and boundaries
+# Acoustic loads
 
 Acoustic pressure and normal velocity are conjugate boundary variables. A rigid wall imposes
 $v_n=0$; an impedance boundary imposes $p=Zv_n$; a radiation boundary approximates an outgoing-wave

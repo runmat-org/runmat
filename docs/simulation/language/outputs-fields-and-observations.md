@@ -1,4 +1,4 @@
-# Outputs, fields, and observations
+# Outputs, fields and observations
 
 An analysis publishes its canonical terminal result and evidence. `output` declarations request
 additional fields, reductions, histories, or retained intermediate state with stable names.

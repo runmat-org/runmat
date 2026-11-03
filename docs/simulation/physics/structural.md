@@ -1,4 +1,4 @@
-# Structural FEA in RunMat: static, modal, transient, harmonic, buckling, and nonlinear analysis
+# Structural
 
 Use structural FEA to answer questions about deformation, stress, reactions, natural frequencies,
 forced vibration, shock response, buckling, and nonlinear load paths. RunMat keeps the physical

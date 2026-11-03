@@ -1,4 +1,6 @@
-# Geometry, models, and assignments
+# Geometry, models and assignments
+
+This page is the syntax reference for geometry, models and assignments. To set up a study, see [Geometry](../geometry) and [Models](../models).
 
 Geometry defines topology. A model assigns physical meaning to that topology. Keeping those roles
 separate allows one admitted CAD revision and mesh to support several material or loading studies.

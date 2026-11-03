@@ -1,4 +1,4 @@
-# Studies, analyses, and state
+# Studies, analyses and state
 
 A study binds one geometry instance, its mesh, one model instance, and an ordered analysis graph.
 It is the smallest independently runnable declaration.

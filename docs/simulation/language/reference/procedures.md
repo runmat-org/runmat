@@ -1,4 +1,4 @@
-# Procedure reference
+# Procedures
 
 An `analysis <name>` block owns exactly one procedure block. A dependent analysis uses
 `analysis <name> after analysis.<producer>`. Required fields vary by procedure; the checker does

@@ -1,4 +1,4 @@
-# Evidence & Artifacts
+# Evidence and artifacts
 
 FEA results need records. RunMat writes records at the boundaries where a workflow can fail, change behavior, or need review: geometry import, meshing, study validation, planning, solving, result queries, comparisons, and governance checks.
 

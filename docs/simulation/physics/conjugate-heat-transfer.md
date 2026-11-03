@@ -1,4 +1,4 @@
-# Conjugate heat-transfer analysis in RunMat: fluid cooling and solid conduction
+# Conjugate heat transfer
 
 Conjugate heat transfer (CHT) solves the flow and temperature of a coolant together with
 conduction in the part it cools. Fluid and solid keep their own materials and equations; a

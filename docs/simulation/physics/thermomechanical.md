@@ -1,4 +1,4 @@
-# Thermomechanical FEA in RunMat: thermal expansion, stress, and coupled state
+# Thermal stress
 
 Thermomechanical analysis computes structural response caused by a temperature field, optionally in
 combination with mechanical loading. RunMat treats temperature as typed state and thermal strain as

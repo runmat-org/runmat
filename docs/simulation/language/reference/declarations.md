@@ -1,4 +1,4 @@
-# Declaration reference
+# Declarations
 
 ## `geometry <name> { ... }`
 

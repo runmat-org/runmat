@@ -1,4 +1,4 @@
-# Finite-Element Analysis
+# Finite-element analysis
 
 RunMat FEA turns exact geometry, an explicitly authored physical model, and a procedure sequence into a validated solver result. A `.fea` file is a typed declarative program: RunMat parses and type-checks it, resolves imported `.fea` modules and `.m` functions, realizes geometry, generates a solver mesh, compiles region-bound properties and conditions, schedules the numerical work locally or on a cluster, and publishes a content-addressed result.
 

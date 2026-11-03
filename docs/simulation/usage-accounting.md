@@ -1,4 +1,4 @@
-# RunMat Simulation Usage Accounting
+# Simulation usage accounting
 
 This document defines how RunMat counts floating-point operations for simulation
 usage limits under the RunMat license and subscriptions. These counts determine

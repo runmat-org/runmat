@@ -1,4 +1,4 @@
-# Execution, parallel work, and distributed work
+# Parallel and distributed execution
 
 Execution policy is optional. A local study with no resource constraints does not need an
 `execution` declaration. Adding or changing placement does not change the physical meaning or
