@@ -481,9 +481,8 @@ impl FeaRunScope {
             heartbeat: heartbeat::Heartbeat::default(),
         });
         if let LeaseAuthority::Metered(budget) = authority {
-            budget.validate().map_err(|denied| {
+            budget.validate().inspect_err(|denied| {
                 state.deny(denied.clone());
-                denied
             })?;
         }
         state.check()?;

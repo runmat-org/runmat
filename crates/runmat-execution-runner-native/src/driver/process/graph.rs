@@ -24,6 +24,15 @@ impl crate::process_output::OutputDrainControl for GraphControl<'_> {
     }
 }
 impl OwnedProcessControl for GraphControl<'_> {
+    fn control_allocation_owner(
+        &self,
+    ) -> Option<runmat_runtime::context::host_allocation::HostControlAllocationOwner> {
+        // This durable Graph caller has an original physical task reservation,
+        // but no Runtime-managed allocation owner. Do not fabricate one from
+        // that reservation or claim that bootstrap storage is Runtime-managed.
+        None
+    }
+
     fn begin_raw_output(
         &self,
         attempt: &AttemptRequest,
@@ -78,12 +87,7 @@ pub(crate) async fn execute_attempt(
     graph: runmat_execution_artifact::GraphExecutionRequest,
     control: &dyn ProcessControl,
 ) -> LocalAttemptObservation {
-    let started = Instant::now();
-    let meters = TransportMeters::default();
-    let mut termination = AttemptExecutionTermination::NotStarted;
-    let mut console = None;
-    let mut console_scopes = Vec::new();
-    let mut retirement = LocalRetirementEvidence::NotStarted;
+    let mut evidence = ProcessAttemptEvidence::new();
     let quarantine = Quarantine::default();
     let result = if control.cancellation().load(Ordering::Acquire) {
         // No staging or child ownership exists for this attempt yet.
@@ -102,17 +106,7 @@ pub(crate) async fn execute_attempt(
                     original: control,
                     authority: &authority,
                 };
-                owned::run_process(
-                    &owner,
-                    launch,
-                    &scoped,
-                    &meters,
-                    &mut termination,
-                    &mut console,
-                    &mut console_scopes,
-                    &mut retirement,
-                )
-                .await
+                owned::run_process(&owner, launch, &scoped, &mut evidence).await
             }
             Err(error) => Err(error),
         }
@@ -130,16 +124,7 @@ pub(crate) async fn execute_attempt(
         result
     };
     drop(quarantine);
-    observe(
-        request,
-        started,
-        result,
-        meters,
-        termination,
-        console,
-        console_scopes,
-        retirement,
-    )
+    evidence.finish(request, result)
 }
 
 fn prepare(

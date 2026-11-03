@@ -69,15 +69,18 @@ pub(super) async fn execute(
 /// attempt in worker_server. Preserve that authority there; the nested child
 /// receives a distinct, locally issued assignment for its private stdio hop.
 pub(in crate::remote) async fn execute_remote_attempt(
-    run_id: &str,
+    context: crate::remote::worker_execution::GraphAttemptContext,
     attempt_id: AttemptId,
     mut request: GraphExecutionRequest,
-    mut resources: ResourceInventory,
     task_resources: runmat_execution::resource::ResourceRequest,
-    host: runmat_execution::host::ExecutionHostInventory,
     cancellation: CancellationToken,
     console_budget: Option<runmat_execution::console::ConsoleBudget>,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    let crate::remote::worker_execution::GraphAttemptContext {
+        run_identity,
+        mut resources,
+        host,
+    } = context;
     validate_child_console_grant(
         request
             .invocation_controls
@@ -153,7 +156,7 @@ pub(in crate::remote) async fn execute_remote_attempt(
         .capabilities
         .insert(Capability::GraphInvocationControlsV14);
     run_owned_attempt(
-        run_id,
+        &run_identity,
         attempt_id.bytes(),
         OwnedGraphAttempt {
             request,
@@ -377,9 +380,9 @@ fn validate_child_console_memory(
     let console_bytes = budget
         .minimum_memory_bytes()
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    if !console_bytes
+    if console_bytes
         .checked_add(environment_bytes)
-        .is_some_and(|required| required <= memory_bytes)
+        .is_none_or(|required| required > memory_bytes)
     {
         return Err(NativeExecutionError::Protocol(
             "child Graph console subtree and environment exceed authenticated task memory".into(),

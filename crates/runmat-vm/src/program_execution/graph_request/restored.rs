@@ -203,13 +203,15 @@ impl RestoredSelectedGraph {
                     move || async move {
                         invoke_selected_code_bound(
                             &code,
-                            current,
-                            binding,
-                            arguments,
-                            outputs,
-                            environment,
+                            crate::interpreter::runner::BoundInvocation {
+                                runtime: current,
+                                binding,
+                                args: arguments,
+                                requested_outputs: outputs,
+                                driver,
+                                lexical_environment: environment,
+                            },
                             None,
-                            driver,
                         )
                         .await
                     },

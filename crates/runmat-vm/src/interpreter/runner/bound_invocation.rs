@@ -10,7 +10,7 @@ use runmat_runtime::{
 use runmat_value::{BoundFunctionAuthority, BoundFunctionBinding, LexicalEnvironment};
 use std::{future::Future, rc::Rc};
 
-pub(super) struct Invocation {
+pub(crate) struct Invocation {
     pub runtime: RuntimeContext,
     pub binding: BoundFunctionBinding,
     pub args: RootedFunctionArguments,

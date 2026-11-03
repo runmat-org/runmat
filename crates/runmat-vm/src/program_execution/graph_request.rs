@@ -108,13 +108,15 @@ async fn invoke_selected_nested_bound(
         .map_err(graph_error)?;
     invoke_selected_code_bound(
         selected,
-        caller_runtime,
-        binding,
-        arguments,
-        requested_outputs,
-        lexical_environment,
+        crate::interpreter::runner::BoundInvocation {
+            runtime: caller_runtime,
+            binding,
+            args: arguments,
+            requested_outputs,
+            driver: None,
+            lexical_environment,
+        },
         foreign,
-        None,
     )
     .await
 }
@@ -122,30 +124,35 @@ async fn invoke_selected_nested_bound(
 #[inline(always)]
 fn invoke_selected_code_bound<'a>(
     selected: &'a selected::RetainedSelectedGraph,
-    caller_runtime: runmat_runtime::context::RuntimeContext,
-    binding: runmat_value::BoundFunctionBinding,
-    arguments: runmat_runtime::call::RootedFunctionArguments,
-    requested_outputs: usize,
-    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    invocation: crate::interpreter::runner::BoundInvocation,
     selected_foreign: Option<&'a Rc<dyn RuntimeForeignService>>,
-    driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
 ) -> impl std::future::Future<Output = Result<RootedValueSequence, runmat_runtime::RuntimeError>> + 'a
 {
     runmat_runtime::execution::after_result(
         async move {
-            let (runtime, registry) =
-                prepare_selected_bound(selected, caller_runtime, &binding, selected_foreign)?;
-            Ok((runtime, registry, binding, arguments, lexical_environment))
-        },
-        move |(runtime, registry, binding, arguments, lexical_environment)| {
-            crate::interpreter::runner::invoke_selected_graph_bound_in_context(
-                runtime,
-                binding,
-                arguments,
-                requested_outputs,
+            let (runtime, registry) = prepare_selected_bound(
+                selected,
+                invocation.runtime,
+                &invocation.binding,
+                selected_foreign,
+            )?;
+            Ok((
                 registry,
-                lexical_environment,
-                driver,
+                crate::interpreter::runner::BoundInvocation {
+                    runtime,
+                    ..invocation
+                },
+            ))
+        },
+        move |(registry, invocation)| {
+            crate::interpreter::runner::invoke_selected_graph_bound_in_context(
+                invocation.runtime,
+                invocation.binding,
+                invocation.args,
+                invocation.requested_outputs,
+                registry,
+                invocation.lexical_environment,
+                invocation.driver,
             )
         },
     )

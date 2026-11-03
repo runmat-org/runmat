@@ -385,7 +385,7 @@ impl ConsoleRetentionOwner {
         scopes: &[ScopedConsoleTranscript],
     ) -> NativeExecutionResult<Usage> {
         if scopes.len() + usize::from(root.is_some())
-            > runmat_execution::console::MAX_CONSOLE_SCOPES as usize
+            > runmat_execution::console::MAX_CONSOLE_SCOPES
         {
             return Err(invalid(
                 "console subtree scope inventory exceeds its canonical bound",
@@ -461,7 +461,7 @@ impl ConsoleRetentionOwner {
                 &scope.transcript,
             )?;
         }
-        Ok(runmat_execution::Digest::sha256(&hash.finalize()))
+        Ok(runmat_execution::Digest::sha256(hash.finalize()))
     }
 
     pub(crate) fn validate_subtree(

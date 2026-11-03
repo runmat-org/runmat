@@ -126,6 +126,29 @@ struct TransportMeters {
     received: IpcByteCounter,
 }
 
+/// Evidence accumulated by the original process owner until its final observation.
+struct ProcessAttemptEvidence {
+    started: Instant,
+    meters: TransportMeters,
+    termination: AttemptExecutionTermination,
+    console: Option<runmat_execution::console::ConsoleTranscript>,
+    console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
+    retirement: LocalRetirementEvidence,
+}
+
+impl ProcessAttemptEvidence {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            meters: TransportMeters::default(),
+            termination: AttemptExecutionTermination::NotStarted,
+            console: None,
+            console_scopes: Vec::new(),
+            retirement: LocalRetirementEvidence::NotStarted,
+        }
+    }
+}
+
 pub(crate) enum GraphProcessQuarantine {
     KnownChild {
         child: Box<RetirementBoundChild<GraphScratchLease>>,
@@ -298,28 +321,14 @@ pub(super) fn execute_attempt(
     request: &AttemptRequest,
     completion: &TaskCompletion,
 ) -> LocalAttemptObservation {
-    let started = Instant::now();
-    let meters = TransportMeters::default();
-    let mut termination = AttemptExecutionTermination::NotStarted;
-    let mut console = None;
-    let mut console_scopes = Vec::new();
-    let mut retirement = LocalRetirementEvidence::NotStarted;
-    let mut result = launch_attempt(
-        driver,
-        request,
-        completion,
-        &meters,
-        &mut termination,
-        &mut console,
-        &mut console_scopes,
-        &mut retirement,
-    );
+    let mut evidence = ProcessAttemptEvidence::new();
+    let mut result = launch_attempt(driver, request, completion, &mut evidence);
     if request.task.console.is_some() {
         if let Some(owner) = driver.console_admission_owner() {
             if let Err(message) = owner.settle_subtree(
                 driver.console_identity(request),
-                console.as_ref(),
-                &console_scopes,
+                evidence.console.as_ref(),
+                &evidence.console_scopes,
             ) {
                 result = Err(TransferFailure::Infrastructure(message));
             }
@@ -335,27 +344,14 @@ pub(super) fn execute_attempt(
     } else {
         result
     };
-    observe(
-        request,
-        started,
-        result,
-        meters,
-        termination,
-        console,
-        console_scopes,
-        retirement,
-    )
+    evidence.finish(request, result)
 }
 
 fn launch_attempt(
     driver: &LocalDriver,
     request: &AttemptRequest,
     completion: &TaskCompletion,
-    meters: &TransportMeters,
-    termination: &mut AttemptExecutionTermination,
-    console: &mut Option<runmat_execution::console::ConsoleTranscript>,
-    console_scopes: &mut Vec<runmat_execution::console::ScopedConsoleTranscript>,
-    retirement: &mut LocalRetirementEvidence,
+    evidence: &mut ProcessAttemptEvidence,
 ) -> Result<WorkerResponse, TransferFailure> {
     request
         .validate()
@@ -463,8 +459,8 @@ fn launch_attempt(
         },
         WorkerLaunchRequest::Reserved(request)
         | WorkerLaunchRequest::ReservedFeaProxy { request, .. }
-        | WorkerLaunchRequest::ReservedConsole { request, .. }
-        | WorkerLaunchRequest::ReservedFea { request, .. } => &request.request().context,
+        | WorkerLaunchRequest::ReservedConsole { request, .. } => &request.request().context,
+        WorkerLaunchRequest::ReservedFea(launch) => &launch.request.request().context,
         WorkerLaunchRequest::StagedGraph(request) => &request.staged_graph_v10.context,
     };
     let spmd_rank = match context {
@@ -484,30 +480,33 @@ fn launch_attempt(
     let control_owner = completion.raw_control_owner();
     let process = runmat_runtime::context::host_allocation::HostControlFuture::new(
         control_owner.as_ref(),
-        || {
-            owned::run_process(
-                &owner,
-                worker_request,
-                &control,
-                meters,
-                termination,
-                console,
-                console_scopes,
-                retirement,
-            )
-        },
+        || owned::run_process(&owner, worker_request, &control, evidence),
     )
-    .map_err(|error| {
-        completion.stop_for_raw_output(std::sync::Arc::new(crate::RawOutputError::HostAllocation(
-            error,
-        )));
-        TransferFailure::Infrastructure(error.to_string())
-    })?;
+    .map_err(control_allocation_failure)?;
     let result = runtime.block_on(process);
     if let Some((gang, rank)) = spmd_rank {
         driver.terminate_collective_rank(&gang, rank);
     }
     result
+}
+
+/// Allocation admission happens before launch and cannot be an output-journal failure.
+fn control_allocation_failure(
+    source: runmat_runtime::context::host_allocation::HostAllocationError,
+) -> TransferFailure {
+    let error = runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+        None,
+        "RunMat:Execution:CpuControl",
+        format!("owned CPU control allocation: {source}"),
+        source,
+    );
+    if runmat_runtime::runtime_error::error_has_control_cancellation_origin(&error) {
+        return TransferFailure::Cancelled;
+    }
+    match runmat_runtime::execution::encode_runtime_failure(&error) {
+        Ok(failure) => TransferFailure::Runtime(Box::new(failure)),
+        Err(message) => TransferFailure::Infrastructure(message),
+    }
 }
 
 fn staged_graph_launch(
@@ -546,71 +545,77 @@ fn staged_graph_launch(
     )))
 }
 
-fn observe(
-    request: &AttemptRequest,
-    started: Instant,
-    response: Result<WorkerResponse, TransferFailure>,
-    meters: TransportMeters,
-    termination: AttemptExecutionTermination,
-    console: Option<runmat_execution::console::ConsoleTranscript>,
-    console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
-    retirement: LocalRetirementEvidence,
-) -> LocalAttemptObservation {
-    let wall_millis = u64::try_from(started.elapsed().as_millis())
-        .unwrap_or(u64::MAX)
-        .max(1);
-    let execution = AttemptExecutionObservation {
-        attempt_id: request.id,
-        worker_id: request.worker_id,
-        wall_millis,
-        termination,
-        local_ipc_sent_bytes: meters.sent.bytes(),
-        local_ipc_received_bytes: meters.received.bytes(),
-    };
-    let accounting = |error: String| TransferFailure::Infrastructure(error);
-    let mut result = response.and_then(|response| match response {
-        WorkerResponse::Success { outputs } => {
-            AttemptSuccess::new(request, outputs, Vec::new(), wall_millis, 0, 0).map_err(accounting)
-        }
-        WorkerResponse::ExternalizedSuccess {
-            outputs,
-            result_objects,
-        } => AttemptSuccess::new(request, outputs, result_objects, wall_millis, 0, 0)
-            .map_err(accounting),
-        WorkerResponse::GraphSuccess { graph } => {
-            AttemptSuccess::new_graph(request, graph, wall_millis, 0, 0).map_err(accounting)
-        }
-        WorkerResponse::SpmdSuccess { outputs } => Ok(AttemptSuccess::Spmd { outputs }),
-        WorkerResponse::Failure { message } => Err(TransferFailure::Execution(message)),
-        WorkerResponse::RuntimeFailure { failure } => {
-            Err(TransferFailure::Runtime(Box::new(failure)))
-        }
-    });
-    // Preflight only reads the admitted program. No process or result producer
-    // has been invoked, so output/egress/relay consumption is known zero. Once
-    // launch is attempted, no such claim can be inferred from its eventual error.
-    let unsuccessful_resources =
-        if result.is_err() && termination == AttemptExecutionTermination::NotStarted {
-            match AttemptResourceAccounting::for_attempt(request, wall_millis, 0, 0, 0) {
-                Ok(resources) => Some(Box::new(resources)),
-                Err(error) => {
-                    result = Err(TransferFailure::Infrastructure(format!(
-                        "{}; preflight accounting unavailable: {error}",
-                        result.as_ref().expect_err("unsuccessful preflight")
-                    )));
-                    None
-                }
-            }
-        } else {
-            None
+impl ProcessAttemptEvidence {
+    fn finish(
+        self,
+        request: &AttemptRequest,
+        response: Result<WorkerResponse, TransferFailure>,
+    ) -> LocalAttemptObservation {
+        let Self {
+            started,
+            meters,
+            termination,
+            console,
+            console_scopes,
+            retirement,
+        } = self;
+        let wall_millis = u64::try_from(started.elapsed().as_millis())
+            .unwrap_or(u64::MAX)
+            .max(1);
+        let execution = AttemptExecutionObservation {
+            attempt_id: request.id,
+            worker_id: request.worker_id,
+            wall_millis,
+            termination,
+            local_ipc_sent_bytes: meters.sent.bytes(),
+            local_ipc_received_bytes: meters.received.bytes(),
         };
-    LocalAttemptObservation {
-        result,
-        execution,
-        unsuccessful_resources,
-        console,
-        console_scopes,
-        retirement,
+        let accounting = |error: String| TransferFailure::Infrastructure(error);
+        let mut result = response.and_then(|response| match response {
+            WorkerResponse::Success { outputs } => {
+                AttemptSuccess::new(request, outputs, Vec::new(), wall_millis, 0, 0)
+                    .map_err(accounting)
+            }
+            WorkerResponse::ExternalizedSuccess {
+                outputs,
+                result_objects,
+            } => AttemptSuccess::new(request, outputs, result_objects, wall_millis, 0, 0)
+                .map_err(accounting),
+            WorkerResponse::GraphSuccess { graph } => {
+                AttemptSuccess::new_graph(request, graph, wall_millis, 0, 0).map_err(accounting)
+            }
+            WorkerResponse::SpmdSuccess { outputs } => Ok(AttemptSuccess::Spmd { outputs }),
+            WorkerResponse::Failure { message } => Err(TransferFailure::Execution(message)),
+            WorkerResponse::RuntimeFailure { failure } => {
+                Err(TransferFailure::Runtime(Box::new(failure)))
+            }
+        });
+        // Preflight only reads the admitted program. No process or result producer
+        // has been invoked, so output/egress/relay consumption is known zero. Once
+        // launch is attempted, no such claim can be inferred from its eventual error.
+        let unsuccessful_resources =
+            if result.is_err() && termination == AttemptExecutionTermination::NotStarted {
+                match AttemptResourceAccounting::for_attempt(request, wall_millis, 0, 0, 0) {
+                    Ok(resources) => Some(Box::new(resources)),
+                    Err(error) => {
+                        result = Err(TransferFailure::Infrastructure(format!(
+                            "{}; preflight accounting unavailable: {error}",
+                            result.as_ref().expect_err("unsuccessful preflight")
+                        )));
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+        LocalAttemptObservation {
+            result,
+            execution,
+            unsuccessful_resources,
+            console,
+            console_scopes,
+            retirement,
+        }
     }
 }
 

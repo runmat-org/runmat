@@ -25,6 +25,26 @@ mod retention_tests;
 
 const ATTACH_CHUNK_BYTES: usize = 1024 * 1024;
 
+struct LocalJobRequestIdentity {
+    request_digest: Digest,
+    idempotency_key_digest: Option<Digest>,
+    local_fea_organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
+}
+
+impl LocalJobRequestIdentity {
+    fn new(
+        request_digest: Digest,
+        idempotency_key_digest: Option<Digest>,
+        local_fea_organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
+    ) -> Self {
+        Self {
+            request_digest: bind_organization(request_digest, local_fea_organization),
+            idempotency_key_digest,
+            local_fea_organization,
+        }
+    }
+}
+
 pub(super) fn bind_organization(
     request: Digest,
     organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
@@ -223,9 +243,7 @@ impl JobStore {
             working_directory: submission.working_directory.clone(),
         };
         self.create_record(
-            organization,
-            request_digest,
-            idempotency_key_digest,
+            LocalJobRequestIdentity::new(request_digest, idempotency_key_digest, organization),
             submission.retention_millis,
             workload,
             now,
@@ -243,9 +261,7 @@ impl JobStore {
         let request_digest = submission.request_digest()?;
         let idempotency_key_digest = submission.idempotency_digest();
         self.create_record(
-            organization,
-            request_digest,
-            idempotency_key_digest,
+            LocalJobRequestIdentity::new(request_digest, idempotency_key_digest, organization),
             submission.retention_millis,
             PersistedWorkload::Program { submission },
             now,
@@ -274,9 +290,7 @@ impl JobStore {
             idempotency_key_digest,
         } = validated;
         self.create_record(
-            organization,
-            request_digest,
-            idempotency_key_digest,
+            LocalJobRequestIdentity::new(request_digest, idempotency_key_digest, organization),
             submission.retention_millis,
             PersistedWorkload::<Box<ProgramBatchSubmission>>::Graph {
                 submission: Box::new(submission),
@@ -288,15 +302,17 @@ impl JobStore {
 
     fn create_record<P: Borrow<ProgramBatchSubmission> + Serialize>(
         &self,
-        local_fea_organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
-        request_digest: Digest,
-        idempotency_key_digest: Option<Digest>,
+        identity: LocalJobRequestIdentity,
         retention_millis: u64,
         workload: PersistedWorkload<P>,
         now: u64,
         frozen_source: Option<(&str, &[u8])>,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
-        let request_digest = bind_organization(request_digest, local_fea_organization);
+        let LocalJobRequestIdentity {
+            request_digest,
+            idempotency_key_digest,
+            local_fea_organization,
+        } = identity;
         if let Some(key_digest) = idempotency_key_digest {
             if let Some(record) = self
                 .list()?

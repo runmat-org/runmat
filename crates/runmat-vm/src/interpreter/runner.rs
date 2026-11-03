@@ -30,6 +30,7 @@ use tracing::{debug, info_span, Instrument};
 
 #[path = "runner/bound_invocation.rs"]
 mod bound_invocation;
+pub(crate) use bound_invocation::Invocation as BoundInvocation;
 #[path = "runner/instruction_loop.rs"]
 mod instruction_loop;
 #[path = "runner/super_constructor.rs"]

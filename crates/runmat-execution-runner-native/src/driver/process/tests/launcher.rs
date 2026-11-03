@@ -10,13 +10,37 @@ use runmat_execution::{
 use runmat_execution_artifact::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 
 use super::super::{
-    worker_exchange_failure, TransferFailure, TransportMeters, WorkerLaunchRequest, WorkerRequest,
-    WorkerResponse,
+    worker_exchange_failure, ProcessAttemptEvidence, TransferFailure, WorkerLaunchRequest,
+    WorkerRequest, WorkerResponse,
 };
 use crate::driver::{LocalDriver, TaskCompletion};
 
 #[path = "selection.rs"]
 mod selection;
+
+#[test]
+fn prelaunch_allocation_failure_preserves_control_and_capacity_diagnostics() {
+    use runmat_runtime::context::host_allocation::HostAllocationError;
+
+    assert!(matches!(
+        super::super::control_allocation_failure(HostAllocationError::Cancelled),
+        TransferFailure::Cancelled
+    ));
+    for (source, identifier) in [
+        (HostAllocationError::Overflow, "RunMat:Execution:CpuControl"),
+        (
+            HostAllocationError::StaleAuthority,
+            "RunMat:parallel:InfrastructureFailure",
+        ),
+    ] {
+        let TransferFailure::Runtime(failure) = super::super::control_allocation_failure(source)
+        else {
+            panic!("allocation failure lost its runtime diagnostic");
+        };
+        assert_eq!(failure.identifier.as_deref(), Some(identifier));
+        assert!(failure.message.contains(&source.to_string()));
+    }
+}
 
 /// Drive the launcher with fresh evidence sinks; these tests assert its typed failures.
 async fn run_process(
@@ -33,11 +57,7 @@ async fn run_process_with_scratch(
     completion: &TaskCompletion,
     scratch_bytes: Option<u64>,
 ) -> Result<WorkerResponse, TransferFailure> {
-    let meters = TransportMeters::default();
-    let mut termination = runmat_execution_runner::AttemptExecutionTermination::NotStarted;
-    let mut console = None;
-    let mut console_scopes = Vec::new();
-    let mut retirement = super::super::LocalRetirementEvidence::NotStarted;
+    let mut evidence = ProcessAttemptEvidence::new();
     let mut attempt = super::preflight::admit(driver, ArtifactId::derive(&[b"launcher-attempt"]));
     if let Some(scratch_bytes) = scratch_bytes {
         attempt.task.resources.scratch_bytes = scratch_bytes;
@@ -50,17 +70,7 @@ async fn run_process_with_scratch(
         graph_quarantine: &driver.graph_quarantine,
     };
     let control = super::super::owned::LocalControl { driver, completion };
-    super::super::owned::run_process(
-        &owner,
-        request,
-        &control,
-        &meters,
-        &mut termination,
-        &mut console,
-        &mut console_scopes,
-        &mut retirement,
-    )
-    .await
+    super::super::owned::run_process(&owner, request, &control, &mut evidence).await
 }
 
 fn shell_driver(script: &str) -> (tempfile::TempDir, Arc<LocalDriver>) {

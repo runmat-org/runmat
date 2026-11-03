@@ -113,20 +113,20 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
             },
             None,
         ),
-        WorkerLaunchRequest::ReservedFea {
-            request,
-            console_budget,
-            fea_grant,
-        } => (
-            match console_budget {
-                Some(console_budget) => WorkerLaunchRequest::ReservedConsole {
-                    request,
-                    console_budget,
+        WorkerLaunchRequest::ReservedFea(launch) => {
+            let (request, console_budget, fea_grant) = launch.into_parts();
+            let request = Box::new(request);
+            (
+                match console_budget {
+                    Some(console_budget) => WorkerLaunchRequest::ReservedConsole {
+                        request,
+                        console_budget,
+                    },
+                    None => WorkerLaunchRequest::Reserved(request),
                 },
-                None => WorkerLaunchRequest::Reserved(request),
-            },
-            Some(fea_grant),
-        ),
+                Some(fea_grant),
+            )
+        }
         WorkerLaunchRequest::StagedGraph(mut graph) => {
             let grant = graph.staged_graph_v10.fea_grant.take();
             (WorkerLaunchRequest::StagedGraph(graph), grant)
@@ -166,7 +166,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
             _ => None,
         },
         WorkerLaunchRequest::StagedGraph(_) => None,
-        WorkerLaunchRequest::ReservedFea { .. } => {
+        WorkerLaunchRequest::ReservedFea(_) => {
             return Err(NativeExecutionError::Protocol(
                 "uninstalled FEA private grant".into(),
             ))
@@ -266,7 +266,7 @@ async fn execute_launch(
         WorkerLaunchRequest::ReservedFeaProxy { .. } => Err(NativeExecutionError::Protocol(
             "uninstalled FEA admission proxy".into(),
         )),
-        WorkerLaunchRequest::ReservedFea { .. } => Err(NativeExecutionError::Protocol(
+        WorkerLaunchRequest::ReservedFea(_) => Err(NativeExecutionError::Protocol(
             "FEA grant must be installed at the private worker boundary".into(),
         )),
         WorkerLaunchRequest::Direct(direct) => match *direct {

@@ -8,7 +8,7 @@ pub use runmat_execution_artifact::{
 /// The Direct arm serializes as the existing WorkerRequest with no new fields.
 /// A Graph child receives only a reference to its parent's owned artifact
 /// store; it must verify and deserialize those exact bytes before effects.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum WorkerLaunchRequest {
     ReservedFeaProxy {
@@ -16,11 +16,7 @@ pub(crate) enum WorkerLaunchRequest {
         console_budget: Option<runmat_execution::console::ConsoleBudget>,
         fea_parent_admission: bool,
     },
-    ReservedFea {
-        request: Box<ReservedProgramExecutionRequest>,
-        console_budget: Option<runmat_execution::console::ConsoleBudget>,
-        fea_grant: crate::fea_delegation::WorkerFeaGrant,
-    },
+    ReservedFea(Box<ReservedFeaLaunch>),
     Direct(Box<WorkerRequest>),
     /// A Direct program with the scheduler's reserved resources, so the worker
     /// admits CPU parallelism within its own reservation.
@@ -31,6 +27,53 @@ pub(crate) enum WorkerLaunchRequest {
     },
     StagedGraph(Box<StagedGraphWorkerLaunch>),
 }
+
+/// Replaces the existing request allocation; it does not nest another request
+/// box. Serde preserves the original request/console_budget/fea_grant object.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ReservedFeaLaunch {
+    pub(crate) request: ReservedProgramExecutionRequest,
+    pub(crate) console_budget: Option<runmat_execution::console::ConsoleBudget>,
+    pub(crate) fea_grant: crate::fea_delegation::WorkerFeaGrant,
+}
+
+impl ReservedFeaLaunch {
+    pub(crate) fn from_reserved(
+        request: Box<ReservedProgramExecutionRequest>,
+        console_budget: Option<runmat_execution::console::ConsoleBudget>,
+        fea_grant: crate::fea_delegation::WorkerFeaGrant,
+    ) -> Self {
+        // The old Box is deallocated on this function's return, before the
+        // caller allocates the replacement envelope from this moved value.
+        Self {
+            request: *request,
+            console_budget,
+            fea_grant,
+        }
+    }
+
+    pub(crate) fn into_parts(
+        self: Box<Self>,
+    ) -> (
+        ReservedProgramExecutionRequest,
+        Option<runmat_execution::console::ConsoleBudget>,
+        crate::fea_delegation::WorkerFeaGrant,
+    ) {
+        let Self {
+            request,
+            console_budget,
+            fea_grant,
+        } = *self;
+        // Likewise free the envelope before a caller restores its request Box.
+        (request, console_budget, fea_grant)
+    }
+}
+
+/// One envelope per process/attempt. The borrowed encoder makes no envelope
+/// copy; the receiver unwraps this block before restoring the request box.
+pub(crate) const FEA_LAUNCH_LAYOUT_GROWTH: usize = std::mem::size_of::<ReservedFeaLaunch>()
+    - std::mem::size_of::<ReservedProgramExecutionRequest>();
 
 impl WorkerLaunchRequest {
     pub(crate) fn fea_proxy(&self) -> bool {
@@ -45,7 +88,7 @@ impl WorkerLaunchRequest {
     }
     pub(crate) fn fea_grant(&self) -> Option<&crate::fea_delegation::WorkerFeaGrant> {
         match self {
-            Self::ReservedFea { fea_grant, .. } => Some(fea_grant),
+            Self::ReservedFea(launch) => Some(&launch.fea_grant),
             Self::StagedGraph(graph) => graph.staged_graph_v10.fea_grant.as_ref(),
             _ => None,
         }
@@ -54,8 +97,8 @@ impl WorkerLaunchRequest {
         match self {
             Self::Reserved(request)
             | Self::ReservedFeaProxy { request, .. }
-            | Self::ReservedConsole { request, .. }
-            | Self::ReservedFea { request, .. } => request.request().assignment.as_ref(),
+            | Self::ReservedConsole { request, .. } => request.request().assignment.as_ref(),
+            Self::ReservedFea(launch) => launch.request.request().assignment.as_ref(),
             Self::StagedGraph(graph) => Some(&graph.staged_graph_v10.assignment),
             _ => None,
         }
@@ -64,8 +107,8 @@ impl WorkerLaunchRequest {
         match self {
             Self::Reserved(request)
             | Self::ReservedFeaProxy { request, .. }
-            | Self::ReservedConsole { request, .. }
-            | Self::ReservedFea { request, .. } => Some(request.resources()),
+            | Self::ReservedConsole { request, .. } => Some(request.resources()),
+            Self::ReservedFea(launch) => Some(launch.request.resources()),
             Self::StagedGraph(graph) => Some(&graph.staged_graph_v10.resources),
             _ => None,
         }
@@ -73,7 +116,7 @@ impl WorkerLaunchRequest {
     pub(crate) fn console_budget(&self) -> Option<runmat_execution::console::ConsoleBudget> {
         match self {
             Self::ReservedFeaProxy { console_budget, .. } => *console_budget,
-            Self::ReservedFea { console_budget, .. } => *console_budget,
+            Self::ReservedFea(launch) => launch.console_budget,
             Self::ReservedConsole { console_budget, .. } => Some(*console_budget),
             Self::StagedGraph(graph) => graph.staged_graph_v10.console_budget,
             Self::Direct(_) | Self::Reserved(_) => None,
@@ -247,6 +290,94 @@ pub struct StoredGraphProgram {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reserved_request(
+        resources: runmat_execution::resource::ResourceRequest,
+    ) -> ReservedProgramExecutionRequest {
+        use runmat_execution::{
+            Digest, OutputContract, ProgramCallable, ProgramFunctionId, ProgramInvocationContext,
+            ProgramRevision,
+        };
+        use runmat_execution_artifact::{
+            ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
+            ProgramTarget,
+        };
+        let revision = ProgramRevision::new(
+            Digest::sha256(b"layout-graph"),
+            Digest::sha256(b"layout-source"),
+            runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+        )
+        .unwrap();
+        let recipe = ProgramBuildRecipe {
+            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+            program_revision: revision,
+            entrypoint: "0".into(),
+            outputs: OutputContract {
+                requested_outputs: 1,
+                owned_work: None,
+            },
+            execution_mode: "interpreter".into(),
+            target: ProgramTarget::portable("launch-layout-test"),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
+            features: Default::default(),
+            compile_options: Default::default(),
+            source_objects: Vec::new(),
+            foreign_policy: None,
+            expected_artifact_id: None,
+        };
+        let artifact = ProgramArtifact::materialize(
+            &recipe,
+            ExecutableForm::InterpreterBytecodeV2,
+            b"not-executed".to_vec(),
+        )
+        .unwrap();
+        ReservedProgramExecutionRequest::new(
+            ProgramExecutionRequest {
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+                recipe,
+                artifact,
+                callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
+                context: ProgramInvocationContext::Direct,
+                assignment: None,
+                job_id: None,
+                arguments: Vec::new(),
+                requested_outputs: 1,
+                environment: Default::default(),
+                console: None,
+            },
+            resources,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn reserved_fea_envelope_keeps_original_wire_and_inline_request_storage() {
+        let grant = crate::fea_delegation::test_grant();
+        let resources = grant.resources.clone();
+        let request = reserved_request(resources.clone());
+        let old =
+            serde_json::json!({"request": &request, "console_budget": null, "fea_grant": &grant});
+        let launch = WorkerLaunchRequest::ReservedFea(Box::new(ReservedFeaLaunch::from_reserved(
+            Box::new(request),
+            None,
+            grant,
+        )));
+        assert_eq!(serde_json::to_value(&launch).unwrap(), old);
+        let decoded: WorkerLaunchRequest = serde_json::from_value(old).unwrap();
+        let WorkerLaunchRequest::ReservedFea(launch) = decoded else {
+            panic!("wrong wire variant")
+        };
+        let (request, console, grant) = launch.into_parts();
+        assert_eq!(request.resources(), &resources);
+        assert_eq!(grant.resources, resources);
+        assert!(console.is_none());
+        assert!(std::mem::size_of::<WorkerLaunchRequest>() <= 128);
+        assert_eq!(
+            std::mem::size_of::<ReservedFeaLaunch>(),
+            std::mem::size_of::<ReservedProgramExecutionRequest>() + FEA_LAUNCH_LAYOUT_GROWTH
+        );
+    }
 
     #[test]
     fn progress_envelope_is_bounded_and_strictly_shaped() {

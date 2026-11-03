@@ -177,12 +177,10 @@ pub(super) async fn execute(
                 );
             };
             return match super::driver::local_graph::execute_remote_attempt(
-                &graph_attempt.run_identity,
+                graph_attempt,
                 attempt_id,
                 *graph,
-                graph_attempt.resources,
                 resources,
-                graph_attempt.host,
                 cancellation.token(),
                 console_budget,
             )

@@ -102,12 +102,7 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
     };
     let limits = negotiate(&local, &remote)
         .map_err(|error| protocol_error("worker handshake is incompatible", error))?;
-    write_response(
-        &mut output,
-        &WorkerResponse::Handshake(local.clone()),
-        limits,
-    )
-    .await?;
+    write_response(&output, &WorkerResponse::Handshake(local.clone()), limits).await?;
     let bootstrap = frames
         .recv()
         .await
@@ -122,7 +117,7 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
     runmat_accelerate::initialize_acceleration_provider_with(
         &(&bootstrap.execution.accelerate).into(),
     );
-    write_response(&mut output, &WorkerResponse::BootstrapReady, limits).await?;
+    write_response(&output, &WorkerResponse::BootstrapReady, limits).await?;
     let mut input = super::control_requests::ControlRequests::from_frames(frames, limits);
 
     let mut installed: Option<InstalledRun> = None;
@@ -183,7 +178,7 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                     snapshot: *snapshot,
                     session,
                 });
-                write_response(&mut output, &WorkerResponse::Ready { run_id }, limits).await?;
+                write_response(&output, &WorkerResponse::Ready { run_id }, limits).await?;
             }
             WorkerRequest::Execute {
                 test_id,
@@ -274,11 +269,11 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                 match result {
                     Ok(attempt) => {
                         for event in attempt.events {
-                            write_response(&mut output, &WorkerResponse::Event { event }, limits)
+                            write_response(&output, &WorkerResponse::Event { event }, limits)
                                 .await?;
                         }
                         write_response(
-                            &mut output,
+                            &output,
                             &WorkerResponse::Completed {
                                 result: attempt.result,
                                 coverage: attempt.coverage,
@@ -311,7 +306,7 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                         })?;
                 }
                 parent_link.disarm();
-                write_response(&mut output, &WorkerResponse::ShutdownComplete, limits).await?;
+                write_response(&output, &WorkerResponse::ShutdownComplete, limits).await?;
                 return Ok(());
             }
         }

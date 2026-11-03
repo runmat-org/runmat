@@ -12,6 +12,11 @@ pub(crate) struct ProcessOwner<'a> {
 pub(crate) trait OwnedProcessControl:
     crate::process_output::OutputDrainControl + Send + Sync
 {
+    /// Each caller must provide its original Runtime-managed owner or state
+    /// explicitly that its control storage has no such owner.
+    fn control_allocation_owner(
+        &self,
+    ) -> Option<runmat_runtime::context::host_allocation::HostControlAllocationOwner>;
     fn fea_provider(&self) -> crate::fea_proxy::Provider {
         crate::fea_proxy::capture()
     }
@@ -67,6 +72,11 @@ impl crate::process_output::OutputDrainControl for LocalControl<'_> {
     }
 }
 impl OwnedProcessControl for LocalControl<'_> {
+    fn control_allocation_owner(
+        &self,
+    ) -> Option<runmat_runtime::context::host_allocation::HostControlAllocationOwner> {
+        self.completion.raw_control_owner()
+    }
     fn fea_provider(&self) -> crate::fea_proxy::Provider {
         self.completion.fea_provider.clone()
     }
@@ -123,16 +133,151 @@ impl OwnedProcessControl for LocalControl<'_> {
     }
 }
 
+struct RetainedLaunchStorage<T = WorkerLaunchRequest> {
+    // Drop the real request backing before refunding its fixed growth claim.
+    request: T,
+    _layout_claim: Option<runmat_value::ExactHostAllocationClaim>,
+}
+
+impl<T> RetainedLaunchStorage<T> {
+    fn unclaimed(request: T) -> Self {
+        Self {
+            request,
+            _layout_claim: None,
+        }
+    }
+
+    fn with_envelope_growth(
+        owner: Option<&runmat_runtime::context::host_allocation::HostControlAllocationOwner>,
+        make_request: impl FnOnce() -> T,
+    ) -> Result<Self, runmat_runtime::context::host_allocation::HostAllocationError> {
+        let claim = owner
+            .map(|owner| owner.claim(crate::protocol::FEA_LAUNCH_LAYOUT_GROWTH))
+            .transpose()?;
+        let request = make_request();
+        Ok(Self {
+            request,
+            _layout_claim: claim,
+        })
+    }
+}
+
+impl RetainedLaunchStorage {
+    fn delegated(
+        request: Box<crate::protocol::ReservedProgramExecutionRequest>,
+        console_budget: Option<runmat_execution::console::ConsoleBudget>,
+        grant: crate::fea_delegation::WorkerFeaGrant,
+        owner: Option<&runmat_runtime::context::host_allocation::HostControlAllocationOwner>,
+    ) -> Result<Self, runmat_runtime::context::host_allocation::HostAllocationError> {
+        Self::with_envelope_growth(owner, || {
+            WorkerLaunchRequest::ReservedFea(Box::new(
+                crate::protocol::ReservedFeaLaunch::from_reserved(request, console_budget, grant),
+            ))
+        })
+    }
+}
+
+#[cfg(test)]
+mod layout_claim_tests {
+    use super::RetainedLaunchStorage;
+    use runmat_runtime::context::host_allocation::HostControlAllocationOwner;
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+    use runmat_runtime::context::{
+        ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+        RuntimeServicePorts,
+    };
+    use std::{cell::Cell, rc::Rc};
+
+    struct Parallel(ManagedHostEffectLedger);
+    impl RuntimeParallelService for Parallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..Default::default()
+            }
+        }
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+
+    #[test]
+    fn launch_backing_retires_before_original_growth_claim_is_refunded() {
+        let ledger = ManagedHostEffectLedger::new_with_epoch(4096, 7);
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(Parallel(ledger.clone()))),
+        )
+        .with_cancellation_token(cancellation.token());
+        let owner = HostControlAllocationOwner::capture(&runtime)
+            .unwrap()
+            .unwrap();
+        struct Backing {
+            ledger: ManagedHostEffectLedger,
+            dropped: Rc<Cell<bool>>,
+        }
+        impl Drop for Backing {
+            fn drop(&mut self) {
+                assert!(self.ledger.snapshot().live_claimed_bytes > 0);
+                self.dropped.set(true);
+            }
+        }
+        let dropped = Rc::new(Cell::new(false));
+        let retained = RetainedLaunchStorage::with_envelope_growth(Some(&owner), || {
+            assert!(
+                ledger.snapshot().live_claimed_bytes
+                    >= crate::protocol::FEA_LAUNCH_LAYOUT_GROWTH as u64
+            );
+            Box::new(Backing {
+                ledger: ledger.clone(),
+                dropped: dropped.clone(),
+            })
+        })
+        .unwrap();
+        assert!(!dropped.get());
+        assert!(
+            ledger.snapshot().live_claimed_bytes
+                >= crate::protocol::FEA_LAUNCH_LAYOUT_GROWTH as u64
+        );
+        drop(retained);
+        assert!(dropped.get());
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        cancellation.cancel(runmat_execution::CancellationReason::User);
+        let factory_called = Cell::new(false);
+        assert!(
+            RetainedLaunchStorage::with_envelope_growth(Some(&owner), || {
+                factory_called.set(true);
+            })
+            .is_err()
+        );
+        assert!(
+            !factory_called.get(),
+            "revoked original owner must refuse before constructing backing"
+        );
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
+}
+
 pub(super) async fn run_process(
     driver: &ProcessOwner<'_>,
     mut request: WorkerLaunchRequest,
     completion: &dyn OwnedProcessControl,
-    meters: &TransportMeters,
-    termination: &mut AttemptExecutionTermination,
-    console: &mut Option<runmat_execution::console::ConsoleTranscript>,
-    console_scopes: &mut Vec<runmat_execution::console::ScopedConsoleTranscript>,
-    retirement: &mut LocalRetirementEvidence,
+    evidence: &mut ProcessAttemptEvidence,
 ) -> Result<WorkerResponse, TransferFailure> {
+    let meters = &evidence.meters;
+    let termination = &mut evidence.termination;
+    let console = &mut evidence.console;
+    let console_scopes = &mut evidence.console_scopes;
+    let retirement = &mut evidence.retirement;
     let fea_parent = completion
         .fea_parent()
         .map_err(TransferFailure::Infrastructure)?;
@@ -172,48 +317,6 @@ pub(super) async fn run_process(
     let _fea_proxy_close = fea_proxy
         .as_ref()
         .map(|proxy| crate::fea_proxy::Close(proxy.clone()));
-    if let Some(source) = &fea_parent {
-        let assignment = request.assignment().ok_or_else(|| {
-            TransferFailure::Infrastructure("FEA child lacks an original assignment".into())
-        })?;
-        let resources = request.resources().ok_or_else(|| {
-            TransferFailure::Infrastructure("FEA child lacks reserved resources".into())
-        })?;
-        let minimum =
-            crate::fea_proxy::storage_bytes(invocation, crate::fea_proxy::StorageRole::Delegated)
-                .map_err(TransferFailure::Infrastructure)?;
-        if resources.memory_bytes < minimum {
-            return Err(TransferFailure::Infrastructure(
-                "inherited FEA controls exceed original worker memory".into(),
-            ));
-        }
-        let grant = crate::fea_delegation::WorkerFeaGrant::new(source, assignment, resources)
-            .map_err(TransferFailure::Infrastructure)?;
-        request = match request {
-            WorkerLaunchRequest::Reserved(request) => WorkerLaunchRequest::ReservedFea {
-                request,
-                console_budget: None,
-                fea_grant: grant,
-            },
-            WorkerLaunchRequest::ReservedConsole {
-                request,
-                console_budget,
-            } => WorkerLaunchRequest::ReservedFea {
-                request,
-                console_budget: Some(console_budget),
-                fea_grant: grant,
-            },
-            WorkerLaunchRequest::StagedGraph(mut graph) => {
-                graph.staged_graph_v10.fea_grant = Some(grant);
-                WorkerLaunchRequest::StagedGraph(graph)
-            }
-            _ => {
-                return Err(TransferFailure::Infrastructure(
-                    "FEA delegation requires the private reserved launch".into(),
-                ))
-            }
-        };
-    }
     if fea_proxy.is_some() {
         request = match request {
             WorkerLaunchRequest::Reserved(request) => WorkerLaunchRequest::ReservedFeaProxy {
@@ -236,8 +339,56 @@ pub(super) async fn run_process(
             other => other,
         };
     }
+    let retained_request = if let Some(source) = &fea_parent {
+        let assignment = request.assignment().ok_or_else(|| {
+            TransferFailure::Infrastructure("FEA child lacks an original assignment".into())
+        })?;
+        let resources = request.resources().ok_or_else(|| {
+            TransferFailure::Infrastructure("FEA child lacks reserved resources".into())
+        })?;
+        let minimum =
+            crate::fea_proxy::storage_bytes(invocation, crate::fea_proxy::StorageRole::Delegated)
+                .map_err(TransferFailure::Infrastructure)?;
+        if resources.memory_bytes < minimum {
+            return Err(TransferFailure::Infrastructure(
+                "inherited FEA controls exceed original worker memory".into(),
+            ));
+        }
+        let grant = crate::fea_delegation::WorkerFeaGrant::new(source, assignment, resources)
+            .map_err(TransferFailure::Infrastructure)?;
+        let owner = completion.control_allocation_owner();
+        let retained = match request {
+            WorkerLaunchRequest::Reserved(request) => {
+                RetainedLaunchStorage::delegated(request, None, grant, owner.as_ref())
+            }
+            WorkerLaunchRequest::ReservedConsole {
+                request,
+                console_budget,
+            } => RetainedLaunchStorage::delegated(
+                request,
+                Some(console_budget),
+                grant,
+                owner.as_ref(),
+            ),
+            WorkerLaunchRequest::StagedGraph(mut graph) => {
+                graph.staged_graph_v10.fea_grant = Some(grant);
+                Ok(RetainedLaunchStorage::unclaimed(
+                    WorkerLaunchRequest::StagedGraph(graph),
+                ))
+            }
+            _ => {
+                return Err(TransferFailure::Infrastructure(
+                    "FEA delegation requires the private reserved launch".into(),
+                ))
+            }
+        };
+        retained.map_err(super::control_allocation_failure)?
+    } else {
+        RetainedLaunchStorage::unclaimed(request)
+    };
+    let request = &retained_request.request;
     #[cfg(windows)]
-    if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
+    if matches!(request, WorkerLaunchRequest::StagedGraph(_)) {
         let own_executable = std::env::current_exe()
             .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
         let builtin_worker = [runmat_process_host::HiddenMode::ExecutionWorker
@@ -261,23 +412,26 @@ pub(super) async fn run_process(
             "local worker has an unverified Graph process tree and refuses new work".into(),
         ));
     }
-    match &request {
+    match request {
         WorkerLaunchRequest::Direct(request) => request
             .validate()
             .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
         WorkerLaunchRequest::Reserved(request)
         | WorkerLaunchRequest::ReservedFeaProxy { request, .. }
-        | WorkerLaunchRequest::ReservedConsole { request, .. }
-        | WorkerLaunchRequest::ReservedFea { request, .. } => request
+        | WorkerLaunchRequest::ReservedConsole { request, .. } => request
+            .validate()
+            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
+        WorkerLaunchRequest::ReservedFea(launch) => launch
+            .request
             .validate()
             .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
         WorkerLaunchRequest::StagedGraph(_) => {}
     }
-    let console_controls = match &request {
+    let console_controls = match request {
         WorkerLaunchRequest::Reserved(request)
         | WorkerLaunchRequest::ReservedFeaProxy { request, .. }
-        | WorkerLaunchRequest::ReservedConsole { request, .. }
-        | WorkerLaunchRequest::ReservedFea { request, .. } => request.request().console,
+        | WorkerLaunchRequest::ReservedConsole { request, .. } => request.request().console,
+        WorkerLaunchRequest::ReservedFea(launch) => launch.request.request().console,
         WorkerLaunchRequest::StagedGraph(_) => {
             completion
                 .graph_authority()
@@ -308,7 +462,7 @@ pub(super) async fn run_process(
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
     let mut console_receipt = None;
     let mut received_scopes = Vec::new();
-    let payload = serde_json::to_vec(&request)
+    let payload = serde_json::to_vec(request)
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
     if payload.len() > driver.config.max_message_bytes as usize {
         return Err(TransferFailure::Infrastructure(
@@ -318,7 +472,7 @@ pub(super) async fn run_process(
     if completion.is_cancelled() {
         return Err(TransferFailure::Cancelled);
     }
-    let graph_scratch = if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
+    let graph_scratch = if matches!(request, WorkerLaunchRequest::StagedGraph(_)) {
         Some(
             PrivateArtifactLease::new_attempt_scratch_in(&driver.config.store_root)
                 .map_err(TransferFailure::Infrastructure)?,
@@ -342,7 +496,7 @@ pub(super) async fn run_process(
         // The signed-in person's membership remains Server-authorized.
         command.environment.insert("RUNMAT_ORG_ID".into(), org);
     }
-    if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
+    if matches!(request, WorkerLaunchRequest::StagedGraph(_)) {
         command.environment_policy =
             EnvironmentPolicy::InheritExcept(vec!["RUNMAT_EXECUTION_WORKER_REMOTE".into()]);
     }
@@ -360,7 +514,7 @@ pub(super) async fn run_process(
             .to_string_lossy()
             .into_owned(),
     );
-    if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
+    if matches!(request, WorkerLaunchRequest::StagedGraph(_)) {
         command.environment.insert(
             NATIVE_ARTIFACT_STORE_ROOT_ENV.into(),
             driver.artifacts.root().to_string_lossy().into_owned(),
@@ -415,7 +569,7 @@ pub(super) async fn run_process(
         },
         None => AttemptChild::Direct(child),
     };
-    let materialized = match &request {
+    let materialized = match request {
         WorkerLaunchRequest::StagedGraph(_) => completion
             .graph_authority()
             .map(|authority| authority.materialized_scratch_bytes),
@@ -717,7 +871,7 @@ pub(super) async fn run_process(
                 .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
         }
     };
-    if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
+    if matches!(request, WorkerLaunchRequest::StagedGraph(_)) {
         // This is a one-shot Graph child. Close our private request writer
         // after the terminal frame so the worker observes EOF before wait.
         // No cancellation or collective command is legal after completion.
@@ -780,7 +934,7 @@ pub(super) async fn run_process(
         if source.cancellation_token().is_cancelled() { return Err(TransferFailure::Cancelled); }
     }
     if let Some(proxy) = &fea_proxy { proxy.terminal_check().map_err(|denied| TransferFailure::Infrastructure(denied.to_string()))?; }
-    match &request {
+    match request {
         WorkerLaunchRequest::Direct(request) => match request.as_ref() {
             WorkerRequest::Direct(request) => response.validate_against(request),
             WorkerRequest::Graph(_) => {
@@ -791,8 +945,8 @@ pub(super) async fn run_process(
         },
         WorkerLaunchRequest::Reserved(request)
         | WorkerLaunchRequest::ReservedFeaProxy { request, .. }
-        | WorkerLaunchRequest::ReservedConsole { request, .. }
-        | WorkerLaunchRequest::ReservedFea { request, .. } => response.validate_against(request.request()),
+        | WorkerLaunchRequest::ReservedConsole { request, .. } => response.validate_against(request.request()),
+        WorkerLaunchRequest::ReservedFea(launch) => response.validate_against(launch.request.request()),
         WorkerLaunchRequest::StagedGraph(_) => completion
             .graph_authority()
             .ok_or_else(|| {
@@ -873,7 +1027,7 @@ pub(super) async fn run_process(
             let message = format!(
                 "worker process tree could not be retired after bounded retries: {error}; original outcome: {original}"
             );
-            if !matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
+            if !matches!(request, WorkerLaunchRequest::StagedGraph(_)) {
                 return Err(TransferFailure::RetirementUnverified(message));
             }
             let AttemptChild::Graph(child) = child else {

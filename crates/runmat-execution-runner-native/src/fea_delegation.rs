@@ -10,6 +10,9 @@ use std::sync::{Arc, Mutex};
 pub(crate) type Source = Arc<dyn FeaRunDelegationSource>;
 pub(crate) const MAX_GRANT_BYTES: u64 = 16 * 1024;
 pub(crate) const STORAGE_BYTES: u64 = MAX_GRANT_BYTES * 4
+    // Keep the existing bounded grant wire/decode allowance. This is only the
+    // additional fixed backing of the one replacement request envelope.
+    + crate::protocol::FEA_LAUNCH_LAYOUT_GROWTH as u64
     + runmat_runtime::analysis::fea_run_admission::FEA_DEADLINE_MONITOR_STACK_BYTES as u64;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -199,9 +202,14 @@ pub(crate) fn capture() -> Result<Option<Source>, String> {
 }
 
 #[cfg(test)]
+pub(crate) fn test_grant() -> WorkerFeaGrant {
+    tests::fixture()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> WorkerFeaGrant {
+    pub(super) fn fixture() -> WorkerFeaGrant {
         let request = runmat_runtime::analysis::fea_run_admission::FeaRunRequest::local(
             runmat_runtime::analysis::fea_run_admission::FeaRunKind::MeshAndSolve,
             2000,
@@ -248,6 +256,22 @@ mod tests {
                 allocation_ceiling_millicores: 2000,
             },
         }
+    }
+    #[test]
+    fn delegated_quote_covers_one_envelope_growth_at_original_memory_boundary() {
+        let old_control = MAX_GRANT_BYTES * 4
+            + runmat_runtime::analysis::fea_run_admission::FEA_DEADLINE_MONITOR_STACK_BYTES as u64;
+        assert_eq!(
+            STORAGE_BYTES - old_control,
+            crate::protocol::FEA_LAUNCH_LAYOUT_GROWTH as u64
+        );
+        let minimum =
+            crate::fea_proxy::storage_bytes(0, crate::fea_proxy::StorageRole::Delegated).unwrap();
+        let mut grant = fixture();
+        grant.resources.memory_bytes = minimum;
+        grant.validate(&grant.assignment, &grant.resources).unwrap();
+        grant.resources.memory_bytes -= 1;
+        assert!(grant.validate(&grant.assignment, &grant.resources).is_err());
     }
     #[test]
     fn private_grant_binds_assignment_and_cpu_without_resetting_parent_clock() {
