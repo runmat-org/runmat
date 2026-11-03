@@ -23,6 +23,17 @@ One GFLOP equals exactly 1,000,000,000 measured floating-point operations under
 this specification. GFLOP measures an amount of work. GFLOP/s measures speed and
 is not the unit of the simulation allowance.
 
+Displays use decimal scales of the same operation count:
+
+| Display unit | Operations |
+| --- | ---: |
+| GFLOP | 1,000,000,000 |
+| TFLOP | 1,000,000,000,000 |
+| PFLOP | 1,000,000,000,000,000 |
+
+For example, 2,500 GFLOP and 2.5 TFLOP describe the same work. Changing the display
+scale does not change the allowance consumed or round the stored count.
+
 Measurement uses defined algorithmic operation counts, not physical instruction
 counters or a conversion from elapsed time. Counters retain exact integer
 operation totals; displayed decimal GFLOP are a presentation of those totals,
@@ -71,6 +82,23 @@ operations require explicit rules. The basic table alone is not a complete
 release measurement schedule. These rules and the supported-operation inventory
 must be completed and reviewed before this draft is published as version 1.
 
+### Sparse LLT reference arithmetic
+
+For a column of an LLT factor with p stored entries below its diagonal, the
+right-looking reference divides those p entries by the diagonal and updates the
+lower triangle of their outer product. Its basic real arithmetic count is
+p² + 2p. For Hermitian complex factors the count is 4p² + 2p: division by the
+real diagonal costs 2p, diagonal updates cost 4p and off-diagonal updates cost
+4p(p − 1). Each column also invokes one real square root; those calls remain
+separate until the intrinsic-counting rule is finalized.
+
+Forward and backward substitution together cost 4p + 2 real operations per
+column and right-hand side, or 16p + 4 for a Hermitian complex factor. Reusing
+a factor for k right-hand sides counts k substitutions without repeating its
+factorization. Column sizes come from the stored symbolic fill, including the
+lower-triangular blocks and trailing patterns of supernodes. Counts use checked
+integers rather than the solver's floating-point performance estimate.
+
 ## Reuse, interrupted runs and retries
 
 Loading, viewing or reusing an existing output does not charge its construction
@@ -78,17 +106,19 @@ again. New numerical work using that output is counted. Examples include solving
 a new load case with an existing mesh, or applying an existing factorization to
 another right-hand side.
 
-The released specification must define settlement for partial work, cancellation,
-numerical failure and infrastructure retries. The proposed policy is to charge
-completed numerical work and avoid duplicate charges caused by RunMat recovery.
-The exact boundaries and their enforceability remain a release-contract decision;
-this draft does not claim that those mechanisms are already implemented.
+Settlement charges completed numerical work. An abandoned run expires 24 hours
+after its last usage report, charging only the completed work last durably
+reported and releasing its unused grant. Reserved operations are not completed
+work. Recovery must preserve completed-work identities to avoid charging the
+same work twice; that ownership mechanism remains a release requirement.
 
 ## Estimates, budgets and usage receipts
 
 A pre-run estimate is distinct from measured usage. Adaptive meshes, nonlinear
 convergence and iterative solves can require additional work. Runs need an
-explicit spending cap and admission for additional work before that cap is exceeded.
+fixed spending cap and admission for additional work before that cap is exceeded.
+The default cap is the available allowance plus eligible packs at admission.
+Users can choose a lower cap; a grant renewal cannot increase that run's cap.
 
 A usage receipt identifies the accounting version, run/attempt identities,
 completed numerical work by category, exact total operations and settlement state.

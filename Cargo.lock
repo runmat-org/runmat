@@ -9114,6 +9114,7 @@ dependencies = [
  "num-complex",
  "rayon",
  "runmat-cpu-execution",
+ "runmat-simulation-usage",
  "thiserror 1.0.69",
 ]
 

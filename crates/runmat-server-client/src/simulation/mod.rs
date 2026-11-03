@@ -105,7 +105,8 @@ impl SimulationLeaseClient {
                 errors::api_error,
             )
             .await?;
-        if lease.budget_ops != request.budget_ops
+        if lease.state != SimulationLeaseState::Active
+            || lease.budget_ops != request.budget_ops
             || lease.granted_ops.operations() == 0
             || lease.granted_ops > lease.budget_ops
             || !(1..=120).contains(&lease.heartbeat_seconds)

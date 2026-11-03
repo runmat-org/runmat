@@ -240,6 +240,9 @@ pub struct SymbolicFactorization {
     pub(crate) complex: bool,
 }
 
+mod reference_work;
+pub use reference_work::{LltReferenceWork, ReferenceWorkError};
+
 impl std::fmt::Debug for SymbolicFactorization {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter

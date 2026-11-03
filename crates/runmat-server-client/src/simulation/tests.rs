@@ -143,7 +143,7 @@ async fn allowance_and_lease_routes_keep_exact_usage_version_and_absolute_grants
             "measurementVersion":null,"runmatVersion":"0.7","renewal":"week","period":null,
             "allowanceOps":u64::MAX.to_string(),"packOps":"0","usedOps":"0","reservedOps":"0",
             "waived":false,"published":true}).to_string()),
-        (format!("POST /v1/orgs/{org}/simulation/leases"), json!({"leaseId":lease,"grantedOps":count(u64::MAX),
+        (format!("POST /v1/orgs/{org}/simulation/leases"), json!({"leaseId":lease,"state":"active","grantedOps":count(u64::MAX),
             "budgetOps":count(u64::MAX),"expiresAt":"2099-01-01T00:00:00Z","heartbeatSeconds":30,"waived":false}).to_string()),
         (format!("POST /v1/simulation/leases/{lease}/usage"), json!({"grantedOps":count(u64::MAX),
             "budgetOps":count(u64::MAX),"totalOps":usage.total().unwrap(),"expiresAt":"2099-01-01T00:00:00Z"}).to_string()),
@@ -185,13 +185,21 @@ async fn invalid_remote_grant_and_oversized_reply_are_refused() {
     let request = start_request();
     let org = OrgId::from_uuid(uuid::Uuid::from_u128(1));
     for response in [
-        json!({"leaseId":SimulationLeaseId::from_uuid(uuid::Uuid::from_u128(2)),
+        json!({"leaseId":SimulationLeaseId::from_uuid(uuid::Uuid::from_u128(2)),"state":"active",
             "grantedOps":"2","budgetOps":"1","expiresAt":"2099-01-01T00:00:00Z","heartbeatSeconds":30,"waived":false}).to_string(),
+        json!({"leaseId":SimulationLeaseId::from_uuid(uuid::Uuid::from_u128(2)),"state":"settled",
+            "grantedOps":count(u64::MAX),"budgetOps":request.budget_ops,"expiresAt":"2099-01-01T00:00:00Z","heartbeatSeconds":30,"waived":false}).to_string(),
+        json!({"leaseId":SimulationLeaseId::from_uuid(uuid::Uuid::from_u128(2)),"state":"expired",
+            "grantedOps":count(u64::MAX),"budgetOps":request.budget_ops,"expiresAt":"2099-01-01T00:00:00Z","heartbeatSeconds":30,"waived":false}).to_string(),
+        json!({"leaseId":SimulationLeaseId::from_uuid(uuid::Uuid::from_u128(2)),
+            "grantedOps":count(u64::MAX),"budgetOps":request.budget_ops,"expiresAt":"2099-01-01T00:00:00Z","heartbeatSeconds":30,"waived":false}).to_string(),
+        json!({"leaseId":SimulationLeaseId::from_uuid(uuid::Uuid::from_u128(2)),"state":"unknown",
+            "grantedOps":count(u64::MAX),"budgetOps":request.budget_ops,"expiresAt":"2099-01-01T00:00:00Z","heartbeatSeconds":30,"waived":false}).to_string(),
         "x".repeat(64 * 1024 + 1),
     ] {
         let (endpoint, server) = fixture(vec![(format!("POST /v1/orgs/{org}/simulation/leases"), response)]).await;
         let error = SimulationLeaseClient::new(&endpoint, "test-key").unwrap().start(&org, &request).await.unwrap_err();
-        assert!(matches!(error, SimulationLeaseError::InvalidResponse(_) | SimulationLeaseError::Transport(crate::ServerLeaseTransportError::BodyTooLarge)));
+        assert!(matches!(error, SimulationLeaseError::InvalidResponse(_) | SimulationLeaseError::Transport(crate::ServerLeaseTransportError::BodyTooLarge | crate::ServerLeaseTransportError::Decode(_))));
         server.await.unwrap();
     }
 }

@@ -58,11 +58,22 @@ pub struct StartSimulationLease {
 #[serde(rename_all = "camelCase")]
 pub struct SimulationLease {
     pub lease_id: SimulationLeaseId,
+    pub state: SimulationLeaseState,
     pub granted_ops: OperationCount,
     pub budget_ops: OperationCount,
     pub expires_at: DateTime<Utc>,
     pub heartbeat_seconds: u64,
     pub waived: bool,
+}
+
+/// Replaying a start returns the original attempt, including its terminal state.
+/// Expiry alone cannot distinguish a recently settled lease from an active one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SimulationLeaseState {
+    Active,
+    Settled,
+    Expired,
 }
 
 #[derive(Clone, Debug, Serialize)]
