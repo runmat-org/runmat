@@ -8,6 +8,7 @@ members = [
     "crates/runmat-constraint",
     "crates/runmat-cad",
     "crates/runmat-rules",
+    "crates/runmat-circuit",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",

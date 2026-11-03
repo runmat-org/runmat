@@ -1,0 +1,14 @@
+[package]
+name = "runmat-circuit"
+version = "0.6.2"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "RunMat PCB core: circuit IR with stable ids, pool library and footprint generators, connectivity and ERC, board layout with stackup and zone fill, spatial index, incremental DRC, routing primitives, clean-room KiCad interchange, fabrication outputs, design-review suites and the board-to-FEA contract"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+# Pure Rust and dependency-light: integer-nanometre geometry with its own exact polygon
+# booleans, ordered maps everywhere, no hashing, so every output is deterministic.
+[dependencies]
+runmat-rules = { path = "../runmat-rules", version = "=0.6.2" }

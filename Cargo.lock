@@ -7937,6 +7937,7 @@ version = "0.6.2"
 dependencies = [
  "hex",
  "runmat-constraint",
+ "runmat-rules",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -7951,6 +7952,13 @@ dependencies = [
  "runmat-build-identity",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "runmat-circuit"
+version = "0.6.2"
+dependencies = [
+ "runmat-rules",
 ]
 
 [[package]]
