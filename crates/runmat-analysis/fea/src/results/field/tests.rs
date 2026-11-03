@@ -44,7 +44,7 @@ fn partition_shape_profile_bounds_actual_contract_without_numeric_storage() {
             sample,
             AnalysisField::host_f64(
                 definition.field_id(),
-                definition.layout(),
+                definition.profile_layout(),
                 vec![count],
                 vec![f64::MAX; count],
             ),
@@ -119,7 +119,7 @@ fn partition_shape_profile_covers_vector_and_tensor_widths() {
         let count = 7;
         let storage = AnalysisField::host_f64(
             definition.field_id(),
-            definition.layout(),
+            definition.profile_layout(),
             definition.storage_shape(count).unwrap(),
             vec![-f64::MAX; count * definition.storage_component_count().unwrap()],
         );
