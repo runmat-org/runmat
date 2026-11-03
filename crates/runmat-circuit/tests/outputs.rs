@@ -69,10 +69,13 @@ fn gerber_drill_netlist_bom_pnp() {
     assert!(top.contains("SMDPad,CuDef"));
     assert!(top.trim_end().ends_with("M02*"));
     let inner = &g["large-In1_Cu.gbr"];
-    assert!(
-        inner.contains("G36*") && inner.contains("%LPC*%"),
-        "zone fill regions with holes"
-    );
+    // Fill holes are cut-ins of one region, never clear polarity (which would also erase
+    // other zones' copper drawn earlier on the layer).
+    assert!(inner.contains("G36*"), "zone fill regions");
+    assert!(g.values().all(|f| !f.contains("%LPC*%")));
+    // Legend text is strokes, not comments.
+    let silk = &g["large-F_Silkscreen.gbr"];
+    assert!(!silk.contains("G04 text"));
     assert!(g["large-F_Mask.gbr"].contains("%TF.FilePolarity,Negative*%"));
     assert!(g["large-Edge_Cuts.gbr"].contains("Profile,NP"));
     // Same input, same bytes.
@@ -114,6 +117,83 @@ fn gerber_drill_netlist_bom_pnp() {
     let pnp = fab::pick_place(&board, false);
     assert!(pnp.lines().count() > 20);
     assert!(pnp.lines().skip(1).all(|l| l.ends_with(",top")));
+}
+
+#[test]
+fn overlapping_zones_text_strokes_and_ipc2581() {
+    use runmat_circuit::geom::poly::{rect_ring, BoolOp, PolySet};
+    use runmat_circuit::geom::{mm, Point, Rect};
+    use runmat_circuit::layout::*;
+    let (_, _, _, mut board) = small();
+    // Two zones on one layer: A's fill has a hole under B's fill. With clear polarity the hole
+    // would erase B; as cut-in regions both survive.
+    let a = board.alloc();
+    let b = board.alloc();
+    let n0 = board.net("GND");
+    let n1 = board.net("+5V");
+    let big = PolySet::from_rings(vec![rect_ring(Rect::new(
+        Point::mm(1.0, 1.0),
+        Point::mm(9.0, 9.0),
+    ))]);
+    let hole = PolySet::from_rings(vec![rect_ring(Rect::new(
+        Point::mm(3.0, 3.0),
+        Point::mm(7.0, 7.0),
+    ))]);
+    let inner = PolySet::from_rings(vec![rect_ring(Rect::new(
+        Point::mm(4.0, 4.0),
+        Point::mm(6.0, 6.0),
+    ))]);
+    let mut za = Zone::new(a, "A", n0, vec![1], big.polys[0].clone());
+    za.fill.insert(1, big.op(&hole, BoolOp::Difference));
+    let mut zb = Zone::new(b, "B", n1, vec![1], inner.polys[0].clone());
+    zb.fill.insert(1, inner.clone());
+    board.zones.insert(a, za);
+    board.zones.insert(b, zb);
+    let tid = board.alloc();
+    board.texts.insert(
+        tid,
+        BoardText {
+            id: tid,
+            layer: Layer::Silk(Side::Top),
+            at: Point::mm(5.0, 12.0),
+            text: "REV A".into(),
+            size: mm(1.0),
+            thickness: mm(0.15),
+            angle: 0.0,
+            mirrored: false,
+        },
+    );
+    let g = fab::gerber(&board, fab::GerberLayer::Copper(1));
+    assert!(!g.contains("%LPC*%"));
+    // The cut-in region for A plus B's region.
+    assert!(g.matches("G36*").count() >= 2);
+    let silk = fab::gerber(&board, fab::GerberLayer::Legend(Side::Top));
+    let draws = silk.lines().filter(|l| l.ends_with("D01*")).count();
+    assert!(draws > 10, "REV A drawn as strokes ({draws} draws)");
+    // IPC-2581C: one document with the data set.
+    let x = runmat_circuit::ipc2581::export(&board, &BTreeMap::new());
+    assert!(x.starts_with("<?xml") && x.contains("<IPC-2581 revision=\"C\""));
+    for tag in [
+        "Content",
+        "LogisticHeader",
+        "HistoryRecord",
+        "Bom",
+        "Ecad",
+        "CadData",
+        "Stackup",
+        "Step",
+    ] {
+        let open = x.matches(&format!("<{tag}>")).count() + x.matches(&format!("<{tag} ")).count();
+        assert_eq!(open, x.matches(&format!("</{tag}>")).count(), "{tag}");
+        assert!(open >= 1, "{tag}");
+    }
+    for f in board.footprints.values() {
+        assert!(x.contains(&format!("<Component refDes=\"{}\"", f.reference)));
+    }
+    assert!(x.contains("<LogicalNet name=\"GND\">"));
+    assert!(x.contains("<Cutout>"), "fill holes as cutouts");
+    assert!(x.contains("layerFunction=\"DRILL\""));
+    assert_eq!(x, runmat_circuit::ipc2581::export(&board, &BTreeMap::new()));
 }
 
 #[test]

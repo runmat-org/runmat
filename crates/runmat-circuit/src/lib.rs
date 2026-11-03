@@ -27,7 +27,11 @@
 //! Interchange and outputs:
 //! - [`kicad`]: clean-room, lossless KiCad 8/9/10 board, footprint, schematic, symbol and
 //!   rules files.
-//! - [`fab`]: Gerber X2, Excellon, IPC-D-356, BOM, pick-and-place.
+//! - [`fab`]: Gerber X2, Excellon, IPC-D-356, BOM, pick-and-place; [`font`]: the stroke
+//!   font text is drawn with; [`ipc2581`]: IPC-2581 revision C. ODB++ is not written yet:
+//!   its directory format (matrix, per-layer feature files, EDA data, netlists) needs the
+//!   ODB++ specification, which Siemens distributes on registration and which this
+//!   clean-room implementation has not used; IPC-2581 carries the same data set.
 //! - [`review`]: design-review suites with typed fixes.
 //! - [`fea`]: the board → FEA `pcb` source contract.
 //! - [`fixture`]: a standard pool and a large-board generator for tests and benchmarks.
@@ -42,8 +46,10 @@ pub mod erc;
 pub mod fab;
 pub mod fea;
 pub mod fixture;
+pub mod font;
 pub mod geom;
 pub mod ids;
+pub mod ipc2581;
 pub mod ir;
 pub mod kicad;
 pub mod layout;

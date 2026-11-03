@@ -13,8 +13,9 @@
 //! - [`pick_place`]: pick-and-place (CSV).
 //!
 //! Outputs are deterministic (sorted, fixed precision, no dates unless the caller passes one).
-//! Board text is not rendered to strokes yet; it is listed in the legend file as an attribute
-//! comment.
+//! Text (board text, footprint fields with `${REFERENCE}`/`${VALUE}` substituted) is drawn as
+//! strokes of the [`crate::font`] stroke font. Zone fills are single regions whose holes are
+//! joined by cut-ins, so overlapping zones on one layer never erase each other.
 
 use crate::geom::poly::Ring;
 use crate::geom::shape::{Core, Prim};
@@ -129,9 +130,6 @@ impl Writer {
         }
         self.body.push_str("G37*\n%TD.AperFunction*%\n");
     }
-    fn polarity(&mut self, dark: bool) {
-        let _ = writeln!(self.body, "%LP{}*%", if dark { "D" } else { "C" });
-    }
     fn finish(self, header: &str) -> String {
         let mut s = String::from(header);
         s.push_str("%FSLAX46Y46*%\n%MOMM*%\n%LPD*%\nG01*\n");
@@ -226,18 +224,16 @@ pub fn gerber(board: &Board, layer: GerberLayer) -> String {
                         .map(|x| board.net_name(x).to_string())
                         .unwrap_or_default();
                     w.object(&[("N", net)]);
+                    // One region per polygon, holes joined by cut-ins: clear polarity would
+                    // also erase other zones' copper drawn earlier on the layer.
                     for p in &f.polys {
-                        w.polarity(true);
-                        w.region(&p.outer, "Conductor");
-                        if !p.holes.is_empty() {
-                            w.polarity(false);
-                            for h in &p.holes {
-                                w.region(h, "Conductor");
-                            }
-                            w.polarity(true);
-                        }
+                        w.region(&crate::geom::poly::cut_in_contour(p), "Conductor");
                     }
                 }
+            }
+            for t in board.texts.values().filter(|t| t.layer == Layer::Copper(l)) {
+                w.object(&[]);
+                text_strokes(&mut w, t, "NonConductor");
             }
             for t in board.tracks.values().filter(|t| t.layer == l) {
                 let ap = w.aperture(Aperture::Circle(t.width), "Conductor");
@@ -356,12 +352,12 @@ pub fn gerber(board: &Board, layer: GerberLayer) -> String {
                 let t = f.transform();
                 w.object(&[("C", f.reference.clone())]);
                 for g in &f.package.silk {
-                    legend_graphic(&mut w, g, &t);
+                    legend_graphic(&mut w, g, &t, Some(f));
                 }
             }
             for g in board.graphics.values() {
                 if g.layer == Layer::Silk(side) {
-                    legend_graphic(&mut w, &g.graphic, &crate::geom::Transform::IDENTITY);
+                    legend_graphic(&mut w, &g.graphic, &crate::geom::Transform::IDENTITY, None);
                 }
             }
             for t in board
@@ -369,13 +365,8 @@ pub fn gerber(board: &Board, layer: GerberLayer) -> String {
                 .values()
                 .filter(|t| t.layer == Layer::Silk(side))
             {
-                let _ = writeln!(
-                    w.body,
-                    "G04 text \"{}\" at {} {}*",
-                    t.text.replace('*', " "),
-                    t.at.x,
-                    t.at.y
-                );
+                w.object(&[]);
+                text_strokes(&mut w, t, "Other,Legend");
             }
         }
         GerberLayer::Profile => {
@@ -390,7 +381,38 @@ pub fn gerber(board: &Board, layer: GerberLayer) -> String {
     w.finish(&header(board, &function, polarity))
 }
 
-fn legend_graphic(w: &mut Writer, g: &Graphic, t: &crate::geom::Transform) {
+/// Board text as strokes of its own thickness.
+fn text_strokes(w: &mut Writer, t: &crate::layout::BoardText, function: &str) {
+    let th = if t.thickness > 0 {
+        t.thickness
+    } else {
+        crate::font::default_thickness(t.size)
+    };
+    let ap = w.aperture(Aperture::Circle(th), function);
+    for pl in crate::font::strokes(&t.text, t.at, t.size, t.angle, t.mirrored) {
+        if pl.len() == 1 {
+            w.flash(ap, pl[0]);
+        } else {
+            w.draw(ap, &pl);
+        }
+    }
+}
+
+/// `${REFERENCE}` / `${VALUE}` (and other footprint properties) substituted.
+fn expand_fields(text: &str, f: Option<&Footprint>) -> String {
+    let Some(f) = f else {
+        return text.to_string();
+    };
+    let mut s = text
+        .replace("${REFERENCE}", &f.reference)
+        .replace("${VALUE}", &f.value);
+    for (k, v) in &f.properties {
+        s = s.replace(&format!("${{{}}}", k.to_uppercase()), v);
+    }
+    s
+}
+
+fn legend_graphic(w: &mut Writer, g: &Graphic, t: &crate::geom::Transform, fp: Option<&Footprint>) {
     match g {
         Graphic::Line { points, width } => {
             let ap = w.aperture(Aperture::Circle((*width).max(1)), "Other,Legend");
@@ -447,7 +469,33 @@ fn legend_graphic(w: &mut Writer, g: &Graphic, t: &crate::geom::Transform) {
             }
             w.draw(ap, &pts);
         }
-        Graphic::Text { .. } => {}
+        Graphic::Text {
+            at,
+            text,
+            size,
+            angle,
+        } => {
+            let ap = w.aperture(
+                Aperture::Circle(crate::font::default_thickness(*size)),
+                "Other,Legend",
+            );
+            // Placed text reads upright: rotation follows the footprint; the bottom side
+            // mirrors it.
+            let txt = expand_fields(text, fp);
+            for pl in crate::font::strokes(
+                &txt,
+                t.apply(*at),
+                *size,
+                t.apply_angle(*angle) - if t.mirror { 180.0 } else { 0.0 },
+                t.mirror,
+            ) {
+                if pl.len() == 1 {
+                    w.flash(ap, pl[0]);
+                } else {
+                    w.draw(ap, &pl);
+                }
+            }
+        }
     }
 }
 

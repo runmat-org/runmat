@@ -843,6 +843,106 @@ pub fn open(set: &PolySet, d: Coord, tol: Coord) -> PolySet {
     grown.intersection(set)
 }
 
+/// A polygon with holes as one contour with *cut-ins*: each hole is joined by a vertical
+/// segment from its lowest vertex down to the nearest boundary below (the outer ring or
+/// another hole), traversed in both directions. This is the form Gerber regions use for
+/// holes (no clear polarity needed); IPC-2581 and ODB++ carry holes natively.
+///
+/// The cut-in point on a slanted edge is rounded to the nanometre grid.
+pub fn cut_in_contour(p: &Polygon) -> Ring {
+    /// Per (ring, edge): (distance² along the edge, cut-in point, hole ring).
+    type Bridges = BTreeMap<(usize, usize), Vec<(i128, Point, usize)>>;
+    if p.holes.is_empty() {
+        return p.outer.clone();
+    }
+    let rings: Vec<&Ring> = std::iter::once(&p.outer).chain(p.holes.iter()).collect();
+    let mut grid: crate::spatial::Grid<u32> = crate::spatial::Grid::new(super::mm(1.0));
+    let mut edges: Vec<(usize, usize)> = Vec::new();
+    for (r, ring) in rings.iter().enumerate() {
+        for i in 0..ring.len() {
+            let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+            grid.insert(edges.len() as u32, Rect::new(a, b));
+            edges.push((r, i));
+        }
+    }
+    let bottom = p.bbox().min.y - 1;
+    // Bridges per (ring, edge): (distance along the edge, cut-in point, hole ring).
+    let mut bridges: Bridges = BTreeMap::new();
+    let mut start: Vec<usize> = vec![0; rings.len()];
+    for h in 1..rings.len() {
+        let ring = rings[h];
+        let vi = (0..ring.len())
+            .min_by_key(|&i| (ring[i].y, ring[i].x))
+            .unwrap();
+        start[h] = vi;
+        let v = ring[vi];
+        let mut best: Option<(i128, i128, usize, Point)> = None; // (y·den numerator order)
+        grid.visit(
+            &Rect::new(Point::new(v.x, bottom), Point::new(v.x, v.y)),
+            |k, _| {
+                let (r, i) = edges[k as usize];
+                if r == h {
+                    return;
+                }
+                let er = rings[r];
+                let (a, b) = (er[i], er[(i + 1) % er.len()]);
+                let (lo, hi) = (a.x.min(b.x), a.x.max(b.x));
+                if v.x < lo || v.x > hi {
+                    return;
+                }
+                // Height of the edge at x = v.x (top endpoint for a vertical edge).
+                let hit = if a.x == b.x {
+                    Point::new(v.x, a.y.max(b.y))
+                } else {
+                    let y = a.y as i128
+                        + round_div(
+                            (v.x - a.x) as i128 * (b.y - a.y) as i128,
+                            (b.x - a.x) as i128,
+                        );
+                    Point::new(v.x, y as Coord)
+                };
+                if hit.y >= v.y {
+                    return;
+                }
+                let key = (hit.y as i128, -(k as i128));
+                if best.is_none_or(|bb| (key.0, key.1) > (bb.0, bb.1)) {
+                    best = Some((key.0, key.1, k as usize, hit));
+                }
+            },
+        );
+        let Some((_, _, k, hit)) = best else {
+            continue;
+        };
+        let (r, i) = edges[k];
+        let a = rings[r][i];
+        let t = (hit - a).dot(hit - a);
+        bridges.entry((r, i)).or_default().push((t, hit, h));
+    }
+    for v in bridges.values_mut() {
+        v.sort();
+    }
+    fn emit(r: usize, rings: &[&Ring], start: &[usize], bridges: &Bridges, out: &mut Ring) {
+        let ring = rings[r];
+        let n = ring.len();
+        for k in 0..n {
+            let i = (start[r] + k) % n;
+            out.push(ring[i]);
+            if let Some(bs) = bridges.get(&(r, i)) {
+                for &(_, hit, h) in bs {
+                    out.push(hit);
+                    emit(h, rings, start, bridges, out);
+                    out.push(rings[h][start[h]]);
+                    out.push(hit);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    emit(0, &rings, &start, &bridges, &mut out);
+    out.dedup();
+    out
+}
+
 pub fn rect_ring(r: Rect) -> Ring {
     vec![
         r.min,
@@ -955,6 +1055,48 @@ mod tests {
         assert_eq!(shape.polys.len(), 1);
         let opened = open(&shape, mm(0.1), 500);
         assert_eq!(opened.polys.len(), 2);
+    }
+
+    #[test]
+    fn cut_in_contours_keep_holes() {
+        let a = vec![sq(0.0, 0.0, 10.0)];
+        let holes = vec![
+            sq(2.0, 2.0, 2.0),
+            sq(2.5, 6.0, 1.0),
+            circle_ring(Point::mm(7.0, 7.0), mm(1.0), 1000),
+            // A slanted hole whose ray lands on a slanted edge of the hole below.
+            vec![
+                Point::mm(6.2, 2.0),
+                Point::mm(8.0, 3.3),
+                Point::mm(6.9, 4.4),
+            ],
+        ];
+        let set = boolean(&a, &holes, BoolOp::Difference);
+        assert_eq!(set.polys.len(), 1);
+        let c = cut_in_contour(&set.polys[0]);
+        // The contour fills exactly the polygon (cut-ins cancel).
+        let again = boolean(std::slice::from_ref(&c), &[], BoolOp::Union);
+        assert_eq!(again.polys.len(), 1);
+        assert_eq!(again.polys[0].holes.len(), 4);
+        assert!(
+            (again.area() - set.area()).abs() < 1e6,
+            "{} {}",
+            again.area(),
+            set.area()
+        );
+        assert!((ring_area(&c) - set.area()).abs() < 1e6);
+        // Cut-ins are vertical.
+        let n = c.len();
+        let mut verticals = 0;
+        for i in 0..n {
+            let (p, q) = (c[i], c[(i + 1) % n]);
+            for j in 0..n {
+                if (c[j], c[(j + 1) % n]) == (q, p) && p.x == q.x {
+                    verticals += 1;
+                }
+            }
+        }
+        assert!(verticals >= 8, "{verticals}");
     }
 
     #[test]
