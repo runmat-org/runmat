@@ -61,7 +61,8 @@ fn large_board_end_to_end() {
     );
     let t_erc = t.elapsed();
     let t = Instant::now();
-    let mut board = fixture::large_board(&pool, &nl, &params);
+    let (mut board, route) = fixture::large_board_report(&pool, &nl, &params);
+    let seeded = fixture::seed_violations(&mut board, 5);
     assert!(board.zones.values().all(|z| z.min_width > 0));
     let t_board = t.elapsed();
     let (mut rules, errs) = BoardRules::new(&board.limits, &specs());
@@ -81,6 +82,11 @@ fn large_board_end_to_end() {
     let t = Instant::now();
     let mut drc = Drc::run(&board, &rules, &[], &reps);
     let t_drc = t.elapsed();
+    let full_findings = drc.findings().len();
+    let mut by_code: std::collections::BTreeMap<String, usize> = Default::default();
+    for f in drc.findings() {
+        *by_code.entry(f.code.clone()).or_default() += 1;
+    }
     let t = Instant::now();
     let rn = route::ratsnest(&board);
     let t_rats = t.elapsed();
@@ -113,14 +119,32 @@ fn large_board_end_to_end() {
     println!(
         "timings: zone fill {t_fill:?} ({} zone layers, {fill_vertices} vertices), DRC full {t_drc:?} ({} findings), ratsnest {t_rats:?} ({} airwires), incremental DRC edit {t_inc:?}",
         reps.len(),
-        drc.findings().len(),
+        full_findings,
         rn.len()
     );
-    let mut by_code: std::collections::BTreeMap<&str, usize> = Default::default();
-    for f in drc.findings() {
-        *by_code.entry(f.code.as_str()).or_default() += 1;
-    }
     println!("DRC findings by code: {by_code:?}");
+    println!("routing: {route:?}; seeded: {seeded:?}");
+    // The generated board is clean apart from the seeded violations and the airwires of what
+    // the generator left unrouted.
+    for (code, n) in &seeded {
+        assert_eq!(
+            by_code.get(*code).copied().unwrap_or(0),
+            *n as usize,
+            "{code}"
+        );
+        assert_eq!(
+            *n,
+            5 * if *code == "clearance" { 2 } else { 1 },
+            "{code} seeds placed"
+        );
+    }
+    for code in by_code.keys() {
+        assert!(
+            seeded.contains_key(code.as_str()) || ["unrouted", "skew"].contains(&code.as_str()),
+            "unexpected `{code}` findings on the generated board"
+        );
+    }
+    assert!(route.completed * 2 > route.attempted, "{route:?}");
     assert!(!rn.is_empty());
     assert!(reps.iter().all(|r| r.polygons > 0));
 }
