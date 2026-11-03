@@ -1,4 +1,5 @@
 //! Synthetic transport contract, not a numerical or formulation qualification.
+use runmat_analysis_core::{AnalysisFieldLayout, ComplexRepresentation};
 use super::*;
 use runmat_analysis_core::{
     AnalysisField, FieldLocation, ObservationQuantity, ObservationValueShape, RecoveryPolicy,
@@ -161,7 +162,7 @@ pub(super) fn fixture() -> Fixture {
             .unwrap(),
             RecoveredFieldSample::FrequencyHertz(numerical.entry.frequency_hz()),
             AnalysisField::host_f64(
-                "pressure",
+                "pressure", AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node).representation(ComplexRepresentation::Complex),
                 vec![count, 2],
                 (0..count * 2)
                     .map(|index| numerical.entry.frequency_hz() * 100_000.0 + index as f64)

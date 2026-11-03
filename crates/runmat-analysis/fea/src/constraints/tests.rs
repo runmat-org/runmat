@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use runmat_analysis_core::{
     AnalysisConstraint, AnalysisField, AnalysisModel, CoordinateFrame, Displacement, Length,
     PairedConstraint, PairingPolicy, PeriodicConstraint, PeriodicTransform, Position,
@@ -1795,12 +1796,12 @@ fn result_evidence_aggregates_only_canonical_reaction_owners() {
     reactions[node_index * 3] = 10.0;
     let fields = vec![
         AnalysisField::host_f64(
-            crate::FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            crate::FEA_FIELD_STRUCTURAL_DISPLACEMENT, AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![node_count, 3],
             vec![0.0; node_count * 3],
         ),
         AnalysisField::host_f64(
-            crate::FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+            crate::FEA_FIELD_STRUCTURAL_REACTION_FORCE, AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node),
             vec![node_count, 3],
             reactions,
         ),

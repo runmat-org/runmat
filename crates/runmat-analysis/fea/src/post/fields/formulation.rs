@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use runmat_analysis_core::AnalysisField;
 
 use crate::{
@@ -73,32 +74,32 @@ pub(super) fn recover_beam_result_fields(
     let element_count = summary.structural_beam_recovery.len();
     Ok(Some(vec![
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
+            FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, AnalysisFieldLayout::scalar(ObservationQuantity::BeamAxialForce, FieldLocation::Element),
             vec![element_count],
             values.axial_force,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
+            FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, AnalysisFieldLayout::canonical(ObservationQuantity::BeamShearForce, FieldLocation::Element),
             vec![element_count, 2],
             values.shear_force,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
+            FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT, AnalysisFieldLayout::scalar(ObservationQuantity::BeamTorsionMoment, FieldLocation::Element),
             vec![element_count],
             values.torsion_moment,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
+            FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, AnalysisFieldLayout::canonical(ObservationQuantity::BeamBendingMoment, FieldLocation::Element),
             vec![element_count, 2],
             values.bending_moment,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
+            FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS, AnalysisFieldLayout::canonical(ObservationQuantity::BeamBendingStress, FieldLocation::Element),
             vec![element_count, 2],
             values.bending_stress,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
+            FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, AnalysisFieldLayout::scalar(ObservationQuantity::BeamTorsionStress, FieldLocation::Element),
             vec![element_count],
             values.torsion_stress,
         ),
@@ -287,22 +288,22 @@ pub(super) fn recover_shell_result_fields(
     let element_count = summary.structural_shell_recovery.len();
     Ok(Some(vec![
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+            FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, AnalysisFieldLayout::canonical(ObservationQuantity::ShellMembraneForce, FieldLocation::Element),
             vec![element_count, 3],
             values.membrane_force,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+            FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, AnalysisFieldLayout::canonical(ObservationQuantity::ShellBendingMoment, FieldLocation::Element),
             vec![element_count, 3],
             values.bending_moment,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+            FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, AnalysisFieldLayout::canonical(ObservationQuantity::ShellTransverseShear, FieldLocation::Element),
             vec![element_count, 2],
             values.transverse_shear,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+            FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, AnalysisFieldLayout::scalar(ObservationQuantity::ShellVonMises, FieldLocation::Element),
             vec![element_count],
             values.von_mises,
         ),

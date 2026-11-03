@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use super::*;
 
 #[test]
@@ -31,7 +32,7 @@ fn ordinal_history_checks_reject_duplicates_reordering_and_invalid_storage() {
     let fields: Vec<_> = (0..3)
         .map(|index| {
             AnalysisField::host_f64(
-                fea_thermal_temperature_field_id(index),
+                fea_thermal_temperature_field_id(index), AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node).step(index),
                 vec![2],
                 vec![300.0; 2],
             )
@@ -50,17 +51,17 @@ fn ordinal_history_checks_reject_duplicates_reordering_and_invalid_storage() {
     assert!(check(&fields[..2]).is_err());
     let mut invalid = fields.clone();
     invalid[1] = AnalysisField::host_f64(
-        fea_thermal_temperature_field_id(1),
+        fea_thermal_temperature_field_id(1), AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node).step(1),
         vec![2],
         vec![f64::NAN; 2],
     );
     assert!(check(&invalid).is_err());
     invalid[1] = AnalysisField::host_f64(
-        fea_thermal_temperature_field_id(1),
+        fea_thermal_temperature_field_id(1), AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node).step(1),
         vec![1, 2],
         vec![300.0; 2],
     );
     assert!(check(&invalid).is_err());
-    invalid[1] = AnalysisField::host_f64(fea_thermal_temperature_field_id(1), vec![2], vec![300.0]);
+    invalid[1] = AnalysisField::host_f64(fea_thermal_temperature_field_id(1), AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node).step(1), vec![2], vec![300.0]);
     assert!(check(&invalid).is_err());
 }

@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation};
 use super::*;
 use crate::{
     assembly::{
@@ -254,12 +255,12 @@ fn synthetic_operator_recovery_does_not_publish_continuum_fields() {
 fn generic_field_take_does_not_claim_constraint_group_reaction_ownership() {
     let mut fields = vec![
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT, AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![1, VECTOR_COMPONENT_COUNT],
             vec![1.0, 2.0, 3.0],
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE,
+            FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE, AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Constraint),
             vec![1, VECTOR_COMPONENT_COUNT],
             vec![4.0, 5.0, 6.0],
         ),

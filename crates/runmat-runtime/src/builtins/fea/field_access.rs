@@ -293,6 +293,7 @@ fn required_nonempty_string_for_builtin<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 
     #[test]
     fn page_values_preserve_real_and_complex_numeric_semantics() {
@@ -330,7 +331,7 @@ mod tests {
     fn complex_page_exposes_one_based_progress_without_flattening_phase() {
         let mut descriptor = crate::analysis::AnalysisFieldDescriptor::from_field(
             &runmat_analysis_core::AnalysisField::host_f64(
-                "structural.displacement",
+                "structural.displacement", AnalysisFieldLayout::scalar(ObservationQuantity::Displacement, FieldLocation::Global),
                 vec![4],
                 vec![0.0; 4],
             ),

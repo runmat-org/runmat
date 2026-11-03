@@ -1,3 +1,4 @@
+mod compact_mesh;
 mod geometry_lines;
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
@@ -785,6 +786,13 @@ impl FigureScene {
         })
     }
 
+    /// The largest distance between a saved position and the scene's own position when
+    /// [`Self::from_geometry_scene`] exports it (the export's position quantization).
+    pub fn geometry_position_error_m(scene: &crate::geometry_scene::GeometryScene) -> f64 {
+        compact_mesh::PositionGrid::for_diagonal((scene.bounds.max - scene.bounds.min).length())
+            .maximum_error()
+    }
+
     pub fn from_geometry_scene(scene: &crate::geometry_scene::GeometryScene) -> Self {
         let mut figure = Figure::new()
             .with_grid(scene.show_grid)
@@ -796,10 +804,11 @@ impl FigureScene {
         figure.z_label = Some("Z".to_string());
         figure.set_axes_view(0, -38.0, 24.0);
         let snapshot = FigureSnapshot::capture(&figure);
+        let grid = compact_mesh::PositionGrid::for_diagonal((scene.bounds.max - scene.bounds.min).length());
         let plots = scene
             .chunks
             .iter()
-            .filter_map(scene_chunk_to_mesh_plot)
+            .filter_map(|chunk| scene_chunk_to_mesh_plot(chunk, grid))
             .collect::<Vec<_>>();
 
         Self {
@@ -809,7 +818,7 @@ impl FigureScene {
             geometry_lines: scene
                 .chunks
                 .iter()
-                .filter_map(GeometryLines::capture)
+                .filter_map(|chunk| GeometryLines::capture(chunk, grid))
                 .collect(),
             layout: FigureLayout {
                 axes_rows: 1,
@@ -1084,6 +1093,7 @@ fn append_geometry_scene_chunks(
 
 fn scene_chunk_to_mesh_plot(
     chunk: &crate::geometry_scene::GeometrySceneChunk,
+    grid: compact_mesh::PositionGrid,
 ) -> Option<ScenePlot> {
     if chunk.render_data.pipeline_type != crate::core::PipelineType::Triangles {
         return None;
@@ -1092,18 +1102,12 @@ fn scene_chunk_to_mesh_plot(
     if indices.len() < 3 {
         return None;
     }
-    let triangles = indices
-        .chunks_exact(3)
-        .map(|item| [item[0], item[1], item[2]])
-        .collect::<Vec<_>>();
-    if triangles.is_empty() {
-        return None;
-    }
-    let vertices = chunk
-        .vertices
-        .iter()
-        .map(|vertex| vertex.position)
-        .collect::<Vec<_>>();
+    let compact_mesh::CompactSurface {
+        vertices,
+        triangles,
+        vertex_colors,
+        triangle_colors,
+    } = compact_mesh::compact_surface(&chunk.vertices, indices, grid)?;
     Some(ScenePlot::Mesh {
         vertices,
         triangles,
@@ -1115,8 +1119,8 @@ fn scene_chunk_to_mesh_plot(
         edge_width: 0.0,
         edge_mode: "none".to_string(),
         feature_edge_groups: Vec::new(),
-        vertex_colors_rgba: chunk.vertices.iter().map(|vertex| vertex.color).collect(),
-        triangle_colors_rgba: Vec::new(),
+        vertex_colors_rgba: vertex_colors,
+        triangle_colors_rgba: triangle_colors,
         axes_index: 0,
         label: chunk.label.clone(),
         regions: chunk.regions.iter().map(Into::into).collect(),

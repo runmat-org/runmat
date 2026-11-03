@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisFieldLayout};
 use runmat_analysis_core::{
     AnalysisField, FieldLocation, ObservationQuantity, ObservationValueShape,
 };
@@ -62,7 +63,7 @@ pub fn recover_constraint_group_observable_fields(
                 RecoveredFieldNumericRepresentation::Real,
             )?,
             RecoveredFieldSample::Final,
-            AnalysisField::host_f64(field_id, vec![result.groups.len(), 3], values),
+            AnalysisField::host_f64(field_id, AnalysisFieldLayout::vector3(quantity, FieldLocation::Constraint), vec![result.groups.len(), 3], values),
         )
     })
     .collect()

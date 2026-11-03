@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisFieldLayout};
 use super::*;
 use crate::{ComputeBackend, ThermalProcedureControl};
 use runmat_analysis_core::{
@@ -60,7 +61,7 @@ fn structural_selection_binds_producer_through_recovery_request() {
         )
         .unwrap(),
         RecoveredFieldSample::Final,
-        AnalysisField::host_f64("displacement", vec![1, 3], vec![0.0; 3]),
+        AnalysisField::host_f64("displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node), vec![1, 3], vec![0.0; 3]),
     )
     .unwrap();
     let manifest = RecoveredFieldArtifact::new(

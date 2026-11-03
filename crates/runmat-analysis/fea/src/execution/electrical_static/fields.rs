@@ -137,10 +137,12 @@ impl ElectricalStaticSolverResult {
                         values.iter().flatten().copied().collect()
                     }
                 };
+                let definition = native_electrical_field_definition(field.field_id, requirement)?;
+                let layout = definition.layout();
                 RecoveredField::new(
-                    native_electrical_field_definition(field.field_id, requirement)?,
+                    definition,
                     RecoveredFieldSample::Final,
-                    AnalysisField::host_f64(field.field_id, field.shape, values),
+                    AnalysisField::host_f64(field.field_id, layout, field.shape, values),
                 )
                 .map_err(invalid)
             })

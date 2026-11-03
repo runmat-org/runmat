@@ -1,5 +1,6 @@
 //! Build disposable scene geometry from exact persisted topology and paged fields.
 use super::*;
+#[cfg(test)]
 pub(super) fn scene_from_topology(
     run_id: &str,
     topology: &AnalysisRenderTopology,
@@ -326,7 +327,7 @@ pub(super) fn automatic_deformation_scale(
     Ok(super::deformation::automatic_scale(
         diagonal,
         max_displacement,
-        &field.label,
+        field.normalized,
     ))
 }
 

@@ -79,7 +79,9 @@ pub use validate_outputs::{
 };
 pub use validate_signals::validate_physical_signals;
 
-pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
+pub use field::{
+    AnalysisField, AnalysisFieldLayout, AnalysisFieldValues, DeviceFieldRef, FieldOrdinal,
+};
 pub use problem::acoustic_impedance::AcousticImpedanceLaw;
 pub use problem::authored_constraints::{
     authored_motion_acceleration_is_compatible, materialized_motion_acceleration_is_compatible,

@@ -81,7 +81,7 @@ fn source(
     let field = RecoveredField::new(
         definition.clone(),
         sample,
-        AnalysisField::host_f64(definition.field_id(), shape, values),
+        AnalysisField::host_f64(definition.field_id(), definition.layout(), shape, values),
     )
     .unwrap();
     let artifact = RecoveredFieldArtifact::new(

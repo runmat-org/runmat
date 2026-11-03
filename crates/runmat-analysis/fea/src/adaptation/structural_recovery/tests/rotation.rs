@@ -1,4 +1,5 @@
 //! Coordinate-frame invariance of the physical symmetric-stress tensor norm.
+use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use super::*;
 
 #[test]
@@ -50,14 +51,14 @@ fn recovery_indicators_and_marking_preserve_stress_under_rotation() {
                 let before = estimate_structural_recovery_error(
                     &mesh,
                     "elements",
-                    &AnalysisField::host_f64(name, shape.clone(), original),
+                    &AnalysisField::host_f64(name, if integration_points { AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::IntegrationPoint) } else { AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element) }, shape.clone(), original),
                     StructuralRecoveryEstimatorOptions::default(),
                 )
                 .unwrap();
                 let after = estimate_structural_recovery_error(
                     &mesh,
                     "elements",
-                    &AnalysisField::host_f64(name, shape, rotated),
+                    &AnalysisField::host_f64(name, if integration_points { AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::IntegrationPoint) } else { AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element) }, shape, rotated),
                     StructuralRecoveryEstimatorOptions::default(),
                 )
                 .unwrap();
@@ -94,7 +95,7 @@ fn physical_shear_and_cold_norm_identity_are_explicit() {
         let estimate = estimate_structural_recovery_error(
             &mesh,
             "elements",
-            &AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![2, 6], values),
+            &AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element), vec![2, 6], values),
             StructuralRecoveryEstimatorOptions::default(),
         )
         .unwrap();
@@ -131,7 +132,7 @@ fn finite_stress_overflow_cannot_become_zero_recovery_error() {
             &mesh,
             "elements",
             &AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+                FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS, AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::IntegrationPoint),
                 vec![8, 6],
                 values
             ),
@@ -153,7 +154,7 @@ fn recovery_reference_norm_integrates_original_tensor_in_both_layouts_and_orders
                         FEA_FIELD_STRUCTURAL_STRESS
                     } else {
                         FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS
-                    },
+                    }, if points == 1 { AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element) } else { AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::IntegrationPoint) },
                     vec![points, 6],
                     (0..points).flat_map(|_| row).collect(),
                 );

@@ -278,7 +278,7 @@ pub(crate) fn combine_observation_partitions(
         value_shape,
         complex_representation: observation.spec.complex_representation,
         entities,
-        field: AnalysisField::host_f64(observation.spec.observation_id.0.clone(), shape, values),
+        field: AnalysisField::host_f64(observation.spec.observation_id.0.clone(), runmat_analysis_core::AnalysisFieldLayout::new(observation.spec.quantity, observation.spec.output_location, observation.result_value_shape.clone()).representation(observation.spec.complex_representation), shape, values),
         partial_access: observation.spec.storage.partial_access,
         partition_evidence,
     };

@@ -27,6 +27,26 @@ pub enum ResponseSpectrumNodalQuantity {
 }
 
 impl ResponseSpectrumNodalQuantity {
+    pub fn layout(self) -> runmat_analysis_core::AnalysisFieldLayout {
+        use runmat_analysis_core::ObservationQuantity as Q;
+        let quantity = match self {
+            Self::RelativeDisplacement => Q::Displacement,
+            Self::Rotation => Q::Rotation,
+            Self::RelativeVelocity | Self::PseudoVelocity => Q::Velocity,
+            Self::RelativeAngularVelocity | Self::PseudoAngularVelocity => Q::AngularVelocity,
+            Self::RelativeAcceleration | Self::AbsoluteAcceleration | Self::PseudoAcceleration => {
+                Q::Acceleration
+            }
+            Self::RelativeAngularAcceleration
+            | Self::AbsoluteAngularAcceleration
+            | Self::PseudoAngularAcceleration => Q::AngularAcceleration,
+        };
+        runmat_analysis_core::AnalysisFieldLayout::vector3(
+            quantity,
+            runmat_analysis_core::FieldLocation::Node,
+        )
+    }
+
     pub const fn for_translation(response: SpectrumResponse) -> Self {
         match response {
             SpectrumResponse::RelativeDisplacement => Self::RelativeDisplacement,

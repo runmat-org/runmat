@@ -18,11 +18,19 @@ pub struct GeometryLines {
     pub wireframe_only: bool,
 }
 impl GeometryLines {
-    pub(super) fn capture(chunk: &GeometrySceneChunk) -> Option<Self> {
-        (chunk.render_data.pipeline_type == PipelineType::Lines).then(|| Self {
-            positions: chunk.vertices.iter().map(|v| v.position).collect(),
-            colors: chunk.vertices.iter().map(|v| v.color).collect(),
-            indices: chunk.indices.clone(),
+    pub(super) fn capture(
+        chunk: &GeometrySceneChunk,
+        grid: super::compact_mesh::PositionGrid,
+    ) -> Option<Self> {
+        if chunk.render_data.pipeline_type != PipelineType::Lines {
+            return None;
+        }
+        let (positions, colors, indices) =
+            super::compact_mesh::compact_lines(&chunk.vertices, chunk.indices.as_deref(), grid);
+        Some(Self {
+            positions,
+            colors,
+            indices: Some(indices),
             mesh_id: chunk.mesh_id.clone(),
             label: chunk.label.clone(),
             visible: chunk.visible,

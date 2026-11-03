@@ -239,8 +239,15 @@ async fn execute_command(
         Commands::Plan { file, root, json } => {
             boxed_command(|| fea::plan(file, root, json, cli, config)).await
         }
-        Commands::Snapshot { file, study, out } => {
-            boxed_command(|| fea::snapshot(file, study, out, cli, config)).await
+        Commands::Snapshot {
+            file,
+            study,
+            step,
+            case,
+            views,
+            out,
+        } => {
+            boxed_command(|| fea::snapshot(file, study, step, case, views, out, cli, config)).await
         }
         Commands::RenderSnapshot { snapshot, out } => {
             boxed_command(|| fea::render_snapshot(snapshot, out)).await

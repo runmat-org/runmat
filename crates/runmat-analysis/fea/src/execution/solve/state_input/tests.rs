@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use super::*;
 use crate::execution::state::CanonicalThermalStatePayload;
 use crate::execution::{
@@ -106,7 +107,7 @@ fn bound_transition(
     let payload = if thermal {
         CanonicalSemanticStatePayload::Thermal {
             state: Box::new(CanonicalThermalStatePayload {
-                temperature: AnalysisField::host_f64("thermal.temperature", vec![1], vec![303.15]),
+                temperature: AnalysisField::host_f64("thermal.temperature", AnalysisFieldLayout::scalar(ObservationQuantity::Temperature, FieldLocation::Node), vec![1], vec![303.15]),
                 ordered_node_ids: vec![1],
                 reference_temperature_k: runmat_types::physical::Temperature::new(293.15),
                 sample_time_s: runmat_types::physical::Time::new(0.0),
@@ -118,7 +119,7 @@ fn bound_transition(
     } else {
         CanonicalSemanticStatePayload::Fields {
             fields: vec![AnalysisField::host_f64(
-                "structural.displacement",
+                "structural.displacement", AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
                 vec![1, 3],
                 vec![0.0; 3],
             )],

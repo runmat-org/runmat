@@ -147,12 +147,14 @@ pub fn statistical_recovered_fields(
                 "statistical field shape differs from the canonical mesh projection",
             ));
         }
+        let layout = definition.layout();
         recovered.push(
             RecoveredField::new(
                 definition,
                 RecoveredFieldSample::Final,
                 AnalysisField::host_f64(
                     field.field_id.clone(),
+                    layout,
                     field.shape.to_vec(),
                     field.values.to_vec(),
                 ),

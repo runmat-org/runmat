@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use runmat_analysis_core::AnalysisField;
 
 use crate::{
@@ -186,13 +187,13 @@ where
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         let shape = nodal_vector_shape(&summary.structural_dof_layout);
         velocity_snapshots.push(AnalysisField::host_f64(
-            fea_transient_velocity_field_id(index),
+            fea_transient_velocity_field_id(index), AnalysisFieldLayout::vector3(ObservationQuantity::Velocity, FieldLocation::Node).step(index),
             shape.clone(),
             projected_velocity.translations,
         ));
         if summary.structural_dof_layout.rotational_dof_count() > 0 {
             angular_velocity_snapshots.push(AnalysisField::host_f64(
-                fea_transient_angular_velocity_field_id(index),
+                fea_transient_angular_velocity_field_id(index), AnalysisFieldLayout::vector3(ObservationQuantity::AngularVelocity, FieldLocation::Node).step(index),
                 shape.clone(),
                 projected_velocity.rotations,
             ));
@@ -242,25 +243,25 @@ where
         }
         connector_results.push(connector_result);
         acceleration_snapshots.push(AnalysisField::host_f64(
-            fea_transient_acceleration_field_id(index),
+            fea_transient_acceleration_field_id(index), AnalysisFieldLayout::vector3(ObservationQuantity::Acceleration, FieldLocation::Node).step(index),
             shape.clone(),
             acceleration.translations,
         ));
         reaction_force_snapshots.push(AnalysisField::host_f64(
             fea_transient_snapshot_field_id(FEA_FIELD_STRUCTURAL_REACTION_FORCE, index)
-                .expect("reaction force has a transient snapshot family"),
+                .expect("reaction force has a transient snapshot family"), AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node).step(index),
             shape.clone(),
             reaction.translations,
         ));
         if summary.structural_dof_layout.rotational_dof_count() > 0 {
             angular_acceleration_snapshots.push(AnalysisField::host_f64(
-                fea_transient_angular_acceleration_field_id(index),
+                fea_transient_angular_acceleration_field_id(index), AnalysisFieldLayout::vector3(ObservationQuantity::AngularAcceleration, FieldLocation::Node).step(index),
                 shape.clone(),
                 acceleration.rotations,
             ));
             reaction_moment_snapshots.push(AnalysisField::host_f64(
                 fea_transient_snapshot_field_id(FEA_FIELD_STRUCTURAL_REACTION_MOMENT, index)
-                    .expect("reaction moment has a transient snapshot family"),
+                    .expect("reaction moment has a transient snapshot family"), AnalysisFieldLayout::vector3(ObservationQuantity::ReactionMoment, FieldLocation::Node).step(index),
                 shape,
                 reaction.rotations,
             ));
@@ -537,7 +538,7 @@ mod tests {
     #[test]
     fn streamed_snapshot_field_moves_its_storage_without_copying_the_history() {
         let mut fields = vec![AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string(),
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string(), AnalysisFieldLayout::scalar(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![1],
             vec![42.0],
         )];

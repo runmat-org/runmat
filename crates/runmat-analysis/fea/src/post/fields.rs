@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisFieldLayout, ObservationQuantity, FieldLocation};
 use runmat_analysis_core::AnalysisField;
 
 use crate::contracts::{
@@ -113,27 +114,27 @@ pub fn recover_result_fields(
     };
     fields.extend([
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+            FEA_FIELD_STRUCTURAL_REACTION_FORCE, AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node),
             vec![node_count, VECTOR_COMPONENT_COUNT],
             reaction_values,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+            FEA_FIELD_STRUCTURAL_REACTION_MOMENT, AnalysisFieldLayout::vector3(ObservationQuantity::ReactionMoment, FieldLocation::Node),
             rotation_shape(summary),
             reaction_moment_values,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+            FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergy, FieldLocation::Global),
             vec![1],
             vec![strain_energy],
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+            FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
             vec![1],
             vec![residual_metrics.normalized_residual_norm],
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+            FEA_FIELD_STRUCTURAL_EQUATION_SCALE, AnalysisFieldLayout::scalar(ObservationQuantity::EquationScale, FieldLocation::Global),
             vec![1],
             vec![residual_metrics.equation_scale],
         ),
@@ -236,12 +237,12 @@ fn recover_deformation_result_fields_with_plan(
 
     let mut fields = vec![
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT, AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![node_count, VECTOR_COMPONENT_COUNT],
             displacement_values,
         ),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_ROTATION,
+            FEA_FIELD_STRUCTURAL_ROTATION, AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node),
             rotation_shape(summary),
             recover_rotation(summary, solution),
         ),
@@ -260,22 +261,22 @@ fn recover_deformation_result_fields_with_plan(
     {
         fields.extend([
             AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_VON_MISES,
+                FEA_FIELD_STRUCTURAL_VON_MISES, AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element),
                 vec![element_count],
                 von_mises_values,
             ),
             AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_STRAIN,
+                FEA_FIELD_STRUCTURAL_STRAIN, AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Strain, FieldLocation::Element),
                 vec![element_count, TENSOR_COMPONENT_COUNT],
                 strain_values,
             ),
             AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_STRESS,
+                FEA_FIELD_STRUCTURAL_STRESS, AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element),
                 vec![element_count, TENSOR_COMPONENT_COUNT],
                 stress_values,
             ),
             AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+                FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergyDensity, FieldLocation::Element),
                 vec![element_count],
                 strain_energy_density_values,
             ),
@@ -283,22 +284,22 @@ fn recover_deformation_result_fields_with_plan(
         if detail == DeformationRecoveryDetail::Complete {
             fields.extend([
                 AnalysisField::host_f64(
-                    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN,
+                    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN, AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Strain, FieldLocation::IntegrationPoint),
                     vec![element_count * 4, TENSOR_COMPONENT_COUNT],
                     integration_point_strain,
                 ),
                 AnalysisField::host_f64(
-                    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+                    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS, AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::IntegrationPoint),
                     vec![element_count * 4, TENSOR_COMPONENT_COUNT],
                     integration_point_stress,
                 ),
                 AnalysisField::host_f64(
-                    FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+                    FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Node),
                     vec![node_count],
                     nodal_von_mises_values,
                 ),
                 AnalysisField::host_f64(
-                    FEA_FIELD_STRUCTURAL_NODAL_STRESS,
+                    FEA_FIELD_STRUCTURAL_NODAL_STRESS, AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Node),
                     vec![node_count, TENSOR_COMPONENT_COUNT],
                     nodal_stress_values,
                 ),
@@ -431,27 +432,27 @@ struct StructuralStrainRecovery {
 
 fn empty_structural_fields() -> Vec<AnalysisField> {
     vec![
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_DISPLACEMENT, vec![0, 3], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_ROTATION, vec![0, 3], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![0], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRAIN, vec![0, 6], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, vec![0, 6], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, vec![0], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_NODAL_STRESS, vec![0, 6], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_DISPLACEMENT, AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node), vec![0, 3], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_ROTATION, AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node), vec![0, 3], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Element), vec![0], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRAIN, AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Strain, FieldLocation::Element), vec![0, 6], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_STRESS, AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Element), vec![0, 6], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Node), vec![0], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_NODAL_STRESS, AnalysisFieldLayout::symmetric_tensor3(ObservationQuantity::Stress, FieldLocation::Node), vec![0, 6], Vec::new()),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergyDensity, FieldLocation::Element),
             vec![0],
             Vec::new(),
         ),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_FORCE, vec![0, 3], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_MOMENT, vec![0, 3], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_FORCE, AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node), vec![0, 3], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_REACTION_MOMENT, AnalysisFieldLayout::vector3(ObservationQuantity::ReactionMoment, FieldLocation::Node), vec![0, 3], Vec::new()),
         AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+            FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergy, FieldLocation::Global),
             vec![0],
             Vec::new(),
         ),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, vec![0], Vec::new()),
-        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_EQUATION_SCALE, vec![0], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global), vec![0], Vec::new()),
+        AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_EQUATION_SCALE, AnalysisFieldLayout::scalar(ObservationQuantity::EquationScale, FieldLocation::Global), vec![0], Vec::new()),
     ]
 }
 

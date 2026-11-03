@@ -1,4 +1,5 @@
 //! Native real nodal pressure per retained sample, through the shared recovered-field contract.
+use runmat_analysis_core::{AnalysisFieldLayout};
 use super::*;
 use crate::{
     execution::{
@@ -12,7 +13,7 @@ use crate::{
     },
 };
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, FieldLocation, ObservationQuantity, ObservationValueShape,
+    AnalysisField, FieldLocation, ObservationQuantity, ObservationValueShape,
     RecoveryPolicy,
 };
 
@@ -90,11 +91,12 @@ impl AcousticResponseSolverResult {
                 RecoveredField::new(
                     definition.clone(),
                     *sample,
-                    AnalysisField {
-                        field_id: ACOUSTIC_PRESSURE_FIELD_ID.into(),
-                        shape: vec![nodes],
-                        values: AnalysisFieldValues::HostF64(values.clone()),
-                    },
+                    AnalysisField::host_f64(
+                        ACOUSTIC_PRESSURE_FIELD_ID,
+                        definition.layout(),
+                        vec![nodes],
+                        values.clone(),
+                    ),
                 )
                 .map_err(invalid)
             })
@@ -134,18 +136,25 @@ impl AcousticResponseSolverResult {
             .into_iter()
             .enumerate()
         {
-            let field_id = match field.sample() {
-                crate::results::field::RecoveredFieldSample::ModeIndex(mode) => {
-                    format!("acoustic.mode_shape.{mode}")
-                }
-                crate::results::field::RecoveredFieldSample::TimeSeconds(_) => {
-                    format!("{ACOUSTIC_PRESSURE_FIELD_ID}.time.{}", ordinal + 1)
-                }
+            let (field_id, field_ordinal) = match field.sample() {
+                // The sample numbers modes from 1; the ordinal is the 0-based mode index.
+                crate::results::field::RecoveredFieldSample::ModeIndex(mode) => (
+                    format!("acoustic.mode_shape.{mode}"),
+                    runmat_analysis_core::FieldOrdinal::Mode(
+                        mode.checked_sub(1)
+                            .ok_or_else(|| invalid("acoustic mode numbers start at 1"))?,
+                    ),
+                ),
+                crate::results::field::RecoveredFieldSample::TimeSeconds(_) => (
+                    format!("{ACOUSTIC_PRESSURE_FIELD_ID}.time.{}", ordinal + 1),
+                    runmat_analysis_core::FieldOrdinal::Step(ordinal),
+                ),
                 _ => return Err(invalid("acoustic response sample is a mode or a time")),
             };
             let storage = field.into_storage();
             fields.push(AnalysisField {
                 field_id,
+                layout: storage.layout.with_ordinal(field_ordinal),
                 shape: storage.shape,
                 values: storage.values,
             });
@@ -161,12 +170,12 @@ impl AcousticResponseSolverResult {
         match self.diagnostics() {
             AcousticResponseDiagnostics::Modal { frequencies_hz, .. } => vec![
                 AnalysisField::host_f64(
-                    crate::contracts::FEA_FIELD_MODAL_FREQUENCY_HZ,
+                    crate::contracts::FEA_FIELD_MODAL_FREQUENCY_HZ, AnalysisFieldLayout::scalar(ObservationQuantity::ModalFrequency, FieldLocation::Mode),
                     vec![frequencies_hz.len()],
                     frequencies_hz.clone(),
                 ),
                 AnalysisField::host_f64(
-                    crate::contracts::FEA_FIELD_MODAL_EIGENVALUE,
+                    crate::contracts::FEA_FIELD_MODAL_EIGENVALUE, AnalysisFieldLayout::scalar(ObservationQuantity::Eigenvalue, FieldLocation::Mode),
                     vec![frequencies_hz.len()],
                     frequencies_hz
                         .iter()
@@ -183,14 +192,14 @@ impl AcousticResponseSolverResult {
                 // Energy evidence covers every accepted time point, not only retained fields.
                 let times = time_points_s.clone();
                 vec![
-                    AnalysisField::host_f64("acoustic.time_s", vec![times.len()], times),
+                    AnalysisField::host_f64("acoustic.time_s", AnalysisFieldLayout::scalar(ObservationQuantity::Time, FieldLocation::Global), vec![times.len()], times),
                     AnalysisField::host_f64(
-                        "acoustic.energy_j",
+                        "acoustic.energy_j", AnalysisFieldLayout::scalar(ObservationQuantity::AcousticEnergy, FieldLocation::Global),
                         vec![acoustic_energy_j.len()],
                         acoustic_energy_j.clone(),
                     ),
                     AnalysisField::host_f64(
-                        "acoustic.boundary_absorbed_energy_j",
+                        "acoustic.boundary_absorbed_energy_j", AnalysisFieldLayout::scalar(ObservationQuantity::AbsorbedEnergy, FieldLocation::Global),
                         vec![boundary_absorbed_energy_j.len()],
                         boundary_absorbed_energy_j.clone(),
                     ),
@@ -206,18 +215,18 @@ impl AcousticResponseSolverResult {
         match self.diagnostics() {
             AcousticResponseDiagnostics::Modal { frequencies_hz, .. } => vec![
                 AnalysisField::host_f64(
-                    crate::contracts::FEA_FIELD_MODAL_FREQUENCY_HZ,
+                    crate::contracts::FEA_FIELD_MODAL_FREQUENCY_HZ, AnalysisFieldLayout::scalar(ObservationQuantity::ModalFrequency, FieldLocation::Mode),
                     vec![frequencies_hz.len()],
                     frequencies_hz.clone(),
                 ),
                 AnalysisField::host_f64(
-                    "acoustic.mode_pressure",
+                    "acoustic.mode_pressure", AnalysisFieldLayout::components(ObservationQuantity::AcousticPressure, FieldLocation::Mode, nodes),
                     vec![self.pressure_pa().len(), nodes],
                     self.pressure_pa().iter().flatten().copied().collect(),
                 ),
             ],
             AcousticResponseDiagnostics::Transient { .. } => vec![AnalysisField::host_f64(
-                ACOUSTIC_PRESSURE_FIELD_ID,
+                ACOUSTIC_PRESSURE_FIELD_ID, AnalysisFieldLayout::scalar(ObservationQuantity::AcousticPressure, FieldLocation::Node),
                 vec![nodes],
                 self.pressure_pa()
                     .last()

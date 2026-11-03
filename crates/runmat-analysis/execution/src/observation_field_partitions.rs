@@ -189,7 +189,7 @@ mod tests {
             definition.clone(),
             RecoveredFieldSample::Final,
             AnalysisField::host_f64(
-                "large.temperature",
+                "large.temperature", definition.layout(),
                 vec![entity_count],
                 (0..entity_count).map(|index| index as f64).collect(),
             ),

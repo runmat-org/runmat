@@ -97,7 +97,7 @@ impl AnalysisPublicationBuilder {
             let recovered = RecoveredField::new(
                 entry.definition.clone(),
                 entry.sample,
-                AnalysisField::host_f64(&field.field_id, field.shape.clone(), values),
+                AnalysisField::host_f64(&field.field_id, entry.definition.layout(), field.shape.clone(), values),
             )
             .map_err(|e| e.to_string())?;
             if recovered.identity() != entry.field {

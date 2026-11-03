@@ -13,11 +13,15 @@ fn identity_content<'a, S: Serialize + ?Sized>(
 }
 
 impl RecoveredField {
+    /// The definition is the one authority for a recovered field's quantity, location, value
+    /// shape and representation: the stored values take its layout. Only the published state
+    /// (the ordinal: which mode or step) comes from the storage.
     pub fn new(
         definition: RecoveredFieldDefinition,
         sample: RecoveredFieldSample,
-        storage: AnalysisField,
+        mut storage: AnalysisField,
     ) -> Result<Self, RecoveredFieldError> {
+        storage.layout = definition.layout().with_ordinal(storage.layout.ordinal);
         let field = Self {
             identity: RecoveredFieldIdentity(Digest::sha256([])),
             definition,
@@ -50,6 +54,9 @@ impl RecoveredField {
     }
 
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
+        if self.storage.layout != self.definition.layout().with_ordinal(self.storage.layout.ordinal) {
+            return Err(RecoveredFieldError::StorageLayoutMismatch);
+        }
         if self.identity != self.derive_identity()? {
             return Err(RecoveredFieldError::IdentityMismatch);
         }
@@ -66,6 +73,10 @@ impl RecoveredField {
         definition.validate()?;
         sample.validate()?;
         definition.validate_storage_shape(storage)?;
+        // Borrowed content is identified as the owned field would be: in its definition's layout.
+        if storage.layout != definition.layout().with_ordinal(storage.layout.ordinal) {
+            return Err(RecoveredFieldError::StorageLayoutMismatch);
+        }
         encode_contract(
             FIELD_PREFIX,
             "recovered-field-identity",

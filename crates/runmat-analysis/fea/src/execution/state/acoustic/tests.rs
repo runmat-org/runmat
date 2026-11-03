@@ -204,6 +204,7 @@ fn acoustic_state_rejects_substituted_result_mesh_and_payload() {
         first.sample(),
         AnalysisField {
             field_id: first.storage().field_id.clone(),
+            layout: first.definition().layout(),
             shape: first.storage().shape.clone(),
             values: AnalysisFieldValues::DeviceRef(DeviceFieldRef {
                 backend: "test-device".into(),

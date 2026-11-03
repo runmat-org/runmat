@@ -39,7 +39,7 @@ fn observation_fixture(
         definition.clone(),
         coordinate,
         AnalysisField::host_f64(
-            "pressure",
+            "pressure", definition.layout(),
             vec![projection.nodes.len(), 2],
             vec![1.0; projection.nodes.len() * 2],
         ),

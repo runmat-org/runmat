@@ -30,11 +30,16 @@ struct FieldData {
     values: FieldValues,
     label: String,
     unit: String,
+    /// A mode shape: its amplitude is an arbitrary eigenvector normalization, not metres.
+    normalized: bool,
+    /// A nodal displacement (or displacement mode shape) that can displace the drawn shape.
+    deforms: bool,
 }
 
 enum FieldValues {
     Paged {
         run_id: String,
+        selection: AnalysisFieldSelection,
         cache: RefCell<FieldPageCache>,
     },
     #[cfg(test)]
@@ -59,14 +64,18 @@ impl FieldData {
         match &self.values {
             #[cfg(test)]
             FieldValues::Inline(values) => Ok(values[start..end].to_vec()),
-            FieldValues::Paged { run_id, cache } => {
+            FieldValues::Paged {
+                run_id,
+                selection,
+                cache,
+            } => {
                 let mut result = Vec::with_capacity(len);
                 let mut cursor = start;
                 while cursor < end {
                     let page_start = cursor / FIELD_PAGE_VALUES * FIELD_PAGE_VALUES;
                     let mut cache = cache.borrow_mut();
                     if !cache.pages.contains_key(&page_start) {
-                        let page = load_field_page(run_id, &self.label, page_start)?;
+                        let page = load_field_page(run_id, selection, page_start)?;
                         if page.offset != page_start
                             || page.count != FIELD_PAGE_VALUES.min(self.value_count - page_start)
                         {
@@ -113,18 +122,27 @@ impl FieldData {
             values: FieldValues::Inline(values),
             label: label.into(),
             unit: unit.into(),
+            normalized: false,
+            deforms: location == AnalysisFieldLocation::Node && components == 3,
         }
+    }
+
+    /// The same values as a published mode shape (arbitrary normalization).
+    #[cfg(test)]
+    fn mode_shape(mut self) -> Self {
+        self.normalized = true;
+        self
     }
 }
 
 fn load_field_page(
     run_id: &str,
-    field_id: &str,
+    selection: &AnalysisFieldSelection,
     offset: usize,
 ) -> Result<super::AnalysisFieldPageResult, String> {
     analysis_field_page_by_run_id_op(
         run_id,
-        AnalysisFieldSelection::new(field_id, None),
+        selection.clone(),
         AnalysisFieldRequestOptions {
             offset: Some(offset),
             limit: Some(FIELD_PAGE_VALUES),
@@ -146,50 +164,168 @@ fn page_real_values(values: AnalysisFieldPageValues) -> Vec<f64> {
 }
 
 mod deformation;
+pub mod extrema;
+pub mod volume;
 
-fn is_deformation_field(id: &str) -> bool {
-    id == "structural.displacement" || deformation::is_modal_field(id)
-}
-
+/// Build one complete view of a run: `field` colors the surface and `deformation`, a nodal
+/// vector field of the same run, displaces it. Both are explicit selections of published
+/// fields (with their sample), so the caller decides from the field descriptors.
+///
+/// `scalar_range` colors the field over a known range, such as the field's true extrema from
+/// [`extrema::field_extrema`]; without it the range is taken from the drawn surface.
+/// `solver_mesh` is the run's canonical solver mesh artifact: a run whose publication keeps no
+/// render tiles (frequency-sampled runs) is drawn from the boundary of that mesh, the same
+/// projection the tiles store.
+///
+/// `detail` [`SurfaceDetail::Corners`] draws each quadratic boundary face as one corner
+/// triangle (from the solver mesh), for a scene that must fit a payload budget; the returned
+/// [`SurfaceApproximation`] states what that leaves out.
+#[allow(clippy::too_many_arguments)]
 pub fn build_scene(
     run_id: &str,
-    field_id: Option<&str>,
+    solver_mesh: Option<&str>,
+    field: Option<&AnalysisFieldSelection>,
+    deformation: Option<&AnalysisFieldSelection>,
+    scalar_range: Option<(f64, f64)>,
     shape_mode: &str,
     exaggeration: f64,
     show_undeformed_outline: bool,
-) -> Result<(GeometryScene, f64), String> {
+    detail: super::SurfaceDetail,
+) -> Result<(GeometryScene, f64, SurfaceApproximation), String> {
     if !matches!(shape_mode, "undeformed" | "true" | "exaggerated") {
         return Err(format!("unknown FEA shape mode '{shape_mode}'"));
     }
     if !exaggeration.is_finite() || !(0.0..=100.0).contains(&exaggeration) {
         return Err("FEA exaggeration must be finite and between 0 and 100".into());
     }
-    let topology = storage::load_render_topology(run_id)?
-        .ok_or_else(|| format!("FEA run '{run_id}' has no persisted render topology"))?;
-    let field = field_id.map(|id| load_field(run_id, id)).transpose()?;
-    let additional_deformation = if shape_mode == "undeformed"
-        || field
-            .as_ref()
-            .is_some_and(|field| is_deformation_field(&field.label))
-    {
-        None
-    } else {
-        load_field(run_id, "structural.displacement").ok()
+    let load_from_solver_mesh = |detail| -> Result<_, String> {
+        solver_mesh
+            .map(|path| {
+                super::solver_mesh_artifact::load_solver_mesh_artifact(std::path::Path::new(path))
+                    .map_err(|error| error.to_string())
+            })
+            .transpose()?
+            .and_then(|mesh| super::render_topology_from_solver_mesh_at(Some(&mesh), detail))
+            .ok_or_else(|| format!("FEA run '{run_id}' has no persisted render topology"))
     };
-    let deformation = field
-        .as_ref()
-        .filter(|field| is_deformation_field(&field.label))
-        .or(additional_deformation.as_ref())
-        .filter(|field| field.location == AnalysisFieldLocation::Node && field.components >= 3);
-    scene_from_topology(
+    let (topology, dropped) = match detail {
+        super::SurfaceDetail::Corners => load_from_solver_mesh(detail)?,
+        super::SurfaceDetail::Full => match storage::load_render_topology(run_id)? {
+            Some(topology) => (topology, Vec::new()),
+            None => load_from_solver_mesh(detail)?,
+        },
+    };
+    let field_data = field
+        .map(|selection| load_field(run_id, selection))
+        .transpose()?;
+    let separate_deformation = match deformation {
+        Some(selection) if shape_mode != "undeformed" && field != Some(selection) => {
+            Some(load_field(run_id, selection)?)
+        }
+        _ => None,
+    };
+    let deformation_data = match deformation {
+        None => None,
+        Some(_) if shape_mode == "undeformed" => None,
+        Some(selection) if field == Some(selection) => field_data.as_ref(),
+        Some(_) => separate_deformation.as_ref(),
+    };
+    if let Some(data) = deformation_data {
+        if data.location != AnalysisFieldLocation::Node || data.components < 3 {
+            return Err(format!(
+                "deformation field '{}' is not a nodal vector field",
+                data.label
+            ));
+        }
+    }
+    let stats = scalar_range.map(|range| SceneStats {
+        element_count: topology.volume_element_count,
+        scalar_range: Some(range),
+        automatic_scale: None,
+    });
+    let (scene, scale) = scene_from_topology_with_stats(
         run_id,
         &topology,
-        field.as_ref(),
-        deformation,
+        field_data.as_ref(),
+        deformation_data,
         shape_mode,
         exaggeration,
         show_undeformed_outline,
-    )
+        stats,
+    )?;
+    let approximation = SurfaceApproximation::of_dropped(
+        detail,
+        &topology,
+        &dropped,
+        field_data.as_ref(),
+        deformation_data,
+        scale,
+    )?;
+    Ok((scene, scale, approximation))
+}
+
+/// What a drawn surface leaves out of the solution on the boundary.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct SurfaceApproximation {
+    /// `full`: every boundary node is drawn where it is. `corners`: each quadratic face is one
+    /// triangle through its corners.
+    pub detail: &'static str,
+    /// Largest distance between a dropped midside node (as drawn, deformation included) and the
+    /// midpoint of the drawn edge, in metres.
+    pub position_error_m: f64,
+    /// Largest difference between the colored value at a dropped midside node and the linear
+    /// color drawn there; zero for element fields, absent without a field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_error: Option<f64>,
+}
+
+impl SurfaceApproximation {
+    fn of_dropped(
+        detail: super::SurfaceDetail,
+        topology: &AnalysisRenderTopology,
+        dropped: &[[u32; 3]],
+        field: Option<&FieldData>,
+        deformation: Option<&FieldData>,
+        scale: f64,
+    ) -> Result<Self, String> {
+        let mut approximation = Self {
+            detail: match detail {
+                super::SurfaceDetail::Full => "full",
+                super::SurfaceDetail::Corners => "corners",
+            },
+            position_error_m: 0.0,
+            value_error: field.map(|_| 0.0),
+        };
+        let Some(mesh) = topology.meshes.first() else {
+            return Ok(approximation);
+        };
+        for &[a, b, midside] in dropped {
+            let drawn = |node: u32| {
+                deform_position(
+                    cast_position(mesh.vertices[node as usize]),
+                    Some(node as usize),
+                    deformation,
+                    scale,
+                )
+                .map(|p| p.map(f64::from))
+            };
+            let (pa, pb, pm) = (drawn(a)?, drawn(b)?, drawn(midside)?);
+            let gap = (0..3)
+                .map(|axis| (pm[axis] - 0.5 * (pa[axis] + pb[axis])).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            approximation.position_error_m = approximation.position_error_m.max(gap);
+            if let Some(field) = field.filter(|field| field.location == AnalysisFieldLocation::Node)
+            {
+                let value = |node: u32| field_magnitude(field, node as usize, 1);
+                let error = (value(midside)? - 0.5 * (value(a)? + value(b)?)).abs();
+                if let Some(worst) = approximation.value_error.as_mut() {
+                    *worst = worst.max(error);
+                }
+            }
+        }
+        Ok(approximation)
+    }
 }
 
 /// Materialize only the LOD nodes chosen for this view. The returned scene is
@@ -232,19 +368,25 @@ pub fn build_scene_view(
         volume_element_count: selection.volume_element_count,
         meshes,
     };
-    let field = field_id.map(|id| load_field(run_id, id)).transpose()?;
+    let field = field_id
+        .map(|id| load_field(run_id, &AnalysisFieldSelection::new(id, None)))
+        .transpose()?;
     let additional_deformation = if shape_mode == "undeformed"
         || field
             .as_ref()
-            .is_some_and(|field| is_deformation_field(&field.label))
+            .is_some_and(|field| field.deforms)
     {
         None
     } else {
-        load_field(run_id, "structural.displacement").ok()
+        load_field(
+            run_id,
+            &AnalysisFieldSelection::new("structural.displacement", None),
+        )
+        .ok()
     };
     let deformation = field
         .as_ref()
-        .filter(|field| is_deformation_field(&field.label))
+        .filter(|field| field.deforms)
         .or(additional_deformation.as_ref())
         .filter(|field| field.location == AnalysisFieldLocation::Node && field.components >= 3);
     let stats = SceneStats::from_selection(&selection, field.as_ref(), deformation);
@@ -314,7 +456,7 @@ impl SceneStats {
                 .iter()
                 .find(|summary| summary.field_id == field.label)
                 .map(|summary| {
-                    deformation::automatic_scale(diagonal, summary.maximum, &field.label)
+                    deformation::automatic_scale(diagonal, summary.maximum, field.normalized)
                 })
         });
         Self {
@@ -325,8 +467,9 @@ impl SceneStats {
     }
 }
 
-fn load_field(run_id: &str, field_id: &str) -> Result<FieldData, String> {
-    let page = load_field_page(run_id, field_id, 0)?;
+fn load_field(run_id: &str, selection: &AnalysisFieldSelection) -> Result<FieldData, String> {
+    let field_id = selection.field_id.as_str();
+    let page = load_field_page(run_id, selection, 0)?;
     let descriptor = &page.descriptor;
     if !matches!(
         descriptor.location,
@@ -350,16 +493,21 @@ fn load_field(run_id: &str, field_id: &str) -> Result<FieldData, String> {
     let mut cache = FieldPageCache::default();
     cache.order.push_back(0);
     cache.pages.insert(0, first);
+    let normalized = deformation::is_mode_shape(descriptor);
+    let deforms = deformation::displaces(descriptor);
     Ok(FieldData {
         location: descriptor.location,
         components,
         value_count: page.total_count,
         values: FieldValues::Paged {
             run_id: run_id.into(),
+            selection: selection.clone(),
             cache: RefCell::new(cache),
         },
         label: field_id.to_string(),
         unit: descriptor.unit.clone().unwrap_or_default(),
+        normalized,
+        deforms,
     })
 }
 

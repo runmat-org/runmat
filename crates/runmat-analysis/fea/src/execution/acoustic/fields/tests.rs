@@ -40,7 +40,7 @@ fn sampled_native_catalog_profiles_cover_partition_boundaries() {
                         definition.clone(),
                         sample,
                         AnalysisField::host_f64(
-                            definition.field_id(),
+                            definition.field_id(), definition.layout(),
                             shape,
                             vec![f64::MAX; count * width],
                         ),

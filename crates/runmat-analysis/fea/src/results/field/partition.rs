@@ -191,7 +191,7 @@ impl RecoveredFieldPartition {
             definition: source.definition().clone(),
             sample: source.sample(),
             source_indices,
-            storage: AnalysisField::host_f64(source.definition().field_id(), shape, values),
+            storage: AnalysisField::host_f64(source.definition().field_id(), source.definition().layout(), shape, values),
         };
         partition.identity = partition.derive_identity()?;
         partition.validate()?;

@@ -368,11 +368,13 @@ fn native_field(
     values: Vec<f64>,
 ) -> AnalysisExecutionResult<RecoveredField> {
     let definition = native_acoustic_field_definition(field_id, requirement)?;
+    let layout = definition.layout();
     RecoveredField::new(
         definition,
         sample,
         AnalysisField {
             field_id: field_id.into(),
+            layout,
             shape,
             values: AnalysisFieldValues::HostF64(values),
         },

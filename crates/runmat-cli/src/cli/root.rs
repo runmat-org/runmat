@@ -392,6 +392,17 @@ pub enum Commands {
         /// Select one study declared by the root module
         #[arg(long)]
         study: Option<String>,
+        /// Capture this analysis step of a multi-step study (default: the final step)
+        #[arg(long)]
+        step: Option<String>,
+        /// Capture only this execution case (and its sub-cases), for a study that publishes
+        /// several, such as one per harmonic frequency (default: every case)
+        #[arg(long)]
+        case: Option<String>,
+        /// Capture only this view (repeatable), by the id the capture gives it, such as
+        /// `geometry`, `stress` or `mode-2` (default: every view the study offers)
+        #[arg(long = "view")]
+        views: Vec<String>,
         /// Snapshot metadata output; scenes and previews are written beside it
         #[arg(long)]
         out: PathBuf,
@@ -974,7 +985,13 @@ mod tests {
 
         for command in ["check", "plan", "run"] {
             assert!(Cli::try_parse_from([
-                "runmat", command, "model.fea", "--study", "a", "--sweep", "b",
+                "runmat",
+                command,
+                "model.fea",
+                "--study",
+                "a",
+                "--sweep",
+                "b",
             ])
             .is_err());
         }

@@ -72,6 +72,13 @@ impl StructuralLinearFieldQuantity {
     /// Statistical solvers retain this closed quantity instead of attaching unit strings. The
     /// model's canonical unit system and this quantity determine the units of RMS; variance uses
     /// the square of those units.
+    pub fn layout(self) -> runmat_analysis_core::AnalysisFieldLayout {
+        runmat_analysis_core::AnalysisFieldLayout::canonical(
+            self.observation_quantity(),
+            self.location(),
+        )
+    }
+
     pub const fn observation_quantity(self) -> ObservationQuantity {
         match self {
             Self::Displacement => ObservationQuantity::Displacement,

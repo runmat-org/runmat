@@ -46,6 +46,7 @@ fn fixture() -> AnalysisRunResult {
             series_reductions: vec![],
             fields: vec![AnalysisField::host_f64(
                 "temperature",
+                runmat_analysis_core::AnalysisFieldLayout::scalar(runmat_analysis_core::ObservationQuantity::Temperature, runmat_analysis_core::FieldLocation::Node),
                 vec![3],
                 vec![0.0, 0.25, 0.5],
             )],

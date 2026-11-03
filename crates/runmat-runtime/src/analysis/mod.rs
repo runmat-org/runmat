@@ -52,7 +52,8 @@ use evidence_filesystem::{atomic_write_bytes, fs_create_dir_all};
 mod modal_run_admission;
 mod render_topology;
 use modal_run_admission::analysis_admit_modal_run_with_id;
-use render_topology::render_topology_from_solver_mesh;
+use render_topology::{render_topology_from_solver_mesh, render_topology_from_solver_mesh_at};
+pub use render_topology::{DroppedMidsides, SurfaceDetail};
 pub mod assessment;
 mod nonlinear_result;
 pub use artifact_root::{

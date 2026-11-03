@@ -43,6 +43,9 @@ pub(crate) async fn run(
 pub async fn snapshot(
     file: PathBuf,
     study: Option<String>,
+    step: Option<String>,
+    case: Option<String>,
+    views: Vec<String>,
     out: PathBuf,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
@@ -51,7 +54,15 @@ pub async fn snapshot(
     let checked = super::source::check_source(&file, cli, config).await?;
     require_valid(&checked, &file, true)?;
     let selected = resolve_root(&checked, &FeaRootArgs { study, sweep: None })?;
-    super::snapshot::capture(&checked, selected, &out).await
+    super::snapshot::capture(
+        &checked,
+        selected,
+        step.as_deref(),
+        case.as_deref(),
+        &views,
+        &out,
+    )
+    .await
 }
 
 pub async fn render_snapshot(snapshot: PathBuf, out: PathBuf) -> Result<()> {

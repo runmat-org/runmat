@@ -14,10 +14,19 @@ use std::path::Path;
 mod geometry;
 
 #[derive(Deserialize)]
-struct Snapshot {
-    schema_version: u16,
+struct SavedRun {
     run_id: String,
     results: AnalysisResultsData,
+}
+
+#[derive(Deserialize)]
+struct Snapshot {
+    schema_version: u16,
+    #[serde(flatten)]
+    primary: SavedRun,
+    /// Further captured runs of a study that publishes several cases.
+    #[serde(default)]
+    runs: Vec<SavedRun>,
 }
 
 #[derive(Serialize)]
@@ -42,6 +51,29 @@ pub(in crate::commands::fea) fn verify_saved_fields(snapshot: &Path, output: &Pa
     );
     let snapshot: Snapshot = serde_json::from_slice(&bytes)?;
     ensure!(snapshot.schema_version == 1, "unsupported snapshot schema");
+    let runs = std::iter::once(&snapshot.primary)
+        .chain(&snapshot.runs)
+        .map(verify_run)
+        .collect::<Result<Vec<_>>>()?;
+    let mut receipt = runs.into_iter();
+    let (run_id, fields, geometry) = receipt.next().context("snapshot has no run")?;
+    let others = receipt
+        .map(|(run_id, fields, geometry)| {
+            serde_json::json!({ "runId": run_id, "fields": fields, "geometry": geometry })
+        })
+        .collect::<Vec<_>>();
+    std::fs::write(
+        output,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schemaVersion": 1, "runId": run_id, "fields": fields,
+            "geometry": geometry, "runs": others,
+            "method": "fresh native process, original authenticated artifact readers, all bounded field pages and saved geometry tiles; no solve"
+        }))?,
+    )?;
+    Ok(())
+}
+
+fn verify_run(snapshot: &SavedRun) -> Result<(String, Vec<FieldReplay>, serde_json::Value)> {
     let cold = analysis_results_by_run_id_op(
         &snapshot.run_id,
         AnalysisResultsQuery::default(),
@@ -114,13 +146,5 @@ pub(in crate::commands::fea) fn verify_saved_fields(snapshot: &Path, output: &Pa
             scalar_bytes_sha256: hex::encode(hash.finalize()),
         });
     }
-    std::fs::write(
-        output,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schemaVersion": 1, "runId": snapshot.run_id, "fields": replay,
-            "geometry": geometry,
-            "method": "fresh native process, original authenticated artifact readers, all bounded field pages and saved geometry tiles; no solve"
-        }))?,
-    )?;
-    Ok(())
+    Ok((snapshot.run_id.clone(), replay, geometry))
 }

@@ -67,9 +67,9 @@ fn native_field(sampling: &SampledVolumeFieldTopology, edge: bool) -> RecoveredF
     };
     let storage_shape = if edge { vec![count] } else { vec![count, 3] };
     RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
-        AnalysisField::host_f64(id, storage_shape, values),
+        AnalysisField::host_f64(id, definition.layout(), storage_shape, values),
     )
     .unwrap()
 }

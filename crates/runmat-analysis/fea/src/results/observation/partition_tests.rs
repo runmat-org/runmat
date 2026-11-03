@@ -122,9 +122,9 @@ fn prepared_on(
         .map(|node| node.coordinates_m.canonical_value().iter().sum())
         .collect::<Vec<_>>();
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
-        AnalysisField::host_f64("temperature.partitioned", vec![values.len()], values),
+        AnalysisField::host_f64("temperature.partitioned", definition.layout(), vec![values.len()], values),
     )
     .unwrap();
     let catalog = RecoveredFieldCatalog::new(&projection, vec![field.clone()]).unwrap();
@@ -221,10 +221,10 @@ fn integration_point_partitions_reconstruct_exact_entities_and_values() {
     .unwrap();
     let values = (0..24).map(|value| value as f64).collect::<Vec<_>>();
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
         AnalysisField::host_f64(
-            crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+            crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS, definition.layout(),
             vec![4, 6],
             values.clone(),
         ),
@@ -340,9 +340,9 @@ fn materialized_volume_weighted_recovery_is_partition_equivalent() {
         .map(|index| index as f64 + 1.0)
         .collect::<Vec<_>>();
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
-        AnalysisField::host_f64("structural.nodal_von_mises", vec![values.len()], values),
+        AnalysisField::host_f64("structural.nodal_von_mises", definition.layout(), vec![values.len()], values),
     )
     .unwrap();
     let topology = ObservationTopology::from_projection(&projection).unwrap();
@@ -585,7 +585,7 @@ fn partitioned_history_restart_preserves_placement_neutral_result_identity() {
             let field = RecoveredField::new(
                 definition.clone(),
                 coordinate,
-                AnalysisField::host_f64("temperature.partitioned", vec![values.len()], values),
+                AnalysisField::host_f64("temperature.partitioned", definition.layout(), vec![values.len()], values),
             )
             .unwrap();
             evaluate_partitioned_observation(
@@ -732,10 +732,10 @@ pub(super) fn checkpoint_test_evidence(time: f64) -> super::ObservationPartition
     )
     .unwrap();
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::TimeSeconds(time),
         AnalysisField::host_f64(
-            "temperature.partitioned",
+            "temperature.partitioned", definition.layout(),
             vec![projection.nodes.len()],
             vec![time; projection.nodes.len()],
         ),
@@ -808,9 +808,9 @@ fn pressure_resultant_and_offset_moment_match_the_divergence_theorem() {
         .map(|node| node.coordinates_m.canonical_value()[0])
         .collect::<Vec<_>>();
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
-        AnalysisField::host_f64("contact.pressure", vec![values.len()], values),
+        AnalysisField::host_f64("contact.pressure", definition.layout(), vec![values.len()], values),
     )
     .unwrap();
     let topology = ObservationTopology::from_projection(&projection).unwrap();
@@ -932,10 +932,10 @@ fn complex_volume_resultant_and_moment_preserve_the_complete_phasor() {
     .unwrap();
     let phasor = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
         AnalysisField::host_f64(
-            "magnetic_flux_density.phasor",
+            "magnetic_flux_density.phasor", definition.layout(),
             vec![projection.elements.len(), 3, 2],
             phasor.repeat(projection.elements.len()),
         ),
@@ -1052,10 +1052,10 @@ fn boundary_stress_resultant_uses_cauchy_traction_and_rejects_ambiguous_pressure
     .unwrap();
     let tensor = [2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
         AnalysisField::host_f64(
-            "stress.traction",
+            "stress.traction", definition.layout(),
             vec![projection.nodes.len(), 6],
             tensor.repeat(projection.nodes.len()),
         ),
@@ -1152,10 +1152,10 @@ fn complex_boundary_pressure_resultant_is_partition_equivalent() {
     .unwrap();
     let pressure = [2.0, -3.0];
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
         AnalysisField::host_f64(
-            "pressure.phasor",
+            "pressure.phasor", definition.layout(),
             vec![projection.nodes.len(), 2],
             pressure.repeat(projection.nodes.len()),
         ),
@@ -1237,10 +1237,10 @@ fn vector_l2_norm_is_scalar_and_partition_equivalent() {
     )
     .unwrap();
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
         AnalysisField::host_f64(
-            "displacement.norm",
+            "displacement.norm", definition.layout(),
             vec![projection.nodes.len(), 3],
             [3.0, 4.0, 0.0].repeat(projection.nodes.len()),
         ),
@@ -1341,7 +1341,7 @@ fn nodal_reaction_resultant_and_moment_are_discrete_partition_equivalent_sums() 
     let field = RecoveredField::new(
         definition.clone(),
         RecoveredFieldSample::Final,
-        AnalysisField::host_f64("reaction.force", vec![projection.nodes.len(), 3], values),
+        AnalysisField::host_f64("reaction.force", definition.layout(), vec![projection.nodes.len(), 3], values),
     )
     .unwrap();
     let topology = ObservationTopology::from_projection(&projection).unwrap();
@@ -1519,9 +1519,9 @@ fn partitioned_event_evaluation_binds_exact_attribution_across_workers() {
         .map(|node| node.coordinates_m.canonical_value().iter().sum())
         .collect::<Vec<_>>();
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         sample,
-        AnalysisField::host_f64("temperature.partitioned", vec![values.len()], values),
+        AnalysisField::host_f64("temperature.partitioned", definition.layout(), vec![values.len()], values),
     )
     .unwrap();
     let sequence = SequenceIdentity::new(Digest::sha256("partition-event-sequence")).unwrap();

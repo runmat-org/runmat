@@ -46,6 +46,7 @@ impl Serialize for FieldProjection<'_> {
             "storage",
             &AnalysisField::host_f64_serialization(
                 self.definition.field_id(),
+                &self.definition.layout(),
                 &self.shape,
                 &self.values,
             ),

@@ -95,8 +95,13 @@ impl Serialize for Fields<'_> {
                 let shape = definition
                     .storage_shape(*count)
                     .map_err(serde::ser::Error::custom)?;
-                let storage =
-                    AnalysisField::host_f64_serialization(definition.field_id(), &shape, &values);
+                let layout = definition.layout();
+                let storage = AnalysisField::host_f64_serialization(
+                    definition.field_id(),
+                    &layout,
+                    &shape,
+                    &values,
+                );
                 seq.serialize_element(&FieldWire {
                     identity: Digest::from_bytes([0; 32]),
                     definition,
@@ -323,6 +328,7 @@ pub(super) fn admit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
     use runmat_canonical_codec::profile_serialized;
 
     #[test]
@@ -330,9 +336,14 @@ mod tests {
         let original = [[f64::MAX, -f64::MAX, f64::MIN_POSITIVE], [1.0, 2.0, 3.0]];
         let values = Values::Velocity(&original);
         let shape = [2, 3];
-        let borrowed = AnalysisField::host_f64_serialization("cfd.velocity", &shape, &values);
+        let layout = runmat_analysis_core::AnalysisFieldLayout::vector3(
+            runmat_analysis_core::ObservationQuantity::FluidVelocity,
+            runmat_analysis_core::FieldLocation::Cell,
+        );
+        let borrowed =
+            AnalysisField::host_f64_serialization("cfd.velocity", &layout, &shape, &values);
         let actual = AnalysisField::host_f64(
-            "cfd.velocity",
+            "cfd.velocity", AnalysisFieldLayout::vector3(ObservationQuantity::FluidVelocity, FieldLocation::Cell),
             shape.to_vec(),
             original.iter().flatten().copied().collect(),
         );
@@ -491,7 +502,7 @@ mod tests {
                     definition.clone(),
                     RecoveredFieldSample::Final,
                     AnalysisField::host_f64(
-                        definition.field_id(),
+                        definition.field_id(), definition.layout(),
                         definition.storage_shape(count).unwrap(),
                         values.next().unwrap(),
                     ),
