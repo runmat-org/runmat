@@ -30,6 +30,7 @@ pub(super) struct MomentumJacobianPattern {
 
 impl MomentumJacobianPattern {
     /// Scalar entries of the assembled 3n × 3n block.
+    #[cfg(test)]
     pub(super) fn entries(&self) -> usize {
         self.col_idx.len()
     }
