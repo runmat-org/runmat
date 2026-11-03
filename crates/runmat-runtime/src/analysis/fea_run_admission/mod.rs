@@ -2,17 +2,24 @@
 //! Numerical libraries do not depend on account policy or lease transport.
 
 pub(crate) mod entrypoints;
+pub(crate) mod async_host;
+pub use async_host::{AsyncFeaRunAdmission, AsyncFeaRunLease};
 mod lifecycle;
 mod host;
 mod provider;
 mod scope;
 mod types;
 
-pub use host::{FeaRunAdmissionContext, FeaRunAdmissionFuture};
-pub use lifecycle::FeaRunScope;
-pub use provider::{replace_fea_run_admission, FeaRunAdmissionGuard};
-pub use scope::ScopedFeaRunFuture;
+pub use host::{FeaRunAdmissionContext, FeaRunAdmissionFuture, FeaRunAdmissionHostGuard};
+pub use lifecycle::{FeaRunControl, FeaRunScope};
+pub use provider::capture_fea_run_admission;
+pub use provider::{
+    current_fea_cpu_capacity_millicores, current_local_fea_organization_hint,
+    replace_fea_run_admission, FeaRunAdmissionGuard,
+};
+pub use scope::{CheckedFeaRunFuture, ScopedFeaRunFuture};
 pub use types::{
-    FeaRunAdmission, FeaRunDenied, FeaRunKind, FeaRunOutcome, FeaRunPermit, FeaRunRequest,
-    FeaRunSite,
+    FeaLocalOrganization, FeaRunAdmission, FeaRunBudget, FeaRunDelegation, FeaRunDelegationSource,
+    FeaRunDenied, FeaRunExecutionError, FeaRunKind, FeaRunOrigin, FeaRunOutcome, FeaRunPermit,
+    FeaRunRequest, FeaRunSite, FEA_DEADLINE_MONITOR_STACK_BYTES, FEA_HEARTBEAT_STACK_BYTES,
 };

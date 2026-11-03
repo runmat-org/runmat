@@ -34,7 +34,7 @@ pub struct DriverSnapshot {
 
 impl DriverSnapshot {
     pub fn validate(&self) -> RunnerResult<()> {
-        if self.schema_version != 3 || self.driver_fence == 0 {
+        if self.schema_version != 4 || self.driver_fence == 0 {
             return Err(RunnerError::Invalid(
                 "driver snapshot schema or fence is invalid".into(),
             ));

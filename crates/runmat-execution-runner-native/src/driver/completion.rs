@@ -49,6 +49,8 @@ pub(crate) struct GraphAttemptAuthority {
 }
 
 pub(crate) struct TaskCompletion {
+    pub(super) fea_provider: crate::fea_proxy::Provider,
+    pub(super) fea_parent: Result<Option<crate::fea_delegation::Source>, String>,
     value: Mutex<Option<PersistedCompletion>>,
     terminal_wake: Arc<tokio::sync::Notify>,
     progress: Mutex<VecDeque<crate::protocol::ProgramProgress>>,
@@ -67,6 +69,8 @@ pub(crate) struct TaskCompletion {
 impl TaskCompletion {
     pub(super) fn new() -> Self {
         Self {
+            fea_provider: crate::fea_proxy::capture(),
+            fea_parent: crate::fea_delegation::capture(),
             value: Mutex::new(None),
             terminal_wake: Arc::new(tokio::sync::Notify::new()),
             progress: Mutex::new(VecDeque::new()),

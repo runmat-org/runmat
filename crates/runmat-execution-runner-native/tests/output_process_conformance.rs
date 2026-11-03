@@ -36,6 +36,8 @@ mod publisher_exit;
 mod parent_loss;
 #[path = "output_process_conformance/portable_units.rs"]
 mod portable_units;
+#[path = "output_process_conformance/nested_console.rs"]
+mod nested_console;
 
 fn main() {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -273,6 +275,7 @@ async fn witness() {
     handles::verify_caller(&service).await;
     cancellation::verify(&config).await;
     portable_units::verify(&config).await;
+    nested_console::verify(&config).await;
     environment::verify_producer_exit(&config).await;
     for requested in [0, 1, 2] {
         let original_call = call(requested).await;

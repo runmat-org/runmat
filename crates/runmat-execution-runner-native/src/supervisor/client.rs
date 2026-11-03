@@ -26,12 +26,22 @@ pub enum JobSubmissionDisposition {
 #[derive(Clone)]
 pub struct LocalSupervisorClient {
     config: Arc<LocalSupervisorConfig>,
+    local_fea_organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
 }
 
 impl LocalSupervisorClient {
     pub fn new(config: LocalSupervisorConfig) -> Self {
+        let selected =
+            runmat_runtime::analysis::fea_run_admission::current_local_fea_organization_hint();
+        let local_fea_organization = match selected {
+            runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization::Default => {
+                config.execution.local_fea_organization
+            }
+            selected => selected,
+        };
         Self {
             config: Arc::new(config),
+            local_fea_organization,
         }
     }
 
@@ -313,6 +323,7 @@ impl LocalSupervisorClient {
         let mut stream = self.connect().await?;
         let token = read_token(&self.config.paths.token)?;
         let request = SupervisorRequest {
+            local_fea_organization: self.local_fea_organization,
             protocol_version: SUPERVISOR_PROTOCOL_VERSION,
             authentication_token: token,
             config_identity: self.config.identity()?,

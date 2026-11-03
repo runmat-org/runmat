@@ -5,13 +5,225 @@ pub use runmat_execution::value::{EXTERNALIZED_VALUE_MEDIA_TYPE, EXTERNALIZED_VA
 use serde::{Deserialize, Serialize};
 
 use super::request::validate_externalized_inventory;
-use super::{
-    ProgramExecutionResponse, MAX_PROGRAM_EXECUTION_RESULT_OBJECTS,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
-};
+#[cfg(test)]
+use super::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION;
+use super::{ProgramExecutionResponse, MAX_PROGRAM_EXECUTION_RESULT_OBJECTS};
 use crate::{ArtifactError, ArtifactResult};
 
 pub const MAX_PROGRAM_EXECUTION_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
+pub const PROGRAM_EXECUTION_OUTPUTS_SCHEMA_VERSION: u16 = 9;
+pub const MAX_PROGRAM_EXECUTION_CONSOLE_SCOPES: u32 = 1024;
+pub const PROGRAM_EXECUTION_CONSOLE_SCOPE_BYTES: u64 =
+    runmat_execution::console::CONSOLE_SCOPE_BYTES;
+
+pub use runmat_execution::console::ConsoleBudget as ProgramExecutionConsoleBudget;
+
+pub use runmat_execution::console::{
+    ScopedConsoleTranscript as ProgramExecutionConsoleScope,
+    ScopedConsoleTranscriptRef as ProgramExecutionConsoleScopeRef,
+};
+
+/// A source calls the visitor while its original retention owner is borrowed.
+pub trait ProgramExecutionConsoleSource {
+    fn visit(
+        &self,
+        visitor: &mut dyn FnMut(ProgramExecutionConsoleScopeRef<'_>) -> ArtifactResult<()>,
+    ) -> ArtifactResult<()>;
+}
+
+/// Reusable borrowed sequence for terminal artifact and private worker frames.
+/// Every visit serializes before its original owner releases the borrow.
+pub struct ProgramExecutionConsoleScopeSequence<'a> {
+    root: Option<&'a runmat_execution::console::ConsoleTranscript>,
+    source: &'a dyn ProgramExecutionConsoleSource,
+    budget: Option<ProgramExecutionConsoleBudget>,
+    delegated_root: Option<runmat_execution::console::ConsoleSourceIdentity>,
+    require_complete_root: bool,
+}
+impl<'a> ProgramExecutionConsoleScopeSequence<'a> {
+    pub fn new(
+        root: Option<&'a runmat_execution::console::ConsoleTranscript>,
+        source: &'a dyn ProgramExecutionConsoleSource,
+        budget: Option<ProgramExecutionConsoleBudget>,
+    ) -> Self {
+        Self {
+            root,
+            source,
+            budget,
+            delegated_root: None,
+            require_complete_root: false,
+        }
+    }
+
+    fn with_delegated_root(
+        mut self,
+        identity: Option<runmat_execution::console::ConsoleSourceIdentity>,
+        require_complete: bool,
+    ) -> Self {
+        self.delegated_root = identity;
+        self.require_complete_root = require_complete;
+        self
+    }
+}
+impl Serialize for ProgramExecutionConsoleScopeSequence<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut inventory = ConsoleEncodingInventory::new(self.root, self.budget)
+            .map_err(serde::ser::Error::custom)?;
+        let mut sequence = serializer.serialize_seq(None)?;
+        let mut found_root = false;
+        if self.root.is_some() && self.delegated_root.is_some() {
+            return Err(serde::ser::Error::custom("console has two root owners"));
+        }
+        self.source
+            .visit(&mut |scope| {
+                inventory.scope(&scope)?;
+                let identity = runmat_execution::console::ConsoleSourceIdentity {
+                    scope_id: scope.scope_id,
+                    pool_id: scope.pool_id,
+                    task_id: scope.task_id,
+                    attempt_id: scope.attempt_id,
+                };
+                if Some(identity) == self.delegated_root {
+                    found_root = true;
+                    if self.require_complete_root
+                        && scope.transcript.completion()
+                            != runmat_execution::console::ConsoleCompletion::Complete
+                    {
+                        return Err(ArtifactError::Invalid(
+                            "successful delegated root console is incomplete".into(),
+                        ));
+                    }
+                }
+                sequence
+                    .serialize_element(&scope)
+                    .map_err(|error| ArtifactError::Encoding(error.to_string()))
+            })
+            .map_err(serde::ser::Error::custom)?;
+        inventory.finish().map_err(serde::ser::Error::custom)?;
+        if self.delegated_root.is_some() && !found_root {
+            return Err(serde::ser::Error::custom(
+                "delegated root console source is missing",
+            ));
+        }
+        sequence.end()
+    }
+}
+
+struct ConsoleEncodingInventory {
+    budget: Option<ProgramExecutionConsoleBudget>,
+    scopes: u64,
+    records: u64,
+    text: u64,
+    identities: BTreeSet<(
+        runmat_execution::ExecutionScopeId,
+        runmat_execution::PoolId,
+        runmat_execution::TaskId,
+        runmat_execution::identity::AttemptId,
+    )>,
+}
+
+impl ConsoleEncodingInventory {
+    fn new(
+        root: Option<&runmat_execution::console::ConsoleTranscript>,
+        budget: Option<ProgramExecutionConsoleBudget>,
+    ) -> ArtifactResult<Self> {
+        if let Some(budget) = budget {
+            budget.validate().map_err(crate::error::contract_error)?;
+        }
+        let mut inventory = Self {
+            budget,
+            scopes: 0,
+            records: 0,
+            text: 0,
+            identities: BTreeSet::new(),
+        };
+        if let Some(root) = root {
+            inventory.admit(root)?;
+        }
+        Ok(inventory)
+    }
+    fn scope(&mut self, scope: &ProgramExecutionConsoleScopeRef<'_>) -> ArtifactResult<()> {
+        if !self.identities.insert((
+            scope.scope_id,
+            scope.pool_id,
+            scope.task_id,
+            scope.attempt_id,
+        )) {
+            return Err(ArtifactError::Invalid(
+                "duplicate original console source".into(),
+            ));
+        }
+        self.admit(scope.transcript)
+    }
+    fn admit(
+        &mut self,
+        transcript: &runmat_execution::console::ConsoleTranscript,
+    ) -> ArtifactResult<()> {
+        transcript
+            .validate()
+            .map_err(crate::error::contract_error)?;
+        self.scopes += 1;
+        self.records += transcript.records().len() as u64;
+        self.text += transcript.text_bytes();
+        let budget = self.budget.ok_or_else(|| {
+            ArtifactError::Invalid("captured console omits its admitted budget".into())
+        })?;
+        let retained = runmat_execution::console::CONSOLE_RETAINED_COPY_FACTOR
+            * (self.records
+                * std::mem::size_of::<runmat_execution::console::ConsoleRecord>() as u64
+                + self.text
+                + self.scopes * PROGRAM_EXECUTION_CONSOLE_SCOPE_BYTES);
+        let encoded = 6 * self.text
+            + 256 * self.records
+            + self.scopes * PROGRAM_EXECUTION_CONSOLE_SCOPE_BYTES
+            + 1024;
+        if self.scopes > u64::from(budget.max_scopes)
+            || self.records > budget.max_records
+            || self.text > budget.max_text_bytes
+            || retained > budget.max_retained_bytes
+            || encoded > budget.max_encoded_bytes
+        {
+            return Err(ArtifactError::Limit(
+                "original console sources exceed their admitted aggregate budget".into(),
+            ));
+        }
+        Ok(())
+    }
+    fn finish(&self) -> ArtifactResult<()> {
+        if self.scopes == 0 && self.budget.is_some() {
+            return Err(ArtifactError::Invalid(
+                "console budget without captured evidence".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+struct ConsoleEncodingWriter {
+    bytes: Vec<u8>,
+    limit: u64,
+}
+impl std::io::Write for ConsoleEncodingWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let next = (self.bytes.len() as u64)
+            .checked_add(bytes.len() as u64)
+            .ok_or_else(|| std::io::Error::other("terminal console encoding overflow"))?;
+        if next > self.limit {
+            return Err(std::io::Error::other(
+                "terminal output exceeds admitted encoding budget",
+            ));
+        }
+        self.bytes
+            .try_reserve(bytes.len())
+            .map_err(std::io::Error::other)?;
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 pub const MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES: u64 =
     MAX_PROGRAM_EXECUTION_OBJECT_BYTES * MAX_PROGRAM_EXECUTION_RESULT_OBJECTS as u64;
 pub const PROGRAM_EXECUTION_OBJECT_CLOSURE_SCHEMA_VERSION: u16 = 2;
@@ -276,6 +488,14 @@ pub struct ProgramExecutionOutputs {
     pub schema_version: u16,
     pub response: ProgramExecutionResponse,
     pub objects: Vec<ProgramExecutionObjectLocation>,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_transcript")]
+    pub console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_scopes")]
+    pub console_scopes: Vec<ProgramExecutionConsoleScope>,
+    #[serde(deserialize_with = "required_console_budget")]
+    pub console_budget: Option<ProgramExecutionConsoleBudget>,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_source_identity")]
+    pub delegated_console_root: Option<runmat_execution::console::ConsoleSourceIdentity>,
 }
 
 impl ProgramExecutionOutputs {
@@ -283,21 +503,176 @@ impl ProgramExecutionOutputs {
         response: ProgramExecutionResponse,
         objects: Vec<ProgramExecutionObjectLocation>,
     ) -> ArtifactResult<Self> {
+        Self::with_console(response, objects, None)
+    }
+
+    pub fn with_console(
+        response: ProgramExecutionResponse,
+        objects: Vec<ProgramExecutionObjectLocation>,
+        console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+    ) -> ArtifactResult<Self> {
+        let budget = console
+            .as_ref()
+            .map(|console| ProgramExecutionConsoleBudget::single(console.limits()))
+            .transpose()
+            .map_err(crate::error::contract_error)?;
+        Self::with_console_scopes(response, objects, console, Vec::new(), budget)
+    }
+
+    pub fn with_console_scopes(
+        response: ProgramExecutionResponse,
+        objects: Vec<ProgramExecutionObjectLocation>,
+        console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+        console_scopes: Vec<ProgramExecutionConsoleScope>,
+        console_budget: Option<ProgramExecutionConsoleBudget>,
+    ) -> ArtifactResult<Self> {
         let outputs = Self {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+            schema_version: PROGRAM_EXECUTION_OUTPUTS_SCHEMA_VERSION,
             response,
             objects,
+            console,
+            console_scopes,
+            console_budget,
+            delegated_console_root: None,
         };
         outputs.validate()?;
         Ok(outputs)
     }
 
+    /// Encode original sources during their owner's synchronous visit. The
+    /// borrowed inventory never survives a driver lock or copies its text.
+    pub fn encode_with_console_source(
+        &self,
+        console: Option<&runmat_execution::console::ConsoleTranscript>,
+        sources: &dyn ProgramExecutionConsoleSource,
+        console_budget: Option<ProgramExecutionConsoleBudget>,
+        delegated_console_root: Option<runmat_execution::console::ConsoleSourceIdentity>,
+    ) -> ArtifactResult<Vec<u8>> {
+        self.validate()?;
+        validate_root_completion(&self.response, console)?;
+        if self.console.is_some()
+            || !self.console_scopes.is_empty()
+            || self.delegated_console_root.is_some()
+        {
+            return Err(ArtifactError::Invalid(
+                "output already owns console evidence".into(),
+            ));
+        }
+        #[derive(Serialize)]
+        struct View<'a> {
+            schema_version: u16,
+            response: &'a ProgramExecutionResponse,
+            objects: &'a [ProgramExecutionObjectLocation],
+            console: Option<&'a runmat_execution::console::ConsoleTranscript>,
+            console_scopes: ProgramExecutionConsoleScopeSequence<'a>,
+            console_budget: Option<ProgramExecutionConsoleBudget>,
+            delegated_console_root: Option<runmat_execution::console::ConsoleSourceIdentity>,
+        }
+        let view = View {
+            schema_version: self.schema_version,
+            response: &self.response,
+            objects: &self.objects,
+            console,
+            console_scopes: ProgramExecutionConsoleScopeSequence::new(
+                console,
+                sources,
+                console_budget,
+            )
+            .with_delegated_root(
+                delegated_console_root,
+                matches!(
+                    &self.response,
+                    ProgramExecutionResponse::Success { .. }
+                        | ProgramExecutionResponse::ExternalizedSuccess { .. }
+                ),
+            ),
+            console_budget,
+            delegated_console_root,
+        };
+        // Program values retain their transport allowance. The independently
+        // admitted console component extends the envelope, while its visitor
+        // enforces console-only counters and encoding bounds.
+        let limit = MAX_PROGRAM_EXECUTION_OBJECT_BYTES
+            .checked_add(console_budget.map_or(0, |budget| budget.max_encoded_bytes))
+            .ok_or_else(|| ArtifactError::Limit("terminal envelope bound overflow".into()))?;
+        let mut output = ConsoleEncodingWriter {
+            bytes: Vec::new(),
+            limit,
+        };
+        serde_json::to_writer(&mut output, &view)
+            .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
+        Ok(output.bytes)
+    }
+
+    pub fn encode_with_retained_console(
+        &self,
+        console: Option<&runmat_execution::console::ConsoleTranscript>,
+        scopes: &[ProgramExecutionConsoleScopeRef<'_>],
+        budget: Option<ProgramExecutionConsoleBudget>,
+        delegated_console_root: Option<runmat_execution::console::ConsoleSourceIdentity>,
+    ) -> ArtifactResult<Vec<u8>> {
+        struct Slice<'a, 'b>(&'a [ProgramExecutionConsoleScopeRef<'b>]);
+        impl ProgramExecutionConsoleSource for Slice<'_, '_> {
+            fn visit(
+                &self,
+                visitor: &mut dyn FnMut(ProgramExecutionConsoleScopeRef<'_>) -> ArtifactResult<()>,
+            ) -> ArtifactResult<()> {
+                for scope in self.0 {
+                    visitor(ProgramExecutionConsoleScopeRef {
+                        scope_id: scope.scope_id,
+                        pool_id: scope.pool_id,
+                        task_id: scope.task_id,
+                        attempt_id: scope.attempt_id,
+                        transcript: scope.transcript,
+                    })?;
+                }
+                Ok(())
+            }
+        }
+        self.encode_with_console_source(console, &Slice(scopes), budget, delegated_console_root)
+    }
+
+    /// The original physical root remains in its source inventory when delegated.
+    pub fn root_console(&self) -> Option<&runmat_execution::console::ConsoleTranscript> {
+        runmat_execution::console::original_root(
+            self.console.as_deref(),
+            &self.console_scopes,
+            self.delegated_console_root,
+        )
+    }
+
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION {
+        if self.schema_version != PROGRAM_EXECUTION_OUTPUTS_SCHEMA_VERSION {
             return Err(ArtifactError::Invalid(
                 "program outputs use an unsupported schema".into(),
             ));
         }
+        if let Some(console) = &self.console {
+            console
+                .validate()
+                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        }
+        validate_root_completion(&self.response, self.console.as_deref())?;
+        runmat_execution::console::validate_scopes(&self.console_scopes)
+            .map_err(crate::error::contract_error)?;
+        runmat_execution::console::validate_delegated_root(
+            self.console.as_deref(),
+            &self.console_scopes,
+            self.delegated_console_root,
+            matches!(
+                &self.response,
+                ProgramExecutionResponse::Success { .. }
+                    | ProgramExecutionResponse::ExternalizedSuccess { .. }
+            ),
+        )
+        .map_err(crate::error::contract_error)?;
+        validate_console_batch(
+            self.console.as_deref(),
+            self.console_scopes
+                .iter()
+                .map(|scope| scope.transcript.as_ref()),
+            self.console_budget,
+        )?;
         validate_locations(&self.objects, ValueRefKind::ResultObject, "result")?;
         match &self.response {
             ProgramExecutionResponse::Success { outputs } => {
@@ -359,12 +734,97 @@ impl ProgramExecutionOutputs {
     }
 }
 
+fn validate_root_completion(
+    response: &ProgramExecutionResponse,
+    root: Option<&runmat_execution::console::ConsoleTranscript>,
+) -> ArtifactResult<()> {
+    if matches!(
+        response,
+        ProgramExecutionResponse::Success { .. }
+            | ProgramExecutionResponse::ExternalizedSuccess { .. }
+    ) && root.is_some_and(|root| {
+        root.completion() != runmat_execution::console::ConsoleCompletion::Complete
+    }) {
+        return Err(ArtifactError::Invalid(
+            "successful program output carries an incomplete root console".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_locations(
     objects: &[ProgramExecutionObjectLocation],
     expected_kind: ValueRefKind,
     inventory_name: &str,
 ) -> ArtifactResult<()> {
     validate_location_inventory(objects, LocationKinds::Exact(expected_kind), inventory_name)
+}
+
+fn required_console_budget<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ProgramExecutionConsoleBudget>, D::Error> {
+    let budget = Option::<ProgramExecutionConsoleBudget>::deserialize(deserializer)?;
+    if let Some(budget) = budget {
+        budget.validate().map_err(serde::de::Error::custom)?;
+    }
+    Ok(budget)
+}
+
+fn validate_console_batch<'a>(
+    root: Option<&'a runmat_execution::console::ConsoleTranscript>,
+    scopes: impl Iterator<Item = &'a runmat_execution::console::ConsoleTranscript>,
+    budget: Option<ProgramExecutionConsoleBudget>,
+) -> ArtifactResult<()> {
+    let mut count = 0_u64;
+    let mut records = 0_u64;
+    let mut text = 0_u64;
+    for transcript in root.into_iter().chain(scopes) {
+        transcript
+            .validate()
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        count = count
+            .checked_add(1)
+            .ok_or_else(|| ArtifactError::Limit("console scope count overflow".into()))?;
+        records = records
+            .checked_add(transcript.records().len() as u64)
+            .ok_or_else(|| ArtifactError::Limit("console record count overflow".into()))?;
+        text = text
+            .checked_add(transcript.text_bytes())
+            .ok_or_else(|| ArtifactError::Limit("console text count overflow".into()))?;
+        if count > u64::from(MAX_PROGRAM_EXECUTION_CONSOLE_SCOPES) {
+            return Err(ArtifactError::Limit(
+                "console scope inventory exceeds its bound".into(),
+            ));
+        }
+    }
+    if count == 0 {
+        if budget.is_some() {
+            return Err(ArtifactError::Invalid(
+                "console budget without captured evidence".into(),
+            ));
+        }
+        return Ok(());
+    }
+    let budget = budget.ok_or_else(|| {
+        ArtifactError::Invalid("captured console omits its aggregate budget".into())
+    })?;
+    budget.validate().map_err(crate::error::contract_error)?;
+    let retained = runmat_execution::console::CONSOLE_RETAINED_COPY_FACTOR
+        * (records * std::mem::size_of::<runmat_execution::console::ConsoleRecord>() as u64
+            + text
+            + count * PROGRAM_EXECUTION_CONSOLE_SCOPE_BYTES);
+    let encoded = text * 6 + records * 256 + count * PROGRAM_EXECUTION_CONSOLE_SCOPE_BYTES + 1024;
+    if count > u64::from(budget.max_scopes)
+        || records > budget.max_records
+        || text > budget.max_text_bytes
+        || retained > budget.max_retained_bytes
+        || encoded > budget.max_encoded_bytes
+    {
+        return Err(ArtifactError::Limit(
+            "terminal console inventory exceeds its admitted aggregate budget".into(),
+        ));
+    }
+    Ok(())
 }
 
 enum LocationKinds {
@@ -499,6 +959,142 @@ mod tests {
 
     use super::*;
     use crate::ProgramExecutionInputs;
+
+    #[test]
+    fn successful_outputs_require_complete_root_but_failure_keeps_prefix() {
+        use runmat_execution::console::{ConsoleCapture, ConsoleLimits, ConsoleStream};
+        let limits = ConsoleLimits {
+            max_records: 4,
+            max_text_bytes: 64,
+        };
+        let mut capture = ConsoleCapture::new(limits).unwrap();
+        capture
+            .push_borrowed(ConsoleStream::Stdout, "before failure\n")
+            .unwrap();
+        let interrupted = Box::new(capture.finish(false));
+        let success = ProgramExecutionOutputs::new(
+            ProgramExecutionResponse::Success { outputs: vec![] },
+            vec![],
+        )
+        .unwrap();
+        let budget = ProgramExecutionConsoleBudget::single(limits).unwrap();
+        let returned = ProgramExecutionOutputs::new(
+            ProgramExecutionResponse::Success {
+                outputs: vec![ValuePayload::Inline(Box::new(InlineValue::String(
+                    "r".repeat(8192).into(),
+                )))],
+            },
+            vec![],
+        )
+        .unwrap();
+        let complete = ConsoleCapture::new(limits).unwrap().finish(true);
+        let encoded = returned
+            .encode_with_retained_console(Some(&complete), &[], Some(budget), None)
+            .unwrap();
+        assert!(encoded.len() as u64 > budget.max_encoded_bytes);
+        let decoded: ProgramExecutionOutputs = serde_json::from_slice(&encoded).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(decoded.response, returned.response);
+        assert!(success
+            .encode_with_retained_console(Some(&interrupted), &[], Some(budget), None)
+            .is_err());
+        let mut failed = ProgramExecutionOutputs::with_console(
+            ProgramExecutionResponse::Failure {
+                message: "original failure".into(),
+            },
+            vec![],
+            Some(interrupted),
+        )
+        .unwrap();
+        assert!(failed.validate().is_ok());
+        failed.response = ProgramExecutionResponse::Success { outputs: vec![] };
+        assert!(failed.validate().is_err());
+    }
+
+    #[test]
+    fn scoped_failed_attempt_prefix_is_independent_of_successful_root() {
+        use runmat_execution::console::{ConsoleCapture, ConsoleLimits};
+        let limits = ConsoleLimits {
+            max_records: 4,
+            max_text_bytes: 64,
+        };
+        let root = Box::new(ConsoleCapture::new(limits).unwrap().finish(true));
+        let scope = ProgramExecutionConsoleScope {
+            scope_id: runmat_execution::ExecutionScopeId::derive(&[b"child"]),
+            pool_id: runmat_execution::PoolId::derive(&[b"child"]),
+            task_id: runmat_execution::TaskId::derive(&[b"child"]),
+            attempt_id: runmat_execution::identity::AttemptId::derive(&[b"child"]),
+            transcript: Box::new(ConsoleCapture::new(limits).unwrap().finish(false)),
+        };
+        let budget = ProgramExecutionConsoleBudget::for_driver_allocation(1024 * 1024 * 1024);
+        let mut outputs = ProgramExecutionOutputs::with_console_scopes(
+            ProgramExecutionResponse::Success { outputs: vec![] },
+            vec![],
+            Some(root),
+            vec![scope],
+            Some(budget),
+        )
+        .unwrap();
+        let bytes = serde_json::to_vec(&outputs).unwrap();
+        let decoded: ProgramExecutionOutputs = serde_json::from_slice(&bytes).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(decoded, outputs);
+        outputs.console_budget.as_mut().unwrap().max_scopes = 1;
+        assert!(outputs.validate().is_err());
+        let mut value = serde_json::to_value(decoded).unwrap();
+        value.as_object_mut().unwrap().remove("console_scopes");
+        assert!(serde_json::from_value::<ProgramExecutionOutputs>(value).is_err());
+    }
+
+    #[test]
+    fn terminal_wire_preserves_delegated_root_identity_and_completion() {
+        use runmat_execution::console::{ConsoleCapture, ConsoleLimits, ConsoleStream};
+        let limits = ConsoleLimits {
+            max_records: 4,
+            max_text_bytes: 64,
+        };
+        let identity = runmat_execution::console::ConsoleSourceIdentity {
+            scope_id: runmat_execution::ExecutionScopeId::derive(&[b"physical-root"]),
+            pool_id: runmat_execution::PoolId::derive(&[b"physical-root"]),
+            task_id: runmat_execution::TaskId::derive(&[b"physical-root"]),
+            attempt_id: runmat_execution::identity::AttemptId::derive(&[b"physical-root"]),
+        };
+        let budget = ProgramExecutionConsoleBudget::for_driver_allocation(1024 * 1024 * 1024);
+        for complete in [false, true] {
+            let mut capture = ConsoleCapture::new(limits).unwrap();
+            capture
+                .push(ConsoleStream::Stdout, "original output".into())
+                .unwrap();
+            let capture = capture.finish(complete);
+            let scope = ProgramExecutionConsoleScopeRef {
+                scope_id: identity.scope_id,
+                pool_id: identity.pool_id,
+                task_id: identity.task_id,
+                attempt_id: identity.attempt_id,
+                transcript: &capture,
+            };
+            let outputs = ProgramExecutionOutputs::new(
+                ProgramExecutionResponse::Success { outputs: vec![] },
+                vec![],
+            )
+            .unwrap();
+            let encoded =
+                outputs.encode_with_retained_console(None, &[scope], Some(budget), Some(identity));
+            if !complete {
+                assert!(encoded.is_err());
+                continue;
+            }
+            let mut decoded: ProgramExecutionOutputs =
+                serde_json::from_slice(&encoded.unwrap()).unwrap();
+            decoded.validate().unwrap();
+            assert!(decoded.console.is_none());
+            assert_eq!(decoded.delegated_console_root, Some(identity));
+            assert_eq!(decoded.root_console(), Some(&capture));
+            decoded.delegated_console_root.as_mut().unwrap().attempt_id =
+                runmat_execution::identity::AttemptId::derive(&[b"unrelated-source"]);
+            assert!(decoded.validate().is_err());
+        }
+    }
 
     fn result_reference(bytes: &[u8]) -> ValueRef {
         let logical_digest = Digest::sha256(bytes);

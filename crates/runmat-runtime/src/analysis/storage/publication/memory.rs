@@ -70,6 +70,8 @@ pub(in crate::analysis::storage) fn commit(
         return Err("retained publication references absent objects".into());
     }
     reachable.extend(prepared.chunks.keys().copied());
+    crate::analysis::fea_run_admission::FeaRunScope::check_publication_checked()
+        .map_err(|denied| AnalysisPublicationError::from(denied.to_string()))?;
     if crate::interrupt::is_cancelled() {
         return Err("study publication was cancelled".into());
     }

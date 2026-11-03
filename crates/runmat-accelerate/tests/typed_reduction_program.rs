@@ -3,6 +3,8 @@
 mod fixture;
 #[path = "support/reduction_program.rs"]
 mod support;
+#[path = "support/direct_reduction_runtime.rs"]
+mod invocation;
 use futures::executor::block_on;
 use runmat_accelerate::fusion::FusionOp;
 use runmat_accelerate::fusion_exec::resolve_reduction_program;
@@ -40,67 +42,157 @@ fn add(left: u32, right: u32, output: u32) -> FusionOp {
     }
 }
 
+struct ManagedControls(runmat_runtime::context::host_effect::ManagedHostEffectLedger);
+impl runmat_runtime::context::RuntimeParallelService for ManagedControls {
+    fn supports(&self, _: runmat_runtime::context::ParallelCapability) -> bool {
+        false
+    }
+    fn placement_resources(&self) -> runmat_runtime::context::RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
+        runmat_runtime::context::RuntimeParallelResources {
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+            ..Default::default()
+        }
+    }
+    fn managed_host_effect_ledger(
+        &self,
+    ) -> Option<runmat_runtime::context::host_effect::ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn actual_host_controls_fail_before_any_producer_probe_for_all_four_owners() {
     let owner = new_owner();
     let _provider = ThreadProviderGuard::set(Some(owner));
-    for name in ["sum", "mean", "min", "max"] {
-        owner.reset();
-        let left = owner.input();
-        let right = owner.input();
-        let mut controls = Vec::new();
-        if matches!(name, "min" | "max") {
-            controls.push(tensor(false, vec![0, 0]));
+    for managed in [false, true] {
+        for name in ["sum", "mean", "min", "max"] {
+            owner.reset();
+            let left = owner.input();
+            let right = owner.input();
+            let mut controls = Vec::new();
+            if matches!(name, "min" | "max") {
+                controls.push(tensor(false, vec![0, 0]));
+            }
+            controls.push(Value::Num(0.5));
+            let mut ids = vec![0, 1];
+            ids.extend((0..controls.len()).map(|index| 2 + index as u32));
+            let mut terminal = vec![10];
+            terminal.extend_from_slice(&ids[2..]);
+            let plan = reduction(
+                fixture::plan(
+                    vec![
+                        builtin("power", vec![0, 1], 10),
+                        builtin(name, terminal, 11),
+                    ],
+                    11,
+                ),
+                ids,
+                10,
+            );
+            let mut values = vec![
+                Value::GpuTensor(left.handle.clone()),
+                Value::GpuTensor(right.handle.clone()),
+            ];
+            values.extend(controls.iter().cloned());
+            let mut request = request(&plan, values);
+            let ledger = managed.then(|| {
+                runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(1 << 20)
+            });
+            if let Some(ledger) = &ledger {
+                let runtime = invocation::runtime();
+                let ports = runtime
+                    .service_ports()
+                    .clone()
+                    .with_parallel(Rc::new(ManagedControls(ledger.clone())));
+                request.runtime = Some(runtime.with_service_ports(ports));
+            }
+            let failure =
+                match block_on(resolve_reduction_program(&request, ProviderPrecision::F64)) {
+                    Err(error) => error,
+                    _ => panic!("{name}: invalid axis must retain the owner's parser error"),
+                };
+            let actual = failure
+                .source()
+                .unwrap()
+                .downcast_ref::<runmat_runtime::RuntimeError>()
+                .expect("actual parser error source");
+            let mut host_args = vec![tensor(false, vec![2, 2])];
+            host_args.extend(controls);
+            let expected = block_on(runmat_runtime::call_builtin_async_with_outputs(
+                name, &host_args, 1,
+            ))
+            .unwrap_err();
+            assert_eq!(actual.identifier(), expected.identifier());
+            assert_eq!(actual.to_string(), expected.to_string());
+            assert_eq!(owner.calls.load(Ordering::SeqCst), 0);
+            if let Some(ledger) = &ledger {
+                let snapshot = ledger.snapshot();
+                assert!(
+                    snapshot.peak_reserved_bytes > 0,
+                    "the original managed owner funds parser admission"
+                );
+                assert_eq!(
+                    snapshot.live_reserved_bytes, 0,
+                    "failed parser releases its original control claims"
+                );
+            }
+            assert_eq!(left.probe.retirements(), 0);
+            assert_eq!(right.probe.retirements(), 0);
+            drop(request);
+            drop(left.handle);
+            drop(right.handle);
+            assert_eq!(left.probe.retirements(), 1);
+            assert_eq!(right.probe.retirements(), 1);
         }
-        controls.push(Value::Num(0.5));
-        let mut ids = vec![0, 1];
-        ids.extend((0..controls.len()).map(|index| 2 + index as u32));
-        let mut terminal = vec![10];
-        terminal.extend_from_slice(&ids[2..]);
-        let plan = reduction(
-            fixture::plan(
-                vec![
-                    builtin("power", vec![0, 1], 10),
-                    builtin(name, terminal, 11),
-                ],
-                11,
-            ),
-            ids,
-            10,
-        );
-        let mut values = vec![
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn rejected_axis_does_not_bypass_an_exhausted_managed_control_owner() {
+    let owner = new_owner();
+    let _provider = ThreadProviderGuard::set(Some(owner));
+    let left = owner.input();
+    let right = owner.input();
+    let plan = reduction(
+        fixture::plan(
+            vec![
+                builtin("power", vec![0, 1], 10),
+                builtin("sum", vec![10, 2], 11),
+            ],
+            11,
+        ),
+        vec![0, 1, 2],
+        10,
+    );
+    let ledger = runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(0);
+    let runtime = invocation::runtime();
+    let ports = runtime
+        .service_ports()
+        .clone()
+        .with_parallel(Rc::new(ManagedControls(ledger.clone())));
+    let mut request = request(
+        &plan,
+        vec![
             Value::GpuTensor(left.handle.clone()),
             Value::GpuTensor(right.handle.clone()),
-        ];
-        values.extend(controls.iter().cloned());
-        let request = request(&plan, values);
-        let failure = match block_on(resolve_reduction_program(&request, ProviderPrecision::F64)) {
-            Err(error) => error,
-            _ => panic!("{name}: invalid axis must retain the owner's parser error"),
-        };
-        let actual = failure
-            .source()
-            .unwrap()
-            .downcast_ref::<runmat_runtime::RuntimeError>()
-            .expect("actual parser error source");
-        let mut host_args = vec![tensor(false, vec![2, 2])];
-        host_args.extend(controls);
-        let expected = block_on(runmat_runtime::call_builtin_async_with_outputs(
-            name, &host_args, 1,
-        ))
-        .unwrap_err();
-        assert_eq!(actual.identifier(), expected.identifier());
-        assert_eq!(actual.to_string(), expected.to_string());
-        assert_eq!(owner.calls.load(Ordering::SeqCst), 0);
-        assert_eq!(left.probe.retirements(), 0);
-        assert_eq!(right.probe.retirements(), 0);
-        drop(request);
-        drop(left.handle);
-        drop(right.handle);
-        assert_eq!(left.probe.retirements(), 1);
-        assert_eq!(right.probe.retirements(), 1);
-    }
+            Value::Num(0.5),
+        ],
+    );
+    request.runtime = Some(runtime.with_service_ports(ports));
+    let failure = match block_on(resolve_reduction_program(&request, ProviderPrecision::F64)) {
+        Err(failure) => failure,
+        _ => panic!("an unfunded parser cannot run or create a recipe"),
+    };
+    assert!(!failure.is_after_effect());
+    assert_eq!(owner.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(ledger.snapshot().peak_reserved_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    assert_eq!(left.probe.retirements(), 0);
+    assert_eq!(right.probe.retirements(), 0);
 }
 
 struct DenyBindings {

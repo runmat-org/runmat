@@ -32,6 +32,8 @@ pub struct RemoteSpmdGangProgram {
     pub captures: Vec<ValuePayload>,
     pub requested_outputs: u16,
     pub resources: ResourceRequest,
+    /// Exact invoking owner's per-rank controls; ranks keep separate transcripts.
+    pub console: Option<runmat_execution::console::ConsoleLimits>,
 }
 
 pub struct RemoteSpmdGangCompletion {
@@ -70,7 +72,7 @@ impl RemotePoolDriver {
                     callable: callable.clone(),
                     requested_outputs: program.requested_outputs,
                     environment: runmat_execution::EnvironmentSnapshot::default(),
-                    console: None,
+                    console: program.console,
                 },
                 ProgramExecutionInputs {
                     schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
@@ -112,7 +114,7 @@ impl RemotePoolDriver {
                     host,
                     invocation_context: context,
                     environment: runmat_execution::EnvironmentSnapshot::default(),
-                    console: None,
+                    console: program.console,
                     inputs: program.captures.clone(),
                     outputs: OutputContract {
                         requested_outputs: program.requested_outputs,
@@ -272,7 +274,7 @@ fn validate_gang_program(
         .driver
         .lock()
         .expect("remote driver poisoned")
-        .snapshot()
+        .snapshot_ref()
         .pools
         .get(&pool.pool_id)
         .map(|pool| pool.workers.len())

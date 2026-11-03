@@ -26,6 +26,8 @@ pub enum InterpreterOutcome {
 /// value.
 #[derive(Debug)]
 pub struct InterpreterCompletion {
+    /// Actual assigned language binding, including an implicit script expression.
+    pub ans_slot: Option<usize>,
     pub values: InterpreterVars,
     pub assigned_slots: HashSet<usize>,
 }
@@ -265,6 +267,7 @@ impl InterpreterState {
         Self {
             stack: crate::interpreter::stack::InterpreterStack::unbounded(),
             context: ExecutionContext {
+                publish_script_ans: false,
                 call_stack: Vec::new(),
                 locals: Vec::new(),
                 instruction_pointer: 0,

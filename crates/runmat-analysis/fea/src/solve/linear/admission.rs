@@ -15,6 +15,22 @@ pub(super) fn invalid_system_result(
 ) -> LinearSolveResult {
     if matches!(
         error,
+        RealSystemError::Coercivity(
+            crate::algebra::CoercivityError::FactorAdmission { .. }
+                | crate::algebra::CoercivityError::AdmissionDimension { .. }
+                | crate::algebra::CoercivityError::ResourceLimit { .. }
+        )
+    ) {
+        return rejected_system_result(
+            operator,
+            backend,
+            preconditioner,
+            "FEA_SOLVER_WORK_EXCEEDS_ADMISSION",
+            error.to_string(),
+        );
+    }
+    if matches!(
+        error,
         RealSystemError::Coercivity(crate::algebra::CoercivityError::Cancelled)
     ) {
         let mut result = rejected_system_result(

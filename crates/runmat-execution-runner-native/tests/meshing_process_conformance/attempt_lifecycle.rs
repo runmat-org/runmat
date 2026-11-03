@@ -52,6 +52,7 @@ pub(super) async fn fault_child(mode: &str) {
         serde_json::to_vec(&WorkerProcessMessage::Completed {
             response,
             console: None,
+            console_scopes: Vec::new(),
         })
         .unwrap()
     };

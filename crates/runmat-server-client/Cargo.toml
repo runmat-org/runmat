@@ -40,4 +40,4 @@ progenitor = "0.11"
 serde_yaml = "0.9"
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt", "macros", "io-util"] }

@@ -52,10 +52,14 @@ pub fn replace_interrupt(handle: Option<CancellationToken>) -> InterruptGuard {
 /// Why the active execution must stop: a cancelled generation or raised
 /// interrupt (`User`), otherwise an elapsed inherited deadline.
 pub fn stop_reason() -> Option<CancellationReason> {
+    let _ = crate::analysis::fea_run_admission::FeaRunScope::check_current();
     current_interrupt().and_then(|token| token.stop_reason())
 }
 
 pub fn is_cancelled() -> bool {
+    if crate::analysis::fea_run_admission::FeaRunScope::check_current().is_err() {
+        return true;
+    }
     if let Some(runtime) = crate::context::legacy::active() {
         return runtime.is_cancelled();
     }

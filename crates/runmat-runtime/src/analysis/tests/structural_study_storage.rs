@@ -545,6 +545,12 @@ fn run_storage_rejects_process_local_device_field_references() {
         OperationContext::new(None, None),
     )
     .unwrap();
+    let transfer = AnalysisStudyStepResult {
+        run: generated.clone(),
+        resolved_solver_options: AnalysisSolverOptions::StructuralLinear(Default::default()),
+    };
+    analysis_validate_study_step_transfer(&transfer)
+        .expect("host fields transfer without changing backend");
     let mut run = generated.data;
     run.run_id = "run_device_field_reference".to_string();
     let field = run.run.fields.first_mut().expect("linear result field");
@@ -554,6 +560,10 @@ fn run_storage_rejects_process_local_device_field_references() {
         token: "process-local-token".to_string(),
         element_count,
     });
+    let mut transferred = transfer;
+    transferred.run.data = run.clone();
+    let denied = analysis_validate_study_step_transfer(&transferred).unwrap_err();
+    assert_eq!(denied.error_code, "RM.FEA.WORKER.PROCESS_LOCAL_FIELD");
 
     let error = storage::AnalysisArtifactStore::persist_run(
         &storage::InMemoryAnalysisArtifactStore::new(),

@@ -44,7 +44,11 @@ impl JobStore {
             PersistedWorkload::Script { .. } => Ok(None),
             PersistedWorkload::Program { submission } => {
                 submission.validate()?;
-                if submission.request_digest()? != request.request_digest {
+                if super::store::bind_organization(
+                    submission.request_digest()?,
+                    request.local_fea_organization,
+                ) != request.request_digest
+                {
                     return Err(invalid(
                         "durable program differs from its original invocation",
                     ));
@@ -55,7 +59,11 @@ impl JobStore {
             }
             PersistedWorkload::Graph { submission } => {
                 submission.validate()?;
-                if submission.request_digest()? != request.request_digest {
+                if super::store::bind_organization(
+                    submission.request_digest()?,
+                    request.local_fea_organization,
+                ) != request.request_digest
+                {
                     return Err(invalid(
                         "durable Graph differs from its original invocation",
                     ));

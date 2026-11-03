@@ -414,6 +414,8 @@ impl RuntimeExecutionServices for NativeExecutionService {
         cancellation: runmat_execution::cancellation::CancellationToken,
         runtime: &runmat_runtime::context::RuntimeContext,
     ) -> Result<Vec<TaskHandle>, ExecutionServiceError> {
+        self.driver
+            .bind_console_parent(runtime, calls.iter().any(|call| call.console.is_some()))?;
         let owner =
             runmat_runtime::context::host_allocation::HostControlAllocationOwner::capture(runtime)
                 .map_err(|error| {
@@ -555,6 +557,16 @@ impl RuntimeExecutionServices for NativeExecutionService {
         pool: Option<&PoolHandle>,
         runtime: &runmat_runtime::context::RuntimeContext,
     ) -> Result<TaskHandle, ExecutionServiceError> {
+        let capture_requested = {
+            let state = self.state.lock().expect("native service poisoned");
+            match state.futures.get(&future.id) {
+                Some(FutureState::Deferred(call)) => call.console.is_some(),
+                Some(FutureState::Materializing(reservation)) => reservation.call.console.is_some(),
+                _ => false,
+            }
+        };
+        self.driver
+            .bind_console_parent(runtime, capture_requested)?;
         if let Some(pool) = pool {
             self.inspect_pool(pool)?;
         }

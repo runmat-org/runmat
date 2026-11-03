@@ -37,7 +37,7 @@ pub struct TestArgs {
     #[arg(long)]
     pub queue: Option<String>,
 
-    /// Pinned endpoint identity fingerprint trusted for remote tests
+    /// Optional independent endpoint identity pin for remote tests
     #[arg(long)]
     pub trust_identity: Option<String>,
 

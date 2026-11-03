@@ -112,7 +112,7 @@ impl CompletedMagneticStudy {
 }
 
 /// Reconstruct every task from authored inputs and consume its saved response/accounting pair.
-/// No unmetered shortcut: source imports, admission and terminal usage checks run unchanged.
+/// Completion reuses the source imports, admission and terminal usage checks.
 pub fn import_magnetic_study_completion(
     source: &impl CacheImport,
     preparation: MagneticStudyPreparation,

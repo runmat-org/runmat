@@ -10,10 +10,6 @@
       "path": "docs/getting-started/cli.md"
     },
     {
-      "id": "doc:runtime/getting-started/check",
-      "path": "docs/getting-started/check.md"
-    },
-    {
       "id": "doc:runtime/getting-started/projects",
       "path": "docs/getting-started/projects.md"
     },
@@ -504,6 +500,30 @@
     {
       "id": "doc:runtime/packages/ci",
       "path": "docs/packages/ci.md"
+    },
+    {
+      "id": "doc:runtime/interop/python",
+      "path": "docs/execution/python.md"
+    },
+    {
+      "id": "doc:runtime/interop/mex",
+      "path": "docs/execution/mex.md"
+    },
+    {
+      "id": "doc:runtime/interop/java",
+      "path": "docs/execution/java.md"
+    },
+    {
+      "id": "doc:runtime/interop/native-libraries",
+      "path": "docs/execution/native-libraries.md"
+    },
+    {
+      "id": "doc:runtime/execution/parallel",
+      "path": "docs/execution/parallel.md"
+    },
+    {
+      "id": "doc:runtime/development/extensions",
+      "path": "docs/development/extensions.md"
     },
     {
       "id": "doc:runtime/execution/remote",

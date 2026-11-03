@@ -8,6 +8,11 @@ use runmat_runtime::analysis::storage::{AnalysisArtifactStore, FilesystemAnalysi
 use serde_json::Value;
 use tempfile::TempDir;
 
+#[path = "support/local_offline.rs"]
+mod local_offline;
+#[path = "support/fea_admission.rs"]
+mod fea_admission;
+
 #[path = "typed_fea_geometry_cli/acoustic.rs"]
 mod acoustic;
 
@@ -23,7 +28,9 @@ mod electrical;
 mod harmonic;
 
 fn runmat(project: &TempDir, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_runmat"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
+    local_offline::configure(&mut command, project.path());
+    command
         .current_dir(project.path())
         .args(args)
         .env_remove("RUNMAT_CONFIG")
@@ -39,9 +46,9 @@ fn runmat(project: &TempDir, args: &[&str]) -> std::process::Output {
         .env(
             "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
             project.path().join("study-artifacts"),
-        )
-        .output()
-        .expect("run typed FEA geometry command")
+        );
+    let _admission = fea_admission::AdmissionServer::for_command(&mut command, project.path());
+    command.output().expect("run typed FEA geometry command")
 }
 
 #[test]

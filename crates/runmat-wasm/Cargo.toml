@@ -24,6 +24,7 @@ occt-wasm-host = [
 ]
 
 [dependencies]
+runmat-analysis-core = { workspace = true }
 runmat-analysis-execution = { workspace = true }
 runmat-analysis-fea = { workspace = true }
 runmat-meshing-core = { workspace = true }

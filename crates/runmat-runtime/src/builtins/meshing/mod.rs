@@ -33,6 +33,26 @@ const QUALITY_NAME: &str = "meshing.quality";
 const EVIDENCE_NAME: &str = "meshing.evidence";
 const MESH_METHOD_NAME: &str = "__runmat_meshing_mesh";
 
+fn meshing_runtime_error(failure: crate::meshing::MeshingExecutionError) -> crate::RuntimeError {
+    use crate::meshing::MeshingExecutionError;
+    match failure {
+        MeshingExecutionError::Admission(denied) => build_runtime_error(denied.to_string())
+            .with_builtin(GENERATE_NAME)
+            .with_identifier(denied.error_code())
+            .build(),
+        MeshingExecutionError::Provider(message) => error(GENERATE_NAME, message),
+        MeshingExecutionError::WithLeaseFailure { primary, lease } => {
+            crate::runtime_error::complete_with_cleanup::<()>(
+                Err(meshing_runtime_error(*primary)),
+                Err(meshing_runtime_error(MeshingExecutionError::Admission(
+                    lease,
+                ))),
+            )
+            .expect_err("an original mesh failure remains an error")
+        }
+    }
+}
+
 #[runtime_builtin(
     name = "meshing.generate",
     binding_variant = "default",
@@ -49,7 +69,7 @@ pub async fn generate_builtin(args: crate::call::BuiltinArguments) -> BuiltinRes
         &runmat_builtins::MESHING_ERROR_INVALID,
     )?;
     let settings = parse_settings(options)?;
-    let output = crate::meshing::execute_meshing(&crate::meshing::MeshingExecutionRequest {
+    let request = crate::meshing::MeshingExecutionRequest {
         source_path: PathBuf::from(&asset.source.path),
         source_units: match &asset.source.unit_evidence {
             runmat_geometry_core::physical::LengthUnitEvidence::ExplicitFallback {
@@ -62,16 +82,32 @@ pub async fn generate_builtin(args: crate::call::BuiltinArguments) -> BuiltinRes
             .map_err(|message| error(GENERATE_NAME, message))?,
         settings,
         contact_definitions: Vec::new(),
-    })
-    .map_err(|failure| match failure {
-        crate::meshing::MeshingExecutionError::Admission(denied) => {
-            build_runtime_error(denied.to_string())
+    };
+    let output = crate::analysis::fea_run_admission::async_host::run(
+        crate::analysis::fea_run_admission::FeaRunKind::Meshing,
+        runmat_execution::Digest::from_bytes(request.expected_source_sha256),
+        async {
+            crate::meshing::execute_meshing_async(&request)
+                .await
+                .map_err(meshing_runtime_error)
+        },
+        |failure| {
+            let code = match &failure {
+                crate::analysis::fea_run_admission::FeaRunExecutionError::Cancelled => {
+                    "RM.FEA.Cancelled"
+                }
+                crate::analysis::fea_run_admission::FeaRunExecutionError::Denied(denied) => {
+                    denied.error_code()
+                }
+            };
+            build_runtime_error(failure.to_string())
                 .with_builtin(GENERATE_NAME)
-                .with_identifier(denied.error_code())
+                .with_identifier(code)
                 .build()
-        }
-        crate::meshing::MeshingExecutionError::Provider(message) => error(GENERATE_NAME, message),
-    })?;
+        },
+        |result, lease_error| crate::runtime_error::complete_with_cleanup(result, Err(lease_error)),
+    )
+    .await?;
     output
         .evidence
         .validate(&output.artifact)

@@ -26,6 +26,7 @@ pub(crate) mod process;
 
 mod clock;
 mod completion;
+mod console;
 mod persistence;
 pub(crate) use completion::{next_task_completion_order, GraphAttemptAuthority, TaskCompletion};
 
@@ -107,6 +108,8 @@ pub(crate) struct LocalDriver {
     remote_graph_inventory: Option<ResourceInventory>,
     remote_graph_max_wall_millis: Option<u64>,
     completions: Mutex<HashMap<TaskId, Arc<TaskCompletion>>>,
+    console_admission: Mutex<console::LocalConsoleAuthority>,
+    parent_console_attempts: Mutex<BTreeSet<runmat_execution::identity::AttemptId>>,
     collectives: collective::ProcessCollectiveBroker,
     #[cfg(test)]
     fail_next_checkpoint: AtomicBool,
@@ -180,6 +183,8 @@ impl LocalDriver {
             remote_graph_inventory,
             remote_graph_max_wall_millis,
             completions: Mutex::new(HashMap::new()),
+            console_admission: Mutex::new(console::LocalConsoleAuthority::StandaloneOriginalTask),
+            parent_console_attempts: Mutex::new(BTreeSet::new()),
             collectives: collective::ProcessCollectiveBroker::default(),
             #[cfg(test)]
             fail_next_checkpoint: AtomicBool::new(false),
@@ -300,6 +305,22 @@ impl LocalDriver {
             .ok_or_else(|| {
                 NativeExecutionError::Protocol("invocation memory reservation overflow".into())
             })?;
+        let memory_bytes = memory_bytes
+            .checked_add(
+                crate::fea_proxy::automatic_storage_bytes()
+                    .map_err(NativeExecutionError::Protocol)?,
+            )
+            .ok_or_else(|| {
+                NativeExecutionError::Protocol("local FEA control reservation overflow".into())
+            })?;
+        let console_budget = self.quote_console_subgrant(console, memory_bytes)?;
+        let memory_bytes =
+            crate::console_retention::allocation_floor(memory_bytes, console, console_budget)?;
+        let max_artifact_bytes = crate::console_retention::artifact_floor(
+            u64::from(self.config.max_message_bytes),
+            console,
+            console_budget,
+        )?;
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
         let host = artifact
             .execution_host_requirement(
@@ -328,7 +349,7 @@ impl LocalDriver {
                 memory_bytes,
                 scratch_bytes,
                 max_wall_millis: 24 * 60 * 60 * 1000,
-                max_artifact_bytes: u64::from(self.config.max_message_bytes),
+                max_artifact_bytes,
                 max_egress_bytes: 0,
                 max_relay_bytes: 0,
                 accelerators: accelerator_requirements,
@@ -501,6 +522,20 @@ impl LocalDriver {
         let memory_bytes = selected
             .input_allocation_floor_bytes(serialized_length)
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        let memory_bytes = if graph.task.is_none() {
+            memory_bytes
+                .checked_add(
+                    crate::fea_proxy::automatic_storage_bytes()
+                        .map_err(NativeExecutionError::Protocol)?,
+                )
+                .ok_or_else(|| {
+                    NativeExecutionError::Protocol(
+                        "local Graph FEA control reservation overflow".into(),
+                    )
+                })?
+        } else {
+            memory_bytes
+        };
         let materialized_scratch_bytes =
             crate::attempt_scratch::materialized_bytes(admitted.selected_bundles())?;
         let recipe = &selected.recipe;
@@ -510,6 +545,23 @@ impl LocalDriver {
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let invocation_context = selected.context.clone();
         let invocation_controls = selected.invocation_controls.clone().unwrap_or_default();
+        let console_budget = self.quote_console_subgrant(
+            invocation_controls.console,
+            graph
+                .task
+                .as_ref()
+                .map_or(memory_bytes, |task| task.request.resources.memory_bytes),
+        )?;
+        let memory_bytes = crate::console_retention::allocation_floor(
+            memory_bytes,
+            invocation_controls.console,
+            console_budget,
+        )?;
+        let max_artifact_bytes = crate::console_retention::artifact_floor(
+            stored.length,
+            invocation_controls.console,
+            console_budget,
+        )?;
         let scratch_bytes = crate::process_output::RawOutputBudget::local_scratch_bytes(
             stored
                 .length
@@ -548,7 +600,7 @@ impl LocalDriver {
                         max_wall_millis: self
                             .remote_graph_max_wall_millis
                             .unwrap_or(24 * 60 * 60 * 1000),
-                        max_artifact_bytes: stored.length,
+                        max_artifact_bytes,
                         max_egress_bytes: 0,
                         max_relay_bytes: 0,
                         accelerators: recipe.accelerators.clone(),
@@ -562,6 +614,15 @@ impl LocalDriver {
             }
         };
         let request = &submission.request;
+        if console_budget.is_some()
+            && (memory_bytes > request.resources.memory_bytes
+                || max_artifact_bytes > request.resources.max_artifact_bytes)
+        {
+            return Err(NativeExecutionError::Protocol(
+                "Graph console subtree and original inputs exceed the original task reservation"
+                    .into(),
+            ));
+        }
         crate::process_output::RawOutputBudget::from_grant(
             request.resources.scratch_bytes,
             materialized_scratch_bytes,
@@ -1195,6 +1256,7 @@ mod task_completion_tests {
         let scope = crate::config::fresh_scope_id(b"resize-test", 1);
         let driver = LocalDriver::new(
             crate::NativeExecutionConfig {
+                local_fea_organization: Default::default(),
                 executable: std::env::current_exe().unwrap(),
                 worker_arguments: vec!["--execution-worker".into()],
                 max_workers: 3,

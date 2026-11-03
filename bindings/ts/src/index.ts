@@ -1210,6 +1210,9 @@ export interface GeometryPreviewResult extends GeometryInspectResult {
 
 export type { LocalFeaWorkerContext } from "./fea-run-context.js";
 import type { LocalFeaWorkerContext } from "./fea-run-context.js";
+export { createFeaRunAdmissionHook, FeaRunAdmissionError, feaRunAdmissionError } from "./fea-run-admission.js";
+export type { FeaRunAdmission, FeaRunAdmissionHook, FeaRunWorkerAdmission, FeaRunWorkerLeaseState, FeaRunRequest, FeaRunLease, FeaRunLeaseRenewal, FeaRunUsage, FeaRunOutcome, FeaRunDenied, FeaRunStopReason } from "./fea-run-admission.js";
+import { createFeaRunAdmissionHook, FeaRunAdmissionError, type FeaRunAdmission, type FeaRunAdmissionHook, type FeaRunWorkerAdmission, type FeaRunLease } from "./fea-run-admission.js";
 
 export interface RunMatSessionHandle {
   listProjectEntrypoints(projectPath: string, context?: ProjectEntrypointContext): Promise<ProjectEntrypointDescription[]>;
@@ -1230,6 +1233,8 @@ export interface RunMatSessionHandle {
   feaCapabilities(): Promise<FeaCapabilities>;
   planFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaExecutionChoices>;
   runFeaSource(path: string, planId: string, inputManifest?: InputManifest): Promise<FeaRunResult>;
+  setFeaRunAdmission(admission: FeaRunAdmission | FeaRunAdmissionHook | null): void;
+  renewFeaRunLease(runId: string, lease: FeaRunLease): void;
   checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult>;
   checkFeaWorkspace(request: FeaWorkspaceCheckRequest): Promise<FeaWorkspaceCheckResult>;
   browseFeaSource(request: FeaBrowseRequest): Promise<FeaBrowseOutcome>;
@@ -1336,6 +1341,8 @@ interface RunMatNativeSession extends ProjectEntrypointSessionExports {
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
   planFeaSource?: (path: string, inputManifest?: InputManifest) => FeaExecutionChoices | Promise<FeaExecutionChoices>;
   runFeaSource?: (path: string, planId: string, inputManifest?: InputManifest) => FeaRunResult | Promise<FeaRunResult>;
+  setFeaRunAdmission?: (admission: FeaRunAdmissionHook | null) => void;
+  renewFeaRunLease?: (runId: string, lease: FeaRunLease) => void;
   inspectFeaChanges?: (id: FeaChangeSetId) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
   reviewFeaChanges?: (request: FeaChangeSetReviewRequest) => FeaChangeSetReview | Promise<FeaChangeSetReview>;
   stageFeaChanges?: (request: FeaChangeSetRequest) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
@@ -1563,7 +1570,8 @@ interface RunMatNativeModule extends OpenTelemetryNativeExports, RuntimeSettings
   executeProgramArtifact?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
-  executePreparedFeaStudy?: (json: string, memoryBytes: number, context?: LocalFeaWorkerContext) => Promise<string>;
+  executePreparedFeaStudy?: (json: string, memoryBytes: number, context?: LocalFeaWorkerContext, admission?: FeaRunWorkerAdmission) => Promise<string>;
+  executeOwnedFeaStudyStep?: (json: string, memoryBytes: number, context?: LocalFeaWorkerContext, admission?: FeaRunWorkerAdmission) => Promise<string>;
   executeWorkerProgram?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
@@ -1868,11 +1876,20 @@ export async function prepareClusterGraph(programJson: Uint8Array, project: NonN
   return native.prepareClusterGraph(programJson, project);
 }
 
-/** Execute local numerical work without an account or billing adapter. */
-export async function executePreparedFeaStudy(json: string, memoryBytes: number, wasmModule?: WasmInitInput, context?: LocalFeaWorkerContext): Promise<string> {
+/** Execute only an owned worker's exact admitted root delegation. */
+export async function executePreparedFeaStudy(json: string, memoryBytes: number, wasmModule?: WasmInitInput, context?: LocalFeaWorkerContext, admission?: FeaRunWorkerAdmission): Promise<string> {
   const native = await loadNativeModule(wasmModule);
   if (!native.executePreparedFeaStudy) throw new Error("Rebuild the browser numerical runtime assets with prepared FEA execution support.");
-  return native.executePreparedFeaStudy(json, memoryBytes, context);
+  if (!context || !admission) throw new FeaRunAdmissionError({ reason: "signInRequired" });
+  return native.executePreparedFeaStudy(json, memoryBytes, context, admission);
+}
+
+/** Execute one original typed study step inside its supervised numerical worker. */
+export async function executeOwnedFeaStudyStep(json: string, memoryBytes: number, wasmModule?: WasmInitInput, context?: LocalFeaWorkerContext, admission?: FeaRunWorkerAdmission): Promise<string> {
+  const native = await loadNativeModule(wasmModule);
+  if (!native.executeOwnedFeaStudyStep) throw new Error("Rebuild the browser numerical runtime assets with owned FEA study-step support.");
+  if (!context || !admission) throw new FeaRunAdmissionError({ reason: "signInRequired" });
+  return native.executeOwnedFeaStudyStep(json, memoryBytes, context, admission);
 }
 
 export async function executeWorkerProgram(
@@ -2671,6 +2688,19 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.ensureActive();
     if (!this.native.runFeaSource) throw new Error("Reload the current runtime to run this simulation.");
     return this.native.runFeaSource(path, planId, inputManifest);
+  }
+
+  setFeaRunAdmission(admission: FeaRunAdmission | FeaRunAdmissionHook | null): void {
+    this.ensureActive();
+    if (!this.native.setFeaRunAdmission) throw new Error("Reload the current runtime to install FEA lease admission.");
+    this.native.setFeaRunAdmission(admission === null ? null : "check" in admission
+      ? admission : createFeaRunAdmissionHook(admission, () => this.cancelExecution(), (runId, lease) => this.renewFeaRunLease(runId, lease)));
+  }
+
+  renewFeaRunLease(runId: string, lease: FeaRunLease): void {
+    this.ensureActive();
+    if (!this.native.renewFeaRunLease) throw new Error("Reload the current runtime to renew an FEA lease.");
+    this.native.renewFeaRunLease(runId, lease);
   }
 
   async checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult> {

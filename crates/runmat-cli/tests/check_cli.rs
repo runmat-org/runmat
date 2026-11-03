@@ -10,6 +10,8 @@ use runmat_meshing_core::{CanonicalMeshingContract, MeshingEvidence, SolverMeshA
 
 #[path = "support/local_offline.rs"]
 mod local_offline;
+#[path = "support/fea_admission.rs"]
+mod fea_admission;
 
 fn runmat(temp: &TempDir, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
@@ -25,6 +27,7 @@ fn runmat(temp: &TempDir, args: &[&str]) -> Output {
             "RUNMAT_EXECUTION_STATE_DIR",
             temp.path().join("execution-state"),
         );
+    let _admission = fea_admission::AdmissionServer::for_command(&mut command, temp.path());
     command.output().expect("run runmat check")
 }
 
@@ -42,6 +45,7 @@ fn runmat_with_env(temp: &TempDir, args: &[&str], env: &[(&str, &str)]) -> Outpu
     for (key, value) in env {
         command.env(key, value);
     }
+    let _admission = fea_admission::AdmissionServer::for_command(&mut command, temp.path());
     command.output().expect("run runmat check")
 }
 
@@ -102,9 +106,9 @@ fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
         .env(
             "RUNMAT_EXECUTION_STATE_DIR",
             temp.path().join("execution-state"),
-        )
-        .output()
-        .expect("run repository FEA example")
+        );
+    let _admission = fea_admission::AdmissionServer::for_command(&mut command, temp.path());
+    command.output().expect("run repository FEA example")
 }
 
 fn assert_fea_checks(temp: &TempDir, path: &str) {

@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use runmat_execution::identity::AttemptId;
 use runmat_execution::SpmdTaskContext;
-use runmat_execution_runner::{AttemptReport, AttemptSuccess};
+use runmat_execution_runner::AttemptSuccess;
 use tokio::sync::oneshot;
 
 use super::{RemoteAttempt, RemoteWorkerChannel};
@@ -189,9 +189,10 @@ pub(super) async fn execute(
     attempt: RemoteAttempt,
     progress: Option<&RemoteProgressBuffer>,
     collectives: Option<RemoteCollectiveAssignment>,
-) -> NativeExecutionResult<AttemptReport> {
+    console_budget: Option<runmat_execution::console::ConsoleBudget>,
+) -> NativeExecutionResult<runmat_execution_runner::port::BackendReport> {
     let attempt_id = attempt.scheduling.id;
-    let execution = channel.execute(attempt);
+    let execution = channel.execute_observed(attempt, console_budget);
     tokio::pin!(execution);
     loop {
         tokio::select! {

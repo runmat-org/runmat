@@ -34,6 +34,10 @@ pub struct AttemptTerminal {
     pub disposition: AttemptDisposition,
     #[serde(deserialize_with = "runmat_execution::console::deserialize_transcript")]
     pub console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_scopes")]
+    pub console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_source_identity")]
+    pub delegated_console_root: Option<runmat_execution::console::ConsoleSourceIdentity>,
     /// Saved logical driver clock, not worker elapsed time or a cessation fence.
     pub closed_at_driver_millis: u64,
     /// Original report; None explicitly leaves consumption unaccounted.
@@ -56,6 +60,10 @@ pub struct AttemptRetirementUnverified {
     pub execution: Option<Box<super::AttemptExecutionObservation>>,
     #[serde(deserialize_with = "runmat_execution::console::deserialize_transcript")]
     pub console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_scopes")]
+    pub console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_source_identity")]
+    pub delegated_console_root: Option<runmat_execution::console::ConsoleSourceIdentity>,
     /// Set only by the later exact fenced backend retirement certificate.
     pub retired_at_driver_millis: Option<u64>,
 }
@@ -78,6 +86,10 @@ impl AttemptTerminal {
                         .console
                         .as_ref()
                         .is_some_and(|saved| self.console.as_ref() != Some(saved))
+                    || (!original.console_scopes.is_empty()
+                        && self.console_scopes != original.console_scopes)
+                    || (original.delegated_console_root.is_some()
+                        && self.delegated_console_root != original.delegated_console_root)
             })
         {
             return Err("terminal report replaced original uncertain attempt evidence".into());
@@ -86,6 +98,8 @@ impl AttemptTerminal {
             && (self.resources.is_some()
                 || self.execution.is_some()
                 || self.console.is_some()
+                || !self.console_scopes.is_empty()
+                || self.delegated_console_root.is_some()
                 || self.diagnostic.is_some()
                 || attempt
                     .unverified_retirement
@@ -94,6 +108,8 @@ impl AttemptTerminal {
                         uncertainty.resources.is_some()
                             || uncertainty.execution.is_some()
                             || uncertainty.console.is_some()
+                            || !uncertainty.console_scopes.is_empty()
+                            || uncertainty.delegated_console_root.is_some()
                             || uncertainty.failure.is_some()
                             || uncertainty.failure_kind.is_some()
                     }))
@@ -106,8 +122,26 @@ impl AttemptTerminal {
                 return Err("console evidence differs from original attempt controls".into());
             }
         }
+        runmat_execution::console::validate_scopes(&self.console_scopes)
+            .map_err(|error| error.to_string())?;
+        runmat_execution::console::validate_delegated_root(
+            self.console.as_deref(),
+            &self.console_scopes,
+            self.delegated_console_root,
+            self.disposition == AttemptDisposition::Succeeded,
+        )
+        .map_err(|error| error.to_string())?;
+        runmat_execution::console::validate_source_controls(
+            self.console.as_deref(),
+            &self.console_scopes,
+            self.delegated_console_root,
+            attempt.request.task.console,
+            attempt.request.id,
+        )
+        .map_err(|error| error.to_string())?;
         if self.disposition == AttemptDisposition::Succeeded
             && attempt.request.task.console.is_some()
+            && self.delegated_console_root.is_none()
             && self.console.as_ref().is_none_or(|console| {
                 console.completion() != runmat_execution::console::ConsoleCompletion::Complete
             })
@@ -182,6 +216,23 @@ impl AttemptRecord {
                     );
                 }
             }
+            runmat_execution::console::validate_scopes(&uncertainty.console_scopes)
+                .map_err(|error| error.to_string())?;
+            runmat_execution::console::validate_delegated_root(
+                uncertainty.console.as_deref(),
+                &uncertainty.console_scopes,
+                uncertainty.delegated_console_root,
+                false,
+            )
+            .map_err(|error| error.to_string())?;
+            runmat_execution::console::validate_source_controls(
+                uncertainty.console.as_deref(),
+                &uncertainty.console_scopes,
+                uncertainty.delegated_console_root,
+                self.request.task.console,
+                self.request.id,
+            )
+            .map_err(|error| error.to_string())?;
         }
         if self.state == AttemptState::Lost && self.unverified_retirement.is_none() {
             return Err("lost attempt lacks its original uncertainty and retirement proof".into());

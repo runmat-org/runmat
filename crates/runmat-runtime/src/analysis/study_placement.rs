@@ -8,8 +8,8 @@ use crate::operations::{
 
 use super::{
     analysis_complete_structural_study_op, analysis_complete_study_sweep_op,
-    analysis_prepare_structural_study_op, analysis_study_sweep_identity, AnalysisStudyRunData,
-    AnalysisStudySpec, AnalysisStudySweepData, AnalysisStudySweepRunOutcome,
+    analysis_prepare_structural_study_op, analysis_study_sweep_identity, fea_run_admission,
+    AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData, AnalysisStudySweepRunOutcome,
     AnalysisStudySweepSpec, PreparedStructuralStudy, StructuralStudyExecutionFailure,
     StructuralStudyExecutionOutcome, ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
     ANALYSIS_RUN_STUDY_SWEEP_OPERATION, ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
@@ -43,7 +43,8 @@ pub trait StructuralStudyPlacementExecutor: Send + Sync {
     fn allocated_cpu_millicores(&self, study_count: usize) -> u32;
 
     fn run_site(&self) -> super::fea_run_admission::FeaRunSite {
-        super::fea_run_admission::FeaRunSite::Local
+        super::fea_run_admission::FeaRunScope::admission_site()
+            .unwrap_or(super::fea_run_admission::FeaRunSite::Local)
     }
 
     fn execute<'a>(
@@ -65,12 +66,36 @@ pub async fn analysis_execute_structural_study_with_placement(
         executor,
         1,
     )?;
-    let result = scope
-        .run_future(execute_study_admitted(spec, context, executor))
-        .await;
+    let result = match scope
+        .run_checked_result_future(execute_study_admitted(spec, context.clone(), executor))
+        .await
+    {
+        Ok(result) => result,
+        Err(failure) => {
+            let classification = failure.outcome();
+            return fea_run_admission::entrypoints::settle_result(
+                scope,
+                Err(failure.into_operation_error(
+                    ANALYSIS_RUN_STUDY_OPERATION,
+                    ANALYSIS_RUN_STUDY_OP_VERSION,
+                    &context,
+                )),
+                classification,
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                &context,
+            );
+        }
+    };
     let outcome = placement_outcome(&result);
-    scope.settle(outcome);
-    result
+    super::fea_run_admission::entrypoints::settle_result(
+        scope,
+        result,
+        outcome,
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        &context,
+    )
 }
 
 async fn execute_study_admitted(
@@ -116,15 +141,39 @@ pub async fn analysis_execute_structural_sweep_with_placement(
             spec.studies.len()
         },
     )?;
-    let result = scope
-        .run_future(execute_sweep_admitted(spec, context, executor))
-        .await;
+    let result = match scope
+        .run_checked_result_future(execute_sweep_admitted(spec, context.clone(), executor))
+        .await
+    {
+        Ok(result) => result,
+        Err(failure) => {
+            let classification = failure.outcome();
+            return fea_run_admission::entrypoints::settle_result(
+                scope,
+                Err(failure.into_operation_error(
+                    ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+                    ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+                    &context,
+                )),
+                classification,
+                ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+                ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+                &context,
+            );
+        }
+    };
     let outcome = match &result {
         Ok(value) => super::fea_run_admission::entrypoints::sweep_outcome(&value.data),
         Err(_) => placement_outcome(&result),
     };
-    scope.settle(outcome);
-    result
+    super::fea_run_admission::entrypoints::settle_result(
+        scope,
+        result,
+        outcome,
+        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+        &context,
+    )
 }
 
 async fn execute_sweep_admitted(

@@ -681,6 +681,22 @@ fn standalone_runtime(
     use runmat_runtime::context::{RuntimeContext, RuntimeLanguageMode};
 
     let execution = Rc::new(runmat_runtime::execution::RuntimeExecutionService::new());
+    // Prefer the current embedding/host authority. Otherwise install only a
+    // lazy native adapter: plain programs (including untaken FEA branches)
+    // never read credentials or contact Server. Each invocation gets fresh
+    // selector capture rather than pinning a previous invocation's account.
+    let fea_admission =
+        match runmat_runtime::analysis::fea_run_admission::capture_fea_run_admission() {
+            Ok(originating) => originating,
+            Err(runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired) => {
+                std::sync::Arc::new(runmat_fea_admission_native::NativeFeaAdmission::new(None))
+            }
+            Err(_) => std::sync::Arc::new(
+                runmat_fea_admission_native::NativeFeaAdmission::from_selection(
+                    runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization::Invalid,
+                ),
+            ),
+        };
     let runtime = if let Some(binding) = selected {
         let environment_read_selected = binding.services.iter().any(|service| {
             service.kind
@@ -717,6 +733,11 @@ fn standalone_runtime(
     };
     runtime.set_language_mode(mode);
     runtime.set_runmat_extensions_enabled(matches!(mode, RuntimeLanguageMode::RunMat));
+    let ports = runtime
+        .service_ports()
+        .clone()
+        .with_sync_fea_run_admission(fea_admission);
+    let runtime = runtime.with_service_ports(ports);
     Ok(crate::program::install_acceleration_services(runtime))
 }
 

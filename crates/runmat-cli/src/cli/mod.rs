@@ -17,6 +17,7 @@ pub use cluster::{
     ClusterCommand, ClusterJoinArgs, ClusterStateArg, NodeArgs, NodeCommand, NodeOptions,
     NodeServiceCommand, NodeStateArg, NodeTrustTier,
 };
+pub(crate) use execution_target::resolve_endpoint_trust;
 pub use execution_target::{ExecutionTarget, ExecutionTargetArgs, RemoteExecutionTarget};
 pub use fea::{FeaCommand, FeaRootArgs};
 pub use job::{JobCommand, JobRecoveryCommand};

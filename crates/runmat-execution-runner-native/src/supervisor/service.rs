@@ -52,8 +52,20 @@ impl LocalSupervisor {
         &self,
         submission: BatchSubmission,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+        self.submit_with_organization(
+            submission,
+            runmat_runtime::analysis::fea_run_admission::current_local_fea_organization_hint(),
+        )
+        .await
+    }
+
+    async fn submit_with_organization(
+        &self,
+        submission: BatchSubmission,
+        organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
+    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
         let mut store = self.store.lock().await;
-        let (record, created) = store.create_script(submission, unix_millis())?;
+        let (record, created) = store.create_script(submission, unix_millis(), organization)?;
         if !created {
             return Ok((record, true));
         }
@@ -64,6 +76,18 @@ impl LocalSupervisor {
     pub async fn submit_graph(
         &self,
         submission: GraphBatchSubmission,
+    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+        self.submit_graph_with_organization(
+            submission,
+            runmat_runtime::analysis::fea_run_admission::current_local_fea_organization_hint(),
+        )
+        .await
+    }
+
+    async fn submit_graph_with_organization(
+        &self,
+        submission: GraphBatchSubmission,
+        organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
         // Canonical archive decode and selected-V3 admission can be expensive;
         // complete it before entering the durable-store critical section.
@@ -93,7 +117,8 @@ impl LocalSupervisor {
             // Preserve the complete original scheduler submission, not merely
             // the request's derived callable or a replacement resource grant.
             let task = task.clone();
-            let (record, created) = store.create_graph_validated(validated, unix_millis())?;
+            let (record, created) =
+                store.create_graph_validated(validated, unix_millis(), organization)?;
             if !created {
                 return Ok((record, true));
             }
@@ -103,7 +128,8 @@ impl LocalSupervisor {
                 .await?;
             return Ok((store.record(record.handle.id)?, false));
         }
-        let (record, created) = store.create_graph_validated(validated, unix_millis())?;
+        let (record, created) =
+            store.create_graph_validated(validated, unix_millis(), organization)?;
         if !created {
             return Ok((record, true));
         }
@@ -242,7 +268,12 @@ impl LocalSupervisor {
         let job_dir = store.job_dir(record.handle.id);
         let mut command = HostCommand::new(&self.config.execution.executable);
         command.arguments = vec![HiddenMode::ExecutionDriver.marker().into()];
-        command.environment_policy = EnvironmentPolicy::Inherit;
+        command.environment_policy = EnvironmentPolicy::InheritExcept(vec!["RUNMAT_ORG_ID".into()]);
+        if let Some(org) =
+            crate::config::local_organization_environment(record.local_fea_organization)
+        {
+            command.environment.insert("RUNMAT_ORG_ID".into(), org);
+        }
         command.environment.insert(
             "RUNMAT_EXECUTION_JOB_DIR".into(),
             job_dir.to_string_lossy().into_owned(),
@@ -297,6 +328,7 @@ impl LocalSupervisor {
     pub(super) async fn command(
         &self,
         command: SupervisorCommand,
+        organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
     ) -> NativeExecutionResult<SupervisorResponse> {
         Ok(match command {
             SupervisorCommand::Ping => SupervisorResponse::Pong {
@@ -308,15 +340,21 @@ impl LocalSupervisor {
                 }
             }
             SupervisorCommand::Submit { submission } => {
-                let (record, duplicate) = self.submit(*submission).await?;
+                let (record, duplicate) = self
+                    .submit_with_organization(*submission, organization)
+                    .await?;
                 SupervisorResponse::Submitted { record, duplicate }
             }
             SupervisorCommand::SubmitProgram { submission } => {
-                let (record, duplicate) = self.submit_program(*submission).await?;
+                let (record, duplicate) = self
+                    .submit_program_with_organization(*submission, organization)
+                    .await?;
                 SupervisorResponse::Submitted { record, duplicate }
             }
             SupervisorCommand::SubmitGraph { submission } => {
-                let (record, duplicate) = self.submit_graph(*submission).await?;
+                let (record, duplicate) = self
+                    .submit_graph_with_organization(*submission, organization)
+                    .await?;
                 SupervisorResponse::Submitted { record, duplicate }
             }
             SupervisorCommand::List => SupervisorResponse::Jobs {

@@ -1,5 +1,5 @@
 //! Construct only the selected branch and retain the original roots through
-//! completion/adoption. No allocation, runtime projection or driver is added.
+//! completion/adoption in one exactly admitted selected-body allocation.
 use super::selection::{Branch, Selected};
 use super::*;
 use crate::builtins::math::host_route::{self, NumericHostRoute};
@@ -10,14 +10,13 @@ use crate::context::VmFusionHostInstruction;
 use futures::future::Either;
 use runmat_builtins::BuiltinBindingIdentity;
 
-#[inline(always)]
 pub(super) fn execute<'a, F, Fut>(
     context: Option<&'a RuntimeContext>,
     identity: BuiltinCatalogIdentity,
     operator: runmat_types::OperatorKind,
     selected: Selected,
     body: F,
-) -> impl Future<Output = BuiltinResult<RootedValue>> + 'a
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue>
 where
     F: FnOnce(Value, Value) -> Fut + 'a,
     Fut: Future<Output = BuiltinResult<RootedValue>> + 'a,
@@ -28,23 +27,47 @@ where
         branch,
         inputs,
     } = selected;
-    let future = match branch {
-        Branch::Ordinary => Either::Left(Either::Left(body(left, right))),
-        Branch::Host(route) => Either::Left(Either::Right(host(
-            context.expect("selected host route has its original runtime"),
-            identity,
-            operator,
-            left,
-            right,
-            route,
-            body,
-        ))),
-        Branch::Admitted(admission) => {
-            Either::Right(admitted(context, admission, operator, left, right, body))
-        }
-    };
-    crate::execution::with_retained_owner(future, inputs)
+    match branch {
+        Branch::Ordinary => admit_selected(context, inputs, || body(left, right)),
+        Branch::Host(route) => admit_selected(context, inputs, || {
+            host(
+                context.expect("selected host route has its original runtime"),
+                identity,
+                operator,
+                left,
+                right,
+                route,
+                body,
+            )
+        }),
+        Branch::Admitted(admission) => admit_selected(context, inputs, || {
+            admitted(context, admission, operator, left, right, body)
+        }),
+    }
 }
+
+// The preparation successor carries this small erased owner, not an enum of
+// all three concrete bodies. Construct only the selected body at the existing
+// layout-admission boundary, after its exact storage claim and before polling.
+#[inline(never)]
+fn admit_selected<'a, Fut>(
+    context: Option<&RuntimeContext>,
+    inputs: crate::execution::RootedValueLease,
+    make: impl FnOnce() -> Fut,
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue>
+where
+    Fut: Future<Output = BuiltinResult<RootedValue>> + 'a,
+{
+    crate::execution::rooted_continuation::admit_optional_hostcall_with_contextual_error(
+        context,
+        || crate::execution::with_retained_owner(make(), inputs),
+    )
+    .unwrap_or_else(crate::execution::RuntimeContinuationFuture::rejected)
+}
+
+#[cfg(test)]
+#[path = "selected_execution/tests.rs"]
+mod tests;
 fn host<'a, F, Fut>(
     context: &'a RuntimeContext,
     identity: BuiltinCatalogIdentity,

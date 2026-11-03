@@ -966,6 +966,50 @@ pub async fn interpret_workspace(
     admission: Option<crate::runtime::workspace::PendingWorkspaceAdmission>,
     dynamic_admission: Option<DynamicEvalAdmissionPort>,
 ) -> WorkspaceInterpreterOutcome {
+    interpret_workspace_with_script_ans(
+        bytecode,
+        initial_vars,
+        current_function_name,
+        runtime,
+        admission,
+        dynamic_admission,
+        false,
+    )
+    .await
+}
+
+/// Execute an admitted standalone script with frame-owned implicit `ans`
+/// publication. Interactive execution keeps its separate host publication owner.
+pub async fn interpret_script_workspace(
+    bytecode: &Bytecode,
+    initial_vars: InterpreterVars,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    admission: Option<crate::runtime::workspace::PendingWorkspaceAdmission>,
+    dynamic_admission: Option<DynamicEvalAdmissionPort>,
+    requested_outputs: usize,
+) -> WorkspaceInterpreterOutcome {
+    interpret_workspace_with_script_ans(
+        bytecode,
+        initial_vars,
+        current_function_name,
+        runtime,
+        admission,
+        dynamic_admission,
+        requested_outputs == 1,
+    )
+    .await
+}
+
+async fn interpret_workspace_with_script_ans(
+    bytecode: &Bytecode,
+    initial_vars: InterpreterVars,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    admission: Option<crate::runtime::workspace::PendingWorkspaceAdmission>,
+    dynamic_admission: Option<DynamicEvalAdmissionPort>,
+    publish_script_ans: bool,
+) -> WorkspaceInterpreterOutcome {
     let arity = runtime
         .invocation_arity()
         .unwrap_or(RuntimeInvocationArity::Script);
@@ -986,6 +1030,7 @@ pub async fn interpret_workspace(
             current_function_name,
             runtime.clone(),
             dynamic_admission,
+            publish_script_ans,
         )),
     ));
     runtime
@@ -1278,6 +1323,7 @@ async fn interpret_workspace_inner(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
     dynamic_admission: Option<DynamicEvalAdmissionPort>,
+    publish_script_ans: bool,
 ) -> VmResult<InterpreterOutcome> {
     bytecode
         .validate_selected_source_owners(&runtime)
@@ -1309,6 +1355,7 @@ async fn interpret_workspace_inner(
         runtime,
     )?);
     state.context.dynamic_eval_admission = dynamic_admission;
+    state.context.publish_script_ans = publish_script_ans;
     let result = Box::pin(run_interpreter_owned(state)).await;
     drop(borrowed_inputs);
     match result {
@@ -1912,11 +1959,17 @@ async fn run_interpreter_inner(state: InterpreterState) -> VmResult<InterpreterO
         current_function_name,
     )?;
     crate::runtime::workspace::reconcile_workspace_vars(&mut vars);
+    let ans_slot = crate::runtime::workspace::current_workspace_assigned_slot("ans");
+    let mut assigned_slots = completion_assigned_slots
+        .unwrap_or_else(crate::runtime::workspace::current_workspace_assigned_slots);
+    if let Some(slot) = ans_slot {
+        assigned_slots.insert(slot);
+    }
     Ok(InterpreterOutcome::Completed(
         runmat_runtime::execution::RootedResult::new(
             crate::interpreter::state::InterpreterCompletion {
-                assigned_slots: completion_assigned_slots
-                    .unwrap_or_else(crate::runtime::workspace::current_workspace_assigned_slots),
+                ans_slot,
+                assigned_slots,
                 values: vars,
             },
         )

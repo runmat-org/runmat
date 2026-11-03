@@ -86,8 +86,9 @@ pub struct FusionReductionDeclaration {
     /// from a name or treat an unsupported extrema as Sum.
     pub operation: FusionReductionOperation,
     pub prepare: FusionReductionPreparer,
-    /// Allocation-free bound from the same operation-owned lexical plan used
-    /// by preparation. None retains ordinary dispatch and its diagnostics.
+    /// Allocation-free bound from the owner's lexical plan or a bounded
+    /// rejected scalar-axis parser path. Funding a parser is not mathematical
+    /// eligibility. None retains ordinary dispatch and its diagnostics.
     pub resources:
         for<'a> fn(FusionReductionPreparationQuery<'a>) -> Option<FusionReductionPreparationQuote>,
 }
@@ -238,6 +239,14 @@ pub(crate) fn reduction_sum_bytes(parts: &[u64]) -> Option<u64> {
     parts
         .iter()
         .try_fold(0u64, |total, &part| total.checked_add(part))
+}
+
+/// Recognize a rejected scalar axis using the same typed dimension decoder
+/// as the public owners. This only funds their existing parser/error path;
+/// it supplies no axis plan, prepared mathematics or kernel eligibility.
+pub(crate) fn reduction_rejected_scalar_axis(controls: &[Value]) -> bool {
+    matches!(controls, [value @ (Value::Num(_) | Value::Int(_))]
+        if crate::builtins::common::tensor::scalar_dimension_from_value_typed(value, false).is_err())
 }
 
 pub(crate) fn reduction_vec<T>(count: usize) -> crate::BuiltinResult<Vec<T>> {

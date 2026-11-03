@@ -36,3 +36,13 @@ pub(crate) mod testing;
 pub(crate) mod fea_execution;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod fea_run_context;
+#[cfg(not(feature = "graphics-replay"))]
+mod fea_lease;
+#[cfg(not(feature = "graphics-replay"))]
+mod fea_meshing;
+#[cfg(not(feature = "graphics-replay"))]
+mod fea_async_host;
+#[cfg(not(feature = "graphics-replay"))]
+mod fea_analysis_host;
+#[cfg(not(feature = "graphics-replay"))]
+pub(crate) mod fea_step_worker;

@@ -2,6 +2,7 @@ mod bootstrap;
 mod framing;
 mod reader;
 mod writer;
+pub(crate) use bootstrap::decode_bootstrap;
 
 pub use bootstrap::{
     read_bootstrap, write_bootstrap, NativeWorkerBootstrap, NATIVE_BOOTSTRAP_SCHEMA_VERSION,

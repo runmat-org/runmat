@@ -30,6 +30,13 @@ async fn run() -> ExitCode {
     match runmat_process_host::HiddenModeRegistry::standard().detect(args.clone()) {
         Ok(Some(runmat_process_host::HiddenMode::TestWorker)) => {
             let _otel = runmat::observability::init_from_env();
+            let _fea_admission = match runmat::app::bootstrap::install_local_fea_admission(None) {
+                Ok(guard) => guard,
+                Err(error) => {
+                    eprintln!("runmat test worker admission failed: {error}");
+                    return ExitCode::from(2);
+                }
+            };
             return match runmat::commands::test::worker::run_stdio().await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
@@ -40,6 +47,18 @@ async fn run() -> ExitCode {
         }
         Ok(Some(runmat_process_host::HiddenMode::ExecutionWorker)) => {
             let _otel = runmat::observability::init_from_env();
+            let remote = std::env::var_os("RUNMAT_EXECUTION_WORKER_REMOTE").is_some();
+            let _fea_admission = if remote {
+                None
+            } else {
+                match runmat::app::bootstrap::install_local_fea_admission(None) {
+                    Ok(guard) => Some(guard),
+                    Err(error) => {
+                        eprintln!("runmat local execution worker admission failed: {error}");
+                        return ExitCode::from(2);
+                    }
+                }
+            };
             if runmat_execution_runner_native::cooperative::is_cooperative_rank_process() {
                 let result = tokio::task::spawn_blocking(
                     runmat_execution_runner_native::cooperative::run_cooperative_rank_from_env,
@@ -57,7 +76,6 @@ async fn run() -> ExitCode {
                     }
                 };
             }
-            let remote = std::env::var_os("RUNMAT_EXECUTION_WORKER_REMOTE").is_some();
             let result = if remote {
                 runmat_execution_runner_native::run_remote_worker_from_env().await
             } else {
@@ -111,6 +129,13 @@ async fn run() -> ExitCode {
                     }
                 };
             }
+            let _fea_admission = match runmat::app::bootstrap::install_local_fea_admission(None) {
+                Ok(guard) => guard,
+                Err(error) => {
+                    eprintln!("runmat local batch admission failed: {error}");
+                    return ExitCode::from(2);
+                }
+            };
             return runmat::commands::batch::run_driver().await;
         }
         Ok(Some(runmat_process_host::HiddenMode::LocalSupervisor)) => {

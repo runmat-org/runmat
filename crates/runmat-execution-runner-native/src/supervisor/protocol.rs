@@ -5,12 +5,14 @@ use super::{
     BatchSubmission, GraphBatchSubmission, JobAttachment, LocalJobRecord, ProgramBatchSubmission,
 };
 
-pub const SUPERVISOR_PROTOCOL_VERSION: u16 = 6;
+pub const SUPERVISOR_PROTOCOL_VERSION: u16 = 7;
 pub const SUPERVISOR_MAX_MESSAGE_BYTES: u32 = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SupervisorRequest {
+    #[serde(default)]
+    pub local_fea_organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
     pub protocol_version: u16,
     pub authentication_token: String,
     pub config_identity: runmat_execution::Digest,

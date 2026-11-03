@@ -26,6 +26,9 @@ enum Request {
         objects: Vec<LogicalObject>,
         settings: MeshingRequestSettings,
     },
+    MeshImportedSource {
+        request: Box<runmat_analysis_execution::ImportedSourceMeshingRequest>,
+    },
 }
 struct Cancellation;
 impl runmat_meshing_core::MeshingCancellationSignal for Cancellation {
@@ -54,6 +57,39 @@ pub(super) fn execute(
         .ok_or_else(|| "Exact CAD execution is unavailable.".to_owned())?;
     match request {
         Request::Profile => serde_json::to_string(&profile).map_err(|e| e.to_string().into()),
+        Request::MeshImportedSource { request } => {
+            // The surrounding owned-worker JS host validates the original
+            // parent delegation before this call and before returning bytes.
+            let ceilings = runmat_meshing_core::MeshingExecutionCeilings::for_host(
+                MAX_GEOMETRY_MEMORY_BYTES,
+                &request.settings.limits,
+            );
+            let platform = PlatformBuildIdentity {
+                capability_cohort: "browser-serial-occt".into(),
+                target_triple: "wasm32-unknown-emscripten".into(),
+                build_digest: StableDigest::from_bytes(
+                    *Digest::sha256(concat!("runmat-exact-browser:", env!("CARGO_PKG_VERSION")))
+                        .bytes(),
+                ),
+                exact_kernel_abi: Some(profile.kernel_abi),
+            };
+            let mut store = MemoryObjectStore::new(INVENTORY).map_err(|error| error.to_string())?;
+            let context =
+                runmat_geometry_io::GeometryImportContext::with_cancellation_probe(|| {
+                    runmat_meshing_core::MeshingCancellationSignal::is_cancelled(&Cancellation)
+                });
+            let result = runmat_analysis_execution::mesh_imported_source_serial(
+                *request,
+                &mut store,
+                &context,
+                ceilings,
+                platform,
+                INVENTORY,
+                &Cancellation,
+                &mut runmat_meshing_execution::NoopMeshingProgress,
+            )?;
+            serde_json::to_string(&result).map_err(|error| error.to_string().into())
+        }
         Request::MaterializeAndMesh {
             program,
             objects,

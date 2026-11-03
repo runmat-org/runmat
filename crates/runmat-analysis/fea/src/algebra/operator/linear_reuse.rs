@@ -80,17 +80,23 @@ impl LinearPreparationReuse {
         }
     }
 
-    pub(super) fn prepare(
+    pub(super) fn prepare_admitted(
         &mut self,
         matrix: &RealSparseMatrix,
         rhs: &[f64],
         source: Option<&NullspaceEliminationEvidence>,
+        admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     ) -> Result<PreparedSolverAdmissibility, CoercivityError> {
-        if let Some(certificate) = self
-            .certificate
-            .as_ref()
-            .filter(|certificate| certificate.validate_for(matrix).is_ok())
-        {
+        if let Some(certificate) = self.certificate.as_ref().filter(|certificate| {
+            certificate.validate_for(matrix).is_ok()
+                && admission.is_none_or(|policy| {
+                    policy.admits_certificate(certificate)
+                        && self.factor.as_ref().is_none_or(|factor| {
+                            factor.0.symbolic().workspace_policy()
+                                == runmat_sparse_solvers::direct::DirectWorkspacePolicy::CallerOwned
+                        })
+                })
+        }) {
             return PreparedSolverAdmissibility::bind_existing_with_source(
                 certificate.clone(),
                 self.factor.clone(),
@@ -136,12 +142,12 @@ impl LinearPreparationReuse {
                 // A local-energy bound too weak to separate the assembly error from zero is not
                 // a disproof: the sparse Cholesky proof decides, and its factor serves the solve.
                 Err(CoercivityError::EnergyIndeterminate { .. }) => {
-                    PreparedSolverAdmissibility::prove(matrix, rhs, source)?
+                    PreparedSolverAdmissibility::prove_admitted(matrix, rhs, source, admission)?
                 }
                 Err(error) => return Err(error),
             }
         } else {
-            PreparedSolverAdmissibility::prove(matrix, rhs, source)?
+            PreparedSolverAdmissibility::prove_admitted(matrix, rhs, source, admission)?
         };
         self.certificate = Some(evidence.coercivity().clone());
         self.factor = evidence.factor().cloned();

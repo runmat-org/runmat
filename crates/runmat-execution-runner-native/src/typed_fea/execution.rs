@@ -8,22 +8,31 @@ pub async fn execute_prepared_fea_study_locally(
     prepared: PreparedFeaStudy,
     options: &LocalFeaExecutionOptions,
 ) -> Result<CompletedLocalFeaCase, String> {
+    validate_prepared_execution(&prepared, options)?;
     use runmat_runtime::analysis::fea_run_admission::{
         FeaRunKind, FeaRunOutcome, FeaRunRequest, FeaRunScope,
     };
     let workers = options.workers.unwrap_or(prepared.workers).max(1);
     let threads = prepared.root.local_execution.thread_count();
     crate::machine_capacity::study_allocation(workers, Some(u32::from(threads.get())))?;
-    let request = FeaRunRequest::local(
+    let mut request = FeaRunRequest::local(
         FeaRunKind::MeshAndSolve,
         u64::from(workers) * u64::from(threads.get()) * 1000,
         prepared.root.authored_study_digest,
     )
     .map_err(|e| format!("{}: {e}", e.error_code()))?;
+    request.site = FeaRunScope::admission_site().map_err(|e| format!("{}: {e}", e.error_code()))?;
     let scope = FeaRunScope::admit(request).map_err(|e| format!("{}: {e}", e.error_code()))?;
-    let result = scope
-        .run_future(execute_prepared_with_source(prepared, options, None))
-        .await;
+    let result = match scope
+        .run_checked_result_future(execute_prepared_with_source(prepared, options, None))
+        .await
+    {
+        Ok(result) => result,
+        Err(failure) => {
+            let _ = scope.settle(failure.outcome());
+            return Err(failure.to_string());
+        }
+    };
     let outcome = if runmat_runtime::interrupt::is_cancelled() {
         FeaRunOutcome::Cancelled
     } else if result.is_ok() {
@@ -31,8 +40,13 @@ pub async fn execute_prepared_fea_study_locally(
     } else {
         FeaRunOutcome::Failed
     };
-    scope.settle(outcome);
-    result
+    let settlement = scope.settle(outcome);
+    match result {
+        Err(original) => Err(original),
+        Ok(value) => settlement
+            .map(|()| value)
+            .map_err(|error| format!("{}: {error}", error.error_code())),
+    }
 }
 
 pub(super) async fn execute_prepared_with_source(

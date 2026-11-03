@@ -2,7 +2,7 @@
 
 This guide builds and runs a small structural study, then shows generated inputs, sweeps, and cluster placement. The complete repository examples are checked as part of the release workflow.
 
-Meshing and solving on your own computer never use core-hours and need no sign-in. Runs sent to a cluster use core-hours; see [Usage and limits](https://runmat.com/docs/desktop/usage-and-limits) for each plan's weekly allowance.
+Meshing and solving use core-hours wherever they run, including on your own computer. Sign in to RunMat and keep a connection to RunMat Server while the run executes. The Free plan includes 1 core-hour per person each week; Scale includes 100. Usage is allocated CPU cores multiplied by elapsed run time; GPU time is excluded. See [Usage and limits](https://runmat.com/docs/desktop/usage-and-limits).
 
 ## A Complete Study
 
@@ -76,6 +76,7 @@ This separation is deliberate:
 ```sh
 runmat fea check bracket.fea
 runmat fea plan bracket.fea
+runmat login
 runmat fea run bracket.fea
 ```
 

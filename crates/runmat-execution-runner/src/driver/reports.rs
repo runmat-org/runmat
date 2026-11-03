@@ -17,6 +17,8 @@ pub(super) struct ProviderEvidence {
     pub resources: Option<Box<crate::task::AttemptResourceAccounting>>,
     pub execution: Option<Box<crate::task::AttemptExecutionObservation>>,
     pub console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+    pub console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
+    pub delegated_console_root: Option<runmat_execution::console::ConsoleSourceIdentity>,
 }
 
 impl Driver {
@@ -43,6 +45,8 @@ impl Driver {
             });
         let execution = report.execution.clone();
         let console = report.console.take();
+        let console_scopes = std::mem::take(&mut report.console_scopes);
+        let delegated_console_root = report.delegated_console_root;
         let cancelling = attempt.cancellation_requested_at.is_some();
         let unresolved = attempt
             .unverified_retirement
@@ -108,6 +112,8 @@ impl Driver {
                     resources,
                     execution,
                     console,
+                    console_scopes,
+                    delegated_console_root,
                 },
                 diagnostic,
                 failure,
@@ -135,6 +141,8 @@ impl Driver {
                         resources,
                         execution,
                         console,
+                        console_scopes,
+                        delegated_console_root,
                     },
                     Some("owned builtin report differs from its output contract".into()),
                 )?;
@@ -145,7 +153,12 @@ impl Driver {
             AttemptReport::Started => self.start_attempt(&report)?,
             AttemptReport::Succeeded { result } => {
                 if (attempt.request.task.console.is_some()
-                    && console.as_ref().is_none_or(|console| {
+                    && runmat_execution::console::original_root(
+                        console.as_deref(),
+                        &console_scopes,
+                        delegated_console_root,
+                    )
+                    .is_none_or(|console| {
                         console.completion()
                             != runmat_execution::console::ConsoleCompletion::Complete
                     }))
@@ -175,6 +188,8 @@ impl Driver {
                                 .map(Box::new),
                             execution,
                             console,
+                            console_scopes,
+                            delegated_console_root,
                         },
                         Some(
                             "worker success contradicts admitted accounting or execution evidence"
@@ -194,6 +209,8 @@ impl Driver {
                             resources: None,
                             execution,
                             console,
+                            console_scopes,
+                            delegated_console_root,
                         },
                         Some("worker success violates its portable transport contract".into()),
                     )?;
@@ -207,6 +224,8 @@ impl Driver {
                         resources: result.resources().cloned().map(Box::new),
                         execution,
                         console,
+                        console_scopes,
+                        delegated_console_root,
                     },
                     None,
                 )?;
@@ -238,6 +257,8 @@ impl Driver {
                         resources,
                         execution,
                         console,
+                        console_scopes,
+                        delegated_console_root,
                     },
                     Some(message),
                 )?;
@@ -250,6 +271,8 @@ impl Driver {
                         resources,
                         execution,
                         console,
+                        console_scopes,
+                        delegated_console_root,
                     },
                     None,
                 )?;
@@ -261,6 +284,8 @@ impl Driver {
                         resources,
                         execution,
                         console,
+                        console_scopes,
+                        delegated_console_root,
                     },
                     message,
                     None,
@@ -274,6 +299,8 @@ impl Driver {
                         resources,
                         execution,
                         console,
+                        console_scopes,
+                        delegated_console_root,
                     },
                     message,
                     None,
@@ -290,6 +317,13 @@ impl Driver {
                         resources: resources.or_else(|| original.resources.clone()),
                         execution: execution.or_else(|| original.execution.clone()),
                         console: console.or_else(|| original.console.clone()),
+                        delegated_console_root: delegated_console_root
+                            .or(original.delegated_console_root),
+                        console_scopes: if console_scopes.is_empty() {
+                            original.console_scopes.clone()
+                        } else {
+                            console_scopes
+                        },
                     };
                     let cause = match (original.failure_kind, original.failure.as_ref()) {
                         (Some(AttemptFailureKind::Infrastructure), None) => {
@@ -347,6 +381,8 @@ impl Driver {
                             resources,
                             execution,
                             console,
+                            console_scopes,
+                            delegated_console_root,
                         },
                         None,
                     )?;
@@ -379,6 +415,8 @@ impl Driver {
                         resources,
                         execution,
                         console,
+                        console_scopes,
+                        delegated_console_root,
                     },
                     None,
                 )?;
@@ -441,6 +479,8 @@ impl Driver {
                         && evidence.resources.is_none()
                         && evidence.execution.is_none()
                         && evidence.console.is_none()
+                        && evidence.console_scopes.is_empty()
+                        && evidence.delegated_console_root.is_none()
                         && evidence.failure.is_none()
                         && evidence.failure_kind.is_none()
                 });
@@ -463,7 +503,9 @@ impl Driver {
             && (!certified_original
                 || report.unsuccessful_resources.is_some()
                 || report.execution.is_some()
-                || report.console.is_some())
+                || report.console.is_some()
+                || !report.console_scopes.is_empty())
+            || (certified_not_started && report.delegated_console_root.is_some())
         {
             return Some("never-started certification differs from unresolved original assignment");
         }
@@ -492,6 +534,30 @@ impl Driver {
         {
             return Some("retirement report differs from original observation tuple");
         }
+        if matches!(report.report, AttemptReport::Retired)
+            && report.delegated_console_root.is_some()
+            && attempt
+                .unverified_retirement
+                .as_ref()
+                .is_some_and(|original| {
+                    original.delegated_console_root.is_some()
+                        && original.delegated_console_root != report.delegated_console_root
+                })
+        {
+            return Some("retirement report replaced original delegated console root");
+        }
+        if matches!(report.report, AttemptReport::Retired)
+            && !report.console_scopes.is_empty()
+            && attempt
+                .unverified_retirement
+                .as_ref()
+                .is_some_and(|original| {
+                    !original.console_scopes.is_empty()
+                        && original.console_scopes != report.console_scopes
+                })
+        {
+            return Some("retirement report replaced original scoped console evidence");
+        }
         if matches!(&report.report, AttemptReport::RuntimeFailed { failure } if failure.validate().is_err())
         {
             return Some("invalid original runtime failure");
@@ -503,6 +569,37 @@ impl Driver {
             {
                 return Some("invalid original console evidence");
             }
+        }
+        if runmat_execution::console::validate_scopes(&report.console_scopes).is_err()
+            || (report.delegated_console_root.is_some()
+                && matches!(&report.report, AttemptReport::Succeeded { result } if !matches!(result, crate::task::AttemptSuccess::Graph { .. })))
+            || runmat_execution::console::validate_delegated_root(
+                report.console.as_deref(),
+                &report.console_scopes,
+                report.delegated_console_root,
+                matches!(report.report, AttemptReport::Succeeded { .. }),
+            )
+            .is_err()
+            || (report.delegated_console_root.is_some()
+                && matches!(
+                    report.report,
+                    AttemptReport::Started | AttemptReport::CertifiedNotStarted {}
+                ))
+            || (!report.console_scopes.is_empty()
+                && matches!(
+                    report.report,
+                    AttemptReport::Started | AttemptReport::CertifiedNotStarted {}
+                ))
+            || runmat_execution::console::validate_source_controls(
+                report.console.as_deref(),
+                &report.console_scopes,
+                report.delegated_console_root,
+                attempt.request.task.console,
+                report.attempt_id,
+            )
+            .is_err()
+        {
+            return Some("invalid original scoped console evidence");
         }
         if let Some(execution) = &report.execution {
             if matches!(report.report, AttemptReport::Started)
@@ -629,6 +726,8 @@ impl Driver {
             resources: evidence.resources,
             execution: evidence.execution,
             console: evidence.console,
+            console_scopes: evidence.console_scopes,
+            delegated_console_root: evidence.delegated_console_root,
             diagnostic,
         };
         terminal

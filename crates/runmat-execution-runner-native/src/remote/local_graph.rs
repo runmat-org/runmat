@@ -58,6 +58,7 @@ pub(super) async fn execute(
             inventory,
             maximum_wall_millis: allocation.maximum_wall_millis,
             host: None,
+            console_budget: None,
         },
         CancellationInput::Watch(&mut cancellation),
     )
@@ -75,7 +76,26 @@ pub(in crate::remote) async fn execute_remote_attempt(
     task_resources: runmat_execution::resource::ResourceRequest,
     host: runmat_execution::host::ExecutionHostInventory,
     cancellation: CancellationToken,
+    console_budget: Option<runmat_execution::console::ConsoleBudget>,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    validate_child_console_grant(
+        request
+            .invocation_controls
+            .as_ref()
+            .and_then(|controls| controls.console),
+        console_budget,
+    )?;
+    if let Some(budget) = console_budget {
+        validate_child_console_memory(
+            &request
+                .invocation_controls
+                .as_ref()
+                .expect("console controls and grant checked above")
+                .environment,
+            budget,
+            task_resources.memory_bytes,
+        )?;
+    }
     let Some(assignment) = request.assignment.take() else {
         return Err(NativeExecutionError::Protocol(
             "remote Graph attempt lacks its authenticated outer assignment".into(),
@@ -141,6 +161,7 @@ pub(in crate::remote) async fn execute_remote_attempt(
             inventory: resources,
             maximum_wall_millis: task_resources.max_wall_millis,
             host: Some(host),
+            console_budget,
         },
         CancellationInput::Token(cancellation),
     )
@@ -183,6 +204,7 @@ struct OwnedGraphAttempt {
     inventory: ResourceInventory,
     maximum_wall_millis: u64,
     host: Option<runmat_execution::host::ExecutionHostInventory>,
+    console_budget: Option<runmat_execution::console::ConsoleBudget>,
 }
 
 async fn run_owned_attempt(
@@ -197,6 +219,7 @@ async fn run_owned_attempt(
         inventory,
         maximum_wall_millis,
         host,
+        console_budget,
     } = attempt;
     if cancellation.is_cancelled() {
         return Ok(RemotePoolExecutionOutcome::Cancelled);
@@ -232,6 +255,12 @@ async fn run_owned_attempt(
         Some(inventory),
         Some(maximum_wall_millis),
     )?;
+    if let Some(budget) = console_budget {
+        let owner = crate::console_retention::ConsoleRetentionOwner::from_subgrant(budget)?;
+        driver
+            .install_console_parent(owner)
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    }
     let completion = driver.submit_graph_with_control(
         LocalGraphSubmission {
             task_id,
@@ -244,7 +273,7 @@ async fn run_owned_attempt(
     let mut cancel_sent = false;
     loop {
         if let Some(result) = completion.try_value() {
-            return Ok(match result {
+            let mut outcome = match result {
                 Ok(AttemptSuccess::Graph { graph, .. }) => RemotePoolExecutionOutcome::Completed(
                     RemotePoolExecutionResult::without_objects(
                         ProgramExecutionResponse::GraphSuccess { graph },
@@ -253,6 +282,15 @@ async fn run_owned_attempt(
                 Ok(_) => RemotePoolExecutionOutcome::Indeterminate(
                     "isolated Graph attempt returned a non-Graph result".into(),
                 ),
+                Err(TransferFailure::Cancelled) if console_budget.is_some() => {
+                    let mut result = RemotePoolExecutionResult::without_objects(
+                        ProgramExecutionResponse::Failure {
+                            message: TransferFailure::Cancelled.to_string(),
+                        },
+                    );
+                    result.cancelled = true;
+                    RemotePoolExecutionOutcome::Completed(result)
+                }
                 Err(TransferFailure::Cancelled) => RemotePoolExecutionOutcome::Cancelled,
                 Err(TransferFailure::RetirementUnverified(message))
                 | Err(TransferFailure::WorkerLost(message)) => {
@@ -271,7 +309,28 @@ async fn run_owned_attempt(
                         ),
                     )
                 }
-            });
+            };
+            if let (Some(budget), RemotePoolExecutionOutcome::Completed(result)) =
+                (console_budget, &mut outcome)
+            {
+                // Keep the original scheduler owner until terminal encoding.
+                // Its physical root and descendants retain their own typed
+                // identities; no transcript is cloned or relabelled here.
+                result.console = Some(
+                    super::super::pool_execution::RemoteTerminalConsole::LocalSources {
+                        root: driver.delegated_console_root(
+                            task_id,
+                            matches!(
+                                &result.response,
+                                ProgramExecutionResponse::GraphSuccess { .. }
+                            ),
+                        )?,
+                        source: driver.retained_console_source(),
+                        budget,
+                    },
+                );
+            }
+            return Ok(outcome);
         }
         if !cancel_sent && cancellation.is_cancelled() {
             driver.cancel_task(task_id, runmat_execution::CancellationReason::User)?;
@@ -286,5 +345,103 @@ async fn run_owned_attempt(
             }
             _ = tokio::time::sleep(Duration::from_millis(100)) => {}
         }
+    }
+}
+
+fn validate_child_console_grant(
+    controls: Option<runmat_execution::console::ConsoleLimits>,
+    budget: Option<runmat_execution::console::ConsoleBudget>,
+) -> NativeExecutionResult<()> {
+    if controls.is_some() != budget.is_some() {
+        return Err(NativeExecutionError::Protocol(
+            "remote child Graph console controls and inherited grant must agree".into(),
+        ));
+    }
+    if let Some(budget) = budget {
+        budget
+            .validate()
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    }
+    Ok(())
+}
+
+fn validate_child_console_memory(
+    environment: &runmat_execution::EnvironmentSnapshot,
+    budget: runmat_execution::console::ConsoleBudget,
+    memory_bytes: u64,
+) -> NativeExecutionResult<()> {
+    let environment_bytes = environment
+        .storage_profile()
+        .and_then(|profile| profile.minimum_memory_bytes())
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let console_bytes = budget
+        .minimum_memory_bytes()
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    if !console_bytes
+        .checked_add(environment_bytes)
+        .is_some_and(|required| required <= memory_bytes)
+    {
+        return Err(NativeExecutionError::Protocol(
+            "child Graph console subtree and environment exceed authenticated task memory".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod console_grant_tests {
+    use super::{validate_child_console_grant, validate_child_console_memory};
+    use runmat_execution::console::{ConsoleBudget, ConsoleLimits};
+
+    #[test]
+    fn child_graph_requires_matching_explicit_inherited_capture_grant() {
+        let controls = ConsoleLimits {
+            max_records: 8,
+            max_text_bytes: 1024,
+        };
+        let budget = ConsoleBudget::single(controls).unwrap();
+        assert!(validate_child_console_grant(None, None).is_ok());
+        assert!(validate_child_console_grant(Some(controls), Some(budget)).is_ok());
+        assert!(validate_child_console_grant(Some(controls), None).is_err());
+        assert!(validate_child_console_grant(None, Some(budget)).is_err());
+        let invalid = ConsoleBudget {
+            max_scopes: 0,
+            ..budget
+        };
+        assert!(validate_child_console_grant(Some(controls), Some(invalid)).is_err());
+    }
+
+    #[test]
+    fn child_graph_charges_console_and_environment_together() {
+        let environment = runmat_execution::EnvironmentSnapshot::new(vec![(
+            "CAPTURED".into(),
+            "original environment".into(),
+        )])
+        .unwrap();
+        let budget = ConsoleBudget::single(ConsoleLimits {
+            max_records: 8,
+            max_text_bytes: 1024,
+        })
+        .unwrap();
+        let console_bytes = budget.minimum_memory_bytes().unwrap();
+        let environment_bytes = environment
+            .storage_profile()
+            .unwrap()
+            .minimum_memory_bytes()
+            .unwrap();
+        assert!(environment_bytes < console_bytes);
+        assert!(validate_child_console_memory(&environment, budget, console_bytes).is_err());
+        assert!(validate_child_console_memory(
+            &environment,
+            budget,
+            console_bytes + environment_bytes - 1
+        )
+        .is_err());
+        assert!(validate_child_console_memory(
+            &environment,
+            budget,
+            console_bytes + environment_bytes
+        )
+        .is_ok());
     }
 }

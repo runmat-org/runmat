@@ -109,6 +109,11 @@ pub(crate) async fn await_outputs(run_id: &str) -> Result<ProgramExecutionOutput
             outputs
                 .validate()
                 .context("remote result payload failed integrity validation")?;
+            super::console::validate_requested_capture(
+                &outputs,
+                saved.console,
+                saved.console_budget,
+            )?;
             return Ok(outputs);
         }
         if let Some(artifact_id) = &run.diagnostic_artifact_id {
@@ -225,6 +230,10 @@ async fn print_terminal(
         outputs
             .validate()
             .context("remote result payload failed integrity validation")?;
+        super::console::validate_requested_capture(&outputs, saved.console, saved.console_budget)?;
+        if !json {
+            super::console::print_outputs(&outputs)?;
+        }
         if let secret::SavedOutputIntent::FeaStudy {
             study_id,
             expectation,
@@ -370,8 +379,16 @@ async fn print_terminal(
                     "run": run,
                     "result": response,
                     "resultObjectCount": result_object_count,
+                    "console": outputs.console,
+                    "consoleScopes": outputs.console_scopes,
+                    "consoleBudget": outputs.console_budget,
+                    "delegatedConsoleRoot": outputs.delegated_console_root,
                 }))?
             );
+            super::result::ensure_terminal_success(
+                response,
+                super::result::ResultOrigin::Attached,
+            )?;
         } else {
             print_run(&run);
             println!(
@@ -406,16 +423,18 @@ async fn print_terminal(
             );
         } else {
             print_run(&run);
-            bail!("{message}");
         }
-        return Ok(());
+        bail!("{message}");
     }
     if json {
         println!("{}", serde_json::to_string(&run)?);
     } else {
         print_run(&run);
     }
-    Ok(())
+    bail!(
+        "remote run ended in state '{}' without a terminal result",
+        run.state
+    )
 }
 
 fn print_materialized_mesh(

@@ -998,14 +998,14 @@ pub async fn write_array_payload_async(
     chunk_shape: &[usize],
 ) -> BuiltinResult<(PathBuf, PathBuf)> {
     let (provider, resolved) = captured_storage_root(root)?;
-    let mut unmetered = None;
+    let mut write_budget = None;
     let (payload_path, index_path) = write_array_payload_on(
         provider.as_ref(),
         &resolved,
         array,
         payload,
         chunk_shape,
-        &mut unmetered,
+        &mut write_budget,
     )
     .await?;
     let rebase = |path: PathBuf| {

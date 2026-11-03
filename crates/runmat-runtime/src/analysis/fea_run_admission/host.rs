@@ -22,20 +22,47 @@ pub struct FeaRunAdmissionContext {
     admission: Arc<dyn FeaRunAdmission>,
 }
 
+/// Thread-bound host selection; dropping restores the previous invocation host.
+pub struct FeaRunAdmissionHostGuard {
+    previous: Option<Arc<dyn FeaRunAdmission>>,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+impl Drop for FeaRunAdmissionHostGuard {
+    fn drop(&mut self) {
+        HOST.with(|value| *value.borrow_mut() = self.previous.take());
+    }
+}
+
 impl FeaRunAdmissionContext {
+    /// Trusted host boundary: constrain independently starting child FEA roots
+    /// to the original private worker reservation and its fixed deadline. This
+    /// selects an installed provider lazily; it does not grant a lease.
+    pub fn with_current_resource_bounds(
+        cpu_millicores: u64,
+        deadline_unix_millis: u64,
+    ) -> Result<Self, super::FeaRunDenied> {
+        if cpu_millicores == 0 {
+            return Err(super::FeaRunDenied::LicenseInvalid);
+        }
+        Ok(Self::new(Arc::new(ResourceBoundHost {
+            provider: super::provider::current(),
+            cpu_millicores,
+            deadline_unix_millis,
+        })))
+    }
+    pub fn enter(&self) -> FeaRunAdmissionHostGuard {
+        let previous = HOST.with(|value| value.replace(Some(Arc::clone(&self.admission))));
+        FeaRunAdmissionHostGuard {
+            previous,
+            _thread: std::marker::PhantomData,
+        }
+    }
     pub fn new(admission: Arc<dyn FeaRunAdmission>) -> Self {
         Self { admission }
     }
 
     pub fn run_sync<T>(&self, operation: impl FnOnce() -> T) -> T {
-        struct Restore(Option<Arc<dyn FeaRunAdmission>>);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                HOST.with(|value| *value.borrow_mut() = self.0.take());
-            }
-        }
-        let previous = HOST.with(|value| value.replace(Some(Arc::clone(&self.admission))));
-        let _restore = Restore(previous);
+        let _restore = self.enter();
         operation()
     }
 
@@ -46,6 +73,100 @@ impl FeaRunAdmissionContext {
             context: self.clone(),
             future: Box::pin(future),
         }
+    }
+}
+
+struct ResourceBoundHost {
+    provider: Result<Arc<dyn FeaRunAdmission>, super::FeaRunDenied>,
+    cpu_millicores: u64,
+    deadline_unix_millis: u64,
+}
+impl FeaRunAdmission for ResourceBoundHost {
+    fn admit(
+        &self,
+        request: &super::FeaRunRequest,
+    ) -> Result<Box<dyn super::FeaRunPermit>, super::FeaRunDenied> {
+        request.validate()?;
+        if request.allocated_cpu_millicores > self.cpu_millicores {
+            return Err(super::FeaRunDenied::LicenseInvalid);
+        }
+        let now = runmat_time::unix_timestamp_ms();
+        let remaining = u128::from(self.deadline_unix_millis).saturating_sub(now);
+        if remaining == 0 {
+            return Err(super::FeaRunDenied::LeaseExpired);
+        }
+        let held_ceiling = u64::try_from(
+            remaining
+                .checked_mul(u128::from(request.allocated_cpu_millicores))
+                .ok_or(super::FeaRunDenied::LicenseInvalid)?
+                .div_ceil(1000),
+        )
+        .map_err(|_| super::FeaRunDenied::LicenseInvalid)?;
+        let permit = self
+            .provider
+            .as_ref()
+            .map_err(Clone::clone)?
+            .admit(request)?;
+        Ok(Box::new(ResourceBoundPermit {
+            permit,
+            deadline_unix_millis: self.deadline_unix_millis,
+            held_ceiling,
+        }))
+    }
+    fn allocated_cpu_capacity_millicores(&self) -> Option<u64> {
+        Some(self.cpu_millicores)
+    }
+    fn site(&self) -> super::FeaRunSite {
+        self.provider
+            .as_ref()
+            .map_or(super::FeaRunSite::Local, |provider| provider.site())
+    }
+    fn origin(&self) -> Option<super::FeaRunOrigin> {
+        self.provider
+            .as_ref()
+            .ok()
+            .and_then(|provider| provider.origin())
+    }
+    fn local_organization_hint(&self) -> super::FeaLocalOrganization {
+        self.provider
+            .as_ref()
+            .ok()
+            .map_or(super::FeaLocalOrganization::Default, |provider| {
+                provider.local_organization_hint()
+            })
+    }
+}
+struct ResourceBoundPermit {
+    permit: Box<dyn super::FeaRunPermit>,
+    deadline_unix_millis: u64,
+    held_ceiling: u64,
+}
+impl ResourceBoundPermit {
+    fn clamp(&self, mut budget: super::FeaRunBudget) -> super::FeaRunBudget {
+        budget.expires_at_unix_millis =
+            budget.expires_at_unix_millis.min(self.deadline_unix_millis);
+        budget.held_core_millis = budget.held_core_millis.min(self.held_ceiling);
+        budget
+    }
+}
+impl super::FeaRunPermit for ResourceBoundPermit {
+    fn budget(&self) -> super::FeaRunBudget {
+        self.clamp(self.permit.budget())
+    }
+    fn heartbeat(
+        &self,
+        usage: &runmat_execution::resource::ResourceUsage,
+    ) -> Result<super::FeaRunBudget, super::FeaRunDenied> {
+        let budget = self.clamp(self.permit.heartbeat(usage)?);
+        budget.validate()?;
+        Ok(budget)
+    }
+    fn settle(
+        self: Box<Self>,
+        outcome: super::FeaRunOutcome,
+        usage: &runmat_execution::resource::ResourceUsage,
+    ) -> Result<(), super::FeaRunDenied> {
+        self.permit.settle(outcome, usage)
     }
 }
 

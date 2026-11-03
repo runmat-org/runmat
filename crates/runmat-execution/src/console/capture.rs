@@ -12,13 +12,9 @@ pub struct ConsoleCapture {
 impl ConsoleCapture {
     pub fn new(limits: ConsoleLimits) -> Result<Self, ContractError> {
         limits.validate()?;
-        let mut records = Vec::new();
-        records
-            .try_reserve_exact(limits.max_records as usize)
-            .map_err(|_| ContractError::invalid("console capture", "record allocation failed"))?;
         Ok(Self {
             limits,
-            records,
+            records: Vec::new(),
             text_bytes: 0,
             rejected: None,
         })
@@ -39,8 +35,19 @@ impl ConsoleCapture {
         self.rejected
     }
 
+    /// Reject the original source controls before a shared owner admits a
+    /// retained allocation. This preserves sticky source-overflow evidence.
+    pub fn check_borrowed_record(
+        &mut self,
+        stream: ConsoleStream,
+        text: &str,
+    ) -> Result<(), ContractError> {
+        self.precheck(stream, text)
+    }
+
     pub fn push(&mut self, stream: ConsoleStream, text: String) -> Result<(), ContractError> {
         self.precheck(stream, &text)?;
+        self.reserve_record()?;
         self.push_prechecked(stream, text);
         Ok(())
     }
@@ -53,6 +60,7 @@ impl ConsoleCapture {
         text: &str,
     ) -> Result<(), ContractError> {
         self.precheck(stream, text)?;
+        self.reserve_record()?;
         let mut retained = String::new();
         retained
             .try_reserve_exact(text.len())
@@ -100,6 +108,22 @@ impl ConsoleCapture {
         });
     }
 
+    fn reserve_record(&mut self) -> Result<(), ContractError> {
+        if self.records.len() == self.records.capacity() {
+            // Lazy exact growth matches the per-record owner's geometric
+            // capacity quote, including the first record of a quiet source.
+            let next = (self.records.len() + 1)
+                .next_power_of_two()
+                .min(self.limits.max_records as usize);
+            self.records
+                .try_reserve_exact(next - self.records.len())
+                .map_err(|_| {
+                    ContractError::invalid("console capture", "record allocation failed")
+                })?;
+        }
+        Ok(())
+    }
+
     /// Move the original inventory, retaining a rejected prefix even if the
     /// program otherwise returned successfully. No transcript clone is needed.
     pub fn finish(self, completed: bool) -> ConsoleTranscript {
@@ -107,7 +131,10 @@ impl ConsoleCapture {
             schema_version: CONSOLE_TRANSCRIPT_SCHEMA_VERSION,
             source_receipt: None,
             limits: self.limits,
-            records: self.records,
+            // Seal by moving the original inventory. Quiet completed sources
+            // must not retain every pre-admitted record slot for the root's
+            // lifetime. Pending reservations cover this bounded shrink.
+            records: self.records.into_boxed_slice().into_vec(),
             text_bytes: self.text_bytes,
             completion: match self.rejected {
                 Some(reason) => ConsoleCompletion::Rejected { reason },
@@ -132,6 +159,32 @@ fn limit_error(limit: ConsoleRejection, limits: ConsoleLimits) -> ContractError 
 #[cfg(test)]
 mod borrowed_tests {
     use super::*;
+
+    #[test]
+    fn sealing_releases_unused_slots_without_cloning_or_losing_records() {
+        let limits = ConsoleLimits {
+            max_records: 4096,
+            max_text_bytes: 1024,
+        };
+        let empty = ConsoleCapture::new(limits).unwrap().finish(true);
+        assert_eq!(empty.records.capacity(), 0);
+        let mut capture = ConsoleCapture::new(limits).unwrap();
+        assert_eq!(capture.records.capacity(), 0);
+        capture
+            .push(ConsoleStream::Stdout, "original".into())
+            .unwrap();
+        let transcript = capture.finish(false);
+        assert_eq!(transcript.records.len(), 1);
+        assert_eq!(transcript.records.capacity(), 1);
+        assert_eq!(transcript.records[0].text.as_ref(), "original");
+        assert_eq!(transcript.completion(), ConsoleCompletion::Interrupted);
+        transcript.validate().unwrap();
+        let receipt = transcript.receipt().unwrap();
+        let decoded: ConsoleTranscript =
+            serde_json::from_slice(&serde_json::to_vec(&transcript).unwrap()).unwrap();
+        assert_eq!(decoded.records.capacity(), decoded.records.len());
+        assert_eq!(decoded.receipt().unwrap(), receipt);
+    }
 
     #[test]
     fn oversized_borrowed_text_rejects_before_retention_and_remains_sticky() {

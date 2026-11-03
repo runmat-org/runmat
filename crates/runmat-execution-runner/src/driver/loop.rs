@@ -30,7 +30,7 @@ impl Driver {
         }
         Ok(Self {
             snapshot: DriverSnapshot {
-                schema_version: 3,
+                schema_version: 4,
                 config,
                 driver_fence,
                 now_millis: 0,

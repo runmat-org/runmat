@@ -61,6 +61,13 @@ pub enum CoercivityError {
         update_count: u64,
         update_limit: u64,
     },
+    #[error("coercivity factor needs {required_bytes} numerical bytes; admitted {budget_bytes}")]
+    FactorAdmission {
+        required_bytes: u64,
+        budget_bytes: u64,
+    },
+    #[error("coercivity dimension {required} differs from admitted {admitted}")]
+    AdmissionDimension { required: u64, admitted: u64 },
     #[error("coercivity symbolic ordering could not cover the complete operator graph")]
     SymbolicOrdering,
     #[error("coercivity proof was cancelled")]
@@ -169,10 +176,13 @@ impl CoercivityCertificate {
 
     /// Proves strict positivity of the inertia by a sparse Cholesky factorization of the
     /// diagonally scaled operator and returns the factorization for reuse by the solve.
-    pub(super) fn prove(
+    pub(super) fn prove_admitted(
         matrix: &RealSparseMatrix,
+        admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     ) -> Result<(Self, SharedFactor), CoercivityError> {
-        use runmat_sparse_solvers::direct::{DirectOptions, DirectSolver, FactorKind};
+        use runmat_sparse_solvers::direct::{
+            DirectOptions, DirectSolver, DirectWorkspacePolicy, FactorKind, SymbolicFactorization,
+        };
         let dimension = matrix.rows();
         if dimension == 0
             || matrix.columns() != dimension
@@ -205,13 +215,52 @@ impl CoercivityCertificate {
             }
         }
         let arrays = crate::solve::shared_sparse::CsrArrays::of(matrix);
-        let solver = DirectSolver::<f64>::new(
-            arrays.view().into(),
-            DirectOptions {
-                refinement_steps: 2,
-                ..DirectOptions::new(FactorKind::Cholesky)
+        let options = DirectOptions {
+            refinement_steps: 2,
+            workspace: if admission.is_some() {
+                DirectWorkspacePolicy::CallerOwned
+            } else {
+                DirectWorkspacePolicy::BackendManaged
             },
-            crate::solve::shared_sparse::control(),
+            ..DirectOptions::new(FactorKind::Cholesky)
+        };
+        let control = crate::solve::shared_sparse::control();
+        let symbolic =
+            SymbolicFactorization::analyze::<f64>(arrays.view().into(), &options, control)
+                .map_err(|_| CoercivityError::SymbolicOrdering)?;
+        let estimate = symbolic.estimate();
+        if let Some(admission) = admission {
+            if admission.dimension.0 != dimension as u64 {
+                return Err(CoercivityError::AdmissionDimension {
+                    required: dimension as u64,
+                    admitted: admission.dimension.0,
+                });
+            }
+            let updates = symbolic::flop_count(&estimate);
+            if estimate.factor_entries > admission.factor_nonzero_upper_bound.0
+                || updates > admission.update_count_upper_bound.0
+            {
+                return Err(CoercivityError::ResourceLimit {
+                    pivot: 0,
+                    factor_nonzero_count: estimate.factor_entries,
+                    factor_nonzero_limit: admission.factor_nonzero_upper_bound.0,
+                    update_count: updates,
+                    update_limit: admission.update_count_upper_bound.0,
+                });
+            }
+            if estimate.peak_bytes() > admission.resident_bytes_upper_bound.0 {
+                return Err(CoercivityError::FactorAdmission {
+                    required_bytes: estimate.peak_bytes(),
+                    budget_bytes: admission.resident_bytes_upper_bound.0,
+                });
+            }
+        }
+        let solver = DirectSolver::<f64>::factorize(
+            symbolic,
+            arrays.view().into(),
+            options,
+            admission.map(|policy| policy.resident_bytes_upper_bound.0),
+            control,
         )
         .map_err(|error| match error {
             runmat_sparse_solvers::SolverError::NotPositiveDefinite { pivot }
@@ -329,16 +378,17 @@ impl CoercivityCertificate {
 }
 
 impl PreparedSolverAdmissibility {
-    pub(super) fn prove(
+    pub(super) fn prove_admitted(
         matrix: &RealSparseMatrix,
         rhs: &[f64],
         source: Option<&NullspaceEliminationEvidence>,
+        admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     ) -> Result<Self, CoercivityError> {
         let source_prepared = source
             .map(|source| source.bind_prepared(matrix, rhs))
             .transpose()
             .map_err(|error| CoercivityError::Encoding(error.to_string()))?;
-        let (coercivity, factor) = CoercivityCertificate::prove(matrix)?;
+        let (coercivity, factor) = CoercivityCertificate::prove_admitted(matrix, admission)?;
         Self::bind(
             coercivity,
             rhs,
@@ -458,10 +508,42 @@ mod tests {
     }
 
     #[test]
+    fn finite_coercivity_consumes_planned_scratch_quote_before_numeric_factorization() {
+        use crate::planning::resource::{ByteCount, Count, SolverAdmissionResourcePolicy};
+        let operator = matrix([[4.0, 1.0, 1.0], [1.0, 3.0, 0.0], [1.0, 0.0, 2.0]]);
+        let estimate = symbolic::analyze(operator.pattern()).unwrap();
+        let mut admission = SolverAdmissionResourcePolicy {
+            dimension: Count(3),
+            factor_nonzero_upper_bound: Count(estimate.factor_entries),
+            update_count_upper_bound: Count(symbolic::flop_count(&estimate)),
+            resident_bytes_upper_bound: ByteCount(estimate.peak_bytes()),
+        };
+        let (certificate, factor) =
+            CoercivityCertificate::prove_admitted(&operator, Some(&admission)).unwrap();
+        assert!(admission.admits_certificate(&certificate));
+        assert_eq!(
+            factor.0.symbolic().workspace_policy(),
+            runmat_sparse_solvers::direct::DirectWorkspacePolicy::CallerOwned
+        );
+        admission.resident_bytes_upper_bound.0 -= 1;
+        assert!(matches!(
+            CoercivityCertificate::prove_admitted(&operator, Some(&admission)),
+            Err(CoercivityError::FactorAdmission { .. })
+        ));
+        admission.resident_bytes_upper_bound.0 += 1;
+        admission.factor_nonzero_upper_bound.0 -= 1;
+        assert!(matches!(
+            CoercivityCertificate::prove_admitted(&operator, Some(&admission)),
+            Err(CoercivityError::ResourceLimit { .. })
+        ));
+    }
+
+    #[test]
     fn sparse_inertia_proves_fill_requiring_spd_operator_and_binds_rhs() {
         let operator = matrix([[4.0, 1.0, 1.0], [1.0, 3.0, 0.0], [1.0, 0.0, 2.0]]);
         let evidence =
-            PreparedSolverAdmissibility::prove(&operator, &[1.0, 2.0, 3.0], None).unwrap();
+            PreparedSolverAdmissibility::prove_admitted(&operator, &[1.0, 2.0, 3.0], None, None)
+                .unwrap();
         let estimate = symbolic::analyze(operator.pattern()).unwrap();
         assert_eq!(evidence.coercivity.work_counts().1, estimate.factor_entries);
         assert_eq!(
@@ -481,11 +563,11 @@ mod tests {
         let mechanism = matrix([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
         let indefinite = matrix([[1.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
         assert!(matches!(
-            CoercivityCertificate::prove(&mechanism).map(|(c, _)| c),
+            CoercivityCertificate::prove_admitted(&mechanism, None).map(|(c, _)| c),
             Err(CoercivityError::NonPositivePivot { .. })
         ));
         assert!(matches!(
-            CoercivityCertificate::prove(&indefinite).map(|(c, _)| c),
+            CoercivityCertificate::prove_admitted(&indefinite, None).map(|(c, _)| c),
             Err(CoercivityError::NonPositivePivot { .. })
         ));
     }
@@ -499,14 +581,14 @@ mod tests {
             [-1.0e-6, 4.0e11, 0.0],
             [0.0, 0.0, 1.0],
         ]);
-        assert!(CoercivityCertificate::prove(&reduced).is_ok());
+        assert!(CoercivityCertificate::prove_admitted(&reduced, None).is_ok());
     }
 
     #[test]
     fn symmetric_metadata_cannot_hide_asymmetric_values() {
         let asymmetric = matrix([[2.0, 1.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 1.0]]);
         assert_eq!(
-            CoercivityCertificate::prove(&asymmetric).map(|(c, _)| c),
+            CoercivityCertificate::prove_admitted(&asymmetric, None).map(|(c, _)| c),
             Err(CoercivityError::AsymmetricValues)
         );
     }

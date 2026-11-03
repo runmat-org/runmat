@@ -776,7 +776,8 @@ result they already import. Resource estimation revision 29 reserves each produc
 the actual declaration inventory. The publication worker rederives its resource plan and compares
 the catalog entry with the actual source profile before constructing a state. Native schedulers
 admit those plans and retain actual publication attempts; durable closure reconstruction explicitly
-records an unmetered import rather than inventing scheduler usage. Existing numerical receipts
+records a durable import without a live scheduler attempt. FEA execution is admitted and accounted
+at its owning run, separately from this import metadata. Existing numerical receipts
 and numerical result identities are unchanged. This does not qualify interrupted solves, complete
 workflow accounting, or a broader formulation envelope.
 

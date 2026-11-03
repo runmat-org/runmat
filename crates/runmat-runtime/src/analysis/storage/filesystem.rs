@@ -88,6 +88,8 @@ impl access::FilesystemAccess<'_> {
         }
         let bytes = serde_json::to_vec_pretty(&prepared.persisted)
             .map_err(|err| format!("failed to encode run artifact: {err}"))?;
+        crate::analysis::fea_run_admission::FeaRunScope::check_publication_checked()
+            .map_err(|denied| AnalysisPublicationError::from(denied.to_string()))?;
         match self.atomic_create_new(&path, &bytes).map_err(|error| {
             AnalysisPublicationError::from_io(error)
                 .context("failed to publish immutable run artifact")

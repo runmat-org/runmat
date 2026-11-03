@@ -7,7 +7,7 @@ use crate::operations::{
 
 use super::contracts::{AnalysisExecutionStep, AnalysisRunResult, AnalysisSolverOptions};
 use super::{
-    analysis_run_cfd_with_options_op, execute_acoustic_with_options, execute_modal_with_options,
+    execute_acoustic_with_options, execute_cfd_with_options, execute_modal_with_options,
     execute_nonlinear_with_options, execute_transient_with_options,
     linear_static_execution::execute_linear_static_with_executor,
     thermal_execution::execute_thermal_with_options, StructuralLinearExecutor,
@@ -24,9 +24,30 @@ pub(super) fn execute_study_step(
     context: &OperationContext,
     structural_executor: Option<&dyn StructuralLinearExecutor>,
 ) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
+    execute_study_step_with_policy(
+        model,
+        procedure_step,
+        execution,
+        solver_mesh_artifact_path,
+        context,
+        structural_executor,
+        false,
+    )
+}
+
+pub(super) fn execute_study_step_with_policy(
+    model: &AnalysisModel,
+    procedure_step: &ProcedureStep,
+    execution: &AnalysisExecutionStep,
+    solver_mesh_artifact_path: Option<&str>,
+    context: &OperationContext,
+    structural_executor: Option<&dyn StructuralLinearExecutor>,
+    require_accelerator: bool,
+) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
     runmat_analysis_fea::accelerator_admission::with_accelerator_admission_policy(
-        if crate::context::current_acceleration_policy()
-            .is_some_and(|policy| !policy.allow_host_fallback)
+        if require_accelerator
+            || crate::context::current_acceleration_policy()
+                .is_some_and(|policy| !policy.allow_host_fallback)
         {
             runmat_analysis_fea::accelerator_admission::AcceleratorAdmissionPolicy::Required
         } else {
@@ -234,7 +255,7 @@ fn execute_admitted_study_step(
         }
         AnalysisSolverOptions::IncompressibleFlow(authored_options) => {
             let options = authored_options.clone();
-            let run = analysis_run_cfd_with_options_op(
+            let run = execute_cfd_with_options(
                 &model,
                 execution.backend,
                 options.clone(),

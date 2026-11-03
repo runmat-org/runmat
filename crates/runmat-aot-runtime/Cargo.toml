@@ -12,6 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
+runmat-fea-admission-native = { workspace = true }
 runmat-core = { workspace = true, default-features = false, optional = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }

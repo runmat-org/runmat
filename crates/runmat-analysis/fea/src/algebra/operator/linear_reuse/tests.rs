@@ -168,9 +168,13 @@ fn source_owned_energy_proof_rebinds_rhs_and_invalidates_changed_operator() {
             .copy_from_slice(&[1., -1., -1., 1.]);
     }
     let mut reuse = LinearPreparationReuse::with_local_energy(source, vec![true, false, false], 1.);
-    let before = reuse.prepare(&operator, &[0., 1., 0.], None).unwrap();
+    let before = reuse
+        .prepare_admitted(&operator, &[0., 1., 0.], None, None)
+        .unwrap();
     assert!(reuse.local_energy.is_none());
-    let after = reuse.prepare(&operator, &[0., 2., 0.], None).unwrap();
+    let after = reuse
+        .prepare_admitted(&operator, &[0., 2., 0.], None, None)
+        .unwrap();
     assert_eq!(before.coercivity(), after.coercivity());
     assert_ne!(before, after);
     assert_eq!(
@@ -184,7 +188,9 @@ fn source_owned_energy_proof_rebinds_rhs_and_invalidates_changed_operator() {
         MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
     )
     .unwrap();
-    assert!(reuse.prepare(&corrupt, &[0., 2., 0.], None).is_err());
+    assert!(reuse
+        .prepare_admitted(&corrupt, &[0., 2., 0.], None, None)
+        .is_err());
     assert!(reuse.certificate.is_none() && reuse.local_energy.is_none());
 }
 
@@ -213,7 +219,9 @@ fn uncertifiable_local_energy_falls_back_to_the_factorization_proof() {
         .unwrap()
         .copy_from_slice(&[2., -1., -1., 2.]);
     let mut reuse = LinearPreparationReuse::with_local_energy(source, vec![true, false, false], 1.);
-    let prepared = reuse.prepare(&operator, &[0., 1., 0.], None).unwrap();
+    let prepared = reuse
+        .prepare_admitted(&operator, &[0., 1., 0.], None, None)
+        .unwrap();
     assert!(
         reuse.factor.is_some(),
         "the Cholesky proof certified the operator"

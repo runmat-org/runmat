@@ -82,6 +82,8 @@ pub enum RemoteWorkerCommand {
     },
     Execute {
         attempt: Box<RemoteAttempt>,
+        #[serde(deserialize_with = "runmat_execution::console::deserialize_budget")]
+        console_budget: Option<runmat_execution::console::ConsoleBudget>,
     },
     CompleteCollective {
         attempt_id: AttemptId,
@@ -167,7 +169,15 @@ pub enum RemoteWorkerOutcome {
         request: runmat_execution::CollectiveRequest,
     },
     Attempt {
+        #[serde(deserialize_with = "runmat_execution::console::deserialize_source_identity")]
+        delegated_console_root: Option<runmat_execution::console::ConsoleSourceIdentity>,
         report: AttemptReport,
+        #[serde(deserialize_with = "runmat_execution::console::deserialize_transcript")]
+        console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+        #[serde(deserialize_with = "runmat_execution::console::deserialize_scopes")]
+        console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
+        #[serde(deserialize_with = "runmat_execution::console::deserialize_budget")]
+        console_budget: Option<runmat_execution::console::ConsoleBudget>,
     },
     AdmissionDeferred {
         attempt_id: AttemptId,

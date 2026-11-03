@@ -113,6 +113,8 @@ impl InMemoryAnalysisArtifactStore {
             .remove(id)
             .ok_or("original incoming record absent")?;
         let timestamp = created_at(&record).to_owned();
+        crate::analysis::fea_run_admission::FeaRunScope::check_publication_checked()
+            .map_err(|denied| denied.to_string())?;
         if crate::interrupt::is_cancelled() {
             return Err("analysis publication was cancelled".into());
         }

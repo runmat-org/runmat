@@ -40,7 +40,12 @@ pub(super) async fn execute_single_root(
             })?;
             let response = ProgramExecutionResponse::from_success_outputs(outputs, result_objects);
             response.validate_against(&request).map_err(protocol)?;
-            packaged(response, pool).map(RemotePoolExecutionOutcome::Completed)
+            let mut result = packaged(response, Arc::clone(&pool))?;
+            if request.console.is_some() {
+                result.console =
+                    Some(super::pool_execution::RemoteTerminalConsole::Task { pool, task_id });
+            }
+            Ok(RemotePoolExecutionOutcome::Completed(result))
         }
         Err(failure) => task_failure_outcome(pool, task_id, failure),
     }
@@ -135,22 +140,20 @@ pub(super) fn observed_execution(
     if !cancellation_requested {
         return completed;
     }
-    let snapshot = pool.snapshot();
-    if snapshot
-        .tasks
-        .values()
-        .any(|task| task.state == TaskState::Indeterminate)
-    {
+    let (indeterminate, cancelled) = pool.cancellation_state_flags();
+    if indeterminate {
         return Ok(RemotePoolExecutionOutcome::Indeterminate(
             "remote cancellation lost worker ownership before quiescence was proven".into(),
         ));
     }
-    if snapshot
-        .tasks
-        .values()
-        .any(|task| task.state == TaskState::Cancelled)
-    {
-        Ok(RemotePoolExecutionOutcome::Cancelled)
+    if cancelled {
+        match completed {
+            Ok(RemotePoolExecutionOutcome::Completed(mut result)) => {
+                result.cancelled = true;
+                Ok(RemotePoolExecutionOutcome::Completed(result))
+            }
+            _ => Ok(RemotePoolExecutionOutcome::Cancelled),
+        }
     } else {
         completed
     }
@@ -212,7 +215,7 @@ pub(super) fn task_failure_outcome(
     task_id: TaskId,
     failure: crate::NativeProgramFailure,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
-    let state = pool.snapshot().tasks.get(&task_id).map(|task| task.state);
+    let state = pool.task_state(task_id);
     if state == Some(TaskState::Indeterminate) {
         return Ok(RemotePoolExecutionOutcome::Indeterminate(
             failure.to_string(),
@@ -227,25 +230,35 @@ pub(super) fn task_failure_outcome(
             return Ok(RemotePoolExecutionOutcome::Indeterminate(message));
         }
         crate::NativeProgramFailure::Cancelled => {
-            return Ok(RemotePoolExecutionOutcome::Cancelled);
+            let mut result = packaged(
+                ProgramExecutionResponse::Failure {
+                    message: "remote attempt was cancelled".into(),
+                },
+                Arc::clone(&pool),
+            )?;
+            result.cancelled = true;
+            if pool.task_console_requested(task_id) {
+                result.console =
+                    Some(super::pool_execution::RemoteTerminalConsole::Task { pool, task_id });
+            }
+            return Ok(RemotePoolExecutionOutcome::Completed(result));
         }
         crate::NativeProgramFailure::Runtime(failure) => {
             ProgramExecutionResponse::RuntimeFailure { failure }
         }
     };
-    packaged(response, pool).map(RemotePoolExecutionOutcome::Completed)
+    let mut result = packaged(response, Arc::clone(&pool))?;
+    if pool.task_console_requested(task_id) {
+        result.console = Some(super::pool_execution::RemoteTerminalConsole::Task { pool, task_id });
+    }
+    Ok(RemotePoolExecutionOutcome::Completed(result))
 }
 
 pub(super) fn execution_failure_outcome(
     pool: Arc<RemotePoolDriver>,
     message: String,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
-    if pool
-        .snapshot()
-        .tasks
-        .values()
-        .any(|task| task.state == TaskState::Indeterminate)
-    {
+    if pool.has_task_state(TaskState::Indeterminate) {
         Ok(RemotePoolExecutionOutcome::Indeterminate(message))
     } else {
         packaged(ProgramExecutionResponse::Failure { message }, pool)
@@ -272,6 +285,8 @@ pub(super) fn packaged(
     }
     Ok(RemotePoolExecutionResult {
         response,
+        console: None,
+        cancelled: false,
         objects: super::result_objects::RemoteResultObjects::Pool(pool),
     })
 }

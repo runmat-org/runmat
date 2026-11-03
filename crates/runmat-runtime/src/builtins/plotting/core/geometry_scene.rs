@@ -125,7 +125,7 @@ pub fn present_geometry_scene_on_surface(surface_id: u32, handle: u32) -> crate:
     };
     super::web::present_geometry_scene_on_surface(surface_id, handle, scene)?;
     if take_imported_geometry_scene(handle) {
-        let _ = super::web::reset_surface_camera(surface_id);
+        log::info!("runmat-plot: imported geometry scene bound surface_id={surface_id} handle={handle} camera_reset=false");
     }
     Ok(())
 }

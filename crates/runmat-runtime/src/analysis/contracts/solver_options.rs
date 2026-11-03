@@ -2,6 +2,20 @@
 use super::*;
 
 impl AnalysisSolverOptions {
+    pub(in crate::analysis) fn solver_mesh_artifact_path(&self) -> Option<&str> {
+        match self {
+            Self::StructuralLinear(o) => o.solver_mesh_artifact_path.as_deref(),
+            Self::StructuralFrequency(o) => o.solver_mesh_artifact_path.as_deref(),
+            Self::StructuralModes(o) => o.solver_mesh_artifact_path.as_deref(),
+            Self::StructuralResponseSpectrum(o) => o.solver_mesh_artifact_path.as_deref(),
+            Self::StructuralRandomResponse(o) => o.solver_mesh_artifact_path.as_deref(),
+            Self::StructuralBuckling(o) => o.solver_mesh_artifact_path.as_deref(),
+            Self::ThermalDiffusion(o) => o.solver_mesh_artifact_path.as_deref(),
+            Self::StructuralTransient(o) => o.solver_mesh_artifact_path.as_deref(),
+            Self::StructuralNonlinear(o) => o.solver_mesh_artifact_path.as_deref(),
+            _ => None,
+        }
+    }
     pub(in crate::analysis) fn clear_solver_mesh_artifact_path(&mut self) {
         match self {
             Self::ElectricalStatic(_) | Self::Magnetostatic(_) | Self::MaxwellHarmonic(_) => {}

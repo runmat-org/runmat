@@ -17,10 +17,13 @@ project downloaded, check, plan, and run it:
 ```sh
 runmat fea check cantilever-static.fea
 runmat fea plan cantilever-static.fea
+runmat login
 runmat fea run cantilever-static.fea
 ```
 
-Meshing and solving on your own computer need no account. Runs sent to a cluster use core-hours; see [Usage and limits](https://runmat.com/docs/desktop/usage-and-limits).
+Meshing and solving use core-hours on your own computer and on a cluster, and require sign-in and a connection to RunMat Server. The Free plan includes 1 core-hour per person each week; Scale includes 100. Usage is allocated CPU cores multiplied by elapsed run time; GPU time is excluded. See [Usage and limits](https://runmat.com/docs/desktop/usage-and-limits).
+
+Checking and planning a study do not mesh or solve. Ordinary local `.m` scripts that do not start FEA need no account or connection.
 
 `runmat check file.fea` and `runmat run file.fea` are shorthand for the corresponding `runmat fea` commands. If a root module declares more than one runnable root, select it with `--study <id>` or `--sweep <id>`.
 

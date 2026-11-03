@@ -36,6 +36,7 @@ async fn run_process_with_scratch(
     let meters = TransportMeters::default();
     let mut termination = runmat_execution_runner::AttemptExecutionTermination::NotStarted;
     let mut console = None;
+    let mut console_scopes = Vec::new();
     let mut retirement = super::super::LocalRetirementEvidence::NotStarted;
     let mut attempt = super::preflight::admit(driver, ArtifactId::derive(&[b"launcher-attempt"]));
     if let Some(scratch_bytes) = scratch_bytes {
@@ -56,6 +57,7 @@ async fn run_process_with_scratch(
         &meters,
         &mut termination,
         &mut console,
+        &mut console_scopes,
         &mut retirement,
     )
     .await
@@ -66,6 +68,7 @@ fn shell_driver(script: &str) -> (tempfile::TempDir, Arc<LocalDriver>) {
     let scope = crate::config::fresh_scope_id(b"process-outcome-test", 1);
     let driver = LocalDriver::new(
         crate::NativeExecutionConfig {
+            local_fea_organization: Default::default(),
             executable: if script == "private-control-exit" {
                 std::env::current_exe().expect("test executable")
             } else {

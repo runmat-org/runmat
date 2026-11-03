@@ -138,6 +138,7 @@ use study_contract::{
 use study_execution::{
     collect_semantic_state_fields, execute_study_step, in_process_study_topology_digest,
 };
+mod study_step_execution;
 pub use study_placement::{
     analysis_execute_structural_study_with_placement,
     analysis_execute_structural_sweep_with_placement, StructuralStudyPlacementEntry,
@@ -146,6 +147,12 @@ pub use study_placement::{
 };
 pub use study_publication::*;
 pub use study_result::*;
+pub use study_step_execution::{
+    analysis_execute_study_step, analysis_execute_study_sweep_with_step_executor,
+    analysis_execute_study_with_step_executor, analysis_validate_study_step_transfer,
+    AnalysisStudyStepExecutor, AnalysisStudyStepFuture, AnalysisStudyStepHost,
+    AnalysisStudyStepRequest, AnalysisStudyStepResult,
+};
 pub use study_sweep::{
     analysis_complete_study_sweep_op, analysis_study_sweep_definition,
     analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
@@ -422,12 +429,12 @@ const ANALYSIS_PLAN_STUDY_OPERATION: &str = "fea.plan_study";
 const ANALYSIS_PLAN_STUDY_OP_VERSION: &str = "fea.plan_study/v1";
 const ANALYSIS_PLAN_STUDY_SWEEP_OPERATION: &str = "fea.plan_study_sweep";
 const ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION: &str = "fea.plan_study_sweep/v1";
-const ANALYSIS_RUN_STUDY_OPERATION: &str = "fea.run_study";
-const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "fea.run_study/v1";
+pub(crate) const ANALYSIS_RUN_STUDY_OPERATION: &str = "fea.run_study";
+pub(crate) const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "fea.run_study/v1";
 const ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION: &str = "fea.validate_study_sweep";
 const ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION: &str = "fea.validate_study_sweep/v1";
-const ANALYSIS_RUN_STUDY_SWEEP_OPERATION: &str = "fea.run_study_sweep";
-const ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION: &str = "fea.run_study_sweep/v1";
+pub(crate) const ANALYSIS_RUN_STUDY_SWEEP_OPERATION: &str = "fea.run_study_sweep";
+pub(crate) const ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION: &str = "fea.run_study_sweep/v1";
 const ANALYSIS_VALIDATE_OPERATION: &str = "fea.validate";
 const ANALYSIS_VALIDATE_OP_VERSION: &str = "fea.validate/v1";
 const ANALYSIS_RESULTS_OPERATION: &str = "fea.results";
@@ -1378,33 +1385,7 @@ fn analysis_run_study_with_structural_executor_admitted(
     structural_executor: Option<&dyn StructuralLinearExecutor>,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let prepared = prepare_study_run(spec, context)?;
-    if prepared
-        .steps
-        .iter()
-        .any(|step| !step.procedure_step.state_inputs.is_empty())
-    {
-        return Err(operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &prepared.context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.SEQUENCE_EXECUTOR_REQUIRED",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "studies that consume upstream state require the canonical structural sequence executor",
-            BTreeMap::from([("study_id".to_string(), prepared.spec.study_id.clone())]),
-        ));
-    }
-    let _study_identity =
-        StudyIdentity::from_authored_digest(analysis_study_content_digest(&prepared.spec), None)
-            .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
-    let sequence_identity = SequenceIdentity::from_solver_contract(&prepared.model.sequence)
-        .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
-    let topology_digest = in_process_study_topology_digest(&prepared)?;
-    let mut completed = Vec::with_capacity(prepared.steps.len());
-    let mut states = Vec::new();
+    let mut completion = study_step_execution::StudyStepCompletion::new(&prepared)?;
     for step in &prepared.steps {
         let (run, resolved_solver_options) = execute_study_step(
             &prepared.model,
@@ -1414,43 +1395,9 @@ fn analysis_run_study_with_structural_executor_admitted(
             &prepared.context,
             structural_executor,
         )?;
-        let step_identity =
-            StepIdentity::from_solver_contract(sequence_identity, &step.procedure_step)
-                .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
-        let result_bytes = serde_json::to_vec(&run.data.run)
-            .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
-        let solver_result_identity = SolverResultIdentity::from_step_result(
-            step_identity,
-            runmat_execution::Digest::sha256(result_bytes),
-        )
-        .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
-        for declaration in &step.procedure_step.state_outputs {
-            states.push(
-                CanonicalSemanticState::new(CanonicalSemanticStateInput {
-                    producer: step_identity,
-                    declaration: declaration.clone(),
-                    topology_digest,
-                    source_result: solver_result_identity,
-                    payload: semantic_state_payload(&run.data, declaration)
-                        .map_err(|error| study_sequence_contract_error(&prepared.context, error))?,
-                })
-                .map_err(|error| study_sequence_contract_error(&prepared.context, error))?,
-            );
-        }
-        completed.push(CompletedStudyStep {
-            step_id: step.procedure_step.step_id.clone(),
-            solver_result_identity,
-            run: CompletedStudyStepRun::Standard(Box::new(run)),
-            resolved_solver_options,
-        });
+        completion.push(&prepared, step, run, resolved_solver_options)?;
     }
-    complete_study_run(
-        study_completion_from_prepared(prepared),
-        completed,
-        states,
-        None,
-    )?
-    .publish_legacy()
+    completion.finish(prepared)
 }
 
 fn semantic_state_payload(

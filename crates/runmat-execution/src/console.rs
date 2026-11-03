@@ -12,7 +12,17 @@ pub use page::{ConsoleCursor, ConsoleFragment, ConsolePage, ConsoleReadBudget};
 mod capture;
 pub use capture::ConsoleCapture;
 mod admission;
+mod scopes;
+mod budget;
 pub use admission::{deserialize_controls, invocation_memory_bytes, ConsoleStorageProfile};
+pub use budget::{
+    deserialize_budget, ConsoleBudget, CONSOLE_RETAINED_COPY_FACTOR, CONSOLE_SCOPE_BYTES,
+};
+pub use scopes::{
+    deserialize_scopes, deserialize_source_identity, original_root, validate_delegated_root,
+    validate_scopes, validate_source_controls, ConsoleSourceIdentity, ScopedConsoleTranscript,
+    ScopedConsoleTranscriptRef, MAX_CONSOLE_SCOPES,
+};
 
 pub const CONSOLE_TRANSCRIPT_SCHEMA_VERSION: u16 = 2;
 pub const MAX_CONSOLE_RECORDS: u32 = 65_536;
@@ -88,6 +98,7 @@ pub struct ConsoleRecord {
 pub struct ConsoleTranscript {
     schema_version: u16,
     limits: ConsoleLimits,
+    #[serde(deserialize_with = "deserialize_records")]
     records: Vec<ConsoleRecord>,
     text_bytes: u64,
     completion: ConsoleCompletion,
@@ -162,6 +173,14 @@ where
     D: serde::Deserializer<'de>,
 {
     Deserialize::deserialize(deserializer)
+}
+
+fn deserialize_records<'de, D>(deserializer: D) -> Result<Vec<ConsoleRecord>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let records = Vec::<ConsoleRecord>::deserialize(deserializer)?;
+    Ok(records.into_boxed_slice().into_vec())
 }
 
 /// Required optional evidence: omitted fields cannot imply a complete empty console.

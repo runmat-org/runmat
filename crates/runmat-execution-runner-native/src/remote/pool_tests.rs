@@ -2358,6 +2358,7 @@ async fn execute_encrypted_spmd_program(
                 captures: Vec::new(),
                 requested_outputs: program.requested_outputs,
                 resources: request(),
+                console: None,
             })
             .unwrap();
         let result = completion.wait().await;

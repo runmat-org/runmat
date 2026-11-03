@@ -8,4 +8,4 @@ pub use compatibility::{
 };
 pub use handshake::{ProtocolHandshake, WorkerCapability};
 pub use limits::ProtocolLimits;
-pub use message::{WorkerRequest, WorkerResponse};
+pub use message::{WorkerExecutionAdmission, WorkerRequest, WorkerResponse};

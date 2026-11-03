@@ -9,7 +9,8 @@ pub mod stdio;
 #[cfg(any(unix, windows))]
 pub mod private_control;
 pub use parent::{
-    ParentFrames, WorkerParentGuard, WorkerParentLink, WORKER_PARENT_MONITOR_STACK_BYTES,
+    ParentFrameObserver, ParentFrames, WorkerParentGuard, WorkerParentLink,
+    WORKER_PARENT_MONITOR_STACK_BYTES,
 };
 
 #[cfg(unix)]

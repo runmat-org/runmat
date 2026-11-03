@@ -6997,3 +6997,5 @@ fn electromagnetic_harmonic_defaults_select_genuine_maxwell_without_vector_poten
         AnalysisSolverOptions::MaxwellHarmonic(_)
     ));
 }
+
+mod study_step_execution;

@@ -9,7 +9,7 @@ use runmat_analysis_execution::{
 };
 use runmat_core::{FeaGeometryExecutionHost, PreparedSerialFeaStudy};
 use runmat_execution::Digest;
-use runmat_runtime::analysis::fea_run_admission::{FeaRunKind, FeaRunOutcome};
+use runmat_runtime::analysis::fea_run_admission::{FeaRunKind, FeaRunOutcome, FeaRunRequest};
 use runmat_runtime::analysis::AnalysisExecutionReadiness;
 use std::path::Path;
 use wasm_bindgen::{prelude::*, JsCast};
@@ -33,7 +33,7 @@ struct BrowserGeometryHost<'a> {
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(catch,js_name=__runmatOcctExecute)]
-    async fn exact_execute(json: &str, delegation: JsValue) -> Result<JsValue, JsValue>;
+    pub(super) async fn exact_execute(json: &str, delegation: JsValue) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch,js_name=__runmatExecutePreparedFeaStudy)]
     async fn execute_prepared(
         json: &str,
@@ -68,6 +68,7 @@ impl FeaGeometryExecutionHost for BrowserGeometryHost<'_> {
                 &json,
                 self.context
                     .worker_context(&json)
+                    .await
                     .map_err(preparation_error_from_js)?,
             )
             .await
@@ -104,6 +105,43 @@ fn resident_bytes() -> u64 {
 }
 #[wasm_bindgen]
 impl RunMatWasm {
+    #[wasm_bindgen(js_name=setFeaRunAdmission)]
+    pub fn set_fea_run_admission_js(&self, admission: JsValue) -> Result<(), JsValue> {
+        if self.active_fea_lease.borrow().is_some() || self.pending_fea_admission.get() {
+            return Err(js_error(
+                "Finish the active FEA run before replacing its admission host.",
+            ));
+        }
+        *self.fea_admission.borrow_mut() = if admission.is_null() || admission.is_undefined() {
+            None
+        } else {
+            Some(admission)
+        };
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name=renewFeaRunLease)]
+    pub fn renew_fea_run_lease_js(&self, run_id: String, lease: JsValue) -> Result<(), JsValue> {
+        let lease: super::fea_lease::Lease =
+            serde_wasm_bindgen::from_value(lease).map_err(|_| {
+                super::fea_lease::denied_to_js(
+                    runmat_runtime::analysis::fea_run_admission::FeaRunDenied::LicenseInvalid,
+                )
+            })?;
+        let slot = self.active_fea_lease.borrow();
+        let active = slot
+            .as_ref()
+            .filter(|active| active.run_id == run_id && active.lease_id == lease.lease_id)
+            .ok_or_else(|| {
+                super::fea_lease::denied_to_js(
+                    runmat_runtime::analysis::fea_run_admission::FeaRunDenied::LicenseInvalid,
+                )
+            })?;
+        active
+            .control
+            .renew(lease.budget()?)
+            .map_err(super::fea_lease::denied_to_js)
+    }
     #[wasm_bindgen(js_name=planFeaSource)]
     pub async fn plan_fea_source_js(
         &self,
@@ -226,18 +264,29 @@ impl RunMatWasm {
             .borrow_mut()
             .take()
             .ok_or_else(|| js_error("The selected execution options are no longer available."))?;
-        // Local work has no billing gate; retain one allocation identity and
-        // usage scope through preparation, numerical work and publication.
-        let context =
-            LocalFeaRunContext::new(FeaRunKind::MeshAndSolve, checked_study_identity(&fresh)?)?;
-        let scope = context.scope()?;
-        ensure_not_cancelled(&cancellation)?;
+        // Await the installed host before the first mesh/solve effect.
+        let request = FeaRunRequest::local(
+            FeaRunKind::MeshAndSolve,
+            1000,
+            checked_study_identity(&fresh)?,
+        )
+        .map_err(super::fea_lease::denied_to_js)?;
+        let context = super::fea_async_host::start(
+            self.fea_admission.clone(),
+            self.active_fea_lease.clone(),
+            self.pending_fea_admission.clone(),
+            request,
+        )
+        .await
+        .map_err(super::fea_lease::denied_to_js)?;
         let observation = session
             .fea_execution_timing_profile()
             .for_source(&fresh, runmat_core::FeaTimingRoute::BrowserCheckedSource, 1)
             .ok()
             .map(|key| key.start());
-        let outcome = scope.run_future(async {
+        let outcome = context.scope().run_checked_result_future(async {
+            ensure_not_cancelled(&cancellation)?;
+            context.check().await?;
             let result = filesystem.run(async {
             // First mesh only after explicit Run. The existing preparation and
             // exact resource planner remain the sole allocation authority.
@@ -257,11 +306,12 @@ impl RunMatWasm {
             let json = execute_prepared(
                 &request,
                 available_memory as f64,
-                context.worker_context(&request)?,
+                context.worker_context(&request).await?,
             )
             .await?
             .as_string()
             .ok_or_else(|| js_error("Invalid numerical execution response."))?;
+            context.check().await?;
             ensure_not_cancelled(&cancellation)?;
             if json.len() > 128 << 20 {
                 return Err(js_error(
@@ -282,6 +332,7 @@ impl RunMatWasm {
             // original provider and its canonical workspace transaction authority.
             Ok::<_, JsValue>(result)
             }).await??;
+            context.check().await?;
             filesystem.run_original(async {
             let publication_identity = runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!("browser-fea:{plan_id}")).map_err(|e| js_error(&e))?;
             let payload = runmat_runtime::analysis::storage::with_artifact_access(true, |_| {
@@ -298,20 +349,24 @@ impl RunMatWasm {
             Ok(payload)
             }).await?
         })
-        .await;
+        .await.map_err(super::fea_lease::execution_error_to_js).and_then(|result| result);
         if let Some(observation) = observation {
             if !cancellation.token().is_cancelled() {
                 observation.complete(outcome.is_ok());
             }
         }
-        scope.settle(if cancellation.token().is_cancelled() {
-            FeaRunOutcome::Cancelled
-        } else if outcome.is_ok() {
-            FeaRunOutcome::Completed
-        } else {
-            FeaRunOutcome::Failed
-        });
-        outcome
+        let admitted = context.check().await;
+        let settled = context
+            .finish(if cancellation.token().is_cancelled() {
+                FeaRunOutcome::Cancelled
+            } else if outcome.is_ok() {
+                FeaRunOutcome::Completed
+            } else {
+                FeaRunOutcome::Failed
+            })
+            .await;
+        let outcome = super::fea_lease::merge_js_lease_error(outcome, admitted.err());
+        super::fea_lease::merge_js_lease_error(outcome, settled.err())
     }
 }
 
@@ -355,16 +410,25 @@ pub async fn execute_prepared_fea_study(
     json: String,
     memory_bytes: f64,
     worker_context: JsValue,
+    worker_admission: JsValue,
 ) -> Result<String, JsValue> {
-    // Local execution is unmetered, but an owned worker still checks the exact
-    // parent payload and canonical source identity before numerical execution.
+    // Content JSON is not authority: the trusted parent revalidates its cached
+    // admitted root and exact delegation before this worker can solve.
     validate_numerical_input(json.len(), memory_bytes)?;
     let study: PreparedSerialFeaStudy =
         serde_json::from_str(&json).map_err(|error| js_error(&error.to_string()))?;
-    let context =
-        LocalFeaRunContext::for_worker(worker_context, &json, study.authored_study_digest)?;
-    let scope = context.scope()?;
-    let result = scope.run_sync(|| execute_prepared_fea_study_local(study, memory_bytes));
+    let context = LocalFeaRunContext::for_worker(
+        worker_context,
+        worker_admission,
+        &json,
+        study.authored_study_digest,
+    )
+    .await?;
+    let result = context
+        .scope()
+        .run_checked_sync(|| execute_prepared_fea_study_local(study, memory_bytes))
+        .map_err(super::fea_lease::denied_to_js)
+        .and_then(|result| result);
     let outcome = if runmat_runtime::interrupt::is_cancelled() {
         FeaRunOutcome::Cancelled
     } else if result.is_ok() {
@@ -372,11 +436,11 @@ pub async fn execute_prepared_fea_study(
     } else {
         FeaRunOutcome::Failed
     };
-    scope.settle(outcome);
-    result
+    let settled = context.settle(outcome).await;
+    super::fea_lease::merge_js_lease_error(result, settled.err())
 }
 
-fn validate_numerical_input(json_len: usize, memory_bytes: f64) -> Result<(), JsValue> {
+pub(super) fn validate_numerical_input(json_len: usize, memory_bytes: f64) -> Result<(), JsValue> {
     if json_len > 128 << 20
         || !memory_bytes.is_finite()
         || memory_bytes < 1.0

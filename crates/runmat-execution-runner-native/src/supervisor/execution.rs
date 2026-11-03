@@ -24,6 +24,18 @@ impl LocalSupervisor {
         &self,
         submission: ProgramBatchSubmission,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+        self.submit_program_with_organization(
+            submission,
+            runmat_runtime::analysis::fea_run_admission::current_local_fea_organization_hint(),
+        )
+        .await
+    }
+
+    pub(super) async fn submit_program_with_organization(
+        &self,
+        submission: ProgramBatchSubmission,
+        organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
+    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
         submission.validate()?;
         let mut store = self.store.lock().await;
         let mut scheduler = self.scheduler.lock().await;
@@ -49,7 +61,7 @@ impl LocalSupervisor {
             &stored,
             u64::from(self.config.execution.max_message_bytes),
         )?;
-        let (record, created) = store.create_program(&submission, unix_millis())?;
+        let (record, created) = store.create_program(&submission, unix_millis(), organization)?;
         if !created {
             // A duplicate returns the original authority; it never dispatches new physics.
             return Ok((record, true));

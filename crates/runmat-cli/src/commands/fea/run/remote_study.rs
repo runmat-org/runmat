@@ -75,6 +75,7 @@ pub(super) async fn execute_study_remotely(
             Ok::<PreparedRemoteExecution, anyhow::Error>(remote)
         },
         RemoteSubmissionOptions {
+            console: None,
             project: target.project,
             cluster: target.cluster,
             queue: target.queue,

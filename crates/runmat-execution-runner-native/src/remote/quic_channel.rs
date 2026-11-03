@@ -184,7 +184,7 @@ impl QuicRemoteWorkerChannel {
     ) -> NativeExecutionResult<RemoteWorkerOutcome> {
         let correlation_id = Uuid::new_v4().to_string();
         let attempt_id = match &command {
-            RemoteWorkerCommand::Execute { attempt } => Some(attempt.scheduling.id),
+            RemoteWorkerCommand::Execute { attempt, .. } => Some(attempt.scheduling.id),
             _ => None,
         };
         let request = RemoteWorkerRequest {
@@ -480,6 +480,19 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
     }
 
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
+        Ok(self.execute_observed(attempt, None).await?.report)
+    }
+
+    async fn execute_observed(
+        &self,
+        attempt: RemoteAttempt,
+        console_budget: Option<runmat_execution::console::ConsoleBudget>,
+    ) -> NativeExecutionResult<runmat_execution_runner::port::BackendReport> {
+        if attempt.scheduling.task.console.is_some() != console_budget.is_some() {
+            return Err(protocol(
+                "remote console invocation omits its bounded subtree grant",
+            ));
+        }
         let deadline = tokio::time::Instant::now() + RESPONSE_TIMEOUT;
         loop {
             match self
@@ -487,11 +500,84 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
                     FrameKind::Control,
                     RemoteWorkerCommand::Execute {
                         attempt: Box::new(attempt.clone()),
+                        console_budget,
                     },
                 )
                 .await?
             {
-                RemoteWorkerOutcome::Attempt { report } => return Ok(report),
+                RemoteWorkerOutcome::Attempt {
+                    report,
+                    console,
+                    console_scopes,
+                    delegated_console_root,
+                    console_budget: returned_budget,
+                } => {
+                    if returned_budget != console_budget {
+                        return Err(protocol(
+                            "worker changed its original console subtree grant",
+                        ));
+                    }
+                    if let Some(console) = &console {
+                        console.validate().map_err(protocol)?;
+                        if Some(console.limits()) != attempt.scheduling.task.console {
+                            return Err(protocol(
+                                "remote console differs from its admitted invocation controls",
+                            ));
+                        }
+                    }
+                    runmat_execution::console::validate_scopes(&console_scopes)
+                        .map_err(protocol)?;
+                    if delegated_console_root.is_some()
+                        && !matches!(
+                            attempt.program,
+                            super::channel::RemoteAttemptProgram::GraphStaged(_)
+                        )
+                    {
+                        return Err(protocol("Direct worker cannot delegate its console root"));
+                    }
+                    if delegated_console_root.is_some()
+                        && matches!(&report, AttemptReport::Succeeded { result } if !matches!(result, runmat_execution_runner::AttemptSuccess::Graph { .. }))
+                    {
+                        return Err(protocol(
+                            "delegated console root requires the typed Graph result",
+                        ));
+                    }
+                    runmat_execution::console::validate_delegated_root(
+                        console.as_deref(),
+                        &console_scopes,
+                        delegated_console_root,
+                        matches!(report, AttemptReport::Succeeded { .. }),
+                    )
+                    .map_err(protocol)?;
+                    runmat_execution::console::validate_source_controls(
+                        console.as_deref(),
+                        &console_scopes,
+                        delegated_console_root,
+                        attempt.scheduling.task.console,
+                        attempt.scheduling.id,
+                    )
+                    .map_err(protocol)?;
+                    if matches!(report, AttemptReport::Succeeded { .. })
+                        && attempt.scheduling.task.console.is_some()
+                        && delegated_console_root.is_none()
+                        && console.as_ref().is_none_or(|capture| {
+                            capture.completion()
+                                != runmat_execution::console::ConsoleCompletion::Complete
+                        })
+                    {
+                        return Err(protocol(
+                            "remote success lacks complete requested console evidence",
+                        ));
+                    }
+                    let mut observed = runmat_execution_runner::port::BackendReport::for_request(
+                        &attempt.scheduling,
+                        report,
+                    );
+                    observed.console = console;
+                    observed.console_scopes = console_scopes;
+                    observed.delegated_console_root = delegated_console_root;
+                    return Ok(observed);
+                }
                 RemoteWorkerOutcome::AdmissionDeferred {
                     attempt_id,
                     worker_id,

@@ -7,6 +7,23 @@ pub(super) enum ResultOrigin {
     Recovered,
 }
 
+pub(super) fn ensure_terminal_success(
+    response: ProgramExecutionResponse,
+    origin: ResultOrigin,
+) -> Result<()> {
+    match response {
+        failure @ (ProgramExecutionResponse::Failure { .. }
+        | ProgramExecutionResponse::RuntimeFailure { .. }) => {
+            format_terminal_result(failure, origin)?;
+            Ok(())
+        }
+        ProgramExecutionResponse::Success { .. }
+        | ProgramExecutionResponse::GraphSuccess { .. }
+        | ProgramExecutionResponse::ExternalizedSuccess { .. }
+        | ProgramExecutionResponse::SpmdSuccess { .. } => Ok(()),
+    }
+}
+
 pub(super) fn format_terminal_result(
     response: ProgramExecutionResponse,
     origin: ResultOrigin,
@@ -49,6 +66,20 @@ pub(super) fn format_terminal_result(
 mod tests {
     use super::*;
     use runmat_execution::value::PayloadGraph;
+
+    #[test]
+    fn json_terminal_failure_keeps_nonzero_exit_semantics() {
+        for origin in [ResultOrigin::Attached, ResultOrigin::Recovered] {
+            let error = ensure_terminal_success(
+                ProgramExecutionResponse::Failure {
+                    message: "original user failure".into(),
+                },
+                origin,
+            )
+            .unwrap_err();
+            assert_eq!(error.to_string(), "original user failure");
+        }
+    }
 
     #[test]
     fn terminal_results_preserve_direct_and_rooted_graph_representations() {

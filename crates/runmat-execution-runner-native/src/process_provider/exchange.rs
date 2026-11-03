@@ -14,6 +14,7 @@ pub(super) async fn exchange(
     control: &dyn ProcessControl,
     meters: &TransportMeters,
     console: &mut Option<runmat_execution::console::ConsoleTranscript>,
+    console_scopes: &mut Vec<runmat_execution::console::ScopedConsoleTranscript>,
 ) -> Result<WorkerResponse, String> {
     // Both application pipes are already owned by the sibling drain future.
     let accept = tokio::time::timeout(Duration::from_secs(30), listener.accept());
@@ -61,8 +62,12 @@ pub(super) async fn exchange(
     if should_stop(control) {
         return Err(stop_diagnostic(control));
     }
-    let WorkerLaunchRequest::Reserved(reserved) = request else {
-        return Err("durable program provider launches reserved direct programs only".into());
+    let reserved = match request {
+        WorkerLaunchRequest::Reserved(reserved)
+        | WorkerLaunchRequest::ReservedConsole {
+            request: reserved, ..
+        } => reserved,
+        _ => return Err("durable program provider launches reserved direct programs only".into()),
     };
     let program = reserved.request();
     let mut receiver = program
@@ -71,6 +76,7 @@ pub(super) async fn exchange(
         .transpose()
         .map_err(|error| error.to_string())?;
     let mut receipt = None;
+    let mut received_scopes = Vec::new();
     let response = read_response(
         &mut reader,
         limits,
@@ -78,12 +84,19 @@ pub(super) async fn exchange(
         control,
         &mut receiver,
         &mut receipt,
+        &mut received_scopes,
     )
     .await;
     *console = receiver
         .map(|receiver| receiver.finish(receipt.as_ref()))
         .transpose()
         .map_err(|error| error.to_string())?;
+    crate::console_bridge::validate_imported_subtree(
+        console.as_ref(),
+        &received_scopes,
+        request.console_budget(),
+    )?;
+    *console_scopes = received_scopes;
     let response = response?;
     // Keep the request pipe open until a terminal frame is received. EOF before
     // then is parent death to domain workers, and would cancel healthy execution.
@@ -118,6 +131,7 @@ async fn read_response(
     control: &dyn ProcessControl,
     receiver: &mut Option<runmat_execution::console::ConsoleReceiver>,
     receipt: &mut Option<runmat_execution::console::ConsoleReceipt>,
+    console_scopes: &mut Vec<runmat_execution::console::ScopedConsoleTranscript>,
 ) -> Result<WorkerResponse, String> {
     let mut last_progress_sequence = 0;
     loop {
@@ -128,6 +142,9 @@ async fn read_response(
         match serde_json::from_slice::<WorkerProcessMessage>(&payload)
             .map_err(|error| error.to_string())?
         {
+            WorkerProcessMessage::FeaAdmissionCall { .. } => {
+                return Err("durable worker requested ungranted FEA proxy".into())
+            }
             WorkerProcessMessage::Progress { progress } => {
                 progress.validate()?;
                 if progress.sequence <= last_progress_sequence {
@@ -144,7 +161,11 @@ async fn read_response(
                 control
                     .record_console(receiver.records().last().expect("retained original record"))?;
             }
-            WorkerProcessMessage::Completed { response, console } => {
+            WorkerProcessMessage::Completed {
+                response,
+                console,
+                console_scopes: scopes,
+            } => {
                 match (receiver.as_ref(), console.as_ref()) {
                     (Some(receiver), Some(console)) => receiver
                         .verify_receipt(console)
@@ -161,6 +182,7 @@ async fn read_response(
                     control.finish_console(console)?;
                 }
                 *receipt = console;
+                *console_scopes = scopes;
                 return Ok(response);
             }
             WorkerProcessMessage::CollectiveRequest { .. } => {

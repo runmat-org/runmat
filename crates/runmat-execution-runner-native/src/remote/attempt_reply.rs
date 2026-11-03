@@ -8,12 +8,50 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use super::protocol::{RemoteWorkerOutcome, RemoteWorkerReply, REMOTE_WORKER_PROTOCOL_VERSION};
 use super::route::RemoteFrameRoute;
 
+pub(super) enum RemoteAttemptConsole {
+    Captured(crate::console_bridge::NativeCapturedConsole),
+    Sources {
+        root: Option<runmat_execution::console::ConsoleSourceIdentity>,
+        source: Arc<dyn runmat_runtime::context::RuntimeRetainedConsoleSource>,
+        budget: runmat_execution::console::ConsoleBudget,
+    },
+}
+impl RemoteAttemptConsole {
+    fn delegated_root(&self) -> Option<runmat_execution::console::ConsoleSourceIdentity> {
+        match self {
+            Self::Captured(_) => None,
+            Self::Sources { root, .. } => *root,
+        }
+    }
+    fn root(&self) -> Option<&runmat_execution::console::ConsoleTranscript> {
+        match self {
+            Self::Captured(capture) => Some(&capture.transcript),
+            Self::Sources { .. } => None,
+        }
+    }
+    fn source(&self) -> crate::console_bridge::RuntimeConsoleSourceAdapter<'_> {
+        match self {
+            Self::Captured(capture) => capture.source(),
+            Self::Sources { source, .. } => {
+                crate::console_bridge::RuntimeConsoleSourceAdapter(source.as_ref())
+            }
+        }
+    }
+    fn budget(&self) -> runmat_execution::console::ConsoleBudget {
+        match self {
+            Self::Captured(capture) => capture.budget,
+            Self::Sources { budget, .. } => *budget,
+        }
+    }
+}
+type TerminalEvidence = (AttemptReport, Option<RemoteAttemptConsole>);
+
 /// Owns the terminal reply for an admitted Execute request independently of
 /// the execution task. Forced cancellation may abort that task, but must not
 /// strand the request correlation at the driver.
 pub(super) struct AttemptReply {
     completed: AtomicBool,
-    reports: mpsc::UnboundedSender<(AttemptReport, Option<oneshot::Sender<()>>)>,
+    reports: mpsc::UnboundedSender<(TerminalEvidence, Option<oneshot::Sender<()>>)>,
 }
 
 impl AttemptReply {
@@ -22,24 +60,79 @@ impl AttemptReply {
         sender: Arc<Mutex<EncryptedFrameSession>>,
         limits: FrameLimits,
         correlation_id: String,
+        console_budget: Option<runmat_execution::console::ConsoleBudget>,
     ) -> Arc<Self> {
         let (reports, mut receiver) =
-            mpsc::unbounded_channel::<(AttemptReport, Option<oneshot::Sender<()>>)>();
+            mpsc::unbounded_channel::<(TerminalEvidence, Option<oneshot::Sender<()>>)>();
         tokio::task::spawn_local(async move {
-            let Some((report, delivered)) = receiver.recv().await else {
+            let Some(((report, console), delivered)) = receiver.recv().await else {
                 return;
             };
-            let _ = super::worker_protocol::reply(
-                connection.as_ref(),
-                sender.as_ref(),
-                limits,
-                RemoteWorkerReply {
+            if let Some(console) = console {
+                let source = console.source();
+                #[derive(serde::Serialize)]
+                #[serde(tag = "kind", rename_all = "snake_case")]
+                enum Outcome<'a> {
+                    Attempt {
+                        delegated_console_root:
+                            Option<runmat_execution::console::ConsoleSourceIdentity>,
+                        report: &'a AttemptReport,
+                        console: Option<&'a runmat_execution::console::ConsoleTranscript>,
+                        console_scopes:
+                            runmat_execution_artifact::ProgramExecutionConsoleScopeSequence<'a>,
+                        console_budget: Option<runmat_execution::console::ConsoleBudget>,
+                    },
+                }
+                #[derive(serde::Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Reply<'a> {
+                    schema_version: u16,
+                    correlation_id: &'a str,
+                    outcome: Outcome<'a>,
+                }
+                let message = Reply {
                     schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
-                    correlation_id,
-                    outcome: RemoteWorkerOutcome::Attempt { report },
-                },
-            )
-            .await;
+                    correlation_id: &correlation_id,
+                    outcome: Outcome::Attempt {
+                        delegated_console_root: console.delegated_root(),
+                        report: &report,
+                        console: console.root(),
+                        console_scopes:
+                            runmat_execution_artifact::ProgramExecutionConsoleScopeSequence::new(
+                                console.root(),
+                                &source,
+                                Some(console.budget()),
+                            ),
+                        console_budget,
+                    },
+                };
+                let _ = super::worker_protocol::reply_kind(
+                    connection.as_ref(),
+                    sender.as_ref(),
+                    limits,
+                    runmat_execution_transport_native::frame::FrameKind::Control,
+                    message,
+                )
+                .await;
+            } else {
+                let _ = super::worker_protocol::reply(
+                    connection.as_ref(),
+                    sender.as_ref(),
+                    limits,
+                    RemoteWorkerReply {
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
+                        correlation_id,
+                        outcome: RemoteWorkerOutcome::Attempt {
+                            delegated_console_root: None,
+                            report,
+                            console: None,
+                            console_scopes: Vec::new(),
+                            console_budget,
+                        },
+                    },
+                )
+                .await;
+            }
             if let Some(delivered) = delivered {
                 let _ = delivered.send(());
             }
@@ -51,25 +144,41 @@ impl AttemptReply {
     }
 
     pub(super) fn complete(&self, report: AttemptReport) {
+        self.complete_with_console(report, None);
+    }
+
+    pub(super) fn complete_with_console(
+        &self,
+        report: AttemptReport,
+        console: Option<RemoteAttemptConsole>,
+    ) {
         if self
             .completed
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            let _ = self.reports.send((report, None));
+            let _ = self.reports.send(((report, console), None));
         }
     }
 
     /// A fatal Graph retirement report must be attempted on the encrypted
     /// channel before its unhealthy worker drains and closes that channel.
-    pub(super) async fn complete_before_drain(&self, report: AttemptReport) {
+    pub(super) async fn complete_before_drain_with_console(
+        &self,
+        report: AttemptReport,
+        console: Option<RemoteAttemptConsole>,
+    ) {
         if self
             .completed
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
             let (delivered, receipt) = oneshot::channel();
-            if self.reports.send((report, Some(delivered))).is_ok() {
+            if self
+                .reports
+                .send(((report, console), Some(delivered)))
+                .is_ok()
+            {
                 let _ = tokio::time::timeout(std::time::Duration::from_secs(5), receipt).await;
             }
         }
@@ -130,6 +239,7 @@ mod tests {
                     Arc::new(Mutex::new(session)),
                     FrameLimits::default(),
                     "execute-correlation".into(),
+                    None,
                 );
                 let execution_reply = Arc::clone(&reply);
                 let execution = tokio::task::spawn_local(async move {
@@ -168,7 +278,9 @@ mod tests {
                 assert!(matches!(
                     decoded.outcome,
                     RemoteWorkerOutcome::Attempt {
-                        report: AttemptReport::Cancelled
+                        report: AttemptReport::Cancelled,
+                        console: None,
+                        ..
                     }
                 ));
             })

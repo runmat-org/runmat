@@ -61,6 +61,7 @@ pub(super) struct WorkerExecutionInput {
     pub environment: Vec<(String, String)>,
     /// Scheduler reservation this attempt executes under.
     pub resources: ResourceRequest,
+    pub console_budget: Option<runmat_execution::console::ConsoleBudget>,
 }
 
 /// Request-local effect ports and cancellation, separate from program proof.
@@ -74,6 +75,10 @@ pub(super) struct WorkerExecutionPorts {
 
 pub(super) enum WorkerExecutionOutcome {
     Response(ProgramExecutionResponse),
+    CapturedResponse(
+        ProgramExecutionResponse,
+        Option<super::attempt_reply::RemoteAttemptConsole>,
+    ),
     RetirementUnverified(String),
 }
 
@@ -139,6 +144,7 @@ pub(super) async fn execute(
         bundle,
         environment,
         resources,
+        console_budget,
     } = input;
     let WorkerExecutionPorts {
         collective,
@@ -178,11 +184,29 @@ pub(super) async fn execute(
                 resources,
                 graph_attempt.host,
                 cancellation.token(),
+                console_budget,
             )
             .await
             {
                 Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(result)) => {
-                    WorkerExecutionOutcome::Response(result.response)
+                    match result.console {
+                        Some(super::pool_execution::RemoteTerminalConsole::LocalSources {
+                            root,
+                            source,
+                            budget,
+                        }) => WorkerExecutionOutcome::CapturedResponse(
+                            result.response,
+                            Some(super::attempt_reply::RemoteAttemptConsole::Sources {
+                                root,
+                                source,
+                                budget,
+                            }),
+                        ),
+                        None => WorkerExecutionOutcome::Response(result.response),
+                        Some(_) => WorkerExecutionOutcome::RetirementUnverified(
+                            "remote Graph child changed its console retention owner".into(),
+                        ),
+                    }
                 }
                 Ok(super::pool_execution::RemotePoolExecutionOutcome::Cancelled) => {
                     WorkerExecutionOutcome::Response(failure("remote Graph attempt was cancelled"))
@@ -194,6 +218,57 @@ pub(super) async fn execute(
             };
         }
     };
+    if matches!(
+        program.artifact.form,
+        ExecutableForm::ExecutableUnitV4 | ExecutableForm::InterpreterRegionSourcesV1
+    ) {
+        drop(progress_sender);
+        let console_owner = match (program.console, console_budget, program.assignment.as_ref()) {
+            (None, None, _) => None,
+            (Some(_), Some(budget), Some(assignment)) => {
+                let owner =
+                    match crate::console_retention::ConsoleRetentionOwner::from_subgrant(budget) {
+                        Ok(owner) => owner,
+                        Err(error) => {
+                            return WorkerExecutionOutcome::Response(failure(&error.to_string()))
+                        }
+                    };
+                Some(crate::test_workload::HostConsoleOwner {
+                    owner,
+                    budget,
+                    identity: runmat_runtime::context::RuntimeConsoleScopeIdentity {
+                        scope_id: assignment.scope_id,
+                        pool_id: assignment.pool_id,
+                        task_id: assignment.task_id,
+                        attempt_id: assignment.attempt_id,
+                    },
+                })
+            }
+            _ => {
+                return WorkerExecutionOutcome::Response(failure(
+                    "remote console has no exact assigned subtree owner",
+                ))
+            }
+        };
+        let (response, console) = crate::test_workload::execute_host_program_request_with_console(
+            program,
+            crate::test_workload::HostProgramContext {
+                materialized: project.as_deref(),
+                collective,
+                bundle,
+                environment: Some(&environment),
+                cancellation: Some(cancellation.flag()),
+                resources: Some(&resources),
+                console_owner,
+                console_sink: None,
+            },
+        )
+        .await;
+        return WorkerExecutionOutcome::CapturedResponse(
+            response,
+            console.map(super::attempt_reply::RemoteAttemptConsole::Captured),
+        );
+    }
     WorkerExecutionOutcome::Response(
         execute_direct(
             attempt_id,
@@ -367,6 +442,8 @@ async fn execute_direct(
             environment: Some(&environment),
             cancellation: Some(cancellation.flag()),
             resources: Some(&resources),
+            console_owner: None,
+            console_sink: None,
         },
     )
     .await

@@ -24,10 +24,16 @@ pub(crate) fn run_classified<T>(
     work: impl FnOnce() -> Result<T, OperationErrorEnvelope>,
     success_outcome: impl FnOnce(&T) -> FeaRunOutcome,
 ) -> Result<T, OperationErrorEnvelope> {
-    let allocation = (runmat_cpu_execution::current_threads() as u64).saturating_mul(1000);
-    let request = FeaRunRequest::local(kind, allocation, identity)
+    let allocation = super::current_fea_cpu_capacity_millicores()
+        .unwrap_or_else(|| (runmat_cpu_execution::current_threads() as u64).saturating_mul(1000));
+    let mut request = FeaRunRequest::local(kind, allocation, identity)
+        .map_err(|denied| denied.into_operation_error(operation, version, context))?;
+    request.site = FeaRunScope::admission_site()
         .map_err(|denied| denied.into_operation_error(operation, version, context))?;
     let scope = FeaRunScope::admit(request)
+        .map_err(|denied| denied.into_operation_error(operation, version, context))?;
+    scope
+        .check()
         .map_err(|denied| denied.into_operation_error(operation, version, context))?;
     let result = scope.run_sync(work);
     let outcome = match &result {
@@ -40,8 +46,60 @@ pub(crate) fn run_classified<T>(
         }
         Err(_) => FeaRunOutcome::Failed,
     };
-    scope.settle(outcome);
-    result
+    settle_result(scope, result, outcome, operation, version, context)
+}
+
+pub(crate) fn settle_result<T>(
+    scope: FeaRunScope,
+    result: Result<T, OperationErrorEnvelope>,
+    outcome: FeaRunOutcome,
+    operation: &str,
+    version: &str,
+    context: &OperationContext,
+) -> Result<T, OperationErrorEnvelope> {
+    let (result, outcome) = match result {
+        Ok(value) => match scope.check_execution() {
+            Ok(()) => (Ok(value), outcome),
+            Err(failure) => {
+                let stopped = failure.outcome();
+                (
+                    Err(failure.into_operation_error(operation, version, context)),
+                    stopped,
+                )
+            }
+        },
+        Err(original) => (Err(original), outcome),
+    };
+    let lease_error = scope
+        .settle(outcome)
+        .err()
+        .map(|denied| denied.into_operation_error(operation, version, context));
+    merge_lease_error(result, lease_error)
+}
+
+/// Keep the domain's original typed cause. The context boundary carries one
+/// complete secondary envelope, rather than concatenating diagnostic strings.
+pub(crate) fn merge_lease_error<T>(
+    result: Result<T, OperationErrorEnvelope>,
+    lease_error: Option<OperationErrorEnvelope>,
+) -> Result<T, OperationErrorEnvelope> {
+    match (result, lease_error) {
+        (Ok(_), Some(lease)) => Err(lease),
+        (Err(mut original), Some(lease)) => {
+            original
+                .context
+                .entry("fea_lease_error_code".into())
+                .or_insert_with(|| lease.error_code.clone());
+            if let Ok(encoded) = serde_json::to_string(&lease) {
+                original
+                    .context
+                    .entry("fea_lease_error".into())
+                    .or_insert(encoded);
+            }
+            Err(original)
+        }
+        (result, None) => result,
+    }
 }
 
 pub(crate) fn sweep_outcome(data: &AnalysisStudySweepData) -> FeaRunOutcome {
@@ -155,21 +213,42 @@ standalone!(
 #[cfg(test)]
 pub fn test_admission() -> std::sync::Arc<dyn super::FeaRunAdmission> {
     struct TestAdmission;
-    struct TestPermit;
+    struct TestPermit {
+        budget: super::FeaRunBudget,
+    }
     impl super::FeaRunAdmission for TestAdmission {
         fn admit(
             &self,
-            _: &FeaRunRequest,
+            request: &FeaRunRequest,
         ) -> Result<Box<dyn super::FeaRunPermit>, super::FeaRunDenied> {
-            Ok(Box::new(TestPermit))
+            let held = (u128::from(request.allocated_cpu_millicores) * 3_600_000).div_ceil(1000);
+            Ok(Box::new(TestPermit {
+                budget: super::FeaRunBudget {
+                    held_core_millis: u64::try_from(held)
+                        .map_err(|_| super::FeaRunDenied::LicenseInvalid)?,
+                    expires_at_unix_millis: (runmat_time::unix_timestamp_ms() as u64)
+                        .saturating_add(3_600_000),
+                    heartbeat_millis: 30_000,
+                },
+            }))
         }
     }
     impl super::FeaRunPermit for TestPermit {
+        fn budget(&self) -> super::FeaRunBudget {
+            self.budget
+        }
+        fn heartbeat(
+            &self,
+            _: &runmat_execution::resource::ResourceUsage,
+        ) -> Result<super::FeaRunBudget, super::FeaRunDenied> {
+            Ok(self.budget())
+        }
         fn settle(
             self: Box<Self>,
             _: FeaRunOutcome,
             _: &runmat_execution::resource::ResourceUsage,
-        ) {
+        ) -> Result<(), super::FeaRunDenied> {
+            Ok(())
         }
     }
     std::sync::Arc::new(TestAdmission)

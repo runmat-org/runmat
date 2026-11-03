@@ -90,7 +90,11 @@ pub(super) fn load_driver_invocation(
                 retention_millis: request.retention_millis,
             };
             submission.validate()?;
-            if submission.request_digest()? != request.request_digest {
+            if super::store::bind_organization(
+                submission.request_digest()?,
+                request.local_fea_organization,
+            ) != request.request_digest
+            {
                 return Err(NativeExecutionError::Protocol(
                     "durable driver request no longer matches its identity".into(),
                 ));
@@ -105,7 +109,11 @@ pub(super) fn load_driver_invocation(
         PersistedWorkload::Program { mut submission } => {
             submission.idempotency_key = None;
             submission.validate()?;
-            if submission.request_digest()? != request.request_digest {
+            if super::store::bind_organization(
+                submission.request_digest()?,
+                request.local_fea_organization,
+            ) != request.request_digest
+            {
                 return Err(NativeExecutionError::Protocol(
                     "durable program request no longer matches its identity".into(),
                 ));
@@ -122,7 +130,11 @@ pub(super) fn load_driver_invocation(
         PersistedWorkload::Graph { mut submission } => {
             submission.idempotency_key = None;
             submission.validate()?;
-            if submission.request_digest()? != request.request_digest {
+            if super::store::bind_organization(
+                submission.request_digest()?,
+                request.local_fea_organization,
+            ) != request.request_digest
+            {
                 return Err(NativeExecutionError::Protocol(
                     "durable graph request no longer matches its identity".into(),
                 ));

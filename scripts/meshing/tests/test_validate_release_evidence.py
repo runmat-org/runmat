@@ -23,8 +23,8 @@ class ReleaseEvidenceValidationTests(unittest.TestCase):
 
     def test_rejects_soft_failure(self):
         path = self.mutated_workflow(
-            "    timeout-minutes: 180",
-            "    continue-on-error: true\n    timeout-minutes: 180",
+            "    timeout-minutes: 10",
+            "    continue-on-error: true\n    timeout-minutes: 10",
         )
         with self.assertRaisesRegex(ReleaseEvidenceError, "contains bypass"):
             validate_workflow(path)

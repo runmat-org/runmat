@@ -787,6 +787,8 @@ fn physical_proof_reports_preserve_the_scheduler_terminal_cause() {
         resources: None,
         execution: None,
         console: None,
+        console_scopes: Vec::new(),
+        delegated_console_root: None,
         retired_at_driver_millis: Some(2),
     };
     assert!(matches!(

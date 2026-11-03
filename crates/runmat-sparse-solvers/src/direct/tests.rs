@@ -72,7 +72,10 @@ fn cholesky_matches_dense_reference_with_every_ordering() {
 fn symbolic_reuse_refactorizes_new_values_and_rejects_new_patterns() {
     let a = poisson3d::<f64>(9, 9, 9);
     let n = a.nrows();
-    let options = DirectOptions::new(FactorKind::Cholesky);
+    let options = DirectOptions {
+        workspace: DirectWorkspacePolicy::CallerOwned,
+        ..DirectOptions::new(FactorKind::Cholesky)
+    };
     let symbolic =
         SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE)
             .unwrap();
@@ -126,6 +129,110 @@ fn symbolic_reuse_refactorizes_new_values_and_rejects_new_patterns() {
     )
     .unwrap_err();
     assert!(matches!(refused, SolverError::OverBudget { .. }));
+}
+
+#[test]
+fn finite_workspace_policy_quotes_and_executes_same_nonpivoting_factor() {
+    let a = poisson3d::<f64>(4, 4, 4);
+    let b = vec![1.0; a.nrows()];
+    for kind in [FactorKind::Cholesky, FactorKind::Ldlt] {
+        let managed = DirectOptions::new(kind);
+        let managed_symbolic =
+            SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &managed, SolveControl::NONE)
+                .unwrap();
+        assert!(matches!(
+            DirectSolver::<f64>::factorize(
+                managed_symbolic,
+                a.as_ref().into(),
+                managed,
+                Some(u64::MAX),
+                SolveControl::NONE
+            ),
+            Err(SolverError::Unsupported(_))
+        ));
+        let options = DirectOptions {
+            workspace: DirectWorkspacePolicy::CallerOwned,
+            ..DirectOptions::new(kind)
+        };
+        let symbolic =
+            SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE)
+                .unwrap();
+        assert_eq!(
+            symbolic.workspace_policy(),
+            DirectWorkspacePolicy::CallerOwned
+        );
+        assert!(
+            matches!(&symbolic.inner, SymbolicInner::Cholesky(inner) if matches!(inner.raw(), faer::sparse::linalg::cholesky::SymbolicCholeskyRaw::Simplicial(_)))
+        );
+        let quote = symbolic.estimate().peak_bytes();
+        let numeric_started = std::sync::atomic::AtomicBool::new(false);
+        let observe = |progress: Progress| {
+            if progress.phase == ProgressPhase::NumericFactorization {
+                numeric_started.store(true, std::sync::atomic::Ordering::Release);
+            }
+        };
+        assert!(matches!(
+            DirectSolver::<f64>::factorize(
+                symbolic.clone(),
+                a.as_ref().into(),
+                options.clone(),
+                Some(quote - 1),
+                SolveControl {
+                    progress: Some(&observe),
+                    ..SolveControl::NONE
+                }
+            ),
+            Err(SolverError::OverBudget { .. })
+        ));
+        assert!(!numeric_started.load(std::sync::atomic::Ordering::Acquire));
+        let solver = DirectSolver::<f64>::factorize(
+            symbolic.clone(),
+            a.as_ref().into(),
+            options.clone(),
+            Some(quote),
+            SolveControl::NONE,
+        )
+        .unwrap();
+        let mut x = b.clone();
+        solver.solve_in_place(&mut x, 1).unwrap();
+        assert!(relative_residual(&a, &x, &b) < 1e-12);
+        let mut contradicted = options;
+        contradicted.workspace = DirectWorkspacePolicy::BackendManaged;
+        assert!(matches!(
+            DirectSolver::<f64>::factorize(
+                symbolic,
+                a.as_ref().into(),
+                contradicted,
+                None,
+                SolveControl::NONE
+            ),
+            Err(SolverError::Unsupported(_))
+        ));
+    }
+    for kind in [FactorKind::BunchKaufman, FactorKind::Lu] {
+        let options = DirectOptions {
+            workspace: DirectWorkspacePolicy::CallerOwned,
+            ..DirectOptions::new(kind)
+        };
+        assert!(matches!(
+            SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE),
+            Err(SolverError::Unsupported(_))
+        ));
+        let managed = DirectOptions::new(kind);
+        let symbolic =
+            SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &managed, SolveControl::NONE)
+                .unwrap();
+        assert!(matches!(
+            DirectSolver::<f64>::factorize(
+                symbolic,
+                a.as_ref().into(),
+                managed,
+                Some(u64::MAX),
+                SolveControl::NONE
+            ),
+            Err(SolverError::Unsupported(_))
+        ));
+    }
 }
 
 #[test]

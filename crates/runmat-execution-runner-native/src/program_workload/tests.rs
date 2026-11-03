@@ -3,12 +3,16 @@ use runmat_execution_artifact::*;
 use runmat_value::{CharArray, Value};
 
 async fn original_request() -> ProgramExecutionRequest {
+    request_for_source("function y = environment(); y = getenv('RUNMAT_NATIVE_CONTEXT'); end").await
+}
+
+async fn request_for_source(source_text: &str) -> ProgramExecutionRequest {
     let mut producer = runmat_core::RunMatSession::with_options(false, false).unwrap();
     let source = runmat_core::ExecutableSource::frozen(
         "frozen-host",
         "environment.m",
         "environment.m",
-        "function y = environment(); y = getenv('RUNMAT_NATIVE_CONTEXT'); end",
+        source_text,
     );
     let unit = producer
         .compile_executable_unit(source, None)
@@ -59,6 +63,28 @@ async fn original_request() -> ProgramExecutionRequest {
         requested_outputs: 1,
     };
     serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn owned_transcript_preserves_success_and_original_failure_prefix() {
+    use runmat_execution::console::{ConsoleCompletion, ConsoleLimits};
+    for (source, succeeds) in [
+        ("function y = environment(); disp('owned sentinel'); y = 7; end", true),
+        ("function y = environment(); fprintf('failure prefix'); error('original failure'); y = 7; end", false),
+    ] {
+        let mut request = request_for_source(source).await;
+        request.console = Some(ConsoleLimits { max_records: 16, max_text_bytes: 1024 });
+        assert!(matches!(execute_unit(&request, None, None, None).await, ProgramExecutionResponse::Failure { .. }));
+        let (response, transcript) = execute_unit_with_transcript(&request, None, None, None, None).await;
+        assert_eq!(matches!(response, ProgramExecutionResponse::Success { .. }), succeeds, "{response:?}");
+        let transcript = transcript.expect("requested capture retains its original owner inventory");
+        assert_eq!(transcript.completion(), ConsoleCompletion::Complete);
+        let text: String = transcript.records().iter().map(|record| record.text.as_ref()).collect();
+        assert!(text.contains(if succeeds { "owned sentinel" } else { "failure prefix" }));
+        if !succeeds {
+            assert!(format!("{response:?}").contains("original failure"));
+        }
+    }
 }
 
 #[tokio::test]

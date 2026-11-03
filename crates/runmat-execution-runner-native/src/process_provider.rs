@@ -79,6 +79,7 @@ pub(crate) struct ObservedAttempt {
     pub execution: AttemptExecutionObservation,
     pub unsuccessful_resources: Option<Box<AttemptResourceAccounting>>,
     pub console: Option<runmat_execution::console::ConsoleTranscript>,
+    pub console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
     retirement: LocalRetirementEvidence,
 }
 
@@ -86,6 +87,7 @@ pub(crate) struct ObservedAttempt {
 struct ProcessOutcome<'a> {
     termination: &'a mut AttemptExecutionTermination,
     console: &'a mut Option<runmat_execution::console::ConsoleTranscript>,
+    console_scopes: &'a mut Vec<runmat_execution::console::ScopedConsoleTranscript>,
     retirement: &'a mut LocalRetirementEvidence,
 }
 
@@ -98,6 +100,7 @@ pub(crate) async fn execute_attempt(
     let meters = TransportMeters::default();
     let mut termination = AttemptExecutionTermination::NotStarted;
     let mut console = None;
+    let mut console_scopes = Vec::new();
     let mut retirement = LocalRetirementEvidence::NotStarted;
     let response = if control.cancellation().load(Ordering::Acquire) {
         Err("execution was cancelled before process launch".into())
@@ -113,6 +116,7 @@ pub(crate) async fn execute_attempt(
                     ProcessOutcome {
                         termination: &mut termination,
                         console: &mut console,
+                        console_scopes: &mut console_scopes,
                         retirement: &mut retirement,
                     },
                 )
@@ -123,6 +127,7 @@ pub(crate) async fn execute_attempt(
     };
     let mut observed = observe(request, started, response, meters, termination, retirement);
     observed.console = console;
+    observed.console_scopes = console_scopes;
     observed
 }
 
@@ -168,6 +173,7 @@ impl ObservedAttempt {
         report.execution = Some(Box::new(self.execution));
         report.unsuccessful_resources = self.unsuccessful_resources;
         report.console = self.console.map(Box::new);
+        report.console_scopes = self.console_scopes;
         (self.result, report)
     }
 
@@ -239,6 +245,7 @@ fn observe(
     ObservedAttempt {
         retirement,
         console: None,
+        console_scopes: Vec::new(),
         result,
         response: original_response,
         execution,
@@ -314,13 +321,25 @@ fn prepare_program(
     if minimum > request.task.resources.memory_bytes {
         return Err("native invocation and parent monitor exceed task memory reservation".into());
     }
-    Ok(WorkerLaunchRequest::Reserved(Box::new(
+    let reserved = Box::new(
         runmat_execution_artifact::ReservedProgramExecutionRequest::new(
             worker_request,
             request.task.resources.clone(),
         )
         .map_err(|error| error.to_string())?,
-    )))
+    );
+    match request.task.console {
+        Some(controls) => Ok(WorkerLaunchRequest::ReservedConsole {
+            request: reserved,
+            console_budget: crate::console_retention::ConsoleRetentionOwner::source_subgrant(
+                request.task.resources.memory_bytes,
+                controls,
+                1,
+            )
+            .map_err(|error| error.to_string())?,
+        }),
+        None => Ok(WorkerLaunchRequest::Reserved(reserved)),
+    }
 }
 
 async fn run_process(
@@ -334,6 +353,7 @@ async fn run_process(
     let ProcessOutcome {
         termination,
         console,
+        console_scopes,
         retirement,
     } = outcome;
     if control.cancellation().load(Ordering::Acquire) {
@@ -425,7 +445,7 @@ async fn run_process(
         let result = async {
     let stderr = child.captured_stderr();
     let response = exchange::exchange(
-        provider, listener, &request, control, meters, console,
+        provider, listener, &request, control, meters, console, console_scopes,
     )
     .await;
     let exit = if response.is_err() {

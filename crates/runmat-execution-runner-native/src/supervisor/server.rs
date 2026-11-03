@@ -74,7 +74,7 @@ where
                     ) =>
             {
                 supervisor
-                    .command(request.command)
+                    .command(request.command, request.local_fea_organization)
                     .await
                     .unwrap_or_else(|error| {
                         SupervisorResponse::error("request_failed", error.to_string())

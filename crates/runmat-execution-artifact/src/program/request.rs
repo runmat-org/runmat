@@ -445,9 +445,12 @@ fn validate_console(
         limits
             .validate_transport(64 * 1024 * 1024)
             .map_err(contract_error)?;
-        if form != ExecutableForm::ExecutableUnitV4 {
+        if !matches!(
+            form,
+            ExecutableForm::ExecutableUnitV4 | ExecutableForm::InterpreterRegionSourcesV1
+        ) {
             return Err(ArtifactError::Invalid(
-                "console capture requires a session-capable complete executable unit".into(),
+                "console capture requires a session-capable complete executable unit or typed region".into(),
             ));
         }
     }

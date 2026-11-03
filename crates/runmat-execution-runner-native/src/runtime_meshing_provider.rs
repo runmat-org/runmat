@@ -139,18 +139,21 @@ pub fn mesh_source_with_native_execution(
         FeaRunKind, FeaRunOutcome, FeaRunRequest, FeaRunScope,
     };
     let mut execution = MeshingExecutionPolicy::default();
-    if let Some(allocation) = FeaRunScope::current_allocation() {
+    if let Some(allocation) =
+        runmat_runtime::analysis::fea_run_admission::current_fea_cpu_capacity_millicores()
+    {
         execution.cpu_millicores = u32::try_from(allocation).map_err(|_| {
             NativeMeshingSourceError::InvalidRequest(
                 "meshing CPU allocation exceeds its bound".into(),
             )
         })?;
     }
-    let admission_request = FeaRunRequest::local(
+    let mut admission_request = FeaRunRequest::local(
         FeaRunKind::Meshing,
         u64::from(execution.cpu_millicores),
         Digest::sha256(&request_bytes),
     )?;
+    admission_request.site = FeaRunScope::admission_site()?;
     let scope = FeaRunScope::admit(admission_request)?;
     let mut config = NativeExecutionConfig::for_current_executable()
         .map_err(NativeMeshingSourceError::WorkerConfiguration)?;
@@ -162,6 +165,7 @@ pub fn mesh_source_with_native_execution(
         .max_workers
         .min(execution.cpu_millicores / 1000)
         .max(1);
+    scope.check()?;
     let result = scope.run_sync(|| {
         mesh_exact_geometry(
             config,
@@ -197,8 +201,11 @@ pub fn mesh_source_with_native_execution(
     } else {
         FeaRunOutcome::Failed
     };
-    scope.settle(outcome);
-    result
+    let settlement = scope.settle(outcome);
+    match result {
+        Err(original) => Err(original),
+        Ok(value) => settlement.map(|()| value).map_err(Into::into),
+    }
 }
 
 pub fn resolve_native_meshing_request(

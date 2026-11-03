@@ -199,10 +199,7 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
                 isolation.as_str()
             );
         }
-        let trust_identity = args
-            .trust_identity
-            .clone()
-            .context("remote tests require --trust-identity with a pinned endpoint fingerprint")?;
+        let trust_identity = crate::cli::resolve_endpoint_trust(args.trust_identity.as_deref())?;
         let queue = args
             .queue
             .clone()

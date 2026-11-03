@@ -9,6 +9,134 @@ fn context(host: Rc<PortableConsoleHost>) -> RuntimeContext {
 }
 
 #[test]
+fn shared_admission_keeps_original_child_prefix_scoped_after_parent_finish() {
+    use crate::context::{
+        RuntimeConsoleAdmission, RuntimeConsoleScopeIdentity, RuntimeConsoleScopeRef,
+        RuntimeRetainedConsoleSource,
+    };
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    struct TwoRecords(AtomicUsize);
+    impl RuntimeConsoleAdmission for TwoRecords {
+        fn max_scopes(&self) -> u32 {
+            4
+        }
+        fn reserve(
+            &self,
+            _: RuntimeConsoleScopeIdentity,
+            limits: ConsoleLimits,
+        ) -> Result<(), String> {
+            limits.validate().map_err(|error| error.to_string())
+        }
+        fn admit_record(
+            &self,
+            _: RuntimeConsoleScopeIdentity,
+            _: ConsoleStream,
+            _: &str,
+        ) -> Result<(), String> {
+            self.0
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                    (count < 2).then_some(count + 1)
+                })
+                .map(|_| ())
+                .map_err(|_| "shared record budget exhausted".into())
+        }
+        fn settle(
+            &self,
+            _: RuntimeConsoleScopeIdentity,
+            transcript: &ConsoleTranscript,
+        ) -> Result<(), String> {
+            transcript.validate().map_err(|error| error.to_string())
+        }
+    }
+    struct OriginalChild {
+        identity: RuntimeConsoleScopeIdentity,
+        transcript: Box<ConsoleTranscript>,
+    }
+    impl RuntimeRetainedConsoleSource for OriginalChild {
+        fn source_identity(
+            &self,
+        ) -> Option<(runmat_execution::ExecutionScopeId, runmat_execution::PoolId)> {
+            Some((self.identity.scope_id, self.identity.pool_id))
+        }
+        fn visit(
+            &self,
+            visitor: &mut dyn FnMut(RuntimeConsoleScopeRef<'_>) -> Result<(), String>,
+        ) -> Result<(), String> {
+            visitor(RuntimeConsoleScopeRef {
+                identity: self.identity,
+                transcript: &self.transcript,
+            })
+        }
+    }
+    let identity = |name: &[u8]| RuntimeConsoleScopeIdentity {
+        scope_id: runmat_execution::ExecutionScopeId::derive(&[name]),
+        pool_id: runmat_execution::PoolId::derive(&[name]),
+        task_id: runmat_execution::TaskId::derive(&[name]),
+        attempt_id: runmat_execution::identity::AttemptId::derive(&[name]),
+    };
+    let owner: Arc<dyn RuntimeConsoleAdmission> = Arc::new(TwoRecords(AtomicUsize::new(0)));
+    let limits = ConsoleLimits {
+        max_records: 4,
+        max_text_bytes: 100,
+    };
+    let parent = PortableConsoleHost::new(limits).unwrap();
+    parent
+        .install_console_admission(owner.clone(), identity(b"parent"))
+        .unwrap();
+    parent.console(ConsoleStream::Stdout, "parent".into());
+    let child = PortableConsoleHost::new(limits).unwrap();
+    let child_identity = identity(b"child");
+    child
+        .install_console_admission(owner, child_identity)
+        .unwrap();
+    child.console(ConsoleStream::Stderr, "original child prefix".into());
+    child.console(ConsoleStream::Stdout, "rejected".into());
+    assert_eq!(
+        child.check_execution().unwrap_err().identifier(),
+        Some("RunMat:console:CaptureRejected")
+    );
+    let transcript = Box::new(child.finish(true).unwrap());
+    let original_pointer = transcript.as_ref() as *const ConsoleTranscript;
+    assert_eq!(transcript.completion(), ConsoleCompletion::Interrupted);
+    let source = Arc::new(OriginalChild {
+        identity: child_identity,
+        transcript,
+    });
+    parent.retain_console_source(source.clone()).unwrap();
+    parent.retain_console_source(source).unwrap(); // same driver is retained once
+    let retained = parent.retained_console_source();
+    let root = parent.finish(false).unwrap();
+    drop(parent);
+    assert_eq!(root.records()[0].sequence, 1);
+    let mut seen = 0;
+    retained
+        .visit(&mut |scope| {
+            seen += 1;
+            assert_eq!(scope.identity, child_identity);
+            assert_eq!(
+                scope.transcript as *const ConsoleTranscript,
+                original_pointer
+            );
+            assert_eq!(scope.transcript.records().len(), 1);
+            assert_eq!(scope.transcript.records()[0].sequence, 1); // source-local, not globally renumbered
+            assert_eq!(
+                scope.transcript.records()[0].text.as_ref(),
+                "original child prefix"
+            );
+            assert_eq!(
+                scope.transcript.completion(),
+                ConsoleCompletion::Interrupted
+            );
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(seen, 1);
+}
+
+#[test]
 fn retaining_host_has_no_duplicate_buffer_and_evalc_remains_hidden() {
     let host = Rc::new(
         PortableConsoleHost::new(ConsoleLimits {

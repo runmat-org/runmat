@@ -45,6 +45,7 @@ mod admission;
 mod attempt_execution;
 mod clock;
 mod completion;
+mod console;
 mod input_inventory;
 mod inspection;
 mod membership;
@@ -97,6 +98,8 @@ pub struct RemotePoolDriver {
     pub(super) pool_id: PoolId,
     direct_bundle: Option<DirectPoolBundle>,
     pub(super) driver: Mutex<Driver>,
+    console_retention: Mutex<Option<Arc<crate::console_retention::ConsoleRetentionOwner>>>,
+    console_max_in_flight: u32,
     worker_registration: AsyncMutex<()>,
     channels: RwLock<HashMap<runmat_execution::identity::WorkerId, WorkerRoute>>,
     original_owners:
@@ -232,6 +235,7 @@ impl RemotePoolDriver {
         value_scope: impl Into<String>,
     ) -> NativeExecutionResult<Arc<Self>> {
         let pool_id = pool.id;
+        let console_max_in_flight = pool.max_in_flight;
         let mut driver = Driver::new(DriverConfig::default(), driver_fence)?;
         driver.handle(DriverCommand::RegisterScope {
             scope_id,
@@ -246,6 +250,8 @@ impl RemotePoolDriver {
             pool_id,
             direct_bundle,
             driver: Mutex::new(driver),
+            console_retention: Mutex::new(None),
+            console_max_in_flight,
             worker_registration: AsyncMutex::new(()),
             channels: RwLock::new(HashMap::new()),
             original_owners: Mutex::new(HashMap::new()),

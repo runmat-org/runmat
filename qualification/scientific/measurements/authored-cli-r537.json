@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "cohort": "authored-cli-physics",
+  "record_type": "historical_measurement_import",
+  "is_final_policy_receipt": false,
+  "releaseQualified": false,
+  "measured": {
+    "source_revision": "ad012c3b7042431ea6f3ccc4b3df6adeb468984a",
+    "target": "linux-x86_64",
+    "toolchain": "1.90.0",
+    "command": [
+      "cargo",
+      "test",
+      "--all-targets",
+      "--no-fail-fast",
+      "--all-features",
+      "--package",
+      "runmat",
+      "--package",
+      "runmat-config",
+      "--package",
+      "runmat-execution",
+      "--package",
+      "runmat-execution-artifact",
+      "--package",
+      "runmat-execution-runner",
+      "--package",
+      "runmat-execution-runner-native",
+      "--package",
+      "runmat-execution-transport-native",
+      "--package",
+      "runmat-logging",
+      "--package",
+      "runmat-lsp",
+      "--package",
+      "runmat-node-agent",
+      "--package",
+      "runmat-package",
+      "--package",
+      "runmat-package-cache",
+      "--package",
+      "runmat-package-cache-native",
+      "--package",
+      "runmat-process-host",
+      "--package",
+      "runmat-server-client",
+      "--package",
+      "runmat-test-runner",
+      "--package",
+      "runmat-test-runner-execution",
+      "--package",
+      "runmat-test-runner-native",
+      "--package",
+      "runmat-wasm"
+    ],
+    "profile": {
+      "cargo_profile": "test",
+      "cargo_log_description": "unoptimized",
+      "release": false,
+      "test_lto": "off",
+      "dev_debug": 0,
+      "test_debug": 0,
+      "numerical_dependencies": "Historical Cargo.toml retains package-specific dev opt-level=3 overrides; this is not an entirely unoptimized numerical stack."
+    },
+    "environment": {
+      "RUST_TEST_THREADS": "1",
+      "RUSTUP_TOOLCHAIN": "1.90.0",
+      "CARGO_TARGET_DIR": "/home/nallana/rm1293/targets",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_BUILD_JOBS": "1",
+      "CMAKE_BUILD_PARALLEL_LEVEL": "1",
+      "CARGO_PROFILE_DEV_DEBUG": "0",
+      "CARGO_PROFILE_TEST_DEBUG": "0",
+      "CARGO_PROFILE_RELEASE_DEBUG": "0"
+    },
+    "log_sha256": "5212503e07e79264b0961b505f4e002b58f1847351f672fdf7898555bb52fb0d",
+    "log_location": "/home/nallana/rm1293/logs/settings-linux-r537.tooling-distributed.log",
+    "artifacts": [
+      {
+        "sha256": "a5002ea271bad29cfd91cfc7c377ca21962af88482264f15b40eb4d59dea7fa9",
+        "location": "/home/nallana/rm1293/logs/settings-linux-r603.artifacts/runmat",
+        "original_execution_path": "/home/nallana/rm1293/targets/debug/runmat",
+        "kind": "executed_cli",
+        "bytes": 1363867272,
+        "mtime_utc": "2026-11-02T21:22:13.105606745Z",
+        "archive_ctime_utc": "2026-11-02T23:37:50.595553954Z"
+      },
+      {
+        "sha256": "91a8a9c6b180d842f4d21dd187bf1d6992a709e39e718a3fce6d71274669dac4",
+        "location": "/home/nallana/rm1293/logs/settings-linux-r603.artifacts/typed_fea_geometry_cli-ce02acb478aa43c1",
+        "original_execution_path": "/home/nallana/rm1293/targets/debug/deps/typed_fea_geometry_cli-ce02acb478aa43c1",
+        "kind": "test_harness",
+        "bytes": 883162560,
+        "mtime_utc": "2026-11-02T21:21:17.132040970Z",
+        "archive_ctime_utc": "2026-11-02T23:37:52.927786203Z"
+      }
+    ],
+    "exit_code": 0,
+    "exit_code_basis": "Cargo printed the complete successful target result, then started the next harness. No independent target exit file was captured.",
+    "passed": 12,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 0,
+    "case_names": [
+      "acoustic::authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog",
+      "acoustic::duct::authored_incident_duct_refines_and_reopens_full_partial_complex_components",
+      "acoustic::duct::authored_matched_duct_refines_and_reopens_full_partial_complex_components",
+      "acoustic::duct::authored_volume_velocity_duct_refines_and_reopens_full_partial_complex_components",
+      "acoustic::response::pressure_transient_publishes_its_complete_time_history",
+      "acoustic::response::rigid_cube_cavity_modes_match_rectangular_room_frequencies",
+      "assessments::authored_transient_and_frequency_assessments_reopen_without_re_solving_the_numerical_run",
+      "authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium",
+      "electrical::authored_charged_poisson_tet10_signed_gauge_and_cold_publication",
+      "electrical::authored_electrical_prism_both_equations_orders_sign_and_gauge_reopen_cold",
+      "generated_and_derived_geometry_complete_the_typed_study_pipeline",
+      "harmonic::authored_harmonic_generated_and_explicit_sources_preserve_rod_response_and_phase"
+    ],
+    "seconds": 4347.05,
+    "inputs": {
+      "sha256": "e9b468a0afd474e2350b9f804efb65030191faab9acb6a005c58867c1e5dd8f3",
+      "files": 24727,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "inputs_basis": "Canonical Git inventory reconstructed from the original revision using the declared input roots; not a digest captured during the historical execution. Original frozen-source manifest and retirement guard are retained in the provenance record.",
+    "parent_run": {
+      "tooling_distributed_status": "interrupted_after_completed_target",
+      "tooling_distributed_exit_code": null,
+      "earlier_runtime_exit_code": 101,
+      "controller_exit_file_value": 0,
+      "controller_exit_is_qualification_pass": false,
+      "controller_exit_explanation": "Legacy EXIT trap wrote 0 during authorized retirement; earlier runtime phase failed 101 and tooling-distributed did not complete.",
+      "runtime_exit_record": {
+        "path": "/home/nallana/rm1293/logs/settings-linux-r537.runtime.exit",
+        "sha256": "39b8dc3fc8b44765c8e6f1adee04c5b465e555ab791cc42d0d9e810d5b64297c"
+      },
+      "results_record": {
+        "path": "/home/nallana/rm1293/logs/settings-linux-r537.results.tsv",
+        "sha256": "fffc0c7af7d453746a94343dcf5957b740829f8e32aee029f053bb04dc754fa7",
+        "content": "runtime\t101\n"
+      },
+      "legacy_controller_exit_record": {
+        "path": "/home/nallana/rm1293/logs/settings-linux-r537.exit",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      }
+    },
+    "command_basis": "Reconstructed exactly from the historical runner at source_revision and controller invocation; the runner did not print argv into the captured log.",
+    "toolchain_basis": "R537 controller exports RUSTUP_TOOLCHAIN=1.90.0; a separate contemporaneous rustc -Vv record was not found in this packet.",
+    "artifact_copy_limitations": "Retained archive hashes were measured during this audit, not during the original test. Filesystem timestamps and the retirement narrative support preservation but do not independently prove a contemporaneously hashed byte-for-byte copy. No missing copy record is fabricated."
+  },
+  "historical_inventory": {
+    "path": ".tmp-rm1064/settings-scientific-historical-r615.json",
+    "sha256": "f65aa8a652b45f13546d0bc0beb4a0fbe68ad64da8e09baec8049603724f53ff"
+  },
+  "review_metadata": {
+    "status": "draft_import_only; final receipt and source conservation review pending",
+    "scope": "Original completed 12-case correctness target under its actual test-profile execution; no claim that its interrupted containing command passed or that it executed the future release recipe.",
+    "final_product_smoke_required": true,
+    "final_product_smoke_evidence": "Before final closure, the existing source conservation review must list hashed qualification_evidence witnesses for the actual final packaged CLI product report (complete 31-product results) and matching build/source/artifact identities. Verify that report with the existing product-report validator and review the exact executed final artifact hashes. No new smoke proof schema is introduced.",
+    "conservation_required": "Review every source-input change independently; preserve measured.inputs. Use existing conservation changed_inputs and qualification_evidence guards. This record does not establish conservation.",
+    "provenance_limitations": {
+      "retirement_time_utc": "2026-11-02T23:16:24.038905+00:00",
+      "inspection": "Read-only R615 SSH inspection rehashed both retained archive files and inspected metadata and the embedded CLI path. Retired-source and retirement remote hashes matched the local records.",
+      "copy_manifest_found": false,
+      "bounded_search": "Archive directory listing and ~/rm1293 depth-two search for R603 records and hash manifests; no small contemporaneous artifact-copy manifest or SHA log was found.",
+      "limitations": "Retained archive hashes were measured during this audit, not during the original test. Filesystem timestamps and the retirement narrative support preservation but do not independently prove a contemporaneously hashed byte-for-byte copy. No missing copy record is fabricated."
+    }
+  }
+}

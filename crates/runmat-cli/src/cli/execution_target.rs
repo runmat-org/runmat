@@ -1,9 +1,13 @@
 use anyhow::{bail, Result};
 use clap::Args;
+use runmat_server_client::execution::RemoteEndpointTrust;
 use uuid::Uuid;
 
 #[derive(Args, Clone, Debug, Default, Eq, PartialEq)]
 pub struct ExecutionTargetArgs {
+    /// Organization for local FEA core-hours; defaults to the signed-in organization
+    #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
+    pub org: Option<Uuid>,
     /// Run on this remote cluster instead of the local machine
     #[arg(long)]
     pub cluster: Option<String>,
@@ -13,7 +17,7 @@ pub struct ExecutionTargetArgs {
     /// Remote scheduler queue
     #[arg(long)]
     pub queue: Option<String>,
-    /// Pinned endpoint identity fingerprint trusted for this run
+    /// Optional independent endpoint identity pin (otherwise trust authenticated Server admission)
     #[arg(long)]
     pub trust_identity: Option<String>,
     /// Stable submission identity for safe client retries
@@ -38,7 +42,7 @@ pub struct RemoteExecutionTarget {
     pub cluster: String,
     pub project: Option<Uuid>,
     pub queue: String,
-    pub trust_identity: String,
+    pub trust_identity: RemoteEndpointTrust,
     pub idempotency_key: Option<String>,
     pub workers: u32,
     pub detach: bool,
@@ -58,20 +62,13 @@ impl ExecutionTargetArgs {
             }
             return Ok(ExecutionTarget::Local);
         };
+        if self.org.is_some() {
+            bail!("--org selects local FEA core-hours; remote execution uses the selected project's organization");
+        }
         let cluster = bounded_required(cluster, "cluster")?;
         // Read remote defaults only after selecting a remote route. A trust
         // environment variable must not make ordinary local execution remote.
-        let trust_identity = match self.trust_identity.as_deref() {
-            Some(value) => bounded_required(value, "trust identity")?,
-            None => {
-                let value = std::env::var("RUNMAT_TRUST_IDENTITY").map_err(|error| {
-                    anyhow::anyhow!(error).context(
-                        "remote execution requires --trust-identity or RUNMAT_TRUST_IDENTITY",
-                    )
-                })?;
-                bounded_required(&value, "trust identity")?
-            }
-        };
+        let trust_identity = resolve_endpoint_trust(self.trust_identity.as_deref())?;
         let queue = bounded_required(self.queue.as_deref().unwrap_or("default"), "queue")?;
         if self
             .idempotency_key
@@ -92,6 +89,24 @@ impl ExecutionTargetArgs {
     }
 }
 
+pub(crate) fn resolve_endpoint_trust(pin: Option<&str>) -> Result<RemoteEndpointTrust> {
+    resolve_endpoint_trust_with_environment(pin, || std::env::var("RUNMAT_TRUST_IDENTITY"))
+}
+
+fn resolve_endpoint_trust_with_environment(
+    pin: Option<&str>,
+    environment: impl FnOnce() -> std::result::Result<String, std::env::VarError>,
+) -> Result<RemoteEndpointTrust> {
+    if let Some(pin) = pin {
+        return RemoteEndpointTrust::from_optional_pin(Some(pin));
+    }
+    match environment() {
+        Ok(pin) => RemoteEndpointTrust::from_optional_pin(Some(&pin)),
+        Err(std::env::VarError::NotPresent) => Ok(RemoteEndpointTrust::AuthenticatedServer),
+        Err(error) => Err(anyhow::anyhow!(error).context("invalid RUNMAT_TRUST_IDENTITY")),
+    }
+}
+
 fn bounded_required(value: &str, name: &str) -> Result<String> {
     if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
         bail!("{name} is empty, malformed, or exceeds its bound");
@@ -102,6 +117,49 @@ fn bounded_required(value: &str, name: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn omitted_pin_uses_environment_or_authenticated_server() {
+        assert_eq!(
+            resolve_endpoint_trust_with_environment(None, || Err(std::env::VarError::NotPresent))
+                .unwrap(),
+            RemoteEndpointTrust::AuthenticatedServer
+        );
+        assert_eq!(
+            resolve_endpoint_trust_with_environment(None, || Ok("sha256:environment".into()))
+                .unwrap(),
+            RemoteEndpointTrust::PinnedIdentity("sha256:environment".into())
+        );
+    }
+
+    #[test]
+    fn explicit_pin_takes_precedence_without_reading_environment() {
+        assert_eq!(
+            resolve_endpoint_trust_with_environment(Some("sha256:explicit"), || {
+                panic!("explicit pins must not read the environment")
+            })
+            .unwrap(),
+            RemoteEndpointTrust::PinnedIdentity("sha256:explicit".into())
+        );
+        for pin in ["", "pin other", "pin\nother", &"x".repeat(257)] {
+            assert!(resolve_endpoint_trust_with_environment(Some(pin), || {
+                panic!("invalid explicit pins must not fall back to the environment")
+            })
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn malformed_environment_pin_fails_without_falling_back_to_server_trust() {
+        for pin in ["", "pin other", "pin\nother", &"x".repeat(257)] {
+            assert!(resolve_endpoint_trust_with_environment(None, || Ok(pin.into())).is_err());
+        }
+        let error = resolve_endpoint_trust_with_environment(None, || {
+            Err(std::env::VarError::NotUnicode("invalid".into()))
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("invalid RUNMAT_TRUST_IDENTITY"));
+    }
 
     #[test]
     fn local_target_rejects_remote_only_options() {

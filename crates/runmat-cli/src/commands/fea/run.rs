@@ -311,6 +311,7 @@ async fn execute_sweep_remotely(
             Ok::<PreparedRemoteExecution, anyhow::Error>(remote)
         },
         RemoteSubmissionOptions {
+            console: None,
             project: target.project,
             cluster: target.cluster,
             queue: target.queue,
@@ -462,13 +463,11 @@ fn resolve_execution(
         {
             bail!("remote CLI options require an explicit --cluster override");
         }
-        let profile_name = profile_name.context(
+        profile_name.context(
             "cluster placement without an execution profile requires an explicit --cluster override",
         )?;
         let route = profile.context("execution profile disappeared during placement")?;
-        let trust_identity = route.trust_identity.clone().with_context(|| {
-            format!("execution profile `{profile_name}` has no pinned trust identity")
-        })?;
+        let trust_identity = crate::cli::resolve_endpoint_trust(route.trust_identity.as_deref())?;
         let workers = policy
             .and_then(|policy| policy.resources.workers)
             .map_or(1, |range| range.maximum.max(1));

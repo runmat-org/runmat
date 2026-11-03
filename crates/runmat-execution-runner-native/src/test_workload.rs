@@ -90,11 +90,167 @@ pub(crate) struct HostProgramContext<'a> {
     pub cancellation: Option<Arc<AtomicBool>>,
     /// Scheduler reservation within which domain workers admit CPU parallelism.
     pub resources: Option<&'a runmat_execution::resource::ResourceRequest>,
+    pub console_owner: Option<HostConsoleOwner>,
+    pub console_sink: Option<Rc<dyn runmat_runtime::context::PortableConsoleSink>>,
+}
+
+pub(crate) struct HostConsoleOwner {
+    pub owner: Arc<dyn runmat_runtime::context::RuntimeConsoleAdmission>,
+    pub identity: runmat_runtime::context::RuntimeConsoleScopeIdentity,
+    pub budget: runmat_execution::console::ConsoleBudget,
 }
 
 pub(crate) async fn execute_host_program_request_in_context(
     request: ProgramExecutionRequest,
     context: HostProgramContext<'_>,
+) -> ProgramExecutionResponse {
+    execute_host_program_request_inner(request, context, None).await
+}
+
+/// One terminal transport owns and seals this invocation's existing capture.
+/// Session cleanup completes before the transcript leaves its original owner.
+pub(crate) async fn execute_host_program_request_with_console(
+    request: ProgramExecutionRequest,
+    context: HostProgramContext<'_>,
+) -> (
+    ProgramExecutionResponse,
+    Option<crate::console_bridge::NativeCapturedConsole>,
+) {
+    let admission =
+        runmat_execution::console::invocation_memory_bytes(&request.environment, request.console)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| match context.resources {
+                Some(resources) if bytes > resources.memory_bytes => {
+                    Err("invocation console exceeds its authenticated memory reservation".into())
+                }
+                None if request.console.is_some() => {
+                    Err("captured console requires its authenticated allocation reservation".into())
+                }
+                _ => Ok(()),
+            })
+            .and_then(|()| match (request.console, context.resources) {
+                (Some(limits), Some(resources))
+                    if limits
+                        .storage_profile()
+                        .map_err(|error| error.to_string())?
+                        .max_encoded_bytes
+                        > resources.max_artifact_bytes =>
+                {
+                    Err("invocation console exceeds its authenticated artifact reservation".into())
+                }
+                _ => Ok(()),
+            });
+    if let Err(message) = admission {
+        return (ProgramExecutionResponse::Failure { message }, None);
+    }
+    let cancellation = context.cancellation.clone();
+    let host = match request
+        .console
+        .map(|limits| {
+            runmat_runtime::context::PortableConsoleHost::with_sink(
+                limits,
+                context.console_sink.clone(),
+            )
+        })
+        .transpose()
+    {
+        Ok(host) => host.map(Rc::new),
+        Err(error) => {
+            return (
+                ProgramExecutionResponse::Failure {
+                    message: error.to_string(),
+                },
+                None,
+            )
+        }
+    };
+    let mut budget = None;
+    if let Some(host) = &host {
+        let Some(admission) = &context.console_owner else {
+            return (
+                ProgramExecutionResponse::Failure {
+                    message: "captured console has no original aggregate admission owner".into(),
+                },
+                None,
+            );
+        };
+        let component = admission.budget.minimum_memory_bytes().and_then(|memory| {
+            request
+                .environment
+                .storage_profile()?
+                .minimum_memory_bytes()
+                .and_then(|environment| {
+                    memory.checked_add(environment).ok_or_else(|| {
+                        runmat_execution::ContractError::Invalid {
+                            field: "console budget",
+                            reason: "invocation storage overflow".into(),
+                        }
+                    })
+                })
+        });
+        match (component, context.resources) {
+            (Ok(bytes), Some(resources))
+                if bytes <= resources.memory_bytes
+                    && admission.budget.max_encoded_bytes <= resources.max_artifact_bytes => {}
+            (Err(error), _) => {
+                return (
+                    ProgramExecutionResponse::Failure {
+                        message: error.to_string(),
+                    },
+                    None,
+                )
+            }
+            _ => {
+                return (
+                    ProgramExecutionResponse::Failure {
+                        message: "console subtree exceeds its authenticated execution reservation"
+                            .into(),
+                    },
+                    None,
+                )
+            }
+        }
+        if let Err(error) =
+            host.install_console_admission(Arc::clone(&admission.owner), admission.identity)
+        {
+            return (
+                ProgramExecutionResponse::Failure {
+                    message: error.to_string(),
+                },
+                None,
+            );
+        }
+        budget = Some(admission.budget);
+    }
+    let response = execute_host_program_request_inner(request, context, host.clone()).await;
+    let completed = cancellation
+        .as_ref()
+        .is_none_or(|flag| !flag.load(std::sync::atomic::Ordering::Acquire));
+    match host
+        .map(|host| {
+            host.finish(completed)
+                .map(|transcript| crate::console_bridge::NativeCapturedConsole {
+                    transcript: Box::new(transcript),
+                    scopes: host.retained_console_source(),
+                    budget: budget.expect("capture admission owns its budget"),
+                })
+        })
+        .transpose()
+    {
+        Ok(console) => (response, console),
+        Err(error) => (
+            ProgramExecutionResponse::Failure {
+                message: error.to_string(),
+            },
+            None,
+        ),
+    }
+}
+
+async fn execute_host_program_request_inner(
+    request: ProgramExecutionRequest,
+    context: HostProgramContext<'_>,
+    console_host: Option<Rc<runmat_runtime::context::PortableConsoleHost>>,
 ) -> ProgramExecutionResponse {
     let HostProgramContext {
         materialized,
@@ -103,6 +259,8 @@ pub(crate) async fn execute_host_program_request_in_context(
         environment,
         cancellation,
         resources,
+        console_owner: _,
+        console_sink: _,
     } = context;
     let project = materialized.and_then(|materialized| materialized.handoff());
     if let Err(error) = request.validate_for_portable_host() {
@@ -187,12 +345,21 @@ pub(crate) async fn execute_host_program_request_in_context(
     if request.artifact.form == ExecutableForm::ExecutableUnitV4
         && bundle.is_none()
         && collective.is_none()
+        && console_host.is_none()
     {
         return crate::program_workload::execute_unit(&request, project, environment, cancellation)
             .await;
     }
     if request.artifact.form != ExecutableForm::TestAttemptV1 {
-        return execute_portable_request(request, materialized, collective, bundle).await;
+        return execute_portable_request(
+            request,
+            materialized,
+            collective,
+            bundle,
+            console_host,
+            cancellation,
+        )
+        .await;
     }
     match execute_test_attempt(&request, materialized, bundle, cancellation).await {
         Ok(execution) => match runmat_test_runner_execution::encode_execution(&execution) {
@@ -210,12 +377,16 @@ async fn execute_portable_request(
     materialized: Option<&crate::materialized_project::MaterializedProject>,
     collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
     bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
+    console_host: Option<Rc<runmat_runtime::context::PortableConsoleHost>>,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> ProgramExecutionResponse {
-    execute_host_unit_request(
+    program_host::execute_host_unit_request_with_console(
         HostUnitRequest::Direct(Box::new(request)),
         materialized,
         collective,
         bundle,
+        console_host,
+        cancellation,
     )
     .await
 }

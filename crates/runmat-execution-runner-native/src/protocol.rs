@@ -9,13 +9,76 @@ pub use runmat_execution_artifact::{
 /// A Graph child receives only a reference to its parent's owned artifact
 /// store; it must verify and deserialize those exact bytes before effects.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub(crate) enum WorkerLaunchRequest {
+    ReservedFeaProxy {
+        request: Box<ReservedProgramExecutionRequest>,
+        console_budget: Option<runmat_execution::console::ConsoleBudget>,
+        fea_parent_admission: bool,
+    },
+    ReservedFea {
+        request: Box<ReservedProgramExecutionRequest>,
+        console_budget: Option<runmat_execution::console::ConsoleBudget>,
+        fea_grant: crate::fea_delegation::WorkerFeaGrant,
+    },
     Direct(Box<WorkerRequest>),
     /// A Direct program with the scheduler's reserved resources, so the worker
     /// admits CPU parallelism within its own reservation.
     Reserved(Box<ReservedProgramExecutionRequest>),
+    ReservedConsole {
+        request: Box<ReservedProgramExecutionRequest>,
+        console_budget: runmat_execution::console::ConsoleBudget,
+    },
     StagedGraph(Box<StagedGraphWorkerLaunch>),
+}
+
+impl WorkerLaunchRequest {
+    pub(crate) fn fea_proxy(&self) -> bool {
+        match self {
+            Self::ReservedFeaProxy {
+                fea_parent_admission,
+                ..
+            } => *fea_parent_admission,
+            Self::StagedGraph(graph) => graph.staged_graph_v10.fea_parent_admission,
+            _ => false,
+        }
+    }
+    pub(crate) fn fea_grant(&self) -> Option<&crate::fea_delegation::WorkerFeaGrant> {
+        match self {
+            Self::ReservedFea { fea_grant, .. } => Some(fea_grant),
+            Self::StagedGraph(graph) => graph.staged_graph_v10.fea_grant.as_ref(),
+            _ => None,
+        }
+    }
+    pub(crate) fn assignment(&self) -> Option<&runmat_execution::ProgramExecutionAssignment> {
+        match self {
+            Self::Reserved(request)
+            | Self::ReservedFeaProxy { request, .. }
+            | Self::ReservedConsole { request, .. }
+            | Self::ReservedFea { request, .. } => request.request().assignment.as_ref(),
+            Self::StagedGraph(graph) => Some(&graph.staged_graph_v10.assignment),
+            _ => None,
+        }
+    }
+    pub(crate) fn resources(&self) -> Option<&runmat_execution::resource::ResourceRequest> {
+        match self {
+            Self::Reserved(request)
+            | Self::ReservedFeaProxy { request, .. }
+            | Self::ReservedConsole { request, .. }
+            | Self::ReservedFea { request, .. } => Some(request.resources()),
+            Self::StagedGraph(graph) => Some(&graph.staged_graph_v10.resources),
+            _ => None,
+        }
+    }
+    pub(crate) fn console_budget(&self) -> Option<runmat_execution::console::ConsoleBudget> {
+        match self {
+            Self::ReservedFeaProxy { console_budget, .. } => *console_budget,
+            Self::ReservedFea { console_budget, .. } => *console_budget,
+            Self::ReservedConsole { console_budget, .. } => Some(*console_budget),
+            Self::StagedGraph(graph) => graph.staged_graph_v10.console_budget,
+            Self::Direct(_) | Self::Reserved(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -27,6 +90,7 @@ pub(crate) struct StagedGraphWorkerLaunch {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct StagedGraphWorkerReference {
+    pub fea_parent_admission: bool,
     pub artifact_id: runmat_execution::identity::ArtifactId,
     pub stored_digest: runmat_execution::Digest,
     pub stored_length: u64,
@@ -35,6 +99,10 @@ pub(crate) struct StagedGraphWorkerReference {
     pub requested_outputs: u16,
     /// The original scheduler reservation, never inferred from project policy.
     pub resources: runmat_execution::resource::ResourceRequest,
+    #[serde(deserialize_with = "required_option")]
+    pub console_budget: Option<runmat_execution::console::ConsoleBudget>,
+    #[serde(deserialize_with = "required_option")]
+    pub fea_grant: Option<crate::fea_delegation::WorkerFeaGrant>,
 }
 
 pub const NATIVE_WORKER_MESSAGE_SCHEMA_V2: u16 = 2;
@@ -74,6 +142,9 @@ impl ProgramProgress {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "message", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkerProcessMessage {
+    FeaAdmissionCall {
+        call: crate::fea_proxy::Call,
+    },
     Progress {
         progress: ProgramProgress,
     },
@@ -87,6 +158,8 @@ pub enum WorkerProcessMessage {
         response: WorkerResponse,
         #[serde(deserialize_with = "required_option")]
         console: Option<runmat_execution::console::ConsoleReceipt>,
+        #[serde(deserialize_with = "runmat_execution::console::deserialize_scopes")]
+        console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
     },
     /// Worker-side admission/transport failure before a Program response
     /// exists. It cannot be mistaken for a user-code execution failure.
@@ -117,6 +190,15 @@ pub enum CollectiveProcessResult {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "message", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkerDriverMessage {
+    FeaAdmissionReply {
+        sequence: u64,
+        reply: crate::fea_proxy::Reply,
+    },
+    FeaLeaseUpdate {
+        run_id: String,
+        attempt_id: runmat_execution::identity::AttemptId,
+        update: crate::fea_delegation::FeaLeaseUpdate,
+    },
     CollectiveCompletion {
         context: runmat_execution::SpmdTaskContext,
         id: runmat_types::CollectiveId,

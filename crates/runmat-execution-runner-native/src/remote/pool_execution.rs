@@ -43,7 +43,55 @@ pub(crate) enum RemotePoolExecutionOutcome {
 
 pub(crate) struct RemotePoolExecutionResult {
     pub(crate) response: ProgramExecutionResponse,
+    pub(crate) console: Option<RemoteTerminalConsole>,
+    pub(crate) cancelled: bool,
     pub(super) objects: super::result_objects::RemoteResultObjects,
+}
+
+/// Scheduler retention remains the original evidence owner. Only encoding
+/// borrows it; no complete transcript is cloned to publish the terminal result.
+pub(crate) enum RemoteTerminalConsole {
+    Owned(crate::console_bridge::NativeCapturedConsole),
+    LocalSources {
+        root: Option<runmat_execution::console::ConsoleSourceIdentity>,
+        source: Arc<dyn runmat_runtime::context::RuntimeRetainedConsoleSource>,
+        budget: runmat_execution::console::ConsoleBudget,
+    },
+    Task {
+        pool: Arc<RemotePoolDriver>,
+        task_id: runmat_execution::TaskId,
+    },
+}
+
+impl RemoteTerminalConsole {
+    pub(crate) fn encode(
+        &self,
+        outputs: &runmat_execution_artifact::ProgramExecutionOutputs,
+    ) -> NativeExecutionResult<Vec<u8>> {
+        match self {
+            Self::LocalSources {
+                root,
+                source,
+                budget,
+            } => outputs
+                .encode_with_console_source(
+                    None,
+                    &crate::console_bridge::RuntimeConsoleSourceAdapter(source.as_ref()),
+                    Some(*budget),
+                    *root,
+                )
+                .map_err(protocol),
+            Self::Owned(console) => outputs
+                .encode_with_console_source(
+                    Some(&console.transcript),
+                    &console.source(),
+                    Some(console.budget),
+                    None,
+                )
+                .map_err(protocol),
+            Self::Task { pool, task_id } => pool.encode_terminal_console(*task_id, outputs),
+        }
+    }
 }
 
 impl RemotePoolExecutionResult {
@@ -51,6 +99,8 @@ impl RemotePoolExecutionResult {
     pub(crate) fn without_objects(response: ProgramExecutionResponse) -> Self {
         Self {
             response,
+            console: None,
+            cancelled: false,
             objects: super::result_objects::RemoteResultObjects::None,
         }
     }
@@ -77,6 +127,7 @@ pub(super) struct RemotePoolExecution<'a> {
     pub(super) checkpoint_sequence: u64,
     pub(super) desired_workers: u32,
     pub(super) resources: AllocationResources,
+    pub(super) driver_resources: AllocationResources,
     pub(super) cancellation: tokio::sync::watch::Receiver<bool>,
     pub(super) ready_v1: bool,
     pub(super) clock_parent: Option<super::config::DriverClockParent>,
@@ -112,6 +163,7 @@ pub(super) async fn execute(
         checkpoint_sequence,
         desired_workers,
         resources,
+        driver_resources,
         mut cancellation,
         ready_v1,
         clock_parent,
@@ -187,6 +239,7 @@ pub(super) async fn execute(
             (pool, RootProgram::Graph(admitted))
         }
     };
+    pool.configure_console_retention(&driver_resources)?;
     for object in input_objects {
         if object.is_externalized_value() {
             pool.register_value_object(object.reference, object.bytes)?;

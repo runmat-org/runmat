@@ -141,7 +141,24 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
                 .lock()
                 .expect("test attempt registry poisoned") = Some(launch.clone());
             let started = Instant::now();
-            let execution = self.inner.execute(&session.inner, request).await;
+            let assignment = runmat_execution::ProgramExecutionAssignment {
+                scope_id: launch.scope_id,
+                pool_id: launch.task.pool_id,
+                task_id: launch.task_id,
+                attempt_id: launch.id,
+                worker_id: launch.worker_id,
+                backend: runmat_execution::PoolBackend::LocalProcesses,
+                resources: launch.resource_assignment.clone(),
+            };
+            let execution = self
+                .inner
+                .execute_admitted(
+                    &session.inner,
+                    request,
+                    assignment,
+                    launch.task.resources.clone(),
+                )
+                .await;
             let report = match &execution {
                 Ok(_) => AttemptReport::Succeeded {
                     result: metered_success(&launch, elapsed_millis(started)),

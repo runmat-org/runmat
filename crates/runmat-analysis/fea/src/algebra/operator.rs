@@ -201,17 +201,18 @@ impl AssembledRealSystem {
         rhs
     }
     pub fn prepare_linear(&self) -> Result<PreparedRealLinearSystem, RealSystemError> {
-        self.prepare_linear_with_reuse(None)
+        self.prepare_linear_with_reuse(None, None)
     }
     pub(crate) fn prepare_linear_reusing(
         &self,
         reuse: &mut LinearPreparationReuse,
     ) -> Result<PreparedRealLinearSystem, RealSystemError> {
-        self.prepare_linear_with_reuse(Some(reuse))
+        self.prepare_linear_with_reuse(Some(reuse), None)
     }
-    fn prepare_linear_with_reuse(
+    pub(crate) fn prepare_linear_with_reuse(
         &self,
         reuse: Option<&mut LinearPreparationReuse>,
+        admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     ) -> Result<PreparedRealLinearSystem, RealSystemError> {
         let stiffness = self.operators.stiffness();
         let rhs = self.linear_rhs();
@@ -224,6 +225,7 @@ impl AssembledRealSystem {
             self.constrained_dofs.clone(),
             self.nullspace_evidence.as_ref(),
             reuse,
+            admission,
         )
     }
 
@@ -397,15 +399,16 @@ impl PreparedRealLinearSystem {
         constrained_dofs: Vec<bool>,
         source: Option<&NullspaceEliminationEvidence>,
     ) -> Result<Self, RealSystemError> {
-        Self::try_new_with_reuse(matrix, rhs, constrained_dofs, source, None)
+        Self::try_new_with_reuse(matrix, rhs, constrained_dofs, source, None, None)
     }
-    pub(crate) fn try_new_reusing(
+    pub(crate) fn try_new_admitted(
         matrix: RealSparseMatrix,
         rhs: Vec<f64>,
         constrained_dofs: Vec<bool>,
-        reuse: &mut LinearPreparationReuse,
+        reuse: Option<&mut LinearPreparationReuse>,
+        admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     ) -> Result<Self, RealSystemError> {
-        Self::try_new_with_reuse(matrix, rhs, constrained_dofs, None, Some(reuse))
+        Self::try_new_with_reuse(matrix, rhs, constrained_dofs, None, reuse, admission)
     }
     fn try_new_with_reuse(
         matrix: RealSparseMatrix,
@@ -413,6 +416,7 @@ impl PreparedRealLinearSystem {
         constrained_dofs: Vec<bool>,
         source: Option<&NullspaceEliminationEvidence>,
         reuse: Option<&mut LinearPreparationReuse>,
+        admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     ) -> Result<Self, RealSystemError> {
         if matrix.rows() != matrix.columns()
             || rhs.len() != matrix.rows()
@@ -425,8 +429,10 @@ impl PreparedRealLinearSystem {
         }
         let admissibility = Some(
             match reuse {
-                Some(reuse) => reuse.prepare(&matrix, &rhs, source),
-                None => PreparedSolverAdmissibility::prove(&matrix, &rhs, source),
+                Some(reuse) => reuse.prepare_admitted(&matrix, &rhs, source, admission),
+                None => {
+                    PreparedSolverAdmissibility::prove_admitted(&matrix, &rhs, source, admission)
+                }
             }
             .map_err(RealSystemError::Coercivity)?,
         );

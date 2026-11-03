@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{bail, Context, Result};
 use base64::Engine as _;
 use rand::RngCore as _;
-use runmat_execution::security::{EndpointTrustPolicy, ExecutionTrustTier};
+use runmat_execution::security::EndpointTrustPolicy;
 use runmat_execution::value::{InlineValue, ValuePayload};
 use runmat_execution::{Digest, OutputContract, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
@@ -19,6 +19,7 @@ use runmat_execution_artifact::{
     ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
     PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
+use runmat_server_client::execution::RemoteEndpointTrust;
 use runmat_server_client::execution::{endpoint_evidence, public_error, ExecutionArtifactUpload};
 use runmat_server_client::public_api::types;
 use sha2::{Digest as _, Sha256};
@@ -31,6 +32,7 @@ use crate::commands::session::create_session;
 const RETENTION_SECONDS: u64 = 7 * 24 * 60 * 60;
 const MEDIA_TYPE: &str = "application/vnd.runmat.execution+ciphertext";
 const ENCRYPTION_SUITE: &str = "hkdf-sha256-aes256gcm-v1";
+const DRIVER_MEMORY_BYTES: i64 = 1024 * 1024 * 1024;
 
 pub(crate) struct PreparedRemoteExecution {
     pub revision: ProgramRevision,
@@ -41,10 +43,11 @@ pub(crate) struct PreparedRemoteExecution {
 }
 
 pub(crate) struct RemoteSubmissionOptions {
+    pub console: Option<runmat_execution::console::ConsoleLimits>,
     pub project: Option<Uuid>,
     pub cluster: String,
     pub queue: String,
-    pub trust_identity: String,
+    pub trust_identity: RemoteEndpointTrust,
     pub idempotency_key: Option<String>,
     pub workers: u32,
     pub accelerator: Option<runmat_execution::resource::AcceleratorRequest>,
@@ -57,7 +60,7 @@ pub(crate) struct JobSubmission {
     pub project: Option<Uuid>,
     pub cluster: String,
     pub queue: String,
-    pub trust_identity: String,
+    pub trust_identity: RemoteEndpointTrust,
     pub function: Option<String>,
     pub idempotency_key: Option<String>,
     pub workers: u32,
@@ -192,7 +195,7 @@ pub async fn submit(
         .cloned()
         .context("compiled bundle has no program artifact")?;
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
-        console: None,
+        console: Some(super::console::TERMINAL_CONSOLE_LIMITS),
         environment: runmat_execution::EnvironmentSnapshot::default(),
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
@@ -222,6 +225,7 @@ pub async fn submit(
             objects: Vec::new(),
         },
         RemoteSubmissionOptions {
+            console: Some(super::console::TERMINAL_CONSOLE_LIMITS),
             project,
             cluster,
             queue,
@@ -322,7 +326,7 @@ async fn submit_scoped_with_accelerators<F>(
     revision: ProgramRevision,
     bundle_archive_size: usize,
     prepare: F,
-    options: RemoteSubmissionOptions,
+    mut options: RemoteSubmissionOptions,
     accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
 ) -> Result<types::RunResponse>
 where
@@ -364,13 +368,13 @@ where
         .map(|recipient| recipient.fingerprint.clone());
     let idempotency_key = options
         .idempotency_key
+        .take()
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let request_digest = request_digest(
         &idempotency_key,
         &revision,
         cluster_id.as_str(),
-        &options.queue,
-        options.workers,
+        &options,
         &digest_accelerators,
         recovery_fingerprint.as_deref(),
     );
@@ -398,7 +402,7 @@ where
                 ]),
                 resources: types::ResourceRequestBody {
                     cpu_millicores: 1_000,
-                    memory_bytes: 1024 * 1024 * 1024,
+                    memory_bytes: DRIVER_MEMORY_BYTES,
                     scratch_bytes: 1024 * 1024 * 1024,
                     accelerators: driver_accelerators,
                     maximum_wall_millis: 60 * 60 * 1_000,
@@ -422,6 +426,25 @@ where
         observer(run.id.clone());
     }
     let prepared = prepare(&run.id)?;
+    let console = {
+        let program: runmat_execution_artifact::RemoteProgramObject =
+            serde_json::from_slice(&prepared.descriptor)
+                .context("decode run-scoped program object")?;
+        program.validate()?;
+        match &program {
+            runmat_execution_artifact::RemoteProgramObject::Direct(descriptor) => {
+                descriptor.console
+            }
+            runmat_execution_artifact::RemoteProgramObject::Graph(request) => request
+                .invocation_controls
+                .as_ref()
+                .and_then(|controls| controls.console),
+        }
+    };
+    anyhow::ensure!(
+        console == options.console,
+        "run-scoped console controls changed after submission admission"
+    );
     if prepared.revision != revision
         || size_class(prepared.bundle_archive.len()) != size_class(bundle_archive_size)
     {
@@ -432,6 +455,13 @@ where
         .endpoint_identity
         .context("allocation did not publish endpoint identity")?;
     let evidence = endpoint_evidence(&identity.evidence)?;
+    if admission.run_id != run.id
+        || identity.node_id != evidence.node_id
+        || identity.lease_id != admission.allocation_lease_id
+        || u64::try_from(admission.fencing_token)? != evidence.fencing_token
+    {
+        bail!("endpoint evidence does not match the authenticated allocation");
+    }
     verify_evidence(
         &evidence,
         &run,
@@ -569,14 +599,21 @@ where
         .await
         .map_err(public_error)?
         .into_inner();
-    secret::save(&SavedRemoteRun::new(
+    let mut saved = SavedRemoteRun::new(
         committed.id.clone(),
         server_url,
         project_id.to_string(),
         endpoint_fingerprint,
         &run_key,
         options.output_intent,
-    ))?;
+    );
+    saved.console = console;
+    saved.console_budget = saved.console.map(|_| {
+        runmat_execution_artifact::ProgramExecutionConsoleBudget::for_driver_allocation(
+            DRIVER_MEMORY_BYTES as u64,
+        )
+    });
+    secret::save(&saved)?;
     Ok(committed)
 }
 
@@ -610,7 +647,7 @@ fn verify_evidence(
     evidence: &runmat_execution::security::EndpointIdentityEvidence,
     run: &types::RunResponse,
     allocation_id: &str,
-    trusted_identity: &str,
+    trusted_identity: &RemoteEndpointTrust,
 ) -> Result<()> {
     trust_policy(trusted_identity)?.verify(evidence)?;
     if evidence.org_id != run.org_id
@@ -623,28 +660,14 @@ fn verify_evidence(
     Ok(())
 }
 
-fn trust_policy(identity: &str) -> Result<EndpointTrustPolicy> {
-    if identity.is_empty() {
-        bail!("a pinned endpoint identity fingerprint is required");
-    }
-    Ok(EndpointTrustPolicy {
-        permitted_tiers: [
-            ExecutionTrustTier::CustomerTrusted,
-            ExecutionTrustTier::HostedOrdinary,
-            ExecutionTrustTier::AttestedConfidential,
-        ]
-        .into_iter()
-        .collect(),
-        trusted_identity_fingerprints: [identity.to_string()].into_iter().collect(),
-        allowed_attestation_classes: BTreeSet::new(),
-        require_pinned_identity: true,
-        now_unix_millis: SystemTime::now()
+fn trust_policy(identity: &RemoteEndpointTrust) -> Result<EndpointTrustPolicy> {
+    identity.policy_at(
+        SystemTime::now()
             .duration_since(UNIX_EPOCH)?
             .as_millis()
             .try_into()
             .context("system clock exceeds execution timestamp range")?,
-        maximum_clock_skew_millis: 30_000,
-    })
+    )
 }
 
 fn random_run_key() -> Result<RunKeyMaterial> {
@@ -712,18 +735,27 @@ fn request_digest(
     idempotency_key: &str,
     revision: &ProgramRevision,
     cluster: &str,
-    queue: &str,
-    workers: u32,
+    options: &RemoteSubmissionOptions,
     accelerators: &[runmat_execution::resource::AcceleratorRequest],
     recovery_recipient_fingerprint: Option<&str>,
 ) -> String {
     let mut digest = Sha256::new();
-    digest.update(b"runmat-remote-run-request-v1\0");
+    digest.update(b"runmat-remote-run-request-v2\0");
     digest.update(idempotency_key.as_bytes());
     digest.update(revision.canonical_identity().as_bytes());
     digest.update(cluster.as_bytes());
-    digest.update(queue.as_bytes());
-    digest.update(workers.to_be_bytes());
+    digest.update(options.queue.as_bytes());
+    digest.update(options.workers.to_be_bytes());
+    digest.update(b"\0console\0");
+    match options.console {
+        None => digest.update([0]),
+        Some(limits) => {
+            digest.update([1]);
+            digest.update(limits.max_records.to_be_bytes());
+            digest.update(limits.max_text_bytes.to_be_bytes());
+        }
+    }
+    digest.update(DRIVER_MEMORY_BYTES.to_be_bytes());
     for accelerator in accelerators {
         digest.update(b"\0accelerator\0");
         digest.update(

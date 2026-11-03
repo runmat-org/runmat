@@ -167,18 +167,14 @@ fn solve_affine_constraint_system_with_kind(
 
     let reduced_dofs = reduction.reduced_dof_count;
     let reduced_pattern_entries = reduced_operator.pattern().column_indices().len();
-    let preparation = shared_sparse::with_plan(plan, move || match reuse {
-        Some(reuse) => PreparedRealLinearSystem::try_new_reusing(
+    let preparation = shared_sparse::with_plan(plan, move || {
+        PreparedRealLinearSystem::try_new_admitted(
             reduced_operator,
             reduced_rhs,
             vec![false; reduced_dofs],
             reuse,
-        ),
-        None => PreparedRealLinearSystem::try_new(
-            reduced_operator,
-            reduced_rhs,
-            vec![false; reduced_dofs],
-        ),
+            admission,
+        )
     });
     let prepared = match preparation {
         Ok(prepared) => prepared,

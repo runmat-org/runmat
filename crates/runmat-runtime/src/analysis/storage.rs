@@ -739,6 +739,8 @@ pub fn next_run_id() -> String {
 }
 
 pub fn persist_run_result(run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
+    crate::analysis::fea_run_admission::FeaRunScope::check_publication_checked()
+        .map_err(|denied| denied.to_string())?;
     let guard = capture_artifact_store()?;
     guard.persist_run(run)
 }

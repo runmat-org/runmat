@@ -78,7 +78,22 @@ fn usable_memory(host_available: u64, container_available: Option<u64>) -> u64 {
 /// co-located workers fit (`workers × threads ≤ capacity`). Sweep case concurrency and remote
 /// fan-out derive from the same plan ([`case_concurrency`]).
 pub(super) fn study_allocation(workers: u32, explicit_threads: Option<u32>) -> Result<u32, String> {
-    allocate(cpu_millicores() / 1000, workers, explicit_threads)
+    allocate(fea_cpu_millicores() / 1000, workers, explicit_threads)
+}
+
+/// Numerical defaults fit both this machine and the original admitted FEA root.
+/// This is a planning ceiling, not a mutation of an authored CPU/thread request.
+fn fea_cpu_millicores() -> u32 {
+    admitted_capacity(
+        cpu_millicores(),
+        runmat_runtime::analysis::fea_run_admission::current_fea_cpu_capacity_millicores(),
+    )
+}
+
+fn admitted_capacity(machine: u32, original: Option<u64>) -> u32 {
+    original.map_or(machine, |original| {
+        machine.min(original.min(u64::from(u32::MAX)) as u32)
+    })
 }
 
 fn allocate(capacity: u32, workers: u32, explicit_threads: Option<u32>) -> Result<u32, String> {
@@ -105,7 +120,7 @@ pub(crate) fn case_concurrency(
     cases: usize,
     authored_limit: Option<usize>,
 ) -> usize {
-    let capacity = (cpu_millicores() / 1000).max(1) as usize;
+    let capacity = (fea_cpu_millicores() / 1000).max(1) as usize;
     let per_case =
         (workers_per_case.max(1) as usize).saturating_mul(threads_per_worker.max(1) as usize);
     (capacity / per_case)
@@ -136,5 +151,16 @@ mod tests {
         assert!(allocate(16, 4, Some(17)).is_err());
         assert!(allocate(16, 17, None).is_err());
         assert!(allocate(16, 0, None).is_err());
+    }
+
+    #[test]
+    fn trusted_root_caps_defaults_and_rejects_explicit_excess() {
+        let cap = admitted_capacity(32_000, Some(2_000)) / 1000;
+        assert_eq!(allocate(cap, 1, None).unwrap(), 2);
+        assert_eq!(allocate(cap, 2, None).unwrap(), 1);
+        assert!(allocate(cap, 1, Some(3)).is_err());
+        assert!(allocate(cap, 3, None).is_err());
+        assert!(allocate(admitted_capacity(32_000, Some(999)) / 1000, 1, None).is_err());
+        assert_eq!(admitted_capacity(32_000, None), 32_000);
     }
 }

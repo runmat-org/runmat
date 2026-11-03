@@ -54,8 +54,11 @@ impl RemotePoolDriver {
                     || task.host != host
                     || task.outputs != graph.recipe.outputs
                     || task.invocation_context != graph.context
-                    || task.environment != runmat_execution::EnvironmentSnapshot::default()
-                    || task.console.is_some()
+                    || !runmat_execution_artifact::GraphInvocationControls::matches_original(
+                        graph.invocation_controls.as_ref(),
+                        &task.environment,
+                        task.console,
+                    )
                     || !task.inputs.is_empty()
                     || graph.assignment.is_some()
                     || graph.job_id.is_some()
@@ -126,7 +129,7 @@ impl RemotePoolDriver {
             .driver
             .lock()
             .expect("remote driver poisoned")
-            .snapshot()
+            .snapshot_ref()
             .tasks
             .get(&submission.request.id)
             .cloned();

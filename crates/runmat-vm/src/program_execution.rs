@@ -1086,17 +1086,14 @@ async fn execute_unit_script(
             message: "scripts do not define multiple output ordinals".into(),
         };
     }
-    let result_slot = bytecode
-        .var_names
-        .iter()
-        .find_map(|(slot, name)| (name == "ans").then_some(*slot));
-    let result = crate::interpret_workspace(
+    let result = crate::interpret_script_workspace(
         &bytecode,
         crate::interpreter::vars::InterpreterVars::from_owned(Vec::new()),
         Some("<main>"),
         runtime.clone(),
         None,
         None,
+        usize::from(requested_outputs),
     )
     .await
     .outcome;
@@ -1108,7 +1105,8 @@ async fn execute_unit_script(
                 };
             }
             // Allocated slots are not results: never fabricate an unassigned `ans`.
-            let Some(value) = result_slot
+            let Some(value) = completion
+                .ans_slot
                 .filter(|slot| completion.assigned_slots.contains(slot))
                 .and_then(|slot| completion.values.get(slot).map(|value| value.clone()))
             else {

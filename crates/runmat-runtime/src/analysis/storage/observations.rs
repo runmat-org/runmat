@@ -107,6 +107,8 @@ pub fn persist_thermal_observations(
     completed: &ThermalStudyCompletion,
     source: &ThermalStudyObjectSource,
 ) -> Result<(), String> {
+    crate::analysis::fea_run_admission::FeaRunScope::check_publication_checked()
+        .map_err(|denied| denied.to_string())?;
     capture_artifact_store()?.persist_thermal_observations(run_id, completed, source)
 }
 

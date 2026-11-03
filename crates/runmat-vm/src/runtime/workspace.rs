@@ -833,6 +833,19 @@ pub fn workspace_slot_assigned(index: usize) -> Option<bool> {
     })
 }
 
+pub(crate) fn current_workspace_assigned_slot(name: &str) -> Option<usize> {
+    with_stack(current_owner(), |stack| {
+        let frame = stack.last()?;
+        let slot = *frame.state.names.get(name)?;
+        frame
+            .state
+            .slot_lifecycle
+            .get(&slot)?
+            .is_assigned()
+            .then_some(slot)
+    })
+}
+
 pub fn workspace_slot_name(index: usize) -> Option<String> {
     workspace_slot_name_handle(index).map(|name| name.as_str().to_owned())
 }

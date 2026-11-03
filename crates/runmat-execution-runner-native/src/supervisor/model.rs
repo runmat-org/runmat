@@ -329,6 +329,9 @@ impl LocalJobState {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LocalJobRecord {
+    /// Per-job local account selector; never part of hardware or authored environment.
+    #[serde(default)]
+    pub local_fea_organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
     pub schema_version: u16,
     pub handle: JobHandle,
     /// The persisted request's typed workload. Legacy records omit this field

@@ -25,6 +25,26 @@ mod retention_tests;
 
 const ATTACH_CHUNK_BYTES: usize = 1024 * 1024;
 
+pub(super) fn bind_organization(
+    request: Digest,
+    organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
+) -> Digest {
+    use runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization;
+    let selector = match organization {
+        FeaLocalOrganization::Default => return request,
+        FeaLocalOrganization::Selected(org) => [b"selected\0".as_slice(), org.as_bytes()].concat(),
+        FeaLocalOrganization::Invalid => b"invalid".to_vec(),
+    };
+    Digest::sha256(
+        [
+            b"runmat-local-job-account-selector-v1\0".as_slice(),
+            request.bytes(),
+            &selector,
+        ]
+        .concat(),
+    )
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SupervisorPaths {
     pub root: PathBuf,
@@ -80,6 +100,9 @@ impl SupervisorPaths {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PersistedRequest<W = PersistedWorkload> {
+    #[serde(default)]
+    pub(super) local_fea_organization:
+        runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
     pub(super) schema_version: u16,
     pub(super) handle: JobHandle,
     pub(super) request_digest: Digest,
@@ -129,7 +152,7 @@ impl PersistedRequest {
             PersistedWorkload::Program { submission } => submission.request_digest()?,
             PersistedWorkload::Graph { submission } => submission.request_digest()?,
         };
-        if digest != self.request_digest {
+        if bind_organization(digest, self.local_fea_organization) != self.request_digest {
             return Err(NativeExecutionError::Protocol(
                 "durable job workload differs from its request digest".into(),
             ));
@@ -188,6 +211,7 @@ impl JobStore {
         &self,
         submission: BatchSubmission,
         now: u64,
+        organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
         submission.validate()?;
         let request_digest = submission.request_digest()?;
@@ -199,6 +223,7 @@ impl JobStore {
             working_directory: submission.working_directory.clone(),
         };
         self.create_record(
+            organization,
             request_digest,
             idempotency_key_digest,
             submission.retention_millis,
@@ -212,11 +237,13 @@ impl JobStore {
         &self,
         submission: &ProgramBatchSubmission,
         now: u64,
+        organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
         submission.validate()?;
         let request_digest = submission.request_digest()?;
         let idempotency_key_digest = submission.idempotency_digest();
         self.create_record(
+            organization,
             request_digest,
             idempotency_key_digest,
             submission.retention_millis,
@@ -232,13 +259,14 @@ impl JobStore {
         submission: GraphBatchSubmission,
         now: u64,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
-        self.create_graph_validated(submission.into_validated()?, now)
+        self.create_graph_validated(submission.into_validated()?, now, Default::default())
     }
 
     pub(super) fn create_graph_validated(
         &self,
         validated: super::model::ValidatedGraphBatchSubmission,
         now: u64,
+        organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
         let super::model::ValidatedGraphBatchSubmission {
             submission,
@@ -246,6 +274,7 @@ impl JobStore {
             idempotency_key_digest,
         } = validated;
         self.create_record(
+            organization,
             request_digest,
             idempotency_key_digest,
             submission.retention_millis,
@@ -259,6 +288,7 @@ impl JobStore {
 
     fn create_record<P: Borrow<ProgramBatchSubmission> + Serialize>(
         &self,
+        local_fea_organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
         request_digest: Digest,
         idempotency_key_digest: Option<Digest>,
         retention_millis: u64,
@@ -266,6 +296,7 @@ impl JobStore {
         now: u64,
         frozen_source: Option<(&str, &[u8])>,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+        let request_digest = bind_organization(request_digest, local_fea_organization);
         if let Some(key_digest) = idempotency_key_digest {
             if let Some(record) = self
                 .list()?
@@ -303,6 +334,7 @@ impl JobStore {
             atomic_write(&job_dir.join(source_name), source)?;
         }
         let request = PersistedRequest {
+            local_fea_organization,
             schema_version: 1,
             handle: handle.clone(),
             request_digest,
@@ -312,6 +344,7 @@ impl JobStore {
         };
         atomic_json(&job_dir.join("request.json"), &request)?;
         let mut record = LocalJobRecord {
+            local_fea_organization,
             schema_version: 1,
             handle,
             workload_kind: workload.kind(),
@@ -341,6 +374,7 @@ impl JobStore {
         if request.schema_version != 1
             || request.handle != record.handle
             || request.request_digest != record.request_digest
+            || request.local_fea_organization != record.local_fea_organization
         {
             return Err(NativeExecutionError::Protocol(
                 "durable job workload differs from its stored identity".into(),
@@ -388,6 +422,7 @@ impl JobStore {
             if request.schema_version != 1
                 || request.handle != record.handle
                 || request.request_digest != record.request_digest
+                || request.local_fea_organization != record.local_fea_organization
                 || !(MIN_RETENTION_MILLIS..=MAX_RETENTION_MILLIS)
                     .contains(&request.retention_millis)
             {
@@ -534,6 +569,7 @@ impl JobStore {
                     .join(format!("record.corrupt-{}.json", Uuid::new_v4().simple()));
                 let _ = fs::rename(self.job_dir(job_id).join("record.json"), corrupt);
                 let mut record = LocalJobRecord {
+                    local_fea_organization: request.local_fea_organization,
                     schema_version: 1,
                     handle: request.handle,
                     workload_kind: request.workload.kind(),

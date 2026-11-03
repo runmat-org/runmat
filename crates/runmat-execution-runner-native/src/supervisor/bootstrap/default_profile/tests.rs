@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn hardware_profile_does_not_capture_local_account_selection() {
+    let mut original = NativeExecutionConfig::for_current_executable().unwrap();
+    original.local_fea_organization =
+        runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization::Selected(
+            uuid::Uuid::from_u128(1),
+        );
+    let encoded = serde_json::to_vec(&original).unwrap();
+    let restored: NativeExecutionConfig = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(restored.local_fea_organization, Default::default());
+    let mut other = original.clone();
+    other.local_fea_organization =
+        runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization::Selected(
+            uuid::Uuid::from_u128(2),
+        );
+    assert_eq!(serde_json::to_vec(&other).unwrap(), encoded);
+}
+
+#[test]
 fn default_profile_reuses_original_authority_and_converges_on_racing_publication() {
     let original = NativeExecutionConfig::for_current_executable().unwrap();
     let executable = original.executable.clone();

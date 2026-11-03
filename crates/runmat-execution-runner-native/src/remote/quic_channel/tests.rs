@@ -86,7 +86,7 @@ async fn original_receive_and_decode_failures_reach_waiters_and_reject_later_req
             let diagnostic = if payload.starts_with(b"not") {
                 "invalid remote worker envelope: expected ident"
             } else {
-                "unsupported remote worker protocol 5; expected 9"
+                "unsupported remote worker protocol 5; expected 10"
             };
             assert!(
                 matches!(original.as_ref(), NativeExecutionError::Protocol(message)

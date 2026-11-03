@@ -86,7 +86,9 @@ pub async fn import_figure_scene_from_path_async(
 pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> crate::BuiltinResult<()> {
     super::web::present_figure_on_surface(surface_id, handle)?;
     if take_imported_figure(handle) {
-        let _ = super::web::reset_surface_camera(surface_id);
+        // Binding fits the scene and applies its authored axes views. A second
+        // reset would discard that view and is not part of importing a figure.
+        log::info!("runmat-plot: imported figure bound surface_id={surface_id} handle={handle} camera_reset=false");
     }
     Ok(())
 }

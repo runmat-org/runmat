@@ -19,6 +19,8 @@ pub fn write_canonical_artifact_pair(
 /// any destination is replaced, and a publication failure restores the files
 /// already replaced. Existing destinations are protected unless `force`.
 pub fn write_canonical_artifacts(artifacts: &[(&Path, &[u8])], force: bool) -> Result<(), String> {
+    crate::analysis::fea_run_admission::FeaRunScope::check_publication_checked()
+        .map_err(|denied| denied.to_string())?;
     for (index, (path, _)) in artifacts.iter().enumerate() {
         if artifacts[..index].iter().any(|(other, _)| other == path) {
             return Err("canonical artifact destinations must be distinct".to_string());
@@ -45,7 +47,11 @@ pub fn write_canonical_artifacts(artifacts: &[(&Path, &[u8])], force: bool) -> R
         }
     }
     for index in 0..staged.len() {
-        if let Err(error) = staged[index].publish() {
+        let publication =
+            crate::analysis::fea_run_admission::FeaRunScope::check_publication_checked()
+                .map_err(|denied| denied.to_string())
+                .and_then(|()| staged[index].publish());
+        if let Err(error) = publication {
             let mut rollback_errors = Vec::new();
             if let Err(rollback) = staged[index].restore() {
                 rollback_errors.push(rollback);

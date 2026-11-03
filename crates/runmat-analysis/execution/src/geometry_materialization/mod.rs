@@ -28,6 +28,11 @@ pub use host::{
 mod occt_evaluator;
 pub use occt_evaluator::OcctMeshingEvaluatorProvider;
 mod serial_mesh;
+mod imported_mesh;
+pub use imported_mesh::{
+    mesh_imported_source_serial, ImportedMeshContactSelectors, ImportedSourceMeshingRequest,
+    ImportedSourceMeshingResult,
+};
 pub use serial_mesh::{
     materialize_and_mesh_serial, PreparedFeaGeometry, SerialGeometryMeshingError,
     SerialGeometryMeshingResult,

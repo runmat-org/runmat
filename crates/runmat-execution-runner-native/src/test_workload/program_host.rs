@@ -40,6 +40,7 @@ struct ForeignHostRoute<'a> {
     selected_direct: Option<SelectedDirectRoute<'a>>,
     session: runmat_core::RunMatSession,
     collective: Option<Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+    cancellation: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 type HostResponseFuture<'a> =
@@ -67,7 +68,39 @@ pub(super) fn execute_host_unit_request_with_graphics<'a>(
     bundle: Option<Arc<ExecutionBundle>>,
     graphics: &runmat_core::SessionGraphicsHost,
 ) -> HostResponseFuture<'a> {
-    match prepare_host_unit_route(request, materialized, collective, bundle, graphics) {
+    match prepare_host_unit_route(
+        request,
+        materialized,
+        collective,
+        bundle,
+        graphics,
+        None,
+        None,
+    ) {
+        Ok(execution) => execution,
+        Err(error) => Box::pin(std::future::ready(ProgramExecutionResponse::Failure {
+            message: error.message,
+        })),
+    }
+}
+
+pub(super) fn execute_host_unit_request_with_console<'a>(
+    request: HostUnitRequest,
+    materialized: Option<&'a MaterializedProject>,
+    collective: Option<Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+    bundle: Option<Arc<ExecutionBundle>>,
+    console_host: Option<Rc<runmat_runtime::context::PortableConsoleHost>>,
+    cancellation: Option<Arc<std::sync::atomic::AtomicBool>>,
+) -> HostResponseFuture<'a> {
+    match prepare_host_unit_route(
+        request,
+        materialized,
+        collective,
+        bundle,
+        &runmat_core::SessionGraphicsHost::Unavailable,
+        console_host,
+        cancellation,
+    ) {
         Ok(execution) => execution,
         Err(error) => Box::pin(std::future::ready(ProgramExecutionResponse::Failure {
             message: error.message,
@@ -82,6 +115,8 @@ fn prepare_host_unit_route<'a>(
     collective: Option<Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
     bundle: Option<Arc<ExecutionBundle>>,
     graphics: &runmat_core::SessionGraphicsHost,
+    console_host: Option<Rc<runmat_runtime::context::PortableConsoleHost>>,
+    cancellation: Option<Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<HostResponseFuture<'a>, HostPreparationError> {
     let failure = |message| HostPreparationError { message };
     let runtime_config = match &request {
@@ -210,13 +245,24 @@ fn prepare_host_unit_route<'a>(
         && collective.is_none()
         && selected_direct.is_none()
         && runtime_config.is_none()
+        && console_host.is_none()
         && matches!(graphics, runmat_core::SessionGraphicsHost::Unavailable)
     {
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_host(Rc::new(runmat_runtime::context::NonCapturingPortableHost));
+        let runtime = runtime.with_service_ports(ports);
         return Ok(match request {
-            HostUnitRequest::Direct(request) => {
-                Box::pin(runmat_vm::execute_program_request(*request))
-            }
-            HostUnitRequest::Graph(request) => Box::pin(runmat_vm::execute_graph_request(*request)),
+            HostUnitRequest::Direct(request) => Box::pin(
+                runmat_vm::execute_program_request_with_context(*request, runtime),
+            ),
+            HostUnitRequest::Graph(request) => Box::pin(
+                runmat_vm::execute_graph_request_with_context(*request, runtime),
+            ),
         });
     }
     if selected_direct.is_none() && interop != runmat_types::InteropManifest::empty() {
@@ -255,6 +301,11 @@ fn prepare_host_unit_route<'a>(
             "failed to initialize foreign execution session: {error}"
         ))
     })?;
+    if let Some(host) = console_host {
+        session.install_host_service(host);
+    } else {
+        session.install_host_service(Rc::new(runmat_runtime::context::NonCapturingPortableHost));
+    }
     if let Some(config) = &runtime_config {
         session
             .apply_cluster_runtime_config(config)
@@ -284,6 +335,7 @@ fn prepare_host_unit_route<'a>(
         selected_direct,
         session,
         collective,
+        cancellation,
     })))
 }
 
@@ -294,6 +346,7 @@ async fn execute_foreign_host_route(route: ForeignHostRoute<'_>) -> ProgramExecu
         mut selected_direct,
         mut session,
         collective,
+        cancellation,
     } = route;
     if let Some(selected) = selected_direct.as_ref() {
         if let Err(response) = boxed_selected_install(&mut session, selected, &interop).await {
@@ -305,6 +358,13 @@ async fn execute_foreign_host_route(route: ForeignHostRoute<'_>) -> ProgramExecu
         HostUnitRequest::Graph(request) => request.recipe.program_revision.clone(),
     };
     let runtime = session.execution_runtime_context(revision);
+    let runtime = if let Some(flag) = cancellation {
+        runtime.with_cancellation_token(
+            runmat_execution::cancellation::CancellationToken::from_shared(flag),
+        )
+    } else {
+        runtime
+    };
     let runtime = if let Some(collective) = collective {
         let ports = runtime.service_ports().clone().with_collective(collective);
         runtime.with_service_ports(ports)

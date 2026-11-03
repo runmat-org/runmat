@@ -39,10 +39,14 @@ impl Driver {
             if original.resources.is_none()
                 && original.execution.is_none()
                 && original.console.is_none()
+                && original.console_scopes.is_empty()
+                && original.delegated_console_root.is_none()
             {
                 original.resources = evidence.resources;
                 original.execution = evidence.execution;
                 original.console = evidence.console;
+                original.console_scopes = evidence.console_scopes;
+                original.delegated_console_root = evidence.delegated_console_root;
             }
             return Ok(());
         }
@@ -54,6 +58,8 @@ impl Driver {
             resources: evidence.resources,
             execution: evidence.execution,
             console: evidence.console,
+            console_scopes: evidence.console_scopes,
+            delegated_console_root: evidence.delegated_console_root,
             retired_at_driver_millis: None,
         }));
         self.worker_mut(attempt.request.worker_id)?.lifecycle = WorkerLifecycle::Lost;

@@ -861,13 +861,33 @@ async fn results_data_from_value(
 
 async fn run_study_result_to_object(spec: &AnalysisStudySpec) -> BuiltinResult<Value> {
     let context = OperationContext::new(None, None);
-    let envelope = if let Some(service) = crate::context::legacy::active()
-        .and_then(|runtime| runtime.service_ports().analysis().cloned())
-    {
-        service.execute_study(spec.clone(), context).await
-    } else {
-        analysis_run_study_op(spec, context)
-    }
+    let envelope = crate::analysis::fea_run_admission::async_host::run(
+        crate::analysis::fea_run_admission::FeaRunKind::MeshAndSolve,
+        crate::analysis::analysis_study_content_digest(spec),
+        async {
+            if let Some(service) = crate::context::legacy::active()
+                .and_then(|runtime| runtime.service_ports().analysis().cloned())
+            {
+                service.execute_study(spec.clone(), context.clone()).await
+            } else {
+                analysis_run_study_op(spec, context.clone())
+            }
+        },
+        |denied| {
+            denied.into_operation_error(
+                crate::analysis::ANALYSIS_RUN_STUDY_OPERATION,
+                crate::analysis::ANALYSIS_RUN_STUDY_OP_VERSION,
+                &context,
+            )
+        },
+        |result, lease_error| {
+            crate::analysis::fea_run_admission::entrypoints::merge_lease_error(
+                result,
+                Some(lease_error),
+            )
+        },
+    )
+    .await
     .map_err(|err| operation_error(RUN_NAME, &ERROR_OPERATION, err))?;
     let mut object = serializable_to_object_value(
         RUN_NAME,
@@ -883,13 +903,34 @@ async fn run_sweep(
     spec: &AnalysisStudySweepSpec,
 ) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
     let context = OperationContext::new(None, None);
-    if let Some(service) = crate::context::legacy::active()
-        .and_then(|runtime| runtime.service_ports().analysis().cloned())
-    {
-        service.execute_sweep(spec.clone(), context).await
-    } else {
-        analysis_run_study_sweep_op(spec, context)
-    }
+    let identity = crate::analysis::analysis_study_sweep_identity(spec, &context)?;
+    crate::analysis::fea_run_admission::async_host::run(
+        crate::analysis::fea_run_admission::FeaRunKind::MeshAndSolve,
+        identity.digest(),
+        async {
+            if let Some(service) = crate::context::legacy::active()
+                .and_then(|runtime| runtime.service_ports().analysis().cloned())
+            {
+                service.execute_sweep(spec.clone(), context.clone()).await
+            } else {
+                analysis_run_study_sweep_op(spec, context.clone())
+            }
+        },
+        |denied| {
+            denied.into_operation_error(
+                crate::analysis::ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+                crate::analysis::ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+                &context,
+            )
+        },
+        |result, lease_error| {
+            crate::analysis::fea_run_admission::entrypoints::merge_lease_error(
+                result,
+                Some(lease_error),
+            )
+        },
+    )
+    .await
 }
 
 fn insert_study_context(

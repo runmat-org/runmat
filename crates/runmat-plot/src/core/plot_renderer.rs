@@ -1467,8 +1467,7 @@ impl PlotRenderer {
     /// while preserving the current zoom distance.
     /// For 2D, this is equivalent to Fit Extents (since "home" without data bounds is rarely useful).
     pub fn reset_camera_position(&mut self) {
-        let dir = Vec3::new(1.0, -1.0, 1.0).normalize_or_zero();
-        let data_centers: Vec<Vec3> = (0..self.axes_cameras.len())
+        let data_centers: Vec<Option<Vec3>> = (0..self.axes_cameras.len())
             .map(|idx| {
                 if self.axes_has_3d_content(idx) {
                     self.display_bounds_3d_for_axes(idx)
@@ -1476,7 +1475,6 @@ impl PlotRenderer {
                     self.axes_bounds(idx)
                 }
                 .map(|b| (b.min + b.max) * 0.5)
-                .unwrap_or_else(|| self.axes_cameras[idx].target)
             })
             .collect();
         let display_bounds: PerAxesViewBounds = (0..self.axes_cameras.len())
@@ -1487,12 +1485,7 @@ impl PlotRenderer {
                 c.projection,
                 crate::core::camera::ProjectionType::Perspective { .. }
             ) {
-                let data_center = data_centers.get(idx).copied().unwrap_or(c.target);
-                let dist = (c.position - c.target).length().max(0.1);
-                c.target = data_center;
-                c.up = Vec3::Z;
-                c.position = data_center + dir * dist;
-                c.mark_dirty();
+                c.reset_perspective_orientation(data_centers[idx]);
             } else if let Some((x_min, x_max, y_min, y_max)) = display_bounds[idx] {
                 let mut cam = Self::create_default_camera();
                 if let crate::core::camera::ProjectionType::Orthographic {

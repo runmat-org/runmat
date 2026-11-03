@@ -3,6 +3,7 @@ mod cluster;
 mod evidence;
 mod host;
 mod transfer;
+mod trust;
 
 use anyhow::Result;
 
@@ -16,6 +17,7 @@ pub use cluster::{org_cluster_by_name, project_cluster_by_name};
 pub use evidence::endpoint_evidence;
 pub use host::{execution_host_inventory_from_api, execution_host_inventory_to_api};
 pub use transfer::{ExecutionArtifactUpload, ExecutionClient};
+pub use trust::RemoteEndpointTrust;
 
 pub type RunResponse = public_api::types::RunResponse;
 

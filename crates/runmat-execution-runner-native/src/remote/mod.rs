@@ -9,6 +9,7 @@ mod config;
 mod crypto;
 mod direct_admission;
 mod driver;
+mod fea_admission;
 pub(crate) mod exact_meshing;
 pub(crate) mod exact_structural_study;
 pub(crate) mod exact_structural_sweep;

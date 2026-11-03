@@ -7619,6 +7619,7 @@ dependencies = [
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner-native",
+ "runmat-fea-admission-native",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-geometry-core",
@@ -7874,6 +7875,7 @@ dependencies = [
  "runmat-core",
  "runmat-execution",
  "runmat-execution-artifact",
+ "runmat-fea-admission-native",
  "runmat-gc",
  "runmat-java",
  "runmat-mex",
@@ -8215,6 +8217,20 @@ dependencies = [
 [[package]]
 name = "runmat-extension-abi"
 version = "0.6.2"
+
+[[package]]
+name = "runmat-fea-admission-native"
+version = "0.6.2"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "reqwest 0.12.28",
+ "runmat-execution",
+ "runmat-runtime",
+ "runmat-server-client",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "runmat-fea-source"
@@ -9012,6 +9028,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
@@ -9175,10 +9192,12 @@ dependencies = [
  "runmat-core",
  "runmat-execution",
  "runmat-execution-artifact",
+ "runmat-execution-runner-native",
  "runmat-native-codegen",
  "runmat-native-ffi",
  "runmat-package",
  "runmat-process-host",
+ "runmat-runtime",
  "runmat-test",
  "runmat-test-runner",
  "runmat-types",
@@ -9283,6 +9302,7 @@ dependencies = [
  "miette",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-core",
  "runmat-analysis-execution",
  "runmat-analysis-fea",
  "runmat-analysis-language",

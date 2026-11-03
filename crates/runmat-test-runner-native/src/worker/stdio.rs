@@ -5,8 +5,13 @@ use runmat_test::protocol::{
     negotiate, ProtocolHandshake, ProtocolLimits, WorkerCapability, WorkerRequest, WorkerResponse,
 };
 
-use crate::transport::{read_bootstrap, read_request, write_response};
+use crate::transport::decode_bootstrap;
 use crate::{NativeRunnerError, NativeRunnerResult};
+use runmat_execution_runner_native::fea_proxy;
+use runmat_process_host::ipc::private_control::ControlFrameWriter;
+use runmat_process_host::ipc::{FrameLimits, WorkerParentLink};
+use runmat_runtime::analysis::fea_run_admission::*;
+use std::sync::Arc;
 
 struct InstalledRun {
     plan: TestPlan,
@@ -22,10 +27,8 @@ struct InstalledRun {
 /// remains transport-agnostic, while CLI and Desktop reuse this exact Core
 /// execution adapter instead of implementing independent child loops.
 pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
-    let control = runmat_process_host::ipc::private_control::connect_host()
-        .await
+    let control = runmat_process_host::ipc::private_control::connect_host_blocking()
         .map_err(|error| NativeRunnerError::Protocol(error.to_string()))?;
-    let (mut input, mut output) = (control.reader, control.writer);
     let local = ProtocolHandshake::current(
         "runmat-native-worker",
         vec![
@@ -35,9 +38,60 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
             WorkerCapability::Coverage,
         ],
     );
-    let first = read_request(&mut input, local.limits)
+    let frame_limits = FrameLimits {
+        max_message_bytes: local.limits.max_message_bytes,
+    };
+    let replies = Arc::new(fea_proxy::Replies::default());
+    let observer_replies = replies.clone();
+    let active_cancel = Arc::new(std::sync::Mutex::new(
+        None::<(
+            runmat_test::identity::RunId,
+            runmat_execution::cancellation::CancellationSource,
+        )>,
+    ));
+    let observer_cancel = active_cancel.clone();
+    let observer_limits = local.limits;
+    let (parent_link, mut frames) = WorkerParentLink::start_bounded_with_observer(
+        control.reader,
+        frame_limits,
+        Some(Arc::new(move |bytes| {
+            if observer_replies.observe(bytes) {
+                return true;
+            }
+            #[derive(serde::Deserialize)]
+            #[serde(tag = "type", rename_all = "snake_case")]
+            enum CancelProbe {
+                Cancel {},
+            }
+            if matches!(
+                serde_json::from_slice::<CancelProbe>(bytes),
+                Ok(CancelProbe::Cancel {})
+            ) {
+                if let Ok(WorkerRequest::Cancel { run_id, .. }) =
+                    runmat_test::protocol::decode_request(bytes, observer_limits)
+                {
+                    if let Some((active, cancellation)) =
+                        &*observer_cancel.lock().unwrap_or_else(|e| e.into_inner())
+                    {
+                        if *active == run_id {
+                            cancellation.cancel(runmat_execution::CancellationReason::User);
+                        }
+                    }
+                }
+            }
+            false
+        })),
+    )
+    .map_err(|error| protocol_error("failed to monitor coordinator", error))?;
+    let mut output = ControlFrameWriter::new(control.writer, frame_limits)
+        .map_err(|error| protocol_error("failed to open coordinator writer", error))?;
+    let first = frames
+        .recv()
         .await
+        .ok_or_else(|| NativeRunnerError::Protocol("coordinator closed before handshake".into()))?
         .map_err(|error| protocol_error("failed to read coordinator handshake", error))?;
+    let first = runmat_test::protocol::decode_request(&first, local.limits)
+        .map_err(|error| protocol_error("invalid coordinator handshake", error))?;
     let remote = match first {
         WorkerRequest::Handshake(handshake) => handshake,
         request => {
@@ -54,13 +108,22 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
         limits,
     )
     .await?;
-    let bootstrap = read_bootstrap(&mut input, limits)
+    let bootstrap = frames
+        .recv()
         .await
+        .ok_or_else(|| NativeRunnerError::Protocol("coordinator closed before bootstrap".into()))?
         .map_err(|error| protocol_error("failed to read native worker bootstrap", error))?;
+    if bootstrap.len() > limits.max_message_bytes as usize {
+        return Err(NativeRunnerError::Protocol(
+            "bootstrap exceeds negotiated limit".into(),
+        ));
+    }
+    let bootstrap = decode_bootstrap(&bootstrap)?;
     runmat_accelerate::initialize_acceleration_provider_with(
         &(&bootstrap.execution.accelerate).into(),
     );
-    let mut input = super::control_requests::ControlRequests::new(input, limits);
+    write_response(&mut output, &WorkerResponse::BootstrapReady, limits).await?;
+    let mut input = super::control_requests::ControlRequests::from_frames(frames, limits);
 
     let mut installed: Option<InstalledRun> = None;
     loop {
@@ -122,7 +185,11 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                 });
                 write_response(&mut output, &WorkerResponse::Ready { run_id }, limits).await?;
             }
-            WorkerRequest::Execute { test_id, attempt } => {
+            WorkerRequest::Execute {
+                test_id,
+                attempt,
+                admission,
+            } => {
                 let Some(run) = installed.as_mut() else {
                     reject(
                         &mut output,
@@ -133,14 +200,40 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                     .await?;
                     continue;
                 };
+                let provider: Arc<dyn FeaRunAdmission> = if let Some(admission) = admission {
+                    admission
+                        .assignment
+                        .validate()
+                        .map_err(|error| protocol_error("invalid test assignment", error))?;
+                    admission
+                        .assignment
+                        .resources
+                        .validate_for_request(&admission.resources)
+                        .map_err(|error| protocol_error("invalid test resources", error))?;
+                    admission
+                        .resources
+                        .validate()
+                        .map_err(|error| protocol_error("invalid test resource request", error))?;
+                    Arc::new(fea_proxy::WorkerAdmission(fea_proxy::Client::new(
+                        admission.assignment,
+                        u64::from(admission.resources.cpu_millicores),
+                        output.clone(),
+                        replies.clone(),
+                    )))
+                } else {
+                    Arc::new(UnadmittedTestWorker)
+                };
+                let admission = FeaRunAdmissionContext::new(provider);
                 let cancellation = runmat_execution::cancellation::CancellationSource::new();
-                let execution = run.session.execute_planned_test(
+                *active_cancel.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some((run.plan.run_id.clone(), cancellation.clone()));
+                let execution = admission.run_future(run.session.execute_planned_test(
                     &run.snapshot,
                     &run.plan,
                     &test_id,
                     attempt,
                     cancellation.token(),
-                );
+                ));
                 tokio::pin!(execution);
                 let result = loop {
                     tokio::select! {
@@ -174,6 +267,10 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                         }
                     }
                 };
+                active_cancel
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take();
                 match result {
                     Ok(attempt) => {
                         for event in attempt.events {
@@ -213,6 +310,7 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                             protocol_error("failed to shut down the worker session", error)
                         })?;
                 }
+                parent_link.disarm();
                 write_response(&mut output, &WorkerResponse::ShutdownComplete, limits).await?;
                 return Ok(());
             }
@@ -261,7 +359,7 @@ fn issue_local_project_paths(
 }
 
 async fn reject(
-    output: &mut (impl tokio::io::AsyncWrite + Unpin),
+    output: &mut ControlFrameWriter,
     limits: ProtocolLimits,
     code: &str,
     message: &str,
@@ -275,6 +373,26 @@ async fn reject(
         limits,
     )
     .await
+}
+
+struct UnadmittedTestWorker;
+impl FeaRunAdmission for UnadmittedTestWorker {
+    fn admit(&self, _: &FeaRunRequest) -> Result<Box<dyn FeaRunPermit>, FeaRunDenied> {
+        Err(FeaRunDenied::LicenseInvalid)
+    }
+}
+
+async fn write_response(
+    output: &ControlFrameWriter,
+    response: &WorkerResponse,
+    limits: ProtocolLimits,
+) -> NativeRunnerResult<()> {
+    let payload = runmat_test::protocol::encode_response(response, limits)
+        .map_err(|error| protocol_error("invalid worker response", error))?;
+    output
+        .write_owned(payload)
+        .await
+        .map_err(|error| protocol_error("failed to write worker response", error))
 }
 
 fn protocol_error(context: &str, error: impl std::fmt::Display) -> NativeRunnerError {

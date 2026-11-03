@@ -21,7 +21,9 @@ fn admitted(
         futures::executor::block_on(supervisor.execution_context(Some("program-key"))).unwrap();
     let submission = crate::supervisor::tests::original_program_submission(context);
     let store = futures::executor::block_on(supervisor.store.lock());
-    let (record, _) = store.create_program(&submission, unix_millis()).unwrap();
+    let (record, _) = store
+        .create_program(&submission, unix_millis(), Default::default())
+        .unwrap();
     let mut scheduler = futures::executor::block_on(supervisor.scheduler.lock());
     scheduler.tick().unwrap();
     let request = scheduler

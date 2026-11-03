@@ -19,6 +19,10 @@ pub struct BackendReport {
     pub report: AttemptReport,
     #[serde(deserialize_with = "runmat_execution::console::deserialize_transcript")]
     pub console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_scopes")]
+    pub console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_source_identity")]
+    pub delegated_console_root: Option<runmat_execution::console::ConsoleSourceIdentity>,
     /// Original provider evidence; absent when the provider cannot establish it.
     #[serde(deserialize_with = "required_option")]
     pub execution: Option<Box<crate::task::AttemptExecutionObservation>>,
@@ -37,6 +41,8 @@ impl BackendReport {
             driver_fence: request.driver_fence,
             report,
             console: None,
+            console_scopes: Vec::new(),
+            delegated_console_root: None,
             execution: None,
             unsuccessful_resources: None,
         }

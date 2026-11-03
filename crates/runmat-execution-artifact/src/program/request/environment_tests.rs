@@ -59,6 +59,7 @@ fn capture_rejects_incomplete_executable_forms_and_oversized_records() {
         .to_string()
         .contains("complete executable unit"));
     validate_console(Some(limits), ExecutableForm::ExecutableUnitV4).unwrap();
+    validate_console(Some(limits), ExecutableForm::InterpreterRegionSourcesV1).unwrap();
     let too_large = runmat_execution::console::ConsoleLimits {
         max_records: 4,
         max_text_bytes: 16 * 1024 * 1024,

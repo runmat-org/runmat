@@ -75,6 +75,10 @@ pub struct AuthToken {
     pub client_id: Option<String>,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("No stored credentials. Run `runmat login` or set RUNMAT_API_KEY.")]
+pub struct SignInRequired;
+
 impl RemoteConfig {
     pub fn load() -> Result<Self> {
         let path = config_path()?;
@@ -282,9 +286,7 @@ pub async fn resolve_auth_token(config: &mut RemoteConfig, server_url: &str) -> 
         config.save()?;
         return Ok(refreshed.access_token);
     }
-    token.context(
-        "No stored credentials. Run `runmat login --server <url> --project <id>` or set RUNMAT_API_KEY."
-    )
+    token.ok_or_else(|| SignInRequired.into())
 }
 
 pub fn build_public_client(server_url: &str, token: &str) -> Result<public_api::Client> {
@@ -929,10 +931,9 @@ async fn refresh_access_token(
         .send()
         .await
         .context("Failed to refresh access token")?;
-    if !response.status().is_success() {
-        let status = response.status();
-        anyhow::bail!("Token refresh failed ({status})")
-    }
+    let response = response
+        .error_for_status()
+        .context("Token refresh failed")?;
     let token = response
         .json::<TokenResponse>()
         .await

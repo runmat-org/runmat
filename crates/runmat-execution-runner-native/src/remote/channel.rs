@@ -149,6 +149,19 @@ pub trait RemoteWorkerChannel: Send + Sync {
 
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport>;
 
+    /// Terminal evidence uses the scheduler's existing canonical report owner.
+    async fn execute_observed(
+        &self,
+        attempt: RemoteAttempt,
+        _console_budget: Option<runmat_execution::console::ConsoleBudget>,
+    ) -> NativeExecutionResult<runmat_execution_runner::port::BackendReport> {
+        let request = attempt.scheduling.clone();
+        let report = self.execute(attempt).await?;
+        Ok(runmat_execution_runner::port::BackendReport::for_request(
+            &request, report,
+        ))
+    }
+
     /// A non-QUIC implementation has no authority to certify physical owner
     /// retirement. Control acknowledgements and ordinary reports are insufficient.
     async fn authenticated_physical_retirement(

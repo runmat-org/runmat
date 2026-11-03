@@ -149,7 +149,85 @@ For `.fea` files, check loads geometry, resolves selectors, validates the study 
 
 FEA JSON mode returns structured validation and plan payloads for CI and tooling.
 
-See the [runmat check reference](/docs/runtime/getting-started/check) for worked diagnostics, project source examples, and guidance on using checks in automation.
+### Project sources
+
+If `main.m` calls `toolbox/helper.m`, add the helper directory to the check:
+
+```bash
+runmat check --path toolbox main.m
+```
+
+A helper beside `main.m` is discoverable without `--path`. For a project-wide
+setting, configure source roots in `runmat.toml`:
+
+```toml
+[package]
+name = "check-example"
+
+[sources]
+roots = ["toolbox"]
+```
+
+Then use `runmat check main.m`. The CLI checks that entrypoint and its statically
+reached source closure; it does not recursively check independent scripts.
+Cross-file diagnostics retain each source's location. Verbose and JSON output
+identify partial analysis of unknown inputs, recursion or conditional calls.
+
+The check does not execute `addpath`. A call whose resolution depends on a runtime
+path change reports `RM-RES0002`; configure a source root or use `--path` to make
+the helper available during analysis. JSON reports that coverage as
+`runtime_dependent`.
+
+### Reading diagnostics
+
+Diagnostic codes, source locations and help text describe the problem. For
+example, a call to an unavailable `definitely_missing` function reports:
+
+```text
+warning[RM-RES0001]: cannot find function `definitely_missing`
+ --> missing.m:1:9
+```
+
+Check the spelling and put the function beside the script or in a configured
+source root. This warning exits successfully by default; `-D warnings` makes it
+fail the check.
+
+For `A = ones(2, 3); B = ones(4, 2); C = A * B;`, the check reports
+`RM-TYPE-MATMUL`: the inner dimensions 3 and 4 differ. Change the matrix dimensions
+to match the intended calculation. Syntax errors, such as `value = ;`, report
+`RunMat:ParseError` with the source location.
+
+### Exit status and automation
+
+| Result | Exit status |
+| --- | --- |
+| No errors or warnings | `0` |
+| Warnings, without `-D warnings` | `0` |
+| Errors, or warnings with `-D warnings` | `1` |
+
+Treat any nonzero status as failure; argument and startup failures may use other
+nonzero values. To save JSON while preserving the command's status:
+
+```sh
+status=0
+runmat check --json -D warnings analysis.m > check.json || status=$?
+cat check.json
+exit "$status"
+```
+
+Keep stderr separate from the JSON. Analysis failures emit the diagnostic report;
+startup, argument or file-loading failures may occur before a report is available.
+`outcome` is `clean`, `warnings` or `failed`. A `partial` analysis domain describes
+coverage and does not itself fail the check.
+
+Diagnostics retain source IDs, byte offsets and line/column coordinates, including
+related locations in other files. The `sources` array maps IDs to paths without
+embedding file contents. When source text is unavailable, paths and line/column
+coordinates are `null`, while byte offsets and source identity remain available.
+`analysis_incomplete_sources`, `call_context_budget_exhausted` and
+`call_context_precision_withheld` describe composition and call-analysis limits.
+
+For checks through the public SDK, see [JavaScript and browser checks](#javascript-and-browser-checks).
 
 ## Pass Runtime Options
 
@@ -192,70 +270,58 @@ JIT and acceleration settings are independent. With `--no-jit`, the VM can still
 
 ## Clusters and Remote Jobs
 
-Cluster administration and durable encrypted jobs use the active Server,
-organization and project credentials. Cluster names are unique within an
-organization, case-insensitive, and contain 1–63 ASCII letters, digits, hyphens
-or underscores, starting with a letter or digit. `--org` is optional with a
-selected organization or one available organization, including a scoped API
-key's organization. Interactive ambiguity prompts for a selection; unattended
-and JSON commands require an explicit context instead. Endpoint trust uses
-`--trust-identity` or `RUNMAT_TRUST_IDENTITY` and is never inferred from an
-unverified replacement identity.
+Create a cluster once, join the machines that will execute work, then add
+`--cluster` to your usual run command. On your computer, sign in as an
+organization administrator and create the cluster:
 
 ```bash
-runmat cluster list
-runmat cluster create --name workstation-pool --queue default
-runmat cluster nodes workstation-pool
-runmat cluster node-state workstation-pool NODE_ID draining
-
-runmat analysis.m --cluster workstation-pool --trust-identity SHA256_FINGERPRINT --detach
-runmat job list
-runmat job show RUN_ID
-runmat job attach RUN_ID
-runmat job cancel RUN_ID
-
-runmat job recovery keygen --output runmat-recovery.json
-runmat job recovery configure --org ORG_ID --key runmat-recovery.json
-runmat job recovery recover RUN_ID --project PROJECT_ID --key runmat-recovery.json
+runmat login
+runmat cluster create --name engineering
 ```
-
-Cluster administration and durable job observation/mutation support `--json`.
-JSON mode emits one complete API object or page without ANSI escapes; human list
-mode uses tab-separated output. The filename shorthand and explicit
-`runmat run analysis.m --cluster workstation-pool` use the same submission path.
 
 On the machine joining the cluster, sign in with an authorized account or supply
 its API key through `RUNMAT_API_KEY`, then join by name:
 
 ```bash
 runmat login
-runmat cluster join workstation-pool
+runmat cluster join engineering
 ```
 
-Join runs in the foreground by default. `--service` installs and starts the
-native systemd, launchd or Windows service instead, requiring the platform's
-administrative privileges. Perform service registration and installation as the
-same OS identity, with that identity's account credentials and selected
-organization. The running agent uses only its machine credential, not the
-account credential used to authorize registration.
-
-Local lifecycle commands live under `node`:
+Leave that terminal running to accept work. Back on your computer, confirm the
+node is active, select a Server project if needed, and run your script from its
+local project directory:
 
 ```bash
-runmat node status
-runmat node inventory
-runmat node service print
-runmat node service install --dry-run
-runmat node run
+runmat cluster nodes engineering
+runmat project select PROJECT_ID
+runmat analysis.m --cluster engineering
 ```
 
-Use the same `--state-directory` and OS identity as the original registration;
-system services have platform-specific state directories. Service configuration
-contains no credentials. Removing the service preserves its private machine
-identity for reinstall; revoke the node before deleting that identity. Do not
-run the foreground agent alongside its installed service.
+RunMat trusts the authenticated Server to identify the execution machine,
+verifies its signed run/allocation evidence, and encrypts the workload automatically.
+`runmat run analysis.m` uses the same path. Omit `--cluster` to run locally.
 
-Organization recovery is optional. The CLI generates and retains the private key locally, sends only its validated public recipient to the Server policy API, and decrypts authorized terminal results or diagnostics on the custodian machine. Once configured, every new submission must carry an envelope for the exact active fingerprint. Keep rotated private keys for the full artifact-retention period. See [Remote Execution](/docs/runtime/execution/remote) for customer-node, hosted-node, browser, draining, and recovery workflows.
+The command waits for completion. Add `--detach` to return after submission:
+
+```bash
+runmat analysis.m --cluster engineering --detach
+runmat job show RUN_ID
+runmat job attach RUN_ID
+runmat job cancel RUN_ID
+```
+
+Join authorizes machine registration with your signed-in account or API key.
+Cluster commands use names. `--org` is optional with a selected or single authorized
+organization; interactive commands ask when the choice is ambiguous.
+
+For background services, automation/JSON output, organization selection,
+cluster-name rules, dependency locking, draining and organization recovery, see
+[Remote Execution](/docs/runtime/execution/remote). These are separate from the
+normal create → join → run flow.
+
+For independent endpoint verification, supply `--trust-identity FINGERPRINT` or
+set `RUNMAT_TRUST_IDENTITY`. Explicit pins remain strict. See the guide's
+[encryption and trust details](/docs/runtime/execution/remote#encryption-and-independent-identity-verification).
 
 ## Packages
 
@@ -284,7 +350,7 @@ runmat test
 runmat test tests/solver --name convergence --tag fast
 runmat test --jobs 4 --isolation process --report junit
 runmat test --coverage --coverage-format lcov
-runmat test --cluster workstation-pool --project PROJECT_ID --trust-identity SHA256_FINGERPRINT --max-workers 8
+runmat test --cluster engineering --max-workers 8
 ```
 
 Runtime and test dependency groups are resolved together before discovery. The default native isolation is a fresh killable process; `session` and `none` are explicit weaker modes. Reports, captured output, diagnostics, artifacts, retries, cancellation, and coverage are projections of one deterministic event/result stream. Human, JSON, JUnit, and TAP reports are supported, as are JSON, LCOV, Cobertura, and HTML coverage reports. Exact options and defaults are available from `runmat test --help`.
@@ -295,7 +361,7 @@ The same portable discovery, plan, coordinator, result, and coverage authorities
 
 Process workers receive platform startup variables and any parent variables explicitly selected with `--allow-env NAME` or `[test].environment-allowlist`. Set `[runtime.foreign.python].executable` to pin interpreter selection; use `--allow-env PATH` when tests intentionally need the parent's command lookup path.
 
-Remote tests use the same coordinator through the general execution scheduler and encrypted execution control/data plane. `--cluster` overrides `[test.cluster].profile`, `--queue` overrides `[test.cluster].queue`, and `--max-workers` caps concurrent remote fixture groups. A pinned `--trust-identity` is required before protected plan, source, result, event, artifact, or coverage content is encrypted to the admitted endpoint. The Server sees only the coarse execution metadata needed for admission, leases, routing, retention, and billing; it cannot decrypt test content or detailed results.
+Remote tests use the same coordinator through the general execution scheduler and encrypted execution control/data plane. `--cluster` overrides `[test.cluster].profile`, `--queue` overrides `[test.cluster].queue`, and `--max-workers` caps concurrent remote fixture groups. Endpoint identity comes from authenticated Server admission; optional `--trust-identity` or `RUNMAT_TRUST_IDENTITY` adds independent pinning. Workload content is encrypted after the signed evidence is verified. The Server receives the coarse metadata needed to coordinate execution, not the plaintext test content or detailed results.
 
 Remote jobs carry an exact compiled program artifact and frozen package identities inside the encrypted execution bundle, without source bytes or a project handoff. Drivers and workers validate the artifact, target, package graph, and source revision identities and execute it without reconstructing a source tree. Remote tests retain the separate source-project closure they need for fixtures, dynamic test discovery, and source-aware reporting; workers validate and materialize those verified logical objects into a private read-only source root. Package resolution and private-package decryption happen only on the submitting client in both cases, so remote workers need no Git, Server-project, registry, or package-decryption credentials and cannot silently select a different dependency.
 
@@ -498,3 +564,55 @@ runmat project fs --help
 ```
 
 Use command help as the source of truth for exact flags in the installed version.
+
+## JavaScript and browser checks
+
+After installing the host filesystem through `initRunMat`, the public SDK's
+`checkSource` calls the same Rust project frontend as the CLI. No JavaScript
+parser or shadow checker runs, and checking does not execute user code.
+
+```typescript
+import { checkSource } from "runmat";
+
+const script = await checkSource({ target: { kind: "script", path: "/project/src/main.m" } });
+const fn = await checkSource({
+  target: { kind: "function", path: "/project/src/helper.m", function: "helper" },
+});
+const project = await checkSource({ target: { kind: "project", path: "/project/runmat.toml" } });
+const diagnostics = project.documents.flatMap(document => document.diagnostics);
+```
+
+Script/function checks compose the statically reached source closure. A project
+check additionally checks **every indexed root-package `.m` source**, including
+unreached scripts/functions. Each document has its own source table; never join
+source IDs from different document reports. Shared dependency diagnostics can
+occur in more than one root report. The compiler's completeness/resolution fields
+remain visible; a clean report does not prove runtime-dependent calls safe.
+
+`userSettingsJson` supplies the optional host-owned user layer; project settings,
+including language compatibility, come from the selected project's actual
+manifest. `policy: "clusterWorker"` excludes the user layer. `searchPaths` uses
+the original captured filesystem CWD, as the CLI does. Function selection uses
+the actual primary HIR module's top-level function identities, not a filename,
+public-callability catalog or name-only match in a companion source. A private
+function file or `server.m` declaring `main` can be checked directly. Parse and
+lowering errors remain their original diagnostics when no HIR is available.
+
+Optional `inputManifest` uses the existing immutable versioned filesystem
+contract. Include the manifest, primary source and any reached sources; missing
+versions reject rather than reading live replacements. Otherwise the check uses
+the current host filesystem captured at request admission. It retains that
+authority across asynchronous reads using a filesystem-owned thread/poll-local
+read scope, without mutating the process provider. Selected runtime filesystem
+authority takes precedence; a different selected owner is refused, never masked.
+Infrastructure/configuration/selection failures reject the
+Promise; compiler findings remain structured diagnostics in the returned report.
+
+Diagnostics retain CLI `code`, `severity`, `category`, `primary`, `secondary`,
+notes/help/suggestions, plus typed producer `stage` and `location`/`related`
+aliases. Stages come from compiler operations, never diagnostic message/category
+strings. Locations preserve UTF-8 byte `start`/`end` and one-based
+Unicode-scalar line/column coordinates. They are **not** zero-based LSP UTF-16
+positions. A span with an unknown explicit source ID stays unlocated rather
+than borrowing another document's coordinates. Older WASM without `checkSource`
+rejects explicitly and requires matching rebuilt browser assets.

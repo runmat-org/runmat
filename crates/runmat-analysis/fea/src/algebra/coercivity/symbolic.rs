@@ -1,4 +1,4 @@
-//! Resource envelopes for coercivity proofs by supernodal sparse Cholesky.
+//! Resource envelopes for coercivity proofs by explicit-scratch sparse Cholesky.
 //!
 //! The proof and the direct solve are one factorization from the shared solver layer
 //! (`runmat-sparse-solvers`): nested-dissection ordering and an exact symbolic analysis give the
@@ -6,7 +6,9 @@
 
 use runmat_sparse_solvers::{
     control::SolveControl,
-    direct::{DirectOptions, FactorEstimate, FactorKind, SymbolicFactorization},
+    direct::{
+        DirectOptions, DirectWorkspacePolicy, FactorEstimate, FactorKind, SymbolicFactorization,
+    },
 };
 
 use crate::algebra::SparsePattern;
@@ -177,7 +179,10 @@ pub(super) fn analyze(pattern: &SparsePattern) -> Result<FactorEstimate, Coerciv
         pattern.rows(),
         &offsets,
         &columns,
-        &DirectOptions::new(FactorKind::Cholesky),
+        &DirectOptions {
+            workspace: DirectWorkspacePolicy::CallerOwned,
+            ..DirectOptions::new(FactorKind::Cholesky)
+        },
         SolveControl::NONE,
     )
     .map_err(|_| CoercivityError::SymbolicOrdering)?;

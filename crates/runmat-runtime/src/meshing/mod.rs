@@ -42,6 +42,27 @@ pub enum MeshingExecutionError {
     Admission(#[from] crate::analysis::fea_run_admission::FeaRunDenied),
     #[error("{0}")]
     Provider(String),
+    #[error("{primary}")]
+    WithLeaseFailure {
+        primary: Box<MeshingExecutionError>,
+        lease: crate::analysis::fea_run_admission::FeaRunDenied,
+    },
+}
+
+impl MeshingExecutionError {
+    fn merge_lease<T>(
+        result: Result<T, Self>,
+        lease: Option<crate::analysis::fea_run_admission::FeaRunDenied>,
+    ) -> Result<T, Self> {
+        match (result, lease) {
+            (result, None) => result,
+            (Ok(_), Some(lease)) => Err(Self::Admission(lease)),
+            (Err(primary), Some(lease)) => Err(Self::WithLeaseFailure {
+                primary: Box::new(primary),
+                lease,
+            }),
+        }
+    }
 }
 
 pub type MeshingExecutionProvider = Arc<
@@ -50,6 +71,66 @@ pub type MeshingExecutionProvider = Arc<
         + Sync
         + 'static,
 >;
+
+/// Await an owned host mesher without changing the canonical request or the
+/// parent's allocation. Hosts without an async mesher keep the existing route.
+pub async fn execute_meshing_async(
+    request: &MeshingExecutionRequest,
+) -> Result<MeshingExecutionOutput, MeshingExecutionError> {
+    use crate::analysis::fea_run_admission::{
+        FeaRunExecutionError, FeaRunKind, FeaRunOutcome, FeaRunRequest, FeaRunScope,
+    };
+    let service = crate::context::legacy::active()
+        .and_then(|runtime| runtime.service_ports().analysis().cloned());
+    let Some(service) = service else {
+        return execute_meshing(request);
+    };
+    let allocation = crate::analysis::fea_run_admission::current_fea_cpu_capacity_millicores()
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+                .min(runmat_cpu_execution::MAX_THREADS) as u64
+                * 1000
+        });
+    let mut admission = FeaRunRequest::local(
+        FeaRunKind::Meshing,
+        allocation,
+        runmat_execution::Digest::from_bytes(request.expected_source_sha256),
+    )?;
+    if let Some(site) = FeaRunScope::current_site() {
+        admission.site = site;
+    }
+    let scope = FeaRunScope::admit(admission)?;
+    let checked = scope
+        .run_checked_result_future(async {
+            let output = match service.generate_mesh(request.clone()) {
+                Some(execution) => execution.await?,
+                None => execute_meshing(request)?,
+            };
+            output
+                .evidence
+                .validate(&output.artifact)
+                .map_err(|error| MeshingExecutionError::Provider(error.to_string()))?;
+            Ok(output)
+        })
+        .await;
+    let outcome = match &checked {
+        Err(failure) => failure.outcome(),
+        Ok(_) if crate::interrupt::is_cancelled() => FeaRunOutcome::Cancelled,
+        Ok(Ok(_)) => FeaRunOutcome::Completed,
+        Ok(Err(_)) => FeaRunOutcome::Failed,
+    };
+    let result = checked
+        .map_err(|failure| match failure {
+            FeaRunExecutionError::Denied(denied) => MeshingExecutionError::Admission(denied),
+            FeaRunExecutionError::Cancelled => {
+                MeshingExecutionError::Provider("FEA run cancelled.".into())
+            }
+        })
+        .and_then(|result| result);
+    MeshingExecutionError::merge_lease(result, scope.settle(outcome).err())
+}
 
 fn provider_slot() -> &'static RwLock<Option<MeshingExecutionProvider>> {
     static PROVIDER: OnceLock<RwLock<Option<MeshingExecutionProvider>>> = OnceLock::new();
@@ -94,23 +175,25 @@ pub fn execute_meshing(
             .min(runmat_cpu_execution::MAX_THREADS) as u64
             * 1000
     });
-    let admission = FeaRunRequest::local(
+    let mut admission = FeaRunRequest::local(
         FeaRunKind::Meshing,
         allocation,
         runmat_execution::Digest::from_bytes(request.expected_source_sha256),
     )?;
+    admission.site = FeaRunScope::admission_site()?;
     let scope = FeaRunScope::admit(admission)?;
+    scope.check()?;
     let result = scope
         .run_sync(|| execute_meshing_admitted(request))
         .map_err(MeshingExecutionError::Provider);
-    scope.settle(if crate::interrupt::is_cancelled() {
+    let settlement = scope.settle(if crate::interrupt::is_cancelled() {
         FeaRunOutcome::Cancelled
     } else if result.is_ok() {
         FeaRunOutcome::Completed
     } else {
         FeaRunOutcome::Failed
     });
-    result
+    MeshingExecutionError::merge_lease(result, settlement.err())
 }
 
 fn execute_meshing_admitted(

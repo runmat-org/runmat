@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
-pub const SAVED_REMOTE_RUN_SCHEMA_VERSION: u16 = 1;
+pub const SAVED_REMOTE_RUN_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,6 +83,10 @@ pub struct SavedRemoteRun {
     pub endpoint_fingerprint: String,
     pub run_key: String,
     pub output_intent: SavedOutputIntent,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_controls")]
+    pub console: Option<runmat_execution::console::ConsoleLimits>,
+    #[serde(deserialize_with = "deserialize_console_budget")]
+    pub console_budget: Option<runmat_execution_artifact::ProgramExecutionConsoleBudget>,
 }
 
 impl SavedRemoteRun {
@@ -103,6 +107,8 @@ impl SavedRemoteRun {
             run_key: base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .encode(run_key.expose_for_recipient_envelope()),
             output_intent,
+            console: None,
+            console_budget: None,
         }
     }
 
@@ -113,6 +119,16 @@ impl SavedRemoteRun {
         if self.run_id != expected_run_id {
             anyhow::bail!("saved remote run identity does not match its storage key");
         }
+        if let Some(limits) = self.console {
+            limits.validate()?;
+        }
+        if let Some(budget) = self.console_budget {
+            budget.validate()?;
+        }
+        anyhow::ensure!(
+            self.console.is_some() == self.console_budget.is_some(),
+            "saved remote console controls are incomplete"
+        );
         match &self.output_intent {
             SavedOutputIntent::FeaStudy {
                 study_id,
@@ -291,6 +307,20 @@ impl SavedRemoteRun {
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy(bytes)
             .map_err(anyhow::Error::from)
     }
+}
+
+fn deserialize_console_budget<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<runmat_execution_artifact::ProgramExecutionConsoleBudget>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let budget: Option<runmat_execution_artifact::ProgramExecutionConsoleBudget> =
+        Deserialize::deserialize(deserializer)?;
+    if let Some(budget) = budget {
+        budget.validate().map_err(serde::de::Error::custom)?;
+    }
+    Ok(budget)
 }
 
 fn validate_frozen_assessments(

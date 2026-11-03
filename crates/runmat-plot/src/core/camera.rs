@@ -566,8 +566,13 @@ impl Camera {
         self.set_clip_planes(near, far);
     }
 
-    /// Convert screen coordinates to world coordinates (for picking)
+    /// Unproject to data coordinates, including inverse axis scaling, for picking.
     pub fn screen_to_world(&mut self, screen_pos: Vec2, screen_size: Vec2, depth: f32) -> Vec3 {
+        self.screen_to_render(screen_pos, screen_size, depth) / self.axis_scale
+    }
+
+    /// Unproject to the axis-scaled coordinates used by camera positions and targets.
+    pub fn screen_to_render(&mut self, screen_pos: Vec2, screen_size: Vec2, depth: f32) -> Vec3 {
         if self.view_proj_dirty {
             self.update_matrices();
         }
@@ -577,9 +582,7 @@ impl Camera {
         let ndc = Vec3::new(ndc_x, ndc_y, depth * 2.0 - 1.0);
 
         // Unproject to world coordinates
-        let view_proj_inv =
-            (self.projection_matrix * self.view_matrix * Mat4::from_scale(self.axis_scale))
-                .inverse();
+        let view_proj_inv = (self.projection_matrix * self.view_matrix).inverse();
         let world_pos = view_proj_inv * ndc.extend(1.0);
 
         if world_pos.w != 0.0 {
@@ -587,6 +590,16 @@ impl Camera {
         } else {
             world_pos.truncate()
         }
+    }
+
+    /// Reset a perspective view around a data-space center, preserving render-space distance.
+    pub(crate) fn reset_perspective_orientation(&mut self, data_center: Option<Vec3>) {
+        let center = data_center.map_or(self.target, |point| point * self.axis_scale);
+        let distance = self.position.distance(self.target).max(0.1);
+        self.target = center;
+        self.up = Vec3::Z;
+        self.position = center + Vec3::new(1.0, -1.0, 1.0).normalize() * distance;
+        self.mark_dirty();
     }
 
     /// Update the view and projection matrices
@@ -674,7 +687,7 @@ impl CameraController {
         Ok(())
     }
 
-    /// Supply an exact host-picked point for under-cursor orbit. If absent, use
+    /// Supply an exact host-picked point in data coordinates for under-cursor orbit. If absent, use
     /// the cursor ray's intersection with the view-target plane, not the origin.
     pub fn set_cursor_orbit_anchor(&mut self, anchor: Option<Vec3>) -> Result<(), &'static str> {
         if anchor.is_some_and(|point| !point.is_finite()) {
@@ -691,24 +704,27 @@ impl CameraController {
             .unwrap_or_else(|| match self.navigation.orbit_center {
                 OrbitCenter::ViewCenter => camera.target,
                 OrbitCenter::Origin => Vec3::ZERO,
-                OrbitCenter::UnderCursor => self.cursor_orbit_anchor.unwrap_or_else(|| {
-                    let size = Vec2::new(viewport.0.max(1) as f32, viewport.1.max(1) as f32);
-                    let near = camera.screen_to_world(position, size, 0.0);
-                    let far = camera.screen_to_world(position, size, 1.0);
-                    let direction = (far - near).normalize_or_zero();
-                    let normal = (camera.target - camera.position).normalize_or_zero();
-                    let denominator = direction.dot(normal);
-                    if denominator.abs() < 1e-6 {
-                        return camera.target;
-                    }
-                    let distance = (camera.target - near).dot(normal) / denominator;
-                    let point = near + direction * distance;
-                    if point.is_finite() && distance >= 0.0 {
-                        point
-                    } else {
-                        camera.target
-                    }
-                }),
+                OrbitCenter::UnderCursor => self
+                    .cursor_orbit_anchor
+                    .map(|point| point * camera.axis_scale)
+                    .unwrap_or_else(|| {
+                        let size = Vec2::new(viewport.0.max(1) as f32, viewport.1.max(1) as f32);
+                        let near = camera.screen_to_render(position, size, 0.0);
+                        let far = camera.screen_to_render(position, size, 1.0);
+                        let direction = (far - near).normalize_or_zero();
+                        let normal = (camera.target - camera.position).normalize_or_zero();
+                        let denominator = direction.dot(normal);
+                        if denominator.abs() < 1e-6 {
+                            return camera.target;
+                        }
+                        let distance = (camera.target - near).dot(normal) / denominator;
+                        let point = near + direction * distance;
+                        if point.is_finite() && distance >= 0.0 {
+                            point
+                        } else {
+                            camera.target
+                        }
+                    }),
             });
         self.drag_orbit_pivot = Some(pivot);
         let target = camera.target;
@@ -978,8 +994,8 @@ impl CameraController {
                 let pos = Vec2::new(position_px.x.clamp(0.0, vw), position_px.y.clamp(0.0, vh));
 
                 // Build a ray from the cursor through the view frustum.
-                let p_near = camera.screen_to_world(pos, screen_size, 0.0);
-                let p_far = camera.screen_to_world(pos, screen_size, 1.0);
+                let p_near = camera.screen_to_render(pos, screen_size, 0.0);
+                let p_far = camera.screen_to_render(pos, screen_size, 1.0);
                 let dir = (p_far - p_near).normalize_or_zero();
                 if dir.length_squared() < 1e-9 {
                     return;
@@ -1084,6 +1100,88 @@ pub enum MouseButton {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scaled_camera_reset_zoom_and_orbit_preserve_their_screen_anchors() {
+        let center = Vec3::new(100.0, 1.0, 25.0);
+        let size = Vec2::new(800.0, 600.0);
+        let cursor = Vec2::new(600.0, 220.0);
+        for explicit_anchor in [false, true] {
+            let mut camera = Camera::new();
+            camera.axis_scale = Vec3::new(0.02, 1.0, 0.04);
+            camera.target = center * camera.axis_scale;
+            camera.position = camera.target + Vec3::new(4.0, -4.0, 4.0);
+            let distance = camera.position.distance(camera.target);
+            camera.reset_perspective_orientation(Some(center));
+            assert!((camera.position.distance(camera.target) - distance).abs() < 1e-5);
+            let projected = camera.view_proj_matrix().project_point3(center);
+            assert!(projected.truncate().length() < 1e-5, "{projected:?}");
+            assert!(projected.z > 0.0 && projected.z < 1.0);
+
+            let near = camera.screen_to_render(cursor, size, 0.0);
+            let far = camera.screen_to_render(cursor, size, 1.0);
+            let direction = (far - near).normalize();
+            let normal = (camera.target - camera.position).normalize();
+            let distance = (camera.target - near).dot(normal) / direction.dot(normal);
+            let anchor = (near + direction * distance) / camera.axis_scale;
+            let screen_anchor = camera.view_proj_matrix().project_point3(anchor).truncate();
+            let mut controller = CameraController::new();
+            controller.mouse_wheel(
+                Vec2::Y,
+                cursor,
+                (800, 600),
+                Modifiers::default(),
+                &mut camera,
+            );
+            let after_zoom = camera.view_proj_matrix().project_point3(anchor).truncate();
+            assert!(
+                after_zoom.distance(screen_anchor) < 1e-4,
+                "{after_zoom:?} != {screen_anchor:?}"
+            );
+
+            controller
+                .set_navigation_options(NavigationOptions {
+                    orbit_center: OrbitCenter::UnderCursor,
+                    ..Default::default()
+                })
+                .unwrap();
+            let orbit_anchor = if explicit_anchor {
+                controller.set_cursor_orbit_anchor(Some(anchor)).unwrap();
+                anchor
+            } else {
+                // Dolly moves the target plane. Without a host-picked point,
+                // orbit selects the cursor intersection with that new plane,
+                // which need not be the pre-zoom anchor at its original depth.
+                let near = camera.screen_to_render(cursor, size, 0.0);
+                let far = camera.screen_to_render(cursor, size, 1.0);
+                let direction = (far - near).normalize();
+                let normal = (camera.target - camera.position).normalize();
+                let distance = (camera.target - near).dot(normal) / direction.dot(normal);
+                (near + direction * distance) / camera.axis_scale
+            };
+            let orbit_screen_anchor = camera
+                .view_proj_matrix()
+                .project_point3(orbit_anchor)
+                .truncate();
+            assert!(orbit_screen_anchor.distance(screen_anchor) < 1e-4);
+            controller.mouse_press(cursor, MouseButton::Left, Modifiers::default());
+            controller.mouse_move(
+                cursor,
+                Vec2::new(8.0, 5.0),
+                (800, 600),
+                Modifiers::default(),
+                &mut camera,
+            );
+            let after_orbit = camera
+                .view_proj_matrix()
+                .project_point3(orbit_anchor)
+                .truncate();
+            assert!(
+                after_orbit.distance(orbit_screen_anchor) < 1e-4,
+                "explicit_anchor={explicit_anchor}: {after_orbit:?} != {orbit_screen_anchor:?}"
+            );
+        }
+    }
 
     #[test]
     fn navigation_options_preserve_defaults_and_apply_trackpad_zoom_and_pivots() {

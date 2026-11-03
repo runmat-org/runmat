@@ -236,6 +236,7 @@ pub async fn run_meshing_worker_stdio(
         &WorkerProcessMessage::Completed {
             response,
             console: None,
+            console_scopes: Vec::new(),
         },
         frame_limits,
     )

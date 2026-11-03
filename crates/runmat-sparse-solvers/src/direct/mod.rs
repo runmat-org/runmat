@@ -73,10 +73,22 @@ impl FactorKind {
     }
 }
 
+/// Ownership contract selected before symbolic analysis and retained for numeric work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectWorkspacePolicy {
+    /// Performance-selected kernels may retain backend-managed packing storage.
+    BackendManaged,
+    /// Numeric work uses only the factor storage and the quoted explicit scratch.
+    /// Supported for simplicial Cholesky and LDLT; pivoting routes require their
+    /// own complete storage contract before they can accept this policy.
+    CallerOwned,
+}
+
 /// Options for symbolic analysis and numeric factorization.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DirectOptions {
     pub kind: FactorKind,
+    pub workspace: DirectWorkspacePolicy,
     pub ordering: Ordering,
     /// Expected pivot signs (original numbering) for [`FactorKind::Ldlt`]: pivots with the wrong
     /// sign or magnitude below `regularization_epsilon` are replaced by `sign *
@@ -94,6 +106,7 @@ impl DirectOptions {
     pub fn new(kind: FactorKind) -> Self {
         Self {
             kind,
+            workspace: DirectWorkspacePolicy::BackendManaged,
             ordering: Ordering::Auto,
             pivot_signs: None,
             regularization_delta: 0.0,
@@ -104,7 +117,9 @@ impl DirectOptions {
     }
 }
 
-/// Exact sizes of a factorization, known after symbolic analysis and before numeric work.
+/// Factor payload and explicit numeric scratch, known after symbolic analysis.
+/// Backend-managed kernels may retain additional packing storage; only a
+/// CallerOwned, non-nominal analysis is eligible for finite numeric admission.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FactorEstimate {
     pub dimension: usize,
@@ -122,7 +137,8 @@ pub struct FactorEstimate {
 }
 
 impl FactorEstimate {
-    /// Factor + workspace bytes: the resident peak of a numeric factorization.
+    /// Factor payload plus explicit scratch, excluding borrowed input arrays.
+    /// This is a numeric admission quote only under CallerOwned policy.
     pub fn peak_bytes(&self) -> u64 {
         self.factor_bytes.saturating_add(self.workspace_bytes)
     }
@@ -215,6 +231,7 @@ pub(crate) enum SymbolicInner {
 /// factorizations and threads.
 pub struct SymbolicFactorization {
     pub(crate) kind: FactorKind,
+    pub(crate) workspace: DirectWorkspacePolicy,
     pub(crate) inner: SymbolicInner,
     pub(crate) fingerprint: PatternFingerprint,
     pub(crate) input_transposed: bool,
@@ -241,6 +258,13 @@ impl SymbolicFactorization {
         options: &DirectOptions,
         control: SolveControl<'_>,
     ) -> SolverResult<Arc<Self>> {
+        if options.workspace == DirectWorkspacePolicy::CallerOwned
+            && !matches!(options.kind, FactorKind::Cholesky | FactorKind::Ldlt)
+        {
+            return Err(SolverError::Unsupported(
+                "caller-owned numeric workspace requires nonpivoting Cholesky or LDLT".into(),
+            ));
+        }
         if matrix.nrows() != matrix.ncols() {
             return Err(SolverError::Dimension(
                 "direct factorization requires a square matrix".into(),
@@ -264,7 +288,7 @@ impl SymbolicFactorization {
                     residual: 0.0,
                     converged: 0,
                 });
-                cholesky::analyze::<T>(matrix, kind, &permutation)?
+                cholesky::analyze::<T>(matrix, kind, options.workspace, &permutation)?
             }
         };
         Ok(Arc::new(symbolic))
@@ -285,6 +309,9 @@ impl SymbolicFactorization {
 
     pub fn kind(&self) -> FactorKind {
         self.kind
+    }
+    pub fn workspace_policy(&self) -> DirectWorkspacePolicy {
+        self.workspace
     }
     pub fn estimate(&self) -> FactorEstimate {
         self.estimate
@@ -367,8 +394,8 @@ impl<T: FactorScalar> DirectSolver<T> {
         Self::factorize(symbolic, matrix, options, None, control)
     }
 
-    /// Numeric factorization on an existing analysis. When `budget_bytes` is given the
-    /// factorization is refused (before allocating) if its quoted peak exceeds it.
+    /// Numeric factorization on an existing analysis. A finite budget requires
+    /// CallerOwned scratch and an exact quote; refusal precedes numeric allocation.
     pub fn factorize(
         symbolic: Arc<SymbolicFactorization>,
         matrix: SparseInput<'_, T>,
@@ -376,7 +403,19 @@ impl<T: FactorScalar> DirectSolver<T> {
         budget_bytes: Option<u64>,
         control: SolveControl<'_>,
     ) -> SolverResult<Self> {
+        if options.kind != symbolic.kind || options.workspace != symbolic.workspace {
+            return Err(SolverError::Unsupported(
+                "numeric strategy differs from the quoted symbolic factorization".into(),
+            ));
+        }
         if let Some(budget) = budget_bytes {
+            if symbolic.workspace != DirectWorkspacePolicy::CallerOwned || symbolic.estimate.nominal
+            {
+                return Err(SolverError::Unsupported(
+                    "finite numeric admission requires an exact caller-owned workspace quote"
+                        .into(),
+                ));
+            }
             let required = symbolic.estimate.peak_bytes();
             if required > budget {
                 return Err(SolverError::OverBudget { required, budget });

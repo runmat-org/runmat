@@ -24,6 +24,62 @@ fn ordinary_runtime(mode: LanguageCompatibilityMode) -> runmat_runtime::context:
 }
 
 #[test]
+fn standalone_fea_admission_is_lazy_and_keeps_each_originating_host() {
+    use runmat_runtime::analysis::fea_run_admission::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    struct Host(AtomicUsize);
+    impl FeaRunAdmission for Host {
+        fn admit(&self, _: &FeaRunRequest) -> Result<Box<dyn FeaRunPermit>, FeaRunDenied> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(FeaRunDenied::LicenseInvalid)
+        }
+    }
+    let first = Arc::new(Host(AtomicUsize::new(0)));
+    let second = Arc::new(Host(AtomicUsize::new(0)));
+    let make = |host: Arc<dyn FeaRunAdmission>| {
+        FeaRunAdmissionContext::new(host)
+            .run_sync(|| ordinary_runtime(LanguageCompatibilityMode::RunMat))
+    };
+    let runtime_first = make(first.clone());
+    let runtime_second = make(second.clone());
+    assert_eq!(first.0.load(Ordering::SeqCst), 0);
+    assert_eq!(second.0.load(Ordering::SeqCst), 0);
+    for (runtime, expected) in [
+        (&runtime_first, first.clone()),
+        (&runtime_second, second.clone()),
+    ] {
+        let _runtime = runtime.enter();
+        let actual = capture_fea_run_admission().unwrap();
+        let expected: Arc<dyn FeaRunAdmission> = expected;
+        assert!(Arc::ptr_eq(&actual, &expected));
+    }
+    let _runtime = runtime_first.enter();
+    let request = FeaRunRequest::local(
+        FeaRunKind::Solve,
+        1000,
+        Digest::sha256(b"compiled-fea-root"),
+    )
+    .unwrap();
+    assert!(matches!(
+        FeaRunScope::admit(request),
+        Err(FeaRunDenied::LicenseInvalid)
+    ));
+    assert_eq!(first.0.load(Ordering::SeqCst), 1);
+    assert_eq!(second.0.load(Ordering::SeqCst), 0);
+    // Explicit invocation hosts still override the stored fallback port.
+    let second_erased: Arc<dyn FeaRunAdmission> = second.clone();
+    FeaRunAdmissionContext::new(second_erased.clone()).run_sync(|| {
+        assert!(Arc::ptr_eq(
+            &capture_fea_run_admission().unwrap(),
+            &second_erased
+        ));
+    });
+}
+
+#[test]
 fn standalone_policy_comes_from_program_revision() {
     for (mode, expected, extensions) in [
         (

@@ -125,15 +125,29 @@ impl Plan<'_> {
 fn resources(
     query: FusionReductionPreparationQuery<'_>,
 ) -> Option<FusionReductionPreparationQuote> {
-    let plan = lexical_plan(&query.controls)?;
     let rank = query.input_rank_upper.max(2);
-    let axes = plan.axes.resolved_capacity(rank);
+    let (retained_axes, axes) = match lexical_plan(&query.controls) {
+        Some(plan) => (plan.axes.retained_len(), plan.axes.resolved_capacity(rank)),
+        None if query.controls.supported()
+            && query
+                .controls
+                .values
+                .first()
+                .is_some_and(is_empty_placeholder)
+            && crate::builtins::common::spec::reduction_rejected_scalar_axis(
+                &query.controls.values[1..],
+            ) =>
+        {
+            (0, 1)
+        }
+        None => return None,
+    };
     Some(FusionReductionPreparationQuote {
         prepare_scratch_bytes: u64::try_from(std::mem::size_of_val(&prepare_impl(query.controls)))
             .ok()?,
         prepared_retained_bytes: reduction_sum_bytes(&[
             reduction_layout::<Prepared>(1)?,
-            reduction_layout::<usize>(plan.axes.retained_len())?,
+            reduction_layout::<usize>(retained_axes)?,
         ])?,
         // Old output shape during scalar collapse; no host-kernel masks or
         // subspace strides are built by this semantic receipt.

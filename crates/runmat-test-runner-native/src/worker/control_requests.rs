@@ -1,5 +1,6 @@
 //! One bounded reader preserves partially received frames across cancellation.
 use runmat_test::protocol::{ProtocolLimits, WorkerRequest};
+#[cfg(test)]
 use tokio::io::AsyncRead;
 use tokio::sync::mpsc;
 
@@ -7,10 +8,13 @@ use crate::{NativeRunnerError, NativeRunnerResult};
 
 pub(super) struct ControlRequests {
     requests: mpsc::Receiver<NativeRunnerResult<WorkerRequest>>,
-    reader: tokio::task::JoinHandle<()>,
+    frames: Option<mpsc::Receiver<runmat_process_host::ProcessHostResult<Vec<u8>>>>,
+    limits: ProtocolLimits,
+    reader: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ControlRequests {
+    #[cfg(test)]
     pub(super) fn new(
         mut input: impl AsyncRead + Unpin + Send + 'static,
         limits: ProtocolLimits,
@@ -31,10 +35,37 @@ impl ControlRequests {
                 }
             }
         });
-        Self { requests, reader }
+        Self {
+            requests,
+            frames: None,
+            limits,
+            reader: Some(reader),
+        }
+    }
+
+    pub(super) fn from_frames(
+        frames: mpsc::Receiver<runmat_process_host::ProcessHostResult<Vec<u8>>>,
+        limits: ProtocolLimits,
+    ) -> Self {
+        let (_, requests) = mpsc::channel(1);
+        Self {
+            requests,
+            frames: Some(frames),
+            limits,
+            reader: None,
+        }
     }
 
     pub(super) async fn next(&mut self) -> NativeRunnerResult<WorkerRequest> {
+        if let Some(frames) = &mut self.frames {
+            let payload = frames
+                .recv()
+                .await
+                .ok_or_else(|| NativeRunnerError::Protocol("native parent reader stopped".into()))?
+                .map_err(|error| NativeRunnerError::Protocol(error.to_string()))?;
+            return runmat_test::protocol::decode_request(&payload, self.limits)
+                .map_err(|error| NativeRunnerError::Protocol(error.to_string()));
+        }
         self.requests.recv().await.ok_or_else(|| {
             NativeRunnerError::Protocol("native worker control reader stopped".into())
         })?
@@ -43,7 +74,9 @@ impl ControlRequests {
 
 impl Drop for ControlRequests {
     fn drop(&mut self) {
-        self.reader.abort();
+        if let Some(reader) = &self.reader {
+            reader.abort();
+        }
     }
 }
 

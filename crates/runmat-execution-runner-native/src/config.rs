@@ -6,9 +6,25 @@ use runmat_execution::{resource::Capability, ExecutionScopeId};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 
+/// Preserve a captured invalid selector as a denial at actual FEA admission.
+/// Plain child programs do not consult the lazy account provider.
+pub(crate) fn local_organization_environment(
+    selector: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
+) -> Option<String> {
+    use runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization;
+    match selector {
+        FeaLocalOrganization::Default => None,
+        FeaLocalOrganization::Selected(org) => Some(org.to_string()),
+        FeaLocalOrganization::Invalid => Some("invalid-local-fea-organization".into()),
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeExecutionConfig {
+    /// Captured local lease account selector, never program environment or authority.
+    #[serde(skip)]
+    pub local_fea_organization: runmat_runtime::analysis::fea_run_admission::FeaLocalOrganization,
     pub executable: PathBuf,
     pub worker_arguments: Vec<String>,
     pub max_workers: u32,
@@ -66,6 +82,8 @@ impl NativeExecutionConfig {
             .map_err(io::Error::other)?;
         accelerator_devices.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(Self {
+            local_fea_organization:
+                runmat_runtime::analysis::fea_run_admission::current_local_fea_organization_hint(),
             executable: std::env::current_exe()?,
             worker_arguments: vec![runmat_process_host::HiddenMode::ExecutionWorker
                 .marker()

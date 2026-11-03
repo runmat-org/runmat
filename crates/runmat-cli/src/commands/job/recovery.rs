@@ -336,6 +336,9 @@ async fn recover(
         outputs
             .validate()
             .context("recovered result payload failed integrity validation")?;
+        if !json {
+            super::console::print_outputs(&outputs)?;
+        }
         let result_object_count = outputs.objects.len();
         let result = outputs.response;
         if json {
@@ -345,8 +348,13 @@ async fn recover(
                     "runId": run_id,
                     "result": result,
                     "resultObjectCount": result_object_count,
+                    "console": outputs.console,
+                    "consoleScopes": outputs.console_scopes,
+                    "consoleBudget": outputs.console_budget,
+                    "delegatedConsoleRoot": outputs.delegated_console_root,
                 }))?
             );
+            super::result::ensure_terminal_success(result, super::result::ResultOrigin::Recovered)?;
         } else {
             println!(
                 "{}",
@@ -382,7 +390,6 @@ async fn recover(
                     "diagnostic": message,
                 }))?
             );
-            return Ok(());
         }
         bail!("{message}");
     }

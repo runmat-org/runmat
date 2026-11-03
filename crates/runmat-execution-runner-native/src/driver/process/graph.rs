@@ -82,6 +82,7 @@ pub(crate) async fn execute_attempt(
     let meters = TransportMeters::default();
     let mut termination = AttemptExecutionTermination::NotStarted;
     let mut console = None;
+    let mut console_scopes = Vec::new();
     let mut retirement = LocalRetirementEvidence::NotStarted;
     let quarantine = Quarantine::default();
     let result = if control.cancellation().load(Ordering::Acquire) {
@@ -108,6 +109,7 @@ pub(crate) async fn execute_attempt(
                     &meters,
                     &mut termination,
                     &mut console,
+                    &mut console_scopes,
                     &mut retirement,
                 )
                 .await
@@ -135,6 +137,7 @@ pub(crate) async fn execute_attempt(
         meters,
         termination,
         console,
+        console_scopes,
         retirement,
     )
 }
@@ -204,7 +207,23 @@ fn prepare(
         resources: request.resource_assignment.clone(),
     };
     Ok((
-        staged_graph_launch(request, &authority, assignment)?,
+        staged_graph_launch(
+            request,
+            &authority,
+            assignment,
+            request
+                .task
+                .console
+                .map(|controls| {
+                    crate::console_retention::ConsoleRetentionOwner::source_subgrant(
+                        request.task.resources.memory_bytes,
+                        controls,
+                        1,
+                    )
+                })
+                .transpose()
+                .map_err(|error| invalid(error.to_string()))?,
+        )?,
         authority,
     ))
 }

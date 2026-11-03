@@ -1,6 +1,6 @@
 //! Revalidate staged Graph work against its original scheduler authority.
 use runmat_execution::identity::ArtifactId;
-use runmat_execution::{EnvironmentSnapshot, PoolBackend, ProgramExecutionAssignment};
+use runmat_execution::{PoolBackend, ProgramExecutionAssignment};
 use runmat_execution_artifact::GraphExecutionRequest;
 use runmat_execution_runner::{AttemptRequest, WorkerSpec};
 
@@ -48,8 +48,11 @@ pub(super) fn validate(
     if !scheduling.task.inputs.is_empty()
         || scheduling.task.invocation_context != graph.context
         || scheduling.task.outputs != graph.recipe.outputs
-        || scheduling.task.environment != EnvironmentSnapshot::default()
-        || scheduling.task.console.is_some()
+        || !runmat_execution_artifact::GraphInvocationControls::matches_original(
+            graph.invocation_controls.as_ref(),
+            &scheduling.task.environment,
+            scheduling.task.console,
+        )
     {
         return Err("graph invocation differs from its original scheduler contract");
     }

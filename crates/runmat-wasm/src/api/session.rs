@@ -73,10 +73,14 @@ pub struct RunMatWasm {
     #[cfg(target_arch = "wasm32")]
     input_handler: RefCell<Option<JsInputHandler>>,
     pub(crate) fea_selection: RefCell<Option<super::fea_execution::BrowserFeaSelection>>,
+    pub(crate) fea_admission: std::rc::Rc<RefCell<Option<JsValue>>>,
+    pub(crate) active_fea_lease:
+        std::rc::Rc<RefCell<Option<super::fea_run_context::ActiveFeaLease>>>,
+    pub(crate) pending_fea_admission: std::rc::Rc<Cell<bool>>,
     clear_workspace_after_flight: Cell<bool>,
     #[cfg(target_arch = "wasm32")]
     local_tasks: RefCell<std::rc::Rc<runmat_runtime::context::BrowserLocalTaskSupervisor>>,
-    config: RefCell<SessionConfig>,
+    config: std::rc::Rc<RefCell<SessionConfig>>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
     pub(crate) active_interrupt:
@@ -247,7 +251,7 @@ struct GeometryInputFile {
 
 impl RunMatWasm {
     pub(crate) fn new(
-        session: RunMatSession,
+        mut session: RunMatSession,
         config: SessionConfig,
         gpu_status: GpuStatus,
         telemetry_sink: Option<Arc<dyn TelemetrySink>>,
@@ -255,6 +259,24 @@ impl RunMatWasm {
         execution_service: std::rc::Rc<BrowserExecutionService>,
         dialog_host: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>>,
     ) -> Self {
+        let fea_admission = std::rc::Rc::new(RefCell::new(None));
+        let active_fea_lease = std::rc::Rc::new(RefCell::new(None));
+        let pending_fea_admission = std::rc::Rc::new(Cell::new(false));
+        let config = std::rc::Rc::new(RefCell::new(config));
+        session.install_analysis_service(std::rc::Rc::new(
+            super::fea_analysis_host::BrowserAnalysisService {
+                host: fea_admission.clone(),
+                active: active_fea_lease.clone(),
+                config: config.clone(),
+            },
+        ));
+        session.install_fea_run_admission_service(std::rc::Rc::new(
+            super::fea_async_host::BrowserFeaAdmission {
+                host: fea_admission.clone(),
+                active: active_fea_lease.clone(),
+                pending: pending_fea_admission.clone(),
+            },
+        ));
         #[cfg(target_arch = "wasm32")]
         let local_tasks = RefCell::new(session.browser_local_task_supervisor());
         Self {
@@ -263,10 +285,13 @@ impl RunMatWasm {
             #[cfg(target_arch = "wasm32")]
             input_handler: RefCell::new(None),
             fea_selection: RefCell::new(None),
+            fea_admission,
+            active_fea_lease,
+            pending_fea_admission,
             clear_workspace_after_flight: Cell::new(false),
             #[cfg(target_arch = "wasm32")]
             local_tasks,
-            config: RefCell::new(config),
+            config,
             gpu_status,
             disposed: Cell::new(false),
             active_interrupt: RefCell::new(None),
@@ -1281,6 +1306,20 @@ impl RunMatWasm {
         session.set_callstack_limit(config.callstack_limit);
         session.set_error_namespace(config.error_namespace.clone());
         session.install_execution_services(self.execution_service.clone());
+        session.install_analysis_service(std::rc::Rc::new(
+            super::fea_analysis_host::BrowserAnalysisService {
+                host: self.fea_admission.clone(),
+                active: self.active_fea_lease.clone(),
+                config: self.config.clone(),
+            },
+        ));
+        session.install_fea_run_admission_service(std::rc::Rc::new(
+            super::fea_async_host::BrowserFeaAdmission {
+                host: self.fea_admission.clone(),
+                active: self.active_fea_lease.clone(),
+                pending: self.pending_fea_admission.clone(),
+            },
+        ));
         if self.execution_service.has_owned_cpu_worker() {
             session.install_owned_builtin_work_service(self.execution_service.clone());
         }

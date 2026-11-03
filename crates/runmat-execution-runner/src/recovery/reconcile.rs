@@ -39,6 +39,8 @@ pub fn reconcile_snapshot_at_fence(
                 Box::new(crate::task::AttemptRetirementUnverified {
                     observed_at_driver_millis,
                     console: None,
+                    console_scopes: Vec::new(),
+                    delegated_console_root: None,
                     resources: None,
                     execution: None,
                     diagnostic: "driver authority replaced before a retirement certificate".into(),

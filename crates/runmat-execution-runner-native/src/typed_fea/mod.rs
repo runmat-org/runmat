@@ -264,12 +264,24 @@ pub async fn execute_checked_fea_locally(
         .resolve_root(options.root.as_ref())
         .map_err(|error| error.to_string())?;
     let (scope, options) = run_admission::admit_root(source, &root, options)?;
-    let result = scope
-        .run_future(execute_admitted_root(source, root, options))
-        .await;
+    let result = match scope
+        .run_checked_result_future(execute_admitted_root(source, root, options))
+        .await
+    {
+        Ok(result) => result,
+        Err(failure) => {
+            let _ = scope.settle(failure.outcome());
+            return Err(failure.to_string());
+        }
+    };
     let outcome = run_admission::outcome(&result);
-    scope.settle(outcome);
-    result
+    let settlement = scope.settle(outcome);
+    match result {
+        Err(original) => Err(original),
+        Ok(value) => settlement
+            .map(|()| value)
+            .map_err(|error| format!("{}: {error}", error.error_code())),
+    }
 }
 
 async fn execute_admitted_root(

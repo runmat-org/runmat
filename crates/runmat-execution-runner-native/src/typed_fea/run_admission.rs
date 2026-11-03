@@ -76,14 +76,22 @@ pub(super) fn admit_root(
         .and_then(|v| v.checked_mul(concurrency as u64))
         .and_then(|v| v.checked_mul(1000))
         .ok_or("FEA CPU allocation overflow")?;
+    if runmat_runtime::analysis::fea_run_admission::current_fea_cpu_capacity_millicores()
+        .is_some_and(|ceiling| millicores > ceiling)
+    {
+        return Err(
+            "FEA worker/thread/case allocation exceeds the original admitted CPU capacity".into(),
+        );
+    }
     let mut identity = source.check_result().revision.0.to_vec();
     identity.extend_from_slice(root_id.as_bytes());
-    let request = FeaRunRequest::local(
+    let mut request = FeaRunRequest::local(
         FeaRunKind::MeshAndSolve,
         millicores,
         runmat_execution::Digest::sha256(identity),
     )
     .map_err(|e| format!("{}: {e}", e.error_code()))?;
+    request.site = FeaRunScope::admission_site().map_err(|e| format!("{}: {e}", e.error_code()))?;
     let scope = FeaRunScope::admit(request).map_err(|e| format!("{}: {e}", e.error_code()))?;
     Ok((scope, options))
 }

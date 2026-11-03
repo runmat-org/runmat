@@ -1,3 +1,5 @@
+#[path = "support/fea_admission.rs"]
+mod fea_admission_support;
 use runmat_analysis_core::{
     AnalysisExcitation, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure,
     AnalysisSequence, CoordinateFrame, EvidenceConfidence, ExcitationAction, ExcitationCase,
@@ -482,6 +484,7 @@ fn material_conflict_contract_model() -> AnalysisModel {
 
 #[test]
 fn geometry_operation_contracts_are_v1_and_versioned() {
+    let _fea_admission = fea_admission_support::guard();
     let context = OperationContext::new(Some("trace-contract-1".to_string()), None);
     let inspect = geometry_inspect_op("/part.stl", TRIANGLE_STL.as_bytes(), context.clone())
         .expect("inspect should succeed");
@@ -567,6 +570,7 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
 
 #[test]
 fn analysis_validate_contract_is_v1_and_maps_codes() {
+    let _fea_admission = fea_admission_support::guard();
     let model = contract_linear_static_model();
     let context = OperationContext::new(Some("trace-contract-2".to_string()), None);
     let envelope = analysis_validate(&model, &CoordinateFrame::Global, context)
@@ -589,6 +593,7 @@ fn analysis_validate_contract_is_v1_and_maps_codes() {
 
 #[test]
 fn analysis_study_workflow_contract_persists_evidence_artifacts() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let _study_artifact_env_guard = study_artifact_env_guard();
         static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
@@ -689,6 +694,7 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
 
 #[test]
 fn analysis_study_sweep_contract_executes_multiple_studies() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let _study_artifact_env_guard = study_artifact_env_guard();
         static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
@@ -762,6 +768,7 @@ fn analysis_study_sweep_contract_executes_multiple_studies() {
 
 #[test]
 fn analysis_study_sweep_contract_can_continue_on_failure() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let _study_artifact_env_guard = study_artifact_env_guard();
         static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
@@ -839,6 +846,7 @@ fn analysis_study_sweep_contract_can_continue_on_failure() {
 
 #[test]
 fn analysis_study_sweep_validate_contract_is_v1_and_typed() {
+    let _fea_admission = fea_admission_support::guard();
     let _study_artifact_env_guard = study_artifact_env_guard();
     static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
     let evidence_root = std::env::temp_dir().join(format!(
@@ -917,6 +925,7 @@ fn analysis_study_sweep_validate_contract_is_v1_and_typed() {
 
 #[test]
 fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
+    let _fea_admission = fea_admission_support::guard();
     let _study_artifact_env_guard = study_artifact_env_guard();
     static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
     let evidence_root = std::env::temp_dir().join(format!(
@@ -992,6 +1001,7 @@ fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
 
 #[test]
 fn analysis_model_decode_rejects_noncanonical_units_and_validate_maps_frame_mismatch() {
+    let _fea_admission = fea_admission_support::guard();
     let canonical = contract_linear_static_model();
     let mut wire = serde_json::to_value(&canonical).expect("encode canonical model");
     assert_eq!(
@@ -1032,6 +1042,7 @@ fn analysis_model_decode_rejects_noncanonical_units_and_validate_maps_frame_mism
 
 #[test]
 fn analysis_run_contract_is_v1_and_numerically_accepted_for_fixture() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = contract_linear_static_model();
         let envelope = analysis_run_linear_static_with_options(
@@ -1091,6 +1102,7 @@ fn analysis_run_contract_is_v1_and_numerically_accepted_for_fixture() {
 
 #[test]
 fn convenience_run_requires_production_qualified_formulation() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let error = analysis_run_linear_static_op(
             &contract_linear_static_model(),
@@ -1110,6 +1122,7 @@ fn convenience_run_requires_production_qualified_formulation() {
 
 #[test]
 fn analysis_run_modal_contract_is_v1_and_typed() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let modal_model = contract_modal_model("contract_modal_model");
 
@@ -1218,6 +1231,7 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
 
 #[test]
 fn analysis_run_modal_with_options_contract_controls_mode_budget() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let modal_model = contract_modal_model("contract_modal_model_opts");
 
@@ -1271,6 +1285,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
 
 #[test]
 fn analysis_run_acoustic_contract_is_v1_and_typed() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let acoustic_model = contract_acoustic_model("contract_acoustic_model");
 
@@ -1328,6 +1343,7 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
 
 #[test]
 fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let mut model = contract_linear_static_model();
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(
@@ -1380,6 +1396,7 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
 
 #[test]
 fn analysis_run_cht_contract_requires_an_authored_study() {
+    let _fea_admission = fea_admission_support::guard();
     let model = contract_cht_model("contract_cht_model");
     let envelope = analysis_run_cht_op(
         &model,
@@ -1402,6 +1419,7 @@ fn analysis_run_cht_contract_requires_an_authored_study() {
 
 #[test]
 fn analysis_run_thermal_contract_preserves_steady_and_transient_identities() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = contract_thermal_model(
             "contract_thermal_model",
@@ -1456,6 +1474,7 @@ fn analysis_run_thermal_contract_preserves_steady_and_transient_identities() {
 
 #[test]
 fn thermomechanical_transient_contract_fails_closed() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = fixture_model(FixtureId::ThermoMechanicalKickoff);
 
@@ -1474,6 +1493,7 @@ fn thermomechanical_transient_contract_fails_closed() {
 
 #[test]
 fn analysis_run_transient_contract_is_v1_and_typed() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let mut model = contract_linear_static_model();
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
@@ -1536,6 +1556,7 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
 
 #[test]
 fn analysis_run_fsi_contract_requires_an_authored_study() {
+    let _fea_admission = fea_admission_support::guard();
     let mut model = contract_linear_static_model();
     model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
         "fsi_sequence",
@@ -1574,6 +1595,7 @@ fn analysis_run_fsi_contract_requires_an_authored_study() {
 
 #[test]
 fn analysis_run_nonlinear_contract_is_v1_and_typed() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = fixture_model(FixtureId::NonlinearAssembly);
         let envelope = analysis_run_nonlinear_with_options_op(
@@ -1689,6 +1711,7 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
 
 #[test]
 fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = fixture_model(FixtureId::NonlinearLoadPathMix);
         let envelope = analysis_run_nonlinear_with_options_op(
@@ -1741,6 +1764,7 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
 
 #[test]
 fn nonlinear_contract_snapshot_matches_expected_shape() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = fixture_model(FixtureId::NonlinearLoadPathMix);
         let envelope = analysis_run_nonlinear_with_options_op(
@@ -1795,6 +1819,7 @@ fn nonlinear_contract_snapshot_matches_expected_shape() {
 
 #[test]
 fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = fixture_model(FixtureId::NonlinearAssembly);
         let envelope = analysis_run_nonlinear_with_options_op(
@@ -1832,6 +1857,7 @@ fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
 
 #[test]
 fn analysis_run_nonlinear_policy_contract_divergence_is_explicit() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = fixture_model(FixtureId::NonlinearAssembly);
         let run_with_policy = |policy| {
@@ -1874,6 +1900,7 @@ fn analysis_run_nonlinear_policy_contract_divergence_is_explicit() {
 
 #[test]
 fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = fixture_model(FixtureId::NonlinearSofteningBenchmark);
         let run_with_policy = |policy| {
@@ -1908,6 +1935,7 @@ fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
 
 #[test]
 fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let _artifact_store_guard = study_artifact_env_guard();
         let model = fixture_model(FixtureId::NonlinearAssembly);
@@ -1954,6 +1982,7 @@ fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
 
 #[test]
 fn analysis_trends_contract_is_v1_and_typed() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let _artifact_store_guard = study_artifact_env_guard();
         storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::InMemory)
@@ -2001,6 +2030,7 @@ fn analysis_trends_contract_is_v1_and_typed() {
 
 #[test]
 fn analysis_run_transient_with_options_contract_controls_execution_window() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let mut model = contract_linear_static_model();
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
@@ -2037,6 +2067,7 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
 
 #[test]
 fn analysis_modal_large_fixture_quality_signals_propagate_to_results() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = fixture_model(FixtureId::ModalLarge);
         let envelope = analysis_run_modal_with_options_op(
@@ -2113,6 +2144,7 @@ fn analysis_modal_large_fixture_quality_signals_propagate_to_results() {
 
 #[test]
 fn analysis_transient_long_fixture_quality_signals_propagate_to_results() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = fixture_model(FixtureId::TransientLong);
         let envelope = analysis_run_transient_with_options_op(
@@ -2187,6 +2219,7 @@ fn analysis_transient_long_fixture_quality_signals_propagate_to_results() {
 
 #[test]
 fn analysis_results_contract_is_v1_and_filterable() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = contract_linear_static_model();
         let run = analysis_run_linear_static_with_options(
@@ -2229,6 +2262,7 @@ fn analysis_results_contract_is_v1_and_filterable() {
 
 #[test]
 fn analysis_results_unknown_field_maps_typed_error_contract() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = contract_linear_static_model();
         let run = analysis_run_linear_static_with_options(
@@ -2266,6 +2300,7 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
 
 #[test]
 fn analysis_results_modal_query_controls_are_typed() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let modal_model = contract_modal_model("contract_modal_results_model");
         let modal_run = analysis_run_modal_with_options_op(
@@ -2336,6 +2371,7 @@ fn analysis_results_modal_query_controls_are_typed() {
 
 #[test]
 fn analysis_results_transient_query_controls_are_typed() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let mut model = contract_linear_static_model();
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
@@ -2403,6 +2439,7 @@ fn analysis_results_transient_query_controls_are_typed() {
 
 #[test]
 fn analysis_results_by_run_id_contract_roundtrip() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let _artifact_store_guard = study_artifact_env_guard();
         let model = contract_linear_static_model();
@@ -2460,6 +2497,7 @@ fn analysis_results_by_run_id_contract_roundtrip() {
 
 #[test]
 fn analysis_results_by_run_id_missing_maps_typed_error_contract() {
+    let _fea_admission = fea_admission_support::guard();
     let err = analysis_results_by_run_id_op(
         "run_does_not_exist",
         AnalysisResultsQuery::default(),
@@ -2474,6 +2512,7 @@ fn analysis_results_by_run_id_missing_maps_typed_error_contract() {
 
 #[test]
 fn analysis_run_contract_maps_fixture_validation_failure() {
+    let _fea_admission = fea_admission_support::guard();
     let missing_materials = fixture_model(FixtureId::MissingMaterials);
     let err = analysis_run_linear_static_with_options(
         &missing_materials,
@@ -2496,6 +2535,7 @@ fn analysis_run_contract_maps_fixture_validation_failure() {
 
 #[test]
 fn multi_material_confidence_mismatch_degrades_publishability() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = material_conflict_contract_model();
         let envelope = analysis_run_linear_static_with_options(
@@ -2524,6 +2564,7 @@ fn multi_material_confidence_mismatch_degrades_publishability() {
 
 #[test]
 fn analysis_run_deterministic_contract_is_stable_across_replays() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = contract_linear_static_model();
         let options = AnalysisRunOptions {
@@ -2564,6 +2605,7 @@ fn analysis_run_deterministic_contract_is_stable_across_replays() {
 
 #[test]
 fn analysis_run_cpu_provenance_and_gpu_admission_are_truthful() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
         let cpu = analysis_run_linear_static_with_options(
@@ -2603,6 +2645,7 @@ fn analysis_run_cpu_provenance_and_gpu_admission_are_truthful() {
 
 #[test]
 fn analysis_run_gpu_without_provider_rejects_before_execution() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
         assert_static_gpu_admission_rejected("trace-contract-8");
@@ -2642,6 +2685,7 @@ impl runmat_accelerate_api::AccelProvider for AdmissionProbeProvider {
 
 #[test]
 fn analysis_run_gpu_with_provider_rejects_without_device_transfers() {
+    let _fea_admission = fea_admission_support::guard();
     {
         static PROVIDER: AdmissionProbeProvider = AdmissionProbeProvider {
             uploads: AtomicU64::new(0),
@@ -2658,6 +2702,7 @@ fn analysis_run_gpu_with_provider_rejects_without_device_transfers() {
 
 #[test]
 fn analysis_run_gpu_upload_failure_provider_is_not_reached() {
+    let _fea_admission = fea_admission_support::guard();
     {
         static PROVIDER: AdmissionProbeProvider = AdmissionProbeProvider {
             uploads: AtomicU64::new(0),
@@ -2674,6 +2719,7 @@ fn analysis_run_gpu_upload_failure_provider_is_not_reached() {
 
 #[test]
 fn strict_policy_quality_reasons_propagate_to_results_contracts() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let _artifact_store_guard = study_artifact_env_guard();
         let model = material_conflict_contract_model();
@@ -2734,6 +2780,7 @@ fn strict_policy_quality_reasons_propagate_to_results_contracts() {
 
 #[test]
 fn balanced_and_strict_reject_the_same_material_conflict() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let model = material_conflict_contract_model();
 
@@ -2807,6 +2854,7 @@ fn balanced_and_strict_reject_the_same_material_conflict() {
 
 #[test]
 fn balanced_and_strict_material_rejection_propagates_through_results_endpoints() {
+    let _fea_admission = fea_admission_support::guard();
     {
         let _artifact_store_guard = study_artifact_env_guard();
         let model = material_conflict_contract_model();
@@ -2920,6 +2968,7 @@ fn balanced_and_strict_material_rejection_propagates_through_results_endpoints()
 
 #[test]
 fn retired_electromagnetic_proxy_operation_contract_cannot_deserialize() {
+    let _fea_admission = fea_admission_support::guard();
     let removed = serde_json::json!({
         "solver": "electromagnetic_potential",
         "options": {
@@ -2934,6 +2983,7 @@ fn retired_electromagnetic_proxy_operation_contract_cannot_deserialize() {
 
 #[test]
 fn maxwell_operation_contract_selects_genuine_complex_defaults() {
+    let _fea_admission = fea_admission_support::guard();
     let options =
         AnalysisSolverOptions::defaults_for(&ProcedureStep::electromagnetic_harmonic("field"))
             .unwrap();

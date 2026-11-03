@@ -27,13 +27,39 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
             evidence_path: spec.meshing_evidence_artifact_path.clone(),
         });
     }
-    let Some(settings) = spec.meshing_settings.clone() else {
+    let Some(request) = study_meshing_request(spec)? else {
         return Ok(ResolvedStudyMesh {
             artifact_path: None,
             evidence_path: None,
         });
     };
-    let output = crate::meshing::execute_meshing(&crate::meshing::MeshingExecutionRequest {
+    let output = crate::meshing::execute_meshing(&request).map_err(|error| error.to_string())?;
+    validate_and_persist_mesh(&output)
+}
+
+/// Resolve the same original request through the host's owned async mesher.
+pub(super) async fn resolve_study_mesh_async(
+    spec: &AnalysisStudySpec,
+) -> Result<ResolvedStudyMesh, String> {
+    if spec.solver_mesh_artifact_path.is_some() {
+        return resolve_study_mesh(spec);
+    }
+    let Some(request) = study_meshing_request(spec)? else {
+        return resolve_study_mesh(spec);
+    };
+    let output = crate::meshing::execute_meshing_async(&request)
+        .await
+        .map_err(|error| error.to_string())?;
+    validate_and_persist_mesh(&output)
+}
+
+fn study_meshing_request(
+    spec: &AnalysisStudySpec,
+) -> Result<Option<crate::meshing::MeshingExecutionRequest>, String> {
+    let Some(settings) = spec.meshing_settings.clone() else {
+        return Ok(None);
+    };
+    Ok(Some(crate::meshing::MeshingExecutionRequest {
         source_path: PathBuf::from(&spec.geometry.source.path),
         source_units: match &spec.geometry.source.unit_evidence {
             runmat_geometry_core::physical::LengthUnitEvidence::ExplicitFallback {
@@ -45,13 +71,17 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
         expected_source_sha256: crate::meshing::parse_source_sha256(&spec.geometry.source.sha256)?,
         settings,
         contact_definitions: meshing_contact_definitions(spec),
-    })
-    .map_err(|error| error.to_string())?;
+    }))
+}
+
+fn validate_and_persist_mesh(
+    output: &crate::meshing::MeshingExecutionOutput,
+) -> Result<ResolvedStudyMesh, String> {
     output
         .evidence
         .validate(&output.artifact)
         .map_err(|error| format!("meshing provider returned invalid evidence: {error}"))?;
-    persist_mesh_output(&output)
+    persist_mesh_output(output)
 }
 
 pub(super) fn meshing_contact_definitions(

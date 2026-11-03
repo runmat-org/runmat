@@ -1,4 +1,5 @@
 pub(crate) mod attach;
+mod console;
 mod crypto;
 mod recovery;
 mod result;

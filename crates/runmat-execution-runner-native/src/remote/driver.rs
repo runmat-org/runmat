@@ -40,6 +40,7 @@ pub(super) async fn run_remote_driver(
     config: RemoteDriverConfig,
     control: Arc<dyn DriverControlPlane>,
 ) -> NativeExecutionResult<()> {
+    let original_clock = super::fea_admission::AllocationClock::begin();
     let material_bytes = std::fs::read(&config.endpoint_identity_file).map_err(protocol)?;
     let material: EndpointIdentityMaterial =
         serde_json::from_slice(&material_bytes).map_err(protocol)?;
@@ -254,15 +255,24 @@ pub(super) async fn run_remote_driver(
 
     let mut usage_sequence = 0_u64;
     let (cancellation_sender, cancellation_receiver) = tokio::sync::watch::channel(false);
-    let supports_owned_cancellation =
-        bootstrap.desired_worker_count > 0 || matches!(&admitted, AdmittedRemoteProgram::Graph(_));
+    let direct_cancellation = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let supports_owned_cancellation = bootstrap.desired_worker_count > 0
+        || matches!(&admitted, AdmittedRemoteProgram::Graph(_))
+        || matches!(&admitted, AdmittedRemoteProgram::Direct(program) if matches!(program.request.artifact.form,
+            runmat_execution_artifact::ExecutableForm::ExecutableUnitV4 | runmat_execution_artifact::ExecutableForm::InterpreterRegionSourcesV1));
     let execution = async {
         if bootstrap.desired_worker_count == 0 {
             match admitted {
                 AdmittedRemoteProgram::Direct(admitted) => {
-                    let response =
-                        execute_local_direct(*admitted, input_objects, &bootstrap.driver_resources)
-                            .await?;
+                    let response = execute_local_direct(
+                        *admitted,
+                        input_objects,
+                        &bootstrap.driver_resources,
+                        Some(Arc::clone(&direct_cancellation)),
+                        &config.authority,
+                        original_clock,
+                    )
+                    .await?;
                     Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(response))
                 }
                 AdmittedRemoteProgram::Graph(admitted) => {
@@ -293,6 +303,7 @@ pub(super) async fn run_remote_driver(
                 checkpoint_sequence,
                 desired_workers: bootstrap.desired_worker_count,
                 resources: bootstrap.worker_resources,
+                driver_resources: bootstrap.driver_resources,
                 cancellation: cancellation_receiver,
                 ready_v1: config.ready_v1,
                 clock_parent: config.clock_parent.clone(),
@@ -364,6 +375,7 @@ pub(super) async fn run_remote_driver(
                     .map_err(protocol)?;
                 if heartbeat.cancellation_requested {
                     if supports_owned_cancellation {
+                        direct_cancellation.store(true, std::sync::atomic::Ordering::Release);
                         cancellation_sender.send_replace(true);
                         continue;
                     }
@@ -395,6 +407,9 @@ async fn execute_local_direct(
     admitted: program::AdmittedDirectProgram,
     input_objects: Vec<ProgramExecutionObject>,
     allocation: &runmat_execution_transport_native::control::ResourceRequest,
+    cancellation: Option<Arc<std::sync::atomic::AtomicBool>>,
+    authority: &DriverAuthority,
+    original_clock: super::fea_admission::AllocationClock,
 ) -> NativeExecutionResult<super::pool_execution::RemotePoolExecutionResult> {
     let program::AdmittedDirectProgram {
         mut request,
@@ -417,6 +432,45 @@ async fn execute_local_direct(
     }
     let objects = super::object_transfer::RemoteObjectStore::new()?;
     let mut values = std::collections::HashMap::new();
+    let mut console = None;
+    let resources = super::pool_resources::task_resources(allocation)?;
+    let fea_admission = super::fea_admission::for_verified_driver(
+        authority,
+        allocation,
+        original_clock,
+        runmat_execution::cancellation::CancellationToken::from_shared(
+            cancellation.clone().ok_or_else(|| {
+                protocol("verified driver FEA authority lacks physical cancellation")
+            })?,
+        ),
+    )
+    .map_err(protocol)?;
+    let console_owner = request.console.map(|_| {
+        let owner = crate::console_retention::ConsoleRetentionOwner::new(allocation.memory_bytes);
+        crate::test_workload::HostConsoleOwner {
+            budget: owner.limits(),
+            owner,
+            identity: runmat_runtime::context::RuntimeConsoleScopeIdentity {
+                scope_id: runmat_execution::ExecutionScopeId::derive(&[
+                    authority.run_id.as_bytes(),
+                    b"remote-root",
+                ]),
+                pool_id: runmat_execution::PoolId::derive(&[
+                    authority.run_id.as_bytes(),
+                    b"driver-console",
+                ]),
+                task_id: runmat_execution::TaskId::derive(&[
+                    authority.run_id.as_bytes(),
+                    b"remote-root",
+                ]),
+                attempt_id: runmat_execution::identity::AttemptId::derive(&[
+                    authority.run_id.as_bytes(),
+                    &authority.fencing_token.to_be_bytes(),
+                    b"driver-console",
+                ]),
+            },
+        }
+    });
     for object in input_objects {
         if let Some(value) = object.decode_externalized_value().map_err(protocol)? {
             values.insert(object.reference.id, value);
@@ -455,21 +509,33 @@ async fn execute_local_direct(
                 .map(|argument| super::value_transfer::materialize(argument, &values))
                 .collect::<NativeExecutionResult<Vec<_>>>()?;
             let environment = bundle.manifest.portable_environment.clone();
-            crate::test_workload::execute_host_program_request_in_context(
-                request,
-                crate::test_workload::HostProgramContext {
-                    materialized: materialized.as_ref(),
-                    collective: None,
-                    bundle: Some(bundle),
-                    environment: Some(&environment),
-                    cancellation: None,
-                    resources: None,
-                },
-            )
-            .await
+            let (response, captured) = fea_admission
+                .run_future(
+                    crate::test_workload::execute_host_program_request_with_console(
+                        request,
+                        crate::test_workload::HostProgramContext {
+                            materialized: materialized.as_ref(),
+                            collective: None,
+                            bundle: Some(bundle),
+                            environment: Some(&environment),
+                            cancellation: cancellation.clone(),
+                            resources: Some(&resources),
+                            console_owner,
+                            console_sink: None,
+                        },
+                    ),
+                )
+                .await;
+            console = captured.map(super::pool_execution::RemoteTerminalConsole::Owned);
+            response
         }
     };
-    collect_result_objects(response, objects)
+    let mut result = collect_result_objects(response, objects)?;
+    result.console = console;
+    result.cancelled = cancellation
+        .as_ref()
+        .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire));
+    Ok(result)
 }
 
 /// The driver is the execution owner when a Direct analysis has no workers.
@@ -513,9 +579,18 @@ pub(super) async fn commit_response(
     run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
     result: super::pool_execution::RemotePoolExecutionResult,
 ) -> NativeExecutionResult<()> {
-    let super::pool_execution::RemotePoolExecutionResult { response, objects } = result;
+    let super::pool_execution::RemotePoolExecutionResult {
+        response,
+        objects,
+        console,
+        cancelled,
+    } = result;
+    let failed = matches!(
+        &response,
+        ProgramExecutionResponse::Failure { .. } | ProgramExecutionResponse::RuntimeFailure { .. }
+    );
     let response = match response {
-        response @ ProgramExecutionResponse::GraphSuccess { .. } => {
+        response @ ProgramExecutionResponse::GraphSuccess { .. } if console.is_none() => {
             let plaintext = serde_json::to_vec(&response).map_err(protocol)?;
             let result = store_encrypted(
                 control,
@@ -547,7 +622,7 @@ pub(super) async fn commit_response(
             )
             .await;
         }
-        response @ ProgramExecutionResponse::RuntimeFailure { .. } => {
+        response @ ProgramExecutionResponse::RuntimeFailure { .. } if console.is_none() => {
             let plaintext = serde_json::to_vec(&response).map_err(protocol)?;
             return fail_with_diagnostic(
                 control,
@@ -560,15 +635,17 @@ pub(super) async fn commit_response(
         }
         response => response,
     };
-    if let ProgramExecutionResponse::Failure { message } = response {
-        return fail_with_diagnostic(
-            control,
-            config,
-            run_key,
-            message.as_bytes(),
-            "execution-failed",
-        )
-        .await;
+    if console.is_none() {
+        if let ProgramExecutionResponse::Failure { message } = response {
+            return fail_with_diagnostic(
+                control,
+                config,
+                run_key,
+                message.as_bytes(),
+                "execution-failed",
+            )
+            .await;
+        }
     }
 
     let references: &[runmat_execution::value::ValueRef] = match &response {
@@ -611,7 +688,10 @@ pub(super) async fn commit_response(
         });
     }
     let outputs = ProgramExecutionOutputs::new(response, locations).map_err(protocol)?;
-    let plaintext = serde_json::to_vec(&outputs).map_err(protocol)?;
+    let plaintext = match console {
+        Some(console) => console.encode(&outputs)?,
+        None => serde_json::to_vec(&outputs).map_err(protocol)?,
+    };
     let result = store_encrypted(
         control,
         &config.authority,
@@ -625,8 +705,20 @@ pub(super) async fn commit_response(
     transition(
         control,
         config,
-        DriverRunTarget::Succeeded,
-        None,
+        if cancelled {
+            DriverRunTarget::Cancelled
+        } else if failed {
+            DriverRunTarget::Failed
+        } else {
+            DriverRunTarget::Succeeded
+        },
+        if cancelled {
+            Some("cancelled-during-execution")
+        } else if failed {
+            Some("execution-failed")
+        } else {
+            None
+        },
         Some(result),
         None,
     )
@@ -680,6 +772,8 @@ fn collect_result_objects(
     }
     Ok(super::pool_execution::RemotePoolExecutionResult {
         response,
+        console: None,
+        cancelled: false,
         objects: super::result_objects::RemoteResultObjects::Local(store),
     })
 }

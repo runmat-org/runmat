@@ -95,6 +95,7 @@ GROUPS = {
         "runmat-package-cache-native",
         "runmat-process-host",
         "runmat-server-client",
+        "runmat-fea-admission-native",
         "runmat-test-runner",
         "runmat-test-runner-execution",
         "runmat-test-runner-native",
@@ -102,11 +103,14 @@ GROUPS = {
     ),
 }
 
-# Long continuum refinement belongs to an explicit scientific lane, not every
-# ordinary platform CI shard. Keep the tests runnable without changing assertions.
-EXTENDED_TEST_FILTERS = {
-    "geometry-analysis": ("pipeline::transient::rod_qualification::",),
-}
+def scientific_filters(group: str) -> tuple[str, ...]:
+    """Route the declared long cohorts separately; never change their assertions."""
+    policy_path = Path(__file__).resolve().parents[2] / "qualification/scientific/policy.json"
+    policy = json.loads(policy_path.read_text())
+    if policy.get("schema_version") != 1:
+        raise SystemExit("unsupported scientific qualification policy")
+    return tuple(pattern for cohort in policy["cohorts"] if cohort.get("group") == group
+                 for pattern in cohort["ordinary_skip"])
 
 
 def workspace_packages(repo_root: Path) -> set[str]:
@@ -142,10 +146,27 @@ def validate_groups(actual: set[str]) -> None:
 # enable every external BLAS backend and Python/Julia binding simultaneously.
 PACKAGE_TEST_FEATURE_PROFILES = {"runmat-clarabel": ((), ("serde",))}
 
+# These harness-free programs parse positional arguments, not libtest filters.
+# The release compiler census still checks every target; these bounded runs
+# exercise their result assertions without collecting performance evidence.
+STANDALONE_BENCHMARK_SMOKES = (
+    ("runmat-accelerate", "direct_call_observation", "100", "3"),
+    ("runmat-execution", "cancellation", "1000", "3"),
+)
+
+
+def benchmark_commands(group: str) -> list[list[str]]:
+    return [
+        ["cargo", "test", "--all-features", "--package", package,
+         "--bench", target, "--", iterations, samples]
+        for package, target, iterations, samples in STANDALONE_BENCHMARK_SMOKES
+        if package in GROUPS[group]
+    ]
+
 
 def test_commands(group: str, include_extended: bool) -> list[list[str]]:
     packages = GROUPS[group]
-    common = ["cargo", "test", "--all-targets", "--no-fail-fast"]
+    common = ["cargo", "test", "--lib", "--bins", "--tests", "--examples", "--no-fail-fast"]
     ordinary = [package for package in packages if package not in PACKAGE_TEST_FEATURE_PROFILES]
     commands = [
         [*common, "--all-features", *(argument for package in ordinary for argument in ("--package", package))]
@@ -157,7 +178,7 @@ def test_commands(group: str, include_extended: bool) -> list[list[str]]:
                 command.extend(("--features", ",".join(features)))
             commands.append(command)
     if not include_extended:
-        filters = EXTENDED_TEST_FILTERS.get(group, ())
+        filters = scientific_filters(group)
         if filters:
             for command in commands:
                 command.append("--")
@@ -172,7 +193,7 @@ def main() -> int:
     parser.add_argument(
         "--include-extended",
         action="store_true",
-        help="include the scientific refinement lane in the selected group",
+        help="include all declared scientific qualification cohorts in the selected group",
     )
     parser.add_argument(
         "--check",
@@ -190,7 +211,7 @@ def main() -> int:
         return 0
 
     failure = 0
-    for command in test_commands(args.group, args.include_extended):
+    for command in [*test_commands(args.group, args.include_extended), *benchmark_commands(args.group)]:
         code = subprocess.run(command, cwd=repo_root).returncode
         if code and not failure:
             failure = code

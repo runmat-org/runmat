@@ -945,19 +945,16 @@ impl RunMatSession {
         requested_outputs: usize,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
         debug_assert!(requested_outputs <= 1);
-        let result_slot = runtime_bytecode
-            .var_names
-            .iter()
-            .find_map(|(slot, name)| (name == "ans").then_some(*slot));
         // The VM allocates its dense storage. Supplying placeholders here
         // would declare every slot assigned before the script has run.
-        match runmat_vm::interpret_workspace(
+        match runmat_vm::interpret_script_workspace(
             runtime_bytecode,
             runmat_vm::InterpreterVars::from_owned(Vec::new()),
             Some(&unit.source().relative_path),
             runtime.clone(),
             None,
             Some(self.source_evaluator.dynamic_admission_port()),
+            requested_outputs,
         )
         .await
         .outcome?
@@ -972,7 +969,8 @@ impl RunMatSession {
                 // Dense VM storage is not an output contract. An explicit
                 // script result is only the `ans` binding assigned by this
                 // invocation, never the last allocated variable slot.
-                let value = result_slot
+                let value = completion
+                    .ans_slot
                     .filter(|slot| completion.assigned_slots.contains(slot))
                     .and_then(|slot| completion.values.get(slot).map(|value| value.clone()))
                     .ok_or_else(|| {

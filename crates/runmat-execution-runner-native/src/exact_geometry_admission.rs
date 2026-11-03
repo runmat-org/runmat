@@ -258,6 +258,7 @@ mod tests {
     fn session() -> (tempfile::TempDir, NativeProgramSession) {
         let directory = tempfile::tempdir().unwrap();
         let session = NativeProgramSession::new(NativeExecutionConfig {
+            local_fea_organization: Default::default(),
             executable: std::env::current_exe().unwrap(),
             worker_arguments: vec!["--execution-worker".into()],
             max_workers: 1,

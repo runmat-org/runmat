@@ -11,6 +11,7 @@ build = "build.rs"
 links = "runmat_runtime_native"
 
 [dependencies]
+uuid = { version = "1", default-features = false, features = ["serde"] }
 clarabel = { workspace = true }
 runmat-fea-source = { workspace = true }
 allocator-api2 = "=0.2.21"

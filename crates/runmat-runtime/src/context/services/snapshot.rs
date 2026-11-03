@@ -41,4 +41,8 @@ pub(super) struct ServicePortSnapshot {
     pub(super) callable_artifacts: Option<Rc<dyn crate::context::RuntimeCallableArtifactService>>,
     pub(super) program: Option<Rc<dyn RuntimeProgramService>>,
     pub(super) analysis: Option<Rc<dyn RuntimeAnalysisService>>,
+    pub(super) fea_run_admission:
+        Option<Rc<dyn crate::analysis::fea_run_admission::AsyncFeaRunAdmission>>,
+    pub(super) sync_fea_run_admission:
+        Option<Arc<dyn crate::analysis::fea_run_admission::FeaRunAdmission>>,
 }

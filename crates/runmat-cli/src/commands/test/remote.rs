@@ -31,7 +31,7 @@ pub(super) struct RemoteTestBackendConfig {
     pub project: Option<Uuid>,
     pub cluster: String,
     pub queue: String,
-    pub trust_identity: String,
+    pub trust_identity: runmat_server_client::execution::RemoteEndpointTrust,
     pub max_workers: usize,
     pub project_handoff: FrozenProjectHandoff,
     pub interop: runmat_types::InteropManifest,
@@ -45,11 +45,10 @@ impl RemoteTestBackend {
     pub fn new(config: RemoteTestBackendConfig) -> Result<Self, BackendError> {
         if config.cluster.trim().is_empty()
             || config.queue.trim().is_empty()
-            || config.trust_identity.trim().is_empty()
             || config.max_workers == 0
         {
             return Err(rejected(
-                "remote tests require a cluster, queue, pinned trust identity, and non-zero worker bound",
+                "remote tests require a cluster, queue, and non-zero worker bound",
             ));
         }
         config
@@ -223,6 +222,7 @@ impl WorkerBackend for RemoteTestBackend {
                     objects: Vec::new(),
                 },
                 RemoteSubmissionOptions {
+                    console: None,
                     project: self.config.project,
                     cluster: self.config.cluster.clone(),
                     queue: self.config.queue.clone(),

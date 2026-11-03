@@ -59,9 +59,9 @@ pub enum AttemptSuccess {
     Values {
         outputs: Vec<ValuePayload>,
         result_objects: Vec<ValueRef>,
-        /// Present on scheduler attempts. Serial domain executors may prepare an unmetered
-        /// success, but the generic driver rejects it as an attempt report until a worker
-        /// binds accounting.
+        /// Present on scheduler attempts. Serial domain executors can prepare
+        /// results without scheduler accounting; the generic driver requires
+        /// worker-bound accounting before accepting an attempt report.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resources: Option<Box<AttemptResourceAccounting>>,
     },

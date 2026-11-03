@@ -17,6 +17,23 @@ impl RemotePoolDriver {
             .expect("remote attempt cancellation registry poisoned")
             .insert(request.id, cancellation.clone());
         tokio::spawn(async move {
+            let console_budget = match this.reserve_console_attempt(&request) {
+                Ok(budget) => budget,
+                Err(error) => {
+                    this.attempt_cancellation
+                        .lock()
+                        .expect("remote attempt cancellation registry poisoned")
+                        .remove(&request.id);
+                    this.apply_report(BackendReport::for_request(
+                        &request,
+                        AttemptReport::Failed {
+                            kind: AttemptFailureKind::Rejected,
+                            message: error.to_string(),
+                        },
+                    ));
+                    return;
+                }
+            };
             let route = this.channels.read().await.get(&request.worker_id).cloned();
             let program = this
                 .programs
@@ -32,6 +49,9 @@ impl RemotePoolDriver {
                 .cloned();
             let mut pending_results = None;
             let mut unsuccessful_resources = None;
+            let mut console = None;
+            let mut console_scopes = Vec::new();
+            let mut delegated_console_root = None;
             let mut retirement_ack_route: Option<Arc<dyn RemoteWorkerChannel>> = None;
             let mut retirement_evidence: Option<crate::remote::AuthenticatedPhysicalRetirement> =
                 None;
@@ -89,8 +109,25 @@ impl RemotePoolDriver {
                                 },
                                 progress.as_deref(),
                                 collective_context,
+                                console_budget,
                             )
                             .await;
+                            let execution = execution.and_then(|mut observed| {
+                                if observed.attempt_id != request.id
+                                    || observed.task_id != request.task_id
+                                    || observed.worker_id != request.worker_id
+                                    || observed.driver_fence != request.driver_fence
+                                {
+                                    return Err(NativeExecutionError::Protocol(
+                                        "remote observed report differs from its original attempt"
+                                            .into(),
+                                    ));
+                                }
+                                console = observed.console.take();
+                                console_scopes = std::mem::take(&mut observed.console_scopes);
+                                delegated_console_root = observed.delegated_console_root;
+                                Ok(observed.report)
+                            });
                             let execution = match execution {
                                 Ok(AttemptReport::RetirementUnverified { message }) => {
                                     Ok(AttemptReport::RetirementUnverified { message })
@@ -193,7 +230,7 @@ impl RemotePoolDriver {
                 .driver
                 .lock()
                 .expect("remote driver poisoned")
-                .snapshot()
+                .snapshot_ref()
                 .attempts
                 .get(&request.id)
                 .is_some_and(|attempt| attempt.cancellation_requested_at.is_some());
@@ -217,6 +254,9 @@ impl RemotePoolDriver {
                 .expect("remote attempt cancellation registry poisoned")
                 .remove(&request.id);
             let mut report = BackendReport::for_request(&request, report);
+            report.console = console;
+            report.console_scopes = console_scopes;
+            report.delegated_console_root = delegated_console_root;
             report.unsuccessful_resources = unsuccessful_resources;
             let mut retired_from_evidence = false;
             if let Some(failed_route) = failed_route {

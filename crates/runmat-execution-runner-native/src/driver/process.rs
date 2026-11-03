@@ -40,6 +40,7 @@ pub(crate) struct LocalAttemptObservation {
     pub execution: AttemptExecutionObservation,
     pub unsuccessful_resources: Option<Box<AttemptResourceAccounting>>,
     pub console: Option<runmat_execution::console::ConsoleTranscript>,
+    pub console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
     retirement: LocalRetirementEvidence,
 }
 
@@ -114,6 +115,7 @@ impl LocalAttemptObservation {
         report.execution = Some(Box::new(self.execution));
         report.unsuccessful_resources = self.unsuccessful_resources;
         report.console = self.console.map(Box::new);
+        report.console_scopes = self.console_scopes;
         (self.result, report)
     }
 }
@@ -300,16 +302,29 @@ pub(super) fn execute_attempt(
     let meters = TransportMeters::default();
     let mut termination = AttemptExecutionTermination::NotStarted;
     let mut console = None;
+    let mut console_scopes = Vec::new();
     let mut retirement = LocalRetirementEvidence::NotStarted;
-    let result = launch_attempt(
+    let mut result = launch_attempt(
         driver,
         request,
         completion,
         &meters,
         &mut termination,
         &mut console,
+        &mut console_scopes,
         &mut retirement,
     );
+    if request.task.console.is_some() {
+        if let Some(owner) = driver.console_admission_owner() {
+            if let Err(message) = owner.settle_subtree(
+                driver.console_identity(request),
+                console.as_ref(),
+                &console_scopes,
+            ) {
+                result = Err(TransferFailure::Infrastructure(message));
+            }
+        }
+    }
     let result = if let Some(message) = completion.control_failure() {
         match result {
             Err(TransferFailure::RetirementUnverified(message)) => {
@@ -327,6 +342,7 @@ pub(super) fn execute_attempt(
         meters,
         termination,
         console,
+        console_scopes,
         retirement,
     )
 }
@@ -338,6 +354,7 @@ fn launch_attempt(
     meters: &TransportMeters,
     termination: &mut AttemptExecutionTermination,
     console: &mut Option<runmat_execution::console::ConsoleTranscript>,
+    console_scopes: &mut Vec<runmat_execution::console::ScopedConsoleTranscript>,
     retirement: &mut LocalRetirementEvidence,
 ) -> Result<WorkerResponse, TransferFailure> {
     request
@@ -348,6 +365,7 @@ fn launch_attempt(
     if completion.is_cancelled() {
         return Err(TransferFailure::Cancelled);
     }
+    let console_budget = driver.console_subgrant(request)?;
     let assignment = runmat_execution::ProgramExecutionAssignment {
         scope_id: request.scope_id,
         pool_id: request.task.pool_id,
@@ -358,7 +376,7 @@ fn launch_attempt(
         resources: request.resource_assignment.clone(),
     };
     let worker_request = if let Some(graph) = completion.graph_authority.as_ref() {
-        staged_graph_launch(request, graph, assignment)?
+        staged_graph_launch(request, graph, assignment, console_budget)?
     } else {
         let artifact_id = request.task.program_artifact_id().ok_or_else(|| {
             TransferFailure::Infrastructure("native program attempt has no program artifact".into())
@@ -418,10 +436,17 @@ fn launch_attempt(
             ));
         }
         // The worker receives its exact reservation and admits CPU parallelism within it.
-        WorkerLaunchRequest::Reserved(Box::new(
+        let reserved = Box::new(
             ReservedProgramExecutionRequest::new(program, request.task.resources.clone())
                 .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
-        ))
+        );
+        match console_budget {
+            Some(console_budget) => WorkerLaunchRequest::ReservedConsole {
+                request: reserved,
+                console_budget,
+            },
+            None => WorkerLaunchRequest::Reserved(reserved),
+        }
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -436,7 +461,10 @@ fn launch_attempt(
                 ));
             }
         },
-        WorkerLaunchRequest::Reserved(request) => &request.request().context,
+        WorkerLaunchRequest::Reserved(request)
+        | WorkerLaunchRequest::ReservedFeaProxy { request, .. }
+        | WorkerLaunchRequest::ReservedConsole { request, .. }
+        | WorkerLaunchRequest::ReservedFea { request, .. } => &request.request().context,
         WorkerLaunchRequest::StagedGraph(request) => &request.staged_graph_v10.context,
     };
     let spmd_rank = match context {
@@ -464,6 +492,7 @@ fn launch_attempt(
                 meters,
                 termination,
                 console,
+                console_scopes,
                 retirement,
             )
         },
@@ -485,6 +514,7 @@ fn staged_graph_launch(
     request: &AttemptRequest,
     graph: &super::GraphAttemptAuthority,
     assignment: runmat_execution::ProgramExecutionAssignment,
+    console_budget: Option<runmat_execution::console::ConsoleBudget>,
 ) -> Result<WorkerLaunchRequest, TransferFailure> {
     if request.task.program_artifact_id() != Some(graph.request_artifact_id)
         || request.task.invocation_context != graph.context
@@ -501,6 +531,7 @@ fn staged_graph_launch(
     Ok(WorkerLaunchRequest::StagedGraph(Box::new(
         StagedGraphWorkerLaunch {
             staged_graph_v10: StagedGraphWorkerReference {
+                fea_parent_admission: false,
                 artifact_id: graph.artifact_id,
                 stored_digest: graph.stored_digest,
                 stored_length: graph.stored_length,
@@ -508,6 +539,8 @@ fn staged_graph_launch(
                 context: graph.context.clone(),
                 requested_outputs: graph.requested_outputs,
                 resources: request.task.resources.clone(),
+                console_budget,
+                fea_grant: None,
             },
         },
     )))
@@ -520,6 +553,7 @@ fn observe(
     meters: TransportMeters,
     termination: AttemptExecutionTermination,
     console: Option<runmat_execution::console::ConsoleTranscript>,
+    console_scopes: Vec<runmat_execution::console::ScopedConsoleTranscript>,
     retirement: LocalRetirementEvidence,
 ) -> LocalAttemptObservation {
     let wall_millis = u64::try_from(started.elapsed().as_millis())
@@ -575,6 +609,7 @@ fn observe(
         execution,
         unsuccessful_resources,
         console,
+        console_scopes,
         retirement,
     }
 }

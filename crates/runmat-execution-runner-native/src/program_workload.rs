@@ -28,6 +28,34 @@ pub(crate) async fn execute_unit_with_console(
     ProgramExecutionResponse,
     Option<runmat_execution::console::ConsoleReceipt>,
 ) {
+    let (response, console) =
+        execute_unit_with_transcript(request, project, environment, cancellation, sink).await;
+    let receipt = match console.map(|console| console.receipt()).transpose() {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            return (
+                ProgramExecutionResponse::Failure {
+                    message: error.to_string(),
+                },
+                None,
+            )
+        }
+    };
+    (response, receipt)
+}
+
+/// Terminal transports take the original bounded capture, rather than another
+/// full-size receiver. Streaming process transports continue to use its receipt.
+pub(crate) async fn execute_unit_with_transcript(
+    request: &ProgramExecutionRequest,
+    project: Option<&runmat_package::FrozenProjectHandoff>,
+    environment: Option<&[(String, String)]>,
+    cancellation: Option<Arc<AtomicBool>>,
+    sink: Option<std::rc::Rc<dyn runmat_runtime::context::PortableConsoleSink>>,
+) -> (
+    ProgramExecutionResponse,
+    Option<runmat_execution::console::ConsoleTranscript>,
+) {
     let host = match request
         .console
         .map(|limits| runmat_runtime::context::PortableConsoleHost::with_sink(limits, sink))
@@ -58,21 +86,8 @@ pub(crate) async fn execute_unit_with_console(
     let completed = cancellation
         .as_ref()
         .is_none_or(|signal| !signal.load(std::sync::atomic::Ordering::Acquire));
-    let receipt = match host.map(|host| host.finish(completed)).transpose() {
-        Ok(transcript) => match transcript
-            .map(|transcript| transcript.receipt())
-            .transpose()
-        {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                return (
-                    ProgramExecutionResponse::Failure {
-                        message: error.to_string(),
-                    },
-                    None,
-                )
-            }
-        },
+    let console = match host.map(|host| host.finish(completed)).transpose() {
+        Ok(transcript) => transcript,
         Err(error) => {
             return (
                 ProgramExecutionResponse::Failure {
@@ -82,7 +97,7 @@ pub(crate) async fn execute_unit_with_console(
             )
         }
     };
-    (response, receipt)
+    (response, console)
 }
 
 async fn invoke_unit(

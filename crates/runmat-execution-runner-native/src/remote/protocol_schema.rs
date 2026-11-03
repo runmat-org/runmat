@@ -12,8 +12,8 @@ pub const REMOTE_WORKER_PROTOCOL_V7: u16 = 7;
 /// V8 adds an exact, authenticated physical-owner retirement query.
 #[cfg(test)]
 pub const REMOTE_WORKER_PROTOCOL_V8: u16 = 8;
-/// V9 adds post-server-ACK exact attempt-journal reclamation.
-pub const REMOTE_WORKER_PROTOCOL_VERSION: u16 = 9;
+/// V10 carries the original bounded terminal console inventory on Attempt replies.
+pub const REMOTE_WORKER_PROTOCOL_VERSION: u16 = 10;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,7 +42,7 @@ mod tests {
         let frozen =
             br#"{"schemaVersion":4,"command":{"kind":"removed_output_list","values":[1]}}"#;
         let error = admit_remote_worker_bytes(frozen).unwrap_err();
-        assert!(error.contains("unsupported remote worker protocol 4; expected 9"));
+        assert!(error.contains("unsupported remote worker protocol 4; expected 10"));
         assert!(error.contains("rebuild or upgrade"));
     }
 
@@ -51,7 +51,7 @@ mod tests {
         let frozen = br#"{"schemaVersion":5,"command":{"kind":"drain"}}"#;
         let error = admit_remote_worker_bytes(frozen).unwrap_err();
         assert!(error.contains(&format!(
-            "unsupported remote worker protocol {REMOTE_WORKER_PROTOCOL_V5}; expected 9"
+            "unsupported remote worker protocol {REMOTE_WORKER_PROTOCOL_V5}; expected 10"
         )));
     }
 
@@ -61,7 +61,7 @@ mod tests {
         let frozen = br#"{"schemaVersion":6,"command":{"kind":"drain"}}"#;
         assert!(admit_remote_worker_bytes(frozen)
             .unwrap_err()
-            .contains("expected 9"));
+            .contains("expected 10"));
     }
 
     #[test]
@@ -76,6 +76,10 @@ mod tests {
             admit_remote_worker_bytes(br#"{"schemaVersion":8,"command":{"kind":"drain"}}"#)
                 .is_err()
         );
-        admit_remote_worker_bytes(br#"{"schemaVersion":9,"command":{"kind":"drain"}}"#).unwrap();
+        assert!(
+            admit_remote_worker_bytes(br#"{"schemaVersion":9,"command":{"kind":"drain"}}"#)
+                .is_err()
+        );
+        admit_remote_worker_bytes(br#"{"schemaVersion":10,"command":{"kind":"drain"}}"#).unwrap();
     }
 }

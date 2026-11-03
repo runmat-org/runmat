@@ -13,6 +13,8 @@ runmat-accelerate = { workspace = true }
 runmat-config = { workspace = true, features = ["accelerate"] }
 runmat-aot = { workspace = true }
 runmat-execution = { workspace = true }
+runmat-execution-runner-native = { workspace = true }
+runmat-runtime = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-test = { workspace = true }

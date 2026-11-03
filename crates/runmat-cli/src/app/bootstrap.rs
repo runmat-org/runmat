@@ -12,6 +12,17 @@ use crate::cli::{Cli, CliOverrideSources, Commands, GcPreset, LogLevel, OptLevel
 use crate::logging::format_log_record;
 use crate::telemetry;
 
+/// Install a lazy local host port for CLI-owned worker entry points. This does
+/// not read credentials or contact Server until an FEA root asks for admission.
+pub fn install_local_fea_admission(
+    org: Option<uuid::Uuid>,
+) -> Result<runmat_runtime::analysis::fea_run_admission::FeaRunAdmissionGuard> {
+    runmat_runtime::analysis::fea_run_admission::replace_fea_run_admission(Some(
+        std::sync::Arc::new(super::fea_admission::CliFeaAdmission::new(org)),
+    ))
+    .map_err(anyhow::Error::msg)
+}
+
 pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     crate::presentation::initialize(cli.color, crate::presentation::cli_output_mode(&cli));
     if cli.generate_config {
@@ -70,6 +81,10 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         .build();
     let logging = crate::observability::init_with_terminal(&config.logging, terminal_logger)
         .map_err(|error| anyhow::anyhow!("failed to initialize CLI logging: {error}"))?;
+
+    // Installing this port performs no credential reads, transport setup or
+    // network requests. Only an admitted local FEA root calls the provider.
+    let _fea_admission = install_local_fea_admission(super::fea_admission::organization(&cli))?;
 
     let result = async move {
         telemetry::init(&config.telemetry);

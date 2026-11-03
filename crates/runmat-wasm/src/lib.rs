@@ -64,3 +64,5 @@ pub use api::streams::{
 
 #[cfg(not(feature = "graphics-replay"))]
 pub use api::fea_execution::execute_prepared_fea_study;
+#[cfg(not(feature = "graphics-replay"))]
+pub use api::fea_step_worker::execute_owned_fea_study_step;

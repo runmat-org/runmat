@@ -30,9 +30,11 @@ pub(super) async fn reply_kind(
     sender: &Mutex<EncryptedFrameSession>,
     limits: FrameLimits,
     kind: FrameKind,
-    reply: RemoteWorkerReply,
+    reply: impl serde::Serialize,
 ) -> NativeExecutionResult<()> {
-    let plaintext = serde_json::to_vec(&reply).map_err(protocol)?;
+    let plaintext =
+        runmat_canonical_codec::encode_json_bounded(&reply, limits.maximum_payload_bytes as u64)
+            .map_err(protocol)?;
     let frame = sender
         .lock()
         .await

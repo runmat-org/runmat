@@ -514,6 +514,23 @@ pub trait RuntimeHostService {
         None
     }
 
+    fn console_admission(&self) -> Option<std::sync::Arc<dyn super::RuntimeConsoleAdmission>> {
+        None
+    }
+
+    /// Retain the original child owner until the outer terminal is encoded.
+    /// Only callers requesting console capture need this capability.
+    fn retain_console_source(
+        &self,
+        _source: std::sync::Arc<dyn super::RuntimeRetainedConsoleSource>,
+    ) -> Result<(), RuntimeError> {
+        Err(
+            crate::build_runtime_error("host cannot retain child console scopes")
+                .with_identifier("RunMat:console:CaptureUnavailable")
+                .build(),
+        )
+    }
+
     /// Sticky host failures cannot be hidden by a caught language exception.
     fn check_execution(&self) -> Result<(), RuntimeError> {
         Ok(())
@@ -1617,6 +1634,19 @@ pub struct RuntimeSignalMaterializationRequest {
 /// accelerator, and distributed execution. The returned signal is canonical solver data and
 /// contains no callback or runtime handle.
 pub trait RuntimeAnalysisService {
+    /// An owned mesher returns only canonical numerical mesh/evidence. The
+    /// parent retains admission and persistence. None keeps the native route.
+    fn generate_mesh(
+        &self,
+        _request: crate::meshing::MeshingExecutionRequest,
+    ) -> Option<
+        RuntimeServiceFuture<
+            Result<crate::meshing::MeshingExecutionOutput, crate::meshing::MeshingExecutionError>,
+        >,
+    > {
+        None
+    }
+
     fn materialize_signal(
         &self,
         request: RuntimeSignalMaterializationRequest,
@@ -1765,6 +1795,8 @@ impl RuntimeServicePorts {
                 callable_artifacts: None,
                 program: None,
                 analysis: None,
+                fea_run_admission: None,
+                sync_fea_run_admission: None,
             }),
         }
     }
@@ -1864,6 +1896,31 @@ macro_rules! port_accessors {
 }
 
 impl RuntimeServicePorts {
+    pub fn sync_fea_run_admission(
+        &self,
+    ) -> Option<&Arc<dyn crate::analysis::fea_run_admission::FeaRunAdmission>> {
+        self.shared.sync_fea_run_admission.as_ref()
+    }
+    /// Session-owned native admission; installation does not acquire a lease.
+    pub fn with_sync_fea_run_admission(
+        mut self,
+        admission: Arc<dyn crate::analysis::fea_run_admission::FeaRunAdmission>,
+    ) -> Self {
+        Rc::make_mut(&mut self.shared).sync_fea_run_admission = Some(admission);
+        self
+    }
+    pub fn fea_run_admission(
+        &self,
+    ) -> Option<&Rc<dyn crate::analysis::fea_run_admission::AsyncFeaRunAdmission>> {
+        self.shared.fea_run_admission.as_ref()
+    }
+    pub fn with_fea_run_admission(
+        mut self,
+        admission: Rc<dyn crate::analysis::fea_run_admission::AsyncFeaRunAdmission>,
+    ) -> Self {
+        Rc::make_mut(&mut self.shared).fea_run_admission = Some(admission);
+        self
+    }
     /// Omit the physical owned-CPU service. NeverYield embeddings execute
     /// supported kernels inline; cooperative native hosts require a CPU service.
     pub fn without_blocking_cpu(mut self) -> Self {

@@ -672,29 +672,31 @@ impl RemotePoolDriver {
     pub(in crate::remote) fn unresolved_original_owners(
         &self,
     ) -> NativeExecutionResult<BTreeMap<WorkerId, OriginalWorkerOwner>> {
-        let snapshot = self
-            .driver
-            .lock()
-            .expect("remote driver poisoned")
-            .snapshot();
+        let requests = {
+            let driver = self.driver.lock().expect("remote driver poisoned");
+            driver
+                .snapshot_ref()
+                .attempts
+                .values()
+                .filter(|attempt| {
+                    attempt
+                        .unverified_retirement
+                        .as_ref()
+                        .is_some_and(|record| record.retired_at_driver_millis.is_none())
+                })
+                .map(|attempt| (attempt.request.worker_id, attempt.request.driver_fence))
+                .collect::<Vec<_>>()
+        };
         let owners = self
             .original_owners
             .lock()
             .expect("original owners poisoned");
         let mut unresolved = BTreeMap::new();
-        for attempt in snapshot.attempts.values() {
-            if attempt
-                .unverified_retirement
-                .as_ref()
-                .is_none_or(|record| record.retired_at_driver_millis.is_some())
-            {
-                continue;
-            }
-            let worker_id = attempt.request.worker_id;
+        for (worker_id, driver_fence) in requests {
             let owner = owners.get(&worker_id).ok_or_else(|| {
                 invalid("uncertain original worker lacks authenticated allocation owner")
             })?;
-            if attempt.request.driver_fence != owner.driver_fencing_token {
+            if driver_fence != owner.driver_fencing_token {
                 return Err(invalid(
                     "uncertain attempt differs from its original driver fence",
                 ));
@@ -790,11 +792,8 @@ impl RemotePoolDriver {
             claims.insert(claim.attempt_id, claim);
         }
         let requests = {
-            let snapshot = self
-                .driver
-                .lock()
-                .expect("remote driver poisoned")
-                .snapshot();
+            let driver = self.driver.lock().expect("remote driver poisoned");
+            let snapshot = driver.snapshot_ref();
             for claim in claims.values() {
                 let original = snapshot
                     .attempts
@@ -829,7 +828,25 @@ impl RemotePoolDriver {
                             .as_ref()
                             .is_some_and(|record| record.retired_at_driver_millis.is_none())
                 })
-                .cloned()
+                .map(|attempt| {
+                    (
+                        attempt.request.clone(),
+                        attempt.state,
+                        attempt.terminal.is_some(),
+                        attempt
+                            .unverified_retirement
+                            .as_ref()
+                            .is_some_and(|record| {
+                                record.resources.is_none()
+                                    && record.execution.is_none()
+                                    && record.console.is_none()
+                                    && record.console_scopes.is_empty()
+                                    && record.failure.is_none()
+                                    && record.failure_kind.is_none()
+                                    && record.retired_at_driver_millis.is_none()
+                            }),
+                    )
+                })
                 .collect::<Vec<_>>()
         };
         if requests.is_empty() {
@@ -850,8 +867,7 @@ impl RemotePoolDriver {
             assert!(std::mem::size_of::<RetirementDecision>() <= 2 * std::mem::size_of::<usize>());
         let decisions = requests
             .into_iter()
-            .map(|attempt| {
-                let request = attempt.request;
+            .map(|(request, state, has_terminal, unobserved)| {
                 let Some(claim) = claims.get(&request.id) else {
                     // A complete original-owner journal is meaningful negative
                     // evidence only for an assignment in the latest accepted
@@ -860,19 +876,11 @@ impl RemotePoolDriver {
                     if !authoritative_unstarted
                         .is_some_and(|inventory| inventory.matches(self.pool_id, &request))
                         || !matches!(
-                            attempt.state,
+                            state,
                             runmat_execution::state::AttemptState::Assigned
                                 | runmat_execution::state::AttemptState::Starting
                         )
-                        || attempt.terminal.is_some()
-                        || attempt.unverified_retirement.as_ref().is_none_or(|record| {
-                            record.resources.is_some()
-                                || record.execution.is_some()
-                                || record.console.is_some()
-                                || record.failure.is_some()
-                                || record.failure_kind.is_some()
-                                || record.retired_at_driver_millis.is_some()
-                        })
+                        || has_terminal || !unobserved
                     {
                         return Err(invalid(
                             "node retirement lacks original attempt accounting or certified non-admission",
@@ -946,12 +954,13 @@ impl RemotePoolDriver {
                 "authenticated worker owner differs from pool identity",
             ));
         }
-        let snapshot = self
+        let pool = self
             .driver
             .lock()
             .expect("remote driver poisoned")
-            .snapshot();
-        let pool = &snapshot.pools[&self.pool_id];
+            .snapshot_ref()
+            .pools[&self.pool_id]
+            .clone();
         let mut owners = self
             .original_owners
             .lock()

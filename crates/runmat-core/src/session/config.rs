@@ -114,6 +114,19 @@ impl RunMatSession {
         self.runtime_context = self.runtime_context.clone().with_execution(services);
     }
 
+    /// Install a session-local async FEA host. Ordinary scripts do not contact it.
+    pub fn install_fea_run_admission_service(
+        &mut self,
+        service: std::rc::Rc<dyn runmat_runtime::analysis::fea_run_admission::AsyncFeaRunAdmission>,
+    ) {
+        let ports = self
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_fea_run_admission(service);
+        self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
+    }
+
     /// Install an exact invocation-owned builtin worker port supplied by the
     /// host. Ordinary serial sessions do not gain worker authority.
     pub fn install_owned_builtin_work_service(

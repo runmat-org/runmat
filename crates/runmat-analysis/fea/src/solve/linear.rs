@@ -239,9 +239,8 @@ fn solve_operator_system_with_settings(
     let plan = settings.plan;
     let reuse = settings.preparation;
     // The coercivity proof factors the operator; run it on the admitted plan.
-    let preparation = shared_sparse::with_plan(plan, move || match reuse {
-        Some(reuse) => operator.prepare_linear_reusing(reuse),
-        None => operator.prepare_linear(),
+    let preparation = shared_sparse::with_plan(plan, move || {
+        operator.prepare_linear_with_reuse(reuse, settings.admission)
     });
     let prepared = match preparation {
         Ok(prepared) => prepared,

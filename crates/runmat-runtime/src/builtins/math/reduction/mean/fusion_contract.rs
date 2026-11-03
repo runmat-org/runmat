@@ -131,24 +131,35 @@ impl Plan<'_> {
 fn resources(
     query: FusionReductionPreparationQuery<'_>,
 ) -> Option<FusionReductionPreparationQuote> {
-    let plan = lexical_plan(&query.controls)?;
     let rank = query.input_rank_upper.max(2);
-    let dimensions = plan.axes.retained_len().max(1);
-    let retained_axes = if plan.axes.retained_len() > 1 {
-        plan.axes.retained_len()
-    } else {
-        0
-    };
-    let temporary_scalar_axis = usize::from(plan.axes.retained_len() == 1);
+    let (dimensions, retained_axes, temporary_scalar_axis, all_axes) =
+        match lexical_plan(&query.controls) {
+            Some(plan) => (
+                plan.axes.retained_len().max(1),
+                if plan.axes.retained_len() > 1 {
+                    plan.axes.retained_len()
+                } else {
+                    0
+                },
+                usize::from(plan.axes.retained_len() == 1),
+                matches!(plan.axes, ReductionAxisPlan::All),
+            ),
+            // The ordinary scalar-axis parser may allocate its one-element
+            // dimension worklist before returning the original typed diagnostic.
+            None if query.controls.supported()
+                && crate::builtins::common::spec::reduction_rejected_scalar_axis(
+                    query.controls.values,
+                ) =>
+            {
+                (1, 0, 1, false)
+            }
+            None => return None,
+        };
     let stages = dimensions;
     let mut retained = reduction_layout::<FusionReductionContract>(stages)?;
     // Each actual stage owns input shape, output shape, and axes. All-axes
     // uses rank axes; other stages use one. Rank is the captured shape bound.
-    let axis_count = if matches!(plan.axes, ReductionAxisPlan::All) {
-        rank
-    } else {
-        1
-    };
+    let axis_count = if all_axes { rank } else { 1 };
     let stage_backing = reduction_sum_bytes(&[
         reduction_layout::<usize>(rank)?,
         reduction_layout::<usize>(rank)?,

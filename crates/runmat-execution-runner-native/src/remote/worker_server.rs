@@ -824,7 +824,21 @@ pub(super) async fn run_worker_loop(
                 )
                 .await?;
             }
-            RemoteWorkerCommand::Execute { attempt } => {
+            RemoteWorkerCommand::Execute { attempt, console_budget } => {
+                let valid_console_budget = match (attempt.scheduling.task.console, console_budget) {
+                    (None, None) => true,
+                    (Some(controls), Some(budget)) => budget.validate().is_ok()
+                        && budget.max_records <= u64::from(controls.max_records)
+                        && budget.max_text_bytes <= controls.max_text_bytes
+                        && budget.max_encoded_bytes <= (limits.maximum_payload_bytes as u64).saturating_sub(64 * 1024)
+                        && budget.minimum_memory_bytes().is_ok_and(|bytes| bytes <= attempt.scheduling.task.resources.memory_bytes),
+                    _ => false,
+                };
+                if !valid_console_budget {
+                    reply(connection.as_ref(), &sender, limits,
+                        rejected(request.correlation_id, "console subtree grant differs from its authenticated invocation or terminal frame")).await?;
+                    continue;
+                }
                 if attempt_journal.as_ref().is_some_and(|journal| {
                     journal
                         .lock()
@@ -913,6 +927,7 @@ pub(super) async fn run_worker_loop(
                     Arc::clone(&sender),
                     limits,
                     correlation_id.clone(),
+                    console_budget,
                 );
                 let attempt_reply_for_task = Arc::clone(&attempt_reply);
                 let connection = Arc::clone(&connection);
@@ -977,6 +992,7 @@ pub(super) async fn run_worker_loop(
                         return;
                     }
                     let started = Instant::now();
+                    let original_clock = super::fea_admission::AllocationClock::begin();
                     let program = attempt.program;
                     let materialized = match &program {
                         WorkerProgramRequest::Graph(_) => Ok(Vec::new()),
@@ -1015,7 +1031,14 @@ pub(super) async fn run_worker_loop(
                                             dyn runmat_runtime::context::RuntimeCollectiveService,
                                         >
                                 });
-                                super::worker_execution::execute(
+                                let fea_admission = match super::fea_admission::for_verified_attempt(
+                                    &graph_run_identity, &scheduling, original_clock, cancellation_for_task.token(),
+                                ) {
+                                    Ok(admission) => admission,
+                                    Err(error) => return super::worker_execution::WorkerExecutionOutcome::Response(
+                                        runmat_execution_artifact::ProgramExecutionResponse::Failure { message: error.to_string() }),
+                                };
+                                fea_admission.run_future(super::worker_execution::execute(
                                     super::worker_execution::WorkerExecutionInput {
                                         attempt_id,
                                         program,
@@ -1030,6 +1053,7 @@ pub(super) async fn run_worker_loop(
                                         bundle,
                                         environment,
                                         resources: scheduling.task.resources.clone(),
+                                        console_budget,
                                     },
                                     super::worker_execution::WorkerExecutionPorts {
                                         collective,
@@ -1038,7 +1062,7 @@ pub(super) async fn run_worker_loop(
                                         cancellation: cancellation_for_task,
                                         progress_sender,
                                     },
-                                )
+                                ))
                                 .await
                             }
                             Err(error) => super::worker_execution::WorkerExecutionOutcome::Response(
@@ -1080,6 +1104,7 @@ pub(super) async fn run_worker_loop(
                     // completes cooperative/adapter retirement before terminal
                     // publication. Never publish a late successful result after
                     // the scheduler has cancelled the attempt.
+                    let mut console = None;
                     let (mut report, mut retirement_unverified) = match response {
                         super::worker_execution::WorkerExecutionOutcome::RetirementUnverified(message) => (
                             runmat_execution_runner::AttemptReport::RetirementUnverified { message },
@@ -1096,6 +1121,16 @@ pub(super) async fn run_worker_loop(
                                         .unwrap_or(u64::MAX)
                                         .max(1),
                                 )
+                            };
+                            (report, false)
+                        }
+                        super::worker_execution::WorkerExecutionOutcome::CapturedResponse(response, capture) => {
+                            console = capture;
+                            let report = if cancellation_after_task.was_cancelled() {
+                                runmat_execution_runner::AttemptReport::Cancelled
+                            } else {
+                                super::worker_execution::report(&scheduling, response,
+                                    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX).max(1))
                             };
                             (report, false)
                         }
@@ -1120,9 +1155,9 @@ pub(super) async fn run_worker_loop(
                         // encrypted send. Otherwise the drain loop may close
                         // the connection before the reply task is polled.
                         state_for_task.lock().await.draining = true;
-                        attempt_reply_for_task.complete_before_drain(report).await;
+                        attempt_reply_for_task.complete_before_drain_with_console(report, console).await;
                     } else {
-                        attempt_reply_for_task.complete(report);
+                        attempt_reply_for_task.complete_with_console(report, console);
                     }
                     let mut state = state_for_task.lock().await;
                     let _ = state.finish_attempt(attempt_id, !retirement_unverified);

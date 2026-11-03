@@ -12,13 +12,14 @@ use crate::par;
 
 pub(super) fn analyze<T: FactorScalar>(
     matrix: SparseInput<'_, T>,
-    _options: &DirectOptions,
+    options: &DirectOptions,
 ) -> SolverResult<SymbolicFactorization> {
     let (columns, transposed) = matrix.as_columns();
     let symbolic = factorize_symbolic_lu(columns.faer_symbolic(), Default::default())?;
     let estimate = nominal_estimate::<T>(matrix, &symbolic)?;
     Ok(SymbolicFactorization {
         kind: FactorKind::Lu,
+        workspace: options.workspace,
         fingerprint: matrix.pattern_fingerprint(),
         input_transposed: transposed,
         estimate,

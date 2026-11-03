@@ -80,7 +80,6 @@ pub(crate) struct SessionConfig {
 
 impl SessionConfig {
     pub(crate) fn from_options(opts: &InitOptions) -> Result<Self, String> {
-        use runmat_config::runtime::{AccelPowerPreference as Power, LanguageCompatMode};
         let mut runtime = opts
             .runtime_settings
             .as_ref()
@@ -131,6 +130,22 @@ impl SessionConfig {
         if let Some(vertices) = opts.surface_vertex_budget {
             runtime.plotting.surface_vertex_budget = Some(vertices);
         }
+        Self::from_runtime_and_options(runtime, opts)
+    }
+
+    /// Reuse the already resolved original worker policy without consulting
+    /// another user/project layer or the worker's ambient environment.
+    pub(crate) fn from_closed_runtime(
+        runtime: runmat_config::runtime::RunMatRuntimeConfig,
+    ) -> Result<Self, String> {
+        Self::from_runtime_and_options(runtime, &InitOptions::default())
+    }
+
+    fn from_runtime_and_options(
+        runtime: runmat_config::runtime::RunMatRuntimeConfig,
+        opts: &InitOptions,
+    ) -> Result<Self, String> {
+        use runmat_config::runtime::{AccelPowerPreference as Power, LanguageCompatMode};
         #[cfg(target_arch = "wasm32")]
         crate::runtime::settings::validate_browser_capabilities(&runtime)?;
         let language_compat = match runtime.language.compat {

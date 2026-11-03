@@ -155,6 +155,7 @@ async fn completed_attempt_releases_its_worker_reservation_once_inner() {
                 )),
                 runmat_execution_transport_native::frame::FrameLimits::default(),
                 "reservation-correlation".into(),
+                None,
             ),
             resources,
             cancellation: Default::default(),

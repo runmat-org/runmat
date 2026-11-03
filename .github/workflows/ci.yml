@@ -3,6 +3,10 @@ name: CI
 on:
   workflow_call:
     inputs:
+      source_ref:
+        description: Exact source ref selected by the calling release workflow
+        type: string
+        default: ''
       release_validation:
         description: Run validation lanes when CI is called from the Release workflow
         type: boolean
@@ -22,11 +26,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scientific-receipts:
+    name: Verify committed scientific qualification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python3 scripts/qualification/scientific.py verify
+
   distribution-contracts:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -133,6 +151,8 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Isolate Cargo build artifacts
         shell: bash
@@ -402,6 +422,8 @@ jobs:
       RUNMAT_FEA_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - uses: actions-rs/toolchain@v1
         with:
@@ -416,8 +438,10 @@ jobs:
             libhdf5-dev libopenblas-dev liblapack-dev libssl-dev \
             libzmq3-dev pkg-config ca-certificates
 
-      - name: Run FEA package tests
-        run: cargo test -p runmat-analysis-core -p runmat-analysis-fea -p runmat-analysis-execution
+      # Ordinary package tests already run in geometry-analysis. Do not bypass
+      # its scientific routing with another unfiltered Cargo invocation.
+      - name: Verify scientific source and qualification receipts
+        run: python3 scripts/qualification/scientific.py verify
 
       - name: Qualify exact-f64 resident sparse execution
         env:
@@ -910,6 +934,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Resolve branch artifact identity
         if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')

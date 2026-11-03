@@ -18,6 +18,17 @@ pub trait WorkerBackend {
         session: &'a Self::Session,
         request: ExecutionRequest,
     ) -> BackendFuture<'a, WorkerExecution>;
+    /// Carry the original scheduler allocation to a physical worker adapter.
+    /// Backends without an isolated process retain their existing execution path.
+    fn execute_admitted<'a>(
+        &'a self,
+        session: &'a Self::Session,
+        request: ExecutionRequest,
+        _assignment: runmat_execution::ProgramExecutionAssignment,
+        _resources: runmat_execution::resource::ResourceRequest,
+    ) -> BackendFuture<'a, WorkerExecution> {
+        self.execute(session, request)
+    }
     fn cancel<'a>(
         &'a self,
         session: &'a Self::Session,

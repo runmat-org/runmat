@@ -12,6 +12,12 @@ pub(crate) struct ProcessOwner<'a> {
 pub(crate) trait OwnedProcessControl:
     crate::process_output::OutputDrainControl + Send + Sync
 {
+    fn fea_provider(&self) -> crate::fea_proxy::Provider {
+        crate::fea_proxy::capture()
+    }
+    fn fea_parent(&self) -> Result<Option<crate::fea_delegation::Source>, String> {
+        crate::fea_delegation::capture()
+    }
     fn begin_raw_output(
         &self,
         attempt: &AttemptRequest,
@@ -61,6 +67,12 @@ impl crate::process_output::OutputDrainControl for LocalControl<'_> {
     }
 }
 impl OwnedProcessControl for LocalControl<'_> {
+    fn fea_provider(&self) -> crate::fea_proxy::Provider {
+        self.completion.fea_provider.clone()
+    }
+    fn fea_parent(&self) -> Result<Option<crate::fea_delegation::Source>, String> {
+        self.completion.fea_parent.clone()
+    }
     fn begin_raw_output(
         &self,
         attempt: &AttemptRequest,
@@ -113,13 +125,117 @@ impl OwnedProcessControl for LocalControl<'_> {
 
 pub(super) async fn run_process(
     driver: &ProcessOwner<'_>,
-    request: WorkerLaunchRequest,
+    mut request: WorkerLaunchRequest,
     completion: &dyn OwnedProcessControl,
     meters: &TransportMeters,
     termination: &mut AttemptExecutionTermination,
     console: &mut Option<runmat_execution::console::ConsoleTranscript>,
+    console_scopes: &mut Vec<runmat_execution::console::ScopedConsoleTranscript>,
     retirement: &mut LocalRetirementEvidence,
 ) -> Result<WorkerResponse, TransferFailure> {
+    let fea_parent = completion
+        .fea_parent()
+        .map_err(TransferFailure::Infrastructure)?;
+    let invocation = runmat_execution::console::invocation_memory_bytes(
+        &driver.attempt.task.environment,
+        driver.attempt.task.console,
+    )
+    .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+    let fea_proxy = if fea_parent.is_none() {
+        let minimum =
+            crate::fea_proxy::storage_bytes(invocation, crate::fea_proxy::StorageRole::Proxy)
+                .map_err(TransferFailure::Infrastructure)?;
+        if request
+            .resources()
+            .is_some_and(|resources| minimum > resources.memory_bytes)
+        {
+            return Err(TransferFailure::Infrastructure(
+                "FEA proxy and invocation controls exceed original worker memory".into(),
+            ));
+        }
+        match (request.assignment(), request.resources()) {
+            (Some(assignment), Some(resources)) => Some(
+                crate::fea_proxy::Parent::new(
+                    completion.fea_provider(),
+                    assignment.clone(),
+                    resources.clone(),
+                    driver.attempt.task.deadline_unix_millis,
+                    invocation,
+                )
+                .map_err(TransferFailure::Infrastructure)?,
+            ),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let _fea_proxy_close = fea_proxy
+        .as_ref()
+        .map(|proxy| crate::fea_proxy::Close(proxy.clone()));
+    if let Some(source) = &fea_parent {
+        let assignment = request.assignment().ok_or_else(|| {
+            TransferFailure::Infrastructure("FEA child lacks an original assignment".into())
+        })?;
+        let resources = request.resources().ok_or_else(|| {
+            TransferFailure::Infrastructure("FEA child lacks reserved resources".into())
+        })?;
+        let minimum =
+            crate::fea_proxy::storage_bytes(invocation, crate::fea_proxy::StorageRole::Delegated)
+                .map_err(TransferFailure::Infrastructure)?;
+        if resources.memory_bytes < minimum {
+            return Err(TransferFailure::Infrastructure(
+                "inherited FEA controls exceed original worker memory".into(),
+            ));
+        }
+        let grant = crate::fea_delegation::WorkerFeaGrant::new(source, assignment, resources)
+            .map_err(TransferFailure::Infrastructure)?;
+        request = match request {
+            WorkerLaunchRequest::Reserved(request) => WorkerLaunchRequest::ReservedFea {
+                request,
+                console_budget: None,
+                fea_grant: grant,
+            },
+            WorkerLaunchRequest::ReservedConsole {
+                request,
+                console_budget,
+            } => WorkerLaunchRequest::ReservedFea {
+                request,
+                console_budget: Some(console_budget),
+                fea_grant: grant,
+            },
+            WorkerLaunchRequest::StagedGraph(mut graph) => {
+                graph.staged_graph_v10.fea_grant = Some(grant);
+                WorkerLaunchRequest::StagedGraph(graph)
+            }
+            _ => {
+                return Err(TransferFailure::Infrastructure(
+                    "FEA delegation requires the private reserved launch".into(),
+                ))
+            }
+        };
+    }
+    if fea_proxy.is_some() {
+        request = match request {
+            WorkerLaunchRequest::Reserved(request) => WorkerLaunchRequest::ReservedFeaProxy {
+                request,
+                console_budget: None,
+                fea_parent_admission: true,
+            },
+            WorkerLaunchRequest::ReservedConsole {
+                request,
+                console_budget,
+            } => WorkerLaunchRequest::ReservedFeaProxy {
+                request,
+                console_budget: Some(console_budget),
+                fea_parent_admission: true,
+            },
+            WorkerLaunchRequest::StagedGraph(mut graph) => {
+                graph.staged_graph_v10.fea_parent_admission = true;
+                WorkerLaunchRequest::StagedGraph(graph)
+            }
+            other => other,
+        };
+    }
     #[cfg(windows)]
     if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
         let own_executable = std::env::current_exe()
@@ -149,13 +265,19 @@ pub(super) async fn run_process(
         WorkerLaunchRequest::Direct(request) => request
             .validate()
             .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
-        WorkerLaunchRequest::Reserved(request) => request
+        WorkerLaunchRequest::Reserved(request)
+        | WorkerLaunchRequest::ReservedFeaProxy { request, .. }
+        | WorkerLaunchRequest::ReservedConsole { request, .. }
+        | WorkerLaunchRequest::ReservedFea { request, .. } => request
             .validate()
             .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
         WorkerLaunchRequest::StagedGraph(_) => {}
     }
     let console_controls = match &request {
-        WorkerLaunchRequest::Reserved(request) => request.request().console,
+        WorkerLaunchRequest::Reserved(request)
+        | WorkerLaunchRequest::ReservedFeaProxy { request, .. }
+        | WorkerLaunchRequest::ReservedConsole { request, .. }
+        | WorkerLaunchRequest::ReservedFea { request, .. } => request.request().console,
         WorkerLaunchRequest::StagedGraph(_) => {
             completion
                 .graph_authority()
@@ -169,11 +291,23 @@ pub(super) async fn run_process(
         }
         WorkerLaunchRequest::Direct(_) => None,
     };
+    let console_budget = request.console_budget();
+    if console_controls.is_some() != console_budget.is_some() {
+        return Err(TransferFailure::Infrastructure(
+            "worker capture omits its original delegated subtree grant".into(),
+        ));
+    }
+    if let Some(budget) = console_budget {
+        budget
+            .validate()
+            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+    }
     let mut console_receiver = console_controls
         .map(runmat_execution::console::ConsoleReceiver::new)
         .transpose()
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
     let mut console_receipt = None;
+    let mut received_scopes = Vec::new();
     let payload = serde_json::to_vec(&request)
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
     if payload.len() > driver.config.max_message_bytes as usize {
@@ -201,6 +335,13 @@ pub(super) async fn run_process(
     command.stdio = runmat_process_host::StdioPolicy::PrivateControl(listener.endpoint().clone());
     command.arguments = driver.config.worker_arguments.clone();
     command.environment_policy = EnvironmentPolicy::Inherit;
+    if let Some(org) =
+        crate::config::local_organization_environment(driver.config.local_fea_organization)
+    {
+        // This owned local worker resolves the same explicit CLI account selector.
+        // The signed-in person's membership remains Server-authorized.
+        command.environment.insert("RUNMAT_ORG_ID".into(), org);
+    }
     if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
         command.environment_policy =
             EnvironmentPolicy::InheritExcept(vec!["RUNMAT_EXECUTION_WORKER_REMOTE".into()]);
@@ -381,6 +522,7 @@ pub(super) async fn run_process(
         return Err(TransferFailure::Cancelled);
     }
     let mut last_progress_sequence = 0;
+    let mut last_fea_budget = request.fea_grant().map(|grant| grant.parent.budget);
     let mut graph_cancel_sent_at = None;
     let response = loop {
         let payload = {
@@ -393,6 +535,34 @@ pub(super) async fn run_process(
                 break response.map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
             }
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                if let Some(proxy) = &fea_proxy { proxy.check().map_err(|denied| TransferFailure::Infrastructure(denied.to_string()))?; }
+                if let Some(source) = &fea_parent {
+                    let snapshot = match source.snapshot() {
+                        Ok(snapshot) => snapshot,
+                        Err(denied) => {
+                            if let Some(grant) = request.fea_grant() {
+                                let update = WorkerDriverMessage::FeaLeaseUpdate { run_id: grant.parent.request.run_id.clone(), attempt_id: grant.assignment.attempt_id,
+                                    update: crate::fea_delegation::FeaLeaseUpdate::Denied { denied: denied.clone() } };
+                                if let Ok(payload) = serde_json::to_vec(&update) { let _ = tokio::time::timeout(Duration::from_secs(1), write_payload(&mut writer, &payload, limits)).await; }
+                            }
+                            return Err(TransferFailure::Infrastructure(denied.to_string()));
+                        }
+                    };
+                    if source.cancellation_token().is_cancelled() { return Err(TransferFailure::Cancelled); }
+                    if last_fea_budget != Some(snapshot.budget) {
+                        let grant = request.fea_grant().ok_or_else(|| TransferFailure::Infrastructure("FEA renewal lacks its original child grant".into()))?;
+                        if snapshot.origin != grant.parent.origin || snapshot.request != grant.parent.request {
+                            return Err(TransferFailure::Infrastructure("FEA renewal changed its original parent identity".into()));
+                        }
+                        let update = WorkerDriverMessage::FeaLeaseUpdate { run_id: snapshot.request.run_id, attempt_id: grant.assignment.attempt_id,
+                            update: crate::fea_delegation::FeaLeaseUpdate::Renewed { budget: snapshot.budget } };
+                        let payload = serde_json::to_vec(&update).map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+                        tokio::time::timeout(Duration::from_secs(1), write_payload(&mut writer, &payload, limits)).await
+                            .map_err(|_| TransferFailure::Infrastructure("FEA renewal delivery exceeded its bound".into()))?
+                            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+                        last_fea_budget = Some(snapshot.budget);
+                    }
+                }
                 if completion.is_cancelled() {
                     if let WorkerLaunchRequest::StagedGraph(staged) = &request {
                         if let Some(sent_at) = graph_cancel_sent_at {
@@ -426,8 +596,31 @@ pub(super) async fn run_process(
             }
         }}
         };
+        if payload.len() as u64 <= crate::fea_proxy::MAX_FRAME_BYTES && crate::fea_proxy::is_call(&payload) && fea_proxy.is_none() {
+            return Err(TransferFailure::Infrastructure("worker requested ungranted FEA admission proxy".into()));
+        }
         if let Ok(message) = serde_json::from_slice::<WorkerProcessMessage>(&payload) {
             match message {
+                WorkerProcessMessage::FeaAdmissionCall { call } => {
+                    if payload.len() as u64 > crate::fea_proxy::MAX_FRAME_BYTES { return Err(TransferFailure::Infrastructure("FEA proxy request exceeds its control bound".into())); }
+                    let proxy = fea_proxy.as_ref().ok_or_else(|| TransferFailure::Infrastructure("worker requested ungranted FEA admission proxy".into()))?.clone();
+                    let sequence = call.sequence;
+                    let worker = proxy.clone();
+                    let operation = tokio::task::spawn_blocking(move || worker.call(call));
+                    tokio::pin!(operation);
+                    let reply = loop { tokio::select! {
+                        reply = &mut operation => break reply.map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
+                        _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                            if completion.is_cancelled() { return Err(TransferFailure::Cancelled); }
+                            proxy.check().map_err(|denied| TransferFailure::Infrastructure(denied.to_string()))?;
+                        }
+                    }};
+                    let encoded = runmat_canonical_codec::encode_json_bounded(&WorkerDriverMessage::FeaAdmissionReply { sequence, reply }, crate::fea_proxy::MAX_FRAME_BYTES)
+                        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+                    tokio::time::timeout(Duration::from_secs(1), write_payload(&mut writer, &encoded, limits)).await
+                        .map_err(|_| TransferFailure::Infrastructure("FEA proxy reply delivery exceeded its bound".into()))?
+                        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+                }
                 WorkerProcessMessage::Progress { progress } => {
                     progress
                         .validate()
@@ -489,6 +682,7 @@ pub(super) async fn run_process(
                 WorkerProcessMessage::Completed {
                     response,
                     console: receipt,
+                    console_scopes: scopes,
                 } => {
                     match (console_receiver.as_ref(), receipt.as_ref()) {
                         (Some(receiver), Some(receipt)) => receiver
@@ -505,6 +699,7 @@ pub(super) async fn run_process(
                         completion.finish_console(receipt).map_err(TransferFailure::Infrastructure)?;
                     }
                     console_receipt = receipt;
+                    received_scopes = scopes;
                     break response;
                 }
                 WorkerProcessMessage::InfrastructureFailure { message } => {
@@ -580,6 +775,11 @@ pub(super) async fn run_process(
             )));
         }
     }
+    if let Some(source) = &fea_parent {
+        source.snapshot().map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+        if source.cancellation_token().is_cancelled() { return Err(TransferFailure::Cancelled); }
+    }
+    if let Some(proxy) = &fea_proxy { proxy.terminal_check().map_err(|denied| TransferFailure::Infrastructure(denied.to_string()))?; }
     match &request {
         WorkerLaunchRequest::Direct(request) => match request.as_ref() {
             WorkerRequest::Direct(request) => response.validate_against(request),
@@ -589,7 +789,10 @@ pub(super) async fn run_process(
             ));
             }
         },
-        WorkerLaunchRequest::Reserved(request) => response.validate_against(request.request()),
+        WorkerLaunchRequest::Reserved(request)
+        | WorkerLaunchRequest::ReservedFeaProxy { request, .. }
+        | WorkerLaunchRequest::ReservedConsole { request, .. }
+        | WorkerLaunchRequest::ReservedFea { request, .. } => response.validate_against(request.request()),
         WorkerLaunchRequest::StagedGraph(_) => completion
             .graph_authority()
             .ok_or_else(|| {
@@ -615,7 +818,13 @@ pub(super) async fn run_process(
     let outcome = match console_result {
         Ok(transcript) => {
             *console = transcript;
-            outcome
+            match crate::console_bridge::validate_imported_subtree(console.as_ref(), &received_scopes, console_budget) {
+                Ok(()) => {
+                    *console_scopes = received_scopes;
+                    outcome
+                }
+                Err(message) => Err(TransferFailure::Infrastructure(message)),
+            }
         }
         Err(error) => match outcome {
             Err(original) => Err(original),

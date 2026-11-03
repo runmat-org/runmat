@@ -8,6 +8,8 @@ mod fluid_study_fixture;
 mod fluid_support;
 #[path = "support/phase_execution.rs"]
 mod phase_execution_support;
+#[path = "support/fea_admission.rs"]
+mod fea_admission_support;
 #[path = "analysis_process_conformance/static_recovery.rs"]
 mod static_recovery;
 use std::collections::BTreeSet;
@@ -167,7 +169,12 @@ fn main() {
     } else {
         tokio::runtime::Builder::new_current_thread()
     };
-    runtime.enable_all().build().unwrap().block_on(parent());
+    let admission = fea_admission_support::context();
+    runtime
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(admission.run_future(parent()));
 }
 
 async fn parent() {

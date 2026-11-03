@@ -15,7 +15,7 @@ impl RemotePoolDriver {
         }
         {
             let driver = self.driver.lock().expect("remote driver poisoned");
-            let snapshot = driver.snapshot();
+            let snapshot = driver.snapshot_ref();
             let pool = snapshot
                 .pools
                 .get(&self.pool_id)
@@ -197,7 +197,7 @@ impl RemotePoolDriver {
             self.driver
                 .lock()
                 .expect("remote driver poisoned")
-                .snapshot()
+                .snapshot_ref()
                 .attempts
                 .values()
                 .filter(|attempt| {

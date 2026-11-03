@@ -1,4 +1,4 @@
-//! Local public roots bypass billing while preserving cancellation/provider guards.
+//! Local FEA roots require lease admission before numerical/provider effects.
 use super::*;
 use crate::analysis::fea_run_admission::{
     FeaRunAdmission, FeaRunAdmissionContext, FeaRunDenied, FeaRunPermit, FeaRunRequest,
@@ -13,15 +13,9 @@ impl FeaRunAdmission for DenyingHost {
     }
 }
 
-fn assert_not_billing_denied(error: OperationErrorEnvelope, root: &str) {
-    assert!(
-        ![
-            "RM.FEA.SignInRequired",
-            "RM.FEA.AllowanceUsed",
-            "RM.FEA.LeaseInvalid",
-            "RM.FEA.ServerUnreachable"
-        ]
-        .contains(&error.error_code.as_str()),
+fn assert_billing_denied(error: OperationErrorEnvelope, root: &str) {
+    assert_eq!(
+        error.error_code, "RM.FEA.SignInRequired",
         "{root}: {}",
         error.message
     );
@@ -34,11 +28,8 @@ type ModelRoot = fn(
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope>;
 
 #[test]
-fn local_model_execution_roots_reach_cancellation_or_domain_validation_without_billing() {
+fn local_model_roots_require_admission_after_pure_domain_validation() {
     let _host_state = analysis_test_guard();
-    let _interrupt = crate::interrupt::replace_interrupt(Some(
-        runmat_execution::CancellationToken::from_shared(Arc::new(AtomicBool::new(true))),
-    ));
     let host = Arc::new(DenyingHost::default());
     let context = FeaRunAdmissionContext::new(host.clone());
     let model = sample_model();
@@ -85,18 +76,21 @@ fn local_model_execution_roots_reach_cancellation_or_domain_validation_without_b
         assert!(
             matches!(
                 error.error_type,
-                OperationErrorType::Cancelled | OperationErrorType::Validation
+                OperationErrorType::Capacity | OperationErrorType::Validation
             ),
             "{name}: local admission must preserve cancellation/domain guards: {}",
             error.error_code
         );
-        assert_not_billing_denied(error, name);
+        if error.error_type != OperationErrorType::Validation {
+            assert_billing_denied(error, name);
+        }
     }
     let requests = host.0.lock().unwrap();
     assert!(
-        requests.is_empty(),
-        "local public roots must never consult the billing host"
+        !requests.is_empty(),
+        "valid local public roots must require the installed lease provider"
     );
+    let admitted = requests.len();
     drop(requests);
 
     // Retired reduced coupled-flow model roots remain validation-only.
@@ -109,7 +103,7 @@ fn local_model_execution_roots_reach_cancellation_or_domain_validation_without_b
         assert!(error.error_code.ends_with(".AUTHORED_STUDY_REQUIRED"));
         assert_eq!(error.error_type, OperationErrorType::Validation);
     }
-    assert!(host.0.lock().unwrap().is_empty());
+    assert_eq!(host.0.lock().unwrap().len(), admitted);
 }
 
 struct RejectExecution;
@@ -135,7 +129,7 @@ impl StructuralStudyPlacementExecutor for RejectExecution {
 }
 
 #[test]
-fn local_study_placement_and_meshing_preserve_provider_errors_without_billing() {
+fn local_study_placement_and_meshing_refuse_before_provider_effects() {
     let _host_state = analysis_test_guard();
     let meshing_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let calls = Arc::clone(&meshing_calls);
@@ -181,9 +175,9 @@ fn local_study_placement_and_meshing_preserve_provider_errors_without_billing() 
             ),
         ]
     }) {
-        assert_not_billing_denied(error, name);
+        assert_billing_denied(error, name);
     }
-    assert_eq!(meshing_calls.load(Ordering::SeqCst), 3);
+    assert_eq!(meshing_calls.load(Ordering::SeqCst), 0);
     let placement_errors = pollster::block_on(context.run_future(async {
         [
             analysis_execute_structural_study_with_placement(
@@ -203,7 +197,7 @@ fn local_study_placement_and_meshing_preserve_provider_errors_without_billing() 
         ]
     }));
     for error in placement_errors {
-        assert_not_billing_denied(error, "placement");
+        assert_billing_denied(error, "placement");
     }
     let error = context
         .run_sync(|| {
@@ -218,11 +212,13 @@ fn local_study_placement_and_meshing_preserve_provider_errors_without_billing() 
         .unwrap_err();
     assert!(matches!(
         error,
-        crate::meshing::MeshingExecutionError::Provider(ref message) if message == "offline local meshing provider reached"
+        crate::meshing::MeshingExecutionError::Admission(FeaRunDenied::SignInRequired)
     ));
     let requests = host.0.lock().unwrap();
-    assert!(
-        requests.is_empty(),
-        "local study/placement/mesh roots must not consult billing"
+    assert_eq!(
+        requests.len(),
+        6,
+        "each denied public root is admitted before work"
     );
+    assert_eq!(meshing_calls.load(Ordering::SeqCst), 0);
 }

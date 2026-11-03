@@ -141,6 +141,8 @@ pub(in crate::analysis::storage) fn commit(
         &manifest_path,
         &resources::json(&prepared.manifest, prepared.maximum_bytes)?,
     )?;
+    crate::analysis::fea_run_admission::FeaRunScope::check_publication_checked()
+        .map_err(|denied| AnalysisPublicationError::from(denied.to_string()))?;
     objects.commit()?;
     for (id, record) in &prepared.runs {
         let path = root.join("runs").join(format!("{id}.json"));
@@ -161,6 +163,8 @@ pub(in crate::analysis::storage) fn commit(
     if crate::interrupt::is_cancelled() {
         return Err("study publication was cancelled".into());
     }
+    crate::analysis::fea_run_admission::FeaRunScope::check_publication_checked()
+        .map_err(|denied| AnalysisPublicationError::from(denied.to_string()))?;
     // The shared durable journal owns visibility and recovery of the whole edit set.
     transaction::transition(
         store,

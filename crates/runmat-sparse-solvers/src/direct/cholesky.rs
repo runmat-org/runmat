@@ -8,8 +8,8 @@ use faer::sparse::linalg::SupernodalThreshold;
 use faer::{Conj, MatMut, Side};
 
 use super::{
-    memory, stack_bytes, try_vec, DirectOptions, FactorEstimate, FactorKind, FactorScalar, Inertia,
-    NumericInner, SparseInput, SymbolicFactorization, SymbolicInner,
+    memory, stack_bytes, try_vec, DirectOptions, DirectWorkspacePolicy, FactorEstimate, FactorKind,
+    FactorScalar, Inertia, NumericInner, SparseInput, SymbolicFactorization, SymbolicInner,
 };
 use crate::error::{SolverError, SolverResult};
 use crate::ordering::Permutation;
@@ -23,13 +23,16 @@ fn real<T: FactorScalar>(value: f64) -> T::Real {
 pub(super) fn analyze<T: FactorScalar>(
     matrix: SparseInput<'_, T>,
     kind: FactorKind,
+    workspace: DirectWorkspacePolicy,
     permutation: &Permutation,
 ) -> SolverResult<SymbolicFactorization> {
     let (columns, transposed) = matrix.as_columns();
     let n = columns.ncols();
     let perm = faer::perm::PermRef::new_checked(&permutation.perm, &permutation.inverse, n);
     let params = CholeskySymbolicParams {
-        supernodal_flop_ratio_threshold: if kind == FactorKind::BunchKaufman {
+        supernodal_flop_ratio_threshold: if workspace == DirectWorkspacePolicy::CallerOwned {
+            SupernodalThreshold::FORCE_SIMPLICIAL
+        } else if kind == FactorKind::BunchKaufman {
             // Pivoting happens inside supernodes only; the simplicial path would not pivot.
             SupernodalThreshold::FORCE_SUPERNODAL
         } else {
@@ -46,6 +49,7 @@ pub(super) fn analyze<T: FactorScalar>(
     let estimate = estimate::<T>(&symbolic, kind);
     Ok(SymbolicFactorization {
         kind,
+        workspace,
         fingerprint: matrix.pattern_fingerprint(),
         input_transposed: transposed,
         estimate,
@@ -70,7 +74,8 @@ fn estimate<T: FactorScalar>(
                     c * c
                 })
                 .sum();
-            (((n + 1) + this.row_idx().len()) as u64 * 8, flops)
+            // Column offsets, row indices and retained elimination tree.
+            (((2 * n + 1) + this.row_idx().len()) as u64 * 8, flops)
         }
         SymbolicCholeskyRaw::Supernodal(this) => {
             let begin = this.supernode_begin();
@@ -108,8 +113,22 @@ fn estimate<T: FactorScalar>(
     FactorEstimate {
         dimension: n,
         factor_entries: entries,
-        factor_bytes: entries * scalar + structure + pivoting,
-        workspace_bytes: stack_bytes(workspace),
+        factor_bytes: entries * scalar
+            + structure
+            + pivoting
+            + if symbolic.perm().is_some() {
+                n as u64 * 16
+            } else {
+                0
+            },
+        // LDLT verifies the extracted diagonal while its explicit factorization
+        // scratch remains live. This is wrapper-owned numerical storage too.
+        workspace_bytes: stack_bytes(workspace)
+            + if kind == FactorKind::Ldlt {
+                n as u64 * scalar
+            } else {
+                0
+            },
         flops: flops * if T::IS_COMPLEX { 4.0 } else { 1.0 },
         nominal: false,
     }

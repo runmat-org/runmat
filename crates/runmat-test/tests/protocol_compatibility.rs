@@ -13,6 +13,59 @@ use runmat_test::{
 use std::collections::BTreeMap;
 
 #[test]
+fn execution_admission_preserves_original_assignment_and_rejects_invalid_resources() {
+    use runmat_execution::identity::{AttemptId, WorkerId};
+    use runmat_execution::{
+        ExecutionScopeId, PoolBackend, PoolId, ProgramExecutionAssignment, TaskId,
+    };
+    let limits = ProtocolLimits::default();
+    let mut request = WorkerRequest::Execute {
+        test_id: common::test_id("admitted"),
+        attempt: 1,
+        admission: Some(runmat_test::protocol::WorkerExecutionAdmission {
+            assignment: ProgramExecutionAssignment {
+                scope_id: ExecutionScopeId::derive(&[b"scope"]),
+                pool_id: PoolId::derive(&[b"pool"]),
+                task_id: TaskId::derive(&[b"task"]),
+                attempt_id: AttemptId::derive(&[b"attempt"]),
+                worker_id: WorkerId::derive(&[b"worker"]),
+                backend: PoolBackend::LocalProcesses,
+                resources: Default::default(),
+            },
+            resources: runmat_execution::resource::ResourceRequest {
+                cpu_millicores: 1000,
+                memory_bytes: 64 * 1024 * 1024,
+                scratch_bytes: 0,
+                max_wall_millis: 30_000,
+                max_artifact_bytes: 0,
+                max_egress_bytes: 0,
+                max_relay_bytes: 0,
+                accelerators: vec![],
+                required_capabilities: Default::default(),
+            },
+        }),
+    };
+    let bytes = encode_request(&request, limits).unwrap();
+    assert_eq!(decode_request(&bytes, limits).unwrap(), request);
+    if let WorkerRequest::Execute {
+        admission: Some(admission),
+        ..
+    } = &mut request
+    {
+        admission.resources.cpu_millicores = 0;
+    }
+    assert!(encode_request(&request, limits).is_err());
+    assert_eq!(
+        decode_response(
+            &encode_response(&WorkerResponse::BootstrapReady, limits).unwrap(),
+            limits
+        )
+        .unwrap(),
+        WorkerResponse::BootstrapReady
+    );
+}
+
+#[test]
 fn protocol_negotiates_the_stricter_bound_and_round_trips() {
     let local = ProtocolHandshake::current("native", vec![WorkerCapability::StrongIsolation]);
     let mut remote =

@@ -224,7 +224,9 @@ fn exact_program_submission_round_trips_through_durable_storage() {
         futures::executor::block_on(supervisor.execution_context(Some("program-key"))).unwrap();
     let store = futures::executor::block_on(supervisor.store.lock());
     let submission = original_program_submission(context);
-    let (record, created) = store.create_program(&submission, 1).unwrap();
+    let (record, created) = store
+        .create_program(&submission, 1, Default::default())
+        .unwrap();
     assert!(created);
     let mut scheduler = futures::executor::block_on(supervisor.scheduler.lock());
     let request = scheduler
@@ -247,7 +249,9 @@ fn exact_program_submission_round_trips_through_durable_storage() {
         store.program_assignment(record.handle.id).unwrap(),
         Some(assignment)
     );
-    let (duplicate, created) = store.create_program(&submission, 2).unwrap();
+    let (duplicate, created) = store
+        .create_program(&submission, 2, Default::default())
+        .unwrap();
     assert!(!created);
     assert_eq!(duplicate.handle, record.handle);
     let mut report = runmat_execution_runner::port::BackendReport::for_request(
@@ -440,7 +444,9 @@ fn legacy_program_workload_kind_is_checked_against_original_stored_request() {
         scope_id: runmat_execution::ExecutionScopeId::derive(&[b"round-trip-scope"]),
         pool_id: runmat_execution::PoolId::derive(&[b"round-trip-pool"]),
     });
-    let (mut record, created) = store.create_program(&submission, 1).unwrap();
+    let (mut record, created) = store
+        .create_program(&submission, 1, Default::default())
+        .unwrap();
     assert!(created);
     assert_eq!(
         store.record(record.handle.id).unwrap().workload_kind,
@@ -469,7 +475,9 @@ fn legacy_program_workload_kind_is_checked_against_original_stored_request() {
         .expect("expected an exact program submission");
     assert_eq!(recovered.callable, submission.callable);
     assert_eq!(recovered.artifact, submission.artifact);
-    let (duplicate, created) = store.create_program(&submission, 2).unwrap();
+    let (duplicate, created) = store
+        .create_program(&submission, 2, Default::default())
+        .unwrap();
     assert!(!created);
     assert_eq!(duplicate.handle, record.handle);
     // Portable program results are provider reports, never driver completions.

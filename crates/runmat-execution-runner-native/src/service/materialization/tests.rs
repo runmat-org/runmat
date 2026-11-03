@@ -16,6 +16,7 @@ fn service_fixture() -> (tempfile::TempDir, super::NativeExecutionService) {
 
     let temporary = tempfile::tempdir().expect("temporary native session");
     let config = crate::NativeExecutionConfig {
+        local_fea_organization: Default::default(),
         executable: "/bin/sh".into(),
         worker_arguments: vec!["-c".into(), "exit 0".into()],
         max_workers: 1,

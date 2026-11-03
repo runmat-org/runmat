@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{NativeRunnerError, NativeRunnerResult};
 
-pub const NATIVE_BOOTSTRAP_SCHEMA_VERSION: u16 = 2;
+pub const NATIVE_BOOTSTRAP_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -54,7 +54,11 @@ pub async fn read_bootstrap(
         runmat_process_host::ipc::read_payload(reader, super::framing::host_limits(limits))
             .await
             .map_err(map_host_error)?;
-    let bootstrap: NativeWorkerBootstrap = serde_json::from_slice(&payload)
+    decode_bootstrap(&payload)
+}
+
+pub(crate) fn decode_bootstrap(payload: &[u8]) -> NativeRunnerResult<NativeWorkerBootstrap> {
+    let bootstrap: NativeWorkerBootstrap = serde_json::from_slice(payload)
         .map_err(|error| NativeRunnerError::Protocol(error.to_string()))?;
     if bootstrap.schema_version != NATIVE_BOOTSTRAP_SCHEMA_VERSION {
         return Err(NativeRunnerError::Protocol(format!(

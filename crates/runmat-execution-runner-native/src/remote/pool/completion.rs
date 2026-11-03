@@ -186,6 +186,10 @@ impl RemotePoolDriver {
                     .ok()
                     .is_some_and(|task| task.active_attempt == Some(reported_attempt_id));
             let previous_events = driver.events().len();
+            if let Err(error) = self.validate_console_report_reservation(&report) {
+                tracing::error!(%task_id, %error, "remote console report rejected before retention");
+                return;
+            }
             let actions = match driver.handle(DriverCommand::BackendReport(report)) {
                 Ok(actions) => actions,
                 Err(error) => {
@@ -193,6 +197,28 @@ impl RemotePoolDriver {
                     return;
                 }
             };
+            if let Some(attempt) = driver.snapshot_ref().attempts.get(&reported_attempt_id) {
+                let (console, scopes) =
+                    if let Some(record) = attempt.terminal.as_ref().filter(|record| {
+                        record.console.is_some() || !record.console_scopes.is_empty()
+                    }) {
+                        (record.console.as_deref(), record.console_scopes.as_slice())
+                    } else if let Some(record) = attempt.unverified_retirement.as_ref() {
+                        (record.console.as_deref(), record.console_scopes.as_slice())
+                    } else {
+                        (
+                            None,
+                            &[] as &[runmat_execution::console::ScopedConsoleTranscript],
+                        )
+                    };
+                if let Err(error) = self.settle_console_attempt(&attempt.request, console, scopes) {
+                    // A valid accepted transcript cannot exceed its original
+                    // pre-dispatch maxima. Never turn an accounting fault into
+                    // silently dropped console or a successful completion.
+                    tracing::error!(%task_id, %error, "accepted remote console retention accounting failed");
+                    return;
+                }
+            }
             let outcome = driver.task_record(task_id).ok().and_then(|task| {
                 if task.state == TaskState::Succeeded {
                     Some(match &task.committed {

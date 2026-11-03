@@ -7,13 +7,13 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 pub(super) enum FramedReader {
     Private(ControlReader),
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     Fixture(tokio::process::ChildStdout),
 }
 
 pub(super) enum FramedWriter {
     Private(ControlWriter),
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     Fixture(tokio::process::ChildStdin),
 }
 
@@ -25,7 +25,7 @@ impl AsyncRead for FramedReader {
     ) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
             Self::Private(reader) => Pin::new(reader).poll_read(context, buffer),
-            #[cfg(test)]
+            #[cfg(all(test, unix))]
             Self::Fixture(reader) => Pin::new(reader).poll_read(context, buffer),
         }
     }
@@ -39,21 +39,21 @@ impl AsyncWrite for FramedWriter {
     ) -> Poll<std::io::Result<usize>> {
         match self.get_mut() {
             Self::Private(writer) => Pin::new(writer).poll_write(context, bytes),
-            #[cfg(test)]
+            #[cfg(all(test, unix))]
             Self::Fixture(writer) => Pin::new(writer).poll_write(context, bytes),
         }
     }
     fn poll_flush(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
             Self::Private(writer) => Pin::new(writer).poll_flush(context),
-            #[cfg(test)]
+            #[cfg(all(test, unix))]
             Self::Fixture(writer) => Pin::new(writer).poll_flush(context),
         }
     }
     fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
             Self::Private(writer) => Pin::new(writer).poll_shutdown(context),
-            #[cfg(test)]
+            #[cfg(all(test, unix))]
             Self::Fixture(writer) => Pin::new(writer).poll_shutdown(context),
         }
     }

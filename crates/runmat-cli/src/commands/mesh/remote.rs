@@ -117,6 +117,7 @@ pub(super) async fn execute(
             )
         },
         RemoteSubmissionOptions {
+            console: None,
             project: target.project,
             cluster: target.cluster,
             queue: target.queue,

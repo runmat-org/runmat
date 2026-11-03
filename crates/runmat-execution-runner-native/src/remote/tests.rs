@@ -246,6 +246,8 @@ async fn remote_driver_commits_verified_externalized_results() {
         })
         .unwrap();
     let result = super::pool_execution::RemotePoolExecutionResult {
+        console: None,
+        cancelled: false,
         response: ProgramExecutionResponse::ExternalizedSuccess {
             outputs: vec![runmat_execution::value::ValuePayload::Object(Box::new(
                 reference.clone(),

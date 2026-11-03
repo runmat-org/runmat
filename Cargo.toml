@@ -39,6 +39,7 @@ members = [
     "crates/runmat-lsp",
     "crates/runmat-cli",
     "crates/runmat-server-client",
+    "crates/runmat-fea-admission-native",
     "crates/runmat-core",
     "crates/runmat-build-identity",
     "crates/runmat-time",
@@ -186,6 +187,7 @@ runmat-process-host = { version = "=0.6.2", path = "crates/runmat-process-host" 
 runmat-static-analysis = { version = "=0.6.2", path = "crates/runmat-static-analysis" }
 runmat-canonical-codec = { version = "=0.6.2", path = "crates/runmat-canonical-codec" }
 runmat-server-client = { version = "=0.6.2", path = "crates/runmat-server-client" }
+runmat-fea-admission-native = { version = "=0.6.2", path = "crates/runmat-fea-admission-native" }
 runmat-node-agent = { version = "=0.6.2", path = "crates/runmat-node-agent" }
 runmat-accelerate = { version = "=0.6.2", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.6.2", path = "crates/runmat-accelerate-api" }

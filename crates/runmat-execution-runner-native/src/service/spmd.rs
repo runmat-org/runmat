@@ -27,6 +27,15 @@ struct OwnedRank {
     result: Option<runmat_runtime::execution::SpmdRankResult>,
 }
 
+fn rank_console_controls(
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> Option<runmat_execution::console::ConsoleLimits> {
+    runtime
+        .service_ports()
+        .host()
+        .and_then(|host| host.console_limits())
+}
+
 impl Drop for OwnedGang {
     fn drop(&mut self) {
         if !self.complete {
@@ -47,6 +56,10 @@ pub(super) async fn execute(
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<runmat_runtime::execution::SpmdGangResults, ExecutionServiceError> {
     call.validate()?;
+    let console = rank_console_controls(runtime);
+    service
+        .driver
+        .bind_console_parent(runtime, console.is_some())?;
     service.validate_scope(call.gang.scope_id)?;
     let pool = match service.current_pool() {
         Ok(Some(pool)) if pool.handle == call.gang.pool => pool,
@@ -102,7 +115,7 @@ pub(super) async fn execute(
             retry: runmat_execution::RetryPolicy::Never,
             program_revision: call.program_revision.clone(),
             environment: runmat_execution::EnvironmentSnapshot::default(),
-            console: None,
+            console,
             capabilities: call.capabilities.clone(),
             program: runmat_runtime::execution::DeferredProgram::RegionSourcesV1(
                 call.program.clone().into(),
@@ -144,7 +157,7 @@ pub(super) async fn execute(
                 },
                 retry: runmat_execution::RetryPolicy::Never,
                 environment: runmat_execution::EnvironmentSnapshot::default(),
-                console: None,
+                console,
             },
             controls.clone(),
         ) {
@@ -298,5 +311,28 @@ pub(super) fn retain_first_spmd_failure(
         .is_none_or(|(current_order, _)| order < *current_order)
     {
         *first = Some((order, failure));
+    }
+}
+
+#[cfg(test)]
+mod console_tests {
+    use super::*;
+    use runmat_execution::console::ConsoleLimits;
+    use runmat_runtime::context::{PortableConsoleHost, RuntimeContext, RuntimeServicePorts};
+    use std::rc::Rc;
+
+    #[test]
+    fn rank_controls_preserve_unrequested_console_and_exact_invoking_owner() {
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        assert_eq!(rank_console_controls(&runtime), None);
+        let limits = ConsoleLimits {
+            max_records: 17,
+            max_text_bytes: 4096,
+        };
+        let host = Rc::new(PortableConsoleHost::new(limits).unwrap());
+        let runtime = runtime.with_service_ports(RuntimeServicePorts::default().with_host(host));
+        assert_eq!(rank_console_controls(&runtime), Some(limits));
     }
 }

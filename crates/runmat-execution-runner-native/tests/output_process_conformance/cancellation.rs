@@ -27,7 +27,7 @@ pub(super) async fn blocked_worker() {
     let reference = launch["staged_graph_v10"]
         .as_object()
         .expect("actual parent-issued staged graph reference");
-    assert_eq!(reference.len(), 7);
+    assert_eq!(reference.len(), 8);
     for field in [
         "artifact_id",
         "stored_digest",
@@ -36,6 +36,7 @@ pub(super) async fn blocked_worker() {
         "context",
         "requested_outputs",
         "resources",
+        "console_budget",
     ] {
         assert!(
             !reference[field].is_null(),

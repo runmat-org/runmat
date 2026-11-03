@@ -415,6 +415,38 @@ async fn complete_portable_script_executes_after_component_reconstruction() {
         runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0]).unwrap(),
         runmat_value::Value::Num(42.0)
     );
+    for (source, expected) in [
+        ("1 + 1\nans + 3\n", 5.0),
+        ("1 + 1\nans = 7;\n", 7.0),
+        ("1 + 1\nanswer = 42;\nanswer\n", 2.0),
+    ] {
+        let unit = session
+            .compile_executable_unit(
+                ExecutableSource::new("path:portable-ans-order", "ordered.m", source),
+                None,
+            )
+            .await
+            .unwrap();
+        let response = execute_portable_envelope(&unit.portable_envelope().unwrap()).await;
+        let runmat_execution_artifact::ProgramExecutionResponse::Success { outputs } = response
+        else {
+            panic!("assigned script result did not survive: {response:?}");
+        };
+        assert_eq!(
+            runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0]).unwrap(),
+            runmat_value::Value::Num(expected)
+        );
+        let mut invocation = ProcedureInvocation::entrypoint();
+        invocation.requested_outputs = 1;
+        assert_eq!(
+            session
+                .invoke_executable(&unit, invocation, &InvocationControl::default())
+                .await
+                .unwrap()
+                .as_slice(),
+            &[runmat_value::Value::Num(expected)]
+        );
+    }
     let display_only = session
         .compile_executable_unit(
             ExecutableSource::new(
@@ -431,6 +463,22 @@ async fn complete_portable_script_executes_after_component_reconstruction() {
         runmat_execution_artifact::ProgramExecutionResponse::Failure { message }
             if message == "script did not produce the requested ans value"
     ));
+    let cleared = session
+        .compile_executable_unit(
+            ExecutableSource::new(
+                "path:portable-cleared-ans",
+                "cleared.m",
+                "1 + 1\nclear ans\n",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(execute_portable_envelope(&cleared.portable_envelope().unwrap()).await,
+        runmat_execution_artifact::ProgramExecutionResponse::Failure { message }
+            if message == "script did not produce the requested ans value")
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

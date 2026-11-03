@@ -40,7 +40,7 @@ impl RemotePoolDriver {
                 .driver
                 .lock()
                 .expect("remote driver poisoned")
-                .snapshot()
+                .snapshot_ref()
                 .attempts
                 .get(&report.attempt_id)
                 .map(|attempt| attempt.request.clone());
