@@ -247,7 +247,7 @@ const ADJOINT_INPUT: &str = r#"
 @group(0) @binding(2) var<storage, read> gamma: Tensor;
 @group(0) @binding(3) var<storage, read> statistics: Tensor;
 @group(0) @binding(4) var<storage, read> sums: Tensor;
-@group(0) @binding(5) var<storage, read_write> dx: Tensor;
+@group(0) @binding(5) var<storage, read_write> input_gradient: Tensor;
 $COMMON$
 
 @compute @workgroup_size($WG$)
@@ -262,13 +262,13 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let count = $SCALAR$(params.group_size);
   let centered = count * dxhat - sums.data[2u * position.x] - xhat * sums.data[2u * position.x + 1u];
   if (statistics.data[base + 2u] == $SCALAR$(0.0)) {
-    dx.data[index] = ($SCALAR$(1.0) / sqrt(epsilon())) / count * centered;
+    input_gradient.data[index] = ($SCALAR$(1.0) / sqrt(epsilon())) / count * centered;
   } else {
     // Reconstitute the physical standard deviation before dividing the complete
     // derivative numerator. Neither inv_std_scaled / maximum nor centered /
     // maximum is necessarily representable when the final derivative is.
     let standard_deviation = scaled_ratio(statistics.data[base], statistics.data[base + 2u]);
-    dx.data[index] = scaled_ratio(centered, standard_deviation) / count;
+    input_gradient.data[index] = scaled_ratio(centered, standard_deviation) / count;
   }
 }
 "#;

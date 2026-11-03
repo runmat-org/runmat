@@ -17,6 +17,9 @@ struct Params {
     @BATCH_FIELDS@
 };
 struct Pair { a: vec2<u32>, b: vec2<u32>, };
+// A value record preserves the four lanes across shader-language backends.
+// HLSL has no array-valued function return type.
+struct CounterWords { lanes: array<vec2<u32>, 4>, };
 
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: Params;
@@ -46,26 +49,26 @@ fn mix64(a: vec2<u32>, b: vec2<u32>, rotation: u32) -> Pair {
     return Pair(sum, rotl64(b, rotation) ^ sum);
 }
 
-fn counter_for_item_attempt(index: u32, attempt: vec2<u32>) -> array<vec2<u32>, 4> {
+fn counter_for_item_attempt(index: u32, attempt: vec2<u32>) -> CounterWords {
     let first0 = params.first0 + index;
     let carry0 = select(0u, 1u, first0 < params.first0);
     let first1 = params.first1 + carry0;
     let carry1 = select(0u, 1u, first1 < params.first1);
     let first2 = params.first2 + carry1;
     let carry2 = select(0u, 1u, first2 < params.first2);
-    return array<vec2<u32>, 4>(
+    return CounterWords(array<vec2<u32>, 4>(
         vec2<u32>(first0, first1),
         vec2<u32>(first2, params.first3 + carry2),
         attempt,
         vec2<u32>(0u, 0u)
-    );
+    ));
 }
 
-fn counter_for_item(index: u32) -> array<vec2<u32>, 4> {
+fn counter_for_item(index: u32) -> CounterWords {
     return counter_for_item_attempt(index, vec2<u32>(0u, 0u));
 }
 
-fn threefry(counter: array<vec2<u32>, 4>) -> array<vec2<u32>, 4> {
+fn threefry(counter: CounterWords) -> CounterWords {
     let parity = vec2<u32>(0xA9FC1A22u, 0x1BD11BDAu);
     let keys = array<vec2<u32>, 5>(
         vec2<u32>(params.seed0, params.seed1),
@@ -81,8 +84,8 @@ fn threefry(counter: array<vec2<u32>, 4>) -> array<vec2<u32>, 4> {
         vec2<u32>(58u, 22u), vec2<u32>(32u, 32u)
     );
     var words = array<vec2<u32>, 4>(
-        add64(counter[0], keys[0]), add64(counter[1], keys[1]),
-        add64(counter[2], keys[2]), add64(counter[3], keys[3])
+        add64(counter.lanes[0], keys[0]), add64(counter.lanes[1], keys[1]),
+        add64(counter.lanes[2], keys[2]), add64(counter.lanes[3], keys[3])
     );
     for (var round: u32 = 0u; round < 20u; round = round + 1u) {
         let rotation = rotations[round % 8u];
@@ -105,7 +108,7 @@ fn threefry(counter: array<vec2<u32>, 4>) -> array<vec2<u32>, 4> {
             words[3] = add64(words[3], vec2<u32>(injection, 0u));
         }
     }
-    return words;
+    return CounterWords(words);
 }
 
 @UNIFORM_FUNCTION@
@@ -114,6 +117,6 @@ fn threefry(counter: array<vec2<u32>, 4>) -> array<vec2<u32>, 4> {
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if gid.x >= params.chunk { return; }
     let global_idx = params.offset + gid.x;
-    let words = threefry(counter_for_item(global_idx));
+    let words = threefry(counter_for_item(global_idx)).lanes;
     Out.data[global_idx] = @SAMPLE@;
 }
