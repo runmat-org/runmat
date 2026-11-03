@@ -65,7 +65,6 @@ fn fea_results_validates_one_based_selectors_and_zero_one_flags_before_lookup() 
             "IncludeModalResults",
             "IncludeTransientResults",
             "IncludeNonlinearResults",
-            "IncludeElectromagneticResults",
         ] {
             let accepted = format!(
                 "value = fea.results(\"missing_integer_contract_run\", \"{flag}\", {constructor}(1));"
@@ -89,6 +88,16 @@ fn fea_results_validates_one_based_selectors_and_zero_one_flags_before_lookup() 
                 "{invalid}"
             );
         }
+        // Electromagnetic results are fields; fea.results has no section flag for them.
+        let unknown = format!(
+            "value = fea.results(\"missing_integer_contract_run\", \"IncludeElectromagneticResults\", {constructor}(1));"
+        );
+        let error = execute_source(&unknown).expect_err("unknown fea.results option");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:fea:InvalidInput"),
+            "{unknown}"
+        );
     }
 }
 
