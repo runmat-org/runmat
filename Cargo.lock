@@ -8502,6 +8502,7 @@ dependencies = [
  "runmat-analysis-language",
  "runmat-builtins",
  "runmat-config",
+ "runmat-fea-syntax",
  "runmat-filesystem",
  "runmat-hir",
  "runmat-lexer",
