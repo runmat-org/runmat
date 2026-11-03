@@ -195,7 +195,9 @@ impl<'a> BoardGraph<'a> {
             BItem::Zone(z) => b.zones[&z].layers.clone(),
             BItem::Pad(f, k) => {
                 let fp = &b.footprints[&f];
-                fp.pads(n)[k as usize].layers.iter().copied().collect()
+                fp.pad(k as usize, n)
+                    .map(|p| p.layers.into_iter().collect())
+                    .unwrap_or_default()
             }
             BItem::Footprint(f) => {
                 vec![if b.footprints[&f].side == crate::layout::Side::Top {
@@ -661,10 +663,13 @@ impl BoardRules {
         self.single.resolve(g, it, prop).map(|r| r.value)
     }
     pub fn pair_len(&self, a: BItem, b: BItem, prop: &str) -> Coord {
-        self.pair
-            .resolve(a, b, prop)
-            .and_then(|r| r.value.as_len())
-            .unwrap_or(0)
+        self.pair_len_id(a, b, self.pair.prop_id(prop))
+    }
+    /// [`BoardRules::pair_len`] by interned property id: a memo lookup, no allocation.
+    pub fn pair_len_id(&self, a: BItem, b: BItem, prop: runmat_rules::PropId) -> Coord {
+        self.pair.with_resolved(a, b, prop, |r| {
+            r.and_then(|r| r.value.as_len()).unwrap_or(0)
+        })
     }
     /// Largest clearance any rule can require: the spatial query radius.
     pub fn max_clearance(&self) -> Coord {

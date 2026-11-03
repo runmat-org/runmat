@@ -657,36 +657,37 @@ impl Footprint {
     }
     pub fn pads(&self, copper_count: u8) -> Vec<PlacedPad> {
         let t = self.transform();
-        let last = copper_count.saturating_sub(1);
-        self.package
-            .pads
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                let layers: BTreeSet<u8> = match (p.copper, self.side) {
-                    (CopperSpan::All, _) if p.kind != PadKind::Npth => (0..copper_count).collect(),
-                    (CopperSpan::All, _) => BTreeSet::new(),
-                    (CopperSpan::Front, Side::Top) | (CopperSpan::Back, Side::Bottom) => [0].into(),
-                    (CopperSpan::Front, Side::Bottom) | (CopperSpan::Back, Side::Top) => {
-                        [last].into()
-                    }
-                };
-                PlacedPad {
-                    footprint: self.id,
-                    index: i,
-                    name: p.name.clone(),
-                    net: self.pad_nets.get(&p.name).copied(),
-                    kind: p.kind,
-                    prim: pad_prim(p, &t),
-                    center: t.apply(p.at),
-                    layers,
-                    drill: p.drill.as_ref().map(|d| d.diameter),
-                    plated: p.drill.as_ref().is_some_and(|d| d.plated),
-                    thermal_pad: p.thermal_pad,
-                    side: self.side,
-                }
-            })
+        (0..self.package.pads.len())
+            .map(|i| self.placed(i, copper_count, &t))
             .collect()
+    }
+    /// Pad `i` in board coordinates (without placing the others).
+    pub fn pad(&self, i: usize, copper_count: u8) -> Option<PlacedPad> {
+        (i < self.package.pads.len()).then(|| self.placed(i, copper_count, &self.transform()))
+    }
+    fn placed(&self, i: usize, copper_count: u8, t: &Transform) -> PlacedPad {
+        let p = &self.package.pads[i];
+        let last = copper_count.saturating_sub(1);
+        let layers: BTreeSet<u8> = match (p.copper, self.side) {
+            (CopperSpan::All, _) if p.kind != PadKind::Npth => (0..copper_count).collect(),
+            (CopperSpan::All, _) => BTreeSet::new(),
+            (CopperSpan::Front, Side::Top) | (CopperSpan::Back, Side::Bottom) => [0].into(),
+            (CopperSpan::Front, Side::Bottom) | (CopperSpan::Back, Side::Top) => [last].into(),
+        };
+        PlacedPad {
+            footprint: self.id,
+            index: i,
+            name: p.name.clone(),
+            net: self.pad_nets.get(&p.name).copied(),
+            kind: p.kind,
+            prim: pad_prim(p, t),
+            center: t.apply(p.at),
+            layers,
+            drill: p.drill.as_ref().map(|d| d.diameter),
+            plated: p.drill.as_ref().is_some_and(|d| d.plated),
+            thermal_pad: p.thermal_pad,
+            side: self.side,
+        }
     }
     /// Courtyard rings in board coordinates.
     pub fn courtyard(&self) -> Vec<Ring> {

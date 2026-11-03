@@ -122,7 +122,12 @@ impl<V: fmt::Debug> fmt::Display for PairExplanation<V> {
 }
 
 type Sig = Vec<(RuleHandle, u8, Specificity)>;
-type Memo<V> = BTreeMap<(u32, u32, String), Option<PairResolved<V>>>;
+/// Memo keyed by `(lower signature, higher signature, property id)`: no allocation per lookup.
+type Memo<V> = BTreeMap<(u32, u32, u32), Option<PairResolved<V>>>;
+
+/// An interned property name: resolve with it to skip even the name lookup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PropId(pub u32);
 
 /// Pair-rule store with per-side match sets and a signature memo.
 #[derive(Debug)]
@@ -133,6 +138,8 @@ pub struct PairCascade<V, Id: Ord> {
     item_sig: BTreeMap<Id, u32>,
     sigs: BTreeMap<Sig, u32>,
     sig_list: Vec<Sig>,
+    /// Interned property names (ids are dense, in first-seen order).
+    props: RefCell<BTreeMap<String, u32>>,
     memo: RefCell<Memo<V>>,
 }
 
@@ -151,6 +158,7 @@ impl<V: Clone, Id: Copy + Ord + fmt::Debug> PairCascade<V, Id> {
             item_sig: BTreeMap::new(),
             sigs: BTreeMap::new(),
             sig_list: Vec::new(),
+            props: RefCell::new(BTreeMap::new()),
             memo: RefCell::new(BTreeMap::new()),
         };
         s.intern(Vec::new());
@@ -176,12 +184,17 @@ impl<V: Clone, Id: Copy + Ord + fmt::Debug> PairCascade<V, Id> {
         let h = RuleHandle(self.next);
         self.next += 1;
         self.rules.insert(h, rule);
+        self.memo.borrow_mut().clear();
         h
     }
+    /// Removing or replacing a rule changes which items match it: call
+    /// [`PairCascade::rebuild`] afterwards.
     pub fn remove_rule(&mut self, h: RuleHandle) -> Option<PairRule<V>> {
+        self.memo.borrow_mut().clear();
         self.rules.remove(&h)
     }
     pub fn replace_rule(&mut self, h: RuleHandle, rule: PairRule<V>) {
+        self.memo.borrow_mut().clear();
         self.rules.insert(h, rule);
     }
     pub fn rules(&self) -> impl Iterator<Item = (RuleHandle, &PairRule<V>)> {
@@ -305,19 +318,52 @@ impl<V: Clone, Id: Copy + Ord + fmt::Debug> PairCascade<V, Id> {
         out
     }
 
+    /// The id of a property name, interning it on first use.
+    pub fn prop_id(&self, property: &str) -> PropId {
+        if let Some(i) = self.props.borrow().get(property) {
+            return PropId(*i);
+        }
+        let mut m = self.props.borrow_mut();
+        let i = m.len() as u32;
+        m.insert(property.to_string(), i);
+        PropId(i)
+    }
+
+    fn prop_name(&self, id: PropId) -> String {
+        self.props
+            .borrow()
+            .iter()
+            .find(|(_, i)| **i == id.0)
+            .map(|(k, _)| k.clone())
+            .unwrap_or_default()
+    }
+
     /// The effective value of `property` for the pair `{x, y}`.
     pub fn resolve(&self, x: Id, y: Id, property: &str) -> Option<PairResolved<V>> {
+        self.with_resolved(x, y, self.prop_id(property), |r| r.cloned())
+    }
+
+    /// Like [`PairCascade::resolve`] by property id, lending the memoised result to `f`
+    /// instead of cloning it (the DRC hot path reads only the value).
+    pub fn with_resolved<R>(
+        &self,
+        x: Id,
+        y: Id,
+        property: PropId,
+        f: impl FnOnce(Option<&PairResolved<V>>) -> R,
+    ) -> R {
         let (sx, sy) = {
             let a = self.class_of(x);
             let b = self.class_of(y);
             (a.min(b), a.max(b))
         };
-        let key = (sx, sy, property.to_string());
+        let key = (sx, sy, property.0);
         if let Some(v) = self.memo.borrow().get(&key) {
-            return v.clone();
+            return f(v.as_ref());
         }
+        let name = self.prop_name(property);
         let r = self
-            .candidates(sx, sy, property)
+            .candidates(sx, sy, &name)
             .into_iter()
             .next()
             .map(|(w, v)| PairResolved {
@@ -325,13 +371,14 @@ impl<V: Clone, Id: Copy + Ord + fmt::Debug> PairCascade<V, Id> {
                 rule: Some(w),
             })
             .or_else(|| {
-                self.defaults.get(property).map(|v| PairResolved {
+                self.defaults.get(&name).map(|v| PairResolved {
                     value: v.clone(),
                     rule: None,
                 })
             });
-        self.memo.borrow_mut().insert(key, r.clone());
-        r
+        let out = f(r.as_ref());
+        self.memo.borrow_mut().insert(key, r);
+        out
     }
 
     pub fn explain(&self, x: Id, y: Id, property: &str) -> PairExplanation<V> {

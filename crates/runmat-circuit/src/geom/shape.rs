@@ -177,6 +177,15 @@ pub fn point_segment_distance(p: Point, a: Point, b: Point) -> f64 {
     (px - ax - t * dx).hypot(py - ay - t * dy)
 }
 
+/// Exact test that `p` lies on the closed segment `a–b`.
+pub fn point_on_segment(p: Point, a: Point, b: Point) -> bool {
+    orient(a, b, p) == 0
+        && p.x >= a.x.min(b.x)
+        && p.x <= a.x.max(b.x)
+        && p.y >= a.y.min(b.y)
+        && p.y <= a.y.max(b.y)
+}
+
 /// Exact test that two closed segments share a point.
 pub fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
     let d1 = orient(a, b, c);

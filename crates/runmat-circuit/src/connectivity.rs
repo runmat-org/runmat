@@ -9,10 +9,10 @@
 //! [`crate::elab`]; this module is its physical counterpart.
 
 use crate::board_rules::BItem;
-use crate::geom::shape::Prim;
+use crate::geom::shape::{Core, Prim};
 use crate::geom::{Point, Rect};
 use crate::layout::{Board, NetId};
-use crate::spatial::Grid;
+use crate::spatial::{EdgeIndex, Grid};
 use std::collections::BTreeMap;
 
 /// One copper node of a net.
@@ -106,6 +106,10 @@ fn find(p: &mut [usize], mut x: usize) -> usize {
 }
 
 /// Islands of one net's nodes.
+///
+/// Small nodes go in a grid and are tested pairwise. A fill polygon is never tested as a
+/// polygon against each candidate (that would cost its whole vertex count per test): its
+/// edges are indexed once, and each candidate is probed against the index.
 pub fn islands(net: NetId, nodes: Vec<Node>) -> NetConnectivity {
     let n = nodes.len();
     let mut parent: Vec<usize> = (0..n).collect();
@@ -113,7 +117,6 @@ pub fn islands(net: NetId, nodes: Vec<Node>) -> NetConnectivity {
     let mut boxes: Vec<Vec<Rect>> = Vec::with_capacity(n);
     for (i, nd) in nodes.iter().enumerate() {
         let bs: Vec<Rect> = nd.prims.iter().map(|p| p.bbox()).collect();
-        // Large fill polygons are not put in the grid; they are tested against candidates.
         if nd.fill.is_none() {
             for (k, b) in bs.iter().enumerate() {
                 grid.insert((i, k), *b);
@@ -121,42 +124,67 @@ pub fn islands(net: NetId, nodes: Vec<Node>) -> NetConnectivity {
         }
         boxes.push(bs);
     }
+    let union = |parent: &mut Vec<usize>, i: usize, j: usize| {
+        let (a, c) = (find(parent, i), find(parent, j));
+        parent[a.max(c)] = a.min(c);
+    };
+    let mut fills: Vec<(usize, EdgeIndex)> = Vec::new();
     for i in 0..n {
+        if nodes[i].fill.is_some() {
+            if let Core::Poly(rs) = &nodes[i].prims[0].core {
+                fills.push((i, EdgeIndex::new(rs.iter(), crate::geom::mm(1.0))));
+            }
+            continue;
+        }
         for (k, b) in boxes[i].iter().enumerate() {
-            let cands: Vec<(usize, usize)> = if nodes[i].fill.is_some() {
-                grid.query(b)
-            } else {
-                grid.query(&b.inflate(1))
-            };
-            for (j, kj) in cands {
-                if j == i || nodes[i].layers & nodes[j].layers == 0 {
+            for (j, kj) in grid.query(&b.inflate(1)) {
+                if j <= i || nodes[i].layers & nodes[j].layers == 0 {
                     continue;
                 }
                 if find(&mut parent, i) == find(&mut parent, j) {
                     continue;
                 }
                 if nodes[i].prims[k].gap(&nodes[j].prims[kj]) <= 0.0 {
-                    let (a, c) = (find(&mut parent, i), find(&mut parent, j));
-                    parent[a.max(c)] = a.min(c);
+                    union(&mut parent, i, j);
                 }
+            }
+        }
+    }
+    for (i, idx) in &fills {
+        for (j, kj) in grid.query(&boxes[*i][0]) {
+            if nodes[*i].layers & nodes[j].layers == 0
+                || find(&mut parent, *i) == find(&mut parent, j)
+            {
+                continue;
+            }
+            if idx.touches(&nodes[j].prims[kj]) {
+                union(&mut parent, *i, j);
             }
         }
     }
     // Fill polygons of the same zone and layer that touch each other are already merged by
     // the boolean; different zones on a layer may touch.
-    for i in 0..n {
-        if nodes[i].fill.is_none() {
-            continue;
-        }
-        for j in i + 1..n {
-            if nodes[j].fill.is_none() || nodes[i].layers & nodes[j].layers == 0 {
+    for (a, (i, ia)) in fills.iter().enumerate() {
+        for (j, _) in &fills[a + 1..] {
+            if nodes[*i].layers & nodes[*j].layers == 0
+                || !boxes[*i][0].intersects(&boxes[*j][0])
+                || find(&mut parent, *i) == find(&mut parent, *j)
+            {
                 continue;
             }
-            if boxes[i][0].intersects(&boxes[j][0])
-                && nodes[i].prims[0].gap(&nodes[j].prims[0]) <= 0.0
-            {
-                let (a, c) = (find(&mut parent, i), find(&mut parent, j));
-                parent[a.max(c)] = a.min(c);
+            let other = &nodes[*j].prims[0];
+            let Core::Poly(rs) = &other.core else {
+                continue;
+            };
+            let touch = rs.iter().any(|r| {
+                (0..r.len()).any(|e| {
+                    ia.probe(&Prim::segment(r[e], r[(e + 1) % r.len()], 0), 1)
+                        .gap
+                        <= 0.0
+                })
+            }) || ia.touches(other);
+            if touch {
+                union(&mut parent, *i, *j);
             }
         }
     }

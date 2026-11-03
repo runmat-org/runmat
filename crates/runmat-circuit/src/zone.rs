@@ -24,6 +24,7 @@ use crate::geom::shape::Prim;
 use crate::geom::{Coord, Point, Rect, Transform};
 use crate::layout::{Board, IslandPolicy, ItemId, NetId, PadConnect, PlacedPad};
 use crate::library::PadKind;
+use crate::spatial::EdgeIndex;
 use std::collections::BTreeMap;
 
 /// Tolerance for arcs in fills: 5 µm.
@@ -235,7 +236,15 @@ pub fn fill_zones(
                         .pair_len(zkey, BItem::Zone(oz), props::CLEARANCE)
                         .max(z.clearance.unwrap_or(0))
                         + FILL_MARGIN;
-                    cutters.extend(crate::geom::poly::inflate(&f.rings(), clr, FILL_TOL).rings());
+                    cutters.extend(
+                        crate::geom::offset::offset_set(
+                            f,
+                            clr,
+                            crate::geom::offset::Join::Round,
+                            FILL_TOL,
+                        )
+                        .rings(),
+                    );
                 }
                 let mut fill = boolean(&area.rings(), &cutters, BoolOp::Difference);
                 // Spokes, clipped by everything except the thermal gaps themselves.
@@ -271,14 +280,13 @@ pub fn fill_zones(
                 let mut kept = Vec::new();
                 let mut removed = 0;
                 for poly in fill.polys {
-                    let single = PolySet {
-                        polys: vec![poly.clone()],
-                    };
+                    let pb = poly.bbox();
+                    let idx = EdgeIndex::new(poly.rings(), crate::geom::mm(1.0));
                     let connected = z.net.is_some()
                         && items.iter().any(|it| {
                             it.net == z.net
-                                && it.prim.bbox().intersects(&poly.bbox())
-                                && touches(&single, &it.prim)
+                                && it.prim.bbox().intersects(&pb)
+                                && idx.touches(&it.prim)
                         });
                     let keep = match z.islands {
                         IslandPolicy::Keep => true,
@@ -300,13 +308,17 @@ pub fn fill_zones(
                     area: fill.area(),
                     ..Default::default()
                 };
+                let fill_idx = EdgeIndex::new(
+                    fill.polys.iter().flat_map(|p| p.rings()),
+                    crate::geom::mm(1.0),
+                );
                 for (k, rings) in spoke_rings {
                     let (p, gap, _) = thermal[k];
                     let mut reached = 0;
                     for r in &rings {
                         // Probe just beyond the gap along the spoke centreline.
                         let tip = spoke_probe(r, p, gap);
-                        if fill.contains(tip) == Some(true) {
+                        if fill_idx.contains(tip) == Some(true) {
                             reached += 1;
                         }
                     }
@@ -343,30 +355,14 @@ fn spoke_probe(ring: &Ring, p: &PlacedPad, gap: Coord) -> Point {
     )
 }
 
-/// Whether a fill polygon set touches (overlaps) a primitive.
+/// Whether a fill polygon set touches (overlaps) a primitive. For many queries against one
+/// fill, build an [`EdgeIndex`] once instead.
 pub fn touches(fill: &PolySet, prim: &Prim) -> bool {
-    if fill.contains(prim.anchor()) != Some(false) {
-        return true;
-    }
-    for poly in &fill.polys {
-        for r in poly.rings() {
-            let p = Prim::polygon(vec![r.clone()]);
-            if p.gap(prim) <= 0.0 {
-                // Ring boundary within the primitive: they overlap (the primitive straddles an
-                // edge of the fill).
-                return poly.contains(prim.anchor()) != Some(false) || ring_crosses(r, prim);
-            }
-        }
-    }
-    false
-}
-
-fn ring_crosses(r: &Ring, prim: &Prim) -> bool {
-    let n = r.len();
-    (0..n).any(|i| {
-        let e = Prim::segment(r[i], r[(i + 1) % n], 0);
-        e.gap(prim) <= 0.0
-    })
+    EdgeIndex::new(
+        fill.polys.iter().flat_map(|p| p.rings()),
+        crate::geom::mm(1.0),
+    )
+    .touches(prim)
 }
 
 /// A rectangle as a zone outline, for tests and generators.

@@ -4,11 +4,13 @@
 //! polygon booleans are exact and platform-independent. Valid coordinates satisfy
 //! `|v| < 2^38` nm (about 275 m), which keeps every exact predicate inside `i128`.
 //!
-//! - [`poly`]: polygon booleans (union, intersection, difference, xor) with non-zero fill,
-//!   offsetting (inflate/deflate), and ring utilities.
+//! - [`poly`]: polygon booleans (union, intersection, difference, xor) with non-zero or
+//!   positive fill, and ring utilities.
+//! - [`offset`]: polygon offsetting with round, miter and square joins.
 //! - [`shape`]: copper and graphic primitives (circle, rect, rounded rect, oval, trapezoid,
 //!   segment, arc, polygon) with their outlines and exact-enough distances.
 
+pub mod offset;
 pub mod poly;
 pub mod shape;
 

@@ -1,4 +1,4 @@
-//! Exact polygon booleans and offsets on integer coordinates.
+//! Exact polygon booleans on integer coordinates (offsets are in [`super::offset`]).
 //!
 //! # Algorithm
 //!
@@ -6,16 +6,19 @@
 //!    `(y, x)` order with a winding contribution per operand (+1 when the ring runs upward,
 //!    −1 when downward). Rings may have any orientation and may overlap; each operand is
 //!    filled by the non-zero rule.
-//! 2. **Arrangement.** Edges are split at every crossing, T-junction and collinear overlap,
+//! 2. **Arrangement.** Edges are bucketed in a uniform grid sized to the edge count and split
+//!    at every crossing, T-junction and collinear overlap among edges sharing a cell,
 //!    found with exact `i128` orientation tests. Crossing points are rounded to the integer
 //!    grid; splitting repeats until no new crossings appear, which handles the rare
 //!    rounding-induced crossings. Identical edges are merged by summing contributions, so
 //!    shared boundaries cancel exactly.
 //! 3. **Classification.** A sweep over the distinct `y` values keeps the active edges
-//!    ordered by `x` inside each slab (exact rational comparison). Since no two edges cross
-//!    inside a slab, one prefix sum gives the winding of both operands on each side of every
-//!    edge. An edge is a result boundary when the boolean predicate differs on its two sides.
-//!    Horizontal edges are classified by querying the windings just below and just above.
+//!    ordered by `x` inside each slab (exact rational comparison). Since no edge crosses or
+//!    starts inside another, the winding just right of an edge is constant over its life: it
+//!    is computed once, from its left neighbour, when the edge enters the sweep. An edge is a
+//!    result boundary when the predicate (under the operand's [`FillRule`]) differs on its
+//!    two sides. Horizontal edges are classified by the windings just below and just above,
+//!    found by binary search.
 //! 4. **Rings.** Boundary edges are directed with the result's interior on the left and
 //!    linked into rings, taking the leftmost turn at shared vertices so rings touching at a
 //!    point separate. Positive-area rings are outers (counter-clockwise); negative-area rings
@@ -41,6 +44,15 @@ pub struct Polygon {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PolySet {
     pub polys: Vec<Polygon>,
+}
+
+/// How an operand's windings fill: non-zero (any orientation) or positive (only regions wound
+/// counter-clockwise, which polygon offsetting needs to drop its inverted loops).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FillRule {
+    #[default]
+    NonZero,
+    Positive,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -292,36 +304,75 @@ fn intersect(e: &E, f: &E, se: &mut Vec<Point>, sf: &mut Vec<Point>) {
     }
 }
 
-fn split_pass(edges: &[E]) -> Option<Vec<E>> {
+/// Finds every pair of edges whose boxes meet, by bucketing edges into a uniform grid sized
+/// to the edge count (a pair is tested once, in the first cell both boxes share).
+fn candidate_pairs(edges: &[E], mut f: impl FnMut(usize, usize)) {
     let n = edges.len();
-    let mut order: Vec<usize> = (0..n).collect();
-    let minx = |e: &E| e.a.x.min(e.b.x);
-    let maxx = |e: &E| e.a.x.max(e.b.x);
-    order.sort_by_key(|&i| (minx(&edges[i]), i));
-    let mut splits: Vec<Vec<Point>> = vec![Vec::new(); n];
-    let mut any = false;
-    for oi in 0..n {
-        let i = order[oi];
-        let ei = edges[i];
-        let mxi = maxx(&ei);
-        let (ylo, yhi) = (ei.a.y, ei.b.y);
-        for &j in &order[oi + 1..] {
-            let ej = edges[j];
-            if minx(&ej) > mxi {
-                break;
+    if n < 2 {
+        return;
+    }
+    let bb = |e: &E| Rect::new(e.a, e.b);
+    let all = edges.iter().fold(Rect::EMPTY, |r, e| r.union(bb(e)));
+    let (w, h) = (
+        (all.width() as f64).max(1.0),
+        (all.height() as f64).max(1.0),
+    );
+    // About two edges per cell; cells no smaller than the median edge.
+    let mut lens: Vec<Coord> = edges
+        .iter()
+        .map(|e| (e.b.x - e.a.x).abs().max(e.b.y - e.a.y))
+        .collect();
+    let mid = lens.len() / 2;
+    let median = *lens.select_nth_unstable(mid).1 as f64;
+    let cell = ((w * h / n as f64 * 2.0).sqrt()).max(median).max(1.0);
+    let gx = ((w / cell).ceil() as usize).clamp(1, 4096);
+    let gy = ((h / cell).ceil() as usize).clamp(1, 4096);
+    let cx = |x: Coord| (((x - all.min.x) as f64 / w * gx as f64) as usize).min(gx - 1);
+    let cy = |y: Coord| (((y - all.min.y) as f64 / h * gy as f64) as usize).min(gy - 1);
+    let mut cells: Vec<Vec<u32>> = vec![Vec::new(); gx * gy];
+    let mut ranges: Vec<(usize, usize, usize, usize)> = Vec::with_capacity(n);
+    for (i, e) in edges.iter().enumerate() {
+        let r = bb(e);
+        let (x0, y0, x1, y1) = (cx(r.min.x), cy(r.min.y), cx(r.max.x), cy(r.max.y));
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                cells[y * gx + x].push(i as u32);
             }
-            if ej.b.y < ylo || ej.a.y > yhi {
-                continue;
-            }
-            let (mut si, mut sj) = (Vec::new(), Vec::new());
-            intersect(&ei, &ej, &mut si, &mut sj);
-            if !si.is_empty() || !sj.is_empty() {
-                any = true;
-                splits[i].extend(si);
-                splits[j].extend(sj);
+        }
+        ranges.push((x0, y0, x1, y1));
+    }
+    for (c, list) in cells.iter().enumerate() {
+        let (x, y) = (c % gx, c / gx);
+        for (k, &i) in list.iter().enumerate() {
+            let (i, ri) = (i as usize, ranges[i as usize]);
+            let bi = bb(&edges[i]);
+            for &j in &list[k + 1..] {
+                let (j, rj) = (j as usize, ranges[j as usize]);
+                // Reference cell: the first cell both ranges share.
+                if x != ri.0.max(rj.0) || y != ri.1.max(rj.1) {
+                    continue;
+                }
+                if bi.intersects(&bb(&edges[j])) {
+                    f(i, j);
+                }
             }
         }
     }
+}
+
+fn split_pass(edges: &[E]) -> Option<Vec<E>> {
+    let n = edges.len();
+    let mut splits: Vec<Vec<Point>> = vec![Vec::new(); n];
+    let mut any = false;
+    candidate_pairs(edges, |i, j| {
+        let (mut si, mut sj) = (Vec::new(), Vec::new());
+        intersect(&edges[i], &edges[j], &mut si, &mut sj);
+        if !si.is_empty() || !sj.is_empty() {
+            any = true;
+            splits[i].extend(si);
+            splits[j].extend(sj);
+        }
+    });
     if !any {
         return None;
     }
@@ -376,9 +427,11 @@ fn left_of(e: &E, y: Coord, s2: i128) -> bool {
     num < s2 * dy
 }
 
-fn pred(op: BoolOp, w: [i32; 2]) -> bool {
-    let a = w[0] != 0;
-    let b = w[1] != 0;
+fn pred(op: BoolOp, fill: FillRule, w: [i32; 2]) -> bool {
+    let (a, b) = match fill {
+        FillRule::NonZero => (w[0] != 0, w[1] != 0),
+        FillRule::Positive => (w[0] > 0, w[1] > 0),
+    };
     match op {
         BoolOp::Union => a || b,
         BoolOp::Intersection => a && b,
@@ -389,6 +442,11 @@ fn pred(op: BoolOp, w: [i32; 2]) -> bool {
 
 /// Boolean of two ring sets, each filled by the non-zero rule.
 pub fn boolean(a: &[Ring], b: &[Ring], op: BoolOp) -> PolySet {
+    boolean_with(a, b, op, FillRule::NonZero)
+}
+
+/// Boolean of two ring sets filled by `fill`.
+pub fn boolean_with(a: &[Ring], b: &[Ring], op: BoolOp, fill: FillRule) -> PolySet {
     let mut edges = Vec::new();
     for (k, set) in [a, b].iter().enumerate() {
         for r in set.iter() {
@@ -405,11 +463,11 @@ pub fn boolean(a: &[Ring], b: &[Ring], op: BoolOp) -> PolySet {
             }
         }
     }
-    let boundary = classify(edges, op);
+    let boundary = classify(edges, op, fill);
     build_rings(boundary)
 }
 
-fn classify(mut edges: Vec<E>, op: BoolOp) -> Vec<(Point, Point)> {
+fn classify(mut edges: Vec<E>, op: BoolOp, fill: FillRule) -> Vec<(Point, Point)> {
     for _ in 0..16 {
         match split_pass(&edges) {
             Some(e) => edges = e,
@@ -443,20 +501,25 @@ fn classify(mut edges: Vec<E>, op: BoolOp) -> Vec<(Point, Point)> {
     ys.sort_unstable();
     ys.dedup();
 
+    // Sweep. `active` holds the edges spanning the current slab ordered by x; `right[i]` is
+    // the winding just right of edge `i`, constant over the edge's life because no edge
+    // crosses or starts in the interior of another.
     let mut out = Vec::new();
     let mut active: Vec<usize> = Vec::new();
+    let mut right: Vec<[i32; 2]> = vec![[0, 0]; vert.len()];
+    let mut ends: Vec<usize> = (0..vert.len()).collect();
+    ends.sort_by_key(|&i| (vert[i].b.y, i));
+    let mut next_end = 0usize;
     let mut next = 0usize;
     let mut hi = 0usize; // horizontals are sorted by (y, x)
-    let wind = |active: &[usize], y: Coord, s2: i128| -> [i32; 2] {
-        let mut w = [0, 0];
-        for &i in active {
-            let e = &vert[i];
-            if left_of(e, y, s2) {
-                w[0] -= e.w[0];
-                w[1] -= e.w[1];
-            }
+                         // Winding at doubled abscissa `s2` on the line `y` among `active` (edges spanning `y`).
+    let wind = |active: &[usize], right: &[[i32; 2]], y: Coord, s2: i128| -> [i32; 2] {
+        let k = active.partition_point(|&i| left_of(&vert[i], y, s2));
+        if k == 0 {
+            [0, 0]
+        } else {
+            right[active[k - 1]]
         }
-        w
     };
     for (k, &y) in ys.iter().enumerate() {
         let h_start = hi;
@@ -466,41 +529,58 @@ fn classify(mut edges: Vec<E>, op: BoolOp) -> Vec<(Point, Point)> {
         let hs = &horiz[h_start..hi];
         let below: Vec<[i32; 2]> = hs
             .iter()
-            .map(|h| wind(&active, y, h.a.x as i128 + h.b.x as i128))
+            .map(|h| wind(&active, &right, y, h.a.x as i128 + h.b.x as i128))
             .collect();
-        active.retain(|&i| vert[i].b.y != y);
-        let mut new_edges = Vec::new();
+        // Remove edges ending here: each is found by its order in the slab below.
+        if k > 0 {
+            let y2 = ys[k - 1] as i128 + y as i128;
+            while next_end < ends.len() && vert[ends[next_end]].b.y == y {
+                let e = ends[next_end];
+                next_end += 1;
+                if let Ok(pos) = active.binary_search_by(|&ai| cmp_at(&vert[ai], &vert[e], y2)) {
+                    active.remove(pos);
+                }
+            }
+        }
+        let first_new = next;
         while next < vert.len() && vert[next].a.y == y {
-            new_edges.push(next);
             next += 1;
         }
-        if !new_edges.is_empty() && k + 1 < ys.len() {
+        if first_new < next && k + 1 < ys.len() {
             let y2 = y as i128 + ys[k + 1] as i128;
-            for &ni in &new_edges {
+            for ni in first_new..next {
                 let pos = active
                     .binary_search_by(|&ai| cmp_at(&vert[ai], &vert[ni], y2))
                     .unwrap_or_else(|p| p);
                 active.insert(pos, ni);
             }
-            let mut w = [0i32, 0];
-            for &ai in &active {
-                let e = &vert[ai];
-                let left = w;
-                let right = [w[0] - e.w[0], w[1] - e.w[1]];
-                if e.a.y == y {
-                    let il = pred(op, left);
-                    let ir = pred(op, right);
-                    if il != ir {
-                        out.push(if il { (e.a, e.b) } else { (e.b, e.a) });
-                    }
+            // Windings left to right, after every new edge is in place (a new edge's left
+            // neighbour may be another new edge).
+            let mut pos: Vec<usize> = (first_new..next)
+                .map(|ni| {
+                    active
+                        .binary_search_by(|&ai| cmp_at(&vert[ai], &vert[ni], y2))
+                        .expect("inserted edge")
+                })
+                .collect();
+            pos.sort_unstable();
+            for p in pos {
+                let ni = active[p];
+                let left = if p == 0 { [0, 0] } else { right[active[p - 1]] };
+                let e = &vert[ni];
+                let r = [left[0] - e.w[0], left[1] - e.w[1]];
+                right[ni] = r;
+                let il = pred(op, fill, left);
+                let ir = pred(op, fill, r);
+                if il != ir {
+                    out.push(if il { (e.a, e.b) } else { (e.b, e.a) });
                 }
-                w = right;
             }
         }
         for (h, wb) in hs.iter().zip(below) {
-            let wa = wind(&active, y, h.a.x as i128 + h.b.x as i128);
-            let ib = pred(op, wb);
-            let ia = pred(op, wa);
+            let wa = wind(&active, &right, y, h.a.x as i128 + h.b.x as i128);
+            let ib = pred(op, fill, wb);
+            let ia = pred(op, fill, wa);
             if ib != ia {
                 // Interior above means interior on the left of a rightward edge.
                 out.push(if ia { (h.a, h.b) } else { (h.b, h.a) });
@@ -740,47 +820,16 @@ pub fn capsule_ring(a: Point, b: Point, r: Coord, tol: Coord) -> Ring {
     out
 }
 
-/// Minkowski sum of the filled rings with a disk of radius `d` (an outward offset with round
-/// joins), as a union of the rings, one band per edge and one disk per vertex.
+/// Outward offset by `d` with round joins: the points within `d` of the filled rings (any
+/// orientation, non-zero fill). Arc chords lie outside the true offset. See
+/// [`super::offset`] for other joins.
 pub fn inflate(rings: &[Ring], d: Coord, tol: Coord) -> PolySet {
-    if d <= 0 {
-        return boolean(rings, &[], BoolOp::Union);
-    }
-    let mut parts: Vec<Ring> = rings.to_vec();
-    for r in rings {
-        let n = r.len();
-        for i in 0..n {
-            let a = r[i];
-            let b = r[(i + 1) % n];
-            let band = edge_band(a, b, d);
-            if !band.is_empty() {
-                parts.push(band);
-            }
-            parts.push(circle_ring(a, d, tol));
-        }
-    }
-    boolean(&parts, &[], BoolOp::Union)
+    super::offset::offset(rings, d, super::offset::Join::Round, tol)
 }
 
-/// Minkowski erosion by a disk of radius `d`: the points at least `d` inside the set.
+/// Erosion by `d` with round joins: the points at least `d` inside the set.
 pub fn deflate(set: &PolySet, d: Coord, tol: Coord) -> PolySet {
-    if d <= 0 {
-        return set.clone();
-    }
-    let mut cutters: Vec<Ring> = Vec::new();
-    for r in set.rings() {
-        let n = r.len();
-        for i in 0..n {
-            let a = r[i];
-            let b = r[(i + 1) % n];
-            let band = edge_band(a, b, d);
-            if !band.is_empty() {
-                cutters.push(band);
-            }
-            cutters.push(circle_ring(a, d, tol));
-        }
-    }
-    boolean(&set.rings(), &cutters, BoolOp::Difference)
+    super::offset::offset_set(set, -d, super::offset::Join::Round, tol)
 }
 
 /// Morphological opening: removes every part narrower than `2·d` (erode then dilate).
@@ -789,7 +838,7 @@ pub fn open(set: &PolySet, d: Coord, tol: Coord) -> PolySet {
     if e.is_empty() {
         return e;
     }
-    let grown = inflate(&e.rings(), d, tol);
+    let grown = super::offset::offset_set(&e, d, super::offset::Join::Round, tol);
     // Dilation of the erosion stays inside the original up to the polygon tolerance.
     grown.intersection(set)
 }

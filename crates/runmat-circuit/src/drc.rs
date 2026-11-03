@@ -36,7 +36,7 @@ use crate::geom::shape::{point_segment_distance, Prim};
 use crate::geom::{Coord, Point, Rect};
 use crate::layout::{Board, Layer, NetId, Side, ViaKind};
 use crate::library::{Graphic, PadKind};
-use crate::spatial::Grid;
+use crate::spatial::{EdgeIndex, Grid};
 use crate::zone::FillReport;
 use runmat_rules::SourceKey;
 use std::collections::{BTreeMap, BTreeSet};
@@ -59,40 +59,44 @@ pub struct DrcFinding {
 
 type FKey = (String, Vec<BItem>, Option<u8>);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct CKey {
-    owner: BItem,
-    sub: u32,
-}
-
+/// A copper primitive in the DRC store, keyed in the spatial grid by its slot.
 #[derive(Clone, Debug)]
 struct CPrim {
+    owner: BItem,
+    sub: u32,
     net: Option<NetId>,
     layers: u64,
     prim: Prim,
 }
 
+/// One zone's fill on one layer, with its edges indexed (fills are large: they are never put
+/// in the item grid, and are checked from the item side).
+#[derive(Clone, Debug)]
+struct ZoneFill {
+    zone: BItem,
+    layer: u8,
+    net: Option<NetId>,
+    edges: EdgeIndex,
+}
+
 /// DRC state kept between edits.
 pub struct Drc {
-    index: Grid<CKey>,
-    prims: BTreeMap<CKey, CPrim>,
-    owners: BTreeMap<BItem, Vec<CKey>>,
+    index: Grid<u32>,
+    slots: Vec<Option<CPrim>>,
+    free: Vec<u32>,
+    owners: BTreeMap<BItem, Vec<u32>>,
     findings: BTreeMap<FKey, DrcFinding>,
     pub impedance_targets: BTreeMap<String, f64>,
     diff_pairs: Vec<(NetId, NetId)>,
     spokes: Vec<FillReport>,
-    zone_cache: Vec<ZoneFillCache>,
+    zones: Vec<ZoneFill>,
+    outline: EdgeIndex,
 }
 
-/// A zone fill on one layer with its bounding boxes (whole set, per polygon).
-type ZoneFillCache = (
-    BItem,
-    u8,
-    crate::geom::poly::PolySet,
-    Option<NetId>,
-    Rect,
-    Vec<Rect>,
-);
+/// Grid cell for copper items: near the typical item size plus clearance.
+const ITEM_CELL: Coord = 1_000_000;
+/// Cell for zone-fill and outline edges.
+const EDGE_CELL: Coord = 1_000_000;
 
 fn key_items(mut v: Vec<BItem>) -> Vec<BItem> {
     v.sort();
@@ -100,8 +104,8 @@ fn key_items(mut v: Vec<BItem>) -> Vec<BItem> {
     v
 }
 
-fn owner_prims(board: &Board, it: BItem) -> Vec<CPrim> {
-    let n = board.copper_count();
+/// Copper primitives of a non-zone owner as `(net, layer mask, primitive)`.
+fn owner_prims(board: &Board, it: BItem) -> Vec<(Option<NetId>, u64, Prim)> {
     match it {
         BItem::Track(t) => board
             .tracks
@@ -109,11 +113,7 @@ fn owner_prims(board: &Board, it: BItem) -> Vec<CPrim> {
             .map(|t| {
                 t.prims()
                     .into_iter()
-                    .map(|p| CPrim {
-                        net: t.net,
-                        layers: 1 << t.layer,
-                        prim: p,
-                    })
+                    .map(|p| (t.net, 1u64 << t.layer, p))
                     .collect()
             })
             .unwrap_or_default(),
@@ -121,45 +121,20 @@ fn owner_prims(board: &Board, it: BItem) -> Vec<CPrim> {
             .vias
             .get(&v)
             .map(|v| {
-                vec![CPrim {
-                    net: v.net,
-                    layers: layer_mask(v.layers()),
-                    prim: Prim::circle(v.at, v.diameter / 2),
-                }]
+                vec![(
+                    v.net,
+                    layer_mask(v.layers()),
+                    Prim::circle(v.at, v.diameter / 2),
+                )]
             })
             .unwrap_or_default(),
         BItem::Pad(f, k) => board
             .footprints
             .get(&f)
-            .and_then(|fp| fp.pads(n).into_iter().nth(k as usize))
+            .and_then(|fp| fp.pad(k as usize, board.copper_count()))
             .filter(|p| p.kind != PadKind::Npth && !p.layers.is_empty())
-            .map(|p| {
-                vec![CPrim {
-                    net: p.net,
-                    layers: layer_mask(p.layers.iter().copied()),
-                    prim: p.prim,
-                }]
-            })
+            .map(|p| vec![(p.net, layer_mask(p.layers.iter().copied()), p.prim)])
             .unwrap_or_default(),
-        BItem::Zone(z) => {
-            let Some(z) = board.zones.get(&z) else {
-                return vec![];
-            };
-            let mut out = Vec::new();
-            for (layer, set) in &z.fill {
-                for r in set.rings() {
-                    let m = r.len();
-                    for i in 0..m {
-                        out.push(CPrim {
-                            net: z.net,
-                            layers: 1 << layer,
-                            prim: Prim::segment(r[i], r[(i + 1) % m], 0),
-                        });
-                    }
-                }
-            }
-            out
-        }
         _ => vec![],
     }
 }
@@ -179,6 +154,25 @@ fn copper_owners(board: &Board) -> Vec<BItem> {
 
 fn lowest(mask: u64) -> u8 {
     mask.trailing_zeros() as u8
+}
+
+fn outline_index(board: &Board) -> EdgeIndex {
+    EdgeIndex::new(board.outline.rings(), EDGE_CELL)
+}
+
+fn zone_fills(board: &Board) -> Vec<ZoneFill> {
+    board
+        .zones
+        .values()
+        .flat_map(|z| {
+            z.fill.iter().map(move |(l, s)| ZoneFill {
+                zone: BItem::Zone(z.id),
+                layer: *l,
+                net: z.net,
+                edges: EdgeIndex::new(s.polys.iter().flat_map(|p| p.rings()), EDGE_CELL),
+            })
+        })
+        .collect()
 }
 
 fn graphic_prims(g: &Graphic, t: &crate::geom::Transform) -> Vec<Prim> {
@@ -250,24 +244,26 @@ impl Drc {
         spokes: &[FillReport],
     ) -> Drc {
         let mut d = Drc {
-            index: Grid::new(crate::geom::mm(1.0)),
-            prims: BTreeMap::new(),
+            index: Grid::new(ITEM_CELL),
+            slots: Vec::new(),
+            free: Vec::new(),
             owners: BTreeMap::new(),
             findings: BTreeMap::new(),
             impedance_targets: BTreeMap::new(),
             diff_pairs: diff_pairs.to_vec(),
             spokes: spokes.to_vec(),
-            zone_cache: Vec::new(),
+            zones: zone_fills(board),
+            outline: outline_index(board),
         };
-        d.rebuild_zone_cache(board);
         let owners = copper_owners(board);
         for o in &owners {
             d.index_owner(board, *o);
         }
         let g = BoardGraph::new(board, diff_pairs);
         for o in &owners {
-            d.check_owner(board, rules, &g, *o);
+            d.check_owner(board, rules, &g, *o, true);
         }
+        d.check_zone_pairs(rules, None);
         d.check_holes(board, rules, None);
         d.check_footprints(board, rules, &g, None);
         let nets: BTreeSet<NetId> = (0..board.nets.len() as u32).map(NetId).collect();
@@ -275,35 +271,61 @@ impl Drc {
         d
     }
 
+    fn slot(&self, s: u32) -> &CPrim {
+        self.slots[s as usize].as_ref().expect("live DRC slot")
+    }
+
     fn index_owner(&mut self, board: &Board, o: BItem) {
         let ps = owner_prims(board, o);
         let mut keys = Vec::with_capacity(ps.len());
-        for (k, p) in ps.into_iter().enumerate() {
-            let key = CKey {
+        for (k, (net, layers, prim)) in ps.into_iter().enumerate() {
+            let cp = CPrim {
                 owner: o,
                 sub: k as u32,
+                net,
+                layers,
+                prim,
             };
-            self.index.insert(key, p.prim.bbox());
-            self.prims.insert(key, p);
-            keys.push(key);
+            let bb = cp.prim.bbox();
+            let s = match self.free.pop() {
+                Some(s) => {
+                    self.slots[s as usize] = Some(cp);
+                    s
+                }
+                None => {
+                    self.slots.push(Some(cp));
+                    (self.slots.len() - 1) as u32
+                }
+            };
+            self.index.insert(s, bb);
+            keys.push(s);
         }
         self.owners.insert(o, keys);
     }
 
     fn unindex_owner(&mut self, o: BItem) {
         if let Some(keys) = self.owners.remove(&o) {
-            for k in keys {
-                self.index.remove(k);
-                self.prims.remove(&k);
+            for s in keys {
+                self.index.remove(s);
+                self.slots[s as usize] = None;
+                self.free.push(s);
             }
         }
     }
 
     fn put(&mut self, f: DrcFinding) {
         let key = (f.code.clone(), f.items.clone(), f.layer);
+        // Keep the worst instance (smallest actual value) per key; ties go to the smaller
+        // location so the result does not depend on check order.
+        let worse = |new: &DrcFinding, old: &DrcFinding| {
+            let (a, b) = (
+                new.actual.unwrap_or(f64::MAX),
+                old.actual.unwrap_or(f64::MAX),
+            );
+            a < b || (a == b && (new.at.x, new.at.y) < (old.at.x, old.at.y))
+        };
         match self.findings.get(&key) {
-            // Keep the worst instance (smallest actual value) per key.
-            Some(old) if old.actual.unwrap_or(f64::MAX) <= f.actual.unwrap_or(f64::MAX) => {}
+            Some(old) if !worse(&f, old) => {}
             _ => {
                 self.findings.insert(key, f);
             }
@@ -318,154 +340,216 @@ impl Drc {
         self.findings.values().filter(|f| f.code == code).count()
     }
 
-    fn clearance_pairs(&mut self, board: &Board, rules: &BoardRules, o: BItem) {
-        let radius = rules.max_clearance().max(board.limits.min_clearance);
+    /// Item-to-item clearance from owner `o`. With `one_sided`, only pairs with a larger
+    /// owner are checked (a full run visits both sides, so each pair is measured once).
+    fn clearance_pairs(&mut self, rules: &BoardRules, o: BItem, one_sided: bool) {
+        let radius = rules.max_clearance();
+        let pid = rules.pair.prop_id(props::CLEARANCE);
         let keys = self.owners.get(&o).cloned().unwrap_or_default();
-        let zone_fills = std::mem::take(&mut self.zone_cache);
         let mut found: Vec<DrcFinding> = Vec::new();
-        for k in keys {
-            let p = self.prims[&k].clone();
-            let q = p.prim.bbox().inflate(radius);
-            for nk in self.index.query(&q) {
-                if nk.owner == o {
-                    continue;
+        for s in keys {
+            let p = self.slot(s);
+            let pb = p.prim.bbox();
+            self.index.visit(&pb.inflate(radius), |ns, nb| {
+                let np = self.slots[ns as usize].as_ref().unwrap();
+                if np.owner == o || (one_sided && np.owner < o) {
+                    return;
                 }
-                let np = &self.prims[&nk];
                 let shared = p.layers & np.layers;
-                if shared == 0 {
-                    continue;
+                if shared == 0 || (p.net.is_some() && p.net == np.net) {
+                    return;
                 }
-                if p.net.is_some() && p.net == np.net {
-                    continue;
+                let req = rules.pair_len_id(o, np.owner, pid);
+                if !pb.inflate(req).intersects(nb) {
+                    return;
                 }
-                // Zone edges are only checked from the item side.
-                let req = rules.pair_len(o, nk.owner, props::CLEARANCE);
                 let gap = p.prim.gap(&np.prim);
                 if gap < req as f64 {
-                    let (rule, source) = rules.pair_origin(o, nk.owner, props::CLEARANCE);
-                    found.push(DrcFinding {
-                        code: "clearance".into(),
-                        severity: Severity::Error,
-                        items: key_items(vec![o, nk.owner]),
-                        layer: Some(lowest(shared)),
-                        at: p.prim.anchor(),
-                        actual: Some(gap.max(0.0)),
-                        required: Some(req as f64),
+                    let (rule, source) = rules.pair_origin(o, np.owner, props::CLEARANCE);
+                    let at = if (p.owner, p.sub) < (np.owner, np.sub) {
+                        p.prim.anchor()
+                    } else {
+                        np.prim.anchor()
+                    };
+                    found.push(clearance_finding(
+                        vec![o, np.owner],
+                        lowest(shared),
+                        at,
+                        gap,
+                        req,
                         rule,
                         source,
-                        message: format!(
-                            "clearance {:.4} mm < {:.4} mm",
-                            gap.max(0.0) * 1e-6,
-                            req as f64 * 1e-6
-                        ),
-                    });
+                    ));
                 }
+            });
+            if matches!(o, BItem::Zone(_)) {
+                continue;
             }
-            // Containment in another net's fill. Only needed when no edge of that fill is
-            // near (an overlap across an edge is already found above), so the expensive
-            // point-in-polygon test runs only for primitives deep inside or far outside fills.
-            if !matches!(o, BItem::Zone(_)) {
-                let near_zone_edges: BTreeSet<BItem> = self
-                    .index
-                    .query(&p.prim.bbox().inflate(radius))
-                    .into_iter()
-                    .filter(|k| matches!(k.owner, BItem::Zone(_)))
-                    .map(|k| k.owner)
-                    .collect();
-                let anchor = p.prim.anchor();
-                for (zi, layer, set, znet, bbox, boxes) in &zone_fills {
-                    if p.layers & (1 << layer) == 0 || (p.net.is_some() && p.net == *znet) {
-                        continue;
-                    }
-                    if near_zone_edges.contains(zi) || !bbox.intersects(&p.prim.bbox()) {
-                        continue;
-                    }
-                    let inside =
-                        set.polys.iter().zip(boxes).any(|(poly, b)| {
-                            b.contains(anchor) && poly.contains(anchor) == Some(true)
-                        });
-                    if inside {
-                        let req = rules.pair_len(o, *zi, props::CLEARANCE);
-                        let (rule, source) = rules.pair_origin(o, *zi, props::CLEARANCE);
-                        found.push(DrcFinding {
-                            code: "clearance".into(),
-                            severity: Severity::Error,
-                            items: key_items(vec![o, *zi]),
-                            layer: Some(*layer),
-                            at: p.prim.anchor(),
-                            actual: Some(0.0),
-                            required: Some(req as f64),
-                            rule,
-                            source,
-                            message: "copper inside another net's zone fill".into(),
-                        });
-                    }
-                }
+            for z in &self.zones {
+                self.zone_probe(rules, p, z, &mut found);
             }
         }
-        self.zone_cache = zone_fills;
         for f in found {
             self.put(f);
         }
     }
 
-    fn rebuild_zone_cache(&mut self, board: &Board) {
-        self.zone_cache = board
-            .zones
-            .values()
-            .flat_map(|z| {
-                z.fill.iter().map(move |(l, s)| {
-                    let boxes: Vec<Rect> = s.polys.iter().map(|p| p.bbox()).collect();
-                    let bb = boxes.iter().fold(Rect::EMPTY, |a, b| a.union(*b));
-                    (BItem::Zone(z.id), *l, s.clone(), z.net, bb, boxes)
-                })
-            })
-            .collect();
+    /// One item primitive against one zone fill: clearance across the fill's edges, or
+    /// containment when no edge crosses it.
+    fn zone_probe(&self, rules: &BoardRules, p: &CPrim, z: &ZoneFill, found: &mut Vec<DrcFinding>) {
+        if p.layers & (1 << z.layer) == 0 || (p.net.is_some() && p.net == z.net) {
+            return;
+        }
+        let pb = p.prim.bbox();
+        let req = rules.pair_len_id(p.owner, z.zone, rules.pair.prop_id(props::CLEARANCE));
+        if !z.edges.bbox().inflate(req).intersects(&pb) {
+            return;
+        }
+        let pr = z.edges.probe(&p.prim, req);
+        let origin = || rules.pair_origin(p.owner, z.zone, props::CLEARANCE);
+        if pr.gap < req as f64 {
+            let (rule, source) = origin();
+            found.push(clearance_finding(
+                vec![p.owner, z.zone],
+                z.layer,
+                p.prim.anchor(),
+                pr.gap,
+                req,
+                rule,
+                source,
+            ));
+        } else if pr.inside == Some(true) {
+            let (rule, source) = origin();
+            let mut f = clearance_finding(
+                vec![p.owner, z.zone],
+                z.layer,
+                p.prim.anchor(),
+                0.0,
+                req,
+                rule,
+                source,
+            );
+            f.message = "copper inside another net's zone fill".into();
+            found.push(f);
+        }
     }
 
-    fn check_owner(&mut self, board: &Board, rules: &BoardRules, g: &BoardGraph, o: BItem) {
-        self.clearance_pairs(board, rules, o);
-        let n = board.copper_count();
-        let anchor = self
-            .owners
-            .get(&o)
-            .and_then(|ks| ks.first())
-            .map(|k| self.prims[k].prim.anchor());
-        // Edge clearance and outside-board.
-        if let Some(keys) = self.owners.get(&o).cloned() {
-            if !matches!(o, BItem::Zone(_)) {
-                let req = rules.pair_len(o, BItem::Edge, props::EDGE_CLEARANCE);
-                let mut worst: Option<(f64, Point)> = None;
-                for k in &keys {
-                    let p = &self.prims[k].prim;
-                    let outside = board.outline.contains(p.anchor()) == Some(false);
-                    let mut gap = edge_gap(board, p);
-                    if outside {
-                        gap = -1.0;
-                    }
-                    if gap < req as f64 && worst.is_none_or(|w| gap < w.0) {
-                        worst = Some((gap, p.anchor()));
-                    }
+    /// Every item near the fills of `zones` against those fills, plus their zone-to-zone
+    /// clearance (after an edit to a zone).
+    fn check_zone_items(&mut self, rules: &BoardRules, zones: &BTreeSet<BItem>) {
+        let mut found = Vec::new();
+        for z in self.zones.iter().filter(|z| zones.contains(&z.zone)) {
+            let mut seen = BTreeSet::new();
+            self.index
+                .visit(&z.edges.bbox().inflate(rules.max_clearance()), |s, _| {
+                    seen.insert(s);
+                });
+            for s in seen {
+                self.zone_probe(rules, self.slot(s), z, &mut found);
+            }
+        }
+        for f in found {
+            self.put(f);
+        }
+        self.check_zone_pairs(rules, Some(zones));
+    }
+
+    /// Clearance between fills of different nets on one layer. With `only`, pairs involving
+    /// those zones; otherwise every pair once.
+    fn check_zone_pairs(&mut self, rules: &BoardRules, only: Option<&BTreeSet<BItem>>) {
+        let pid = rules.pair.prop_id(props::CLEARANCE);
+        let mut found = Vec::new();
+        for (i, a) in self.zones.iter().enumerate() {
+            for b in &self.zones[i + 1..] {
+                if a.layer != b.layer || a.zone == b.zone || (a.net.is_some() && a.net == b.net) {
+                    continue;
                 }
-                if let Some((gap, at)) = worst {
-                    let (rule, source) = rules.pair_origin(o, BItem::Edge, props::EDGE_CLEARANCE);
-                    self.put(DrcFinding {
-                        code: "edge-clearance".into(),
-                        severity: Severity::Error,
-                        items: vec![o],
-                        layer: None,
+                if only.is_some_and(|o| !o.contains(&a.zone) && !o.contains(&b.zone)) {
+                    continue;
+                }
+                let req = rules.pair_len_id(a.zone, b.zone, pid);
+                if !a.edges.bbox().inflate(req).intersects(&b.edges.bbox()) {
+                    continue;
+                }
+                let mut worst: Option<(f64, Point)> = None;
+                a.edges.visit_near(&b.edges.bbox().inflate(req), |p, q| {
+                    let e = Prim::segment(p, q, 0);
+                    let g = b.edges.probe(&e, req).gap;
+                    if g < req as f64 && worst.is_none_or(|w| g < w.0) {
+                        worst = Some((g, p));
+                    }
+                });
+                if let Some((g, at)) = worst {
+                    let (rule, source) = rules.pair_origin(a.zone, b.zone, props::CLEARANCE);
+                    found.push(clearance_finding(
+                        vec![a.zone, b.zone],
+                        a.layer,
                         at,
-                        actual: Some(gap.max(0.0)),
-                        required: Some(req as f64),
+                        g,
+                        req,
                         rule,
                         source,
-                        message: if gap < 0.0 {
-                            "copper outside the board outline".into()
-                        } else {
-                            format!("{:.4} mm from the board edge", gap * 1e-6)
-                        },
-                    });
+                    ));
                 }
+            }
+        }
+        for f in found {
+            self.put(f);
+        }
+    }
+
+    fn check_owner(
+        &mut self,
+        board: &Board,
+        rules: &BoardRules,
+        g: &BoardGraph,
+        o: BItem,
+        full: bool,
+    ) {
+        let n = board.copper_count();
+        if let BItem::Zone(_) = o {
+            // Zones are checked from the item side in a full run; after an edit to a zone,
+            // every item near its fill is re-probed against it.
+            if !full {
+                self.check_zone_items(rules, &BTreeSet::from([o]));
+            }
+            return;
+        }
+        self.clearance_pairs(rules, o, full);
+        // Edge clearance and outside-board.
+        if let Some(keys) = self.owners.get(&o).cloned() {
+            let req = rules.pair_len(o, BItem::Edge, props::EDGE_CLEARANCE);
+            let mut worst: Option<(f64, Point)> = None;
+            for k in &keys {
+                let p = &self.slot(*k).prim;
+                let pr = self.outline.probe(p, req);
+                let gap = if pr.inside == Some(false) {
+                    -1.0
+                } else {
+                    pr.gap
+                };
+                if gap < req as f64 && worst.is_none_or(|w| gap < w.0) {
+                    worst = Some((gap, p.anchor()));
+                }
+            }
+            if let Some((gap, at)) = worst {
+                let (rule, source) = rules.pair_origin(o, BItem::Edge, props::EDGE_CLEARANCE);
+                self.put(DrcFinding {
+                    code: "edge-clearance".into(),
+                    severity: Severity::Error,
+                    items: vec![o],
+                    layer: None,
+                    at,
+                    actual: Some(gap.max(0.0)),
+                    required: Some(req as f64),
+                    rule,
+                    source,
+                    message: if gap < 0.0 {
+                        "copper outside the board outline".into()
+                    } else {
+                        format!("{:.4} mm from the board edge", gap * 1e-6)
+                    },
+                });
             }
         }
         match o {
@@ -544,8 +628,9 @@ impl Drc {
             }
             BItem::Pad(f, k) => {
                 let fp = &board.footprints[&f];
-                let pads = fp.pads(n);
-                let p = &pads[k as usize];
+                let Some(p) = fp.pad(k as usize, n) else {
+                    return;
+                };
                 if let (Some(d), true) = (p.drill, p.plated) {
                     let b = p.prim.bbox();
                     let size = b.width().min(b.height());
@@ -564,10 +649,8 @@ impl Drc {
                     self.bend_check(board, o, p.center, b.width().max(b.height()) / 2);
                 }
             }
-            BItem::Zone(_) => {}
             _ => {}
         }
-        let _ = anchor;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -648,13 +731,13 @@ impl Drc {
                 continue;
             }
             let ko = Prim::polygon(k.outline.rings().cloned().collect());
-            if keys.iter().any(|ck| self.prims[ck].prim.gap(&ko) < 0.0) {
+            if keys.iter().any(|ck| self.slot(*ck).prim.gap(&ko) < 0.0) {
                 self.put(DrcFinding {
                     code: "keepout".into(),
                     severity: Severity::Error,
                     items: vec![o],
                     layer: layers.first().copied(),
-                    at: self.prims[&keys[0]].prim.anchor(),
+                    at: self.slot(keys[0]).prim.anchor(),
                     actual: None,
                     required: None,
                     rule: k.name.clone(),
@@ -672,7 +755,7 @@ impl Drc {
         let Some(k) = self.owners.get(&o).and_then(|v| v.first()) else {
             return;
         };
-        let at = self.prims[k].prim.anchor();
+        let at = self.slot(*k).prim.anchor();
         let present = board.copper_at(at);
         let missing: Vec<u8> = layers
             .iter()
@@ -890,19 +973,19 @@ impl Drc {
                 .bbox()
                 .inflate(board.limits.min_silk_to_pad.max(crate::geom::mm(0.5)));
             for k in self.index.query(&q) {
-                let BItem::Pad(..) = k.owner else { continue };
-                let cp = &self.prims[&k];
+                let cp = self.slot(k);
+                let BItem::Pad(..) = cp.owner else { continue };
                 if cp.layers & (1 << layer) == 0 {
                     continue;
                 }
-                let req = rules.pair_len(*owner, k.owner, props::SILK_CLEARANCE);
+                let req = rules.pair_len(*owner, cp.owner, props::SILK_CLEARANCE);
                 let gap = sp.gap(&cp.prim);
                 if gap < req as f64 {
-                    let (rule, source) = rules.pair_origin(*owner, k.owner, props::SILK_CLEARANCE);
+                    let (rule, source) = rules.pair_origin(*owner, cp.owner, props::SILK_CLEARANCE);
                     found.push(DrcFinding {
                         code: "silk-to-pad".into(),
                         severity: Severity::Warning,
-                        items: key_items(vec![*owner, k.owner]),
+                        items: key_items(vec![*owner, cp.owner]),
                         layer: Some(layer),
                         at: sp.anchor(),
                         actual: Some(gap.max(0.0)),
@@ -1249,17 +1332,36 @@ impl Drc {
         };
         for &c in changed.iter().chain(removed) {
             expand(c, &mut touched);
-        }
-        // Nets before and after.
-        for t in &touched {
-            if let Some(ps) = self.owners.get(t) {
-                for k in ps {
-                    if let Some(n) = self.prims[k].net {
-                        nets.insert(n);
-                    }
-                }
+            // A removed footprint's pads are only known to the store.
+            if let BItem::Footprint(f) = c {
+                touched.extend(
+                    self.owners
+                        .range(BItem::Pad(f, 0)..=BItem::Pad(f, u32::MAX))
+                        .map(|(k, _)| *k),
+                );
             }
         }
+        // Nets before and after.
+        let nets_of = |d: &Drc, nets: &mut BTreeSet<NetId>, after: bool| {
+            for t in &touched {
+                if let Some(ps) = d.owners.get(t) {
+                    for k in ps {
+                        if let Some(n) = d.slot(*k).net {
+                            nets.insert(n);
+                        }
+                    }
+                }
+                if let BItem::Zone(z) = t {
+                    let net = if after {
+                        board.zones.get(z).and_then(|z| z.net)
+                    } else {
+                        d.zones.iter().find(|f| f.zone == *t).and_then(|f| f.net)
+                    };
+                    nets.extend(net);
+                }
+            }
+        };
+        nets_of(self, &mut nets, false);
         // Footprints of touched pads (courtyard/silk); removed footprints are dropped below.
         let mut fps: BTreeSet<BItem> = BTreeSet::new();
         for t in &touched {
@@ -1270,8 +1372,6 @@ impl Drc {
                 _ => {}
             }
         }
-        // Drop findings involving touched items, their nets, or their footprints.
-        let net_items: BTreeSet<BItem> = nets.iter().map(|n| BItem::Net(n.0)).collect();
         for t in &touched {
             self.unindex_owner(*t);
         }
@@ -1279,27 +1379,17 @@ impl Drc {
             let mut items = BTreeSet::from([c]);
             expand(c, &mut items);
             for i in items {
-                if matches!(
-                    i,
-                    BItem::Pad(..) | BItem::Track(_) | BItem::Via(_) | BItem::Zone(_)
-                ) {
-                    self.index_owner(board, i);
-                }
-            }
-        }
-        for t in &touched {
-            if let Some(ps) = self.owners.get(t) {
-                for k in ps {
-                    if let Some(n) = self.prims[k].net {
-                        nets.insert(n);
+                match i {
+                    BItem::Pad(..) | BItem::Track(_) | BItem::Via(_) => self.index_owner(board, i),
+                    BItem::Zone(z) if board.zones.contains_key(&z) => {
+                        self.owners.insert(i, Vec::new());
                     }
+                    _ => {}
                 }
             }
         }
-        let net_items: BTreeSet<BItem> = net_items
-            .into_iter()
-            .chain(nets.iter().map(|n| BItem::Net(n.0)))
-            .collect();
+        nets_of(self, &mut nets, true);
+        let net_items: BTreeSet<BItem> = nets.iter().map(|n| BItem::Net(n.0)).collect();
         self.findings.retain(|(_, items, _), _| {
             !items
                 .iter()
@@ -1308,8 +1398,9 @@ impl Drc {
         self.findings
             .retain(|(code, items, _), _| !(code == "silk-to-pad" && items.contains(&BItem::Edge)));
         if touched.iter().any(|t| matches!(t, BItem::Zone(_))) {
-            self.rebuild_zone_cache(board);
+            self.zones = zone_fills(board);
         }
+        self.outline = outline_index(board);
         let g = BoardGraph::new(board, &self.diff_pairs);
         let present: Vec<BItem> = touched
             .iter()
@@ -1317,7 +1408,7 @@ impl Drc {
             .filter(|t| self.owners.contains_key(t))
             .collect();
         for o in present {
-            self.check_owner(board, rules, &g, o);
+            self.check_owner(board, rules, &g, o, false);
         }
         let fp_live: BTreeSet<BItem> = fps
             .iter()
@@ -1362,6 +1453,33 @@ impl Drc {
     }
 }
 
+fn clearance_finding(
+    items: Vec<BItem>,
+    layer: u8,
+    at: Point,
+    gap: f64,
+    req: Coord,
+    rule: String,
+    source: SourceKey,
+) -> DrcFinding {
+    DrcFinding {
+        code: "clearance".into(),
+        severity: Severity::Error,
+        items: key_items(items),
+        layer: Some(layer),
+        at,
+        actual: Some(gap.max(0.0)),
+        required: Some(req as f64),
+        rule,
+        source,
+        message: format!(
+            "clearance {:.4} mm < {:.4} mm",
+            gap.max(0.0) * 1e-6,
+            req as f64 * 1e-6
+        ),
+    }
+}
+
 fn courtyard_overlap(a: &Prim, b: &Prim) -> bool {
     match (&a.core, &b.core) {
         (crate::geom::shape::Core::Poly(ra), crate::geom::shape::Core::Poly(rb)) => {
@@ -1369,20 +1487,4 @@ fn courtyard_overlap(a: &Prim, b: &Prim) -> bool {
         }
         _ => true,
     }
-}
-
-fn edge_gap(board: &Board, p: &Prim) -> f64 {
-    let mut best = f64::INFINITY;
-    let bb = p.bbox();
-    for r in board.outline.rings() {
-        let m = r.len();
-        for i in 0..m {
-            let (a, b) = (r[i], r[(i + 1) % m]);
-            let eb = Rect::new(a, b);
-            if eb.inflate(crate::geom::mm(5.0)).intersects(&bb) {
-                best = best.min(p.gap(&Prim::segment(a, b, 0)));
-            }
-        }
-    }
-    best
 }

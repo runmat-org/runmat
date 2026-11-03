@@ -62,10 +62,7 @@ fn large_board_end_to_end() {
     let t_erc = t.elapsed();
     let t = Instant::now();
     let mut board = fixture::large_board(&pool, &nl, &params);
-    // Large pours: skip the min-width opening here (it is exercised on small boards).
-    for z in board.zones.values_mut() {
-        z.min_width = 0;
-    }
+    assert!(board.zones.values().all(|z| z.min_width > 0));
     let t_board = t.elapsed();
     let (mut rules, errs) = BoardRules::new(&board.limits, &specs());
     assert!(errs.is_empty());

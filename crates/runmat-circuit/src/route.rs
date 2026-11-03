@@ -167,7 +167,10 @@ pub fn obstacles(
         if let Some(f) = z.fill.get(&layer) {
             if net.is_none() || z.net != net {
                 let grow = board.limits.min_clearance + width / 2 + 1000;
-                rings.extend(crate::geom::poly::inflate(&f.rings(), grow, tol).rings());
+                rings.extend(
+                    crate::geom::offset::offset_set(f, grow, crate::geom::offset::Join::Round, tol)
+                        .rings(),
+                );
             }
         }
     }
