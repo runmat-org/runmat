@@ -45,7 +45,9 @@ pub enum SimulationBudgetError {
 }
 
 impl SimulationAllowance {
-    /// Snapshot the current available allowance and packs as a fixed run cap.
+    /// Preflight the available allowance and packs for display or a lower cap.
+    /// Default admission omits budgetOps so Server chooses its fixed cap from
+    /// the admission-time balance, rather than this earlier summary.
     /// A later start response may grant less if concurrent work reserves funds.
     /// An academic waiver uses the representable per-run maximum unless lowered.
     pub fn spending_cap(

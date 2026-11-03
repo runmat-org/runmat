@@ -51,7 +51,10 @@ pub struct StartSimulationLease {
     pub study_identity: Digest,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimate_ops: Option<OperationCount>,
-    pub budget_ops: OperationCount,
+    /// None lets Server snapshot currently available allowance and eligible packs
+    /// at admission. Some supplies an explicit lower spending cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_ops: Option<OperationCount>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -90,6 +93,7 @@ pub struct ReportSimulationUsage {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulationGrant {
+    pub state: SimulationLeaseState,
     pub granted_ops: OperationCount,
     pub budget_ops: OperationCount,
     pub total_ops: OperationTotal,

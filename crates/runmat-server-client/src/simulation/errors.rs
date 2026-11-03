@@ -17,6 +17,8 @@ pub enum SimulationErrorCode {
     OverGrant,
     #[serde(rename = "simulation.budget_reached")]
     BudgetReached,
+    #[serde(rename = "simulation.budget_exceeds_available")]
+    BudgetExceedsAvailable,
     #[serde(rename = "simulation.lease_not_found")]
     LeaseNotFound,
     #[serde(rename = "simulation.receipt_not_found")]
@@ -38,6 +40,7 @@ pub struct SimulationErrorDetails {
     pub granted_ops: Option<OperationCount>,
     pub total_ops: Option<OperationTotal>,
     pub budget_ops: Option<OperationCount>,
+    pub available_ops: Option<OperationCount>,
 }
 
 #[derive(Debug, thiserror::Error)]

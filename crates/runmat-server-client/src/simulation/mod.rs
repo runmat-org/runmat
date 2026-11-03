@@ -84,7 +84,9 @@ impl SimulationLeaseClient {
         request: &StartSimulationLease,
     ) -> Result<SimulationLease, SimulationLeaseError> {
         if !(1..=1_000_000).contains(&request.attempt)
-            || request.budget_ops.operations() == 0
+            || request
+                .budget_ops
+                .is_some_and(|budget| budget.operations() == 0)
             || request.runmat_version.is_empty()
             || request.runmat_version.len() > 64
         {
@@ -106,7 +108,9 @@ impl SimulationLeaseClient {
             )
             .await?;
         if lease.state != SimulationLeaseState::Active
-            || lease.budget_ops != request.budget_ops
+            || request
+                .budget_ops
+                .is_some_and(|budget| lease.budget_ops != budget)
             || lease.granted_ops.operations() == 0
             || lease.granted_ops > lease.budget_ops
             || !(1..=120).contains(&lease.heartbeat_seconds)
@@ -125,7 +129,8 @@ impl SimulationLeaseClient {
         request: &ReportSimulationUsage,
     ) -> Result<SimulationGrant, SimulationLeaseError> {
         validate_detail(request.other_detail.as_deref())?;
-        self.transport
+        let grant: SimulationGrant = self
+            .transport
             .response(
                 self.transport
                     .http
@@ -136,7 +141,22 @@ impl SimulationLeaseClient {
                     .json(request),
                 errors::api_error,
             )
-            .await
+            .await?;
+        if grant.state != SimulationLeaseState::Active
+            || grant.granted_ops.operations() == 0
+            || grant.granted_ops > grant.budget_ops
+            || grant.total_ops > runmat_simulation_usage::OperationTotal::from(grant.granted_ops)
+            || grant.total_ops
+                != request.used_ops.wide_total().map_err(|_| {
+                    SimulationLeaseError::InvalidRequest("completed operation total")
+                })?
+            || grant.expires_at <= Utc::now()
+        {
+            return Err(SimulationLeaseError::InvalidResponse(
+                "usage grant, reported total or lease liveness",
+            ));
+        }
+        Ok(grant)
     }
 
     pub async fn settle(
@@ -145,7 +165,8 @@ impl SimulationLeaseClient {
         request: &SettleSimulationLease,
     ) -> Result<SimulationReceipt, SimulationLeaseError> {
         validate_detail(request.other_detail.as_deref())?;
-        self.transport
+        let receipt: SimulationReceipt = self
+            .transport
             .response(
                 self.transport
                     .http
@@ -156,7 +177,35 @@ impl SimulationLeaseClient {
                     .json(request),
                 errors::api_error,
             )
-            .await
+            .await?;
+        let total = request
+            .used_ops
+            .wide_total()
+            .map_err(|_| SimulationLeaseError::InvalidRequest("completed operation total"))?;
+        let outcome = match request.outcome {
+            SimulationOutcome::Completed => SimulationReceiptOutcome::Completed,
+            SimulationOutcome::Cancelled => SimulationReceiptOutcome::Cancelled,
+            SimulationOutcome::Failed => SimulationReceiptOutcome::Failed,
+        };
+        if &receipt.lease_id != lease
+            || receipt.measurement_version != request.measurement_version
+            || receipt.used_ops != request.used_ops
+            || receipt.outcome != outcome
+            || receipt.total_ops != total
+            || receipt.granted_ops > receipt.budget_ops
+            || total > runmat_simulation_usage::OperationTotal::from(receipt.granted_ops)
+            || receipt.charged_ops
+                != if receipt.waived {
+                    runmat_simulation_usage::OperationTotal::ZERO
+                } else {
+                    total
+                }
+        {
+            return Err(SimulationLeaseError::InvalidResponse(
+                "settlement identity, completed work or charge",
+            ));
+        }
+        Ok(receipt)
     }
 }
 
