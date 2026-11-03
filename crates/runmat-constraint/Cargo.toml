@@ -1,0 +1,13 @@
+[package]
+name = "runmat-constraint"
+version = "0.6.2"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "2D sketch and 3D mate constraint solver for RunMat CAD: decomposition, Newton/Levenberg-Marquardt with analytic Jacobians, DOF and redundancy diagnosis"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+# Deliberately dependency-free: the solver carries its own small sparse LDLᵀ, minimum-degree
+# ordering and Givens row QR so the crate builds in seconds and stays deterministic.
+[dependencies]

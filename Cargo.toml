@@ -5,6 +5,8 @@ members = [
     "crates/runmat-simulation-usage",
     "crates/runmat-sparse-solvers",
     "crates/runmat-sparse-accelerate",
+    "crates/runmat-constraint",
+    "crates/runmat-cad",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",
