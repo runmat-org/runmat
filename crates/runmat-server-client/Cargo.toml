@@ -20,6 +20,7 @@ rand = "0.8"
 runmat-execution = { workspace = true }
 runmat-package = { workspace = true }
 runmat-types = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 progenitor-client = "0.11"
 regress = "0.10"
 futures = "0.3"

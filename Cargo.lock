@@ -9073,6 +9073,7 @@ dependencies = [
  "reqwest 0.12.28",
  "runmat-execution",
  "runmat-package",
+ "runmat-simulation-usage",
  "runmat-types",
  "serde",
  "serde_json",

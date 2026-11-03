@@ -1,4 +1,4 @@
-use crate::{CountOverflow, OperationCount};
+use crate::{CountOverflow, OperationCount, OperationTotal};
 use serde::{Deserialize, Serialize};
 
 /// Transport categories; the measurement schedule owns individual kernel counts.
@@ -24,6 +24,20 @@ pub struct CompletedUsage {
 }
 
 impl CompletedUsage {
+    /// Aggregate transport can represent sums wider than one admitted grant.
+    pub fn wide_total(self) -> Result<OperationTotal, CountOverflow> {
+        [
+            self.meshing,
+            self.assembly,
+            self.factorization,
+            self.solve,
+            self.other,
+        ]
+        .into_iter()
+        .map(OperationTotal::from)
+        .try_fold(OperationTotal::ZERO, OperationTotal::checked_add)
+    }
+
     pub fn total(self) -> Result<OperationCount, CountOverflow> {
         [
             self.meshing,

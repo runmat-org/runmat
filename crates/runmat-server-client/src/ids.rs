@@ -105,6 +105,9 @@ prefixed_id!(ClusterId, "cls_");
 prefixed_id!(ClusterNodeId, "node_");
 prefixed_id!(FsVersionId, "fsv_");
 prefixed_id!(SnapshotId, "snap_");
+prefixed_id!(SimulationRunId, "run_");
+prefixed_id!(SimulationLeaseId, "simlease_");
+prefixed_id!(SimulationReceiptId, "simreceipt_");
 
 #[cfg(test)]
 mod tests {
