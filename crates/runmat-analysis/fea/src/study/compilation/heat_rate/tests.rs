@@ -116,7 +116,7 @@ fn total_heat_rate_is_p_over_the_meshed_region_volume_and_balances() {
         model.excitations[0].excitation().distribution,
         ExcitationDistribution::IntensityPerVolume
     );
-    model.validate().unwrap();
+    runmat_analysis_core::validate_model(&model).unwrap();
     let result = crate::run_thermal_with_options(
         &model,
         crate::ComputeBackend::Cpu,

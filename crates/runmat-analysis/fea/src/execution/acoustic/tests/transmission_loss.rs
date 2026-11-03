@@ -24,7 +24,11 @@ fn layered(cells: usize, frequency: f64) -> (AcousticHarmonicWorkload, SolverMes
     for element in &mut topology.volume_elements {
         let x = element.node_ids[..4]
             .iter()
-            .map(|id| topology.nodes[*id as usize - 1].coordinates_m.canonical_value()[0])
+            .map(|id| {
+                topology.nodes[*id as usize - 1]
+                    .coordinates_m
+                    .canonical_value()[0]
+            })
             .sum::<f64>()
             / 4.0;
         let side = usize::from(x > 1.0 / 3.0 && x < 2.0 / 3.0);
@@ -46,9 +50,8 @@ fn layered(cells: usize, frequency: f64) -> (AcousticHarmonicWorkload, SolverMes
     let model = &mut authored.model;
     model.constraints.clear();
     model.boundaries.clear();
-    model.material_assignments[0].target = PropertyRegionTarget::solid(
-        runmat_meshing_core::fixtures::fixture_region("ambient"),
-    );
+    model.material_assignments[0].target =
+        PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_region("ambient"));
     let mut layer = model.materials[0].clone();
     layer.material_id = "layer_fluid".into();
     layer.mass_density_kg_per_m3 = Some(runmat_types::physical::MassDensity::new(5.0));
@@ -75,27 +78,31 @@ fn layered(cells: usize, frequency: f64) -> (AcousticHarmonicWorkload, SolverMes
         },
         provenance: SignalProvenance::Authored,
     }));
-    crate::fixtures::replace_fixture_excitations(
-        model,
-        vec![ExcitationAction::AcousticIncidentPressure(AnalysisExcitation {
-            excitation_id: ExcitationId("engine".into()),
-            target: ExcitationTarget::Region(RegionTarget::boundary(
-                runmat_meshing_core::fixtures::fixture_face("slab_left"),
-            )),
-            frame: CoordinateFrame::Global,
-            direction: None,
-            distribution: ExcitationDistribution::UniformKinematic,
-            kinematics: ExcitationKinematics::FixedFrame,
-            signal_id: SignalId("incident".into()),
-            active_step_ids: Vec::new(),
-            combination_group: None,
-            projection: ProjectionRequirement {
-                preserve_resultant: true,
-                preserve_moment: false,
-                relative_tolerance: 1e-10,
+    // The incident wave replaces the fixture's loads; its signal was pushed above.
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    model
+        .excitations
+        .extend([ExcitationAction::AcousticIncidentPressure(
+            AnalysisExcitation {
+                excitation_id: ExcitationId("engine".into()),
+                target: ExcitationTarget::Region(RegionTarget::boundary(
+                    runmat_meshing_core::fixtures::fixture_face("slab_left"),
+                )),
+                frame: CoordinateFrame::Global,
+                direction: None,
+                distribution: ExcitationDistribution::UniformKinematic,
+                kinematics: ExcitationKinematics::FixedFrame,
+                signal_id: SignalId("incident".into()),
+                active_step_ids: Vec::new(),
+                combination_group: None,
+                projection: ProjectionRequirement {
+                    preserve_resultant: true,
+                    preserve_moment: false,
+                    relative_tolerance: 1e-10,
+                },
             },
-        })],
-    );
+        )]);
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "tailpipe".into(),
         target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
@@ -175,7 +182,10 @@ fn transmission_loss(cells: usize, frequency: f64) -> f64 {
     )
     .unwrap();
     let observed = evaluate_observations(&plan, &projection, &catalog).unwrap();
-    assert_eq!(observed[0].quantity, ObservationQuantity::AcousticPortIntensity);
+    assert_eq!(
+        observed[0].quantity,
+        ObservationQuantity::AcousticPortIntensity
+    );
     observed[0].field.as_host_f64().unwrap()[0]
 }
 
@@ -198,7 +208,9 @@ fn transmission_loss_of_a_layer_matches_the_plane_wave_reference() {
         let expected = reference(frequency);
         let coarse = (transmission_loss(6, frequency) - expected).abs();
         let fine = (transmission_loss(9, frequency) - expected).abs();
-        eprintln!("TL f={frequency}: reference {expected:.5} dB, error {coarse:.2e} (6) {fine:.2e} (9)");
+        eprintln!(
+            "TL f={frequency}: reference {expected:.5} dB, error {coarse:.2e} (6) {fine:.2e} (9)"
+        );
         assert!(fine < 0.05, "f={frequency}: |TL - reference| = {fine} dB");
         assert!(fine <= coarse + 1e-9, "f={frequency}: no refinement gain");
     }
