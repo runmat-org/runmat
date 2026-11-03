@@ -16,6 +16,86 @@ fn lower_semantic(src: &str) -> runmat_hir::HirAssembly {
 }
 
 #[test]
+fn implicit_ans_has_one_current_scope_binding_only_after_value_expression() {
+    let assembly = lower_semantic("1 + 1\nans + 1\nans = 7;\n");
+    let bindings: Vec<_> = assembly
+        .bindings
+        .iter()
+        .filter(|b| b.name.0 == "ans")
+        .collect();
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].role, BindingRole::ImplicitAns);
+    assert_eq!(
+        assembly
+            .statement_result_bindings
+            .values()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![bindings[0].id]
+    );
+    assert_eq!(
+        bindings[0].workspace_visibility,
+        WorkspaceVisibility::ImplicitAns
+    );
+    for source in ["1 + 1;\n", "disp(7)\n", "answer = 42;\nanswer\n"] {
+        assert!(
+            !lower_semantic(source)
+                .bindings
+                .iter()
+                .any(|b| b.name.0 == "ans"),
+            "{source}"
+        );
+    }
+    let ast = runmat_parser::parse("ans + 1\n").unwrap();
+    assert!(lower(&ast, &LoweringContext::empty()).is_err());
+    for incoming in [false, true] {
+        let variables = if incoming {
+            HashMap::from([("ans".to_owned(), 3)])
+        } else {
+            HashMap::new()
+        };
+        let source = if incoming {
+            "ans + 1\n"
+        } else {
+            "ans = 7;\nans + 1\n"
+        };
+        let ast = runmat_parser::parse(source).unwrap();
+        let assembly = lower(&ast, &LoweringContext::new(&variables))
+            .unwrap()
+            .assembly;
+        let (&owner, &result) = assembly.statement_result_bindings.iter().next().unwrap();
+        let binding = assembly
+            .bindings
+            .iter()
+            .find(|binding| binding.id == result)
+            .unwrap();
+        assert_eq!(binding.owner, runmat_hir::BindingOwner::Function(owner));
+        assert_eq!(
+            binding.role,
+            if incoming {
+                BindingRole::IncomingWorkspace
+            } else {
+                BindingRole::Local
+            }
+        );
+        assert_eq!(
+            assembly
+                .bindings
+                .iter()
+                .filter(|binding| binding.name.0 == "ans")
+                .count(),
+            1
+        );
+        let restored: runmat_hir::HirAssembly =
+            serde_json::from_slice(&serde_json::to_vec(&assembly).unwrap()).unwrap();
+        assert_eq!(
+            restored.statement_result_bindings,
+            assembly.statement_result_bindings
+        );
+    }
+}
+
+#[test]
 fn parallel_regions_receive_stable_function_local_identities() {
     let assembly = lower_semantic("parfor (i = 1:10, 4); y = i; end; spmd (2, 8); z = 1; end");
     let function = assembly

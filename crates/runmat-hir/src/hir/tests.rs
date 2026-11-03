@@ -13,6 +13,7 @@ fn assembly_owns_core_items() {
 
     let assembly = HirAssembly {
         bound_function_modifiers: Default::default(),
+        statement_result_bindings: Default::default(),
         primary_source: None,
         modules: vec![HirModule {
             id: module,

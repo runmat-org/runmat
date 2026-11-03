@@ -41,7 +41,6 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
         mut workspace_updates,
         mut workspace_snapshot_force_full,
         vm_workspace_completion,
-        ans_update,
         is_expression_stmt,
         is_semicolon_suppressed,
         final_stmt_emit,
@@ -74,13 +73,9 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
         workspace_projection,
         fusion_snapshot,
         variable_array: _unstarted_frame,
-        #[cfg(not(target_arch = "wasm32"))]
-        frame_extent,
         workspace_admission: _workspace_admission,
         ..
     } = workspace;
-    #[cfg(not(target_arch = "wasm32"))]
-    let mut ans_update = ans_update;
 
     let last_assign_var = display_context.last_assign_var;
     let last_expr_emits = display_context.last_expr_emits;
@@ -153,14 +148,6 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    if used_jit && is_expression_stmt {
-        if let Some(value) = result_value.clone() {
-            let slot = execution_vars.get("ans").copied().unwrap_or(frame_extent);
-            ans_update = Some((slot, value));
-        }
-    }
-
     let execution_time = start_time.elapsed();
     #[cfg(not(target_arch = "wasm32"))]
     if let Some((_, profile)) = tiered_interactive.as_ref() {
@@ -190,37 +177,9 @@ pub(super) fn run(active: Active<'_>) -> std::result::Result<SessionExecution, R
     let vm_workspace_state = (!used_jit)
         .then(|| vm_workspace_completion.map(|completion| completion.state))
         .flatten();
-    // An unsuppressed expression updates `ans` only after successful
-    // execution. This is a language-visible host write, so admit it
-    // explicitly instead of inferring it from the completed register file.
-    if error.is_none() {
-        if let Some((var_id, value)) = ans_update {
-            runmat_runtime::execution::validate_storable_value(&value)
-                .map_err(RunError::Runtime)?;
-            runmat_runtime::context::RuntimeWorkspaceService::assign_executor_slot_ref(
-                workspace_projection.as_ref(),
-                &execution_runtime,
-                var_id,
-                "ans",
-                &value,
-            )
-            .map_err(RunError::Runtime)?;
-            workspace_publication
-                .publish_pending()
-                .map_err(RunError::Runtime)?;
-            // The typed executor-slot origin above prepared the exact
-            // compiler binding before this canonical publication. The
-            // completed slot may have been appended after compilation.
-            let published_changes = workspace_projection
-                .take_published_changes_with_context(&execution_runtime)
-                .map_err(RunError::Runtime)?;
-            for change in published_changes.changes() {
-                if let (Some(name), Some(value)) = (change.name(), change.value()) {
-                    workspace_updates.push(workspace_entry(name, value));
-                }
-            }
-        }
-    }
+    // Implicit ans is an ordinary compiler-authored MIR binding assignment.
+    // Its exact frame owner has already published the same effect as any
+    // explicit assignment, including a completed prefix before a later error.
 
     // Refresh only compiler metadata; the exact completed owner retains
     // values. The register file/native snapshot is never a second workspace.

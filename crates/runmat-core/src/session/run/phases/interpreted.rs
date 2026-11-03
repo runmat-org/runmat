@@ -97,7 +97,6 @@ fn complete(
                     if state.is_semicolon_suppressed {
                         state.suppressed_value = Some(value);
                     } else {
-                        state.ans_update = Some((slot, value.clone()));
                         state.result_value = Some(value);
                     }
                 }

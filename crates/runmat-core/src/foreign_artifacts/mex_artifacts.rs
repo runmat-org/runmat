@@ -194,9 +194,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         std::fs::write(
             temp.path().join("runmat.toml"),
             format!(
-                "[package]\nname = \"mex-project\"\n[sources]\nroots = [\"src\"]\n[mex-artifacts.packaged_fixture]\nmanifest = \"{}\"\nmodule = \"{}\"\n",
-                manifest.display(),
-                module.display()
+                "[package]\nname = \"mex-project\"\n[sources]\nroots = [\"src\"]\n[mex-artifacts.packaged_fixture]\nmanifest = {}\nmodule = {}\n",
+                serde_json::to_string(&manifest.to_string_lossy().replace('\\', "/")).unwrap(),
+                serde_json::to_string(&module.to_string_lossy().replace('\\', "/")).unwrap()
             ),
         )
         .unwrap();

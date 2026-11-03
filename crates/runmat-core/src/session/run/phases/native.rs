@@ -64,7 +64,6 @@ pub(super) async fn run<'a>(
     let workspace_updates: Vec<WorkspaceEntry> = Vec::new();
     let workspace_snapshot_force_full = false;
     let vm_workspace_completion = None;
-    let ans_update: Option<(usize, Value)> = None;
     #[cfg(not(target_arch = "wasm32"))]
     let tiered_interactive = session
         .prepare_tiered_interactive(&interactive_unit, &workspace_projection, &execution_runtime)
@@ -225,7 +224,6 @@ pub(super) async fn run<'a>(
             workspace_updates,
             workspace_snapshot_force_full,
             vm_workspace_completion,
-            ans_update,
             is_expression_stmt,
             is_semicolon_suppressed,
             final_stmt_emit,

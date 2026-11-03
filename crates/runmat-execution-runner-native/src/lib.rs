@@ -191,7 +191,7 @@ pub use analysis_transient::{
     StructuralTransientRecoveryPublisher,
 };
 pub use config::NativeExecutionConfig;
-pub use error::{NativeExecutionError, NativeExecutionResult};
+pub use error::{MetadataIoOperation, NativeExecutionError, NativeExecutionResult};
 pub use exact_geometry_admission::{
     admit_prepared_exact_geometry, prepare_exact_geometry_admission, ExactGeometryAdmissionError,
     NativeMeshingContactDefinition, PreparedExactGeometryAdmission,

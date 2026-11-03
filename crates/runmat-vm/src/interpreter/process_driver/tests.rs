@@ -9,6 +9,143 @@ use runmat_value::{HandleRef, Value};
 use std::cell::RefCell;
 use std::error::Error;
 
+#[test]
+fn selected_reentry_reuses_exact_poll_owner_and_runs_as_a_sibling() {
+    for managed in [false, true] {
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let mut runtime = RuntimeContext::with_cancellation(
+            Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+            cancellation.token(),
+        );
+        if managed {
+            runtime =
+                runtime.with_service_ports(RuntimeServicePorts::default().with_parallel(Rc::new(
+                    ManagedParallel(ManagedHostEffectLedger::new(8 * 1024 * 1024)),
+                )));
+        }
+        assert!(ProcessDriverHandle::current_in_context(&runtime)
+            .unwrap()
+            .is_none());
+        let owner =
+            ProcessContinuationDriver::new_with_dynamic_admission_in_context(&runtime, None)
+                .unwrap();
+        let current = runtime.clone();
+        let unrelated = RuntimeContext::with_cancellation(
+            Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+            cancellation.token(),
+        );
+        let changed_generation = runtime.clone().with_cancellation_token(
+            runmat_execution::cancellation::CancellationSource::new().token(),
+        );
+        let root_poll = Rc::new(Cell::new(false));
+        let active = root_poll.clone();
+        let driven = owner.drive_in_context(&runtime, move || {
+            let pending = async move {
+                assert!(ProcessDriverHandle::current_in_context(&unrelated).is_err());
+                assert!(ProcessDriverHandle::current_in_context(&changed_generation).is_err());
+                let handle = ProcessDriverHandle::current_in_context(&current)?
+                    .expect("original root poll owns reentry");
+                let child_runtime = current.clone();
+                let child_handle = handle.clone();
+                let child_active = active.clone();
+                handle
+                    .enqueue_owned_in_context(&current, move || async move {
+                        assert!(
+                            !child_active.get(),
+                            "callee must not retain its caller's poll stack"
+                        );
+                        let selected = ProcessDriverHandle::current_in_context(&child_runtime)?
+                            .expect("original child poll owns reentry");
+                        let selected_owner = selected.owner()?;
+                        let original_owner = child_handle.owner()?;
+                        assert!(
+                            match (&selected_owner, &original_owner) {
+                                (
+                                    DriverStateOwner::Legacy(left),
+                                    DriverStateOwner::Legacy(right),
+                                ) => Rc::ptr_eq(left, right),
+                                (
+                                    DriverStateOwner::Managed(left),
+                                    DriverStateOwner::Managed(right),
+                                ) => left.ptr_eq(right),
+                                _ => false,
+                            },
+                            "selected child must reuse the original physical driver"
+                        );
+                        assert_eq!(
+                            selected.owner()?.borrow().current,
+                            child_handle.owner()?.borrow().current
+                        );
+                        assert!(selected.owner()?.borrow().current.is_some());
+                        Ok::<_, RuntimeError>(42)
+                    })?
+                    .await
+            };
+            let mut pending = Box::pin(pending);
+            futures::future::poll_fn(move |context| {
+                root_poll.set(true);
+                let result = pending.as_mut().poll(context);
+                root_poll.set(false);
+                result
+            })
+        });
+        let driven = driven.unwrap();
+        assert_eq!(futures::executor::block_on(driven).unwrap(), 42);
+        assert!(ProcessDriverHandle::current_in_context(&runtime)
+            .unwrap()
+            .is_none());
+    }
+}
+
+#[test]
+fn selected_driver_handoff_restores_after_pending_and_panic() {
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+        runmat_execution::cancellation::CancellationSource::new().token(),
+    );
+    let owner =
+        ProcessContinuationDriver::new_with_dynamic_admission_in_context(&runtime, None).unwrap();
+    let current = runtime.clone();
+    let mut pending = Box::pin(
+        owner
+            .drive_in_context(&runtime, move || async move {
+                assert!(ProcessDriverHandle::current_in_context(&current)
+                    .unwrap()
+                    .is_some());
+                futures::future::pending::<()>().await
+            })
+            .unwrap(),
+    );
+    assert!(pending
+        .as_mut()
+        .poll(&mut Context::from_waker(&noop_waker()))
+        .is_pending());
+    assert!(ProcessDriverHandle::current_in_context(&runtime)
+        .unwrap()
+        .is_none());
+    drop(pending);
+    drop(owner);
+    let independent =
+        ProcessContinuationDriver::new_with_dynamic_admission_in_context(&runtime, None).unwrap();
+    let current = runtime.clone();
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        futures::executor::block_on(
+            independent
+                .drive_in_context(&runtime, move || async move {
+                    assert!(ProcessDriverHandle::current_in_context(&current)
+                        .unwrap()
+                        .is_some());
+                    panic!("selected root panic witness")
+                })
+                .unwrap(),
+        )
+    }));
+    assert!(unwind.is_err());
+    assert!(ProcessDriverHandle::current_in_context(&runtime)
+        .unwrap()
+        .is_none());
+}
+
 struct Retired(&'static str, Rc<RefCell<Vec<&'static str>>>);
 
 struct CatchScopedProbe {

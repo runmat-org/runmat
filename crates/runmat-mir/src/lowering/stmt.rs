@@ -158,8 +158,34 @@ pub(crate) fn lower_stmt_with_replacements(
         }
         HirStmtKind::ExprStmt(expr, suppressed) => {
             let mut stmts = Vec::new();
-            let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
+            let mut value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
+            if !*suppressed
+                && expr.emits_statement_output()
+                && !matches!(expr.kind, HirExprKind::Binding(_))
+            {
+                if let Some(ans) = ctx.statement_ans_local()? {
+                    // Evaluate once, then publish through the ordinary binding
+                    // assignment used by every executor. The temporary is also
+                    // the exact source of statement output, never a console read.
+                    let result = ctx.fresh_temp(stmt.span);
+                    stmts.push(MirStmt {
+                        kind: MirStmtKind::Assign {
+                            place: MirPlace::Local(result),
+                            value,
+                        },
+                        span: stmt.span,
+                    });
+                    stmts.push(MirStmt {
+                        kind: MirStmtKind::Assign {
+                            place: MirPlace::Local(ans),
+                            value: MirRvalue::Use(crate::MirOperand::Local(result)),
+                        },
+                        span: stmt.span,
+                    });
+                    value = MirRvalue::Use(crate::MirOperand::Local(result));
+                }
+            }
             stmts.push(MirStmt {
                 kind: MirStmtKind::Expr(value),
                 span: stmt.span,

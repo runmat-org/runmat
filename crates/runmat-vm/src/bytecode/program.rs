@@ -109,9 +109,6 @@ pub struct CallFrame {
 
 #[derive(Debug)]
 pub struct ExecutionContext {
-    /// Standalone script entrypoints publish typed implicit-expression results
-    /// in their own VM workspace; interactive hosts retain their existing owner.
-    pub(crate) publish_script_ans: bool,
     pub call_stack: Vec<CallFrame>,
     pub locals: Vec<Value>,
     pub instruction_pointer: usize,
@@ -135,7 +132,6 @@ pub struct ExecutionContext {
 impl Default for ExecutionContext {
     fn default() -> Self {
         Self {
-            publish_script_ans: false,
             call_stack: Vec::new(),
             locals: Vec::new(),
             instruction_pointer: 0,

@@ -15,6 +15,7 @@ pub(crate) struct MirLoweringContext {
     next_distributed_value: Cell<u32>,
     next_collective: Cell<u32>,
     next_sequence_local: Cell<usize>,
+    statement_ans: Option<BindingId>,
 }
 
 impl Default for MirLoweringContext {
@@ -30,11 +31,22 @@ impl Default for MirLoweringContext {
             next_distributed_value: Cell::new(0),
             next_collective: Cell::new(0),
             next_sequence_local: Cell::new(0),
+            statement_ans: None,
         }
     }
 }
 
 impl MirLoweringContext {
+    pub(crate) fn with_statement_ans(mut self, binding: Option<BindingId>) -> Self {
+        self.statement_ans = binding;
+        self
+    }
+
+    pub(crate) fn statement_ans_local(&self) -> Result<Option<MirLocalId>, HirError> {
+        self.statement_ans
+            .map(|binding| self.local_for_binding(binding))
+            .transpose()
+    }
     pub(crate) fn with_async_functions(
         async_functions: HashSet<FunctionId>,
         external_async_functions: HashSet<FunctionId>,

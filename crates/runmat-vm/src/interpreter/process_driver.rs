@@ -423,6 +423,25 @@ impl WakeHub {
 #[derive(Clone)]
 pub(crate) struct ProcessDriverHandle(DriverHandleOwner);
 
+thread_local! {
+    // A transient weak capability, never a retained runtime or driver owner.
+    static POLLING_DRIVER: RefCell<Option<ProcessDriverHandle>> = const { RefCell::new(None) };
+}
+
+struct PollingDriverGuard(Option<ProcessDriverHandle>);
+impl PollingDriverGuard {
+    fn enter(handle: ProcessDriverHandle) -> Self {
+        Self(POLLING_DRIVER.with(|slot| slot.replace(Some(handle))))
+    }
+}
+impl Drop for PollingDriverGuard {
+    fn drop(&mut self) {
+        POLLING_DRIVER.with(|slot| {
+            slot.replace(self.0.take());
+        });
+    }
+}
+
 #[derive(Clone)]
 enum DriverHandleOwner {
     Legacy(RcWeak<RefCell<DriverState>>),
@@ -438,6 +457,18 @@ impl std::fmt::Debug for ProcessDriverHandle {
 }
 
 impl ProcessDriverHandle {
+    /// Reenter only the driver currently polling this exact invocation. A
+    /// different context or cancellation generation is a refusal, not a new
+    /// owner fallback. Outside a poll, an independent invocation has no handle.
+    pub(crate) fn current_in_context(
+        context: &RuntimeContext,
+    ) -> Result<Option<Self>, RuntimeError> {
+        let handle = POLLING_DRIVER.with(|slot| slot.borrow().clone());
+        if let Some(handle) = &handle {
+            handle.owner()?.borrow().ensure_context(context)?;
+        }
+        Ok(handle)
+    }
     fn owner(&self) -> Result<DriverStateOwner, RuntimeError> {
         match &self.0 {
             DriverHandleOwner::Legacy(owner) => owner
@@ -1014,12 +1045,14 @@ impl<F: Future> Future for DrivenInvocation<F> {
             if ready.get().id == CallId(0) {
                 let root_waker = this.root_wake.waker();
                 let mut root_context = Context::from_waker(&root_waker);
-                match this
-                    .root
-                    .as_mut()
-                    .expect("VM invocation polled after completion")
-                    .poll(&mut root_context)
-                {
+                let result = {
+                    let _driver = PollingDriverGuard::enter(this.poll_handle());
+                    this.root
+                        .as_mut()
+                        .expect("VM invocation polled after completion")
+                        .poll(&mut root_context)
+                };
+                match result {
                     Poll::Ready(result) => {
                         this.retire_all();
                         return Poll::Ready(result);
@@ -1038,7 +1071,10 @@ impl<F: Future> Future for DrivenInvocation<F> {
             this.state.borrow_mut().current = Some((id, task.depth));
             let task_waker = ready.waker();
             let mut task_context = Context::from_waker(&task_waker);
-            let result = task.poll(&mut task_context);
+            let result = {
+                let _driver = PollingDriverGuard::enter(this.poll_handle());
+                task.poll(&mut task_context)
+            };
             this.state.borrow_mut().current = None;
             match result {
                 Poll::Ready(()) => {
@@ -1053,6 +1089,17 @@ impl<F: Future> Future for DrivenInvocation<F> {
 }
 
 impl<F: Future> DrivenInvocation<F> {
+    fn poll_handle(&self) -> ProcessDriverHandle {
+        ProcessDriverHandle(match &self.state {
+            DriverStateOwner::Legacy(owner) => DriverHandleOwner::Legacy(Rc::downgrade(owner)),
+            DriverStateOwner::Managed(_) => DriverHandleOwner::Managed(
+                self.managed_port
+                    .as_ref()
+                    .expect("live managed driver poll")
+                    .clone(),
+            ),
+        })
+    }
     fn retire_subtree(&mut self, id: CallId, task: QueuedCall, publish: bool) {
         task.deactivate();
         {

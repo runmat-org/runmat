@@ -7,6 +7,23 @@ use std::collections::HashSet;
 use super::{control_flow::ControlFlowBuilder, expr::lower_simple_operand, MirLoweringContext};
 
 pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
+    for (owner, binding) in &hir.statement_result_bindings {
+        let function = hir
+            .functions
+            .iter()
+            .find(|function| function.id == *owner)
+            .ok_or_else(|| HirError::new("statement result references a missing function"))?;
+        if !function.locals.contains(binding)
+            || !hir.bindings.iter().any(|candidate| {
+                candidate.id == *binding
+                    && candidate.owner == runmat_hir::BindingOwner::Function(*owner)
+            })
+        {
+            return Err(HirError::new(
+                "statement result binding differs from its exact function owner",
+            ));
+        }
+    }
     let mut assembly = MirAssembly {
         classes: hir
             .classes
@@ -91,7 +108,8 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
                     async_functions.clone(),
                     external_async_functions.clone(),
                     function.id,
-                ),
+                )
+                .with_statement_ans(hir.statement_result_bindings.get(&function.id).copied()),
                 &incoming_workspace,
                 &external_workspace,
             )?,

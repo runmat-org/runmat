@@ -267,7 +267,6 @@ impl InterpreterState {
         Self {
             stack: crate::interpreter::stack::InterpreterStack::unbounded(),
             context: ExecutionContext {
-                publish_script_ans: false,
                 call_stack: Vec::new(),
                 locals: Vec::new(),
                 instruction_pointer: 0,

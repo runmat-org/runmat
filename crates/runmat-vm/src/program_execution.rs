@@ -1086,14 +1086,13 @@ async fn execute_unit_script(
             message: "scripts do not define multiple output ordinals".into(),
         };
     }
-    let result = crate::interpret_script_workspace(
+    let result = crate::interpret_workspace(
         &bytecode,
         crate::interpreter::vars::InterpreterVars::from_owned(Vec::new()),
         Some("<main>"),
         runtime.clone(),
         None,
         None,
-        usize::from(requested_outputs),
     )
     .await
     .outcome;

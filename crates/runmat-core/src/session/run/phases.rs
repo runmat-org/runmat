@@ -25,7 +25,6 @@ struct State<'a> {
     workspace_updates: Vec<WorkspaceEntry>,
     workspace_snapshot_force_full: bool,
     vm_workspace_completion: Option<runmat_vm::WorkspaceExecutionCompletion>,
-    ans_update: Option<(usize, Value)>,
     #[cfg(not(target_arch = "wasm32"))]
     tiered_interactive: Option<(
         runmat_native_executor::execute::NativeWorkspaceInput,

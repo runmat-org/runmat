@@ -3,6 +3,29 @@ use runmat_canonical_codec::CanonicalCodecErrorKind;
 use serde::ser::SerializeSeq;
 use std::cell::Cell;
 
+#[test]
+fn failed_metadata_mutation_retains_operation_path_and_io_cause() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("head.json");
+    std::fs::create_dir(&path).unwrap();
+    let error = atomic_json(&path, &serde_json::json!({"head": 1})).unwrap_err();
+    let NativeExecutionError::MetadataIo {
+        operation,
+        path: failed_path,
+        source,
+    } = &error
+    else {
+        panic!("expected typed metadata I/O cause, got {error}");
+    };
+    assert_eq!(*operation, crate::MetadataIoOperation::AtomicReplacement);
+    assert_eq!(failed_path, &path);
+    assert_eq!(source.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(std::error::Error::source(&error)
+        .unwrap()
+        .is::<std::io::Error>());
+    assert!(path.is_dir());
+}
+
 /// A small borrowed inventory that would expand far beyond the real wire ceiling.
 /// Early rejection must stop traversal, not finish encoding and then measure it.
 struct Expanding<'a> {

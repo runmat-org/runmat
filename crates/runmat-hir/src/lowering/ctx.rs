@@ -775,7 +775,11 @@ impl LoweringCtx {
         }
         let id = self.alloc_binding_id();
         let owner = self.current_scope().owner;
-        let workspace_visibility = self.current_scope().workspace_visibility.clone();
+        let workspace_visibility = if role == BindingRole::ImplicitAns {
+            WorkspaceVisibility::ImplicitAns
+        } else {
+            self.current_scope().workspace_visibility.clone()
+        };
         self.current_scope_mut()
             .bindings
             .insert(name.to_string(), id);
@@ -2299,14 +2303,38 @@ impl LoweringCtx {
                 } else {
                     self.requested_outputs_for_expr_stmt(expr)?
                 };
-                let stmt = HirStmtKind::ExprStmt(
-                    self.lower_expr_semantic_requested_in_context(
-                        expr,
-                        requested_outputs,
-                        runmat_types::ObjectIndexingContext::Statement,
-                    )?,
-                    *suppressed,
-                );
+                let lowered = self.lower_expr_semantic_requested_in_context(
+                    expr,
+                    requested_outputs,
+                    runmat_types::ObjectIndexingContext::Statement,
+                )?;
+                // Establish this scope's result binding only after resolving
+                // the expression: an initial read of ans is still undefined.
+                // Named-variable display and no-output calls never assign ans.
+                if !*suppressed
+                    && lowered.emits_statement_output()
+                    && !matches!(lowered.kind, HirExprKind::Binding(_))
+                {
+                    let binding = self.define_binding(
+                        "ans",
+                        BindingRole::ImplicitAns,
+                        BindingStorage::Lexical,
+                        span,
+                    );
+                    let BindingOwner::Function(function) = self.current_scope().owner else {
+                        return Err(HirError::new("statement result has no function owner"));
+                    };
+                    self.assembly
+                        .statement_result_bindings
+                        .insert(function, binding);
+                    self.record_mutation(
+                        HirPlace::Binding(binding),
+                        PlaceMutationKind::BindOrAssign,
+                        AssignmentCreationPolicy::CreateBinding,
+                        AssignmentShapePolicy::Exact,
+                    );
+                }
+                let stmt = HirStmtKind::ExprStmt(lowered, *suppressed);
                 if external_binding_effect.is_some() {
                     self.mark_external_bindings_visible();
                 }

@@ -34,11 +34,9 @@ pub(crate) fn install_admitted(
             manifest.module_name, manifest.target.suffix
         );
         let module_path = root.write_verified(&module_relative, &entry.module)?;
-        let manifest_path = MexArtifactManifest::path_for_module(module_path.as_path());
-        let manifest_relative = manifest_path
-            .strip_prefix(root.path())
-            .map_err(|error| format!("MEX manifest is outside private root: {error}"))?;
-        root.write_verified(&manifest_relative.to_string_lossy(), &entry.manifest)?;
+        // Object keys remain portable; the private root resolves native paths.
+        let manifest_relative = format!("{module_relative}.runmat.json");
+        root.write_verified(&manifest_relative, &entry.manifest)?;
         session
             .install_artifact(module_path.as_path())
             .map_err(|error| format!("install standalone MEX artifact: {error}"))?;

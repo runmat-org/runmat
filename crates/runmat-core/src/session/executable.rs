@@ -947,14 +947,13 @@ impl RunMatSession {
         debug_assert!(requested_outputs <= 1);
         // The VM allocates its dense storage. Supplying placeholders here
         // would declare every slot assigned before the script has run.
-        match runmat_vm::interpret_script_workspace(
+        match runmat_vm::interpret_workspace(
             runtime_bytecode,
             runmat_vm::InterpreterVars::from_owned(Vec::new()),
             Some(&unit.source().relative_path),
             runtime.clone(),
             None,
             Some(self.source_evaluator.dynamic_admission_port()),
-            requested_outputs,
         )
         .await
         .outcome?

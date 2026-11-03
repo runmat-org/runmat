@@ -810,6 +810,30 @@ pub(super) async fn discover_companion_source_statements_async(
     compose_project_compilation_context_async(&context, compat_mode).await
 }
 
+/// A diagnostic name never grants filesystem access. Inline input can use an
+/// installed project's manifest as its lookup anchor; only a resolved primary
+/// path selects a source file or starts implicit project discovery.
+pub(super) async fn companion_source_statements_for_input_async(
+    primary_access_path: Option<&str>,
+    compat_mode: runmat_parser::CompatMode,
+    handoff: Option<&runmat_package::FrozenProjectHandoff>,
+) -> Result<CompanionSourceDiscovery, RuntimeError> {
+    if let Some(handoff) = handoff {
+        let anchor = handoff.project.manifest_path.to_string_lossy();
+        companion_source_statements_from_handoff_async(
+            primary_access_path.unwrap_or(anchor.as_ref()),
+            compat_mode,
+            handoff,
+            None,
+        )
+        .await
+    } else if let Some(path) = primary_access_path {
+        discover_companion_source_statements_async(path, compat_mode).await
+    } else {
+        Ok(CompanionSourceDiscovery::default())
+    }
+}
+
 pub(super) async fn companion_source_statements_from_handoff_async(
     source_name: &str,
     compat_mode: runmat_parser::CompatMode,
@@ -957,8 +981,12 @@ impl RunMatSession {
             session.active_source_fullpath_name = primary_access_path;
 
             let companion_result = if let Some((handoff, captured)) = captured_snapshot {
+                let anchor = handoff.project.manifest_path.to_string_lossy();
                 match project_compilation_context_from_handoff(
-                    session.active_source_name.as_str(),
+                    session
+                        .active_source_fullpath_name
+                        .as_deref()
+                        .unwrap_or(anchor.as_ref()),
                     handoff,
                 ) {
                     Ok(context) => {
@@ -974,8 +1002,12 @@ impl RunMatSession {
                     Err(error) => Err(error),
                 }
             } else if let Some(handoff) = session.project_handoff.as_ref() {
+                let anchor = handoff.project.manifest_path.to_string_lossy();
                 companion_source_statements_from_handoff_async(
-                    session.active_source_name.as_str(),
+                    session
+                        .active_source_fullpath_name
+                        .as_deref()
+                        .unwrap_or(anchor.as_ref()),
                     session.compat_mode,
                     handoff,
                     test_authority,
@@ -984,9 +1016,10 @@ impl RunMatSession {
             } else if test_authority.is_some() {
                 Ok(CompanionSourceDiscovery::default())
             } else {
-                discover_companion_source_statements_async(
-                    &source.relative_path,
+                companion_source_statements_for_input_async(
+                    session.active_source_fullpath_name.as_deref(),
                     session.compat_mode,
+                    None,
                 )
                 .await
             };
@@ -1177,23 +1210,37 @@ impl RunMatSession {
         source_name: &str,
         input: &str,
     ) -> std::result::Result<PreparedExecution, RunError> {
+        self.compile_input_with_source_access(source_name, None, input)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn compile_input_for_source_path(
+        &mut self,
+        source_path: &str,
+        input: &str,
+    ) -> std::result::Result<PreparedExecution, RunError> {
+        self.compile_input_with_source_access(source_path, Some(source_path), input)
+    }
+
+    #[cfg(test)]
+    fn compile_input_with_source_access(
+        &mut self,
+        source_name: &str,
+        access_path: Option<&str>,
+        input: &str,
+    ) -> std::result::Result<PreparedExecution, RunError> {
         let mut scope = super::source_scope::SourceCompositionScope::enter(self);
         let session = scope.session();
         session.active_source_name = source_name.to_string();
-        session.active_source_fullpath_name = None;
+        session.active_source_fullpath_name = access_path.map(str::to_owned);
         let handoff = session.project_handoff.clone();
         let companion = futures::executor::block_on(async {
-            if let Some(handoff) = handoff.as_ref() {
-                companion_source_statements_from_handoff_async(
-                    source_name,
-                    session.compat_mode,
-                    handoff,
-                    None,
-                )
-                .await
-            } else {
-                discover_companion_source_statements_async(source_name, session.compat_mode).await
-            }
+            companion_source_statements_for_input_async(
+                access_path,
+                session.compat_mode,
+                handoff.as_ref(),
+            )
+            .await
         })
         .map_err(|error| {
             RunError::Runtime(
@@ -1960,7 +2007,12 @@ mod source_discovery_tests {
                 format!("function y = {name}(x)\narguments\nx double\nend\ny = helper(x);\nend\n");
             fs::write(&path, &text).unwrap();
             let unit = futures::executor::block_on(session.compile_executable_unit(
-                crate::ExecutableSource::new("source-attribution", path.to_str().unwrap(), text),
+                crate::ExecutableSource::frozen(
+                    "source-attribution",
+                    path.to_str().unwrap(),
+                    path.to_str().unwrap(),
+                    text,
+                ),
                 None,
             ))
             .unwrap();
@@ -2109,6 +2161,63 @@ mod source_discovery_tests {
         assert!(names.contains("pkg.tool"));
         assert!(names.contains("secret"));
         assert!(!names.iter().any(|name| name.ends_with("hidden")));
+    }
+
+    #[test]
+    fn inline_project_lookup_uses_manifest_authority_and_root_private_visibility() {
+        let _provider_guard = runmat_filesystem::provider_override_lock();
+        let temp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(temp.path().join("private")).unwrap();
+        fs::create_dir_all(temp.path().join("nested/private")).unwrap();
+        fs::write(
+            temp.path().join("runmat.toml"),
+            "[package]\nname = \"inline-project\"\n[sources]\nroots = [\".\"]\n",
+        )
+        .unwrap();
+        let main = temp.path().join("main.m");
+        fs::write(&main, "value = helper();").unwrap();
+        fs::write(
+            temp.path().join("helper.m"),
+            "function y = helper(); y = 1; end",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("private/root_secret.m"),
+            "function y = root_secret(); y = 2; end",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("nested/private/nested_secret.m"),
+            "function y = nested_secret(); y = 3; end",
+        )
+        .unwrap();
+        let project = futures::executor::block_on(
+            runmat_package::discover_frozen_project_from_async(&main, Default::default()),
+        )
+        .unwrap()
+        .unwrap();
+        let handoff = runmat_package::FrozenProjectHandoff::new(project);
+        let discovery = futures::executor::block_on(companion_source_statements_for_input_async(
+            None,
+            runmat_parser::CompatMode::RunMat,
+            Some(&handoff),
+        ))
+        .unwrap();
+        let names = discovered_function_names(&discovery);
+        assert!(names.contains("helper"));
+        assert!(names.contains("root_secret"));
+        assert!(!names.contains("nested_secret"));
+        let symbols = &discovery.source_catalog.as_ref().unwrap().symbols;
+        assert!(symbols.contains("root_secret"));
+        assert!(!symbols.contains("nested_secret"));
+        let inline = futures::executor::block_on(companion_source_statements_for_input_async(
+            None,
+            runmat_parser::CompatMode::RunMat,
+            None,
+        ))
+        .unwrap();
+        assert!(inline.statements.is_empty());
+        assert!(inline.source_catalog.is_none());
     }
 
     #[test]

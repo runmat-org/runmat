@@ -975,7 +975,9 @@ fn top_level_await_result(
     statements: &mut Vec<crate::MirStmt>,
 ) -> Result<TopLevelAwaitResult, HirError> {
     match &stmt.kind {
-        HirStmtKind::ExprStmt(expr, _) if expr.id == await_expr.id => {
+        HirStmtKind::ExprStmt(expr, suppressed)
+            if expr.id == await_expr.id && (*suppressed || !expr.emits_statement_output()) =>
+        {
             Ok(TopLevelAwaitResult::ExpressionStatement)
         }
         HirStmtKind::Assign(place, expr, _) if expr.id == await_expr.id => Ok(

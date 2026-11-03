@@ -202,7 +202,7 @@ pub(crate) async fn execute_stdin_script_with_graphics(
     let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
     boxed_command(|| {
         execute_script_request(
-            cwd.join("<stdin>"),
+            cwd,
             SourceInput::Text {
                 name: "<stdin>".to_owned(),
                 text: content,

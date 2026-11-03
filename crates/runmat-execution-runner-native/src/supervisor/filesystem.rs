@@ -88,10 +88,20 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> NativeExecutionResult<(
     let parent = path.parent().ok_or_else(|| {
         NativeExecutionError::Configuration("durable metadata path has no parent".into())
     })?;
-    secure_directory(parent)?;
+    runmat_filesystem::NativeFsProvider
+        .create_private_directory_durable(parent)
+        .map_err(|source| NativeExecutionError::MetadataIo {
+            operation: crate::MetadataIoOperation::PreparePrivateDirectory,
+            path: parent.to_owned(),
+            source,
+        })?;
     let outcome = NativeFsProvider
         .atomic_replace_sync(path, bytes)
-        .map_err(io_error)?;
+        .map_err(|source| NativeExecutionError::MetadataIo {
+            operation: crate::MetadataIoOperation::AtomicReplacement,
+            path: path.to_owned(),
+            source,
+        })?;
     let evidence = crate::NativeCheckpointEvidence::from_publication(outcome);
     if let Some(diagnostic) = evidence.delivery_error() {
         return Err(NativeExecutionError::CheckpointDelivery {

@@ -26,6 +26,11 @@ pub struct HirAssembly {
     /// Original declarations for retained functions outside this unit's ID namespace.
     #[serde(default)]
     pub bound_function_modifiers: std::collections::BTreeMap<FunctionId, FunctionModifiers>,
+    /// Exact current-function binding selected for implicit statement results.
+    /// Reusing an incoming or explicit binding preserves its original role and
+    /// storage; consumers must not rediscover this authority from its name.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub statement_result_bindings: std::collections::BTreeMap<FunctionId, BindingId>,
     /// Compiler-admitted program root, including function-only and empty
     /// sources with no synthetic executable entrypoint.
     #[serde(default, skip_serializing_if = "Option::is_none")]

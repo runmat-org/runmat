@@ -3037,7 +3037,7 @@ roots = ["."]
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
-        .compile_input_for_source_name(&source_name, "import stats.*; y = summarize(1);")
+        .compile_input_for_source_path(&source_name, "import stats.*; y = summarize(1);")
         .expect("compile");
 
     let calls = &prepared.lowering().hir_index.calls;
@@ -9007,7 +9007,10 @@ roots = ["."]
 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
-    let error = execute_text_request_named_source(&mut session, &source_name, "v = 1;")
+    // Naming inline input after a real file does not grant file/project access.
+    execute_text_request_named_source(&mut session, &source_name, "v = 1;")
+        .expect("inline display name must not discover the adjacent invalid helper");
+    let error = execute_path_request(&mut session, &source_name)
         .expect_err("invalid graph-declared source must fail composition");
     let RunError::Runtime(error) = error else {
         panic!("expected project composition runtime error");
@@ -9019,6 +9022,25 @@ roots = ["."]
     assert!(error
         .message
         .contains("failed to parse graph-declared source"));
+}
+
+#[test]
+fn inline_source_display_names_do_not_require_host_path_syntax() {
+    for name in [
+        "<stdin>",
+        "<test>",
+        "remote:logical/main.m",
+        "display|only?name.m",
+    ] {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let outcome = execute_text_request_named_source(&mut session, name, "answer = 42;")
+            .expect("inline input must not perform filesystem lookup using its display name");
+        assert!(outcome_has_named_upsert(
+            &outcome,
+            "answer",
+            &runmat_value::Value::Num(42.0)
+        ));
+    }
 }
 
 #[test]
@@ -9230,7 +9252,7 @@ roots = ["."]
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
-        .compile_input_for_source_name(&source_name, "import statsdep.*; y = summarize(1);")
+        .compile_input_for_source_path(&source_name, "import statsdep.*; y = summarize(1);")
         .expect("compile");
 
     let calls = &prepared.lowering().hir_index.calls;
@@ -9285,7 +9307,7 @@ roots = ["."]
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
-        .compile_input_for_source_name(&source_name, "import statsdep.*; f = @summarize;")
+        .compile_input_for_source_path(&source_name, "import statsdep.*; f = @summarize;")
         .expect("compile");
 
     assert!(

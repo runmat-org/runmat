@@ -284,14 +284,14 @@ fn msvc_arguments(
     if build.language == MexSourceLanguage::Cxx {
         arguments.extend(build.sources.iter().map(|path| {
             let mode = match MexSourceLanguage::detect(path) {
-                MexSourceLanguage::C => "/TC",
-                MexSourceLanguage::Cxx => "/TP",
+                MexSourceLanguage::C => "/Tc",
+                MexSourceLanguage::Cxx => "/Tp",
                 MexSourceLanguage::Fortran => unreachable!("Fortran does not use MSVC"),
                 MexSourceLanguage::Cuda => unreachable!("CUDA uses a multi-step build"),
             };
             format!("{mode}{}", path.display())
         }));
-        arguments.push(format!("/TP{}", support_source.display()));
+        arguments.push(format!("/Tp{}", support_source.display()));
     } else {
         arguments.extend(build.sources.iter().map(|path| path.display().to_string()));
         arguments.push(support_source.display().to_string());
@@ -457,8 +457,8 @@ fn cxx_msvc_steps(
         arguments.push(format!(
             "{}{}",
             match language {
-                MexSourceLanguage::C => "/TC",
-                MexSourceLanguage::Cxx => "/TP",
+                MexSourceLanguage::C => "/Tc",
+                MexSourceLanguage::Cxx => "/Tp",
                 MexSourceLanguage::Fortran => unreachable!("Fortran does not use MSVC"),
                 MexSourceLanguage::Cuda => unreachable!("CUDA uses its own build plan"),
             },
@@ -487,7 +487,7 @@ fn cxx_msvc_steps(
     push_definitions(build, function_name, "/D", &mut support_arguments);
     support_arguments.extend(build.c_compiler_arguments.iter().cloned());
     support_arguments.extend([
-        format!("/TC{}", support_source.display()),
+        format!("/Tc{}", support_source.display()),
         format!("/Fo{}", support_object.display()),
     ]);
     steps.push(MexBuildStep {
@@ -1036,8 +1036,8 @@ mod tests {
     #[test]
     fn msvc_cpp_plan_compiles_each_language_then_links_once() {
         let temporary = tempfile::tempdir().unwrap();
-        let cpp = temporary.path().join("gateway.cpp");
-        let c = temporary.path().join("support.c");
+        let cpp = temporary.path().join("gateway with spaces.cpp");
+        let c = temporary.path().join("support with spaces.c");
         std::fs::write(&cpp, "class MexFunction {}; ").unwrap();
         std::fs::write(&c, "void support(void) {} ").unwrap();
         let build = MexBuild::new(&cpp, temporary.path())
@@ -1056,16 +1056,19 @@ mod tests {
         assert_eq!(plan.steps.len(), 4);
         assert!(plan.steps[0]
             .arguments
-            .iter()
-            .any(|argument| argument.starts_with("/TP")));
+            .contains(&format!("/Tp{}", cpp.display())));
         assert!(plan.steps[1]
             .arguments
-            .iter()
-            .any(|argument| argument.starts_with("/TC")));
+            .contains(&format!("/Tc{}", c.display())));
         assert!(plan.steps[2]
             .arguments
             .iter()
-            .any(|argument| argument.starts_with("/TC")));
+            .any(|argument| argument.starts_with("/Tc")));
+        assert!(plan
+            .steps
+            .iter()
+            .flat_map(|step| &step.arguments)
+            .all(|argument| !argument.starts_with("/TP") && !argument.starts_with("/TC")));
         assert!(plan.steps[3].arguments.contains(&"/LD".to_string()));
     }
 

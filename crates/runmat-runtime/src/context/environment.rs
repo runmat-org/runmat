@@ -16,14 +16,24 @@ impl EnvironmentState {
     pub(crate) fn from_host() -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         let entries = std::env::vars_os()
-            .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
-            .collect();
+            .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)));
         #[cfg(target_arch = "wasm32")]
         let entries = [("HOME", "/"), ("PATH", "/"), ("USER", "user")]
             .into_iter()
-            .map(|(key, value)| (key.into(), value.into()))
-            .collect();
-        Self(entries)
+            .map(|(key, value)| (key.into(), value.into()));
+        Self::from_host_entries(entries)
+    }
+
+    fn from_host_entries(entries: impl IntoIterator<Item = (String, String)>) -> Self {
+        // Windows' native environment block includes drive-directory bookkeeping
+        // under names beginning with '='. Rust preserves these entries, but they
+        // are not application variables and cannot enter a portable snapshot.
+        Self(
+            entries
+                .into_iter()
+                .filter(|(name, _)| !name.starts_with('='))
+                .collect(),
+        )
     }
 
     pub(super) fn from_snapshot(entries: Vec<(String, String)>) -> io::Result<Self> {

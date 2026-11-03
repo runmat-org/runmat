@@ -1,5 +1,18 @@
 use crate::{builtins::common::env, context::RuntimeContext, execution::RuntimeExecutionService};
 use std::rc::Rc;
+
+#[test]
+fn host_capture_omits_native_bookkeeping_without_relaxing_snapshot_validation() {
+    let entries = vec![
+        ("=C:".into(), "C:\\workspace".into()),
+        ("VISIBLE".into(), "kept".into()),
+    ];
+    assert!(runmat_execution::EnvironmentSnapshot::new(entries.clone()).is_err());
+    let captured = super::EnvironmentState::from_host_entries(entries);
+    assert_eq!(captured.vars(), [("VISIBLE".into(), "kept".into())]);
+    assert!(runmat_execution::EnvironmentSnapshot::new(captured.vars()).is_ok());
+}
+
 fn context(value: &str) -> RuntimeContext {
     let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     context

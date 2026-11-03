@@ -22,24 +22,12 @@ pub(super) async fn prepare<'a>(
             Some(session.mex_runtime.native_lane_child_factory()),
         ));
     session.configure_dynamic_function_services();
-    let source_lookup_name = session
-        .current_source_fullpath_name()
-        .unwrap_or_else(|| session.current_source_name());
-    let companion = if let Some(handoff) = session.project_handoff.as_ref() {
-        super::super::compile::companion_source_statements_from_handoff_async(
-            source_lookup_name,
-            session.compat_mode,
-            handoff,
-            None,
-        )
-        .await
-    } else {
-        super::super::compile::discover_companion_source_statements_async(
-            source_lookup_name,
-            session.compat_mode,
-        )
-        .await
-    }
+    let companion = super::super::compile::companion_source_statements_for_input_async(
+        session.current_source_fullpath_name(),
+        session.compat_mode,
+        session.project_handoff.as_ref(),
+    )
+    .await
     .map_err(|error| {
         RunError::Runtime(
             build_runtime_error(format!("project composition failed: {error}"))

@@ -119,7 +119,7 @@ pub(in super::super) fn executable_primary_access_path(
     handoff: Option<&runmat_package::FrozenProjectHandoff>,
 ) -> Result<Option<String>, String> {
     let Some(handoff) = handoff else {
-        return Ok(None);
+        return Ok(root.explicit_lookup_path().map(str::to_owned));
     };
     if let Some(captured) = root.captured_primary() {
         captured.validate(handoff, root)?;
@@ -149,6 +149,17 @@ mod tests {
             relative_path: relative.into(),
             access_path: access.into(),
         }
+    }
+
+    #[test]
+    fn only_explicit_lookup_path_grants_non_project_file_access() {
+        let inline = ExecutableSource::new("unit", "/display/main.m", "x = 1;");
+        assert_eq!(executable_primary_access_path(&inline, None).unwrap(), None);
+        let captured = ExecutableSource::frozen("unit", "main.m", "/issued/main.m", "x = 1;");
+        assert_eq!(
+            executable_primary_access_path(&captured, None).unwrap(),
+            Some("/issued/main.m".to_owned()),
+        );
     }
 
     #[test]

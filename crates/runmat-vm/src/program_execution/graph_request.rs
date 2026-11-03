@@ -114,6 +114,7 @@ async fn invoke_selected_nested_bound(
         requested_outputs,
         lexical_environment,
         foreign,
+        None,
     )
     .await
 }
@@ -127,6 +128,7 @@ fn invoke_selected_code_bound<'a>(
     requested_outputs: usize,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
     selected_foreign: Option<&'a Rc<dyn RuntimeForeignService>>,
+    driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
 ) -> impl std::future::Future<Output = Result<RootedValueSequence, runmat_runtime::RuntimeError>> + 'a
 {
     runmat_runtime::execution::after_result(
@@ -143,6 +145,7 @@ fn invoke_selected_code_bound<'a>(
                 requested_outputs,
                 registry,
                 lexical_environment,
+                driver,
             )
         },
     )
@@ -576,6 +579,7 @@ async fn invoke_bound_root(
                 usize::from(request.requested_outputs),
                 view,
                 environment,
+                None,
             )
             .await
         })

@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn replacement_failure_retains_exact_stage_path_and_os_cause() {
+    let directory = tempfile::tempdir().unwrap();
+    let parent = directory.path().join("missing");
+    let path = parent.join("head.json");
+    let original = fs::metadata(&parent).unwrap_err();
+    let error = publish(&path, b"replacement").unwrap_err();
+    assert_eq!(error.kind(), original.kind());
+    let context = error
+        .get_ref()
+        .unwrap()
+        .downcast_ref::<ReplacementFailure>()
+        .unwrap();
+    assert!(matches!(context.operation, Operation::InspectParent));
+    assert_eq!(context.path, parent);
+    assert_eq!(context.source.raw_os_error(), original.raw_os_error());
+    assert!(context.cleanup.is_none());
+    assert!(std::error::Error::source(context)
+        .unwrap()
+        .is::<io::Error>());
+}
+
+#[test]
 fn replacement_is_complete_and_flush_uncertainty_does_not_undo_visibility() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("current");

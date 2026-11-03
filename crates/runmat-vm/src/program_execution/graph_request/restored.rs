@@ -189,9 +189,15 @@ impl RestoredSelectedGraph {
             ));
         }
         let code = Rc::clone(&self.code);
+        // Capture the existing invocation's weak driver before projecting its
+        // selected code/source view. Reuse its canonical sibling queue rather
+        // than recursively driving a second VM beneath the caller's builtin.
+        let driver =
+            crate::interpreter::process_driver::ProcessDriverHandle::current_in_context(&runtime)?;
         let invoker = runmat_runtime::user_functions::install_local_bound_function_invoker(
             Rc::new(move |current, binding, arguments, outputs, environment| {
                 let code = Rc::clone(&code);
+                let driver = driver.clone();
                 runmat_runtime::execution::admit_executable_sequence_with(
                     &current.clone(),
                     move || async move {
@@ -203,6 +209,7 @@ impl RestoredSelectedGraph {
                             outputs,
                             environment,
                             None,
+                            driver,
                         )
                         .await
                     },

@@ -2,6 +2,13 @@
 pub enum NativeExecutionError {
     #[error("native process output failed: {0}")]
     ProcessOutput(#[source] std::sync::Arc<crate::RawOutputError>),
+    #[error("native metadata {operation:?} at {} failed: {source}", path.display())]
+    MetadataIo {
+        operation: MetadataIoOperation,
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("native execution was cancelled")]
     Cancelled,
     #[error("native task {task_id} was cancelled: {cancellation:?}; quiescence={quiescence:?}")]
@@ -44,6 +51,12 @@ pub enum NativeExecutionError {
     Protocol(String),
     #[error("portable execution driver failed: {0}")]
     Driver(#[from] runmat_execution_runner::RunnerError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MetadataIoOperation {
+    PreparePrivateDirectory,
+    AtomicReplacement,
 }
 
 pub type NativeExecutionResult<T> = Result<T, NativeExecutionError>;

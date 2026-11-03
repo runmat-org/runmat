@@ -268,6 +268,10 @@ impl ExecutableSource {
     pub(crate) fn lookup_path(&self) -> &str {
         self.lookup_path.as_deref().unwrap_or(&self.relative_path)
     }
+
+    pub(crate) fn explicit_lookup_path(&self) -> Option<&str> {
+        self.lookup_path.as_deref()
+    }
 }
 
 #[cfg(test)]

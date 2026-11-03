@@ -30,13 +30,20 @@ fn result_for<'a>(
 async fn execute_portable_envelope(
     envelope: &runmat_execution::ExecutableUnitEnvelope,
 ) -> runmat_execution_artifact::ProgramExecutionResponse {
+    execute_portable_envelope_with_outputs(envelope, 1).await
+}
+
+async fn execute_portable_envelope_with_outputs(
+    envelope: &runmat_execution::ExecutableUnitEnvelope,
+    requested_outputs: u16,
+) -> runmat_execution_artifact::ProgramExecutionResponse {
     let function = envelope.manifest.identity.entrypoint_function.unwrap();
     let recipe = runmat_execution_artifact::ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
         entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: runmat_execution::OutputContract {
-            requested_outputs: 1,
+            requested_outputs,
             owned_work: None,
         },
         execution_mode: "interpreter".into(),
@@ -68,7 +75,7 @@ async fn execute_portable_envelope(
         assignment: None,
         job_id: None,
         arguments: Vec::new(),
-        requested_outputs: 1,
+        requested_outputs,
     })
     .await
 }
@@ -479,6 +486,74 @@ async fn complete_portable_script_executes_after_component_reconstruction() {
         runmat_execution_artifact::ProgramExecutionResponse::Failure { message }
             if message == "script did not produce the requested ans value")
     );
+    let no_outputs = session
+        .compile_executable_unit(
+            ExecutableSource::new(
+                "path:portable-no-outputs",
+                "no-outputs.m",
+                "1 + 1\nassert(ans == 2);\n",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(execute_portable_envelope_with_outputs(&no_outputs.portable_envelope().unwrap(), 0).await,
+        runmat_execution_artifact::ProgramExecutionResponse::Success { outputs } if outputs.is_empty())
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn ordinary_commands_share_the_compiler_owned_ans_binding() {
+    let modes: &[bool] = if cfg!(all(feature = "jit", not(target_arch = "wasm32"))) {
+        &[false, true]
+    } else {
+        &[false]
+    };
+    for &jit in modes {
+        for (index, (source, expected)) in [
+            ("1 + 1\nans + 1\n", Some(3.0)),
+            ("1 + 1\nans = 7;\n", Some(7.0)),
+            ("1 + 1\nanswer = 42;\nanswer\n", Some(2.0)),
+            ("1 + 1;\ndisp(7)\n", None),
+            ("answer = 42;\nanswer\n", None),
+            ("1 + 1\nclear ans\n", None),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut session = RunMatSession::with_options(jit, false).unwrap();
+            for _ in 0..if jit && index == 0 { 12 } else { 1 } {
+                let request = runmat_core::abi::ExecutionRequest::for_source(
+                    runmat_core::abi::SourceInput::Text {
+                        name: "<ans-command>".into(),
+                        text: source.into(),
+                    },
+                    runmat_core::CompatMode::Matlab,
+                    runmat_core::abi::HostExecutionPolicy::default(),
+                    session.workspace_handle(),
+                );
+                let outcome = session.execute_request(request).await.result.unwrap();
+                assert!(
+                    !outcome.has_errors(),
+                    "jit={jit}, {source}: {:?}",
+                    outcome.diagnostics
+                );
+                assert_eq!(
+                    session.get_variables().unwrap().get("ans").cloned(),
+                    expected.map(runmat_value::Value::Num),
+                    "jit={jit}, {source}"
+                );
+            }
+            if jit && index == 0 {
+                assert!(
+                    session.stats().jit_compiled > 0,
+                    "ordinary ans never reached native execution"
+                );
+            }
+        }
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

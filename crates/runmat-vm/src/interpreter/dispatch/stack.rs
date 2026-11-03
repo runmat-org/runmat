@@ -55,13 +55,7 @@ pub async fn emit_stack_top(
     label: &EmitLabel,
     var_names: &HashMap<usize, String>,
 ) -> Result<(), RuntimeError> {
-    stack_ops::emit_stack_top(&context.runtime, stack, label, var_names).await?;
-    if context.publish_script_ans && matches!(label, EmitLabel::Ans) {
-        if let Some(value) = stack.last() {
-            crate::runtime::workspace::workspace_assign("ans", value.clone())?;
-        }
-    }
-    Ok(())
+    stack_ops::emit_stack_top(&context.runtime, stack, label, var_names).await
 }
 
 pub async fn emit_var(
