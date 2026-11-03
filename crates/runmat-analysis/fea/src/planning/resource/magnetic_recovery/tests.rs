@@ -130,3 +130,75 @@ fn magnetic_recovery_shape_rejects_missing_or_relabelled_native_inventory() {
     .unwrap();
     assert!(magnetic_field_recovery_shape(&request).is_err());
 }
+
+/// Calibration probe (ignored): magnetostatic count reservation components against the exact
+/// symbolic factor of the derived saddle, for an `RM_DIAG_N` slab (Tet10), then optionally the
+/// solve's process peak RSS. Run alone (`--exact --ignored`).
+#[test]
+#[ignore]
+fn diagnostic_magnetostatic_reservation_at_scale() {
+    let n: usize = std::env::var("RM_DIAG_N").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
+    let mesh = mesh(ElementOrder::Tet10, n);
+    let workload = MagnetostaticWorkload {
+        model: authored_model(1.0),
+        step_id: runmat_analysis_core::ProcedureStepId("potential".into()),
+        relative_residual_target: 1e-10,
+    };
+    let r = crate::physics::magnetic::resources::require_canonical_ceiling(
+        &workload.model,
+        &mesh,
+        u64::MAX >> 12,
+    )
+    .unwrap();
+    println!("{r:?}");
+    let input = crate::physics::magnetic::compile_canonical_input(
+        &workload.model,
+        &mesh,
+        workload.step_id.as_str(),
+        workload.relative_residual_target,
+    )
+    .unwrap();
+    let derived = crate::physics::magnetic::MagneticSystemPlan::derive_with_spaces(
+        &input.projection,
+        &input.grounded_faces,
+    )
+    .unwrap();
+    let saddle = derived.plan.saddle_pattern();
+    let offsets = saddle.row_offsets().iter().map(|&v| v as usize).collect::<Vec<_>>();
+    let columns = saddle.column_indices().iter().map(|&v| v as usize).collect::<Vec<_>>();
+    let estimate = runmat_sparse_solvers::direct::SymbolicFactorization::analyze_pattern::<f64>(
+        saddle.rows(),
+        &offsets,
+        &columns,
+        &runmat_sparse_solvers::direct::DirectOptions::new(
+            runmat_sparse_solvers::direct::FactorKind::BunchKaufman,
+        ),
+        runmat_sparse_solvers::control::SolveControl::NONE,
+    )
+    .unwrap()
+    .estimate();
+    println!(
+        "nodes {} elements {} saddle_rows {} saddle_nnz {} physical_nnz {} exact_factor_peak {}",
+        mesh.topology.nodes.len(),
+        mesh.topology.volume_elements.len(),
+        saddle.rows(),
+        saddle.column_indices().len(),
+        derived.plan.physical_pattern().column_indices().len(),
+        estimate.peak_bytes()
+    );
+    drop((input, derived, offsets, columns));
+    if std::env::var("RM_DIAG_SOLVE").is_ok() {
+        let peak = || {
+            let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+            unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+            unsafe { usage.assume_init() }.ru_maxrss
+        };
+        let before = peak();
+        let result = workload.execute(&mesh);
+        println!(
+            "rss_peak_before_solve {before} rss_peak_after_solve {} ok {}",
+            peak(),
+            result.is_ok()
+        );
+    }
+}

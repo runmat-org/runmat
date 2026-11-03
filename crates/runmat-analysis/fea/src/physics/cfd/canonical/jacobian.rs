@@ -79,6 +79,12 @@ impl MomentumJacobianPattern {
         })
     }
 
+    /// Sum over cells of their block-row stencil sizes: the scalar operator holds nine
+    /// entries per block column.
+    pub(super) fn block_column_count(&self) -> u64 {
+        self.rows.iter().map(|row| row.len() as u64).sum()
+    }
+
     fn position(&self, k: usize, r: usize, j: usize, m: usize) -> Result<usize, Error> {
         let n = self.rows.len();
         let row = &self.rows[r];

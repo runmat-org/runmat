@@ -404,7 +404,15 @@ impl<'a> CanonicalFluidProblem<'a> {
         if items > policy.maximum_authority_items {
             return Err(CanonicalFluidError::Resource("authority items"));
         }
-        let reservation = resources::reserve(source, topology, policy)?;
+        // Necessary early gate: every cell's momentum row holds at least its own block, so a
+        // ceiling below this minimum rejects before the stencils are derived. The admitted
+        // reservation is rederived below from the exact momentum pattern.
+        let reservation = resources::reserve_exact(
+            source,
+            topology,
+            policy,
+            topology.cells.len() as u64,
+        )?;
         if constraints
             .iter()
             .any(|c| c.constraint_id.is_empty() || c.constraint_id.len() > 256)
@@ -418,7 +426,9 @@ impl<'a> CanonicalFluidProblem<'a> {
         {
             return Err(CanonicalFluidError::Resource("boundary authority metadata"));
         }
-        let reservation = resources::admit_authority_profile(
+        // Count-only gate before boundary/source binding allocates; the admitted reservation is
+        // rederived below from the momentum pattern.
+        resources::admit_authority_profile(
             source,
             constraints,
             boundary_operators,
@@ -506,6 +516,22 @@ impl<'a> CanonicalFluidProblem<'a> {
         let velocity_stencils = velocity_gradient::derive(topology, &boundaries)?;
         let momentum_jacobian =
             jacobian::MomentumJacobianPattern::derive(topology, &boundaries, &velocity_stencils)?;
+        // Admit the exact momentum stencil now that its pattern exists; the count-only bound
+        // above only gated the derivation.
+        let reservation = resources::admit_authority_profile(
+            source,
+            constraints,
+            boundary_operators,
+            signals,
+            excitations,
+            policy,
+            resources::reserve_exact(
+                source,
+                topology,
+                policy,
+                momentum_jacobian.block_column_count(),
+            )?,
+        )?;
         let numerical_input_identity = identity(
             "fea-fluid-numerical-input/v8",
             &(

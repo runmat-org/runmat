@@ -207,16 +207,18 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
     let entries = facts.support().column_indices().len() as u64;
     assert_eq!(
         required,
-        facts.csr_payload_bytes_upper_bound().0
+        (facts.csr_payload_bytes_upper_bound().0
             + facts.solver_admission().resident_bytes_upper_bound.0
+            + facts.workspace().reservation_bytes().unwrap().0)
+            .max(facts.planning_resident_bytes.0)
             + history.retained_field_bytes.0
             + history.retained_metadata_bytes.0
             + history.validation_scratch_bytes.0
             + 8 * (rows + 1 + entries)
-            + facts.workspace().reservation_bytes().unwrap().0
-            + ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(&mesh)
-                .unwrap()
-                .0
+    );
+    assert_eq!(
+        facts.planning_resident_bytes,
+        ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(&mesh).unwrap()
     );
     assert!(required > history.retained_field_bytes.0);
     let required = crate::planning::resource::ThermalPreassemblyResourceFacts::derive(

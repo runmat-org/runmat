@@ -191,6 +191,16 @@ impl PreparedFluidSource {
         let properties = prepared.materialize().map_err(invalid)?;
         let cells = crate::study::derive_fluid_cells(model, mesh, &properties).map_err(invalid)?;
         let coupled = cells.selection != crate::topology::FiniteVolumeCellSelection::AllElements;
+        // The count-only gate above charged geometry scratch over the whole mesh, before the
+        // cell selection was known. A coupled study derives finite volumes only on its fluid
+        // cells: the admitted preparation carries that selection's scratch.
+        let selected_scratch = FiniteVolumeTopology::reserve(&source, geometry_policy, &cells.selection)
+            .map_err(invalid)?
+            .scratch_bytes as u64;
+        let preparation_resident_bytes = preparation_resident_bytes
+            .checked_sub(geometry.scratch_bytes as u64)
+            .and_then(|bytes| bytes.checked_add(selected_scratch))
+            .ok_or_else(|| invalid("fluid preparation residency"))?;
         let topology =
             FiniteVolumeTopology::derive_selected(&source, geometry_policy, cells.selection)
                 .map_err(invalid)?;

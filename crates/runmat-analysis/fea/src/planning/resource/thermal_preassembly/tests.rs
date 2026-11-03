@@ -519,3 +519,89 @@ fn admitted_identity(
     )
     .unwrap()
 }
+
+/// Calibration probe (ignored): prints every thermal reservation component for a linear steady
+/// slab of `RM_DIAG_N`³ hexahedra (Tet10), then optionally solves it and prints the process
+/// peak RSS. Run alone (`--exact --ignored`) so the RSS belongs to this solve.
+#[test]
+#[ignore]
+fn diagnostic_thermal_components_at_scale() {
+    use runmat_analysis_core::{
+        AnalysisBoundary, BoundaryOperator, HeatTransferCoefficient, PrescribedValue,
+        RegionTarget, Temperature,
+    };
+    let n = std::env::var("RM_DIAG_N").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+    let mesh = runmat_meshing_core::fixtures::quadratic_slab_mesh(n);
+    let mut workload = crate::physics::thermal::qualification::workload();
+    workload
+        .model
+        .boundaries
+        .retain(|b| b.boundary_id == "insulated-sides");
+    workload.model.boundaries.push(AnalysisBoundary {
+        boundary_id: "right-film".into(),
+        target: RegionTarget::boundary(runmat_meshing_core::fixtures::fixture_face("slab_right")),
+        operator: BoundaryOperator::ThermalConvection {
+            ambient_temperature: PrescribedValue::Constant(Temperature::new(300.0)),
+            coefficient: HeatTransferCoefficient::new(25.0),
+        },
+    });
+    crate::physics::thermal::qualification::left_temperature(
+        &mut workload,
+        PrescribedValue::Constant(Temperature::new(350.0)),
+    );
+    let schedule = workload.solve_schedule().unwrap();
+    let facts = ThermalPreassemblyResourceFacts::derive(
+        &[],
+        &workload.model,
+        &workload.model.sequence.steps[0],
+        &mesh,
+        &schedule,
+        &admitted_identity(&workload, &mesh),
+    )
+    .unwrap();
+    let ops = &facts.operators;
+    let admission = ops.solver_admission();
+    println!(
+        "nodes {} elements {} support_nnz {}",
+        mesh.topology.nodes.len(),
+        mesh.topology.volume_elements.len(),
+        ops.support().column_indices().len()
+    );
+    println!(
+        "operators total {} csr {} factor_admission {} workspace {} history {}",
+        ops.numerical_reservation_bytes(&facts.history).unwrap().0,
+        ops.csr_payload_bytes_upper_bound().0,
+        admission.resident_bytes_upper_bound.0,
+        ops.workspace().reservation_bytes().unwrap().0,
+        facts.history.reservation_bytes().unwrap().0
+    );
+    println!(
+        "sources {} observations {} realization {} metadata {} model {} properties {} \
+         field_construction {} catalog {} manifest_metadata {} retained {} total {}",
+        facts.sources.reservation_bytes().unwrap().0,
+        facts.observations.reservation_bytes().unwrap().0,
+        facts.realization.reservation_bytes().unwrap().0,
+        facts.metadata.reservation_bytes().unwrap().0,
+        facts.model_materialization_bytes.0,
+        facts.property_compilation_bytes.0,
+        facts.field_construction.reservation_bytes().0,
+        facts.manifest_catalog.reservation_bytes().unwrap().0,
+        facts.manifest_metadata.reservation_bytes().0,
+        facts.manifest_retained.reservation_bytes().unwrap().0,
+        facts.reservation_bytes().unwrap().0
+    );
+    if std::env::var("RM_DIAG_SOLVE").is_ok() {
+        let peak = || {
+            let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+            unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+            unsafe { usage.assume_init() }.ru_maxrss
+        };
+        let before = peak();
+        let result = workload.execute(&mesh).unwrap();
+        println!(
+            "rss_peak_before_solve {before} rss_peak_after_solve {} temperatures {}",
+            peak(),
+            result.temperature_snapshots.len()
+        );
+    }
+}

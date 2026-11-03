@@ -651,23 +651,13 @@ pub(in crate::analysis) fn typed_resident(
     )
     .map_err(Into::into)
 }
+/// Resident bytes of owned typed publication inputs and their clones. The direct codec builds
+/// no value tree, so these owners are priced as typed storage, not as a materialized tree.
 pub(in crate::analysis) fn resident(
     value: &impl Serialize,
     maximum: u64,
 ) -> Result<u64, AnalysisPublicationError> {
-    profile_serialized(
-        value,
-        CanonicalLimits::new(
-            usize::try_from(maximum).map_err(|_| AnalysisPublicationError::ResourceLimit {
-                message: "publication budget exceeds address space".into(),
-            })?,
-            100_000_000,
-            65_536,
-            64,
-        ),
-    )
-    .map(|p| p.materialization_resident_bytes_estimate)
-    .map_err(Into::into)
+    typed_resident(value, maximum)
 }
 fn frequency_bytes(
     step: &AnalysisStudyStepRunData,
