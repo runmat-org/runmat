@@ -1,4 +1,4 @@
-# The `.fea` language
+# Study language
 
 A `.fea` file defines an engineering analysis in source form. It names the geometry, regions,
 mesh, material behavior, applied conditions, analysis sequence, requested results, and—when

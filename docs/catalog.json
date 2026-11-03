@@ -158,6 +158,10 @@
       "path": "docs/simulation/models.md"
     },
     {
+      "id": "doc:fea/materials",
+      "path": "docs/simulation/materials.md"
+    },
+    {
       "id": "doc:fea/study-contracts",
       "path": "docs/simulation/study-contracts.md"
     },
