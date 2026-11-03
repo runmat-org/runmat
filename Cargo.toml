@@ -2,6 +2,7 @@
 members = [
     "crates/runmat-async",
     "crates/runmat-cpu-execution",
+    "crates/runmat-simulation-usage",
     "crates/runmat-sparse-solvers",
     "crates/runmat-sparse-accelerate",
     "crates/runmat-lexer",
@@ -89,6 +90,7 @@ resolver = "2"
 clarabel = { package = "runmat-clarabel", version = "=0.6.2", path = "crates/runmat-clarabel", default-features = false }
 runmat-build-identity = { version = "=0.6.2", path = "crates/runmat-build-identity" }
 runmat-cpu-execution = { version = "=0.6.2", path = "crates/runmat-cpu-execution" }
+runmat-simulation-usage = { version = "=0.6.2", path = "crates/runmat-simulation-usage" }
 runmat-sparse-solvers = { version = "=0.6.2", path = "crates/runmat-sparse-solvers" }
 runmat-sparse-accelerate = { version = "=0.6.2", path = "crates/runmat-sparse-accelerate" }
 # External dependencies used across multiple crates
