@@ -8,7 +8,7 @@ use runmat_circuit::geom::{mm, Point};
 use runmat_circuit::kicad::{dru, footprint, pcb, sch, sexpr};
 use runmat_circuit::layout::*;
 use runmat_circuit::library::footprint as gen;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const BOARD: &str = include_str!("kicad/board.kicad_pcb");
 const ROOT: &str = include_str!("kicad/root.kicad_sch");
@@ -367,4 +367,138 @@ fn design_rules_round_trip_and_apply() {
         rules.value(&g, BItem::Via(via), props::ANNULAR_MIN),
         Some(RuleValue::Len(mm(0.15)))
     );
+}
+
+#[test]
+fn fresh_schematic_export_reimports_with_the_same_connectivity() {
+    use runmat_circuit::kicad::sch_export::{export, SchExportOptions};
+    let p = runmat_circuit::fixture::LargeParams {
+        channels: 24,
+        copper_layers: 6,
+        route_every: 0,
+        pours: false,
+    };
+    let (pool, _, nl, _) = runmat_circuit::fixture::large(&p);
+    let files = export(
+        &nl,
+        &pool,
+        &SchExportOptions {
+            project: "large".into(),
+            ..Default::default()
+        },
+    );
+    // Root plus one page per channel and the top level (which spills onto more pages).
+    assert!(files.len() >= 26, "{} files", files.len());
+    assert_eq!(
+        files,
+        export(
+            &nl,
+            &pool,
+            &SchExportOptions {
+                project: "large".into(),
+                ..Default::default()
+            }
+        )
+    );
+    let imp = sch::read_hierarchy(&files, "large.kicad_sch").unwrap();
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    let back = elaborate(
+        &imp.design,
+        &imp.pool,
+        &ElabOptions::default(),
+        Some(&imp.lock),
+    );
+    // Same partition of (designator, pad) into nets.
+    let partition = |nl: &runmat_circuit::elab::Netlist| {
+        let mut sets: BTreeSet<BTreeSet<(String, String)>> = BTreeSet::new();
+        for n in &nl.nets {
+            let s: BTreeSet<(String, String)> = n
+                .pins
+                .iter()
+                .flat_map(|&(c, p)| {
+                    let comp = &nl.components[c];
+                    let pin = &comp.pins[p];
+                    let pads = if pin.pads.is_empty() {
+                        vec![pin.pin.clone()]
+                    } else {
+                        pin.pads.clone()
+                    };
+                    pads.into_iter()
+                        .map(move |pad| (comp.designator.clone(), pad))
+                })
+                .collect();
+            if s.len() > 1 {
+                sets.insert(s);
+            }
+        }
+        sets
+    };
+    let (a, b) = (partition(&nl), partition(&back));
+    assert_eq!(a.len(), b.len());
+    assert_eq!(a, b);
+    let designators: BTreeSet<_> = nl.components.iter().map(|c| c.designator.clone()).collect();
+    let back_d: BTreeSet<_> = back
+        .components
+        .iter()
+        .map(|c| c.designator.clone())
+        .collect();
+    assert_eq!(designators, back_d);
+    // Readability: no wire longer than a stub; nets are carried by labels.
+    for (f, text) in &files {
+        let tree = runmat_circuit::kicad::sexpr::parse(text).unwrap();
+        for w in tree.children("wire") {
+            let pts = runmat_circuit::kicad::pts_of(w.child("pts"));
+            assert!(pts[0].dist(pts[1]) <= 2.54e6 + 1.0, "{f}");
+        }
+    }
+}
+
+#[test]
+fn custom_pad_primitives_union_with_the_anchor() {
+    use runmat_circuit::library::PadShape;
+    let src = r#"(footprint "T:Custom" (layer "F.Cu")
+      (pad "1" smd custom (at 0 0) (size 1 1) (layers "F.Cu" "F.Mask")
+        (options (clearance outline) (anchor rect))
+        (primitives
+          (gr_line (start 0 0) (end 3 0) (width 0.4))
+          (gr_circle (center 5 0) (end 6 0) (width 0.2))
+          (gr_arc (start 0 -1) (mid -1 -2) (end 0 -3) (width 0.2))
+          (gr_rect (start -0.5 2) (end 0.5 3) (width 0) (fill yes))
+          (gr_poly (pts (xy 2 1) (xy 3 1) (xy 2.5 1.6)) (width 0.1))
+        ))
+    )"#;
+    let node = sexpr::parse(src).unwrap();
+    let fp = footprint::read(&node, false);
+    let PadShape::Custom { points, holes } = &fp.package.pads[0].shape else {
+        panic!("{:?}", fp.package.pads[0].shape)
+    };
+    // The stroked circle is a ring: its inside stays open (a hole) since nothing covers it,
+    // but it is a separate island from the anchor, so the largest island is kept.
+    let r = runmat_circuit::geom::Rect::from_points(points.iter().copied());
+    // Anchor (−0.5…0.5) joined by the line to x = 3.2; the arc, rectangle, polygon and ring
+    // do not touch it and are separate islands (the largest island is the pad).
+    assert!(r.max.x >= mm(3.1) && r.min.x <= mm(-0.49), "{r:?}");
+    assert!(holes.is_empty());
+    // A filled anchor with a stroked circle around its centre leaves no hole; one beside it,
+    // overlapping the anchor, keeps its own hole.
+    let src2 = r#"(footprint "T:Ring" (layer "F.Cu")
+      (pad "1" smd custom (at 0 0) (size 0.5 0.5) (layers "F.Cu")
+        (options (anchor circle))
+        (primitives (gr_circle (center 1 0) (end 2 0) (width 0.6)))))"#;
+    let fp2 = footprint::read(&sexpr::parse(src2).unwrap(), false);
+    let PadShape::Custom { holes, .. } = &fp2.package.pads[0].shape else {
+        panic!()
+    };
+    assert_eq!(holes.len(), 1, "the ring keeps its open centre");
+    // Writing a holed custom pad keeps the hole (keyhole contour) and a dot anchor.
+    let out = sexpr::write(&footprint::write(&fp2.package, None));
+    assert!(
+        out.contains("(anchor circle)") && out.contains("(size 0.01 0.01)"),
+        "{out}"
+    );
+    let back = footprint::read(&sexpr::parse(&out).unwrap(), false);
+    let PadShape::Custom { holes: h2, .. } = &back.package.pads[0].shape else {
+        panic!()
+    };
+    assert_eq!(h2.len(), 1);
 }

@@ -113,18 +113,7 @@ fn pad_shape(node: &SExpr, size: (Coord, Coord)) -> PadShape {
                 .map(|v| (v * 1e6) as Coord)
                 .unwrap_or(0),
         },
-        Some("custom") => {
-            let pts = node
-                .child("primitives")
-                .and_then(|p| p.child("gr_poly"))
-                .map(|g| pts_of(g.child("pts")))
-                .unwrap_or_default();
-            if pts.len() >= 3 {
-                PadShape::Custom { points: pts }
-            } else {
-                PadShape::Rect { w, h }
-            }
-        }
+        Some("custom") => custom_shape(node, size).unwrap_or(PadShape::Rect { w, h }),
         _ => {
             if let Some(r) = node.child_f("chamfer_ratio") {
                 let mut corners = 0u8;
@@ -152,6 +141,167 @@ fn pad_shape(node: &SExpr, size: (Coord, Coord)) -> PadShape {
             PadShape::Rect { w, h }
         }
     }
+}
+
+/// A custom pad: the anchor (`(options (anchor rect|circle))`, sized by the pad's `size`)
+/// unioned with every primitive: `gr_poly` (filled, with its stroke), `gr_line`, `gr_arc`
+/// (start/mid/end, or the older centre/end/angle form), `gr_circle` (filled disk or stroked
+/// ring), `gr_rect`, `gr_curve` (cubic Bézier, flattened), each stroked by its `width`.
+/// Coordinates are pad-local. A pad is one copper island: primitives that touch nothing
+/// else are dropped, keeping the largest island.
+fn custom_shape(node: &SExpr, size: (Coord, Coord)) -> Option<PadShape> {
+    use crate::geom::poly::{boolean, capsule_ring, circle_ring, BoolOp};
+    use crate::geom::shape::{arc_from_three, arc_points};
+    let tol = crate::geom::ARC_TOL;
+    let (w, h) = size;
+    let mut rings: Vec<Ring> = Vec::new();
+    let anchor = node
+        .child("options")
+        .and_then(|o| o.child_arg("anchor"))
+        .unwrap_or("rect");
+    if w > 0 && h > 0 {
+        if anchor == "circle" {
+            rings.push(circle_ring(Point::ORIGIN, w / 2, tol));
+        } else {
+            rings.push(rect_ring(Rect::new(
+                Point::new(-w / 2, -h / 2),
+                Point::new(w / 2, h / 2),
+            )));
+        }
+    }
+    let width_of = |g: &SExpr| {
+        mm_of(g.child("width"))
+            .or_else(|| mm_of(g.child("stroke").and_then(|s| s.child("width"))))
+            .unwrap_or(0)
+    };
+    let filled = |g: &SExpr| {
+        g.child("fill")
+            .and_then(|f| f.arg(0).or_else(|| f.child_arg("type")))
+            .is_some_and(|v| v == "yes" || v == "solid")
+    };
+    let stroke = |pts: &[Point], wd: Coord, closed: bool, out: &mut Vec<Ring>| {
+        if wd <= 0 {
+            return;
+        }
+        let n = pts.len();
+        let m = if closed { n } else { n.saturating_sub(1) };
+        for i in 0..m {
+            out.push(capsule_ring(pts[i], pts[(i + 1) % n], wd / 2, tol));
+        }
+    };
+    let prims = node.child("primitives")?;
+    for g in prims.items().iter().skip(1) {
+        let wd = width_of(g);
+        match g.head() {
+            Some("gr_poly") => {
+                let pts = pts_of(g.child("pts"));
+                if pts.len() >= 3 && (filled(g) || g.child("fill").is_none()) {
+                    rings.push(pts.clone());
+                }
+                stroke(&pts, wd, true, &mut rings);
+            }
+            Some("gr_line") => {
+                let (a, _) = at_of(g.child("start"));
+                let (b, _) = at_of(g.child("end"));
+                stroke(&[a, b], wd, false, &mut rings);
+            }
+            Some("gr_arc") => {
+                let (s0, _) = at_of(g.child("start"));
+                let (e0, _) = at_of(g.child("end"));
+                let pts = if let Some(m) = g.child("mid") {
+                    let (m, _) = at_of(Some(m));
+                    match arc_from_three(s0, m, e0) {
+                        Some((c, sw)) => arc_points(c, s0, sw, tol),
+                        None => vec![s0, e0],
+                    }
+                } else {
+                    // Older form: start is the centre, end the arc start, angle the sweep
+                    // (clockwise on screen, so counter-clockwise with y up).
+                    let sweep = g.child_f("angle").unwrap_or(0.0);
+                    arc_points(s0, e0, sweep, tol)
+                };
+                stroke(&pts, wd.max(1), false, &mut rings);
+            }
+            Some("gr_circle") => {
+                let (c, _) = at_of(g.child("center"));
+                let (e, _) = at_of(g.child("end"));
+                let r = c.dist(e) as Coord;
+                rings.push(circle_ring(c, r + wd / 2, tol));
+                if !filled(g) && r > wd / 2 {
+                    // A stroked circle is a ring: its inside stays open unless another
+                    // primitive covers it (non-zero union).
+                    let mut inner = circle_ring(c, r - wd / 2, tol);
+                    inner.reverse();
+                    rings.push(inner);
+                }
+            }
+            Some("gr_rect") => {
+                let (a, _) = at_of(g.child("start"));
+                let (b, _) = at_of(g.child("end"));
+                let r = rect_ring(Rect::new(a, b));
+                if filled(g) {
+                    rings.push(r.clone());
+                }
+                stroke(&r, wd, true, &mut rings);
+            }
+            Some("gr_curve") => {
+                let c = pts_of(g.child("pts"));
+                if c.len() == 4 {
+                    let n = 32;
+                    let pts: Vec<Point> = (0..=n)
+                        .map(|k| {
+                            let t = k as f64 / n as f64;
+                            let u = 1.0 - t;
+                            let f = |a: Coord, b: Coord, cc: Coord, d: Coord| {
+                                u * u * u * a as f64
+                                    + 3.0 * u * u * t * b as f64
+                                    + 3.0 * u * t * t * cc as f64
+                                    + t * t * t * d as f64
+                            };
+                            Point::from_f(
+                                f(c[0].x, c[1].x, c[2].x, c[3].x),
+                                f(c[0].y, c[1].y, c[2].y, c[3].y),
+                            )
+                        })
+                        .collect();
+                    stroke(&pts, wd.max(1), false, &mut rings);
+                }
+            }
+            _ => {}
+        }
+    }
+    let set = boolean(&rings, &[], BoolOp::Union);
+    let poly = set
+        .polys
+        .iter()
+        .max_by(|a, b| a.area().total_cmp(&b.area()))?
+        .clone();
+    Some(PadShape::Custom {
+        points: poly.outer,
+        holes: poly.holes,
+    })
+}
+
+/// One ring for a polygon with holes (primitives can only add area): each hole is spliced in
+/// through a zero-width slit from the nearest outer vertex.
+fn keyhole(outer: &[Point], holes: &[Vec<Point>]) -> Vec<Point> {
+    let mut ring = outer.to_vec();
+    for h in holes.iter().filter(|h| h.len() >= 3) {
+        let (mut bi, mut bj, mut bd) = (0, 0, f64::INFINITY);
+        for (i, p) in ring.iter().enumerate() {
+            for (j, q) in h.iter().enumerate() {
+                let d = p.dist(*q);
+                if d < bd {
+                    (bi, bj, bd) = (i, j, d);
+                }
+            }
+        }
+        let mut next = ring[..=bi].to_vec();
+        next.extend(h[bj..].iter().chain(&h[..=bj]).copied());
+        next.extend_from_slice(&ring[bi..]);
+        ring = next;
+    }
+    ring
 }
 
 /// Reads a footprint node. `in_board` selects the board convention (absolute pad angles,
@@ -533,19 +683,28 @@ pub fn pad_node(
                 ],
             )
         }
-        PadShape::Custom { points } => (
+        PadShape::Custom { points, holes } => (
             "custom",
-            vec![SExpr::list(
-                "primitives",
-                vec![SExpr::list(
-                    "gr_poly",
+            vec![
+                SExpr::list(
+                    "options",
                     vec![
-                        pts_node(points),
-                        SExpr::list("width", vec![SExpr::num(0.0)]),
-                        SExpr::list("fill", vec![SExpr::sym("yes")]),
+                        SExpr::list("clearance", vec![SExpr::sym("outline")]),
+                        SExpr::list("anchor", vec![SExpr::sym("circle")]),
                     ],
-                )],
-            )],
+                ),
+                SExpr::list(
+                    "primitives",
+                    vec![SExpr::list(
+                        "gr_poly",
+                        vec![
+                            pts_node(&keyhole(points, holes)),
+                            SExpr::list("width", vec![SExpr::num(0.0)]),
+                            SExpr::list("fill", vec![SExpr::sym("yes")]),
+                        ],
+                    )],
+                ),
+            ],
         ),
     };
     let rot = if back { -p.rotation } else { p.rotation };
@@ -586,7 +745,12 @@ pub fn pad_node(
         SExpr::sym(kind),
         SExpr::sym(shape),
         SExpr::list("at", at_items),
-        SExpr::list("size", vec![len(w), len(h)]),
+        // A custom pad's anchor is part of its shape: keep it a 10 µm dot at the origin.
+        if matches!(p.shape, PadShape::Custom { .. }) {
+            SExpr::list("size", vec![len(10_000), len(10_000)])
+        } else {
+            SExpr::list("size", vec![len(w), len(h)])
+        },
     ];
     if let Some(d) = &p.drill {
         items.push(match d.slot {

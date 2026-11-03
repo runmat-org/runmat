@@ -779,7 +779,11 @@ impl Router<'_> {
         } else {
             let along_x = rel.x.abs() >= rel.y.abs();
             let sign = |v: Coord| if v >= 0 { 1 } else { -1 };
-            let stagger = if pad.index.is_multiple_of(2) { 0 } else { mm(0.7) };
+            let stagger = if pad.index.is_multiple_of(2) {
+                0
+            } else {
+                mm(0.7)
+            };
             for dist in [
                 mm(0.9) + stagger,
                 mm(1.6) + stagger,

@@ -647,7 +647,7 @@ pub fn pad_prim(p: &PadDef, t: &Transform) -> Prim {
             }
             Prim::local_polygon(&pts, &t)
         }
-        PadShape::Custom { points } => Prim::local_polygon(points, &t),
+        PadShape::Custom { points, holes } => Prim::local_polygon_with_holes(points, holes, &t),
     }
 }
 

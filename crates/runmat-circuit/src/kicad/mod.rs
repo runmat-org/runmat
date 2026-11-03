@@ -10,7 +10,11 @@
 //! - [`sch`]: `.kicad_sch` hierarchies ⇄ [`crate::ir::Design`] (symbols, wires, junctions,
 //!   labels, global and hierarchical labels, power symbols, buses, sheets and sheet pins,
 //!   no-connects) and `.kicad_sym` libraries ⇄ pool units and entities.
+//! - [`sch_export`]: a fresh, automatically placed `.kicad_sch` hierarchy from an elaborated
+//!   design (pages by hierarchy, components ordered by connectivity, labels for nets).
 //! - [`dru`]: `.kicad_dru` custom rules ⇄ [`crate::board_rules::RuleSpec`].
+//! - [`project`]: `.kicad_pro` net classes (patterns and assignments) ⇄ design net classes
+//!   and board rules, edited losslessly.
 //!
 //! Coordinates: KiCad files are millimetres with y pointing down; RunMat is nanometres with y
 //! up. Angles keep their value (counter-clockwise as seen on screen in both).
@@ -18,7 +22,9 @@
 pub mod dru;
 pub mod footprint;
 pub mod pcb;
+pub mod project;
 pub mod sch;
+pub mod sch_export;
 pub mod sexpr;
 
 use crate::geom::{Coord, Point};

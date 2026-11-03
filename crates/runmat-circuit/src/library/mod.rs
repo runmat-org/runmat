@@ -198,9 +198,10 @@ pub enum PadShape {
         chamfer: Coord,
         corners: u8,
     },
-    /// Arbitrary polygon in pad-local coordinates.
+    /// Arbitrary polygon in pad-local coordinates (outer counter-clockwise), with holes.
     Custom {
         points: Vec<Point>,
+        holes: Vec<Vec<Point>>,
     },
 }
 
@@ -213,7 +214,7 @@ impl PadShape {
             | PadShape::Oval { w, h }
             | PadShape::Trapezoid { w, h, .. }
             | PadShape::Chamfered { w, h, .. } => (*w, *h),
-            PadShape::Custom { points } => {
+            PadShape::Custom { points, .. } => {
                 let r = crate::geom::Rect::from_points(points.iter().copied());
                 (r.width(), r.height())
             }

@@ -91,6 +91,26 @@ impl Prim {
         Prim::polygon(vec![ring])
     }
 
+    /// Polygon with holes from local points, placed by `t` (outer counter-clockwise, holes
+    /// clockwise whatever the transform's handedness).
+    pub fn local_polygon_with_holes(points: &[Point], holes: &[Vec<Point>], t: &Transform) -> Prim {
+        let place = |r: &[Point], ccw: bool| {
+            let mut ring: Ring = r.iter().map(|p| t.apply(*p)).collect();
+            if (super::poly::area2(&ring) > 0) != ccw {
+                ring.reverse();
+            }
+            ring
+        };
+        let mut rings = vec![place(points, true)];
+        rings.extend(
+            holes
+                .iter()
+                .filter(|h| h.len() >= 3)
+                .map(|h| place(h, false)),
+        );
+        Prim::polygon(rings)
+    }
+
     pub fn bbox(&self) -> Rect {
         let core = match &self.core {
             Core::Point(p) => Rect::new(*p, *p),
