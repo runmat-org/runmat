@@ -1,6 +1,7 @@
 //! Lazy native FEA lease host shared by CLI and standalone native images.
 //! Construction captures only a typed selector. Each admitted root owns its transport thread.
 use std::sync::mpsc::{self, SyncSender};
+use std::sync::Mutex;
 
 use runmat_execution::resource::ResourceUsage;
 use runmat_runtime::analysis::fea_run_admission::{
@@ -39,8 +40,26 @@ enum Command {
     Settle(FeaLeaseOutcome, FeaLeaseUsage, Reply<()>),
 }
 struct Permit {
-    commands: SyncSender<Command>,
+    commands: Mutex<tokio::sync::mpsc::Sender<Command>>,
     initial: FeaRunBudget,
+}
+
+impl Permit {
+    fn request<T>(&self, command: impl FnOnce(Reply<T>) -> Command) -> Result<T, FeaRunDenied> {
+        // One exchange owns the bounded command slot until its reply arrives.
+        // The synchronous host may run inside Tokio, so blocking_send is unsuitable.
+        let commands = self
+            .commands
+            .lock()
+            .map_err(|_| FeaRunDenied::ServerUnreachable)?;
+        let (reply, result) = mpsc::sync_channel(1);
+        commands
+            .try_send(command(reply))
+            .map_err(|_| FeaRunDenied::ServerUnreachable)?;
+        let result = result.recv().map_err(|_| FeaRunDenied::ServerUnreachable)?;
+        drop(commands);
+        result
+    }
 }
 
 fn denial(error: FeaLeaseError) -> FeaRunDenied {
@@ -97,7 +116,7 @@ impl FeaRunAdmission for NativeFeaAdmission {
             FeaLocalOrganization::Invalid => return Err(FeaRunDenied::LicenseInvalid),
         };
         let (ready, initial) = mpsc::sync_channel(1);
-        let (commands, receiver) = mpsc::sync_channel(1);
+        let (commands, mut receiver) = tokio::sync::mpsc::channel(1);
         // This runtime is owned and driven on a fresh OS thread, never the
         // caller's Tokio lane. A synchronous FEA root can safely await replies.
         std::thread::Builder::new()
@@ -113,48 +132,57 @@ impl FeaRunAdmission for NativeFeaAdmission {
                         return;
                     }
                 };
-                let opened = runtime.block_on(open(org, request));
-                let (client, lease, initial_budget) = match opened {
-                    Ok(value) => value,
-                    Err(error) => {
-                        let _ = ready.send(Err(error));
+                runtime.block_on(async move {
+                    let opened = open(org, request).await;
+                    let (client, lease, initial_budget) = match opened {
+                        Ok(value) => value,
+                        Err(error) => {
+                            let _ = ready.send(Err(error));
+                            return;
+                        }
+                    };
+                    if ready.send(Ok(initial_budget)).is_err() {
                         return;
                     }
-                };
-                if ready.send(Ok(initial_budget)).is_err() {
-                    return;
-                }
-                while let Ok(command) = receiver.recv() {
-                    match command {
-                        Command::Heartbeat(usage, reply) => {
-                            let result = runtime
-                                .block_on(client.usage(&lease.lease_id, usage))
-                                .map_err(denial)
-                                .and_then(|hold| {
-                                    budget(
-                                        hold.held_core_millis,
-                                        hold.expires_at,
-                                        lease.heartbeat_seconds,
-                                    )
-                                });
-                            let _ = reply.send(result);
-                        }
-                        Command::Settle(outcome, usage, reply) => {
-                            let result = runtime
-                                .block_on(client.settle(&lease.lease_id, outcome, usage))
-                                .map(|_| ())
-                                .map_err(denial);
-                            let _ = reply.send(result);
-                            break;
+                    // Keep the reactor running between requests so idle connections
+                    // observe peer closure before the next heartbeat uses the pool.
+                    while let Some(command) = receiver.recv().await {
+                        match command {
+                            Command::Heartbeat(usage, reply) => {
+                                let result = client
+                                    .usage(&lease.lease_id, usage)
+                                    .await
+                                    .map_err(denial)
+                                    .and_then(|hold| {
+                                        budget(
+                                            hold.held_core_millis,
+                                            hold.expires_at,
+                                            lease.heartbeat_seconds,
+                                        )
+                                    });
+                                let _ = reply.send(result);
+                            }
+                            Command::Settle(outcome, usage, reply) => {
+                                let result = client
+                                    .settle(&lease.lease_id, outcome, usage)
+                                    .await
+                                    .map(|_| ())
+                                    .map_err(denial);
+                                let _ = reply.send(result);
+                                break;
+                            }
                         }
                     }
-                }
+                });
             })
             .map_err(|_| FeaRunDenied::ServerUnreachable)?;
         let initial = initial
             .recv()
             .map_err(|_| FeaRunDenied::ServerUnreachable)??;
-        Ok(Box::new(Permit { commands, initial }))
+        Ok(Box::new(Permit {
+            commands: Mutex::new(commands),
+            initial,
+        }))
     }
 }
 
@@ -223,11 +251,7 @@ impl FeaRunPermit for Permit {
         self.initial
     }
     fn heartbeat(&self, value: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
-        let (reply, result) = mpsc::sync_channel(1);
-        self.commands
-            .send(Command::Heartbeat(usage(value), reply))
-            .map_err(|_| FeaRunDenied::ServerUnreachable)?;
-        result.recv().map_err(|_| FeaRunDenied::ServerUnreachable)?
+        self.request(|reply| Command::Heartbeat(usage(value), reply))
     }
     fn settle(
         self: Box<Self>,
@@ -239,11 +263,7 @@ impl FeaRunPermit for Permit {
             FeaRunOutcome::Cancelled => FeaLeaseOutcome::Cancelled,
             FeaRunOutcome::Failed => FeaLeaseOutcome::Failed,
         };
-        let (reply, result) = mpsc::sync_channel(1);
-        self.commands
-            .send(Command::Settle(outcome, usage(value), reply))
-            .map_err(|_| FeaRunDenied::ServerUnreachable)?;
-        result.recv().map_err(|_| FeaRunDenied::ServerUnreachable)?
+        self.request(|reply| Command::Settle(outcome, usage(value), reply))
     }
 }
 
@@ -294,22 +314,25 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn synchronous_permit_reply_does_not_depend_on_the_callers_tokio_lane() {
         let initial = budget(100, chrono::Utc::now() + chrono::Duration::seconds(60), 30).unwrap();
-        let (commands, receiver) = mpsc::sync_channel(1);
+        let (commands, mut receiver) = tokio::sync::mpsc::channel(1);
         let owner = std::thread::spawn(move || {
-            let Command::Heartbeat(usage, reply) = receiver.recv().unwrap() else {
+            let Command::Heartbeat(usage, reply) = receiver.blocking_recv().unwrap() else {
                 panic!("expected heartbeat")
             };
             assert_eq!((usage.cpu_core_millis, usage.wall_millis), (2, 1));
             reply.send(Err(FeaRunDenied::LeaseExpired)).unwrap();
             let Command::Settle(FeaLeaseOutcome::Cancelled, usage, reply) =
-                receiver.recv().unwrap()
+                receiver.blocking_recv().unwrap()
             else {
                 panic!("expected own-run cancellation settlement")
             };
             assert_eq!((usage.cpu_core_millis, usage.wall_millis), (2, 1));
             reply.send(Ok(())).unwrap();
         });
-        let permit = Box::new(Permit { commands, initial });
+        let permit = Box::new(Permit {
+            commands: Mutex::new(commands),
+            initial,
+        });
         let usage = ResourceUsage {
             cpu_core_millis: 2,
             wall_millis: 1,
