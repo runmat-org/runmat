@@ -836,13 +836,16 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                         }
                     }
                     Some(Modifier::Draft(ds)) => {
-                        for d in ds {
-                            if d.region(p) {
-                                occ[i] = d.material(p);
-                                if occ[i] {
-                                    owners[i] |= 1;
-                                }
-                                break;
+                        // Near drafted faces the material is what every draft whose region
+                        // holds the point leaves (corners where two drafts meet take both).
+                        let mut decided = None;
+                        for d in ds.iter().filter(|d| d.region(p)) {
+                            decided = Some(decided.unwrap_or(true) && d.material(p));
+                        }
+                        if let Some(m) = decided {
+                            occ[i] = m;
+                            if m {
+                                owners[i] |= 1;
                             }
                         }
                     }
@@ -1038,9 +1041,11 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
         };
         let mut ls: Vec<HistorySource> = Vec::new();
         let mut kind = FacetKind::Planar;
-        // A drafted face's tilted surface.
-        for d in drafts {
-            if d.region(cen) && d.material(cin) != d.material(cout) {
+        // A drafted face's tilted surface: the draft deciding either side of the facet whose
+        // material changes across it.
+        for d in drafts.iter().filter(|d| d.region(cin) || d.region(cout)) {
+            let side = |p: [f64; 3]| !d.region(p) || d.material(p);
+            if side(cin) != side(cout) {
                 ls.push(HistorySource::Input {
                     from: OperandEntity {
                         operand: job.operand_ids[0],
