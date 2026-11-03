@@ -20,7 +20,8 @@ pub enum VarFlag {
     Driven,
 }
 
-/// What a variable means inside its entity. Used for diagnostics and warm-start keys.
+/// What a variable means inside its entity. Used for diagnostics, warm-start keys and
+/// unit-aware scaling (lengths versus angles).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum VarRole {
     X,
@@ -34,8 +35,12 @@ pub enum VarRole {
     QuatX,
     QuatY,
     QuatZ,
-    /// A curve parameter introduced by a point-on-spline constraint.
+    /// A curve parameter introduced by a point-on-spline constraint or an ellipse tangency
+    /// (the contact point's eccentric angle).
     CurveParameter,
+    /// A NURBS control-point weight. Created [`VarFlag::Fixed`]; set it free (or drive it with
+    /// [`Constraint::VarValue`]) to make the weight a design variable.
+    Weight,
     /// A variable created through [`System::add_var`].
     User,
 }
@@ -128,11 +133,30 @@ pub enum EntityKind {
         semi_minor: VarId,
         rotation: VarId,
     },
-    /// A non-rational B-spline given by control points and a clamped knot vector.
+    /// A B-spline given by control points and a knot vector: clamped or periodic (closed),
+    /// polynomial or rational (NURBS, one weight variable per control point).
+    ///
+    /// A periodic spline of `n` control points is evaluated on the wrapped control sequence
+    /// `P0 … Pn-1 P0 … Pp-1` with `n + 2p + 1` knots whose spacing repeats with period
+    /// `knots[n + p] - knots[p]`; the parameter wraps around that period.
     BSpline {
         degree: usize,
         control_points: Vec<EntityId>,
         knots: Vec<f64>,
+        /// One weight per control point (empty for a polynomial spline).
+        weights: Vec<VarId>,
+        /// A closed spline with no ends.
+        periodic: bool,
+    },
+    /// A counter-clockwise elliptical arc from `start` to `end` on an ellipse. Internal
+    /// constraints keep both ends on the ellipse.
+    EllipticalArc {
+        center: EntityId,
+        semi_major: VarId,
+        semi_minor: VarId,
+        rotation: VarId,
+        start: EntityId,
+        end: EntityId,
     },
     /// A rigid body with 6 DOF: position and a quaternion `[w, x, y, z]` (normalised by an
     /// internal constraint).
@@ -228,6 +252,32 @@ pub enum Mate {
     },
 }
 
+/// An ellipse dimension.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EllipseMeasure {
+    SemiMajor,
+    SemiMinor,
+    /// `2a`.
+    MajorDiameter,
+    /// `2b`.
+    MinorDiameter,
+    /// The distance between the foci, `2·sqrt(a² - b²)`.
+    FocalDistance,
+}
+
+/// Spline construction options for [`System::spline`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SplineOptions {
+    /// Explicit knots. Clamped: `n + p + 1` non-decreasing knots with `p + 1` equal values at
+    /// each end. Periodic: `n + 2p + 1` non-decreasing knots with periodic spacing. `None`
+    /// gives a uniform vector on `[0, 1]`.
+    pub knots: Option<Vec<f64>>,
+    /// One positive weight per control point (a rational spline, NURBS).
+    pub weights: Option<Vec<f64>>,
+    /// A closed (periodic) spline.
+    pub periodic: bool,
+}
+
 /// Constraints. 2D variants take point and curve entities; [`Constraint::Mate`] takes
 /// connectors. Angles are radians; lengths are in the caller's unit.
 #[derive(Clone, Debug, PartialEq)]
@@ -244,10 +294,14 @@ pub enum Constraint {
     VerticalPoints(EntityId, EntityId),
     Parallel(EntityId, EntityId),
     Perpendicular(EntityId, EntityId),
-    /// Line–circle, line–arc, or circle/arc–circle/arc tangency. The side (and internal vs
-    /// external contact) is kept from the starting geometry.
+    /// Tangency between a line, a circle or arc, and an ellipse or elliptical arc, in any
+    /// pairing except line–line. The side (and internal vs external contact) is kept from the
+    /// starting geometry. Round–ellipse and ellipse–ellipse tangency carry the contact point's
+    /// eccentric angle on each ellipse as auxiliary variables (seeded from the starting
+    /// geometry; see [`ConstraintRecord::aux`]).
     Tangent(EntityId, EntityId),
-    /// G1 continuity where two open curves (line, arc or spline) meet at the given ends.
+    /// G1 continuity where two open curves (line, arc, elliptical arc or clamped spline) meet
+    /// at the given ends.
     /// Coincidence of the ends is a separate [`Constraint::Coincident`].
     TangentAtEnd {
         a: EntityId,
@@ -263,6 +317,7 @@ pub enum Constraint {
         arc: EntityId,
     },
     EqualLength(EntityId, EntityId),
+    /// Circles/arcs share a radius, or ellipses/elliptical arcs share both semi-axes.
     EqualRadius(EntityId, EntityId),
     /// Circles/arcs share a centre.
     Concentric(EntityId, EntityId),
@@ -316,6 +371,12 @@ pub enum Constraint {
         var: VarId,
         value: f64,
     },
+    /// A dimension of an ellipse or elliptical arc.
+    EllipseDimension {
+        curve: EntityId,
+        measure: EllipseMeasure,
+        value: f64,
+    },
     Mate(Mate),
 }
 
@@ -330,6 +391,7 @@ impl Constraint {
                 | Constraint::Diameter { .. }
                 | Constraint::Length { .. }
                 | Constraint::VarValue { .. }
+                | Constraint::EllipseDimension { .. }
                 | Constraint::Mate(Mate::Distance {
                     target: Target::Exact(_),
                     ..
@@ -349,6 +411,8 @@ pub enum InternalKind {
     ArcRadius,
     /// Keeps a body's quaternion at unit length.
     QuaternionNorm,
+    /// Keeps an elliptical arc's two ends on its ellipse.
+    EllipticalArcEnds,
 }
 
 /// A stored constraint.
@@ -357,7 +421,8 @@ pub struct ConstraintRecord {
     pub constraint: ConstraintKindRecord,
     /// A reference ("driven") dimension: measured and reported, never enforced.
     pub reference: bool,
-    /// Variables owned by this constraint (the curve parameter of a point-on-spline).
+    /// Variables owned by this constraint (the curve parameter of a point-on-spline, the
+    /// contact angles of an ellipse tangency).
     pub aux: Vec<VarId>,
     /// Fix targets captured when the constraint was added.
     pub(crate) fix_targets: Vec<f64>,
@@ -385,8 +450,8 @@ pub enum BuildError {
     },
     /// Both arguments are the same entity where two are needed.
     SameEntity(EntityId),
-    /// A B-spline needs `degree ≥ 1`, at least `degree + 1` control points, and at most
-    /// [`MAX_SPLINE_CONTROL_POINTS`] of them.
+    /// A B-spline needs `degree ≥ 1`, at least `degree + 1` control points (at most
+    /// [`MAX_SPLINE_CONTROL_POINTS`]), valid knots and positive weights.
     BadSpline(&'static str),
     /// A value is not finite, or a dimension is negative where it must not be.
     BadValue(&'static str),
@@ -415,8 +480,10 @@ impl fmt::Display for BuildError {
 
 impl std::error::Error for BuildError {}
 
-/// The largest spline the solver accepts (keeps per-constraint derivative width bounded).
-pub const MAX_SPLINE_CONTROL_POINTS: usize = 30;
+/// The largest spline the solver accepts. Derivatives of spline residuals are taken over the
+/// control points of the active knot span only (see [`crate::ad`]), so the cost of a spline
+/// constraint does not grow with the control-point count; the bound only guards id space.
+pub const MAX_SPLINE_CONTROL_POINTS: usize = 1 << 20;
 
 /// A constraint system.
 #[derive(Clone, Debug, Default)]
@@ -525,10 +592,28 @@ impl System {
                 self.collect_vars(*center, out);
                 out.extend([*semi_major, *semi_minor, *rotation]);
             }
-            EntityKind::BSpline { control_points, .. } => {
+            EntityKind::BSpline {
+                control_points,
+                weights,
+                ..
+            } => {
                 for p in control_points {
                     self.collect_vars(*p, out);
                 }
+                out.extend(weights.iter().copied());
+            }
+            EntityKind::EllipticalArc {
+                center,
+                semi_major,
+                semi_minor,
+                rotation,
+                start,
+                end,
+            } => {
+                self.collect_vars(*center, out);
+                out.extend([*semi_major, *semi_minor, *rotation]);
+                self.collect_vars(*start, out);
+                self.collect_vars(*end, out);
             }
             EntityKind::Body {
                 position,
@@ -662,25 +747,60 @@ impl System {
         }))
     }
 
+    /// An elliptical arc counter-clockwise from `start` to `end` on the ellipse with this
+    /// centre, semi-axes and major-axis rotation. Adds the internal ends-on-ellipse constraint.
+    pub fn elliptical_arc(
+        &mut self,
+        center: EntityId,
+        semi_major: f64,
+        semi_minor: f64,
+        rotation: f64,
+        start: EntityId,
+        end: EntityId,
+    ) -> Result<EntityId, BuildError> {
+        self.expect_point(center)?;
+        self.expect_point(start)?;
+        self.expect_point(end)?;
+        if center == start || center == end || start == end {
+            return Err(BuildError::SameEntity(center));
+        }
+        finite(semi_major)?;
+        finite(semi_minor)?;
+        finite(rotation)?;
+        if semi_major <= 0.0 || semi_minor <= 0.0 {
+            return Err(BuildError::BadValue("ellipse semi-axes must be positive"));
+        }
+        let e = self.next_entity();
+        let a = self.push_var(semi_major, VarFlag::Free, VarRole::SemiMajor, Some(e));
+        let b = self.push_var(semi_minor, VarFlag::Free, VarRole::SemiMinor, Some(e));
+        let r = self.push_var(rotation, VarFlag::Free, VarRole::Rotation, Some(e));
+        let id = self.push_entity(EntityKind::EllipticalArc {
+            center,
+            semi_major: a,
+            semi_minor: b,
+            rotation: r,
+            start,
+            end,
+        });
+        self.constraints.push(ConstraintRecord {
+            constraint: ConstraintKindRecord::Internal {
+                kind: InternalKind::EllipticalArcEnds,
+                entity: id,
+            },
+            reference: false,
+            aux: Vec::new(),
+            fix_targets: Vec::new(),
+        });
+        Ok(id)
+    }
+
     /// A clamped B-spline with a uniform knot vector on `[0, 1]`.
     pub fn bspline(
         &mut self,
         degree: usize,
         control_points: &[EntityId],
     ) -> Result<EntityId, BuildError> {
-        let n = control_points.len();
-        if degree == 0 || n < degree + 1 {
-            return Err(BuildError::BadSpline(
-                "need degree >= 1 and at least degree + 1 control points",
-            ));
-        }
-        let interior = n - degree - 1;
-        let mut knots = vec![0.0; degree + 1];
-        for i in 1..=interior {
-            knots.push(i as f64 / (interior + 1) as f64);
-        }
-        knots.extend(std::iter::repeat_n(1.0, degree + 1));
-        self.bspline_with_knots(degree, control_points, knots)
+        self.spline(degree, control_points, SplineOptions::default())
     }
 
     /// A B-spline with explicit knots. Knots must be non-decreasing, clamped
@@ -691,8 +811,61 @@ impl System {
         control_points: &[EntityId],
         knots: Vec<f64>,
     ) -> Result<EntityId, BuildError> {
+        self.spline(
+            degree,
+            control_points,
+            SplineOptions {
+                knots: Some(knots),
+                ..SplineOptions::default()
+            },
+        )
+    }
+
+    /// A clamped rational B-spline (NURBS) with a uniform knot vector and one weight per
+    /// control point.
+    pub fn nurbs(
+        &mut self,
+        degree: usize,
+        control_points: &[EntityId],
+        weights: &[f64],
+    ) -> Result<EntityId, BuildError> {
+        self.spline(
+            degree,
+            control_points,
+            SplineOptions {
+                weights: Some(weights.to_vec()),
+                ..SplineOptions::default()
+            },
+        )
+    }
+
+    /// A closed (periodic) B-spline with uniform knots through `control_points` (do not
+    /// repeat the first points; the wrap is implicit).
+    pub fn periodic_bspline(
+        &mut self,
+        degree: usize,
+        control_points: &[EntityId],
+    ) -> Result<EntityId, BuildError> {
+        self.spline(
+            degree,
+            control_points,
+            SplineOptions {
+                periodic: true,
+                ..SplineOptions::default()
+            },
+        )
+    }
+
+    /// A B-spline: clamped or periodic, polynomial or rational.
+    pub fn spline(
+        &mut self,
+        degree: usize,
+        control_points: &[EntityId],
+        options: SplineOptions,
+    ) -> Result<EntityId, BuildError> {
         let n = control_points.len();
-        if degree == 0 || n < degree + 1 {
+        let p = degree;
+        if p == 0 || n < p + 1 {
             return Err(BuildError::BadSpline(
                 "need degree >= 1 and at least degree + 1 control points",
             ));
@@ -700,36 +873,100 @@ impl System {
         if n > MAX_SPLINE_CONTROL_POINTS {
             return Err(BuildError::BadSpline("too many control points"));
         }
-        if knots.len() != n + degree + 1 {
-            return Err(BuildError::BadSpline(
-                "knot count must be control points + degree + 1",
-            ));
+        for c in control_points {
+            self.expect_point(*c)?;
         }
-        if knots.windows(2).any(|w| {
-            matches!(
-                w[1].partial_cmp(&w[0]),
-                None | Some(std::cmp::Ordering::Less)
-            )
-        }) || knots.iter().any(|k| !k.is_finite())
+        if options.periodic {
+            let mut seen = control_points.to_vec();
+            seen.sort();
+            seen.dedup();
+            if seen.len() != n {
+                return Err(BuildError::BadSpline(
+                    "periodic control points must be distinct (the wrap is implicit)",
+                ));
+            }
+        }
+        let knots = match options.knots {
+            Some(k) => k,
+            None if options.periodic => (0..n + 2 * p + 1)
+                .map(|i| (i as f64 - p as f64) / n as f64)
+                .collect(),
+            None => {
+                let interior = n - p - 1;
+                let mut k = vec![0.0; p + 1];
+                for i in 1..=interior {
+                    k.push(i as f64 / (interior + 1) as f64);
+                }
+                k.extend(std::iter::repeat_n(1.0, p + 1));
+                k
+            }
+        };
+        if knots.iter().any(|k| !k.is_finite())
+            || knots.windows(2).any(|w| {
+                matches!(
+                    w[1].partial_cmp(&w[0]),
+                    None | Some(std::cmp::Ordering::Less)
+                )
+            })
         {
             return Err(BuildError::BadSpline(
                 "knots must be finite and non-decreasing",
             ));
         }
-        let (k0, k1) = (knots[0], knots[knots.len() - 1]);
-        if knots[..=degree].iter().any(|&k| k != k0)
-            || knots[n..].iter().any(|&k| k != k1)
-            || k1 <= k0
-        {
-            return Err(BuildError::BadSpline("knots must be clamped"));
+        if options.periodic {
+            if knots.len() != n + 2 * p + 1 {
+                return Err(BuildError::BadSpline(
+                    "periodic knot count must be control points + 2 degree + 1",
+                ));
+            }
+            let period = knots[n + p] - knots[p];
+            if period <= 0.0 {
+                return Err(BuildError::BadSpline("periodic knot domain is empty"));
+            }
+            let tol = 1e-12 * (1.0 + period.abs() + knots[0].abs());
+            if (0..knots.len() - n).any(|i| ((knots[i + n] - knots[i]) - period).abs() > tol) {
+                return Err(BuildError::BadSpline(
+                    "periodic knot spacing must repeat every control-point count",
+                ));
+            }
+            if (p..n + p).all(|i| knots[i + 1] == knots[i]) {
+                return Err(BuildError::BadSpline("periodic knot domain is empty"));
+            }
+        } else {
+            if knots.len() != n + p + 1 {
+                return Err(BuildError::BadSpline(
+                    "knot count must be control points + degree + 1",
+                ));
+            }
+            let (k0, k1) = (knots[0], knots[knots.len() - 1]);
+            if knots[..=p].iter().any(|&k| k != k0)
+                || knots[n..].iter().any(|&k| k != k1)
+                || k1 <= k0
+            {
+                return Err(BuildError::BadSpline("knots must be clamped"));
+            }
         }
-        for p in control_points {
-            self.expect_point(*p)?;
+        if let Some(w) = &options.weights {
+            if w.len() != n {
+                return Err(BuildError::BadSpline("need one weight per control point"));
+            }
+            if w.iter().any(|w| !w.is_finite() || *w <= 0.0) {
+                return Err(BuildError::BadSpline("weights must be finite and positive"));
+            }
         }
+        let e = self.next_entity();
+        let weights = options
+            .weights
+            .unwrap_or_default()
+            .into_iter()
+            .map(|w| self.push_var(w, VarFlag::Fixed, VarRole::Weight, Some(e)))
+            .collect();
         Ok(self.push_entity(EntityKind::BSpline {
             degree,
             control_points: control_points.to_vec(),
             knots,
+            weights,
+            periodic: options.periodic,
         }))
     }
 
@@ -810,6 +1047,11 @@ impl System {
                 aux.push(self.push_var(t0, VarFlag::Free, VarRole::CurveParameter, None));
             }
         }
+        if let Constraint::Tangent(a, b) = &c {
+            for t in crate::residual::seed_tangent_angles(self, *a, *b) {
+                aux.push(self.push_var(t, VarFlag::Free, VarRole::CurveParameter, None));
+            }
+        }
         if let Constraint::Fix(e) = &c {
             fix_targets = self
                 .entity_vars(*e)
@@ -857,6 +1099,14 @@ impl System {
     fn expect_line(&self, e: EntityId) -> Result<(), BuildError> {
         self.expect(e, "a line", |k| matches!(k, EntityKind::Line { .. }))
     }
+    fn expect_elliptic(&self, e: EntityId) -> Result<(), BuildError> {
+        self.expect(e, "an ellipse or elliptical arc", |k| {
+            matches!(
+                k,
+                EntityKind::Ellipse { .. } | EntityKind::EllipticalArc { .. }
+            )
+        })
+    }
     fn expect_round(&self, e: EntityId) -> Result<(), BuildError> {
         self.expect(e, "a circle or arc", |k| {
             matches!(k, EntityKind::Circle { .. } | EntityKind::Arc { .. })
@@ -872,10 +1122,16 @@ impl System {
         }
     }
     fn expect_open(&self, e: EntityId) -> Result<(), BuildError> {
-        self.expect(e, "a line, arc or spline", |k| {
+        self.expect(e, "a line, arc, elliptical arc or open spline", |k| {
             matches!(
                 k,
-                EntityKind::Line { .. } | EntityKind::Arc { .. } | EntityKind::BSpline { .. }
+                EntityKind::Line { .. }
+                    | EntityKind::Arc { .. }
+                    | EntityKind::EllipticalArc { .. }
+                    | EntityKind::BSpline {
+                        periodic: false,
+                        ..
+                    }
             )
         })
     }
@@ -906,18 +1162,29 @@ impl System {
             }
             C::Tangent(a, b) => {
                 Self::distinct(*a, *b)?;
+                let curve = |e: EntityId| {
+                    self.expect(e, "a circle, arc, ellipse or elliptical arc", |k| {
+                        matches!(
+                            k,
+                            EntityKind::Circle { .. }
+                                | EntityKind::Arc { .. }
+                                | EntityKind::Ellipse { .. }
+                                | EntityKind::EllipticalArc { .. }
+                        )
+                    })
+                };
                 let la = matches!(self.get(*a)?, EntityKind::Line { .. });
                 let lb = matches!(self.get(*b)?, EntityKind::Line { .. });
                 match (la, lb) {
                     (true, true) => Err(BuildError::WrongKind {
                         entity: *b,
-                        expected: "a circle or arc",
+                        expected: "a circle, arc, ellipse or elliptical arc",
                     }),
-                    (true, false) => self.expect_round(*b),
-                    (false, true) => self.expect_round(*a),
+                    (true, false) => curve(*b),
+                    (false, true) => curve(*a),
                     (false, false) => {
-                        self.expect_round(*a)?;
-                        self.expect_round(*b)
+                        curve(*a)?;
+                        curve(*b)
                     }
                 }
             }
@@ -931,8 +1198,12 @@ impl System {
                     EntityKind::BSpline {
                         degree,
                         control_points,
+                        periodic,
                         ..
                     } => {
+                        if *periodic {
+                            return Err(BuildError::BadSpline("a periodic spline has no ends"));
+                        }
                         if *degree < 2 || control_points.len() < 3 {
                             return Err(BuildError::BadSpline(
                                 "G2 needs degree >= 2 and 3 control points",
@@ -947,6 +1218,15 @@ impl System {
                     }
                 }
                 self.expect(*arc, "an arc", |k| matches!(k, EntityKind::Arc { .. }))
+            }
+            C::EqualRadius(a, b)
+                if matches!(
+                    self.get(*a)?,
+                    EntityKind::Ellipse { .. } | EntityKind::EllipticalArc { .. }
+                ) =>
+            {
+                self.expect_elliptic(*b)?;
+                Self::distinct(*a, *b)
             }
             C::EqualRadius(a, b) | C::Concentric(a, b) | C::Coradial(a, b) => {
                 self.expect_round(*a)?;
@@ -977,6 +1257,7 @@ impl System {
                             | EntityKind::Circle { .. }
                             | EntityKind::Arc { .. }
                             | EntityKind::Ellipse { .. }
+                            | EntityKind::EllipticalArc { .. }
                             | EntityKind::BSpline { .. }
                     )
                 })
@@ -1025,6 +1306,15 @@ impl System {
                     return Err(BuildError::UnknownVar(*var));
                 }
                 Ok(())
+            }
+            C::EllipseDimension { curve, value, .. } => {
+                finite(*value)?;
+                if *value < 0.0 {
+                    return Err(BuildError::BadValue(
+                        "ellipse dimension must be non-negative",
+                    ));
+                }
+                self.expect_elliptic(*curve)
             }
             C::Mate(m) => self.validate_mate(m),
         }

@@ -8,6 +8,13 @@
 //! Orientation-dependent constraints (tangent side, internal versus external contact, the side
 //! of a point–line distance, the curvature sign of a G2 joint) take their branch from the
 //! starting geometry, so a solve never flips a sketch to the mirror configuration.
+//!
+//! # Wide constraints
+//!
+//! A residual's derivatives are taken by forward-mode AD seeded only on the layout entries it
+//! really reads at the current point ([`Op::support`]), in chunks of at most 16 seeds. A point
+//! on a spline with hundreds of control points reads the `degree + 1` control points of its
+//! active knot span, so its Jacobian block costs the same as for a 4-point Bézier.
 
 use crate::ad::{Dual, Real};
 use crate::ids::{ConstraintId, EntityId, VarId};
@@ -41,23 +48,40 @@ impl Round {
     }
 }
 
-/// How the tangent direction at an open-curve end is read from a 4-variable layout.
+/// How the tangent direction at an open-curve end is read from its end layout.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum EndDir {
     /// `[p, q]`: direction `q - p` (a line, or a spline's end control polygon leg).
     Segment,
     /// `[c, p]`: perpendicular to the radius `p - c` (an arc end).
     ArcRadius,
+    /// `[ellipse(5), p]`: the counter-clockwise ellipse tangent at `p` (an elliptical arc end).
+    Ellipse,
 }
 
 impl EndDir {
-    fn dir<S: Real>(self, x: &[S]) -> (S, S) {
-        let (dx, dy) = (x[2] - x[0], x[3] - x[1]);
+    fn len(self) -> usize {
         match self {
-            EndDir::Segment => (dx, dy),
-            EndDir::ArcRadius => (-dy, dx),
+            EndDir::Segment | EndDir::ArcRadius => 4,
+            EndDir::Ellipse => 7,
         }
     }
+    fn dir<S: Real>(self, x: &[S]) -> (S, S) {
+        match self {
+            EndDir::Segment => (x[2] - x[0], x[3] - x[1]),
+            EndDir::ArcRadius => (-(x[3] - x[1]), x[2] - x[0]),
+            EndDir::Ellipse => ell_tangent_at(&x[0..5], (x[5], x[6])),
+        }
+    }
+}
+
+/// The unit of a residual row, for unit-aware scaling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Unit {
+    /// A length (scaled by the sub-problem's characteristic length).
+    Length,
+    /// An angle, a ratio or another dimensionless quantity (not scaled).
+    Ratio,
 }
 
 /// A lowered residual.
@@ -82,20 +106,38 @@ pub(crate) enum Op {
         internal: bool,
         sigma: f64,
     },
-    /// `[endA(4), endB(4)]` → `sin` of the angle between the end tangents.
+    /// `[line, ellipse(5)]` → `side · dist(c, line) - h(n)`, `h` the ellipse's support
+    /// function along the line normal.
+    TangentLineEllipse { side: f64 },
+    /// `[round, ellipse(5), θ]` → the ellipse point at eccentric angle `θ` is on the circle
+    /// and the circle's radius there is normal to the ellipse (2 rows).
+    TangentRoundEllipse { round: Round },
+    /// `[ellipseA(5), ellipseB(5), θa, θb]` → the two contact points coincide and their
+    /// tangents are parallel (3 rows).
+    TangentEllipses,
+    /// `[endA, endB]` → `sin` of the angle between the end tangents.
     TangentEnds { a: EndDir, b: EndDir },
-    /// `[Q0, Q1, Q2, arc(6)]` → G1 (`cos` between tangent and radius) and `κ r - σ`.
+    /// `[Q0, Q1, Q2, arc(6)]` (then `[w0, w1, w2]` when rational) → G1 (`cos` between
+    /// tangent and radius) and `κ r - σ`.
     CurvatureG2 {
         e1: f64,
         e2: f64,
         f: f64,
         degree: f64,
         sigma: f64,
+        rational: bool,
     },
     /// `[l1, l2]` → `|l1| - |l2|`.
     EqualLength,
     /// `[roundA, roundB]` → `ra - rb`.
     EqualRadius { a: Round, b: Round },
+    /// `[aA, bA, aB, bB]` → equal semi-axes (2 rows).
+    EqualEllipse,
+    /// `[a, b]` → an ellipse dimension minus its value.
+    EllipseValue {
+        measure: crate::system::EllipseMeasure,
+        v: f64,
+    },
     /// `[roundA, roundB]` → centres coincide and radii are equal (3 rows).
     Coradial { a: Round, b: Round },
     /// `[p, line]` → `p - mid(line)` (2 rows).
@@ -113,14 +155,25 @@ pub(crate) enum Op {
     },
     /// `[body(7)]` → position and orientation held (6 rows).
     FixBody { targets: [f64; 7] },
+    /// `[ellipse(5), s, e]` → ellipse held, each end held along its tangent (7 rows).
+    FixEllipticalArc {
+        targets: [f64; 9],
+        tangents: [f64; 4],
+    },
     /// `[p, line]` → signed distance from the line.
     PointOnLine,
     /// `[p, round]` → `|p - c| - r`.
     PointOnRound { round: Round },
     /// `[p, ellipse(5)]` → scaled implicit ellipse equation.
     PointOnEllipse,
-    /// `[p, t, control points…]` → `p - C(t)` (2 rows).
-    PointOnSpline { degree: usize, knots: Vec<f64> },
+    /// `[p, t, control points…, weights…]` → `p - C(t)` (2 rows). Control points (and
+    /// weights, when rational) are the wrapped sequence for a periodic spline.
+    PointOnSpline {
+        degree: usize,
+        knots: Vec<f64>,
+        rational: bool,
+        periodic: bool,
+    },
     /// `[p, q]` → `|p - q| - d`.
     DistancePP { d: f64 },
     /// `[p, line]` → `side · dist - d`.
@@ -137,6 +190,8 @@ pub(crate) enum Op {
     ArcRadius,
     /// Internal: `[q(4)]` → `(|q|² - 1) / 2`.
     QuatNorm,
+    /// Internal: `[ellipse(5), s, e]` → both ends on the ellipse (2 rows).
+    EllipticalArcEnds,
     /// `[bodyA(7), bodyB(7)]` → mate rows.
     Mate { kind: MateOp, la: Frame, lb: Frame },
 }
@@ -168,8 +223,12 @@ impl Op {
             | Op::Symmetric
             | Op::Collinear
             | Op::PointOnSpline { .. } => 2,
-            Op::CurvatureG2 { .. } => 2,
-            Op::Coradial { .. } => 3,
+            Op::CurvatureG2 { .. }
+            | Op::TangentRoundEllipse { .. }
+            | Op::EqualEllipse
+            | Op::EllipticalArcEnds => 2,
+            Op::Coradial { .. } | Op::TangentEllipses => 3,
+            Op::FixEllipticalArc { .. } => 7,
             Op::FixValues { targets } => targets.len(),
             Op::FixArc { .. } => 5,
             Op::FixBody { .. } => 6,
@@ -192,7 +251,10 @@ impl Op {
         match &mut op {
             Op::DistancePP { d } | Op::DistancePL { d, .. } => *d = t,
             Op::Angle { theta } => *theta = t,
-            Op::RadiusValue { v, .. } | Op::Length { v } | Op::VarValue { v } => *v = t,
+            Op::RadiusValue { v, .. }
+            | Op::Length { v }
+            | Op::VarValue { v }
+            | Op::EllipseValue { v, .. } => *v = t,
             Op::Mate { kind, .. } => match kind {
                 MateOp::DistancePoint { d } | MateOp::DistancePlane { d } => *d = t,
                 MateOp::AngleAboutZ { theta } | MateOp::AngleBetweenZ { theta } => *theta = t,
@@ -240,8 +302,40 @@ impl Op {
                     d - (ra + rb)
                 };
             }
+            Op::TangentLineEllipse { side } => {
+                let l = &x[0..4];
+                let e = &x[4..9];
+                let d = seg(l);
+                let nd = norm(d);
+                let n = (-d.1 / nd, d.0 / nd);
+                let (u, v) = ell_axes(e);
+                let h = ((e[2] * dot(n, u)).sq() + (e[3] * dot(n, v)).sq()).sqrt();
+                out[0] = signed_dist(l, (e[0], e[1])) * *side - h;
+            }
+            Op::TangentRoundEllipse { round } => {
+                let k = round.len();
+                let r = round.radius(&x[..k]);
+                let e = &x[k..k + 5];
+                let t = x[k + 5];
+                let p = ell_point(e, t);
+                let tan = ell_tangent(e, t);
+                let q = (p.0 - x[0], p.1 - x[1]);
+                let nq = norm(q);
+                out[0] = nq - r;
+                out[1] = dot(q, tan) / (nq * norm(tan));
+            }
+            Op::TangentEllipses => {
+                let (ea, eb) = (&x[0..5], &x[5..10]);
+                let (ta, tb) = (x[10], x[11]);
+                let (pa, pb) = (ell_point(ea, ta), ell_point(eb, tb));
+                out[0] = pa.0 - pb.0;
+                out[1] = pa.1 - pb.1;
+                let (da, db) = (ell_tangent(ea, ta), ell_tangent(eb, tb));
+                out[2] = cross(da, db) / (norm(da) * norm(db));
+            }
             Op::TangentEnds { a, b } => {
-                let (ta, tb) = (a.dir(&x[0..4]), b.dir(&x[4..8]));
+                let k = a.len();
+                let (ta, tb) = (a.dir(&x[0..k]), b.dir(&x[k..k + b.len()]));
                 out[0] = cross(ta, tb) / (norm(ta) * norm(tb));
             }
             Op::CurvatureG2 {
@@ -250,6 +344,7 @@ impl Op {
                 f,
                 degree,
                 sigma,
+                rational,
             } => {
                 let p = *degree;
                 let q0 = (x[0], x[1]);
@@ -265,11 +360,35 @@ impl Op {
                 let rad = (q0.0 - arc[0], q0.1 - arc[1]);
                 out[0] = dot(c1, rad) / (norm(c1) * norm(rad));
                 let n1 = norm(c1);
-                let kappa = cross(c1, c2) / (n1 * n1 * n1);
+                let mut kappa = cross(c1, c2) / (n1 * n1 * n1);
+                if *rational {
+                    // The end of a clamped NURBS: κ scales by w0 w2 / w1² (Farin).
+                    let w = &x[12..15];
+                    kappa = kappa * w[0] * w[2] / w[1].sq();
+                }
                 out[1] = kappa * Round::Arc.radius(arc) - *sigma;
             }
             Op::EqualLength => out[0] = norm(seg(&x[0..4])) - norm(seg(&x[4..8])),
             Op::EqualRadius { a, b } => out[0] = a.radius(&x[..a.len()]) - b.radius(&x[a.len()..]),
+            Op::EqualEllipse => {
+                out[0] = x[0] - x[2];
+                out[1] = x[1] - x[3];
+            }
+            Op::EllipseValue { measure, v } => {
+                use crate::system::EllipseMeasure as M;
+                let (a, b) = (x[0], x[1]);
+                out[0] = match measure {
+                    M::SemiMajor => a,
+                    M::SemiMinor => b,
+                    M::MajorDiameter => a * 2.0,
+                    M::MinorDiameter => b * 2.0,
+                    M::FocalDistance => {
+                        let d = a.sq() - b.sq();
+                        let d = if d.val() < 0.0 { -d } else { d };
+                        d.sqrt() * 2.0
+                    }
+                } - *v;
+            }
             Op::Coradial { a, b } => {
                 let xb = &x[a.len()..];
                 out[0] = x[0] - xb[0];
@@ -319,22 +438,29 @@ impl Op {
                 out[4] = v[1];
                 out[5] = v[2];
             }
+            Op::FixEllipticalArc { targets, tangents } => {
+                for i in 0..5 {
+                    out[i] = x[i] - targets[i];
+                }
+                out[5] = (x[5] - targets[5]) * tangents[0] + (x[6] - targets[6]) * tangents[1];
+                out[6] = (x[7] - targets[7]) * tangents[2] + (x[8] - targets[8]) * tangents[3];
+            }
             Op::PointOnLine => out[0] = signed_dist(&x[2..6], (x[0], x[1])),
             Op::PointOnRound { round } => {
                 let c = &x[2..];
                 out[0] = (x[0] - c[0]).hypot(x[1] - c[1]) - round.radius(c);
             }
-            Op::PointOnEllipse => {
-                let e = &x[2..7];
-                let (dx, dy) = (x[0] - e[0], x[1] - e[1]);
-                let (s, c) = (e[4].sin(), e[4].cos());
-                let u = c * dx + s * dy;
-                let v = c * dy - s * dx;
-                let (a, b) = (e[2], e[3]);
-                out[0] = ((u / a).sq() + (v / b).sq() - 1.0) * ((a + b) * 0.25);
-            }
-            Op::PointOnSpline { degree, knots } => {
-                let (cx, cy) = spline_point(*degree, knots, &x[3..], x[2]);
+            Op::PointOnEllipse => out[0] = ell_implicit(&x[2..7], (x[0], x[1])),
+            Op::PointOnSpline {
+                degree,
+                knots,
+                rational,
+                periodic,
+            } => {
+                let m = spline_count(x.len(), *rational);
+                let cps = &x[3..3 + 2 * m];
+                let w = rational.then(|| &x[3 + 2 * m..3 + 3 * m]);
+                let (cx, cy) = spline_eval(*degree, knots, cps, w, x[2], *periodic);
                 out[0] = x[0] - cx;
                 out[1] = x[1] - cy;
             }
@@ -353,6 +479,11 @@ impl Op {
             Op::QuatNorm => {
                 out[0] = (x[0].sq() + x[1].sq() + x[2].sq() + x[3].sq() - 1.0) * 0.5;
             }
+            Op::EllipticalArcEnds => {
+                let e = &x[0..5];
+                out[0] = ell_implicit(e, (x[5], x[6]));
+                out[1] = ell_implicit(e, (x[7], x[8]));
+            }
             Op::Mate { kind, la, lb } => eval_mate(*kind, la, lb, x, out),
         }
     }
@@ -362,15 +493,97 @@ impl Op {
         self.eval(x, out);
     }
 
+    /// The layout entries the residual reads at `x`, ascending, when that is a strict subset
+    /// known in advance (a spline point reads only its active knot span).
+    pub(crate) fn support(&self, x: &[f64]) -> Option<Vec<usize>> {
+        match self {
+            Op::PointOnSpline {
+                degree,
+                knots,
+                rational,
+                periodic,
+            } => {
+                let m = spline_count(x.len(), *rational);
+                let s = spline_span(*degree, knots, m, x[2], *periodic);
+                let first = s - degree;
+                let mut out = vec![0, 1, 2];
+                for j in first..=s {
+                    out.extend([3 + 2 * j, 4 + 2 * j]);
+                }
+                if *rational {
+                    out.extend((first..=s).map(|j| 3 + 2 * m + j));
+                }
+                Some(out)
+            }
+            _ => None,
+        }
+    }
+
     /// Residual values and the dense `rows × x.len()` Jacobian block (row-major).
     pub(crate) fn jacobian(&self, x: &[f64], vals: &mut [f64], jac: &mut [f64]) {
         let n = x.len();
+        if let Op::FixValues { targets } = self {
+            // Linear: the identity block.
+            jac.iter_mut().for_each(|v| *v = 0.0);
+            for (i, t) in targets.iter().enumerate() {
+                vals[i] = x[i] - t;
+                jac[i * n + i] = 1.0;
+            }
+            return;
+        }
+        if let Some(support) = self.support(x) {
+            return jac_support(self, x, &support, vals, jac);
+        }
         match n {
             0..=4 => jac_n::<4>(self, x, vals, jac),
             5..=8 => jac_n::<8>(self, x, vals, jac),
             9..=16 => jac_n::<16>(self, x, vals, jac),
             17..=32 => jac_n::<32>(self, x, vals, jac),
-            _ => jac_n::<64>(self, x, vals, jac),
+            33..=64 => jac_n::<64>(self, x, vals, jac),
+            _ => {
+                let all: Vec<usize> = (0..n).collect();
+                jac_support(self, x, &all, vals, jac)
+            }
+        }
+    }
+}
+
+/// Chunked forward-mode AD seeded only on `support`: `ceil(|support| / 16)` evaluations, each
+/// carrying at most 16 derivative lanes. Columns outside the support are zero.
+fn jac_support(op: &Op, x: &[f64], support: &[usize], vals: &mut [f64], jac: &mut [f64]) {
+    jac.iter_mut().for_each(|v| *v = 0.0);
+    if support.is_empty() {
+        op.values(x, vals);
+        return;
+    }
+    for chunk in support.chunks(16) {
+        match chunk.len() {
+            0..=4 => jac_chunk::<4>(op, x, chunk, vals, jac),
+            5..=8 => jac_chunk::<8>(op, x, chunk, vals, jac),
+            _ => jac_chunk::<16>(op, x, chunk, vals, jac),
+        }
+    }
+}
+
+fn jac_chunk<const N: usize>(
+    op: &Op,
+    x: &[f64],
+    chunk: &[usize],
+    vals: &mut [f64],
+    jac: &mut [f64],
+) {
+    let n = x.len();
+    let mut xs: Vec<Dual<N>> = x.iter().map(|&v| Dual::cst(v)).collect();
+    for (k, &i) in chunk.iter().enumerate() {
+        xs[i] = Dual::var(x[i], k);
+    }
+    let rows = op.rows();
+    let mut out = vec![Dual::<N>::cst(0.0); rows];
+    op.eval(&xs, &mut out);
+    for r in 0..rows {
+        vals[r] = out[r].v;
+        for (k, &i) in chunk.iter().enumerate() {
+            jac[r * n + i] = out[r].d[k];
         }
     }
 }
@@ -422,23 +635,80 @@ fn wrap<S: Real>(a: S) -> S {
     }
 }
 
-/// A point on a clamped B-spline by de Boor's algorithm. The span comes from the primal
-/// parameter, clamped to the knot domain; outside the domain the end polynomial extends.
-pub(crate) fn spline_point<S: Real>(degree: usize, knots: &[f64], cps: &[S], t: S) -> (S, S) {
-    let count = cps.len() / 2;
-    let last = count - 1;
-    let tv = t.val().clamp(knots[degree], knots[last + 1]);
-    let mut s = degree;
-    while s < last && tv >= knots[s + 1] {
-        s += 1;
+/// The number of (wrapped) control points in a point-on-spline layout of length `len`.
+fn spline_count(len: usize, rational: bool) -> usize {
+    (len - 3) / if rational { 3 } else { 2 }
+}
+
+/// A periodic parameter wrapped into `[knots[p], knots[m])` by a constant shift (the
+/// derivative is unchanged).
+fn wrap_parameter<S: Real>(degree: usize, knots: &[f64], m: usize, t: S) -> S {
+    let (t0, t1) = (knots[degree], knots[m]);
+    let period = t1 - t0;
+    let k = ((t.val() - t0) / period).floor();
+    if k == 0.0 || !k.is_finite() {
+        t
+    } else {
+        t - k * period
     }
-    let mut dx: Vec<S> = (0..=degree).map(|j| cps[2 * (j + s - degree)]).collect();
-    let mut dy: Vec<S> = (0..=degree)
-        .map(|j| cps[2 * (j + s - degree) + 1])
-        .collect();
+}
+
+/// The knot span `s ∈ [p, m - 1]` (`knots[s] ≤ t < knots[s + 1]`, the last span closed) for
+/// the primal parameter, clamped to the domain (wrapped first when periodic). Binary search.
+pub(crate) fn spline_span(degree: usize, knots: &[f64], m: usize, t: f64, periodic: bool) -> usize {
+    let t = if periodic {
+        wrap_parameter(degree, knots, m, t)
+    } else {
+        t
+    };
+    let tv = t.clamp(knots[degree], knots[m]);
+    degree + knots[degree + 1..m].partition_point(|&k| k <= tv)
+}
+
+/// A point on a B-spline by de Boor's algorithm over the active span (homogeneous when
+/// rational). `cps` holds `m` points as `[x0, y0, x1, y1, …]` (the wrapped sequence for a
+/// periodic spline) and `weights` one weight per point. Outside a clamped domain the end
+/// polynomial extends; a periodic parameter wraps.
+pub(crate) fn spline_eval<S: Real>(
+    degree: usize,
+    knots: &[f64],
+    cps: &[S],
+    weights: Option<&[S]>,
+    t: S,
+    periodic: bool,
+) -> (S, S) {
+    let m = cps.len() / 2;
+    let t = if periodic {
+        wrap_parameter(degree, knots, m, t)
+    } else {
+        t
+    };
+    let s = spline_span(degree, knots, m, t.val(), false);
+    let first = s - degree;
+    let w = |j: usize| weights.map_or(S::cst(1.0), |w| w[j]);
+    // De Boor works on degree + 1 homogeneous points: on the stack up to degree 15.
+    const STACK: usize = 16;
+    let mut sx = [S::cst(0.0); STACK];
+    let mut sy = [S::cst(0.0); STACK];
+    let mut sw = [S::cst(0.0); STACK];
+    let (mut hx, mut hy, mut hw);
+    let (dx, dy, dw): (&mut [S], &mut [S], &mut [S]) = if degree < STACK {
+        (&mut sx[..=degree], &mut sy[..=degree], &mut sw[..=degree])
+    } else {
+        hx = vec![S::cst(0.0); degree + 1];
+        hy = vec![S::cst(0.0); degree + 1];
+        hw = vec![S::cst(0.0); degree + 1];
+        (&mut hx[..], &mut hy[..], &mut hw[..])
+    };
+    for j in 0..=degree {
+        let wj = w(first + j);
+        dx[j] = cps[2 * (first + j)] * wj;
+        dy[j] = cps[2 * (first + j) + 1] * wj;
+        dw[j] = wj;
+    }
     for r in 1..=degree {
         for j in (r..=degree).rev() {
-            let i = j + s - degree;
+            let i = j + first;
             let den = knots[i + degree + 1 - r] - knots[i];
             let alpha = if den > 0.0 {
                 (t - knots[i]) / den
@@ -448,35 +718,314 @@ pub(crate) fn spline_point<S: Real>(degree: usize, knots: &[f64], cps: &[S], t: 
             let one = S::cst(1.0) - alpha;
             dx[j] = dx[j - 1] * one + dx[j] * alpha;
             dy[j] = dy[j - 1] * one + dy[j] * alpha;
+            if weights.is_some() {
+                dw[j] = dw[j - 1] * one + dw[j] * alpha;
+            }
         }
     }
-    (dx[degree], dy[degree])
+    if weights.is_some() {
+        (dx[degree] / dw[degree], dy[degree] / dw[degree])
+    } else {
+        (dx[degree], dy[degree])
+    }
 }
 
-/// The parameter of the sampled spline point closest to `p` (deterministic, used to seed the
-/// curve parameter of a point-on-spline constraint).
-pub(crate) fn closest_spline_parameter(sys: &System, curve: EntityId, p: [f64; 2]) -> f64 {
+/// A spline's evaluation data from current values: degree, knots, wrapped control-point
+/// coordinates, wrapped weights (when rational), periodic flag.
+pub(crate) type SplineData = (usize, Vec<f64>, Vec<f64>, Option<Vec<f64>>, bool);
+
+pub(crate) fn spline_data(sys: &System, curve: EntityId, values: &[f64]) -> Option<SplineData> {
     let EntityKind::BSpline {
         degree,
         control_points,
         knots,
+        weights,
+        periodic,
     } = &sys.entity(curve).kind
     else {
-        return 0.0;
+        return None;
     };
-    let cps: Vec<f64> = control_points.iter().flat_map(|c| sys.point(*c)).collect();
-    let (t0, t1) = (knots[*degree], knots[control_points.len()]);
-    let samples = 256;
-    let mut best = (f64::INFINITY, t0);
-    for i in 0..=samples {
-        let t = t0 + (t1 - t0) * i as f64 / samples as f64;
-        let (x, y) = spline_point(*degree, knots, &cps, t);
-        let d = (x - p[0]).hypot(y - p[1]);
-        if d < best.0 {
-            best = (d, t);
+    let (pts, ws) = wrapped_spline(*degree, control_points, weights, *periodic);
+    let point = |p: EntityId| match sys.entity(p).kind {
+        EntityKind::Point2 { x, y } => [values[x.index()], values[y.index()]],
+        _ => unreachable!("validated point"),
+    };
+    let cps: Vec<f64> = pts.iter().flat_map(|c| point(*c)).collect();
+    let w = (!ws.is_empty()).then(|| ws.iter().map(|v| values[v.index()]).collect());
+    Some((*degree, knots.clone(), cps, w, *periodic))
+}
+
+/// The evaluation sequence of a spline's control points and weights (the first `degree`
+/// repeated at the end when periodic).
+pub(crate) fn wrapped_spline(
+    degree: usize,
+    control_points: &[EntityId],
+    weights: &[VarId],
+    periodic: bool,
+) -> (Vec<EntityId>, Vec<VarId>) {
+    let mut pts = control_points.to_vec();
+    let mut ws = weights.to_vec();
+    if periodic {
+        pts.extend_from_slice(&control_points[..degree]);
+        if !weights.is_empty() {
+            ws.extend_from_slice(&weights[..degree]);
         }
     }
-    best.1
+    (pts, ws)
+}
+
+/// The parameter of the spline point closest to `p` (deterministic, used to seed the curve
+/// parameter of a point-on-spline constraint).
+///
+/// Each knot span lies in the convex hull of its `degree + 1` control points (weights are
+/// positive), so the distance from `p` to the span's control bounding box bounds the span from
+/// below. Spans are visited nearest bound first and sampled (at least 8 samples each, 256 over
+/// the whole curve) until the bound exceeds the best distance found; a golden-section search
+/// then refines around the best sample. The cost grows with the spans near `p`, not with the
+/// control-point count.
+pub(crate) fn closest_spline_parameter(sys: &System, curve: EntityId, p: [f64; 2]) -> f64 {
+    let values: Vec<f64> = sys.vars.iter().map(|v| v.value).collect();
+    let Some((degree, knots, cps, w, periodic)) = spline_data(sys, curve, &values) else {
+        return 0.0;
+    };
+    let m = cps.len() / 2;
+    let (t0, t1) = (knots[degree], knots[m]);
+    let d2 = |t: f64| {
+        let (x, y) = spline_eval(degree, &knots, &cps, w.as_deref(), t, periodic);
+        (x - p[0]).powi(2) + (y - p[1]).powi(2)
+    };
+    let spans: Vec<usize> = (degree..m).filter(|&s| knots[s + 1] > knots[s]).collect();
+    let per_span = 8.max(256 / spans.len().max(1));
+    let mut order: Vec<(f64, usize)> = spans
+        .iter()
+        .map(|&s| {
+            let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+            for j in s - degree..=s {
+                for k in 0..2 {
+                    lo[k] = lo[k].min(cps[2 * j + k]);
+                    hi[k] = hi[k].max(cps[2 * j + k]);
+                }
+            }
+            let gap = |k: usize| (lo[k] - p[k]).max(p[k] - hi[k]).max(0.0);
+            (gap(0).powi(2) + gap(1).powi(2), s)
+        })
+        .collect();
+    order.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let mut best = (f64::INFINITY, t0, (t1 - t0) / 256.0);
+    for (bound, s) in order {
+        if bound > best.0 {
+            break;
+        }
+        let (a, b) = (knots[s], knots[s + 1]);
+        let h = (b - a) / per_span as f64;
+        for i in 0..=per_span {
+            let t = a + h * i as f64;
+            let d = d2(t);
+            if d < best.0 || (d == best.0 && t < best.1) {
+                best = (d, t, h);
+            }
+        }
+    }
+    let h = best.2;
+    let (mut a, mut b) = (best.1 - h, best.1 + h);
+    if !periodic {
+        a = a.max(t0);
+        b = b.min(t1);
+    }
+    let g = 0.5 * (5f64.sqrt() - 1.0);
+    for _ in 0..60 {
+        let c = b - g * (b - a);
+        let d = a + g * (b - a);
+        if d2(c) < d2(d) {
+            b = d;
+        } else {
+            a = c;
+        }
+    }
+    let t = 0.5 * (a + b);
+    if d2(t) < best.0 {
+        t
+    } else {
+        best.1
+    }
+}
+
+// ------------------------------------------------------------------ ellipse helpers
+
+/// Major and minor axis directions of `[cx, cy, a, b, rot]`.
+fn ell_axes<S: Real>(e: &[S]) -> ((S, S), (S, S)) {
+    let (s, c) = (e[4].sin(), e[4].cos());
+    ((c, s), (-s, c))
+}
+
+/// The ellipse point at eccentric angle `t`.
+fn ell_point<S: Real>(e: &[S], t: S) -> (S, S) {
+    let (u, v) = ell_axes(e);
+    let (ca, sb) = (e[2] * t.cos(), e[3] * t.sin());
+    (e[0] + u.0 * ca + v.0 * sb, e[1] + u.1 * ca + v.1 * sb)
+}
+
+/// `dE/dt` at eccentric angle `t` (counter-clockwise).
+fn ell_tangent<S: Real>(e: &[S], t: S) -> (S, S) {
+    let (u, v) = ell_axes(e);
+    let (sa, cb) = (-(e[2] * t.sin()), e[3] * t.cos());
+    (u.0 * sa + v.0 * cb, u.1 * sa + v.1 * cb)
+}
+
+/// The counter-clockwise tangent direction at (or nearest) `p`: perpendicular to the
+/// gradient of the implicit equation, scaled by `ab` to stay well sized.
+fn ell_tangent_at<S: Real>(e: &[S], p: (S, S)) -> (S, S) {
+    let (u, v) = ell_axes(e);
+    let d = (p.0 - e[0], p.1 - e[1]);
+    let (lu, lv) = (dot(d, u), dot(d, v));
+    let (a, b) = (e[2], e[3]);
+    // Local CCW tangent (-v/b², u/a²) times a·b.
+    let (tu, tv) = (-(lv * a / b), lu * b / a);
+    (u.0 * tu + v.0 * tv, u.1 * tu + v.1 * tv)
+}
+
+/// The scaled implicit equation: zero on the ellipse, about the distance to it nearby.
+fn ell_implicit<S: Real>(e: &[S], p: (S, S)) -> S {
+    let (u, v) = ell_axes(e);
+    let d = (p.0 - e[0], p.1 - e[1]);
+    let (a, b) = (e[2], e[3]);
+    ((dot(d, u) / a).sq() + (dot(d, v) / b).sq() - 1.0) * ((a + b) * 0.25)
+}
+
+fn ellipse_values(sys: &System, e: EntityId) -> Option<[f64; 5]> {
+    match &sys.entity(e).kind {
+        EntityKind::Ellipse {
+            center,
+            semi_major,
+            semi_minor,
+            rotation,
+        }
+        | EntityKind::EllipticalArc {
+            center,
+            semi_major,
+            semi_minor,
+            rotation,
+            ..
+        } => {
+            let c = sys.point(*center);
+            Some([
+                c[0],
+                c[1],
+                sys.value(*semi_major),
+                sys.value(*semi_minor),
+                sys.value(*rotation),
+            ])
+        }
+        _ => None,
+    }
+}
+
+fn round_values_sys(sys: &System, e: EntityId) -> Option<([f64; 2], f64)> {
+    match &sys.entity(e).kind {
+        EntityKind::Circle { center, radius } => Some((sys.point(*center), sys.value(*radius))),
+        EntityKind::Arc { center, start, .. } => {
+            let (c, s) = (sys.point(*center), sys.point(*start));
+            Some((c, (s[0] - c[0]).hypot(s[1] - c[1])))
+        }
+        _ => None,
+    }
+}
+
+/// The angle in `[0, 2π)` minimising `objective` among the zeros of `slope` (its derivative
+/// up to a positive factor), found by sign changes over 720 samples and bisection. Falls back
+/// to the best sample when `slope` never changes sign.
+fn best_stationary_angle(objective: impl Fn(f64) -> f64, slope: impl Fn(f64) -> f64) -> f64 {
+    let n = 720;
+    let h = 2.0 * PI / n as f64;
+    let mut best = (f64::INFINITY, 0.0);
+    let mut fallback = (f64::INFINITY, 0.0);
+    let mut prev = slope(0.0);
+    for i in 0..n {
+        let (a, b) = (h * i as f64, h * (i + 1) as f64);
+        let next = slope(b);
+        let fa = objective(a);
+        if fa < fallback.0 {
+            fallback = (fa, a);
+        }
+        if (prev <= 0.0) != (next <= 0.0) {
+            let (mut lo, mut hi, mut slo) = (a, b, prev);
+            for _ in 0..60 {
+                let mid = 0.5 * (lo + hi);
+                let sm = slope(mid);
+                if (sm <= 0.0) == (slo <= 0.0) {
+                    lo = mid;
+                    slo = sm;
+                } else {
+                    hi = mid;
+                }
+            }
+            let t = 0.5 * (lo + hi);
+            let f = objective(t);
+            if f < best.0 {
+                best = (f, t);
+            }
+        }
+        prev = next;
+    }
+    if best.0.is_finite() {
+        best.1
+    } else {
+        fallback.1
+    }
+}
+
+/// Starting contact angles for a tangency that carries them: none for line or round pairs,
+/// one (on the ellipse) for round–ellipse, two for ellipse–ellipse (in argument order).
+///
+/// The contact point of a round–ellipse tangency is a point where the distance from the
+/// circle's centre to the ellipse is stationary; the one whose distance is closest to the
+/// radius is taken. For two ellipses, the contact on the first is a stationary point of the
+/// second's implicit equation along it (closest to zero), and the contact on the second is
+/// the closest point to it.
+pub(crate) fn seed_tangent_angles(sys: &System, a: EntityId, b: EntityId) -> Vec<f64> {
+    let ea = ellipse_values(sys, a);
+    let eb = ellipse_values(sys, b);
+    let closest_on = |e: [f64; 5], p: [f64; 2]| {
+        best_stationary_angle(
+            |t| {
+                let q = ell_point(&e, t);
+                (q.0 - p[0]).hypot(q.1 - p[1])
+            },
+            |t| {
+                let q = ell_point(&e, t);
+                dot((q.0 - p[0], q.1 - p[1]), ell_tangent(&e, t))
+            },
+        )
+    };
+    match (ea, eb) {
+        (Some(ea), Some(eb)) => {
+            let h = 1e-6;
+            let f = |t: f64| ell_implicit(&eb, ell_point(&ea, t));
+            let ta = best_stationary_angle(|t| f(t).abs(), |t| f(t + h) - f(t - h));
+            let pa = ell_point(&ea, ta);
+            vec![ta, closest_on(eb, [pa.0, pa.1])]
+        }
+        (Some(e), None) | (None, Some(e)) => {
+            let other = if ea.is_some() { b } else { a };
+            match round_values_sys(sys, other) {
+                Some((c, r)) => {
+                    let t = best_stationary_angle(
+                        |t| {
+                            let q = ell_point(&e, t);
+                            ((q.0 - c[0]).hypot(q.1 - c[1]) - r).abs()
+                        },
+                        |t| {
+                            let q = ell_point(&e, t);
+                            dot((q.0 - c[0], q.1 - c[1]), ell_tangent(&e, t))
+                        },
+                    );
+                    vec![t]
+                }
+                None => Vec::new(),
+            }
+        }
+        (None, None) => Vec::new(),
+    }
 }
 
 // ------------------------------------------------------------------ 3D helpers
@@ -627,6 +1176,8 @@ pub(crate) struct Compiled {
     pub range: Option<(f64, f64)>,
     pub reference: bool,
     pub internal: bool,
+    /// The unit of each residual row (for unit-aware scaling).
+    pub units: Vec<Unit>,
 }
 
 struct Lower<'a> {
@@ -717,9 +1268,85 @@ impl<'a> Lower<'a> {
             _ => unreachable!("validated connector"),
         }
     }
-    /// Pushes the 4-variable end layout of an open curve and returns how to read it.
+    /// Pushes `[cx, cy, a, b, rot]` of an ellipse or elliptical arc.
+    fn ellipse(&mut self, e: EntityId) {
+        match self.kind(e).clone() {
+            EntityKind::Ellipse {
+                center,
+                semi_major,
+                semi_minor,
+                rotation,
+            }
+            | EntityKind::EllipticalArc {
+                center,
+                semi_major,
+                semi_minor,
+                rotation,
+                ..
+            } => {
+                self.point(center);
+                self.vars.extend([semi_major, semi_minor, rotation]);
+            }
+            _ => unreachable!("validated ellipse"),
+        }
+    }
+    fn ell_values(&self, e: EntityId) -> [f64; 5] {
+        match self.kind(e) {
+            EntityKind::Ellipse {
+                center,
+                semi_major,
+                semi_minor,
+                rotation,
+            }
+            | EntityKind::EllipticalArc {
+                center,
+                semi_major,
+                semi_minor,
+                rotation,
+                ..
+            } => {
+                let c = self.pv(*center);
+                [
+                    c[0],
+                    c[1],
+                    self.v(*semi_major),
+                    self.v(*semi_minor),
+                    self.v(*rotation),
+                ]
+            }
+            _ => unreachable!("validated ellipse"),
+        }
+    }
+    /// Pushes a spline's wrapped control points then wrapped weights.
+    fn spline(&mut self, e: EntityId) -> (usize, Vec<f64>, bool, bool) {
+        match self.kind(e).clone() {
+            EntityKind::BSpline {
+                degree,
+                control_points,
+                knots,
+                weights,
+                periodic,
+            } => {
+                let (pts, ws) = wrapped_spline(degree, &control_points, &weights, periodic);
+                for p in pts {
+                    self.point(p);
+                }
+                self.vars.extend(ws);
+                (degree, knots, !weights.is_empty(), periodic)
+            }
+            _ => unreachable!("validated spline"),
+        }
+    }
+    /// Pushes the end layout of an open curve and returns how to read it.
     fn end(&mut self, e: EntityId, end: CurveEnd) -> EndDir {
         match self.kind(e).clone() {
+            EntityKind::EllipticalArc {
+                start, end: stop, ..
+            } => {
+                self.ellipse(e);
+                self.point(if end == CurveEnd::Start { start } else { stop });
+                EndDir::Ellipse
+            }
             EntityKind::Line { start, end: stop } => {
                 self.point(start);
                 self.point(stop);
@@ -763,6 +1390,45 @@ fn signed_dist_f(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> f64 {
 }
 
 /// Lowers every constraint of `sys` using `values` as the starting geometry for branch hints.
+fn var_unit(sys: &System, v: VarId) -> Unit {
+    use crate::system::VarRole as R;
+    match sys.var(v).role {
+        R::X | R::Y | R::Z | R::Radius | R::SemiMajor | R::SemiMinor => Unit::Length,
+        _ => Unit::Ratio,
+    }
+}
+
+/// Row units of a lowered op (`vars` is its layout, for ops whose rows are raw variables).
+fn row_units(op: &Op, vars: &[VarId], sys: &System) -> Vec<Unit> {
+    use Unit::{Length as L, Ratio as A};
+    match op {
+        Op::Parallel | Op::Perpendicular | Op::TangentEnds { .. } | Op::Angle { .. } => vec![A],
+        Op::CurvatureG2 { .. } => vec![A, A],
+        Op::QuatNorm => vec![A],
+        Op::TangentRoundEllipse { .. } => vec![L, A],
+        Op::TangentEllipses => vec![L, L, A],
+        Op::FixValues { .. } => vars.iter().map(|&v| var_unit(sys, v)).collect(),
+        Op::VarValue { .. } => vec![var_unit(sys, vars[0])],
+        Op::FixBody { .. } => vec![L, L, L, A, A, A],
+        Op::FixEllipticalArc { .. } => vec![L, L, L, L, A, L, L],
+        Op::Mate { kind, .. } => match kind {
+            MateOp::Fasten => vec![L, L, L, A, A, A],
+            MateOp::Revolute => vec![L, L, L, A, A],
+            MateOp::Slider => vec![A, A, L, L, A],
+            MateOp::Cylindrical => vec![A, A, L, L],
+            MateOp::Planar => vec![A, A, L],
+            MateOp::Ball => vec![L, L, L],
+            MateOp::Parallel => vec![A, A],
+            MateOp::TangentSphere { .. }
+            | MateOp::DistancePoint { .. }
+            | MateOp::DistancePlane { .. } => vec![L],
+            MateOp::TangentCylinder { .. } => vec![A, L],
+            MateOp::AngleAboutZ { .. } | MateOp::AngleBetweenZ { .. } => vec![A],
+        },
+        other => vec![L; other.rows()],
+    }
+}
+
 pub(crate) fn compile(sys: &System, values: &[f64]) -> Vec<Compiled> {
     let mut out = Vec::with_capacity(sys.constraints.len());
     for (i, rec) in sys.constraints.iter().enumerate() {
@@ -787,11 +1453,23 @@ pub(crate) fn compile(sys: &System, values: &[f64]) -> Vec<Compiled> {
                         l.vars.extend(*orientation);
                         Op::QuatNorm
                     }
+                    InternalKind::EllipticalArcEnds => {
+                        let EntityKind::EllipticalArc { start, end, .. } = l.kind(*entity).clone()
+                        else {
+                            unreachable!()
+                        };
+                        l.ellipse(*entity);
+                        l.point(start);
+                        l.point(end);
+                        Op::EllipticalArcEnds
+                    }
                 };
                 (op, true)
             }
             ConstraintKindRecord::User(c) => (lower_user(&mut l, c, rec, &mut range), false),
         };
+        let units = row_units(&op, &l.vars, sys);
+        debug_assert_eq!(units.len(), op.rows());
         out.push(Compiled {
             id,
             vars: l.vars,
@@ -799,6 +1477,7 @@ pub(crate) fn compile(sys: &System, values: &[f64]) -> Vec<Compiled> {
             range,
             reference: rec.reference,
             internal,
+            units,
         });
     }
     out
@@ -848,7 +1527,32 @@ fn lower_user(
         C::Tangent(a, b) => {
             let a_line = matches!(l.kind(*a), EntityKind::Line { .. });
             let b_line = matches!(l.kind(*b), EntityKind::Line { .. });
-            if a_line || b_line {
+            let elliptic = |l: &Lower<'_>, e: EntityId| {
+                matches!(
+                    l.kind(e),
+                    EntityKind::Ellipse { .. } | EntityKind::EllipticalArc { .. }
+                )
+            };
+            let (a_ell, b_ell) = (elliptic(l, *a), elliptic(l, *b));
+            if (a_line && b_ell) || (b_line && a_ell) {
+                let (line, ell) = if a_line { (*a, *b) } else { (*b, *a) };
+                let [pa, pb] = l.line(line);
+                let e = l.ell_values(ell);
+                let side = sign(signed_dist_f(l.pv(pa), l.pv(pb), [e[0], e[1]]));
+                l.ellipse(ell);
+                Op::TangentLineEllipse { side }
+            } else if a_ell && b_ell {
+                l.ellipse(*a);
+                l.ellipse(*b);
+                l.vars.extend([rec.aux[0], rec.aux[1]]);
+                Op::TangentEllipses
+            } else if a_ell || b_ell {
+                let (round_e, ell) = if a_ell { (*b, *a) } else { (*a, *b) };
+                let round = l.round(round_e);
+                l.ellipse(ell);
+                l.vars.push(rec.aux[0]);
+                Op::TangentRoundEllipse { round }
+            } else if a_line || b_line {
                 let (line, round_e) = if a_line { (*a, *b) } else { (*b, *a) };
                 let [pa, pb] = l.line(line);
                 let (c0, _) = l.round_values(round_e);
@@ -880,6 +1584,8 @@ fn lower_user(
                 degree,
                 control_points,
                 knots,
+                weights,
+                ..
             } = l.kind(*spline).clone()
             else {
                 unreachable!()
@@ -912,18 +1618,53 @@ fn lower_user(
                 l.point(p);
             }
             l.round(*arc);
+            let rational = !weights.is_empty();
+            if rational {
+                let w = match end {
+                    CurveEnd::Start => [weights[0], weights[1], weights[2]],
+                    CurveEnd::End => [weights[n], weights[n - 1], weights[n - 2]],
+                };
+                l.vars.extend(w);
+            }
             Op::CurvatureG2 {
                 e1,
                 e2,
                 f,
                 degree: p as f64,
                 sigma,
+                rational,
             }
         }
         C::EqualLength(a, b) => {
             l.line(*a);
             l.line(*b);
             Op::EqualLength
+        }
+        C::EqualRadius(a, b)
+            if matches!(
+                l.kind(*a),
+                EntityKind::Ellipse { .. } | EntityKind::EllipticalArc { .. }
+            ) =>
+        {
+            for e in [*a, *b] {
+                match l.kind(e) {
+                    EntityKind::Ellipse {
+                        semi_major,
+                        semi_minor,
+                        ..
+                    }
+                    | EntityKind::EllipticalArc {
+                        semi_major,
+                        semi_minor,
+                        ..
+                    } => {
+                        let (sa, sb) = (*semi_major, *semi_minor);
+                        l.vars.extend([sa, sb]);
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            Op::EqualEllipse
         }
         C::EqualRadius(a, b) => {
             let ra = l.round(*a);
@@ -974,6 +1715,22 @@ fn lower_user(
                     tangent: [-r[1] / n, r[0] / n],
                 }
             }
+            EntityKind::EllipticalArc { start, end, .. } => {
+                l.ellipse(*e);
+                l.point(start);
+                l.point(end);
+                let t: [f64; 9] = rec.fix_targets[..9].try_into().expect("9 targets");
+                let unit = |p: [f64; 2]| {
+                    let d = ell_tangent_at(&t[0..5], (p[0], p[1]));
+                    let n = d.0.hypot(d.1).max(1e-300);
+                    [d.0 / n, d.1 / n]
+                };
+                let (ts, te) = (unit([t[5], t[6]]), unit([t[7], t[8]]));
+                Op::FixEllipticalArc {
+                    targets: t,
+                    tangents: [ts[0], ts[1], te[0], te[1]],
+                }
+            }
             EntityKind::Body { .. } => {
                 l.body(*e);
                 let t = &rec.fix_targets;
@@ -983,10 +1740,21 @@ fn lower_user(
                 }
             }
             _ => {
-                l.vars = l.sys.entity_vars(*e);
-                Op::FixValues {
-                    targets: rec.fix_targets.clone(),
+                // Spline weights are held only while they are free: a fixed weight is already
+                // constant and a row on it would read as redundant.
+                let all = l.sys.entity_vars(*e);
+                let mut targets = Vec::with_capacity(all.len());
+                for (v, t) in all.into_iter().zip(&rec.fix_targets) {
+                    let var = l.sys.var(v);
+                    if var.role == crate::system::VarRole::Weight
+                        && var.flag != crate::system::VarFlag::Free
+                    {
+                        continue;
+                    }
+                    l.vars.push(v);
+                    targets.push(*t);
                 }
+                Op::FixValues { targets }
             }
         },
         C::PointOnCurve { point, curve } => {
@@ -999,26 +1767,19 @@ fn lower_user(
                 EntityKind::Circle { .. } | EntityKind::Arc { .. } => Op::PointOnRound {
                     round: l.round(*curve),
                 },
-                EntityKind::Ellipse {
-                    center,
-                    semi_major,
-                    semi_minor,
-                    rotation,
-                } => {
-                    l.point(center);
-                    l.vars.extend([semi_major, semi_minor, rotation]);
+                EntityKind::Ellipse { .. } | EntityKind::EllipticalArc { .. } => {
+                    l.ellipse(*curve);
                     Op::PointOnEllipse
                 }
-                EntityKind::BSpline {
-                    degree,
-                    control_points,
-                    knots,
-                } => {
+                EntityKind::BSpline { .. } => {
                     l.vars.push(rec.aux[0]);
-                    for p in &control_points {
-                        l.point(*p);
+                    let (degree, knots, rational, periodic) = l.spline(*curve);
+                    Op::PointOnSpline {
+                        degree,
+                        knots,
+                        rational,
+                        periodic,
                     }
-                    Op::PointOnSpline { degree, knots }
                 }
                 _ => unreachable!(),
             }
@@ -1061,6 +1822,32 @@ fn lower_user(
         C::VarValue { var, value } => {
             l.vars.push(*var);
             Op::VarValue { v: *value }
+        }
+        C::EllipseDimension {
+            curve,
+            measure,
+            value,
+        } => {
+            match l.kind(*curve) {
+                EntityKind::Ellipse {
+                    semi_major,
+                    semi_minor,
+                    ..
+                }
+                | EntityKind::EllipticalArc {
+                    semi_major,
+                    semi_minor,
+                    ..
+                } => {
+                    let (a, b) = (*semi_major, *semi_minor);
+                    l.vars.extend([a, b]);
+                }
+                _ => unreachable!(),
+            }
+            Op::EllipseValue {
+                measure: *measure,
+                v: *value,
+            }
         }
         C::Mate(m) => {
             let (a, b) = crate::system::mate_connectors(m);
@@ -1236,9 +2023,53 @@ mod tests {
                     f: 0.5,
                     degree: 3.0,
                     sigma: 1.0,
+                    rational: false,
                 },
                 12,
             ),
+            (
+                Op::CurvatureG2 {
+                    e1: 0.5,
+                    e2: 0.5,
+                    f: 0.5,
+                    degree: 3.0,
+                    sigma: 1.0,
+                    rational: true,
+                },
+                15,
+            ),
+            (Op::TangentLineEllipse { side: -1.0 }, 9),
+            (
+                Op::TangentRoundEllipse {
+                    round: Round::Circle,
+                },
+                9,
+            ),
+            (Op::TangentRoundEllipse { round: Round::Arc }, 12),
+            (Op::TangentEllipses, 12),
+            (
+                Op::TangentEnds {
+                    a: EndDir::Ellipse,
+                    b: EndDir::Segment,
+                },
+                11,
+            ),
+            (Op::EqualEllipse, 4),
+            (
+                Op::EllipseValue {
+                    measure: crate::system::EllipseMeasure::FocalDistance,
+                    v: 1.0,
+                },
+                2,
+            ),
+            (
+                Op::FixEllipticalArc {
+                    targets: [0.0, 0.0, 2.0, 1.0, 0.3, 1.0, 0.5, -1.0, 0.2],
+                    tangents: [0.6, 0.8, -0.8, 0.6],
+                },
+                9,
+            ),
+            (Op::EllipticalArcEnds, 9),
             (Op::EqualLength, 8),
             (
                 Op::EqualRadius {
@@ -1285,7 +2116,34 @@ mod tests {
             ),
             (Op::PointOnRound { round: Round::Arc }, 8),
             (Op::PointOnEllipse, 7),
-            (Op::PointOnSpline { degree: 3, knots }, 3 + 10),
+            (
+                Op::PointOnSpline {
+                    degree: 3,
+                    knots: knots.clone(),
+                    rational: false,
+                    periodic: false,
+                },
+                3 + 10,
+            ),
+            (
+                Op::PointOnSpline {
+                    degree: 3,
+                    knots,
+                    rational: true,
+                    periodic: false,
+                },
+                3 + 15,
+            ),
+            (
+                // 4 periodic control points, degree 2: 6 wrapped points, 9 knots.
+                Op::PointOnSpline {
+                    degree: 2,
+                    knots: (0..9).map(|i| (i as f64 - 2.0) / 4.0).collect(),
+                    rational: true,
+                    periodic: true,
+                },
+                3 + 18,
+            ),
             (Op::DistancePP { d: 1.0 }, 4),
             (Op::DistancePL { d: 1.0, side: -1.0 }, 6),
             (Op::Angle { theta: 0.4 }, 8),
@@ -1308,12 +2166,42 @@ mod tests {
         for (k, (op, n)) in cases.iter().enumerate() {
             for seed in 0..4u64 {
                 let mut x = pseudo(*n, 17 + seed * 31 + k as u64 * 7);
-                if matches!(op, Op::PointOnEllipse) {
-                    x[4] = x[4].abs() + 0.5;
-                    x[5] = x[5].abs() + 0.3;
+                // Positive semi-axes where the layout has them.
+                let semi: &[usize] = match op {
+                    Op::PointOnEllipse => &[4, 5],
+                    Op::TangentLineEllipse { .. } => &[6, 7],
+                    Op::TangentRoundEllipse {
+                        round: Round::Circle,
+                    } => &[5, 6],
+                    Op::TangentRoundEllipse { round: Round::Arc } => &[8, 9],
+                    Op::TangentEllipses => &[2, 3, 7, 8],
+                    Op::TangentEnds {
+                        a: EndDir::Ellipse, ..
+                    }
+                    | Op::EllipticalArcEnds
+                    | Op::FixEllipticalArc { .. } => &[2, 3],
+                    Op::EllipseValue { .. } | Op::EqualEllipse => &[0, 1],
+                    _ => &[],
+                };
+                for &i in semi {
+                    x[i] = x[i].abs() + 0.5;
                 }
-                if matches!(op, Op::PointOnSpline { .. }) {
-                    x[2] = 0.1 + 0.2 * seed as f64; // stay inside one knot span per case
+                if let Op::PointOnSpline { rational, .. } = op {
+                    x[2] = 0.13 + 0.2 * seed as f64; // off the knots (FD needs smoothness)
+                    if *rational {
+                        let m = spline_count(*n, true);
+                        for w in &mut x[3 + 2 * m..] {
+                            *w = w.abs() + 0.3;
+                        }
+                    }
+                }
+                if let Op::CurvatureG2 { rational: true, .. } = op {
+                    for w in &mut x[12..15] {
+                        *w = w.abs() + 0.3;
+                    }
+                }
+                if let Op::EllipseValue { .. } = op {
+                    x[0] = x[1] + 0.7; // a > b away from the circle case
                 }
                 check(op, &x);
             }

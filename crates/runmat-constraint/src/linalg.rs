@@ -57,6 +57,16 @@ impl SparseRows {
         (&self.idx[a..b], &self.val[a..b])
     }
 
+    /// Multiplies row `i` by `s[i]`.
+    pub fn scale_rows(&mut self, s: &[f64]) {
+        for (i, &si) in s.iter().enumerate().take(self.nrows()) {
+            if si != 1.0 {
+                let (a, b) = (self.ptr[i], self.ptr[i + 1]);
+                self.val[a..b].iter_mut().for_each(|v| *v *= si);
+            }
+        }
+    }
+
     pub fn row_norm(&self, i: usize) -> f64 {
         self.row(i).1.iter().map(|v| v * v).sum::<f64>().sqrt()
     }
