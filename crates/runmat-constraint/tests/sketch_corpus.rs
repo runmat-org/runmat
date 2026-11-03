@@ -21,16 +21,36 @@ struct Expect {
 
 impl Expect {
     fn well() -> Self {
-        Expect { status: Status::WellDefined, dof: 0, redundant: Some(vec![]), conflict_includes: vec![] }
+        Expect {
+            status: Status::WellDefined,
+            dof: 0,
+            redundant: Some(vec![]),
+            conflict_includes: vec![],
+        }
     }
     fn under(dof: usize) -> Self {
-        Expect { status: Status::UnderDefined, dof, redundant: Some(vec![]), conflict_includes: vec![] }
+        Expect {
+            status: Status::UnderDefined,
+            dof,
+            redundant: Some(vec![]),
+            conflict_includes: vec![],
+        }
     }
     fn over(dof: usize, redundant: Vec<ConstraintId>) -> Self {
-        Expect { status: Status::OverDefined, dof, redundant: Some(redundant), conflict_includes: vec![] }
+        Expect {
+            status: Status::OverDefined,
+            dof,
+            redundant: Some(redundant),
+            conflict_includes: vec![],
+        }
     }
     fn conflict(includes: Vec<ConstraintId>) -> Self {
-        Expect { status: Status::Conflicting, dof: usize::MAX, redundant: None, conflict_includes: includes }
+        Expect {
+            status: Status::Conflicting,
+            dof: usize::MAX,
+            redundant: None,
+            conflict_includes: includes,
+        }
     }
 }
 
@@ -50,8 +70,16 @@ fn run_case(name: &str, s: System, e: Expect, check: Option<Check>) {
         assert!(set.contains(c), "{name}: conflict set {set:?} lacks {c}");
     }
     if e.status != Status::Conflicting {
-        assert!(rep.converged, "{name}: not converged, residual {}", rep.residual_norm);
-        assert!(rep.max_residual <= 1e-10, "{name}: residual {}", rep.max_residual);
+        assert!(
+            rep.converged,
+            "{name}: not converged, residual {}",
+            rep.residual_norm
+        );
+        assert!(
+            rep.max_residual <= 1e-10,
+            "{name}: residual {}",
+            rep.max_residual
+        );
     } else {
         assert!(!rep.converged, "{name}: conflicting but converged");
     }
@@ -65,8 +93,17 @@ fn run_case(name: &str, s: System, e: Expect, check: Option<Check>) {
         again.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
         "{name}: not deterministic"
     );
-    let whole = solve(&s, &SolveOptions { decompose: false, ..opts() });
-    assert_eq!(whole.status, rep.status, "{name}: status without decomposition");
+    let whole = solve(
+        &s,
+        &SolveOptions {
+            decompose: false,
+            ..opts()
+        },
+    );
+    assert_eq!(
+        whole.status, rep.status,
+        "{name}: status without decomposition"
+    );
     if rep.dof != usize::MAX {
         assert_eq!(whole.dof, rep.dof, "{name}: dof without decomposition");
     }
@@ -79,8 +116,20 @@ fn fixed_rect(w: f64, h: f64) -> (System, Rect, Vec<ConstraintId>) {
     let r = rect(&mut s, 0.3, -0.2, w * 0.9 + 1.0, h * 1.1 - 0.5);
     let mut ids = vec![s.constrain(Constraint::Fix(r.p[0])).unwrap()];
     ids.extend(square_up(&mut s, &r));
-    ids.push(s.constrain(Constraint::Length { line: r.l[0], value: w }).unwrap());
-    ids.push(s.constrain(Constraint::Length { line: r.l[1], value: h }).unwrap());
+    ids.push(
+        s.constrain(Constraint::Length {
+            line: r.l[0],
+            value: w,
+        })
+        .unwrap(),
+    );
+    ids.push(
+        s.constrain(Constraint::Length {
+            line: r.l[1],
+            value: h,
+        })
+        .unwrap(),
+    );
     (s, r, ids)
 }
 
@@ -92,12 +141,18 @@ fn corpus_01_horizontal_segment() {
     let l = s.line(a, b).unwrap();
     s.constrain(Constraint::Fix(a)).unwrap();
     s.constrain(Constraint::Horizontal(l)).unwrap();
-    s.constrain(Constraint::Length { line: l, value: 10.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: l,
+        value: 10.0,
+    })
+    .unwrap();
     run_case(
         "horizontal segment",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, b), [11.0, 1.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, b), [11.0, 1.0], 1e-9)
+        })),
     );
 }
 
@@ -110,7 +165,9 @@ fn corpus_02_rectangle() {
         "rectangle",
         s,
         Expect::well(),
-        Some(Box::new(move |s, rep| assert_pt(pt(rep, s, p2), [p0[0] + 40.0, p0[1] + 20.0], 1e-9))),
+        Some(Box::new(move |s, rep| {
+            assert_pt(pt(rep, s, p2), [p0[0] + 40.0, p0[1] + 20.0], 1e-9)
+        })),
     );
 }
 
@@ -139,8 +196,16 @@ fn corpus_03_rectangle_from_coincident_segments() {
     s.constrain(Constraint::Vertical(lines[1])).unwrap();
     s.constrain(Constraint::Horizontal(lines[2])).unwrap();
     s.constrain(Constraint::Vertical(lines[3])).unwrap();
-    s.constrain(Constraint::Length { line: lines[0], value: 30.0 }).unwrap();
-    s.constrain(Constraint::Length { line: lines[1], value: 10.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: lines[0],
+        value: 30.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: lines[1],
+        value: 10.0,
+    })
+    .unwrap();
     run_case("coincident rectangle", s, Expect::well(), None);
 }
 
@@ -155,9 +220,21 @@ fn corpus_04_right_triangle_keeps_branch() {
     let ca = s.line(c, a).unwrap();
     s.constrain(Constraint::Fix(a)).unwrap();
     s.constrain(Constraint::Horizontal(ab)).unwrap();
-    s.constrain(Constraint::Length { line: ab, value: 3.0 }).unwrap();
-    s.constrain(Constraint::Length { line: bc, value: 4.0 }).unwrap();
-    s.constrain(Constraint::Length { line: ca, value: 5.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: ab,
+        value: 3.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: bc,
+        value: 4.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: ca,
+        value: 5.0,
+    })
+    .unwrap();
     run_case(
         "3-4-5 triangle",
         s,
@@ -182,12 +259,18 @@ fn corpus_05_equilateral_triangle() {
     s.constrain(Constraint::Horizontal(ab)).unwrap();
     s.constrain(Constraint::EqualLength(ab, bc)).unwrap();
     s.constrain(Constraint::EqualLength(bc, ca)).unwrap();
-    s.constrain(Constraint::Length { line: ab, value: 10.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: ab,
+        value: 10.0,
+    })
+    .unwrap();
     run_case(
         "equilateral",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, c), [5.0, 5.0 * 3f64.sqrt()], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, c), [5.0, 5.0 * 3f64.sqrt()], 1e-9)
+        })),
     );
 }
 
@@ -197,7 +280,11 @@ fn corpus_06_circle_center_and_radius() {
     let c = s.point2(1.0, 2.0);
     let k = s.circle(c, 3.0).unwrap();
     s.constrain(Constraint::Fix(c)).unwrap();
-    s.constrain(Constraint::Radius { curve: k, value: 5.0 }).unwrap();
+    s.constrain(Constraint::Radius {
+        curve: k,
+        value: 5.0,
+    })
+    .unwrap();
     run_case("circle radius", s, Expect::well(), None);
 }
 
@@ -207,13 +294,24 @@ fn corpus_07_circle_diameter_and_reference_radius() {
     let c = s.point2(0.0, 0.0);
     let k = s.circle(c, 3.0).unwrap();
     s.constrain(Constraint::Fix(c)).unwrap();
-    s.constrain(Constraint::Diameter { curve: k, value: 12.0 }).unwrap();
-    let rr = s.reference(Constraint::Radius { curve: k, value: 1.0 }).unwrap();
+    s.constrain(Constraint::Diameter {
+        curve: k,
+        value: 12.0,
+    })
+    .unwrap();
+    let rr = s
+        .reference(Constraint::Radius {
+            curve: k,
+            value: 1.0,
+        })
+        .unwrap();
     run_case(
         "circle diameter",
         s,
         Expect::well(),
-        Some(Box::new(move |_, r| assert_close(r.measurement(rr).unwrap(), 6.0, 1e-9))),
+        Some(Box::new(move |_, r| {
+            assert_close(r.measurement(rr).unwrap(), 6.0, 1e-9)
+        })),
     );
 }
 
@@ -233,17 +331,46 @@ fn corpus_08_obround_slot() {
     let top = s.line(p4, p1).unwrap();
     s.constrain(Constraint::Fix(c1)).unwrap();
     s.constrain(Constraint::HorizontalPoints(c1, c2)).unwrap();
-    s.constrain(Constraint::TangentAtEnd { a: bottom, a_end: CurveEnd::Start, b: left, b_end: CurveEnd::End })
-        .unwrap();
-    s.constrain(Constraint::TangentAtEnd { a: bottom, a_end: CurveEnd::End, b: right, b_end: CurveEnd::Start })
-        .unwrap();
-    s.constrain(Constraint::TangentAtEnd { a: top, a_end: CurveEnd::Start, b: right, b_end: CurveEnd::End })
-        .unwrap();
-    s.constrain(Constraint::TangentAtEnd { a: top, a_end: CurveEnd::End, b: left, b_end: CurveEnd::Start })
-        .unwrap();
+    s.constrain(Constraint::TangentAtEnd {
+        a: bottom,
+        a_end: CurveEnd::Start,
+        b: left,
+        b_end: CurveEnd::End,
+    })
+    .unwrap();
+    s.constrain(Constraint::TangentAtEnd {
+        a: bottom,
+        a_end: CurveEnd::End,
+        b: right,
+        b_end: CurveEnd::Start,
+    })
+    .unwrap();
+    s.constrain(Constraint::TangentAtEnd {
+        a: top,
+        a_end: CurveEnd::Start,
+        b: right,
+        b_end: CurveEnd::End,
+    })
+    .unwrap();
+    s.constrain(Constraint::TangentAtEnd {
+        a: top,
+        a_end: CurveEnd::End,
+        b: left,
+        b_end: CurveEnd::Start,
+    })
+    .unwrap();
     s.constrain(Constraint::EqualRadius(left, right)).unwrap();
-    s.constrain(Constraint::Distance { a: c1, b: c2, value: l }).unwrap();
-    s.constrain(Constraint::Radius { curve: left, value: r }).unwrap();
+    s.constrain(Constraint::Distance {
+        a: c1,
+        b: c2,
+        value: l,
+    })
+    .unwrap();
+    s.constrain(Constraint::Radius {
+        curve: left,
+        value: r,
+    })
+    .unwrap();
     run_case(
         "obround",
         s,
@@ -266,12 +393,18 @@ fn corpus_09_concentric_circles() {
     let k2 = s.circle(c2, 2.0).unwrap();
     s.constrain(Constraint::Fix(k1)).unwrap();
     s.constrain(Constraint::Concentric(k1, k2)).unwrap();
-    s.constrain(Constraint::Radius { curve: k2, value: 2.5 }).unwrap();
+    s.constrain(Constraint::Radius {
+        curve: k2,
+        value: 2.5,
+    })
+    .unwrap();
     run_case(
         "concentric",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, c2), [0.0, 0.0], 1e-12))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, c2), [0.0, 0.0], 1e-12)
+        })),
     );
 }
 
@@ -283,14 +416,20 @@ fn corpus_10_external_tangent_circles() {
     let k1 = s.circle(c1, 4.0).unwrap();
     let k2 = s.circle(c2, 3.0).unwrap();
     s.constrain(Constraint::Fix(k1)).unwrap();
-    s.constrain(Constraint::Radius { curve: k2, value: 3.0 }).unwrap();
+    s.constrain(Constraint::Radius {
+        curve: k2,
+        value: 3.0,
+    })
+    .unwrap();
     s.constrain(Constraint::HorizontalPoints(c1, c2)).unwrap();
     s.constrain(Constraint::Tangent(k1, k2)).unwrap();
     run_case(
         "external tangency",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, c2), [7.0, 0.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, c2), [7.0, 0.0], 1e-9)
+        })),
     );
 }
 
@@ -302,14 +441,20 @@ fn corpus_11_internal_tangent_circles() {
     let k1 = s.circle(c1, 5.0).unwrap();
     let k2 = s.circle(c2, 2.0).unwrap();
     s.constrain(Constraint::Fix(k1)).unwrap();
-    s.constrain(Constraint::Radius { curve: k2, value: 2.0 }).unwrap();
+    s.constrain(Constraint::Radius {
+        curve: k2,
+        value: 2.0,
+    })
+    .unwrap();
     s.constrain(Constraint::HorizontalPoints(c1, c2)).unwrap();
     s.constrain(Constraint::Tangent(k2, k1)).unwrap();
     run_case(
         "internal tangency",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, c2), [3.0, 0.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, c2), [3.0, 0.0], 1e-9)
+        })),
     );
 }
 
@@ -325,7 +470,11 @@ fn corpus_12_line_tangent_to_circle() {
     s.constrain(Constraint::Horizontal(l)).unwrap();
     s.constrain(Constraint::Tangent(l, k)).unwrap();
     s.constrain(Constraint::VerticalPoints(a, c)).unwrap();
-    s.constrain(Constraint::Length { line: l, value: 10.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: l,
+        value: 10.0,
+    })
+    .unwrap();
     run_case(
         "line tangent to circle",
         s,
@@ -343,12 +492,15 @@ fn corpus_13_midpoint() {
     let l = s.line_xy([0.0, 0.0], [10.0, 4.0]);
     let m = s.point2(3.0, 3.0);
     s.constrain(Constraint::Fix(l)).unwrap();
-    s.constrain(Constraint::Midpoint { point: m, line: l }).unwrap();
+    s.constrain(Constraint::Midpoint { point: m, line: l })
+        .unwrap();
     run_case(
         "midpoint",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, m), [5.0, 2.0], 1e-10))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, m), [5.0, 2.0], 1e-10)
+        })),
     );
 }
 
@@ -366,7 +518,9 @@ fn corpus_14_symmetric_about_axis() {
         "symmetric",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, b), [3.0, 1.0], 1e-10))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, b), [3.0, 1.0], 1e-10)
+        })),
     );
 }
 
@@ -377,10 +531,27 @@ fn corpus_15_collinear_segments() {
     let l2 = s.line_xy([12.5, 0.6], [17.0, -0.4]);
     s.constrain(Constraint::Fix(l1)).unwrap();
     s.constrain(Constraint::Collinear(l1, l2)).unwrap();
-    s.constrain(Constraint::Length { line: l2, value: 5.0 }).unwrap();
-    let EntityKind::Line { start: l2a, end: l2b } = s.entity(l2).kind else { unreachable!() };
-    let EntityKind::Line { end: l1b, .. } = s.entity(l1).kind else { unreachable!() };
-    s.constrain(Constraint::Distance { a: l1b, b: l2a, value: 2.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: l2,
+        value: 5.0,
+    })
+    .unwrap();
+    let EntityKind::Line {
+        start: l2a,
+        end: l2b,
+    } = s.entity(l2).kind
+    else {
+        unreachable!()
+    };
+    let EntityKind::Line { end: l1b, .. } = s.entity(l1).kind else {
+        unreachable!()
+    };
+    s.constrain(Constraint::Distance {
+        a: l1b,
+        b: l2a,
+        value: 2.0,
+    })
+    .unwrap();
     run_case(
         "collinear",
         s,
@@ -401,13 +572,24 @@ fn corpus_16_angle_between_lines() {
     let l1 = s.line(o, a).unwrap();
     let l2 = s.line(o, b).unwrap();
     s.constrain(Constraint::Fix(l1)).unwrap();
-    s.constrain(Constraint::Angle { a: l1, b: l2, value: PI / 6.0 }).unwrap();
-    s.constrain(Constraint::Length { line: l2, value: 6.0 }).unwrap();
+    s.constrain(Constraint::Angle {
+        a: l1,
+        b: l2,
+        value: PI / 6.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: l2,
+        value: 6.0,
+    })
+    .unwrap();
     run_case(
         "angle",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, b), [6.0 * (PI / 6.0).cos(), 3.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, b), [6.0 * (PI / 6.0).cos(), 3.0], 1e-9)
+        })),
     );
 }
 
@@ -422,13 +604,23 @@ fn corpus_17_perpendicular_l_bracket() {
     s.constrain(Constraint::Fix(o)).unwrap();
     s.constrain(Constraint::Horizontal(l1)).unwrap();
     s.constrain(Constraint::Perpendicular(l1, l2)).unwrap();
-    s.constrain(Constraint::Length { line: l1, value: 20.0 }).unwrap();
-    s.constrain(Constraint::Length { line: l2, value: 12.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: l1,
+        value: 20.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: l2,
+        value: 12.0,
+    })
+    .unwrap();
     run_case(
         "L bracket",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, b), [0.0, 12.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, b), [0.0, 12.0], 1e-9)
+        })),
     );
 }
 
@@ -441,15 +633,28 @@ fn corpus_18_parallel_at_distance() {
     let l2 = s.line(a, b).unwrap();
     s.constrain(Constraint::Fix(l1)).unwrap();
     s.constrain(Constraint::Parallel(l1, l2)).unwrap();
-    s.constrain(Constraint::Distance { a, b: l1, value: 5.0 }).unwrap();
-    let EntityKind::Line { start: l1a, .. } = s.entity(l1).kind else { unreachable!() };
+    s.constrain(Constraint::Distance {
+        a,
+        b: l1,
+        value: 5.0,
+    })
+    .unwrap();
+    let EntityKind::Line { start: l1a, .. } = s.entity(l1).kind else {
+        unreachable!()
+    };
     s.constrain(Constraint::VerticalPoints(a, l1a)).unwrap();
-    s.constrain(Constraint::Length { line: l2, value: 8.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: l2,
+        value: 8.0,
+    })
+    .unwrap();
     run_case(
         "parallel offset",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, b), [8.0, 5.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, b), [8.0, 5.0], 1e-9)
+        })),
     );
 }
 
@@ -460,13 +665,16 @@ fn corpus_19_point_on_circle_level_with_center() {
     let k = s.circle(c, 5.0).unwrap();
     let p = s.point2(-4.0, 0.6);
     s.constrain(Constraint::Fix(k)).unwrap();
-    s.constrain(Constraint::PointOnCurve { point: p, curve: k }).unwrap();
+    s.constrain(Constraint::PointOnCurve { point: p, curve: k })
+        .unwrap();
     s.constrain(Constraint::HorizontalPoints(p, c)).unwrap();
     run_case(
         "point on circle",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, p), [-5.0, 0.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, p), [-5.0, 0.0], 1e-9)
+        })),
     );
 }
 
@@ -484,7 +692,9 @@ fn corpus_20_arc_fully_defined() {
         "arc",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, en), [0.0, 5.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, en), [0.0, 5.0], 1e-9)
+        })),
     );
 }
 
@@ -493,41 +703,75 @@ fn corpus_21_ellipse_and_point() {
     let mut s = System::new();
     let c = s.point2(1.0, 1.0);
     let e = s.ellipse(c, 4.5, 2.2, 0.1).unwrap();
-    let EntityKind::Ellipse { semi_major, semi_minor, rotation, .. } = s.entity(e).kind else { unreachable!() };
+    let EntityKind::Ellipse {
+        semi_major,
+        semi_minor,
+        rotation,
+        ..
+    } = s.entity(e).kind
+    else {
+        unreachable!()
+    };
     let p = s.point2(5.5, 1.2);
     s.constrain(Constraint::Fix(c)).unwrap();
-    s.constrain(Constraint::VarValue { var: semi_major, value: 5.0 }).unwrap();
-    s.constrain(Constraint::VarValue { var: semi_minor, value: 2.0 }).unwrap();
-    s.constrain(Constraint::VarValue { var: rotation, value: 0.0 }).unwrap();
-    s.constrain(Constraint::PointOnCurve { point: p, curve: e }).unwrap();
+    s.constrain(Constraint::VarValue {
+        var: semi_major,
+        value: 5.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::VarValue {
+        var: semi_minor,
+        value: 2.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::VarValue {
+        var: rotation,
+        value: 0.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::PointOnCurve { point: p, curve: e })
+        .unwrap();
     s.constrain(Constraint::HorizontalPoints(p, c)).unwrap();
     run_case(
         "ellipse",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, p), [6.0, 1.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, p), [6.0, 1.0], 1e-9)
+        })),
     );
 }
 
 #[test]
 fn corpus_22_point_on_fixed_spline() {
     let mut s = System::new();
-    let cps: Vec<EntityId> =
-        [[0.0, 0.0], [2.0, 4.0], [6.0, 4.0], [8.0, 0.0]].iter().map(|p| s.point2(p[0], p[1])).collect();
+    let cps: Vec<EntityId> = [[0.0, 0.0], [2.0, 4.0], [6.0, 4.0], [8.0, 0.0]]
+        .iter()
+        .map(|p| s.point2(p[0], p[1]))
+        .collect();
     let sp = s.bspline(3, &cps).unwrap();
     for &c in &cps {
         s.constrain(Constraint::Fix(c)).unwrap();
     }
     let p = s.point2(3.9, 2.5);
-    s.constrain(Constraint::PointOnCurve { point: p, curve: sp }).unwrap();
-    let EntityKind::Point2 { x, .. } = s.entity(p).kind else { unreachable!() };
-    s.constrain(Constraint::VarValue { var: x, value: 4.0 }).unwrap();
+    s.constrain(Constraint::PointOnCurve {
+        point: p,
+        curve: sp,
+    })
+    .unwrap();
+    let EntityKind::Point2 { x, .. } = s.entity(p).kind else {
+        unreachable!()
+    };
+    s.constrain(Constraint::VarValue { var: x, value: 4.0 })
+        .unwrap();
     // A symmetric cubic Bézier: at x = 4 (t = 0.5) y = 3.
     run_case(
         "point on spline",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, p), [4.0, 3.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, p), [4.0, 3.0], 1e-9)
+        })),
     );
 }
 
@@ -539,13 +783,20 @@ fn corpus_23_g2_spline_into_arc() {
     let a1 = s.point2(0.0, 10.0);
     let arc = s.arc(c, a0, a1).unwrap();
     s.constrain(Constraint::Fix(arc)).unwrap();
-    let cps: Vec<EntityId> =
-        [[0.2, 10.1], [-4.0, 10.3], [-8.0, 8.0], [-12.0, 4.0]].iter().map(|p| s.point2(p[0], p[1])).collect();
+    let cps: Vec<EntityId> = [[0.2, 10.1], [-4.0, 10.3], [-8.0, 8.0], [-12.0, 4.0]]
+        .iter()
+        .map(|p| s.point2(p[0], p[1]))
+        .collect();
     let sp = s.bspline(3, &cps).unwrap();
     s.constrain(Constraint::Fix(cps[2])).unwrap();
     s.constrain(Constraint::Fix(cps[3])).unwrap();
     s.constrain(Constraint::Coincident(cps[0], a1)).unwrap();
-    s.constrain(Constraint::CurvatureContinuity { spline: sp, end: CurveEnd::Start, arc }).unwrap();
+    s.constrain(Constraint::CurvatureContinuity {
+        spline: sp,
+        end: CurveEnd::Start,
+        arc,
+    })
+    .unwrap();
     let p1 = cps[1];
     run_case(
         "G2 spline-arc",
@@ -562,15 +813,27 @@ fn corpus_23_g2_spline_into_arc() {
 fn corpus_24_tangent_arc_off_line_end() {
     let mut s = System::new();
     let l = s.line_xy([-10.0, 0.0], [0.0, 0.0]);
-    let EntityKind::Line { end: le, .. } = s.entity(l).kind else { unreachable!() };
+    let EntityKind::Line { end: le, .. } = s.entity(l).kind else {
+        unreachable!()
+    };
     let c = s.point2(0.3, 4.8);
     let st = s.point2(0.2, 0.1);
     let en = s.point2(5.2, 5.1);
     let arc = s.arc(c, st, en).unwrap();
     s.constrain(Constraint::Fix(l)).unwrap();
     s.constrain(Constraint::Coincident(st, le)).unwrap();
-    s.constrain(Constraint::TangentAtEnd { a: l, a_end: CurveEnd::End, b: arc, b_end: CurveEnd::Start }).unwrap();
-    s.constrain(Constraint::Radius { curve: arc, value: 5.0 }).unwrap();
+    s.constrain(Constraint::TangentAtEnd {
+        a: l,
+        a_end: CurveEnd::End,
+        b: arc,
+        b_end: CurveEnd::Start,
+    })
+    .unwrap();
+    s.constrain(Constraint::Radius {
+        curve: arc,
+        value: 5.0,
+    })
+    .unwrap();
     s.constrain(Constraint::HorizontalPoints(c, en)).unwrap();
     run_case(
         "tangent arc",
@@ -596,16 +859,25 @@ fn corpus_25_regular_hexagon_on_construction_circle() {
             s.point2(r * a.cos(), r * a.sin())
         })
         .collect();
-    let lines: Vec<EntityId> = (0..6).map(|i| s.line(pts[i], pts[(i + 1) % 6]).unwrap()).collect();
+    let lines: Vec<EntityId> = (0..6)
+        .map(|i| s.line(pts[i], pts[(i + 1) % 6]).unwrap())
+        .collect();
     s.constrain(Constraint::Fix(c)).unwrap();
-    s.constrain(Constraint::Radius { curve: k, value: 10.0 }).unwrap();
+    s.constrain(Constraint::Radius {
+        curve: k,
+        value: 10.0,
+    })
+    .unwrap();
     for &p in &pts {
-        s.constrain(Constraint::PointOnCurve { point: p, curve: k }).unwrap();
+        s.constrain(Constraint::PointOnCurve { point: p, curve: k })
+            .unwrap();
     }
     for i in 1..6 {
-        s.constrain(Constraint::EqualLength(lines[0], lines[i])).unwrap();
+        s.constrain(Constraint::EqualLength(lines[0], lines[i]))
+            .unwrap();
     }
-    s.constrain(Constraint::HorizontalPoints(pts[0], c)).unwrap();
+    s.constrain(Constraint::HorizontalPoints(pts[0], c))
+        .unwrap();
     let p1 = pts[1];
     // Five chord equalities fix the five independent central angles; the horizontal pins the
     // rotation: 12 rows, 12 unknowns, no redundancy.
@@ -613,7 +885,9 @@ fn corpus_25_regular_hexagon_on_construction_circle() {
         "hexagon",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, p1), [5.0, 5.0 * 3f64.sqrt()], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, p1), [5.0, 5.0 * 3f64.sqrt()], 1e-9)
+        })),
     );
 }
 
@@ -647,13 +921,16 @@ fn corpus_27_distance_point_point() {
     let a = s.point2(1.0, 1.0);
     let b = s.point2(4.0, 1.5);
     s.constrain(Constraint::Fix(a)).unwrap();
-    s.constrain(Constraint::Distance { a, b, value: 5.0 }).unwrap();
+    s.constrain(Constraint::Distance { a, b, value: 5.0 })
+        .unwrap();
     s.constrain(Constraint::HorizontalPoints(a, b)).unwrap();
     run_case(
         "distance",
         s,
         Expect::well(),
-        Some(Box::new(move |s, r| assert_pt(pt(r, s, b), [6.0, 1.0], 1e-9))),
+        Some(Box::new(move |s, r| {
+            assert_pt(pt(r, s, b), [6.0, 1.0], 1e-9)
+        })),
     );
 }
 
@@ -664,14 +941,24 @@ fn corpus_28_grounded_by_flags() {
     let r = rect(&mut s, 0.0, 0.0, 9.0, 4.0);
     s.set_entity_flag(r.p[0], VarFlag::Fixed);
     square_up(&mut s, &r);
-    s.constrain(Constraint::Length { line: r.l[0], value: 10.0 }).unwrap();
-    s.constrain(Constraint::Length { line: r.l[3], value: 5.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: r.l[0],
+        value: 10.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: r.l[3],
+        value: 5.0,
+    })
+    .unwrap();
     let p2 = r.p[2];
     run_case(
         "flag-grounded rectangle",
         s,
         Expect::well(),
-        Some(Box::new(move |s, rep| assert_pt(pt(rep, s, p2), [10.0, 5.0], 1e-9))),
+        Some(Box::new(move |s, rep| {
+            assert_pt(pt(rep, s, p2), [10.0, 5.0], 1e-9)
+        })),
     );
 }
 
@@ -717,7 +1004,11 @@ fn corpus_32_floating_rectangle() {
     let mut s = System::new();
     let r = rect(&mut s, 0.0, 0.0, 5.0, 3.0);
     square_up(&mut s, &r);
-    s.constrain(Constraint::Length { line: r.l[0], value: 5.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: r.l[0],
+        value: 5.0,
+    })
+    .unwrap();
     run_case("floating rectangle", s, Expect::under(3), None);
 }
 
@@ -748,7 +1039,11 @@ fn corpus_34_triangle_with_one_fixed_corner() {
     s.line(b, c).unwrap();
     s.line(c, a).unwrap();
     s.constrain(Constraint::Fix(a)).unwrap();
-    s.constrain(Constraint::Length { line: ab, value: 4.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: ab,
+        value: 4.0,
+    })
+    .unwrap();
     run_case("triangle one corner", s, Expect::under(3), None);
 }
 
@@ -759,7 +1054,11 @@ fn corpus_35_rotating_link() {
     let b = s.point2(3.0, 4.0);
     let l = s.line(a, b).unwrap();
     s.constrain(Constraint::Fix(a)).unwrap();
-    s.constrain(Constraint::Length { line: l, value: 5.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: l,
+        value: 5.0,
+    })
+    .unwrap();
     run_case(
         "rotating link",
         s,
@@ -779,7 +1078,8 @@ fn corpus_36_point_on_fixed_circle() {
     let k = s.circle(c, 5.0).unwrap();
     let p = s.point2(3.0, 4.2);
     s.constrain(Constraint::Fix(k)).unwrap();
-    s.constrain(Constraint::PointOnCurve { point: p, curve: k }).unwrap();
+    s.constrain(Constraint::PointOnCurve { point: p, curve: k })
+        .unwrap();
     run_case("point on circle", s, Expect::under(1), None);
 }
 
@@ -791,7 +1091,11 @@ fn corpus_37_free_ellipse_and_spline() {
     let cps: Vec<EntityId> = (0..5).map(|i| s.point2(i as f64, (i % 2) as f64)).collect();
     let sp = s.bspline(3, &cps).unwrap();
     let p = s.point2(2.0, 0.6);
-    s.constrain(Constraint::PointOnCurve { point: p, curve: sp }).unwrap();
+    s.constrain(Constraint::PointOnCurve {
+        point: p,
+        curve: sp,
+    })
+    .unwrap();
     // ellipse 5 + spline 10 + (point 2 + parameter 1 - 2 rows) = 16
     run_case(
         "free ellipse and spline",
@@ -813,9 +1117,21 @@ fn corpus_38_planar_four_bar() {
     let crank = s.line(a, b).unwrap();
     let coupler = s.line(b, c).unwrap();
     let rocker = s.line(c, d).unwrap();
-    s.constrain(Constraint::Length { line: crank, value: 1.0 }).unwrap();
-    s.constrain(Constraint::Length { line: coupler, value: 4.0 }).unwrap();
-    s.constrain(Constraint::Length { line: rocker, value: 2.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: crank,
+        value: 1.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: coupler,
+        value: 4.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: rocker,
+        value: 2.0,
+    })
+    .unwrap();
     run_case(
         "four-bar",
         s,
@@ -837,8 +1153,16 @@ fn corpus_39_planar_slider_crank() {
     s.constrain(Constraint::Fix(o)).unwrap();
     let crank = s.line(o, a).unwrap();
     let rod = s.line(a, b).unwrap();
-    s.constrain(Constraint::Length { line: crank, value: 1.0 }).unwrap();
-    s.constrain(Constraint::Length { line: rod, value: 3.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: crank,
+        value: 1.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: rod,
+        value: 3.0,
+    })
+    .unwrap();
     s.constrain(Constraint::HorizontalPoints(o, b)).unwrap();
     run_case("slider-crank", s, Expect::under(1), None);
 }
@@ -849,7 +1173,11 @@ fn corpus_40_partially_dimensioned_rectangle() {
     let r = rect(&mut s, 0.0, 0.0, 5.0, 3.0);
     s.constrain(Constraint::Fix(r.p[0])).unwrap();
     square_up(&mut s, &r);
-    s.constrain(Constraint::Length { line: r.l[0], value: 6.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: r.l[0],
+        value: 6.0,
+    })
+    .unwrap();
     let p = r.p;
     let l = r.l;
     run_case(
@@ -885,15 +1213,28 @@ fn corpus_42_duplicate_horizontal() {
     let h1 = s.constrain(Constraint::Horizontal(l)).unwrap();
     let h2 = s.constrain(Constraint::Horizontal(l)).unwrap();
     let rep = solve(&s, &opts());
-    assert_eq!(rep.redundant, vec![DependentConstraint { constraint: h2, depends_on: vec![h1] }]);
+    assert_eq!(
+        rep.redundant,
+        vec![DependentConstraint {
+            constraint: h2,
+            depends_on: vec![h1]
+        }]
+    );
     run_case("duplicate horizontal", s, Expect::over(3, vec![h2]), None);
 }
 
 #[test]
 fn corpus_43_equal_lengths_already_dimensioned() {
     let (mut s, r, _) = fixed_rect(40.0, 20.0);
-    let w2 = s.constrain(Constraint::Length { line: r.l[2], value: 40.0 }).unwrap();
-    let eq = s.constrain(Constraint::EqualLength(r.l[1], r.l[3])).unwrap();
+    let w2 = s
+        .constrain(Constraint::Length {
+            line: r.l[2],
+            value: 40.0,
+        })
+        .unwrap();
+    let eq = s
+        .constrain(Constraint::EqualLength(r.l[1], r.l[3]))
+        .unwrap();
     run_case("dimensioned twice", s, Expect::over(0, vec![w2, eq]), None);
 }
 
@@ -904,8 +1245,19 @@ fn corpus_44_horizontal_on_grounded_line() {
     s.set_entity_flag(l, VarFlag::Fixed);
     let h = s.constrain(Constraint::Horizontal(l)).unwrap();
     let rep = solve(&s, &opts());
-    assert_eq!(rep.redundant, vec![DependentConstraint { constraint: h, depends_on: vec![] }]);
-    run_case("horizontal on grounded line", s, Expect::over(0, vec![h]), None);
+    assert_eq!(
+        rep.redundant,
+        vec![DependentConstraint {
+            constraint: h,
+            depends_on: vec![]
+        }]
+    );
+    run_case(
+        "horizontal on grounded line",
+        s,
+        Expect::over(0, vec![h]),
+        None,
+    );
 }
 
 #[test]
@@ -919,11 +1271,28 @@ fn corpus_45_triangle_with_consistent_angle() {
     let ca = s.line(c, a).unwrap();
     s.constrain(Constraint::Fix(a)).unwrap();
     s.constrain(Constraint::Horizontal(ab)).unwrap();
-    s.constrain(Constraint::Length { line: ab, value: 3.0 }).unwrap();
-    s.constrain(Constraint::Length { line: bc, value: 4.0 }).unwrap();
-    s.constrain(Constraint::Length { line: ca, value: 5.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: ab,
+        value: 3.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: bc,
+        value: 4.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: ca,
+        value: 5.0,
+    })
+    .unwrap();
     let perp = s.constrain(Constraint::Perpendicular(ab, bc)).unwrap();
-    run_case("3-4-5 with right angle", s, Expect::over(0, vec![perp]), None);
+    run_case(
+        "3-4-5 with right angle",
+        s,
+        Expect::over(0, vec![perp]),
+        None,
+    );
 }
 
 // ============================================================================ conflicting
@@ -936,8 +1305,18 @@ fn corpus_46_two_lengths_on_one_line() {
     let l = s.line(a, b).unwrap();
     s.constrain(Constraint::Fix(a)).unwrap();
     s.constrain(Constraint::Horizontal(l)).unwrap();
-    let l10 = s.constrain(Constraint::Length { line: l, value: 10.0 }).unwrap();
-    let l20 = s.constrain(Constraint::Length { line: l, value: 20.0 }).unwrap();
+    let l10 = s
+        .constrain(Constraint::Length {
+            line: l,
+            value: 10.0,
+        })
+        .unwrap();
+    let l20 = s
+        .constrain(Constraint::Length {
+            line: l,
+            value: 20.0,
+        })
+        .unwrap();
     let rep = solve(&s, &opts());
     assert_eq!(rep.conflicting.len(), 1);
     assert_eq!(rep.conflicting[0].constraint, l20);
@@ -955,7 +1334,12 @@ fn corpus_47_horizontal_vertical_and_length() {
     s.constrain(Constraint::Fix(a)).unwrap();
     let h = s.constrain(Constraint::Horizontal(l)).unwrap();
     let v = s.constrain(Constraint::Vertical(l)).unwrap();
-    let len = s.constrain(Constraint::Length { line: l, value: 10.0 }).unwrap();
+    let len = s
+        .constrain(Constraint::Length {
+            line: l,
+            value: 10.0,
+        })
+        .unwrap();
     run_case("h + v + length", s, Expect::conflict(vec![len, h, v]), None);
 }
 
@@ -966,8 +1350,15 @@ fn corpus_48_fixed_points_wrong_distance() {
     let b = s.point2(3.0, 0.0);
     let fa = s.constrain(Constraint::Fix(a)).unwrap();
     let fb = s.constrain(Constraint::Fix(b)).unwrap();
-    let d = s.constrain(Constraint::Distance { a, b, value: 5.0 }).unwrap();
-    run_case("fixed points, wrong distance", s, Expect::conflict(vec![d, fa, fb]), None);
+    let d = s
+        .constrain(Constraint::Distance { a, b, value: 5.0 })
+        .unwrap();
+    run_case(
+        "fixed points, wrong distance",
+        s,
+        Expect::conflict(vec![d, fa, fb]),
+        None,
+    );
 }
 
 #[test]
@@ -978,15 +1369,33 @@ fn corpus_49_triangle_inequality_violated() {
     let c = s.point2(4.0, 1.0);
     s.constrain(Constraint::Fix(a)).unwrap();
     s.constrain(Constraint::Fix(b)).unwrap();
-    let ac = s.constrain(Constraint::Distance { a, b: c, value: 3.0 }).unwrap();
-    let bc = s.constrain(Constraint::Distance { a: b, b: c, value: 4.0 }).unwrap();
+    let ac = s
+        .constrain(Constraint::Distance {
+            a,
+            b: c,
+            value: 3.0,
+        })
+        .unwrap();
+    let bc = s
+        .constrain(Constraint::Distance {
+            a: b,
+            b: c,
+            value: 4.0,
+        })
+        .unwrap();
     run_case("3 + 4 < 10", s, Expect::conflict(vec![ac, bc]), None);
 }
 
 #[test]
 fn corpus_50_rectangle_with_wrong_diagonal() {
     let (mut s, r, ids) = fixed_rect(40.0, 20.0);
-    let diag = s.constrain(Constraint::Distance { a: r.p[0], b: r.p[2], value: 50.0 }).unwrap();
+    let diag = s
+        .constrain(Constraint::Distance {
+            a: r.p[0],
+            b: r.p[2],
+            value: 50.0,
+        })
+        .unwrap();
     let rep = solve(&s, &opts());
     let set = rep.conflict_set();
     // The diagonal fights the width and height.
@@ -1003,15 +1412,30 @@ fn corpus_51_concentric_but_apart() {
     let k2 = s.circle(c2, 1.0).unwrap();
     s.constrain(Constraint::Fix(c1)).unwrap();
     let con = s.constrain(Constraint::Concentric(k1, k2)).unwrap();
-    let d = s.constrain(Constraint::Distance { a: c1, b: c2, value: 4.0 }).unwrap();
-    run_case("concentric and apart", s, Expect::conflict(vec![con, d]), None);
+    let d = s
+        .constrain(Constraint::Distance {
+            a: c1,
+            b: c2,
+            value: 4.0,
+        })
+        .unwrap();
+    run_case(
+        "concentric and apart",
+        s,
+        Expect::conflict(vec![con, d]),
+        None,
+    );
 }
 
 // ============================================================================ drag
 
 fn drag_case(s: &System, req: &DragRequest) -> SolveReport {
     let rep = drag(s, req, &opts());
-    assert!(rep.converged, "drag did not converge: {}", rep.residual_norm);
+    assert!(
+        rep.converged,
+        "drag did not converge: {}",
+        rep.residual_norm
+    );
     rep
 }
 
@@ -1031,11 +1455,19 @@ fn corpus_53_drag_link_end() {
     let b = s.point2(6.0, 1.0);
     let l = s.line(a, b).unwrap();
     s.constrain(Constraint::Fix(a)).unwrap();
-    s.constrain(Constraint::Length { line: l, value: 5.0 }).unwrap();
+    s.constrain(Constraint::Length {
+        line: l,
+        value: 5.0,
+    })
+    .unwrap();
     let target = [1.0 + 3.0, 1.0 + 9.0];
     let rep = drag_case(&s, &DragRequest::point(&s, b, target));
     let n = 3f64.hypot(9.0);
-    assert_pt(pt(&rep, &s, b), [1.0 + 5.0 * 3.0 / n, 1.0 + 5.0 * 9.0 / n], 1e-9);
+    assert_pt(
+        pt(&rep, &s, b),
+        [1.0 + 5.0 * 3.0 / n, 1.0 + 5.0 * 9.0 / n],
+        1e-9,
+    );
     assert_pt(pt(&rep, &s, a), [1.0, 1.0], 1e-12);
 }
 
@@ -1046,7 +1478,8 @@ fn corpus_54_drag_point_on_circle() {
     let k = s.circle(c, 5.0).unwrap();
     let p = s.point2(5.0, 0.0);
     s.constrain(Constraint::Fix(k)).unwrap();
-    s.constrain(Constraint::PointOnCurve { point: p, curve: k }).unwrap();
+    s.constrain(Constraint::PointOnCurve { point: p, curve: k })
+        .unwrap();
     let rep = drag_case(&s, &DragRequest::point(&s, p, [-6.0, 8.0]));
     assert_pt(pt(&rep, &s, p), [-3.0, 4.0], 1e-9);
     assert_close(rep.drag.unwrap().distance_to_target, 5.0, 1e-9);
@@ -1073,9 +1506,20 @@ fn corpus_56_drag_four_bar_coupler() {
     let c = s.point2(3.874, 1.997);
     s.constrain(Constraint::Fix(a)).unwrap();
     s.constrain(Constraint::Fix(d)).unwrap();
-    s.constrain(Constraint::Distance { a, b, value: 1.0 }).unwrap();
-    s.constrain(Constraint::Distance { a: b, b: c, value: 4.0 }).unwrap();
-    s.constrain(Constraint::Distance { a: c, b: d, value: 2.0 }).unwrap();
+    s.constrain(Constraint::Distance { a, b, value: 1.0 })
+        .unwrap();
+    s.constrain(Constraint::Distance {
+        a: b,
+        b: c,
+        value: 4.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Distance {
+        a: c,
+        b: d,
+        value: 2.0,
+    })
+    .unwrap();
     let rep = drag_case(&s, &DragRequest::point(&s, b, [0.8, 0.9]));
     let (pb, pc) = (pt(&rep, &s, b), pt(&rep, &s, c));
     assert_close(dist(pb, [0.0, 0.0]), 1.0, 1e-9);

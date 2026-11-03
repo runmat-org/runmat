@@ -55,12 +55,12 @@ mod system;
 
 pub use ids::{ConstraintId, EntityId, VarId};
 pub use report::{
-    ComponentReport, DependentConstraint, DragReport, EntityDof, Measurement, Method, SolveOptions, SolveReport,
-    Status, WarmStart, WarmStartReport,
+    ComponentReport, DependentConstraint, DragReport, EntityDof, Measurement, Method, SolveOptions,
+    SolveReport, Status, WarmStart, WarmStartReport,
 };
 pub use solver::{drag, solve, DragRequest};
 pub use system::{
-    AngleMode, BuildError, Constraint, ConstraintKindRecord, ConstraintRecord, CurveEnd, DistanceMode, Entity,
-    EntityKind, Frame, InternalKind, Mate, System, TangentKind, Target, VarFlag, VarRole, Variable,
-    MAX_SPLINE_CONTROL_POINTS,
+    AngleMode, BuildError, Constraint, ConstraintKindRecord, ConstraintRecord, CurveEnd,
+    DistanceMode, Entity, EntityKind, Frame, InternalKind, Mate, System, TangentKind, Target,
+    VarFlag, VarRole, Variable, MAX_SPLINE_CONTROL_POINTS,
 };

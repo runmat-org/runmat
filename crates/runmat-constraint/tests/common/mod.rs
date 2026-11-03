@@ -15,7 +15,12 @@ pub struct Rect {
 }
 
 pub fn rect(s: &mut System, x: f64, y: f64, w: f64, h: f64) -> Rect {
-    let p = [s.point2(x, y), s.point2(x + w, y), s.point2(x + w, y + h), s.point2(x, y + h)];
+    let p = [
+        s.point2(x, y),
+        s.point2(x + w, y),
+        s.point2(x + w, y + h),
+        s.point2(x, y + h),
+    ];
     let l = [
         s.line(p[0], p[1]).unwrap(),
         s.line(p[1], p[2]).unwrap(),

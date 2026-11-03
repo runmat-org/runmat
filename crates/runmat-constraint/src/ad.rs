@@ -93,8 +93,8 @@ impl<const N: usize> Add for Dual<N> {
     #[inline]
     fn add(self, o: Self) -> Self {
         let mut d = self.d;
-        for i in 0..N {
-            d[i] += o.d[i];
+        for (di, odi) in d.iter_mut().zip(o.d.iter()) {
+            *di += odi;
         }
         Self { v: self.v + o.v, d }
     }
@@ -104,8 +104,8 @@ impl<const N: usize> Sub for Dual<N> {
     #[inline]
     fn sub(self, o: Self) -> Self {
         let mut d = self.d;
-        for i in 0..N {
-            d[i] -= o.d[i];
+        for (di, odi) in d.iter_mut().zip(o.d.iter()) {
+            *di -= odi;
         }
         Self { v: self.v - o.v, d }
     }
@@ -115,8 +115,8 @@ impl<const N: usize> Mul for Dual<N> {
     #[inline]
     fn mul(self, o: Self) -> Self {
         let mut d = [0.0; N];
-        for i in 0..N {
-            d[i] = self.d[i] * o.v + self.v * o.d[i];
+        for ((di, sdi), odi) in d.iter_mut().zip(self.d.iter()).zip(o.d.iter()) {
+            *di = sdi * o.v + self.v * odi;
         }
         Self { v: self.v * o.v, d }
     }
@@ -128,8 +128,8 @@ impl<const N: usize> Div for Dual<N> {
         let inv = 1.0 / o.v;
         let q = self.v * inv;
         let mut d = [0.0; N];
-        for i in 0..N {
-            d[i] = (self.d[i] - q * o.d[i]) * inv;
+        for ((di, sdi), odi) in d.iter_mut().zip(self.d.iter()).zip(o.d.iter()) {
+            *di = (sdi - q * odi) * inv;
         }
         Self { v: q, d }
     }
@@ -149,14 +149,20 @@ impl<const N: usize> Add<f64> for Dual<N> {
     type Output = Self;
     #[inline]
     fn add(self, o: f64) -> Self {
-        Self { v: self.v + o, d: self.d }
+        Self {
+            v: self.v + o,
+            d: self.d,
+        }
     }
 }
 impl<const N: usize> Sub<f64> for Dual<N> {
     type Output = Self;
     #[inline]
     fn sub(self, o: f64) -> Self {
-        Self { v: self.v - o, d: self.d }
+        Self {
+            v: self.v - o,
+            d: self.d,
+        }
     }
 }
 impl<const N: usize> Mul<f64> for Dual<N> {
@@ -199,15 +205,19 @@ impl<const N: usize> Real for Dual<N> {
         let v = self.v.atan2(x.v);
         let mut d = [0.0; N];
         if r2 > 1e-300 {
-            for i in 0..N {
-                d[i] = (x.v * self.d[i] - self.v * x.d[i]) / r2;
+            for ((di, sdi), xdi) in d.iter_mut().zip(self.d.iter()).zip(x.d.iter()) {
+                *di = (x.v * sdi - self.v * xdi) / r2;
             }
         }
         Self { v, d }
     }
     fn powi(self, n: i32) -> Self {
         let v = self.v.powi(n);
-        let dv = if n == 0 { 0.0 } else { n as f64 * self.v.powi(n - 1) };
+        let dv = if n == 0 {
+            0.0
+        } else {
+            n as f64 * self.v.powi(n - 1)
+        };
         self.chain(v, dv)
     }
 }

@@ -12,7 +12,14 @@ pub struct WarmStart {
 impl WarmStart {
     /// Every variable's value from an earlier report.
     pub fn from_report(report: &SolveReport) -> Self {
-        Self { values: report.values.iter().enumerate().map(|(i, &v)| (VarId(i as u32), v)).collect() }
+        Self {
+            values: report
+                .values
+                .iter()
+                .enumerate()
+                .map(|(i, &v)| (VarId(i as u32), v))
+                .collect(),
+        }
     }
 }
 
@@ -183,7 +190,10 @@ impl SolveReport {
         self.entity_dof.get(e.index()).and_then(|d| d.dof)
     }
     pub fn measurement(&self, c: ConstraintId) -> Option<f64> {
-        self.measurements.iter().find(|m| m.constraint == c).map(|m| m.value)
+        self.measurements
+            .iter()
+            .find(|m| m.constraint == c)
+            .map(|m| m.value)
     }
     /// The redundant constraint ids.
     pub fn redundant_ids(&self) -> Vec<ConstraintId> {
@@ -191,8 +201,11 @@ impl SolveReport {
     }
     /// Every constraint involved in a conflict (each conflicting one plus what it fights).
     pub fn conflict_set(&self) -> Vec<ConstraintId> {
-        let mut out: Vec<ConstraintId> =
-            self.conflicting.iter().flat_map(|d| std::iter::once(d.constraint).chain(d.depends_on.iter().copied())).collect();
+        let mut out: Vec<ConstraintId> = self
+            .conflicting
+            .iter()
+            .flat_map(|d| std::iter::once(d.constraint).chain(d.depends_on.iter().copied()))
+            .collect();
         out.sort();
         out.dedup();
         out

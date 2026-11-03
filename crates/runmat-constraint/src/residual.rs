@@ -12,8 +12,8 @@
 use crate::ad::{Dual, Real};
 use crate::ids::{ConstraintId, EntityId, VarId};
 use crate::system::{
-    AngleMode, Constraint, ConstraintKindRecord, CurveEnd, DistanceMode, EntityKind, Frame, InternalKind,
-    Mate, System, TangentKind, Target,
+    AngleMode, Constraint, ConstraintKindRecord, CurveEnd, DistanceMode, EntityKind, Frame,
+    InternalKind, Mate, System, TangentKind, Target,
 };
 use std::f64::consts::PI;
 
@@ -76,11 +76,22 @@ pub(crate) enum Op {
     /// `[line, round]` → `side · dist(c, line) - r`.
     TangentLineRound { round: Round, side: f64 },
     /// `[roundA, roundB]` → `|ca - cb| - (ra + rb)` or `|ca - cb| - σ(ra - rb)`.
-    TangentRounds { a: Round, b: Round, internal: bool, sigma: f64 },
+    TangentRounds {
+        a: Round,
+        b: Round,
+        internal: bool,
+        sigma: f64,
+    },
     /// `[endA(4), endB(4)]` → `sin` of the angle between the end tangents.
     TangentEnds { a: EndDir, b: EndDir },
     /// `[Q0, Q1, Q2, arc(6)]` → G1 (`cos` between tangent and radius) and `κ r - σ`.
-    CurvatureG2 { e1: f64, e2: f64, f: f64, degree: f64, sigma: f64 },
+    CurvatureG2 {
+        e1: f64,
+        e2: f64,
+        f: f64,
+        degree: f64,
+        sigma: f64,
+    },
     /// `[l1, l2]` → `|l1| - |l2|`.
     EqualLength,
     /// `[roundA, roundB]` → `ra - rb`.
@@ -96,7 +107,10 @@ pub(crate) enum Op {
     /// `[vars…]` → `x_i - target_i`.
     FixValues { targets: Vec<f64> },
     /// `[c, s, e]` → centre and start fixed, end held along its circle's tangent (5 rows).
-    FixArc { targets: [f64; 6], tangent: [f64; 2] },
+    FixArc {
+        targets: [f64; 6],
+        tangent: [f64; 2],
+    },
     /// `[body(7)]` → position and orientation held (6 rows).
     FixBody { targets: [f64; 7] },
     /// `[p, line]` → signed distance from the line.
@@ -149,7 +163,11 @@ impl Op {
     /// The number of residual rows.
     pub(crate) fn rows(&self) -> usize {
         match self {
-            Op::Coincident | Op::Midpoint | Op::Symmetric | Op::Collinear | Op::PointOnSpline { .. } => 2,
+            Op::Coincident
+            | Op::Midpoint
+            | Op::Symmetric
+            | Op::Collinear
+            | Op::PointOnSpline { .. } => 2,
             Op::CurvatureG2 { .. } => 2,
             Op::Coradial { .. } => 3,
             Op::FixValues { targets } => targets.len(),
@@ -206,25 +224,43 @@ impl Op {
                 let r = round.radius(&x[4..]);
                 out[0] = signed_dist(&x[0..4], (x[4], x[5])) * *side - r;
             }
-            Op::TangentRounds { a, b, internal, sigma } => {
+            Op::TangentRounds {
+                a,
+                b,
+                internal,
+                sigma,
+            } => {
                 let ra = a.radius(&x[..a.len()]);
                 let xb = &x[a.len()..];
                 let rb = b.radius(xb);
                 let d = (x[0] - xb[0]).hypot(x[1] - xb[1]);
-                out[0] = if *internal { d - (ra - rb) * *sigma } else { d - (ra + rb) };
+                out[0] = if *internal {
+                    d - (ra - rb) * *sigma
+                } else {
+                    d - (ra + rb)
+                };
             }
             Op::TangentEnds { a, b } => {
                 let (ta, tb) = (a.dir(&x[0..4]), b.dir(&x[4..8]));
                 out[0] = cross(ta, tb) / (norm(ta) * norm(tb));
             }
-            Op::CurvatureG2 { e1, e2, f, degree, sigma } => {
+            Op::CurvatureG2 {
+                e1,
+                e2,
+                f,
+                degree,
+                sigma,
+            } => {
                 let p = *degree;
                 let q0 = (x[0], x[1]);
                 let d01 = (x[2] - x[0], x[3] - x[1]);
                 let d12 = (x[4] - x[2], x[5] - x[3]);
                 let c1 = (d01.0 * (p / e1), d01.1 * (p / e1));
                 let k = p * (p - 1.0) / f;
-                let c2 = ((d12.0 / *e2 - d01.0 / *e1) * k, (d12.1 / *e2 - d01.1 / *e1) * k);
+                let c2 = (
+                    (d12.0 / *e2 - d01.0 / *e1) * k,
+                    (d12.1 / *e2 - d01.1 / *e1) * k,
+                );
                 let arc = &x[6..12];
                 let rad = (q0.0 - arc[0], q0.1 - arc[1]);
                 out[0] = dot(c1, rad) / (norm(c1) * norm(rad));
@@ -272,7 +308,12 @@ impl Op {
                     out[i] = x[i] - targets[i];
                 }
                 let q = unit_quat(&x[3..7]);
-                let q0 = [S::cst(targets[3]), S::cst(targets[4]), S::cst(targets[5]), S::cst(targets[6])];
+                let q0 = [
+                    S::cst(targets[3]),
+                    S::cst(targets[4]),
+                    S::cst(targets[5]),
+                    S::cst(targets[6]),
+                ];
                 let v = rel_vec(&q0, &q);
                 out[3] = v[0];
                 out[4] = v[1];
@@ -337,7 +378,11 @@ impl Op {
 fn jac_n<const N: usize>(op: &Op, x: &[f64], vals: &mut [f64], jac: &mut [f64]) {
     let n = x.len();
     assert!(n <= N, "constraint reads {n} variables, more than {N}");
-    let xs: Vec<Dual<N>> = x.iter().enumerate().map(|(i, &v)| Dual::var(v, i)).collect();
+    let xs: Vec<Dual<N>> = x
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| Dual::var(v, i))
+        .collect();
     let rows = op.rows();
     let mut out = vec![Dual::<N>::cst(0.0); rows];
     op.eval(&xs, &mut out);
@@ -388,12 +433,18 @@ pub(crate) fn spline_point<S: Real>(degree: usize, knots: &[f64], cps: &[S], t: 
         s += 1;
     }
     let mut dx: Vec<S> = (0..=degree).map(|j| cps[2 * (j + s - degree)]).collect();
-    let mut dy: Vec<S> = (0..=degree).map(|j| cps[2 * (j + s - degree) + 1]).collect();
+    let mut dy: Vec<S> = (0..=degree)
+        .map(|j| cps[2 * (j + s - degree) + 1])
+        .collect();
     for r in 1..=degree {
         for j in (r..=degree).rev() {
             let i = j + s - degree;
             let den = knots[i + degree + 1 - r] - knots[i];
-            let alpha = if den > 0.0 { (t - knots[i]) / den } else { S::cst(0.0) };
+            let alpha = if den > 0.0 {
+                (t - knots[i]) / den
+            } else {
+                S::cst(0.0)
+            };
             let one = S::cst(1.0) - alpha;
             dx[j] = dx[j - 1] * one + dx[j] * alpha;
             dy[j] = dy[j - 1] * one + dy[j] * alpha;
@@ -405,7 +456,12 @@ pub(crate) fn spline_point<S: Real>(degree: usize, knots: &[f64], cps: &[S], t: 
 /// The parameter of the sampled spline point closest to `p` (deterministic, used to seed the
 /// curve parameter of a point-on-spline constraint).
 pub(crate) fn closest_spline_parameter(sys: &System, curve: EntityId, p: [f64; 2]) -> f64 {
-    let EntityKind::BSpline { degree, control_points, knots } = &sys.entity(curve).kind else {
+    let EntityKind::BSpline {
+        degree,
+        control_points,
+        knots,
+    } = &sys.entity(curve).kind
+    else {
         return 0.0;
     };
     let cps: Vec<f64> = control_points.iter().flat_map(|c| sys.point(*c)).collect();
@@ -452,11 +508,19 @@ fn rotate<S: Real>(q: &[S; 4], v: [S; 3]) -> [S; 3] {
     let t = cross3(u, v);
     let t = [t[0] * 2.0, t[1] * 2.0, t[2] * 2.0];
     let ut = cross3(u, t);
-    [v[0] + q[0] * t[0] + ut[0], v[1] + q[0] * t[1] + ut[1], v[2] + q[0] * t[2] + ut[2]]
+    [
+        v[0] + q[0] * t[0] + ut[0],
+        v[1] + q[0] * t[1] + ut[1],
+        v[2] + q[0] * t[2] + ut[2],
+    ]
 }
 
 fn cross3<S: Real>(a: [S; 3], b: [S; 3]) -> [S; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 fn dot3<S: Real>(a: [S; 3], b: [S; 3]) -> S {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -475,9 +539,21 @@ fn connector_world<S: Real>(x: &[S], local: &Frame) -> ([S; 3], [S; 4], [[S; 3];
     let q = qmul(&qb, &ql);
     let (w, a, b, c) = (q[0], q[1], q[2], q[3]);
     let one = S::cst(1.0);
-    let xa = [one - (b.sq() + c.sq()) * 2.0, (a * b + w * c) * 2.0, (a * c - w * b) * 2.0];
-    let ya = [(a * b - w * c) * 2.0, one - (a.sq() + c.sq()) * 2.0, (b * c + w * a) * 2.0];
-    let za = [(a * c + w * b) * 2.0, (b * c - w * a) * 2.0, one - (a.sq() + b.sq()) * 2.0];
+    let xa = [
+        one - (b.sq() + c.sq()) * 2.0,
+        (a * b + w * c) * 2.0,
+        (a * c - w * b) * 2.0,
+    ];
+    let ya = [
+        (a * b - w * c) * 2.0,
+        one - (a.sq() + c.sq()) * 2.0,
+        (b * c + w * a) * 2.0,
+    ];
+    let za = [
+        (a * c + w * b) * 2.0,
+        (b * c - w * a) * 2.0,
+        one - (a.sq() + b.sq()) * 2.0,
+    ];
     (origin, q, [xa, ya, za])
 }
 
@@ -621,7 +697,10 @@ impl<'a> Lower<'a> {
     }
     fn body(&mut self, b: EntityId) {
         match self.kind(b) {
-            EntityKind::Body { position, orientation } => {
+            EntityKind::Body {
+                position,
+                orientation,
+            } => {
                 let (p, q) = (*position, *orientation);
                 self.vars.extend(p);
                 self.vars.extend(q);
@@ -646,7 +725,11 @@ impl<'a> Lower<'a> {
                 self.point(stop);
                 EndDir::Segment
             }
-            EntityKind::Arc { center, start, end: stop } => {
+            EntityKind::Arc {
+                center,
+                start,
+                end: stop,
+            } => {
                 self.point(center);
                 self.point(if end == CurveEnd::Start { start } else { stop });
                 EndDir::ArcRadius
@@ -684,7 +767,11 @@ pub(crate) fn compile(sys: &System, values: &[f64]) -> Vec<Compiled> {
     let mut out = Vec::with_capacity(sys.constraints.len());
     for (i, rec) in sys.constraints.iter().enumerate() {
         let id = ConstraintId(i as u32);
-        let mut l = Lower { sys, values, vars: Vec::new() };
+        let mut l = Lower {
+            sys,
+            values,
+            vars: Vec::new(),
+        };
         let mut range = None;
         let (op, internal) = match &rec.constraint {
             ConstraintKindRecord::Internal { kind, entity } => {
@@ -694,7 +781,9 @@ pub(crate) fn compile(sys: &System, values: &[f64]) -> Vec<Compiled> {
                         Op::ArcRadius
                     }
                     InternalKind::QuaternionNorm => {
-                        let EntityKind::Body { orientation, .. } = l.kind(*entity) else { unreachable!() };
+                        let EntityKind::Body { orientation, .. } = l.kind(*entity) else {
+                            unreachable!()
+                        };
                         l.vars.extend(*orientation);
                         Op::QuatNorm
                     }
@@ -703,7 +792,14 @@ pub(crate) fn compile(sys: &System, values: &[f64]) -> Vec<Compiled> {
             }
             ConstraintKindRecord::User(c) => (lower_user(&mut l, c, rec, &mut range), false),
         };
-        out.push(Compiled { id, vars: l.vars, op, range, reference: rec.reference, internal });
+        out.push(Compiled {
+            id,
+            vars: l.vars,
+            op,
+            range,
+            reference: rec.reference,
+            internal,
+        });
     }
     out
 }
@@ -766,7 +862,12 @@ fn lower_user(
                 let internal = (d - (ra - rb).abs()).abs() < (d - (ra + rb)).abs();
                 let ra_kind = l.round(*a);
                 let rb_kind = l.round(*b);
-                Op::TangentRounds { a: ra_kind, b: rb_kind, internal, sigma: sign(ra - rb) }
+                Op::TangentRounds {
+                    a: ra_kind,
+                    b: rb_kind,
+                    internal,
+                    sigma: sign(ra - rb),
+                }
             }
         }
         C::TangentAtEnd { a, a_end, b, b_end } => {
@@ -775,7 +876,12 @@ fn lower_user(
             Op::TangentEnds { a: da, b: db }
         }
         C::CurvatureContinuity { spline, end, arc } => {
-            let EntityKind::BSpline { degree, control_points, knots } = l.kind(*spline).clone() else {
+            let EntityKind::BSpline {
+                degree,
+                control_points,
+                knots,
+            } = l.kind(*spline).clone()
+            else {
                 unreachable!()
             };
             let n = control_points.len() - 1;
@@ -788,7 +894,11 @@ fn lower_user(
                     knots[p + 1] - knots[2],
                 ),
                 CurveEnd::End => (
-                    [control_points[n], control_points[n - 1], control_points[n - 2]],
+                    [
+                        control_points[n],
+                        control_points[n - 1],
+                        control_points[n - 2],
+                    ],
                     knots[n + p] - knots[n],
                     knots[n + p - 1] - knots[n - 1],
                     knots[n + p - 1] - knots[n],
@@ -802,7 +912,13 @@ fn lower_user(
                 l.point(p);
             }
             l.round(*arc);
-            Op::CurvatureG2 { e1, e2, f, degree: p as f64, sigma }
+            Op::CurvatureG2 {
+                e1,
+                e2,
+                f,
+                degree: p as f64,
+                sigma,
+            }
         }
         C::EqualLength(a, b) => {
             l.line(*a);
@@ -853,17 +969,24 @@ fn lower_user(
                 let t = &rec.fix_targets;
                 let r = [t[4] - t[0], t[5] - t[1]];
                 let n = r[0].hypot(r[1]).max(1e-300);
-                Op::FixArc { targets: [t[0], t[1], t[2], t[3], t[4], t[5]], tangent: [-r[1] / n, r[0] / n] }
+                Op::FixArc {
+                    targets: [t[0], t[1], t[2], t[3], t[4], t[5]],
+                    tangent: [-r[1] / n, r[0] / n],
+                }
             }
             EntityKind::Body { .. } => {
                 l.body(*e);
                 let t = &rec.fix_targets;
                 let q = crate::system::normalize4([t[3], t[4], t[5], t[6]]);
-                Op::FixBody { targets: [t[0], t[1], t[2], q[0], q[1], q[2], q[3]] }
+                Op::FixBody {
+                    targets: [t[0], t[1], t[2], q[0], q[1], q[2], q[3]],
+                }
             }
             _ => {
                 l.vars = l.sys.entity_vars(*e);
-                Op::FixValues { targets: rec.fix_targets.clone() }
+                Op::FixValues {
+                    targets: rec.fix_targets.clone(),
+                }
             }
         },
         C::PointOnCurve { point, curve } => {
@@ -873,13 +996,24 @@ fn lower_user(
                     l.line(*curve);
                     Op::PointOnLine
                 }
-                EntityKind::Circle { .. } | EntityKind::Arc { .. } => Op::PointOnRound { round: l.round(*curve) },
-                EntityKind::Ellipse { center, semi_major, semi_minor, rotation } => {
+                EntityKind::Circle { .. } | EntityKind::Arc { .. } => Op::PointOnRound {
+                    round: l.round(*curve),
+                },
+                EntityKind::Ellipse {
+                    center,
+                    semi_major,
+                    semi_minor,
+                    rotation,
+                } => {
                     l.point(center);
                     l.vars.extend([semi_major, semi_minor, rotation]);
                     Op::PointOnEllipse
                 }
-                EntityKind::BSpline { degree, control_points, knots } => {
+                EntityKind::BSpline {
+                    degree,
+                    control_points,
+                    knots,
+                } => {
                     l.vars.push(rec.aux[0]);
                     for p in &control_points {
                         l.point(*p);
@@ -910,8 +1044,16 @@ fn lower_user(
             l.line(*b);
             Op::Angle { theta: *value }
         }
-        C::Radius { curve, value } => Op::RadiusValue { round: l.round(*curve), scale: 1.0, v: *value },
-        C::Diameter { curve, value } => Op::RadiusValue { round: l.round(*curve), scale: 2.0, v: *value },
+        C::Radius { curve, value } => Op::RadiusValue {
+            round: l.round(*curve),
+            scale: 1.0,
+            v: *value,
+        },
+        C::Diameter { curve, value } => Op::RadiusValue {
+            round: l.round(*curve),
+            scale: 2.0,
+            v: *value,
+        },
         C::Length { line, value } => {
             l.line(*line);
             Op::Length { v: *value }
@@ -939,22 +1081,34 @@ fn lower_user(
                 Mate::Planar { .. } => MateOp::Planar,
                 Mate::Ball { .. } => MateOp::Ball,
                 Mate::Parallel { .. } => MateOp::Parallel,
-                Mate::Tangent { kind: TangentKind::PlaneSphere { radius }, .. } => {
-                    MateOp::TangentSphere { r: *radius }
-                }
-                Mate::Tangent { kind: TangentKind::PlaneCylinder { radius }, .. } => {
-                    MateOp::TangentCylinder { r: *radius }
-                }
-                Mate::Distance { mode: DistanceMode::PointPoint, target: t, .. } => {
-                    MateOp::DistancePoint { d: target(t) }
-                }
-                Mate::Distance { mode: DistanceMode::PlanePoint, target: t, .. } => {
-                    MateOp::DistancePlane { d: target(t) }
-                }
-                Mate::Angle { mode: AngleMode::AboutZ, target: t, .. } => MateOp::AngleAboutZ { theta: target(t) },
-                Mate::Angle { mode: AngleMode::BetweenZ, target: t, .. } => {
-                    MateOp::AngleBetweenZ { theta: target(t) }
-                }
+                Mate::Tangent {
+                    kind: TangentKind::PlaneSphere { radius },
+                    ..
+                } => MateOp::TangentSphere { r: *radius },
+                Mate::Tangent {
+                    kind: TangentKind::PlaneCylinder { radius },
+                    ..
+                } => MateOp::TangentCylinder { r: *radius },
+                Mate::Distance {
+                    mode: DistanceMode::PointPoint,
+                    target: t,
+                    ..
+                } => MateOp::DistancePoint { d: target(t) },
+                Mate::Distance {
+                    mode: DistanceMode::PlanePoint,
+                    target: t,
+                    ..
+                } => MateOp::DistancePlane { d: target(t) },
+                Mate::Angle {
+                    mode: AngleMode::AboutZ,
+                    target: t,
+                    ..
+                } => MateOp::AngleAboutZ { theta: target(t) },
+                Mate::Angle {
+                    mode: AngleMode::BetweenZ,
+                    target: t,
+                    ..
+                } => MateOp::AngleBetweenZ { theta: target(t) },
             };
             Op::Mate { kind, la, lb }
         }
@@ -1002,7 +1156,9 @@ mod tests {
         let mut s = seed;
         (0..n)
             .map(|_| {
-                s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                s = s
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 ((s >> 11) as f64 / (1u64 << 53) as f64) * 4.0 - 2.0
             })
             .collect()
@@ -1034,30 +1190,113 @@ mod tests {
             (Op::SameY, 4),
             (Op::Parallel, 8),
             (Op::Perpendicular, 8),
-            (Op::TangentLineRound { round: Round::Circle, side: 1.0 }, 7),
-            (Op::TangentLineRound { round: Round::Arc, side: -1.0 }, 10),
-            (Op::TangentRounds { a: Round::Circle, b: Round::Arc, internal: false, sigma: 1.0 }, 9),
-            (Op::TangentRounds { a: Round::Arc, b: Round::Circle, internal: true, sigma: -1.0 }, 9),
-            (Op::TangentEnds { a: EndDir::Segment, b: EndDir::ArcRadius }, 8),
-            (Op::CurvatureG2 { e1: 0.5, e2: 0.5, f: 0.5, degree: 3.0, sigma: 1.0 }, 12),
+            (
+                Op::TangentLineRound {
+                    round: Round::Circle,
+                    side: 1.0,
+                },
+                7,
+            ),
+            (
+                Op::TangentLineRound {
+                    round: Round::Arc,
+                    side: -1.0,
+                },
+                10,
+            ),
+            (
+                Op::TangentRounds {
+                    a: Round::Circle,
+                    b: Round::Arc,
+                    internal: false,
+                    sigma: 1.0,
+                },
+                9,
+            ),
+            (
+                Op::TangentRounds {
+                    a: Round::Arc,
+                    b: Round::Circle,
+                    internal: true,
+                    sigma: -1.0,
+                },
+                9,
+            ),
+            (
+                Op::TangentEnds {
+                    a: EndDir::Segment,
+                    b: EndDir::ArcRadius,
+                },
+                8,
+            ),
+            (
+                Op::CurvatureG2 {
+                    e1: 0.5,
+                    e2: 0.5,
+                    f: 0.5,
+                    degree: 3.0,
+                    sigma: 1.0,
+                },
+                12,
+            ),
             (Op::EqualLength, 8),
-            (Op::EqualRadius { a: Round::Circle, b: Round::Arc }, 9),
-            (Op::Coradial { a: Round::Arc, b: Round::Circle }, 9),
+            (
+                Op::EqualRadius {
+                    a: Round::Circle,
+                    b: Round::Arc,
+                },
+                9,
+            ),
+            (
+                Op::Coradial {
+                    a: Round::Arc,
+                    b: Round::Circle,
+                },
+                9,
+            ),
             (Op::Midpoint, 6),
             (Op::Symmetric, 8),
             (Op::Collinear, 8),
-            (Op::FixValues { targets: vec![0.1, 0.2, 0.3] }, 3),
-            (Op::FixArc { targets: [0.0, 0.0, 1.0, 0.0, 0.0, 1.0], tangent: [-1.0, 0.0] }, 6),
-            (Op::FixBody { targets: [0.0, 0.0, 0.0, 0.9, 0.1, 0.3, 0.2] }, 7),
+            (
+                Op::FixValues {
+                    targets: vec![0.1, 0.2, 0.3],
+                },
+                3,
+            ),
+            (
+                Op::FixArc {
+                    targets: [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+                    tangent: [-1.0, 0.0],
+                },
+                6,
+            ),
+            (
+                Op::FixBody {
+                    targets: [0.0, 0.0, 0.0, 0.9, 0.1, 0.3, 0.2],
+                },
+                7,
+            ),
             (Op::PointOnLine, 6),
-            (Op::PointOnRound { round: Round::Circle }, 5),
+            (
+                Op::PointOnRound {
+                    round: Round::Circle,
+                },
+                5,
+            ),
             (Op::PointOnRound { round: Round::Arc }, 8),
             (Op::PointOnEllipse, 7),
             (Op::PointOnSpline { degree: 3, knots }, 3 + 10),
             (Op::DistancePP { d: 1.0 }, 4),
             (Op::DistancePL { d: 1.0, side: -1.0 }, 6),
             (Op::Angle { theta: 0.4 }, 8),
-            (Op::RadiusValue { round: Round::Arc, scale: 2.0, v: 1.0 }, 6),
+            (
+                Op::RadiusValue {
+                    round: Round::Arc,
+                    scale: 2.0,
+                    v: 1.0,
+                },
+                6,
+            ),
             (Op::Length { v: 1.0 }, 4),
             (Op::VarValue { v: 1.0 }, 1),
             (Op::ArcRadius, 6),

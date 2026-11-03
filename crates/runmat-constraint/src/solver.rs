@@ -30,7 +30,9 @@ impl DragRequest {
     /// Drag a 2D point toward `to`.
     pub fn point(sys: &System, point: EntityId, to: [f64; 2]) -> DragRequest {
         match sys.entity(point).kind {
-            EntityKind::Point2 { x, y } => DragRequest { targets: vec![(x, to[0]), (y, to[1])] },
+            EntityKind::Point2 { x, y } => DragRequest {
+                targets: vec![(x, to[0]), (y, to[1])],
+            },
             _ => panic!("{point} is not a point"),
         }
     }
@@ -38,9 +40,9 @@ impl DragRequest {
     /// Drag a body's origin toward `to` (orientation follows the constraints).
     pub fn body_position(sys: &System, body: EntityId, to: [f64; 3]) -> DragRequest {
         match sys.entity(body).kind {
-            EntityKind::Body { position, .. } => {
-                DragRequest { targets: (0..3).map(|i| (position[i], to[i])).collect() }
-            }
+            EntityKind::Body { position, .. } => DragRequest {
+                targets: (0..3).map(|i| (position[i], to[i])).collect(),
+            },
             _ => panic!("{body} is not a body"),
         }
     }
@@ -80,12 +82,23 @@ struct SubResult {
 }
 
 impl<'a> Problem<'a> {
-    fn new(compiled: &'a [Compiled], ops: &'a [Option<Op>], is_free: &[bool], x: &[f64], tol: f64) -> Self {
+    fn new(
+        compiled: &'a [Compiled],
+        ops: &'a [Option<Op>],
+        is_free: &[bool],
+        x: &[f64],
+        tol: f64,
+    ) -> Self {
         let mut rows = Vec::new();
         let mut row_vars = Vec::new();
         for (ci, c) in compiled.iter().enumerate() {
             let Some(op) = &ops[ci] else { continue };
-            let mut fv: Vec<usize> = c.vars.iter().map(|v| v.index()).filter(|&v| is_free[v]).collect();
+            let mut fv: Vec<usize> = c
+                .vars
+                .iter()
+                .map(|v| v.index())
+                .filter(|&v| is_free[v])
+                .collect();
             fv.sort_unstable();
             fv.dedup();
             if c.internal && fv.is_empty() {
@@ -103,7 +116,13 @@ impl<'a> Problem<'a> {
             }
         }
         let free = (0..is_free.len()).filter(|&v| is_free[v]).collect();
-        Problem { compiled, ops, rows, row_vars, free }
+        Problem {
+            compiled,
+            ops,
+            rows,
+            row_vars,
+            free,
+        }
     }
 
     fn op(&self, c: usize) -> &Op {
@@ -131,7 +150,13 @@ impl<'a> Problem<'a> {
     }
 
     /// Residuals and the Jacobian of `rows` with respect to the variables mapped by `col_of`.
-    fn jacobian(&self, rows: &[usize], x: &[f64], col_of: &[usize], ncols: usize) -> (Vec<f64>, SparseRows) {
+    fn jacobian(
+        &self,
+        rows: &[usize],
+        x: &[f64],
+        col_of: &[usize],
+        ncols: usize,
+    ) -> (Vec<f64>, SparseRows) {
         let mut res = Vec::with_capacity(rows.len());
         let mut jac = SparseRows::new(ncols);
         let mut cached: Option<(usize, Vec<f64>, Vec<f64>)> = None;
@@ -175,10 +200,18 @@ impl<'a> Problem<'a> {
         let mut r = Vec::new();
         self.residuals(rows, x, &mut r);
         if max_abs(&r) <= opts.tolerance {
-            return SubResult { converged: true, iterations: 0, method: Method::None };
+            return SubResult {
+                converged: true,
+                iterations: 0,
+                method: Method::None,
+            };
         }
         if vars.is_empty() {
-            return SubResult { converged: false, iterations: 0, method: Method::None };
+            return SubResult {
+                converged: false,
+                iterations: 0,
+                method: Method::None,
+            };
         }
         for (k, &v) in vars.iter().enumerate() {
             col_of[v] = k;
@@ -232,7 +265,11 @@ impl<'a> Problem<'a> {
                 }
             } else {
                 jac.mul(&delta, &mut jd);
-                let predicted = f - r.iter().zip(&jd).map(|(a, b)| (a + b) * (a + b)).sum::<f64>();
+                let predicted = f - r
+                    .iter()
+                    .zip(&jd)
+                    .map(|(a, b)| (a + b) * (a + b))
+                    .sum::<f64>();
                 for (k, &v) in vars.iter().enumerate() {
                     trial[v] = x[v] + delta[k];
                 }
@@ -281,7 +318,11 @@ impl<'a> Problem<'a> {
         for &v in vars {
             col_of[v] = NONE;
         }
-        SubResult { converged, iterations, method }
+        SubResult {
+            converged,
+            iterations,
+            method,
+        }
     }
 
     /// Solves one connected component, by DM blocks when that splits it, else whole.
@@ -320,7 +361,14 @@ impl<'a> Problem<'a> {
                     let mut r = Vec::new();
                     self.residuals(rows, x, &mut r);
                     if max_abs(&r) <= opts.tolerance {
-                        return (SubResult { converged: true, iterations: total, method }, blocks.len());
+                        return (
+                            SubResult {
+                                converged: true,
+                                iterations: total,
+                                method,
+                            },
+                            blocks.len(),
+                        );
                     }
                 }
                 for (k, &v) in vars.iter().enumerate() {
@@ -335,10 +383,17 @@ impl<'a> Problem<'a> {
 
     /// Which component variables each row really reads: the Jacobian's nonzeros at a
     /// deterministically perturbed point (so axis-aligned geometry shows no false zeros).
-    fn structural_pattern(&self, rows: &[usize], vars: &[usize], x: &[f64], col_of: &mut [usize]) -> Vec<Vec<usize>> {
+    fn structural_pattern(
+        &self,
+        rows: &[usize],
+        vars: &[usize],
+        x: &[f64],
+        col_of: &mut [usize],
+    ) -> Vec<Vec<usize>> {
         let mut xp = x.to_vec();
         for &v in vars {
-            let h = ((v as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f64 / (1u64 << 24) as f64;
+            let h =
+                ((v as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f64 / (1u64 << 24) as f64;
             xp[v] += (0.3 + 0.7 * h) * 1e-3 * (1.0 + x[v].abs());
         }
         for (k, &v) in vars.iter().enumerate() {
@@ -354,7 +409,9 @@ impl<'a> Problem<'a> {
 
 fn merge_method(a: Method, b: Method) -> Method {
     match (a, b) {
-        (Method::LevenbergMarquardt, _) | (_, Method::LevenbergMarquardt) => Method::LevenbergMarquardt,
+        (Method::LevenbergMarquardt, _) | (_, Method::LevenbergMarquardt) => {
+            Method::LevenbergMarquardt
+        }
         (Method::Newton, _) | (_, Method::Newton) => Method::Newton,
         _ => Method::None,
     }
@@ -378,7 +435,13 @@ fn norm2(r: &[f64]) -> f64 {
     r.iter().map(|v| v * v).sum()
 }
 fn max_abs(r: &[f64]) -> f64 {
-    r.iter().fold(0.0f64, |m, v| if v.is_nan() { f64::INFINITY } else { m.max(v.abs()) })
+    r.iter().fold(0.0f64, |m, v| {
+        if v.is_nan() {
+            f64::INFINITY
+        } else {
+            m.max(v.abs())
+        }
+    })
 }
 
 /// Component diagnostics.
@@ -412,10 +475,10 @@ fn diagnose(
     let norms: Vec<f64> = (0..m).map(|i| jac.row_norm(i)).collect();
     let mut jn = SparseRows::new(n);
     let mut entries = Vec::new();
-    for i in 0..m {
+    for (i, &norm) in norms.iter().enumerate() {
         let (c, v) = jac.row(i);
-        if norms[i] > 1e-14 {
-            entries.extend(c.iter().zip(v).map(|(&c, &v)| (c, v / norms[i])));
+        if norm > 1e-14 {
+            entries.extend(c.iter().zip(v).map(|(&c, &v)| (c, v / norm)));
         }
         jn.push_row(&mut entries);
     }
@@ -437,7 +500,11 @@ fn diagnose(
         }
         let ones = vec![1.0; n];
         let gram = ji.gram(&ones, 1e-14);
-        let f = if indep.is_empty() { None } else { Some(Ldlt::factor(&gram, 1e-14)) };
+        let f = if indep.is_empty() {
+            None
+        } else {
+            Some(Ldlt::factor(&gram, 1e-14))
+        };
         let mut dense = vec![0.0; n];
         for &k in &dep_rows {
             if norms[k] <= 1e-14 {
@@ -476,7 +543,15 @@ fn diagnose(
         // No dependent row carries the inconsistency (the iterate may sit just off the singular
         // configuration). At a least-squares stationary point the residual itself lies in the
         // left null space of J: its support is the conflicting set.
-        let rn: Vec<f64> = (0..m).map(|i| if norms[i] > 1e-14 { r[i] / norms[i] } else { r[i] }).collect();
+        let rn: Vec<f64> = (0..m)
+            .map(|i| {
+                if norms[i] > 1e-14 {
+                    r[i] / norms[i]
+                } else {
+                    r[i]
+                }
+            })
+            .collect();
         let mut g = vec![0.0; n];
         jn.mul_t(&rn, &mut g);
         let rnorm = norm2(&rn).sqrt();
@@ -492,11 +567,20 @@ fn diagnose(
         Some(Vec::new())
     } else if n.saturating_mul(dof) <= opts.max_null_space_entries {
         let basis = qr.null_space();
-        Some((0..n).map(|j| basis.iter().map(|b| b[j]).collect()).collect())
+        Some(
+            (0..n)
+                .map(|j| basis.iter().map(|b| b[j]).collect())
+                .collect(),
+        )
     } else {
         None
     };
-    Diagnosis { rank, dof, dependent, null_rows }
+    Diagnosis {
+        rank,
+        dof,
+        dependent,
+        null_rows,
+    }
 }
 
 fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) -> SolveReport {
@@ -524,8 +608,10 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
     }
 
     let compiled = compile(sys, &x);
-    let mut ops: Vec<Option<Op>> =
-        compiled.iter().map(|c| (!c.reference && c.range.is_none()).then(|| c.op.clone())).collect();
+    let mut ops: Vec<Option<Op>> = compiled
+        .iter()
+        .map(|c| (!c.reference && c.range.is_none()).then(|| c.op.clone()))
+        .collect();
     let mut active_limits: Vec<(ConstraintId, f64)> = Vec::new();
 
     let mut col_of = vec![NONE; nv];
@@ -543,7 +629,8 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
         let (comps, _) = split(&problem, nv);
         solved = Vec::with_capacity(comps.len());
         for (rows, vars) in comps {
-            let (mut res, blocks) = problem.solve_component(&rows, &vars, &mut x, &weights, &mut col_of, opts);
+            let (mut res, blocks) =
+                problem.solve_component(&rows, &vars, &mut x, &weights, &mut col_of, opts);
             // Drag refinement: put the dragged variables back on their targets and solve again.
             // Each round shrinks the remaining offset by about the drag weight, so a reachable
             // target is met exactly and an unreachable one settles at its constrained closest
@@ -563,11 +650,16 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
                     for &(v, t) in &dragged {
                         x[v] = t;
                     }
-                    let (again, _) = problem.solve_component(&rows, &vars, &mut x, &weights, &mut col_of, opts);
+                    let (again, _) =
+                        problem.solve_component(&rows, &vars, &mut x, &weights, &mut col_of, opts);
                     res.iterations += again.iterations;
                     res.method = merge_method(res.method, again.method);
                     res.converged = again.converged;
-                    let change = vars.iter().zip(&before).map(|(&v, b)| (x[v] - b).abs()).fold(0.0f64, f64::max);
+                    let change = vars
+                        .iter()
+                        .zip(&before)
+                        .map(|(&v, b)| (x[v] - b).abs())
+                        .fold(0.0f64, f64::max);
                     if change <= opts.tolerance {
                         break;
                     }
@@ -621,19 +713,23 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
     let mut r = Vec::new();
 
     let constraint_of = |row: usize| ConstraintId(problem.rows[row].c as u32);
-    let push_dependent = |list: &mut Vec<DependentConstraint>, c: ConstraintId, deps: Vec<ConstraintId>| {
-        if let Some(d) = list.iter_mut().find(|d| d.constraint == c) {
-            d.depends_on.extend(deps);
-            d.depends_on.sort();
-            d.depends_on.dedup();
-        } else {
-            let mut deps = deps;
-            deps.sort();
-            deps.dedup();
-            deps.retain(|&d| d != c);
-            list.push(DependentConstraint { constraint: c, depends_on: deps });
-        }
-    };
+    let push_dependent =
+        |list: &mut Vec<DependentConstraint>, c: ConstraintId, deps: Vec<ConstraintId>| {
+            if let Some(d) = list.iter_mut().find(|d| d.constraint == c) {
+                d.depends_on.extend(deps);
+                d.depends_on.sort();
+                d.depends_on.dedup();
+            } else {
+                let mut deps = deps;
+                deps.sort();
+                deps.dedup();
+                deps.retain(|&d| d != c);
+                list.push(DependentConstraint {
+                    constraint: c,
+                    depends_on: deps,
+                });
+            }
+        };
 
     for (k, ((rows, vars), (_, _, res, blocks))) in comps.iter().zip(&solved).enumerate() {
         problem.residuals(rows, &x, &mut r);
@@ -647,7 +743,8 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
             let d = diagnose(&problem, rows, vars, &x, converged, &mut col_of, opts);
             for (row, deps, bad) in d.dependent {
                 let c = constraint_of(rows[row]);
-                let mut deps: Vec<ConstraintId> = deps.iter().map(|&i| constraint_of(rows[i])).collect();
+                let mut deps: Vec<ConstraintId> =
+                    deps.iter().map(|&i| constraint_of(rows[i])).collect();
                 deps.retain(|&d| d != c);
                 if bad {
                     push_dependent(&mut conflicting, c, deps);
@@ -662,7 +759,11 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
         if opts.diagnose {
             match &null_rows {
                 Some(nr) if dof > 0 => {
-                    let scale = nr.iter().map(|row| row_norm(row)).fold(0.0f64, f64::max).max(1.0);
+                    let scale = nr
+                        .iter()
+                        .map(|row| row_norm(row))
+                        .fold(0.0f64, f64::max)
+                        .max(1.0);
                     for (j, &v) in vars.iter().enumerate() {
                         determined[v] = row_norm(&nr[j]) <= 1e-8 * scale;
                     }
@@ -708,7 +809,12 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
         (0..sys.entities.len())
             .map(|e| {
                 let id = EntityId(e as u32);
-                let mut vs: Vec<usize> = sys.entity_vars(id).iter().map(|v| v.index()).filter(|&v| is_free[v]).collect();
+                let mut vs: Vec<usize> = sys
+                    .entity_vars(id)
+                    .iter()
+                    .map(|v| v.index())
+                    .filter(|&v| is_free[v])
+                    .collect();
                 vs.sort_unstable();
                 vs.dedup();
                 let mut by_comp: Vec<(usize, usize)> = vs.iter().map(|&v| var_comp[v]).collect();
@@ -725,14 +831,20 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
                         Some(0)
                     } else {
                         null_by_comp[comp].as_ref().map(|nr| {
-                            let sub: Vec<Vec<f64>> = by_comp[i..j].iter().map(|&(_, col)| nr[col].clone()).collect();
+                            let sub: Vec<Vec<f64>> = by_comp[i..j]
+                                .iter()
+                                .map(|&(_, col)| nr[col].clone())
+                                .collect();
                             dense_rank(&sub, 1e-8)
                         })
                     };
                     total = total.zip(add).map(|(a, b)| a + b);
                     i = j;
                 }
-                EntityDof { entity: id, dof: total }
+                EntityDof {
+                    entity: id,
+                    dof: total,
+                }
             })
             .collect()
     } else {
@@ -747,13 +859,26 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
     let measurements = compiled
         .iter()
         .filter(|c| c.reference)
-        .map(|c| Measurement { constraint: c.id, value: measure(c, &x) })
+        .map(|c| Measurement {
+            constraint: c.id,
+            value: measure(c, &x),
+        })
         .collect();
 
     let warm_start = opts.warm_start.as_ref().map(|_| {
-        let max_deviation = cached.iter().map(|&(v, c)| (x[v] - c).abs()).fold(0.0f64, f64::max);
-        let matches = cached.iter().all(|&(v, c)| (x[v] - c).abs() <= opts.warm_start_tolerance * (1.0 + c.abs()));
-        WarmStartReport { applied: cached.len(), cache_satisfied, matches, max_deviation }
+        let max_deviation = cached
+            .iter()
+            .map(|&(v, c)| (x[v] - c).abs())
+            .fold(0.0f64, f64::max);
+        let matches = cached
+            .iter()
+            .all(|&(v, c)| (x[v] - c).abs() <= opts.warm_start_tolerance * (1.0 + c.abs()));
+        WarmStartReport {
+            applied: cached.len(),
+            cache_satisfied,
+            matches,
+            max_deviation,
+        }
     });
     let drag = drag_request.map(|d| DragReport {
         distance_to_target: d
@@ -819,8 +944,15 @@ fn split(p: &Problem<'_>, nv: usize) -> Split {
     for (k, &v) in p.free.iter().enumerate() {
         dense[v] = k;
     }
-    let row_vars: Vec<Vec<usize>> = p.row_vars.iter().map(|vs| vs.iter().map(|&v| dense[v]).collect()).collect();
+    let row_vars: Vec<Vec<usize>> = p
+        .row_vars
+        .iter()
+        .map(|vs| vs.iter().map(|&v| dense[v]).collect())
+        .collect();
     let (comps, orphan) = components(p.free.len(), &row_vars);
-    let comps = comps.into_iter().map(|c| (c.rows, c.vars.into_iter().map(|v| p.free[v]).collect())).collect();
+    let comps = comps
+        .into_iter()
+        .map(|c| (c.rows, c.vars.into_iter().map(|v| p.free[v]).collect()))
+        .collect();
     (comps, orphan)
 }

@@ -48,7 +48,10 @@ pub(crate) fn components(nvars: usize, row_vars: &[Vec<usize>]) -> (Vec<Componen
         let r = find(&mut parent, v);
         if slot[r] == NONE {
             slot[r] = out.len();
-            out.push(Component { rows: Vec::new(), vars: Vec::new() });
+            out.push(Component {
+                rows: Vec::new(),
+                vars: Vec::new(),
+            });
         }
         out[slot[r]].vars.push(v);
     }
@@ -85,7 +88,11 @@ pub(crate) struct Block {
 /// Dulmage–Mendelsohn decomposition of a bipartite structure with `nrows` equations and `nvars`
 /// unknowns. Returns blocks in solve order: over-determined, square blocks (dependencies first),
 /// under-determined. Empty blocks are omitted.
-pub(crate) fn dulmage_mendelsohn(nrows: usize, nvars: usize, row_vars: &[Vec<usize>]) -> Vec<Block> {
+pub(crate) fn dulmage_mendelsohn(
+    nrows: usize,
+    nvars: usize,
+    row_vars: &[Vec<usize>],
+) -> Vec<Block> {
     // Variable → rows.
     let mut var_rows: Vec<Vec<usize>> = vec![Vec::new(); nvars];
     for (r, vs) in row_vars.iter().enumerate() {
@@ -189,11 +196,17 @@ pub(crate) fn dulmage_mendelsohn(nrows: usize, nvars: usize, row_vars: &[Vec<usi
     let over_rows: Vec<usize> = (0..nrows).filter(|&r| in_over_row[r]).collect();
     let over_vars: Vec<usize> = (0..nvars).filter(|&v| in_over_var[v]).collect();
     if !over_rows.is_empty() {
-        blocks.push(Block { kind: BlockKind::Over, rows: over_rows, vars: over_vars });
+        blocks.push(Block {
+            kind: BlockKind::Over,
+            rows: over_rows,
+            vars: over_vars,
+        });
     }
 
     // Square part: Tarjan SCC over matched rows, edge r → match(v) for each square var v of r.
-    let square: Vec<usize> = (0..nrows).filter(|&r| !in_over_row[r] && !in_under_row[r]).collect();
+    let square: Vec<usize> = (0..nrows)
+        .filter(|&r| !in_over_row[r] && !in_under_row[r])
+        .collect();
     let mut is_square = vec![false; nrows];
     for &r in &square {
         is_square[r] = true;
@@ -257,7 +270,11 @@ pub(crate) fn dulmage_mendelsohn(nrows: usize, nvars: usize, row_vars: &[Vec<usi
                     rows.sort_unstable();
                     let mut vars: Vec<usize> = rows.iter().map(|&r| row_match[r]).collect();
                     vars.sort_unstable();
-                    blocks.push(Block { kind: BlockKind::Square, rows, vars });
+                    blocks.push(Block {
+                        kind: BlockKind::Square,
+                        rows,
+                        vars,
+                    });
                 }
             }
         }
@@ -266,7 +283,11 @@ pub(crate) fn dulmage_mendelsohn(nrows: usize, nvars: usize, row_vars: &[Vec<usi
     let under_rows: Vec<usize> = (0..nrows).filter(|&r| in_under_row[r]).collect();
     let under_vars: Vec<usize> = (0..nvars).filter(|&v| in_under_var[v]).collect();
     if !under_vars.is_empty() {
-        blocks.push(Block { kind: BlockKind::Under, rows: under_rows, vars: under_vars });
+        blocks.push(Block {
+            kind: BlockKind::Under,
+            rows: under_rows,
+            vars: under_vars,
+        });
     }
     blocks
 }
@@ -294,7 +315,15 @@ mod tests {
         let rows = vec![vec![0], vec![0, 1], vec![1, 2], vec![2, 3, 4]];
         let b = dulmage_mendelsohn(4, 5, &rows);
         let kinds: Vec<_> = b.iter().map(|b| b.kind).collect();
-        assert_eq!(kinds, vec![BlockKind::Square, BlockKind::Square, BlockKind::Square, BlockKind::Under]);
+        assert_eq!(
+            kinds,
+            vec![
+                BlockKind::Square,
+                BlockKind::Square,
+                BlockKind::Square,
+                BlockKind::Under
+            ]
+        );
         assert_eq!(b[0].vars, vec![0]);
         assert_eq!(b[1].vars, vec![1]);
         assert_eq!(b[2].vars, vec![2]);

@@ -23,7 +23,12 @@ pub(crate) struct SparseRows {
 
 impl SparseRows {
     pub fn new(ncols: usize) -> Self {
-        Self { ncols, ptr: vec![0], idx: Vec::new(), val: Vec::new() }
+        Self {
+            ncols,
+            ptr: vec![0],
+            idx: Vec::new(),
+            val: Vec::new(),
+        }
     }
 
     pub fn nrows(&self) -> usize {
@@ -58,19 +63,19 @@ impl SparseRows {
 
     /// `y = A x`.
     pub fn mul(&self, x: &[f64], y: &mut [f64]) {
-        for i in 0..self.nrows() {
+        for (i, yi) in y.iter_mut().enumerate().take(self.nrows()) {
             let (c, v) = self.row(i);
-            y[i] = c.iter().zip(v).map(|(&c, &v)| v * x[c]).sum();
+            *yi = c.iter().zip(v).map(|(&c, &v)| v * x[c]).sum();
         }
     }
 
     /// `y = Aᵀ x`.
     pub fn mul_t(&self, x: &[f64], y: &mut [f64]) {
         y.iter_mut().for_each(|v| *v = 0.0);
-        for i in 0..self.nrows() {
+        for (i, &xi) in x.iter().enumerate().take(self.nrows()) {
             let (c, v) = self.row(i);
             for (&c, &v) in c.iter().zip(v) {
-                y[c] += v * x[i];
+                y[c] += v * xi;
             }
         }
     }
@@ -227,12 +232,20 @@ impl Ldlt {
                 lnz[i] += 1;
                 top += 1;
             }
-            if !(d[k] > floor) {
+            // NaN pivots are regularised too.
+            if d[k].partial_cmp(&floor) != Some(std::cmp::Ordering::Greater) {
                 // Rank-deficient input (redundant rows): regularise the pivot.
                 d[k] = floor;
             }
         }
-        Ldlt { n, perm, lp, li, lx, d }
+        Ldlt {
+            n,
+            perm,
+            lp,
+            li,
+            lx,
+            d,
+        }
     }
 
     /// Solves `A x = b` in place.
@@ -245,8 +258,8 @@ impl Ldlt {
                 x[self.li[p]] -= self.lx[p] * xj;
             }
         }
-        for j in 0..n {
-            x[j] /= self.d[j];
+        for (xj, dj) in x.iter_mut().zip(self.d.iter()).take(n) {
+            *xj /= dj;
         }
         for j in (0..n).rev() {
             let mut s = x[j];
@@ -360,7 +373,11 @@ impl RowQr {
             }
             independent.push(installed);
         }
-        RowQr { ncols: n, r, independent }
+        RowQr {
+            ncols: n,
+            r,
+            independent,
+        }
     }
 
     pub fn rank(&self) -> usize {
@@ -441,8 +458,12 @@ mod tests {
     fn mat(rows: &[&[f64]]) -> SparseRows {
         let mut a = SparseRows::new(rows[0].len());
         for r in rows {
-            let mut e: Vec<(usize, f64)> =
-                r.iter().enumerate().filter(|(_, v)| **v != 0.0).map(|(i, v)| (i, *v)).collect();
+            let mut e: Vec<(usize, f64)> = r
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| **v != 0.0)
+                .map(|(i, v)| (i, *v))
+                .collect();
             a.push_row(&mut e);
         }
         a
@@ -450,7 +471,12 @@ mod tests {
 
     #[test]
     fn ldlt_solves_spd() {
-        let a = mat(&[&[4.0, 1.0, 0.0, 0.5], &[1.0, 3.0, 0.2, 0.0], &[0.0, 0.2, 2.0, 0.1], &[0.5, 0.0, 0.1, 5.0]]);
+        let a = mat(&[
+            &[4.0, 1.0, 0.0, 0.5],
+            &[1.0, 3.0, 0.2, 0.0],
+            &[0.0, 0.2, 2.0, 0.1],
+            &[0.5, 0.0, 0.1, 5.0],
+        ]);
         let f = Ldlt::factor(&a, 1e-300);
         let x = [1.0, -2.0, 0.5, 3.0];
         let mut b = vec![0.0; 4];
@@ -463,7 +489,12 @@ mod tests {
 
     #[test]
     fn row_qr_flags_dependent_rows() {
-        let a = mat(&[&[1.0, 1.0, 0.0], &[0.0, 1.0, 1.0], &[1.0, 2.0, 1.0], &[0.0, 0.0, 1.0]]);
+        let a = mat(&[
+            &[1.0, 1.0, 0.0],
+            &[0.0, 1.0, 1.0],
+            &[1.0, 2.0, 1.0],
+            &[0.0, 0.0, 1.0],
+        ]);
         let qr = RowQr::factor(&a, 1e-10);
         assert_eq!(qr.independent, vec![true, true, false, true]);
         assert_eq!(qr.rank(), 3);

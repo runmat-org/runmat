@@ -58,10 +58,16 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub const IDENTITY: Frame = Frame { origin: [0.0; 3], rotation: [1.0, 0.0, 0.0, 0.0] };
+    pub const IDENTITY: Frame = Frame {
+        origin: [0.0; 3],
+        rotation: [1.0, 0.0, 0.0, 0.0],
+    };
 
     pub fn at(origin: [f64; 3]) -> Frame {
-        Frame { origin, rotation: [1.0, 0.0, 0.0, 0.0] }
+        Frame {
+            origin,
+            rotation: [1.0, 0.0, 0.0, 0.0],
+        }
     }
 
     /// A frame rotated by `angle` radians about the unit `axis`.
@@ -69,7 +75,10 @@ impl Frame {
         let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
         let (s, c) = (0.5 * angle).sin_cos();
         let k = if n > 0.0 { s / n } else { 0.0 };
-        Frame { origin, rotation: [c, axis[0] * k, axis[1] * k, axis[2] * k] }
+        Frame {
+            origin,
+            rotation: [c, axis[0] * k, axis[1] * k, axis[2] * k],
+        }
     }
 
     /// A frame whose local Z axis points along `z` (the X axis is chosen deterministically).
@@ -107,14 +116,30 @@ pub enum EntityKind {
     Circle { center: EntityId, radius: VarId },
     /// A counter-clockwise arc from `start` to `end` about `center`. An internal constraint
     /// keeps `|start - center| = |end - center|`; the radius is that distance.
-    Arc { center: EntityId, start: EntityId, end: EntityId },
+    Arc {
+        center: EntityId,
+        start: EntityId,
+        end: EntityId,
+    },
     /// A full ellipse: centre, semi-axes and the rotation (radians) of the major axis.
-    Ellipse { center: EntityId, semi_major: VarId, semi_minor: VarId, rotation: VarId },
+    Ellipse {
+        center: EntityId,
+        semi_major: VarId,
+        semi_minor: VarId,
+        rotation: VarId,
+    },
     /// A non-rational B-spline given by control points and a clamped knot vector.
-    BSpline { degree: usize, control_points: Vec<EntityId>, knots: Vec<f64> },
+    BSpline {
+        degree: usize,
+        control_points: Vec<EntityId>,
+        knots: Vec<f64>,
+    },
     /// A rigid body with 6 DOF: position and a quaternion `[w, x, y, z]` (normalised by an
     /// internal constraint).
-    Body { position: [VarId; 3], orientation: [VarId; 4] },
+    Body {
+        position: [VarId; 3],
+        orientation: [VarId; 4],
+    },
     /// A mate connector: a frame fixed in a body, supplied by the CAD layer.
     Connector { body: EntityId, local: Frame },
 }
@@ -184,9 +209,23 @@ pub enum Mate {
     /// Z axes parallel (4 DOF).
     Parallel { a: EntityId, b: EntityId },
     /// Tangency between A's XY plane and a sphere or cylinder on B.
-    Tangent { a: EntityId, b: EntityId, kind: TangentKind },
-    Distance { a: EntityId, b: EntityId, mode: DistanceMode, target: Target },
-    Angle { a: EntityId, b: EntityId, mode: AngleMode, target: Target },
+    Tangent {
+        a: EntityId,
+        b: EntityId,
+        kind: TangentKind,
+    },
+    Distance {
+        a: EntityId,
+        b: EntityId,
+        mode: DistanceMode,
+        target: Target,
+    },
+    Angle {
+        a: EntityId,
+        b: EntityId,
+        mode: AngleMode,
+        target: Target,
+    },
 }
 
 /// Constraints. 2D variants take point and curve entities; [`Constraint::Mate`] takes
@@ -210,34 +249,73 @@ pub enum Constraint {
     Tangent(EntityId, EntityId),
     /// G1 continuity where two open curves (line, arc or spline) meet at the given ends.
     /// Coincidence of the ends is a separate [`Constraint::Coincident`].
-    TangentAtEnd { a: EntityId, a_end: CurveEnd, b: EntityId, b_end: CurveEnd },
+    TangentAtEnd {
+        a: EntityId,
+        a_end: CurveEnd,
+        b: EntityId,
+        b_end: CurveEnd,
+    },
     /// G2 continuity between a spline end and an arc: tangent directions and curvature match.
     /// Coincidence is separate. Needs spline degree ≥ 2.
-    CurvatureContinuity { spline: EntityId, end: CurveEnd, arc: EntityId },
+    CurvatureContinuity {
+        spline: EntityId,
+        end: CurveEnd,
+        arc: EntityId,
+    },
     EqualLength(EntityId, EntityId),
     EqualRadius(EntityId, EntityId),
     /// Circles/arcs share a centre.
     Concentric(EntityId, EntityId),
     /// Circles/arcs share a centre and a radius.
     Coradial(EntityId, EntityId),
-    Midpoint { point: EntityId, line: EntityId },
+    Midpoint {
+        point: EntityId,
+        line: EntityId,
+    },
     /// `a` and `b` are mirror images in the line `axis`.
-    Symmetric { a: EntityId, b: EntityId, axis: EntityId },
+    Symmetric {
+        a: EntityId,
+        b: EntityId,
+        axis: EntityId,
+    },
     Collinear(EntityId, EntityId),
     /// Holds an entity at its current values (points, lines, circles, arcs, ellipses,
     /// splines, bodies).
     Fix(EntityId),
     /// A point lies on a line (infinite), circle, arc (its circle), ellipse or spline.
-    PointOnCurve { point: EntityId, curve: EntityId },
+    PointOnCurve {
+        point: EntityId,
+        curve: EntityId,
+    },
     /// Point–point distance, or unsigned point–line distance when one side is a line.
-    Distance { a: EntityId, b: EntityId, value: f64 },
+    Distance {
+        a: EntityId,
+        b: EntityId,
+        value: f64,
+    },
     /// The signed angle from line `a`'s direction to line `b`'s, radians.
-    Angle { a: EntityId, b: EntityId, value: f64 },
-    Radius { curve: EntityId, value: f64 },
-    Diameter { curve: EntityId, value: f64 },
-    Length { line: EntityId, value: f64 },
+    Angle {
+        a: EntityId,
+        b: EntityId,
+        value: f64,
+    },
+    Radius {
+        curve: EntityId,
+        value: f64,
+    },
+    Diameter {
+        curve: EntityId,
+        value: f64,
+    },
+    Length {
+        line: EntityId,
+        value: f64,
+    },
     /// A raw variable equals a value (for example an ellipse semi-axis).
-    VarValue { var: VarId, value: f64 },
+    VarValue {
+        var: VarId,
+        value: f64,
+    },
     Mate(Mate),
 }
 
@@ -252,8 +330,14 @@ impl Constraint {
                 | Constraint::Diameter { .. }
                 | Constraint::Length { .. }
                 | Constraint::VarValue { .. }
-                | Constraint::Mate(Mate::Distance { target: Target::Exact(_), .. })
-                | Constraint::Mate(Mate::Angle { target: Target::Exact(_), .. })
+                | Constraint::Mate(Mate::Distance {
+                    target: Target::Exact(_),
+                    ..
+                })
+                | Constraint::Mate(Mate::Angle {
+                    target: Target::Exact(_),
+                    ..
+                })
         )
     }
 }
@@ -283,7 +367,10 @@ pub struct ConstraintRecord {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConstraintKindRecord {
     User(Constraint),
-    Internal { kind: InternalKind, entity: EntityId },
+    Internal {
+        kind: InternalKind,
+        entity: EntityId,
+    },
 }
 
 /// A constraint the system refused.
@@ -292,7 +379,10 @@ pub enum BuildError {
     UnknownEntity(EntityId),
     UnknownVar(VarId),
     /// The entity has the wrong kind for this argument.
-    WrongKind { entity: EntityId, expected: &'static str },
+    WrongKind {
+        entity: EntityId,
+        expected: &'static str,
+    },
     /// Both arguments are the same entity where two are needed.
     SameEntity(EntityId),
     /// A B-spline needs `degree ≥ 1`, at least `degree + 1` control points, and at most
@@ -426,7 +516,12 @@ impl System {
                 self.collect_vars(*start, out);
                 self.collect_vars(*end, out);
             }
-            EntityKind::Ellipse { center, semi_major, semi_minor, rotation } => {
+            EntityKind::Ellipse {
+                center,
+                semi_major,
+                semi_minor,
+                rotation,
+            } => {
                 self.collect_vars(*center, out);
                 out.extend([*semi_major, *semi_minor, *rotation]);
             }
@@ -435,7 +530,10 @@ impl System {
                     self.collect_vars(*p, out);
                 }
             }
-            EntityKind::Body { position, orientation } => {
+            EntityKind::Body {
+                position,
+                orientation,
+            } => {
                 out.extend(position.iter().copied());
                 out.extend(orientation.iter().copied());
             }
@@ -450,9 +548,20 @@ impl System {
         self.push_var(value, flag, VarRole::User, None)
     }
 
-    fn push_var(&mut self, value: f64, flag: VarFlag, role: VarRole, owner: Option<EntityId>) -> VarId {
+    fn push_var(
+        &mut self,
+        value: f64,
+        flag: VarFlag,
+        role: VarRole,
+        owner: Option<EntityId>,
+    ) -> VarId {
         let id = VarId(self.vars.len() as u32);
-        self.vars.push(Variable { value, flag, role, owner });
+        self.vars.push(Variable {
+            value,
+            flag,
+            role,
+            owner,
+        });
         id
     }
 
@@ -462,7 +571,10 @@ impl System {
 
     fn push_entity(&mut self, kind: EntityKind) -> EntityId {
         let id = self.next_entity();
-        self.entities.push(Entity { kind, construction: false });
+        self.entities.push(Entity {
+            kind,
+            construction: false,
+        });
         id
     }
 
@@ -499,7 +611,12 @@ impl System {
     }
 
     /// An arc; adds the internal equal-radius constraint.
-    pub fn arc(&mut self, center: EntityId, start: EntityId, end: EntityId) -> Result<EntityId, BuildError> {
+    pub fn arc(
+        &mut self,
+        center: EntityId,
+        start: EntityId,
+        end: EntityId,
+    ) -> Result<EntityId, BuildError> {
         self.expect_point(center)?;
         self.expect_point(start)?;
         self.expect_point(end)?;
@@ -508,7 +625,10 @@ impl System {
         }
         let e = self.push_entity(EntityKind::Arc { center, start, end });
         self.constraints.push(ConstraintRecord {
-            constraint: ConstraintKindRecord::Internal { kind: InternalKind::ArcRadius, entity: e },
+            constraint: ConstraintKindRecord::Internal {
+                kind: InternalKind::ArcRadius,
+                entity: e,
+            },
             reference: false,
             aux: Vec::new(),
             fix_targets: Vec::new(),
@@ -534,21 +654,32 @@ impl System {
         let a = self.push_var(semi_major, VarFlag::Free, VarRole::SemiMajor, Some(e));
         let b = self.push_var(semi_minor, VarFlag::Free, VarRole::SemiMinor, Some(e));
         let r = self.push_var(rotation, VarFlag::Free, VarRole::Rotation, Some(e));
-        Ok(self.push_entity(EntityKind::Ellipse { center, semi_major: a, semi_minor: b, rotation: r }))
+        Ok(self.push_entity(EntityKind::Ellipse {
+            center,
+            semi_major: a,
+            semi_minor: b,
+            rotation: r,
+        }))
     }
 
     /// A clamped B-spline with a uniform knot vector on `[0, 1]`.
-    pub fn bspline(&mut self, degree: usize, control_points: &[EntityId]) -> Result<EntityId, BuildError> {
+    pub fn bspline(
+        &mut self,
+        degree: usize,
+        control_points: &[EntityId],
+    ) -> Result<EntityId, BuildError> {
         let n = control_points.len();
         if degree == 0 || n < degree + 1 {
-            return Err(BuildError::BadSpline("need degree >= 1 and at least degree + 1 control points"));
+            return Err(BuildError::BadSpline(
+                "need degree >= 1 and at least degree + 1 control points",
+            ));
         }
         let interior = n - degree - 1;
         let mut knots = vec![0.0; degree + 1];
         for i in 1..=interior {
             knots.push(i as f64 / (interior + 1) as f64);
         }
-        knots.extend(std::iter::repeat(1.0).take(degree + 1));
+        knots.extend(std::iter::repeat_n(1.0, degree + 1));
         self.bspline_with_knots(degree, control_points, knots)
     }
 
@@ -562,38 +693,70 @@ impl System {
     ) -> Result<EntityId, BuildError> {
         let n = control_points.len();
         if degree == 0 || n < degree + 1 {
-            return Err(BuildError::BadSpline("need degree >= 1 and at least degree + 1 control points"));
+            return Err(BuildError::BadSpline(
+                "need degree >= 1 and at least degree + 1 control points",
+            ));
         }
         if n > MAX_SPLINE_CONTROL_POINTS {
             return Err(BuildError::BadSpline("too many control points"));
         }
         if knots.len() != n + degree + 1 {
-            return Err(BuildError::BadSpline("knot count must be control points + degree + 1"));
+            return Err(BuildError::BadSpline(
+                "knot count must be control points + degree + 1",
+            ));
         }
-        if knots.windows(2).any(|w| !(w[1] >= w[0])) || knots.iter().any(|k| !k.is_finite()) {
-            return Err(BuildError::BadSpline("knots must be finite and non-decreasing"));
+        if knots.windows(2).any(|w| {
+            matches!(
+                w[1].partial_cmp(&w[0]),
+                None | Some(std::cmp::Ordering::Less)
+            )
+        }) || knots.iter().any(|k| !k.is_finite())
+        {
+            return Err(BuildError::BadSpline(
+                "knots must be finite and non-decreasing",
+            ));
         }
         let (k0, k1) = (knots[0], knots[knots.len() - 1]);
-        if knots[..=degree].iter().any(|&k| k != k0) || knots[n..].iter().any(|&k| k != k1) || k1 <= k0 {
+        if knots[..=degree].iter().any(|&k| k != k0)
+            || knots[n..].iter().any(|&k| k != k1)
+            || k1 <= k0
+        {
             return Err(BuildError::BadSpline("knots must be clamped"));
         }
         for p in control_points {
             self.expect_point(*p)?;
         }
-        Ok(self.push_entity(EntityKind::BSpline { degree, control_points: control_points.to_vec(), knots }))
+        Ok(self.push_entity(EntityKind::BSpline {
+            degree,
+            control_points: control_points.to_vec(),
+            knots,
+        }))
     }
 
     /// A rigid body at `pose` (6 DOF); adds the internal quaternion-norm constraint.
     pub fn body(&mut self, pose: Frame) -> EntityId {
         let e = self.next_entity();
         let roles = [VarRole::X, VarRole::Y, VarRole::Z];
-        let position = [0, 1, 2].map(|i| self.push_var(pose.origin[i], VarFlag::Free, roles[i], Some(e)));
+        let position =
+            [0, 1, 2].map(|i| self.push_var(pose.origin[i], VarFlag::Free, roles[i], Some(e)));
         let q = normalize4(pose.rotation);
-        let qroles = [VarRole::QuatW, VarRole::QuatX, VarRole::QuatY, VarRole::QuatZ];
-        let orientation = [0, 1, 2, 3].map(|i| self.push_var(q[i], VarFlag::Free, qroles[i], Some(e)));
-        let id = self.push_entity(EntityKind::Body { position, orientation });
+        let qroles = [
+            VarRole::QuatW,
+            VarRole::QuatX,
+            VarRole::QuatY,
+            VarRole::QuatZ,
+        ];
+        let orientation =
+            [0, 1, 2, 3].map(|i| self.push_var(q[i], VarFlag::Free, qroles[i], Some(e)));
+        let id = self.push_entity(EntityKind::Body {
+            position,
+            orientation,
+        });
         self.constraints.push(ConstraintRecord {
-            constraint: ConstraintKindRecord::Internal { kind: InternalKind::QuaternionNorm, entity: id },
+            constraint: ConstraintKindRecord::Internal {
+                kind: InternalKind::QuaternionNorm,
+                entity: id,
+            },
             reference: false,
             aux: Vec::new(),
             fix_targets: Vec::new(),
@@ -611,7 +774,10 @@ impl System {
     /// A mate connector fixed in `body` at `local` (body coordinates).
     pub fn connector(&mut self, body: EntityId, local: Frame) -> Result<EntityId, BuildError> {
         self.expect(body, "a body", |k| matches!(k, EntityKind::Body { .. }))?;
-        let local = Frame { origin: local.origin, rotation: normalize4(local.rotation) };
+        let local = Frame {
+            origin: local.origin,
+            rotation: normalize4(local.rotation),
+        };
         Ok(self.push_entity(EntityKind::Connector { body, local }))
     }
 
@@ -628,19 +794,28 @@ impl System {
         self.add_constraint(c, true)
     }
 
-    fn add_constraint(&mut self, c: Constraint, reference: bool) -> Result<ConstraintId, BuildError> {
+    fn add_constraint(
+        &mut self,
+        c: Constraint,
+        reference: bool,
+    ) -> Result<ConstraintId, BuildError> {
         self.validate(&c)?;
         let id = ConstraintId(self.constraints.len() as u32);
         let mut aux = Vec::new();
         let mut fix_targets = Vec::new();
         if let Constraint::PointOnCurve { point, curve } = &c {
             if let EntityKind::BSpline { .. } = self.entities[curve.index()].kind {
-                let t0 = crate::residual::closest_spline_parameter(self, *curve, self.point(*point));
+                let t0 =
+                    crate::residual::closest_spline_parameter(self, *curve, self.point(*point));
                 aux.push(self.push_var(t0, VarFlag::Free, VarRole::CurveParameter, None));
             }
         }
         if let Constraint::Fix(e) = &c {
-            fix_targets = self.entity_vars(*e).iter().map(|v| self.value(*v)).collect();
+            fix_targets = self
+                .entity_vars(*e)
+                .iter()
+                .map(|v| self.value(*v))
+                .collect();
         }
         self.constraints.push(ConstraintRecord {
             constraint: ConstraintKindRecord::User(c),
@@ -654,7 +829,10 @@ impl System {
     // ---------------------------------------------------------------- validation
 
     fn get(&self, e: EntityId) -> Result<&EntityKind, BuildError> {
-        self.entities.get(e.index()).map(|x| &x.kind).ok_or(BuildError::UnknownEntity(e))
+        self.entities
+            .get(e.index())
+            .map(|x| &x.kind)
+            .ok_or(BuildError::UnknownEntity(e))
     }
 
     fn expect(
@@ -666,7 +844,10 @@ impl System {
         if ok(self.get(e)?) {
             Ok(())
         } else {
-            Err(BuildError::WrongKind { entity: e, expected })
+            Err(BuildError::WrongKind {
+                entity: e,
+                expected,
+            })
         }
     }
 
@@ -677,17 +858,25 @@ impl System {
         self.expect(e, "a line", |k| matches!(k, EntityKind::Line { .. }))
     }
     fn expect_round(&self, e: EntityId) -> Result<(), BuildError> {
-        self.expect(e, "a circle or arc", |k| matches!(k, EntityKind::Circle { .. } | EntityKind::Arc { .. }))
+        self.expect(e, "a circle or arc", |k| {
+            matches!(k, EntityKind::Circle { .. } | EntityKind::Arc { .. })
+        })
     }
     fn expect_connector(&self, e: EntityId) -> Result<EntityId, BuildError> {
         match self.get(e)? {
             EntityKind::Connector { body, .. } => Ok(*body),
-            _ => Err(BuildError::WrongKind { entity: e, expected: "a mate connector" }),
+            _ => Err(BuildError::WrongKind {
+                entity: e,
+                expected: "a mate connector",
+            }),
         }
     }
     fn expect_open(&self, e: EntityId) -> Result<(), BuildError> {
         self.expect(e, "a line, arc or spline", |k| {
-            matches!(k, EntityKind::Line { .. } | EntityKind::Arc { .. } | EntityKind::BSpline { .. })
+            matches!(
+                k,
+                EntityKind::Line { .. } | EntityKind::Arc { .. } | EntityKind::BSpline { .. }
+            )
         })
     }
     fn distinct(a: EntityId, b: EntityId) -> Result<(), BuildError> {
@@ -707,7 +896,10 @@ impl System {
                 Self::distinct(*a, *b)
             }
             C::Horizontal(l) | C::Vertical(l) => self.expect_line(*l),
-            C::Parallel(a, b) | C::Perpendicular(a, b) | C::EqualLength(a, b) | C::Collinear(a, b) => {
+            C::Parallel(a, b)
+            | C::Perpendicular(a, b)
+            | C::EqualLength(a, b)
+            | C::Collinear(a, b) => {
                 self.expect_line(*a)?;
                 self.expect_line(*b)?;
                 Self::distinct(*a, *b)
@@ -717,7 +909,10 @@ impl System {
                 let la = matches!(self.get(*a)?, EntityKind::Line { .. });
                 let lb = matches!(self.get(*b)?, EntityKind::Line { .. });
                 match (la, lb) {
-                    (true, true) => Err(BuildError::WrongKind { entity: *b, expected: "a circle or arc" }),
+                    (true, true) => Err(BuildError::WrongKind {
+                        entity: *b,
+                        expected: "a circle or arc",
+                    }),
                     (true, false) => self.expect_round(*b),
                     (false, true) => self.expect_round(*a),
                     (false, false) => {
@@ -733,12 +928,23 @@ impl System {
             }
             C::CurvatureContinuity { spline, arc, .. } => {
                 match self.get(*spline)? {
-                    EntityKind::BSpline { degree, control_points, .. } => {
+                    EntityKind::BSpline {
+                        degree,
+                        control_points,
+                        ..
+                    } => {
                         if *degree < 2 || control_points.len() < 3 {
-                            return Err(BuildError::BadSpline("G2 needs degree >= 2 and 3 control points"));
+                            return Err(BuildError::BadSpline(
+                                "G2 needs degree >= 2 and 3 control points",
+                            ));
                         }
                     }
-                    _ => return Err(BuildError::WrongKind { entity: *spline, expected: "a B-spline" }),
+                    _ => {
+                        return Err(BuildError::WrongKind {
+                            entity: *spline,
+                            expected: "a B-spline",
+                        })
+                    }
                 }
                 self.expect(*arc, "an arc", |k| matches!(k, EntityKind::Arc { .. }))
             }
@@ -758,7 +964,9 @@ impl System {
                 self.expect_line(*axis)
             }
             C::Fix(e) => self.get(*e).map(|_| ()).and_then(|_| {
-                self.expect(*e, "a fixable entity", |k| !matches!(k, EntityKind::Connector { .. }))
+                self.expect(*e, "a fixable entity", |k| {
+                    !matches!(k, EntityKind::Connector { .. })
+                })
             }),
             C::PointOnCurve { point, curve } => {
                 self.expect_point(*point)?;
@@ -785,7 +993,10 @@ impl System {
                     (true, true) => Ok(()),
                     (true, false) => self.expect_line(*b),
                     (false, true) => self.expect_line(*a),
-                    (false, false) => Err(BuildError::WrongKind { entity: *a, expected: "a point" }),
+                    (false, false) => Err(BuildError::WrongKind {
+                        entity: *a,
+                        expected: "a point",
+                    }),
                 }
             }
             C::Angle { a, b, value } => {
@@ -827,7 +1038,10 @@ impl System {
             return Err(BuildError::SameBody(ba));
         }
         match m {
-            Mate::Tangent { kind: TangentKind::PlaneSphere { radius } | TangentKind::PlaneCylinder { radius }, .. } => {
+            Mate::Tangent {
+                kind: TangentKind::PlaneSphere { radius } | TangentKind::PlaneCylinder { radius },
+                ..
+            } => {
                 finite(*radius)?;
                 if *radius < 0.0 {
                     return Err(BuildError::BadValue("radius must be non-negative"));
