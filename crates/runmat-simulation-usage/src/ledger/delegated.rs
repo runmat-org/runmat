@@ -56,25 +56,7 @@ impl DelegatedReservation {
             .checked_sub(self.maximum.operations())
             .map(OperationCount::from_operations)
             .ok_or(LedgerError::InvalidGrant)?;
-        let mut state = self.ledger.lock()?;
-        if state.closed {
-            return Err(LedgerError::Closed);
-        }
-        let reserved = state.reserved.checked_add(additional)?;
-        let required = state.completed.total()?.checked_add(reserved)?;
-        if required > state.budget {
-            return Err(LedgerError::BudgetExceeded {
-                required,
-                budget: state.budget,
-            });
-        }
-        if required > state.grant {
-            return Err(LedgerError::MoreGrantRequired {
-                required,
-                granted: state.grant,
-            });
-        }
-        state.reserved = reserved;
+        self.ledger.reserve_additional_capacity(additional)?;
         self.maximum = maximum;
         Ok(())
     }

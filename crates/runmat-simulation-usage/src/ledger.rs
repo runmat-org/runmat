@@ -1,9 +1,11 @@
 use crate::{CompletedUsage, CountOverflow, OperationCount, UsageCategory};
 use std::fmt;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, Weak};
 
 mod delegated;
+mod renewal;
 pub use delegated::DelegatedReservation;
+pub use renewal::GrantRenewal;
 
 /// One run's admitted operation budget. Storage is fixed-size; reserving a
 /// numerical batch allocates no heap memory and does not lock per operation.
@@ -13,6 +15,7 @@ pub use delegated::DelegatedReservation;
 /// Network grant renewal and account policy belong to the host admission owner.
 pub struct UsageLedger {
     state: Mutex<State>,
+    renewal: Option<Weak<dyn GrantRenewal>>,
 }
 
 struct State {
@@ -50,6 +53,7 @@ pub enum LedgerError {
     OutstandingWork,
     Closed,
     InvalidState,
+    GrantUnavailable,
 }
 
 impl From<CountOverflow> for LedgerError {
@@ -70,6 +74,7 @@ impl fmt::Display for LedgerError {
             Self::OutstandingWork => f.write_str("simulation work reservations are still active"),
             Self::Closed => f.write_str("simulation usage ledger is closed"),
             Self::InvalidState => f.write_str("simulation usage ledger state is invalid"),
+            Self::GrantUnavailable => f.write_str("the simulation host could not renew the operation grant"),
         }
     }
 }
@@ -81,6 +86,7 @@ impl UsageLedger {
             return Err(LedgerError::InvalidGrant);
         }
         Ok(Self {
+            renewal: None,
             state: Mutex::new(State {
                 budget,
                 grant,
@@ -129,6 +135,18 @@ impl UsageLedger {
     }
 
     fn reserve_capacity(&self, maximum: OperationCount) -> Result<(), LedgerError> {
+        self.with_renewal(|| self.try_reserve_capacity(maximum, true))
+    }
+
+    fn reserve_additional_capacity(&self, additional: OperationCount) -> Result<(), LedgerError> {
+        self.with_renewal(|| self.try_reserve_capacity(additional, false))
+    }
+
+    fn try_reserve_capacity(
+        &self,
+        maximum: OperationCount,
+        new_owner: bool,
+    ) -> Result<(), LedgerError> {
         let mut state = self.lock()?;
         if state.closed {
             return Err(LedgerError::Closed);
@@ -149,7 +167,7 @@ impl UsageLedger {
         }
         let active = state
             .active
-            .checked_add(1)
+            .checked_add(usize::from(new_owner))
             .ok_or(LedgerError::CountOverflow)?;
         state.reserved = reserved;
         state.active = active;
