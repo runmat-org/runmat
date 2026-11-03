@@ -29,6 +29,13 @@ impl UsageContext {
         &self.ledger
     }
 
+    pub fn delegate(
+        &self,
+        maximum: crate::OperationCount,
+    ) -> Result<crate::DelegatedReservation, crate::LedgerError> {
+        self.ledger.delegate(maximum)
+    }
+
     pub fn enter(&self) -> UsageContextGuard {
         UsageContextGuard {
             previous: CURRENT.with(|slot| slot.replace(Some(self.clone()))),

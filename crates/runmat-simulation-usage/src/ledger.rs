@@ -33,7 +33,7 @@ pub struct LedgerSnapshot {
     pub reserved: OperationCount,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum LedgerError {
     CountOverflow,
     BudgetExceeded {

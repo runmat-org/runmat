@@ -8,6 +8,12 @@ use std::fmt;
 pub struct MeasurementVersion(String);
 
 impl MeasurementVersion {
+    /// Reference arithmetic schedule used by the 0.7 simulation owner. The
+    /// identity alone does not certify instrumentation or published allowances.
+    pub fn reference_v1() -> Self {
+        Self("rsua-1".to_owned())
+    }
+
     pub fn parse(value: &str) -> Result<Self, InvalidMeasurementVersion> {
         let bytes = value.as_bytes();
         if bytes.len() > 64

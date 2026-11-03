@@ -23,7 +23,7 @@ impl UsageLedger {
     }
 }
 
-/// One child owns this fixed portion of the parent's operation grant. This
+/// One child owns a disjoint portion of the parent's operation grant. This
 /// owner cannot be cloned or serialized. Reports are cumulative and preserve
 /// each category; replaying a report adds no work or grant.
 ///
@@ -44,6 +44,39 @@ impl DelegatedReservation {
 
     pub fn completed(&self) -> CompletedUsage {
         self.completed
+    }
+
+    /// Increase the child's absolute capacity before publishing a renewal to
+    /// it. Only the increment is reserved; replaying the same renewal is inert.
+    /// Completed child work already belongs to the parent and remains charged.
+    /// The host serializes this owner with authenticated reports and renewals.
+    pub fn increase_capacity(&mut self, maximum: OperationCount) -> Result<(), LedgerError> {
+        let additional = maximum
+            .operations()
+            .checked_sub(self.maximum.operations())
+            .map(OperationCount::from_operations)
+            .ok_or(LedgerError::InvalidGrant)?;
+        let mut state = self.ledger.lock()?;
+        if state.closed {
+            return Err(LedgerError::Closed);
+        }
+        let reserved = state.reserved.checked_add(additional)?;
+        let required = state.completed.total()?.checked_add(reserved)?;
+        if required > state.budget {
+            return Err(LedgerError::BudgetExceeded {
+                required,
+                budget: state.budget,
+            });
+        }
+        if required > state.grant {
+            return Err(LedgerError::MoreGrantRequired {
+                required,
+                granted: state.grant,
+            });
+        }
+        state.reserved = reserved;
+        self.maximum = maximum;
+        Ok(())
     }
 
     /// Merge authenticated cumulative completed work into the parent. Validate
@@ -199,6 +232,45 @@ mod tests {
         assert_eq!(child.completed(), initial);
         child.finish(initial).unwrap();
         assert_eq!(ledger.finish().unwrap(), initial);
+    }
+
+    #[test]
+    fn child_renewals_reserve_only_the_increment_against_shared_capacity() {
+        let ledger = Arc::new(UsageLedger::new(count(100), count(50)).unwrap());
+        let mut child = ledger.delegate(count(20)).unwrap();
+        let usage = CompletedUsage {
+            solve: count(10),
+            ..Default::default()
+        };
+        child.report(usage).unwrap();
+        let local = ledger.reserve(UsageCategory::Assembly, count(30)).unwrap();
+        let before = ledger.snapshot().unwrap();
+        assert_eq!(
+            child.increase_capacity(count(30)),
+            Err(LedgerError::MoreGrantRequired {
+                required: count(60),
+                granted: count(50),
+            })
+        );
+        assert_eq!(ledger.snapshot().unwrap(), before);
+        assert_eq!(child.capacity(), count(20));
+        ledger.update_grant(count(100)).unwrap();
+        child.increase_capacity(count(70)).unwrap();
+        let renewed = ledger.snapshot().unwrap();
+        child.increase_capacity(count(70)).unwrap();
+        assert_eq!(ledger.snapshot().unwrap(), renewed);
+        assert_eq!(
+            child.increase_capacity(count(69)),
+            Err(LedgerError::InvalidGrant)
+        );
+        assert!(matches!(
+            child.increase_capacity(count(71)),
+            Err(LedgerError::BudgetExceeded { .. })
+        ));
+        assert_eq!(ledger.snapshot().unwrap(), renewed);
+        child.finish(usage).unwrap();
+        drop(local);
+        assert_eq!(ledger.finish().unwrap(), usage);
     }
 
     #[test]

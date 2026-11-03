@@ -24,6 +24,14 @@ pub struct CompletedUsage {
 }
 
 impl CompletedUsage {
+    pub fn is_monotonic_since(self, previous: Self) -> bool {
+        self.meshing >= previous.meshing
+            && self.assembly >= previous.assembly
+            && self.factorization >= previous.factorization
+            && self.solve >= previous.solve
+            && self.other >= previous.other
+    }
+
     /// Aggregate transport can represent sums wider than one admitted grant.
     pub fn wide_total(self) -> Result<OperationTotal, CountOverflow> {
         [
