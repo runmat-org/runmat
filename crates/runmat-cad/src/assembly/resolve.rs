@@ -754,7 +754,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
 
     fn local_uuid(&mut self, file: &FilePath, kind: &str, name: &str) -> (ItemUuid, bool) {
         let p = item_path(file, kind, name);
-        if let Some(l) = self.ctx.lock.and_then(|l| l.lookup(&p)) {
+        // Only a current entry counts: a path that is now an alias names the renamed item,
+        // and a new item authored under the old name is a different item.
+        if let Some(l) = self
+            .ctx
+            .lock
+            .and_then(|l| l.lookup(&p))
+            .filter(|l| !l.via_alias)
+        {
             return (l.uuid, true);
         }
         *self.unlocked_files.entry(file.clone()).or_insert(0) += 1;

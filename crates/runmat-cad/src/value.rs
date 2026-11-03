@@ -3,14 +3,51 @@
 //! Follows `research/12-values-and-resolution.md` design A in outline: a value is static (a
 //! quantity literal, a reference to an input or let, an expression, a tolerance) or dynamic (a
 //! pure function call evaluated through [`DynamicValueEvaluator`]). Units go through the
-//! [`UnitAuthority`] seam. Open questions bookmarked in that report (tables, ranges, `.m` typing)
-//! are not modelled yet.
+//! [`UnitAuthority`] seam.
+//!
+//! The owner questions in report 12 §6 are bookmarked; each default is one field of
+//! [`VALUE_CHOICES`], so a different answer is a one-line change that every consumer
+//! (evaluator, scope resolver, syntax layer) reads from one place.
 
 use crate::ids::{InputName, LetName};
 use crate::units::{Dimension, QuantityKindId, UnitAuthority};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
+
+/// The bookmarked value-model decisions (report 12 §6), with the defaults in force.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ValueChoices {
+    /// Q1: declarations are referenced kind-qualified (`material.aluminum`); bare names are
+    /// locals and functions only.
+    pub kind_qualified_references: bool,
+    /// Q2: a bare double from `.m` for a dimensioned target is an error unless the design
+    /// file writes `as <unit>`.
+    pub as_unit_escape: bool,
+    /// Q3: the one comment form.
+    pub comment: &'static str,
+    /// Q4: same-folder files cannot shadow the dialect's vocabulary.
+    pub vocabulary_shadowable: bool,
+    /// Q5: `volatile` values are allowed and snapshotted into `runmat.lock` at release.
+    pub allow_volatile: bool,
+    /// Q6: `+pkg` folders and `use <folder>` reach other folders; plain subfolders are not
+    /// in scope.
+    pub packages_and_use: bool,
+    /// Q8: randomness seeded by an argument counts as deterministic.
+    pub seeded_random_is_deterministic: bool,
+}
+
+pub const VALUE_CHOICES: ValueChoices = ValueChoices {
+    kind_qualified_references: true,
+    as_unit_escape: true,
+    comment: "//",
+    vocabulary_shadowable: false,
+    allow_volatile: true,
+    packages_and_use: true,
+    seeded_random_is_deterministic: true,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "form")]
@@ -49,6 +86,18 @@ pub enum ValueExpr {
     /// A dynamic value: a pure function call, evaluated in the value phase.
     Dynamic {
         call: DynamicCall,
+    },
+    /// `<expr> as <unit>`: states the unit of a bare double (an `.m` result). Reviewable and
+    /// greppable in the design file.
+    Coerce {
+        expr: Box<ValueExpr>,
+        unit: String,
+    },
+    /// A kind-qualified reference to another declaration's value (`part.bracket.mass`,
+    /// `material.al_7075.density`, `part.skeleton.publish.station_pitch`), resolved by the
+    /// scope ([`DynamicValueEvaluator::reference`]). Derived values are read-only.
+    Reference {
+        path: Vec<String>,
     },
 }
 
@@ -133,6 +182,15 @@ impl ValueExpr {
                     arg.collect_names(inputs, lets);
                 }
             }
+            ValueExpr::Coerce { expr, .. } => expr.collect_names(inputs, lets),
+            ValueExpr::Reference { .. } => {}
+        }
+    }
+
+    pub fn coerce(expr: ValueExpr, unit: &str) -> Self {
+        ValueExpr::Coerce {
+            expr: Box::new(expr),
+            unit: unit.to_owned(),
         }
     }
 }
@@ -206,6 +264,116 @@ pub enum ValueError {
     DynamicFailed { function: String, message: String },
     #[error("values depend on each other: {cycle:?}")]
     Cycle { cycle: Vec<String> },
+    #[error("`{function}` returned a plain number for a {expected} value; write `as {si}` at the call or return a quantity")]
+    UnitlessResult {
+        function: String,
+        expected: String,
+        si: String,
+    },
+    #[error("`{function}` is not deterministic ({reason}); mark the use `volatile` or remove the effect")]
+    NotDeterministic { function: String, reason: String },
+    #[error("`volatile` values are not allowed in this project")]
+    VolatileNotAllowed { function: String },
+    #[error("`as {unit}` applies to a plain number, found {found}")]
+    CoerceDimensioned { unit: String, found: String },
+    #[error("unresolved reference `{path}`")]
+    UnresolvedReference { path: String },
+}
+
+/// What a dynamic value function returned.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "output")]
+pub enum DynamicOutput {
+    Quantity {
+        value: Quantity,
+    },
+    /// A bare double (the `.m` returned no unit).
+    Double {
+        value: f64,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "randomness")]
+pub enum Randomness {
+    None,
+    /// Seeded by this argument.
+    Seeded {
+        argument: String,
+    },
+    Unseeded,
+}
+
+/// The determinism contract the value phase checks, and the inputs of the cache key.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DynamicContract {
+    /// The compiled function's digest.
+    pub function_digest: String,
+    /// Transitive callee digests, sorted.
+    #[serde(default)]
+    pub callees: Vec<String>,
+    /// Files the function declares it reads (literal paths), with their content digests.
+    #[serde(default)]
+    pub reads: Vec<(String, String)>,
+    pub runtime_version: String,
+    /// Static effects other than declared reads (I/O, clock, network): the reason, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<String>,
+    pub randomness: Randomness,
+}
+
+impl DynamicContract {
+    pub fn deterministic(&self) -> Result<(), String> {
+        if let Some(e) = &self.effect {
+            return Err(e.clone());
+        }
+        match &self.randomness {
+            Randomness::None => Ok(()),
+            Randomness::Seeded { .. } if VALUE_CHOICES.seeded_random_is_deterministic => Ok(()),
+            Randomness::Seeded { argument } => Err(format!("randomness seeded by `{}`", argument)),
+            Randomness::Unseeded => Err("unseeded randomness".into()),
+        }
+    }
+}
+
+/// The value cache key: function digest, callees, canonical SI arguments (bit exact), declared
+/// reads and the runtime version.
+pub fn dynamic_cache_key(
+    call: &DynamicCall,
+    args: &[(String, Quantity)],
+    contract: &DynamicContract,
+) -> String {
+    let mut h = Sha256::new();
+    let mut part = |b: &[u8]| {
+        h.update((b.len() as u64).to_be_bytes());
+        h.update(b);
+    };
+    part(b"runmat-cad/value/v1");
+    part(call.function.as_bytes());
+    part(contract.function_digest.as_bytes());
+    for c in &contract.callees {
+        part(c.as_bytes());
+    }
+    for (n, q) in args {
+        part(n.as_bytes());
+        part(&q.si.to_bits().to_be_bytes());
+        part(&serde_json::to_vec(&q.dimension).expect("dimension serialises"));
+    }
+    for (path, digest) in &contract.reads {
+        part(path.as_bytes());
+        part(digest.as_bytes());
+    }
+    part(contract.runtime_version.as_bytes());
+    format!("sha256:{}", hex::encode(h.finalize()))
+}
+
+/// A volatile value as evaluated (or as replayed from a release snapshot).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VolatileValue {
+    pub function: String,
+    pub value: Quantity,
+    /// Replayed from `runmat.lock [values]` rather than evaluated.
+    pub from_snapshot: bool,
 }
 
 /// Evaluates dynamic values. The real implementation runs `.m` functions in the value phase;
@@ -218,6 +386,38 @@ pub trait DynamicValueEvaluator {
     ) -> Result<Quantity, String>;
     /// The function's digest for cache keys (compiled digest plus callees and declared reads).
     fn digest(&self, call: &DynamicCall) -> String;
+
+    /// The determinism contract. The default is a pure function with only its digest.
+    fn contract(&self, call: &DynamicCall) -> DynamicContract {
+        DynamicContract {
+            function_digest: self.digest(call),
+            callees: Vec::new(),
+            reads: Vec::new(),
+            runtime_version: String::new(),
+            effect: None,
+            randomness: Randomness::None,
+        }
+    }
+
+    /// The raw result, which may be a bare double. The default wraps [`Self::evaluate`].
+    fn evaluate_output(
+        &self,
+        call: &DynamicCall,
+        arguments: &[(String, Quantity)],
+    ) -> Result<DynamicOutput, String> {
+        self.evaluate(call, arguments)
+            .map(|value| DynamicOutput::Quantity { value })
+    }
+
+    /// A released snapshot of a volatile value, by cache key (`runmat.lock [values]`).
+    fn snapshot(&self, _key: &str) -> Option<Quantity> {
+        None
+    }
+
+    /// Resolve a kind-qualified reference to another declaration's value.
+    fn reference(&self, _path: &[String]) -> Option<Result<Quantity, String>> {
+        None
+    }
 }
 
 /// Rejects every dynamic value. Use until the value phase lands.
@@ -247,6 +447,9 @@ pub struct ValueEnv {
     pub lets: BTreeMap<LetName, Quantity>,
     /// Values that failed, with the error. Their dependents fail with a cascade.
     pub failed: BTreeMap<String, ValueError>,
+    /// Volatile values used, by cache key: what a release snapshots.
+    #[serde(default)]
+    pub volatile: RefCell<BTreeMap<String, VolatileValue>>,
 }
 
 pub struct Evaluator<'a> {
@@ -334,14 +537,112 @@ impl<'a> Evaluator<'a> {
                 for (name, arg) in &call.arguments {
                     args.push((name.clone(), self.eval(arg, env)?));
                 }
-                self.dynamic
-                    .evaluate(call, &args)
+                let contract = self.dynamic.contract(call);
+                if call.volatile {
+                    if !VALUE_CHOICES.allow_volatile {
+                        return Err(ValueError::VolatileNotAllowed {
+                            function: call.function.clone(),
+                        });
+                    }
+                } else if let Err(reason) = contract.deterministic() {
+                    return Err(ValueError::NotDeterministic {
+                        function: call.function.clone(),
+                        reason,
+                    });
+                }
+                let key = dynamic_cache_key(call, &args, &contract);
+                if call.volatile {
+                    if let Some(v) = self.dynamic.snapshot(&key) {
+                        env.volatile.borrow_mut().insert(
+                            key,
+                            VolatileValue {
+                                function: call.function.clone(),
+                                value: v,
+                                from_snapshot: true,
+                            },
+                        );
+                        return Ok(v);
+                    }
+                }
+                let out = self
+                    .dynamic
+                    .evaluate_output(call, &args)
                     .map_err(|message| ValueError::DynamicFailed {
                         function: call.function.clone(),
                         message,
+                    })?;
+                let q = match out {
+                    DynamicOutput::Quantity { value } => value,
+                    DynamicOutput::Double { value } => Quantity::dimensionless(value),
+                };
+                if call.volatile {
+                    env.volatile.borrow_mut().insert(
+                        key,
+                        VolatileValue {
+                            function: call.function.clone(),
+                            value: q,
+                            from_snapshot: false,
+                        },
+                    );
+                }
+                Ok(q)
+            }
+            ValueExpr::Coerce { expr, unit } => {
+                let info = self
+                    .units
+                    .unit(unit)
+                    .ok_or_else(|| ValueError::UnknownUnit { unit: unit.clone() })?;
+                let q = self.eval(expr, env)?;
+                if q.dimension.is_dimensionless() {
+                    Ok(Quantity::new(q.si * info.scale, info.dimension))
+                } else if q.dimension == info.dimension {
+                    Ok(q)
+                } else {
+                    Err(ValueError::CoerceDimensioned {
+                        unit: unit.clone(),
+                        found: q.dimension.to_string(),
                     })
+                }
+            }
+            ValueExpr::Reference { path } => match self.dynamic.reference(path) {
+                Some(Ok(q)) => Ok(q),
+                Some(Err(message)) => Err(ValueError::DynamicFailed {
+                    function: path.join("."),
+                    message,
+                }),
+                None => Err(ValueError::UnresolvedReference {
+                    path: path.join("."),
+                }),
+            },
+        }
+    }
+
+    /// A bare `.m` call whose plain-number result meets a dimensioned target: the specific
+    /// error with its fix-it, instead of a generic mismatch.
+    fn unitless(
+        &self,
+        expr: &ValueExpr,
+        env: &ValueEnv,
+        expected: Dimension,
+        si: &str,
+    ) -> Option<ValueError> {
+        if let ValueExpr::Dynamic { call } = expr {
+            if expected.is_dimensionless() {
+                return None;
+            }
+            let mut args = Vec::new();
+            for (n, a) in &call.arguments {
+                args.push((n.clone(), self.eval(a, env).ok()?));
+            }
+            if let Ok(DynamicOutput::Double { .. }) = self.dynamic.evaluate_output(call, &args) {
+                return Some(ValueError::UnitlessResult {
+                    function: call.function.clone(),
+                    expected: expected.to_string(),
+                    si: si.to_owned(),
+                });
             }
         }
+        None
     }
 
     /// Evaluate and check against an expected dimension.
@@ -353,6 +654,9 @@ impl<'a> Evaluator<'a> {
     ) -> Result<f64, ValueError> {
         let q = self.eval(expr, env)?;
         if q.dimension != expected {
+            if let Some(e) = self.unitless(expr, env, expected, &expected.to_string()) {
+                return Err(e);
+            }
             return Err(ValueError::UnitMismatch {
                 expected: expected.to_string(),
                 found: q.dimension.to_string(),
@@ -490,6 +794,9 @@ impl<'a> Evaluator<'a> {
             })?;
         let q = self.eval(expr, env)?;
         if q.dimension != info.dimension {
+            if let Some(e) = self.unitless(expr, env, info.dimension, &info.si_symbol) {
+                return Err(e);
+            }
             return Err(ValueError::UnitMismatch {
                 expected: format!("{} ({})", info.id, info.si_symbol),
                 found: q.dimension.to_string(),

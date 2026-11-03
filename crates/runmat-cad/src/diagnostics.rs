@@ -64,6 +64,12 @@ pub enum DiagCode {
     XrefPublisherBroken,
     #[serde(rename = "cad.xref.pin_behind")]
     XrefPinBehind,
+    #[serde(rename = "cad.xref.via_alias")]
+    XrefViaAlias,
+    #[serde(rename = "cad.merge.redirected")]
+    MergeRedirected,
+    #[serde(rename = "cad.merge.broken")]
+    MergeBroken,
     #[serde(rename = "cad.value.failed")]
     ValueFailed,
     #[serde(rename = "cad.sketch.solve_failed")]

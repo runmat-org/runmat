@@ -10,6 +10,7 @@ use crate::ids::{FilePath, PartitionName, PublishName, RevisionId};
 use crate::model::datum::DatumValue;
 use crate::model::items::{PublishEntry, PublishTarget};
 use crate::model::PartDocument;
+use crate::refs::lock::{ItemPath, LockError, LockSection, UuidMinter};
 use crate::refs::name::{EntityName, SourceTag, TopoKind};
 use crate::refs::reference::{Reference, XrefContext};
 use crate::value::Quantity;
@@ -287,6 +288,60 @@ pub fn apply_publish(publisher: &mut PartDocument, edit: &AutoPublishEdit) {
             publisher.publishes.push(entry.clone());
         }
     }
+}
+
+/// Apply an auto-publish edit and give the new entry its stable id in the lock, so later
+/// renames of it resolve for every consumer through the alias.
+pub fn apply_publish_locked(
+    publisher: &mut PartDocument,
+    edit: &AutoPublishEdit,
+    lock: &mut LockSection,
+    minter: &mut dyn UuidMinter,
+) {
+    apply_publish(publisher, edit);
+    if let Reference::Published { name, .. } = &edit.reference {
+        lock.ensure(&ItemPath::publish(&publisher.path, name), minter);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "error")]
+pub enum PublishRenameError {
+    #[error("`{file}` publishes no `{name}`")]
+    Unknown { file: FilePath, name: PublishName },
+    #[error("`{file}` already publishes `{name}`")]
+    Exists { file: FilePath, name: PublishName },
+    #[error(transparent)]
+    Lock(#[from] LockError),
+}
+
+/// Rename a publish entry (part of the file's API): the entry is renamed in place and the
+/// lock records the old name as an alias, so consumers keep resolving and are told to update
+/// (`cad.xref.via_alias` with a rewrite repair).
+pub fn rename_publish(
+    publisher: &mut PartDocument,
+    from: &PublishName,
+    to: &PublishName,
+    lock: &mut LockSection,
+    minter: &mut dyn UuidMinter,
+) -> Result<(), PublishRenameError> {
+    if publisher.publish(to).is_some() {
+        return Err(PublishRenameError::Exists {
+            file: publisher.path.clone(),
+            name: to.clone(),
+        });
+    }
+    let Some(entry) = publisher.publishes.iter_mut().find(|p| &p.name == from) else {
+        return Err(PublishRenameError::Unknown {
+            file: publisher.path.clone(),
+            name: from.clone(),
+        });
+    };
+    entry.name = to.clone();
+    let old = ItemPath::publish(&publisher.path, from);
+    lock.ensure(&old, minter);
+    lock.rename(&old, &ItemPath::publish(&publisher.path, to))?;
+    Ok(())
 }
 
 fn suggested_name(r: &Reference) -> String {

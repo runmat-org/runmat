@@ -19,7 +19,7 @@ use crate::ids::{FeatureId, FilePath};
 use crate::model::datum::{dot, sub};
 use crate::model::items::{Cardinality, PublishEntry, PublishTarget};
 use crate::refs::history::{EntityIndex, SurfaceKind, Topology};
-use crate::refs::lock::LockSection;
+use crate::refs::lock::{ItemPath, LockSection};
 use crate::refs::name::{EntityName, InstanceKey, Role, SourceTag, TopoKind};
 use crate::refs::naming::{edge_name, BodyNames};
 use crate::refs::publish::{ForeignTarget, PublishedCatalog, XrefProblem};
@@ -116,6 +116,14 @@ pub enum ResolveNote {
         file: FilePath,
         pinned: crate::ids::RevisionId,
         latest: crate::ids::RevisionId,
+    },
+    /// A cross-file reference followed a file or publish rename through the lock.
+    XrefRenamed {
+        from_file: FilePath,
+        to_file: FilePath,
+        from_name: crate::ids::PublishName,
+        to_name: crate::ids::PublishName,
+        rewritten: Reference,
     },
     /// Some members of a list were waiting and were left out.
     Dormant {
@@ -690,20 +698,31 @@ impl<'a> Resolver<'a> {
                 problem: XrefProblem::NoCatalog,
             });
         };
+        // A renamed file resolves through the lock's file alias.
+        let mut target_file = file.clone();
         if !catalog.knows(file) {
-            return Stop::Fail(RefProblem::Xref {
-                problem: XrefProblem::UnknownFile { file: file.clone() },
-            });
+            let moved = self
+                .lock
+                .and_then(|l| l.lookup(&ItemPath::file(file)))
+                .filter(|l| l.via_alias && catalog.knows(&l.current.file));
+            match moved {
+                Some(l) => target_file = l.current.file,
+                None => {
+                    return Stop::Fail(RefProblem::Xref {
+                        problem: XrefProblem::UnknownFile { file: file.clone() },
+                    })
+                }
+            }
         }
         let pinned = match context {
             XrefContext::Live => {
                 let here = catalog.partition(self.file);
-                let there = catalog.partition(file);
+                let there = catalog.partition(&target_file);
                 if here != there {
                     return Stop::Fail(RefProblem::Xref {
                         problem: XrefProblem::LiveAcrossPartition {
-                            file: file.clone(),
-                            latest_release: catalog.latest_release(file),
+                            file: target_file.clone(),
+                            latest_release: catalog.latest_release(&target_file),
                         },
                     });
                 }
@@ -711,14 +730,50 @@ impl<'a> Resolver<'a> {
             }
             XrefContext::Pinned { revision } => Some(revision),
         };
-        match catalog.resolve_published(file, name, pinned) {
+        let mut target_name = name.clone();
+        let mut result = catalog.resolve_published(&target_file, name, pinned);
+        if let Err(XrefProblem::NotPublished { .. }) = &result {
+            // A renamed publish entry resolves through its alias (recorded under the old or
+            // the current file path). A pin sees the old revision, where the old name exists.
+            for f in [file, &target_file] {
+                let alias = self
+                    .lock
+                    .and_then(|l| l.lookup(&ItemPath::publish(f, name)))
+                    .filter(|l| {
+                        l.via_alias && l.current.item.len() == 2 && l.current.item[0] == "publish"
+                    });
+                if let Some(l) = alias {
+                    let new = crate::ids::PublishName::new(l.current.item[1].clone());
+                    let r = catalog.resolve_published(&target_file, &new, pinned);
+                    if r.is_ok() {
+                        target_name = new;
+                        result = r;
+                        break;
+                    }
+                }
+            }
+        }
+        match result {
             Ok(target) => {
                 let mut notes = Vec::new();
+                if &target_file != file || &target_name != name {
+                    notes.push(ResolveNote::XrefRenamed {
+                        from_file: file.clone(),
+                        to_file: target_file.clone(),
+                        from_name: name.clone(),
+                        to_name: target_name.clone(),
+                        rewritten: Reference::Published {
+                            file: Some(target_file.clone()),
+                            name: target_name.clone(),
+                            context: context.clone(),
+                        },
+                    });
+                }
                 if let Some(pinned) = pinned {
-                    if let Some(latest) = catalog.latest_release(file) {
+                    if let Some(latest) = catalog.latest_release(&target_file) {
                         if &latest != pinned {
                             notes.push(ResolveNote::PinBehind {
-                                file: file.clone(),
+                                file: target_file.clone(),
                                 pinned: pinned.clone(),
                                 latest,
                             });

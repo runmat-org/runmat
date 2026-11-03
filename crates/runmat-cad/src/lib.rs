@@ -2,6 +2,8 @@
 //!
 //! - [`assembly`]: product structure, variants and effectivity, mates, patterns, fastener
 //!   rules, representations and load levels, BOM, interference, the assembly index.
+//! - [`config`]: columnar design tables, change impact and affected-only verify.
+//! - [`scope`]: folder-scoped name resolution (no same-folder imports, `use`, `+pkg`).
 //! - [`model`]: the part document (inputs, sketches, datums, features, part outputs, regions,
 //!   publish entries, materials, links, configurations).
 //! - [`refs`]: the reference and naming system and the history contract kernels emit.
@@ -13,12 +15,14 @@
 //!   the constraint solver.
 
 pub mod assembly;
+pub mod config;
 pub mod diagnostics;
 pub mod ids;
 pub mod index;
 pub mod model;
 pub mod refs;
 pub mod regen;
+pub mod scope;
 mod serde_rows;
 pub mod sketch_solver;
 pub mod units;

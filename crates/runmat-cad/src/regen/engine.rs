@@ -138,6 +138,10 @@ pub struct ReferenceRecord {
     pub param: String,
     pub reference: Reference,
     pub outcome: ResolveOutcome,
+    /// The resolved entities by structured name (empty unless resolved). Merge re-checks
+    /// compare these.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<Vec<EntityName>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -483,6 +487,7 @@ impl<'a, 'b> Run<'a, 'b> {
             param: site.param.clone().unwrap_or_default(),
             reference: reference.clone(),
             outcome: outcome.clone(),
+            entities: Vec::new(),
         });
         match outcome {
             ResolveOutcome::Resolved(r) => {
@@ -500,6 +505,9 @@ impl<'a, 'b> Run<'a, 'b> {
                     }
                     _ => names,
                 };
+                if let Some(rec) = self.records.last_mut() {
+                    rec.entities = names.clone();
+                }
                 self.ref_ids
                     .push((site.param.clone().unwrap_or_default(), names));
                 Ok(r)
@@ -628,6 +636,33 @@ impl<'a, 'b> Run<'a, 'b> {
                         .collect(),
                 );
             }
+            ResolveNote::XrefRenamed {
+                from_file,
+                to_file,
+                from_name,
+                to_name,
+                rewritten,
+            } => {
+                let what = match (from_file == to_file, from_name == to_name) {
+                    (false, false) => format!(
+                        "`{}` → `{}` and `{}` → `{}`",
+                        from_file, to_file, from_name, to_name
+                    ),
+                    (false, true) => format!("`{}` → `{}`", from_file, to_file),
+                    _ => format!("`{}` → `{}` in `{}`", from_name, to_name, to_file),
+                };
+                self.diags.push(
+                    DiagCode::XrefViaAlias,
+                    Severity::Info,
+                    site.clone(),
+                    format!("renamed ({}); resolved through the lock alias", what),
+                    Cause::Root,
+                    vec![Repair::RewriteReference {
+                        site: site.clone(),
+                        reference: rewritten.clone(),
+                    }],
+                );
+            }
             ResolveNote::Merged { .. } | ResolveNote::Pieces { .. } => {}
         }
     }
@@ -668,6 +703,7 @@ impl<'a, 'b> Run<'a, 'b> {
                         param: site.param.clone().unwrap_or_default(),
                         reference: r.clone(),
                         outcome: ResolveOutcome::Waiting(w.clone()),
+                        entities: Vec::new(),
                     });
                     waiting.push(w);
                 }

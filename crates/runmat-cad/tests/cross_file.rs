@@ -459,3 +459,155 @@ fn x12_lock_merge_and_conflicts() {
     let back: LockSection = serde_json::from_str(&json).unwrap();
     assert_eq!(back, r);
 }
+
+#[test]
+fn x13_publish_renames_resolve_through_the_lock_and_ask_for_a_rewrite() {
+    let mut env = Env::new();
+    let mut sk = skeleton();
+    let mut lock = LockSection::default();
+    let mut m = SeededMinter { seed: "x".into() };
+    rename_publish(
+        &mut sk,
+        &PublishName::new("mount_face"),
+        &PublishName::new("attach_face"),
+        &mut lock,
+        &mut m,
+    )
+    .unwrap();
+    let (mut cat, _) = catalog_with(&env, &sk, &[]);
+    cat.set_partition(&FilePath::new("frames/frame12.part"), "structures");
+    env.catalog = Some(cat);
+    let d = consumer(
+        "frames/frame12.part",
+        Reference::published(
+            Some("interfaces/skeleton.part"),
+            "mount_face",
+            XrefContext::Live,
+        ),
+    );
+    let r = env.regen(&d);
+    assert!(
+        has(&r, DiagCode::XrefNotPublished),
+        "without the lock the old name is gone"
+    );
+    env.lock = Some(lock);
+    let r = env.regen(&d);
+    assert!(region_ok(&r, "mount"), "{:#?}", r.diagnostics);
+    let n = diag(&r, DiagCode::XrefViaAlias);
+    match &n.repairs[0] {
+        Repair::RewriteReference {
+            reference: Reference::Published { name, .. },
+            ..
+        } => assert_eq!(name.0, "attach_face"),
+        other => panic!("{:?}", other),
+    }
+}
+
+#[test]
+fn x14_file_moves_resolve_through_the_lock() {
+    let mut env = Env::new();
+    let mut sk = skeleton();
+    let mut lock = LockSection::default();
+    let mut m = SeededMinter { seed: "x".into() };
+    lock.ensure(
+        &ItemPath::publish(&sk.path, &PublishName::new("mount_face")),
+        &mut m,
+    );
+    let old = sk.path.clone();
+    let new = FilePath::new("interfaces/fuselage/skeleton.part");
+    assert_eq!(lock.rename_file(&old, &new, &mut m).unwrap(), 2);
+    sk.path = new.clone();
+    let (mut cat, _) = catalog_with(&env, &sk, &[]);
+    cat.set_partition(&FilePath::new("frames/frame12.part"), "structures");
+    env.catalog = Some(cat);
+    env.lock = Some(lock);
+    let d = consumer(
+        "frames/frame12.part",
+        Reference::published(Some(old.as_str()), "mount_face", XrefContext::Live),
+    );
+    let r = env.regen(&d);
+    assert!(region_ok(&r, "mount"), "{:#?}", r.diagnostics);
+    let n = diag(&r, DiagCode::XrefViaAlias);
+    assert!(
+        n.message.contains("fuselage/skeleton.part"),
+        "{}",
+        n.message
+    );
+}
+
+#[test]
+fn x15_auto_publish_records_the_new_entry_in_the_lock() {
+    let env = Env::new();
+    let mut sk = skeleton();
+    let (cat, _) = catalog_with(&env, &sk, &[]);
+    let pick = ForeignPick {
+        file: sk.path.clone(),
+        kind: TopoKind::Face,
+        reference: Reference::start_cap("body"),
+    };
+    let mut cat = cat;
+    cat.set_partition(&FilePath::new("frames/frame12.part"), "structures");
+    let edit = auto_publish(&sk, &pick, &FilePath::new("frames/frame12.part"), &cat).unwrap();
+    let mut lock = LockSection::default();
+    let mut m = SeededMinter { seed: "x".into() };
+    apply_publish_locked(&mut sk, &edit, &mut lock, &mut m);
+    let name = edit.add.as_ref().unwrap().name.clone();
+    assert!(lock.lookup(&ItemPath::publish(&sk.path, &name)).is_some());
+    // Publishing the same pick again reuses the entry.
+    let again = auto_publish(&sk, &pick, &FilePath::new("frames/frame12.part"), &cat).unwrap();
+    assert!(again.add.is_none());
+}
+
+#[test]
+fn x16_merges_report_redirected_and_broken_references() {
+    let env = Env::new();
+    let mut base = block();
+    base.publishes.push(PublishEntry {
+        name: PublishName::new("mount_face"),
+        target: PublishTarget::Entities {
+            kind: TopoKind::Face,
+            references: vec![Reference::end_cap("body")],
+        },
+        auto: false,
+    });
+    base.regions.push(region(
+        "mount",
+        TopoKind::Face,
+        vec![Reference::published(None, "mount_face", XrefContext::Live)],
+        Cardinality::ExactlyOne,
+    ));
+    let rb = env.regen(&base);
+    // Theirs re-targets the publish: an intended change, so a merge that keeps it is fine.
+    let mut theirs = base.clone();
+    if let PublishTarget::Entities { references, .. } = &mut theirs.publishes[0].target {
+        references[0] = Reference::start_cap("body");
+    }
+    let rt = env.regen(&theirs);
+    let ok = merge::recheck_part_merge(Some(&rb), &rb, &rt, &rt);
+    assert!(ok.findings.is_empty(), "{:?}", ok.findings);
+    assert!(ok.checked > 0);
+    // Both sides kept the end cap, the merged result moved it: redirected.
+    let bad = merge::recheck_part_merge(Some(&rb), &rb, &rb, &rt);
+    assert_eq!(bad.findings.len(), 1, "{:?}", bad.findings);
+    assert!(matches!(
+        bad.findings[0],
+        merge::MergeFinding::Redirected { .. }
+    ));
+    assert_eq!(
+        bad.diagnostics.diagnostics[0].code,
+        DiagCode::MergeRedirected
+    );
+    // The merge dropped the publish: broken.
+    let mut gone = base.clone();
+    gone.publishes.clear();
+    let rg = env.regen(&gone);
+    let broken = merge::recheck_part_merge(Some(&rb), &rb, &rb, &rg);
+    assert!(
+        broken
+            .findings
+            .iter()
+            .any(|f| matches!(f, merge::MergeFinding::Broken { .. })),
+        "{:?}",
+        broken.findings
+    );
+}

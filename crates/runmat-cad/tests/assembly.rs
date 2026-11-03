@@ -1848,3 +1848,75 @@ fn a22_values_flow_from_assembly_inputs_and_unknown_axes_are_reported() {
     let _ = Transform::IDENTITY;
     let _: BTreeMap<String, String> = r.variant.clone();
 }
+
+#[test]
+fn a23_merges_report_paths_that_now_name_another_occurrence() {
+    let base_src = bracket_project();
+    let mut lock = LockSection::default();
+    let mut m = SeededMinter { seed: "t".into() };
+    for d in base_src.assemblies.values() {
+        lock_assembly(d, &mut lock, &mut m);
+    }
+    let rig = FilePath::new("rig.assembly");
+    let base = run_with(
+        &base_src,
+        "rig.assembly",
+        &ResolveRequest::default(),
+        Some(&lock),
+        None,
+        None,
+        None,
+    );
+    // Ours renames `bracket` → `support`.
+    let mut ours_src = bracket_project();
+    let mut top = (*ours_src.assemblies[&(rig.clone(), None)]).clone();
+    top.occurrences
+        .iter_mut()
+        .find(|o| o.name == "bracket")
+        .unwrap()
+        .name = "support".into();
+    ours_src.add_assembly(top.clone());
+    let mut ours_lock = lock.clone();
+    ours_lock
+        .rename(
+            &item_path(&rig, "occurrence", "bracket"),
+            &item_path(&rig, "occurrence", "support"),
+        )
+        .unwrap();
+    let ours = run_with(
+        &ours_src,
+        "rig.assembly",
+        &ResolveRequest::default(),
+        Some(&ours_lock),
+        None,
+        None,
+        None,
+    );
+    // The text merge keeps ours' rename and theirs' untouched `bracket` lines, so the merged
+    // file has both a `support` and a new `bracket`.
+    let mut merged_src = bracket_project();
+    let mut merged = top.clone();
+    let mut extra = Occurrence::new("bracket", DefinitionRef::part("plate.part", None));
+    extra.placement = at(0.0, 0.0, 100.0);
+    merged.occurrences.push(extra);
+    merged_src.add_assembly(merged);
+    let mr = run_with(
+        &merged_src,
+        "rig.assembly",
+        &ResolveRequest::default(),
+        Some(&ours_lock),
+        None,
+        None,
+        None,
+    );
+    assert_ne!(
+        mr.node(mr.find_display("bracket").unwrap()).uuid,
+        mr.node(mr.find_display("support").unwrap()).uuid,
+        "a new item under an old name is a new item"
+    );
+    let (redirects, diags) =
+        runmat_cad::refs::merge::recheck_assembly_merge(Some(&base), &ours, &base, &mr);
+    assert_eq!(redirects.len(), 1, "{:?}", redirects);
+    assert_eq!(redirects[0].path, "bracket");
+    assert_eq!(diags.diagnostics[0].code, DiagCode::MergeRedirected);
+}

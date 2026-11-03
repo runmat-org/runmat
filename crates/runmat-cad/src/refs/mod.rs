@@ -8,9 +8,11 @@
 //! - [`resolve`]: reference + state → entity set, or a specific diagnosed reason.
 //! - [`publish`]: publish/consume, the catalog seam, auto-publish.
 //! - [`lock`]: stable item ids and rename aliases.
+//! - [`merge`]: re-resolution after merge (redirected and broken references).
 
 pub mod history;
 pub mod lock;
+pub mod merge;
 pub mod name;
 pub mod naming;
 pub mod publish;
@@ -22,8 +24,9 @@ pub use lock::{ItemPath, LockEntry, LockError, LockSection, SeededMinter, UuidMi
 pub use name::*;
 pub use naming::{edge_name, BodyNames, NamingContext};
 pub use publish::{
-    apply_publish, auto_publish, AutoPublishEdit, AutoPublishError, ForeignEntity, ForeignPick,
-    ForeignTarget, MemoryCatalog, PublishTable, PublishedCatalog, XrefProblem,
+    apply_publish, apply_publish_locked, auto_publish, rename_publish, AutoPublishEdit,
+    AutoPublishError, ForeignEntity, ForeignPick, ForeignTarget, MemoryCatalog, PublishRenameError,
+    PublishTable, PublishedCatalog, XrefProblem,
 };
 pub use reference::*;
 pub use resolve::{

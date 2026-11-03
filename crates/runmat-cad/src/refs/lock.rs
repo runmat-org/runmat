@@ -32,6 +32,19 @@ impl ItemPath {
             item: vec!["part".into(), part.0.clone()],
         }
     }
+    /// The file itself (its rename alias).
+    pub fn file(file: &FilePath) -> Self {
+        Self {
+            file: file.clone(),
+            item: vec!["file".into()],
+        }
+    }
+    pub fn publish(file: &FilePath, name: &crate::ids::PublishName) -> Self {
+        Self {
+            file: file.clone(),
+            item: vec!["publish".into(), name.0.clone()],
+        }
+    }
     pub fn occurrence(file: &FilePath, path: &[&str]) -> Self {
         let mut item = vec!["occurrence".to_owned()];
         item.extend(path.iter().map(|s| s.to_string()));
@@ -269,6 +282,31 @@ impl LockSection {
         let uuid = entry.uuid;
         self.insert_entry(to.clone(), entry);
         Ok(uuid)
+    }
+
+    /// Move every item of `from` to `to` (a file rename or move), keeping ids and recording
+    /// each old path as an alias. The file's own entry is created if it had none.
+    pub fn rename_file(
+        &mut self,
+        from: &FilePath,
+        to: &FilePath,
+        minter: &mut dyn UuidMinter,
+    ) -> Result<usize, LockError> {
+        self.ensure(&ItemPath::file(from), minter);
+        let moving: Vec<ItemPath> = self
+            .entries
+            .keys()
+            .filter(|p| &p.file == from)
+            .cloned()
+            .collect();
+        for p in &moving {
+            let target = ItemPath {
+                file: to.clone(),
+                item: p.item.clone(),
+            };
+            self.rename(p, &target)?;
+        }
+        Ok(moving.len())
     }
 
     /// The current feature id for a feature known by an older name in `file`.
