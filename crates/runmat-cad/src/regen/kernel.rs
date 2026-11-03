@@ -202,6 +202,190 @@ impl Transform {
             r[2][0] * v[0] + r[2][1] * v[1] + r[2][2] * v[2],
         ]
     }
+    pub const IDENTITY: Transform = Transform {
+        rotation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        translation: [0.0; 3],
+    };
+
+    /// `self ∘ other`: apply `other` first, then `self`.
+    pub fn compose(&self, other: &Transform) -> Transform {
+        let a = &self.rotation;
+        let b = &other.rotation;
+        let mut r = [[0.0; 3]; 3];
+        for (i, row) in r.iter_mut().enumerate() {
+            for (j, v) in row.iter_mut().enumerate() {
+                *v = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+            }
+        }
+        Transform {
+            rotation: r,
+            translation: self.apply(other.translation),
+        }
+    }
+
+    /// The inverse of a rigid transform (or of a reflection: `R` is orthogonal either way).
+    pub fn inverse(&self) -> Transform {
+        let r = &self.rotation;
+        let rt = [
+            [r[0][0], r[1][0], r[2][0]],
+            [r[0][1], r[1][1], r[2][1]],
+            [r[0][2], r[1][2], r[2][2]],
+        ];
+        let t = self.translation;
+        let inv = Transform {
+            rotation: rt,
+            translation: [0.0; 3],
+        };
+        let mt = inv.apply_vector(t);
+        Transform {
+            rotation: rt,
+            translation: [-mt[0], -mt[1], -mt[2]],
+        }
+    }
+
+    pub fn determinant(&self) -> f64 {
+        let r = &self.rotation;
+        r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
+            - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+            + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0])
+    }
+
+    /// The transform taking frame-local coordinates to the frame's parent coordinates.
+    pub fn from_frame(f: &Frame) -> Transform {
+        Transform {
+            rotation: [
+                [f.x[0], f.y[0], f.z[0]],
+                [f.x[1], f.y[1], f.z[1]],
+                [f.x[2], f.y[2], f.z[2]],
+            ],
+            translation: f.origin,
+        }
+    }
+
+    /// The frame this transform places (its image of the world frame).
+    pub fn to_frame(&self) -> Frame {
+        let r = &self.rotation;
+        Frame {
+            origin: self.translation,
+            x: [r[0][0], r[1][0], r[2][0]],
+            y: [r[0][1], r[1][1], r[2][1]],
+            z: [r[0][2], r[1][2], r[2][2]],
+        }
+    }
+
+    /// Rotation by `angle` radians about the unit `axis` through `point`.
+    pub fn rotation_about(point: [f64; 3], axis: [f64; 3], angle: f64) -> Transform {
+        let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        let (x, y, z) = if n > 0.0 {
+            (axis[0] / n, axis[1] / n, axis[2] / n)
+        } else {
+            (0.0, 0.0, 1.0)
+        };
+        let (s, c) = angle.sin_cos();
+        let t = 1.0 - c;
+        let rot = Transform {
+            rotation: [
+                [t * x * x + c, t * x * y - s * z, t * x * z + s * y],
+                [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
+                [t * x * z - s * y, t * y * z + s * x, t * z * z + c],
+            ],
+            translation: [0.0; 3],
+        };
+        Transform::translation(point)
+            .compose(&rot)
+            .compose(&Transform::translation([-point[0], -point[1], -point[2]]))
+    }
+
+    /// The unit quaternion `[w, x, y, z]` of a proper rotation (Shepperd's method).
+    pub fn quaternion(&self) -> [f64; 4] {
+        let m = &self.rotation;
+        let tr = m[0][0] + m[1][1] + m[2][2];
+        let q = if tr > 0.0 {
+            let s = (tr + 1.0).sqrt() * 2.0;
+            [
+                0.25 * s,
+                (m[2][1] - m[1][2]) / s,
+                (m[0][2] - m[2][0]) / s,
+                (m[1][0] - m[0][1]) / s,
+            ]
+        } else if m[0][0] > m[1][1] && m[0][0] > m[2][2] {
+            let s = (1.0 + m[0][0] - m[1][1] - m[2][2]).sqrt() * 2.0;
+            [
+                (m[2][1] - m[1][2]) / s,
+                0.25 * s,
+                (m[0][1] + m[1][0]) / s,
+                (m[0][2] + m[2][0]) / s,
+            ]
+        } else if m[1][1] > m[2][2] {
+            let s = (1.0 + m[1][1] - m[0][0] - m[2][2]).sqrt() * 2.0;
+            [
+                (m[0][2] - m[2][0]) / s,
+                (m[0][1] + m[1][0]) / s,
+                0.25 * s,
+                (m[1][2] + m[2][1]) / s,
+            ]
+        } else {
+            let s = (1.0 + m[2][2] - m[0][0] - m[1][1]).sqrt() * 2.0;
+            [
+                (m[1][0] - m[0][1]) / s,
+                (m[0][2] + m[2][0]) / s,
+                (m[1][2] + m[2][1]) / s,
+                0.25 * s,
+            ]
+        };
+        let n = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+        // A canonical sign keeps keys and the index deterministic.
+        let sign = if q[0] < 0.0 { -1.0 } else { 1.0 };
+        [
+            sign * q[0] / n,
+            sign * q[1] / n,
+            sign * q[2] / n,
+            sign * q[3] / n,
+        ]
+    }
+
+    /// A proper rigid transform from a unit quaternion `[w, x, y, z]` and a translation.
+    pub fn from_quaternion(q: [f64; 4], translation: [f64; 3]) -> Transform {
+        let n = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+        let (w, x, y, z) = if n > 0.0 {
+            (q[0] / n, q[1] / n, q[2] / n, q[3] / n)
+        } else {
+            (1.0, 0.0, 0.0, 0.0)
+        };
+        Transform {
+            rotation: [
+                [
+                    1.0 - 2.0 * (y * y + z * z),
+                    2.0 * (x * y - w * z),
+                    2.0 * (x * z + w * y),
+                ],
+                [
+                    2.0 * (x * y + w * z),
+                    1.0 - 2.0 * (x * x + z * z),
+                    2.0 * (y * z - w * x),
+                ],
+                [
+                    2.0 * (x * z - w * y),
+                    2.0 * (y * z + w * x),
+                    1.0 - 2.0 * (x * x + y * y),
+                ],
+            ],
+            translation,
+        }
+    }
+
+    /// Largest absolute entry difference: rotation and translation together.
+    pub fn max_difference(&self, other: &Transform) -> f64 {
+        let mut m: f64 = 0.0;
+        for i in 0..3 {
+            for j in 0..3 {
+                m = m.max((self.rotation[i][j] - other.rotation[i][j]).abs());
+            }
+            m = m.max((self.translation[i] - other.translation[i]).abs());
+        }
+        m
+    }
+
     /// Reflection across the plane through `point` with unit `normal`.
     pub fn reflection(point: [f64; 3], normal: [f64; 3]) -> Self {
         let n = normal;

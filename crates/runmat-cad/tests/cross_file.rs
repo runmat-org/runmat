@@ -429,9 +429,9 @@ fn x12_lock_merge_and_conflicts() {
     assert_eq!(ua, ub, "seeded ids are deterministic");
     b.ensure(&ItemPath::occurrence(&f, &["wing.left", "box"]), &mut m);
     let merged = a.merge(&b).unwrap();
-    assert_eq!(merged.entries.len(), 2);
+    assert_eq!(merged.len(), 2);
     let mut c = LockSection::default();
-    c.entries.insert(
+    c.insert_entry(
         ItemPath::part(&f, &"gasket".into()),
         LockEntry {
             uuid: runmat_cad::ids::ItemUuid(7),

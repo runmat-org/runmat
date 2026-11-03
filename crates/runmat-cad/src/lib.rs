@@ -1,5 +1,7 @@
 //! RunMat CAD: the kernel-free design layer.
 //!
+//! - [`assembly`]: product structure, variants and effectivity, mates, patterns, fastener
+//!   rules, representations and load levels, BOM, interference, the assembly index.
 //! - [`model`]: the part document (inputs, sketches, datums, features, part outputs, regions,
 //!   publish entries, materials, links, configurations).
 //! - [`refs`]: the reference and naming system and the history contract kernels emit.
@@ -10,6 +12,7 @@
 //! - [`units`], [`value`], [`sketch_solver`]: seams to the unit authority, the value phase and
 //!   the constraint solver.
 
+pub mod assembly;
 pub mod diagnostics;
 pub mod ids;
 pub mod index;

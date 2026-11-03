@@ -56,12 +56,39 @@ pub struct LockEntry {
     pub aliases: BTreeSet<ItemPath>,
 }
 
+/// Keyed by the item's current path, so serialisation is sorted and stable. Serialised as a
+/// list of `{ path, uuid, aliases }` rows (JSON maps need string keys). Two derived indexes
+/// (alias → current path, uuid → current path) are rebuilt on load and kept in step by every
+/// mutation, so lookups stay logarithmic at hundreds of thousands of occurrence paths. They are
+/// never serialised: the entries are the one source of truth.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "LockRepr", into = "LockRepr")]
 pub struct LockSection {
-    /// Keyed by the item's current path, so serialisation is sorted and stable. Serialised as
-    /// a list of `{ path, uuid, aliases }` rows (JSON maps need string keys).
+    entries: BTreeMap<ItemPath, LockEntry>,
+    alias_index: BTreeMap<ItemPath, ItemPath>,
+    uuid_index: BTreeMap<ItemUuid, ItemPath>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LockRepr {
     #[serde(with = "entry_rows")]
-    pub entries: BTreeMap<ItemPath, LockEntry>,
+    entries: BTreeMap<ItemPath, LockEntry>,
+}
+
+impl From<LockRepr> for LockSection {
+    fn from(r: LockRepr) -> Self {
+        let mut s = LockSection::default();
+        for (p, e) in r.entries {
+            s.insert_entry(p, e);
+        }
+        s
+    }
+}
+
+impl From<LockSection> for LockRepr {
+    fn from(s: LockSection) -> Self {
+        LockRepr { entries: s.entries }
+    }
 }
 
 mod entry_rows {
@@ -154,13 +181,53 @@ pub struct LockLookup {
 }
 
 impl LockSection {
+    pub fn entries(&self) -> &BTreeMap<ItemPath, LockEntry> {
+        &self.entries
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Insert or replace an entry as is (no conflict checks; [`LockSection::merge`] checks).
+    pub fn insert_entry(&mut self, path: ItemPath, entry: LockEntry) {
+        if let Some(old) = self.entries.remove(&path) {
+            self.unindex(&path, &old);
+        }
+        for a in &entry.aliases {
+            self.alias_index.insert(a.clone(), path.clone());
+        }
+        self.uuid_index.insert(entry.uuid, path.clone());
+        self.entries.insert(path, entry);
+    }
+
+    fn unindex(&mut self, path: &ItemPath, entry: &LockEntry) {
+        for a in &entry.aliases {
+            if self.alias_index.get(a) == Some(path) {
+                self.alias_index.remove(a);
+            }
+        }
+        if self.uuid_index.get(&entry.uuid) == Some(path) {
+            self.uuid_index.remove(&entry.uuid);
+        }
+    }
+
+    /// The current path of an id.
+    pub fn path_of(&self, uuid: ItemUuid) -> Option<&ItemPath> {
+        self.uuid_index.get(&uuid)
+    }
+
     /// The id for `path`, minting one if the item is new.
     pub fn ensure(&mut self, path: &ItemPath, minter: &mut dyn UuidMinter) -> ItemUuid {
         if let Some(e) = self.entries.get(path) {
             return e.uuid;
         }
         let uuid = minter.mint(path);
-        self.entries.insert(
+        self.insert_entry(
             path.clone(),
             LockEntry {
                 uuid,
@@ -178,14 +245,13 @@ impl LockSection {
                 via_alias: false,
             });
         }
-        self.entries
-            .iter()
-            .find(|(_, e)| e.aliases.contains(path))
-            .map(|(p, e)| LockLookup {
-                uuid: e.uuid,
-                current: p.clone(),
-                via_alias: true,
-            })
+        let current = self.alias_index.get(path)?;
+        let e = self.entries.get(current)?;
+        Some(LockLookup {
+            uuid: e.uuid,
+            current: current.clone(),
+            via_alias: true,
+        })
     }
 
     /// Record a rename: the id moves to `to`, and `from` becomes an alias.
@@ -197,10 +263,11 @@ impl LockSection {
             .entries
             .remove(from)
             .ok_or_else(|| LockError::Unknown { path: from.clone() })?;
+        self.unindex(from, &entry);
         entry.aliases.insert(from.clone());
         entry.aliases.remove(to);
         let uuid = entry.uuid;
-        self.entries.insert(to.clone(), entry);
+        self.insert_entry(to.clone(), entry);
         Ok(uuid)
     }
 
@@ -220,7 +287,7 @@ impl LockSection {
     pub fn merge(&self, other: &LockSection) -> Result<LockSection, LockError> {
         let mut out = self.clone();
         for (path, e) in &other.entries {
-            match out.entries.get_mut(path) {
+            match out.entries.get(path) {
                 Some(mine) if mine.uuid != e.uuid => {
                     return Err(LockError::PathConflict {
                         path: path.clone(),
@@ -228,10 +295,12 @@ impl LockSection {
                         b: e.uuid,
                     })
                 }
-                Some(mine) => mine.aliases.extend(e.aliases.iter().cloned()),
-                None => {
-                    out.entries.insert(path.clone(), e.clone());
+                Some(mine) => {
+                    let mut merged = mine.clone();
+                    merged.aliases.extend(e.aliases.iter().cloned());
+                    out.insert_entry(path.clone(), merged);
                 }
+                None => out.insert_entry(path.clone(), e.clone()),
             }
         }
         let mut by_uuid: BTreeMap<ItemUuid, &ItemPath> = BTreeMap::new();
