@@ -2,6 +2,9 @@ use crate::{CompletedUsage, CountOverflow, OperationCount, UsageCategory};
 use std::fmt;
 use std::sync::{Mutex, MutexGuard};
 
+mod delegated;
+pub use delegated::DelegatedReservation;
+
 /// One run's admitted operation budget. Storage is fixed-size; reserving a
 /// numerical batch allocates no heap memory and does not lock per operation.
 ///
@@ -43,6 +46,7 @@ pub enum LedgerError {
     },
     InvalidGrant,
     InvalidReservation,
+    NonMonotonicUsage,
     OutstandingWork,
     Closed,
     InvalidState,
@@ -62,6 +66,7 @@ impl fmt::Display for LedgerError {
             Self::MoreGrantRequired { required, granted } => write!(f, "simulation work needs a total grant of {required} operations; {granted} are granted"),
             Self::InvalidGrant => f.write_str("simulation grant must be monotonic and within the spending cap"),
             Self::InvalidReservation => f.write_str("completed simulation work exceeds its reservation"),
+            Self::NonMonotonicUsage => f.write_str("completed simulation usage cannot decrease in any category"),
             Self::OutstandingWork => f.write_str("simulation work reservations are still active"),
             Self::Closed => f.write_str("simulation usage ledger is closed"),
             Self::InvalidState => f.write_str("simulation usage ledger state is invalid"),
@@ -115,6 +120,15 @@ impl UsageLedger {
         category: UsageCategory,
         maximum: OperationCount,
     ) -> Result<WorkReservation<'_>, LedgerError> {
+        self.reserve_capacity(maximum)?;
+        Ok(WorkReservation {
+            ledger: self,
+            category,
+            remaining: maximum,
+        })
+    }
+
+    fn reserve_capacity(&self, maximum: OperationCount) -> Result<(), LedgerError> {
         let mut state = self.lock()?;
         if state.closed {
             return Err(LedgerError::Closed);
@@ -139,11 +153,7 @@ impl UsageLedger {
             .ok_or(LedgerError::CountOverflow)?;
         state.reserved = reserved;
         state.active = active;
-        Ok(WorkReservation {
-            ledger: self,
-            category,
-            remaining: maximum,
-        })
+        Ok(())
     }
 
     pub fn snapshot(&self) -> Result<LedgerSnapshot, LedgerError> {
