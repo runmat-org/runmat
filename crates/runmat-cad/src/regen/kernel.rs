@@ -92,9 +92,11 @@ pub trait CadKernel {
 #[serde(rename_all = "snake_case", tag = "segment")]
 pub enum SegmentKind {
     Line,
-    /// Counter-clockwise about `center`.
+    /// About `center`, counter-clockwise from `start` to `end` unless `clockwise`.
     Arc {
         center: [f64; 2],
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        clockwise: bool,
     },
     Circle {
         center: [f64; 2],
@@ -147,9 +149,15 @@ pub enum ToolShape {
         axis_direction: [f64; 3],
         angle: f64,
     },
+    /// The profile swept along a polyline path. `path_curves[i]` is the path curve segment `i`
+    /// (from `path[i]` to `path[i + 1]`) belongs to, so a curved path curve sampled into
+    /// several segments still makes one face per profile curve; side faces are numbered by
+    /// path curve when the path has several. Empty: each segment is its own curve.
     Sweep {
         profile: CanonicalProfile,
         path: Vec<[f64; 3]>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path_curves: Vec<u32>,
     },
     Loft {
         profiles: Vec<CanonicalProfile>,

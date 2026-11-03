@@ -1106,6 +1106,50 @@ impl<'a, 'b> Run<'a, 'b> {
         }
     }
 
+    /// A sweep path: the sketch's curves chained end to end (open or closed), as a polyline in
+    /// part coordinates plus the path curve each segment samples.
+    fn path(
+        &mut self,
+        i: usize,
+        f: &FeatureId,
+        param: &str,
+        p: &ProfileRef,
+    ) -> Result<(Vec<[f64; 3]>, Vec<u32>), Halt> {
+        self.gate_feature(i, f, &p.sketch, param)?;
+        let Some((solved, frame)) = self.st.sketches.get(&p.sketch).cloned() else {
+            return Err(self.error(
+                f,
+                Some(param),
+                DiagCode::RefKindMismatch,
+                format!("`{}` is not a sketch", p.sketch),
+                Vec::new(),
+            ));
+        };
+        let Some(FeatureKind::Sketch(sketch)) = self.doc.feature(&p.sketch).map(|x| &x.kind) else {
+            unreachable!("gated")
+        };
+        match build_path(sketch, &solved) {
+            Ok(segs) => {
+                let mut pts = Vec::new();
+                let mut curves = Vec::new();
+                for (ci, seg) in segs.iter().enumerate() {
+                    let samples = segment_samples(seg);
+                    if pts.is_empty() {
+                        pts.push(frame.to_world(samples[0]));
+                    }
+                    for q in &samples[1..] {
+                        pts.push(frame.to_world(*q));
+                        curves.push(ci as u32);
+                    }
+                }
+                Ok((pts, curves))
+            }
+            Err(msg) => {
+                Err(self.error(f, Some(param), DiagCode::SketchOpenProfile, msg, Vec::new()))
+            }
+        }
+    }
+
     fn bodies_of(set: &BTreeSet<EntityHandle>) -> Vec<usize> {
         let mut v: Vec<usize> = set.iter().map(|h| h.body as usize).collect();
         v.sort();
@@ -1393,16 +1437,14 @@ impl<'a, 'b> Run<'a, 'b> {
             }
             FeatureKind::Sweep(s) => {
                 let profile = self.profile(i, id, "profile", &s.profile)?;
-                let path_profile = self.profile(i, id, "path", &s.path)?;
-                let path: Vec<[f64; 3]> = path_profile
-                    .loops
-                    .iter()
-                    .flatten()
-                    .map(|seg| path_profile.frame.to_world(seg.start))
-                    .collect();
+                let (path, path_curves) = self.path(i, id, "path", &s.path)?;
                 let (combine, operands) = self.mode_operands(i, id, &s.mode)?;
                 let tool = ToolOp {
-                    shape: ToolShape::Sweep { profile, path },
+                    shape: ToolShape::Sweep {
+                        profile,
+                        path,
+                        path_curves,
+                    },
                     combine,
                 };
                 Ok(Compiled::Op {
@@ -2332,6 +2374,7 @@ fn build_loops(
                 curve: id.clone(),
                 kind: SegmentKind::Arc {
                     center: solved.point(id, PointRole::Center)?,
+                    clockwise: false,
                 },
                 start: solved.point(id, PointRole::Start)?,
                 end: solved.point(id, PointRole::End)?,
@@ -2395,7 +2438,7 @@ fn build_loops(
                 };
                 let mut s = pool.remove(k);
                 if !close(s.start, end) {
-                    std::mem::swap(&mut s.start, &mut s.end);
+                    reverse_segment(&mut s);
                 }
                 chain.push(s);
             }
@@ -2425,6 +2468,134 @@ fn build_loops(
     let o = loops.remove(outer);
     loops.insert(0, o);
     Ok(loops)
+}
+
+fn reverse_segment(s: &mut ProfileSegment) {
+    std::mem::swap(&mut s.start, &mut s.end);
+    if let SegmentKind::Arc { clockwise, .. } = &mut s.kind {
+        *clockwise = !*clockwise;
+    }
+}
+
+/// Points along a segment from start to end: the ends for a line, samples for an arc.
+fn segment_samples(s: &ProfileSegment) -> Vec<[f64; 2]> {
+    match s.kind {
+        SegmentKind::Line => vec![s.start, s.end],
+        SegmentKind::Arc { center, clockwise } => {
+            let r = ((s.start[0] - center[0]).powi(2) + (s.start[1] - center[1]).powi(2)).sqrt();
+            let a0 = (s.start[1] - center[1]).atan2(s.start[0] - center[0]);
+            let a1 = (s.end[1] - center[1]).atan2(s.end[0] - center[0]);
+            let tau = std::f64::consts::TAU;
+            let mut sweep = a1 - a0;
+            if clockwise {
+                while sweep >= -1e-12 {
+                    sweep -= tau;
+                }
+            } else {
+                while sweep <= 1e-12 {
+                    sweep += tau;
+                }
+            }
+            let n = ((sweep.abs() / (std::f64::consts::PI / 12.0)).ceil() as usize).max(2);
+            (0..=n)
+                .map(|k| {
+                    let a = a0 + sweep * k as f64 / n as f64;
+                    [center[0] + r * a.cos(), center[1] + r * a.sin()]
+                })
+                .collect()
+        }
+        SegmentKind::Circle { center, radius } => (0..=24)
+            .map(|k| {
+                let a = std::f64::consts::TAU * k as f64 / 24.0;
+                [center[0] + radius * a.cos(), center[1] + radius * a.sin()]
+            })
+            .collect(),
+    }
+}
+
+/// A sketch's non-construction curves chained end to end into one path, starting from a free
+/// end when the path is open.
+fn build_path(sketch: &Sketch, solved: &SolvedSketch) -> Result<Vec<ProfileSegment>, String> {
+    let close = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9;
+    let mut pool: Vec<ProfileSegment> = Vec::new();
+    for e in sketch.entities.iter().filter(|e| !e.construction) {
+        let seg = match &e.geometry {
+            SketchGeometry::Line { .. } => ProfileSegment {
+                curve: e.id.clone(),
+                kind: SegmentKind::Line,
+                start: solved
+                    .point(&e.id, PointRole::Start)
+                    .ok_or("path line not solved")?,
+                end: solved
+                    .point(&e.id, PointRole::End)
+                    .ok_or("path line not solved")?,
+            },
+            SketchGeometry::Arc { .. } => ProfileSegment {
+                curve: e.id.clone(),
+                kind: SegmentKind::Arc {
+                    center: solved
+                        .point(&e.id, PointRole::Center)
+                        .ok_or("path arc not solved")?,
+                    clockwise: false,
+                },
+                start: solved
+                    .point(&e.id, PointRole::Start)
+                    .ok_or("path arc not solved")?,
+                end: solved
+                    .point(&e.id, PointRole::End)
+                    .ok_or("path arc not solved")?,
+            },
+            _ => continue,
+        };
+        pool.push(seg);
+    }
+    if pool.is_empty() {
+        return Err("the path sketch has no curves".into());
+    }
+    // Start at a free end: an endpoint no other curve shares.
+    let shared = |p: [f64; 2], me: usize, pool: &[ProfileSegment]| {
+        pool.iter()
+            .enumerate()
+            .any(|(j, s)| j != me && (close(s.start, p) || close(s.end, p)))
+    };
+    let mut first = 0;
+    let mut flip = false;
+    'find: for (i, s) in pool.iter().enumerate() {
+        if !shared(s.start, i, &pool) {
+            first = i;
+            break 'find;
+        }
+        if !shared(s.end, i, &pool) {
+            first = i;
+            flip = true;
+            break 'find;
+        }
+    }
+    let mut seg = pool.remove(first);
+    if flip {
+        reverse_segment(&mut seg);
+    }
+    let mut chain = vec![seg];
+    while !pool.is_empty() {
+        let end = chain.last().expect("non-empty").end;
+        let Some(k) = pool
+            .iter()
+            .position(|s| close(s.start, end) || close(s.end, end))
+        else {
+            return Err(format!(
+                "the path is broken at ({:.6}, {:.6}) after `{}`",
+                end[0],
+                end[1],
+                chain.last().expect("non-empty").curve
+            ));
+        };
+        let mut s = pool.remove(k);
+        if !close(s.start, end) {
+            reverse_segment(&mut s);
+        }
+        chain.push(s);
+    }
+    Ok(chain)
 }
 
 /// For each body of a slot tie, a reference that selects it alone: the body carrying a face

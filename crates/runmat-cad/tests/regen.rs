@@ -29,7 +29,8 @@ fn revolve_doc() -> PartDocument {
         "spin",
         FeatureKind::Revolve(Revolve {
             profile: ProfileRef::sketch("s_rev"),
-            axis: AxisRef::origin(OriginAxis::Y),
+            // Normal to the profile plane: the kernel refuses it.
+            axis: AxisRef::origin(OriginAxis::Z),
             angle: ValueExpr::deg(360.0),
             mode: BodyMode::New,
         }),
@@ -77,7 +78,8 @@ fn g01_failure_is_root_dependents_cascade_independents_regenerate() {
         panic!("{:?}", spin)
     };
     let root = &r.diagnostics.diagnostics[diagnostic as usize];
-    assert_eq!(root.code, DiagCode::KernelNotSupported);
+    assert_eq!(root.code, DiagCode::KernelFailed);
+    assert!(root.message.contains("profile plane"), "{}", root.message);
     assert_eq!(root.cause, Cause::Root);
     // The dependent fillet is a cascade of that root.
     match r.status("round_spin").unwrap() {
@@ -358,18 +360,44 @@ fn g08_open_profile_and_kernel_not_supported_are_specific() {
     d.features.push(sketch("open", s));
     d.features
         .push(extrude("x", "open", mm(1.0), BodyMode::New));
+    // A chamfer on an edge of a fillet face: the fake kernel blends straight edges between
+    // planar faces only.
+    d.features.push(fillet(
+        "r1",
+        vec![Reference::edges_between(
+            side("body", "s1", "l1"),
+            Reference::end_cap("body"),
+        )],
+        1.0,
+    ));
+    let side_name = EntityName::generated(
+        "body",
+        Role::Side,
+        SourceTag::Curve {
+            sketch: fid("s1"),
+            entity: runmat_cad::ids::SketchEntityId::new("l1"),
+        },
+    );
+    let end_name = EntityName::generated("body", Role::EndCap, SourceTag::None);
     d.features.push(Feature::new(
-        "sh",
-        FeatureKind::Shell(Shell {
-            body: Reference::feature_body("body"),
-            open_faces: vec![Reference::end_cap("body")],
-            thickness: mm(1.0),
+        "ch",
+        FeatureKind::Chamfer(Chamfer {
+            edges: vec![Reference::edges_between(
+                Reference::gen_face(
+                    "r1",
+                    Role::Blend,
+                    SourceTag::edge_between(&side_name, &end_name),
+                ),
+                Reference::end_cap("body"),
+            )],
+            distance: mm(0.5),
+            distance2: None,
         }),
     ));
     let r = env.regen(&d);
     assert!(has(&r, DiagCode::SketchOpenProfile));
     let ns = diag(&r, DiagCode::KernelNotSupported);
-    assert!(ns.message.contains("shell"));
+    assert!(ns.message.contains("blend"), "{}", ns.message);
     assert_eq!(ns.severity, Severity::Error);
     assert!(r.parts.values().all(|p| p.ok), "the model stays usable");
 }

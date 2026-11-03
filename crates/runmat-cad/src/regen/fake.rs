@@ -8,14 +8,28 @@
 //! chamfers are synthetic blend faces laid over grid edges and carried through later
 //! operations.
 //!
-//! Supported: extrudes of axis-aligned rectilinear polygons on axis-aligned frames (new, add,
-//! cut, intersect, blind, symmetric, through all), square "holes", patterns and mirrors of those
-//! tools by translation and axis reflection, body patterns, booleans, splits by axis-aligned
-//! planes, translation, fillets and chamfers on straight grid edges, and imports of named boxes.
-//! Everything else returns `KernelError::NotSupported`, which tests use for continue-past-failure.
+//! Rectilinear tools (axis-aligned polygon extrudes on axis-aligned frames) are exact. Every
+//! other shape is a sampled tool ([`sampled`]): its occupancy is decided at cell centres and its
+//! facets are labelled by the tool surface the boundary crosses, so a curved or off-axis
+//! surface becomes one faceted face (a staircase of facets with one label) and the edges where
+//! it meets other faces are chained into one edge per run. History stays exact in the K1 sense:
+//! roles, tags and ordinals come from the operation's definition; splits, merges and deletions
+//! come from occupancy.
+//!
+//! Supported: extrudes of line, arc and circle profiles on any frame (new, add, cut, intersect,
+//! blind, symmetric, through all); revolves at any angle; translational sweeps along polyline
+//! paths; ruled lofts through parallel sections; round holes (simple, counterbore, countersink,
+//! blind or through); patterns and mirrors of tools and of bodies under any rigid motion or
+//! reflection; booleans; splits by axis-aligned planes; transforms; fillets and chamfers on
+//! straight edges between planar grid faces; shells (inner walls tagged by the face they
+//! offset, rims tagged by the face they open); drafts of planar faces about a neutral plane;
+//! and imports of named boxes. Everything else returns `KernelError::NotSupported`, which tests
+//! use for continue-past-failure.
 
 // Grid code indexes several per-axis arrays in step; index loops read clearer than zips here.
 #![allow(clippy::needless_range_loop)]
+
+mod sampled;
 
 use crate::model::datum::Frame;
 use crate::refs::history::*;
@@ -30,7 +44,7 @@ const EPS: f64 = 1e-9;
 type SegmentKey = (usize, [usize; 3]);
 /// An edge run's identity: its face pair, axis and line (start index zeroed).
 type PieceKey = ((u32, u32), usize, [usize; 3]);
-type EdgeRow = (EdgeTopo, EdgeMeta, [[usize; 3]; 2]);
+type EdgeRow = (EdgeTopo, EdgeMeta, Vec<[usize; 3]>);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FakeImportBox {
@@ -74,9 +88,78 @@ impl Rect {
 
 #[derive(Clone, Debug)]
 struct FFace {
-    /// `None` for blend faces.
+    /// The plane of a planar grid face; `None` for faceted and blend faces.
     plane: Option<PlaneKey>,
     rects: Vec<Rect>,
+    /// For a faceted face (a curved or off-axis surface on the grid): each rect's plane, in
+    /// step with `rects`. Empty for planar and blend faces.
+    facet_planes: Vec<PlaneKey>,
+    /// Informative surface of a faceted face.
+    surface: Option<SurfaceKind>,
+}
+
+/// Whether a facet lies on a planar grid face or on a faceted surface.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FacetKind {
+    Planar,
+    Faceted(SurfaceKind),
+}
+
+impl FFace {
+    fn blend() -> Self {
+        FFace {
+            plane: None,
+            rects: Vec::new(),
+            facet_planes: Vec::new(),
+            surface: None,
+        }
+    }
+
+    fn is_grid(&self) -> bool {
+        !self.rects.is_empty()
+    }
+
+    fn rect_planes(&self) -> Vec<(PlaneKey, Rect)> {
+        match self.plane {
+            Some(p) => self.rects.iter().map(|r| (p, *r)).collect(),
+            None => self
+                .facet_planes
+                .iter()
+                .copied()
+                .zip(self.rects.iter().copied())
+                .collect(),
+        }
+    }
+
+    fn lies_on(&self, plane: &PlaneKey, p: [f64; 3]) -> bool {
+        match &self.plane {
+            Some(fp) => fp.same(plane) && self.rects.iter().any(|r| r.contains(p)),
+            None => self
+                .facet_planes
+                .iter()
+                .zip(&self.rects)
+                .any(|(fp, r)| fp.same(plane) && r.contains(p)),
+        }
+    }
+
+    fn hint(&self) -> SurfaceKind {
+        match self.plane {
+            Some(p) => {
+                let mut n = [0.0; 3];
+                n[p.axis] = p.dir as f64;
+                SurfaceKind::Plane { normal: n }
+            }
+            None => self.surface.unwrap_or(SurfaceKind::Other),
+        }
+    }
+
+    fn kind(&self) -> FacetKind {
+        if self.plane.is_some() {
+            FacetKind::Planar
+        } else {
+            FacetKind::Faceted(self.hint())
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -236,29 +319,24 @@ impl Prism {
         }
     }
 
-    /// Apply a diagonal transform (translation and axis reflections only).
-    fn transformed(&self, t: &Transform) -> Result<Prism, KernelError> {
-        let r = &t.rotation;
-        for i in 0..3 {
-            for j in 0..3 {
-                let want_zero = i != j;
-                if (want_zero && r[i][j].abs() > EPS)
-                    || (!want_zero && (r[i][j].abs() - 1.0).abs() > EPS)
-                {
-                    return Err(KernelError::NotSupported {
-                        what: "fake kernel: rotations in patterns".into(),
-                    });
-                }
-            }
-        }
-        let map = |a: usize, x: f64| r[a][a] * x + t.translation[a];
+    /// Apply a signed axis permutation (right-angle rotations, axis reflections, translation)
+    /// exactly; `None` for any other motion.
+    fn permuted(&self, t: &Transform) -> Option<Prism> {
+        let perm = signed_permutation(t)?;
+        let map = |a: usize, x: f64| -> (usize, f64) {
+            let (b, sg) = perm[a];
+            (b, sg * x + t.translation[b])
+        };
         let mut p = self.clone();
+        p.k = perm[self.k].0;
+        p.u = perm[self.u].0;
+        p.v = perm[self.v].0;
         for l in &mut p.loops {
             for q in l.iter_mut() {
-                *q = [map(self.u, q[0]), map(self.v, q[1])];
+                *q = [map(self.u, q[0]).1, map(self.v, q[1]).1];
             }
         }
-        let (a, b) = (map(self.k, self.lo), map(self.k, self.hi));
+        let (a, b) = (map(self.k, self.lo).1, map(self.k, self.hi).1);
         if a <= b {
             p.lo = a;
             p.hi = b;
@@ -267,7 +345,44 @@ impl Prism {
             p.hi = a;
             std::mem::swap(&mut p.lo_label, &mut p.hi_label);
         }
-        Ok(p)
+        Some(p)
+    }
+
+    /// The same prism as a sampled tool, for motions that leave the grid axes.
+    fn to_sampled(&self) -> sampled::Sampled {
+        let mut rot = [[0.0; 3]; 3];
+        rot[self.u][0] = 1.0;
+        rot[self.v][1] = 1.0;
+        rot[self.k][2] = 1.0;
+        let to_world = Transform {
+            rotation: rot,
+            translation: [0.0; 3],
+        };
+        let loops: Vec<Vec<(sampled::Curve2, HistorySource)>> = self
+            .loops
+            .iter()
+            .zip(&self.edge_labels)
+            .map(|(l, labs)| {
+                (0..l.len())
+                    .map(|i| {
+                        (
+                            sampled::Curve2::Line {
+                                a: l[i],
+                                b: l[(i + 1) % l.len()],
+                            },
+                            labs[i].clone(),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        sampled::prism(
+            to_world,
+            &loops,
+            self.lo,
+            self.hi,
+            [self.lo_label.clone(), self.hi_label.clone()],
+        )
     }
 
     fn relabel(&mut self, seed: u32, instance: &InstanceKey) {
@@ -288,6 +403,96 @@ impl Prism {
             for s in l {
                 fix(s);
             }
+        }
+    }
+}
+
+/// For each source axis, the axis it maps to and the sign, when `t`'s rotation is a signed
+/// permutation.
+fn signed_permutation(t: &Transform) -> Option<[(usize, f64); 3]> {
+    let r = &t.rotation;
+    let mut out = [(0usize, 0.0f64); 3];
+    for a in 0..3 {
+        let mut found = None;
+        for b in 0..3 {
+            let x = r[b][a];
+            if (x.abs() - 1.0).abs() < EPS {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some((b, x.signum()));
+            } else if x.abs() > EPS {
+                return None;
+            }
+        }
+        out[a] = found?;
+    }
+    Some(out)
+}
+
+/// A tool shape on the grid: exact rectilinear prisms, or sampled shapes.
+#[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
+enum Tool {
+    Exact(Prism),
+    Sampled(Box<sampled::Sampled>),
+}
+
+impl Tool {
+    fn inside(&self, p: [f64; 3]) -> bool {
+        match self {
+            Tool::Exact(t) => t.inside(p),
+            Tool::Sampled(t) => t.inside(p),
+        }
+    }
+
+    fn breaks(&self, out: &mut [Vec<f64>; 3]) {
+        match self {
+            Tool::Exact(t) => t.breaks(out),
+            Tool::Sampled(t) => t.breaks(out),
+        }
+    }
+
+    /// The label of a facet on `plane` at `cen` between cell centres `a` (the facet's cell)
+    /// and `b` (across it), when this tool bounds it.
+    fn label(
+        &self,
+        plane: &PlaneKey,
+        cen: [f64; 3],
+        a: [f64; 3],
+        b: [f64; 3],
+    ) -> Option<(HistorySource, FacetKind)> {
+        match self {
+            Tool::Exact(t) => t
+                .label(plane.axis, plane.offset, cen)
+                .map(|l| (l, FacetKind::Planar)),
+            Tool::Sampled(t) => t.crossing(a, b).map(|i| {
+                let s = &t.surfaces[i];
+                let kind = match s.plane {
+                    Some((ax, off)) if ax == plane.axis && (off - plane.offset).abs() < 1e-7 => {
+                        FacetKind::Planar
+                    }
+                    _ => FacetKind::Faceted(s.hint),
+                };
+                (s.label.clone(), kind)
+            }),
+        }
+    }
+
+    fn relabel(&mut self, seed: u32, instance: &InstanceKey) {
+        match self {
+            Tool::Exact(t) => t.relabel(seed, instance),
+            Tool::Sampled(t) => t.relabel(seed, instance),
+        }
+    }
+
+    fn transformed(&self, t: &Transform) -> Tool {
+        match self {
+            Tool::Exact(p) => match p.permuted(t) {
+                Some(q) => Tool::Exact(q),
+                None => Tool::Sampled(Box::new(p.to_sampled().transformed(t))),
+            },
+            Tool::Sampled(s) => Tool::Sampled(Box::new(s.transformed(t))),
         }
     }
 }
@@ -393,66 +598,6 @@ fn prism_from_profile(
     })
 }
 
-fn hole_prisms(
-    frame: &Frame,
-    positions: &[(String, [f64; 2])],
-    diameter: f64,
-    depth: Option<f64>,
-    bounds: (f64, f64),
-) -> Result<Vec<Prism>, KernelError> {
-    let (k, ks, u, v) = frame_axes(frame)?;
-    let r = diameter / 2.0;
-    let mut out = Vec::new();
-    for (key, at) in positions {
-        let corners = [[r, -r], [r, r], [-r, r], [-r, -r]];
-        let pts: Vec<[f64; 2]> = corners
-            .iter()
-            .map(|c| {
-                let w = frame.to_world([at[0] + c[0], at[1] + c[1]]);
-                [w[u], w[v]]
-            })
-            .collect();
-        // Wall ordinals follow the definition: +x side, +y side, −x side, −y side.
-        let labels: Vec<HistorySource> = (0..4)
-            .map(|i| gen(Role::HoleWall, KernelTag::Key { key: key.clone() }, Some(i)))
-            .collect();
-        let top = frame.origin[k];
-        let bottom = match depth {
-            Some(d) => top - ks * d,
-            None => {
-                if ks > 0.0 {
-                    bounds.0
-                } else {
-                    bounds.1
-                }
-            }
-        };
-        let bottom_label = gen(Role::HoleBottom, KernelTag::Key { key: key.clone() }, None);
-        let top_label = gen(
-            Role::HoleBottom,
-            KernelTag::Key { key: key.clone() },
-            Some(1),
-        );
-        let (lo, hi, lo_label, hi_label) = if bottom < top {
-            (bottom, top, bottom_label, top_label)
-        } else {
-            (top, bottom, top_label, bottom_label)
-        };
-        out.push(Prism {
-            k,
-            u,
-            v,
-            loops: vec![pts],
-            edge_labels: vec![labels],
-            lo,
-            hi,
-            lo_label,
-            hi_label,
-        });
-    }
-    Ok(out)
-}
-
 // ------------------------------------------------------------------------------- re-gridding
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -472,13 +617,86 @@ struct GridJob<'a> {
     operands: Vec<&'a FakeSolid>,
     /// Operand indices into the operation's operand list (for labels).
     operand_ids: Vec<u32>,
-    tools: Vec<Prism>,
+    tools: Vec<Tool>,
     mode: Mode,
     /// Split plane: axis, offset, normal sign.
     split: Option<(usize, f64, f64)>,
     /// For imports: one tool part per body.
     separate_tools: bool,
     body_label: Option<Vec<HistorySource>>,
+    /// A shell or draft applied to the (single) operand in `Mode::Keep`.
+    modifier: Option<Modifier>,
+}
+
+#[derive(Clone, Debug)]
+struct ShellSpec {
+    open: BTreeSet<u32>,
+    thickness: f64,
+}
+
+#[derive(Clone, Debug)]
+struct DraftSpec {
+    /// The drafted face's index in the operand.
+    face: u32,
+    plane: PlaneKey,
+    lo: [f64; 3],
+    hi: [f64; 3],
+    origin: [f64; 3],
+    pull: [f64; 3],
+    tan: f64,
+    reach: f64,
+}
+
+impl DraftSpec {
+    fn region(&self, p: [f64; 3]) -> bool {
+        (0..3).all(|a| {
+            if a == self.plane.axis {
+                (p[a] - self.plane.offset).abs() <= self.reach + EPS
+            } else {
+                p[a] >= self.lo[a] - EPS && p[a] <= self.hi[a] + EPS
+            }
+        })
+    }
+
+    /// Whether `p` is material after the draft (near this face).
+    fn material(&self, p: [f64; 3]) -> bool {
+        let h = (0..3)
+            .map(|a| (p[a] - self.origin[a]) * self.pull[a])
+            .sum::<f64>();
+        (self.plane.dir as f64) * (p[self.plane.axis] - self.plane.offset) < -self.tan * h
+    }
+
+    fn normal(&self) -> [f64; 3] {
+        let mut n = [0.0; 3];
+        n[self.plane.axis] = self.plane.dir as f64;
+        for a in 0..3 {
+            n[a] += self.tan * self.pull[a];
+        }
+        let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        [n[0] / l, n[1] / l, n[2] / l]
+    }
+}
+
+#[derive(Clone, Debug)]
+enum Modifier {
+    Shell(ShellSpec),
+    Draft(Vec<DraftSpec>),
+}
+
+fn rect_distance(p: [f64; 3], r: &Rect) -> f64 {
+    let mut s = 0.0;
+    for a in 0..3 {
+        let d = (r.lo[a] - p[a]).max(p[a] - r.hi[a]).max(0.0);
+        s += d * d;
+    }
+    s.sqrt()
+}
+
+fn face_distance(p: [f64; 3], f: &FFace) -> f64 {
+    f.rects
+        .iter()
+        .map(|r| rect_distance(p, r))
+        .fold(f64::INFINITY, f64::min)
 }
 
 struct GridResult {
@@ -511,6 +729,35 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
     }
     if let Some((a, c, _)) = job.split {
         breaks[a].push(c);
+    }
+    match &job.modifier {
+        Some(Modifier::Shell(sh)) => {
+            if let Some(o) = job.operands.first() {
+                for (fi, f) in o.faces.iter().enumerate() {
+                    if sh.open.contains(&(fi as u32)) {
+                        continue;
+                    }
+                    for (pk, _) in f.rect_planes() {
+                        breaks[pk.axis].push(pk.offset - (pk.dir as f64) * sh.thickness);
+                    }
+                }
+            }
+        }
+        Some(Modifier::Draft(ds)) => {
+            for d in ds {
+                for a in 0..3 {
+                    let (lo, hi) = if a == d.plane.axis {
+                        (d.plane.offset - d.reach, d.plane.offset + d.reach)
+                    } else {
+                        (d.lo[a], d.hi[a])
+                    };
+                    for k in 0..=sampled::RES {
+                        breaks[a].push(lo + (hi - lo) * k as f64 / sampled::RES as f64);
+                    }
+                }
+            }
+        }
+        None => {}
     }
     let grid: [Vec<f64>; 3] = [
         dedup_sorted(breaks[0].clone()),
@@ -575,6 +822,31 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                 };
                 if matches!(job.mode, Mode::BoolCut | Mode::BoolIntersect) && occ[i] {
                     owners[i] = 1;
+                }
+                match &job.modifier {
+                    Some(Modifier::Shell(sh)) if occ[i] => {
+                        let o = job.operands[0];
+                        let cavity = o.faces.iter().enumerate().all(|(fi, f)| {
+                            sh.open.contains(&(fi as u32))
+                                || !f.is_grid()
+                                || face_distance(p, f) > sh.thickness + EPS
+                        });
+                        if cavity {
+                            occ[i] = false;
+                        }
+                    }
+                    Some(Modifier::Draft(ds)) => {
+                        for d in ds {
+                            if d.region(p) {
+                                occ[i] = d.material(p);
+                                if occ[i] {
+                                    owners[i] |= 1;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -729,7 +1001,13 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
     };
 
     // Labels.
+    let drafts: &[DraftSpec] = match &job.modifier {
+        Some(Modifier::Draft(ds)) => ds,
+        _ => &[],
+    };
+    let draft_reach = drafts.iter().map(|d| d.reach).fold(0.0, f64::max);
     let mut labels: Vec<Vec<HistorySource>> = Vec::with_capacity(facets.len());
+    let mut kinds: Vec<FacetKind> = Vec::with_capacity(facets.len());
     for f in &facets {
         let plane = facet_plane(f);
         let r = facet_rect(f);
@@ -737,24 +1015,62 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
         for a in 0..3 {
             cen[a] = (r.lo[a] + r.hi[a]) / 2.0;
         }
-        let mut ls: Vec<HistorySource> = Vec::new();
-        for (k, o) in job.operands.iter().enumerate() {
-            let bool_mode = matches!(
-                job.mode,
-                Mode::BoolUnion | Mode::BoolCut | Mode::BoolIntersect
-            );
-            if owners[f.cell] & (1 << k) == 0 && !matches!(job.mode, Mode::Add) && !bool_mode {
-                continue;
+        let cin = center(f.c);
+        // The cell across the facet (or the mirror point past the grid's edge).
+        let cout = {
+            let mut nc = f.c;
+            let inside_grid = if f.dir > 0 {
+                nc[f.axis] += 1;
+                nc[f.axis] < d[f.axis]
+            } else if nc[f.axis] > 0 {
+                nc[f.axis] -= 1;
+                true
+            } else {
+                false
+            };
+            if inside_grid {
+                center(nc)
+            } else {
+                let mut m = cin;
+                m[plane.axis] = 2.0 * plane.offset - cin[plane.axis];
+                m
             }
-            for (fi, face) in o.faces.iter().enumerate() {
-                if let Some(p) = &face.plane {
-                    if p.same(&plane) && face.rects.iter().any(|r| r.contains(cen)) {
+        };
+        let mut ls: Vec<HistorySource> = Vec::new();
+        let mut kind = FacetKind::Planar;
+        // A drafted face's tilted surface.
+        for d in drafts {
+            if d.region(cen) && d.material(cin) != d.material(cout) {
+                ls.push(HistorySource::Input {
+                    from: OperandEntity {
+                        operand: job.operand_ids[0],
+                        entity: d.face,
+                    },
+                });
+                kind = FacetKind::Faceted(SurfaceKind::Plane { normal: d.normal() });
+                break;
+            }
+        }
+        if ls.is_empty() {
+            for (k, o) in job.operands.iter().enumerate() {
+                let bool_mode = matches!(
+                    job.mode,
+                    Mode::BoolUnion | Mode::BoolCut | Mode::BoolIntersect
+                );
+                if owners[f.cell] & (1 << k) == 0 && !matches!(job.mode, Mode::Add) && !bool_mode {
+                    continue;
+                }
+                for (fi, face) in o.faces.iter().enumerate() {
+                    if face.lies_on(&plane, cen) {
                         ls.push(HistorySource::Input {
                             from: OperandEntity {
                                 operand: job.operand_ids[k],
                                 entity: fi as u32,
                             },
                         });
+                        if let FacetKind::Faceted(h) = face.kind() {
+                            kind = FacetKind::Faceted(h);
+                        }
                     }
                 }
             }
@@ -767,23 +1083,85 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
             };
             for (k, o) in job.operands.iter().enumerate().skip(1) {
                 for (fi, face) in o.faces.iter().enumerate() {
-                    if let Some(p) = &face.plane {
-                        if p.same(&flipped) && face.rects.iter().any(|r| r.contains(cen)) {
-                            ls.push(HistorySource::Input {
-                                from: OperandEntity {
-                                    operand: job.operand_ids[k],
-                                    entity: fi as u32,
-                                },
-                            });
+                    if face.lies_on(&flipped, cen) {
+                        ls.push(HistorySource::Input {
+                            from: OperandEntity {
+                                operand: job.operand_ids[k],
+                                entity: fi as u32,
+                            },
+                        });
+                        if let FacetKind::Faceted(h) = face.kind() {
+                            kind = FacetKind::Faceted(h);
                         }
                     }
                 }
             }
         }
+        if ls.is_empty() && !drafts.is_empty() {
+            // A neighbour of a drafted face, extended or trimmed on its own plane.
+            let o = job.operands[0];
+            let mut best: Option<(f64, usize)> = None;
+            for (fi, face) in o.faces.iter().enumerate() {
+                if face.plane.map(|p| p.same(&plane)).unwrap_or(false) {
+                    let d = face_distance(cen, face);
+                    if d <= draft_reach + EPS && best.map(|b| d < b.0).unwrap_or(true) {
+                        best = Some((d, fi));
+                    }
+                }
+            }
+            if let Some((_, fi)) = best {
+                ls.push(HistorySource::Input {
+                    from: OperandEntity {
+                        operand: job.operand_ids[0],
+                        entity: fi as u32,
+                    },
+                });
+            }
+        }
+        if let Some(Modifier::Shell(sh)) = &job.modifier {
+            let o = job.operands[0];
+            for l in ls.iter_mut() {
+                if let HistorySource::Input { from } = l {
+                    if sh.open.contains(&from.entity) {
+                        *l = gen(Role::ShellRim, KernelTag::InputFace { face: *from }, None);
+                    }
+                }
+            }
+            if ls.is_empty() {
+                let mut best: Option<(f64, usize)> = None;
+                for (fi, face) in o.faces.iter().enumerate() {
+                    if sh.open.contains(&(fi as u32)) || !face.is_grid() {
+                        continue;
+                    }
+                    let d = (face_distance(cen, face) - sh.thickness).abs();
+                    if best.map(|b| d < b.0 - EPS).unwrap_or(true) {
+                        best = Some((d, fi));
+                    }
+                }
+                if let Some((_, fi)) = best {
+                    let face = &o.faces[fi];
+                    kind = match face.plane {
+                        Some(p) if p.axis == plane.axis => FacetKind::Planar,
+                        _ => FacetKind::Faceted(SurfaceKind::Other),
+                    };
+                    ls.push(gen(
+                        Role::ShellInner,
+                        KernelTag::InputFace {
+                            face: OperandEntity {
+                                operand: job.operand_ids[0],
+                                entity: fi as u32,
+                            },
+                        },
+                        None,
+                    ));
+                }
+            }
+        }
         if ls.is_empty() {
             for t in &job.tools {
-                if let Some(l) = t.label(plane.axis, plane.offset, cen) {
+                if let Some((l, k)) = t.label(&plane, cen, cin, cout) {
                     ls.push(l);
+                    kind = k;
                     break;
                 }
             }
@@ -810,11 +1188,16 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
         ls.sort();
         ls.dedup();
         labels.push(ls);
+        kinds.push(kind);
     }
 
-    // Faces: coplanar facets that share a facet edge, per component.
+    // Faces: planar facets join coplanar neighbours (so flush faces merge); a faceted facet
+    // joins any facet sharing a facet edge and a label (one curved surface, one face).
     let mut fparent: Vec<usize> = (0..facets.len()).collect();
     for (fi, f) in facets.iter().enumerate() {
+        if kinds[fi] != FacetKind::Planar {
+            continue;
+        }
         for b in 0..3 {
             if b == f.axis || f.c[b] + 1 >= d[b] {
                 continue;
@@ -822,10 +1205,49 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
             let mut nc = f.c;
             nc[b] += 1;
             if let Some(&gj) = facet_at.get(&(idx(nc), f.axis, f.dir)) {
-                if facets[gj].comp == f.comp && facet_plane(&facets[gj]).same(&facet_plane(f)) {
+                if facets[gj].comp == f.comp
+                    && kinds[gj] == FacetKind::Planar
+                    && facet_plane(&facets[gj]).same(&facet_plane(f))
+                {
                     let (ra, rb) = (find(&mut fparent, fi), find(&mut fparent, gj));
                     if ra != rb {
                         fparent[ra.max(rb)] = ra.min(rb);
+                    }
+                }
+            }
+        }
+    }
+    if kinds.iter().any(|k| *k != FacetKind::Planar) {
+        let mut seg_facets: BTreeMap<SegmentKey, Vec<usize>> = BTreeMap::new();
+        for (fi, f) in facets.iter().enumerate() {
+            let ia = if f.dir > 0 {
+                f.c[f.axis] + 1
+            } else {
+                f.c[f.axis]
+            };
+            let others: Vec<usize> = (0..3).filter(|a| *a != f.axis).collect();
+            for (along, fixed) in [(others[0], others[1]), (others[1], others[0])] {
+                for off in 0..2 {
+                    let mut pt = f.c;
+                    pt[f.axis] = ia;
+                    pt[fixed] = f.c[fixed] + off;
+                    seg_facets.entry((along, pt)).or_default().push(fi);
+                }
+            }
+        }
+        for list in seg_facets.values() {
+            for (x, &i) in list.iter().enumerate() {
+                for &j in &list[x + 1..] {
+                    if facets[i].comp != facets[j].comp
+                        || (kinds[i] == FacetKind::Planar && kinds[j] == FacetKind::Planar)
+                    {
+                        continue;
+                    }
+                    if labels[i].iter().any(|l| labels[j].contains(l)) {
+                        let (ra, rb) = (find(&mut fparent, i), find(&mut fparent, j));
+                        if ra != rb {
+                            fparent[ra.max(rb)] = ra.min(rb);
+                        }
                     }
                 }
             }
@@ -855,22 +1277,43 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
     let mut body_sources = Vec::with_capacity(ncomp);
     for comp in 0..ncomp {
         let nf = comp_faces[comp].len();
-        let mut faces: Vec<FFace> = vec![
-            FFace {
-                plane: None,
-                rects: Vec::new()
-            };
-            nf
-        ];
+        let mut faces: Vec<FFace> = vec![FFace::blend(); nf];
         let mut fsrc: Vec<BTreeSet<HistorySource>> = vec![BTreeSet::new(); nf];
+        let mut planar = vec![true; nf];
         for (fi, f) in facets.iter().enumerate() {
             if f.comp != comp {
                 continue;
             }
             let l = facet_face[fi];
-            faces[l].plane = Some(facet_plane(f));
+            let pk = facet_plane(f);
+            if let FacetKind::Faceted(h) = kinds[fi] {
+                planar[l] = false;
+                if faces[l].surface.is_none() {
+                    faces[l].surface = Some(h);
+                }
+            }
+            if let Some(p0) = faces[l]
+                .plane
+                .or_else(|| faces[l].facet_planes.first().copied())
+            {
+                if !p0.same(&pk) {
+                    planar[l] = false;
+                }
+            }
+            if faces[l].plane.is_none() && faces[l].facet_planes.is_empty() {
+                faces[l].plane = Some(pk);
+            }
+            faces[l].facet_planes.push(pk);
             faces[l].rects.push(facet_rect(f));
             fsrc[l].extend(labels[fi].iter().cloned());
+        }
+        for (l, face) in faces.iter_mut().enumerate() {
+            if planar[l] {
+                face.facet_planes.clear();
+                face.surface = None;
+            } else {
+                face.plane = None;
+            }
         }
         let mut cocc = vec![false; n];
         let mut bsrc: BTreeSet<HistorySource> = BTreeSet::new();
@@ -951,8 +1394,8 @@ fn build_topology(s: &mut FakeSolid) {
     // Segment map: (along, start grid point) -> [(face, cell key)].
     let mut segs: BTreeMap<SegmentKey, Vec<(u32, [usize; 3])>> = BTreeMap::new();
     for (fi, f) in s.faces.iter().enumerate() {
-        let Some(p) = f.plane else { continue };
-        for r in &f.rects {
+        for (p, r) in f.rect_planes() {
+            let r = &r;
             let mut c = [0usize; 3];
             for a in 0..3 {
                 c[a] = gi(a, r.lo[a]);
@@ -1067,33 +1510,125 @@ fn build_topology(s: &mut FakeSolid) {
     for f in &s.faces {
         topo.faces.push(FaceTopo { geom: face_geom(f) });
     }
-    let mut edges: Vec<EdgeRow> = Vec::new();
+    // Runs touching a faceted face are chained into one edge per connected run between the
+    // same two faces (a staircase approximating one curve is one edge). A chain continues
+    // through a point only where exactly two runs meet.
+    let faceted = |f: u32| {
+        let face = &s.faces[f as usize];
+        face.plane.is_none() && face.is_grid()
+    };
+    let mut degree: BTreeMap<[usize; 3], usize> = BTreeMap::new();
     for r in &split_runs {
-        let a = point(r, r.lo);
-        let b = point(r, r.hi);
-        let (wa, wb) = (world(a), world(b));
-        let pa = s.faces[r.faces.0 as usize].plane;
-        let pb = s.faces[r.faces.1 as usize].plane;
+        *degree.entry(point(r, r.lo)).or_default() += 1;
+        *degree.entry(point(r, r.hi)).or_default() += 1;
+    }
+    let mut cparent: Vec<usize> = (0..split_runs.len()).collect();
+    fn cfind(p: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while p[r] != r {
+            r = p[r];
+        }
+        p[x] = r;
+        r
+    }
+    {
+        type ChainKey = ([usize; 3], (u32, u32));
+        let mut at: BTreeMap<ChainKey, Vec<usize>> = BTreeMap::new();
+        for (i, r) in split_runs.iter().enumerate() {
+            if !(faceted(r.faces.0) || faceted(r.faces.1)) {
+                continue;
+            }
+            for t in [r.lo, r.hi] {
+                let pt = point(r, t);
+                if degree.get(&pt).copied() == Some(2) {
+                    at.entry((pt, r.faces)).or_default().push(i);
+                }
+            }
+        }
+        for list in at.values() {
+            if list.len() == 2 {
+                let (a, b) = (cfind(&mut cparent, list[0]), cfind(&mut cparent, list[1]));
+                if a != b {
+                    cparent[a.max(b)] = a.min(b);
+                }
+            }
+        }
+    }
+    let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for i in 0..split_runs.len() {
+        let r = cfind(&mut cparent, i);
+        groups.entry(r).or_default().push(i);
+    }
+    let mut edges: Vec<EdgeRow> = Vec::new();
+    for members in groups.values() {
+        let r = &split_runs[members[0]];
+        if members.len() == 1 {
+            let a = point(r, r.lo);
+            let b = point(r, r.hi);
+            let (wa, wb) = (world(a), world(b));
+            let pa = s.faces[r.faces.0 as usize].plane;
+            let pb = s.faces[r.faces.1 as usize].plane;
+            edges.push((
+                EdgeTopo {
+                    faces: [r.faces.0, r.faces.1],
+                    geom: EdgeGeom {
+                        start: wa,
+                        end: wb,
+                        length: (wb[r.along] - wa[r.along]).abs(),
+                    },
+                },
+                EdgeMeta {
+                    along: r.along,
+                    at: wa,
+                    lo: wa[r.along],
+                    hi: wb[r.along],
+                    planes: match (pa, pb) {
+                        (Some(x), Some(y)) => Some([x, y]),
+                        _ => None,
+                    },
+                },
+                vec![a, b],
+            ));
+            continue;
+        }
+        // A chain: its ends are the points used once within it; a closed chain has none.
+        let mut uses: BTreeMap<[usize; 3], usize> = BTreeMap::new();
+        let mut length = 0.0;
+        for &m in members {
+            let q = &split_runs[m];
+            *uses.entry(point(q, q.lo)).or_default() += 1;
+            *uses.entry(point(q, q.hi)).or_default() += 1;
+            length += (grid[q.along][q.hi] - grid[q.along][q.lo]).abs();
+        }
+        let ends: Vec<[usize; 3]> = uses
+            .iter()
+            .filter(|(_, n)| **n == 1)
+            .map(|(p, _)| *p)
+            .collect();
+        let (wa, wb) = match ends.as_slice() {
+            [a, b] => (world(*a), world(*b)),
+            _ => {
+                let p = *uses.keys().next().expect("chain has points");
+                (world(p), world(p))
+            }
+        };
         edges.push((
             EdgeTopo {
                 faces: [r.faces.0, r.faces.1],
                 geom: EdgeGeom {
                     start: wa,
                     end: wb,
-                    length: (wb[r.along] - wa[r.along]).abs(),
+                    length,
                 },
             },
             EdgeMeta {
                 along: r.along,
                 at: wa,
-                lo: wa[r.along],
-                hi: wb[r.along],
-                planes: match (pa, pb) {
-                    (Some(x), Some(y)) => Some([x, y]),
-                    _ => None,
-                },
+                lo: 0.0,
+                hi: length,
+                planes: None,
             },
-            [a, b],
+            ends,
         ));
     }
 
@@ -1159,10 +1694,7 @@ fn build_topology(s: &mut FakeSolid) {
                     SurfaceKind::Other
                 };
                 new_faces.push((
-                    FFace {
-                        plane: None,
-                        rects: Vec::new(),
-                    },
+                    FFace::blend(),
                     FaceGeom {
                         surface,
                         centroid: mid,
@@ -1181,7 +1713,7 @@ fn build_topology(s: &mut FakeSolid) {
                         geom: e.geom,
                     },
                     meta2,
-                    ends,
+                    ends.clone(),
                 ));
                 final_edges.push((
                     EdgeTopo {
@@ -1246,16 +1778,8 @@ fn face_geom(f: &FFace) -> FaceGeom {
             *x /= area;
         }
     }
-    let normal = match f.plane {
-        Some(p) => {
-            let mut n = [0.0; 3];
-            n[p.axis] = p.dir as f64;
-            n
-        }
-        None => [0.0; 3],
-    };
     FaceGeom {
-        surface: SurfaceKind::Plane { normal },
+        surface: f.hint(),
         centroid: c,
         area,
         bbox_min: lo,
@@ -1464,26 +1988,197 @@ impl FakeKernel {
         Ok(KernelOutput { bodies, history })
     }
 
-    fn tool_prisms(
+    fn tools(
         &self,
         op: &ToolOp,
         solids: &[&FakeSolid],
         profile_index: u32,
-    ) -> Result<Vec<Prism>, KernelError> {
-        let (blo, bhi, _, _) = Self::bounds(solids);
+    ) -> Result<Vec<Tool>, KernelError> {
+        let (blo, bhi, lo, hi) = Self::bounds(solids);
+        let corners: Vec<[f64; 3]> = (0..8)
+            .map(|i| {
+                [
+                    if i & 1 == 0 { lo[0] } else { hi[0] },
+                    if i & 2 == 0 { lo[1] } else { hi[1] },
+                    if i & 4 == 0 { lo[2] } else { hi[2] },
+                ]
+            })
+            .collect();
+        // How far along `dir` from `origin` the operands reach, either way, with margin.
+        let reach = |origin: [f64; 3], dir: [f64; 3]| -> (f64, f64) {
+            let ds: Vec<f64> = corners
+                .iter()
+                .map(|c| (0..3).map(|a| (c[a] - origin[a]) * dir[a]).sum::<f64>())
+                .collect();
+            let m = (bhi - blo).abs().max(1.0) * 0.05;
+            (
+                ds.iter().cloned().fold(f64::INFINITY, f64::min) - m,
+                ds.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + m,
+            )
+        };
+        let side = |curve: &crate::ids::SketchEntityId| {
+            gen(
+                Role::Side,
+                KernelTag::Curve {
+                    profile: profile_index,
+                    curve: curve.clone(),
+                },
+                None,
+            )
+        };
+        let curves = |p: &CanonicalProfile| -> Vec<Vec<(sampled::Curve2, HistorySource)>> {
+            p.loops
+                .iter()
+                .map(|l| {
+                    l.iter()
+                        .map(|seg| (sampled::Curve2::from_segment(seg), side(&seg.curve)))
+                        .collect()
+                })
+                .collect()
+        };
+        let caps = || {
+            [
+                gen(Role::StartCap, KernelTag::None, None),
+                gen(Role::EndCap, KernelTag::None, None),
+            ]
+        };
         match &op.shape {
             ToolShape::Prism {
                 profile,
                 start,
                 end,
                 through_all,
-            } => Ok(vec![prism_from_profile(
+            } => {
+                let exact = prism_from_profile(
+                    profile,
+                    *start,
+                    *end,
+                    through_all.then_some((blo, bhi)),
+                    profile_index,
+                );
+                match exact {
+                    Ok(p) => Ok(vec![Tool::Exact(p)]),
+                    Err(KernelError::NotSupported { .. }) => {
+                        let mut e = *end;
+                        if *through_all {
+                            let (a, b) = reach(profile.frame.origin, profile.frame.z);
+                            e = if end - start >= 0.0 { b } else { a };
+                        }
+                        Ok(vec![Tool::Sampled(Box::new(sampled::prism(
+                            Transform::from_frame(&profile.frame),
+                            &curves(profile),
+                            *start,
+                            e,
+                            caps(),
+                        )))])
+                    }
+                    Err(other) => Err(other),
+                }
+            }
+            ToolShape::Revolve {
                 profile,
-                *start,
-                *end,
-                through_all.then_some((blo, bhi)),
-                profile_index,
-            )?]),
+                axis_point,
+                axis_direction,
+                angle,
+            } => {
+                let to_world = Transform::from_frame(&profile.frame);
+                let inv = to_world.inverse();
+                let ap = inv.apply(*axis_point);
+                let ad = inv.apply_vector(*axis_direction);
+                if ap[2].abs() > 1e-7 || ad[2].abs() > 1e-7 {
+                    return Err(KernelError::Failed {
+                        message: "the revolve axis must lie in the profile plane".into(),
+                    });
+                }
+                Ok(vec![Tool::Sampled(Box::new(sampled::revolve(
+                    to_world,
+                    &curves(profile),
+                    [ap[0], ap[1]],
+                    [ad[0], ad[1]],
+                    *angle,
+                    Some(caps()),
+                )?))])
+            }
+            ToolShape::Sweep {
+                profile,
+                path,
+                path_curves,
+            } => {
+                let to_world = Transform::from_frame(&profile.frame);
+                let inv = to_world.inverse();
+                let local: Vec<[f64; 3]> = path.iter().map(|p| inv.apply(*p)).collect();
+                Ok(vec![Tool::Sampled(Box::new(sampled::sweep(
+                    to_world,
+                    &curves(profile),
+                    &local,
+                    path_curves,
+                    caps(),
+                )?))])
+            }
+            ToolShape::Loft { profiles } => {
+                let first = profiles.first().ok_or_else(|| KernelError::Failed {
+                    message: "a loft needs profiles".into(),
+                })?;
+                let to_world = Transform::from_frame(&first.frame);
+                let inv = to_world.inverse();
+                let mut sections = Vec::new();
+                for p in profiles {
+                    let zl = inv.apply_vector(p.frame.z);
+                    if zl[0].abs() > 1e-7 || zl[1].abs() > 1e-7 {
+                        return Err(KernelError::NotSupported {
+                            what: "fake kernel: lofts through sections that are not parallel"
+                                .into(),
+                        });
+                    }
+                    let z = inv.apply(p.frame.origin)[2];
+                    let map = |q: [f64; 2]| {
+                        let l = inv.apply(p.frame.to_world(q));
+                        [l[0], l[1]]
+                    };
+                    let loops: Vec<Vec<sampled::Curve2>> = p
+                        .loops
+                        .iter()
+                        .map(|l| {
+                            l.iter()
+                                .map(|seg| {
+                                    let mut m = seg.clone();
+                                    m.start = map(seg.start);
+                                    m.end = map(seg.end);
+                                    m.kind = match &seg.kind {
+                                        SegmentKind::Line => SegmentKind::Line,
+                                        SegmentKind::Arc { center, clockwise } => {
+                                            SegmentKind::Arc {
+                                                center: map(*center),
+                                                clockwise: *clockwise,
+                                            }
+                                        }
+                                        SegmentKind::Circle { center, radius } => {
+                                            SegmentKind::Circle {
+                                                center: map(*center),
+                                                radius: *radius,
+                                            }
+                                        }
+                                    };
+                                    sampled::Curve2::from_segment(&m)
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    sections.push((z, loops));
+                }
+                // Sides are tagged by the first section's curves.
+                let labels: Vec<Vec<HistorySource>> = first
+                    .loops
+                    .iter()
+                    .map(|l| l.iter().map(|seg| side(&seg.curve)).collect())
+                    .collect();
+                Ok(vec![Tool::Sampled(Box::new(sampled::loft(
+                    to_world,
+                    sections,
+                    &labels,
+                    caps(),
+                )?))])
+            }
             ToolShape::Holes {
                 frame,
                 positions,
@@ -1492,22 +2187,38 @@ impl FakeKernel {
                 counterbore,
                 countersink,
             } => {
-                if counterbore.is_some() || countersink.is_some() {
-                    return Err(KernelError::NotSupported {
-                        what: "fake kernel: counterbores and countersinks".into(),
-                    });
+                let mut out = Vec::new();
+                for (key, at) in positions {
+                    let origin = frame.to_world(*at);
+                    // Section plane: x radial (frame x), y along the hole axis (frame z).
+                    let section_frame = Frame {
+                        origin,
+                        x: frame.x,
+                        y: frame.z,
+                        z: [-frame.y[0], -frame.y[1], -frame.y[2]],
+                    };
+                    let bottom = match depth {
+                        Some(d) => -d,
+                        None => reach(origin, frame.z).0,
+                    };
+                    let section = sampled::hole_section(
+                        key,
+                        diameter / 2.0,
+                        bottom,
+                        *counterbore,
+                        *countersink,
+                    );
+                    out.push(Tool::Sampled(Box::new(sampled::revolve(
+                        Transform::from_frame(&section_frame),
+                        &[section],
+                        [0.0, 0.0],
+                        [0.0, 1.0],
+                        std::f64::consts::TAU,
+                        None,
+                    )?)));
                 }
-                hole_prisms(frame, positions, *diameter, *depth, (blo, bhi))
+                Ok(out)
             }
-            ToolShape::Revolve { .. } => Err(KernelError::NotSupported {
-                what: "fake kernel: revolve".into(),
-            }),
-            ToolShape::Sweep { .. } => Err(KernelError::NotSupported {
-                what: "fake kernel: sweep".into(),
-            }),
-            ToolShape::Loft { .. } => Err(KernelError::NotSupported {
-                what: "fake kernel: loft".into(),
-            }),
         }
     }
 
@@ -1537,7 +2248,7 @@ impl CadKernel for FakeKernel {
         let ids: Vec<u32> = (0..operands.len() as u32).collect();
         match op {
             KernelOp::Tool(t) => {
-                let tools = self.tool_prisms(t, &solids, 0)?;
+                let tools = self.tools(t, &solids, 0)?;
                 let mode = Self::mode(t.combine);
                 let ops = if mode == Mode::New {
                     Vec::new()
@@ -1556,6 +2267,7 @@ impl CadKernel for FakeKernel {
                     split: None,
                     separate_tools: false,
                     body_label: None,
+                    modifier: None,
                 })?;
                 if mode == Mode::New {
                     self.finish(&[], &[], res, Vec::new(), Vec::new())
@@ -1578,10 +2290,10 @@ impl CadKernel for FakeKernel {
                 }
                 let mut tools = Vec::new();
                 for (si, seed) in seeds.iter().enumerate() {
-                    let base = self.tool_prisms(seed, &solids, 0)?;
+                    let base = self.tools(seed, &solids, si as u32)?;
                     for inst in instances {
                         for p in &base {
-                            let mut q = p.transformed(&inst.transform)?;
+                            let mut q = p.transformed(&inst.transform);
                             q.relabel(si as u32, &inst.key);
                             tools.push(q);
                         }
@@ -1595,6 +2307,7 @@ impl CadKernel for FakeKernel {
                     split: None,
                     separate_tools: false,
                     body_label: None,
+                    modifier: None,
                 })?;
                 self.finish(&solids, &ids, res, Vec::new(), Vec::new())
             }
@@ -1619,7 +2332,7 @@ impl CadKernel for FakeKernel {
                             message: "edge out of range".into(),
                         })?;
                     let planes = meta.planes.ok_or_else(|| KernelError::NotSupported {
-                        what: "fake kernel: blending an edge of a blend".into(),
+                        what: "fake kernel: blending an edge of a blend or a curved edge".into(),
                     })?;
                     fresh_all[e.operand as usize].push(Decoration {
                         role,
@@ -1645,6 +2358,7 @@ impl CadKernel for FakeKernel {
                         split: None,
                         separate_tools: false,
                         body_label: None,
+                        modifier: None,
                     };
                     let res = run_grid(job)?;
                     let mut out = self.finish(
@@ -1669,12 +2383,121 @@ impl CadKernel for FakeKernel {
                 }
                 Ok(KernelOutput { bodies, history })
             }
-            KernelOp::Shell { .. } => Err(KernelError::NotSupported {
-                what: "fake kernel: shell".into(),
-            }),
-            KernelOp::Draft { .. } => Err(KernelError::NotSupported {
-                what: "fake kernel: draft".into(),
-            }),
+            KernelOp::Shell {
+                open_faces,
+                thickness,
+            } => {
+                if solids.len() != 1 {
+                    return Err(KernelError::Failed {
+                        message: "a shell works on one body".into(),
+                    });
+                }
+                if *thickness <= 0.0 {
+                    return Err(KernelError::Failed {
+                        message: "shell thickness must be positive".into(),
+                    });
+                }
+                if !solids[0].decorations.is_empty() {
+                    return Err(KernelError::NotSupported {
+                        what: "fake kernel: shelling a blended body".into(),
+                    });
+                }
+                let open: BTreeSet<u32> = open_faces.iter().map(|e| e.entity).collect();
+                let res = run_grid(GridJob {
+                    operands: solids.clone(),
+                    operand_ids: ids.clone(),
+                    tools: Vec::new(),
+                    mode: Mode::Keep,
+                    split: None,
+                    separate_tools: false,
+                    body_label: None,
+                    modifier: Some(Modifier::Shell(ShellSpec {
+                        open,
+                        thickness: *thickness,
+                    })),
+                })?;
+                self.finish(&solids, &ids, res, Vec::new(), Vec::new())
+            }
+            KernelOp::Draft {
+                faces,
+                neutral,
+                angle,
+            } => {
+                let pull = neutral.z;
+                let tan = angle.tan();
+                let mut bodies = Vec::new();
+                let mut history = OpHistory::default();
+                for (k, so) in solids.iter().enumerate() {
+                    let mut specs = Vec::new();
+                    for e in faces.iter().filter(|e| e.operand as usize == k) {
+                        let face = so.faces.get(e.entity as usize).ok_or(KernelError::Failed {
+                            message: "draft face out of range".into(),
+                        })?;
+                        let plane = face.plane.ok_or_else(|| KernelError::NotSupported {
+                            what: "fake kernel: drafting a curved face".into(),
+                        })?;
+                        if pull[plane.axis].abs() > 1e-9 {
+                            return Err(KernelError::Failed {
+                                message: "a drafted face must be parallel to the pull direction"
+                                    .into(),
+                            });
+                        }
+                        let mut lo = [f64::INFINITY; 3];
+                        let mut hi = [f64::NEG_INFINITY; 3];
+                        for r in &face.rects {
+                            for a in 0..3 {
+                                lo[a] = lo[a].min(r.lo[a]);
+                                hi[a] = hi[a].max(r.hi[a]);
+                            }
+                        }
+                        let mut max_h: f64 = 0.0;
+                        for i in 0..8 {
+                            let c = [
+                                if i & 1 == 0 { lo[0] } else { hi[0] },
+                                if i & 2 == 0 { lo[1] } else { hi[1] },
+                                if i & 4 == 0 { lo[2] } else { hi[2] },
+                            ];
+                            let h: f64 = (0..3).map(|a| (c[a] - neutral.origin[a]) * pull[a]).sum();
+                            max_h = max_h.max(h.abs());
+                        }
+                        specs.push(DraftSpec {
+                            face: e.entity,
+                            plane,
+                            lo,
+                            hi,
+                            origin: neutral.origin,
+                            pull,
+                            tan,
+                            reach: tan.abs() * max_h + EPS,
+                        });
+                    }
+                    let job = GridJob {
+                        operands: vec![so],
+                        operand_ids: vec![k as u32],
+                        tools: Vec::new(),
+                        mode: Mode::Keep,
+                        split: None,
+                        separate_tools: false,
+                        body_label: None,
+                        modifier: (!specs.is_empty()).then_some(Modifier::Draft(specs)),
+                    };
+                    let res = run_grid(job)?;
+                    let mut out = self.finish(&[so], &[k as u32], res, Vec::new(), Vec::new())?;
+                    let base = bodies.len() as u32;
+                    for r in &mut out.history.faces {
+                        r.body += base;
+                    }
+                    for r in &mut out.history.bodies {
+                        r.body += base;
+                    }
+                    history.faces.extend(out.history.faces);
+                    history.bodies.extend(out.history.bodies);
+                    history.deleted_faces.extend(out.history.deleted_faces);
+                    history.deleted_bodies.extend(out.history.deleted_bodies);
+                    bodies.extend(out.bodies);
+                }
+                Ok(KernelOutput { bodies, history })
+            }
             KernelOp::PatternBodies { instances } => {
                 let keep = run_grid(GridJob {
                     operands: solids.clone(),
@@ -1684,14 +2507,41 @@ impl CadKernel for FakeKernel {
                     split: None,
                     separate_tools: false,
                     body_label: None,
+                    modifier: None,
                 })?;
                 let mut extra = Vec::new();
                 for inst in instances {
                     let t = inst.transform;
                     if t.rotation != Transform::translation([0.0; 3]).rotation {
-                        return Err(KernelError::NotSupported {
-                            what: "fake kernel: body patterns other than translation".into(),
-                        });
+                        // Any other motion: re-sample each body's image on the grid.
+                        for (k, s) in solids.iter().enumerate() {
+                            let img = sampled::image(s, k as u32, &t, Some(&inst.key))?;
+                            let res = run_grid(GridJob {
+                                operands: Vec::new(),
+                                operand_ids: Vec::new(),
+                                tools: vec![Tool::Sampled(Box::new(img))],
+                                mode: Mode::New,
+                                split: None,
+                                separate_tools: false,
+                                body_label: Some(vec![HistorySource::Copy {
+                                    from: OperandEntity {
+                                        operand: k as u32,
+                                        entity: 0,
+                                    },
+                                    instance: inst.key.clone(),
+                                }]),
+                                modifier: None,
+                            })?;
+                            for ((c, f), b) in res
+                                .solids
+                                .into_iter()
+                                .zip(res.face_sources)
+                                .zip(res.body_sources)
+                            {
+                                extra.push((c, f, b));
+                            }
+                        }
+                        continue;
                     }
                     for (k, s) in solids.iter().enumerate() {
                         let mut c = (*s).clone();
@@ -1708,7 +2558,7 @@ impl CadKernel for FakeKernel {
                             })
                             .collect::<Vec<_>>();
                         // Drop blend faces from the grid face list; they are rebuilt.
-                        let grid_faces = c.faces.iter().take_while(|f| f.plane.is_some()).count();
+                        let grid_faces = c.faces.iter().take_while(|f| f.is_grid()).count();
                         c.faces.truncate(grid_faces);
                         let srcs = srcs.into_iter().take(grid_faces).collect();
                         extra.push((
@@ -1753,6 +2603,7 @@ impl CadKernel for FakeKernel {
                     split: None,
                     separate_tools: false,
                     body_label: None,
+                    modifier: None,
                 })?;
                 let mut extra = Vec::new();
                 if *keep_tools && mode != Mode::BoolUnion {
@@ -1765,6 +2616,7 @@ impl CadKernel for FakeKernel {
                             split: None,
                             separate_tools: false,
                             body_label: None,
+                            modifier: None,
                         })?;
                         for ((s, f), b) in alone
                             .solids
@@ -1799,6 +2651,7 @@ impl CadKernel for FakeKernel {
                         split: crosses.then_some((a, c, s)),
                         separate_tools: false,
                         body_label: None,
+                        modifier: None,
                     };
                     let res = run_grid(job)?;
                     let mut out = self.finish(&[so], &[k as u32], res, Vec::new(), Vec::new())?;
@@ -1819,9 +2672,60 @@ impl CadKernel for FakeKernel {
             }
             KernelOp::Transform { transform } => {
                 if transform.rotation != Transform::translation([0.0; 3]).rotation {
-                    return Err(KernelError::NotSupported {
-                        what: "fake kernel: rotations".into(),
-                    });
+                    // Rotations and reflections: each body re-sampled at its new place.
+                    let mut bodies = Vec::new();
+                    let mut history = OpHistory::default();
+                    for (k, so) in solids.iter().enumerate() {
+                        let img = sampled::image(so, k as u32, transform, None)?;
+                        let res = run_grid(GridJob {
+                            operands: Vec::new(),
+                            operand_ids: Vec::new(),
+                            tools: vec![Tool::Sampled(Box::new(img))],
+                            mode: Mode::New,
+                            split: None,
+                            separate_tools: false,
+                            body_label: Some(vec![HistorySource::Input {
+                                from: OperandEntity {
+                                    operand: k as u32,
+                                    entity: 0,
+                                },
+                            }]),
+                            modifier: None,
+                        })?;
+                        let mut out = self.finish(&[], &[], res, Vec::new(), Vec::new())?;
+                        // Faces and the body continue the operand's.
+                        out.history.deleted_faces.clear();
+                        out.history.deleted_bodies.clear();
+                        let used: BTreeSet<u32> = out
+                            .history
+                            .faces
+                            .iter()
+                            .flat_map(|r| r.sources.iter())
+                            .filter_map(|s| match s {
+                                HistorySource::Input { from } => Some(from.entity),
+                                _ => None,
+                            })
+                            .collect();
+                        for f in 0..so.faces.len() as u32 {
+                            if !used.contains(&f) {
+                                history.deleted_faces.push(OperandEntity {
+                                    operand: k as u32,
+                                    entity: f,
+                                });
+                            }
+                        }
+                        for r in &mut out.history.faces {
+                            r.body += bodies.len() as u32;
+                            r.evolution = Evolution::Modified;
+                        }
+                        for r in &mut out.history.bodies {
+                            r.body += bodies.len() as u32;
+                        }
+                        history.faces.extend(out.history.faces);
+                        history.bodies.extend(out.history.bodies);
+                        bodies.extend(out.bodies);
+                    }
+                    return Ok(KernelOutput { bodies, history });
                 }
                 let moved: Vec<FakeSolid> = solids
                     .iter()
@@ -1841,6 +2745,7 @@ impl CadKernel for FakeKernel {
                     split: None,
                     separate_tools: false,
                     body_label: None,
+                    modifier: None,
                 })?;
                 self.finish(&refs, &ids, res, Vec::new(), Vec::new())
             }
@@ -1871,7 +2776,7 @@ impl CadKernel for FakeKernel {
                         [b.min[0], b.max[1]],
                     ];
                     let labels = vec![lab(2), lab(1), lab(3), lab(0)];
-                    tools.push(Prism {
+                    tools.push(Tool::Exact(Prism {
                         k: 2,
                         u: 0,
                         v: 1,
@@ -1881,7 +2786,7 @@ impl CadKernel for FakeKernel {
                         hi: b.max[2],
                         lo_label: lab(4),
                         hi_label: lab(5),
-                    });
+                    }));
                     body_labels.push(gen(
                         Role::Body,
                         KernelTag::CadName {
@@ -1898,6 +2803,7 @@ impl CadKernel for FakeKernel {
                     split: None,
                     separate_tools: true,
                     body_label: Some(body_labels),
+                    modifier: None,
                 })?;
                 self.finish(&[], &[], res, Vec::new(), Vec::new())
             }
@@ -1914,6 +2820,12 @@ fn shift(s: &mut FakeSolid, t: [f64; 3]) {
     for f in &mut s.faces {
         if let Some(p) = &mut f.plane {
             p.offset += t[p.axis];
+        }
+        for p in &mut f.facet_planes {
+            p.offset += t[p.axis];
+        }
+        if let Some(h) = &mut f.surface {
+            *h = sampled::move_hint(h, &Transform::translation(t));
         }
         for r in &mut f.rects {
             for a in 0..3 {

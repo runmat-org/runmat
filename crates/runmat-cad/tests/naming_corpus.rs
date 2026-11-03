@@ -1030,7 +1030,7 @@ fn c27_pattern_count_increase_keeps_instances() {
     d.regions.push(region(
         "w2",
         TopoKind::Face,
-        vec![wall(2, Some(0))],
+        vec![wall(2, None)],
         Cardinality::ExactlyOne,
     ));
     d.regions.push(region(
@@ -1042,12 +1042,10 @@ fn c27_pattern_count_increase_keeps_instances() {
     let r1 = env.regen(&d);
     assert_clean(&r1);
     let g1 = region_faces(&r1, "w2")[0];
-    assert!(approx(g1.centroid[0], 0.042), "{:?}", g1.centroid);
-    assert_eq!(
-        region_count(&r1, "w2_all"),
-        4,
-        "the whole wall is its four seam pieces"
-    );
+    // A round hole's wall is one cylindrical face about the instance's axis (x = 40 mm).
+    assert!((g1.centroid[0] - 0.040).abs() < 1e-6, "{:?}", g1.centroid);
+    assert!(matches!(g1.surface, SurfaceKind::Cylinder { .. }));
+    assert_eq!(region_count(&r1, "w2_all"), 1);
     let i = d.feature_index(&fid("row")).unwrap();
     d.features.truncate(i - 1);
     holes(&mut d, 5, 15.0);
@@ -1064,13 +1062,13 @@ fn c28_pattern_count_decrease_reports_removed_instance() {
     d.regions.push(region(
         "w3",
         TopoKind::Face,
-        vec![wall(3, Some(0))],
+        vec![wall(3, None)],
         Cardinality::ExactlyOne,
     ));
     d.regions.push(region(
         "w1",
         TopoKind::Face,
-        vec![wall(1, Some(0))],
+        vec![wall(1, None)],
         Cardinality::ExactlyOne,
     ));
     assert!(region_ok(&env.regen(&d), "w3"));
@@ -1092,14 +1090,14 @@ fn c29_pattern_spacing_edit_moves_same_instance() {
     d.regions.push(region(
         "w2",
         TopoKind::Face,
-        vec![wall(2, Some(0))],
+        vec![wall(2, None)],
         Cardinality::ExactlyOne,
     ));
     let i = d.feature_index(&fid("h")).unwrap();
     d.features.truncate(i);
     holes(&mut d, 3, 20.0);
     let r = env.regen(&d);
-    assert!(approx(region_faces(&r, "w2")[0].centroid[0], 0.052));
+    assert!((region_faces(&r, "w2")[0].centroid[0] - 0.050).abs() < 1e-6);
 }
 
 #[test]
@@ -1110,7 +1108,7 @@ fn c30_pattern_skip_is_reported_by_key() {
     d.regions.push(region(
         "w2",
         TopoKind::Face,
-        vec![wall(2, Some(0))],
+        vec![wall(2, None)],
         Cardinality::ExactlyOne,
     ));
     if let FeatureKind::Pattern(p) = &mut d.feature_mut("row").unwrap().kind {
@@ -1150,7 +1148,7 @@ fn c31_mirror_image_named_by_instance() {
         feature: fid("h"),
         role: Role::HoleWall,
         tag: SourceTag::Key { key: "a".into() },
-        ordinal: Some(0),
+        ordinal: None,
     });
     let img = Reference::face(EntityName::copy(
         &base_wall,
@@ -1165,10 +1163,18 @@ fn c31_mirror_image_named_by_instance() {
     ));
     let r = env.regen(&d);
     assert_clean(&r);
-    // The seed's +x wall at x = 12 mm mirrors to x = 68 mm facing −x.
+    // The seed's wall about x = 10 mm mirrors to a wall about x = 70 mm.
     let g = region_faces(&r, "img")[0];
-    assert!(approx(g.centroid[0], 0.068), "{:?}", g.centroid);
-    assert_eq!(normal(&g), [1.0, 0.0, 0.0]);
+    assert!((g.centroid[0] - 0.070).abs() < 1e-6, "{:?}", g.centroid);
+    match g.surface {
+        SurfaceKind::Cylinder {
+            axis_point, radius, ..
+        } => {
+            assert!((axis_point[0] - 0.070).abs() < 1e-9);
+            assert!((radius - 0.002).abs() < 1e-12);
+        }
+        other => panic!("{:?}", other),
+    }
 }
 
 // ------------------------------------------------------------------------- relational, imports, fallback
