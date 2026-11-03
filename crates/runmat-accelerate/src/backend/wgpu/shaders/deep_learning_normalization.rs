@@ -69,15 +69,12 @@ fn epsilon() -> $SCALAR$ { $EPSILON$ }
 fn quiet_nan() -> $SCALAR$ { $NAN$ }
 fn is_special(value: $SCALAR$) -> bool { $SPECIAL$ }
 
-// The divisors used below are finite, positive normal values. Splitting
-// its binary exponent keeps both scale factors normal. Explicit fused
-// operations prevent a reciprocal of a large divisor from becoming a
-// subnormal intermediate even when the quotient itself is normal.
+// Divisors here are finite, positive normal values. Scale in two exponent
+// steps so representable quotients do not depend on a subnormal reciprocal.
+$SCALING_HELPER$
 fn scaled_ratio(value: $SCALAR$, divisor: $SCALAR$) -> $SCALAR$ {
   $RATIO_SCALE$
-  let numerator = fma(fma(value, first, $SCALAR$(0.0)), second, $SCALAR$(0.0));
-  let denominator = fma(fma(divisor, first, $SCALAR$(0.0)), second, $SCALAR$(0.0));
-  return numerator / denominator;
+  $RATIO_EVALUATION$
 }
 
 // Subtract before scaling when signs agree: the difference cannot overflow,
@@ -281,9 +278,7 @@ fn common(precision: super::super::types::NumericPrecision, binding: u32) -> Str
             "let nan_bits: u32 = 0x7fc00000u; return bitcast<f32>(nan_bits);",
             "return (bitcast<u32>(value) & 0x7f800000u) == 0x7f800000u;",
             r#"let exponent = i32((bitcast<u32>(divisor) >> 23u) & 0xffu) - 127;
-  let half = exponent / 2;
-  let first = bitcast<f32>(u32(127 - half) << 23u);
-  let second = bitcast<f32>(u32(127 - (exponent - half)) << 23u);"#,
+  let half = exponent / 2;"#,
         ),
         super::super::types::NumericPrecision::F64 => (
             "f64",
@@ -303,6 +298,18 @@ fn common(precision: super::super::types::NumericPrecision, binding: u32) -> Str
         .replace("$NAN$", nan)
         .replace("$SPECIAL$", special)
         .replace("$RATIO_SCALE$", ratio_scale)
+        .replace("$SCALING_HELPER$", match precision {
+            super::super::types::NumericPrecision::F32 => include_str!("../../../wgsl/scaling_f32.wgsl"),
+            super::super::types::NumericPrecision::F64 => "",
+        })
+        .replace("$RATIO_EVALUATION$", match precision {
+            super::super::types::NumericPrecision::F32 => r#"let numerator = runmat_scale_f32_pow2(runmat_scale_f32_pow2(value, -half), -(exponent - half));
+  let denominator = bitcast<f32>((bitcast<u32>(divisor) & 0x007fffffu) | 0x3f800000u);
+  return numerator / denominator;"#,
+            super::super::types::NumericPrecision::F64 => r#"let numerator = fma(fma(value, first, f64(0.0)), second, f64(0.0));
+  let denominator = fma(fma(divisor, first, f64(0.0)), second, f64(0.0));
+  return numerator / denominator;"#,
+        })
 }
 
 fn render(
