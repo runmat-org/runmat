@@ -196,6 +196,26 @@ pub enum DiagCode {
     FastenerTableSchema,
     #[serde(rename = "cad.fastener.gauge_failed")]
     FastenerGaugeFailed,
+    #[serde(rename = "cad.explode.unknown_view")]
+    ExplodeUnknownView,
+    #[serde(rename = "cad.explode.unknown_occurrence")]
+    ExplodeUnknownOccurrence,
+    #[serde(rename = "cad.explode.absent_in_configuration")]
+    ExplodeAbsent,
+    #[serde(rename = "cad.explode.zero_direction")]
+    ExplodeZeroDirection,
+    #[serde(rename = "cad.explode.duplicate")]
+    ExplodeDuplicate,
+    #[serde(rename = "cad.explode.cycle")]
+    ExplodeCycle,
+    #[serde(rename = "cad.explode.bad_jog")]
+    ExplodeBadJog,
+    #[serde(rename = "cad.explode.nested")]
+    ExplodeNested,
+    #[serde(rename = "cad.drawing.merge_conflict")]
+    DrawingMergeConflict,
+    #[serde(rename = "cad.drawing.hole_table")]
+    DrawingHoleTable,
 }
 
 impl fmt::Display for DiagCode {
@@ -261,6 +281,10 @@ pub enum Subject {
     Override {
         index: usize,
     },
+    /// A named exploded state of an assembly.
+    Exploded {
+        view: String,
+    },
 }
 
 /// Where in an item: a parameter path such as `edges[1]` or `constraints[3]`.
@@ -311,6 +335,7 @@ impl Site {
             Subject::Axis { name } => format!("option.{}", name),
             Subject::Configuration { name } => format!("configuration.{}", name),
             Subject::Override { index } => format!("override[{}]", index),
+            Subject::Exploded { view } => format!("exploded.{}", view),
         };
         match &self.param {
             Some(p) => format!("{}#{}", base, p),

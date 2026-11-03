@@ -380,6 +380,9 @@ pub fn lock_assembly(
     for c in &doc.connectors {
         names.insert(("connector", &c.name));
     }
+    for e in &doc.exploded {
+        names.insert(("exploded", &e.name));
+    }
     for (k, n) in names {
         lock.ensure(&item_path(&doc.path, k, n), minter);
     }

@@ -8,6 +8,7 @@
 //! keys. Fastener sets are rules ([`crate::assembly::fasteners`]). Nothing here parses text: the
 //! syntax layer (M1) builds these values from the lossless tree.
 
+use crate::assembly::explode::ExplodedView;
 use crate::assembly::fasteners::FastenerSet;
 use crate::assembly::options::{Condition, OptionsBlock};
 use crate::ids::{ConfigurationName, FilePath, InputName, MaterialRef, PartName, PublishName};
@@ -720,6 +721,9 @@ pub struct AssemblyDocument {
     pub properties: Vec<Property>,
     #[serde(default)]
     pub links: Vec<Link>,
+    /// Named exploded states ([`crate::assembly::explode`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exploded: Vec<ExplodedView>,
     #[serde(default)]
     pub closed: bool,
 }
@@ -745,6 +749,7 @@ impl AssemblyDocument {
             configurations: Vec::new(),
             properties: Vec::new(),
             links: Vec::new(),
+            exploded: Vec::new(),
             closed: false,
         }
     }

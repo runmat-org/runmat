@@ -182,6 +182,7 @@ fn drawing() -> DrawingDocument {
         scale: None,
         display: Display::HiddenLines,
         exclude: vec![],
+        exploded: None,
     };
     DrawingDocument {
         path: FilePath::new("rig.drawing"),
@@ -363,6 +364,7 @@ fn d02_broken_references_are_reported_with_view_and_annotation() {
         scale: None,
         display: Display::VisibleLines,
         exclude: vec![],
+        exploded: None,
     });
     let rep = check_drawing(&d, &Model);
     let refs: Vec<&str> = rep

@@ -13,7 +13,7 @@
 //! references break it is reported with the view and annotation, and kept (dangling) rather
 //! than dropped.
 
-use crate::assembly::bom::{Bom, BomItem};
+use crate::assembly::bom::{Bom, BomItem, IndentedRow};
 use crate::assembly::model::RelPath;
 use crate::assembly::options::AxisValue;
 use crate::diagnostics::{Cause, DiagCode, DiagnosticReport, Severity, Site, Subject};
@@ -222,6 +222,10 @@ pub struct View {
     /// Occurrences left out (fasteners in an assembly view).
     #[serde(default)]
     pub exclude: Vec<RelPath>,
+    /// Show the assembly in this named exploded state (its occurrence transforms and explode
+    /// lines), for assembly instructions and service views.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exploded: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -411,6 +415,14 @@ pub trait ModelReferences {
     fn pmi(&self, model: &ModelRef) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
     /// The configuration-aware BOM of the model.
     fn bom(&self, model: &ModelRef) -> Option<Bom>;
+    /// The exploded views the model declares (an assembly's; a part has none).
+    fn exploded_views(&self, _model: &ModelRef) -> BTreeSet<String> {
+        BTreeSet::new()
+    }
+    /// The indented BOM of the model, for indented BOM tables.
+    fn indented_bom(&self, _model: &ModelRef) -> Option<Vec<IndentedRow>> {
+        None
+    }
 }
 
 // ------------------------------------------------------------------------------ checking
@@ -527,6 +539,19 @@ pub fn check_drawing(doc: &DrawingDocument, model: &dyn ModelReferences) -> Draw
                     DiagCode::DrawingReference,
                     s(param),
                     format!("view `{}` {}: `{}` {}", v.name, param, r, m),
+                );
+            }
+        }
+        if let Some(e) = &v.exploded {
+            if !model.exploded_views(&v.model).contains(e) {
+                err(
+                    &mut rep,
+                    DiagCode::DrawingReference,
+                    s("exploded"),
+                    format!(
+                        "view `{}` shows exploded view `{}`, which `{}` does not declare",
+                        v.name, e, v.model.file
+                    ),
                 );
             }
         }
