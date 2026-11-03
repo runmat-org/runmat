@@ -45,12 +45,25 @@ not rounded values used to settle usage.
 | --- | ---: |
 | Real floating-point addition, subtraction, multiplication or division | 1 each |
 | Fused multiply-add | 2 |
+| Real square root or transcendental-function evaluation | 1 per scalar evaluation |
 | Complex arithmetic | The constituent real operations in the specified algorithm |
 | Vector, SIMD or GPU arithmetic | The defined operations for each active numerical element |
 
 Single and double precision use the same convention. Parallel execution and
 instruction fusion do not add charges. Different algorithms or different numbers
 of iterations can perform different amounts of numerical work on the same model.
+
+The square-root and transcendental rule counts one evaluation in the reference
+algorithm, not the arithmetic instructions inside a library implementation.
+It applies to real square root, exponential, logarithmic, power, trigonometric,
+inverse trigonometric, hyperbolic and inverse hyperbolic functions. For example,
+each real `sqrt(x)`, `exp(x)`, `log(x)`, `pow(x,y)` or `atan2(y,x)` evaluation
+counts once. A complex function follows its specified real decomposition;
+it is not counted again on top of those constituent operations. Integer powers
+implemented by a reference multiplication sequence count that sequence instead
+of an additional power call. Real absolute values, sign changes and comparisons
+contribute zero. Backend approximations, range reduction and instruction lowering
+do not change these reference counts.
 
 For a real dot product of positive length n, the direct product-and-sum algorithm
 performs n multiplications and n - 1 additions: 2n - 1 operations. A backend's
@@ -85,10 +98,9 @@ for each supported measurement boundary:
 - External libraries: documented reference counts with the same precision and
   fusion conventions, rather than undocumented backend multipliers.
 
-Square roots, transcendental functions, complex division and other nontrivial
-operations require explicit rules. The basic table alone is not a complete
-release measurement schedule. These rules and the supported-operation inventory
-must be completed and reviewed before this draft is published as version 1.
+The table defines primitive costs. Complex division and the remaining reference
+algorithms still need explicit schedules and a supported-operation inventory
+before this draft is published as version 1.
 
 ### Sparse LLT reference arithmetic
 
@@ -97,8 +109,9 @@ right-looking reference divides those p entries by the diagonal and updates the
 lower triangle of their outer product. Its basic real arithmetic count is
 p² + 2p. For Hermitian complex factors the count is 4p² + 2p: division by the
 real diagonal costs 2p, diagonal updates cost 4p and off-diagonal updates cost
-4p(p − 1). Each column also invokes one real square root; those calls remain
-separate until the intrinsic-counting rule is finalized.
+4p(p − 1). Each column also invokes one real square root, adding one operation
+to either column total. The total factorization count is p² + 2p + 1 per real
+column or 4p² + 2p + 1 per Hermitian complex column.
 
 Forward and backward substitution together cost 4p + 2 real operations per
 column and right-hand side, or 16p + 4 for a Hermitian complex factor. Reusing
@@ -123,7 +136,7 @@ same work twice; that ownership mechanism remains a release requirement.
 ## Estimates, budgets and usage receipts
 
 A pre-run estimate is distinct from measured usage. Adaptive meshes, nonlinear
-convergence and iterative solves can require additional work. Runs need an
+convergence and iterative solves can require additional work. Runs need a
 fixed spending cap and admission for additional work before that cap is exceeded.
 The default cap is the available allowance plus eligible packs at admission.
 Users can choose a lower cap; a grant renewal cannot increase that run's cap.

@@ -14,6 +14,13 @@ pub struct LltReferenceWork {
 }
 
 impl LltReferenceWork {
+    /// Complete factorization under rsua-1: each real square root contributes
+    /// one reference operation, independent of its backend implementation.
+    pub fn factorization_operations(self) -> Result<OperationCount, CountOverflow> {
+        self.basic_operations
+            .checked_add(OperationCount::from_operations(self.square_roots))
+    }
+
     /// Applying a previously computed factor charges only the substitutions.
     pub fn solve_operations(self, rhs_columns: u64) -> Result<OperationCount, CountOverflow> {
         self.solve_operations_per_rhs.checked_mul(rhs_columns)
@@ -33,7 +40,8 @@ pub enum ReferenceWorkError {
 impl SymbolicFactorization {
     /// LLT reference arithmetic over the stored symbolic fill. This count is
     /// independent of the floating-point memory/performance planning estimate.
-    /// Square roots remain separate until the intrinsic schedule is finalized.
+    /// Square roots are retained separately for diagnostics and included by
+    /// `LltReferenceWork::factorization_operations` in the measured total.
     pub fn llt_reference_work(&self) -> Result<LltReferenceWork, ReferenceWorkError> {
         if self.kind != FactorKind::Cholesky {
             return Err(ReferenceWorkError::FactorKind(self.kind));
@@ -148,6 +156,10 @@ mod tests {
                 let measured = llt_columns(heights.iter().copied(), complex).unwrap();
                 assert_eq!(measured.basic_operations.operations(), basic);
                 assert_eq!(measured.square_roots, heights.len() as u64);
+                assert_eq!(
+                    measured.factorization_operations().unwrap().operations(),
+                    basic + heights.len() as u64
+                );
                 assert_eq!(measured.solve_operations_per_rhs.operations(), solve);
                 assert_eq!(measured.solve_operations(0).unwrap(), OperationCount::ZERO);
                 assert_eq!(
@@ -160,6 +172,13 @@ mod tests {
             llt_columns([0].into_iter(), false),
             Err(ReferenceWorkError::InvalidColumn)
         ));
+        assert!(LltReferenceWork {
+            basic_operations: OperationCount::from_operations(u64::MAX),
+            square_roots: 1,
+            ..Default::default()
+        }
+        .factorization_operations()
+        .is_err());
         if usize::BITS == 64 {
             assert!(matches!(
                 llt_columns([usize::MAX].into_iter(), true),
@@ -217,6 +236,7 @@ mod tests {
             let work = symbolic.llt_reference_work().unwrap();
             assert_eq!(work.basic_operations.operations(), 11);
             assert_eq!(work.square_roots, 3);
+            assert_eq!(work.factorization_operations().unwrap().operations(), 14);
             assert_eq!(work.solve_operations_per_rhs.operations(), 18);
             assert!(work.solve_operations(u64::MAX).is_err());
         }
