@@ -89,7 +89,12 @@ impl VertexUvContext<'_> {
                 edge,
                 SharedCurveErrorKind::GeometricMismatch,
                 "vertex pcurve coordinate",
-                "incident pcurves disagree beyond the admitted UV error",
+                format!(
+                    "incident pcurves disagree beyond the admitted UV error at vertex {}: \
+                     {original:?} vs {uv:?} from coedge {} (difference {difference:e}, \
+                     admitted {maximum_error:e})",
+                    vertex.source_topology_id, representative.id.source_topology_id
+                ),
             ));
         }
         Ok(uv)

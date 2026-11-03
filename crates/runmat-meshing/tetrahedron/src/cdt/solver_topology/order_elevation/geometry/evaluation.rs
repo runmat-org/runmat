@@ -53,7 +53,123 @@ pub(super) fn midpoint_geometry(
             point.exact_parameters,
         )
     })
-    .ok_or_else(|| invalid("exact midpoint leaves its source trim domain"))
+    .map_or_else(
+        || {
+            Err(invalid(format!(
+                "exact midpoint leaves its source trim domain: {}",
+                explain_rejected_midpoint(
+                    input,
+                    left,
+                    right,
+                    exact_edge_id,
+                    surface_uses,
+                    evaluation,
+                    options
+                )
+            )))
+        },
+        Ok,
+    )
+}
+
+/// Evidence for a rejected exact midpoint: the owning edge or faces, each candidate's trim
+/// classification and its distance from the curve point.
+fn explain_rejected_midpoint(
+    input: &ProjectionInput<'_>,
+    left: &SolverMeshNode,
+    right: &SolverMeshNode,
+    exact_edge_id: Option<&PersistentEntityId>,
+    surface_uses: &[SurfaceUse],
+    evaluation: PreparedEvaluation<'_, '_>,
+    options: DelaunaySolverTopologyOptions,
+) -> String {
+    let mut text = format!(
+        "edge {:?} -> {:?}",
+        left.coordinates_m.canonical_value(),
+        right.coordinates_m.canonical_value()
+    );
+    let classify = |surface_use: &SurfaceUse, uv: [f64; 2]| {
+        let face = evaluation.sources.face(surface_use.source_face_id).ok()?;
+        let location = ExactTrimClassifier::classify(
+            evaluation.evaluator,
+            &face.trim_classifier_id,
+            uv,
+            options.trim_boundary_tolerance_uv,
+            evaluation.control,
+        )
+        .ok()?;
+        let point = ExactSurfaceEvaluator::point(
+            evaluation.evaluator,
+            &face.surface_evaluator_id,
+            uv,
+            evaluation.control,
+        )
+        .ok()?;
+        let transform = evaluation
+            .sources
+            .transforms
+            .world_transform_for(&face.id)
+            .ok()?;
+        Some((location, transform.transform_point(point.canonical_value())))
+    };
+    let curve_point = exact_edge_id.and_then(|edge_id| {
+        let (left_parameter, right_parameter) =
+            compatible_curve_parameters(left, right, edge_id).ok()?;
+        let parameter = 0.5 * (left_parameter + right_parameter);
+        let edge = evaluation.sources.edge(edge_id).ok()?;
+        let local = ExactCurveEvaluator::point(
+            evaluation.evaluator,
+            &edge.curve_evaluator_id,
+            parameter,
+            evaluation.control,
+        )
+        .ok()?;
+        let transform = evaluation
+            .sources
+            .transforms
+            .world_transform_for(edge_id)
+            .ok()?;
+        Some((
+            edge_id,
+            parameter,
+            transform.transform_point(local.canonical_value()),
+        ))
+    });
+    if let Some((edge_id, parameter, point)) = curve_point {
+        text.push_str(&format!(
+            "; curve {} at {parameter} -> {point:?}",
+            edge_id.source_topology_id
+        ));
+    }
+    let tolerance = input.request.tolerance.source_tolerance_m.canonical_value();
+    for surface_use in surface_uses {
+        let uvs = match curve_point {
+            Some((edge_id, parameter, _)) => {
+                pcurve_uvs(edge_id, parameter, surface_use, evaluation)
+                    .map(Iterator::collect::<Vec<_>>)
+                    .unwrap_or_default()
+            }
+            None => compatible_surface_parameters(left, right, surface_use, [None, None])
+                .map(|(left, right)| vec![interpolate2(left, right, 0.5)])
+                .unwrap_or_default(),
+        };
+        for uv in uvs {
+            let classified = classify(surface_use, uv);
+            let distance = match (classified, curve_point) {
+                (Some((_, point)), Some((_, _, curve))) => (0..3)
+                    .map(|axis| (point[axis] - curve[axis]).powi(2))
+                    .sum::<f64>()
+                    .sqrt(),
+                _ => f64::NAN,
+            };
+            text.push_str(&format!(
+                "; face {} uv {uv:?} {:?} curve distance {distance:e} (source tolerance {tolerance:e})",
+                surface_use.source_face_id.source_topology_id,
+                classified.map(|(location, _)| location)
+            ));
+        }
+    }
+    text
 }
 
 pub(in crate::cdt::solver_topology::order_elevation) fn edge_geometry(
