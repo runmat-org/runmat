@@ -160,6 +160,19 @@ fn split(x: &[f64], n: usize) -> (Vec<V>, Vec<f64>) {
     )
 }
 
+/// Weight of the viscous term `diag(V_c / μ_eff,c)` in the sweep's Schur approximation.
+///
+/// For Stokes-like blocks, `S = D F⁻¹ G` is spectrally equivalent to `M_p / μ` with constants in
+/// `[β², 1]`, where `β` is the discrete inf–sup constant (Cahouet–Chabard): the cellwise term
+/// `V / μ_eff` is the upper end, exact only for cell-scale modes. Measured on the coarse channel
+/// (12 302 cells), the Rayleigh quotients of the exact `S` against the unweighted sweep are 0.32
+/// (lowest mode) and 0.84 (cell-scale mode). Weighting by `w` maps them to `{0.32, 0.84} / w`;
+/// `w = √(0.32 · 0.84) ≈ 0.52` centers that interval on 1 in log scale, minimizing its condition
+/// spread. We use 0.5: steady channel 699 → 239 FGMRES iterations, startup interval 454 → 288
+/// (restart 128), with −dp/dx unchanged; the slab benchmarks are neutral (50 vs 51, 62 vs 56).
+/// The weight changes only the preconditioner, never the discrete flux or the converged solution.
+const VISCOUS_SCHUR_WEIGHT: f64 = 0.5;
+
 /// The pressure operator of the SIMPLE sweep: an approximation of the Schur complement
 /// `S = D F⁻¹ G + C` of the coupled step. It is the Rhie–Chow Laplacian `L(rf)` (SIMPLE's
 /// `D diag(F)⁻¹ G` plus the Rhie–Chow dissipation `C`) plus the viscous term
@@ -198,9 +211,10 @@ fn pressure_schur(
             outlets.push((f.owner, d));
         }
     }
-    // The viscous Schur term (also makes closed domains definite).
+    // The viscous Schur term (also makes closed domains definite), weighted by
+    // VISCOUS_SCHUR_WEIGHT.
     for (c, g) in geometric.iter().enumerate() {
-        a.add(c, c, rau[c] * g);
+        a.add(c, c, VISCOUS_SCHUR_WEIGHT * rau[c] * g);
     }
     let matrix = a.finish().map_err(|e| Error::Operator(e.to_string()))?;
     Ok((matrix, outlets))
@@ -625,4 +639,77 @@ pub(super) fn solve_with_time(
         maximum_cell_momentum_relative: last[4],
         worst_cell: worst,
     })
+}
+
+/// Rayleigh quotients `zᵀ S z` of the exact Schur complement of the coupled linear step and
+/// `zᵀ S̃ z` of the sweep's pressure operator, for a pressure increment `z` at the frozen
+/// iterate (u, p, q). `S z` is the weighted continuity change of the coupled increment
+/// `(−J⁻¹ G z, z)` with `J` solved to 1e-10 or better; the second value is the same for the
+/// sweep's own velocity correction `−G z / a_P` (SIMPLE's operator).
+#[cfg(test)]
+pub(super) fn schur_rayleigh_quotients(
+    p: &CanonicalFluidProblem<'_>,
+    u: &[V],
+    pressure_values: &[f64],
+    q: &[f64],
+    z: &[f64],
+) -> Result<(f64, f64, f64), Error> {
+    let n = u.len();
+    let frozen = freeze(p, u, pressure_values, q, None)?;
+    let base_residual = residual(p, &frozen, u, pressure_values)?;
+    let (laplacian, _) = pressure_schur(p, &frozen.rf, &frozen.rau)?;
+    let blocks =
+        super::jacobian::component_operators(p, &frozen.matrix, &frozen.viscosity_gradients)?;
+    let operator_error = |e: SolverError| Error::Operator(e.to_string());
+    let zero = vec![0.0; n];
+    let zero_force = pressure_force(p, &zero, &pressure_gradient(p, &zero)?)?;
+    let force = pressure_force(p, z, &pressure_gradient(p, z)?)?;
+    let mut rhs = vec![0.0; 3 * n];
+    for c in 0..n {
+        for k in 0..3 {
+            rhs[k * n + c] = -(force[c][k] - zero_force[c][k]);
+        }
+    }
+    let mut velocity = vec![0.0; 3 * n];
+    let report = with_plan(ambient_plan(), || {
+        let amg = |k: usize| Amg::new(blocks[k].view(), momentum_amg_options(), control());
+        let preconditioner = ComponentPreconditioner {
+            n,
+            factors: [amg(0)?, amg(1)?, amg(2)?],
+        };
+        let view = frozen.jacobian.view(&p.momentum_jacobian);
+        linear::restarted_gmres(
+            &mut GmresWorkspace::default(),
+            &view,
+            Some(&preconditioner),
+            &rhs,
+            &mut velocity,
+            1e-12,
+            2000,
+            200,
+            PreconditionerSide::Right,
+        )
+    })
+    .map_err(operator_error)?;
+    assert!(
+        report.relative_residual <= 1e-10,
+        "momentum solve {report:?}"
+    );
+    let trial_p = (0..n)
+        .map(|c| pressure_values[c] + z[c])
+        .collect::<Vec<_>>();
+    let w = frozen.continuity_weight;
+    let quotient = |change: &dyn Fn(usize) -> V| -> Result<f64, Error> {
+        let trial_u = (0..n).map(|c| add(u[c], change(c))).collect::<Vec<_>>();
+        let shifted = residual(p, &frozen, &trial_u, &trial_p)?;
+        Ok((0..n)
+            .map(|c| z[c] * (shifted[3 * n + c] - base_residual[3 * n + c]) / w)
+            .sum::<f64>())
+    };
+    let exact = quotient(&|c| [velocity[c], velocity[n + c], velocity[2 * n + c]])?;
+    // The sweep's own correction z_u = −(G z)/a_P: the operator its pressure step stands for.
+    let simple = quotient(&|c| std::array::from_fn(|k| rhs[k * n + c] / frozen.diagonal[c]))?;
+    let action = spmv(&laplacian, z).map_err(|e| Error::Operator(e.to_string()))?;
+    let approximate = z.iter().zip(&action).map(|(a, b)| a * b).sum::<f64>();
+    Ok((exact, simple, approximate))
 }

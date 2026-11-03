@@ -125,7 +125,10 @@ impl Default for CanonicalFluidPolicy {
             maximum_outer_iterations: 200,
             maximum_nonorthogonal_iterations: 4,
             maximum_linear_iterations: 1000,
-            gmres_restart: 32,
+            // The coupled step's flexible GMRES stagnates at restart 32 (3 230 iterations,
+            // ~241 s per startup interval on the 12k-cell channel); 128 keeps enough of the
+            // Krylov space (454 iterations). Cost: (2r+1) vectors of 4n, ~8 KB per cell.
+            gmres_restart: 128,
             momentum_relaxation: 0.5,
             pressure_relaxation: 0.25,
             linear_relative_tolerance: 1e-8,
@@ -182,6 +185,14 @@ pub struct CanonicalFluidResult {
 pub enum CanonicalFluidError {
     #[error("invalid canonical fluid input: {0}")]
     Invalid(&'static str),
+    /// A geometry-derived authority failed at one cell: the cell names the mesh element.
+    #[error("invalid canonical fluid input: {reason} at element {element_id} (centroid {centroid_m:?} m, {samples} stencil samples)")]
+    InvalidCell {
+        reason: &'static str,
+        element_id: u64,
+        centroid_m: [f64; 3],
+        samples: usize,
+    },
     #[error("unsupported canonical fluid envelope: {0}")]
     Unsupported(&'static str),
     #[error("canonical fluid resource admission failed: {0}")]

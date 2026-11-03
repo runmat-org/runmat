@@ -55,10 +55,11 @@ pub(super) fn derive(
                 displacements[j] = scale(f.owner_area_vector_m2, 1.0 / f.area_m2.canonical_value());
             }
         }
-        let metric = GradientMetric::derive(&displacements)?;
+        let at = |e| super::reconstruction::at_cell(e, cell, 4);
+        let metric = GradientMetric::derive(&displacements).map_err(at)?;
         let mut weights = [(Sample::ZeroNormalDerivative, [0.0; 3]); 4];
         for j in 0..4 {
-            weights[j] = (samples[j], metric.weight(displacements[j])?);
+            weights[j] = (samples[j], metric.weight(displacements[j]).map_err(at)?);
         }
         stencils.push(VelocityGradientStencil { weights });
     }

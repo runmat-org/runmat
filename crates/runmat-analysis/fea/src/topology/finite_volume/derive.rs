@@ -290,6 +290,11 @@ pub(super) fn derive(
     let mut area_sums = vec![[0.0; 3]; cells.len()];
     let mut area_scales = vec![0.0; cells.len()];
     let mut volumes = vec![0.0; cells.len()];
+    // Forward rounding bound of each divergence-theorem sum: the magnitude of its terms plus the
+    // representation error of the absolute face and cell centroids it subtracts. A flat cell's
+    // terms nearly cancel (|c_f − c|·|A_f| ≫ V), so the sum's error is relative to that
+    // magnitude, not to V; a missing, duplicated or reversed face still moves the sum by O(V).
+    let mut volume_scales = vec![0.0; cells.len()];
     for (face_index, face) in faces.iter().enumerate() {
         let delta = subtract(
             face.neighbor
@@ -321,12 +326,17 @@ pub(super) fn derive(
             area_scales[cell] += face.area_m2.canonical_value();
             // Translation invariant divergence theorem relative to this cell centroid.
             volumes[cell] += dot(subtract(face.centroid_m, cells[cell].centroid_m), area) / 3.0;
+            volume_scales[cell] += geometry::divergence_term_scale(
+                face.centroid_m,
+                cells[cell].centroid_m,
+                face.area_m2.canonical_value(),
+            );
         }
     }
     for (i, cell) in cells.iter().enumerate() {
         if counts[i] != 4
             || geometry::length(area_sums[i]) > RELATIVE_TOLERANCE * area_scales[i]
-            || !geometry::close_scalar(volumes[i], cell.volume_m3, cell.volume_m3)
+            || !geometry::close_scalar(volumes[i], cell.volume_m3, volume_scales[i])
         {
             return Err(Error::Invalid("cell closure or conservative volume"));
         }

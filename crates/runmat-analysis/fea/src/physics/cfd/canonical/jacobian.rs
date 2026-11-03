@@ -29,6 +29,11 @@ pub(super) struct MomentumJacobianPattern {
 }
 
 impl MomentumJacobianPattern {
+    /// Scalar entries of the assembled 3n × 3n block.
+    pub(super) fn entries(&self) -> usize {
+        self.col_idx.len()
+    }
+
     pub(super) fn derive(
         t: &FiniteVolumeTopology,
         boundaries: &[FaceBoundary],

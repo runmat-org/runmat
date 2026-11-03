@@ -22,6 +22,21 @@ pub(super) fn close_scalar(left: f64, right: f64, scale: f64) -> bool {
     left.is_finite() && right.is_finite() && (left - right).abs() <= RELATIVE_TOLERANCE * scale
 }
 
+/// Forward rounding bound of one divergence-theorem volume term `(c_f − c)·A_f / 3`: the term's
+/// magnitude plus the representation error of the absolute centroids it subtracts.
+pub(super) fn divergence_term_scale(
+    face_centroid: [f64; 3],
+    cell_centroid: [f64; 3],
+    area_m2: f64,
+) -> f64 {
+    let coordinate = face_centroid
+        .iter()
+        .chain(&cell_centroid)
+        .fold(0.0_f64, |m, v| m.max(v.abs()));
+    area_m2 * (length(super::super::element::subtract(face_centroid, cell_centroid)) + coordinate)
+        / 3.0
+}
+
 pub(super) fn length(vector: [f64; 3]) -> f64 {
     vector[0].hypot(vector[1]).hypot(vector[2])
 }
