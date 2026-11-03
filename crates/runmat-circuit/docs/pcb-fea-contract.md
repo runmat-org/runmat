@@ -54,7 +54,7 @@ layer is needed. This follows the one-authority rule for region identity.
 
 Renames follow the circuit's lock section. A designator or net rename recorded there as an
 ECO rename changes the region name. A study that refers to the old name gets a
-"renamed region" diagnostic carrying the new name. It does not silently re-bind.
+"renamed region" diagnostic carrying the new name, and never silently re-binds. (Required behaviour. It is not implemented yet: the circuit side emits the rename from its lock section, and the `.fea` side reports it.)
 
 ## Power map sources, in priority order
 
