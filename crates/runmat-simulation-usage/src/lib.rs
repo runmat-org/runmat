@@ -6,6 +6,11 @@
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
+mod ledger;
+mod usage;
+pub use ledger::{LedgerError, LedgerSnapshot, UsageLedger, WorkReservation};
+pub use usage::{CompletedUsage, UsageCategory};
+
 /// An exact nonnegative number of reference floating-point operations.
 ///
 /// The wire representation is a canonical decimal string, including for small
