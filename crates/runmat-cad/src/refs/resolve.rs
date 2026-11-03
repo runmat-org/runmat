@@ -19,7 +19,7 @@ use crate::ids::{FeatureId, FilePath};
 use crate::model::datum::{dot, sub};
 use crate::model::items::{Cardinality, PublishEntry, PublishTarget};
 use crate::refs::history::{EntityIndex, SurfaceKind, Topology};
-use crate::refs::lock::{ItemPath, LockSection};
+use crate::refs::lock::LockSection;
 use crate::refs::name::{EntityName, InstanceKey, Role, SourceTag, TopoKind};
 use crate::refs::naming::{edge_name, BodyNames};
 use crate::refs::publish::{ForeignTarget, PublishedCatalog, XrefProblem};
@@ -698,98 +698,41 @@ impl<'a> Resolver<'a> {
                 problem: XrefProblem::NoCatalog,
             });
         };
-        // A renamed file resolves through the lock's file alias.
-        let mut target_file = file.clone();
-        if !catalog.knows(file) {
-            let moved = self
-                .lock
-                .and_then(|l| l.lookup(&ItemPath::file(file)))
-                .filter(|l| l.via_alias && catalog.knows(&l.current.file));
-            match moved {
-                Some(l) => target_file = l.current.file,
-                None => {
-                    return Stop::Fail(RefProblem::Xref {
-                        problem: XrefProblem::UnknownFile { file: file.clone() },
-                    })
-                }
-            }
-        }
-        let pinned = match context {
-            XrefContext::Live => {
-                let here = catalog.partition(self.file);
-                let there = catalog.partition(&target_file);
-                if here != there {
-                    return Stop::Fail(RefProblem::Xref {
-                        problem: XrefProblem::LiveAcrossPartition {
-                            file: target_file.clone(),
-                            latest_release: catalog.latest_release(&target_file),
-                        },
-                    });
-                }
-                None
-            }
-            XrefContext::Pinned { revision } => Some(revision),
+        // The shared cross-file rules (file and publish aliases, partitions, pins).
+        let read = match crate::refs::publish::read_published(
+            catalog, self.lock, self.file, file, name, context,
+        ) {
+            Ok(r) => r,
+            Err(problem) => return Stop::Fail(RefProblem::Xref { problem }),
         };
-        let mut target_name = name.clone();
-        let mut result = catalog.resolve_published(&target_file, name, pinned);
-        if let Err(XrefProblem::NotPublished { .. }) = &result {
-            // A renamed publish entry resolves through its alias (recorded under the old or
-            // the current file path). A pin sees the old revision, where the old name exists.
-            for f in [file, &target_file] {
-                let alias = self
-                    .lock
-                    .and_then(|l| l.lookup(&ItemPath::publish(f, name)))
-                    .filter(|l| {
-                        l.via_alias && l.current.item.len() == 2 && l.current.item[0] == "publish"
-                    });
-                if let Some(l) = alias {
-                    let new = crate::ids::PublishName::new(l.current.item[1].clone());
-                    let r = catalog.resolve_published(&target_file, &new, pinned);
-                    if r.is_ok() {
-                        target_name = new;
-                        result = r;
-                        break;
-                    }
-                }
-            }
+        let mut notes = Vec::new();
+        if read.renamed {
+            notes.push(ResolveNote::XrefRenamed {
+                from_file: file.clone(),
+                to_file: read.file.clone(),
+                from_name: name.clone(),
+                to_name: read.name.clone(),
+                rewritten: Reference::Published {
+                    file: Some(read.file.clone()),
+                    name: read.name.clone(),
+                    context: context.clone(),
+                },
+            });
         }
-        match result {
-            Ok(target) => {
-                let mut notes = Vec::new();
-                if &target_file != file || &target_name != name {
-                    notes.push(ResolveNote::XrefRenamed {
-                        from_file: file.clone(),
-                        to_file: target_file.clone(),
-                        from_name: name.clone(),
-                        to_name: target_name.clone(),
-                        rewritten: Reference::Published {
-                            file: Some(target_file.clone()),
-                            name: target_name.clone(),
-                            context: context.clone(),
-                        },
-                    });
-                }
-                if let Some(pinned) = pinned {
-                    if let Some(latest) = catalog.latest_release(&target_file) {
-                        if &latest != pinned {
-                            notes.push(ResolveNote::PinBehind {
-                                file: target_file.clone(),
-                                pinned: pinned.clone(),
-                                latest,
-                            });
-                        }
-                    }
-                }
-                Stop::Foreign(Box::new(Resolution {
-                    target: Resolved::Foreign {
-                        target: Box::new(target),
-                    },
-                    class: ResolutionClass::Published,
-                    notes,
-                }))
-            }
-            Err(problem) => Stop::Fail(RefProblem::Xref { problem }),
+        if let (XrefContext::Pinned { revision }, Some(latest)) = (context, &read.newer_release) {
+            notes.push(ResolveNote::PinBehind {
+                file: read.file.clone(),
+                pinned: revision.clone(),
+                latest: latest.clone(),
+            });
         }
+        Stop::Foreign(Box::new(Resolution {
+            target: Resolved::Foreign {
+                target: Box::new(read.target),
+            },
+            class: ResolutionClass::Published,
+            notes,
+        }))
     }
 
     #[allow(clippy::result_large_err)]
