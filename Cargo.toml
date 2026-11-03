@@ -9,6 +9,7 @@ members = [
     "crates/runmat-cad",
     "crates/runmat-rules",
     "crates/runmat-circuit",
+    "crates/runmat-circuit-spice",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",

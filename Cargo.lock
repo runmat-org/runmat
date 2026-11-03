@@ -7962,6 +7962,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-circuit-spice"
+version = "0.6.2"
+dependencies = [
+ "libloading 0.8.9",
+ "runmat-circuit",
+]
+
+[[package]]
 name = "runmat-clarabel"
 version = "0.6.2"
 dependencies = [
