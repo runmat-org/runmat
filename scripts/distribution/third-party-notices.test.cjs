@@ -5,6 +5,7 @@ const { join, resolve } = require("node:path");
 const test = require("node:test");
 const { execFileSync } = require("node:child_process");
 const { NOTICE_FILE_NAME, thirdPartyNoticeBytes, stageThirdPartyNotices, stageWasmPackageNotices, verifyThirdPartyNotices } = require("./third-party-notices.cjs");
+const { LICENSE_FILE_NAMES, stageRuntimeLicenses, verifyRuntimeLicenses } = require("./runtime-licenses.cjs");
 
 test("distribution notices survive native and npm archives without changing package metadata", () => {
   const root = mkdtempSync(join(tmpdir(), "runmat-notices-"));
@@ -40,10 +41,20 @@ test("distribution notices survive native and npm archives without changing pack
     mkdirSync(product);
     stageThirdPartyNotices(product);
     stageThirdPartyNotices(product);
+    stageRuntimeLicenses(product);
+    stageRuntimeLicenses(product);
     assert.deepEqual(readFileSync(join(product, NOTICE_FILE_NAME)), thirdPartyNoticeBytes());
     const nativeArchive = join(root, "native.tar.gz");
-    execFileSync("tar", ["-czf", nativeArchive, "-C", product, NOTICE_FILE_NAME]);
+    execFileSync("tar", ["-czf", nativeArchive, "-C", product, NOTICE_FILE_NAME, ...LICENSE_FILE_NAMES]);
     assert.deepEqual(execFileSync("tar", ["-xOf", nativeArchive, NOTICE_FILE_NAME]), thirdPartyNoticeBytes());
+    for (const name of LICENSE_FILE_NAMES) {
+      const expectedLicense = readFileSync(resolve(__dirname, "../..", name));
+      assert.deepEqual(execFileSync("tar", ["-xOf", nativeArchive, name]), expectedLicense);
+    }
+    writeFileSync(join(product, "FREE-USE.md"), "unrelated bytes");
+    assert.throws(() => verifyRuntimeLicenses(product), /Runtime license bytes differ/);
+    assert.throws(() => stageRuntimeLicenses(product), /Runtime license bytes differ/);
+    assert.equal(readFileSync(join(product, "FREE-USE.md"), "utf8"), "unrelated bytes");
     writeFileSync(join(product, NOTICE_FILE_NAME), "stale");
     assert.throws(() => verifyThirdPartyNotices(product), /notice bytes differ/);
     assert.throws(() => stageThirdPartyNotices(product), /notice bytes differ/);

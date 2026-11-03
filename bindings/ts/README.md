@@ -350,4 +350,4 @@ The build expects `wasm-pack` and a Rust toolchain with the `wasm32-unknown-unkn
 
 ## License
 
-Apache License 2.0.
+Business Source License 1.1 with the RunMat Free Use grant. See [LICENSE.md](./LICENSE.md) and [FREE-USE.md](./FREE-USE.md). Each version becomes available under Apache License 2.0 three years after first publication; releases through 0.6.2 retain their Apache terms.

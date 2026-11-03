@@ -43,6 +43,9 @@ export function computeRunnerDigest(root = repositoryRoot()) {
     const dependencies = [
         "scripts/metadata/BuiltinExampleFixtureSchema.mjs",
         "scripts/distribution/third-party-notices.cjs",
+        "scripts/distribution/runtime-licenses.cjs",
+        "LICENSE.md",
+        "FREE-USE.md",
         "scripts/docs/production-documentation.mjs",
         "scripts/development/builtin-migration/documentation-export.mjs",
         "crates/runmat-runtime/src/builtins/math/linalg/ops/linear_operator/LAPACK-LICENSE.txt",

@@ -1,5 +1,6 @@
 [package]
 name = "runmat-geometry-wasm-host"
+description = "Typed exact-geometry host boundary for RunMat WebAssembly execution"
 version = "0.6.2"
 edition = "2021"
 license-file = "../../../LICENSE.md"

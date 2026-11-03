@@ -323,7 +323,7 @@ test("native product staging preserves the executable and closes Windows depende
         writeFileSync(join(first, "runtime.dll"), "same");
         writeFileSync(join(second, "RUNTIME.DLL"), "different");
         const staged = stageNativeProduct({ binary, destination: join(directory, "product"), dependencyDirectories: [first], dependencyNoticeDirectories: [notices, notices] });
-        assert.equal(staged.fileCount, 4);
+        assert.equal(staged.fileCount, 6);
         assert.equal(readFileSync(join(staged.destination, "runtime.dll"), "utf8"), "same");
         assert.deepEqual(readFileSync(join(staged.destination, NOTICE_FILE_NAME)), thirdPartyNoticeBytes());
         assert.equal(readFileSync(join(staged.destination, "THIRD_PARTY_NOTICES.d", "component-LICENSE.txt"), "utf8"), "publisher license bytes\n");

@@ -5,6 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { sha256 } from "./identity.mjs";
 import { readFileSync } from "node:fs";
 import { NOTICE_FILE_NAME, stageThirdPartyNotices } from "../../distribution/third-party-notices.cjs";
+import { LICENSE_FILE_NAMES, stageRuntimeLicenses } from "../../distribution/runtime-licenses.cjs";
 
 export function stageNativeProduct(fields) {
     const source = resolve(fields.binary);
@@ -14,7 +15,7 @@ export function stageNativeProduct(fields) {
     ensureEmptyDirectory(destination);
     const executableName = fields.executableName ?? basename(source);
     validateLeafName(executableName, "native executable name");
-    if (executableName.toLowerCase() === NOTICE_FILE_NAME.toLowerCase()) throw new Error("Native executable name is reserved for distribution notices");
+    if ([NOTICE_FILE_NAME, ...LICENSE_FILE_NAMES].some(name => executableName.toLowerCase() === name.toLowerCase())) throw new Error("Native executable name is reserved for distribution assets");
     const stagedExecutable = join(destination, executableName);
     copyFileSync(source, stagedExecutable);
     chmodSync(stagedExecutable, sourceStat.mode & 0o777);
@@ -57,7 +58,8 @@ export function stageNativeProduct(fields) {
         }
     }
     stageThirdPartyNotices(destination);
-    return { destination, executableName, fileCount: staged.size + 1 };
+    stageRuntimeLicenses(destination);
+    return { destination, executableName, fileCount: staged.size + 1 + LICENSE_FILE_NAMES.length };
 }
 
 function ensureEmptyDirectory(path) {

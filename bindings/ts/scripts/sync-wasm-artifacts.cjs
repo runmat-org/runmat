@@ -5,6 +5,7 @@ const INCLUDE_BUNDLER_ARTIFACTS = false;
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { stageThirdPartyNotices, stageWasmPackageNotices } = require("../../../scripts/distribution/third-party-notices.cjs");
+const { stageRuntimeLicenses } = require("../../../scripts/distribution/runtime-licenses.cjs");
 
 async function artifactStat(source, optional = false) {
   let stat;
@@ -86,6 +87,7 @@ async function syncWasmArtifacts(packageRoot) {
     if (copy.present) await copyTree(copy.source, copy.destination);
   }
   stageThirdPartyNotices(dist);
+  stageRuntimeLicenses(root);
 }
 
 module.exports = { syncWasmArtifacts };

@@ -2,7 +2,7 @@
 
 This guide builds and runs a small structural study, then shows generated inputs, sweeps, and cluster placement. The complete repository examples are checked as part of the release workflow.
 
-Meshing and solving use core-hours wherever they run, including on your own computer. Sign in to RunMat and keep a connection to RunMat Server while the run executes. The Free plan includes 1 core-hour per person each week; Scale includes 100. Usage is allocated CPU cores multiplied by elapsed run time; GPU time is excluded. See [Usage and limits](https://runmat.com/docs/desktop/usage-and-limits).
+Meshing and solving consume the simulation allowance described on the [pricing page](https://runmat.com/pricing). Usage is measured in GFLOP under [RunMat Simulation Usage Accounting](./usage-accounting). Sign-in and a connection to RunMat Server are required for admission.
 
 ## A Complete Study
 

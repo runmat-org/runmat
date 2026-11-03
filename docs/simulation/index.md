@@ -21,7 +21,7 @@ runmat login
 runmat fea run cantilever-static.fea
 ```
 
-Meshing and solving use core-hours on your own computer and on a cluster, and require sign-in and a connection to RunMat Server. The Free plan includes 1 core-hour per person each week; Scale includes 100. Usage is allocated CPU cores multiplied by elapsed run time; GPU time is excluded. See [Usage and limits](https://runmat.com/docs/desktop/usage-and-limits).
+Meshing and solving consume the simulation allowance described on the [pricing page](https://runmat.com/pricing). Usage is measured in GFLOP under [RunMat Simulation Usage Accounting](./usage-accounting). Sign-in and a connection to RunMat Server are required for admission.
 
 Checking and planning a study do not mesh or solve. Ordinary local `.m` scripts that do not start FEA need no account or connection.
 

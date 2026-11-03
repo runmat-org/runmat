@@ -142,6 +142,10 @@
       "path": "docs/simulation/using-fea.md"
     },
     {
+      "id": "doc:fea/usage-accounting",
+      "path": "docs/simulation/usage-accounting.md"
+    },
+    {
       "id": "doc:fea/geometry",
       "path": "docs/simulation/geometry.md"
     },

@@ -340,16 +340,18 @@ jobs:
 
           Push-Location $outDir
           try {
-            $members = @("${{ matrix.platform.bin }}", "THIRD_PARTY_NOTICES.txt") + @(Get-ChildItem -File -Filter *.dll | ForEach-Object { $_.Name })
+            $members = @("${{ matrix.platform.bin }}", "THIRD_PARTY_NOTICES.txt", "LICENSE.md", "FREE-USE.md") + @(Get-ChildItem -File -Filter *.dll | ForEach-Object { $_.Name })
             if (Test-Path -LiteralPath 'THIRD_PARTY_NOTICES.d') { $members += 'THIRD_PARTY_NOTICES.d' }
             & 7z a $archivePath @members
             if ($LASTEXITCODE -ne 0) { throw "Release archive creation failed" }
           } finally { Pop-Location }
           $noticeDir = Join-Path $env:RUNNER_TEMP ("runmat-release-notices-" + [guid]::NewGuid().ToString())
-          & 7z x $archivePath THIRD_PARTY_NOTICES.txt "THIRD_PARTY_NOTICES.d/*" "-o$noticeDir"
+          & 7z x $archivePath THIRD_PARTY_NOTICES.txt LICENSE.md FREE-USE.md "THIRD_PARTY_NOTICES.d/*" "-o$noticeDir"
           if ($LASTEXITCODE -ne 0) { throw "Release archive notice extraction failed" }
           & node scripts/distribution/third-party-notices.cjs verify $noticeDir
           if ($LASTEXITCODE -ne 0) { throw "Release archive notice verification failed" }
+          & node scripts/distribution/runtime-licenses.cjs verify $noticeDir
+          if ($LASTEXITCODE -ne 0) { throw "Release archive license verification failed" }
           foreach ($notice in (Get-ChildItem -LiteralPath (Join-Path $outDir 'THIRD_PARTY_NOTICES.d') -File)) {
             $archived = Join-Path $noticeDir ("THIRD_PARTY_NOTICES.d/" + $notice.Name)
             if ((Get-FileHash -LiteralPath $notice.FullName -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $archived -Algorithm SHA256).Hash) { throw "Redistributable notice changed in release archive: $($notice.Name)" }
@@ -363,8 +365,10 @@ jobs:
           cd artifacts/release-product/${{ matrix.platform.release_for }}/product
           ARTIFACT_NAME="runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}"
           archive="../../../../${ARTIFACT_NAME}.tar.gz"
-          tar czvf "$archive" ${{ matrix.platform.bin }} THIRD_PARTY_NOTICES.txt
+          tar czvf "$archive" ${{ matrix.platform.bin }} THIRD_PARTY_NOTICES.txt LICENSE.md FREE-USE.md
           tar -xOf "$archive" THIRD_PARTY_NOTICES.txt | cmp THIRD_PARTY_NOTICES.txt -
+          tar -xOf "$archive" LICENSE.md | cmp LICENSE.md -
+          tar -xOf "$archive" FREE-USE.md | cmp FREE-USE.md -
           cd -
 
       - name: Publish release artifacts
@@ -462,10 +466,8 @@ jobs:
               cmp "$d/LICENSE.md" crates/runmat-runtime/licenses/CLARABEL-LICENSE.txt
               continue
             fi
-            if [ -f LICENSE ] || [ -f LICENSE.md ]; then
-              cp -f LICENSE* "$d/" || true
-              if [ -f "$d/LICENSE.md" ]; then mv -f "$d/LICENSE.md" "$d/LICENSE"; fi
-            fi
+            cp LICENSE.md "$d/LICENSE"
+            cp FREE-USE.md "$d/FREE-USE.md"
           done < <(find crates -mindepth 2 -maxdepth 4 -name Cargo.toml | sort)
 
       - name: Normalize Cargo.toml license metadata
@@ -476,9 +478,6 @@ jobs:
             if grep -Eq '^license-file[[:space:]]*=[[:space:]]*"\..*/LICENSE' "$toml"; then
               sed -E -i.bak 's#^license-file[[:space:]]*=[[:space:]]*"\..*/LICENSE.*#license-file = "LICENSE"#' "$toml"
               rm -f "$toml.bak"
-            fi
-            if ! grep -Eq '^license[[:space:]]*=' "$toml" && [ -f "${toml%/*}/LICENSE" ]; then
-              awk 'BEGIN{printed=0} {print} /^\[package\]/{if(!printed){print "license = \"MIT\""; printed=1}}' "$toml" > "$toml.tmp" && mv "$toml.tmp" "$toml"
             fi
           done < <(find crates -mindepth 2 -maxdepth 4 -name Cargo.toml | sort)
 

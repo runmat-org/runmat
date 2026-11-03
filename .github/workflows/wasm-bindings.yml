@@ -362,6 +362,8 @@ jobs:
           cmp dist/pkg-web/runmat_wasm_web.js "$packed_root/package/dist/pkg-web/runmat_wasm_web.js"
           cmp dist/pkg-web/runmat_wasm_web_bg.wasm "$packed_root/package/dist/pkg-web/runmat_wasm_web_bg.wasm"
           cmp dist/THIRD_PARTY_NOTICES.txt "$packed_root/package/dist/THIRD_PARTY_NOTICES.txt"
+          cmp LICENSE.md "$packed_root/package/LICENSE.md"
+          cmp FREE-USE.md "$packed_root/package/FREE-USE.md"
           cmp dist/pkg-web/THIRD_PARTY_NOTICES.txt "$packed_root/package/dist/pkg-web/THIRD_PARTY_NOTICES.txt"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
 
