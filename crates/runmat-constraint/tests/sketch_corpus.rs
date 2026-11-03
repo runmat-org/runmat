@@ -107,6 +107,57 @@ fn run_case(name: &str, s: System, e: Expect, check: Option<Check>) {
     if rep.dof != usize::MAX {
         assert_eq!(whole.dof, rep.dof, "{name}: dof without decomposition");
     }
+    // The same diagnosis with the dog leg trust region, without unit scaling, and without the
+    // constructive pre-pass.
+    for (label, o) in [
+        (
+            "dog leg",
+            SolveOptions {
+                algorithm: Algorithm::DogLeg,
+                ..opts()
+            },
+        ),
+        (
+            "unscaled",
+            SolveOptions {
+                scaling: false,
+                ..opts()
+            },
+        ),
+        (
+            "no clusters",
+            SolveOptions {
+                clusters: false,
+                ..opts()
+            },
+        ),
+    ] {
+        let alt = solve(&s, &o);
+        assert_eq!(alt.status, rep.status, "{name}: status with {label}");
+        if e.dof != usize::MAX {
+            assert_eq!(alt.dof, rep.dof, "{name}: dof with {label}");
+        }
+        if let Some(r) = &e.redundant {
+            assert_eq!(
+                &alt.redundant_ids(),
+                r,
+                "{name}: redundant set with {label}"
+            );
+        }
+        if e.status != Status::Conflicting {
+            assert!(
+                alt.max_residual <= 1e-10,
+                "{name}: residual {} with {label}",
+                alt.max_residual
+            );
+        }
+        let again = solve(&s, &o);
+        assert_eq!(
+            alt.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            again.values.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            "{name}: not deterministic with {label}"
+        );
+    }
 }
 
 // ============================================================================ fully defined

@@ -282,6 +282,9 @@ fn not_converged_reports_residual() {
         &s,
         &SolveOptions {
             max_iterations: 1,
+            // The constructive pre-pass would place `c` exactly (two circles about fixed
+            // points); this test is about the numerical iteration running out.
+            clusters: false,
             ..opts()
         },
     );

@@ -3,18 +3,24 @@
 //! # Model
 //!
 //! A [`System`] holds scalar variables ([`VarId`]), entities that own them ([`EntityId`]: 2D
-//! points, lines, circles, arcs, ellipses, B-splines; rigid bodies and mate connectors) and
-//! constraints ([`ConstraintId`]). Constraints are validated when added. Every constraint is a
-//! residual function written once over a generic scalar; forward-mode automatic
-//! differentiation ([`ad`]) gives its exact Jacobian block.
+//! points, lines, circles, arcs, ellipses, elliptical arcs, B-splines — clamped or periodic,
+//! polynomial or rational (NURBS); rigid bodies and mate connectors) and constraints
+//! ([`ConstraintId`]). Constraints are validated when added. Every constraint is a residual
+//! function written once over a generic scalar; forward-mode automatic differentiation
+//! ([`ad`]), seeded only on the variables a residual really reads (a spline point reads the
+//! control points of one knot span), gives its exact Jacobian block at any spline size.
 //!
 //! # Solve
 //!
-//! [`solve`] splits the system into connected components, splits each component by a
-//! Dulmage–Mendelsohn decomposition into an over-determined block, square blocks in dependency
-//! order and an under-determined block, and solves each with damped minimum-norm Newton steps
-//! (sparse LDLᵀ of `J W Jᵀ + μI`), falling back to Levenberg–Marquardt. A component whose
-//! blocks fail is solved whole. [`drag`] adds a soft target for chosen variables.
+//! [`solve`] splits the system into connected components. A constructive pre-pass recognises
+//! rigid clusters (Fudos–Hoffmann triangles, oriented clusters, loci on fixed geometry) and
+//! places them. A Dulmage–Mendelsohn decomposition then splits each component into an
+//! over-determined block, square blocks in dependency order and an under-determined block,
+//! each solved with damped minimum-norm Newton steps (sparse LDLᵀ of `J W Jᵀ + μI`) falling
+//! back to Levenberg–Marquardt, or with Powell's dog leg ([`Algorithm`]). Rows and columns are
+//! scaled by unit (lengths versus angles). A component whose blocks fail is solved whole.
+//! Range limits are inequalities under a primal active set (activated when violated, released
+//! when their multiplier has the wrong sign). [`drag`] adds a soft target for chosen variables.
 //!
 //! # Diagnose
 //!
@@ -45,6 +51,7 @@
 //! ```
 
 pub mod ad;
+mod cluster;
 mod decompose;
 mod ids;
 mod linalg;
@@ -55,12 +62,12 @@ mod system;
 
 pub use ids::{ConstraintId, EntityId, VarId};
 pub use report::{
-    ComponentReport, DependentConstraint, DragReport, EntityDof, Measurement, Method, SolveOptions,
-    SolveReport, Status, WarmStart, WarmStartReport,
+    Algorithm, ComponentReport, DependentConstraint, DragReport, EntityDof, Measurement, Method,
+    SolveOptions, SolveReport, Status, WarmStart, WarmStartReport,
 };
 pub use solver::{drag, solve, DragRequest};
 pub use system::{
     AngleMode, BuildError, Constraint, ConstraintKindRecord, ConstraintRecord, CurveEnd,
-    DistanceMode, Entity, EntityKind, Frame, InternalKind, Mate, System, TangentKind, Target,
-    VarFlag, VarRole, Variable, MAX_SPLINE_CONTROL_POINTS,
+    DistanceMode, EllipseMeasure, Entity, EntityKind, Frame, InternalKind, Mate, SplineOptions,
+    System, TangentKind, Target, VarFlag, VarRole, Variable, MAX_SPLINE_CONTROL_POINTS,
 };
