@@ -79,7 +79,7 @@ async fn fixture(
                 }
             };
             let headers = std::str::from_utf8(&bytes[..header_end]).unwrap();
-            assert!(headers.starts_with(&format!("POST {path} HTTP/1.1\r\n")));
+            assert!(headers.starts_with(&format!("{path} HTTP/1.1\r\n")));
             assert!(headers
                 .to_ascii_lowercase()
                 .contains("authorization: bearer test-key\r\n"));
@@ -90,14 +90,18 @@ async fn fixture(
                         .strip_prefix("content-length:")
                         .map(|value| value.trim().parse().unwrap())
                 })
-                .unwrap();
+                .unwrap_or(0);
             while bytes.len() < header_end + length {
                 let mut chunk = [0; 1024];
                 let read = socket.read(&mut chunk).await.unwrap();
                 assert_ne!(read, 0);
                 bytes.extend_from_slice(&chunk[..read]);
             }
-            bodies.push(serde_json::from_slice(&bytes[header_end..header_end + length]).unwrap());
+            bodies.push(if length == 0 {
+                Value::Null
+            } else {
+                serde_json::from_slice(&bytes[header_end..header_end + length]).unwrap()
+            });
             let header = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n", response.len());
             socket.write_all(header.as_bytes()).await.unwrap();
             // Large negative controls may cause the client to close early.
@@ -109,7 +113,7 @@ async fn fixture(
 }
 
 #[tokio::test]
-async fn all_three_routes_keep_exact_usage_version_and_absolute_grants() {
+async fn allowance_and_lease_routes_keep_exact_usage_version_and_absolute_grants() {
     let org = OrgId::from_uuid(uuid::Uuid::from_u128(1));
     let lease = SimulationLeaseId::from_uuid(uuid::Uuid::from_u128(2));
     let request = start_request();
@@ -135,13 +139,19 @@ async fn all_three_routes_keep_exact_usage_version_and_absolute_grants() {
         "totalOps":usage.total().unwrap(),"grantedOps":count(u64::MAX),"budgetOps":count(u64::MAX),
         "estimateOps":null,"chargedOps":usage.total().unwrap(),"waived":false,"settledAt":"2099-01-01T00:00:00Z"});
     let (endpoint, server) = fixture(vec![
-        (format!("/v1/orgs/{org}/simulation/leases"), json!({"leaseId":lease,"grantedOps":count(u64::MAX),
+        (format!("GET /v1/orgs/{org}/simulation/usage?runmatVersion=0.7.0"), json!({
+            "measurementVersion":null,"runmatVersion":"0.7","renewal":"week","period":null,
+            "allowanceOps":u64::MAX.to_string(),"packOps":"0","usedOps":"0","reservedOps":"0",
+            "waived":false,"published":true}).to_string()),
+        (format!("POST /v1/orgs/{org}/simulation/leases"), json!({"leaseId":lease,"grantedOps":count(u64::MAX),
             "budgetOps":count(u64::MAX),"expiresAt":"2099-01-01T00:00:00Z","heartbeatSeconds":30,"waived":false}).to_string()),
-        (format!("/v1/simulation/leases/{lease}/usage"), json!({"grantedOps":count(u64::MAX),
+        (format!("POST /v1/simulation/leases/{lease}/usage"), json!({"grantedOps":count(u64::MAX),
             "budgetOps":count(u64::MAX),"totalOps":usage.total().unwrap(),"expiresAt":"2099-01-01T00:00:00Z"}).to_string()),
-        (format!("/v1/simulation/leases/{lease}/settle"), receipt.to_string()),
+        (format!("POST /v1/simulation/leases/{lease}/settle"), receipt.to_string()),
     ]).await;
     let client = SimulationLeaseClient::new(&endpoint, "test-key").unwrap();
+    let allowance = client.allowance(&org, "0.7.0").await.unwrap();
+    assert_eq!(allowance.spending_cap(None).unwrap(), request.budget_ops);
     let admitted = client.start(&org, &request).await.unwrap();
     assert_eq!(admitted.granted_ops, count(u64::MAX));
     assert_eq!(
@@ -163,10 +173,11 @@ async fn all_three_routes_keep_exact_usage_version_and_absolute_grants() {
         u128::from(usage.solve.operations())
     );
     let bodies = server.await.unwrap();
-    assert_eq!(bodies[0], serde_json::to_value(&request).unwrap());
-    assert_eq!(bodies[1], serde_json::to_value(&report).unwrap());
-    assert_eq!(bodies[2], serde_json::to_value(&settlement).unwrap());
-    assert!(bodies[1].get("cpuCoreMillis").is_none());
+    assert_eq!(bodies[0], Value::Null);
+    assert_eq!(bodies[1], serde_json::to_value(&request).unwrap());
+    assert_eq!(bodies[2], serde_json::to_value(&report).unwrap());
+    assert_eq!(bodies[3], serde_json::to_value(&settlement).unwrap());
+    assert!(bodies[2].get("cpuCoreMillis").is_none());
 }
 
 #[tokio::test]
@@ -178,7 +189,7 @@ async fn invalid_remote_grant_and_oversized_reply_are_refused() {
             "grantedOps":"2","budgetOps":"1","expiresAt":"2099-01-01T00:00:00Z","heartbeatSeconds":30,"waived":false}).to_string(),
         "x".repeat(64 * 1024 + 1),
     ] {
-        let (endpoint, server) = fixture(vec![(format!("/v1/orgs/{org}/simulation/leases"), response)]).await;
+        let (endpoint, server) = fixture(vec![(format!("POST /v1/orgs/{org}/simulation/leases"), response)]).await;
         let error = SimulationLeaseClient::new(&endpoint, "test-key").unwrap().start(&org, &request).await.unwrap_err();
         assert!(matches!(error, SimulationLeaseError::InvalidResponse(_) | SimulationLeaseError::Transport(crate::ServerLeaseTransportError::BodyTooLarge)));
         server.await.unwrap();

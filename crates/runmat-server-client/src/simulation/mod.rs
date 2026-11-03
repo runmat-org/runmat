@@ -4,6 +4,10 @@
 
 mod errors;
 mod types;
+mod allowance;
+pub use allowance::{
+    SimulationAllowance, SimulationBudgetError, SimulationPeriod, SimulationRenewal,
+};
 pub use errors::{SimulationErrorCode, SimulationErrorDetails, SimulationLeaseError};
 pub use types::*;
 
@@ -23,6 +27,25 @@ impl SimulationLeaseClient {
         Ok(Self {
             transport: LeaseHttp::new(server, token)?,
         })
+    }
+
+    pub async fn allowance(
+        &self,
+        org: &OrgId,
+        runmat_version: &str,
+    ) -> Result<SimulationAllowance, SimulationLeaseError> {
+        self.transport
+            .response(
+                self.transport
+                    .http
+                    .get(format!(
+                        "{}/v1/orgs/{org}/simulation/usage",
+                        self.transport.endpoint.as_str()
+                    ))
+                    .query(&[("runmatVersion", runmat_version)]),
+                errors::api_error,
+            )
+            .await
     }
 
     /// Resolve only an unambiguous membership when no organization is selected.
