@@ -96,7 +96,12 @@ fn standalone_derived_constructor_runs_retained_base_on_same_handle() {
             runmat_core::RunMatSession::with_options(false, false).expect("Core compiler");
         let unit = async_runtime
             .block_on(session.compile_executable_unit(
-                runmat_core::ExecutableSource::new("aot-super@1", "makeAotDerived.m", driver),
+                runmat_core::ExecutableSource::frozen(
+                    "aot-super@1",
+                    "makeAotDerived.m",
+                    directory.path().join("makeAotDerived.m").to_string_lossy(),
+                    driver,
+                ),
                 None,
             ))
             .expect("compile class product");

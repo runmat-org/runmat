@@ -90,10 +90,20 @@ fn forced_native_companion_uses_its_admitted_file_not_primary() {
         .expect("write companion source");
         let _cwd = super::push_cwd(directory.path());
         let mut session = RunMatSession::with_options(false, false).expect("session");
-        let unit = block_on(session.compile_executable_unit(
-            ExecutableSource::new("native-companion@1", "nativeFrameDriver.m", driver),
-            None,
-        ))
+        let unit = block_on(
+            session.compile_executable_unit(
+                ExecutableSource::frozen(
+                    "native-companion@1",
+                    "nativeFrameDriver.m",
+                    directory
+                        .path()
+                        .join("nativeFrameDriver.m")
+                        .to_string_lossy(),
+                    driver,
+                ),
+                None,
+            ),
+        )
         .expect("compile discovered companion");
         assert!(
             unit.source_map()

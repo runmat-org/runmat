@@ -16102,7 +16102,12 @@ fn overlapping_companion_fetch_next_compile_error_keeps_its_source() {
 
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let error = block_on(session.compile_executable_unit(
-        ExecutableSource::new("core-companion-compile@1", "entry_a.m", primary),
+        ExecutableSource::frozen(
+            "core-companion-compile@1",
+            "entry_a.m",
+            temp.path().join("entry_a.m").to_string_lossy(),
+            primary,
+        ),
         None,
     ))
     .expect_err("invalid companion fetchNext call must fail compilation");

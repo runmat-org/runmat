@@ -95,10 +95,20 @@ fn with_native_unit(
             .expect("write compiled function source");
         let _cwd = super::super::push_cwd(directory.path());
         let mut session = RunMatSession::with_options(false, false).expect("native session");
-        let unit = block_on(session.compile_executable_unit(
-            ExecutableSource::new("native-sequence-truth@1", "native_sequence_truth.m", SOURCE),
-            None,
-        ))
+        let unit = block_on(
+            session.compile_executable_unit(
+                ExecutableSource::frozen(
+                    "native-sequence-truth@1",
+                    "native_sequence_truth.m",
+                    directory
+                        .path()
+                        .join("native_sequence_truth.m")
+                        .to_string_lossy(),
+                    SOURCE,
+                ),
+                None,
+            ),
+        )
         .expect("compile generated native entry fixture");
         assert!(unit.bytecode().instructions.is_empty());
         for name in [

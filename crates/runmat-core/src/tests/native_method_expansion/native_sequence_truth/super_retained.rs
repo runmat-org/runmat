@@ -16,7 +16,12 @@ fn compiled_derived_constructor_keeps_base_body_for_interpreted_and_native_entri
         let _cwd = crate::tests::push_cwd(directory.path());
         let mut session = RunMatSession::with_options(false, false).expect("compiled session");
         let unit = block_on(session.compile_executable_unit(
-            ExecutableSource::new("compiled-super@1", "makeCompiled.m", driver),
+            ExecutableSource::frozen(
+                "compiled-super@1",
+                "makeCompiled.m",
+                directory.path().join("makeCompiled.m").to_string_lossy(),
+                driver,
+            ),
             None,
         ))
         .expect("compile derived product");

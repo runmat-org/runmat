@@ -72,10 +72,20 @@ fn with_operator(test: impl FnOnce(&mut RunMatSession, &crate::ExecutableUnit, A
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
         let _cwd = super::super::push_cwd(directory.path());
         let mut session = RunMatSession::with_options(false, false).expect("operator session");
-        let unit = block_on(session.compile_executable_unit(
-            ExecutableSource::new("pending-operator@1", "pending_operator_driver.m", SOURCE),
-            None,
-        ))
+        let unit = block_on(
+            session.compile_executable_unit(
+                ExecutableSource::frozen(
+                    "pending-operator@1",
+                    "pending_operator_driver.m",
+                    directory
+                        .path()
+                        .join("pending_operator_driver.m")
+                        .to_string_lossy(),
+                    SOURCE,
+                ),
+                None,
+            ),
+        )
         .expect("compile operator functions");
         assert!(
             unit.bytecode().instructions.is_empty(),

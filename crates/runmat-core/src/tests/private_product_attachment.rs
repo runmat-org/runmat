@@ -53,9 +53,15 @@ fn private_selected_product_publication_checks_complete_graph_and_is_failure_ato
         std::fs::write(tmp.path().join("main.m"), source).expect("main source");
         let _cwd = push_cwd(tmp.path());
         let mut session = RunMatSession::with_options(false, false).expect("session");
-        let unit = block_on(
-            session.compile_executable_unit(ExecutableSource::new("demo", "main.m", source), None),
-        )
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::frozen(
+                "demo",
+                "main.m",
+                tmp.path().join("main.m").to_string_lossy(),
+                source,
+            ),
+            None,
+        ))
         .expect("selected unit");
         let map = unit
             .source_map()
