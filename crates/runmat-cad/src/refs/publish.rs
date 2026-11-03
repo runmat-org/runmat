@@ -174,6 +174,93 @@ impl PublishedCatalog for MemoryCatalog {
     }
 }
 
+/// One cross-file read resolved by the shared rules ([`read_published`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct XrefRead {
+    pub target: ForeignTarget,
+    /// The file and name actually read (they differ from the written ones after a rename).
+    pub file: FilePath,
+    pub name: PublishName,
+    /// The written file or name reached its target through a lock alias.
+    pub renamed: bool,
+    /// A pinned read whose file has a newer release: that release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub newer_release: Option<RevisionId>,
+}
+
+/// Read `name` published by `file` from `consumer`, by the rules every cross-file reference
+/// (entity, datum or plain value) follows:
+/// - a renamed or moved file resolves through the lock's file alias;
+/// - a live read must stay within the consumer's partition (otherwise pin to a release);
+/// - a pinned read sees the pinned revision;
+/// - a renamed publish entry resolves through its alias (recorded under the old or the
+///   current file path);
+/// - a pin behind the latest release is reported, not failed.
+pub fn read_published(
+    catalog: &dyn PublishedCatalog,
+    lock: Option<&LockSection>,
+    consumer: &FilePath,
+    file: &FilePath,
+    name: &PublishName,
+    context: &XrefContext,
+) -> Result<XrefRead, XrefProblem> {
+    let mut target_file = file.clone();
+    if !catalog.knows(file) {
+        let moved = lock
+            .and_then(|l| l.lookup(&ItemPath::file(file)))
+            .filter(|l| l.via_alias && catalog.knows(&l.current.file));
+        match moved {
+            Some(l) => target_file = l.current.file,
+            None => return Err(XrefProblem::UnknownFile { file: file.clone() }),
+        }
+    }
+    let pinned = match context {
+        XrefContext::Live => {
+            if catalog.partition(consumer) != catalog.partition(&target_file) {
+                return Err(XrefProblem::LiveAcrossPartition {
+                    file: target_file.clone(),
+                    latest_release: catalog.latest_release(&target_file),
+                });
+            }
+            None
+        }
+        XrefContext::Pinned { revision } => Some(revision),
+    };
+    let mut target_name = name.clone();
+    let mut result = catalog.resolve_published(&target_file, name, pinned);
+    if let Err(XrefProblem::NotPublished { .. }) = &result {
+        for f in [file, &target_file] {
+            let alias = lock
+                .and_then(|l| l.lookup(&ItemPath::publish(f, name)))
+                .filter(|l| {
+                    l.via_alias && l.current.item.len() == 2 && l.current.item[0] == "publish"
+                });
+            if let Some(l) = alias {
+                let new = PublishName::new(l.current.item[1].clone());
+                let r = catalog.resolve_published(&target_file, &new, pinned);
+                if r.is_ok() {
+                    target_name = new;
+                    result = r;
+                    break;
+                }
+            }
+        }
+    }
+    let target = result?;
+    let newer_release = pinned.and_then(|p| {
+        catalog
+            .latest_release(&target_file)
+            .filter(|latest| latest != p)
+    });
+    Ok(XrefRead {
+        target,
+        renamed: &target_file != file || &target_name != name,
+        file: target_file,
+        name: target_name,
+        newer_release,
+    })
+}
+
 /// A pick made in another file: the canonical reference in that file's terms.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ForeignPick {

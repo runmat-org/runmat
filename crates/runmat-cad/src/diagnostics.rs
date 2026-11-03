@@ -66,6 +66,8 @@ pub enum DiagCode {
     XrefPinBehind,
     #[serde(rename = "cad.xref.via_alias")]
     XrefViaAlias,
+    #[serde(rename = "cad.xref.not_a_value")]
+    XrefNotAValue,
     #[serde(rename = "cad.merge.redirected")]
     MergeRedirected,
     #[serde(rename = "cad.merge.broken")]
@@ -491,6 +493,20 @@ impl DiagnosticReport {
             span: None,
         });
         id
+    }
+
+    /// Append another report's diagnostics, renumbering their ids (and cascade roots) after
+    /// this report's.
+    pub fn append(&mut self, other: &DiagnosticReport) {
+        let base = self.diagnostics.len() as u32;
+        for d in &other.diagnostics {
+            let mut d = d.clone();
+            d.id += base;
+            if let Cause::Cascade { root } = &mut d.cause {
+                *root += base;
+            }
+            self.diagnostics.push(d);
+        }
     }
 
     pub fn roots(&self) -> impl Iterator<Item = &Diagnostic> {

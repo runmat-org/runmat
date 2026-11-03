@@ -10,8 +10,10 @@ use crate::diagnostics::{
     Subject,
 };
 use crate::ids::{ConfigurationName, FeatureId, PartName, RegionName};
+use crate::metering::{FeatureWork, NoUsageMeter, SolveOutcome, Stopwatch, UsageEvent, UsageMeter};
 use crate::model::datum::{add, cross, dot, normalize, scale, sub};
 use crate::model::*;
+use crate::pmi::{resolve_pmi_with, ResolvedPmi};
 use crate::refs::history::{OperandEntity, SurfaceKind, Topology};
 use crate::refs::lock::{ItemPath, LockSection};
 use crate::refs::naming::{
@@ -24,6 +26,9 @@ use crate::refs::resolve::{
     BodyView, EntityHandle, FeatureEntry, FeatureTable, MakerStatus, RefProblem, Resolution,
     ResolutionPolicy, ResolutionStats, ResolveNote, ResolveOutcome, Resolved, Resolver, WaitCause,
     WaitReason,
+};
+use crate::refs::values::{
+    published_sites, value_error_diagnostic, value_read_diagnostics, PublishedValues,
 };
 use crate::refs::{EntityName, InstanceKey, Reference, TopoKind};
 use crate::regen::deps::DependencyGraph;
@@ -174,6 +179,9 @@ pub struct RegenResult {
     pub materials: Vec<ItemOutcome>,
     /// The resolved publish table, for the project catalog.
     pub publishes: PublishTable,
+    /// The part's PMI resolved against this state (empty when the part declares none). Its
+    /// diagnostics are also in [`RegenResult::diagnostics`].
+    pub pmi: ResolvedPmi,
     pub diagnostics: DiagnosticReport,
     pub stats: ResolutionStats,
     pub final_key: CacheKey,
@@ -220,6 +228,7 @@ struct Run<'a, 'b> {
     failure_diag: BTreeMap<String, u32>,
     records: Vec<ReferenceRecord>,
     ref_ids: Vec<(String, Vec<Vec<EntityName>>)>,
+    meter: &'a dyn UsageMeter,
 }
 
 pub fn regenerate(
@@ -228,9 +237,24 @@ pub fn regenerate(
     req: &RegenRequest,
     cache: &mut RegenCache,
 ) -> RegenResult {
+    regenerate_metered(doc, ctx, req, cache, &NoUsageMeter)
+}
+
+/// [`regenerate`], reporting sketch solves, feature regenerations and the part regeneration
+/// to `meter`.
+pub fn regenerate_metered(
+    doc: &PartDocument,
+    ctx: &RegenContext<'_>,
+    req: &RegenRequest,
+    cache: &mut RegenCache,
+    meter: &dyn UsageMeter,
+) -> RegenResult {
+    let whole = Stopwatch::start(meter);
+    // Published values from other files are read through the catalog, memoised per read.
+    let published = PublishedValues::new(ctx.dynamic, ctx.catalog, ctx.lock, &doc.path);
     let ev = Evaluator {
         units: ctx.units,
-        dynamic: ctx.dynamic,
+        dynamic: &published,
     };
     let mut diags = DiagnosticReport::default();
     let config = match &req.configuration {
@@ -260,17 +284,12 @@ pub fn regenerate(
     let values = ev.evaluate_env(&doc.inputs, &doc.lets, &overrides);
     let mut failure_diag = BTreeMap::new();
     for (name, err) in &values.failed {
-        let id = diags.push(
-            DiagCode::ValueFailed,
-            Severity::Error,
-            Site {
-                subject: Subject::Value { name: name.clone() },
-                param: None,
-            },
-            err.to_string(),
-            Cause::Root,
-            Vec::new(),
-        );
+        let site = Site {
+            subject: Subject::Value { name: name.clone() },
+            param: None,
+        };
+        let (code, message, repairs) = value_error_diagnostic(&site, err);
+        let id = diags.push(code, Severity::Error, site, message, Cause::Root, repairs);
         failure_diag.insert(name.clone(), id);
     }
     let deps = DependencyGraph::analyse(doc);
@@ -289,7 +308,7 @@ pub fn regenerate(
         ctx,
         ev: Evaluator {
             units: ctx.units,
-            dynamic: ctx.dynamic,
+            dynamic: &published,
         },
         values: &values,
         st,
@@ -298,6 +317,7 @@ pub fn regenerate(
         failure_diag,
         records: Vec::new(),
         ref_ids: Vec::new(),
+        meter,
     };
     let rollback = doc
         .rollback_after
@@ -315,6 +335,7 @@ pub fn regenerate(
     for (i, f) in doc.features.iter().enumerate() {
         run.records.clear();
         run.ref_ids.clear();
+        let watch = Stopwatch::start(meter);
         let pre = if rollback.map(|r| i > r).unwrap_or(false) {
             Some((FeatureStatus::RolledBack, MakerStatus::RolledBack))
         } else if f.suppressed {
@@ -371,6 +392,13 @@ pub fn regenerate(
                 }
             }
         };
+        meter.record(&UsageEvent::FeatureRegeneration {
+            file: doc.path.clone(),
+            feature: f.id.clone(),
+            kind: f.kind.name().to_owned(),
+            work: feature_work(&status),
+            duration_nanos: watch.elapsed(meter),
+        });
         outcomes.push(FeatureOutcome {
             id: f.id.clone(),
             kind: f.kind.name().to_owned(),
@@ -381,7 +409,23 @@ pub fn regenerate(
     }
 
     let (parts, regions, materials, publishes) = run.items();
-    RegenResult {
+    value_read_diagnostics(&published_sites(doc), &published, &mut run.diags);
+    let count = |w: FeatureWork| {
+        outcomes
+            .iter()
+            .filter(|o| feature_work(&o.status) == w)
+            .count() as u32
+    };
+    meter.record(&UsageEvent::PartRegeneration {
+        file: doc.path.clone(),
+        configuration: req.configuration.as_ref().map(|c| c.0.clone()),
+        features: outcomes.len() as u32,
+        computed: count(FeatureWork::Computed),
+        cache_hits: count(FeatureWork::CacheHit),
+        failed: count(FeatureWork::Failed),
+        duration_nanos: whole.elapsed(meter),
+    });
+    let mut result = RegenResult {
         configuration: req.configuration.clone(),
         values: values.clone(),
         deps,
@@ -391,9 +435,38 @@ pub fn regenerate(
         regions,
         materials,
         publishes,
+        pmi: ResolvedPmi::default(),
         diagnostics: run.diags,
         stats: run.stats,
         final_key: prev,
+    };
+    if !doc.pmi.is_empty() {
+        let pmi = resolve_pmi_with(
+            doc,
+            &doc.pmi,
+            &result,
+            ctx.units,
+            &published,
+            ctx.lock,
+            ctx.catalog,
+            ctx.policy,
+        );
+        result.diagnostics.append(&pmi.diagnostics);
+        result.pmi = pmi;
+    }
+    result
+}
+
+fn feature_work(s: &FeatureStatus) -> FeatureWork {
+    match s {
+        FeatureStatus::Regenerated => FeatureWork::Computed,
+        FeatureStatus::CacheHit => FeatureWork::CacheHit,
+        FeatureStatus::Frozen => FeatureWork::Frozen,
+        FeatureStatus::Failed { .. } | FeatureStatus::Blocked { .. } => FeatureWork::Failed,
+        FeatureStatus::Suppressed
+        | FeatureStatus::SuppressedInConfiguration
+        | FeatureStatus::RolledBack
+        | FeatureStatus::Waiting { .. } => FeatureWork::Skipped,
     }
 }
 
@@ -843,13 +916,9 @@ impl<'a, 'b> Run<'a, 'b> {
             return Err(Halt::Block(f.clone(), d));
         }
         self.ev.eval_as(v, self.values, dim).map_err(|e| {
-            self.error(
-                f,
-                Some(param),
-                DiagCode::ValueFailed,
-                e.to_string(),
-                Vec::new(),
-            )
+            let (code, message, repairs) =
+                value_error_diagnostic(&Site::feature(f, Some(param)), &e);
+            self.error(f, Some(param), code, message, repairs)
         })
     }
 
@@ -1194,7 +1263,26 @@ impl<'a, 'b> Run<'a, 'b> {
         match &f.kind {
             FeatureKind::Sketch(s) => {
                 let frame = self.plane(i, id, "on", &s.plane)?;
-                match self.ctx.solver.solve(s, &self.ev, self.values) {
+                let watch = Stopwatch::start(self.meter);
+                let solved = self.ctx.solver.solve(s, &self.ev, self.values);
+                self.meter.record(&UsageEvent::SketchSolve {
+                    file: self.doc.path.clone(),
+                    feature: id.clone(),
+                    entities: s.entities.len() as u32,
+                    constraints: s.constraints.len() as u32,
+                    dof: solved.as_ref().ok().and_then(|x| x.dof),
+                    outcome: match &solved {
+                        Err(_) => SolveOutcome::Failed,
+                        Ok(x) => match x.status {
+                            SketchSolveStatus::WellDefined => SolveOutcome::WellDefined,
+                            SketchSolveStatus::UnderDefined => SolveOutcome::UnderDefined,
+                            SketchSolveStatus::OverDefined => SolveOutcome::OverDefined,
+                            SketchSolveStatus::Explicit => SolveOutcome::Explicit,
+                        },
+                    },
+                    duration_nanos: watch.elapsed(self.meter),
+                });
+                match solved {
                     Ok(solved) => {
                         if !solved.redundant.is_empty() {
                             self.diags.push(
@@ -2230,6 +2318,13 @@ impl<'a, 'b> Run<'a, 'b> {
                     _ => Err(()),
                 },
                 PublishTarget::Value { input } => match self.values.inputs.get(input) {
+                    Some(q) => Ok(ForeignTarget {
+                        value: Some(*q),
+                        ..target
+                    }),
+                    None => Err(()),
+                },
+                PublishTarget::Let { name } => match self.values.lets.get(name) {
                     Some(q) => Ok(ForeignTarget {
                         value: Some(*q),
                         ..target

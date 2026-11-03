@@ -1,8 +1,8 @@
 //! Regions, publish entries, properties, materials, links and configurations.
 
 use crate::ids::{
-    ConfigurationName, FeatureId, InputName, MaterialRef, PartName, PropertyName, PublishName,
-    RegionName,
+    ConfigurationName, FeatureId, InputName, LetName, MaterialRef, PartName, PropertyName,
+    PublishName, RegionName,
 };
 use crate::model::datum::DatumRef;
 use crate::refs::{Reference, TopoKind};
@@ -46,8 +46,13 @@ pub enum PublishTarget {
     Part {
         part: PartName,
     },
+    /// A plain value: an input (a parameter, with its unit).
     Value {
         input: InputName,
+    },
+    /// A plain value derived by a `let`.
+    Let {
+        name: LetName,
     },
 }
 

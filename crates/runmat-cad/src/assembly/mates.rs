@@ -16,6 +16,7 @@ use crate::assembly::resolve::{
     InstancePlan, MateOutcome, MateStatus, NodeId, NodeOrigin, PoseStatus, Resolver,
 };
 use crate::diagnostics::{DiagCode, Repair, Severity, Site, Subject};
+use crate::metering::{Stopwatch, UsageEvent};
 use crate::regen::kernel::Transform;
 use crate::value::ValueEnv;
 use runmat_constraint as rc;
@@ -335,7 +336,25 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }
             }
         }
+        let watch = Stopwatch::start(self.meter);
         let report = rc::solve(&sys, &self.req.solve_options);
+        self.meter.record(&UsageEvent::MateSolve {
+            assembly: self
+                .asm
+                .get(&root)
+                .map(|i| i.doc.path.clone())
+                .unwrap_or_else(|| self.nodes[root as usize].definition.file.clone()),
+            scope: self.display_path(root),
+            pass: if hold.is_empty() { 1 } else { 2 },
+            bodies: members.len() as u32,
+            grounded: grounded.len() as u32,
+            mates: mates.len() as u32,
+            variables: report.values.len() as u32,
+            iterations: report.iterations as u32,
+            converged: report.converged,
+            dof: report.dof as u32,
+            duration_nanos: watch.elapsed(self.meter),
+        });
 
         // Write poses back, parents first (members are top-down).
         let mut new_pose: BTreeMap<NodeId, Transform> = BTreeMap::new();

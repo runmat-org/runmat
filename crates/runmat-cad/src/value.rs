@@ -9,7 +9,9 @@
 //! [`VALUE_CHOICES`], so a different answer is a one-line change that every consumer
 //! (evaluator, scope resolver, syntax layer) reads from one place.
 
-use crate::ids::{InputName, LetName};
+use crate::ids::{FilePath, InputName, LetName, PublishName};
+use crate::refs::publish::XrefProblem;
+use crate::refs::reference::XrefContext;
 use crate::units::{Dimension, QuantityKindId, UnitAuthority};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -94,11 +96,31 @@ pub enum ValueExpr {
         unit: String,
     },
     /// A kind-qualified reference to another declaration's value (`part.bracket.mass`,
-    /// `material.al_7075.density`, `part.skeleton.publish.station_pitch`), resolved by the
-    /// scope ([`DynamicValueEvaluator::reference`]). Derived values are read-only.
+    /// `material.al_7075.density`), resolved by the scope ([`DynamicValueEvaluator::reference`]).
+    /// Derived values are read-only.
     Reference {
         path: Vec<String>,
     },
+    /// A plain value another file publishes (`part.skeleton.publish.station_pitch`, after the
+    /// scope has bound `part.skeleton` to its file and `use … @ "R3"` to a pin). Read through
+    /// the project catalog by the same rules as entity cross-file references: live within a
+    /// partition, pinned to a released revision across partitions, renames through the lock
+    /// ([`DynamicValueEvaluator::published`], [`crate::refs::values::PublishedValues`]).
+    Published(Box<ValueXref>),
+}
+
+/// The target of a [`ValueExpr::Published`] read: a publish name in another file, live or
+/// pinned.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ValueXref {
+    pub file: FilePath,
+    pub name: PublishName,
+    #[serde(default = "live_context")]
+    pub context: XrefContext,
+}
+
+fn live_context() -> XrefContext {
+    XrefContext::Live
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,7 +205,47 @@ impl ValueExpr {
                 }
             }
             ValueExpr::Coerce { expr, .. } => expr.collect_names(inputs, lets),
-            ValueExpr::Reference { .. } => {}
+            ValueExpr::Reference { .. } | ValueExpr::Published(_) => {}
+        }
+    }
+
+    pub fn published(file: &str, name: &str, context: XrefContext) -> Self {
+        ValueExpr::Published(Box::new(ValueXref {
+            file: FilePath::new(file),
+            name: PublishName::new(name),
+            context,
+        }))
+    }
+
+    /// Every published value this expression reads, in order.
+    pub fn collect_published<'a>(&'a self, out: &mut Vec<&'a ValueXref>) {
+        match self {
+            ValueExpr::Published(x) => out.push(x),
+            ValueExpr::Quantity { .. }
+            | ValueExpr::Number { .. }
+            | ValueExpr::Input { .. }
+            | ValueExpr::Let { .. }
+            | ValueExpr::Reference { .. } => {}
+            ValueExpr::Neg { operand } => operand.collect_published(out),
+            ValueExpr::Binary { lhs, rhs, .. } => {
+                lhs.collect_published(out);
+                rhs.collect_published(out);
+            }
+            ValueExpr::Toleranced {
+                nominal,
+                minus,
+                plus,
+            } => {
+                nominal.collect_published(out);
+                minus.collect_published(out);
+                plus.collect_published(out);
+            }
+            ValueExpr::Dynamic { call } => {
+                for (_, a) in &call.arguments {
+                    a.collect_published(out);
+                }
+            }
+            ValueExpr::Coerce { expr, .. } => expr.collect_published(out),
         }
     }
 
@@ -278,6 +340,19 @@ pub enum ValueError {
     CoerceDimensioned { unit: String, found: String },
     #[error("unresolved reference `{path}`")]
     UnresolvedReference { path: String },
+    /// A published value could not be read across files.
+    #[error("`{}` from `{}`: {problem}", xref.name, xref.file)]
+    Xref {
+        xref: Box<ValueXref>,
+        problem: Box<XrefProblem>,
+    },
+    /// The published entry exists but is geometry or a datum, not a plain value.
+    #[error("`{file}` publishes `{name}` as {found}, not as a value")]
+    NotAValue {
+        file: FilePath,
+        name: PublishName,
+        found: String,
+    },
 }
 
 /// What a dynamic value function returned.
@@ -416,6 +491,12 @@ pub trait DynamicValueEvaluator {
 
     /// Resolve a kind-qualified reference to another declaration's value.
     fn reference(&self, _path: &[String]) -> Option<Result<Quantity, String>> {
+        None
+    }
+
+    /// Read a plain value another file publishes. `None`: this evaluator has no project
+    /// catalog (the read fails with `cad.xref.no_catalog`).
+    fn published(&self, _xref: &ValueXref) -> Option<Result<Quantity, ValueError>> {
         None
     }
 }
@@ -604,6 +685,13 @@ impl<'a> Evaluator<'a> {
                     })
                 }
             }
+            ValueExpr::Published(x) => match self.dynamic.published(x) {
+                Some(r) => r,
+                None => Err(ValueError::Xref {
+                    xref: x.clone(),
+                    problem: Box::new(XrefProblem::NoCatalog),
+                }),
+            },
             ValueExpr::Reference { path } => match self.dynamic.reference(path) {
                 Some(Ok(q)) => Ok(q),
                 Some(Err(message)) => Err(ValueError::DynamicFailed {

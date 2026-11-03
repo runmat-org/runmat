@@ -14,8 +14,8 @@ pub mod kernel;
 
 pub use deps::{Affected, DependencyGraph};
 pub use engine::{
-    regenerate, FeatureOutcome, FeatureStatus, ItemOutcome, LiveBody, PartState, ReferenceRecord,
-    RegenCache, RegenContext, RegenRequest, RegenResult,
+    regenerate, regenerate_metered, FeatureOutcome, FeatureStatus, ItemOutcome, LiveBody,
+    PartState, ReferenceRecord, RegenCache, RegenContext, RegenRequest, RegenResult,
 };
 pub use fake::{FakeImportBox, FakeKernel};
 pub use hash::CacheKey;

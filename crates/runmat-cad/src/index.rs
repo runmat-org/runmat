@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Bumped on any change to the projection's shape.
-pub const INDEX_FORMAT_VERSION: u32 = 1;
+pub const INDEX_FORMAT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PartIndex {
@@ -39,8 +39,25 @@ pub struct PartIndex {
     pub regions: Vec<RegionRow>,
     pub publishes: Vec<PublishRow>,
     pub links: Vec<Link>,
+    /// PMI items by name with their resolved entities (absent when the part has none).
+    #[serde(default, skip_serializing_if = "PmiIndex::is_empty")]
+    pub pmi: PmiIndex,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: ResolutionStats,
+}
+
+/// The resolved PMI of a part: datum labels, tolerance and size names → entity names.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PmiIndex {
+    pub datums: BTreeMap<String, Vec<Vec<EntityName>>>,
+    pub tolerances: BTreeMap<String, Vec<Vec<EntityName>>>,
+    pub sizes: BTreeMap<String, Vec<Vec<EntityName>>>,
+}
+
+impl PmiIndex {
+    pub fn is_empty(&self) -> bool {
+        self.datums.is_empty() && self.tolerances.is_empty() && self.sizes.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -276,6 +293,11 @@ pub fn build_index(
         regions,
         publishes,
         links: doc.links.clone(),
+        pmi: PmiIndex {
+            datums: result.pmi.datums.clone(),
+            tolerances: result.pmi.tolerances.clone(),
+            sizes: result.pmi.sizes.clone(),
+        },
         diagnostics: result.diagnostics.diagnostics.clone(),
         stats: result.stats.clone(),
     }

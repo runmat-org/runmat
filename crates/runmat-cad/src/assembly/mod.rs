@@ -33,7 +33,8 @@ pub use options::{
     AxisDecl, AxisDomain, AxisValue, CivilDate, Condition, OptionSpace, OptionsBlock,
 };
 pub use resolve::{
-    resolve, NodeId, OccNode, ResolveContext, ResolveRequest, ResolvedAssembly, VariantSelection,
+    resolve, resolve_metered, NodeId, OccNode, ResolveContext, ResolveRequest, ResolvedAssembly,
+    VariantSelection,
 };
 pub use source::{
     Aabb, ConfigKey, ConfiguredSummary, DefinitionSummary, DesignSource, MemorySource,

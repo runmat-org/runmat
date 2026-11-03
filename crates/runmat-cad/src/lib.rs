@@ -17,6 +17,7 @@
 //! - [`index`]: the deterministic JSON projection.
 //! - [`units`], [`value`], [`sketch_solver`]: seams to the unit authority, the value phase and
 //!   the constraint solver.
+//! - [`metering`]: the usage-metering seam (sketch solves, mate solves, regenerations).
 
 pub mod assembly;
 pub mod config;
@@ -24,6 +25,7 @@ pub mod diagnostics;
 pub mod drawing;
 pub mod ids;
 pub mod index;
+pub mod metering;
 pub mod model;
 pub mod pmi;
 pub mod props;
