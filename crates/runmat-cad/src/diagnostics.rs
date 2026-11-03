@@ -70,6 +70,22 @@ pub enum DiagCode {
     MergeRedirected,
     #[serde(rename = "cad.merge.broken")]
     MergeBroken,
+    #[serde(rename = "cad.property.invalid")]
+    PropertyInvalid,
+    #[serde(rename = "cad.property.missing")]
+    PropertyMissing,
+    #[serde(rename = "cad.check.invalid")]
+    CheckInvalid,
+    #[serde(rename = "cad.pmi.reference")]
+    PmiReference,
+    #[serde(rename = "cad.pmi.invalid")]
+    PmiInvalid,
+    #[serde(rename = "cad.drawing.reference")]
+    DrawingReference,
+    #[serde(rename = "cad.drawing.invalid")]
+    DrawingInvalid,
+    #[serde(rename = "cad.drawing.view")]
+    DrawingView,
     #[serde(rename = "cad.value.failed")]
     ValueFailed,
     #[serde(rename = "cad.sketch.solve_failed")]

@@ -19,3 +19,5 @@ hex = { workspace = true }
 thiserror = { workspace = true }
 # A1's solver (itself dependency-free). Used only behind the `SketchSolver` seam.
 runmat-constraint = { path = "../runmat-constraint" }
+# Selector, precedence and explain engine for `check` packs (dependency-free).
+runmat-rules = { path = "../runmat-rules" }

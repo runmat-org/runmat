@@ -69,7 +69,7 @@ pub enum PropertyValue {
 }
 
 /// The scope a property schema field applies at.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PropertyScope {
     #[default]
