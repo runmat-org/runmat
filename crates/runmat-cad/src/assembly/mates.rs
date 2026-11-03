@@ -2,7 +2,9 @@
 //!
 //! Bodies are the scope's member occurrences (rigid sub-assemblies are one body each). Fixed
 //! members of the scope root are ground; fixed members of a floating flexible sub-assembly are
-//! fastened to it. Connectors on occurrences deeper than a member body are carried to that body
+//! fastened to it (its anchor rides on its frame, and is not reported as a separate free body).
+//! A flexible sub-assembly with no fixed member keeps its frame at its placement and only its
+//! members solve. Connectors on occurrences deeper than a member body are carried to that body
 //! by the placement chain. Mates become `runmat-constraint` mates; joint limits become range
 //! targets, which the solver clamps when they bind.
 //!
@@ -16,6 +18,7 @@ use crate::assembly::resolve::{
     InstancePlan, MateOutcome, MateStatus, NodeId, NodeOrigin, PoseStatus, Resolver,
 };
 use crate::diagnostics::{DiagCode, Repair, Severity, Site, Subject};
+use crate::metering::{Stopwatch, UsageEvent};
 use crate::regen::kernel::Transform;
 use crate::value::ValueEnv;
 use runmat_constraint as rc;
@@ -239,6 +242,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
         let mut body: BTreeMap<NodeId, rc::EntityId> = BTreeMap::new();
         let mut scope_pose: BTreeMap<NodeId, Transform> = BTreeMap::new();
         let mut grounded: BTreeSet<NodeId> = BTreeSet::new();
+        // Anchorless flexible sub-assembly frames held at their placement.
+        let mut frames: BTreeSet<NodeId> = BTreeSet::new();
         let root_ground = sys.ground(rc::Frame::IDENTITY);
         let mut internal: BTreeSet<rc::ConstraintId> = BTreeSet::new();
         for &m in members {
@@ -247,7 +252,20 @@ impl<'a, 'b> Resolver<'a, 'b> {
             let n = &self.nodes[m as usize];
             let parent = n.parent.unwrap_or(root);
             let parent_ground = parent == root || grounded.contains(&parent);
-            let ground = hold.contains(&m) || (n.fixed && parent_ground);
+            // A flexible sub-assembly with no fixed member (no anchor) has nothing tying its
+            // own frame to its members: the frame keeps its placement relative to its parent
+            // (it is not a free body), and its floating members solve against the scope.
+            let frame_only = n.flexible
+                && n.expanded
+                && !n
+                    .children
+                    .iter()
+                    .any(|c| member_set.contains(c) && self.nodes[*c as usize].fixed);
+            let anchored = n.fixed || frame_only;
+            let ground = hold.contains(&m) || (anchored && parent_ground);
+            if frame_only && ground {
+                frames.insert(m);
+            }
             let e = if ground {
                 grounded.insert(m);
                 sys.ground(to_frame(&pose))
@@ -255,8 +273,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 sys.body(to_frame(&pose))
             };
             body.insert(m, e);
-            if n.fixed && !ground {
-                // Fixed in a floating flexible sub-assembly: fastened to it.
+            if anchored && !ground {
+                // Fixed in a floating flexible sub-assembly (or an anchorless sub-assembly's
+                // frame inside one): fastened to it.
                 if let Some(&pb) = body.get(&parent) {
                     let ca = sys
                         .connector(pb, to_frame(&n.local))
@@ -335,7 +354,25 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }
             }
         }
+        let watch = Stopwatch::start(self.meter);
         let report = rc::solve(&sys, &self.req.solve_options);
+        self.meter.record(&UsageEvent::MateSolve {
+            assembly: self
+                .asm
+                .get(&root)
+                .map(|i| i.doc.path.clone())
+                .unwrap_or_else(|| self.nodes[root as usize].definition.file.clone()),
+            scope: self.display_path(root),
+            pass: if hold.is_empty() { 1 } else { 2 },
+            bodies: members.len() as u32,
+            grounded: grounded.len() as u32,
+            mates: mates.len() as u32,
+            variables: report.values.len() as u32,
+            iterations: report.iterations as u32,
+            converged: report.converged,
+            dof: report.dof as u32,
+            duration_nanos: watch.elapsed(self.meter),
+        });
 
         // Write poses back, parents first (members are top-down).
         let mut new_pose: BTreeMap<NodeId, Transform> = BTreeMap::new();
@@ -375,6 +412,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 NodeOrigin::Pattern { .. } | NodeOrigin::Mirror { .. }
             ) {
                 n.dof = Some(0);
+                if frames.contains(&m) {
+                    n.pose = PoseStatus::Placed;
+                }
             }
         }
 
@@ -493,9 +533,18 @@ impl<'a, 'b> Resolver<'a, 'b> {
             }
             self.mates[m.outcome].status = st;
         }
+        // A fixed member of a floating flexible sub-assembly rides on it (it is fastened to the
+        // sub-assembly's frame), so only the sub-assembly is named.
+        let rides = |r: &Self, m: NodeId| {
+            let n = &r.nodes[m as usize];
+            n.fixed
+                && n.parent
+                    .map(|p| p != root && member_set.contains(&p))
+                    .unwrap_or(false)
+        };
         let floating: Vec<String> = members
             .iter()
-            .filter(|m| self.nodes[**m as usize].pose == PoseStatus::Floating)
+            .filter(|m| self.nodes[**m as usize].pose == PoseStatus::Floating && !rides(self, **m))
             .map(|m| {
                 format!(
                     "{} ({} DOF)",

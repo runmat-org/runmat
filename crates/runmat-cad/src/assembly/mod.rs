@@ -10,11 +10,13 @@
 //! - [`fasteners`]: fastener rules, columnar instance tables, the catalog and gauge seams.
 //! - [`representation`]: representations, load levels R0–R3 and working sets.
 //! - [`bom`]: configuration-aware BOM and where-used.
+//! - [`explode`]: named exploded states (ordered and radial steps, explode lines with jogs).
 //! - [`interference`]: interference and clearance requests through the kernel seam.
 //! - [`index`]: the assembly JSON index and summary cards.
 //! - [`synth`]: synthetic aircraft-scale fixtures for the scale gate.
 
 pub mod bom;
+pub mod explode;
 pub mod fasteners;
 pub mod index;
 pub mod interference;
@@ -33,7 +35,8 @@ pub use options::{
     AxisDecl, AxisDomain, AxisValue, CivilDate, Condition, OptionSpace, OptionsBlock,
 };
 pub use resolve::{
-    resolve, NodeId, OccNode, ResolveContext, ResolveRequest, ResolvedAssembly, VariantSelection,
+    resolve, resolve_metered, NodeId, OccNode, ResolveContext, ResolveRequest, ResolvedAssembly,
+    VariantSelection,
 };
 pub use source::{
     Aabb, ConfigKey, ConfiguredSummary, DefinitionSummary, DesignSource, MemorySource,

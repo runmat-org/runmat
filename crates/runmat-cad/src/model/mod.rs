@@ -2,7 +2,7 @@
 //!
 //! A [`PartDocument`] is one `.part` file: inputs and lets, one feature history (sketches,
 //! datums and features in order), any number of part outputs, regions, publish entries,
-//! materials, links and configurations. The syntax layer (M1) builds it from the lossless tree;
+//! materials, links, configurations and semantic PMI. The syntax layer (M1) builds it from the lossless tree;
 //! nothing here parses text.
 
 pub mod datum;
@@ -11,6 +11,7 @@ pub mod items;
 pub mod sketch;
 
 use crate::ids::{ConfigurationName, FeatureId, FilePath, PublishName};
+use crate::pmi::PmiSet;
 use crate::value::{InputDecl, LetDecl};
 use serde::{Deserialize, Serialize};
 
@@ -64,6 +65,9 @@ pub struct PartDocument {
     pub configurations: Vec<Configuration>,
     #[serde(default)]
     pub configuration_tables: Vec<ConfigurationTable>,
+    /// Semantic PMI (datums, GD&T, sizes, finishes), resolved by regeneration.
+    #[serde(default, skip_serializing_if = "PmiSet::is_empty")]
+    pub pmi: PmiSet,
     /// The owner marked the file closed: auto-publish is refused.
     #[serde(default)]
     pub closed: bool,
@@ -85,6 +89,7 @@ impl PartDocument {
             links: Vec::new(),
             configurations: Vec::new(),
             configuration_tables: Vec::new(),
+            pmi: PmiSet::default(),
             closed: false,
         }
     }

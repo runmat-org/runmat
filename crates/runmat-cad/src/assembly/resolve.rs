@@ -29,6 +29,7 @@ use crate::assembly::source::{
 };
 use crate::diagnostics::{Cause, DiagCode, DiagnosticReport, Repair, Severity, Site, Subject};
 use crate::ids::{ConfigurationName, FilePath, InputName, ItemUuid, MaterialRef, RevisionId};
+use crate::metering::{NoUsageMeter, UsageMeter};
 use crate::model::items::Property;
 use crate::refs::lock::{ItemPath, LockSection};
 use crate::refs::{InstanceKey, XrefContext};
@@ -379,6 +380,9 @@ pub fn lock_assembly(
     for c in &doc.connectors {
         names.insert(("connector", &c.name));
     }
+    for e in &doc.exploded {
+        names.insert(("exploded", &e.name));
+    }
     for (k, n) in names {
         lock.ensure(&item_path(&doc.path, k, n), minter);
     }
@@ -418,6 +422,7 @@ pub(super) type ConfiguredMemo = Result<Arc<ConfiguredSummary>, SourceError>;
 
 pub(super) struct Resolver<'a, 'b> {
     pub ctx: &'a ResolveContext<'b>,
+    pub meter: &'a dyn UsageMeter,
     pub req: &'a ResolveRequest,
     pub space: OptionSpace,
     pub point: Option<Point>,
@@ -445,8 +450,19 @@ pub(super) struct Resolver<'a, 'b> {
 }
 
 pub fn resolve(top: &FilePath, req: &ResolveRequest, ctx: &ResolveContext<'_>) -> ResolvedAssembly {
+    resolve_metered(top, req, ctx, &NoUsageMeter)
+}
+
+/// [`resolve`], reporting every mate-solve pass to `meter`.
+pub fn resolve_metered(
+    top: &FilePath,
+    req: &ResolveRequest,
+    ctx: &ResolveContext<'_>,
+    meter: &dyn UsageMeter,
+) -> ResolvedAssembly {
     let mut r = Resolver {
         ctx,
+        meter,
         req,
         space: OptionSpace::new(&OptionsBlock::default()),
         point: Some(Vec::new()),

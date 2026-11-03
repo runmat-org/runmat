@@ -8,12 +8,20 @@
 //! - [`ModelReferences`]: resolve a [`Reference`] against the model a view shows (a part's
 //!   regeneration, an occurrence's part inside a resolved assembly).
 //!
+//! - [`bom_table`]: BOM-table rendering data (columns, sort, groups, kept item numbers);
+//! - [`hole_table`]: hole-table rows through the [`hole_table::HoleGeometry`] seam;
+//! - [`merge`]: three-way drawing merges by stable id, with reference re-resolution.
+//!
 //! Annotations carry stable ids, so drawings merge like any other design file. A dimension
 //! names model entities (never projected 2D positions), so it follows the model; when its
 //! references break it is reported with the view and annotation, and kept (dangling) rather
 //! than dropped.
 
-use crate::assembly::bom::{Bom, BomItem};
+pub mod bom_table;
+pub mod hole_table;
+pub mod merge;
+
+use crate::assembly::bom::{Bom, BomItem, BomKind, IndentedRow};
 use crate::assembly::model::RelPath;
 use crate::assembly::options::AxisValue;
 use crate::diagnostics::{Cause, DiagCode, DiagnosticReport, Severity, Site, Subject};
@@ -23,6 +31,11 @@ use crate::refs::name::EntityName;
 use crate::refs::reference::Reference;
 use crate::regen::kernel::KernelError;
 use crate::value::ValueExpr;
+use bom_table::{
+    bom_item_key, render_bom_table, BomProperties, BomSource, BomStructure, BomTableData,
+    BomTableSpec,
+};
+use hole_table::{hole_table, HoleGeometry, HoleTableData, HoleTableSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -222,6 +235,10 @@ pub struct View {
     /// Occurrences left out (fasteners in an assembly view).
     #[serde(default)]
     pub exclude: Vec<RelPath>,
+    /// Show the assembly in this named exploded state (its occurrence transforms and explode
+    /// lines), for assembly instructions and service views.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exploded: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -331,10 +348,14 @@ pub enum TableKind {
         view: String,
         #[serde(default)]
         include_fasteners: bool,
+        #[serde(default)]
+        spec: BomTableSpec,
     },
     Hole {
         view: String,
         origin: Reference,
+        #[serde(default)]
+        spec: HoleTableSpec,
     },
     Revision,
     Bend {
@@ -411,11 +432,40 @@ pub trait ModelReferences {
     fn pmi(&self, model: &ModelRef) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
     /// The configuration-aware BOM of the model.
     fn bom(&self, model: &ModelRef) -> Option<Bom>;
+    /// The exploded views the model declares (an assembly's; a part has none).
+    fn exploded_views(&self, _model: &ModelRef) -> BTreeSet<String> {
+        BTreeSet::new()
+    }
+    /// The indented BOM of the model, for indented BOM tables.
+    fn indented_bom(&self, _model: &ModelRef) -> Option<Vec<IndentedRow>> {
+        None
+    }
+    /// A property of one BOM item's definition (description, finish, vendor …).
+    fn item_property(
+        &self,
+        _model: &ModelRef,
+        _item: &BomItem,
+        _name: &PropertyName,
+    ) -> Option<String> {
+        None
+    }
+}
+
+struct ItemProps<'a> {
+    model: &'a dyn ModelReferences,
+    at: &'a ModelRef,
+}
+
+impl BomProperties for ItemProps<'_> {
+    fn property(&self, item: &BomItem, name: &PropertyName) -> Option<String> {
+        self.model.item_property(self.at, item, name)
+    }
 }
 
 // ------------------------------------------------------------------------------ checking
 
-/// BOM item numbers: stable, by item order (so balloons and table rows agree everywhere).
+/// BOM item numbers by item order, for a table with no numbering of its own. Drawing tables
+/// number through [`bom_table::render_bom_table`], which balloons follow.
 pub fn item_numbers(bom: &Bom) -> BTreeMap<BomItem, u32> {
     bom.rows
         .iter()
@@ -431,8 +481,12 @@ pub struct DrawingReport {
     pub resolved: BTreeMap<String, Vec<Vec<EntityName>>>,
     /// Title-block text per sheet.
     pub title_blocks: BTreeMap<String, Vec<(String, String)>>,
-    /// Balloon id → item number.
-    pub balloons: BTreeMap<String, u32>,
+    /// Balloon id → item number as shown (`3`, or `2.1` from an indented table).
+    pub balloons: BTreeMap<String, String>,
+    /// Rendering data per BOM table.
+    pub bom_tables: BTreeMap<String, BomTableData>,
+    /// Rows per hole table (when hole geometry is available).
+    pub hole_tables: BTreeMap<String, HoleTableData>,
 }
 
 fn dsite(subject: &str, param: &str) -> Site {
@@ -445,6 +499,15 @@ fn dsite(subject: &str, param: &str) -> Site {
 }
 
 pub fn check_drawing(doc: &DrawingDocument, model: &dyn ModelReferences) -> DrawingReport {
+    check_drawing_with(doc, model, None)
+}
+
+/// [`check_drawing`], also generating hole-table rows through the geometry seam.
+pub fn check_drawing_with(
+    doc: &DrawingDocument,
+    model: &dyn ModelReferences,
+    holes: Option<&dyn HoleGeometry>,
+) -> DrawingReport {
     let mut rep = DrawingReport::default();
     let err = |rep: &mut DrawingReport, code: DiagCode, s: Site, m: String| {
         rep.diagnostics
@@ -530,6 +593,19 @@ pub fn check_drawing(doc: &DrawingDocument, model: &dyn ModelReferences) -> Draw
                 );
             }
         }
+        if let Some(e) = &v.exploded {
+            if !model.exploded_views(&v.model).contains(e) {
+                err(
+                    &mut rep,
+                    DiagCode::DrawingReference,
+                    s("exploded"),
+                    format!(
+                        "view `{}` shows exploded view `{}`, which `{}` does not declare",
+                        v.name, e, v.model.file
+                    ),
+                );
+            }
+        }
         for x in &v.exclude {
             if !model.occurrence(&v.model, x) {
                 rep.diagnostics.push(
@@ -547,7 +623,7 @@ pub fn check_drawing(doc: &DrawingDocument, model: &dyn ModelReferences) -> Draw
         }
     }
     // Tables.
-    let mut boms: BTreeMap<&str, BTreeMap<BomItem, u32>> = BTreeMap::new();
+    let mut boms: BTreeMap<&str, BTreeMap<String, String>> = BTreeMap::new();
     for t in &doc.tables {
         let s = |p: &str| dsite(&format!("table.{}", t.name), p);
         if !sheets.contains(t.sheet.as_str()) {
@@ -577,18 +653,52 @@ pub fn check_drawing(doc: &DrawingDocument, model: &dyn ModelReferences) -> Draw
             continue;
         };
         match &t.kind {
-            TableKind::Bom { .. } => match model.bom(&v.model) {
-                Some(b) => {
-                    boms.insert(t.name.as_str(), item_numbers(&b));
+            TableKind::Bom {
+                include_fasteners,
+                spec,
+                ..
+            } => {
+                let mut spec = spec.clone();
+                if !include_fasteners && !spec.exclude_kinds.contains(&BomKind::Fastener) {
+                    spec.exclude_kinds.push(BomKind::Fastener);
                 }
-                None => err(
-                    &mut rep,
-                    DiagCode::DrawingReference,
-                    s("view"),
-                    format!("table `{}`: `{}` has no BOM", t.name, v.model.file),
-                ),
-            },
-            TableKind::Hole { origin, .. } => {
+                let props = ItemProps {
+                    model,
+                    at: &v.model,
+                };
+                let data = if spec.structure == BomStructure::PartsOnly {
+                    model
+                        .bom(&v.model)
+                        .map(|b| render_bom_table(&t.name, &spec, BomSource::Flat(&b), &props))
+                } else {
+                    model.indented_bom(&v.model).map(|rows| {
+                        render_bom_table(&t.name, &spec, BomSource::Indented(&rows), &props)
+                    })
+                };
+                match data {
+                    Some(d) => {
+                        rep.diagnostics.append(&d.diagnostics);
+                        boms.insert(t.name.as_str(), d.numbers.clone());
+                        rep.bom_tables.insert(t.name.clone(), d);
+                    }
+                    None => err(
+                        &mut rep,
+                        DiagCode::DrawingReference,
+                        s("view"),
+                        format!(
+                            "table `{}`: `{}` has no {}BOM",
+                            t.name,
+                            v.model.file,
+                            if spec.structure == BomStructure::PartsOnly {
+                                ""
+                            } else {
+                                "indented "
+                            }
+                        ),
+                    ),
+                }
+            }
+            TableKind::Hole { origin, spec, .. } => {
                 if let Err(m) = model.resolve(&v.model, origin) {
                     err(
                         &mut rep,
@@ -596,6 +706,10 @@ pub fn check_drawing(doc: &DrawingDocument, model: &dyn ModelReferences) -> Draw
                         s("origin"),
                         format!("hole table `{}` origin `{}` {}", t.name, origin, m),
                     );
+                } else if let Some(g) = holes {
+                    let data = hole_table(&t.name, spec, v, origin, g);
+                    rep.diagnostics.append(&data.diagnostics);
+                    rep.hole_tables.insert(t.name.clone(), data);
                 }
             }
             _ => {}
@@ -726,9 +840,14 @@ pub fn check_drawing(doc: &DrawingDocument, model: &dyn ModelReferences) -> Draw
                 } else if let Some(numbers) = boms.get(table.as_str()) {
                     let bom = model.bom(&v.model).unwrap_or_default();
                     let wanted = occurrence.to_string();
-                    match bom.rows.iter().find(|r| r.paths.contains(&wanted)) {
-                        Some(r) => {
-                            rep.balloons.insert(a.id.clone(), numbers[&r.item]);
+                    match bom
+                        .rows
+                        .iter()
+                        .find(|r| r.paths.contains(&wanted))
+                        .and_then(|r| numbers.get(&bom_item_key(&r.item)))
+                    {
+                        Some(n) => {
+                            rep.balloons.insert(a.id.clone(), n.clone());
                         }
                         None => err(
                             &mut rep,

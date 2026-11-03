@@ -13,7 +13,9 @@ use crate::diagnostics::{
 };
 use crate::model::items::Cardinality;
 use crate::model::PartDocument;
+use crate::refs::lock::LockSection;
 use crate::refs::name::{EntityName, TopoKind};
+use crate::refs::publish::PublishedCatalog;
 use crate::refs::reference::Reference;
 use crate::refs::resolve::{ResolutionPolicy, ResolveOutcome, Resolver};
 use crate::regen::engine::RegenResult;
@@ -198,13 +200,51 @@ fn site(item: &str, param: &str) -> Site {
     )
 }
 
-/// Resolve and check a part's PMI against its regeneration.
+impl PmiSet {
+    pub fn is_empty(&self) -> bool {
+        self.datums.is_empty()
+            && self.targets.is_empty()
+            && self.tolerances.is_empty()
+            && self.sizes.is_empty()
+            && self.finishes.is_empty()
+            && self.treatments.is_empty()
+    }
+}
+
+/// Resolve and check a part's PMI against its regeneration. Regeneration calls this for
+/// [`PartDocument::pmi`] itself ([`RegenResult::pmi`]); call it directly for a PMI set held
+/// elsewhere (an imported AP242 set before it is written into the part).
 pub fn resolve_pmi(
     doc: &PartDocument,
     pmi: &PmiSet,
     result: &RegenResult,
     units: &dyn UnitAuthority,
     dynamic: &dyn DynamicValueEvaluator,
+) -> ResolvedPmi {
+    resolve_pmi_with(
+        doc,
+        pmi,
+        result,
+        units,
+        dynamic,
+        None,
+        None,
+        ResolutionPolicy::default(),
+    )
+}
+
+/// [`resolve_pmi`] with the regeneration's lock, catalog and policy, so PMI on published or
+/// renamed entities resolves exactly as the part's own references do.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_pmi_with(
+    doc: &PartDocument,
+    pmi: &PmiSet,
+    result: &RegenResult,
+    units: &dyn UnitAuthority,
+    dynamic: &dyn DynamicValueEvaluator,
+    lock: Option<&LockSection>,
+    catalog: Option<&dyn PublishedCatalog>,
+    policy: ResolutionPolicy,
 ) -> ResolvedPmi {
     let st = &result.state;
     let resolver = Resolver {
@@ -214,9 +254,9 @@ pub fn resolve_pmi(
         consumer: None,
         burials: &st.burials,
         publishes: &doc.publishes,
-        lock: None,
-        catalog: None,
-        policy: ResolutionPolicy::default(),
+        lock,
+        catalog,
+        policy,
         names: Some(&st.names),
     };
     let ev = Evaluator { units, dynamic };

@@ -162,7 +162,7 @@ fn d03_index_shape_and_version() {
     // References carry a display form and the structured value.
     let round = idx.features.iter().find(|f| f.id.0 == "round").unwrap();
     assert!(round.references[0].display.contains("edges_between"));
-    assert!(json.contains("\"format_version\": 1"));
+    assert!(json.contains("\"format_version\": 2"));
 }
 
 #[test]
