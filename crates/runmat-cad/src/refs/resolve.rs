@@ -20,7 +20,7 @@ use crate::model::datum::{dot, sub};
 use crate::model::items::{Cardinality, PublishEntry, PublishTarget};
 use crate::refs::history::{EntityIndex, SurfaceKind, Topology};
 use crate::refs::lock::{ItemPath, LockSection};
-use crate::refs::name::{EntityName, InstanceKey, Role, SourceTag, TopoKind};
+use crate::refs::name::{EntityName, InstanceKey, NameTable, NameToken, Role, SourceTag, TopoKind};
 use crate::refs::naming::{edge_name, BodyNames};
 use crate::refs::publish::{ForeignTarget, PublishedCatalog, XrefProblem};
 use crate::refs::reference::{GeometricFallback, Reference, XrefContext};
@@ -313,6 +313,9 @@ pub struct Resolver<'a> {
     pub lock: Option<&'a LockSection>,
     pub catalog: Option<&'a dyn PublishedCatalog>,
     pub policy: ResolutionPolicy,
+    /// The regeneration's name table: expands nested names and rewrites tokens through rename
+    /// aliases. Without it, renames reach only the outermost record.
+    pub names: Option<&'a NameTable>,
 }
 
 enum Gate {
@@ -498,7 +501,7 @@ impl<'a> Resolver<'a> {
                     Gate::Wait(w) => return Err(Stop::Wait(w)),
                     Gate::Fail(p) => return Err(Stop::Fail(p)),
                     Gate::Alias { from, to } => {
-                        let rewritten = reference.renamed(&from, &to);
+                        let rewritten = self.alias_rewrite(reference, &from, &to);
                         let (s, _, mut notes) = self.set(&rewritten, depth + 1)?;
                         notes.insert(
                             0,
@@ -514,7 +517,17 @@ impl<'a> Resolver<'a> {
             }
         }
         match reference {
-            Reference::Name { kind, name } => self.by_name(*kind, name),
+            Reference::Name { kind, name } => match self.by_name(*kind, name) {
+                Err(Stop::Fail(p @ RefProblem::NotGenerated { .. })) => {
+                    // A name made from names of a renamed feature: the outer maker exists, but
+                    // tokens nested inside still say the old id.
+                    match self.inner_alias(reference, depth) {
+                        Some(found) => Ok(found),
+                        None => Err(Stop::Fail(p)),
+                    }
+                }
+                other => other,
+            },
             Reference::Piece {
                 base,
                 bounded_by,
@@ -840,7 +853,7 @@ impl<'a> Resolver<'a> {
         if out.len() > 1 {
             // Several entities carry a name with the same ordinal: pieces of a split. Distinct
             // ordinals of one ordinal-free query are the whole logical entity, which is exact.
-            let ordinals: BTreeSet<Option<u32>> = exact_names
+            let ordinals: BTreeSet<(Option<u32>, Option<NameToken>)> = exact_names
                 .values()
                 .flat_map(|ns| ns.iter().filter(|n| name.matches(n)).map(ordinal_of))
                 .collect();
@@ -937,6 +950,53 @@ impl<'a> Resolver<'a> {
             .collect()
     }
 
+    /// `reference` with feature `from` renamed to `to`, nested tokens included when the table
+    /// is present.
+    fn alias_rewrite(&self, reference: &Reference, from: &FeatureId, to: &FeatureId) -> Reference {
+        match self.names {
+            Some(table) => {
+                let map = table.alias_map(from, to);
+                reference.renamed_with(from, to, &|t| map.get(t).copied().unwrap_or(*t))
+            }
+            None => reference.renamed(from, to),
+        }
+    }
+
+    /// Try every feature rename recorded for this file on a name that did not resolve.
+    #[allow(clippy::result_large_err)]
+    fn inner_alias(
+        &self,
+        reference: &Reference,
+        depth: u32,
+    ) -> Option<(BTreeSet<EntityHandle>, ResolutionClass, Vec<ResolveNote>)> {
+        let lock = self.lock?;
+        self.names?;
+        for (from, to) in lock.feature_aliases(self.file) {
+            if !self.features.entries.contains_key(&to) {
+                continue;
+            }
+            let rewritten = self.alias_rewrite(reference, &from, &to);
+            if &rewritten == reference {
+                continue;
+            }
+            if let Reference::Name { kind, name } = &rewritten {
+                if let Ok((s, _, mut notes)) = self.by_name(*kind, name) {
+                    let _ = depth;
+                    notes.insert(
+                        0,
+                        ResolveNote::ViaAlias {
+                            from,
+                            to,
+                            rewritten,
+                        },
+                    );
+                    return Some((s, ResolutionClass::ViaAlias, notes));
+                }
+            }
+        }
+        None
+    }
+
     fn blend_replacing(
         &self,
         sa: &BTreeSet<EntityHandle>,
@@ -944,13 +1004,13 @@ impl<'a> Resolver<'a> {
     ) -> Option<(FeatureId, EntityName)> {
         // The blend's tag is the pair of primary names the edge had; match against every name
         // of the two face sets.
-        let names_of = |s: &BTreeSet<EntityHandle>| -> BTreeSet<EntityName> {
+        let names_of = |s: &BTreeSet<EntityHandle>| -> BTreeSet<NameToken> {
             s.iter()
                 .filter(|h| h.kind == TopoKind::Face)
                 .flat_map(|h| {
                     self.bodies[h.body as usize].names.faces[h.index as usize]
                         .iter()
-                        .cloned()
+                        .map(|n| n.token())
                 })
                 .collect()
         };
@@ -963,7 +1023,7 @@ impl<'a> Resolver<'a> {
                         if let (Role::Blend | Role::Chamfer, SourceTag::Edge { between }) =
                             (g.role, &g.tag)
                         {
-                            let [x, y] = &**between;
+                            let [x, y] = between;
                             if (na.contains(x) && nb.contains(y))
                                 || (na.contains(y) && nb.contains(x))
                             {
@@ -984,7 +1044,10 @@ impl<'a> Resolver<'a> {
         let faces = match h.kind {
             TopoKind::Face => topo.face_neighbours(h.index),
             TopoKind::Edge => topo.edge_neighbour_faces(h.index),
-            _ => Vec::new(),
+            // A body's "neighbours" are its own faces: `piece(body, bounded_by = face)` picks
+            // the piece of a split body that carries that face.
+            TopoKind::Body => (0..topo.faces.len() as EntityIndex).collect(),
+            TopoKind::Vertex => Vec::new(),
         };
         faces
             .into_iter()
@@ -1069,8 +1132,28 @@ impl<'a> Resolver<'a> {
     }
 
     /// The canonical reference to an entity in this state (for repairs and auto-publish).
+    ///
+    /// A piece of a split face is written with its stored [`PieceQualifier`]
+    /// (`piece(name, bounded_by = …)`), so the reference selects that piece alone.
+    ///
+    /// [`PieceQualifier`]: crate::refs::naming::PieceQualifier
     pub fn canonical_reference(&self, h: &EntityHandle) -> Option<Reference> {
-        self.primary_ref(h)
+        let base = self.primary_ref(h)?;
+        if h.kind == TopoKind::Face {
+            if let Some(q) = self.bodies[h.body as usize].names.qualifiers.get(&h.index) {
+                return Some(Reference::Piece {
+                    base: Box::new(base),
+                    bounded_by: q.bounded_by.iter().cloned().map(Reference::face).collect(),
+                    not_bounded_by: q
+                        .not_bounded_by
+                        .iter()
+                        .cloned()
+                        .map(Reference::face)
+                        .collect(),
+                });
+            }
+        }
+        Some(base)
     }
 
     fn geometric_matches(&self, fb: &GeometricFallback) -> BTreeSet<EntityHandle> {
@@ -1141,11 +1224,13 @@ impl<'a> Resolver<'a> {
     }
 }
 
-fn ordinal_of(n: &EntityName) -> Option<u32> {
+/// What tells apart the parts of one logical entity: the ordinal, or for a pattern image the
+/// exact base it copies.
+fn ordinal_of(n: &EntityName) -> (Option<u32>, Option<NameToken>) {
     match n {
-        EntityName::Generated(g) => g.ordinal,
-        EntityName::Copy { base, .. } => ordinal_of(base),
-        EntityName::CadFile { .. } => None,
+        EntityName::Generated(g) => (g.ordinal, None),
+        EntityName::Copy { base, .. } => (None, Some(*base)),
+        EntityName::CadFile { .. } => (None, None),
     }
 }
 

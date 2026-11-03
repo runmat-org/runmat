@@ -217,6 +217,7 @@ pub fn resolve_pmi(
         lock: None,
         catalog: None,
         policy: ResolutionPolicy::default(),
+        names: Some(&st.names),
     };
     let ev = Evaluator { units, dynamic };
     let mut out = ResolvedPmi::default();

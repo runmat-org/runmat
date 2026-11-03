@@ -365,7 +365,8 @@ fn suggested_name(r: &Reference) -> String {
                 base,
                 pattern,
                 instance,
-            } => format!("{}_{}_{}", pattern, instance, name_part(base)),
+                ..
+            } => format!("{}_{}_{}", pattern, instance, base.short()),
             EntityName::CadFile { name, .. } => name.clone(),
         }
     }

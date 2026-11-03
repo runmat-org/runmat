@@ -3,7 +3,9 @@
 
 use crate::ids::{FeatureId, FilePath, PartName, PublishName, RegionName, RevisionId};
 use crate::model::items::PublishEntry;
-use crate::refs::{EntityName, RefProblem, Reference, WaitCause, WaitReason, XrefProblem};
+use crate::refs::{
+    EntityName, NameTable, RefProblem, Reference, Shown, WaitCause, WaitReason, XrefProblem,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -34,6 +36,13 @@ pub enum DiagCode {
     RefKindMismatch,
     #[serde(rename = "cad.ref.ambiguous")]
     RefAmbiguous,
+    /// A body was split into pieces equally similar to it by lineage; each kept its names.
+    #[serde(rename = "cad.ref.body_slot_tie")]
+    RefBodySlotTie,
+    /// Two different one-level names produced the same token (never expected; reported, not
+    /// overwritten).
+    #[serde(rename = "cad.ref.token_collision")]
+    RefTokenCollision,
     #[serde(rename = "cad.ref.empty")]
     RefEmpty,
     #[serde(rename = "cad.ref.waiting")]
@@ -537,6 +546,18 @@ pub fn describe_ref_problem(
     reference: &Reference,
     problem: &RefProblem,
 ) -> (DiagCode, String, Vec<Repair>) {
+    describe_ref_problem_in(site, reference, problem, None)
+}
+
+/// [`describe_ref_problem`], with nested names expanded through `table` in the message.
+pub fn describe_ref_problem_in(
+    site: &Site,
+    reference: &Reference,
+    problem: &RefProblem,
+    table: Option<&NameTable>,
+) -> (DiagCode, String, Vec<Repair>) {
+    let raw_reference = reference;
+    let reference = &Shown(raw_reference, table);
     let consumer = match &site.subject {
         Subject::Feature { feature } => Some(feature.clone()),
         _ => None,
@@ -589,7 +610,11 @@ pub fn describe_ref_problem(
             candidates,
         } => (
             DiagCode::RefNotGenerated,
-            format!("`{}` ran but no longer makes `{}`", maker, name),
+            format!(
+                "`{}` ran but no longer makes `{}`",
+                maker,
+                Shown(name, table)
+            ),
             vec![Repair::RePick {
                 site: site.clone(),
                 candidates: candidates.clone(),
@@ -608,7 +633,7 @@ pub fn describe_ref_problem(
             }
             (
                 DiagCode::RefConsumed,
-                format!("`{}` was removed by `{}`", name, by),
+                format!("`{}` was removed by `{}`", Shown(name, table), by),
                 repairs,
             )
         }
@@ -638,7 +663,11 @@ pub fn describe_ref_problem(
         ),
         RefProblem::NotAdjacent { a, b } => (
             DiagCode::RefNotAdjacent,
-            format!("no edge runs between `{}` and `{}`", a, b),
+            format!(
+                "no edge runs between `{}` and `{}`",
+                Shown(a, table),
+                Shown(b, table)
+            ),
             vec![Repair::RePick {
                 site: site.clone(),
                 candidates: Vec::new(),
@@ -648,7 +677,9 @@ pub fn describe_ref_problem(
             DiagCode::RefEdgeReplaced,
             format!(
                 "the edge `{}` was replaced by `{}` from `{}`",
-                reference, blend, by
+                reference,
+                Shown(blend, table),
+                by
             ),
             vec![Repair::UseBlendFace {
                 site: site.clone(),
@@ -659,7 +690,8 @@ pub fn describe_ref_problem(
             DiagCode::RefNoPiece,
             format!(
                 "none of the {} pieces of `{}` matches the qualifier",
-                pieces, base
+                pieces,
+                Shown(base, table)
             ),
             vec![Repair::RePick {
                 site: site.clone(),
@@ -738,7 +770,7 @@ pub fn describe_ref_problem(
             vec![Repair::RemoveReference { site: site.clone() }],
         ),
         RefProblem::FallbackFailed { inner, matches } => {
-            let (_, msg, repairs) = describe_ref_problem(site, reference, inner);
+            let (_, msg, repairs) = describe_ref_problem_in(site, raw_reference, inner, table);
             (
                 DiagCode::RefFallbackFailed,
                 format!(
@@ -749,7 +781,7 @@ pub fn describe_ref_problem(
             )
         }
         RefProblem::FallbackDisabled { inner } => {
-            let (_, msg, repairs) = describe_ref_problem(site, reference, inner);
+            let (_, msg, repairs) = describe_ref_problem_in(site, raw_reference, inner, table);
             (
                 DiagCode::RefFallbackDisabled,
                 format!("{}; the geometric fallback is turned off", msg),
@@ -768,6 +800,16 @@ pub fn describe_ref_problem(
 }
 
 pub fn describe_wait(reference: &Reference, w: &WaitReason) -> (String, Vec<Repair>) {
+    describe_wait_in(reference, w, None)
+}
+
+/// [`describe_wait`], with nested names expanded through `table`.
+pub fn describe_wait_in(
+    reference: &Reference,
+    w: &WaitReason,
+    table: Option<&NameTable>,
+) -> (String, Vec<Repair>) {
+    let reference = &Shown(reference, table);
     let why = match &w.cause {
         WaitCause::Suppressed => format!("`{}` is suppressed", w.maker),
         WaitCause::SuppressedInConfiguration => {

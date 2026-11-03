@@ -308,9 +308,7 @@ fn c08_slot_inserted_after_fillet_splits_blend_into_pieces() {
     let blend = Reference::face(EntityName::Generated(GenerationName {
         feature: fid("round"),
         role: Role::Blend,
-        tag: SourceTag::Edge {
-            between: Box::new(sorted([name_of(&front()), name_of(&top())])),
-        },
+        tag: SourceTag::edge_between(&name_of(&front()), &name_of(&top())),
         ordinal: None,
     }));
     d.regions.push(region(
@@ -329,11 +327,6 @@ fn name_of(r: &Reference) -> EntityName {
         Reference::Name { name, .. } => name.clone(),
         _ => panic!("not a name"),
     }
-}
-
-fn sorted(mut v: [EntityName; 2]) -> [EntityName; 2] {
-    v.sort();
-    v
 }
 
 #[test]
@@ -1022,11 +1015,11 @@ fn wall(instance: u32, ordinal: Option<u32>) -> Reference {
         tag: SourceTag::Key { key: "a".into() },
         ordinal,
     });
-    Reference::face(EntityName::Copy {
-        base: Box::new(base),
-        pattern: fid("row"),
-        instance: InstanceKey::Linear { step: instance },
-    })
+    Reference::face(EntityName::copy(
+        &base,
+        &fid("row"),
+        InstanceKey::Linear { step: instance },
+    ))
 }
 
 #[test]
@@ -1159,11 +1152,11 @@ fn c31_mirror_image_named_by_instance() {
         tag: SourceTag::Key { key: "a".into() },
         ordinal: Some(0),
     });
-    let img = Reference::face(EntityName::Copy {
-        base: Box::new(base_wall),
-        pattern: fid("mir"),
-        instance: InstanceKey::Mirror,
-    });
+    let img = Reference::face(EntityName::copy(
+        &base_wall,
+        &fid("mir"),
+        InstanceKey::Mirror,
+    ));
     d.regions.push(region(
         "img",
         TopoKind::Face,

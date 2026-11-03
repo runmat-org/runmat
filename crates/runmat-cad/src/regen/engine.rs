@@ -6,8 +6,8 @@
 //! that do not depend on it still regenerate, so the model stays viewable and analysable.
 
 use crate::diagnostics::{
-    describe_ref_problem, describe_wait, Cause, DiagCode, DiagnosticReport, Repair, Severity, Site,
-    Subject,
+    describe_ref_problem_in, describe_wait_in, Cause, DiagCode, DiagnosticReport, Repair, Severity,
+    Site, Subject,
 };
 use crate::ids::{ConfigurationName, FeatureId, PartName, RegionName};
 use crate::model::datum::{add, cross, dot, normalize, scale, sub};
@@ -15,7 +15,7 @@ use crate::model::*;
 use crate::refs::history::{OperandEntity, SurfaceKind, Topology};
 use crate::refs::lock::{ItemPath, LockSection};
 use crate::refs::naming::{
-    cad_names_for_import, edge_name, name_outputs, BodyNames, NamingContext, OperandView,
+    cad_names_for_import, edge_name, name_outputs, BodyNames, NamingContext, OperandView, SlotTie,
 };
 use crate::refs::publish::{
     ForeignEntity, ForeignTarget, PublishTable, PublishedCatalog, XrefProblem,
@@ -25,7 +25,7 @@ use crate::refs::resolve::{
     ResolutionPolicy, ResolutionStats, ResolveNote, ResolveOutcome, Resolved, Resolver, WaitCause,
     WaitReason,
 };
-use crate::refs::{EntityName, InstanceKey, Reference, TopoKind};
+use crate::refs::{EntityName, InstanceKey, NameTable, Reference, Shown, TopoKind};
 use crate::regen::deps::DependencyGraph;
 use crate::regen::hash::{chain, CacheKey, KeyInputs};
 use crate::regen::kernel::*;
@@ -71,6 +71,8 @@ pub struct PartState {
     pub datums: BTreeMap<FeatureId, DatumValue>,
     pub sketches: BTreeMap<FeatureId, (SolvedSketch, Frame)>,
     pub burials: BTreeMap<(TopoKind, EntityName), FeatureId>,
+    /// Every one-level name this regeneration produced, by token.
+    pub names: NameTable,
     /// Tool operations each tool feature applied, for patterns and mirrors of features.
     pub tools: BTreeMap<FeatureId, Vec<ToolOp>>,
     pub table: FeatureTable,
@@ -472,6 +474,7 @@ impl<'a, 'b> Run<'a, 'b> {
             lock: self.ctx.lock,
             catalog: self.ctx.catalog,
             policy: self.ctx.policy,
+            names: Some(&self.st.names),
         }
     }
 
@@ -513,7 +516,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 Ok(r)
             }
             ResolveOutcome::Waiting(w) => {
-                let (msg, repairs) = describe_wait(reference, &w);
+                let (msg, repairs) = describe_wait_in(reference, &w, Some(&self.st.names));
                 self.diags.push(
                     DiagCode::RefWaiting,
                     Severity::Info,
@@ -526,13 +529,14 @@ impl<'a, 'b> Run<'a, 'b> {
             }
             ResolveOutcome::Failed(RefProblem::Blocked { maker, root }) => {
                 let root_diag = self.root_of(&root);
-                let (code, msg, repairs) = describe_ref_problem(
+                let (code, msg, repairs) = describe_ref_problem_in(
                     &site,
                     reference,
                     &RefProblem::Blocked {
                         maker,
                         root: root.clone(),
                     },
+                    Some(&self.st.names),
                 );
                 let d = self.diags.push(
                     code,
@@ -545,7 +549,8 @@ impl<'a, 'b> Run<'a, 'b> {
                 Err(Halt::Block(root, d))
             }
             ResolveOutcome::Failed(p) => {
-                let (code, msg, repairs) = describe_ref_problem(&site, reference, &p);
+                let (code, msg, repairs) =
+                    describe_ref_problem_in(&site, reference, &p, Some(&self.st.names));
                 Err(Halt::Fail(self.diags.push(
                     code,
                     Severity::Error,
@@ -721,7 +726,7 @@ impl<'a, 'b> Run<'a, 'b> {
             return Err(h);
         }
         if let ResolveOutcome::Waiting(w) = combined {
-            let (msg, repairs) = describe_wait(&refs[0], &w);
+            let (msg, repairs) = describe_wait_in(&refs[0], &w, Some(&self.st.names));
             self.diags.push(
                 DiagCode::RefWaiting,
                 Severity::Info,
@@ -803,7 +808,7 @@ impl<'a, 'b> Run<'a, 'b> {
             }
         };
         let r = Reference::feature_body(dep.as_str());
-        let (msg, repairs) = describe_wait(&r, &w);
+        let (msg, repairs) = describe_wait_in(&r, &w, Some(&self.st.names));
         self.diags.push(
             DiagCode::RefWaiting,
             Severity::Info,
@@ -1966,6 +1971,39 @@ impl<'a, 'b> Run<'a, 'b> {
                 if import {
                     cad_names_for_import(id, &mut named);
                 }
+                if let Err(c) = named.intern_into(&mut self.st.names) {
+                    return Err(self.error(
+                        id,
+                        None,
+                        DiagCode::RefTokenCollision,
+                        c.to_string(),
+                        Vec::new(),
+                    ));
+                }
+                for tie in &named.slot_ties {
+                    let Some(first) = tie.names.first() else {
+                        continue;
+                    };
+                    let body_ref = Reference::body(first.clone());
+                    let candidates = slot_tie_candidates(&body_ref, tie, &named.bodies);
+                    self.diags.push(
+                        DiagCode::RefBodySlotTie,
+                        Severity::Warning,
+                        Site::feature(id, None),
+                        format!(
+                            "`{}` split `{}` into {} pieces equally similar to it by lineage; \
+                             references to it now select all of them",
+                            id,
+                            Shown(&body_ref, Some(&self.st.names)),
+                            tie.bodies.len()
+                        ),
+                        Cause::Root,
+                        vec![Repair::Disambiguate {
+                            site: Site::feature(id, None),
+                            candidates,
+                        }],
+                    );
+                }
                 let insert_at = operands.first().copied().unwrap_or(self.st.bodies.len());
                 for &b in operands.iter().rev() {
                     self.st.bodies.remove(b);
@@ -2387,4 +2425,38 @@ fn build_loops(
     let o = loops.remove(outer);
     loops.insert(0, o);
     Ok(loops)
+}
+
+/// For each body of a slot tie, a reference that selects it alone: the body carrying a face
+/// name no other tied piece has.
+fn slot_tie_candidates(
+    body_ref: &Reference,
+    tie: &SlotTie,
+    bodies: &[BodyNames],
+) -> Vec<Reference> {
+    let sets: Vec<BTreeSet<&EntityName>> = tie
+        .bodies
+        .iter()
+        .map(|b| {
+            bodies
+                .get(*b as usize)
+                .map(|n| n.faces.iter().flatten().collect())
+                .unwrap_or_default()
+        })
+        .collect();
+    let mut out = Vec::new();
+    for (i, mine) in sets.iter().enumerate() {
+        let unique = mine.iter().find(|n| {
+            sets.iter()
+                .enumerate()
+                .all(|(j, o)| j == i || !o.contains(*n))
+        });
+        if let Some(n) = unique {
+            out.push(Reference::piece(
+                body_ref.clone(),
+                vec![Reference::face((*n).clone())],
+            ));
+        }
+    }
+    out
 }

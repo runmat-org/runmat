@@ -1,7 +1,9 @@
 //! References: what a feature, region or publish entry writes to point at topology.
 
 use crate::ids::{FeatureId, FilePath, PublishName, RevisionId, SketchEntityId};
-use crate::refs::name::{EntityName, GenerationName, InstanceKey, Role, SourceTag, TopoKind};
+use crate::refs::name::{
+    EntityName, GenerationName, InstanceKey, NameToken, Role, Shown, SourceTag, TopoKind,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -141,11 +143,7 @@ impl Reference {
         match base {
             Reference::Name { kind, name } => Reference::Name {
                 kind,
-                name: EntityName::Copy {
-                    base: Box::new(name),
-                    pattern: FeatureId::new(pattern),
-                    instance,
-                },
+                name: EntityName::copy(&name, &FeatureId::new(pattern), instance),
             },
             other => other,
         }
@@ -207,32 +205,45 @@ impl Reference {
         }
     }
 
-    /// The same reference with feature `from` renamed to `to` (an alias rewrite).
+    /// The same reference with feature `from` renamed to `to` (an alias rewrite). Tokens of
+    /// nested names are kept; [`Reference::renamed_with`] maps them too.
     pub fn renamed(&self, from: &FeatureId, to: &FeatureId) -> Reference {
+        self.renamed_with(from, to, &|t| *t)
+    }
+
+    /// The same reference with feature `from` renamed to `to`, and every nested name token
+    /// mapped through `map` (from [`crate::refs::name::NameTable::alias_map`]).
+    pub fn renamed_with(
+        &self,
+        from: &FeatureId,
+        to: &FeatureId,
+        map: &dyn Fn(&NameToken) -> NameToken,
+    ) -> Reference {
+        let r = |x: &Reference| x.renamed_with(from, to, map);
         match self {
             Reference::Name { kind, name } => Reference::Name {
                 kind: *kind,
-                name: name.renamed(from, to),
+                name: name.renamed_with(from, to, map),
             },
             Reference::Piece {
                 base,
                 bounded_by,
                 not_bounded_by,
             } => Reference::Piece {
-                base: Box::new(base.renamed(from, to)),
-                bounded_by: bounded_by.iter().map(|r| r.renamed(from, to)).collect(),
-                not_bounded_by: not_bounded_by.iter().map(|r| r.renamed(from, to)).collect(),
+                base: Box::new(r(base)),
+                bounded_by: bounded_by.iter().map(r).collect(),
+                not_bounded_by: not_bounded_by.iter().map(r).collect(),
             },
             Reference::EdgesBetween { a, b } => Reference::EdgesBetween {
-                a: Box::new(a.renamed(from, to)),
-                b: Box::new(b.renamed(from, to)),
+                a: Box::new(r(a)),
+                b: Box::new(r(b)),
             },
             Reference::VertexOf { of } => Reference::VertexOf {
-                of: of.iter().map(|r| r.renamed(from, to)).collect(),
+                of: of.iter().map(r).collect(),
             },
             Reference::Published { .. } => self.clone(),
             Reference::WithFallback { primary, fallback } => Reference::WithFallback {
-                primary: Box::new(primary.renamed(from, to)),
+                primary: Box::new(r(primary)),
                 fallback: GeometricFallback {
                     maker: if &fallback.maker == from {
                         to.clone()
@@ -254,35 +265,43 @@ impl From<GenerationName> for EntityName {
 
 impl fmt::Display for Reference {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        write!(f, "{}", Shown(self, None))
+    }
+}
+
+impl fmt::Display for Shown<'_, Reference> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let t = self.1;
+        let sh = |r: &Reference| Shown(r, t).to_string();
+        match self.0 {
             Reference::Name { kind, name } => match name {
                 EntityName::Generated(g) if g.role == Role::Body => {
                     write!(f, "feature.{}.body", g.feature)
                 }
-                _ => write!(f, "{}:{}", kind, name),
+                _ => write!(f, "{}:{}", kind, Shown(name, t)),
             },
             Reference::Piece {
                 base,
                 bounded_by,
                 not_bounded_by,
             } => {
-                write!(f, "piece({}", base)?;
+                write!(f, "piece({}", sh(base))?;
                 for r in bounded_by {
-                    write!(f, ", bounded_by = {}", r)?;
+                    write!(f, ", bounded_by = {}", sh(r))?;
                 }
                 for r in not_bounded_by {
-                    write!(f, ", not_bounded_by = {}", r)?;
+                    write!(f, ", not_bounded_by = {}", sh(r))?;
                 }
                 f.write_str(")")
             }
-            Reference::EdgesBetween { a, b } => write!(f, "edges_between({}, {})", a, b),
+            Reference::EdgesBetween { a, b } => write!(f, "edges_between({}, {})", sh(a), sh(b)),
             Reference::VertexOf { of } => {
                 f.write_str("vertex_of(")?;
                 for (i, r) in of.iter().enumerate() {
                     if i > 0 {
                         f.write_str(", ")?;
                     }
-                    write!(f, "{}", r)?;
+                    f.write_str(&sh(r))?;
                 }
                 f.write_str(")")
             }
@@ -304,7 +323,8 @@ impl fmt::Display for Reference {
                 write!(
                     f,
                     "{} (geometric fallback within {})",
-                    primary, fallback.maker
+                    sh(primary),
+                    fallback.maker
                 )
             }
         }

@@ -309,6 +309,26 @@ impl LockSection {
         Ok(moving.len())
     }
 
+    /// Every feature rename recorded for `file`: (old id, current id), sorted.
+    pub fn feature_aliases(&self, file: &FilePath) -> Vec<(FeatureId, FeatureId)> {
+        let mut out = Vec::new();
+        for (path, e) in &self.entries {
+            if &path.file != file || path.item.len() != 2 || path.item[0] != "feature" {
+                continue;
+            }
+            for a in &e.aliases {
+                if &a.file == file && a.item.len() == 2 && a.item[0] == "feature" {
+                    out.push((
+                        FeatureId::new(a.item[1].clone()),
+                        FeatureId::new(path.item[1].clone()),
+                    ));
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
     /// The current feature id for a feature known by an older name in `file`.
     pub fn feature_alias(&self, file: &FilePath, old: &FeatureId) -> Option<FeatureId> {
         let l = self.lookup(&ItemPath::feature(file, old))?;
