@@ -1,7 +1,7 @@
 //! Routing primitives (push-and-shove is P5 and builds on these).
 //!
-//! - [`ratsnest`]: per net, a minimum spanning tree over the net's copper *islands* (Prim's
-//!   algorithm on anchors, with zero cost inside an island), giving the airwires still to
+//! - [`ratsnest`]: per net, the exact minimum spanning tree over the net's copper *islands*
+//!   (Borůvka over a component-labelled k-d tree of anchors), giving the airwires still to
 //!   route.
 //! - [`walkaround`]: the geometry the interactive router's walkaround mode needs: obstacles
 //!   of other nets on the layer grown by clearance plus half the track width and merged with
@@ -32,83 +32,228 @@ pub struct Airwire {
     pub length: f64,
 }
 
-/// Airwires for one net's connectivity.
+/// Airwires for one net's connectivity: the minimum spanning tree over the net's islands,
+/// where joining two islands costs the shortest distance between their anchors.
+///
+/// Exact and sub-quadratic: Borůvka rounds over a k-d tree of the anchors. Each node of the
+/// tree records the component all its anchors belong to (if they agree), so a query for the
+/// nearest anchor outside a component skips whole subtrees inside it; a large island
+/// surrounded by its own anchors costs little. Distances are exact squared integers and edges
+/// are ordered by `(distance², lower anchor, higher anchor)`, a strict total order, so the
+/// tree is the unique MST under that order (what Kruskal over every pair gives). Airwires are
+/// listed in that order.
 pub fn net_ratsnest(c: &NetConnectivity) -> Vec<Airwire> {
     if c.islands <= 1 {
         return vec![];
     }
-    // Anchors with their island.
     let mut anchors: Vec<(Point, usize, BItem)> = Vec::new();
     for (i, n) in c.nodes.iter().enumerate() {
         for a in &n.anchors {
             anchors.push((*a, c.island[i], n.item));
         }
     }
-    let m = anchors.len();
-    let mut in_tree = vec![false; m];
-    let mut island_in = vec![false; c.islands];
-    let mut best = vec![f64::INFINITY; m];
-    let mut from = vec![usize::MAX; m];
-    let mut out = Vec::new();
-    let add_island = |isl: usize,
-                      in_tree: &mut Vec<bool>,
-                      island_in: &mut Vec<bool>,
-                      best: &mut Vec<f64>,
-                      from: &mut Vec<usize>| {
-        island_in[isl] = true;
-        let members: Vec<usize> = (0..m).filter(|&k| anchors[k].1 == isl).collect();
-        for &k in &members {
-            in_tree[k] = true;
+    let pts: Vec<Point> = anchors.iter().map(|a| a.0).collect();
+    let mut comp: Vec<usize> = anchors.iter().map(|a| a.1).collect();
+    let tree = KdTree::new(&pts);
+    let mut uf: Vec<usize> = (0..c.islands).collect();
+    fn root(uf: &mut [usize], mut x: usize) -> usize {
+        while uf[x] != x {
+            uf[x] = uf[uf[x]];
+            x = uf[x];
         }
-        for j in 0..m {
-            if in_tree[j] {
-                continue;
-            }
-            for &k in &members {
-                let d = anchors[j].0.dist(anchors[k].0);
-                if d < best[j] || (d == best[j] && k < from[j]) {
-                    best[j] = d;
-                    from[j] = k;
+        x
+    }
+    let mut edges: Vec<MstEdge> = Vec::new();
+    let mut components = c.islands;
+    while components > 1 {
+        let labels = tree.labels(&comp);
+        // Cheapest outgoing edge per component.
+        let mut best: BTreeMap<usize, MstEdge> = BTreeMap::new();
+        for i in 0..pts.len() {
+            if let Some(e) = tree.nearest_foreign(&pts, &comp, &labels, i) {
+                let k = comp[i];
+                if best.get(&k).is_none_or(|b| e < *b) {
+                    best.insert(k, e);
                 }
             }
         }
-    };
-    add_island(
-        anchors[0].1,
-        &mut in_tree,
-        &mut island_in,
-        &mut best,
-        &mut from,
-    );
-    while island_in.iter().any(|x| !x) {
-        let mut pick = None;
-        for j in 0..m {
-            if !in_tree[j]
-                && !island_in[anchors[j].1]
-                && pick.is_none_or(|p: usize| best[j] < best[p])
-            {
-                pick = Some(j);
+        if best.is_empty() {
+            break;
+        }
+        let mut merged = false;
+        for e in best.into_values() {
+            let (ra, rb) = (root(&mut uf, comp[e.a]), root(&mut uf, comp[e.b]));
+            if ra != rb {
+                uf[ra.max(rb)] = ra.min(rb);
+                components -= 1;
+                edges.push(e);
+                merged = true;
             }
         }
-        let Some(j) = pick else { break };
-        let k = from[j];
-        out.push(Airwire {
-            net: c.net,
-            a: anchors[k].0,
-            b: anchors[j].0,
-            from: anchors[k].2,
-            to: anchors[j].2,
-            length: best[j],
-        });
-        add_island(
-            anchors[j].1,
-            &mut in_tree,
-            &mut island_in,
-            &mut best,
-            &mut from,
-        );
+        if !merged {
+            break;
+        }
+        for k in comp.iter_mut() {
+            *k = root(&mut uf, *k);
+        }
     }
-    out
+    edges.sort();
+    edges
+        .into_iter()
+        .map(|e| Airwire {
+            net: c.net,
+            a: pts[e.a],
+            b: pts[e.b],
+            from: anchors[e.a].2,
+            to: anchors[e.b].2,
+            length: (e.d2 as f64).sqrt(),
+        })
+        .collect()
+}
+
+/// An MST candidate edge between anchors `a < b`, ordered by `(d², a, b)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct MstEdge {
+    d2: i128,
+    a: usize,
+    b: usize,
+}
+
+fn d2(p: Point, q: Point) -> i128 {
+    let (dx, dy) = ((p.x - q.x) as i128, (p.y - q.y) as i128);
+    dx * dx + dy * dy
+}
+
+/// A static 2-d tree over points (median splits, alternating axes).
+struct KdTree {
+    /// Point indices in tree order; node `n` covers `order[lo..hi]`.
+    order: Vec<usize>,
+    nodes: Vec<KdNode>,
+}
+
+struct KdNode {
+    lo: usize,
+    hi: usize,
+    bbox: Rect,
+    children: Option<(usize, usize)>,
+}
+
+const KD_LEAF: usize = 8;
+const MIXED: usize = usize::MAX;
+
+impl KdTree {
+    fn new(pts: &[Point]) -> KdTree {
+        let mut t = KdTree {
+            order: (0..pts.len()).collect(),
+            nodes: Vec::new(),
+        };
+        t.build(pts, 0, pts.len(), 0);
+        t
+    }
+    fn build(&mut self, pts: &[Point], lo: usize, hi: usize, depth: usize) -> usize {
+        let bbox = Rect::from_points(self.order[lo..hi].iter().map(|&i| pts[i]));
+        let id = self.nodes.len();
+        self.nodes.push(KdNode {
+            lo,
+            hi,
+            bbox,
+            children: None,
+        });
+        if hi - lo > KD_LEAF {
+            let mid = (lo + hi) / 2;
+            let x_axis = bbox.width() >= bbox.height() || depth > 64;
+            self.order[lo..hi].select_nth_unstable_by_key(mid - lo, |&i| {
+                if x_axis {
+                    (pts[i].x, pts[i].y, i)
+                } else {
+                    (pts[i].y, pts[i].x, i)
+                }
+            });
+            let l = self.build(pts, lo, mid, depth + 1);
+            let r = self.build(pts, mid, hi, depth + 1);
+            self.nodes[id].children = Some((l, r));
+        }
+        id
+    }
+    /// Per node, the component shared by all its points, or `MIXED`.
+    fn labels(&self, comp: &[usize]) -> Vec<usize> {
+        let mut out = vec![MIXED; self.nodes.len()];
+        for n in (0..self.nodes.len()).rev() {
+            let node = &self.nodes[n];
+            out[n] = match node.children {
+                Some((l, r)) if out[l] == out[r] => out[l],
+                Some(_) => MIXED,
+                None => {
+                    let first = comp[self.order[node.lo]];
+                    if self.order[node.lo..node.hi]
+                        .iter()
+                        .all(|&i| comp[i] == first)
+                    {
+                        first
+                    } else {
+                        MIXED
+                    }
+                }
+            };
+        }
+        out
+    }
+    /// The least edge (under the MST order) from point `q` to a point of another component.
+    fn nearest_foreign(
+        &self,
+        pts: &[Point],
+        comp: &[usize],
+        labels: &[usize],
+        q: usize,
+    ) -> Option<MstEdge> {
+        let mut best: Option<MstEdge> = None;
+        let mut stack = vec![0usize];
+        let p = pts[q];
+        let box_d2 = |r: &Rect| {
+            let dx = (r.min.x - p.x).max(0).max(p.x - r.max.x) as i128;
+            let dy = (r.min.y - p.y).max(0).max(p.y - r.max.y) as i128;
+            dx * dx + dy * dy
+        };
+        while let Some(n) = stack.pop() {
+            let node = &self.nodes[n];
+            if labels[n] == comp[q] {
+                continue;
+            }
+            // `>` keeps equal-distance subtrees: their indices may win the tie.
+            if best.is_some_and(|b| box_d2(&node.bbox) > b.d2) {
+                continue;
+            }
+            match node.children {
+                Some((l, r)) => {
+                    let (dl, dr) = (box_d2(&self.nodes[l].bbox), box_d2(&self.nodes[r].bbox));
+                    // Visit the nearer child first (pushed last).
+                    if dl <= dr {
+                        stack.push(r);
+                        stack.push(l);
+                    } else {
+                        stack.push(l);
+                        stack.push(r);
+                    }
+                }
+                None => {
+                    for &i in &self.order[node.lo..node.hi] {
+                        if comp[i] == comp[q] {
+                            continue;
+                        }
+                        let e = MstEdge {
+                            d2: d2(p, pts[i]),
+                            a: q.min(i),
+                            b: q.max(i),
+                        };
+                        if best.is_none_or(|b| e < b) {
+                            best = Some(e);
+                        }
+                    }
+                }
+            }
+        }
+        best
+    }
 }
 
 /// Airwires for every net, ordered by net.
@@ -519,4 +664,130 @@ pub fn pair_skew(
     n: ((&str, &str), (&str, &str)),
 ) -> Option<f64> {
     Some(trace_length(board, p.0, p.1)? - trace_length(board, n.0, n.1)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connectivity::Node;
+
+    fn net(points: &[(i64, i64, usize)]) -> NetConnectivity {
+        let islands = points.iter().map(|p| p.2).max().unwrap() + 1;
+        NetConnectivity {
+            net: NetId(0),
+            nodes: points
+                .iter()
+                .enumerate()
+                .map(|(i, p)| Node {
+                    item: BItem::Via(ItemId(i as u64)),
+                    fill: None,
+                    layers: 1,
+                    prims: vec![],
+                    anchors: vec![Point::new(p.0, p.1)],
+                })
+                .collect(),
+            island: points.iter().map(|p| p.2).collect(),
+            islands,
+        }
+    }
+
+    /// Kruskal over every anchor pair, under the same edge order.
+    fn reference(c: &NetConnectivity) -> Vec<(Point, Point, i128)> {
+        let pts: Vec<(Point, usize)> = c
+            .nodes
+            .iter()
+            .enumerate()
+            .flat_map(|(i, n)| n.anchors.iter().map(move |a| (*a, c.island[i])))
+            .collect();
+        let mut all = Vec::new();
+        for i in 0..pts.len() {
+            for j in i + 1..pts.len() {
+                if pts[i].1 != pts[j].1 {
+                    all.push(MstEdge {
+                        d2: d2(pts[i].0, pts[j].0),
+                        a: i,
+                        b: j,
+                    });
+                }
+            }
+        }
+        all.sort();
+        let mut uf: Vec<usize> = (0..c.islands).collect();
+        fn root(uf: &mut [usize], mut x: usize) -> usize {
+            while uf[x] != x {
+                x = uf[x];
+            }
+            x
+        }
+        let mut out = Vec::new();
+        for e in all {
+            let (ra, rb) = (root(&mut uf, pts[e.a].1), root(&mut uf, pts[e.b].1));
+            if ra != rb {
+                uf[ra.max(rb)] = ra.min(rb);
+                out.push((pts[e.a].0, pts[e.b].0, e.d2));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn ratsnest_matches_exact_kruskal() {
+        let mut rng = 0x9E3779B97F4A7C15u64;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        for case in 0..40 {
+            let n = 2 + (next() % 400) as usize;
+            let islands = 1 + (next() % n.min(60) as u64) as usize;
+            // Some cases on a coarse lattice to force distance ties.
+            let lattice = case % 3 == 0;
+            let pts: Vec<(i64, i64, usize)> = (0..n)
+                .map(|i| {
+                    let (x, y) = if lattice {
+                        (
+                            (next() % 20) as i64 * 500_000,
+                            (next() % 20) as i64 * 500_000,
+                        )
+                    } else {
+                        ((next() % 100_000_000) as i64, (next() % 60_000_000) as i64)
+                    };
+                    // Every island gets at least one anchor; the rest cluster loosely.
+                    (
+                        x,
+                        y,
+                        if i < islands {
+                            i
+                        } else {
+                            (next() as usize) % islands
+                        },
+                    )
+                })
+                .collect();
+            let c = net(&pts);
+            let got: Vec<(Point, Point, i128)> = net_ratsnest(&c)
+                .iter()
+                .map(|w| (w.a, w.b, d2(w.a, w.b)))
+                .collect();
+            let want = reference(&c);
+            assert_eq!(got.len(), islands - 1, "case {case}");
+            assert_eq!(got, want, "case {case}");
+        }
+    }
+
+    #[test]
+    fn ratsnest_scales() {
+        // 20 000 anchors in 2 000 islands: the old per-island Prim step was quadratic.
+        let mut pts = Vec::new();
+        for i in 0..20_000i64 {
+            pts.push(((i % 200) * 700_000, (i / 200) * 650_000, (i / 10) as usize));
+        }
+        let c = net(&pts);
+        let t = std::time::Instant::now();
+        let w = net_ratsnest(&c);
+        assert_eq!(w.len(), 1_999);
+        assert!(t.elapsed().as_secs_f64() < 5.0, "{:?}", t.elapsed());
+    }
 }
