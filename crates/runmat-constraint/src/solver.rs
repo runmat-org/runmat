@@ -742,8 +742,9 @@ struct Diagnosis {
     dof: usize,
     /// `(row, rows it depends on, conflicting)` with indices into the component's row list.
     dependent: Vec<(usize, Vec<usize>, bool)>,
-    /// Null-space rows per component variable (`None` when skipped for size).
-    null_rows: Option<Vec<Vec<f64>>>,
+    /// Sparse null-space rows per component variable, `(basis vector, value)` (`None` when
+    /// skipped for size).
+    null_rows: Option<Vec<Vec<(usize, f64)>>>,
     /// The row-normalised Jacobian (for per-entity DOF of large entities).
     jn: SparseRows,
 }
@@ -859,15 +860,8 @@ fn diagnose(
     }
     let null_rows = if dof == 0 {
         Some(Vec::new())
-    } else if n.saturating_mul(dof) <= opts.max_null_space_entries {
-        let basis = qr.null_space();
-        Some(
-            (0..n)
-                .map(|j| basis.iter().map(|b| b[j]).collect())
-                .collect(),
-        )
     } else {
-        None
+        qr.null_rows_sparse(opts.max_null_space_entries)
     };
     Diagnosis {
         rank,
@@ -1103,7 +1097,7 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
     let mut determined = is_free.iter().map(|f| !f).collect::<Vec<bool>>();
     // Per free variable: (component index, local column).
     let mut var_comp = vec![(NONE, NONE); nv];
-    let mut null_by_comp: Vec<Option<Vec<Vec<f64>>>> = Vec::with_capacity(comps.len());
+    let mut null_by_comp: Vec<Option<Vec<Vec<(usize, f64)>>>> = Vec::with_capacity(comps.len());
     let mut jn_by_comp: Vec<Option<(SparseRows, usize)>> = Vec::with_capacity(comps.len());
     let mut comp_dof = Vec::with_capacity(comps.len());
     let mut total_dof = 0;
@@ -1168,11 +1162,11 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
                 Some(nr) if dof > 0 => {
                     let scale = nr
                         .iter()
-                        .map(|row| row_norm(row))
+                        .map(|row| sparse_norm(row))
                         .fold(0.0f64, f64::max)
                         .max(1.0);
                     for (j, &v) in vars.iter().enumerate() {
-                        determined[v] = row_norm(&nr[j]) <= 1e-8 * scale;
+                        determined[v] = sparse_norm(&nr[j]) <= 1e-8 * scale;
                     }
                 }
                 Some(_) => vars.iter().for_each(|&v| determined[v] = true),
@@ -1247,8 +1241,23 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
                     } else {
                         match (&null_by_comp[comp], large) {
                             (Some(nr), false) => {
-                                let sub: Vec<Vec<f64>> =
-                                    cols.iter().map(|&col| nr[col].clone()).collect();
+                                // Densify over the basis vectors these columns touch only.
+                                let mut touched: Vec<usize> = cols
+                                    .iter()
+                                    .flat_map(|&col| nr[col].iter().map(|e| e.0))
+                                    .collect();
+                                touched.sort_unstable();
+                                touched.dedup();
+                                let sub: Vec<Vec<f64>> = cols
+                                    .iter()
+                                    .map(|&col| {
+                                        let mut row = vec![0.0; touched.len()];
+                                        for &(b, v) in &nr[col] {
+                                            row[touched.binary_search(&b).expect("touched")] = v;
+                                        }
+                                        row
+                                    })
+                                    .collect();
                                 Some(dense_rank(&sub, 1e-8))
                             }
                             (_, true) => jn_by_comp[comp].as_ref().map(|(jn, rank)| {
@@ -1435,8 +1444,8 @@ fn rank_without(jn: &SparseRows, drop: &[usize], tol: f64) -> usize {
     RowQr::factor(&out, tol).rank()
 }
 
-fn row_norm(v: &[f64]) -> f64 {
-    v.iter().map(|a| a * a).sum::<f64>().sqrt()
+fn sparse_norm(v: &[(usize, f64)]) -> f64 {
+    v.iter().map(|a| a.1 * a.1).sum::<f64>().sqrt()
 }
 
 /// The measured value of a dimension (its residual with a zero target).

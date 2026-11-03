@@ -378,9 +378,27 @@ pub enum Constraint {
         value: f64,
     },
     Mate(Mate),
+    /// A range limit on a 2D dimension: the measured value of `dimension` (a distance, angle,
+    /// radius, diameter, length, variable value or ellipse dimension, whose own value is
+    /// ignored) must lie in `[min, max]`. Handled by the solver's active set: activated as an
+    /// equality at the violated bound, released when the bound holds the solution back.
+    Limit {
+        dimension: Box<Constraint>,
+        min: f64,
+        max: f64,
+    },
 }
 
 impl Constraint {
+    /// A range limit on a dimension.
+    pub fn limit(dimension: Constraint, min: f64, max: f64) -> Constraint {
+        Constraint::Limit {
+            dimension: Box::new(dimension),
+            min,
+            max,
+        }
+    }
+
     /// Whether the constraint has a numeric value a reference (driven) dimension can measure.
     pub fn is_dimension(&self) -> bool {
         matches!(
@@ -1317,6 +1335,40 @@ impl System {
                 self.expect_elliptic(*curve)
             }
             C::Mate(m) => self.validate_mate(m),
+            C::Limit {
+                dimension,
+                min,
+                max,
+            } => {
+                finite(*min)?;
+                finite(*max)?;
+                if min > max {
+                    return Err(BuildError::BadValue("range min exceeds max"));
+                }
+                let mut inner = (**dimension).clone();
+                let is_radius = matches!(inner, C::Radius { .. } | C::Diameter { .. });
+                match &mut inner {
+                    C::Distance { value, .. }
+                    | C::Length { value, .. }
+                    | C::Radius { value, .. }
+                    | C::Diameter { value, .. }
+                    | C::EllipseDimension { value, .. } => {
+                        if *max < 0.0 || (*max <= 0.0 && is_radius) {
+                            return Err(BuildError::BadValue("range of a size must be positive"));
+                        }
+                        // Validate the geometry with a value inside the range.
+                        *value = max.max(f64::MIN_POSITIVE);
+                    }
+                    C::Angle { value, .. } | C::VarValue { value, .. } => *value = *max,
+                    _ => {
+                        return Err(BuildError::BadValue(
+                            "a limit applies to a 2D dimension (distance, angle, radius, \
+                             diameter, length, variable or ellipse dimension)",
+                        ))
+                    }
+                }
+                self.validate(&inner)
+            }
         }
     }
 

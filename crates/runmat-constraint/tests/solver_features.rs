@@ -139,7 +139,13 @@ fn big_triangle() -> (System, EntityId) {
 #[test]
 fn scaling_conditions_mixed_length_angle_systems() {
     let (s, p2) = big_triangle();
-    let scaled = solve(&s, &opts());
+    // The cluster pre-pass constructs this triangle exactly (hinge rule); switch it off to
+    // measure the numerical solve.
+    let numeric = SolveOptions {
+        clusters: false,
+        ..opts()
+    };
+    let scaled = solve(&s, &numeric);
     assert_eq!(scaled.status, Status::WellDefined, "{scaled:#?}");
     assert_pt(
         pt(&scaled, &s, p2),
@@ -150,7 +156,7 @@ fn scaling_conditions_mixed_length_angle_systems() {
         &s,
         &SolveOptions {
             scaling: false,
-            ..opts()
+            ..numeric.clone()
         },
     );
     println!(
@@ -169,6 +175,7 @@ fn dog_leg_solves_and_diagnoses_like_newton() {
     let (s, p2) = big_triangle();
     let o = SolveOptions {
         algorithm: Algorithm::DogLeg,
+        clusters: false,
         ..opts()
     };
     let rep = solve(&s, &o);
@@ -418,4 +425,286 @@ fn report_and_options_round_trip_through_json() {
         partial.max_iterations,
         SolveOptions::default().max_iterations
     );
+}
+
+// ================================================================ angle clusters, hinge
+
+/// Two bars hinged at `h`, each with a length, plus an angle between them: the hinge rule
+/// makes them one rigid cluster, and a fixed, horizontal first bar grounds it.
+#[test]
+fn clusters_close_a_hinge_with_an_angle() {
+    let mut s = System::new();
+    let h = s.point2(0.0, 0.0);
+    let a = s.point2(9.0, 1.5);
+    let b = s.point2(-1.0, 6.0);
+    let la = s.line(h, a).unwrap();
+    let lb = s.line(h, b).unwrap();
+    s.constrain(Constraint::Fix(h)).unwrap();
+    s.constrain(Constraint::Horizontal(la)).unwrap();
+    s.constrain(Constraint::Length {
+        line: la,
+        value: 40.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: lb,
+        value: 25.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Angle {
+        a: la,
+        b: lb,
+        value: 60f64.to_radians(),
+    })
+    .unwrap();
+    let rep = solve(&s, &opts());
+    assert_eq!(rep.status, Status::WellDefined, "{rep:#?}");
+    assert_eq!(rep.iterations, 0, "the construction is exact");
+    assert_eq!(rep.components[0].clusters, 1);
+    assert_pt(pt(&rep, &s, a), [40.0, 0.0], 1e-9);
+    // And the 1e7 triangle of the scaling test.
+    let (big, p2) = big_triangle();
+    let rep = solve(&big, &opts());
+    assert_eq!(rep.iterations, 0);
+    assert_pt(
+        pt(&rep, &big, p2),
+        [1e7 * 0.7f64.cos(), 1e7 * 0.7f64.sin()],
+        1e-6,
+    );
+    let t = 60f64.to_radians();
+    assert_pt(pt(&rep, &s, b), [25.0 * t.cos(), 25.0 * t.sin()], 1e-9);
+}
+
+/// A free-floating two-bar hinge (nothing fixed): the hinge rule still merges the bars, and
+/// the merged cluster is fitted to the drawing.
+#[test]
+fn clusters_merge_a_floating_hinge() {
+    let mut s = System::new();
+    let h = s.point2(1.0, 1.0);
+    let a = s.point2(5.0, 1.2);
+    let b = s.point2(1.1, 4.0);
+    let la = s.line(h, a).unwrap();
+    let lb = s.line(h, b).unwrap();
+    s.constrain(Constraint::Length {
+        line: la,
+        value: 4.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: lb,
+        value: 3.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Perpendicular(la, lb)).unwrap();
+    let rep = solve(&s, &opts());
+    assert!(rep.converged);
+    assert_eq!(rep.components[0].clusters, 1, "{rep:#?}");
+    let (ph, pa, pb) = (pt(&rep, &s, h), pt(&rep, &s, a), pt(&rep, &s, b));
+    let (u, v) = ([pa[0] - ph[0], pa[1] - ph[1]], [pb[0] - ph[0], pb[1] - ph[1]]);
+    assert_close(u[0].hypot(u[1]), 4.0, 1e-9);
+    assert_close(v[0].hypot(v[1]), 3.0, 1e-9);
+    assert_close(u[0] * v[0] + u[1] * v[1], 0.0, 1e-9);
+    // The branch drawn (b counter-clockwise from a) is kept.
+    assert!(u[0] * v[1] - u[1] * v[0] > 0.0);
+}
+
+/// An angle to a horizontal (oriented) bar turns a rigid bar that shares no point with it.
+#[test]
+fn clusters_orient_by_an_angle_to_an_oriented_line() {
+    let mut s = System::new();
+    let p0 = s.point2(0.0, 0.0);
+    let p1 = s.point2(10.0, 0.5);
+    let q0 = s.point2(2.0, 5.0);
+    let q1 = s.point2(6.0, 8.0);
+    let base = s.line(p0, p1).unwrap();
+    let arm = s.line(q0, q1).unwrap();
+    s.constrain(Constraint::Fix(p0)).unwrap();
+    s.constrain(Constraint::Horizontal(base)).unwrap();
+    s.constrain(Constraint::Length {
+        line: base,
+        value: 10.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: arm,
+        value: 5.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Angle {
+        a: base,
+        b: arm,
+        value: 30f64.to_radians(),
+    })
+    .unwrap();
+    let rep = solve(&s, &opts());
+    assert!(rep.converged);
+    let (a, b) = (pt(&rep, &s, q0), pt(&rep, &s, q1));
+    let ang = (b[1] - a[1]).atan2(b[0] - a[0]);
+    assert_close(ang, 30f64.to_radians(), 1e-9);
+    assert_close((b[0] - a[0]).hypot(b[1] - a[1]), 5.0, 1e-9);
+}
+
+/// Two angle relations across one hinge that disagree are refused by the pre-pass and left
+/// for the diagnosis.
+#[test]
+fn clusters_refuse_an_inconsistent_hinge() {
+    let mut s = System::new();
+    let h = s.point2(0.0, 0.0);
+    let a = s.point2(4.0, 0.0);
+    let b = s.point2(0.0, 3.0);
+    let la = s.line(h, a).unwrap();
+    let lb = s.line(h, b).unwrap();
+    s.constrain(Constraint::Fix(h)).unwrap();
+    s.constrain(Constraint::Horizontal(la)).unwrap();
+    s.constrain(Constraint::Length {
+        line: la,
+        value: 4.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Length {
+        line: lb,
+        value: 3.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Angle {
+        a: la,
+        b: lb,
+        value: 1.0,
+    })
+    .unwrap();
+    s.constrain(Constraint::Angle {
+        a: la,
+        b: lb,
+        value: 1.2,
+    })
+    .unwrap();
+    let rep = solve(&s, &opts());
+    assert!(!rep.conflicting.is_empty(), "{rep:#?}");
+}
+
+// ======================================================================= sketch limits
+
+/// A line length limited to [20, 30] drawn at 50: the upper bound activates and the
+/// report names it.
+#[test]
+fn sketch_length_limit_clamps_at_the_bound() {
+    let mut s = System::new();
+    let a = s.point2(0.0, 0.0);
+    let b = s.point2(50.0, 0.0);
+    let l = s.line(a, b).unwrap();
+    s.constrain(Constraint::Fix(a)).unwrap();
+    s.constrain(Constraint::Horizontal(l)).unwrap();
+    let lim = s
+        .constrain(Constraint::limit(
+            Constraint::Length {
+                line: l,
+                value: 0.0,
+            },
+            20.0,
+            30.0,
+        ))
+        .unwrap();
+    let rep = solve(&s, &opts());
+    assert!(rep.converged);
+    assert_eq!(rep.active_limits, vec![(lim, 30.0)]);
+    assert_pt(pt(&rep, &s, b), [30.0, 0.0], 1e-9);
+}
+
+/// A limit already satisfied stays inactive and leaves the sketch under-defined.
+#[test]
+fn sketch_limit_inside_its_range_is_inactive() {
+    let mut s = System::new();
+    let c = s.point2(0.0, 0.0);
+    let circle = s.circle(c, 12.0).unwrap();
+    s.constrain(Constraint::Fix(c)).unwrap();
+    s.constrain(Constraint::limit(
+        Constraint::Radius {
+            curve: circle,
+            value: 1.0,
+        },
+        10.0,
+        15.0,
+    ))
+    .unwrap();
+    let rep = solve(&s, &opts());
+    assert!(rep.converged);
+    assert!(rep.active_limits.is_empty());
+    assert_eq!(rep.status, Status::UnderDefined);
+}
+
+/// An angle limit, and the validation of limits.
+#[test]
+fn sketch_angle_limit_and_validation() {
+    let mut s = System::new();
+    let p = s.point2(0.0, 0.0);
+    let q = s.point2(10.0, 0.0);
+    let r = s.point2(0.0, 10.0);
+    let l1 = s.line(p, q).unwrap();
+    let l2 = s.line(p, r).unwrap();
+    s.constrain(Constraint::Fix(p)).unwrap();
+    s.constrain(Constraint::Fix(q)).unwrap();
+    s.constrain(Constraint::Length {
+        line: l2,
+        value: 10.0,
+    })
+    .unwrap();
+    let lim = s
+        .constrain(Constraint::limit(
+            Constraint::Angle {
+                a: l1,
+                b: l2,
+                value: 0.0,
+            },
+            0.1,
+            0.5,
+        ))
+        .unwrap();
+    let rep = solve(&s, &opts());
+    assert!(rep.converged);
+    assert_eq!(rep.active_limits, vec![(lim, 0.5)]);
+    let e = pt(&rep, &s, r);
+    assert_close(e[1].atan2(e[0]), 0.5, 1e-9);
+    // Bad limits are refused.
+    assert!(s
+        .constrain(Constraint::limit(Constraint::Horizontal(l1), 0.0, 1.0))
+        .is_err());
+    assert!(s
+        .constrain(Constraint::limit(
+            Constraint::Length {
+                line: l1,
+                value: 0.0
+            },
+            3.0,
+            2.0
+        ))
+        .is_err());
+}
+
+// ============================================================ sparse null-space diagnosis
+
+/// A large free spline next to a small entity in one component: the per-entity DOF of the
+/// small entity comes from the sparse null-space rows (the dense basis would be far over
+/// the entry budget), and the spline's from the exact rank identity.
+#[test]
+fn sparse_null_space_gives_entity_dof_next_to_a_large_spline() {
+    let mut s = System::new();
+    let n = 3000;
+    let pts: Vec<EntityId> = (0..n)
+        .map(|i| s.point2(i as f64, ((i as f64) * 0.1).sin()))
+        .collect();
+    let spline = s.bspline(3, &pts).unwrap();
+    // A short line whose start is pinned to the spline's first control point.
+    let q = s.point2(-5.0, 2.0);
+    let line = s.line(pts[0], q).unwrap();
+    s.constrain(Constraint::Length { line, value: 5.0 }).unwrap();
+    let mut o = opts();
+    o.max_null_space_entries = 200_000;
+    let t = Instant::now();
+    let rep = solve(&s, &o);
+    assert!(rep.converged);
+    let dof = |e: EntityId| rep.entity_dof.iter().find(|d| d.entity == e).unwrap().dof;
+    // The line: 4 coordinates, 1 length → 3.
+    assert_eq!(dof(line), Some(3));
+    assert_eq!(dof(spline), Some(2 * n as usize));
+    assert!(t.elapsed().as_secs_f64() < 20.0);
 }

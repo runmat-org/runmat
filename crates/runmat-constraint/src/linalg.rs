@@ -10,7 +10,7 @@
 //!
 //! Everything runs sequentially in a fixed order, so results are bit-identical between runs.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A row-compressed sparse matrix with sorted, duplicate-free column indices per row.
 #[derive(Clone, Debug, Default)]
@@ -394,6 +394,58 @@ impl RowQr {
         self.r.iter().filter(|r| r.is_some()).count()
     }
 
+    /// The null-space basis of [`RowQr::null_space`] as sparse rows: entry `j` lists
+    /// `(basis vector, value)` for column `j`. Back substitution only visits the pivot rows a
+    /// vector reaches through `R`'s pattern, so a banded `R` (a spline: each row couples one
+    /// knot span) costs time and memory in proportion to the band, not `n × dof`. `None` when
+    /// the basis would hold more than `max_entries` entries.
+    pub fn null_rows_sparse(&self, max_entries: usize) -> Option<Vec<Vec<(usize, f64)>>> {
+        let n = self.ncols;
+        // Pivot rows with an entry at each column (other than their own pivot).
+        let mut col_rows: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (j, rj) in self.r.iter().enumerate() {
+            if let Some(rj) = rj {
+                for &(k, _) in &rj[1..] {
+                    col_rows[k].push(j);
+                }
+            }
+        }
+        let mut rows: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
+        let mut entries = 0usize;
+        let mut x: BTreeMap<usize, f64> = BTreeMap::new();
+        let mut todo: BTreeSet<usize> = BTreeSet::new();
+        for (b, f) in (0..n).filter(|&j| self.r[j].is_none()).enumerate() {
+            x.clear();
+            todo.clear();
+            x.insert(f, 1.0);
+            todo.extend(col_rows[f].iter().copied());
+            // Descending: every column a pivot row reads lies after it, so it is final.
+            while let Some(j) = todo.pop_last() {
+                let rj = self.r[j].as_ref().expect("pivot");
+                let mut s = 0.0;
+                for &(k, v) in &rj[1..] {
+                    if let Some(xk) = x.get(&k) {
+                        s += v * xk;
+                    }
+                }
+                let xj = -s / rj[0].1;
+                if xj != 0.0 {
+                    x.insert(j, xj);
+                    todo.extend(col_rows[j].iter().copied());
+                }
+            }
+            entries += x.len();
+            if entries > max_entries {
+                return None;
+            }
+            for (&k, &v) in &x {
+                rows[k].push((b, v));
+            }
+        }
+        Some(rows)
+    }
+
+    #[cfg(test)]
     /// A null-space basis `[-R₁₁⁻¹R₁₂; I]`, one column per non-pivot column, each as a dense
     /// vector of length `ncols`.
     pub fn null_space(&self) -> Vec<Vec<f64>> {
@@ -511,6 +563,17 @@ mod tests {
         let a = mat(&[&[1.0, 1.0, 0.0, 0.0], &[0.0, 0.0, 1.0, -1.0]]);
         let qr = RowQr::factor(&a, 1e-10);
         let ns = qr.null_space();
+        let sparse = qr.null_rows_sparse(usize::MAX).unwrap();
+        for (j, row) in sparse.iter().enumerate() {
+            let mut dense = vec![0.0; ns.len()];
+            for &(b, v) in row {
+                dense[b] = v;
+            }
+            for (b, basis) in ns.iter().enumerate() {
+                assert!((basis[j] - dense[b]).abs() < 1e-12);
+            }
+        }
+        assert!(qr.null_rows_sparse(0).is_none());
         assert_eq!(ns.len(), 2);
         for v in &ns {
             let mut y = vec![0.0; 2];

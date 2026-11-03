@@ -1849,6 +1849,15 @@ fn lower_user(
                 v: *value,
             }
         }
+        C::Limit {
+            dimension,
+            min,
+            max,
+        } => {
+            let op = lower_user(l, dimension, rec, range);
+            *range = Some((*min, *max));
+            op
+        }
         C::Mate(m) => {
             let (a, b) = crate::system::mate_connectors(m);
             let la = l.connector(a);

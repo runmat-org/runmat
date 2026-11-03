@@ -17,6 +17,11 @@
 //! - three clusters that pairwise share one point (Owen's virtual bonds) know the three sides
 //!   of the triangle on the shared points: the triangle is constructed in one cluster's frame
 //!   (circle ∩ circle) and the other two are moved onto it;
+//! - an angle (or parallel, perpendicular) relation between a line of a rigid cluster and a
+//!   line of an oriented or ground cluster turns the rigid cluster until it holds; it becomes
+//!   oriented;
+//! - **hinge**: two rigid clusters sharing exactly one point, with an angle relation between a
+//!   line of each, merge by the rotation about the shared point that satisfies it;
 //! - a point with two loci on ground geometry (a circle about a ground point, a horizontal or
 //!   vertical through one, a ground line) is placed at their intersection.
 //!
@@ -56,6 +61,14 @@ struct Cluster {
     pts: BTreeMap<usize, [f64; 2]>,
 }
 
+/// An angle between two lines, each given by its end point groups.
+#[derive(Clone, Copy, Debug)]
+struct AngleRel {
+    a: (usize, usize),
+    b: (usize, usize),
+    theta: f64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Axis {
     H,
@@ -89,6 +102,8 @@ struct Builder<'a> {
     hv: Vec<(usize, usize, Axis)>,
     /// Point group on the line through two point groups.
     online: Vec<(usize, usize, usize)>,
+    /// Signed angle relations: from line `(a0, a1)`'s direction to line `(b0, b1)`'s, radians.
+    angles: Vec<AngleRel>,
     clusters: Vec<Option<Cluster>>,
     /// Group → clusters holding it.
     index: Vec<BTreeSet<usize>>,
@@ -115,6 +130,15 @@ fn dot(a: [f64; 2], b: [f64; 2]) -> f64 {
 }
 fn len(a: [f64; 2]) -> f64 {
     a[0].hypot(a[1])
+}
+fn wrap_angle(a: f64) -> f64 {
+    let t = std::f64::consts::TAU;
+    let r = a.rem_euclid(t);
+    if r > std::f64::consts::PI {
+        r - t
+    } else {
+        r
+    }
 }
 fn rot(a: [f64; 2], c: f64, s: f64) -> [f64; 2] {
     [c * a[0] - s * a[1], s * a[0] + c * a[1]]
@@ -165,6 +189,7 @@ pub(crate) fn construct(
         dists: Vec::new(),
         hv: Vec::new(),
         online: Vec::new(),
+        angles: Vec::new(),
         clusters: Vec::new(),
         index: Vec::new(),
         refused: BTreeSet::new(),
@@ -376,6 +401,7 @@ impl<'a> Builder<'a> {
         let mut dists = Vec::new();
         let mut hv = Vec::new();
         let mut online = Vec::new();
+        let mut angles = Vec::new();
         for &c in constraints {
             let Some(u) = user(c) else { continue };
             let mut dist = |a: EntityId, b: EntityId, d: f64| {
@@ -432,6 +458,43 @@ impl<'a> Builder<'a> {
                         }
                     }
                 }
+                Constraint::Angle { a, b, .. }
+                | Constraint::Parallel(a, b)
+                | Constraint::Perpendicular(a, b) => {
+                    let (Some((a0, a1)), Some((b0, b1))) = (line_ends(*a), line_ends(*b)) else {
+                        continue;
+                    };
+                    let (Some(ga0), Some(ga1), Some(gb0), Some(gb1)) =
+                        (gid(self, a0), gid(self, a1), gid(self, b0), gid(self, b1))
+                    else {
+                        continue;
+                    };
+                    if ga0 == ga1 || gb0 == gb1 {
+                        continue;
+                    }
+                    let cur = |g0: usize, g1: usize| {
+                        let v = sub(self.groups[g1].cur, self.groups[g0].cur);
+                        v[1].atan2(v[0])
+                    };
+                    let start = wrap_angle(cur(gb0, gb1) - cur(ga0, ga1));
+                    // Parallel and perpendicular keep the branch the starting geometry has.
+                    let theta = match u {
+                        Constraint::Angle { value, .. } => *value,
+                        Constraint::Parallel(..) => {
+                            if start.abs() <= std::f64::consts::FRAC_PI_2 {
+                                0.0
+                            } else {
+                                std::f64::consts::PI
+                            }
+                        }
+                        _ => std::f64::consts::FRAC_PI_2.copysign(start),
+                    };
+                    angles.push(AngleRel {
+                        a: (ga0, ga1),
+                        b: (gb0, gb1),
+                        theta,
+                    });
+                }
                 Constraint::HorizontalPoints(a, b) | Constraint::VerticalPoints(a, b) => {
                     if let (Some(ga), Some(gb)) = (gid(self, *a), gid(self, *b)) {
                         if ga != gb {
@@ -453,6 +516,7 @@ impl<'a> Builder<'a> {
         self.dists = dists;
         self.hv = hv;
         self.online = online;
+        self.angles = angles;
         self.tol = 1e-9 * extent;
         !self.groups.is_empty()
             && (!self.dists.is_empty() || !self.hv.is_empty() || !self.online.is_empty())
@@ -697,6 +761,92 @@ impl<'a> Builder<'a> {
         }
         c.kind = Kind::Oriented;
         true
+    }
+
+    /// The direction angle of line `(g0, g1)` in cluster `i`'s frame, when it holds both ends.
+    fn line_angle(&self, i: usize, l: (usize, usize)) -> Option<f64> {
+        let c = self.live(i);
+        let (p, q) = (c.pts.get(&l.0)?, c.pts.get(&l.1)?);
+        let v = sub(*q, *p);
+        (len(v) > self.tol * 10.0).then(|| v[1].atan2(v[0]))
+    }
+
+    /// For an angle relation with one line in `i` and the other in `j`: the rotation that
+    /// turns `j`'s frame so the relation holds against `i`'s frame.
+    fn relative_turn(&self, i: usize, j: usize, r: &AngleRel) -> Option<f64> {
+        if let (Some(ai), Some(bj)) = (self.line_angle(i, r.a), self.line_angle(j, r.b)) {
+            return Some(ai + r.theta - bj);
+        }
+        if let (Some(bi), Some(aj)) = (self.line_angle(i, r.b), self.line_angle(j, r.a)) {
+            return Some(bi - r.theta - aj);
+        }
+        None
+    }
+
+    /// Angle rule against fixed orientation: a rigid cluster holding one line of an angle
+    /// relation whose other line lies in an oriented (or ground) cluster turns until the
+    /// relation holds and becomes oriented.
+    fn try_angle_orient(&mut self, i: usize) -> bool {
+        if self.live(i).kind != Kind::Rigid {
+            return false;
+        }
+        let rels = self.angles.clone();
+        for r in &rels {
+            for j in 0..self.clusters.len() {
+                if j == i || self.clusters[j].is_none() || self.live(j).kind == Kind::Rigid {
+                    continue;
+                }
+                self.work += 1;
+                // `j`'s frame is the world's orientation; turn `i` onto it.
+                let Some(turn) = self.relative_turn(j, i, r) else {
+                    continue;
+                };
+                let (sn, cs) = turn.sin_cos();
+                let c = self.clusters[i].as_mut().unwrap();
+                for p in c.pts.values_mut() {
+                    *p = rot(*p, cs, sn);
+                }
+                c.kind = Kind::Oriented;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Hinge rule: two rigid clusters sharing exactly one point, with an angle relation
+    /// between a line of each, are one rigid cluster: `j` turns about the hinge point until the
+    /// relation holds and is absorbed into `i`.
+    fn try_hinge(&mut self, i: usize, j: usize) -> Option<usize> {
+        if self.live(i).kind != Kind::Rigid || self.live(j).kind != Kind::Rigid {
+            return None;
+        }
+        if self.refused.contains(&(i.min(j), i.max(j))) {
+            return None;
+        }
+        let shared = self.shared(i, j);
+        if shared.len() != 1 {
+            return None;
+        }
+        let h = shared[0];
+        let rels = self.angles.clone();
+        let turn = rels.iter().find_map(|r| self.relative_turn(i, j, r))?;
+        let (sn, cs) = turn.sin_cos();
+        let (pi, pj) = (self.live(i).pts[&h], self.live(j).pts[&h]);
+        let m = Motion {
+            c: cs,
+            s: sn,
+            t: sub(pi, rot(pj, cs, sn)),
+        };
+        // Other angle relations between the two must agree with the turn.
+        for r in &rels {
+            if let Some(t) = self.relative_turn(i, j, r) {
+                if wrap_angle(t - turn).abs() > 1e-9 {
+                    self.refused.insert((i.min(j), i.max(j)));
+                    return None;
+                }
+            }
+        }
+        self.absorb(i, j, m, Kind::Rigid).then_some(i)
     }
 
     /// Triangle rule with `i` as one of the three clusters. Returns the survivor.
@@ -954,7 +1104,7 @@ impl<'a> Builder<'a> {
                 if self.clusters[i].is_none() {
                     continue;
                 }
-                if self.try_orient(i) {
+                if self.try_orient(i) || self.try_angle_orient(i) {
                     queue.insert(i);
                     queue.extend(self.neighbours(i));
                     continue;
@@ -965,6 +1115,10 @@ impl<'a> Builder<'a> {
                         continue;
                     }
                     if let Some(s) = self.try_merge(i, j) {
+                        changed = Some(s);
+                        break;
+                    }
+                    if let Some(s) = self.try_hinge(i, j) {
                         changed = Some(s);
                         break;
                     }
