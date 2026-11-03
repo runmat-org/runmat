@@ -111,10 +111,23 @@ pub mod props {
     pub const EDGE_CLEARANCE: &str = "edge_clearance";
 }
 
+/// The id of the hypothetical track a router is about to place (see [`BoardGraph::probe`]).
+pub const PROBE_TRACK: ItemId = ItemId(u64::MAX);
+
+/// A track not on the board yet: net, layer and width.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TrackProbe {
+    pub net: Option<NetId>,
+    pub layer: u8,
+    pub width: Coord,
+}
+
 /// The board as an item graph, plus derived membership the pseudo-classes need.
 pub struct BoardGraph<'a> {
     pub board: &'a Board,
     pub diff_nets: BTreeSet<u32>,
+    /// Answers for `BItem::Track(PROBE_TRACK)` without adding it to the board.
+    pub probe: Option<TrackProbe>,
     items: Vec<BItem>,
     names: BTreeMap<BItem, String>,
     room_of: BTreeMap<ItemId, Vec<String>>,
@@ -165,13 +178,30 @@ impl<'a> BoardGraph<'a> {
         BoardGraph {
             board,
             diff_nets,
+            probe: None,
             items,
             names,
             room_of,
         }
     }
 
+    /// The graph answering also for a probe track (not listed in `items`).
+    pub fn probe(mut self, p: TrackProbe) -> Self {
+        self.probe = Some(p);
+        self
+    }
+
+    fn probe_of(&self, it: BItem) -> Option<TrackProbe> {
+        match it {
+            BItem::Track(PROBE_TRACK) => self.probe,
+            _ => None,
+        }
+    }
+
     pub fn net_of(&self, it: BItem) -> Option<NetId> {
+        if let Some(p) = self.probe_of(it) {
+            return p.net;
+        }
         let b = self.board;
         match it {
             BItem::Net(n) => Some(NetId(n)),
@@ -187,6 +217,9 @@ impl<'a> BoardGraph<'a> {
     }
 
     fn layers_of(&self, it: BItem) -> Vec<u8> {
+        if let Some(p) = self.probe_of(it) {
+            return vec![p.layer];
+        }
         let b = self.board;
         let n = b.copper_count();
         match it {
@@ -235,6 +268,7 @@ impl ItemGraph for BoardGraph<'_> {
             BItem::Net(_) => "net",
             BItem::Footprint(_) => "footprint",
             BItem::Pad(..) => "pad",
+            BItem::Track(PROBE_TRACK) if self.probe.is_some() => "track",
             BItem::Track(t) => match self.board.tracks[&t].geom {
                 crate::layout::TrackGeom::Segment { .. } => "track",
                 crate::layout::TrackGeom::Arc { .. } => "arc",
@@ -325,6 +359,17 @@ impl ItemGraph for BoardGraph<'_> {
                     "width" => Some(len_attr(w)),
                     "height" => Some(len_attr(h)),
                     "drill" => p.drill.as_ref().map(|d| len_attr(d.diameter)),
+                    _ => None,
+                }
+            }
+            (BItem::Track(PROBE_TRACK), _) if self.probe.is_some() => {
+                let p = self.probe.unwrap();
+                match name {
+                    "width" => Some(len_attr(p.width)),
+                    "layer" => Some(AttrValue::str(crate::layout::copper_name(
+                        p.layer,
+                        b.copper_count(),
+                    ))),
                     _ => None,
                 }
             }
@@ -670,6 +715,20 @@ impl BoardRules {
         self.pair.with_resolved(a, b, prop, |r| {
             r.and_then(|r| r.value.as_len()).unwrap_or(0)
         })
+    }
+    /// The rule matches of a track about to be placed (for routers).
+    pub fn probe(&self, board: &Board, p: TrackProbe) -> runmat_rules::Probe {
+        self.pair.probe(
+            &BoardGraph::new(board, &[]).probe(p),
+            BItem::Track(PROBE_TRACK),
+        )
+    }
+    /// A pair length between a probed track and an item.
+    pub fn probe_len(&self, p: &runmat_rules::Probe, other: BItem, prop: &str) -> Coord {
+        self.pair
+            .resolve_probe(p, other, prop)
+            .and_then(|r| r.value.as_len())
+            .unwrap_or(0)
     }
     /// Largest clearance any rule can require: the spatial query radius.
     pub fn max_clearance(&self) -> Coord {

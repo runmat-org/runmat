@@ -125,6 +125,13 @@ type Sig = Vec<(RuleHandle, u8, Specificity)>;
 /// Memo keyed by `(lower signature, higher signature, property id)`: no allocation per lookup.
 type Memo<V> = BTreeMap<(u32, u32, u32), Option<PairResolved<V>>>;
 
+/// The rule-side matches of an item outside the rebuilt set (see [`PairCascade::probe`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Probe {
+    sig: Sig,
+    class: Option<u32>,
+}
+
 /// An interned property name: resolve with it to skip even the name lookup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PropId(pub u32);
@@ -268,6 +275,14 @@ impl<V: Clone, Id: Copy + Ord + fmt::Debug> PairCascade<V, Id> {
     }
 
     fn candidates(&self, sx: u32, sy: u32, property: &str) -> Vec<(PairWinner, V)> {
+        self.candidates_sig(
+            &self.sig_list[sx as usize],
+            &self.sig_list[sy as usize],
+            property,
+        )
+    }
+
+    fn candidates_sig(&self, gx: &Sig, gy: &Sig, property: &str) -> Vec<(PairWinner, V)> {
         // Best specificity per rule over both assignments (a→x,b→y) and (a→y,b→x).
         let mut best: BTreeMap<RuleHandle, Specificity> = BTreeMap::new();
         let side = |sig: &Sig, h: RuleHandle, s: u8| {
@@ -275,8 +290,6 @@ impl<V: Clone, Id: Copy + Ord + fmt::Debug> PairCascade<V, Id> {
                 .find(|(hh, ss, _)| *hh == h && *ss == s)
                 .map(|t| t.2)
         };
-        let gx = &self.sig_list[sx as usize];
-        let gy = &self.sig_list[sy as usize];
         for (h, r) in &self.rules {
             if r.declared(property).is_none() {
                 continue;
@@ -336,6 +349,41 @@ impl<V: Clone, Id: Copy + Ord + fmt::Debug> PairCascade<V, Id> {
             .find(|(_, i)| **i == id.0)
             .map(|(k, _)| k.clone())
             .unwrap_or_default()
+    }
+
+    /// The match signature of an item that is not (yet) part of the rebuilt set, such as the
+    /// track an interactive router is about to place: `g` must answer for `id`.
+    pub fn probe<G: ItemGraph<Id = Id>>(&self, g: &G, id: Id) -> Probe {
+        let sig = self.signature(g, id);
+        Probe {
+            class: self.sigs.get(&sig).copied(),
+            sig,
+        }
+    }
+
+    /// The effective value of `property` between a probed item and item `y`.
+    pub fn resolve_probe(&self, p: &Probe, y: Id, property: &str) -> Option<PairResolved<V>> {
+        if let Some(c) = p.class {
+            let pid = self.prop_id(property);
+            let (sx, sy) = (c.min(self.class_of(y)), c.max(self.class_of(y)));
+            if let Some(v) = self.memo.borrow().get(&(sx, sy, pid.0)) {
+                return v.clone();
+            }
+        }
+        let sy = &self.sig_list[self.class_of(y) as usize];
+        self.candidates_sig(&p.sig, sy, property)
+            .into_iter()
+            .next()
+            .map(|(w, v)| PairResolved {
+                value: v,
+                rule: Some(w),
+            })
+            .or_else(|| {
+                self.defaults.get(property).map(|v| PairResolved {
+                    value: v.clone(),
+                    rule: None,
+                })
+            })
     }
 
     /// The effective value of `property` for the pair `{x, y}`.

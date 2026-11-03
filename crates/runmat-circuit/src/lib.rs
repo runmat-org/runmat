@@ -20,7 +20,9 @@
 //! - [`zone`]: copper pour fill (clearances, thermal spokes, minimum width, islands).
 //! - [`spatial`]: grid index; [`connectivity`]: physical copper islands.
 //! - [`drc`]: the incremental DRC kernel.
-//! - [`route`]: ratsnest, walkaround geometry, checked insertion, tuning lengths.
+//! - [`route`]: ratsnest, any-angle walkaround, checked insertion, tuning lengths.
+//! - [`router`]: interactive-routing primitives: 45°/90° shaping, mitred and arc corners,
+//!   clearance hulls, shortest and hugging walkaround.
 //!
 //! Interchange and outputs:
 //! - [`kicad`]: clean-room, lossless KiCad 8/9/10 board, footprint, schematic, symbol and
@@ -48,5 +50,6 @@ pub mod layout;
 pub mod library;
 pub mod review;
 pub mod route;
+pub mod router;
 pub mod spatial;
 pub mod zone;

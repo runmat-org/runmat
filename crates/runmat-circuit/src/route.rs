@@ -11,7 +11,7 @@
 //! - [`trace_length`]: the tuning length between two pads (shortest path over tracks and
 //!   vias, vias counted by their span through the stackup), plus [`net_length`].
 
-use crate::board_rules::{props, BItem, BoardGraph, BoardRules};
+use crate::board_rules::{props, BItem, BoardGraph, BoardRules, TrackProbe};
 use crate::connectivity::{board_connectivity, NetConnectivity};
 use crate::drc::{Drc, DrcFinding};
 use crate::elab::Severity;
@@ -277,13 +277,13 @@ pub fn obstacles(
     let tol = crate::geom::mm(0.01);
     let mut rings = Vec::new();
     let n = board.copper_count();
-    let probe = BItem::Track(ItemId(u64::MAX));
+    let probe = rules.probe(board, TrackProbe { net, layer, width });
     let mut add = |item: BItem, item_net: Option<NetId>, p: &Prim| {
         if net.is_some() && item_net == net {
             return;
         }
         let clr = rules
-            .pair_len(probe, item, props::CLEARANCE)
+            .probe_len(&probe, item, props::CLEARANCE)
             .max(board.limits.min_clearance);
         let grow = clr + width / 2 + 1000;
         if !p.bbox().inflate(grow).intersects(&region) {
@@ -311,7 +311,11 @@ pub fn obstacles(
     for z in board.zones.values() {
         if let Some(f) = z.fill.get(&layer) {
             if net.is_none() || z.net != net {
-                let grow = board.limits.min_clearance + width / 2 + 1000;
+                let grow = rules
+                    .probe_len(&probe, BItem::Zone(z.id), props::CLEARANCE)
+                    .max(board.limits.min_clearance)
+                    + width / 2
+                    + 1000;
                 rings.extend(
                     crate::geom::offset::offset_set(f, grow, crate::geom::offset::Join::Round, tol)
                         .rings(),

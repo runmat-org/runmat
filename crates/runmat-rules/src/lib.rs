@@ -58,7 +58,7 @@ pub use cascade::{
 };
 pub use graph::{AttrType, ItemGraph, PseudoSpec, Schema};
 pub use pair::{
-    PairCandidate, PairCascade, PairExplanation, PairResolved, PairRule, PairWinner, PropId,
+    PairCandidate, PairCascade, PairExplanation, PairResolved, PairRule, PairWinner, Probe, PropId,
 };
 pub use selector::{
     AttrOp, Combinator, Complex, Compound, Expr, Literal, PseudoArg, Selector, SelectorError,

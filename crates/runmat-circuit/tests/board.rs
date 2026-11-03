@@ -520,3 +520,78 @@ fn ratsnest_walkaround_insert_and_length() {
     );
     let _ = Polygon::from_ring(rect_ring(Rect::new(Point::ORIGIN, Point::mm(1.0, 1.0))));
 }
+
+#[test]
+fn interactive_router_plans_drc_clean_tracks() {
+    use runmat_circuit::router::{self, Corners, Geometry, WalkMode};
+    let mut b = small_board();
+    let sig = b.net("SIG");
+    let gnd = b.net("GND");
+    let r0603 = footprint::from_string("R0603").unwrap();
+    let a = b.place("R1", r0603.clone(), Point::mm(5.0, 15.0), 0.0, Side::Top);
+    let c = b.place("R2", r0603, Point::mm(35.0, 12.0), 0.0, Side::Top);
+    for f in [a, c] {
+        b.footprints
+            .get_mut(&f)
+            .unwrap()
+            .pad_nets
+            .insert("2".into(), sig.unwrap());
+    }
+    // A GND wall and a via field between the pads.
+    b.add_track(gnd, 0, mm(0.5), Point::mm(20.0, 4.0), Point::mm(20.0, 22.0));
+    for i in 0..6 {
+        b.add_via(gnd, Point::mm(27.0, 8.0 + i as f64 * 1.2), mm(0.6), mm(0.3));
+    }
+    let pa = b.footprints[&a].pads(4)[1].center;
+    let pc = b.footprints[&c].pads(4)[1].center;
+    let specs = vec![RuleSpec::pair("power", "copper:net-class(power)", "copper")
+        .set(props::CLEARANCE, RuleValue::Len(mm(0.3)))];
+    for geometry in [Geometry::Octilinear, Geometry::Orthogonal] {
+        for (mode, corners) in [
+            (WalkMode::Shortest, Corners::Sharp),
+            (WalkMode::HugBest, Corners::Mitre(mm(0.5))),
+            (WalkMode::Hug { clockwise: false }, Corners::Arc(mm(1.0))),
+        ] {
+            let mut bb = b.clone();
+            let mut r = rules(&bb, &specs);
+            let plan = router::plan(&bb, &r, sig, 0, mm(0.2), pa, pc, geometry, mode, corners)
+                .unwrap_or_else(|| panic!("{geometry:?} {mode:?}"));
+            assert!(plan
+                .path
+                .windows(2)
+                .all(|w| router::allowed(w[0], w[1], geometry)));
+            assert!(plan.length >= pa.dist(pc));
+            let mut drc = Drc::run(&bb, &r, &[], &[]);
+            for g in &plan.tracks {
+                let id = bb.alloc();
+                bb.tracks.insert(
+                    id,
+                    Track {
+                        id,
+                        net: sig,
+                        layer: 0,
+                        width: mm(0.2),
+                        geom: g.clone(),
+                        locked: false,
+                    },
+                );
+                let gr = BoardGraph::new(&bb, &[]);
+                r.single.items_changed(&gr, &[BItem::Track(id)], &[]);
+                r.pair.items_changed(&gr, &[BItem::Track(id)], &[]);
+                drc.update(&bb, &r, &[BItem::Track(id)], &[], None);
+            }
+            let errors: Vec<_> = drc
+                .findings()
+                .into_iter()
+                .filter(|f| {
+                    f.code != "unrouted" && f.severity == runmat_circuit::elab::Severity::Error
+                })
+                .collect();
+            assert!(errors.is_empty(), "{geometry:?} {mode:?}: {errors:?}");
+            assert!(
+                route::ratsnest(&bb).iter().all(|w| Some(w.net) != sig),
+                "{geometry:?} {mode:?}: SIG connected"
+            );
+        }
+    }
+}
