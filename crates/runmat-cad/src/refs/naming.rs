@@ -41,6 +41,9 @@ use thiserror::Error;
 pub struct BodyNames {
     pub body: BTreeSet<EntityName>,
     pub faces: Vec<BTreeSet<EntityName>>,
+    /// Names of a surface body's boundary (laminar) edges, by edge index.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub boundaries: BTreeMap<EntityIndex, BTreeSet<EntityName>>,
     #[serde(default)]
     pub signature: BodySignature,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -193,6 +196,12 @@ pub fn edge_name(
     edge: EntityIndex,
 ) -> Option<[EntityName; 2]> {
     let e = topology.edges.get(edge as usize)?;
+    if e.laminar {
+        // A boundary edge: its face and its own boundary name.
+        let a = names.primary(e.faces[0])?.clone();
+        let b = names.boundaries.get(&edge)?.iter().next()?.clone();
+        return Some(if a <= b { [a, b] } else { [b, a] });
+    }
     let a = names.primary(e.faces[0])?.clone();
     let b = names.primary(e.faces[1])?.clone();
     Some(if a <= b { [a, b] } else { [b, a] })
@@ -350,9 +359,62 @@ pub fn name_outputs(
             }
             faces.push(names);
         }
+        let mut boundaries: BTreeMap<EntityIndex, BTreeSet<EntityName>> = BTreeMap::new();
+        for rec in history.boundaries.iter().filter(|r| r.body == b as u32) {
+            let mut names = BTreeSet::new();
+            for src in &rec.sources {
+                match src {
+                    HistorySource::Input { from } => {
+                        let o = operands.get(from.operand as usize).ok_or(
+                            NamingError::BadOperand {
+                                operand: from.operand,
+                                entity: from.entity,
+                            },
+                        )?;
+                        names.extend(
+                            o.names
+                                .boundaries
+                                .get(&from.entity)
+                                .into_iter()
+                                .flatten()
+                                .cloned(),
+                        );
+                    }
+                    HistorySource::Generated {
+                        role, tag, ordinal, ..
+                    } => {
+                        let profiles = ctx.profiles.first().cloned().unwrap_or_default();
+                        let tag = translate_tag(tag, &profiles, operands)?;
+                        names.insert(EntityName::Generated(GenerationName {
+                            feature: ctx.feature.clone(),
+                            role: *role,
+                            tag,
+                            ordinal: *ordinal,
+                        }));
+                    }
+                    HistorySource::Copy { from, instance } => {
+                        if let Some(o) = operands.get(from.operand as usize) {
+                            for n in o.names.boundaries.get(&from.entity).into_iter().flatten() {
+                                names.insert(EntityName::copy(n, &ctx.feature, instance.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+            if names.is_empty() {
+                return Err(NamingError::Unsourced);
+            }
+            boundaries.insert(rec.edge, names);
+        }
+        for (ei, e) in topo.edges.iter().enumerate() {
+            if e.laminar && !boundaries.contains_key(&(ei as u32)) {
+                return Err(NamingError::Unsourced);
+            }
+        }
         let mut b = BodyNames {
             body: BTreeSet::new(),
             faces,
+            boundaries,
             ..Default::default()
         };
         b.sign();

@@ -2308,11 +2308,12 @@ fn specials() -> Vec<Outcome> {
         let probes = (f.probes)(&p);
         let mut errs = check_all(&d1, &r1, &probes, &|pr| {
             Some(if pr.name == "boss_flat" {
-                // Two collinear lines make coplanar sides, which merge: the face answers to
-                // both curves' names.
+                // Two collinear lines make two coplanar sides, kept apart (the profile does
+                // not ask them to merge): `lb` is the half from x0 to the split point. The
+                // sampled corner arc adds staircase facets near x0.
                 ok1(both(
                     plane_at([0.0, 1.0, 0.0], 1, 25.0 - p["rad"]),
-                    centroid_near([Some(40.0), None, None], 1e-6),
+                    centroid_near([Some(40.0 - p["len"] / 2.0), None, None], 1.5),
                 ))
             } else {
                 pr.expect.clone()

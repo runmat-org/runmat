@@ -48,6 +48,9 @@ pub struct RegenContext<'a> {
     pub lock: Option<&'a LockSection>,
     pub catalog: Option<&'a dyn PublishedCatalog>,
     pub policy: ResolutionPolicy,
+    /// Body slots stored after the previous regeneration ([`crate::regen::slots`]). When set,
+    /// each item naming one body is compared with its stored lineage signature.
+    pub slots: Option<&'a crate::regen::slots::SlotTable>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -187,6 +190,9 @@ pub struct RegenResult {
     pub diagnostics: DiagnosticReport,
     pub stats: ResolutionStats,
     pub final_key: CacheKey,
+    /// Stored body slots compared with this regeneration (empty unless
+    /// [`RegenContext::slots`] was set).
+    pub slots: Vec<crate::regen::slots::SlotRow>,
 }
 
 impl RegenResult {
@@ -441,6 +447,7 @@ pub fn regenerate_metered(
         diagnostics: run.diags,
         stats: run.stats,
         final_key: prev,
+        slots: Vec::new(),
     };
     if !doc.pmi.is_empty() {
         let pmi = resolve_pmi_with(
@@ -455,6 +462,11 @@ pub fn regenerate_metered(
         );
         result.diagnostics.append(&pmi.diagnostics);
         result.pmi = pmi;
+    }
+    if let Some(stored) = ctx.slots {
+        let (rows, diags) = crate::regen::slots::compare_slots(stored, doc, &result);
+        result.diagnostics.append(&diags);
+        result.slots = rows;
     }
     result
 }
@@ -1168,7 +1180,11 @@ impl<'a, 'b> Run<'a, 'b> {
             unreachable!("sketch state")
         };
         match build_loops(sketch, &solved, &p.loops) {
-            Ok(loops) => Ok(CanonicalProfile { frame, loops }),
+            Ok(loops) => Ok(CanonicalProfile {
+                frame,
+                loops,
+                merge_collinear: p.merge_collinear,
+            }),
             Err(msg) => {
                 Err(self.error(f, Some(param), DiagCode::SketchOpenProfile, msg, Vec::new()))
             }

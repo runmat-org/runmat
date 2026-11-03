@@ -200,6 +200,7 @@ impl Env {
             lock: self.lock.as_ref(),
             catalog: self.catalog.as_ref().map(|c| c as &dyn PublishedCatalog),
             policy: self.policy,
+            slots: None,
         }
     }
 

@@ -340,3 +340,78 @@ fn v08_feature_parameters_read_published_values_and_no_catalog_is_specific() {
         .fold(f64::MIN, f64::max);
     assert!(approx(top, 0.020), "{}", top);
 }
+
+// ================================================== dependency graph and change impact
+
+#[test]
+fn published_reads_enter_the_dependency_graph_and_change_impact() {
+    use runmat_cad::config::{affected_by_published, Because};
+    use runmat_cad::ids::ConfigurationName;
+    use runmat_cad::regen::DependencyGraph;
+    use runmat_cad::value::ValueXref;
+    let mut d = consumer("frames/a.part", "width", XrefContext::Live);
+    // A hole pitch read straight from the skeleton, through a let.
+    d.lets.push(LetDecl {
+        name: LetName::new("pitch"),
+        kind: Some(QuantityKindId::new("length")),
+        value: ValueExpr::published(SKELETON, "pitch", XrefContext::Live),
+    });
+    d.features.push(Feature::new(
+        "deep",
+        FeatureKind::Extrude(Extrude {
+            profile: ProfileRef::sketch("s1"),
+            extent: Extent::Blind {
+                distance: ValueExpr::let_("pitch"),
+            },
+            reverse: true,
+            mode: BodyMode::add(),
+        }),
+    ));
+    // `wide` overrides the published width; `lite` suppresses the let reader.
+    let mut wide = Configuration {
+        name: ConfigurationName::new("wide"),
+        ..Default::default()
+    };
+    wide.overrides.insert(InputName::new("width"), mm(120.0));
+    let mut lite = Configuration {
+        name: ConfigurationName::new("lite"),
+        ..Default::default()
+    };
+    lite.suppress.insert(fid("deep"));
+    lite.overrides.insert(InputName::new("width"), mm(90.0));
+    d.configurations.push(wide);
+    d.configurations.push(lite);
+
+    let g = DependencyGraph::analyse(&d);
+    let x_width = ValueXref {
+        file: FilePath::new(SKELETON),
+        name: PublishName::new("width"),
+        context: XrefContext::Live,
+    };
+    let x_pitch = ValueXref {
+        file: FilePath::new(SKELETON),
+        name: PublishName::new("pitch"),
+        context: XrefContext::Live,
+    };
+    assert!(g.input_published[&InputName::new("width")].contains(&x_width));
+    assert!(g.feature_published[&fid("deep")].contains(&x_pitch));
+    // The published width reaches the sketch through the input, and everything after it.
+    let a = g.affected_by_published(std::slice::from_ref(&x_width));
+    assert!(a.features.contains(&fid("s1")) && a.features.contains(&fid("body")));
+    assert!(a.parts.contains(&"bracket".into()));
+
+    // Width moved upstream: the default configuration changes; `wide` and `lite` override it.
+    let imp = affected_by_published(&d, std::slice::from_ref(&x_width));
+    assert!(imp.affected[&None].contains(&Because::Published {
+        value: x_width.clone()
+    }));
+    assert!(imp.unaffected.contains(&ConfigurationName::new("wide")));
+    assert!(imp.unaffected.contains(&ConfigurationName::new("lite")));
+    // Pitch moved: `wide` reads it through `deep`; `lite` suppresses `deep`.
+    let imp = affected_by_published(&d, std::slice::from_ref(&x_pitch));
+    let wide_why = &imp.affected[&Some(ConfigurationName::new("wide"))];
+    assert!(wide_why.contains(&Because::Feature {
+        feature: fid("deep")
+    }));
+    assert!(imp.unaffected.contains(&ConfigurationName::new("lite")));
+}

@@ -80,6 +80,10 @@ pub struct ProfileRef {
     /// Each loop listed by its curves. Empty: every closed loop of the sketch.
     #[serde(default)]
     pub loops: Vec<Vec<SketchEntityId>>,
+    /// Merge the side faces of collinear profile curves into one face. Off by default: each
+    /// sketch curve makes its own face.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub merge_collinear: bool,
 }
 
 impl ProfileRef {
@@ -87,6 +91,7 @@ impl ProfileRef {
         Self {
             sketch: FeatureId::new(id),
             loops: Vec::new(),
+            merge_collinear: false,
         }
     }
 }

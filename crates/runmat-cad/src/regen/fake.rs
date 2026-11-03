@@ -29,7 +29,11 @@
 // Grid code indexes several per-axis arrays in step; index loops read clearer than zips here.
 #![allow(clippy::needless_range_loop)]
 
+mod extra;
 mod sampled;
+mod sheet;
+
+pub use sheet::FakeSheet;
 
 use crate::model::datum::Frame;
 use crate::refs::history::*;
@@ -436,6 +440,8 @@ fn signed_permutation(t: &Transform) -> Option<[(usize, f64); 3]> {
 enum Tool {
     Exact(Prism),
     Sampled(Box<sampled::Sampled>),
+    /// A closed set of labelled polygons (thickened or knitted sheets).
+    Polys(Box<sheet::PolyTool>),
 }
 
 impl Tool {
@@ -443,6 +449,7 @@ impl Tool {
         match self {
             Tool::Exact(t) => t.inside(p),
             Tool::Sampled(t) => t.inside(p),
+            Tool::Polys(t) => t.inside(p),
         }
     }
 
@@ -450,6 +457,7 @@ impl Tool {
         match self {
             Tool::Exact(t) => t.breaks(out),
             Tool::Sampled(t) => t.breaks(out),
+            Tool::Polys(t) => t.breaks(out),
         }
     }
 
@@ -476,6 +484,33 @@ impl Tool {
                 };
                 (s.label.clone(), kind)
             }),
+            Tool::Polys(t) => t.label(plane, cen, a, b),
+        }
+    }
+
+    /// Replace labels by `f` (where it returns one).
+    fn map_labels(&mut self, f: &dyn Fn(&HistorySource) -> Option<HistorySource>) {
+        let mut fix = |l: &mut HistorySource| {
+            if let Some(n) = f(l) {
+                *l = n;
+            }
+        };
+        match self {
+            Tool::Exact(t) => {
+                fix(&mut t.lo_label);
+                fix(&mut t.hi_label);
+                for l in &mut t.edge_labels {
+                    for x in l {
+                        fix(x);
+                    }
+                }
+            }
+            Tool::Sampled(t) => t.map_labels(&mut fix),
+            Tool::Polys(t) => {
+                for (_, l) in &mut t.facets {
+                    fix(l);
+                }
+            }
         }
     }
 
@@ -483,6 +518,19 @@ impl Tool {
         match self {
             Tool::Exact(t) => t.relabel(seed, instance),
             Tool::Sampled(t) => t.relabel(seed, instance),
+            Tool::Polys(t) => {
+                for (_, l) in &mut t.facets {
+                    if let HistorySource::Generated {
+                        seed: sd,
+                        instance: inst,
+                        ..
+                    } = l
+                    {
+                        *sd = Some(seed);
+                        *inst = Some(instance.clone());
+                    }
+                }
+            }
         }
     }
 
@@ -493,6 +541,23 @@ impl Tool {
                 None => Tool::Sampled(Box::new(p.to_sampled().transformed(t))),
             },
             Tool::Sampled(s) => Tool::Sampled(Box::new(s.transformed(t))),
+            Tool::Polys(p) => {
+                let facets = p
+                    .facets
+                    .iter()
+                    .map(|(f, l)| {
+                        let mut g = f.clone();
+                        for lp in &mut g.loops {
+                            for q in lp.iter_mut() {
+                                *q = t.apply(*q);
+                            }
+                        }
+                        g.normal = t.apply_vector(f.normal);
+                        (g, l.clone())
+                    })
+                    .collect();
+                Tool::Polys(Box::new(sheet::PolyTool::new(facets)))
+            }
         }
     }
 }
@@ -626,6 +691,10 @@ struct GridJob<'a> {
     body_label: Option<Vec<HistorySource>>,
     /// A shell or draft applied to the (single) operand in `Mode::Keep`.
     modifier: Option<Modifier>,
+    /// Side faces of collinear profile curves merge into one face (the definition asked).
+    merge_collinear: bool,
+    /// Tools removed from the operands before `tools` combine (a flange trimming its sheet).
+    carve: Vec<Tool>,
 }
 
 #[derive(Clone, Debug)]
@@ -645,6 +714,8 @@ struct DraftSpec {
     pull: [f64; 3],
     tan: f64,
     reach: f64,
+    /// Outward offset of the face plane (offset face, push-pull); zero for a draft.
+    shift: f64,
 }
 
 impl DraftSpec {
@@ -663,7 +734,8 @@ impl DraftSpec {
         let h = (0..3)
             .map(|a| (p[a] - self.origin[a]) * self.pull[a])
             .sum::<f64>();
-        (self.plane.dir as f64) * (p[self.plane.axis] - self.plane.offset) < -self.tan * h
+        (self.plane.dir as f64) * (p[self.plane.axis] - self.plane.offset) - self.shift
+            < -self.tan * h
     }
 
     fn normal(&self) -> [f64; 3] {
@@ -681,6 +753,17 @@ impl DraftSpec {
 enum Modifier {
     Shell(ShellSpec),
     Draft(Vec<DraftSpec>),
+    /// Delete faces and heal: the region the deleted faces bound is filled (a cavity) or
+    /// cleared (a protrusion); neighbours extend over it on their own planes.
+    Fill(FillSpec),
+}
+
+#[derive(Clone, Debug)]
+struct FillSpec {
+    faces: BTreeSet<u32>,
+    lo: [f64; 3],
+    hi: [f64; 3],
+    cavity: bool,
 }
 
 fn rect_distance(p: [f64; 3], r: &Rect) -> f64 {
@@ -717,6 +800,48 @@ fn dedup_sorted(mut v: Vec<f64>) -> Vec<f64> {
     out
 }
 
+/// Whether two coplanar, adjacent planar facets belong to one face. Faces from different
+/// sources merge where they are flush (a tool cap flush with an operand face, two operands
+/// meeting in a union). Two faces that were already separate stay separate: distinct faces of
+/// one operand, and side faces of distinct profile curves (collinear sketch lines), unless the
+/// definition asks for collinear sides to merge.
+fn coplanar_may_merge(a: &[HistorySource], b: &[HistorySource], merge_collinear: bool) -> bool {
+    if a.iter().any(|l| b.contains(l)) {
+        return true;
+    }
+    let side_curve = |l: &HistorySource| {
+        matches!(
+            l,
+            HistorySource::Generated {
+                role: Role::Side,
+                tag: KernelTag::Curve { .. },
+                ..
+            }
+        )
+    };
+    if !a.is_empty() && !b.is_empty() && a.iter().all(side_curve) && b.iter().all(side_curve) {
+        return merge_collinear;
+    }
+    let operand_of = |ls: &[HistorySource]| -> Option<u32> {
+        let mut op = None;
+        for l in ls {
+            match l {
+                HistorySource::Input { from } => match op {
+                    None => op = Some(from.operand),
+                    Some(o) if o == from.operand => {}
+                    Some(_) => return None,
+                },
+                _ => return None,
+            }
+        }
+        op
+    };
+    match (operand_of(a), operand_of(b)) {
+        (Some(x), Some(y)) => x != y,
+        _ => true,
+    }
+}
+
 fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
     let mut breaks: [Vec<f64>; 3] = [Vec::new(), Vec::new(), Vec::new()];
     for o in &job.operands {
@@ -724,7 +849,7 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
             breaks[a].extend(o.grid[a].iter().copied());
         }
     }
-    for t in &job.tools {
+    for t in job.tools.iter().chain(&job.carve) {
         t.breaks(&mut breaks);
     }
     if let Some((a, c, _)) = job.split {
@@ -741,6 +866,12 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                         breaks[pk.axis].push(pk.offset - (pk.dir as f64) * sh.thickness);
                     }
                 }
+            }
+        }
+        Some(Modifier::Fill(fs)) => {
+            for a in 0..3 {
+                breaks[a].push(fs.lo[a]);
+                breaks[a].push(fs.hi[a]);
             }
         }
         Some(Modifier::Draft(ds)) => {
@@ -799,8 +930,9 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                 let c = [x, y, z];
                 let p = center(c);
                 let i = idx(c);
+                let carved = job.carve.iter().any(|t| t.inside(p));
                 for (k, o) in job.operands.iter().enumerate() {
-                    if o.contains(p) {
+                    if o.contains(p) && !carved {
                         owners[i] |= 1 << k;
                     }
                 }
@@ -833,6 +965,16 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                         });
                         if cavity {
                             occ[i] = false;
+                        }
+                    }
+                    Some(Modifier::Fill(fs)) => {
+                        if (0..3).all(|a| p[a] > fs.lo[a] - EPS && p[a] < fs.hi[a] + EPS) {
+                            occ[i] = fs.cavity;
+                            if fs.cavity {
+                                owners[i] |= 1;
+                            } else {
+                                owners[i] = 0;
+                            }
                         }
                     }
                     Some(Modifier::Draft(ds)) => {
@@ -1066,6 +1208,11 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                     continue;
                 }
                 for (fi, face) in o.faces.iter().enumerate() {
+                    if let Some(Modifier::Fill(fs)) = &job.modifier {
+                        if fs.faces.contains(&(fi as u32)) {
+                            continue;
+                        }
+                    }
                     if face.lies_on(&plane, cen) {
                         ls.push(HistorySource::Input {
                             from: OperandEntity {
@@ -1123,6 +1270,29 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                 });
             }
         }
+        if let (true, Some(Modifier::Fill(fs))) = (ls.is_empty(), &job.modifier) {
+            let o = job.operands[0];
+            let mut best: Option<(f64, usize)> = None;
+            for (fi, face) in o.faces.iter().enumerate() {
+                if fs.faces.contains(&(fi as u32)) {
+                    continue;
+                }
+                if face.plane.map(|p| p.same(&plane)).unwrap_or(false) {
+                    let d = face_distance(cen, face);
+                    if best.map(|b| d < b.0).unwrap_or(true) {
+                        best = Some((d, fi));
+                    }
+                }
+            }
+            if let Some((_, fi)) = best {
+                ls.push(HistorySource::Input {
+                    from: OperandEntity {
+                        operand: job.operand_ids[0],
+                        entity: fi as u32,
+                    },
+                });
+            }
+        }
         if let Some(Modifier::Shell(sh)) = &job.modifier {
             let o = job.operands[0];
             for l in ls.iter_mut() {
@@ -1163,7 +1333,7 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
             }
         }
         if ls.is_empty() {
-            for t in &job.tools {
+            for t in job.tools.iter().chain(&job.carve) {
                 if let Some((l, k)) = t.label(&plane, cen, cin, cout) {
                     ls.push(l);
                     kind = k;
@@ -1196,7 +1366,8 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
         kinds.push(kind);
     }
 
-    // Faces: planar facets join coplanar neighbours (so flush faces merge); a faceted facet
+    // Faces: planar facets join coplanar neighbours (so flush faces merge, see
+    // [`coplanar_may_merge`]); a faceted facet
     // joins any facet sharing a facet edge and a label (one curved surface, one face).
     let mut fparent: Vec<usize> = (0..facets.len()).collect();
     for (fi, f) in facets.iter().enumerate() {
@@ -1213,6 +1384,7 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                 if facets[gj].comp == f.comp
                     && kinds[gj] == FacetKind::Planar
                     && facet_plane(&facets[gj]).same(&facet_plane(f))
+                    && coplanar_may_merge(&labels[fi], &labels[gj], job.merge_collinear)
                 {
                     let (ra, rb) = (find(&mut fparent, fi), find(&mut fparent, gj));
                     if ra != rb {
@@ -1581,6 +1753,7 @@ fn build_topology(s: &mut FakeSolid) {
                         end: wb,
                         length: (wb[r.along] - wa[r.along]).abs(),
                     },
+                    laminar: false,
                 },
                 EdgeMeta {
                     along: r.along,
@@ -1625,6 +1798,7 @@ fn build_topology(s: &mut FakeSolid) {
                     end: wb,
                     length,
                 },
+                laminar: false,
             },
             EdgeMeta {
                 along: r.along,
@@ -1716,6 +1890,7 @@ fn build_topology(s: &mut FakeSolid) {
                     EdgeTopo {
                         faces: [e.faces[0], fidx],
                         geom: e.geom,
+                        laminar: false,
                     },
                     meta2,
                     ends.clone(),
@@ -1724,6 +1899,7 @@ fn build_topology(s: &mut FakeSolid) {
                     EdgeTopo {
                         faces: [fidx, e.faces[1]],
                         geom: e.geom,
+                        laminar: false,
                     },
                     meta2,
                     ends,
@@ -2247,6 +2423,9 @@ impl CadKernel for FakeKernel {
         op: &KernelOp,
         operands: &[&BodyHandle],
     ) -> Result<KernelOutput, KernelError> {
+        if let Some(out) = self.execute_extra(op, operands) {
+            return out;
+        }
         let solids: Vec<&FakeSolid> = (0..operands.len())
             .map(|i| Self::solid(operands, i))
             .collect::<Result<_, _>>()?;
@@ -2273,6 +2452,8 @@ impl CadKernel for FakeKernel {
                     separate_tools: false,
                     body_label: None,
                     modifier: None,
+                    merge_collinear: t.shape.merge_collinear(),
+                    carve: Vec::new(),
                 })?;
                 if mode == Mode::New {
                     self.finish(&[], &[], res, Vec::new(), Vec::new())
@@ -2313,6 +2494,8 @@ impl CadKernel for FakeKernel {
                     separate_tools: false,
                     body_label: None,
                     modifier: None,
+                    merge_collinear: false,
+                    carve: Vec::new(),
                 })?;
                 self.finish(&solids, &ids, res, Vec::new(), Vec::new())
             }
@@ -2364,6 +2547,8 @@ impl CadKernel for FakeKernel {
                         separate_tools: false,
                         body_label: None,
                         modifier: None,
+                        merge_collinear: false,
+                        carve: Vec::new(),
                     };
                     let res = run_grid(job)?;
                     let mut out = self.finish(
@@ -2420,6 +2605,8 @@ impl CadKernel for FakeKernel {
                         open,
                         thickness: *thickness,
                     })),
+                    merge_collinear: false,
+                    carve: Vec::new(),
                 })?;
                 self.finish(&solids, &ids, res, Vec::new(), Vec::new())
             }
@@ -2474,6 +2661,7 @@ impl CadKernel for FakeKernel {
                             pull,
                             tan,
                             reach: tan.abs() * max_h + EPS,
+                            shift: 0.0,
                         });
                     }
                     let job = GridJob {
@@ -2485,6 +2673,8 @@ impl CadKernel for FakeKernel {
                         separate_tools: false,
                         body_label: None,
                         modifier: (!specs.is_empty()).then_some(Modifier::Draft(specs)),
+                        merge_collinear: false,
+                        carve: Vec::new(),
                     };
                     let res = run_grid(job)?;
                     let mut out = self.finish(&[so], &[k as u32], res, Vec::new(), Vec::new())?;
@@ -2513,6 +2703,8 @@ impl CadKernel for FakeKernel {
                     separate_tools: false,
                     body_label: None,
                     modifier: None,
+                    merge_collinear: false,
+                    carve: Vec::new(),
                 })?;
                 let mut extra = Vec::new();
                 for inst in instances {
@@ -2536,6 +2728,8 @@ impl CadKernel for FakeKernel {
                                     instance: inst.key.clone(),
                                 }]),
                                 modifier: None,
+                                merge_collinear: false,
+                                carve: Vec::new(),
                             })?;
                             for ((c, f), b) in res
                                 .solids
@@ -2609,6 +2803,8 @@ impl CadKernel for FakeKernel {
                     separate_tools: false,
                     body_label: None,
                     modifier: None,
+                    merge_collinear: false,
+                    carve: Vec::new(),
                 })?;
                 let mut extra = Vec::new();
                 if *keep_tools && mode != Mode::BoolUnion {
@@ -2622,6 +2818,8 @@ impl CadKernel for FakeKernel {
                             separate_tools: false,
                             body_label: None,
                             modifier: None,
+                            merge_collinear: false,
+                            carve: Vec::new(),
                         })?;
                         for ((s, f), b) in alone
                             .solids
@@ -2657,6 +2855,8 @@ impl CadKernel for FakeKernel {
                         separate_tools: false,
                         body_label: None,
                         modifier: None,
+                        merge_collinear: false,
+                        carve: Vec::new(),
                     };
                     let res = run_grid(job)?;
                     let mut out = self.finish(&[so], &[k as u32], res, Vec::new(), Vec::new())?;
@@ -2696,6 +2896,8 @@ impl CadKernel for FakeKernel {
                                 },
                             }]),
                             modifier: None,
+                            merge_collinear: false,
+                            carve: Vec::new(),
                         })?;
                         let mut out = self.finish(&[], &[], res, Vec::new(), Vec::new())?;
                         // Faces and the body continue the operand's.
@@ -2751,6 +2953,8 @@ impl CadKernel for FakeKernel {
                     separate_tools: false,
                     body_label: None,
                     modifier: None,
+                    merge_collinear: false,
+                    carve: Vec::new(),
                 })?;
                 self.finish(&refs, &ids, res, Vec::new(), Vec::new())
             }
@@ -2809,9 +3013,18 @@ impl CadKernel for FakeKernel {
                     separate_tools: true,
                     body_label: Some(body_labels),
                     modifier: None,
+                    merge_collinear: false,
+                    carve: Vec::new(),
                 })?;
                 self.finish(&[], &[], res, Vec::new(), Vec::new())
             }
+            // Handled by `execute_extra`.
+            KernelOp::Labeled { .. }
+            | KernelOp::MoveFaces { .. }
+            | KernelOp::DeleteFaces { .. }
+            | KernelOp::ReplaceFaces { .. }
+            | KernelOp::Scale { .. }
+            | KernelOp::Surface(_) => unreachable!("dispatched first"),
         }
     }
 }

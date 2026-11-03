@@ -781,7 +781,30 @@ impl<'a> Resolver<'a> {
                     }
                 }
             }
-            TopoKind::Edge | TopoKind::Vertex => {
+            TopoKind::Edge => {
+                // A surface body's boundary edge carries a name of its own.
+                for (bi, body) in self.bodies.iter().enumerate() {
+                    for (ei, names) in &body.names.boundaries {
+                        if names.iter().any(|n| name.matches(n)) {
+                            let h = EntityHandle {
+                                body: bi as u32,
+                                kind,
+                                index: *ei,
+                            };
+                            out.insert(h);
+                            exact_names.insert(h, names.iter().cloned().collect());
+                        }
+                    }
+                }
+                if out.is_empty() && !self.bodies.iter().any(|b| !b.names.boundaries.is_empty())
+                {
+                    return Err(Stop::Fail(RefProblem::KindMismatch {
+                        expected: TopoKind::Face,
+                        found: kind,
+                    }));
+                }
+            }
+            TopoKind::Vertex => {
                 return Err(Stop::Fail(RefProblem::KindMismatch {
                     expected: TopoKind::Face,
                     found: kind,

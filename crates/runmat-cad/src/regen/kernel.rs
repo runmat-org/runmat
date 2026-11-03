@@ -7,8 +7,8 @@
 
 use crate::ids::SketchEntityId;
 use crate::model::datum::Frame;
-use crate::refs::history::{OpHistory, OperandEntity, Topology};
-use crate::refs::name::InstanceKey;
+use crate::refs::history::{KernelTag, OpHistory, OperandEntity, Topology};
+use crate::refs::name::{InstanceKey, PlaneSide, Role};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::fmt;
@@ -118,6 +118,10 @@ pub struct ProfileSegment {
 pub struct CanonicalProfile {
     pub frame: Frame,
     pub loops: Vec<Vec<ProfileSegment>>,
+    /// Side faces of collinear (or co-circular) profile curves merge into one face. Off by
+    /// default: each profile curve makes its own side face, as the sketch drew it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub merge_collinear: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,6 +176,19 @@ pub enum ToolShape {
         counterbore: Option<(f64, f64)>,
         countersink: Option<(f64, f64)>,
     },
+}
+
+impl ToolShape {
+    /// Whether the definition asked collinear profile sides to merge.
+    pub fn merge_collinear(&self) -> bool {
+        match self {
+            ToolShape::Prism { profile, .. }
+            | ToolShape::Revolve { profile, .. }
+            | ToolShape::Sweep { profile, .. } => profile.merge_collinear,
+            ToolShape::Loft { profiles } => profiles.iter().all(|p| p.merge_collinear),
+            ToolShape::Holes { .. } => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -411,6 +428,65 @@ impl Transform {
     }
 }
 
+/// The label an operation asks the kernel to give the faces one tool surface makes.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct FaceLabel {
+    pub role: Role,
+    pub tag: KernelTag,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ordinal: Option<u32>,
+}
+
+impl FaceLabel {
+    pub fn key(role: Role, key: impl Into<String>) -> Self {
+        FaceLabel {
+            role,
+            tag: KernelTag::Key { key: key.into() },
+            ordinal: None,
+        }
+    }
+    pub fn with_ordinal(mut self, ordinal: u32) -> Self {
+        self.ordinal = Some(ordinal);
+        self
+    }
+}
+
+/// A tool whose faces carry labels the design layer chose: what sheet metal flanges and
+/// bends, structural members, end caps, gussets, weld beads, ribs, embosses and form tools
+/// lower to. The shape is built as for [`ToolOp`]; each face it makes takes the label of the
+/// surface that made it (`sides` by profile curve, `start`/`end` caps). A curve with no entry,
+/// or a cap with none, keeps the default label ([`Role::Side`] with the curve,
+/// [`Role::StartCap`], [`Role::EndCap`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LabeledTool {
+    pub shape: ToolShape,
+    #[serde(default)]
+    pub sides: Vec<(SketchEntityId, FaceLabel)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<FaceLabel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<FaceLabel>,
+    /// The body's label when this tool alone makes a new body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<FaceLabel>,
+}
+
+/// How the moved faces of a direct edit move.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "motion")]
+pub enum FaceMotion {
+    /// Along each face's own normal by a signed distance (offset face, push-pull).
+    Offset { distance: f64 },
+    /// A rigid translation of the faces; neighbours stretch to follow.
+    Translate { vector: [f64; 3] },
+    /// A rotation about an axis; neighbours stretch to follow.
+    Rotate {
+        axis_point: [f64; 3],
+        axis_direction: [f64; 3],
+        angle: f64,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Instance {
     pub key: InstanceKey,
@@ -465,6 +541,84 @@ pub enum KernelOp {
         source: String,
         digest: String,
     },
+    /// Labelled tools combined with every operand. `carve` tools are removed from the
+    /// operands first (a flange trimming the sheet it grows from), then `tools` are combined.
+    /// With `Combine::New` and `separate`, each tool makes its own body (structural members).
+    Labeled {
+        tools: Vec<LabeledTool>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        carve: Vec<LabeledTool>,
+        combine: Combine,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        separate: bool,
+    },
+    /// Move faces of one body (direct edit); neighbours extend or trim to keep it closed.
+    /// History: moved faces continue their inputs (modified).
+    MoveFaces {
+        faces: Vec<OperandEntity>,
+        motion: FaceMotion,
+    },
+    /// Delete faces of one body. `heal`: neighbours extend to close the gap (a removed hole,
+    /// pocket, boss or blend); otherwise the result is a surface body with the opening.
+    DeleteFaces {
+        faces: Vec<OperandEntity>,
+        heal: bool,
+    },
+    /// Replace faces of operand 0 by a face of operand 1 (a surface body); the material
+    /// between them is added or removed.
+    ReplaceFaces {
+        faces: Vec<OperandEntity>,
+        with: OperandEntity,
+    },
+    /// Scale every operand about `center` by per-axis factors (a mold shrink allowance).
+    Scale {
+        center: [f64; 3],
+        factors: [f64; 3],
+    },
+    /// Surface bodies (open sheets) from canonical patches.
+    Surface(SurfaceOp),
+}
+
+/// Surface-body operations. Faces of surface bodies follow the same history contract;
+/// a surface body's boundary edges name their one face twice ([`crate::refs::history::EdgeTopo`]
+/// with `faces[0] == faces[1]`, `laminar`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "surface")]
+pub enum SurfaceOp {
+    /// Planar patches, one per labelled polygon (frame plus loops; first loop outer).
+    Planar { patches: Vec<SurfacePatch> },
+    /// Open or closed profile chains swept by a tool shape into sheets: every profile curve
+    /// gives a face (no caps).
+    Swept { tool: LabeledTool },
+    /// Offset the operands' faces (all, or `faces`) by a signed distance along their normals.
+    Offset {
+        #[serde(default)]
+        faces: Vec<OperandEntity>,
+        distance: f64,
+    },
+    /// Knit sheets sharing boundary edges into one; `solid` closes a watertight set into a solid.
+    Knit { solid: bool },
+    /// Thicken a sheet into a solid along its normal (`distance` signed; `both` centres it).
+    Thicken {
+        distance: f64,
+        #[serde(default)]
+        both: bool,
+    },
+    /// Trim sheets by a plane, keeping the side `keep` (by the frame's z).
+    Trim { frame: Frame, keep: PlaneSide },
+    /// Extend boundary edges of a sheet by a distance in their face's plane.
+    Extend {
+        edges: Vec<OperandEntity>,
+        distance: f64,
+    },
+    /// The mid-surface of a thin solid: one patch per pair of opposite parallel faces.
+    MidSurface { pairs: Vec<(OperandEntity, OperandEntity)> },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SurfacePatch {
+    pub profile: CanonicalProfile,
+    pub label: FaceLabel,
 }
 
 impl KernelOp {
@@ -481,6 +635,12 @@ impl KernelOp {
             KernelOp::Split { .. } => "split",
             KernelOp::Transform { .. } => "transform",
             KernelOp::Import { .. } => "import",
+            KernelOp::Labeled { .. } => "labeled",
+            KernelOp::MoveFaces { .. } => "move_faces",
+            KernelOp::DeleteFaces { .. } => "delete_faces",
+            KernelOp::ReplaceFaces { .. } => "replace_faces",
+            KernelOp::Scale { .. } => "scale",
+            KernelOp::Surface(_) => "surface",
         }
     }
 }

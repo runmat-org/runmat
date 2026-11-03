@@ -84,6 +84,61 @@ pub enum Role {
     SplitFace,
     /// A body a feature made.
     Body,
+    // ----------------------------------------------------------------- direct edits
+    /// The face that replaced another (replace face), tagged by the face it replaced.
+    Replacement,
+    // ---------------------------------------------------------------------- surfaces
+    /// A surface body's boundary edge, tagged by the profile curve it runs along or ends;
+    /// ordinal 0 at the start cap, 1 at the end cap, 2 at the curve's start point, 3 at its
+    /// end point (none: the curve itself, for a planar patch).
+    Boundary,
+    /// A patch a surface feature made (planar, boundary, fill), tagged by key or curve.
+    SurfacePatch,
+    /// An offset surface's face, tagged by the face it offsets.
+    OffsetFace,
+    /// The strip an extend added past a boundary edge, tagged by the edge's key.
+    Extension,
+    /// A thicken's far face, tagged by the face it offsets.
+    ThickenFace,
+    /// A thicken's rim along a boundary edge, tagged by the edge's key.
+    ThickenRim,
+    /// A mid-surface face, tagged by the face pair key.
+    MidSurface,
+    /// A ruled surface along an edge, tagged by the edge's key.
+    Ruled,
+    // ------------------------------------------------------------------ sheet metal
+    /// A sheet's flat face, tagged by flange key; ordinal 0 is the reference side, 1 the
+    /// opposite side.
+    SheetFace,
+    /// A sheet's thickness face (an edge of the sheet), tagged by flange key and edge.
+    SheetEdge,
+    /// A bend's cylindrical face, tagged by bend key; ordinal 0 inside, 1 outside.
+    BendFace,
+    /// A relief cut's wall, tagged by the relief key.
+    Relief,
+    /// A face a form tool made, tagged by tool face key.
+    FormFace,
+    // -------------------------------------------------------------------- weldments
+    /// A structural member's side, tagged `member/profile-curve`.
+    MemberSide,
+    /// A structural member's end face; ordinal 0 start, 1 end.
+    MemberEnd,
+    /// A weldment end cap's face, tagged by cap key.
+    CapPlate,
+    /// A gusset's face, tagged by gusset key.
+    Gusset,
+    /// A weld bead's face, tagged by bead key.
+    WeldBead,
+    // ------------------------------------------------------------------------ mold
+    /// A parting or shut-off face of a core/cavity split, tagged by key.
+    PartingFace,
+    // ---------------------------------------------------------------------- details
+    /// A modelled thread's face, tagged by the face it threads.
+    ThreadFace,
+    /// The top face of an emboss or deboss, tagged by profile key.
+    EmbossTop,
+    /// A rib's face, tagged by profile curve.
+    Rib,
 }
 
 impl Role {
@@ -103,6 +158,29 @@ impl Role {
             Role::ShellRim => "rim",
             Role::SplitFace => "split_face",
             Role::Body => "body",
+            Role::Replacement => "replacement",
+            Role::Boundary => "boundary",
+            Role::SurfacePatch => "patch",
+            Role::OffsetFace => "offset",
+            Role::Extension => "extension",
+            Role::ThickenFace => "thicken",
+            Role::ThickenRim => "thicken_rim",
+            Role::MidSurface => "mid_surface",
+            Role::Ruled => "ruled",
+            Role::SheetFace => "sheet",
+            Role::SheetEdge => "sheet_edge",
+            Role::BendFace => "bend",
+            Role::Relief => "relief",
+            Role::FormFace => "form",
+            Role::MemberSide => "member_side",
+            Role::MemberEnd => "member_end",
+            Role::CapPlate => "cap_plate",
+            Role::Gusset => "gusset",
+            Role::WeldBead => "weld_bead",
+            Role::PartingFace => "parting",
+            Role::ThreadFace => "thread",
+            Role::EmbossTop => "emboss_top",
+            Role::Rib => "rib",
         }
     }
 }

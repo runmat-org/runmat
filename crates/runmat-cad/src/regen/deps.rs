@@ -14,6 +14,7 @@ use crate::ids::{
 use crate::model::items::PublishTarget;
 use crate::model::{BodyMode, FeatureKind, PartDocument};
 use crate::refs::Reference;
+use crate::value::ValueXref;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -28,6 +29,14 @@ pub struct DependencyGraph {
     pub part_deps: BTreeMap<PartName, BTreeSet<FeatureId>>,
     pub region_deps: BTreeMap<RegionName, BTreeSet<FeatureId>>,
     pub publish_deps: BTreeMap<PublishName, BTreeSet<FeatureId>>,
+    /// Published values (from other files) each feature reads in its own parameters or
+    /// through lets, transitively.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub feature_published: BTreeMap<FeatureId, BTreeSet<ValueXref>>,
+    /// Published values each input's default reads (directly or through lets). A
+    /// configuration overriding the input does not see them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub input_published: BTreeMap<InputName, BTreeSet<ValueXref>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +90,59 @@ impl DependencyGraph {
             let mut stack = BTreeSet::new();
             let_closure(&l.name, &lets, &mut let_inputs, &mut stack);
         }
+        // Let → published values, transitively.
+        fn let_published(
+            name: &LetName,
+            lets: &BTreeMap<&LetName, &crate::value::LetDecl>,
+            memo: &mut BTreeMap<LetName, BTreeSet<ValueXref>>,
+            stack: &mut BTreeSet<LetName>,
+        ) -> BTreeSet<ValueXref> {
+            if let Some(v) = memo.get(name) {
+                return v.clone();
+            }
+            if !stack.insert(name.clone()) {
+                return BTreeSet::new();
+            }
+            let mut out = BTreeSet::new();
+            if let Some(d) = lets.get(name) {
+                let mut xs = Vec::new();
+                d.value.collect_published(&mut xs);
+                out.extend(xs.into_iter().cloned());
+                let mut ins = BTreeSet::new();
+                let mut ls = BTreeSet::new();
+                d.value.collect_names(&mut ins, &mut ls);
+                for l in ls {
+                    out.extend(let_published(&l, lets, memo, stack));
+                }
+            }
+            stack.remove(name);
+            memo.insert(name.clone(), out.clone());
+            out
+        }
+        let mut let_pub: BTreeMap<LetName, BTreeSet<ValueXref>> = BTreeMap::new();
+        for l in &doc.lets {
+            let mut stack = BTreeSet::new();
+            let_published(&l.name, &lets, &mut let_pub, &mut stack);
+        }
+        // Published values an expression reads, directly or through lets.
+        let expr_published = |e: &crate::value::ValueExpr| -> BTreeSet<ValueXref> {
+            let mut xs = Vec::new();
+            e.collect_published(&mut xs);
+            let mut out: BTreeSet<ValueXref> = xs.into_iter().cloned().collect();
+            let mut ins = BTreeSet::new();
+            let mut ls = BTreeSet::new();
+            e.collect_names(&mut ins, &mut ls);
+            for l in ls {
+                out.extend(let_pub.get(&l).cloned().unwrap_or_default());
+            }
+            out
+        };
+        for i in &doc.inputs {
+            let p = expr_published(&i.default);
+            if !p.is_empty() {
+                g.input_published.insert(i.name.clone(), p);
+            }
+        }
         // Inputs whose defaults read other inputs.
         let input_inputs: BTreeMap<InputName, BTreeSet<InputName>> = doc
             .inputs
@@ -125,6 +187,13 @@ impl DependencyGraph {
                 ins.extend(input_inputs.get(&d).cloned().unwrap_or_default());
             }
             g.feature_inputs.insert(f.id.clone(), ins);
+            let mut published = BTreeSet::new();
+            for v in f.kind.values() {
+                published.extend(expr_published(v));
+            }
+            if !published.is_empty() {
+                g.feature_published.insert(f.id.clone(), published);
+            }
 
             let refs: Vec<&Reference> = f.kind.references().into_iter().map(|(_, r)| r).collect();
             let mut deps = reference_makers(&refs);
@@ -274,6 +343,45 @@ impl DependencyGraph {
             .filter(|(_, ins)| ins.iter().any(|i| set.contains(i)))
             .map(|(f, _)| f.clone())
             .collect();
+        let features = self.downstream(&roots);
+        self.items(features)
+    }
+
+    /// Features that read any of these published values directly (their own parameters or
+    /// lets) or through an input default, the latter unless the input is in `overridden`.
+    pub fn published_readers(
+        &self,
+        values: &[ValueXref],
+        overridden: &BTreeSet<InputName>,
+    ) -> BTreeSet<FeatureId> {
+        let set: BTreeSet<&ValueXref> = values.iter().collect();
+        let hit_inputs: BTreeSet<&InputName> = self
+            .input_published
+            .iter()
+            .filter(|(i, p)| !overridden.contains(*i) && p.iter().any(|x| set.contains(x)))
+            .map(|(i, _)| i)
+            .collect();
+        self.order
+            .iter()
+            .filter(|f| {
+                self.feature_published
+                    .get(*f)
+                    .map(|p| p.iter().any(|x| set.contains(x)))
+                    .unwrap_or(false)
+                    || self
+                        .feature_inputs
+                        .get(*f)
+                        .map(|ins| ins.iter().any(|i| hit_inputs.contains(i)))
+                        .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// What a change of these published values (in other files) can change, with no
+    /// configuration selected.
+    pub fn affected_by_published(&self, values: &[ValueXref]) -> Affected {
+        let roots = self.published_readers(values, &BTreeSet::new());
         let features = self.downstream(&roots);
         self.items(features)
     }

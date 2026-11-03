@@ -10,6 +10,7 @@
 //!   static dependency graph, returns which configurations can change: a changed default
 //!   reaches the configurations that do not override it, a changed row reaches its own
 //!   configuration, a changed feature reaches every configuration that does not suppress it.
+//!   [`affected_by_published`] does the same when only values published by other files moved.
 //! - **Verify.** [`verify`] regenerates only those configurations (Creo's instance verify,
 //!   limited to affected instances) and reports each one's errors and final key.
 
@@ -198,6 +199,8 @@ pub enum Because {
     Feature { feature: FeatureId },
     Suppression,
     New,
+    /// A value published by another file that the configuration reads changed.
+    Published { value: crate::value::ValueXref },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -304,6 +307,81 @@ pub fn affected_configurations(old: &PartDocument, new: &PartDocument) -> Impact
         .filter(|n| !new_names.contains(n))
         .cloned()
         .collect();
+    impact
+}
+
+/// Which configurations a change of values published by other files can change: a
+/// configuration is affected when an unsuppressed feature reads a changed value (in its own
+/// parameters or lets, or through an input default the configuration does not override), or
+/// when one of its overrides reads one. Used when an upstream file's published value moves and
+/// this file did not change.
+pub fn affected_by_published(doc: &PartDocument, changed: &[crate::value::ValueXref]) -> Impact {
+    let deps = DependencyGraph::analyse(doc);
+    let changed_set: BTreeSet<&crate::value::ValueXref> = changed.iter().collect();
+    let mut impact = Impact::default();
+    let mut judge = |name: Option<ConfigurationName>,
+                     overrides: &BTreeMap<InputName, ValueExpr>,
+                     suppress: &BTreeSet<FeatureId>| {
+        let overridden: BTreeSet<InputName> = overrides.keys().cloned().collect();
+        let mut why = BTreeSet::new();
+        let mut roots = deps.published_readers(changed, &overridden);
+        // Overrides that read a changed value act like changed inputs.
+        let mut hit_overrides = Vec::new();
+        for (input, expr) in overrides {
+            let mut xs = Vec::new();
+            expr.collect_published(&mut xs);
+            for x in xs.into_iter().filter(|x| changed_set.contains(x)) {
+                why.insert(Because::Published { value: x.clone() });
+                hit_overrides.push(input.clone());
+            }
+        }
+        if !hit_overrides.is_empty() {
+            roots.extend(deps.affected_by_inputs(&hit_overrides).features);
+        }
+        let reached: BTreeSet<FeatureId> = deps
+            .downstream(&roots)
+            .into_iter()
+            .filter(|f| !suppress.contains(f))
+            .collect();
+        for f in &roots {
+            if suppress.contains(f) {
+                continue;
+            }
+            let reads = deps
+                .feature_published
+                .get(f)
+                .into_iter()
+                .flatten()
+                .chain(
+                    deps.feature_inputs
+                        .get(f)
+                        .into_iter()
+                        .flatten()
+                        .filter(|i| !overridden.contains(*i))
+                        .flat_map(|i| deps.input_published.get(i).into_iter().flatten()),
+                )
+                .filter(|x| changed_set.contains(x));
+            for x in reads {
+                why.insert(Because::Published { value: x.clone() });
+            }
+        }
+        for f in reached {
+            why.insert(Because::Feature { feature: f });
+        }
+        match (why.is_empty(), name) {
+            (true, Some(n)) => {
+                impact.unaffected.insert(n);
+            }
+            (true, None) => {}
+            (false, n) => {
+                impact.affected.insert(n, why);
+            }
+        }
+    };
+    judge(None, &BTreeMap::new(), &BTreeSet::new());
+    for c in doc.all_configurations() {
+        judge(Some(c.name.clone()), &c.overrides, &c.suppress);
+    }
     impact
 }
 

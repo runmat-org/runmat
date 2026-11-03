@@ -95,7 +95,7 @@ impl Curve2 {
         }
     }
 
-    fn samples(&self) -> usize {
+    pub(super) fn samples(&self) -> usize {
         match self {
             Curve2::Line { .. } => 1,
             Curve2::Arc { sweep, .. } => ((sweep.abs() / (PI / 24.0)).ceil() as usize).max(2),
@@ -104,7 +104,7 @@ impl Curve2 {
     }
 
     /// `n + 1` points from start to end (`n` from [`Curve2::samples`] or more).
-    fn polyline(&self, n: usize) -> Vec<[f64; 2]> {
+    pub(super) fn polyline(&self, n: usize) -> Vec<[f64; 2]> {
         let n = n.max(1);
         (0..=n)
             .map(|i| {
@@ -562,6 +562,12 @@ impl Sampled {
         }
         for (a, c) in &self.exact {
             out[*a].push(*c);
+        }
+    }
+
+    pub(super) fn map_labels(&mut self, fix: &mut dyn FnMut(&mut HistorySource)) {
+        for s in &mut self.surfaces {
+            fix(&mut s.label);
         }
     }
 

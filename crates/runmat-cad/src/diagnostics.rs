@@ -39,6 +39,10 @@ pub enum DiagCode {
     /// A body was split into pieces equally similar to it by lineage; each kept its names.
     #[serde(rename = "cad.ref.body_slot_tie")]
     RefBodySlotTie,
+    /// The body an item names has drifted from its stored lineage signature, or the item no
+    /// longer resolves while live bodies carry its lineage.
+    #[serde(rename = "cad.ref.body_slot_drift")]
+    RefBodySlotDrift,
     /// Two different one-level names produced the same token (never expected; reported, not
     /// overwritten).
     #[serde(rename = "cad.ref.token_collision")]

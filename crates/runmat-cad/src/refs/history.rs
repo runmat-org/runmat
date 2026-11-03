@@ -23,6 +23,11 @@
 //! 6. **Entity ids are positions** in the output body's topology lists. Output order must be
 //!    deterministic for identical inputs (the regeneration cache and the determinism gate rely
 //!    on it), but nothing may depend on it for identity.
+//! 8. **Surface bodies.** A body may be open (a sheet). Its boundary edges are laminar
+//!    ([`EdgeTopo::laminar`], naming their one face twice) and each has one
+//!    [`BoundaryRecord`] with sources, so a boundary edge has a name of its own (two boundary
+//!    edges of one face cannot be told apart by their faces). A body record's sources follow
+//!    the same rules whether the body is a solid or a sheet.
 //! 7. **An operation that cannot report history fails** with
 //!    [`KernelError::HistoryIncomplete`](crate::regen::kernel::KernelError). It never returns a
 //!    body with guessed history.
@@ -133,10 +138,25 @@ pub struct BodyRecord {
     pub sources: Vec<HistorySource>,
 }
 
+/// A boundary (laminar) edge of a surface body: an edge with one face. Its names come from its
+/// sources like a face's: the boundary edge of an input it continues
+/// ([`HistorySource::Input`] with `entity` the input's edge index), or what the operation made
+/// it as ([`HistorySource::Generated`], tagged from the definition: the profile curve end or
+/// cap it lies on).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BoundaryRecord {
+    pub body: u32,
+    pub edge: EntityIndex,
+    pub sources: Vec<HistorySource>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct OpHistory {
     pub faces: Vec<FaceRecord>,
     pub bodies: Vec<BodyRecord>,
+    /// One record per boundary edge of every output surface body (contract rule 8).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundaries: Vec<BoundaryRecord>,
     #[serde(default)]
     pub deleted_faces: Vec<OperandEntity>,
     #[serde(default)]
@@ -180,8 +200,12 @@ pub struct FaceTopo {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EdgeTopo {
+    /// The two faces; a boundary edge of a surface body names its one face twice.
     pub faces: [EntityIndex; 2],
     pub geom: EdgeGeom,
+    /// A boundary (laminar) edge of a surface body.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub laminar: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
