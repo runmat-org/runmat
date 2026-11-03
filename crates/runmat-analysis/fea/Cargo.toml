@@ -13,6 +13,7 @@ runmat-time = { workspace = true }
 runmat-types = { workspace = true }
 runmat-cpu-execution = { workspace = true }
 runmat-sparse-solvers = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 runmat-sparse-accelerate = { workspace = true }
 runmat-analysis-core = { workspace = true }
 runmat-canonical-codec = { workspace = true }

@@ -65,8 +65,12 @@ pub(crate) fn with_plan<R: Send>(plan: LocalExecutionPlan, work: impl FnOnce() -
     }
     // Cancellation and progress are thread-bound; carry them onto the pool worker.
     let context = crate::progress::capture_fea_progress_context();
+    let usage = runmat_simulation_usage::UsageContext::capture();
     match runmat_cpu_execution::with_cpu_pool(threads, move || {
         let _guard = crate::progress::replace_fea_progress_context(context);
+        let _usage = usage
+            .as_ref()
+            .map(runmat_simulation_usage::UsageContext::enter);
         work()
     }) {
         Ok(result) => result,
@@ -297,8 +301,28 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                     max_iterations: n.saturating_mul(2).clamp(256, 100_000),
                     ..Default::default()
                 };
+                let usage = runmat_simulation_usage::UsageContext::capture();
+                let metered = match usage
+                    .as_ref()
+                    .map(|context| {
+                        runmat_sparse_solvers::operator::MeteredCsrOperator::new(
+                            a,
+                            context.ledger(),
+                            runmat_simulation_usage::UsageCategory::Solve,
+                        )
+                    })
+                    .transpose()
+                {
+                    Ok(operator) => operator,
+                    Err(error) => return failure(error.to_string()),
+                };
+                let operator: &dyn runmat_sparse_solvers::LinearOperator<f64> =
+                    match metered.as_ref() {
+                        Some(operator) => operator,
+                        None => &a,
+                    };
                 match pcg(
-                    &a,
+                    operator,
                     Some(preconditioner.as_ref()),
                     rhs,
                     &mut x,

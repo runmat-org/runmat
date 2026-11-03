@@ -11,6 +11,8 @@ mod usage;
 mod decimal;
 mod total;
 mod measurement;
+mod context;
+pub use context::{UsageContext, UsageContextGuard};
 pub use ledger::{LedgerError, LedgerSnapshot, UsageLedger, WorkReservation};
 pub use measurement::{InvalidMeasurementVersion, MeasurementVersion};
 pub use total::OperationTotal;
