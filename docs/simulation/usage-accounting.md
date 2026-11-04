@@ -102,7 +102,7 @@ The table defines primitive costs. Complex division and the remaining reference
 algorithms still need explicit schedules and a supported-operation inventory
 before this draft is published as version 1.
 
-### Sparse LLT reference arithmetic
+### Sparse LLT and LDLT reference arithmetic
 
 For a column of an LLT factor with p stored entries below its diagonal, the
 right-looking reference divides those p entries by the diagonal and updates the
@@ -120,7 +120,15 @@ factorization. Column sizes come from the stored symbolic fill, including the
 lower-triangular blocks and trailing patterns of supernodes. Counts use checked
 integers rather than the solver's floating-point performance estimate.
 
-An LLT numeric factorization, refactorization or substitution is one reference
+The LDLT reference retains the pre-division column when applying each trailing
+update. Its factorization has the same basic arithmetic as LLT and no square
+roots: p² + 2p per real column or 4p² + 2p per Hermitian complex column.
+Its unit-diagonal triangular substitutions and separate real-diagonal solve
+cost 4p + 1 operations per real column and right-hand side, or 16p + 2 for
+Hermitian complex values. Pivoting block factorizations require their own
+reference schedules; these formulas do not describe Bunch–Kaufman or LU.
+
+An LLT or LDLT numeric factorization, refactorization or substitution is one reference
 batch. The solver reserves its count before numeric allocation or changes to
 the right-hand side, then records it when that batch succeeds. A refused batch
 leaves the factor and right-hand side unchanged. A factorization that fails

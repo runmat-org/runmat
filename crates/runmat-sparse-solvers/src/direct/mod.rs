@@ -241,7 +241,7 @@ pub struct SymbolicFactorization {
 }
 
 mod reference_work;
-pub use reference_work::{LltReferenceWork, ReferenceWorkError};
+pub use reference_work::{DirectReferenceWork, ReferenceWorkError};
 
 impl std::fmt::Debug for SymbolicFactorization {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -433,9 +433,9 @@ impl<T: FactorScalar> DirectSolver<T> {
             converged: 0,
         });
         let (numeric, regularized) = match symbolic.kind {
-            FactorKind::Cholesky => reference_work::with_llt_usage(
+            FactorKind::Cholesky | FactorKind::Ldlt => reference_work::with_direct_usage(
                 &symbolic,
-                reference_work::LltPhase::Factorization,
+                reference_work::DirectPhase::Factorization,
                 || cholesky::factorize::<T>(&symbolic, matrix, &options, None),
             )?,
             FactorKind::Lu => (lu::factorize::<T>(&symbolic, matrix, None)?, 0),
@@ -464,11 +464,11 @@ impl<T: FactorScalar> DirectSolver<T> {
             residual: 0.0,
             converged: 0,
         });
-        if self.symbolic.kind == FactorKind::Cholesky {
+        if matches!(self.symbolic.kind, FactorKind::Cholesky | FactorKind::Ldlt) {
             let symbolic = Arc::clone(&self.symbolic);
-            return reference_work::with_llt_usage(
+            return reference_work::with_direct_usage(
                 &symbolic,
-                reference_work::LltPhase::Factorization,
+                reference_work::DirectPhase::Factorization,
                 || self.refactorize_numeric(matrix),
             );
         }
@@ -520,14 +520,16 @@ impl<T: FactorScalar> DirectSolver<T> {
             return Ok(());
         }
         match &self.numeric {
-            numeric @ NumericInner::Llt(_) => reference_work::with_llt_usage(
-                &self.symbolic,
-                reference_work::LltPhase::Solve { rhs_columns: k },
-                || {
-                    cholesky::solve(&self.symbolic, numeric, rhs, k);
-                    Ok(())
-                },
-            )?,
+            numeric @ (NumericInner::Llt(_) | NumericInner::Ldlt(_)) => {
+                reference_work::with_direct_usage(
+                    &self.symbolic,
+                    reference_work::DirectPhase::Solve { rhs_columns: k },
+                    || {
+                        cholesky::solve(&self.symbolic, numeric, rhs, k);
+                        Ok(())
+                    },
+                )?
+            }
             NumericInner::Lu(numeric) => lu::solve(&self.symbolic, numeric, rhs, k)?,
             numeric => cholesky::solve(&self.symbolic, numeric, rhs, k),
         }
@@ -544,20 +546,22 @@ impl<T: FactorScalar> DirectSolver<T> {
             return Ok(());
         }
         match &self.numeric {
-            numeric @ NumericInner::Llt(_) => reference_work::with_llt_usage(
-                &self.symbolic,
-                reference_work::LltPhase::Solve { rhs_columns: k },
-                || {
-                    for value in rhs.iter_mut() {
-                        *value = value.conj();
-                    }
-                    cholesky::solve(&self.symbolic, numeric, rhs, k);
-                    for value in rhs.iter_mut() {
-                        *value = value.conj();
-                    }
-                    Ok(())
-                },
-            ),
+            numeric @ (NumericInner::Llt(_) | NumericInner::Ldlt(_)) => {
+                reference_work::with_direct_usage(
+                    &self.symbolic,
+                    reference_work::DirectPhase::Solve { rhs_columns: k },
+                    || {
+                        for value in rhs.iter_mut() {
+                            *value = value.conj();
+                        }
+                        cholesky::solve(&self.symbolic, numeric, rhs, k);
+                        for value in rhs.iter_mut() {
+                            *value = value.conj();
+                        }
+                        Ok(())
+                    },
+                )
+            }
             NumericInner::Lu(numeric) => lu::solve_transpose(&self.symbolic, numeric, rhs, k),
             _ => {
                 // Hermitian A: Aᵀ = conj(A), so Aᵀ x = b  ⇔  A conj(x) = conj(b).
