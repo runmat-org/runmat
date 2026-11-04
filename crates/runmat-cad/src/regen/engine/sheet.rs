@@ -425,9 +425,9 @@ impl<'a, 'b> Run<'a, 'b> {
         maker: &FeatureId,
         plate: &CanonicalProfile,
         lines: Vec<FlatBendLine>,
-        moved: ([f64; 2], [f64; 2]),
+        moved: HalfPlane,
     ) -> Result<(), Halt> {
-        let mut earlier: Vec<(FeatureId, ([f64; 2], [f64; 2]))> = Vec::new();
+        let mut earlier: Vec<(FeatureId, HalfPlane)> = Vec::new();
         for n in self.st.bodies[body].names.faces.iter().flatten() {
             if let Some(FeatureRecord::PlateBend { base, moved, .. }) =
                 self.st.records.get(n.maker())
@@ -535,13 +535,12 @@ impl<'a, 'b> Run<'a, 'b> {
     }
 }
 
+/// A half-plane `(p − origin)·normal ≥ 0` of a plate's frame: `(origin, normal)`.
+type HalfPlane = ([f64; 2], [f64; 2]);
+
 /// Whether the half-planes `(p − o)·n ≥ 0` of `a` and `b` share an area inside the polygon
 /// `outline` (its vertices; arcs count by their ends).
-fn half_planes_overlap_in(
-    outline: &[[f64; 2]],
-    a: ([f64; 2], [f64; 2]),
-    b: ([f64; 2], [f64; 2]),
-) -> bool {
+fn half_planes_overlap_in(outline: &[[f64; 2]], a: HalfPlane, b: HalfPlane) -> bool {
     let tol = 1e-9;
     let side =
         |h: ([f64; 2], [f64; 2]), p: [f64; 2]| (p[0] - h.0[0]) * h.1[0] + (p[1] - h.0[1]) * h.1[1];
