@@ -57,3 +57,45 @@ location, ordinal, sample). Per family, what is still needed:
   priority in DISPLAYS rather than displacement only.
 - EM / electrothermal / acoustics harmonic: frequency-peak choice already works per quantity.
 - Any family's statistical outputs: set `FieldStatistic` at the producer, add a Display row.
+
+## Handover state (2026-11-04, hand-back at context cap)
+Branch q-snapshot-5 (worktree /Users/nallana/.claude/jobs/b8482b6b/tmp/q-snapshot-5-wt):
+- 577df8da85 typed FieldStatistic on the layout; transient snapshots carry Step ordinals
+- 6216c93a57 structural frequency records save render tiles (verify-snapshot for harmonic)
+- c6478b011e modal -> modal_harmonic end to end; snapshot capture profiles + 7 profile tests
+- 3fe0e42ec0 merge integration/0.7.1 (T1.1 = 7507f51f46)
+NONE of this has compiled yet (the earlier build attempts died: disk < 100 GB, then the restart).
+One earlier compile found a missing re-export (fixed before commit c6478b011e).
+
+Running on runmat-build-mac (detached with nohup, survives a main-Mac restart):
+- PID 34361 ~/runs/q-snapshot-5/build.sh -> gate build: `cargo test --no-run --message-format short
+  -p runmat -p runmat-analysis-core -p runmat-analysis-fea -p runmat-runtime
+  -p runmat-execution-runner-native --lib`, src ~/src/q-snapshot-5 (synced at 3fe0e42ec0),
+  target ~/targets/q-snapshot-5, log ~/runs/q-snapshot-5/test1.log (ends with "EXIT <code>").
+  Read errors with: tr "\r" "\n" < test1.log | grep -a -E "^[^ ].*(error|warning)|^EXIT"
+
+Next steps for the successor:
+1. Fix compile errors, if any (likely spots: modal_frequency_completion.rs, storage loaders,
+   profiles.rs StoredValues::state_time uses page.data.descriptor.sample).
+2. Run tests (detached, via build.sh with `test --offline ...`):
+   - runmat (CLI) lib: `snapshot::views::profiles` (13 tests incl. 7 new);
+   - runmat-runtime lib: `statistical_field_descriptors_preserve_statistic_units_and_locations`,
+     storage frequency tests, `analysis::` frequency/typed publication tests;
+   - runmat-analysis-fea lib: transient recovery + statistical_fields tests;
+   - runmat-analysis-core lib: field tests.
+   Watch for tests asserting transient snapshot ordinals == Single (changed to Step).
+3. Release: `$J/bin/fea-release <worktree> snap5-<hash>` (J=/Users/nallana/.claude/jobs/b8482b6b/tmp).
+4. Captures: `~/runs/q-snapshot-5/capture.sh snap5-<hash> final harmonic modal-harmonic
+   random-vibration response-spectrum buckling transient plastic` (detached with nohup; it waits for
+   the RunMat server at 127.0.0.1:8080 to answer for 3 min and retries ServerUnreachable 3x;
+   studies in ~/runs/q-snapshot-5/studies/cantilever-*/, output snapshot-final/meta.json +
+   out/final/<study>/{snapshot,verify}.{log,json}, summary out/final/summary.txt).
+   Expected views: harmonic `displacement · <f> Hz`; random `rms-displacement` (m, undeformed);
+   RS `peak-displacement`; buckling `mode-1/2 … load factor 410.xx`; transient displacement/
+   stress/velocity at the peak step `t = … ms`; plastic displacement + stress `load factor 1.000`.
+5. Copy scenes to the main Mac and run
+   `node /Users/nallana/.claude/jobs/b8482b6b/tmp/work/q-snapshot-4/viewer/check-scenes.mjs <scene.json...>`
+   (fetches the renderer from :1001 read-only). Scene format is unchanged by this branch.
+6. Post /tmp/sister-comms/fea-pinned-build-<hash>.txt: tag, commit, `runmat --version`,
+   `shasum -a 256 ~/fea-cli/runmat-snap5-<hash>`, six snapshot paths + verify results.
+Baseline receipts (T1 CLI runmat-hero-a5906bba1a): ~/runs/q-snapshot-5/out/base*/.
