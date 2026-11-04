@@ -1783,10 +1783,29 @@ impl<'a, 'b> Run<'a, 'b> {
                         Vec::new(),
                     ));
                 };
-                self.only_made_by(id, body, &[unfold], "fold")?;
-                let Some((maker, ..)) = self.sheet_of(body) else {
+                // The sheet: the body's own record, else the base flange the unfold's fixed
+                // face was named on (a rebuilt body can lose its body name).
+                let from_face = match self.doc.feature(&unfold).map(|f| &f.kind) {
+                    Some(FeatureKind::SheetMetal(SheetMetalFeature::Unfold {
+                        fixed_face: Reference::Name { name, .. },
+                        ..
+                    })) => Some(name.maker().clone()),
+                    _ => None,
+                };
+                let maker = self.sheet_of(body).map(|s| s.0).or(from_face).filter(|m| {
+                    matches!(
+                        self.st.records.get(m),
+                        Some(FeatureRecord::Sheet {
+                            section: Some(_),
+                            ..
+                        })
+                    )
+                });
+                let Some(maker) = maker else {
                     return Err(self.not_lowered(id, "folding this sheet"));
                 };
+                // Faces the rebuild kept may still carry the base flange's names.
+                self.only_made_by(id, body, &[unfold, maker.clone()], "fold")?;
                 let Some(base) = self.doc.feature(&maker).cloned() else {
                     return Err(self.not_lowered(id, "folding this sheet"));
                 };
