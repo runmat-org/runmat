@@ -1,7 +1,7 @@
 //! Board commands (§9.2) and the 3D tab (§9.3).
 
 use super::CIRCUIT;
-use runmat_cad::commands::*;
+use runmat_design_commands::*;
 use SelectKind as K;
 
 fn brd(id: &str, label: &str, icon: &str, desc: &str) -> CommandDescriptor {
@@ -164,7 +164,7 @@ pub(super) fn add(c: &mut Catalog) {
 }
 
 pub(super) fn tab() -> DomainTab {
-    runmat_cad::commands::tab(
+    runmat_design_commands::tab(
         "board",
         "Board",
         vec![
@@ -324,7 +324,7 @@ pub(super) fn tab() -> DomainTab {
 }
 
 pub(super) fn tab_3d() -> DomainTab {
-    runmat_cad::commands::tab(
+    runmat_design_commands::tab(
         "3d",
         "3D",
         vec![group("check", "Check", vec![c("board.clearance-3d")])],

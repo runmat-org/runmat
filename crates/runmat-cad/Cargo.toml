@@ -21,3 +21,5 @@ thiserror = { workspace = true }
 runmat-constraint = { path = "../runmat-constraint" }
 # Selector, precedence and explain engine for `check` packs (dependency-free).
 runmat-rules = { path = "../runmat-rules" }
+# The design-command descriptor schema shared with runmat-circuit.
+runmat-design-commands = { path = "../runmat-design-commands", version = "=0.6.2" }

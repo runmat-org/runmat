@@ -7,6 +7,7 @@ members = [
     "crates/runmat-sparse-accelerate",
     "crates/runmat-constraint",
     "crates/runmat-cad",
+    "crates/runmat-design-commands",
     "crates/runmat-rules",
     "crates/runmat-circuit",
     "crates/runmat-circuit-spice",

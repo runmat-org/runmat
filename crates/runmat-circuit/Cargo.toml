@@ -13,6 +13,6 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 runmat-rules = { path = "../runmat-rules", version = "=0.6.2" }
 # Design-command descriptor types (one schema for CAD and PCB commands) and the JSON writer.
-runmat-cad = { path = "../runmat-cad", version = "=0.6.2" }
+runmat-design-commands = { path = "../runmat-design-commands", version = "=0.6.2" }
 serde = { workspace = true }
 serde_json = { workspace = true }

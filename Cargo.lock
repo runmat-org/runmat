@@ -7937,6 +7937,7 @@ version = "0.6.2"
 dependencies = [
  "hex",
  "runmat-constraint",
+ "runmat-design-commands",
  "runmat-rules",
  "serde",
  "serde_json",
@@ -7958,7 +7959,7 @@ dependencies = [
 name = "runmat-circuit"
 version = "0.6.2"
 dependencies = [
- "runmat-cad",
+ "runmat-design-commands",
  "runmat-rules",
  "serde",
  "serde_json",
@@ -8102,6 +8103,16 @@ version = "0.6.2"
 dependencies = [
  "rayon",
  "runmat-build-identity",
+]
+
+[[package]]
+name = "runmat-design-commands"
+version = "0.6.2"
+dependencies = [
+ "runmat-cad",
+ "runmat-circuit",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

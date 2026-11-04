@@ -199,20 +199,14 @@ pub fn quantity_spec(name: &str) -> QuantitySpec {
     }
 }
 
-fn base(index: usize) -> Dimension {
-    let mut d = Dimension::DIMENSIONLESS;
-    d.base[index] = 1;
-    d
-}
-// SI base order: length, mass, time, current, temperature, amount, luminous intensity, (spare).
 fn time() -> Dimension {
-    base(2)
+    Dimension::TIME
 }
 fn current() -> Dimension {
-    base(3)
+    Dimension::CURRENT
 }
 fn temperature() -> Dimension {
-    base(4)
+    Dimension::TEMPERATURE
 }
 fn force() -> Dimension {
     Dimension::MASS
@@ -310,6 +304,7 @@ pub fn pick(id: &str, label: &str, accepts: &[SelectKind]) -> Field {
         id,
         label,
         FieldKind::Selection {
+            checklist: false,
             accepts: accepts.to_vec(),
             multiple: false,
             max: Some(1),
@@ -323,9 +318,24 @@ pub fn picks(id: &str, label: &str, accepts: &[SelectKind]) -> Field {
         id,
         label,
         FieldKind::Selection {
+            checklist: false,
             accepts: accepts.to_vec(),
             multiple: true,
             max: None,
+        },
+    )
+}
+
+/// Every item of `accepts` in the file as a checklist, all checked at the start.
+pub fn checklist(id: &str, label: &str, accepts: &[SelectKind]) -> Field {
+    field(
+        id,
+        label,
+        FieldKind::Selection {
+            accepts: accepts.to_vec(),
+            multiple: true,
+            max: None,
+            checklist: true,
         },
     )
 }
