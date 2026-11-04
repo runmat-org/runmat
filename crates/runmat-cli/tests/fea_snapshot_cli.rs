@@ -12,6 +12,11 @@ use std::process::Command;
 use serde_json::Value;
 use tempfile::TempDir;
 
+#[path = "support/local_offline.rs"]
+mod local_offline;
+#[path = "support/fea_admission.rs"]
+mod fea_admission;
+
 const GEOMETRY: &str = r#"
 geometry part {
     file = "./box.brep"
@@ -169,7 +174,9 @@ fn snapshot_to(project: &TempDir, directory: &str, extra: &[&str]) -> Value {
     let out_arg = out.to_string_lossy().to_string();
     args.push(&out_arg);
     args.extend_from_slice(extra);
-    let output = Command::new(env!("CARGO_BIN_EXE_runmat"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
+    local_offline::configure(&mut command, project.path());
+    command
         .current_dir(project.path())
         .args(&args)
         .env_remove("RUNMAT_CONFIG")
@@ -185,9 +192,9 @@ fn snapshot_to(project: &TempDir, directory: &str, extra: &[&str]) -> Value {
         .env(
             "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
             project.path().join("study-artifacts"),
-        )
-        .output()
-        .expect("run snapshot");
+        );
+    let _admission = fea_admission::AdmissionServer::for_command(&mut command, project.path());
+    let output = command.output().expect("run snapshot");
     assert!(
         output.status.success(),
         "snapshot {extra:?} failed: stdout={} stderr={}",
@@ -375,7 +382,6 @@ fn structural_modal_snapshot_shows_only_mode_shapes_and_verifies() {
     let verified = Command::new(env!("CARGO_BIN_EXE_runmat"))
         .current_dir(project.path())
         .args([
-            "fea",
             "verify-snapshot",
             "out/snapshot.json",
             "--out",

@@ -20,8 +20,7 @@ guess a face ordinal from a viewport.
 ## 2. Declare geometry and regions
 
 The example declares both solid occurrences, a support on each disconnected part, and a load face
-on the left part. Each region states its topology role and expected cardinality. Run `runmat fea
-check` after this step; a stale or ambiguous selector should fail before meshing.
+on the left part. Each region states its topology role and expected cardinality. Run `runmat check` after this step; a stale or ambiguous selector should fail before meshing.
 
 The included STEP file carries the authored body and end-face names the study selects; `select name` resolves only names authored in the CAD file. The study stays in one readable source file; exporting the project preserves its CAD names.
 

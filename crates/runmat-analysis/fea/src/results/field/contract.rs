@@ -263,6 +263,15 @@ impl RecoveredFieldDefinition {
         }
     }
 
+    /// The layout pre-value profiles charge: this definition's layout at the widest published
+    /// state a producer may store (stepped and modal fields carry their ordinal in storage).
+    pub fn profile_layout(&self) -> runmat_analysis_core::AnalysisFieldLayout {
+        let widest = usize::try_from(runmat_types::wire_integer::MAX_WIRE_INTEGER)
+            .unwrap_or(usize::MAX);
+        self.layout()
+            .with_ordinal(runmat_analysis_core::FieldOrdinal::Step(widest))
+    }
+
     pub fn value_shape(&self) -> &ObservationValueShape {
         &self.value_shape
     }

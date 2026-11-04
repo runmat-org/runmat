@@ -28,7 +28,7 @@ impl RecoveredField {
             .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
         let shape = definition.storage_shape(entity_count)?;
         let values = ProjectedValues(value_count);
-        let layout = definition.layout();
+        let layout = definition.profile_layout();
         let storage =
             AnalysisField::host_f64_serialization(definition.field_id(), &layout, &shape, &values);
         let content = identity_content(definition, sample, &storage);

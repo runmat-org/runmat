@@ -89,7 +89,7 @@ project-only policy and checked FEA source before that refusal. A serial browser
 study is not serialized as a code bundle.
 
 The source-defined native alternative is the OCCT-enabled CLI:
-`runmat fea run <named-entrypoint> --cluster <cluster>`, subject to its existing
+`runmat run <named-entrypoint> --cluster <cluster>`, subject to its existing
 study selection, native geometry capability and authenticated cluster admission.
 Its owners are `commands/fea/preparation.rs`, `run/remote_study.rs`, and native
 `typed_fea/preparation.rs`. This documents a source route, not a new qualification

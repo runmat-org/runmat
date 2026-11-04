@@ -780,14 +780,20 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_is_no_longer_a_cli_command() {
-        let cli = Cli::try_parse_from(["runmat", "snapshot"])
-            .expect("ordinary positional input must continue to parse as a script path");
-        assert!(cli.command.is_none());
-        assert_eq!(
-            cli.script.as_deref(),
-            Some(std::path::Path::new("snapshot"))
-        );
+    fn snapshot_is_a_study_command_and_scripts_stay_positional() {
+        let cli = Cli::try_parse_from(["runmat", "snapshot", "main.fea", "--out", "x.json"])
+            .expect("snapshot parses as the study capture command");
+        let Some(Commands::Snapshot { file, out, .. }) = cli.command else {
+            panic!("expected the snapshot command");
+        };
+        assert_eq!(file, std::path::Path::new("main.fea"));
+        assert_eq!(out, std::path::Path::new("x.json"));
+        for script in ["main.m", "analysis/run_case.m"] {
+            let cli = Cli::try_parse_from(["runmat", script])
+                .expect("other positional input parses as a script path");
+            assert!(cli.command.is_none());
+            assert_eq!(cli.script.as_deref(), Some(std::path::Path::new(script)));
+        }
     }
 
     #[test]
