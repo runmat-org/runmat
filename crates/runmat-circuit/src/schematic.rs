@@ -17,7 +17,7 @@
 //!   left, the rest on the right; pins numbered by pad. A unit is a library gate, and a gate with
 //!   more than 64 pins (an FPGA, a large MCU) splits into units as KiCad and Altium draw them:
 //!   its signal pins by bank (a `_34` suffix or `BANK3` token in the pin name), else by port
-//!   prefix (`PA`, `PB`), in units of at most 48 pins; its power pins in units of their own,
+//!   prefix (`PA`, `PB`), in even units of at most 48 pins; its power pins in units of their own,
 //!   last. [`units`] is the one split; the canvas and the KiCad export both draw it.
 //! - **Connections.** A two-pin net between facing pins of neighbouring symbols in a row is
 //!   drawn as a wire. Every other connected pin gets a 2.54 mm stub and a label: a power port
@@ -358,8 +358,10 @@ pub fn units(c: &crate::elab::CompInst) -> Vec<Unit> {
         }
         let mut n = 0;
         for (label, pins) in groups {
+            // Even units: 200 pins make five of 40, not four of 48 and one of 8.
             let chunks = pins.len().div_ceil(UNIT_PINS);
-            for (k, chunk) in pins.chunks(UNIT_PINS).enumerate() {
+            let size = pins.len().div_ceil(chunks.max(1));
+            for (k, chunk) in pins.chunks(size.max(1)).enumerate() {
                 let label = if chunks == 1 {
                     label.clone()
                 } else {
@@ -876,6 +878,31 @@ fn junctions(wires: &[SchematicWire]) -> Vec<Xy> {
 #[cfg(test)]
 mod unit_split_tests {
     use super::*;
+
+    #[test]
+    fn a_large_gate_splits_into_even_bank_and_power_units() {
+        let (_, _, nl, _) = crate::fixture::large(&crate::fixture::LargeParams {
+            channels: 2,
+            copper_layers: 4,
+            route_every: 0,
+            pours: false,
+        });
+        let fpga = nl
+            .components
+            .iter()
+            .find(|c| c.pins.len() > SPLIT_ABOVE)
+            .expect("an FPGA");
+        let units = units(fpga);
+        let sizes: Vec<usize> = units.iter().map(|u| u.pins.len()).collect();
+        // 200 IO pins in five units of 40, then the power unit.
+        assert_eq!(sizes, vec![40, 40, 40, 40, 40, 3], "{units:?}");
+        assert_eq!(units[0].name, "A");
+        assert_eq!(units[0].label.as_deref(), Some("IO0–IO39"));
+        assert_eq!(units[5].label.as_deref(), Some("power"));
+        let all: std::collections::BTreeSet<usize> =
+            units.iter().flat_map(|u| u.pins.clone()).collect();
+        assert_eq!(all.len(), fpga.pins.len(), "every pin in exactly one unit");
+    }
 
     #[test]
     fn banks_come_from_the_pin_name() {
