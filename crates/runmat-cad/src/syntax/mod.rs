@@ -30,7 +30,11 @@
 //! [`Site`]: crate::diagnostics::Site
 
 pub mod edit;
+pub mod forms;
+pub mod occurrence;
 pub mod projection;
+pub mod refs;
+pub mod sketch;
 pub mod value;
 
 use crate::assembly::AssemblyDocument;
@@ -171,12 +175,35 @@ pub const DRAWING: DocumentGrammar = DocumentGrammar {
     collections: &[
         named("format", "formats", "format"),
         named("sheet", "sheets", "sheet"),
-        named("view", "views", "view"),
+        // `view front = standard(orientation = front, sheet = "1", model = …, at = [100, 100])`
+        Collection {
+            tagged: Some(Tagged {
+                field: "kind",
+                tag: "view",
+                extras: &[
+                    "sheet", "model", "at", "scale", "display", "exclude", "exploded",
+                ],
+            }),
+            ..named("view", "views", "view")
+        },
+        // `annotation d1 = dimension(style = linear, references = […], view = front, at = [0, 0])`
         Collection {
             id: Some("id"),
+            tagged: Some(Tagged {
+                field: "kind",
+                tag: "annotation",
+                extras: &["view", "at"],
+            }),
             ..named("annotation", "annotations", "annotation")
         },
-        named("table", "tables", "table"),
+        Collection {
+            tagged: Some(Tagged {
+                field: "kind",
+                tag: "table",
+                extras: &["sheet", "at"],
+            }),
+            ..named("table", "tables", "table")
+        },
     ],
     links: None,
 };
@@ -329,5 +356,58 @@ pub fn grammar(dialect: Dialect) -> Option<&'static DocumentGrammar> {
         Dialect::Assembly => Some(&ASSEMBLY),
         Dialect::Drawing => Some(&DRAWING),
         _ => None,
+    }
+}
+
+/// Why a source could not be formatted.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormatError {
+    /// The file is not a part, assembly or drawing.
+    Dialect,
+    /// The source has errors; nothing is rewritten.
+    Invalid(Vec<FeaSyntaxDiagnostic>),
+    Print(PrintError),
+}
+
+impl std::fmt::Display for FormatError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FormatError::Dialect => f.write_str("not a .part, .assembly or .drawing file"),
+            FormatError::Invalid(diagnostics) => write!(
+                f,
+                "the source has {} error(s); the first: {}",
+                diagnostics.len(),
+                diagnostics.first().map_or("", |d| d.message.as_str())
+            ),
+            FormatError::Print(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for FormatError {}
+
+fn format_with<T: Serialize + DeserializeOwned>(
+    grammar: &DocumentGrammar,
+    path: &str,
+    source: &str,
+) -> Result<String, FormatError> {
+    let parsed = grammar_parse::<T>(grammar, path, source);
+    match parsed.document {
+        Some(document) if parsed.diagnostics.is_empty() => {
+            print_with(grammar, &document, &parsed.uses).map_err(FormatError::Print)
+        }
+        _ => Err(FormatError::Invalid(parsed.diagnostics)),
+    }
+}
+
+/// Rewrites a `.part`, `.assembly` or `.drawing` source in the canonical form: the migration
+/// path for files written in the generic record forms (`feature body = extrude { … }`), which
+/// still read. Comments are not kept; use the structured edits to change a file in place.
+pub fn format(path: &str, source: &str) -> Result<String, FormatError> {
+    match Dialect::for_path(path) {
+        Some(Dialect::Part) => format_with::<PartDocument>(&PART, path, source),
+        Some(Dialect::Assembly) => format_with::<AssemblyDocument>(&ASSEMBLY, path, source),
+        Some(Dialect::Drawing) => format_with::<DrawingDocument>(&DRAWING, path, source),
+        _ => Err(FormatError::Dialect),
     }
 }

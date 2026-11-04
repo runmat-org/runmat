@@ -178,11 +178,15 @@ export function grammarText(source) {
 
 const DIALECT_SOURCE = "crates/runmat-design-syntax/src/dialect.rs";
 const CAD_SYNTAX = "crates/runmat-cad/src/syntax/mod.rs";
+// The CAD surface forms' own words (runmat-cad src/syntax/forms.rs `words`).
+const CAD_FORMS = "crates/runmat-cad/src/syntax/forms.rs";
+const CAD_FORM_STATEMENTS = { source: CAD_FORMS, from: /pub const STATEMENTS/, to: /;/, pattern: /"([a-z_]+)"/g };
+const CAD_FORM_OPERATIONS = { source: CAD_FORMS, from: /pub const OPERATIONS/, to: /;/, pattern: /"([a-z_]+)"/g };
 
 /** One entry per design dialect: its registry name, file extension and front-end word tables. */
 export const DESIGN_DIALECTS = [
-    { dialect: "Part", name: "part", extension: "part", statements: { source: CAD_SYNTAX, from: /^pub const PART: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g }, operations: { source: "crates/runmat-cad/src/model/feature.rs", from: /^pub enum FeatureKind \{/m, to: /^\}/m, pattern: /^\s+([A-Z][A-Za-z]*)\(/gm, snake: true } },
-    { dialect: "Assembly", name: "assembly", extension: "assembly", statements: { source: CAD_SYNTAX, from: /^pub const ASSEMBLY: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g } },
+    { dialect: "Part", name: "part", extension: "part", statements: [{ source: CAD_SYNTAX, from: /^pub const PART: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g }, CAD_FORM_STATEMENTS], operations: [{ source: "crates/runmat-cad/src/model/feature.rs", from: /^pub enum FeatureKind \{/m, to: /^\}/m, pattern: /^\s+([A-Z][A-Za-z]*)\(/gm, snake: true }, CAD_FORM_OPERATIONS] },
+    { dialect: "Assembly", name: "assembly", extension: "assembly", statements: [{ source: CAD_SYNTAX, from: /^pub const ASSEMBLY: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g }, CAD_FORM_STATEMENTS] },
     { dialect: "Drawing", name: "drawing", extension: "drawing", statements: { source: CAD_SYNTAX, from: /^pub const DRAWING: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g } },
     { dialect: "Circuit", name: "circuit", extension: "circuit", statements: { source: "crates/runmat-circuit/src/syntax/mod.rs", from: /^pub mod words \{/m, to: /pub const ALL/, pattern: /: &str = "([a-z_]+)"/g } },
     { dialect: "CircuitLayout", name: "circuit-layout", extension: "circuit.layout", statements: { source: "crates/runmat-circuit/src/syntax/layout.rs", from: /^pub mod words \{/m, to: /pub const ALL/, pattern: /: &str = "([a-z_]+)"/g } },
@@ -192,6 +196,7 @@ const snakeCase = name => name.replace(/[A-Z]/g, (letter, index) => (index ? "_"
 
 function wordsIn(source, table) {
     if (!table) return [];
+    if (Array.isArray(table)) return table.flatMap(entry => wordsIn(source, entry));
     const names = registryNames(source, table);
     return table.snake ? names.map(snakeCase).sort() : names;
 }

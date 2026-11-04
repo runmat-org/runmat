@@ -1,0 +1,29 @@
+runmat 0.7
+std 1
+
+part duct {
+    feature c = sketch {
+        plane = { on = datum, datum = { datum = origin_plane, plane = zx } },
+        entities = [
+            {
+                id = floor,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 0 mm, y = 0 mm },
+                    end = { point = coords, x = 30 mm, y = 0 mm }
+                },
+                construction = false
+            },
+            {
+                id = wall,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 30 mm, y = 0 mm },
+                    end = { point = coords, x = 30 mm, y = 20 mm }
+                },
+                construction = false
+            }
+        ]
+    }
+    feature skin = surface { kind = extrude, profile = { sketch = c, loops = [] }, start = 0 mm, end = 25 mm }
+}

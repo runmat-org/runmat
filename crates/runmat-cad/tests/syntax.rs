@@ -379,14 +379,35 @@ fn parts_round_trip_through_text() {
         text.contains("    let half : length = (-2.5 mm) * -(3)\n"),
         "{text}"
     );
-    assert!(text.contains("    feature body = extrude {"), "{text}");
+    assert!(
+        text.contains("    feature body = extrude(profile = sketch.s1, distance = input.thickness, suppressed)\n"),
+        "{text}"
+    );
+    assert!(text.contains("    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])\n"), "{text}");
+    assert!(
+        text.contains(
+            "    feature cut = extrude(profile = sketch.s_cut, through_all, mode = cut)\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("        at = { a = point(60 mm, 10 mm, 10 mm) },\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "edges = [edges_between(feature.body.face.side(s1.l1), feature.body.face.end)],"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("        layout = grid(\n"), "{text}");
     assert!(
         text.contains("    link verifies feature.body to \"checks/mass.fea#check.mass_budget\"\n"),
         "{text}"
     );
     assert!(text.contains("    closed = true\n"), "{text}");
     assert!(
-        text.contains("    publish top = region { region = top }\n"),
+        text.contains("    publish top = region(region = top)\n"),
         "{text}"
     );
 }
@@ -471,7 +492,7 @@ fn every_site_points_at_its_text() {
             .unwrap_or_else(|| panic!("no site `{key}`"));
         &text[span.start as usize..span.end as usize]
     };
-    assert!(at("feature.round").starts_with("feature round = fillet {"));
+    assert!(at("feature.round").starts_with("feature round = fillet("));
     assert!(at("feature.h#diameter").starts_with("4 mm"));
     assert_eq!(at("input.width#default"), "80 mm");
     assert_eq!(at("input.plate#maximum"), "input.thickness");
@@ -727,7 +748,7 @@ fn adding_removing_and_moving_features_keep_comments() {
 
     let change = edit::suppress_feature(&source, "plate.part", "round", true).unwrap();
     assert!(
-        change.source.contains("suppressed = true"),
+        change.source.contains("radius = 2 mm, suppressed)"),
         "{}",
         change.source
     );
@@ -777,7 +798,7 @@ fn adding_a_publish_and_removing_it_restores_the_source() {
     assert!(
         change
             .source
-            .contains("    publish face = region { region = top }\n"),
+            .contains("    publish face = region(region = top)\n"),
         "{}",
         change.source
     );

@@ -33,7 +33,7 @@
     },
     {
       "name": "support.function.part",
-      "match": "(?<![\\w])(?:mate_connector|face_fillet|sheet_metal|full_round|weldment|body_op|boolean|chamfer|extrude|library|pattern|revolve|surface|direct|emboss|fillet|import|mirror|sketch|thread|curve|draft|frame|plane|point|shell|split|sweep|axis|hole|loft|mold|rib)(?![\\w])"
+      "match": "(?<![\\w])(?:mate_connector|edges_between|perpendicular|construction|face_fillet|sheet_metal|through_all|coincident|full_round|horizontal|up_to_next|symmetric|vertex_of|distance|parallel|vertical|weldment|body_op|boolean|chamfer|extrude|library|pattern|revolve|surface|tangent|circle|direct|emboss|fillet|import|length|mirror|origin|radius|sketch|thread|angle|curve|draft|equal|frame|limit|piece|plane|point|shell|split|sweep|up_to|axis|hole|line|loft|mold|arc|fix|rib)(?![\\w])"
     },
     {
       "name": "keyword.control.part",
@@ -41,7 +41,7 @@
     },
     {
       "name": "storage.type.part",
-      "match": "(?<![\\w])(?:configuration|feature_def|material|feature|publish|output|region)(?![\\w])"
+      "match": "(?<![\\w])(?:configuration|feature_def|material|feature|publish|output|region|sketch|use)(?![\\w])"
     },
     {
       "name": "keyword.other.part",
@@ -70,29 +70,47 @@
       {
         "scope": "support.function.part",
         "words": [
+          "angle",
+          "arc",
           "axis",
           "body_op",
           "boolean",
           "chamfer",
+          "circle",
+          "coincident",
+          "construction",
           "curve",
           "direct",
+          "distance",
           "draft",
+          "edges_between",
           "emboss",
+          "equal",
           "extrude",
           "face_fillet",
           "fillet",
+          "fix",
           "frame",
           "full_round",
           "hole",
+          "horizontal",
           "import",
+          "length",
           "library",
+          "limit",
+          "line",
           "loft",
           "mate_connector",
           "mirror",
           "mold",
+          "origin",
+          "parallel",
           "pattern",
+          "perpendicular",
+          "piece",
           "plane",
           "point",
+          "radius",
           "revolve",
           "rib",
           "sheet_metal",
@@ -101,7 +119,14 @@
           "split",
           "surface",
           "sweep",
+          "symmetric",
+          "tangent",
           "thread",
+          "through_all",
+          "up_to",
+          "up_to_next",
+          "vertex_of",
+          "vertical",
           "weldment"
         ]
       },
@@ -132,7 +157,9 @@
           "material",
           "output",
           "publish",
-          "region"
+          "region",
+          "sketch",
+          "use"
         ]
       },
       {

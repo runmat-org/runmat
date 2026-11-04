@@ -1,0 +1,34 @@
+runmat 0.7
+std 1
+
+part skin {
+    feature a = sketch {
+        plane = { on = datum, datum = { datum = origin_plane, plane = xy } },
+        entities = [
+            {
+                id = edge,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 0 mm, y = 0 mm },
+                    end = { point = coords, x = 30 mm, y = 0 mm }
+                },
+                construction = false
+            }
+        ]
+    }
+    feature b = sketch {
+        plane = { on = datum, datum = { datum = origin_plane, plane = zx } },
+        entities = [
+            {
+                id = edge,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 20 mm, y = 0 mm },
+                    end = { point = coords, x = 25 mm, y = 30 mm }
+                },
+                construction = false
+            }
+        ]
+    }
+    feature skin = surface { kind = loft, profiles = [{ sketch = a, loops = [] }, { sketch = b, loops = [] }] }
+}

@@ -221,8 +221,8 @@ part plate {
     input width : length = 80
     input depth : length = { default = 8.5, maximum = 20 }
 
-    feature body = extrude { profile = "sketch.profile", depth = 8 }
-    feature round = fillet { edges = [e1, e2], radius = 2, suppressed = true }
+    feature body = extrude(profile = "sketch.profile", depth = 8)
+    feature round = fillet(edges = [e1, e2], radius = 2, suppressed)
 
     material = { body = body, material = aluminum }
 
@@ -250,8 +250,22 @@ part plate {
     };
     assert_eq!(
         at("feature.round"),
-        "feature round = fillet { edges = [e1, e2], radius = 2, suppressed = true }"
+        "feature round = fillet(edges = [e1, e2], radius = 2, suppressed)"
     );
+    // The record form and named flags read as the same model.
+    let old = text
+        .replace(
+            "fillet(edges = [e1, e2], radius = 2, suppressed)",
+            "fillet { edges = [e1, e2], radius = 2, suppressed = true }",
+        )
+        .replace("depth = 8)", "depth = 8, reverse = false)");
+    let parsed_old = parse_document(&GRAMMAR, "parts/plate.part", &old, &PlainData);
+    assert!(
+        parsed_old.diagnostics.is_empty(),
+        "{:#?}",
+        parsed_old.diagnostics
+    );
+    assert_eq!(parsed_old.json.decode::<Doc>().unwrap(), doc());
     assert_eq!(at("feature.round#edges[1]"), "e2");
     assert_eq!(at("feature.round#radius"), "2");
     assert_eq!(at("input.depth#maximum"), "20");
@@ -311,4 +325,83 @@ fn misplaced_statements_are_diagnosed() {
         messages.iter().any(|m| m.contains("declared twice")),
         "{messages:?}"
     );
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct Check {
+    name: String,
+    rule: String,
+    limit: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct Checked {
+    path: String,
+    checks: Vec<Check>,
+}
+
+struct CheckedModel;
+
+impl DocumentModel for CheckedModel {
+    fn normalize(&self, json: &Json) -> Option<Json> {
+        let model: Checked = json.decode().ok()?;
+        Json::from_serialize(&model).ok()
+    }
+}
+
+const CHECKED: DocumentGrammar = DocumentGrammar {
+    dialect: Dialect::Part,
+    declaration: "part",
+    name_field: None,
+    path_field: Some("path"),
+    header_field: None,
+    collections: &[Collection {
+        word: "check",
+        field: "checks",
+        id: Some("name"),
+        type_field: None,
+        value_field: None,
+        tagged: None,
+        site: "check",
+        unique: true,
+    }],
+    links: None,
+};
+
+#[test]
+fn a_check_reads_in_its_block_form() {
+    let text = "part p {\n    check mass {\n        rule = below\n        limit = 2.5\n    }\n    check span = { rule = above, limit = 1 }\n}\n";
+    let parsed = parse_document(&CHECKED, "p.part", text, &PlainData);
+    assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
+    let doc: Checked = parsed.json.decode().unwrap();
+    assert_eq!(
+        doc.checks[0],
+        Check {
+            name: "mass".into(),
+            rule: "below".into(),
+            limit: 2.5
+        }
+    );
+    assert_eq!(doc.checks[1].limit, 1.0);
+    let at = |key: &str| {
+        let span = parsed.spans[key];
+        &text[span.start..span.end]
+    };
+    assert_eq!(at("check.mass#limit"), "2.5");
+    assert!(at("check.mass").starts_with("check mass {"));
+    let printed = print_document(
+        &CHECKED,
+        &CheckedModel,
+        &Json::from_serialize(&doc).unwrap(),
+        &[],
+        "p",
+        &PlainData,
+    )
+    .unwrap();
+    let back = parse_document(&CHECKED, "p.part", &printed, &PlainData);
+    assert_eq!(back.json.decode::<Checked>().unwrap(), doc);
+    let bad = "part p {\n    check mass {\n        rule below\n    }\n}\n";
+    assert!(!parse_document(&CHECKED, "p.part", bad, &PlainData)
+        .diagnostics
+        .is_empty());
 }

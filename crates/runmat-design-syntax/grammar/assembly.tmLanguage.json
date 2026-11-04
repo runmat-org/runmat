@@ -37,7 +37,7 @@
     },
     {
       "name": "storage.type.assembly",
-      "match": "(?<![\\w])(?:configuration|occurrence|connector|fasteners|envelope|exploded|property|pattern|publish|mirror|mate)(?![\\w])"
+      "match": "(?<![\\w])(?:configuration|occurrence|connector|fasteners|envelope|exploded|property|pattern|publish|mirror|sketch|mate|use)(?![\\w])"
     },
     {
       "name": "keyword.other.assembly",
@@ -94,7 +94,9 @@
           "occurrence",
           "pattern",
           "property",
-          "publish"
+          "publish",
+          "sketch",
+          "use"
         ]
       },
       {

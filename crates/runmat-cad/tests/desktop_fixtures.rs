@@ -462,3 +462,26 @@ fn drawing() -> DrawingDocument {
         }],
     }
 }
+
+/// The Desktop drawing fixture's model reads back from its canonical text.
+#[test]
+fn the_drawing_fixture_round_trips_through_text() {
+    let document = drawing();
+    let text = runmat_cad::syntax::print_drawing(&document, &[]).unwrap();
+    let parsed = runmat_cad::syntax::parse_drawing(&document.path.0, &text);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "{text}\n{:#?}",
+        parsed.diagnostics
+    );
+    assert_eq!(parsed.document.as_ref(), Some(&document), "{text}");
+    assert_eq!(
+        runmat_cad::syntax::print_drawing(parsed.document.as_ref().unwrap(), &[]).unwrap(),
+        text
+    );
+    assert!(text.contains("    view "), "{text}");
+    assert!(
+        !text.contains("kind = {"),
+        "views, annotations and tables take the call form:\n{text}"
+    );
+}

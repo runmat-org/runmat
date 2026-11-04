@@ -15,12 +15,16 @@
 //! cannot write that way (a reference whose path looks like an input) is left to the generic
 //! record form, which also reads back exactly.
 
+use super::refs;
 use crate::ids::{FilePath, InputName, LetName, PublishName};
+use crate::model::datum::{AxisRef, PlaneRef, PointRef};
 use crate::refs::reference::XrefContext;
+use crate::refs::Reference;
 use crate::value::{BinaryOp, DynamicCall, ValueExpr, ValueXref};
 use runmat_design_syntax::ast::{self, Argument, Expr};
+use runmat_design_syntax::document::EntryForms;
 use runmat_design_syntax::json::{
-    format_f64, is_bare_key, is_bare_word, quote, Json, LowerError, ValueSyntax,
+    format_f64, is_bare_key, is_bare_word, is_identifier, quote, Json, LowerError, ValueSyntax,
 };
 use runmat_design_syntax::lexical::FeaTokenKind;
 
@@ -45,6 +49,18 @@ impl ValueSyntax for CadValues {
             }
             Expr::Reference(reference) if reference.segments().len() == 1 => return None,
             Expr::PrefixApplication(application) if !is_volatile(application) => return None,
+            Expr::Reference(_) | Expr::Call(_) => {
+                if let Some(reference) = refs::lower_reference(expr) {
+                    return Some(reference.and_then(|reference| {
+                        Json::from_serialize(&reference)
+                            .map_err(|error| LowerError::new(expr.span(), error.to_string()))
+                    }));
+                }
+                if let Some(datum) = refs::lower_datum(expr, &lower_value) {
+                    return Some(datum);
+                }
+                lower_value(expr)
+            }
             _ => lower_value(expr),
         };
         Some(value.and_then(|value| {
@@ -54,14 +70,64 @@ impl ValueSyntax for CadValues {
     }
 
     fn print(&self, value: &Json) -> Option<String> {
-        value.get("form")?;
-        let expr: ValueExpr = value.decode().ok()?;
-        // Only a value that is exactly this form's serialisation prints as text.
-        if Json::from_serialize(&expr).ok()?.to_value() != value.to_value() {
+        let Json::Object(entries) = value else {
+            return None;
+        };
+        let (first, _) = entries.first()?;
+        match first.as_str() {
+            "ref" => refs::print_reference(&exactly::<Reference>(value)?),
+            "on" => refs::print_plane(&exactly::<PlaneRef>(value)?),
+            "along" => refs::print_axis(&exactly::<AxisRef>(value)?),
+            "point" => refs::print_point(&exactly::<PointRef>(value)?, &print_value),
+            "sketch" if entries.len() == 1 => match &entries[0].1 {
+                Json::String(name) if is_identifier(name) => Some(format!("sketch.{name}")),
+                _ => None,
+            },
+            _ => {
+                value.get("form")?;
+                print_value(&exactly::<ValueExpr>(value)?)
+            }
+        }
+    }
+
+    fn tag_field(&self, scope: Option<&str>, key: &str) -> Option<&'static str> {
+        super::forms::tag_field(scope, key)
+    }
+
+    fn lower_keyed(&self, key: &str, expr: &Expr) -> Option<Result<Json, LowerError>> {
+        if !PLANE_FIELDS.contains(&key) {
             return None;
         }
-        print_value(&expr)
+        let reference = refs::lower_reference(expr)?;
+        Some(reference.and_then(|face| {
+            Json::from_serialize(&PlaneRef::Face { face })
+                .map_err(|error| LowerError::new(expr.span(), error.to_string()))
+        }))
     }
+
+    fn print_keyed(&self, key: &str, value: &Json) -> Option<String> {
+        if !PLANE_FIELDS.contains(&key) {
+            return None;
+        }
+        match exactly::<PlaneRef>(value)? {
+            PlaneRef::Face { face } => refs::print_reference(&face),
+            _ => None,
+        }
+    }
+
+    fn entry_forms(&self) -> Option<&dyn EntryForms> {
+        Some(&super::forms::CadForms)
+    }
+}
+
+/// Fields that hold only planes, so a face reference there is the plane of that face
+/// (`neutral = feature.body.face.end`).
+pub const PLANE_FIELDS: &[&str] = &["neutral", "tool", "parting"];
+
+/// `value` as a `T` when it is exactly `T`'s serialised form.
+pub fn exactly<T: serde::Serialize + serde::de::DeserializeOwned>(value: &Json) -> Option<T> {
+    let decoded: T = value.decode().ok()?;
+    (Json::from_serialize(&decoded).ok()?.to_value() == value.to_value()).then_some(decoded)
 }
 
 fn is_volatile(application: &ast::PrefixApplication) -> bool {
@@ -393,7 +459,9 @@ fn print_bare(expr: &ValueExpr) -> Option<String> {
             }
         }
         ValueExpr::Dynamic { call } => {
-            if !is_bare_word(&call.function) {
+            if !is_bare_word(&call.function)
+                || refs::REFERENCE_FUNCTIONS.contains(&call.function.as_str())
+            {
                 return None;
             }
             let mut arguments = Vec::new();
@@ -424,7 +492,7 @@ fn print_bare(expr: &ValueExpr) -> Option<String> {
             let reads_back = match path.as_slice() {
                 [] | [_] => false,
                 [head, _] if head == "input" || head == "let" => false,
-                _ => published(path).is_none(),
+                _ => published(path).is_none() && !refs::is_reserved_path(path),
             };
             if !reads_back || !path.iter().all(|segment| is_bare_key(segment)) {
                 return None;

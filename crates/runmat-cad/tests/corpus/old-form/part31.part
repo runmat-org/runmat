@@ -1,0 +1,213 @@
+runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+    input rise : length = 20 mm
+    input run : length = 10 mm
+
+    feature s1 = sketch {
+        plane = { on = datum, datum = { datum = origin_plane, plane = xy } },
+        entities = [
+            {
+                id = l1,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 0 mm, y = 0 mm },
+                    end = { point = coords, x = input.width, y = 0 mm }
+                },
+                construction = false
+            },
+            {
+                id = l2,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = input.width, y = 0 mm },
+                    end = { point = coords, x = input.width, y = input.depth }
+                },
+                construction = false
+            },
+            {
+                id = l3,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = input.width, y = input.depth },
+                    end = { point = coords, x = 0 mm, y = input.depth }
+                },
+                construction = false
+            },
+            {
+                id = l4,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 0 mm, y = input.depth },
+                    end = { point = coords, x = 0 mm, y = 0 mm }
+                },
+                construction = false
+            }
+        ]
+    }
+    feature body = extrude {
+        profile = { sketch = s1, loops = [] },
+        extent = { extent = blind, distance = input.thickness }
+    }
+    feature swp = plane {
+        plane = offset,
+        base = { on = datum, datum = { datum = origin_plane, plane = xy } },
+        distance = 20 mm
+    }
+    feature s_swp = sketch {
+        plane = { on = datum, datum = { datum = feature, feature = swp } },
+        entities = [
+            {
+                id = l1,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 60 mm, y = 20 mm },
+                    end = { point = coords, x = 66 mm, y = 20 mm }
+                },
+                construction = false
+            },
+            {
+                id = l2,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 66 mm, y = 20 mm },
+                    end = { point = coords, x = 66 mm, y = 26 mm }
+                },
+                construction = false
+            },
+            {
+                id = l3,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 66 mm, y = 26 mm },
+                    end = { point = coords, x = 60 mm, y = 26 mm }
+                },
+                construction = false
+            },
+            {
+                id = l4,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 60 mm, y = 26 mm },
+                    end = { point = coords, x = 60 mm, y = 20 mm }
+                },
+                construction = false
+            }
+        ]
+    }
+    feature pathp = plane {
+        plane = offset,
+        base = { on = datum, datum = { datum = origin_plane, plane = zx } },
+        distance = 23 mm
+    }
+    feature s_path = sketch {
+        plane = { on = datum, datum = { datum = feature, feature = pathp } },
+        entities = [
+            {
+                id = p1,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 20 mm, y = 63 mm },
+                    end = { point = coords, x = 20 mm + input.rise, y = 63 mm }
+                },
+                construction = false
+            },
+            {
+                id = p2,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 20 mm + input.rise, y = 63 mm },
+                    end = { point = coords, x = 20 mm + input.rise + 10 mm, y = 63 mm + input.run }
+                },
+                construction = false
+            }
+        ]
+    }
+    feature sw = sweep {
+        profile = { sketch = s_swp, loops = [] },
+        path = { sketch = s_path, loops = [] },
+        suppressed = true
+    }
+
+    output bracket = {
+        body = {
+            ref = name,
+            kind = body,
+            name = { form = generated, feature = body, role = body, tag = { tag = "none" } }
+        },
+        part_number = "BR-100",
+        material = "material.aluminum"
+    }
+
+    region sw_l2_0 : face = {
+        select = [
+            {
+                ref = name,
+                kind = face,
+                name = {
+                    form = generated,
+                    feature = sw,
+                    role = side,
+                    tag = { tag = curve, sketch = s_swp, entity = l2 },
+                    ordinal = 0
+                }
+            }
+        ],
+        expect = exactly_one
+    }
+    region sw_l2_1 : face = {
+        select = [
+            {
+                ref = name,
+                kind = face,
+                name = {
+                    form = generated,
+                    feature = sw,
+                    role = side,
+                    tag = { tag = curve, sketch = s_swp, entity = l2 },
+                    ordinal = 1
+                }
+            }
+        ],
+        expect = exactly_one
+    }
+    region sw_l2 : face = {
+        select = [
+            {
+                ref = name,
+                kind = face,
+                name = {
+                    form = generated,
+                    feature = sw,
+                    role = side,
+                    tag = { tag = curve, sketch = s_swp, entity = l2 }
+                }
+            }
+        ],
+        expect = at_least_one
+    }
+    region sw_start : face = {
+        select = [
+            {
+                ref = name,
+                kind = face,
+                name = { form = generated, feature = sw, role = start_cap, tag = { tag = "none" } }
+            }
+        ],
+        expect = exactly_one
+    }
+    region sw_end : face = {
+        select = [
+            {
+                ref = name,
+                kind = face,
+                name = { form = generated, feature = sw, role = end_cap, tag = { tag = "none" } }
+            }
+        ],
+        expect = exactly_one
+    }
+}

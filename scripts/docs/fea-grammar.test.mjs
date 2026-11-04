@@ -64,6 +64,15 @@ test("a design dialect colors its words, values and units", () => {
     assert.equal(scope("    let r = 10 kohm ± 1 %", "%"), "support.type.unit.part");
     assert.equal(scope("    let r = 10 kohm ± 1 %", "±"), "keyword.operator.part");
     assert.equal(scope("    publish top = region { region = top }", "publish"), "keyword.control.part");
+    // The surface forms: call-form features, sketch blocks and reference forms.
+    assert.equal(scope("    feature body = extrude(profile = sketch.s1, distance = 10 mm, through_all)", "extrude"), "support.function.part");
+    assert.equal(scope("    feature body = extrude(profile = sketch.s1, through_all)", "through_all"), "support.function.part");
+    assert.equal(scope("    sketch s1 on origin.xy {", "on"), "keyword.other.part");
+    assert.equal(scope("        constrain distance(l1.start, l2.end) = 60 mm", "distance"), "support.function.part");
+    assert.equal(scope("        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])", "line"), "support.function.part");
+    assert.equal(scope("    edges = [edges_between(feature.body.face.end, feature.body.face.start)]", "edges_between"), "support.function.part");
+    const assembly = designGrammar(repository, DESIGN_DIALECTS.find(entry => entry.name === "assembly"));
+    assert.equal(tokenizeLine(assembly, "    use part bracket from \"bracket.part\" as left {").find(([text]) => text === "use")?.[1], "keyword.control.assembly");
     const circuit = designGrammar(repository, DESIGN_DIALECTS.find(entry => entry.name === "circuit"));
     assert.equal(tokenizeLine(circuit, "    component R1 = { part = \"R0402\" }").find(([text]) => text === "component")?.[1], "storage.type.circuit");
 });

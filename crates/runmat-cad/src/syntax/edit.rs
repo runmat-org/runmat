@@ -311,7 +311,12 @@ pub fn diff_source<T: Serialize + DeserializeOwned + PartialEq>(
             &dedent_first(&text, &indent),
         ));
     }
-    edits.extend(header_edits(source, &printed, old_syntax, new_syntax));
+    let old_document = old
+        .document
+        .as_ref()
+        .ok_or_else(|| EditFailure::Model("the source has no model".into()))?;
+    let old_printed = print_with(grammar, old_document, uses).map_err(EditFailure::Print)?;
+    edits.extend(header_edits(source, &old_printed, &printed));
 
     let edited = apply_edits(source, &edits).map_err(EditFailure::Apply)?;
     let check = grammar_parse::<T>(grammar, path, &edited);
@@ -418,76 +423,47 @@ fn entry_edits(
     edits
 }
 
-fn header_edits(
-    source: &str,
-    printed: &str,
-    old: &DocumentSyntax,
-    new: &DocumentSyntax,
-) -> Vec<TextEdit> {
-    let header = |text: &str, syntax: &DocumentSyntax| -> Option<Span> {
-        let end = syntax.declaration.start;
-        let head = &text[..end];
-        let first_use = head
-            .find("\nuse ")
-            .map(|i| i + 1)
-            .or_else(|| head.starts_with("use ").then_some(0));
-        Some(Span {
-            start: 0,
-            end: first_use.unwrap_or(end),
+/// The `runmat` and `std` lines at the top of a source.
+fn version_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .take_while(|line| {
+            let line = line.trim();
+            line.is_empty() || line.starts_with("runmat ") || line.starts_with("std ")
         })
-    };
-    let (Some(old_span), Some(new_span)) = (header(source, old), header(printed, new)) else {
-        return Vec::new();
-    };
-    let versions = |text: &str| -> Vec<String> {
-        text.lines()
-            .filter(|line| line.starts_with("runmat ") || line.starts_with("std "))
-            .map(str::to_string)
-            .collect()
-    };
-    let old_text = &source[old_span.start..old_span.end];
-    let new_text = &printed[new_span.start..new_span.end];
-    if versions(old_text) == versions(new_text) {
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// Rewrites the version header when the model's header changed: the whole header block is
+/// replaced (or added at the top, or removed), so the result has exactly the new header lines
+/// followed by one blank line.
+fn header_edits(source: &str, old_printed: &str, new_printed: &str) -> Vec<TextEdit> {
+    let wanted = version_lines(new_printed);
+    if version_lines(old_printed) == wanted {
         return Vec::new();
     }
-    // Rewrite only the version lines.
-    let mut out = Vec::new();
-    for (word, line) in [("runmat ", 0), ("std ", 1)] {
-        let wanted = versions(new_text).into_iter().find(|l| l.starts_with(word));
-        let mut offset = 0;
-        let mut found = false;
-        for current in old_text.split_inclusive('\n') {
-            if current.starts_with(word) {
-                found = true;
-                let span = Span {
-                    start: offset,
-                    end: offset + current.trim_end_matches('\n').len(),
-                };
-                match &wanted {
-                    Some(text) if text != current.trim_end_matches('\n') => {
-                        out.push(TextEdit::replace(span, text.clone()))
-                    }
-                    Some(_) => {}
-                    None => out.push(TextEdit::delete(Span {
-                        start: offset,
-                        end: offset + current.len(),
-                    })),
-                }
-            }
-            offset += current.len();
+    let mut end = 0;
+    let mut has_header = false;
+    for line in source.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with("runmat ") || trimmed.starts_with("std ") {
+            has_header = true;
+        } else if !trimmed.is_empty() {
+            break;
         }
-        if !found {
-            if let Some(text) = wanted {
-                let at = if line == 0 {
-                    0
-                } else {
-                    source.find('\n').map_or(0, |i| i + 1)
-                };
-                out.push(TextEdit::insert(at, format!("{text}\n")));
-            }
-        }
+        end += line.len();
     }
-    out
+    let text = if wanted.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n\n", wanted.join("\n"))
+    };
+    if has_header {
+        vec![TextEdit::replace(Span { start: 0, end }, text)]
+    } else {
+        vec![TextEdit::insert(0, text)]
+    }
 }
 
 // ------------------------------------------------------------------------------ the catalog

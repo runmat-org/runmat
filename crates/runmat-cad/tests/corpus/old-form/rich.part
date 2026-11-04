@@ -1,0 +1,240 @@
+runmat 0.7
+std 1
+
+use material aluminum from "./materials"
+use part skeleton from "//wing/skeleton" @ "R3" as sk
+use "./fasteners" as lib
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+    input plate : length = { default = 3 mm, minimum = 1 mm, maximum = input.thickness }
+
+    let v0 = 8 mm
+    let v1 = 2.5
+    let v2 = input.width
+    let v3 = let.half
+    let v4 = -input.width
+    let v5 = input.width / 2
+    let v6 = 10 kohm ± 1 %
+    let v7 = airDensity(altitude = 10 km)
+    let v8 = rho(2) as kg/m^3
+    let v9 = feature.boss.depth
+    let v10 = part.bracket.mass
+    let half : length = (-2.5 mm) * -(3)
+
+    feature s1 = sketch {
+        plane = { on = datum, datum = { datum = origin_plane, plane = xy } },
+        entities = [
+            {
+                id = l1,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 0 mm, y = 0 mm },
+                    end = { point = coords, x = input.width, y = 0 mm }
+                },
+                construction = false
+            },
+            {
+                id = l2,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = input.width, y = 0 mm },
+                    end = { point = coords, x = input.width, y = input.depth }
+                },
+                construction = false
+            },
+            {
+                id = l3,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = input.width, y = input.depth },
+                    end = { point = coords, x = 0 mm, y = input.depth }
+                },
+                construction = false
+            },
+            {
+                id = l4,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 0 mm, y = input.depth },
+                    end = { point = coords, x = 0 mm, y = 0 mm }
+                },
+                construction = false
+            }
+        ]
+    }
+    feature body = extrude {
+        profile = { sketch = s1, loops = [] },
+        extent = { extent = blind, distance = input.thickness },
+        suppressed = true
+    }
+    feature s_cut = sketch {
+        plane = { on = datum, datum = { datum = origin_plane, plane = xy } },
+        entities = [
+            {
+                id = c1,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 20 mm, y = 20 mm },
+                    end = { point = coords, x = 40 mm, y = 20 mm }
+                },
+                construction = false
+            },
+            {
+                id = c2,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 40 mm, y = 20 mm },
+                    end = { point = coords, x = 40 mm, y = 30 mm }
+                },
+                construction = false
+            },
+            {
+                id = c3,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 40 mm, y = 30 mm },
+                    end = { point = coords, x = 20 mm, y = 30 mm }
+                },
+                construction = false
+            },
+            {
+                id = c4,
+                geometry = {
+                    entity = line,
+                    start = { point = coords, x = 20 mm, y = 30 mm },
+                    end = { point = coords, x = 20 mm, y = 20 mm }
+                },
+                construction = false
+            }
+        ]
+    }
+    feature cut = extrude {
+        profile = { sketch = s_cut, loops = [] },
+        extent = { extent = through_all },
+        mode = { mode = cut, targets = [] }
+    }
+    feature h = hole {
+        face = {
+            ref = name,
+            kind = face,
+            name = { form = generated, feature = body, role = end_cap, tag = { tag = "none" } }
+        },
+        positions = [{ key = a, at = { point = coords, x = 60 mm, y = 10 mm, z = 10 mm } }],
+        diameter = 4 mm,
+        end = { end = through_all }
+    }
+    feature round = fillet {
+        edges = [
+            {
+                ref = edges_between,
+                a = {
+                    ref = name,
+                    kind = face,
+                    name = {
+                        form = generated,
+                        feature = body,
+                        role = side,
+                        tag = { tag = curve, sketch = s1, entity = l1 }
+                    }
+                },
+                b = {
+                    ref = name,
+                    kind = face,
+                    name = { form = generated, feature = body, role = end_cap, tag = { tag = "none" } }
+                }
+            }
+        ],
+        radius = 1.5 mm
+    }
+    feature round_missing = fillet {
+        edges = [
+            {
+                ref = edges_between,
+                a = {
+                    ref = name,
+                    kind = face,
+                    name = {
+                        form = generated,
+                        feature = body,
+                        role = side,
+                        tag = { tag = curve, sketch = s1, entity = l9 }
+                    }
+                },
+                b = {
+                    ref = name,
+                    kind = face,
+                    name = { form = generated, feature = body, role = end_cap, tag = { tag = "none" } }
+                }
+            }
+        ],
+        radius = 1 mm
+    }
+    feature row = pattern {
+        seeds = { seeds = features, features = [h] },
+        layout = {
+            layout = grid,
+            first = { along = datum, datum = { datum = origin_axis, axis = x } },
+            first_spacing = 6 mm,
+            first_count = 3,
+            second = { along = datum, datum = { datum = origin_axis, axis = y } },
+            second_spacing = 8 mm,
+            second_count = 2
+        }
+    }
+
+    output bracket = {
+        body = {
+            ref = name,
+            kind = body,
+            name = { form = generated, feature = body, role = body, tag = { tag = "none" } }
+        },
+        part_number = "BR-100",
+        material = "material.aluminum"
+    }
+
+    region top : face = {
+        select = [
+            {
+                ref = name,
+                kind = face,
+                name = { form = generated, feature = body, role = end_cap, tag = { tag = "none" } }
+            }
+        ],
+        expect = at_least_one
+    }
+    region cut_wall : face = {
+        select = [
+            {
+                ref = name,
+                kind = face,
+                name = {
+                    form = generated,
+                    feature = cut,
+                    role = side,
+                    tag = { tag = curve, sketch = s_cut, entity = c1 }
+                }
+            }
+        ],
+        expect = exactly_one
+    }
+
+    publish top = region { region = top }
+
+    material = {
+        body = {
+            ref = name,
+            kind = body,
+            name = { form = generated, feature = body, role = body, tag = { tag = "none" } }
+        },
+        material = "material.steel"
+    }
+
+    configuration long = { overrides = { width = 120 mm }, suppress = [round_missing] }
+
+    link verifies feature.body to "checks/mass.fea#check.mass_budget"
+
+    closed = true
+}

@@ -213,6 +213,31 @@ pub trait ValueSyntax {
     /// Prints `value` when it is one of the dialect's value forms; `None` leaves it to the
     /// generic rules.
     fn print(&self, value: &Json) -> Option<String>;
+
+    /// The tag key of the internally tagged values the field `key` holds, when it is written
+    /// in the call form: `extent = blind(distance = 10 mm)` for `{ extent = blind, distance
+    /// = 10 mm }`, and `mode = cut` for `{ mode = cut }`. `scope` is the tag of the entry whose
+    /// arguments are read (`extrude`), or `None` inside nested values.
+    fn tag_field(&self, _scope: Option<&str>, _key: &str) -> Option<&'static str> {
+        None
+    }
+
+    /// Lowers the value of the field `key` when the field has a form of its own (a plane
+    /// written as a face reference); `None` leaves it to the other rules.
+    fn lower_keyed(&self, _key: &str, _expr: &Expr) -> Option<Result<Json, LowerError>> {
+        None
+    }
+
+    /// Prints the value of the field `key` in the field's own form; the inverse of
+    /// [`ValueSyntax::lower_keyed`].
+    fn print_keyed(&self, _key: &str, _value: &Json) -> Option<String> {
+        None
+    }
+
+    /// The front end's statement forms, for the document engine.
+    fn entry_forms(&self) -> Option<&dyn crate::document::EntryForms> {
+        None
+    }
 }
 
 /// No value forms beyond plain data.
@@ -311,7 +336,123 @@ pub fn lower_record(
             ));
         };
         let child = join_path(path, &key);
-        entries.push((key, lower_expr(&value, hook, &child, spans)?));
+        // A record's first entry may be its own tag (`{ extent = blind, distance = 1 mm }`).
+        let lowered = match bare_word(&value) {
+            Some(word) if entries.is_empty() && is_own_tag(hook, &key) => {
+                spans.push((child, value.span()));
+                Json::String(word)
+            }
+            _ => lower_field(&key, &value, hook, None, &child, spans)?,
+        };
+        entries.push((key, lowered));
+    }
+    Ok(entries)
+}
+
+/// The field `key` holds tagged values whose tag key is `key` itself, so a record's first
+/// entry `key = <word>` is that record's tag.
+fn is_own_tag(hook: &dyn ValueSyntax, key: &str) -> bool {
+    hook.tag_field(None, key) == Some(key)
+}
+
+/// Lowers the value of the field `key`: its own form, the call form of a tagged value, or a
+/// plain value.
+pub fn lower_field(
+    key: &str,
+    expr: &Expr,
+    hook: &dyn ValueSyntax,
+    scope: Option<&str>,
+    path: &str,
+    spans: &mut PathSpans,
+) -> Result<Json, LowerError> {
+    if let Some(result) = hook.lower_keyed(key, expr) {
+        spans.push((path.to_string(), expr.span()));
+        return result;
+    }
+    if let Some(tag) = hook.tag_field(scope, key) {
+        if let Some(variant) = bare_word(expr) {
+            spans.push((path.to_string(), expr.span()));
+            return Ok(Json::Object(vec![(tag.to_string(), Json::String(variant))]));
+        }
+        if let Expr::Call(call) = expr {
+            if let Some(variant) = call.callee().as_ref().and_then(bare_word) {
+                spans.push((path.to_string(), expr.span()));
+                let mut entries = vec![(tag.to_string(), Json::String(variant))];
+                for (key, value) in lower_arguments(call, hook, None, path, spans)? {
+                    if entries.iter().any(|(existing, _)| *existing == key) {
+                        return Err(LowerError::new(
+                            expr.span(),
+                            format!("`{key}` is given twice"),
+                        ));
+                    }
+                    entries.push((key, value));
+                }
+                return Ok(Json::Object(entries));
+            }
+        }
+    }
+    lower_expr(expr, hook, path, spans)
+}
+
+/// A single word that is not a literal (`cut`, `blind`).
+fn bare_word(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Reference(reference) => match reference.segments().as_slice() {
+            [word] if !NOT_BARE.contains(&word.as_str()) => Some(word.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Lowers a call's arguments as record entries: `name = value`, and a lone word as a flag
+/// (`through_all` is `through_all = true`). `scope` is the tag the call writes (see
+/// [`ValueSyntax::tag_field`]).
+pub fn lower_arguments(
+    call: &ast::Call,
+    hook: &dyn ValueSyntax,
+    scope: Option<&str>,
+    path: &str,
+    spans: &mut PathSpans,
+) -> Result<Vec<(String, Json)>, LowerError> {
+    let mut entries: Vec<(String, Json)> = Vec::new();
+    for argument in call.arguments() {
+        let (key, value) = match argument {
+            ast::Argument::Named(named) => {
+                let Some(name) = named.name() else {
+                    return Err(LowerError::new(named.span(), "an argument needs a name"));
+                };
+                let key = name.text();
+                let Some(value) = named.value() else {
+                    return Err(LowerError::new(
+                        named.span(),
+                        format!("`{key}` needs a value"),
+                    ));
+                };
+                let child = join_path(path, &key);
+                let lowered = lower_field(&key, &value, hook, scope, &child, spans)?;
+                (key, lowered)
+            }
+            ast::Argument::Positional(expr) => match bare_word(&expr) {
+                Some(word) => {
+                    spans.push((join_path(path, &word), expr.span()));
+                    (word, Json::Bool(true))
+                }
+                None => {
+                    return Err(LowerError::new(
+                        expr.span(),
+                        "an argument is `name = value`, or a word that turns an option on",
+                    ))
+                }
+            },
+        };
+        if entries.iter().any(|(existing, _)| *existing == key) {
+            return Err(LowerError::new(
+                call.span(),
+                format!("`{key}` is given twice"),
+            ));
+        }
+        entries.push((key, value));
     }
     Ok(entries)
 }
@@ -377,6 +518,12 @@ const NOT_BARE: &[&str] = &["true", "false", "none", "as", "volatile"];
 /// quotes and reads back as the same string.
 pub fn is_bare_word(text: &str) -> bool {
     !NOT_BARE.contains(&text) && is_bare_key(text)
+}
+
+/// Whether `text` can be a call's argument name, a flag or a callee: one word (an identifier
+/// or a keyword) that is not a literal.
+pub fn is_identifier(text: &str) -> bool {
+    is_bare_word(text)
 }
 
 /// Whether `text` can be a record key without quotes (keywords are allowed there).
@@ -469,22 +616,48 @@ pub fn print_record(entries: &[(String, Json)], hook: &dyn ValueSyntax, depth: u
     }
     let printed: Vec<String> = entries
         .iter()
-        .map(|(key, value)| {
-            format!(
-                "{} = {}",
-                print_key(key),
-                print_json(value, hook, depth + 1)
-            )
+        .enumerate()
+        .map(|(index, (key, value))| {
+            let text = match value {
+                // The first entry's word reads as the record's own tag (see `lower_record`).
+                Json::String(word)
+                    if index == 0 && is_own_tag(hook, key) && is_identifier(word) =>
+                {
+                    word.clone()
+                }
+                Json::Object(inner) if index == 0 && is_own_tag(hook, key) && inner.len() == 1 => {
+                    match &inner[0] {
+                        (tag, Json::String(word)) if tag == key && is_identifier(word) => {
+                            format!("{word}()")
+                        }
+                        _ => print_field(key, value, hook, None, depth + 1),
+                    }
+                }
+                _ => print_field(key, value, hook, None, depth + 1),
+            };
+            format!("{} = {text}", print_key(key))
         })
         .collect();
-    let inline = format!("{{ {} }}", printed.join(", "));
+    wrap(&printed, "{ ", " }", "{", "}", depth)
+}
+
+/// `open items close` on one line when it fits, else one item per line.
+fn wrap(
+    printed: &[String],
+    open: &str,
+    close: &str,
+    open_long: &str,
+    close_long: &str,
+    depth: usize,
+) -> String {
+    let inline = format!("{open}{}{close}", printed.join(", "));
     if fits(&inline, depth) {
         return inline;
     }
     // Entries are separated by commas on every line: a number at the end of a line would
     // otherwise take the next key as its unit.
     let inner = INDENT.repeat(depth + 1);
-    let mut out = String::from("{\n");
+    let mut out = format!("{open_long}\n");
     for (index, entry) in printed.iter().enumerate() {
         out.push_str(&inner);
         out.push_str(entry);
@@ -494,8 +667,77 @@ pub fn print_record(entries: &[(String, Json)], hook: &dyn ValueSyntax, depth: u
         out.push('\n');
     }
     out.push_str(&INDENT.repeat(depth));
-    out.push('}');
+    out.push_str(close_long);
     out
+}
+
+/// Prints the value of the field `key` so that [`lower_field`] reads it back.
+pub fn print_field(
+    key: &str,
+    value: &Json,
+    hook: &dyn ValueSyntax,
+    scope: Option<&str>,
+    depth: usize,
+) -> String {
+    if let Some(text) = hook.print_keyed(key, value) {
+        return text;
+    }
+    let Some(tag) = hook.tag_field(scope, key) else {
+        return print_json(value, hook, depth);
+    };
+    if let Json::Object(entries) = value {
+        if let Some(((first, Json::String(variant)), rest)) = entries.split_first() {
+            if first == tag
+                && is_identifier(variant)
+                && rest.iter().all(|(k, _)| k != tag && is_identifier(k))
+            {
+                if rest.is_empty() {
+                    return variant.clone();
+                }
+                return format!("{variant}{}", print_arguments(rest, hook, None, depth));
+            }
+        }
+    }
+    // Anything else must not read back as the call form.
+    let text = print_json(value, hook, depth);
+    if let Json::String(string) = value {
+        if is_bare_word(&text) {
+            return quote(string);
+        }
+    }
+    let callee_end = text
+        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .unwrap_or(text.len());
+    if (callee_end > 0 && text[callee_end..].starts_with('(')) || is_bare_word(&text) {
+        return format!("({text})");
+    }
+    text
+}
+
+/// Prints call arguments, `(name = value, flag)`; a `true` field whose name is a word is
+/// written as the word alone. Every key must be an identifier ([`is_identifier`]).
+pub fn print_arguments(
+    entries: &[(String, Json)],
+    hook: &dyn ValueSyntax,
+    scope: Option<&str>,
+    depth: usize,
+) -> String {
+    let printed: Vec<String> = entries
+        .iter()
+        .map(|(key, value)| {
+            let plain =
+                hook.print_keyed(key, value).is_none() && hook.tag_field(scope, key).is_none();
+            if plain && *value == Json::Bool(true) && is_identifier(key) {
+                return key.clone();
+            }
+            format!(
+                "{} = {}",
+                key,
+                print_field(key, value, hook, scope, depth + 1)
+            )
+        })
+        .collect();
+    wrap(&printed, "(", ")", "(", ")", depth)
 }
 
 pub fn print_key(key: &str) -> String {
