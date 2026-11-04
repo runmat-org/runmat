@@ -465,10 +465,13 @@ fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_M_ORTHOGONALITY,
-            AnalysisFieldLayout::components(
+            // One mode-by-mode matrix for the whole basis: a tensor whatever the mode count.
+            AnalysisFieldLayout::new(
                 ObservationQuantity::MassOrthogonality,
-                FieldLocation::Mode,
-                mode_count,
+                FieldLocation::Global,
+                runmat_analysis_core::ObservationValueShape::Tensor {
+                    extents: vec![mode_count, mode_count],
+                },
             ),
             vec![mode_count, mode_count],
             basis.mass_orthogonality().to_vec(),
