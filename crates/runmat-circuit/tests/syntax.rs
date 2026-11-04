@@ -340,3 +340,54 @@ fn misplaced_statements_are_diagnosed() {
         "{messages:?}"
     );
 }
+
+#[test]
+fn use_lines_read_print_and_resolve() {
+    let power = "runmat 0.7\nstd 1\n\ncircuit power {\n    net_class rail = { trace_width = 0.5 mm }\n    interface usb2 = { members = [DP, DN] }\n    sheet buck {\n        port VIN : power\n        instance ldo = { sheet = ldo }\n    }\n    sheet ldo {\n        port VIN : power\n    }\n}\n";
+    let main = "runmat 0.7\nstd 1\n\nuse sheet buck from \"./power.circuit\" as reg\nuse interface usb2 from \"./power.circuit\"\nuse library passives from \"lib/passives\" @ \"R3\"\nuse \"lib/connectors\" as conn\n\ncircuit ctl {\n    sheet main {\n        instance r = { sheet = reg }\n    }\n}\n";
+    let parsed = parse_circuit("ctl.circuit", main);
+    assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
+    let mut design = parsed.design.unwrap();
+    assert_eq!(design.uses.len(), 4);
+    assert_eq!(design.uses[0].local_name(), Some("reg"));
+    assert_eq!(design.uses[2].revision.as_deref(), Some("R3"));
+    // The use lines print back and read the same.
+    let printed = print_circuit(&design).unwrap();
+    assert!(printed.contains("use sheet buck from \"./power.circuit\" as reg\n"));
+    assert_eq!(
+        parse_circuit("ctl.circuit", &printed).design.unwrap(),
+        design
+    );
+    // Resolving brings in the used sheet (and the sheet it instances) and the interface.
+    let used = parse_circuit("power.circuit", power).design.unwrap();
+    runmat_circuit::syntax::resolve_uses(&mut design, &|from: &str| {
+        (from == "./power.circuit").then(|| used.clone())
+    })
+    .unwrap();
+    assert!(design.sheets.contains_key("reg") && design.sheets.contains_key("ldo"));
+    assert!(design.interfaces.contains_key("usb2"));
+    assert!(!design.net_classes.contains_key("rail"));
+    // Errors: an unknown kind, a name used twice, a folder without a name, a missing file.
+    for (line, message) in [
+        ("use part R1 from \"./x\"", "not one of them"),
+        (
+            "use sheet a from \"./x\"\nuse sheet a from \"./y\"",
+            "already used",
+        ),
+        ("use \"lib/x\"", "under a name"),
+    ] {
+        let p = parse_circuit("ctl.circuit", &format!("{line}\ncircuit ctl {{\n}}\n"));
+        assert!(
+            p.diagnostics.iter().any(|d| d.message.contains(message)),
+            "{line}: {:#?}",
+            p.diagnostics
+        );
+    }
+    let mut missing = parse_circuit(
+        "ctl.circuit",
+        "use circuit p from \"./p.circuit\"\ncircuit ctl {\n}\n",
+    )
+    .design
+    .unwrap();
+    assert!(runmat_circuit::syntax::resolve_uses(&mut missing, &|_: &str| None).is_err());
+}

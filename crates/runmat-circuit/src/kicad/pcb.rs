@@ -4,7 +4,8 @@
 //! `setup`/`stackup`, `net`, `footprint`, `segment`, `arc`, `via` (through, `blind`,
 //! `micro`), `zone` (copper pours with priority, clearance, minimum thickness, thermal
 //! settings, island removal, filled polygons; keepout zones become [`Keepout`]s), and the
-//! `Edge.Cuts` graphics that form the outline and cutouts. Everything else (text, dimensions,
+//! `Edge.Cuts` graphics that form the outline and cutouts, and the board-level
+//! [`SYNC_PROPERTY`] holding the sync record. Everything else (text, dimensions,
 //! groups, plot settings, generator data, unknown future tokens) stays in the tree.
 //!
 //! [`KicadPcb::write`] walks the original tree: each mapped item that is unchanged is written
@@ -30,6 +31,35 @@ enum Key {
     Edge,
     Net,
     Setup,
+    Sync,
+}
+
+/// The board-level property that carries the board's sync record (the `.circuit.layout`
+/// `sync { }` section, as text), so a board exported and re-imported keeps its ECO baseline,
+/// comparator settings and footprint links.
+pub const SYNC_PROPERTY: &str = "RUNMAT_SYNC";
+
+/// The section in `text` (the `sync { … }` statement), or why it does not read.
+fn read_sync_property(text: &str) -> Result<crate::syntax::layout::SyncSection, String> {
+    let parsed = crate::syntax::layout::parse_layout("", &format!("layout kicad {{\n{text}\n}}\n"));
+    match (parsed.sync, parsed.diagnostics.first()) {
+        (Some(section), None) => Ok(section),
+        (_, Some(d)) => Err(d.message.clone()),
+        (None, None) => Ok(Default::default()),
+    }
+}
+
+fn sync_property(board: &Board) -> Option<SExpr> {
+    let section = crate::syntax::layout::SyncSection::of(board);
+    (section != Default::default()).then(|| {
+        SExpr::list(
+            "property",
+            vec![
+                SExpr::str(SYNC_PROPERTY),
+                SExpr::str(&crate::syntax::layout::print_sync(&section, 0)),
+            ],
+        )
+    })
 }
 
 /// A board read from (or destined for) a KiCad file.
@@ -223,8 +253,13 @@ pub fn read(text: &str) -> Result<KicadPcb, String> {
     let mut origin = BTreeMap::new();
     let mut edge_segments = Vec::new();
     let mut edge_rings = Vec::new();
+    let mut sync_text: Option<String> = None;
     for (idx, node) in tree.items().iter().enumerate().skip(1) {
         match node.head() {
+            Some("property") if node.arg(0) == Some(SYNC_PROPERTY) => {
+                origin.insert(idx, Key::Sync);
+                sync_text = node.arg(1).map(str::to_owned);
+            }
             Some("net") => {
                 let code = node.arg(0).unwrap_or("0").to_string();
                 let name = node.arg(1).unwrap_or("").to_string();
@@ -453,6 +488,20 @@ pub fn read(text: &str) -> Result<KicadPcb, String> {
     match outline_from(&edge_segments, edge_rings) {
         Some(o) => board.outline = o,
         None => warnings.push("no closed Edge.Cuts outline".into()),
+    }
+    if let Some(text) = sync_text {
+        match read_sync_property(&text) {
+            Ok(section) => {
+                // The links replace the file's own symbol paths: they are the ECO's identity.
+                let missing = section.install(&mut board);
+                for r in missing {
+                    warnings.push(format!(
+                        "the sync record links {r}, which the board does not have"
+                    ));
+                }
+            }
+            Err(e) => warnings.push(format!("the board's sync record does not read: {e}")),
+        }
     }
     let snapshot = board.clone();
     Ok(KicadPcb {
@@ -873,6 +922,14 @@ impl KicadPcb {
                     }
                 }
                 Some(Key::Setup) => out.push(self.setup_or_general(node)),
+                Some(Key::Sync) => {
+                    let of = crate::syntax::layout::SyncSection::of;
+                    if of(b) == of(s) {
+                        out.push(node.clone());
+                    } else if let Some(p) = sync_property(b) {
+                        out.push(p);
+                    }
+                }
                 Some(Key::Net) => {
                     if !nets_changed {
                         out.push(node.clone());
@@ -1013,6 +1070,17 @@ impl KicadPcb {
         }
         if outline_changed && !edge_written {
             out.extend(edge_nodes(&b.outline));
+        }
+        let of = crate::syntax::layout::SyncSection::of;
+        if !self.origin.values().any(|k| *k == Key::Sync) && of(b) != of(s) {
+            if let Some(p) = sync_property(b) {
+                // After the header items, before the board's own items.
+                let pos = out
+                    .iter()
+                    .position(|x| x.head() == Some("net") || x.head() == Some("footprint"))
+                    .unwrap_or(out.len());
+                out.insert(pos, p);
+            }
         }
         sexpr::write(&SExpr::List(out))
     }

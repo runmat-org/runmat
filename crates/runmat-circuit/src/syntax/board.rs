@@ -83,81 +83,8 @@ use runmat_rules::{SourceKey, SourceOrder};
 use runmat_types::Span;
 use std::collections::{BTreeMap, HashMap};
 
-/// The `.circuit.layout` statement words: the board front end's registry.
-pub mod words {
-    pub const LAYOUT: &str = "layout";
-    pub const STACKUP: &str = "stackup";
-    pub const LAYER: &str = "layer";
-    pub const FINISH: &str = "finish";
-    pub const REGION: &str = "region";
-    pub const OUTLINE: &str = "outline";
-    pub const CUTOUT: &str = "cutout";
-    pub const LIMITS: &str = "limits";
-    pub const NET_CLASS: &str = "net_class";
-    pub const RULE: &str = "rule";
-    pub const NET: &str = "net";
-    pub const ROOM: &str = "room";
-    pub const FOOTPRINT: &str = "footprint";
-    pub const FIDUCIAL: &str = "fiducial";
-    pub const TRACK: &str = "track";
-    pub const ARC: &str = "arc";
-    pub const VIA: &str = "via";
-    pub const POUR: &str = "pour";
-    pub const KEEPOUT: &str = "keepout";
-    pub const TEXT: &str = "text";
-    pub const GRAPHIC: &str = "graphic";
-    pub const DIMENSION: &str = "dimension";
-    pub const PACKAGE: &str = "package";
-    pub const NAME: &str = "name";
-    pub const UUID: &str = "uuid";
-    pub const DESCRIPTION: &str = "description";
-    pub const SMD: &str = "smd";
-    pub const PAD: &str = "pad";
-    pub const COURTYARD: &str = "courtyard";
-    pub const SILK: &str = "silk";
-    pub const FAB: &str = "fab";
-    pub const MODEL: &str = "model";
-    pub const BODY: &str = "body";
-    pub const SYNC: &str = super::super::layout::words::SYNC;
-    /// Every statement word (board, stackup and package statements), for completion and the
-    /// highlighter.
-    pub const ALL: &[&str] = &[
-        LAYOUT,
-        STACKUP,
-        LAYER,
-        FINISH,
-        REGION,
-        OUTLINE,
-        CUTOUT,
-        LIMITS,
-        NET_CLASS,
-        RULE,
-        NET,
-        ROOM,
-        FOOTPRINT,
-        FIDUCIAL,
-        TRACK,
-        ARC,
-        VIA,
-        POUR,
-        KEEPOUT,
-        TEXT,
-        GRAPHIC,
-        DIMENSION,
-        PACKAGE,
-        NAME,
-        UUID,
-        DESCRIPTION,
-        SMD,
-        PAD,
-        COURTYARD,
-        SILK,
-        FAB,
-        MODEL,
-        BODY,
-        SYNC,
-    ];
-}
+/// The `.circuit.layout` statement words: one registry for the board and its sync section.
+pub use super::layout::words;
 
 /// The section a statement belongs to: statements print grouped, in this order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1412,7 +1339,10 @@ fn read_rule(id: &str, v: &Val) -> Read<RuleSpec> {
 
 /* --- stackups ------------------------------------------------------------------------------ */
 
-const MATERIALS: [(&str, fn() -> Material); 4] = [
+/// A built-in material by its written name.
+type Builtin = (&'static str, fn() -> Material);
+
+const MATERIALS: [Builtin; 4] = [
     ("copper", Material::copper),
     ("fr4", Material::fr4),
     ("polyimide", Material::polyimide),

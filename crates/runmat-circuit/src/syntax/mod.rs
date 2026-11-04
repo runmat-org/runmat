@@ -158,6 +158,7 @@ pub fn parse_circuit(path: &str, source: &str) -> ParsedCircuit {
     };
     let mut design: Option<Design> = None;
     let mut loose_sheets = Vec::new();
+    let mut uses: Vec<crate::ir::CircuitUse> = Vec::new();
     for item in syntax.file().items() {
         match item {
             Item::Declaration(declaration) if declaration.keyword() == words::CIRCUIT => {
@@ -173,10 +174,11 @@ pub fn parse_circuit(path: &str, source: &str) -> ParsedCircuit {
                 loose_sheets.push(declaration);
             }
             Item::Declaration(_) | Item::Error(_) => {}
-            Item::Use(declaration) => reader.diagnostics.push(diagnostic(
-                declaration.span(),
-                "`use` in a circuit is not read yet; library parts come from the pool",
-            )),
+            Item::Use(declaration) => {
+                if let Some(u) = reader.note(read_use(&declaration, &uses)) {
+                    uses.push(u);
+                }
+            }
             Item::Import(import) => reader.diagnostics.push(diagnostic(
                 import.span(),
                 "a circuit reads other files with `use`",
@@ -193,10 +195,153 @@ pub fn parse_circuit(path: &str, source: &str) -> ParsedCircuit {
     for sheet in loose_sheets {
         read_sheet(&mut reader, &mut design, &sheet);
     }
+    design.uses = uses;
     ParsedCircuit {
         design: reader.diagnostics.is_empty().then_some(design),
         diagnostics: reader.diagnostics,
     }
+}
+
+/// A `use` line, checked against the kinds a circuit takes and the names already used.
+fn read_use(
+    declaration: &ast::UseDeclaration,
+    earlier: &[crate::ir::CircuitUse],
+) -> Read<crate::ir::CircuitUse> {
+    let item = board::use_item(declaration)?;
+    let u = crate::ir::CircuitUse {
+        symbol: item.symbol,
+        from: item.from,
+        alias: item.alias,
+        revision: item.revision,
+    };
+    if let Some((kind, _)) = &u.symbol {
+        if !crate::ir::CircuitUse::KINDS.contains(&kind.as_str()) {
+            return Err(diagnostic(
+                declaration.span(),
+                format!(
+                    "a circuit uses {}; `{kind}` is not one of them",
+                    crate::ir::CircuitUse::KINDS.join(", ")
+                ),
+            ));
+        }
+    } else if u.alias.is_none() {
+        return Err(diagnostic(
+            declaration.span(),
+            "a whole folder is used under a name: `use \"<folder>\" as <name>`",
+        ));
+    }
+    if let Some(name) = u.local_name() {
+        if earlier.iter().any(|e| e.local_name() == Some(name)) {
+            return Err(diagnostic(
+                declaration.span(),
+                format!("`{name}` is already used; give one of them `as <name>`"),
+            ));
+        }
+    }
+    Ok(u)
+}
+
+fn use_text(u: &crate::ir::CircuitUse) -> String {
+    let mut out = String::from("use ");
+    if let Some((kind, name)) = &u.symbol {
+        out.push_str(&format!("{kind} {name} from "));
+    }
+    out.push_str(&quote(&u.from));
+    if let Some(r) = &u.revision {
+        out.push_str(&format!(" @ {}", quote(r)));
+    }
+    if let Some(a) = &u.alias {
+        out.push_str(&format!(" as {a}"));
+    }
+    out
+}
+
+/// Brings in what a design's `use` lines name: the sheets, interfaces and net classes of used
+/// circuits (`load` reads a used file's design by its `from` path). A `sheet` or `interface`
+/// use takes that one item under its local name, with the sheets it instances. The design's
+/// own declarations win over used ones of the same name; a name two uses bring in is an
+/// error. `library` uses name part libraries, which the pool resolves.
+pub fn resolve_uses(
+    design: &mut Design,
+    load: &dyn Fn(&str) -> Option<Design>,
+) -> Result<(), String> {
+    let mut brought: BTreeMap<String, String> = BTreeMap::new();
+    let mut claim = |kind: &str, name: &str, from: &str| -> Result<(), String> {
+        match brought.insert(format!("{kind} {name}"), from.to_owned()) {
+            Some(other) if other != from => Err(format!(
+                "{kind} `{name}` comes from both \"{other}\" and \"{from}\""
+            )),
+            _ => Ok(()),
+        }
+    };
+    for u in design.uses.clone() {
+        let Some((kind, name)) = &u.symbol else {
+            continue;
+        };
+        if kind == "library" {
+            continue;
+        }
+        let used = load(&u.from).ok_or_else(|| format!("\"{}\" cannot be read", u.from))?;
+        let local = u.local_name().unwrap_or(name).to_owned();
+        let mut add_sheet = |design: &mut Design, sheet: &str, as_name: &str| -> Result<(), String> {
+            // The sheet and every sheet it instances, transitively.
+            let mut todo = vec![(sheet.to_owned(), as_name.to_owned())];
+            while let Some((s, local)) = todo.pop() {
+                let mut def = used
+                    .sheets
+                    .get(&s)
+                    .cloned()
+                    .ok_or_else(|| format!("\"{}\" has no sheet `{s}`", u.from))?;
+                for i in &def.instances {
+                    todo.push((i.sheet.clone(), i.sheet.clone()));
+                }
+                if design.sheets.contains_key(&local) {
+                    continue;
+                }
+                claim("sheet", &local, &u.from)?;
+                def.name = local.clone();
+                design.sheets.insert(local, def);
+            }
+            Ok(())
+        };
+        match kind.as_str() {
+            "circuit" => {
+                let sheets: Vec<String> = used.sheets.keys().cloned().collect();
+                for s in sheets {
+                    add_sheet(design, &s, &s)?;
+                }
+                for (k, i) in &used.interfaces {
+                    claim("interface", k, &u.from)?;
+                    design.interfaces.entry(k.clone()).or_insert_with(|| i.clone());
+                }
+                for (k, c) in &used.net_classes {
+                    claim("net_class", k, &u.from)?;
+                    design.net_classes.entry(k.clone()).or_insert_with(|| c.clone());
+                }
+            }
+            "sheet" => add_sheet(design, name, &local)?,
+            "interface" => {
+                let i = used
+                    .interfaces
+                    .get(name)
+                    .ok_or_else(|| format!("\"{}\" has no interface `{name}`", u.from))?;
+                claim("interface", &local, &u.from)?;
+                design.interfaces.entry(local).or_insert_with(|| i.clone());
+            }
+            "net_class" => {
+                let c = used
+                    .net_classes
+                    .get(name)
+                    .ok_or_else(|| format!("\"{}\" has no net class `{name}`", u.from))?;
+                claim("net_class", &local, &u.from)?;
+                let mut c = c.clone();
+                c.name = local.clone();
+                design.net_classes.entry(local).or_insert(c);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn read_circuit(reader: &mut Reader<'_>, declaration: &ast::Declaration) -> Design {
@@ -1272,6 +1417,13 @@ pub fn print_circuit(design: &Design) -> Print {
         body.push(print_sheet(sheet)?);
     }
     let mut out = String::from("runmat 0.7\nstd 1\n\n");
+    for u in &design.uses {
+        out.push_str(&use_text(u));
+        out.push('\n');
+    }
+    if !design.uses.is_empty() {
+        out.push('\n');
+    }
     out.push_str(&format!("circuit {} {{\n", name(&design.name)));
     for statement in body {
         if statement.is_empty() {

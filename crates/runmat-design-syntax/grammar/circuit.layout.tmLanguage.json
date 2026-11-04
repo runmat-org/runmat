@@ -37,7 +37,7 @@
     },
     {
       "name": "storage.type.circuit-layout",
-      "match": "(?<![\\w])(?:component_class|component|diff_pair|footprint|net_class|compare|version|layout|sync)(?![\\w])"
+      "match": "(?<![\\w])(?:component_class|description|component|courtyard|diff_pair|dimension|footprint|net_class|fiducial|compare|graphic|keepout|outline|package|stackup|version|cutout|finish|layout|limits|region|layer|model|track|body|name|pour|room|rule|silk|sync|text|uuid|arc|fab|net|pad|smd|via)(?![\\w])"
     },
     {
       "name": "keyword.other.circuit-layout",
@@ -84,15 +84,45 @@
       {
         "scope": "storage.type.circuit-layout",
         "words": [
+          "arc",
+          "body",
           "compare",
           "component",
           "component_class",
+          "courtyard",
+          "cutout",
+          "description",
           "diff_pair",
+          "dimension",
+          "fab",
+          "fiducial",
+          "finish",
           "footprint",
+          "graphic",
+          "keepout",
+          "layer",
           "layout",
+          "limits",
+          "model",
+          "name",
+          "net",
           "net_class",
+          "outline",
+          "package",
+          "pad",
+          "pour",
+          "region",
+          "room",
+          "rule",
+          "silk",
+          "smd",
+          "stackup",
           "sync",
-          "version"
+          "text",
+          "track",
+          "uuid",
+          "version",
+          "via"
         ]
       },
       {

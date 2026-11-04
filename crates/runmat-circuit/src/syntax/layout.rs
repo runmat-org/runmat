@@ -51,7 +51,8 @@ use runmat_design_syntax::{parse_source, Dialect, FeaSyntaxDiagnostic, FeaSyntax
 use runmat_types::Span;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The `.circuit.layout` statement words this front end reads: its registry.
+/// The `.circuit.layout` statement words: the board front end's registry (board, stackup,
+/// package and `sync { }` statements). The highlighter is generated from this table.
 pub mod words {
     pub const LAYOUT: &str = "layout";
     pub const SYNC: &str = "sync";
@@ -62,6 +63,36 @@ pub mod words {
     pub const NET_CLASS: &str = "net_class";
     pub const DIFF_PAIR: &str = "diff_pair";
     pub const COMPONENT_CLASS: &str = "component_class";
+    pub const STACKUP: &str = "stackup";
+    pub const LAYER: &str = "layer";
+    pub const FINISH: &str = "finish";
+    pub const REGION: &str = "region";
+    pub const OUTLINE: &str = "outline";
+    pub const CUTOUT: &str = "cutout";
+    pub const LIMITS: &str = "limits";
+    pub const RULE: &str = "rule";
+    pub const NET: &str = "net";
+    pub const ROOM: &str = "room";
+    pub const FIDUCIAL: &str = "fiducial";
+    pub const TRACK: &str = "track";
+    pub const ARC: &str = "arc";
+    pub const VIA: &str = "via";
+    pub const POUR: &str = "pour";
+    pub const KEEPOUT: &str = "keepout";
+    pub const TEXT: &str = "text";
+    pub const GRAPHIC: &str = "graphic";
+    pub const DIMENSION: &str = "dimension";
+    pub const PACKAGE: &str = "package";
+    pub const NAME: &str = "name";
+    pub const UUID: &str = "uuid";
+    pub const DESCRIPTION: &str = "description";
+    pub const SMD: &str = "smd";
+    pub const PAD: &str = "pad";
+    pub const COURTYARD: &str = "courtyard";
+    pub const SILK: &str = "silk";
+    pub const FAB: &str = "fab";
+    pub const MODEL: &str = "model";
+    pub const BODY: &str = "body";
     /// Every statement word, for completion and the highlighter.
     pub const ALL: &[&str] = &[
         LAYOUT,
@@ -73,6 +104,36 @@ pub mod words {
         NET_CLASS,
         DIFF_PAIR,
         COMPONENT_CLASS,
+        STACKUP,
+        LAYER,
+        FINISH,
+        REGION,
+        OUTLINE,
+        CUTOUT,
+        LIMITS,
+        RULE,
+        NET,
+        ROOM,
+        FIDUCIAL,
+        TRACK,
+        ARC,
+        VIA,
+        POUR,
+        KEEPOUT,
+        TEXT,
+        GRAPHIC,
+        DIMENSION,
+        PACKAGE,
+        NAME,
+        UUID,
+        DESCRIPTION,
+        SMD,
+        PAD,
+        COURTYARD,
+        SILK,
+        FAB,
+        MODEL,
+        BODY,
     ];
 }
 

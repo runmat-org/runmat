@@ -335,9 +335,41 @@ pub struct VariantDef {
     pub overrides: BTreeMap<String, Fitting>,
 }
 
+/// A `use` line of a `.circuit` file: what the file takes from another circuit or a library.
+///
+/// - `use circuit power from "./power.circuit"`: every sheet, interface and net class of that
+///   circuit;
+/// - `use sheet buck from "./power.circuit" as reg`: one sheet, under a local name;
+/// - `use interface usb2 from "lib/interfaces.circuit"`: one interface;
+/// - `use library passives from "lib/passives" @ "R3"`: a part library, pinned to a revision;
+/// - `use "lib/connectors" as conn`: a whole library folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CircuitUse {
+    /// `Some((kind, name))`: one symbol; `None`: a whole folder under `alias`.
+    pub symbol: Option<(String, String)>,
+    pub from: String,
+    pub alias: Option<String>,
+    pub revision: Option<String>,
+}
+
+impl CircuitUse {
+    /// The kinds a circuit takes from other files.
+    pub const KINDS: &'static [&'static str] =
+        &["circuit", "sheet", "interface", "net_class", "library"];
+
+    /// The name the file refers to it by.
+    pub fn local_name(&self) -> Option<&str> {
+        self.alias
+            .as_deref()
+            .or(self.symbol.as_ref().map(|(_, name)| name.as_str()))
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Design {
     pub name: String,
+    /// The file's `use` lines, in order.
+    pub uses: Vec<CircuitUse>,
     pub sheets: BTreeMap<String, SheetDef>,
     pub root: String,
     pub net_classes: BTreeMap<String, NetClass>,

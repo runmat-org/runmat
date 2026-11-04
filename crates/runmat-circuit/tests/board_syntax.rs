@@ -1021,3 +1021,44 @@ fn boards_at_scale() {
         text.len()
     );
 }
+
+#[test]
+fn the_sync_record_survives_a_kicad_round_trip() {
+    use runmat_circuit::kicad::pcb;
+    use runmat_circuit::syntax::layout::SyncSection;
+    let board = eco_scenario().board;
+    let before = SyncSection::of(&board);
+    assert!(!before.links.is_empty() && !before.sync.components.is_empty());
+    // Export and import: the baseline, the settings and every footprint link come back.
+    let text = pcb::write_board(&board);
+    assert!(text.contains(pcb::SYNC_PROPERTY));
+    let k = pcb::read(&text).unwrap();
+    assert!(k.warnings.is_empty(), "{:?}", k.warnings);
+    assert_eq!(SyncSection::of(&k.board), before);
+    // An unedited write keeps the file as it was.
+    assert_eq!(k.write(), pcb::read(&k.write()).unwrap().write());
+    // An edit to the settings is written back; the rest of the file stays.
+    let mut k = k;
+    k.board.sync.options.relink_by_designator = false;
+    let edited = k.write();
+    let back = pcb::read(&edited).unwrap();
+    assert!(!back.board.sync.options.relink_by_designator);
+    assert_eq!(back.board.footprints.len(), board.footprints.len());
+    // The imported board prints as a layout and reads back the same record.
+    let mut imported = back.board;
+    imported.name = "ctl".into();
+    let layout = print_board(&imported, &[]);
+    let parsed = parse_board(PATH, &layout);
+    assert_eq!(
+        SyncSection::of(parsed.board.as_ref().unwrap()),
+        SyncSection::of(&imported)
+    );
+    // A record from a newer release is reported, and the board imports without it.
+    let newer = text.replacen("version = 1", "version = 9", 1);
+    let k = pcb::read(&newer).unwrap();
+    assert!(
+        k.warnings.iter().any(|w| w.contains("newer RunMat")),
+        "{:?}",
+        k.warnings
+    );
+}
