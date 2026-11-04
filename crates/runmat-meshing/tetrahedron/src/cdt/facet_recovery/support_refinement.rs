@@ -393,6 +393,7 @@ fn try_insert_support_node(
             })
         }
         CandidateInsertionResult::SegmentConflicts(conflicts) => {
+            let before_split = work.last_rejection().map(str::to_owned);
             let Some(refined) = try_split_recovered_segment_edge(
                 recovery,
                 conflicts[0],
@@ -401,7 +402,30 @@ fn try_insert_support_node(
                 work,
             )?
             else {
-                work.reject("candidate reported an unknown recovered segment conflict");
+                let split_rejection = work
+                    .last_rejection()
+                    .filter(|reason| Some(*reason) != before_split.as_deref())
+                    .unwrap_or("the conflicting edge is not a recovered segment interval")
+                    .to_owned();
+                let source_state =
+                    match crate::cdt::insertion::validate_constrained_delaunay_volume_topology(
+                        &recovery.topology,
+                        protected_faces,
+                        work.options.segment_recovery.insertion,
+                        work.cancellation,
+                    ) {
+                        Ok(()) => "constrained-Delaunay".to_owned(),
+                        Err(failure) => format!("already invalid: {failure}"),
+                    };
+                work.reject(format!(
+                    "support node {:?} conflicts with recovered segment edge {:?} ({} conflicts); \
+                     splitting it was rejected: {split_rejection}; on-facet insertion was \
+                     rejected: {}; the topology before insertion was {source_state}",
+                    node.coordinates_m.canonical_value(),
+                    conflicts[0],
+                    conflicts.len(),
+                    conforming_rejection.as_deref().unwrap_or("no reason recorded")
+                ));
                 return Ok(SupportNodeInsertionState::Unavailable);
             };
             *recovery = refined.recovery;
