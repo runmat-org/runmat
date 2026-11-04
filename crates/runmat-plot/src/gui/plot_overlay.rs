@@ -2717,40 +2717,26 @@ impl PlotOverlay {
             Some(Pos2::new(sx, sy))
         };
 
-        let nice_step = |raw: f64| -> f64 {
-            if !raw.is_finite() || raw <= 0.0 {
-                return 1.0;
-            }
-            let pow10 = 10.0_f64.powf(raw.log10().floor());
-            let norm = raw / pow10;
-            let mult = if norm <= 1.0 {
-                1.0
-            } else if norm <= 2.0 {
-                2.0
-            } else if norm <= 5.0 {
-                5.0
-            } else {
-                10.0
+        // Label the frame the renderer drew its axis lines and tick marks from. Without finite
+        // bounds, fall back to an origin triad sized from the on-screen scale.
+        let frame = plot_renderer.axis_frame_3d(axes_index).unwrap_or_else(|| {
+            let origin = Vec3::ZERO;
+            let px_per = |axis: Vec3| match (project(origin), project(origin + axis)) {
+                (Some(a), Some(b)) => ((b.x - a.x).hypot(b.y - a.y) as f64).max(1e-6),
+                _ => 1.0,
             };
-            mult * pow10
-        };
-
-        // Label the ticks the renderer drew: each axis has its own step and length, since 3-D
-        // axes may scale each data axis differently.
-        let origin = Vec3::ZERO;
-        let (steps, lens) = plot_renderer
-            .world_axis_triad_for_axes(axes_index)
-            .unwrap_or_else(|| {
-                let px_per = |axis: Vec3| match (project(origin), project(origin + axis)) {
-                    (Some(a), Some(b)) => ((b.x - a.x).hypot(b.y - a.y) as f64).max(1e-6),
-                    _ => 1.0,
-                };
-                let steps = [Vec3::X, Vec3::Y, Vec3::Z].map(|axis| nice_step(96.0 / px_per(axis)));
-                (steps, steps.map(|step| step as f32 * 5.0))
-            });
-        if steps.iter().any(|step| !(step.is_finite() && *step > 0.0)) {
-            return;
-        }
+            let steps = [Vec3::X, Vec3::Y, Vec3::Z]
+                .map(|axis| crate::core::plot_renderer::nice_tick_step(96.0 / px_per(axis)));
+            crate::core::plot_renderer::AxisFrame3d {
+                origin,
+                world_origin: true,
+                z_base: origin,
+                lens: steps.map(|step| step as f32 * 5.0),
+                steps,
+            }
+        });
+        let origin = frame.origin;
+        let lens = frame.lens;
 
         let scale = font_scale.max(0.75);
         let font = FontId::proportional(Self::axes_tick_font_size(
@@ -2772,7 +2758,7 @@ impl PlotOverlay {
             (dir / len) * base
         };
 
-        if let Some(pos) = project(Vec3::X * lens[0] * 1.10) {
+        if let Some(pos) = project(origin + Vec3::X * lens[0] * 1.10) {
             if let Some(label) = plot_renderer.overlay_x_label_for_axes(axes_index) {
                 let style = plot_renderer
                     .overlay_x_label_style_for_axes(axes_index)
@@ -2791,7 +2777,7 @@ impl PlotOverlay {
                 );
             }
         }
-        if let Some(pos) = project(Vec3::Y * lens[1] * 1.10) {
+        if let Some(pos) = project(origin + Vec3::Y * lens[1] * 1.10) {
             if let Some(label) = plot_renderer.overlay_y_label_for_axes(axes_index) {
                 let style = plot_renderer
                     .overlay_y_label_style_for_axes(axes_index)
@@ -2811,7 +2797,7 @@ impl PlotOverlay {
                 );
             }
         }
-        if let Some(pos) = project(Vec3::Z * lens[2] * 1.10) {
+        if let Some(pos) = project(frame.z_base + Vec3::Z * lens[2] * 1.10) {
             if let Some(label) = plot_renderer.overlay_z_label_for_axes(axes_index) {
                 let style = plot_renderer
                     .overlay_z_label_style_for_axes(axes_index)
@@ -2837,36 +2823,27 @@ impl PlotOverlay {
             return;
         }
 
-        let draw_axis = |axis: Vec3, major_step: f64, axis_len: f32, color: Color32| {
-            for i in 1..=6 {
-                let t = (i as f32) * (major_step as f32);
-                if t >= axis_len * 0.999 {
-                    break;
-                }
-                let p = origin + axis * t;
+        let draw_axis = |axis_index: usize, axis: Vec3, color: Color32| {
+            for (offset_along, value) in frame.ticks(axis_index) {
+                let p = frame.axis_start(axis_index) + axis * offset_along;
                 let Some(pos) = project(p) else { continue };
                 // Offset labels slightly away from the axis in screen-space based on camera right/up.
                 let offset =
                     outward_offset(pos, 7.0 * scale) + egui::Vec2::new(3.0 * scale, -3.0 * scale);
+                let text = plot_utils::format_tick_label(value);
                 painter.text(
                     pos + offset + egui::vec2(1.0, 1.0),
                     Align2::LEFT_CENTER,
-                    plot_utils::format_tick_label((i as f64) * major_step),
+                    &text,
                     font.clone(),
                     Color32::from_rgba_premultiplied(0, 0, 0, 90),
                 );
-                painter.text(
-                    pos + offset,
-                    Align2::LEFT_CENTER,
-                    plot_utils::format_tick_label((i as f64) * major_step),
-                    font.clone(),
-                    color,
-                );
+                painter.text(pos + offset, Align2::LEFT_CENTER, text, font.clone(), color);
             }
         };
-        draw_axis(Vec3::X, steps[0], lens[0], col_x);
-        draw_axis(Vec3::Y, steps[1], lens[1], col_y);
-        draw_axis(Vec3::Z, steps[2], lens[2], col_z);
+        draw_axis(0, Vec3::X, col_x);
+        draw_axis(1, Vec3::Y, col_y);
+        draw_axis(2, Vec3::Z, col_z);
     }
 
     fn draw_title_in_rect(
