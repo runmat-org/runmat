@@ -718,7 +718,8 @@ pub struct Instance {
 pub enum KernelOp {
     /// Make a tool and combine it with every operand (none for `Combine::New`).
     Tool(ToolOp),
-    /// Blend edges. `variable`: radii at parameters `(t, r)` along every edge (`radius` at
+    /// Blend edges. `variable`: radii at parameters `(t, r)` along every edge, `t` the fraction
+    /// of the edge's length from its [`EdgeGeom`](crate::history::EdgeGeom) start (`radius` at
     /// both ends where none is given). `setbacks`: vertices where the blends stop short and a
     /// corner blend ([`Role::Blend`] tagged [`KernelTag::InputVertex`]) joins them.
     Fillet {

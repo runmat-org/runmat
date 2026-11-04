@@ -190,6 +190,10 @@ pub struct FaceGeom {
     pub bbox_max: [f64; 3],
 }
 
+/// An edge's end points in canonical order, the same on every kernel: `start` precedes `end`
+/// lexicographically (by x, then y, then z), so a straight edge runs towards increasing
+/// coordinates whatever orientation the kernel's topology gives it. A closed edge has
+/// `start == end`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EdgeGeom {
     pub start: [f64; 3],
