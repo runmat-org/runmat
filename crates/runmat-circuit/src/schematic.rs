@@ -78,6 +78,15 @@ impl UnitLayout {
         if right.is_empty() && left.len() > 1 {
             right = left.split_off(left.len().div_ceil(2));
         }
+        // A large part keeps both sides in use: the longer side gives half its excess to the
+        // other, from its end, so the box is half as tall.
+        if right.len() > left.len() + 8 {
+            let n = (right.len() - left.len()) / 2;
+            left.extend(right.split_off(right.len() - n));
+        } else if left.len() > right.len() + 8 {
+            let n = (left.len() - right.len()) / 2;
+            right.extend(left.split_off(left.len() - n));
+        }
         let rows = left.len().max(right.len()).max(1) as Coord;
         let half_h = (rows * PIN_PITCH) / 2 + GRID;
         let name_len = pins.iter().map(|p| p.0.chars().count()).max().unwrap_or(1) as Coord;
