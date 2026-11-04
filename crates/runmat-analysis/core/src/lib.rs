@@ -82,6 +82,7 @@ pub use validate_signals::validate_physical_signals;
 
 pub use field::{
     AnalysisField, AnalysisFieldLayout, AnalysisFieldValues, DeviceFieldRef, FieldOrdinal,
+    FieldStatistic,
 };
 pub use problem::acoustic_impedance::AcousticImpedanceLaw;
 pub use problem::authored_constraints::{
