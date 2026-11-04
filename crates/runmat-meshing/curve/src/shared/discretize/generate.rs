@@ -1,5 +1,5 @@
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, ExactPcurveEvaluator,
+    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, ExactPcurveEvaluator, ExactSurfaceEvaluator,
     GeometryEvaluationControl, ParameterRange,
 };
 
@@ -23,13 +23,20 @@ pub fn discretize_shared_curves(
     topology: &ExactBRepTopology,
     curves: &dyn ExactCurveEvaluator,
     pcurves: &dyn ExactPcurveEvaluator,
+    surfaces: &dyn ExactSurfaceEvaluator,
     metric_field: &dyn CurveMetricField,
     control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<SharedCurveMesh, SharedCurveError> {
     validate_options(options)?;
-    let context =
-        SharedCurveEvaluationContext::new(topology, curves, pcurves, metric_field, control);
+    let context = SharedCurveEvaluationContext::new(
+        topology,
+        curves,
+        pcurves,
+        surfaces,
+        metric_field,
+        control,
+    );
     let mut edges = Vec::with_capacity(context.topology.edges.len());
     for edge in &context.topology.edges {
         context
@@ -80,6 +87,7 @@ pub(crate) fn discretize_edge_with_parameters(
             edge,
             context.curves,
             context.pcurves,
+            context.surfaces,
             context.control,
             options,
         );
@@ -187,10 +195,11 @@ pub(crate) fn discretize_edge_with_parameters(
         context.topology,
         edge,
         context.pcurves,
+        context.surfaces,
         context.control,
         parameter_range,
         &parameters,
-        options.pcurve_absolute_error,
+        options,
     )?;
 
     Ok(SharedCurve {

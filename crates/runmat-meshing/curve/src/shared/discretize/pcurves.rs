@@ -1,20 +1,31 @@
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactEdge, ExactPcurveEvaluator, GeometryEvaluationControl, ParameterRange,
+    ExactBRepTopology, ExactEdge, ExactPcurveEvaluator, ExactSurfaceEvaluator,
+    GeometryEvaluationControl, ParameterRange,
 };
 
 use crate::shared::{SharedCurveError, SharedCurveErrorKind, SharedCurveFaceUse};
 
 use super::error::{edge_error, geometry_error};
+use super::types::SharedCurveDiscretizationOptions;
 
-pub(super) fn face_uses_for_parameters(
+pub(in crate::shared) fn face_uses_for_parameters(
     topology: &ExactBRepTopology,
     edge: &ExactEdge,
     pcurves: &dyn ExactPcurveEvaluator,
+    surfaces: &dyn ExactSurfaceEvaluator,
     control: &dyn GeometryEvaluationControl,
     parameter_range: ParameterRange,
     parameters: &[f64],
-    pcurve_absolute_error: f64,
+    options: SharedCurveDiscretizationOptions,
 ) -> Result<Vec<SharedCurveFaceUse>, SharedCurveError> {
+    let vertex_uv = super::vertex_uv::VertexUvContext {
+        topology,
+        pcurves,
+        surfaces,
+        control,
+        maximum_error: options.pcurve_absolute_error,
+        geometry_error_m: options.geometry_absolute_error_m.canonical_value(),
+    };
     let mut coedges = topology
         .coedges
         .iter()
@@ -64,8 +75,17 @@ pub(super) fn face_uses_for_parameters(
         {
             let first = node_uv[0];
             let last = *node_uv.last().expect("node UV inventory is non-empty");
-            if ((first[0] - last[0]).powi(2) + (first[1] - last[1]).powi(2)).sqrt()
-                > pcurve_absolute_error
+            // A closed edge's pcurve ends meet within the UV error, or their surface points
+            // within its vertex tolerance (the geometry error when the edge has no vertex).
+            let difference = ((first[0] - last[0]).powi(2) + (first[1] - last[1]).powi(2)).sqrt();
+            let admitted_m = edge
+                .start_vertex_id
+                .as_ref()
+                .and_then(|vertex| topology.vertices.iter().find(|item| &item.id == vertex))
+                .map_or(0.0, |vertex| vertex.tolerance_m.canonical_value())
+                .max(vertex_uv.geometry_error_m);
+            if !(difference <= options.pcurve_absolute_error
+                || vertex_uv.model_separation_m(edge, coedge, first, last)? <= admitted_m)
             {
                 return Err(edge_error(
                     edge,
@@ -82,18 +102,8 @@ pub(super) fn face_uses_for_parameters(
                 (node_uv.len() - 1, edge.end_vertex_id.as_ref()),
             ] {
                 if let Some(vertex) = vertex {
-                    node_uv[index] = super::vertex_uv::VertexUvContext {
-                        topology,
-                        pcurves,
-                        control,
-                        maximum_error: pcurve_absolute_error,
-                    }
-                    .canonical_coordinate(
-                        edge,
-                        coedge,
-                        vertex,
-                        node_uv[index],
-                    )?;
+                    node_uv[index] =
+                        vertex_uv.canonical_coordinate(edge, coedge, vertex, node_uv[index])?;
                 }
             }
         }

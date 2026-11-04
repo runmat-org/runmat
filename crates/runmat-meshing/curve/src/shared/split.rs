@@ -140,6 +140,7 @@ pub fn apply_shared_curve_splits(
         context.topology,
         context.curves,
         context.pcurves,
+        context.surfaces,
         context.metric_field,
         context.control,
         options,

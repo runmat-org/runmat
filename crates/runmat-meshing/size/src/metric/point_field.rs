@@ -141,12 +141,17 @@ pub fn integrated_edge_length(delta: [f64; 3], start: MetricTensor3, end: Metric
     if first <= 0.0 || second <= 0.0 {
         return first.max(second);
     }
-    let ratio = first / second;
-    let logarithm = ratio.ln();
-    if logarithm.abs() < 1.0e-9 {
-        return 0.5 * (first + second);
+    // Order the endpoint lengths so an edge measures the same in both directions, bit for bit.
+    let (short, long) = if first < second {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    let logarithm = (long / short).ln();
+    if logarithm < 1.0e-9 {
+        return 0.5 * (short + long);
     }
-    (first - second) / logarithm
+    (long - short) / logarithm
 }
 
 /// Bounding-volume hierarchy over a face's triangles for bounded nearest-distance queries.

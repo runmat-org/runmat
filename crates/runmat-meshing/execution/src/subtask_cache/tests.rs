@@ -112,6 +112,7 @@ fn original_faces_reuse_across_partition_layouts_with_complete_boundary_identity
         &geometry.topology,
         evaluator.as_ref(),
         evaluator.as_ref(),
+        evaluator.as_ref(),
         &UniformCurveMetric::from_target_size_m(0.5).unwrap(),
         &control,
         SharedCurveDiscretizationOptions {

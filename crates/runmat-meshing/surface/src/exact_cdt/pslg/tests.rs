@@ -64,6 +64,7 @@ fn fixture() -> (
         &topology,
         &evaluator,
         &evaluator,
+        &evaluator,
         &UniformCurveMetric::from_target_size_m(0.5).unwrap(),
         &Control,
         SharedCurveDiscretizationOptions {

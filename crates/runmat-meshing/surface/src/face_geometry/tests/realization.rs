@@ -202,6 +202,7 @@ fn large_borrowed_boundary_index_preserves_every_point_and_bounds_sort_preparati
         &fixture.topology,
         &evaluator,
         &evaluator,
+        &evaluator,
         &UniformCurveMetric::from_target_size_m(0.02).unwrap(),
         &Control,
         curve_options(),

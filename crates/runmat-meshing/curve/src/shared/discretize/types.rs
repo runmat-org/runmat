@@ -1,6 +1,6 @@
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, GeometryEvaluationControl,
-    PersistentEntityId,
+    ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, ExactSurfaceEvaluator,
+    GeometryEvaluationControl, PersistentEntityId,
 };
 use runmat_meshing_core::{MetricSourceKind, MetricTensor3};
 
@@ -45,6 +45,7 @@ pub struct SharedCurveEvaluationContext<'a> {
     pub topology: &'a ExactBRepTopology,
     pub curves: &'a dyn ExactCurveEvaluator,
     pub pcurves: &'a dyn ExactPcurveEvaluator,
+    pub surfaces: &'a dyn ExactSurfaceEvaluator,
     pub metric_field: &'a dyn CurveMetricField,
     pub control: &'a dyn GeometryEvaluationControl,
 }
@@ -54,6 +55,7 @@ impl<'a> SharedCurveEvaluationContext<'a> {
         topology: &'a ExactBRepTopology,
         curves: &'a dyn ExactCurveEvaluator,
         pcurves: &'a dyn ExactPcurveEvaluator,
+        surfaces: &'a dyn ExactSurfaceEvaluator,
         metric_field: &'a dyn CurveMetricField,
         control: &'a dyn GeometryEvaluationControl,
     ) -> Self {
@@ -61,6 +63,7 @@ impl<'a> SharedCurveEvaluationContext<'a> {
             topology,
             curves,
             pcurves,
+            surfaces,
             metric_field,
             control,
         }

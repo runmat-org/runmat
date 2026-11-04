@@ -1,5 +1,5 @@
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, ExactPcurveEvaluator,
+    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, ExactPcurveEvaluator, ExactSurfaceEvaluator,
     GeometryEvaluationControl,
 };
 
@@ -22,6 +22,7 @@ pub(super) fn discretize_degenerate_edge(
     edge: &ExactEdge,
     curves: &dyn ExactCurveEvaluator,
     pcurves: &dyn ExactPcurveEvaluator,
+    surfaces: &dyn ExactSurfaceEvaluator,
     control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<SharedCurve, SharedCurveError> {
@@ -84,10 +85,11 @@ pub(super) fn discretize_degenerate_edge(
         topology,
         edge,
         pcurves,
+        surfaces,
         control,
         parameter_range,
         &parameters,
-        options.pcurve_absolute_error,
+        options,
     )?;
     Ok(SharedCurve {
         source_edge_id: edge.id.clone(),

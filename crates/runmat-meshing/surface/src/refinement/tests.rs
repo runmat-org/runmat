@@ -589,7 +589,7 @@ fn protected_split_rebuilds_the_global_curve_and_face_pslg() {
     let metric = UniformCurveMetric::from_target_size_m(1.0).unwrap();
     let options = curve_options();
     let curves = discretize_shared_curves(
-        &topology, &evaluator, &evaluator, &metric, &Control, options,
+        &topology, &evaluator, &evaluator, &evaluator, &metric, &Control, options,
     )
     .unwrap();
     let boundary = crate::build_exact_surface_boundary(&topology, &curves).unwrap();
@@ -621,8 +621,9 @@ fn protected_split_rebuilds_the_global_curve_and_face_pslg() {
         &split.curve_split.source_edge_id,
         split.curve_split.split_parameter,
     );
-    let context =
-        SharedCurveEvaluationContext::new(&topology, &evaluator, &evaluator, &metric, &Control);
+    let context = SharedCurveEvaluationContext::new(
+        &topology, &evaluator, &evaluator, &evaluator, &metric, &Control,
+    );
     let refined = apply_shared_curve_splits(
         &curves,
         context,
@@ -667,6 +668,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     let metric = UniformCurveMetric::from_target_size_m(1.0).unwrap();
     let curves = discretize_shared_curves(
         &topology,
+        &evaluator,
         &evaluator,
         &evaluator,
         &metric,

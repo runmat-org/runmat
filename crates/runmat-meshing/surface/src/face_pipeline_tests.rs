@@ -44,6 +44,7 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         &topology,
         &evaluator,
         &evaluator,
+        &evaluator,
         &curve_metric,
         &Control,
         curve_options(),
@@ -226,6 +227,7 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
             &sheet_topology,
             &evaluator,
             &evaluator,
+            &evaluator,
             &curve_metric,
             &Control,
         ),
@@ -340,6 +342,7 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
             &sheet_topology,
             &evaluator,
             &evaluator,
+            &evaluator,
             &curve_metric,
             &Control,
         ),
@@ -410,6 +413,7 @@ fn authoritative_spherical_octant_runs_the_complete_face_partition() {
     let curve_metric = UniformCurveMetric::from_target_size_m(1.0).unwrap();
     let curves = discretize_shared_curves(
         &topology,
+        &evaluator,
         &evaluator,
         &evaluator,
         &curve_metric,

@@ -208,6 +208,7 @@ fn fixture(transform: Option<GeometryTransform>) -> Fixture {
         &topology,
         &evaluator,
         &evaluator,
+        &evaluator,
         &UniformCurveMetric::from_target_size_m(0.5).unwrap(),
         &Control,
         curve_options(),
