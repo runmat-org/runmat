@@ -51,6 +51,9 @@ impl AdmissionServer {
             while !stopping.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut socket, _)) => {
+                        // On macOS an accepted socket inherits the listener's nonblocking
+                        // mode; reads must block (up to the timeout) until the request lands.
+                        socket.set_nonblocking(false).unwrap();
                         socket
                             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                             .unwrap();
