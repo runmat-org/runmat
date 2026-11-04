@@ -754,6 +754,72 @@ fn multi_thickness_shell() {
     ));
 }
 
+#[test]
+fn outward_shells_make_the_body_the_cavity() {
+    let env = Env::new();
+    let shell = |open: Vec<Reference>| {
+        let mut d = block();
+        let mut s = Shell::new(Reference::feature_body("body"), open, mm(2.0));
+        s.outward = true;
+        d.features.push(feature("sh", FeatureKind::Shell(s)));
+        d
+    };
+    // Open at the top: walls 2 mm outside the 80 × 50 × 10 block, flush with the opening.
+    let mut d = shell(vec![Reference::end_cap("body")]);
+    let l1 = gen_name(
+        "body",
+        Role::Side,
+        SourceTag::Curve {
+            sketch: "s1".into(),
+            entity: SketchEntityId::new("l1"),
+        },
+    );
+    probe(
+        &mut d,
+        "outer",
+        TopoKind::Face,
+        Reference::gen_face("sh", Role::ShellOuter, SourceTag::face_of(&l1)),
+    );
+    let top = gen_name("body", Role::EndCap, SourceTag::None);
+    probe(
+        &mut d,
+        "rim",
+        TopoKind::Face,
+        Reference::gen_face("sh", Role::ShellRim, SourceTag::face_of(&top)),
+    );
+    probe(
+        &mut d,
+        "floor",
+        TopoKind::Face,
+        Reference::start_cap("body"),
+    );
+    let r = env.regen(&d);
+    assert_clean(&r);
+    let v = volume(&env, &r);
+    assert!(
+        near(v, (84.0 * 54.0 * 12.0 - 40_000.0) * MM3, 1e-9),
+        "volume {}",
+        v / MM3
+    );
+    let outer = region_faces(&r, "outer")[0];
+    assert!(approx(outer.centroid[1], -0.002));
+    assert!(normal(&outer)[1] < -0.99);
+    let rim = region_faces(&r, "rim")[0];
+    assert!(approx(rim.centroid[2], 0.01) && normal(&rim)[2] > 0.99);
+    // The old bottom face is now the cavity's floor, facing up into it.
+    let floor = region_faces(&r, "floor")[0];
+    assert!(approx(floor.centroid[2], 0.0) && normal(&floor)[2] > 0.99);
+
+    // Closed: the block becomes a sealed void.
+    let r = env.regen(&shell(Vec::new()));
+    assert_clean(&r);
+    assert!(near(
+        volume(&env, &r),
+        (84.0 * 54.0 * 14.0 - 40_000.0) * MM3,
+        1e-9
+    ));
+}
+
 fn tall() -> PartDocument {
     let mut d = PartDocument::new("p.part");
     d.features.push(sketch(

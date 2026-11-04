@@ -775,11 +775,65 @@ struct ShellSpec {
     thickness: f64,
     /// Walls with their own thickness.
     per_face: BTreeMap<u32, f64>,
+    /// Walls grow outside the body, which becomes the cavity.
+    outward: bool,
 }
 
 impl ShellSpec {
     fn of(&self, face: u32) -> f64 {
         self.per_face.get(&face).copied().unwrap_or(self.thickness)
+    }
+
+    /// For an outward shell, whether `p` (outside the body) is wall: within a face's thickness
+    /// of it (offset faces meeting in sharp corners, so the distance is the largest per axis),
+    /// and not in front of an open face.
+    fn outward_wall(&self, o: &FakeSolid, p: [f64; 3]) -> bool {
+        let mut near = false;
+        for (fi, f) in o.faces.iter().enumerate() {
+            let t = self.of(fi as u32);
+            if self.open.contains(&(fi as u32)) {
+                if let Some(pk) = f.plane {
+                    let ahead = (pk.dir as f64) * (p[pk.axis] - pk.offset) > EPS;
+                    let across = f.rects.iter().any(|r| {
+                        (0..3).all(|a| {
+                            a == pk.axis || (p[a] > r.lo[a] - t - EPS && p[a] < r.hi[a] + t + EPS)
+                        })
+                    });
+                    if ahead && across {
+                        return false;
+                    }
+                }
+                continue;
+            }
+            near |= face_cheb(p, f) <= t + EPS;
+        }
+        near
+    }
+
+    /// The face an outward wall facet at `p` on `plane` offsets: a face facing the same way
+    /// at its thickness behind the facet, the nearest across it (corners go to the first).
+    fn outer_of(&self, o: &FakeSolid, p: [f64; 3], plane: &PlaneKey) -> Option<u32> {
+        let mut best: Option<(f64, u32)> = None;
+        for (fi, f) in o.faces.iter().enumerate() {
+            if self.open.contains(&(fi as u32)) {
+                continue;
+            }
+            let Some(fp) = f
+                .plane
+                .filter(|fp| fp.axis == plane.axis && fp.dir == plane.dir)
+            else {
+                continue;
+            };
+            let behind = (plane.dir as f64) * (plane.offset - fp.offset);
+            if (behind - self.of(fi as u32)).abs() > EPS {
+                continue;
+            }
+            let d = face_cheb(p, f);
+            if best.map(|b| d < b.0 - EPS).unwrap_or(true) {
+                best = Some((d, fi as u32));
+            }
+        }
+        best.map(|b| b.1)
     }
 }
 
@@ -885,6 +939,18 @@ fn rect_distance(p: [f64; 3], r: &Rect) -> f64 {
     s.sqrt()
 }
 
+/// The largest per-axis distance from `p` to a face's rects.
+fn face_cheb(p: [f64; 3], f: &FFace) -> f64 {
+    f.rects
+        .iter()
+        .map(|r| {
+            (0..3)
+                .map(|a| (r.lo[a] - p[a]).max(p[a] - r.hi[a]).max(0.0))
+                .fold(0.0, f64::max)
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
 fn face_distance(p: [f64; 3], f: &FFace) -> f64 {
     f.rects
         .iter()
@@ -972,8 +1038,9 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                     if sh.open.contains(&(fi as u32)) {
                         continue;
                     }
+                    let sign = if sh.outward { -1.0 } else { 1.0 };
                     for (pk, _) in f.rect_planes() {
-                        breaks[pk.axis].push(pk.offset - (pk.dir as f64) * sh.of(fi as u32));
+                        breaks[pk.axis].push(pk.offset - sign * (pk.dir as f64) * sh.of(fi as u32));
                     }
                 }
             }
@@ -1068,6 +1135,12 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                     owners[i] = 1;
                 }
                 match &job.modifier {
+                    Some(Modifier::Shell(sh)) if sh.outward => {
+                        // The body becomes the cavity; walls grow around it.
+                        let o = job.operands[0];
+                        occ[i] = !occ[i] && sh.outward_wall(o, p);
+                        owners[i] = if occ[i] { 1 } else { 0 };
+                    }
                     Some(Modifier::Shell(sh)) if occ[i] => {
                         let o = job.operands[0];
                         let cavity = o.faces.iter().enumerate().all(|(fi, f)| {
@@ -1425,7 +1498,57 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                 });
             }
         }
-        if let Some(Modifier::Shell(sh)) = &job.modifier {
+        if let (true, Some(Modifier::Shell(sh))) = (ls.is_empty(), &job.modifier) {
+            if sh.outward {
+                let o = job.operands[0];
+                let rim = o.faces.iter().enumerate().find(|(fi, f)| {
+                    sh.open.contains(&(*fi as u32))
+                        && f.plane.map(|p| p.same(&plane)).unwrap_or(false)
+                });
+                if o.contains(cout) {
+                    // The cavity: the body's own faces, now facing into it.
+                    let flipped = PlaneKey {
+                        dir: -plane.dir,
+                        ..plane
+                    };
+                    for (fi, face) in o.faces.iter().enumerate() {
+                        if face.lies_on(&flipped, cen) {
+                            ls.push(HistorySource::Input {
+                                from: OperandEntity {
+                                    operand: job.operand_ids[0],
+                                    entity: fi as u32,
+                                },
+                            });
+                        }
+                    }
+                } else if let Some((fi, _)) = rim {
+                    let from = OperandEntity {
+                        operand: job.operand_ids[0],
+                        entity: fi as u32,
+                    };
+                    ls.push(gen(
+                        Role::ShellRim,
+                        KernelTag::InputFace { face: from },
+                        None,
+                    ));
+                } else if let Some(fi) = sh.outer_of(o, cen, &plane) {
+                    let from = OperandEntity {
+                        operand: job.operand_ids[0],
+                        entity: fi,
+                    };
+                    ls.push(gen(
+                        Role::ShellOuter,
+                        KernelTag::InputFace { face: from },
+                        None,
+                    ));
+                }
+            }
+        }
+        let inward_shell = job
+            .modifier
+            .as_ref()
+            .filter(|m| !matches!(m, Modifier::Shell(sh) if sh.outward));
+        if let Some(Modifier::Shell(sh)) = inward_shell {
             let o = job.operands[0];
             for l in ls.iter_mut() {
                 if let HistorySource::Input { from } = l {
@@ -2709,11 +2832,6 @@ impl CadKernel for FakeKernel {
                 faces,
                 outward,
             } => {
-                if *outward {
-                    return Err(KernelError::NotSupported {
-                        what: "fake kernel: shelling outward".into(),
-                    });
-                }
                 let per_face: BTreeMap<u32, f64> =
                     faces.iter().map(|(e, t)| (e.entity, *t)).collect();
                 if solids.len() != 1 {
@@ -2744,6 +2862,7 @@ impl CadKernel for FakeKernel {
                         open,
                         thickness: *thickness,
                         per_face,
+                        outward: *outward,
                     })),
                     merge_collinear: false,
                     carve: Vec::new(),
