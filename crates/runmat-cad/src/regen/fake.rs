@@ -30,6 +30,7 @@
 #![allow(clippy::needless_range_loop)]
 
 mod analysis;
+mod display;
 mod extra;
 mod features;
 mod sampled;

@@ -1,0 +1,406 @@
+//! The display projection: what a design viewport draws, joined with persistent names.
+//!
+//! A regenerated part's bodies are tessellated through the kernel's [`Tessellator`] and each
+//! face, edge and vertex carries the reference text a command field takes
+//! (`feature.body.face.end`, `edges_between(…)`, `vertex_of(…)`), so a pick on the canvas maps
+//! straight to a reference and to the Outline nodes (features, bodies, regions) it belongs to.
+//! Entity indices match the part index's `bodies[i].faces[j]`.
+//!
+//! An assembly's display lists one prototype per configured definition and every part
+//! occurrence as a world transform over its prototype, so the viewport instances repeated
+//! parts. A prototype is a part's mesh when the part is open to the caller, else its
+//! configured bounding box.
+//!
+//! Positions are metres, written as `f32` in flat arrays (`[x, y, z, x, y, z, …]`).
+
+use crate::assembly::model::DefinitionKind;
+use crate::assembly::resolve::ResolvedAssembly;
+use crate::assembly::source::DesignSource;
+use crate::refs::name::{EntityName, TopoKind};
+use crate::refs::Reference;
+use crate::regen::engine::RegenResult;
+use crate::regen::kernel::{BodyMesh, KernelError, TessellationOptions, Tessellator};
+use crate::syntax::refs::print_reference;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Bounds {
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FaceDisplay {
+    pub index: u32,
+    /// The face's reference text, when its name has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    /// Every name the face carries (a merged face has several), as reference text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
+    /// The features that made it.
+    pub features: Vec<String>,
+    pub positions: Vec<f32>,
+    pub triangles: Vec<u32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct EdgeDisplay {
+    pub index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    pub faces: [u32; 2],
+    pub points: Vec<f32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct VertexDisplay {
+    pub index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    pub point: [f32; 3],
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BodyDisplay {
+    pub index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    pub faces: Vec<FaceDisplay>,
+    pub edges: Vec<EdgeDisplay>,
+    pub vertices: Vec<VertexDisplay>,
+    pub triangle_count: u32,
+}
+
+/// A body the kernel could not draw, with why.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DisplayProblem {
+    pub body: u32,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PartDisplay {
+    pub bodies: Vec<BodyDisplay>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<Bounds>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub problems: Vec<DisplayProblem>,
+}
+
+fn flat(points: &[[f64; 3]]) -> Vec<f32> {
+    points.iter().flatten().map(|v| *v as f32).collect()
+}
+
+fn reference_text(kind: TopoKind, name: &EntityName) -> Option<String> {
+    print_reference(&Reference::Name {
+        kind,
+        name: name.clone(),
+    })
+}
+
+fn feature_of(name: &EntityName) -> String {
+    name.maker().0.clone()
+}
+
+fn union(a: Option<Bounds>, lo: [f64; 3], hi: [f64; 3]) -> Bounds {
+    let lo = lo.map(|v| v as f32);
+    let hi = hi.map(|v| v as f32);
+    match a {
+        None => Bounds { min: lo, max: hi },
+        Some(b) => Bounds {
+            min: [0, 1, 2].map(|i| b.min[i].min(lo[i])),
+            max: [0, 1, 2].map(|i| b.max[i].max(hi[i])),
+        },
+    }
+}
+
+/// Draws one body: its mesh joined with the names the regeneration gave each face.
+fn body_display(
+    index: u32,
+    mesh: &BodyMesh,
+    body_names: &BTreeSet<EntityName>,
+    face_names: &[BTreeSet<EntityName>],
+    topology: &crate::refs::history::Topology,
+) -> BodyDisplay {
+    let face_ref: Vec<Option<String>> = (0..mesh.faces.len())
+        .map(|i| {
+            face_names
+                .get(i)
+                .and_then(|names| names.iter().find_map(|n| reference_text(TopoKind::Face, n)))
+        })
+        .collect();
+    let faces = mesh
+        .faces
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let names = face_names.get(i);
+            FaceDisplay {
+                index: i as u32,
+                reference: face_ref[i].clone(),
+                names: names
+                    .map(|set| {
+                        set.iter()
+                            .filter_map(|n| reference_text(TopoKind::Face, n))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                features: names
+                    .map(|set| {
+                        set.iter()
+                            .map(feature_of)
+                            .collect::<BTreeSet<_>>()
+                            .into_iter()
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                positions: flat(&f.positions),
+                triangles: f.triangles.iter().flatten().copied().collect(),
+            }
+        })
+        .collect();
+    let between = |a: u32, b: u32| -> Option<String> {
+        let (fa, fb) = (
+            face_ref.get(a as usize)?.as_ref()?,
+            face_ref.get(b as usize)?.as_ref()?,
+        );
+        Some(format!("edges_between({fa}, {fb})"))
+    };
+    let edges = topology
+        .edges
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let [a, b] = e.faces;
+            EdgeDisplay {
+                index: i as u32,
+                reference: between(a, b),
+                faces: [a, b],
+                points: mesh.edges.get(i).map(|p| flat(p)).unwrap_or_default(),
+            }
+        })
+        .collect();
+    let vertices = topology
+        .vertices
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            // The faces around the vertex, through its edges.
+            let around: BTreeSet<u32> = v
+                .edges
+                .iter()
+                .filter_map(|e| topology.edges.get(*e as usize))
+                .flat_map(|e| e.faces)
+                .collect();
+            let refs: Option<Vec<String>> = around
+                .iter()
+                .take(3)
+                .map(|f| face_ref.get(*f as usize).cloned().flatten())
+                .collect();
+            VertexDisplay {
+                index: i as u32,
+                reference: refs
+                    .filter(|r| !r.is_empty())
+                    .map(|r| format!("vertex_of({})", r.join(", "))),
+                point: mesh
+                    .vertices
+                    .get(i)
+                    .copied()
+                    .unwrap_or(v.point)
+                    .map(|x| x as f32),
+            }
+        })
+        .collect();
+    BodyDisplay {
+        index,
+        reference: body_names
+            .iter()
+            .find_map(|n| reference_text(TopoKind::Body, n)),
+        faces,
+        edges,
+        vertices,
+        triangle_count: mesh.triangle_count() as u32,
+    }
+}
+
+/// The display projection of a regenerated part. A body the kernel cannot draw is listed in
+/// `problems` and left out; the others still draw.
+pub fn part_display(
+    result: &RegenResult,
+    kernel: &dyn Tessellator,
+    options: &TessellationOptions,
+) -> PartDisplay {
+    let mut out = PartDisplay::default();
+    for (i, body) in result.state.bodies.iter().enumerate() {
+        match kernel.tessellate(&body.handle, options) {
+            Ok(mesh) => {
+                if let Some((lo, hi)) = mesh.bounds() {
+                    out.bounds = Some(union(out.bounds.take(), lo, hi));
+                }
+                out.bodies.push(body_display(
+                    i as u32,
+                    &mesh,
+                    &body.names.body,
+                    &body.names.faces,
+                    &body.topology,
+                ));
+            }
+            Err(error) => out.problems.push(DisplayProblem {
+                body: i as u32,
+                message: display_error(&error),
+            }),
+        }
+    }
+    out
+}
+
+fn display_error(error: &KernelError) -> String {
+    error.to_string()
+}
+
+// ---------------------------------------------------------------------------- assemblies
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "shape")]
+pub enum PrototypeShape {
+    /// The part's own display.
+    Mesh { part: Box<PartDisplay> },
+    /// The configured bounding box (the part is not open to the caller).
+    Box { bounds: Bounds },
+    /// Nothing to draw: the definition has no geometry summary.
+    Empty,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Prototype {
+    pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<String>,
+    #[serde(flatten)]
+    pub shape: PrototypeShape,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OccurrenceDisplay {
+    /// The display path, the same as the assembly index's occurrence path.
+    pub path: String,
+    pub uuid: String,
+    pub prototype: u32,
+    /// World transform: the rotation's rows, then the translation (metres).
+    pub transform: [f32; 12],
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AssemblyDisplay {
+    pub prototypes: Vec<Prototype>,
+    pub occurrences: Vec<OccurrenceDisplay>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<Bounds>,
+}
+
+/// The display projection of a resolved assembly. `parts` holds the displays of part files the
+/// caller has regenerated (by file path); other parts draw as their configured boxes.
+pub fn assembly_display(
+    resolved: &ResolvedAssembly,
+    source: &dyn DesignSource,
+    parts: &BTreeMap<String, PartDisplay>,
+) -> AssemblyDisplay {
+    let mut out = AssemblyDisplay::default();
+    let mut prototype_of: BTreeMap<(String, String), u32> = BTreeMap::new();
+    for (id, node) in resolved.nodes.iter().enumerate() {
+        if node.definition.kind != DefinitionKind::Part || node.represented_by_ancestor {
+            continue;
+        }
+        let file = node.definition.file.as_str().to_string();
+        let configuration = node.configuration.name.as_ref().map(|c| c.to_string());
+        let key = (
+            file.clone(),
+            serde_json::to_string(&node.configuration).unwrap_or_default(),
+        );
+        let prototype = match prototype_of.get(&key) {
+            Some(p) => *p,
+            None => {
+                let shape = match parts.get(&file) {
+                    Some(part) => PrototypeShape::Mesh {
+                        part: Box::new(part.clone()),
+                    },
+                    None => match source
+                        .configured(
+                            &node.definition,
+                            node.revision.as_ref(),
+                            &node.configuration,
+                        )
+                        .ok()
+                        .and_then(|c| c.bbox)
+                    {
+                        Some(b) => PrototypeShape::Box {
+                            bounds: Bounds {
+                                min: b.min.map(|v| v as f32),
+                                max: b.max.map(|v| v as f32),
+                            },
+                        },
+                        None => PrototypeShape::Empty,
+                    },
+                };
+                out.prototypes.push(Prototype {
+                    file,
+                    configuration,
+                    shape,
+                });
+                let p = (out.prototypes.len() - 1) as u32;
+                prototype_of.insert(key, p);
+                p
+            }
+        };
+        let w = node.world;
+        let mut transform = [0.0f32; 12];
+        for r in 0..3 {
+            for c in 0..3 {
+                transform[r * 3 + c] = w.rotation[r][c] as f32;
+            }
+            transform[9 + r] = w.translation[r] as f32;
+        }
+        if let Some(local) = prototype_bounds(&out.prototypes[prototype as usize].shape) {
+            let corners = (0..8).map(|k| {
+                let p = [0, 1, 2].map(|a| {
+                    if k & (1 << a) == 0 {
+                        local.min[a] as f64
+                    } else {
+                        local.max[a] as f64
+                    }
+                });
+                w.apply(p)
+            });
+            for c in corners {
+                out.bounds = Some(union(out.bounds.take(), c, c));
+            }
+        }
+        out.occurrences.push(OccurrenceDisplay {
+            path: resolved.path(id as u32),
+            uuid: node.uuid.to_string(),
+            prototype,
+            transform,
+        });
+    }
+    out
+}
+
+fn prototype_bounds(shape: &PrototypeShape) -> Option<Bounds> {
+    match shape {
+        PrototypeShape::Mesh { part } => part.bounds.clone(),
+        PrototypeShape::Box { bounds } => Some(bounds.clone()),
+        PrototypeShape::Empty => None,
+    }
+}
+
+/// The part display as JSON, for the Desktop.
+pub fn part_display_json(display: &PartDisplay) -> String {
+    serde_json::to_string(display).expect("display serializes")
+}
+
+/// The assembly display as JSON, for the Desktop.
+pub fn assembly_display_json(display: &AssemblyDisplay) -> String {
+    serde_json::to_string(display).expect("display serializes")
+}

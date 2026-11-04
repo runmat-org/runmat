@@ -5,3 +5,5 @@
 //! under the design layer's path; `CadKernel` is that trait.
 
 pub use runmat_geometry_kernel::op::*;
+// The display tessellation contract (`crate::display` joins its meshes with names).
+pub use runmat_geometry_kernel::display::*;

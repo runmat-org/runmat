@@ -12,12 +12,16 @@ use runmat_cad::assembly::index::{assembly_index_json, build_assembly_index};
 use runmat_cad::assembly::model::{DefinitionRef, RelPath};
 use runmat_cad::assembly::resolve::{resolve, ResolveContext, ResolveRequest};
 use runmat_cad::assembly::synth::{generate, SynthSpec};
+use runmat_cad::display::{
+    assembly_display, assembly_display_json, part_display, part_display_json,
+};
 use runmat_cad::drawing::index::{build_drawing_index, to_json as drawing_json, AnnotationValues};
 use runmat_cad::drawing::*;
 use runmat_cad::ids::{FilePath, PropertyName};
 use runmat_cad::index::{build_index, to_json};
 use runmat_cad::model::*;
 use runmat_cad::refs::*;
+use runmat_cad::regen::kernel::TessellationOptions;
 use runmat_cad::units::StubUnits;
 use runmat_cad::value::NoDynamicValues;
 use std::collections::{BTreeMap, BTreeSet};
@@ -159,6 +163,13 @@ fn part_fixture() {
     json.push_str("\n}\n");
     serde_json::from_str::<serde_json::Value>(&json).unwrap();
     emit("bracket.part.json", &json);
+    // What the part viewport draws: the test kernel's tessellation, joined with the names.
+    let display = part_display(&r, &env.kernel, &TessellationOptions::default());
+    assert!(display.problems.is_empty(), "{:?}", display.problems);
+    emit(
+        "bracket.part.display.json",
+        &format!("{}\n", part_display_json(&display)),
+    );
 }
 
 #[test]
@@ -195,6 +206,28 @@ fn assembly_fixture() {
         "the Mates folder shows an over-constrained and a failed mate: {statuses:?}"
     );
     emit("rig.assembly.json", &assembly_index_json(&index));
+    // What the assembly viewport draws: each part occurrence over its prototype. The bracket
+    // stands in for the clip so one prototype draws as a mesh; the rest draw as their boxes.
+    let env = Env::new();
+    let bracket = part_display(
+        &env.regen(&bracket()),
+        &env.kernel,
+        &TessellationOptions::default(),
+    );
+    let parts = BTreeMap::from([("library/clip.part".to_string(), bracket)]);
+    let display = assembly_display(&r, &p.source, &parts);
+    assert_eq!(
+        display.occurrences.len(),
+        index
+            .occurrences
+            .iter()
+            .filter(|o| o.definition.kind == runmat_cad::assembly::model::DefinitionKind::Part)
+            .count()
+    );
+    emit(
+        "rig.assembly.display.json",
+        &format!("{}\n", assembly_display_json(&display)),
+    );
 }
 
 /// The frame's web and first clip as mate connectors: the clip fastened to the web although

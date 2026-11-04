@@ -12,6 +12,7 @@
 //! feature `occt-native`) implements it on exact B-rep. No kernel type crosses these traits.
 
 pub mod analysis;
+pub mod display;
 pub mod frame;
 pub mod history;
 pub mod ids;
@@ -21,6 +22,7 @@ pub mod queries;
 pub mod sections;
 
 pub use analysis::GeometryAnalyzer;
+pub use display::{BodyMesh, FaceMesh, TessellationOptions, Tessellator};
 pub use frame::Frame;
 pub use ids::SketchEntityId;
 pub use op::{BodyHandle, Kernel, KernelError, KernelId, KernelOp, KernelOutput};

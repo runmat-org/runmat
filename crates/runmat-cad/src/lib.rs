@@ -30,6 +30,7 @@ pub mod commands;
 pub mod config;
 pub mod dfm;
 pub mod diagnostics;
+pub mod display;
 pub mod drawing;
 pub mod evaluate;
 pub mod ids;
