@@ -35,8 +35,13 @@ fn fea_trends_accepts_every_exact_integer_class() {
 
 #[test]
 fn fea_results_validates_one_based_selectors_and_zero_one_flags_before_lookup() {
+    use runmat_builtins::fea_contract::results_option::ResultsOption;
     for constructor in INTEGER_CONSTRUCTORS {
-        for option in ["ModeIndices", "TransientSnapshotIndices"] {
+        for option in [
+            ResultsOption::ModeIndices,
+            ResultsOption::TransientSnapshotIndices,
+        ] {
+            let option = option.canonical_name();
             let accepted = format!(
                 "value = fea.results(\"missing_integer_contract_run\", \"{option}\", {constructor}([1 2]));"
             );
@@ -60,13 +65,13 @@ fn fea_results_validates_one_based_selectors_and_zero_one_flags_before_lookup() 
         }
 
         for flag in [
-            "IncludeFieldValues",
-            "IncludeDiagnostics",
-            "IncludeModalResults",
-            "IncludeTransientResults",
-            "IncludeNonlinearResults",
-            "IncludeElectromagneticResults",
+            ResultsOption::IncludeFieldValues,
+            ResultsOption::IncludeDiagnostics,
+            ResultsOption::IncludeModalResults,
+            ResultsOption::IncludeTransientResults,
+            ResultsOption::IncludeNonlinearResults,
         ] {
+            let flag = flag.canonical_name();
             let accepted = format!(
                 "value = fea.results(\"missing_integer_contract_run\", \"{flag}\", {constructor}(1));"
             );
@@ -89,6 +94,16 @@ fn fea_results_validates_one_based_selectors_and_zero_one_flags_before_lookup() 
                 "{invalid}"
             );
         }
+        let unsupported = format!(
+            "value = fea.results(\"missing_integer_contract_run\", \"IncludeElectromagneticResults\", {constructor}(1));"
+        );
+        assert_eq!(
+            execute_source(&unsupported)
+                .expect_err("unsupported selector must fail before lookup")
+                .identifier(),
+            Some("RunMat:fea:InvalidInput"),
+            "{unsupported}"
+        );
     }
 }
 

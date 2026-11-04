@@ -28,26 +28,41 @@ impl PreparedEdgeStar {
                 let face = [endpoint, first, second];
                 children.push(Child {
                     face: face.map(|vertex| topology.node(vertex).coordinates_m.canonical_value()),
-                    metric: PreparedJacobian::new(metrics(face)?),
+                    metric: PreparedJacobian::new(metrics(face)?).map_err(|cause| {
+                        error(
+                            DelaunayVolumeSliverErrorKind::Accounting(cause),
+                            "edge-star metric numerical accounting failed",
+                        )
+                    })?,
                 });
             }
         }
         Ok(Self { children })
     }
 
-    pub(in crate::cdt::volume_sliver::insertion) fn score(&self, point: [f64; 3]) -> f64 {
+    pub(in crate::cdt::volume_sliver::insertion) fn score(
+        &self,
+        point: [f64; 3],
+    ) -> Result<f64, DelaunayVolumeSliverError> {
         self.children
             .iter()
-            .map(|child| {
+            .try_fold(f64::INFINITY, |minimum, child| {
                 let [a, b, c] = child.face;
-                child
-                    .metric
-                    .as_ref()
-                    .and_then(|metric| metric.score([a, b, c, point]))
-                    .unwrap_or(0.)
+                let score = match child.metric.as_ref() {
+                    Some(metric) => metric
+                        .score([a, b, c, point])
+                        .map_err(|cause| {
+                            error(
+                                DelaunayVolumeSliverErrorKind::Accounting(cause),
+                                "edge-star score numerical accounting failed",
+                            )
+                        })?
+                        .unwrap_or(0.),
+                    None => 0.0,
+                };
+                Ok(minimum.min(score))
             })
-            .min_by(f64::total_cmp)
-            .unwrap_or(0.)
+            .map(|minimum| if minimum.is_infinite() { 0.0 } else { minimum })
     }
 }
 

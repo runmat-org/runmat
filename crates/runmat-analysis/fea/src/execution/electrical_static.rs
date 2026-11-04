@@ -171,8 +171,17 @@ impl ElectricalStaticWorkload {
             conductivity.as_deref(),
             self.sample_point(),
         )
-        .map_err(invalid)?;
+        .map_err(electrical_failure)?;
         ElectricalStaticSolverResult::new(self, mesh, formulation, response)
+    }
+}
+
+fn electrical_failure(error: crate::physics::electrical::ElectricalStaticError) -> AnalysisExecutionError {
+    match error {
+        crate::physics::electrical::ElectricalStaticError::Accounting(cause) => {
+            AnalysisExecutionError::Usage(cause)
+        }
+        other => invalid(other),
     }
 }
 

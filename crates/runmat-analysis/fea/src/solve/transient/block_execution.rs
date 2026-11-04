@@ -96,17 +96,25 @@ pub(crate) fn solve_structural_transient_block_with_physical_mapping<E: std::fmt
         backend_kind,
         input.options.residual_target,
     );
+    let mut typed_physical_state =
+        |time_s, approach, summary: &AssemblySummary, state: &SecondOrderState| {
+            map_physical_state(time_s, approach, summary, state).map_err(|error| {
+                TransientSolveError::PhysicalMapping {
+                    detail: error.to_string(),
+                }
+            })
+        };
     solve_structural_transient_block_with_strategy(
         input,
         physical_dof_count,
         assembly_at,
-        map_physical_state,
+        &mut typed_physical_state,
         reduce_checkpoint_state,
         &mut strategy,
     )
 }
 
-pub(super) fn solve_structural_transient_block_with_strategy<E, M: std::fmt::Display>(
+pub(super) fn solve_structural_transient_block_with_strategy<E>(
     input: StructuralTransientBlockSolveInput<'_>,
     physical_dof_count: usize,
     assembly_at: &mut impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
@@ -115,7 +123,10 @@ pub(super) fn solve_structural_transient_block_with_strategy<E, M: std::fmt::Dis
         SignalSampleApproach,
         &AssemblySummary,
         &SecondOrderState,
-    ) -> Result<(AssemblySummary, SecondOrderState), M>,
+    ) -> Result<
+        (AssemblySummary, SecondOrderState),
+        TransientSolveError<E>,
+    >,
     restore_checkpoint_state: &mut impl FnMut(
         &StructuralTransientCheckpoint,
     ) -> Result<SecondOrderState, TransientSolveError<E>>,
@@ -173,9 +184,7 @@ pub(super) fn solve_structural_transient_block_with_strategy<E, M: std::fmt::Dis
                 &continuation_summary,
                 &numerical_state,
             )
-            .map_err(|error| TransientSolveError::PhysicalMapping {
-                detail: error.to_string(),
-            })?;
+            ?;
             if mapped_physical_state.displacement() != predecessor.state.displacement.as_slice()
                 || mapped_physical_state.velocity() != predecessor.state.velocity.as_slice()
                 || mapped_physical_state.acceleration()
@@ -283,11 +292,8 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
                             .into(),
                     });
                 }
-                let history = TransientBalanceHistory::start(&summary, &state).map_err(|error| {
-                    TransientSolveError::DynamicBalance {
-                        detail: error.to_string(),
-                    }
-                })?;
+                let history = TransientBalanceHistory::start(&summary, &state)
+                    .map_err(super::balance::DynamicBalanceError::into_transient_solve)?;
                 let initial_sample = TransientInitialSample {
                     time_s: runmat_types::physical::Time::new(schedule.points[0].time_s.canonical_value()),
                     state: state.clone(),
@@ -328,9 +334,7 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
                     });
                 }
                 TransientBalanceHistory::resume(&summary, &state, predecessor.balance.clone())
-                    .map_err(|error| TransientSolveError::DynamicBalance {
-                        detail: error.to_string(),
-                    })?;
+                    .map_err(super::balance::DynamicBalanceError::into_transient_solve)?;
                 (summary, state, approach, predecessor.balance.clone(), None)
             }
             _ => {
@@ -353,9 +357,7 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
     )?;
     let mut history =
         TransientBalanceHistory::resume(&continuation_summary, &continuation_state, accumulator)
-            .map_err(|error| TransientSolveError::DynamicBalance {
-                detail: error.to_string(),
-            })?;
+            .map_err(super::balance::DynamicBalanceError::into_transient_solve)?;
     let mut samples = Vec::with_capacity(empty_block.samples.len());
     for sample in empty_block.samples {
         let interval = sample.integration_interval;
@@ -394,9 +396,7 @@ pub(crate) fn solve_fully_prescribed_transient_block_with_physical_mapping<E>(
                 published_state: &public_state,
                 time_step_s: sample.accepted_time_step_s.canonical_value(),
             })
-            .map_err(|error| TransientSolveError::DynamicBalance {
-                detail: error.to_string(),
-            })?;
+            .map_err(super::balance::DynamicBalanceError::into_transient_solve)?;
         if interval.end_approach == SignalSampleApproach::LeftLimit {
             let right_summary = assembly_at(
                 interval.end_time_s.canonical_value(),

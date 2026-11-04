@@ -127,6 +127,24 @@ impl RemoteWorkerChannel for RelayRemoteWorkerChannel {
         self.protocol.drain_collective_requests(attempt_id)
     }
 
+    fn drain_fea_calls(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+    ) -> Vec<crate::fea_proxy::Call> {
+        self.protocol.drain_fea_calls(attempt_id)
+    }
+
+    async fn complete_fea_call(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+        sequence: u64,
+        reply: crate::fea_proxy::Reply,
+    ) -> NativeExecutionResult<()> {
+        self.protocol
+            .complete_fea_call(attempt_id, sequence, reply)
+            .await
+    }
+
     async fn complete_collective(
         &self,
         attempt_id: runmat_execution::identity::AttemptId,

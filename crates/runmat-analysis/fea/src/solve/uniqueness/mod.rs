@@ -1,5 +1,5 @@
 //! Source-independent candidate construction followed by outward uniqueness proof.
-use super::krylov::{restarted_gmres, right_ilu::SparseRightIlu, GmresPolicy};
+use super::krylov::{restarted_gmres, right_ilu::SparseRightIlu, GmresFailure, GmresPolicy};
 use crate::algebra::{spmv, RealSparseMatrix, RightInverseCheck, RightInverseVerdict};
 use thiserror::Error;
 
@@ -78,6 +78,8 @@ pub enum SparseUniquenessError {
     Cancelled,
     #[error("sparse uniqueness operator or certificate construction failed")]
     Operator,
+    #[error("sparse uniqueness numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
 }
 
 /// Additional task workspace/work excludes the original borrowed operator. No
@@ -110,6 +112,9 @@ pub(crate) fn prepare_sparse_uniqueness(
         Ok(ilu) => ilu,
         Err(super::krylov::right_ilu::SparseRightIluError::Cancelled) => {
             return Err(SparseUniquenessError::Cancelled)
+        }
+        Err(super::krylov::right_ilu::SparseRightIluError::Usage(error)) => {
+            return Err(SparseUniquenessError::Usage(error))
         }
         Err(_) => {
             return Ok((
@@ -144,7 +149,11 @@ pub(crate) fn prepare_sparse_uniqueness(
                 spmv(matrix, &x).map_err(|_| SparseUniquenessError::Operator)
             },
             crate::is_fea_cancelled,
-        )?
+        )
+        .map_err(|error| match error {
+            GmresFailure::Operator(error) => error,
+            GmresFailure::Usage(error) => SparseUniquenessError::Usage(error),
+        })?
         .ok_or(SparseUniquenessError::Operator)?;
         cancelled()?;
         if result.cancelled {
@@ -202,13 +211,14 @@ fn cancelled() -> Result<(), SparseUniquenessError> {
 }
 
 fn ilu_error(error: super::krylov::right_ilu::SparseRightIluError) -> SparseUniquenessError {
-    if matches!(
-        error,
-        super::krylov::right_ilu::SparseRightIluError::Cancelled
-    ) {
-        SparseUniquenessError::Cancelled
-    } else {
-        SparseUniquenessError::Operator
+    match error {
+        super::krylov::right_ilu::SparseRightIluError::Cancelled => {
+            SparseUniquenessError::Cancelled
+        }
+        super::krylov::right_ilu::SparseRightIluError::Usage(error) => {
+            SparseUniquenessError::Usage(error)
+        }
+        _ => SparseUniquenessError::Operator,
     }
 }
 

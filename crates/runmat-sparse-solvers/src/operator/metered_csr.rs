@@ -44,6 +44,9 @@ impl<'a, T: Scalar> MeteredCsrOperator<'a, T> {
 }
 
 impl<T: Scalar> LinearOperator<T> for MeteredCsrOperator<'_, T> {
+    fn reference_apply_work(&self) -> SolverResult<Option<OperationCount>> {
+        Ok(Some(self.operations))
+    }
     fn nrows(&self) -> usize {
         self.matrix.nrows()
     }

@@ -5,6 +5,16 @@ struct Matrix;
 impl GmresOperations<f64> for Matrix {
     type Error = ();
 
+    async fn measured<R>(
+        &mut self,
+        work: runmat_sparse_solvers::krylov::usage::VectorWork,
+        run: impl FnOnce(&mut Self) -> (R, runmat_sparse_solvers::krylov::usage::BatchCompletion),
+    ) -> Result<R, ()> {
+        assert!(runmat_simulation_usage::UsageContext::capture().is_none());
+        work.operations().unwrap();
+        Ok(run(self).0)
+    }
+
     async fn coefficient(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), ()> {
         output[0] = 4.0 * input[0] + input[1];
         output[1] = 2.0 * input[0] + 3.0 * input[1];
@@ -131,6 +141,15 @@ fn complex_rotation_annihilates_the_lower_component() {
 struct Identity(f64);
 impl<T: GmresScalar> GmresOperations<T> for Identity {
     type Error = ();
+    async fn measured<R>(
+        &mut self,
+        work: runmat_sparse_solvers::krylov::usage::VectorWork,
+        run: impl FnOnce(&mut Self) -> (R, runmat_sparse_solvers::krylov::usage::BatchCompletion),
+    ) -> Result<R, ()> {
+        assert!(runmat_simulation_usage::UsageContext::capture().is_none());
+        work.operations().unwrap();
+        Ok(run(self).0)
+    }
     async fn coefficient(&mut self, input: &[T], output: &mut [T]) -> Result<(), ()> {
         for (&input, output) in input.iter().zip(output) {
             *output = T::from_complex(input.to_complex() * self.0).ok_or(())?;

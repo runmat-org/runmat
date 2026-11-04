@@ -17,12 +17,14 @@ mod ilu;
 mod jacobi;
 mod schedule;
 mod schwarz;
+mod usage;
 
 pub use amg::{
-    rigid_body_modes, Amg, AmgExport, AmgLevelExport, AmgOptions, AmgStatistics, NearNullspace,
+    rigid_body_modes, Amg, AmgCapacityError, AmgExport, AmgLevelExport, AmgOptions, AmgStatistics,
+    NearNullspace,
 };
 pub use direct::DirectPreconditioner;
-pub use ilu::{Ilu0, Ilut, IlutOptions};
+pub use ilu::{Ilu0, Ilu0CapacityError, Ilut, IlutOptions};
 pub use jacobi::{BlockJacobi, Jacobi};
 pub use schwarz::{
     graph_partition, AdditiveSchwarz, DirectSubdomainSolver, SchwarzOptions, SubdomainSolver,

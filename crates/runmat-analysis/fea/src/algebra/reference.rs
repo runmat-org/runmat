@@ -5,6 +5,8 @@ use crate::planning::resource::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScopedSpmvError {
+    #[error("sparse numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
     #[error("sparse matrix/vector dimension mismatch")]
     DimensionMismatch,
     #[error("vector reduction dimension mismatch")]

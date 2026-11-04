@@ -4,6 +4,7 @@ use runmat_value::ComplexElement;
 
 pub(super) struct Native<T>(std::marker::PhantomData<T>);
 impl<T: GmresScalar> runmat_sparse_solvers::krylov::gmres::Arithmetic<T> for Native<T> {
+    const DOMAIN: runmat_sparse_solvers::krylov::usage::ArithmeticDomain = T::DOMAIN;
     fn zero() -> T {
         T::zero()
     }
@@ -18,12 +19,15 @@ impl<T: GmresScalar> runmat_sparse_solvers::krylov::gmres::Arithmetic<T> for Nat
     }
 }
 pub(super) trait GmresScalar: Copy + PartialEq {
+    const DOMAIN: runmat_sparse_solvers::krylov::usage::ArithmeticDomain;
     fn zero() -> Self;
     fn to_complex(self) -> Complex64;
     fn from_complex(value: Complex64) -> Option<Self>;
 }
 
 impl GmresScalar for f32 {
+    const DOMAIN: runmat_sparse_solvers::krylov::usage::ArithmeticDomain =
+        runmat_sparse_solvers::krylov::usage::ArithmeticDomain::Real;
     fn zero() -> Self {
         0.0
     }
@@ -39,6 +43,8 @@ impl GmresScalar for f32 {
 }
 
 impl GmresScalar for f64 {
+    const DOMAIN: runmat_sparse_solvers::krylov::usage::ArithmeticDomain =
+        runmat_sparse_solvers::krylov::usage::ArithmeticDomain::Real;
     fn zero() -> Self {
         0.0
     }
@@ -53,6 +59,8 @@ impl GmresScalar for f64 {
 }
 
 impl GmresScalar for ComplexElement<f32> {
+    const DOMAIN: runmat_sparse_solvers::krylov::usage::ArithmeticDomain =
+        runmat_sparse_solvers::krylov::usage::ArithmeticDomain::Complex;
     fn zero() -> Self {
         ComplexElement(0.0, 0.0)
     }
@@ -71,6 +79,8 @@ impl GmresScalar for ComplexElement<f32> {
 }
 
 impl GmresScalar for ComplexElement<f64> {
+    const DOMAIN: runmat_sparse_solvers::krylov::usage::ArithmeticDomain =
+        runmat_sparse_solvers::krylov::usage::ArithmeticDomain::Complex;
     fn zero() -> Self {
         ComplexElement(0.0, 0.0)
     }

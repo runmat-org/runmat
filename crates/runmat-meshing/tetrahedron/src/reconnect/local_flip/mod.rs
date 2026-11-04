@@ -85,6 +85,7 @@ pub struct LocalTetrahedronFlipImprovementReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalTetrahedronFlipError {
+    Accounting(runmat_simulation_usage::LedgerError),
     DegenerateTetrahedron {
         tetrahedron_id: u32,
         node_ids: [u32; 4],

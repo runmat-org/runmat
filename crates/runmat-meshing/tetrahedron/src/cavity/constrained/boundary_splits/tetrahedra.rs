@@ -6,6 +6,7 @@ use super::super::{
     raw_refill_tetrahedron_with_rejection_reason,
     topology::{sorted_edge, sorted_tetrahedron_nodes},
     ConstrainedCavityNode, ConstrainedCavityRefillOptions, ConstrainedCavityRefillTetrahedron,
+    ConstrainedCavityValidationError, RefillTetrahedronError,
 };
 
 pub(crate) fn split_completion_tetrahedra_for_node(
@@ -14,7 +15,7 @@ pub(crate) fn split_completion_tetrahedra_for_node(
     split_node: &ConstrainedCavityNode,
     boundary_nodes: &BTreeMap<u32, Point3>,
     options: ConstrainedCavityRefillOptions,
-) -> Option<Vec<ConstrainedCavityRefillTetrahedron>> {
+) -> Result<Option<Vec<ConstrainedCavityRefillTetrahedron>>, ConstrainedCavityValidationError> {
     let child_specs = [
         [face[0], face[1], split_node.node_id, cap_node_id],
         [face[1], face[2], split_node.node_id, cap_node_id],
@@ -29,16 +30,22 @@ pub(crate) fn split_completion_tetrahedra_for_node(
             boundary_nodes[&cap_node_id],
         ];
         let tetrahedron =
-            raw_refill_tetrahedron_with_rejection_reason(node_ids, points, options).ok()?;
+            match raw_refill_tetrahedron_with_rejection_reason(node_ids, points, options) {
+                Ok(tetrahedron) => tetrahedron,
+                Err(RefillTetrahedronError::Rejected(_)) => return Ok(None),
+                Err(RefillTetrahedronError::Accounting(cause)) => {
+                    return Err(ConstrainedCavityValidationError::Accounting(cause))
+                }
+            };
         if child_tetrahedra.iter().any(|existing| {
             sorted_tetrahedron_nodes(existing.node_ids)
                 == sorted_tetrahedron_nodes(tetrahedron.node_ids)
         }) {
-            return None;
+            return Ok(None);
         }
         child_tetrahedra.push(tetrahedron);
     }
-    Some(child_tetrahedra)
+    Ok(Some(child_tetrahedra))
 }
 
 pub(crate) fn edge_split_completion_tetrahedra_for_node(
@@ -48,11 +55,14 @@ pub(crate) fn edge_split_completion_tetrahedra_for_node(
     split_node: &ConstrainedCavityNode,
     boundary_nodes: &BTreeMap<u32, Point3>,
     options: ConstrainedCavityRefillOptions,
-) -> Option<Vec<ConstrainedCavityRefillTetrahedron>> {
+) -> Result<Option<Vec<ConstrainedCavityRefillTetrahedron>>, ConstrainedCavityValidationError> {
     let [a, b] = edge;
-    let c = face
+    let Some(c) = face
         .into_iter()
-        .find(|node_id| *node_id != a && *node_id != b)?;
+        .find(|node_id| *node_id != a && *node_id != b)
+    else {
+        return Ok(None);
+    };
     let child_specs = [
         [a, split_node.node_id, c, cap_node_id],
         [split_node.node_id, b, c, cap_node_id],
@@ -67,16 +77,22 @@ pub(crate) fn edge_split_completion_tetrahedra_for_node(
             }
         });
         let tetrahedron =
-            raw_refill_tetrahedron_with_rejection_reason(node_ids, points, options).ok()?;
+            match raw_refill_tetrahedron_with_rejection_reason(node_ids, points, options) {
+                Ok(tetrahedron) => tetrahedron,
+                Err(RefillTetrahedronError::Rejected(_)) => return Ok(None),
+                Err(RefillTetrahedronError::Accounting(cause)) => {
+                    return Err(ConstrainedCavityValidationError::Accounting(cause))
+                }
+            };
         if child_tetrahedra.iter().any(|existing| {
             sorted_tetrahedron_nodes(existing.node_ids)
                 == sorted_tetrahedron_nodes(tetrahedron.node_ids)
         }) {
-            return None;
+            return Ok(None);
         }
         child_tetrahedra.push(tetrahedron);
     }
-    Some(child_tetrahedra)
+    Ok(Some(child_tetrahedra))
 }
 
 pub(crate) fn three_edge_split_completion_tetrahedra_for_node(
@@ -86,11 +102,17 @@ pub(crate) fn three_edge_split_completion_tetrahedra_for_node(
     split_node_coordinates: &BTreeMap<u32, Point3>,
     boundary_nodes: &BTreeMap<u32, Point3>,
     options: ConstrainedCavityRefillOptions,
-) -> Option<Vec<ConstrainedCavityRefillTetrahedron>> {
+) -> Result<Option<Vec<ConstrainedCavityRefillTetrahedron>>, ConstrainedCavityValidationError> {
     let [a, b, c] = face;
-    let ab = *split_node_by_edge.get(&sorted_edge([a, b]))?;
-    let bc = *split_node_by_edge.get(&sorted_edge([b, c]))?;
-    let ca = *split_node_by_edge.get(&sorted_edge([c, a]))?;
+    let Some(&ab) = split_node_by_edge.get(&sorted_edge([a, b])) else {
+        return Ok(None);
+    };
+    let Some(&bc) = split_node_by_edge.get(&sorted_edge([b, c])) else {
+        return Ok(None);
+    };
+    let Some(&ca) = split_node_by_edge.get(&sorted_edge([c, a])) else {
+        return Ok(None);
+    };
     let child_specs = [
         [a, ab, ca, cap_node_id],
         [ab, b, bc, cap_node_id],
@@ -106,14 +128,20 @@ pub(crate) fn three_edge_split_completion_tetrahedra_for_node(
                 .unwrap_or_else(|| boundary_nodes[&node_id])
         });
         let tetrahedron =
-            raw_refill_tetrahedron_with_rejection_reason(node_ids, points, options).ok()?;
+            match raw_refill_tetrahedron_with_rejection_reason(node_ids, points, options) {
+                Ok(tetrahedron) => tetrahedron,
+                Err(RefillTetrahedronError::Rejected(_)) => return Ok(None),
+                Err(RefillTetrahedronError::Accounting(cause)) => {
+                    return Err(ConstrainedCavityValidationError::Accounting(cause))
+                }
+            };
         if child_tetrahedra.iter().any(|existing| {
             sorted_tetrahedron_nodes(existing.node_ids)
                 == sorted_tetrahedron_nodes(tetrahedron.node_ids)
         }) {
-            return None;
+            return Ok(None);
         }
         child_tetrahedra.push(tetrahedron);
     }
-    Some(child_tetrahedra)
+    Ok(Some(child_tetrahedra))
 }

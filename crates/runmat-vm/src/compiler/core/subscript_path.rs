@@ -1,7 +1,7 @@
 use super::{
-    Compiler, IDENT_MIR_CELL_EXPAND_PLAN_INVALID, IDENT_MIR_CELL_INDEX_PLAN_INVALID,
-    IDENT_MIR_INDEX_CONTEXT_INVALID, IDENT_MIR_PAREN_CELL_PLAN_INVALID,
-    IDENT_MIR_SUBSCRIPT_CHAIN_INVALID,
+    Compiler, IndexEndContext, IDENT_MIR_CELL_EXPAND_PLAN_INVALID,
+    IDENT_MIR_CELL_INDEX_PLAN_INVALID, IDENT_MIR_INDEX_CONTEXT_INVALID,
+    IDENT_MIR_PAREN_CELL_PLAN_INVALID, IDENT_MIR_SUBSCRIPT_CHAIN_INVALID,
 };
 use crate::bytecode::{
     BytecodeDottedInvokeArgument, BytecodeSubscriptSelector, BytecodeSubscriptStep, Instr,
@@ -90,6 +90,27 @@ impl Compiler {
                     arguments,
                     semantic_fallback,
                 } => {
+                    let contextual = arguments.iter().any(|argument| match argument {
+                        MirDottedInvokeArgument::Contextual(_) => true,
+                        MirDottedInvokeArgument::Call(region) => region.contains_unscoped_end(),
+                        MirDottedInvokeArgument::Colon => false,
+                    });
+                    let variable_width = arguments.iter().any(|argument| {
+                        matches!(argument, MirDottedInvokeArgument::Call(region)
+                            if !matches!(region.argument, runmat_mir::MirCallArg::Single(_)))
+                    });
+                    if contextual && variable_width {
+                        return Err(self
+                            .compile_error("receiver-relative end cannot share an index list with variable-width expansion")
+                            .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
+                    }
+                    if contextual {
+                        // `end` belongs to the stored member's indexing receiver,
+                        // not the containing object. Materialize that member once
+                        // before evaluating its selectors, as for an ordinary
+                        // member/index chain; retain it through nested awaits.
+                        steps.push(BytecodeSubscriptStep::Member(member.clone()));
+                    }
                     // Preparing the prefix is an execution boundary: the next
                     // invocation's arguments must not run before this receiver
                     // has been evaluated. The existing prepared receiver also
@@ -106,18 +127,33 @@ impl Compiler {
                                 compiled.push(BytecodeDottedInvokeArgument::Colon)
                             }
                             MirDottedInvokeArgument::Contextual(region) => {
-                                let previous = self
-                                    .subscript_end_component
-                                    .replace((component, arguments.len()));
-                                self.compile_mir_expression_region(region)?;
-                                self.subscript_end_component = previous;
+                                let previous =
+                                    self.index_end_context.replace(IndexEndContext::Subscript {
+                                        component,
+                                        component_count: arguments.len(),
+                                    });
+                                let result = self.compile_mir_expression_region(region);
+                                self.index_end_context = previous;
+                                result?;
                                 compiled.push(BytecodeDottedInvokeArgument::Call(
                                     runmat_runtime::call::arguments::ArgumentSpec::Single,
                                 ));
                             }
                             MirDottedInvokeArgument::Call(region) => {
-                                self.compile_mir_expression_steps(&region.steps)?;
-                                self.compile_mir_call_arg(&region.argument)?;
+                                // Call-shaped arguments can also be selectors
+                                // on a data member. Bind their `end` to this
+                                // receiver without scalarizing captured lists.
+                                let previous =
+                                    self.index_end_context.replace(IndexEndContext::Subscript {
+                                        component,
+                                        component_count: arguments.len(),
+                                    });
+                                let result = (|| {
+                                    self.compile_mir_expression_steps(&region.steps)?;
+                                    self.compile_mir_call_arg(&region.argument)
+                                })();
+                                self.index_end_context = previous;
+                                result?;
                                 let (mut specs, _) = self
                                     .mir_call_arg_specs(std::slice::from_ref(&region.argument))?;
                                 compiled.push(BytecodeDottedInvokeArgument::Call(specs.remove(0)));
@@ -131,15 +167,41 @@ impl Compiler {
                             BytecodeDottedInvokeArgument::Call(spec) => spec.stack_operand_count(),
                         })
                         .sum();
-                    self.emit(Instr::FinishDottedInvokeReceiver {
-                        prefix_operand_count,
-                        argument_operand_count,
-                    });
-                    let path = vec![BytecodeSubscriptStep::DottedInvoke {
-                        member: member.clone(),
-                        arguments: compiled,
-                        semantic_fallback: semantic_fallback.clone(),
-                    }];
+                    if contextual {
+                        self.emit(Instr::FinishSubscriptEndReceiver {
+                            prefix_operand_count,
+                            selector_count: argument_operand_count,
+                        });
+                    } else {
+                        self.emit(Instr::FinishDottedInvokeReceiver {
+                            prefix_operand_count,
+                            argument_operand_count,
+                        });
+                    }
+                    let path = if contextual {
+                        vec![BytecodeSubscriptStep::Parentheses {
+                            selectors: compiled
+                                .into_iter()
+                                .map(|argument| match argument {
+                                    BytecodeDottedInvokeArgument::Colon => {
+                                        BytecodeSubscriptSelector::Colon
+                                    }
+                                    BytecodeDottedInvokeArgument::Call(
+                                        runmat_runtime::call::arguments::ArgumentSpec::Single,
+                                    ) => BytecodeSubscriptSelector::Value,
+                                    BytecodeDottedInvokeArgument::Call(spec) => {
+                                        BytecodeSubscriptSelector::Expansion(spec)
+                                    }
+                                })
+                                .collect(),
+                        }]
+                    } else {
+                        vec![BytecodeSubscriptStep::DottedInvoke {
+                            member: member.clone(),
+                            arguments: compiled,
+                            semantic_fallback: semantic_fallback.clone(),
+                        }]
+                    };
                     if position + 1 == chain.steps.len() {
                         self.emit_terminal_subscript_path(
                             chain,
@@ -240,11 +302,13 @@ impl Compiler {
                     selectors.push(BytecodeSubscriptSelector::Expansion(spec));
                 }
                 MirIndexComponent::ContextualExpr(region) => {
-                    let previous = self
-                        .subscript_end_component
-                        .replace((component, indexing.components.len()));
-                    self.compile_mir_expression_region(region)?;
-                    self.subscript_end_component = previous;
+                    let previous = self.index_end_context.replace(IndexEndContext::Subscript {
+                        component,
+                        component_count: indexing.components.len(),
+                    });
+                    let result = self.compile_mir_expression_region(region);
+                    self.index_end_context = previous;
+                    result?;
                     selectors.push(BytecodeSubscriptSelector::Value);
                     operand_count += 1;
                 }

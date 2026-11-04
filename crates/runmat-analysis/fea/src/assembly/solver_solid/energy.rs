@@ -232,17 +232,23 @@ fn energy_error(error: crate::algebra::EnergyError) -> SolverSolidAssemblyError 
     }
 }
 
-pub(in crate::assembly) fn assemble_preparing(
+pub(in crate::assembly) async fn assemble_preparing_with_owner<O, F, A>(
     mesh: &SolverMeshArtifact,
     properties: &CompiledPropertyMap,
-    execution: LocalExecutionPlan,
-    mut capture: Option<&mut SolidEnergyPreparation>,
+    mut execution: SolidAssemblyExecution<'_>,
     constraints: (&[bool], Option<&AffineConstraintReduction>),
-) -> Result<SolverSolidOperators, SolverSolidAssemblyError> {
-    if let Some(capture) = capture.as_deref_mut() {
+    before_block: O,
+) -> Result<SolverSolidOperators, A>
+where
+    O: FnMut(super::SolidCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+    A: From<SolverSolidAssemblyError> + Send,
+{
+    if let Some(capture) = execution.capture.as_deref_mut() {
         capture.begin(mesh, constraints.0, constraints.1)?;
     }
     #[cfg(test)]
     crate::assembly::transient_basis::tests::record_operator_assembly();
-    assemble_solver_solid_operators_capturing(mesh, properties, execution, capture)
+    assemble_solver_solid_operators_capturing_with_owner(mesh, properties, execution, before_block)
+        .await
 }

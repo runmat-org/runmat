@@ -12,8 +12,8 @@ pub const REMOTE_WORKER_PROTOCOL_V7: u16 = 7;
 /// V8 adds an exact, authenticated physical-owner retirement query.
 #[cfg(test)]
 pub const REMOTE_WORKER_PROTOCOL_V8: u16 = 8;
-/// V11 carries exact original-attempt counters on physical retirement replies.
-pub const REMOTE_WORKER_PROTOCOL_VERSION: u16 = 11;
+/// V12 relays bounded FEA admission calls over the authenticated attempt route.
+pub const REMOTE_WORKER_PROTOCOL_VERSION: u16 = 12;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

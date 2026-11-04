@@ -38,7 +38,7 @@ use crate::{
     pipeline::electro_thermal::recover_electro_thermal_fields,
     post::{
         fields::{
-            recover_result_fields, structural_field_recovery_metrics,
+            recover_result_fields_with_capacity, structural_field_recovery_metrics_from_fields,
             take_structural_observable_fields,
         },
         recover_connector_observable_fields, recover_constraint_group_observable_fields,
@@ -51,8 +51,10 @@ use crate::{
 };
 pub use prepared::{
     run_linear_static_with_prepared_constraint_plan,
-    run_linear_static_with_prepared_constraint_plan_and_linearization, LinearStaticExecution,
-    StaticResourceAdmission,
+    run_linear_static_with_prepared_constraint_plan_and_linearization,
+    run_linear_static_with_prepared_constraint_plan_and_linearization_tet4_owned,
+    run_linear_static_with_prepared_constraint_plan_tet4_owned, LinearStaticExecution,
+    StaticLinearizationInput, StaticResourceAdmission,
 };
 pub use thermal_state::{
     run_linear_static_from_thermal_state,
@@ -61,6 +63,41 @@ pub use thermal_state::{
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
+
+impl From<LinearAssemblyError> for FeaRunError {
+    fn from(error: LinearAssemblyError) -> Self {
+        match error {
+            LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Accounting(cause))
+            | LinearAssemblyError::Structural(
+                crate::assembly::StructuralAssemblyError::Accounting(cause),
+            )
+            | LinearAssemblyError::ConstraintPlan(
+                crate::constraints::ConstraintPlanError::Accounting(cause),
+            ) => Self::Usage(cause),
+            LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)
+            | LinearAssemblyError::Structural(
+                crate::assembly::StructuralAssemblyError::Cancelled,
+            )
+            | LinearAssemblyError::ConstraintPlan(
+                crate::constraints::ConstraintPlanError::Cancelled,
+            ) => Self::Cancelled,
+            LinearAssemblyError::CouplingRealization(message) => Self::InvalidModel(message),
+            other => Self::Assembly(other.to_string()),
+        }
+    }
+}
+
+impl From<SolverSolidAssemblyError> for FeaRunError {
+    fn from(error: SolverSolidAssemblyError) -> Self {
+        LinearAssemblyError::SolidOperator(error).into()
+    }
+}
+
+impl From<crate::assembly::StructuralAssemblyError> for FeaRunError {
+    fn from(error: crate::assembly::StructuralAssemblyError) -> Self {
+        LinearAssemblyError::Structural(error).into()
+    }
+}
 
 pub fn run_linear_static(
     model: &AnalysisModel,
@@ -78,6 +115,35 @@ pub fn run_linear_static_with_options(
         .map(|result| result.run)
 }
 
+pub async fn run_linear_static_with_options_tet4_owned<O, F, A>(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: LinearStaticSolveOptions,
+    maximum_block_elements: usize,
+    before_block: O,
+) -> Result<FeaRunResult, A>
+where
+    O: FnMut(crate::algebra::NumericalCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+    A: From<FeaRunError>
+        + From<LinearAssemblyError>
+        + From<SolverSolidAssemblyError>
+        + From<crate::assembly::StructuralAssemblyError>
+        + Send,
+{
+    run_linear_static_with_constraint_plan_owned(
+        model,
+        backend,
+        options,
+        StaticPreparedInputs::default(),
+        maximum_block_elements,
+        true,
+        before_block,
+    )
+    .await
+    .map(|result| result.run)
+}
+
 struct LinearStaticComputation {
     thermal_transition: Option<crate::execution::CanonicalStateTransition>,
     run: FeaRunResult,
@@ -85,14 +151,70 @@ struct LinearStaticComputation {
     solution: Vec<f64>,
 }
 
+#[derive(Default)]
+struct StaticPreparedInputs<'a> {
+    constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
+    admitted: Option<StaticResourceAdmission<'a>>,
+    thermal_source: Option<thermal_state::ThermalStateSelection<'a>>,
+}
+
 fn run_linear_static_with_constraint_plan(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    mut options: LinearStaticSolveOptions,
+    options: LinearStaticSolveOptions,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     admitted: Option<StaticResourceAdmission<'_>>,
     thermal_source: Option<thermal_state::ThermalStateSelection<'_>>,
 ) -> Result<LinearStaticComputation, FeaRunError> {
+    struct ReadyWake;
+    impl std::task::Wake for ReadyWake {
+        fn wake(self: std::sync::Arc<Self>) {}
+    }
+    let future = run_linear_static_with_constraint_plan_owned(
+        model,
+        backend,
+        options,
+        StaticPreparedInputs {
+            constraint_plan,
+            admitted,
+            thermal_source,
+        },
+        usize::MAX,
+        false,
+        |_, _| std::future::ready(Ok(())),
+    );
+    let mut future = std::pin::pin!(future);
+    let waker = std::task::Waker::from(std::sync::Arc::new(ReadyWake));
+    let mut context = std::task::Context::from_waker(&waker);
+    match std::future::Future::poll(future.as_mut(), &mut context) {
+        std::task::Poll::Ready(result) => result,
+        std::task::Poll::Pending => unreachable!("immediate static owner cannot suspend"),
+    }
+}
+
+async fn run_linear_static_with_constraint_plan_owned<O, F, A>(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    mut options: LinearStaticSolveOptions,
+    inputs: StaticPreparedInputs<'_>,
+    maximum_block_elements: usize,
+    awaited_solid: bool,
+    mut before_block: O,
+) -> Result<LinearStaticComputation, A>
+where
+    O: FnMut(crate::algebra::NumericalCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+    A: From<FeaRunError>
+        + From<LinearAssemblyError>
+        + From<SolverSolidAssemblyError>
+        + From<crate::assembly::StructuralAssemblyError>
+        + Send,
+{
+    let StaticPreparedInputs {
+        constraint_plan,
+        admitted,
+        thermal_source,
+    } = inputs;
     let execution_step = match thermal_source.as_ref() {
         Some(selection) => thermal_state::require_selected_step(model, selection.consumer_step_id)?,
         None => super::admission::require_structural(model, AnalysisProcedure::Static)?,
@@ -106,7 +228,8 @@ fn run_linear_static_with_constraint_plan(
         return Err(FeaRunError::InvalidModel(
             "static step declares a thermal state input; its retained source must be supplied"
                 .into(),
-        ));
+        )
+        .into());
     }
     emit_phase(
         "fea.run_linear_static",
@@ -131,7 +254,8 @@ fn run_linear_static_with_constraint_plan(
     let admission = crate::contracts::accelerator_admission::admit_accelerator(
         crate::contracts::accelerator_admission::AcceleratorFamily::StructuralStatic,
         backend,
-    )?;
+    )
+    .map_err(FeaRunError::from)?;
     if admission.fallback.is_some() {
         options.algebra_backend_kind =
             crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference;
@@ -178,7 +302,55 @@ fn run_linear_static_with_constraint_plan(
     // factor is ever formed.
     let mut elastic_capture =
         elastic_path.then(crate::assembly::solver_solid::SolidEnergyPreparation::elastic);
-    let summary =
+    let summary = if awaited_solid {
+        crate::assembly::assemble_structural_system_with_owner(
+            model,
+            &excitations,
+            options.solver_mesh.as_ref(),
+            crate::assembly::AssemblyExecution::physical_owned(
+                assembly_constraint_plan,
+                options.local_execution,
+                thermal_transfer
+                    .as_ref()
+                    .map(|transfer| &transfer.temperature),
+                elastic_capture.as_mut(),
+            ),
+            maximum_block_elements,
+            |phase, required| {
+                let phase = match phase {
+                    crate::assembly::StructuralCapacityPhase::Solid(
+                        crate::assembly::solver_solid::SolidCapacityPhase::Block { elements },
+                    ) => crate::algebra::NumericalCapacityPhase::SolidAssemblyBlock { elements },
+                    crate::assembly::StructuralCapacityPhase::Solid(
+                        crate::assembly::solver_solid::SolidCapacityPhase::Tet4Element { element },
+                    ) => crate::algebra::NumericalCapacityPhase::Tet4AssemblyElement { element },
+                    crate::assembly::StructuralCapacityPhase::Solid(
+                        crate::assembly::solver_solid::SolidCapacityPhase::Tet10Element { element },
+                    ) => crate::algebra::NumericalCapacityPhase::Tet10AssemblyElement { element },
+                    crate::assembly::StructuralCapacityPhase::Explicit(
+                        crate::assembly::ExplicitCapacityPhase::Element { index },
+                    ) => crate::algebra::NumericalCapacityPhase::ExplicitAssemblyElement {
+                        element: index,
+                    },
+                    crate::assembly::StructuralCapacityPhase::Explicit(
+                        crate::assembly::ExplicitCapacityPhase::Scatter { elements },
+                    ) => {
+                        crate::algebra::NumericalCapacityPhase::ExplicitAssemblyScatter { elements }
+                    }
+                    crate::assembly::StructuralCapacityPhase::ThermoelasticLoadElement {
+                        element,
+                    } => {
+                        crate::algebra::NumericalCapacityPhase::ThermoelasticLoadElement { element }
+                    }
+                    crate::assembly::StructuralCapacityPhase::SolidRecoveryElement { element } => {
+                        crate::algebra::NumericalCapacityPhase::SolidRecoveryElement { element }
+                    }
+                };
+                before_block(phase, required)
+            },
+        )
+        .await?
+    } else {
         assemble_structural_system_with_execution(
             model,
             &excitations,
@@ -197,17 +369,8 @@ fn run_linear_static_with_constraint_plan(
                 .map(|transfer| &transfer.temperature),
             elastic_capture.as_mut(),
         )
-        .map_err(|err| match err {
-            LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)
-            | LinearAssemblyError::Structural(
-                crate::assembly::StructuralAssemblyError::Cancelled,
-            )
-            | LinearAssemblyError::ConstraintPlan(
-                crate::constraints::ConstraintPlanError::Cancelled,
-            ) => FeaRunError::Cancelled,
-            LinearAssemblyError::CouplingRealization(message) => FeaRunError::InvalidModel(message),
-            other => FeaRunError::Assembly(other.to_string()),
-        })?;
+        .map_err(FeaRunError::from)?
+    };
     // Element recovery now owns the temperatures it needs. Release the aligned global
     // field before solving; only the canonical transition must survive into the result.
     let thermal_transition = thermal_transfer.map(|transfer| transfer.transition);
@@ -226,7 +389,8 @@ fn run_linear_static_with_constraint_plan(
     {
         return Err(FeaRunError::InvalidModel(
             "linear static solid continuum studies require a canonical solver mesh".to_string(),
-        ));
+        )
+        .into());
     }
     let compiled_constraint_plan;
     let executed_constraint_plan = match assembly_constraint_plan {
@@ -238,6 +402,9 @@ fn run_linear_static_with_constraint_plan(
             )
             .map_err(|error| match error {
                 crate::constraints::ConstraintPlanError::Cancelled => FeaRunError::Cancelled,
+                crate::constraints::ConstraintPlanError::Accounting(cause) => {
+                    FeaRunError::Usage(cause)
+                }
                 other => FeaRunError::Assembly(other.to_string()),
             })?;
             &compiled_constraint_plan
@@ -269,13 +436,25 @@ fn run_linear_static_with_constraint_plan(
             })
         })
         .transpose()?;
-    let solve_result = solve::solve_static_system(
-        &summary,
-        &options,
-        preassembly.solver_admission.as_ref(),
-        planned_reduced_support.as_ref(),
-        elastic_reuse.as_mut(),
-    )?;
+    let solve_result = if awaited_solid {
+        solve::solve_static_system_with_owner(
+            &summary,
+            &options,
+            preassembly.solver_admission.as_ref(),
+            planned_reduced_support.as_ref(),
+            elastic_reuse.as_mut(),
+            &mut before_block,
+        )
+        .await?
+    } else {
+        solve::solve_static_system(
+            &summary,
+            &options,
+            preassembly.solver_admission.as_ref(),
+            planned_reduced_support.as_ref(),
+            elastic_reuse.as_mut(),
+        )?
+    };
     let operator_proof = match elastic_reuse.as_ref().and_then(|reuse| reuse.certificate()) {
         Some(certificate) if certificate.proved_by_elastic_rigidity() => {
             crate::contracts::StaticOperatorProof::ElasticRigidity
@@ -283,29 +462,58 @@ fn run_linear_static_with_constraint_plan(
         Some(_) => {
             return Err(FeaRunError::Solve(
                 "elastic rigidity path completed without its elastic proof".into(),
-            ))
+            )
+            .into())
         }
         None => crate::contracts::StaticOperatorProof::SparseCholesky,
     };
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.balance_and_reactions");
-    let static_balance = solve::recover_static_balance(&summary, &solve_result.solution, &options)?;
-    let structural_constraint_result =
-        CanonicalStructuralConstraintResult::recover_for_model_from_solver_state(
+    let static_balance = if awaited_solid {
+        solve::recover_static_balance_with_owner(
+            &summary,
+            &solve_result.solution,
+            &options,
+            &mut before_block,
+        )
+        .await?
+    } else {
+        solve::recover_static_balance(&summary, &solve_result.solution, &options)?
+    };
+    let structural_constraint_result = {
+        use crate::algebra::{
+            capacity::PhaseCapacityOwner, coercivity::NumericalCapacityError,
+            NumericalCapacityPhase,
+        };
+        let owner = awaited_solid.then(|| {
+            PhaseCapacityOwner::new(
+                &mut before_block,
+                NumericalCapacityPhase::ConstraintRecovery,
+            )
+        });
+        CanonicalStructuralConstraintResult::recover_for_model_from_solver_state_with_capacity(
             executed_constraint_plan,
             model,
             options.solver_mesh.as_ref(),
             &solve_result.solution,
             &static_balance.reaction,
+            owner
+                .as_ref()
+                .map(|owner| owner as &dyn runmat_simulation_usage::AsyncCapacityOwner<A>),
         )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        .await
+        .map_err(|error| match error {
+            NumericalCapacityError::Numerical(error) => A::from(FeaRunError::from(error)),
+            NumericalCapacityError::Admission(error) => error,
+        })?
+    };
     structural_constraint_result
         .validate_against_model(
             executed_constraint_plan,
             model,
             options.solver_mesh.as_ref(),
         )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        .map_err(FeaRunError::from)?;
     let structural_connector_result =
         crate::connectors::CanonicalStructuralConnectorResult::recover_static(
             match summary.structural_connector_plan.clone() {
@@ -320,7 +528,8 @@ fn run_linear_static_with_constraint_plan(
                 None => {
                     return Err(FeaRunError::Assembly(
                         "structural assembly did not publish a canonical connector plan".into(),
-                    ))
+                    )
+                    .into())
                 }
             },
             &summary.structural_dof_layout,
@@ -351,11 +560,28 @@ fn run_linear_static_with_constraint_plan(
     );
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.field_recovery");
-    let mut fields = recover_result_fields(&summary, &solve_result, options.local_execution)
+    let mut fields = {
+        use crate::algebra::{
+            capacity::PhaseCapacityOwner, coercivity::NumericalCapacityError,
+            NumericalCapacityPhase,
+        };
+        let owner = awaited_solid.then(|| {
+            PhaseCapacityOwner::new(&mut before_block, NumericalCapacityPhase::FieldRecovery)
+        });
+        recover_result_fields_with_capacity(
+            &summary,
+            &solve_result,
+            options.local_execution,
+            owner
+                .as_ref()
+                .map(|owner| owner as &dyn runmat_simulation_usage::AsyncCapacityOwner<A>),
+        )
+        .await
         .map_err(|error| match error {
-            crate::post::StructuralFieldRecoveryError::Cancelled => FeaRunError::Cancelled,
-            other => FeaRunError::Assembly(other.to_string()),
-        })?;
+            NumericalCapacityError::Numerical(error) => A::from(FeaRunError::from(error)),
+            NumericalCapacityError::Admission(error) => error,
+        })?
+    };
     let thermo_mechanical_fields =
         static_thermomechanical::recover(&summary, &fields, solve_result.residual_norm)?;
     fields.extend(thermo_mechanical_fields.temperature_snapshots);
@@ -524,8 +750,9 @@ fn run_linear_static_with_constraint_plan(
             diagnostics.push(reference_diagnostic);
         }
     }
-    let recovery_metrics = structural_field_recovery_metrics(&summary, &solve_result.solution)
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let recovery_metrics =
+        structural_field_recovery_metrics_from_fields(&summary, &solve_result.solution, &fields)
+            .map_err(FeaRunError::from)?;
     diagnostics.push(FeaDiagnostic {
         code: "FEA_STRUCTURAL_FIELD_RECOVERY".to_string(),
         severity: if recovery_metrics.recovery_element_count > 0
@@ -609,7 +836,8 @@ fn run_linear_static_with_constraint_plan(
         series_reductions: Vec::new(),
         fields,
     };
-    run.validate_solver_formulation()?;
+    run.validate_solver_formulation()
+        .map_err(FeaRunError::from)?;
     Ok(LinearStaticComputation {
         thermal_transition,
         run,

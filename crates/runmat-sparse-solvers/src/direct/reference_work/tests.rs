@@ -215,6 +215,12 @@ fn exercise_admitted_batches<T: super::super::FactorScalar>() {
                 assert_eq!(rhs, [initial; 3]);
                 assert!(solver.solve_transpose_in_place(&mut rhs, 1).is_err());
                 assert_eq!(rhs, [initial; 3]);
+                let mut refined = [T::zero(); 3];
+                assert!(matches!(
+                    solver.solve_refined(matrix.as_ref().into(), &rhs, &mut refined, 1),
+                    Err(SolverError::Usage(LedgerError::MoreGrantRequired { .. }))
+                ));
+                assert_eq!(refined, [T::zero(); 3]);
                 assert!(solver
                     .refactorize(matrix.as_ref().into(), SolveControl::NONE)
                     .is_err());
@@ -224,6 +230,10 @@ fn exercise_admitted_batches<T: super::super::FactorScalar>() {
                 ));
                 assert!(matches!(
                     solver.solve_transpose_in_place(&mut [], usize::MAX),
+                    Err(SolverError::IndexOverflow)
+                ));
+                assert!(matches!(
+                    solver.solve_refined(matrix.as_ref().into(), &[], &mut [], usize::MAX),
                     Err(SolverError::IndexOverflow)
                 ));
                 ledger.update_grant(count(total)).unwrap();

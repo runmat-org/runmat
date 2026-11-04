@@ -42,6 +42,7 @@ pub(super) fn solve_operator_system<K: runmat_types::physical::QuantityMarker>(
             algebra,
             initial,
         )
+        .expect("valid thermal assembly fixture must solve")
     })
 }
 

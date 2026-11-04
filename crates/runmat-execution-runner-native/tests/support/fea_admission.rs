@@ -1,6 +1,6 @@
 //! Explicit numerical-harness host, never linked into the production runtime.
-use runmat_execution::resource::ResourceUsage;
 use runmat_runtime::analysis::fea_run_admission::*;
+use runmat_simulation_usage::OperationCount;
 
 pub fn context() -> FeaRunAdmissionContext {
     struct NumericalHost;
@@ -16,9 +16,9 @@ pub fn context() -> FeaRunAdmissionContext {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|_| FeaRunDenied::LicenseInvalid)?
                 .as_millis();
-            let held = (u128::from(request.allocated_cpu_millicores) * 3_600_000).div_ceil(1000);
             let budget = FeaRunBudget {
-                held_core_millis: u64::try_from(held).map_err(|_| FeaRunDenied::LicenseInvalid)?,
+                budget_ops: OperationCount::from_operations(u64::MAX),
+                granted_ops: OperationCount::from_operations(u64::MAX),
                 expires_at_unix_millis: u64::try_from(now + 3_600_000)
                     .map_err(|_| FeaRunDenied::LicenseInvalid)?,
                 heartbeat_millis: 30_000,
@@ -31,15 +31,11 @@ pub fn context() -> FeaRunAdmissionContext {
         fn budget(&self) -> FeaRunBudget {
             self.budget
         }
-        fn heartbeat(&self, _: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+        fn heartbeat(&self, _: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
             self.budget.validate()?;
             Ok(self.budget)
         }
-        fn settle(
-            self: Box<Self>,
-            _: FeaRunOutcome,
-            _: &ResourceUsage,
-        ) -> Result<(), FeaRunDenied> {
+        fn settle(self: Box<Self>, _: FeaRunOutcome, _: &FeaRunUsage) -> Result<(), FeaRunDenied> {
             Ok(())
         }
     }

@@ -34,6 +34,7 @@ pub(super) fn best_local_cap_for_face(
     options: ConstrainedCavityRefillOptions,
 ) -> Option<([f64; 3], ConstrainedCavityRefillTetrahedron)> {
     local_cap_apex_candidates(face, surface_point, cavity_centroid, node_coordinates)
+        .unwrap()
         .into_iter()
         .filter_map(|apex| {
             let tetrahedron_points = [
@@ -84,6 +85,7 @@ pub(super) fn best_shared_patch_cap_for_faces(
         };
         candidate_points.extend(
             local_cap_apex_candidates(*face, surface_point, cavity_centroid, node_coordinates)
+                .unwrap()
                 .into_iter()
                 .map(|candidate| candidate.coordinates_m.canonical_value()),
         );

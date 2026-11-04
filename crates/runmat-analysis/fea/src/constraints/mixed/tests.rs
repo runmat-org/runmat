@@ -288,7 +288,8 @@ fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
         crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         &crate::solve::backend::cpu_reference::CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(solve.converged, "{:?}", solve.diagnostics);
     let equilibrium = crate::algebra::apply_k(&summary.operator, &solve.solution)
         .into_iter()

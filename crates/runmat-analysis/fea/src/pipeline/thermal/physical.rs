@@ -95,7 +95,7 @@ pub(super) fn run(
         &initial_excitations,
         initial_sample,
     )
-    .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    .map_err(thermal_assembly_failure)?;
     drop(initial_excitations);
     operators.verify_matrix(&initial_assembly.conductivity)?;
     operators.verify_matrix(&initial_assembly.capacity)?;
@@ -297,6 +297,17 @@ pub(super) fn run(
     );
     Ok(result)
 }
+
+fn thermal_assembly_failure(
+    error: crate::physics::thermal::assembly::ThermalAssemblyError,
+) -> FeaRunError {
+    match error {
+        crate::physics::thermal::assembly::ThermalAssemblyError::Accounting(cause) => {
+            FeaRunError::Usage(cause)
+        }
+        other => FeaRunError::Assembly(other.to_string()),
+    }
+}
 struct ProcedureOutcome {
     time_points_s: Vec<f64>,
     recovered: RecoveredSnapshots,
@@ -340,10 +351,10 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
     } = input;
     let reference_temperature_k = assembly
         .steady_reference_temperatures(model, sample, initial_temperature_k[0])
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        .map_err(thermal_assembly_failure)?;
     let operator = assembly
         .steady_increment_operator(model, sample, &reference_temperature_k)
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        .map_err(thermal_assembly_failure)?;
     // A homogeneous anchored increment system has the exact zero solution. Starting it at
     // zero avoids introducing a spurious heat flow by iterating an unrelated warm guess.
     // This chooses the solver's initial state, never rewrites a computed solution.
@@ -388,7 +399,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
     let recover_balance = |temperature: &[f64]| {
         assembly
             .energy_balance(model, sample, temperature, temperature, 1.0, 0.0)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))
+            .map_err(thermal_assembly_failure)
     };
     let mut temperature = absolute(solve.solution.canonical_values());
     let mut energy_balance = recover_balance(&temperature)?;
@@ -657,7 +668,14 @@ fn solve_related(
         relative_tolerance,
         crate::solve::preconditioner::SpdPreconditionerKind::Auto,
     )
-    .map_err(FeaRunError::Solve)?;
+    .map_err(|error| match error {
+        crate::physics::scalar_constraints::ScalarSolveError::Usage(error) => {
+            FeaRunError::Usage(error)
+        }
+        crate::physics::scalar_constraints::ScalarSolveError::Detail(detail) => {
+            FeaRunError::Solve(detail)
+        }
+    })?;
     Ok(LinearSolveResult {
         spectral_estimate: None,
         iterations: reduced.iterations,
@@ -749,7 +767,7 @@ fn push_recovered_snapshot(
     recovered.gradients.push(
         assembly
             .recover_element_temperature_gradients(temperature_k)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?
+            .map_err(thermal_assembly_failure)?
             .into_iter()
             .flatten()
             .collect(),
@@ -757,7 +775,7 @@ fn push_recovered_snapshot(
     recovered.heat_flux.push(
         assembly
             .recover_element_heat_flux(temperature_k)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?
+            .map_err(thermal_assembly_failure)?
             .into_iter()
             .flatten()
             .collect(),
@@ -765,7 +783,7 @@ fn push_recovered_snapshot(
     recovered.storage_rates.push(match previous_temperature_k {
         Some(previous) => assembly
             .recover_element_storage_rate(previous, temperature_k, time_step_s)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?,
+            .map_err(thermal_assembly_failure)?,
         None => vec![0.0; assembly.projection.elements.len()],
     });
     Ok(())

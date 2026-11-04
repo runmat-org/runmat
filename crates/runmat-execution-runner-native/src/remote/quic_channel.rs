@@ -53,6 +53,9 @@ pub struct QuicRemoteWorkerChannel {
             >,
         >,
     >,
+    fea_calls: Arc<
+        Mutex<HashMap<runmat_execution::identity::AttemptId, VecDeque<crate::fea_proxy::Call>>>,
+    >,
     verified_ready: Arc<Mutex<Option<std::collections::BTreeSet<Capability>>>>,
 }
 
@@ -117,6 +120,7 @@ impl QuicRemoteWorkerChannel {
         let pending = Arc::new(Mutex::new(ReplyRegistry::default()));
         let progress = Arc::new(Mutex::new(HashMap::<_, VecDeque<_>>::new()));
         let collectives = Arc::new(Mutex::new(HashMap::<_, VecDeque<_>>::new()));
+        let fea_calls = Arc::new(Mutex::new(HashMap::<_, VecDeque<_>>::new()));
         let verified_ready = Arc::new(Mutex::new(None));
         let ready_state = Arc::clone(&verified_ready);
         let channel = Arc::new(Self {
@@ -140,6 +144,7 @@ impl QuicRemoteWorkerChannel {
             pending: Arc::clone(&pending),
             progress: Arc::clone(&progress),
             collectives: Arc::clone(&collectives),
+            fea_calls: Arc::clone(&fea_calls),
             verified_ready,
         });
         let mut receiver =
@@ -158,6 +163,7 @@ impl QuicRemoteWorkerChannel {
                 pending: &pending,
                 progress: &progress,
                 collectives: &collectives,
+                fea_calls: &fea_calls,
             };
             if let Err(error) =
                 receive::run(route.as_ref(), &mut receiver, limits, &ready, registries).await
@@ -170,6 +176,10 @@ impl QuicRemoteWorkerChannel {
             collectives
                 .lock()
                 .expect("remote collective registry poisoned")
+                .clear();
+            fea_calls
+                .lock()
+                .expect("remote FEA request registry poisoned")
                 .clear();
         });
         // Register V10 immediately. The existing pool reconciliation loop
@@ -626,6 +636,33 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
             .map(VecDeque::into_iter)
             .map(Iterator::collect)
             .unwrap_or_default()
+    }
+
+    fn drain_fea_calls(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+    ) -> Vec<crate::fea_proxy::Call> {
+        self.fea_calls
+            .lock()
+            .expect("remote FEA request registry poisoned")
+            .remove(&attempt_id)
+            .map(VecDeque::into_iter)
+            .map(Iterator::collect)
+            .unwrap_or_default()
+    }
+
+    async fn complete_fea_call(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+        sequence: u64,
+        reply: crate::fea_proxy::Reply,
+    ) -> NativeExecutionResult<()> {
+        self.ack(RemoteWorkerCommand::CompleteFeaAdmission {
+            attempt_id,
+            sequence,
+            reply,
+        })
+        .await
     }
 
     async fn complete_collective(

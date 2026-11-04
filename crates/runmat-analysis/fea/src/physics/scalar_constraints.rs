@@ -8,7 +8,9 @@
 //! symmetric operator symmetric, and expands the reduced solution back to every node.
 use runmat_analysis_core::{PairedConstraint, PeriodicTransform, RegionTarget};
 use runmat_meshing_core::SolverMeshArtifact;
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 use std::collections::BTreeMap;
+use thiserror::Error;
 
 use crate::algebra::RealSparseMatrix;
 use crate::topology::AnalysisProjection;
@@ -173,6 +175,55 @@ pub(crate) struct ScalarSolve {
     pub preconditioner: crate::contracts::SolverPreconditioner,
 }
 
+#[derive(Debug, Error)]
+pub(crate) enum ScalarSolveError {
+    #[error("scalar solve numerical accounting failed: {0}")]
+    Usage(#[from] runmat_simulation_usage::LedgerError),
+    #[error("{0}")]
+    Detail(String),
+}
+
+impl From<String> for ScalarSolveError {
+    fn from(detail: String) -> Self {
+        Self::Detail(detail)
+    }
+}
+
+fn scalar_count(n: usize) -> Result<OperationCount, ScalarSolveError> {
+    Ok(OperationCount::from_operations(
+        u64::try_from(n).map_err(|_| LedgerError::CountOverflow)?,
+    ))
+}
+
+fn scalar_add(
+    left: OperationCount,
+    right: OperationCount,
+) -> Result<OperationCount, ScalarSolveError> {
+    Ok(left.checked_add(right).map_err(LedgerError::from)?)
+}
+
+fn scalar_mul(
+    work: OperationCount,
+    repetitions: usize,
+) -> Result<OperationCount, ScalarSolveError> {
+    Ok(work
+        .checked_mul(u64::try_from(repetitions).map_err(|_| LedgerError::CountOverflow)?)
+        .map_err(LedgerError::from)?)
+}
+
+fn measured_scalar<R>(
+    work: OperationCount,
+    run: impl FnOnce() -> R,
+) -> Result<R, ScalarSolveError> {
+    let Some(context) = UsageContext::capture() else {
+        return Ok(run());
+    };
+    let mut reservation = context.ledger().reserve(UsageCategory::Solve, work)?;
+    let result = run();
+    reservation.complete(work)?;
+    Ok(result)
+}
+
 /// Solve K u = b on the unknown nodes with `known` values fixed and the relations eliminated.
 /// K is symmetric positive (semi)definite and the reduction K_r = T^T K T keeps it so; the
 /// shared SPD solver chooses sparse Cholesky or preconditioned conjugate gradients by size.
@@ -183,7 +234,7 @@ pub(crate) fn solve(
     relations: &[ScalarNodeRelation],
     relative_tolerance: f64,
     strategy: crate::solve::preconditioner::SpdPreconditionerKind,
-) -> Result<ScalarSolve, String> {
+) -> Result<ScalarSolve, ScalarSolveError> {
     let count = known.len();
     let by_secondary: BTreeMap<_, _> = relations.iter().map(|r| (r.secondary, r)).collect();
     let mut column = vec![usize::MAX; count];
@@ -212,33 +263,60 @@ pub(crate) fn solve(
         }
         (vec![(column[node], 1.0)], 0.0)
     };
-    let expansions: Vec<_> = (0..count).map(expand).collect();
+    let expansion_work = relations
+        .iter()
+        .filter(|relation| known[relation.secondary].is_none())
+        .try_fold(OperationCount::ZERO, |total, relation| {
+            let known_primaries = relation
+                .primaries
+                .iter()
+                .filter(|(node, _)| known[*node].is_some())
+                .count();
+            scalar_add(total, scalar_mul(scalar_count(known_primaries)?, 2)?)
+        })?;
+    let expansions: Vec<_> = measured_scalar(expansion_work, || (0..count).map(expand).collect())?;
     let pattern = stiffness.pattern();
     let offsets = pattern.row_offsets();
     let columns = pattern.column_indices();
     let values = stiffness.values();
     let mut rows = vec![BTreeMap::<usize, f64>::new(); unknowns];
     let mut reduced_rhs = vec![0.0; unknowns];
+    let mut reduction_work = OperationCount::ZERO;
     for row in 0..count {
         if known[row].is_some() {
             continue;
         }
-        let (row_terms, _) = &expansions[row];
-        for &(r, wr) in row_terms {
-            reduced_rhs[r] += wr * rhs[row];
-        }
+        let row_terms = expansions[row].0.len();
+        reduction_work = scalar_add(reduction_work, scalar_mul(scalar_count(row_terms)?, 2)?)?;
         for k in offsets[row] as usize..offsets[row + 1] as usize {
-            let col = columns[k] as usize;
-            let value = values[k];
-            let (col_terms, constant) = &expansions[col];
-            for &(r, wr) in row_terms {
-                for &(c, wc) in col_terms {
-                    *rows[r].entry(c).or_insert(0.0) += wr * value * wc;
-                }
-                reduced_rhs[r] -= wr * value * constant;
-            }
+            let col_terms = expansions[columns[k] as usize].0.len();
+            let pair_work = scalar_mul(scalar_count(col_terms)?, 3)?;
+            let per_row_term = scalar_add(pair_work, scalar_count(3)?)?;
+            reduction_work = scalar_add(reduction_work, scalar_mul(per_row_term, row_terms)?)?;
         }
     }
+    measured_scalar(reduction_work, || {
+        for row in 0..count {
+            if known[row].is_some() {
+                continue;
+            }
+            let (row_terms, _) = &expansions[row];
+            for &(r, wr) in row_terms {
+                reduced_rhs[r] += wr * rhs[row];
+            }
+            for k in offsets[row] as usize..offsets[row + 1] as usize {
+                let col = columns[k] as usize;
+                let value = values[k];
+                let (col_terms, constant) = &expansions[col];
+                for &(r, wr) in row_terms {
+                    for &(c, wc) in col_terms {
+                        *rows[r].entry(c).or_insert(0.0) += wr * value * wc;
+                    }
+                    reduced_rhs[r] -= wr * value * constant;
+                }
+            }
+        }
+    })?;
     let mut row_offsets = Vec::with_capacity(unknowns + 1);
     let mut column_indices = Vec::new();
     let mut reduced_values = Vec::new();
@@ -258,13 +336,13 @@ pub(crate) fn solve(
             row_offsets,
             column_indices,
         )
-        .map_err(|error| format!("reduced pattern: {error:?}"))?,
+        .map_err(|error| ScalarSolveError::Detail(format!("reduced pattern: {error:?}")))?,
         reduced_values,
         crate::algebra::OperatorRole::Stiffness,
         crate::algebra::MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
         Vec::new(),
     )
-    .map_err(|error| format!("reduced operator: {error:?}"))?;
+    .map_err(|error| ScalarSolveError::Detail(format!("reduced operator: {error:?}")))?;
     use crate::solve::shared_sparse;
     let strategy = shared_sparse::resolve_spd_strategy(strategy, unknowns, nnz, 1, false);
     let outcome = shared_sparse::solve_spd(shared_sparse::SpdSolveRequest {
@@ -277,33 +355,49 @@ pub(crate) fn solve(
         block_size: 1,
         factor: None,
         device: None,
-    });
+    })?;
     if let Some(failure) = outcome.failure {
-        return Err(failure);
+        return Err(ScalarSolveError::Detail(failure));
     }
     if outcome.cancelled {
-        return Err("reduced scalar solve cancelled".into());
+        return Err(ScalarSolveError::Detail(
+            "reduced scalar solve cancelled".into(),
+        ));
     }
     let relative_residual = if outcome.reference_norm > 0.0 {
-        outcome.residual_norm / outcome.reference_norm
+        measured_scalar(scalar_count(1)?, || {
+            outcome.residual_norm / outcome.reference_norm
+        })?
     } else {
         outcome.residual_norm
     };
     if !outcome.converged {
-        return Err(format!(
+        return Err(ScalarSolveError::Detail(format!(
             "reduced scalar solve did not reach tolerance {relative_tolerance}: relative residual {relative_residual}"
-        ));
+        )));
     }
-    let solution = (0..count)
-        .map(|node| {
-            let (terms, constant) = &expansions[node];
-            constant
-                + terms
-                    .iter()
-                    .map(|&(c, w)| w * outcome.solution[c])
-                    .sum::<f64>()
-        })
-        .collect();
+    let recovery_work = expansions
+        .iter()
+        .try_fold(OperationCount::ZERO, |total, (terms, _)| {
+            let row_work = if terms.is_empty() {
+                scalar_count(1)?
+            } else {
+                scalar_mul(scalar_count(terms.len())?, 2)?
+            };
+            scalar_add(total, row_work)
+        })?;
+    let solution = measured_scalar(recovery_work, || {
+        (0..count)
+            .map(|node| {
+                let (terms, constant) = &expansions[node];
+                constant
+                    + terms
+                        .iter()
+                        .map(|&(c, w)| w * outcome.solution[c])
+                        .sum::<f64>()
+            })
+            .collect()
+    })?;
     let (method, preconditioner) = strategy.provenance();
     Ok(ScalarSolve {
         solution,

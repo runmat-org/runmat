@@ -62,21 +62,32 @@ fn elementwise_mul_on_gpu_handles() {
 }
 
 #[test]
-fn gpu_device_returns_struct() {
+fn gpu_device_requires_session_and_provider_device_control() {
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let info = runmat_runtime::call_builtin("gpuDevice", &[]).unwrap();
-    match info.value() {
-        Value::Struct(s) => {
-            assert!(s.fields.contains_key("device_id"));
-            assert!(s.fields.contains_key("name"));
-            assert!(s.fields.contains_key("vendor"));
-            if let Some(Value::String(backend)) = s.fields.get("backend") {
-                assert_eq!(backend, "inprocess");
-            }
-        }
-        other => panic!("expected struct from gpuDevice, got {other:?}"),
-    }
+    let error = runmat_runtime::call_builtin("gpuDevice", &[])
+        .expect_err("device selection needs an owning RuntimeContext");
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::GPU_DEVICE_ERROR_LIFECYCLE.identifier
+    );
+
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    let _context = runtime.enter();
+    // The in-process numerical provider has no physical device-control port.
+    // Its metadata cannot substitute for a session-owned GPUDevice handle.
+    let error = runmat_runtime::call_builtin("gpuDevice", &[])
+        .expect_err("provider metadata is not device-control authority");
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::GPU_DEVICE_ERROR_NO_PROVIDER.identifier
+    );
+    assert_eq!(
+        error.to_string(),
+        runmat_builtins::GPU_DEVICE_ERROR_NO_PROVIDER.message
+    );
 }
 
 #[test]

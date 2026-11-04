@@ -136,6 +136,7 @@ struct ActiveAttempt {
     assignment: runmat_execution::resource::ResourceAssignment,
     cancellation: Arc<super::worker_execution::AttemptCancellation>,
     collective: Option<Arc<super::collective::RemoteCollectiveChannel>>,
+    fea_control: Arc<super::fea_control::WorkerControl>,
     cooperative: bool,
     finished: tokio::sync::watch::Receiver<bool>,
     request_digest: runmat_execution::Digest,
@@ -896,6 +897,22 @@ pub(super) async fn run_worker_loop(
                 }
                 let attempt_id = attempt.scheduling.id;
                 let scheduling = attempt.scheduling.clone();
+                let cancellation =
+                    Arc::new(super::worker_execution::AttemptCancellation::default());
+                let (fea_control, mut fea_calls) = super::fea_control::WorkerControl::new(
+                    runmat_execution::ProgramExecutionAssignment {
+                        scope_id: scheduling.scope_id,
+                        pool_id: scheduling.task.pool_id,
+                        task_id: scheduling.task_id,
+                        attempt_id: scheduling.id,
+                        worker_id: scheduling.worker_id,
+                        backend: runmat_execution::PoolBackend::Remote,
+                        resources: scheduling.resource_assignment.clone(),
+                    },
+                    u64::from(scheduling.task.resources.cpu_millicores),
+                    cancellation.token(),
+                );
+                let fea_control_for_replies = Arc::clone(&fea_control);
                 if let Some(journal) = &attempt_journal {
                     let begun = {
                         let mut journal = journal.lock().expect("worker attempt journal poisoned");
@@ -956,6 +973,7 @@ pub(super) async fn run_worker_loop(
                     _ => None,
                 };
                 let collective_for_task = collective.as_ref().map(Arc::clone);
+                let fea_control_for_task = Arc::clone(&fea_control);
                 let state_for_task = Arc::clone(&state);
                 let (materialized_project, bundle, objects) = {
                     let state = state.lock().await;
@@ -984,9 +1002,9 @@ pub(super) async fn run_worker_loop(
                         )
                 );
                 let graph_attempt = matches!(&attempt.program, WorkerProgramRequest::Graph(_));
-                let cooperative = externalized || graph_attempt;
-                let cancellation =
-                    Arc::new(super::worker_execution::AttemptCancellation::default());
+                // Execution now owns an OS blocking thread even for plain language work.
+                // Never abort only its async wrapper and then claim the thread retired.
+                let cooperative = true;
                 let cancellation_for_task = Arc::clone(&cancellation);
                 let cancellation_after_task = Arc::clone(&cancellation);
                 let (finished_sender, finished) = tokio::sync::watch::channel(false);
@@ -1018,7 +1036,23 @@ pub(super) async fn run_worker_loop(
                         }
                     };
                     let (progress_sender, mut progress_receiver) = tokio::sync::mpsc::channel(256);
-                    let execution = async {
+                    let scheduling_for_execution = scheduling.clone();
+                    // A numerical FEA permit may synchronously wait for its parent grant.
+                    // Keep the encrypted-session LocalSet available to relay that control
+                    // while this owned attempt runs on its own bounded blocking thread.
+                    let execution = tokio::task::spawn_blocking(move || {
+                        let runtime = match tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                        {
+                            Ok(runtime) => runtime,
+                            Err(error) => {
+                                return super::worker_execution::WorkerExecutionOutcome::RetirementUnverified(
+                                    format!("worker execution runtime unavailable: {error}"),
+                                )
+                            }
+                        };
+                        tokio::task::LocalSet::new().block_on(&runtime, async move {
                         match materialized {
                             Ok(arguments) => {
                                 let program = match program {
@@ -1039,7 +1073,8 @@ pub(super) async fn run_worker_loop(
                                         >
                                 });
                                 let fea_admission = match super::fea_admission::for_verified_attempt(
-                                    &graph_run_identity, &scheduling, original_clock, cancellation_for_task.token(),
+                                    &graph_run_identity, &scheduling_for_execution, original_clock, cancellation_for_task.token(),
+                                    fea_control_for_task,
                                 ) {
                                     Ok(admission) => admission,
                                     Err(error) => return super::worker_execution::WorkerExecutionOutcome::Response(
@@ -1059,7 +1094,7 @@ pub(super) async fn run_worker_loop(
                                         project: materialized_project,
                                         bundle,
                                         environment,
-                                        resources: scheduling.task.resources.clone(),
+                                        resources: scheduling_for_execution.task.resources.clone(),
                                         console_budget,
                                     },
                                     super::worker_execution::WorkerExecutionPorts {
@@ -1078,10 +1113,47 @@ pub(super) async fn run_worker_loop(
                                 },
                             ),
                         }
-                    };
+                        })
+                    });
                     tokio::pin!(execution);
                     let response = loop {
                         tokio::select! {
+                            Some(call) = fea_calls.recv() => {
+                                let bounded = runmat_canonical_codec::encode_json_bounded(
+                                    &call,
+                                    crate::fea_proxy::MAX_FRAME_BYTES,
+                                );
+                                if bounded.is_err() {
+                                    let _ = fea_control_for_replies.complete(
+                                        call.sequence,
+                                        crate::fea_proxy::Reply::Denied {
+                                            denied: runmat_runtime::analysis::fea_run_admission::FeaRunDenied::LicenseInvalid,
+                                        },
+                                    );
+                                } else {
+                                    let sequence = call.sequence;
+                                    if reply(
+                                        connection.as_ref(),
+                                        &sender,
+                                        limits,
+                                        RemoteWorkerReply {
+                                            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
+                                            correlation_id: correlation_id.clone(),
+                                            outcome: RemoteWorkerOutcome::FeaAdmissionCall {
+                                                attempt_id,
+                                                call,
+                                            },
+                                        },
+                                    ).await.is_err() {
+                                        let _ = fea_control_for_replies.complete(
+                                            sequence,
+                                            crate::fea_proxy::Reply::Denied {
+                                                denied: runmat_runtime::analysis::fea_run_admission::FeaRunDenied::ServerUnreachable,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
                             Some(progress) = progress_receiver.recv() => {
                                 let _ = reply_progress(
                                     connection.as_ref(),
@@ -1103,7 +1175,11 @@ pub(super) async fn run_worker_loop(
                                         progress,
                                     ).await;
                                 }
-                                break response;
+                                break response.unwrap_or_else(|error| {
+                                    super::worker_execution::WorkerExecutionOutcome::RetirementUnverified(
+                                        format!("worker execution thread stopped: {error}"),
+                                    )
+                                });
                             }
                         }
                     };
@@ -1191,6 +1267,7 @@ pub(super) async fn run_worker_loop(
                         assignment: reserved_assignment,
                         cancellation,
                         collective,
+                        fea_control,
                         cooperative,
                         finished,
                         request_digest,
@@ -1217,6 +1294,26 @@ pub(super) async fn run_worker_loop(
                             .to_string()
                     })
                     .and_then(|collective| collective.complete(&context, id, sequence, result));
+                let response = match completion {
+                    Ok(()) => acknowledged(request.correlation_id),
+                    Err(message) => rejected(request.correlation_id, message),
+                };
+                reply(connection.as_ref(), &sender, limits, response).await?;
+            }
+            RemoteWorkerCommand::CompleteFeaAdmission {
+                attempt_id,
+                sequence,
+                reply: parent_reply,
+            } => {
+                let control = state
+                    .lock()
+                    .await
+                    .attempts
+                    .get(&attempt_id)
+                    .map(|active| Arc::clone(&active.fea_control));
+                let completion = control
+                    .ok_or("FEA completion targets an unknown attempt")
+                    .and_then(|control| control.complete(sequence, parent_reply));
                 let response = match completion {
                     Ok(()) => acknowledged(request.correlation_id),
                     Err(message) => rejected(request.correlation_id, message),
@@ -1349,23 +1446,38 @@ pub(super) async fn run_worker_loop(
                 if let Some(cancelled_reply) = cancelled_reply {
                     cancelled_reply.complete(runmat_execution_runner::AttemptReport::Cancelled);
                 }
-                // Acknowledge only after the attempt has stopped: cooperative
-                // work publishes its terminal report, aborted work is joined.
-                if let Some(mut completion) = completion {
-                    if !*completion.borrow() {
-                        let _ = completion.changed().await;
-                    }
+                // Retirement may itself be waiting for a parent FEA grant on
+                // this encrypted session. Keep its control receiver running,
+                // but do not acknowledge Cancel until the attempt has stopped.
+                if completion.is_some() || aborted_task.is_some() {
+                    let connection = Arc::clone(&connection);
+                    let sender = Arc::clone(&sender);
+                    tokio::task::spawn_local(async move {
+                        if let Some(mut completion) = completion {
+                            if !*completion.borrow() {
+                                let _ = completion.changed().await;
+                            }
+                        }
+                        if let Some(aborted_task) = aborted_task {
+                            let _ = aborted_task.await;
+                        }
+                        let _ = reply(
+                            connection.as_ref(),
+                            &sender,
+                            limits,
+                            acknowledged(request.correlation_id),
+                        )
+                        .await;
+                    });
+                } else {
+                    reply(
+                        connection.as_ref(),
+                        &sender,
+                        limits,
+                        acknowledged(request.correlation_id),
+                    )
+                    .await?;
                 }
-                if let Some(aborted_task) = aborted_task {
-                    let _ = aborted_task.await;
-                }
-                reply(
-                    connection.as_ref(),
-                    &sender,
-                    limits,
-                    acknowledged(request.correlation_id),
-                )
-                .await?;
             }
             RemoteWorkerCommand::Drain => {
                 let mut state = state.lock().await;

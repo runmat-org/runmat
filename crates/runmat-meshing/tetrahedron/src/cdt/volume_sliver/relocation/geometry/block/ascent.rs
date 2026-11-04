@@ -12,13 +12,26 @@ struct Sample {
     gradient: Vec<f64>,
 }
 impl PreparedBlock {
-    pub(super) fn ascent_direction(&self, points: &[[f64; 3]], radius: f64) -> Option<Vec<f64>> {
+    pub(super) fn ascent_direction(
+        &self,
+        points: &[[f64; 3]],
+        radius: f64,
+    ) -> Result<Option<Vec<f64>>, DelaunayVolumeSliverError> {
         let mut samples = Vec::with_capacity(4 * self.cells.len());
         for cell in &self.cells {
             let positions = std::array::from_fn(|i| {
                 cell.slots[i].map_or(cell.nodes[i].coordinates_m.canonical_value(), |p| points[p])
             });
-            for sample in cell.metric.corner_gradients(positions)? {
+            let Some(gradients) = cell.metric.corner_gradients(positions).map_err(|cause| {
+                error(
+                    DelaunayVolumeSliverErrorKind::Accounting(cause),
+                    "block ascent numerical accounting failed",
+                )
+            })?
+            else {
+                return Ok(None);
+            };
+            for sample in gradients {
                 let mut gradient = vec![0.; 3 * points.len()];
                 for (i, slot) in cell.slots.iter().enumerate() {
                     if let Some(p) = slot {
@@ -33,7 +46,7 @@ impl PreparedBlock {
                 });
             }
         }
-        proposal(&samples, radius)
+        Ok(proposal(&samples, radius))
     }
 }
 fn proposal(samples: &[Sample], radius: f64) -> Option<Vec<f64>> {

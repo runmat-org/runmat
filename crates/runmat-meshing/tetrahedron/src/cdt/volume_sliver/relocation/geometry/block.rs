@@ -30,7 +30,7 @@ impl PreparedBlock {
         vertices: &[u32],
         cells: &BTreeSet<u32>,
         metrics: &dyn Fn(u32) -> runmat_meshing_size::metric::MetricTensor3,
-    ) -> Self {
+    ) -> Result<Self, DelaunayVolumeSliverError> {
         let start = vertices
             .iter()
             .map(|vertex| topology.node(*vertex).coordinates_m.canonical_value())
@@ -54,25 +54,32 @@ impl PreparedBlock {
                         }
                     }
                 }
-                Cell {
+                Ok(Cell {
                     nodes,
                     slots: indices.map(|vertex| vertices.iter().position(|v| *v == vertex)),
-                    metric: PreparedJacobian::new(metrics(*index)).expect("admitted metric"),
-                }
+                    metric: PreparedJacobian::new(metrics(*index))
+                        .map_err(|cause| {
+                            error(
+                                DelaunayVolumeSliverErrorKind::Accounting(cause),
+                                "block metric numerical accounting failed",
+                            )
+                        })?
+                        .expect("admitted metric"),
+                })
             })
-            .collect::<Vec<Cell>>();
+            .collect::<Result<Vec<Cell>, DelaunayVolumeSliverError>>()?;
         let mut slot_cells = vec![Vec::new(); vertices.len()];
         for (index, cell) in cells.iter().enumerate() {
             for slot in cell.slots.iter().flatten() {
                 slot_cells[*slot].push(index);
             }
         }
-        Self {
+        Ok(Self {
             cells,
             start,
             scale,
             slot_cells,
-        }
+        })
     }
     fn cell_value(
         &self,
@@ -102,6 +109,12 @@ impl PreparedBlock {
         Ok(Some(
             cell.metric
                 .score(nodes.map(|node| node.coordinates_m.canonical_value()))
+                .map_err(|cause| {
+                    error(
+                        DelaunayVolumeSliverErrorKind::Accounting(cause),
+                        "block score numerical accounting failed",
+                    )
+                })?
                 .unwrap_or(0.),
         ))
     }
@@ -184,7 +197,7 @@ impl PreparedBlock {
                     "local cluster smoothing cancelled",
                 ));
             }
-            if let Some(direction) = self.ascent_direction(&points, radius) {
+            if let Some(direction) = self.ascent_direction(&points, radius)? {
                 let mut step = radius;
                 let mut accepted = None;
                 for _ in 0..24 {

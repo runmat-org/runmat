@@ -95,6 +95,7 @@ impl PrivateWorkerBootstrap {
                 replies.observe(frame) || observer.observe(frame)
             })),
         )?;
+        proxy_replies.activate_reader();
         Ok(Self {
             parent,
             channel: WorkerControlChannel::new(frames, writer),
@@ -206,7 +207,15 @@ fn admit_launch(
             let resources = request
                 .resources()
                 .ok_or_else(|| protocol("FEA grant lacks reserved child resources"))?;
-            let scope = grant.install(assignment, resources).map_err(protocol)?;
+            let client = crate::fea_proxy::Client::new(
+                assignment.clone(),
+                u64::from(resources.cpu_millicores),
+                writer.clone(),
+                Arc::clone(proxy_replies),
+            );
+            let scope = grant
+                .install_with_parent(assignment, resources, &client)
+                .map_err(protocol)?;
             lease_observer.install(grant, &scope).map_err(protocol)?;
             Ok::<_, NativeExecutionError>(scope)
         })

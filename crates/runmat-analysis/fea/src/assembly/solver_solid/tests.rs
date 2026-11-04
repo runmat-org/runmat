@@ -8,6 +8,39 @@ use runmat_meshing_core::{
 };
 
 #[test]
+fn tet4_block_schedule_uses_immutable_material_shape_and_rejects_adaptive_tet10() {
+    use runmat_simulation_usage::OperationCount;
+
+    let mesh = artifact(ElementOrder::Tet4);
+    let plain =
+        Tet4SolidGrantSchedule::new(&mesh, &inventory(&mesh, material(100.0, 1.0))).unwrap();
+    let scatter = OperationCount::from_operations(7);
+    assert_eq!(
+        plain.block_required(0..1, scatter).unwrap().operations(),
+        1_958
+    );
+    let mut damped = material(100.0, 1.0);
+    damped.damping = MechanicalDampingModel::Rayleigh {
+        mass_coefficient: RayleighMassCoefficient::new(2.0),
+        stiffness_coefficient: RayleighStiffnessCoefficient::new(3.0e-6),
+    };
+    let damped = Tet4SolidGrantSchedule::new(&mesh, &inventory(&mesh, damped)).unwrap();
+    assert_eq!(
+        damped.block_required(0..1, scatter).unwrap().operations(),
+        2_390
+    );
+    assert!(damped.block_required(1..2, scatter).is_err());
+
+    let curved = artifact(ElementOrder::Tet10);
+    assert!(matches!(
+        Tet4SolidGrantSchedule::new(&curved, &inventory(&curved, material(100.0, 1.0))),
+        Err(SolverSolidAssemblyError::AwaitedKernelRequiresStaging(
+            ElementOrder::Tet10
+        ))
+    ));
+}
+
+#[test]
 fn original_energy_capture_preserves_every_physical_operator_and_parallel_sum() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = artifact(order);
@@ -53,6 +86,63 @@ fn scoped_solid_assembly_matches_serial_operators_exactly() {
                     .unwrap();
             assert_eq!(parallel, serial);
         }
+    }
+}
+
+#[test]
+fn awaited_tet4_and_tet10_fill_matches_native_and_refuses_before_element_work() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = artifact(order);
+        let properties = inventory(&mesh, material(70.0e9, 2_700.0));
+        let native = assemble_solver_solid_operators(&mesh, &properties).unwrap();
+        let phases = std::cell::RefCell::new(Vec::new());
+        let awaited =
+            futures::executor::block_on(assemble_solver_solid_operators_capturing_with_owner(
+                &mesh,
+                &properties,
+                SolidAssemblyExecution {
+                    local_execution: LocalExecutionPlan::serial(),
+                    capture: None,
+                    maximum_block_elements: 1,
+                    awaited_elements: true,
+                },
+                |phase, count| {
+                    phases.borrow_mut().push((phase, count));
+                    std::future::ready(Ok::<(), SolverSolidAssemblyError>(()))
+                },
+            ))
+            .unwrap();
+        assert_eq!(awaited, native);
+        assert!(phases.borrow().iter().any(|(phase, _)| matches!(
+            (order, phase),
+            (ElementOrder::Tet4, SolidCapacityPhase::Tet4Element { .. })
+                | (ElementOrder::Tet10, SolidCapacityPhase::Tet10Element { .. })
+        )));
+        assert!(phases
+            .borrow()
+            .iter()
+            .any(|(phase, _)| matches!(phase, SolidCapacityPhase::Block { .. })));
+
+        let denied =
+            futures::executor::block_on(assemble_solver_solid_operators_capturing_with_owner(
+                &mesh,
+                &properties,
+                SolidAssemblyExecution {
+                    local_execution: LocalExecutionPlan::serial(),
+                    capture: None,
+                    maximum_block_elements: 1,
+                    awaited_elements: true,
+                },
+                |_, _| {
+                    std::future::ready(Err::<(), _>(SolverSolidAssemblyError::LocalExecution(
+                        "admission denied".into(),
+                    )))
+                },
+            ));
+        assert!(matches!(
+            denied,
+            Err(SolverSolidAssemblyError::LocalExecution(message)) if message == "admission denied"
+        ));
     }
 }
 
@@ -118,22 +208,38 @@ fn scoped_solid_assembly_preserves_shared_row_sum_across_batches() {
     // Repeated contributions deliberately target identical rows. This exercises summation
     // order and a second bounded wave without admitting a duplicate canonical mesh element.
     let elements = vec![artifact.topology.volume_elements[0].clone(); 19];
-    let serial = assemble_solid_operators(
+    let serial = futures::executor::block_on(assemble_solid_operators_with_owner(
         &elements,
         &properties,
         &nodes,
         nodes.len() * 3,
-        LocalExecutionPlan::serial(),
-        None,
-    )
+        SolidAssemblyExecution {
+            local_execution: LocalExecutionPlan::serial(),
+            capture: None,
+            maximum_block_elements: usize::MAX,
+            awaited_elements: false,
+        },
+        |_, _| std::future::ready(Ok::<(), SolverSolidAssemblyError>(())),
+    ))
     .unwrap();
     let plan = LocalExecutionPlan::from_thread_count(
         crate::planning::resource::LocalThreadCount::new(2).unwrap(),
     )
     .unwrap();
-    let parallel =
-        assemble_solid_operators(&elements, &properties, &nodes, nodes.len() * 3, plan, None)
-            .unwrap();
+    let parallel = futures::executor::block_on(assemble_solid_operators_with_owner(
+        &elements,
+        &properties,
+        &nodes,
+        nodes.len() * 3,
+        SolidAssemblyExecution {
+            local_execution: plan,
+            capture: None,
+            maximum_block_elements: usize::MAX,
+            awaited_elements: false,
+        },
+        |_, _| std::future::ready(Ok::<(), SolverSolidAssemblyError>(())),
+    ))
+    .unwrap();
     assert_eq!(parallel.stiffness, serial.stiffness);
     assert_eq!(parallel.consistent_mass, serial.consistent_mass);
     assert_eq!(parallel.damping, serial.damping);

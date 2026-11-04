@@ -211,6 +211,16 @@ fn for_loop_over_matrix_iterates_columns() {
 }
 
 #[test]
+fn range_variable_reassigned_scalar_iterates_one_column() {
+    let vars = execute_source(
+        "v = 1:3; total = 0; for f = v; total = total + f; end; \
+         v = 7; for f = v; total = total + f; end; assert(total == 13);",
+    )
+    .expect("a reassigned scalar is a one-column iterable");
+    assert!(has_num(&vars, 13.0));
+}
+
+#[test]
 fn undefined_variable_raises_mex() {
     let err = compile_source("y = x + 1;").err().unwrap();
     assert_eq!(err.identifier(), Some("RunMat:UndefinedVariable"));

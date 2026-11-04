@@ -35,8 +35,8 @@ pub use radial::compare_radial_distances_constructed;
 pub use ray::ray_triangle_intersection;
 pub use simplex::{
     orient_tetrahedron_node_ids, tetrahedron_centroid, tetrahedron_edge_aspect_ratio,
-    tetrahedron_scaled_jacobian, tetrahedron_signed_volume, tetrahedron_volume, triangle_area,
-    triangle_centroid,
+    tetrahedron_scaled_jacobian, tetrahedron_scaled_jacobian_with_owner, tetrahedron_signed_volume,
+    tetrahedron_volume, triangle_area, triangle_centroid,
 };
 pub use solve::solve_3x3;
 pub use surface::{point_in_closed_triangle_surface, ray_has_odd_surface_intersections};

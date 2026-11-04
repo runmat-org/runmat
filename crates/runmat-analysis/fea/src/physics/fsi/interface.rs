@@ -46,7 +46,7 @@ pub(super) fn solve_partitioned_interface(
     structural_compliance_per_pa: f64,
     max_linear_iters: usize,
     tolerance: f64,
-) -> Result<PartitionedInterfaceStep, String> {
+) -> Result<PartitionedInterfaceStep, dense::DenseCouplingError> {
     let max_linear_iters = max_linear_iters.max(1);
     let tolerance = tolerance.max(1.0e-12);
     let interface_face_count = cfd::interface_face_count(topology);
@@ -257,7 +257,7 @@ fn solve_structural_interface_response(
     pressure_load: &[f64],
     interface_stiffness_pa_per_m: f64,
     coupling_edges: &[(usize, usize)],
-) -> Result<StructuralInterfaceResponse, String> {
+) -> Result<StructuralInterfaceResponse, dense::DenseCouplingError> {
     let face_count = pressure_load.len();
     if face_count == 0 {
         return Ok(StructuralInterfaceResponse {

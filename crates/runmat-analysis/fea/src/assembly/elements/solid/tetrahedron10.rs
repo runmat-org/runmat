@@ -1,3 +1,4 @@
+use runmat_simulation_usage::{OperationCount, UsageCategory, UsageContext};
 use thiserror::Error;
 
 use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
@@ -23,6 +24,22 @@ pub const TETRAHEDRON10_ELEMENT_DOF_COUNT: usize =
 pub type Tetrahedron10Matrix30 =
     [[f64; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
 
+fn immediate<R>(
+    future: impl std::future::Future<
+        Output = Result<R, Tetrahedron10CapacityError<std::convert::Infallible>>,
+    >,
+) -> Result<R, Tetrahedron10ElementError> {
+    let mut future = std::pin::pin!(future);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    match std::future::Future::poll(future.as_mut(), &mut context) {
+        std::task::Poll::Ready(result) => result.map_err(|error| match error {
+            Tetrahedron10CapacityError::Numerical(error) => error,
+            Tetrahedron10CapacityError::Admission(never) => match never {},
+        }),
+        std::task::Poll::Pending => unreachable!("immediate Tet10 geometry cannot suspend"),
+    }
+}
+
 const QUADRATURE_WEIGHT: f64 = 1.0 / 24.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,19 +50,59 @@ pub struct Tetrahedron10ElementGeometry {
 
 impl Tetrahedron10ElementGeometry {
     pub fn volume_m3(self) -> Result<f64, Tetrahedron10ElementError> {
-        validate_nodes(self.nodes_m)?;
+        immediate(self.volume_m3_with_optional_capacity::<std::convert::Infallible>(None))
+    }
+
+    pub async fn volume_m3_with_capacity<E>(
+        self,
+        owner: &dyn runmat_simulation_usage::AsyncCapacityOwner<E>,
+    ) -> Result<f64, Tetrahedron10CapacityError<E>> {
+        self.volume_m3_with_optional_capacity(Some(owner)).await
+    }
+
+    async fn volume_m3_with_optional_capacity<E>(
+        self,
+        owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<E>>,
+    ) -> Result<f64, Tetrahedron10CapacityError<E>> {
+        if let Some(owner) = owner {
+            super::tetrahedron10_geometry::validate_nodes_with_capacity(self.nodes_m, owner)
+                .await?;
+            let jacobian = if super::tetrahedron10_geometry::is_affine(self) {
+                23
+            } else {
+                185
+            };
+            owner
+                .ensure_capacity(OperationCount::from_operations(22 + 11 * (92 + jacobian)))
+                .await
+                .map_err(Tetrahedron10CapacityError::Admission)?;
+        } else {
+            validate_nodes(self.nodes_m)?;
+        }
+        let usage = UsageContext::capture();
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| {
+                usage
+                    .ledger()
+                    .reserve(UsageCategory::Assembly, OperationCount::from_operations(22))
+            })
+            .transpose()?;
         let volume =
             VOLUME_QUADRATURE
                 .into_iter()
                 .try_fold(0.0, |volume, (barycentric, weight)| {
-                    Ok::<_, Tetrahedron10ElementError>(
-                        volume + weight * jacobian_determinant(self.nodes_m, barycentric)?,
-                    )
+                    let determinant = jacobian_determinant(self.nodes_m, barycentric)?;
+                    let next = volume + weight * determinant;
+                    if let Some(batch) = &mut batch {
+                        batch.complete(OperationCount::from_operations(2))?;
+                    }
+                    Ok::<_, Tetrahedron10ElementError>(next)
                 })?;
         if volume.is_finite() && volume > 0.0 {
             Ok(volume)
         } else {
-            Err(Tetrahedron10ElementError::DegenerateOrInverted)
+            Err(Tetrahedron10ElementError::DegenerateOrInverted.into())
         }
     }
 
@@ -58,9 +115,36 @@ impl Tetrahedron10ElementGeometry {
         self,
         displacement: [f64; TETRAHEDRON10_ELEMENT_DOF_COUNT],
     ) -> Result<[Tetrahedron10RecoveryPoint; 4], Tetrahedron10ElementError> {
-        validate_nodes(self.nodes_m)?;
+        immediate(
+            self.quadrature_strain_with_optional_capacity::<std::convert::Infallible>(
+                displacement,
+                None,
+            ),
+        )
+    }
+
+    pub(crate) async fn quadrature_strain_with_capacity<E>(
+        self,
+        displacement: [f64; TETRAHEDRON10_ELEMENT_DOF_COUNT],
+        owner: &dyn runmat_simulation_usage::AsyncCapacityOwner<E>,
+    ) -> Result<[Tetrahedron10RecoveryPoint; 4], Tetrahedron10CapacityError<E>> {
+        self.quadrature_strain_with_optional_capacity(displacement, Some(owner))
+            .await
+    }
+
+    async fn quadrature_strain_with_optional_capacity<E>(
+        self,
+        displacement: [f64; TETRAHEDRON10_ELEMENT_DOF_COUNT],
+        owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<E>>,
+    ) -> Result<[Tetrahedron10RecoveryPoint; 4], Tetrahedron10CapacityError<E>> {
+        if let Some(owner) = owner {
+            super::tetrahedron10_geometry::validate_nodes_with_capacity(self.nodes_m, owner)
+                .await?;
+        } else {
+            validate_nodes(self.nodes_m)?;
+        }
         if displacement.iter().any(|value| !value.is_finite()) {
-            return Err(Tetrahedron10ElementError::NonFiniteDisplacement);
+            return Err(Tetrahedron10ElementError::NonFiniteDisplacement.into());
         }
         let mut recovered = [Tetrahedron10RecoveryPoint {
             barycentric: [0.0; 4],
@@ -68,10 +152,33 @@ impl Tetrahedron10ElementGeometry {
             strain: [0.0; 6],
         }; 4];
         for (index, point) in recovered.iter_mut().enumerate() {
+            if let Some(owner) = owner {
+                let jacobian = if super::tetrahedron10_geometry::is_affine(self) {
+                    23
+                } else {
+                    185
+                };
+                owner
+                    .ensure_capacity(OperationCount::from_operations(
+                        92 + jacobian + 37 + 150 + 355,
+                    ))
+                    .await
+                    .map_err(Tetrahedron10CapacityError::Admission)?;
+            }
             let barycentric = QUADRATURE[index];
             let (gradients, determinant) =
                 physical_shape_gradients_and_measure(self.nodes_m, barycentric)?;
             let b = strain_displacement_matrix(gradients);
+            let usage = UsageContext::capture();
+            let mut batch = usage
+                .as_ref()
+                .map(|usage| {
+                    usage.ledger().reserve(
+                        UsageCategory::Assembly,
+                        OperationCount::from_operations(355),
+                    )
+                })
+                .transpose()?;
             let strain: [f64; 6] = std::array::from_fn(|component| {
                 b[component]
                     .iter()
@@ -80,6 +187,9 @@ impl Tetrahedron10ElementGeometry {
                     .sum()
             });
             let integration_weight_m3 = QUADRATURE_WEIGHT * determinant;
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(355))?;
+            }
             if strain.iter().all(|value| value.is_finite())
                 && integration_weight_m3.is_finite()
                 && integration_weight_m3 > 0.0
@@ -90,7 +200,7 @@ impl Tetrahedron10ElementGeometry {
                     strain,
                 };
             } else {
-                return Err(Tetrahedron10ElementError::DegenerateOrInverted);
+                return Err(Tetrahedron10ElementError::DegenerateOrInverted.into());
             }
         }
         Ok(recovered)
@@ -100,10 +210,22 @@ impl Tetrahedron10ElementGeometry {
         self,
     ) -> Result<[([f64; 4], f64); 4], Tetrahedron10ElementError> {
         validate_nodes(self.nodes_m)?;
+        let usage = UsageContext::capture();
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| {
+                usage
+                    .ledger()
+                    .reserve(UsageCategory::Assembly, OperationCount::from_operations(4))
+            })
+            .transpose()?;
         let mut data = [([0.0; 4], 0.0); 4];
         for (index, entry) in data.iter_mut().enumerate() {
             let barycentric = QUADRATURE[index];
             let weight = QUADRATURE_WEIGHT * jacobian_determinant(self.nodes_m, barycentric)?;
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(1))?;
+            }
             if !weight.is_finite() || weight <= 0.0 {
                 return Err(Tetrahedron10ElementError::DegenerateOrInverted);
             }
@@ -178,6 +300,31 @@ pub enum Tetrahedron10ElementError {
     UnconvergedStiffnessQuadrature,
     #[error("Tetrahedron10 material is invalid: {0}")]
     InvalidMaterial(#[from] SolidMaterialError),
+    #[error("Tetrahedron10 numerical accounting failed: {0}")]
+    Accounting(#[from] runmat_simulation_usage::LedgerError),
+}
+
+pub enum Tetrahedron10CapacityError<E> {
+    Numerical(Tetrahedron10ElementError),
+    Admission(E),
+}
+
+impl<E> From<Tetrahedron10ElementError> for Tetrahedron10CapacityError<E> {
+    fn from(error: Tetrahedron10ElementError) -> Self {
+        Self::Numerical(error)
+    }
+}
+
+impl<E> From<runmat_simulation_usage::LedgerError> for Tetrahedron10CapacityError<E> {
+    fn from(error: runmat_simulation_usage::LedgerError) -> Self {
+        Self::Numerical(Tetrahedron10ElementError::Accounting(error))
+    }
+}
+
+impl<E> From<SolidMaterialError> for Tetrahedron10CapacityError<E> {
+    fn from(error: SolidMaterialError) -> Self {
+        Self::Numerical(Tetrahedron10ElementError::InvalidMaterial(error))
+    }
 }
 
 pub(super) fn shape_values(barycentric: [f64; 4]) -> [f64; TETRAHEDRON10_ELEMENT_NODE_COUNT] {
@@ -209,6 +356,8 @@ mod tests {
     use super::super::tetrahedron10_stiffness::global_stiffness_matrix;
     use super::*;
     use crate::assembly::elements::solid::Tetrahedron4ElementGeometry;
+    use runmat_simulation_usage::UsageLedger;
+    use std::sync::Arc;
 
     fn straight_unit_tetrahedron() -> Tetrahedron10ElementGeometry {
         let corners = [
@@ -239,6 +388,23 @@ mod tests {
             poisson_ratio: runmat_types::physical::PoissonRatio::new(0.3),
             density_kg_per_m3: runmat_types::physical::MassDensity::new(7_850.0),
         }
+    }
+
+    #[test]
+    fn admitted_affine_tetrahedron10_geometry_conserves_reference_work() {
+        // A reference gradient plus affine determinant (92 + 23), followed
+        // by a reference gradient, affine inverse (60), and 150 transforms.
+        let limit = OperationCount::from_operations(92 + 23 + 92 + 60 + 150);
+        let ledger = Arc::new(UsageLedger::new(limit, limit).unwrap());
+        let context = UsageContext::new(Arc::clone(&ledger));
+        context.run_sync(|| {
+            jacobian_determinant(straight_unit_tetrahedron().nodes_m, [0.25; 4]).unwrap();
+            physical_shape_gradients_and_measure(straight_unit_tetrahedron().nodes_m, [0.25; 4])
+                .unwrap();
+        });
+        let snapshot = ledger.snapshot().unwrap();
+        assert_eq!(snapshot.completed.assembly, limit);
+        assert_eq!(snapshot.reserved, OperationCount::ZERO);
     }
 
     #[test]

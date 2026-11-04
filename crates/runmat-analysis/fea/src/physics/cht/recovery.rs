@@ -70,7 +70,7 @@ pub fn couple_thermal_flow(
     topology: &CfdDomainTopology,
     thermal_run: &FeaThermalRunResult,
     options: ChtCouplingOptions,
-) -> Result<ChtCouplingResult, String> {
+) -> Result<ChtCouplingResult, super::super::coupling::dense::DenseCouplingError> {
     let schedule = cfd::realize_velocity_schedule(
         model,
         PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),

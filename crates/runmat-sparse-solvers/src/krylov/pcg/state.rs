@@ -1,6 +1,7 @@
 //! Reliable-residual PCG state over borrowed admitted slices.
 use super::scale::ScaledPositive;
 use super::{Arithmetic, PcgContinuation, PcgOperation, PcgOperations, PcgOutcome, PcgWork};
+use crate::krylov::usage::{BatchCompletion, ScalarWork, VectorWork};
 use crate::krylov::KrylovFailure;
 mod completion;
 
@@ -76,6 +77,64 @@ fn invalid<E>(message: &'static str) -> KrylovFailure<E> {
     KrylovFailure::Invalid(message)
 }
 
+async fn measured_norm<T, C: PcgOperations<T>>(
+    value: ScaledPositive,
+    checkpoint: &mut C,
+) -> Result<f64, KrylovFailure<C::Error>> {
+    checkpoint
+        .measured(
+            VectorWork::Scalar(if value.is_zero() {
+                ScalarWork::Zero
+            } else {
+                ScalarWork::Norm
+            }),
+            |_| (value.norm(), BatchCompletion::Complete),
+        )
+        .await
+        .map_err(KrylovFailure::Operation)
+}
+
+async fn measured_relative_norm<T, C: PcgOperations<T>>(
+    numerator: ScaledPositive,
+    denominator: ScaledPositive,
+    checkpoint: &mut C,
+) -> Result<f64, KrylovFailure<C::Error>> {
+    let work = if numerator.is_zero() {
+        ScalarWork::Zero
+    } else if denominator.is_zero() {
+        ScalarWork::Norm
+    } else {
+        ScalarWork::RelativeNorm
+    };
+    checkpoint
+        .measured(VectorWork::Scalar(work), |_| {
+            (
+                numerator.relative_norm(denominator),
+                BatchCompletion::Complete,
+            )
+        })
+        .await
+        .map_err(KrylovFailure::Operation)
+}
+
+async fn measured_ratio<T, C: PcgOperations<T>>(
+    numerator: ScaledPositive,
+    denominator: ScaledPositive,
+    checkpoint: &mut C,
+) -> Result<Option<f64>, KrylovFailure<C::Error>> {
+    let work = if denominator.is_zero() {
+        ScalarWork::Zero
+    } else {
+        ScalarWork::Ratio
+    };
+    checkpoint
+        .measured(VectorWork::Scalar(work), |_| {
+            (numerator.ratio(denominator), BatchCompletion::Complete)
+        })
+        .await
+        .map_err(KrylovFailure::Operation)
+}
+
 async fn copy<T: Copy, C: PcgOperations<T>>(
     to: &mut [T],
     from: &[T],
@@ -129,7 +188,27 @@ async fn dot<T: Copy + PartialEq, A: Arithmetic<T>, C: PcgOperations<T>>(
     if left.len() != right.len() {
         return Err(invalid("PCG dot-product extents differ"));
     }
-    if let Some((real, imaginary, absolute_sum)) = checkpoint.native_dot(left, right) {
+    let native = checkpoint
+        .measured(
+            VectorWork::Dot {
+                elements: left.len(),
+                domain: A::DOMAIN,
+            },
+            |checkpoint| {
+                let result = checkpoint.native_dot(left, right);
+                (
+                    result,
+                    if result.is_some() {
+                        BatchCompletion::Complete
+                    } else {
+                        BatchCompletion::Skipped
+                    },
+                )
+            },
+        )
+        .await
+        .map_err(KrylovFailure::Operation)?;
+    if let Some((real, imaginary, absolute_sum)) = native {
         checkpoint
             .cooperate(left.len() as u64)
             .await
@@ -172,17 +251,66 @@ async fn dot<T: Copy + PartialEq, A: Arithmetic<T>, C: PcgOperations<T>>(
         });
     }
     let (mut real, mut imaginary, mut absolute_sum) = (0.0, 0.0, 0.0);
-    for (index, (&a, &b)) in left.iter().zip(right).enumerate() {
-        if index % 1024 == 0 {
-            checkpoint
-                .cooperate((left.len() - index).min(1024) as u64)
-                .await
-                .map_err(KrylovFailure::Operation)?;
-        }
-        let (r, i) = A::scaled_conjugate_product(a, b, left_scale, right_scale);
-        real += r;
-        imaginary += i;
-        absolute_sum += r.hypot(i);
+    for start in (0..left.len()).step_by(1024) {
+        let end = (start + 1024).min(left.len());
+        let mut terms = Vec::with_capacity(end - start);
+        checkpoint
+            .cooperate((end - start) as u64)
+            .await
+            .map_err(KrylovFailure::Operation)?;
+        checkpoint
+            .measured(
+                if start == 0 {
+                    VectorWork::Dot {
+                        elements: end - start,
+                        domain: A::DOMAIN,
+                    }
+                } else {
+                    VectorWork::DotContinue {
+                        elements: end - start,
+                        domain: A::DOMAIN,
+                    }
+                },
+                |_| {
+                    for index in start..end {
+                        let (r, i) = A::scaled_conjugate_product(
+                            left[index],
+                            right[index],
+                            left_scale,
+                            right_scale,
+                        );
+                        real += r;
+                        imaginary += i;
+                        terms.push((r, i));
+                    }
+                    ((), BatchCompletion::Complete)
+                },
+            )
+            .await
+            .map_err(KrylovFailure::Operation)?;
+        let complex_entries = terms
+            .iter()
+            .filter(|(_, imaginary)| *imaginary != 0.0)
+            .count();
+        checkpoint
+            .measured(
+                VectorWork::MagnitudeAccumulate {
+                    elements: terms.len(),
+                    complex_entries,
+                },
+                |_| {
+                    for (real, imaginary) in &terms {
+                        absolute_sum += if *imaginary == 0.0 {
+                            real.abs()
+                        } else {
+                            real.hypot(*imaginary)
+                        };
+                    }
+                    ((), BatchCompletion::Complete)
+                },
+            )
+            .await
+            .map_err(KrylovFailure::Operation)?;
     }
     Ok(ScaledDot {
         real,
@@ -271,25 +399,59 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
         output: &[T],
         checkpoint: &mut C,
     ) -> Result<(), KrylovFailure<C::Error>> {
-        if checkpoint.native_residual(
-            self.rhs,
-            &output[..self.rhs.len()],
-            &mut *self.work.residual,
-        ) {
+        let native = checkpoint
+            .measured(
+                VectorWork::Residual {
+                    elements: self.rhs.len(),
+                    domain: A::DOMAIN,
+                },
+                |checkpoint| {
+                    let applied = checkpoint.native_residual(
+                        self.rhs,
+                        &output[..self.rhs.len()],
+                        &mut *self.work.residual,
+                    );
+                    (
+                        applied,
+                        if applied {
+                            BatchCompletion::Complete
+                        } else {
+                            BatchCompletion::Skipped
+                        },
+                    )
+                },
+            )
+            .await
+            .map_err(KrylovFailure::Operation)?;
+        if native {
             checkpoint
                 .cooperate(self.rhs.len() as u64)
                 .await
                 .map_err(KrylovFailure::Operation)?;
         } else {
-            for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
-                if index % 1024 == 0 {
-                    checkpoint
-                        .cooperate((self.rhs.len() - index).min(1024) as u64)
-                        .await
-                        .map_err(KrylovFailure::Operation)?;
-                }
-                self.work.residual[index] = self.rhs[index];
-                A::subtract_scaled(&mut self.work.residual[index], 1.0, value);
+            for start in (0..self.rhs.len()).step_by(1024) {
+                let end = (start + 1024).min(self.rhs.len());
+                checkpoint
+                    .cooperate((end - start) as u64)
+                    .await
+                    .map_err(KrylovFailure::Operation)?;
+                checkpoint
+                    .measured(
+                        VectorWork::Residual {
+                            elements: end - start,
+                            domain: A::DOMAIN,
+                        },
+                        |_| {
+                            for (offset, product) in output[start..end].iter().enumerate() {
+                                let index = start + offset;
+                                self.work.residual[index] = self.rhs[index];
+                                A::subtract_scaled(&mut self.work.residual[index], 1.0, *product);
+                            }
+                            ((), BatchCompletion::Complete)
+                        },
+                    )
+                    .await
+                    .map_err(KrylovFailure::Operation)?;
             }
         }
         let rhs_squared = dot::<T, A, C>(self.rhs, self.rhs, &mut *checkpoint)
@@ -301,10 +463,10 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 .await?
                 .positive()
                 .ok_or_else(|| invalid("PCG initial residual norm is invalid"))?;
-        self.work.residual_norms[0] = best_squared.norm();
+        self.work.residual_norms[0] = measured_norm::<T, C>(best_squared, checkpoint).await?;
         copy(&mut *self.work.best, &*self.work.x, &mut *checkpoint).await?;
         self.best_certificate = Some(best_squared);
-        let relres = best_squared.relative_norm(rhs_squared);
+        let relres = measured_relative_norm::<T, C>(best_squared, rhs_squared, checkpoint).await?;
         if relres <= self.tolerance {
             self.phase = Phase::Complete(PcgOutcome {
                 flag: 0,
@@ -347,7 +509,16 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
         checkpoint: &mut C,
     ) -> Result<(), KrylovFailure<C::Error>> {
         let product = dot::<T, A, C>(&*self.work.residual, output, &mut *checkpoint).await?;
-        let Some(next_rho) = product.positive_hermitian::<T, A>() else {
+        let next_rho = checkpoint
+            .measured(VectorWork::Scalar(ScalarWork::HermitianCheck), |_| {
+                (
+                    product.positive_hermitian::<T, A>(),
+                    BatchCompletion::Complete,
+                )
+            })
+            .await
+            .map_err(KrylovFailure::Operation)?;
+        let Some(next_rho) = next_rho else {
             let iteration = match stage {
                 PreconditionerStage::Seed(seed) => Iteration {
                     rhs_squared: seed.rhs_squared,
@@ -384,10 +555,18 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                     // Flexible: β = (⟨r, z⟩ − ⟨r_old, z⟩) / ⟨r_old, z_old⟩.
                     Some(previous) => {
                         let cross = dot::<T, A, C>(previous, output, &mut *checkpoint).await?;
-                        let value = (next_rho.value() - cross.value()) / prior.rho.value();
+                        let value = checkpoint
+                            .measured(VectorWork::Scalar(ScalarWork::FlexibleRatio), |_| {
+                                (
+                                    (next_rho.value() - cross.value()) / prior.rho.value(),
+                                    BatchCompletion::Complete,
+                                )
+                            })
+                            .await
+                            .map_err(KrylovFailure::Operation)?;
                         value.is_finite().then_some(value)
                     }
-                    None => next_rho.ratio(prior.rho),
+                    None => measured_ratio::<T, C>(next_rho, prior.rho, checkpoint).await?,
                 };
                 let Some(beta) = beta else {
                     let residual_count = prior.index + 2;
@@ -396,26 +575,64 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                         .await;
                 };
                 self.record_beta(beta);
-                if checkpoint.native_direction(
-                    &mut *self.work.direction,
-                    &output[..self.rhs.len()],
-                    beta,
-                ) {
+                let native = checkpoint
+                    .measured(
+                        VectorWork::Direction {
+                            elements: self.rhs.len(),
+                            domain: A::DOMAIN,
+                        },
+                        |checkpoint| {
+                            let applied = checkpoint.native_direction(
+                                &mut *self.work.direction,
+                                &output[..self.rhs.len()],
+                                beta,
+                            );
+                            (
+                                applied,
+                                if applied {
+                                    BatchCompletion::Complete
+                                } else {
+                                    BatchCompletion::Skipped
+                                },
+                            )
+                        },
+                    )
+                    .await
+                    .map_err(KrylovFailure::Operation)?;
+                if native {
                     checkpoint
                         .cooperate(self.rhs.len() as u64)
                         .await
                         .map_err(KrylovFailure::Operation)?;
                 } else {
-                    for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
-                        if index % 1024 == 0 {
-                            checkpoint
-                                .cooperate((self.rhs.len() - index).min(1024) as u64)
-                                .await
-                                .map_err(KrylovFailure::Operation)?;
-                        }
-                        let previous = self.work.direction[index];
-                        self.work.direction[index] = value;
-                        A::add_scaled(&mut self.work.direction[index], beta, previous);
+                    for start in (0..self.rhs.len()).step_by(1024) {
+                        let end = (start + 1024).min(self.rhs.len());
+                        checkpoint
+                            .cooperate((end - start) as u64)
+                            .await
+                            .map_err(KrylovFailure::Operation)?;
+                        checkpoint
+                            .measured(
+                                VectorWork::Direction {
+                                    elements: end - start,
+                                    domain: A::DOMAIN,
+                                },
+                                |_| {
+                                    for (offset, product) in output[start..end].iter().enumerate() {
+                                        let index = start + offset;
+                                        let previous = self.work.direction[index];
+                                        self.work.direction[index] = *product;
+                                        A::add_scaled(
+                                            &mut self.work.direction[index],
+                                            beta,
+                                            previous,
+                                        );
+                                    }
+                                    ((), BatchCompletion::Complete)
+                                },
+                            )
+                            .await
+                            .map_err(KrylovFailure::Operation)?;
                     }
                 }
                 Iteration {
@@ -447,10 +664,20 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
         checkpoint: &mut C,
     ) -> Result<(), KrylovFailure<C::Error>> {
         let curvature = dot::<T, A, C>(&*self.work.direction, output, &mut *checkpoint).await?;
-        let Some(alpha) = curvature
-            .positive_hermitian::<T, A>()
-            .and_then(|curvature| iteration.rho.ratio(curvature))
-        else {
+        let positive_curvature = checkpoint
+            .measured(VectorWork::Scalar(ScalarWork::HermitianCheck), |_| {
+                (
+                    curvature.positive_hermitian::<T, A>(),
+                    BatchCompletion::Complete,
+                )
+            })
+            .await
+            .map_err(KrylovFailure::Operation)?;
+        let alpha = match positive_curvature {
+            Some(curvature) => measured_ratio::<T, C>(iteration.rho, curvature, checkpoint).await?,
+            None => None,
+        };
+        let Some(alpha) = alpha else {
             let residual_count = iteration.index + 1;
             return self
                 .complete_best(4, iteration, residual_count, &mut *checkpoint)
@@ -463,30 +690,70 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
             copy(previous, &*self.work.residual, &mut *checkpoint).await?;
         }
         let mut progressed = false;
-        if let Some(native) = checkpoint.native_step(
-            &mut *self.work.x,
-            &mut *self.work.residual,
-            &*self.work.direction,
-            &output[..self.rhs.len()],
-            alpha,
-        ) {
+        let native = checkpoint
+            .measured(
+                VectorWork::Step {
+                    elements: self.rhs.len(),
+                    domain: A::DOMAIN,
+                },
+                |checkpoint| {
+                    let result = checkpoint.native_step(
+                        &mut *self.work.x,
+                        &mut *self.work.residual,
+                        &*self.work.direction,
+                        &output[..self.rhs.len()],
+                        alpha,
+                    );
+                    (
+                        result,
+                        if result.is_some() {
+                            BatchCompletion::Complete
+                        } else {
+                            BatchCompletion::Skipped
+                        },
+                    )
+                },
+            )
+            .await
+            .map_err(KrylovFailure::Operation)?;
+        if let Some(native) = native {
             progressed = native;
             checkpoint
                 .cooperate(self.rhs.len() as u64)
                 .await
                 .map_err(KrylovFailure::Operation)?;
         } else {
-            for (index, &value) in output[..self.rhs.len()].iter().enumerate() {
-                if index % 1024 == 0 {
-                    checkpoint
-                        .cooperate((self.rhs.len() - index).min(1024) as u64)
-                        .await
-                        .map_err(KrylovFailure::Operation)?;
-                }
-                let previous = self.work.x[index];
-                A::add_scaled(&mut self.work.x[index], alpha, self.work.direction[index]);
-                progressed |= self.work.x[index] != previous;
-                A::subtract_scaled(&mut self.work.residual[index], alpha, value);
+            for start in (0..self.rhs.len()).step_by(1024) {
+                let end = (start + 1024).min(self.rhs.len());
+                checkpoint
+                    .cooperate((end - start) as u64)
+                    .await
+                    .map_err(KrylovFailure::Operation)?;
+                let changed = checkpoint
+                    .measured(
+                        VectorWork::Step {
+                            elements: end - start,
+                            domain: A::DOMAIN,
+                        },
+                        |_| {
+                            let mut changed = false;
+                            for (offset, product) in output[start..end].iter().enumerate() {
+                                let index = start + offset;
+                                let previous = self.work.x[index];
+                                A::add_scaled(
+                                    &mut self.work.x[index],
+                                    alpha,
+                                    self.work.direction[index],
+                                );
+                                changed |= self.work.x[index] != previous;
+                                A::subtract_scaled(&mut self.work.residual[index], alpha, *product);
+                            }
+                            (changed, BatchCompletion::Complete)
+                        },
+                    )
+                    .await
+                    .map_err(KrylovFailure::Operation)?;
+                progressed |= changed;
             }
         }
         let Some(residual_squared) =
@@ -499,8 +766,11 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
                 .complete_best(4, iteration, residual_count, &mut *checkpoint)
                 .await;
         };
-        self.work.residual_norms[iteration.index + 1] = residual_squared.norm();
-        let relres = residual_squared.relative_norm(iteration.rhs_squared);
+        self.work.residual_norms[iteration.index + 1] =
+            measured_norm::<T, C>(residual_squared, checkpoint).await?;
+        let relres =
+            measured_relative_norm::<T, C>(residual_squared, iteration.rhs_squared, checkpoint)
+                .await?;
         if !progressed {
             // x did not change. In particular, do not replay a successful
             // certificate of this already retained best iterate.
@@ -540,29 +810,68 @@ impl<'a, T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'a, T, A> {
             };
             return Ok(());
         }
-        let Some(beta) = residual_squared.ratio(iteration.rho) else {
+        let Some(beta) =
+            measured_ratio::<T, C>(residual_squared, iteration.rho, checkpoint).await?
+        else {
             let residual_count = iteration.index + 2;
             return self
                 .complete_best(4, iteration, residual_count, &mut *checkpoint)
                 .await;
         };
         self.record_beta(beta);
-        if checkpoint.native_direction(&mut *self.work.direction, &*self.work.residual, beta) {
+        let native = checkpoint
+            .measured(
+                VectorWork::Direction {
+                    elements: self.rhs.len(),
+                    domain: A::DOMAIN,
+                },
+                |checkpoint| {
+                    let applied = checkpoint.native_direction(
+                        &mut *self.work.direction,
+                        &*self.work.residual,
+                        beta,
+                    );
+                    (
+                        applied,
+                        if applied {
+                            BatchCompletion::Complete
+                        } else {
+                            BatchCompletion::Skipped
+                        },
+                    )
+                },
+            )
+            .await
+            .map_err(KrylovFailure::Operation)?;
+        if native {
             checkpoint
                 .cooperate(self.rhs.len() as u64)
                 .await
                 .map_err(KrylovFailure::Operation)?;
         } else {
-            for index in 0..self.rhs.len() {
-                if index % 1024 == 0 {
-                    checkpoint
-                        .cooperate((self.rhs.len() - index).min(1024) as u64)
-                        .await
-                        .map_err(KrylovFailure::Operation)?;
-                }
-                let previous = self.work.direction[index];
-                self.work.direction[index] = self.work.residual[index];
-                A::add_scaled(&mut self.work.direction[index], beta, previous);
+            for start in (0..self.rhs.len()).step_by(1024) {
+                let end = (start + 1024).min(self.rhs.len());
+                checkpoint
+                    .cooperate((end - start) as u64)
+                    .await
+                    .map_err(KrylovFailure::Operation)?;
+                checkpoint
+                    .measured(
+                        VectorWork::Direction {
+                            elements: end - start,
+                            domain: A::DOMAIN,
+                        },
+                        |_| {
+                            for index in start..end {
+                                let previous = self.work.direction[index];
+                                self.work.direction[index] = self.work.residual[index];
+                                A::add_scaled(&mut self.work.direction[index], beta, previous);
+                            }
+                            ((), BatchCompletion::Complete)
+                        },
+                    )
+                    .await
+                    .map_err(KrylovFailure::Operation)?;
             }
         }
         // The synchronous kernel computes beta and updates the direction even

@@ -1,6 +1,6 @@
 use super::{
     apply_direct_constraints, apply_structural_load_plan, assemble_explicit_connectors,
-    assemble_explicit_elements, compile_explicit_load_plan, requested_moment_norm,
+    assemble_explicit_elements_with_owner, compile_explicit_load_plan, requested_moment_norm,
     resolve_constraint_matrix, rotational_row_count, structural_material_summary,
     structural_source_implementations, validate_explicit_topology, validate_structural_inputs,
     AnalysisModel, AssembledRealSystem, AssemblySummary, BoundaryTransferImplementation,
@@ -11,12 +11,22 @@ use super::{
     StructuralNodeDofSet, StructuralProjectionBasis,
 };
 
-pub(super) fn assemble_explicit_structural_system(
+pub(super) async fn assemble_explicit_structural_system_with_owner<O, F, A>(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
     supplied_constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
-) -> Result<AssemblySummary, StructuralAssemblyError> {
+    before: O,
+    awaited_elements: bool,
+) -> Result<AssemblySummary, A>
+where
+    O: FnMut(
+        super::explicit_elements::ExplicitCapacityPhase,
+        runmat_simulation_usage::OperationCount,
+    ) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+    A: From<StructuralAssemblyError> + Send,
+{
     let structural = model
         .structural
         .as_ref()
@@ -60,13 +70,16 @@ pub(super) fn assemble_explicit_structural_system(
         formulations: structural_formulations,
         beam_count,
         shell_count,
-    } = assemble_explicit_elements(
+    } = assemble_explicit_elements_with_owner(
         structural,
         &properties,
         &structural_dof_layout,
         &canonical_node_indices,
         local_execution,
-    )?;
+        awaited_elements,
+        before,
+    )
+    .await?;
     let mut rhs = vec![0.0_f64; dof_count];
     let mut connector_stiffness_assembler = RealSparseAssembler::square(
         dof_count,
@@ -214,7 +227,7 @@ pub(super) fn assemble_explicit_structural_system(
     } {
         Ok(evidence) => Some(evidence),
         Err(crate::algebra::NullspaceEvidenceError::UnderconstrainedComponent) => None,
-        Err(error) => return Err(StructuralAssemblyError::SparseOperator(error.to_string())),
+        Err(error) => return Err(StructuralAssemblyError::SparseOperator(error.to_string()).into()),
     };
     let operator = AssembledRealSystem::try_new_with_nullspace_evidence(
         operators,

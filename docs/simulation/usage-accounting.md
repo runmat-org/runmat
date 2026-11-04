@@ -39,6 +39,11 @@ counters or a conversion from elapsed time. Counters retain exact integer
 operation totals; displayed decimal GFLOP are a presentation of those totals,
 not rounded values used to settle usage.
 
+OCCT CAD preparation and tessellation are excluded from `rsua-1`. They consume
+computing resources but do not consume the simulation allowance. Numerical
+meshing, assembly and solver work outside that OCCT boundary follows the
+counting rules below.
+
 ## Basic counting convention
 
 | Operation | Measured operations |
@@ -64,6 +69,24 @@ implemented by a reference multiplication sequence count that sequence instead
 of an additional power call. Real absolute values, sign changes and comparisons
 contribute zero. Backend approximations, range reduction and instruction lowering
 do not change these reference counts.
+
+Real `hypot(x,y)` also counts one reference evaluation. Complex multiplication
+uses four real multiplications and two additions (6). General complex division
+uses a three-operation denominator, two three-operation numerators and two real
+divisions (11). Complex reciprocal uses that denominator and two divisions (5).
+A complex multiply followed by complex subtraction counts 8. A magnitude uses
+one `hypot` evaluation when the imaginary component is nonzero; the real-only
+absolute-value path contributes zero.
+
+The reference three-dimensional orientation determinant uses nine coordinate
+differences, six cross-product multiplications, three cross-product
+subtractions, three final multiplications and two accumulation additions:
+23 operations per evaluation. Adaptive-precision predicates implement this
+logical determinant with additional precision when needed; their expansion
+arithmetic is backend machinery, not additional reference work. Coordinate
+normalization and other numerical work surrounding the determinant have their
+own counts. Predicate admission precedes the evaluation, and failed geometry
+paths retain the completed reference prefix.
 
 For a real dot product of positive length n, the direct product-and-sum algorithm
 performs n multiplications and n - 1 additions: 2n - 1 operations. A backend's
@@ -96,10 +119,11 @@ for each supported measurement boundary:
 - Nonlinear and transient analyses: constituent numerical work across iterations
   and time steps, without charging it again at enclosing study levels.
 - External libraries: documented reference counts with the same precision and
-  fusion conventions, rather than undocumented backend multipliers.
+  fusion conventions, or an explicit exclusion such as OCCT preparation and
+  tessellation in `rsua-1`.
 
-The table defines primitive costs. Complex division and the remaining reference
-algorithms still need explicit schedules and a supported-operation inventory
+The table defines primitive costs. The remaining reference algorithms still
+need explicit schedules and a supported-operation inventory
 before this draft is published as version 1.
 
 ### Sparse LLT and LDLT reference arithmetic
@@ -136,6 +160,102 @@ before producing a factor does not complete that batch; earlier completed
 batches retain their counts. Cancellation observed after a batch completes
 does not erase its work. These boundaries apply to admitted simulation work;
 ordinary math execution without a simulation ledger needs no spending grant.
+
+### Iterative solver reference arithmetic
+
+PCG, GMRES, MINRES and BiCGStab charge the batches they execute. An early
+convergence or rejected proposal does not charge later iterations. Matrix
+applications and preconditioner applications retain their own owners; the
+recurrence does not add their counts again.
+
+For vectors of positive length n, the common reference batches are:
+
+| Batch | Real operations | Complex operations |
+| --- | ---: | ---: |
+| Dot product | 2n − 1 | 8n − 2 |
+| Euclidean norm, including square root | 2n | 4n |
+| Multiply by a real scalar | n | 2n |
+| Add a real-scaled vector | 2n | 4n |
+| Add a scalar-scaled vector | 2n | 8n |
+| Form `rhs − product` | n | 2n |
+| Divide by a positive real norm | n | 2n |
+| Update solution and residual with a real step | 4n | 8n |
+| Gram–Schmidt projection against k retained vectors | k(4n − 1) | k(16n − 2) |
+
+Empty vectors and empty projection sets contribute zero. Scalar recurrence
+work is counted separately when its branch executes. A zero-denominator
+Anderson proposal, for example, completes its residual difference and two dots
+but performs no coefficient division or proposed-image update. Its real
+reference totals are 5n − 2 before division, 5n − 1 after division, and 8n − 1
+when the image update completes.
+
+Preconditioner setup and application are separate work: reusing a Jacobi, ILU
+or AMG setup does not charge that setup again. A V-cycle counts the operations
+in its retained hierarchy and selected sweeps; unused maximum iteration counts
+are neither reserved nor charged as completed work.
+
+### Structural result recovery
+
+Result recovery counts new numerical work even when it uses an existing solution.
+Copying the solution into a field or reading a completed field does not consume
+operations. Diagnostic summaries reuse the completed strain field; they do not
+repeat element recovery.
+
+The reference recovery kernels use these schedules:
+
+| Kernel | Reference operations |
+| --- | ---: |
+| Tet4 strain projection | Six length-12 dot products: 138 |
+| Tet4 integration-point volume scaling | 1 |
+| Symmetric stress tensor from strain and retained Lamé parameters | 17 per tensor |
+| Three-dimensional von Mises stress | 17 per tensor |
+| Strain-energy density from a strain/stress pair | 12 per tensor |
+| Tet10 extrapolation from four integration points to ten nodes | 217 per element |
+| Volume-weighted tensor accumulation | 13 per contributing element node |
+| Region tensor normalization | 6 per node-region pair |
+| Comparing two recovered region tensors by von Mises stress | 34 per comparison |
+
+Geometry, material parameters and quadrature have their own primitive batches;
+the recovery schedules do not charge those primitives again. Curved Tet10
+geometry uses its selected adaptive validation stages before the fixed recovery
+points. Thermal energy integration counts each selected quadrature rule, including
+additional rules used for convergence. It does not reserve or charge an unused
+maximum-order rule.
+
+These are numerical-kernel schedules. Input and constitutive invariant checks,
+field-shape checks, attribution and diagnostic formatting are outside these
+reference batches. Their implementation details do not change the charge.
+
+### Structural transient integration
+
+Average-acceleration Newmark integration counts each predictor, completed state
+and correction when it executes. For n displacement degrees of freedom:
+
+| Batch | Real operations |
+| --- | ---: |
+| Displacement and velocity predictor, including time-step coefficients | 6n + 5 |
+| Complete displacement and velocity from the solved acceleration | 4n + 3 |
+| Apply an acceleration correction to displacement, velocity and acceleration | 5n + 3 |
+| Form initial acceleration RHS `load − damping − elastic` | 2n |
+| Form an equilibrium residual from load and three force vectors | 3n |
+| Form a displacement increment | n |
+| Average two load, velocity or reaction vectors | 2n |
+
+Mass, damping and stiffness applications use the CSR row-dot schedule above.
+Effective-operator construction counts its executed coefficient scaling and
+accumulation. Linear factorization, substitutions and iterative corrections keep
+their solver counts; integration does not charge those operations again.
+
+Dynamic-balance histories count the matrix applications, dot products, norms,
+energy calculations and work increments needed to produce each snapshot. A
+recovered history counts numerical reconstruction it performs. Reading an
+already computed snapshot consumes no additional operations.
+
+Constraint projection counts two real operations per retained recovery
+coefficient. Expansion counts the reference coefficient products and sums plus
+the affine offsets that it applies. Fixed-DOF selection and vector copies have
+no floating-point arithmetic charge. Input validation remains outside these
+numerical batches.
 
 ## Reuse, interrupted runs and retries
 

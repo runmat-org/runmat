@@ -108,7 +108,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
         }))
     };
     let mut residual =
-        evaluate(&current).map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        evaluate(&current).map_err(super::thermal_assembly_failure)?;
     let mut backtracking_count = 0;
     let mut maximum_linear_residual = 0.0_f64;
     let mut host_sync_count = 0;
@@ -127,7 +127,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
                 input.previous_departure_k,
                 input.time_step_s,
             )
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            .map_err(super::thermal_assembly_failure)?;
         let linear_rhs_norm = rhs_norm(&operator.linear_rhs());
         // Tightening the correction equation may be needed for the declared physical power
         // closure. It never relaxes either the original stopping policy or acceptance target.
@@ -189,7 +189,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
                 Err(crate::physics::thermal::assembly::ThermalAssemblyError::Radiation(
                     crate::physics::thermal::radiation::RadiationError::InvalidState,
                 )) => None,
-                Err(error) => return Err(FeaRunError::Assembly(error.to_string())),
+                Err(error) => return Err(super::thermal_assembly_failure(error)),
             };
             if let Some(trial_residual) = trial_residual {
                 let after_norm = free_norm(trial_residual.residual_w.canonical_values());
@@ -243,7 +243,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
                 .assembly
                 .energy_balance(input.model, input.sample, &absolute, &absolute, 1.0, 0.0)
         }
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        .map_err(super::thermal_assembly_failure)?;
         balance
             .validate()
             .map_err(|error| FeaRunError::Solve(error.to_string()))?;
@@ -284,7 +284,7 @@ pub(super) fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutco
     let references = input
         .assembly
         .steady_reference_temperatures(input.model, input.sample, input.initial_temperature_k[0])
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        .map_err(super::thermal_assembly_failure)?;
     let initial = input
         .initial_temperature_k
         .iter()

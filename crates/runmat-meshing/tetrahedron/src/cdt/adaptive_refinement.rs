@@ -74,6 +74,7 @@ pub struct DelaunayAdaptiveRefinementResult {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayAdaptiveRefinementErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidInput,
     InvalidMarks,
@@ -368,6 +369,9 @@ fn quality_error(
     invalid_kind: DelaunayAdaptiveRefinementErrorKind,
 ) -> DelaunayAdaptiveRefinementError {
     let kind = match failure.kind {
+        DelaunayVolumeQualityErrorKind::Accounting(cause) => {
+            DelaunayAdaptiveRefinementErrorKind::Accounting(cause)
+        }
         DelaunayVolumeQualityErrorKind::InvalidOptions => {
             DelaunayAdaptiveRefinementErrorKind::InvalidOptions
         }

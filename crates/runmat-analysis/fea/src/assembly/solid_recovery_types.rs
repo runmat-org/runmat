@@ -61,7 +61,7 @@ impl SolidRecoveryGeometry {
     }
 
     /// Exact physical volume used by topology-changing recovery operations.
-    pub fn volume_m3(&self) -> Result<f64, String> {
+    pub fn volume_m3(&self) -> Result<f64, SolidRecoveryGeometryError> {
         use super::elements::solid::{Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry};
 
         match self {
@@ -69,12 +69,80 @@ impl SolidRecoveryGeometry {
                 nodes_m: coordinates_m.canonical_value(),
             }
             .volume_m3()
-            .map_err(|source| source.to_string()),
+            .map_err(SolidRecoveryGeometryError::Tetrahedron4),
             Self::Tetrahedron10 { coordinates_m, .. } => Tetrahedron10ElementGeometry {
                 nodes_m: coordinates_m.canonical_value(),
             }
             .volume_m3()
-            .map_err(|source| source.to_string()),
+            .map_err(SolidRecoveryGeometryError::Tetrahedron10),
         }
     }
+
+    pub(crate) async fn volume_m3_with_capacity<A>(
+        &self,
+        owner: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner<A>>,
+    ) -> Result<
+        f64,
+        crate::algebra::coercivity::NumericalCapacityError<SolidRecoveryGeometryError, A>,
+    > {
+        use super::elements::solid::tetrahedron10::Tetrahedron10CapacityError;
+        use crate::algebra::coercivity::NumericalCapacityError;
+        let Some(owner) = owner else {
+            return self.volume_m3().map_err(NumericalCapacityError::Numerical);
+        };
+        match self {
+            Self::Tetrahedron4 { .. } => {
+                owner
+                    .ensure_capacity(self.volume_reference_work())
+                    .await
+                    .map_err(NumericalCapacityError::Admission)?;
+                self.volume_m3().map_err(NumericalCapacityError::Numerical)
+            }
+            Self::Tetrahedron10 { coordinates_m, .. } => {
+                super::elements::solid::Tetrahedron10ElementGeometry {
+                    nodes_m: coordinates_m.canonical_value(),
+                }
+                .volume_m3_with_capacity(owner)
+                .await
+                .map_err(|error| match error {
+                    Tetrahedron10CapacityError::Numerical(error) => {
+                        NumericalCapacityError::Numerical(
+                            SolidRecoveryGeometryError::Tetrahedron10(error),
+                        )
+                    }
+                    Tetrahedron10CapacityError::Admission(error) => {
+                        NumericalCapacityError::Admission(error)
+                    }
+                })
+            }
+        }
+    }
+
+    /// Work reserved by the fixed physical-volume primitive for this geometry.
+    pub(crate) fn volume_reference_work(&self) -> runmat_simulation_usage::OperationCount {
+        use super::elements::solid::{tetrahedron10_is_affine, Tetrahedron10ElementGeometry};
+        let operations = match self {
+            Self::Tetrahedron4 { .. } => 24,
+            Self::Tetrahedron10 { coordinates_m, .. } => {
+                let determinant = if tetrahedron10_is_affine(Tetrahedron10ElementGeometry {
+                    nodes_m: coordinates_m.canonical_value(),
+                }) {
+                    23
+                } else {
+                    185
+                };
+                // Eleven reference gradients and determinants, plus volume accumulation.
+                11 * (92 + determinant) + 22
+            }
+        };
+        runmat_simulation_usage::OperationCount::from_operations(operations)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum SolidRecoveryGeometryError {
+    #[error(transparent)]
+    Tetrahedron4(#[from] super::elements::solid::Tetrahedron4ElementError),
+    #[error(transparent)]
+    Tetrahedron10(#[from] super::elements::solid::Tetrahedron10ElementError),
 }

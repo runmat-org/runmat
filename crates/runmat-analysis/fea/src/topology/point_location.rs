@@ -27,7 +27,7 @@ impl AnalysisProjection {
             {
                 continue;
             }
-            let Some(shape_values) = locate_in_element(self, element, position_m) else {
+            let Some(shape_values) = locate_in_element(self, element, position_m)? else {
                 continue;
             };
             if element
@@ -89,21 +89,20 @@ fn locate_in_element(
     projection: &AnalysisProjection,
     element: &ProjectedElement,
     position_m: [f64; 3],
-) -> Option<[f64; 10]> {
+) -> Result<Option<[f64; 10]>, super::AnalysisProjectionError> {
     let expected = match element.order {
         ElementOrder::Tet4 => 4,
         ElementOrder::Tet10 => 10,
     };
     if element.node_indices.len() != expected {
-        return None;
+        return Ok(None);
     }
     let mut coordinates = [[0.0; 3]; 10];
     for (coordinate, index) in coordinates.iter_mut().zip(&element.node_indices) {
-        *coordinate = projection
-            .nodes
-            .get(*index)?
-            .coordinates_m
-            .canonical_value();
+        let Some(node) = projection.nodes.get(*index) else {
+            return Ok(None);
+        };
+        *coordinate = node.coordinates_m.canonical_value();
     }
     let coordinates = &coordinates[..expected];
     let coordinate_scale = coordinates
@@ -122,7 +121,7 @@ fn locate_in_element(
         if position_m[axis] < minimum - physical_tolerance
             || position_m[axis] > maximum + physical_tolerance
         {
-            return None;
+            return Ok(None);
         }
     }
 
@@ -142,15 +141,18 @@ fn locate_in_element(
         Some([0.0, 1.0, 0.0]),
         Some([0.0, 0.0, 1.0]),
     ];
-    starts.into_iter().flatten().find_map(|reference| {
-        invert_isoparametric_point(
+    for reference in starts.into_iter().flatten() {
+        if let Some(shape) = invert_isoparametric_point(
             element.order,
             coordinates,
             position_m,
             physical_tolerance,
             reference,
-        )
-    })
+        )? {
+            return Ok(Some(shape));
+        }
+    }
+    Ok(None)
 }
 
 fn invert_isoparametric_point(
@@ -159,7 +161,7 @@ fn invert_isoparametric_point(
     position_m: [f64; 3],
     physical_tolerance: f64,
     mut reference: [f64; 3],
-) -> Option<[f64; 10]> {
+) -> Result<Option<[f64; 10]>, super::AnalysisProjectionError> {
     let expected = coordinates.len();
     for _ in 0..MAXIMUM_NEWTON_ITERATIONS {
         let barycentric = [
@@ -168,16 +170,16 @@ fn invert_isoparametric_point(
             reference[1],
             reference[2],
         ];
-        let (shape_values, derivatives) = volume_shape(order, barycentric);
+        let (shape_values, derivatives) = volume_shape(order, barycentric)?;
         let mapped = weighted_position(coordinates, &shape_values[..expected]);
         let residual = std::array::from_fn(|axis| mapped[axis] - position_m[axis]);
         if norm(residual) <= physical_tolerance {
             if barycentric.iter().all(|coordinate| {
                 *coordinate >= -REFERENCE_TOLERANCE && *coordinate <= 1.0 + REFERENCE_TOLERANCE
             }) {
-                return Some(shape_values);
+                return Ok(Some(shape_values));
             }
-            return None;
+            return Ok(None);
         }
         let jacobian = std::array::from_fn(|physical_axis| {
             std::array::from_fn(|reference_axis| {
@@ -188,7 +190,9 @@ fn invert_isoparametric_point(
                     .sum()
             })
         });
-        let correction = solve_3x3(jacobian, residual)?;
+        let Some(correction) = solve_3x3(jacobian, residual) else {
+            return Ok(None);
+        };
         let current_norm = norm(residual);
         let mut step = 1.0;
         let mut accepted = None;
@@ -200,7 +204,7 @@ fn invert_isoparametric_point(
                 candidate[1],
                 candidate[2],
             ];
-            let (candidate_shape, _) = volume_shape(order, candidate_barycentric);
+            let (candidate_shape, _) = volume_shape(order, candidate_barycentric)?;
             let candidate_position = weighted_position(coordinates, &candidate_shape[..expected]);
             let candidate_residual =
                 std::array::from_fn(|axis| candidate_position[axis] - position_m[axis]);
@@ -210,12 +214,15 @@ fn invert_isoparametric_point(
             }
             step *= 0.5;
         }
-        reference = accepted?;
+        let Some(next) = accepted else {
+            return Ok(None);
+        };
+        reference = next;
         if reference.iter().any(|coordinate| !coordinate.is_finite()) {
-            return None;
+            return Ok(None);
         }
     }
-    None
+    Ok(None)
 }
 
 fn weighted_position(coordinates: &[[f64; 3]], shape_values: &[f64]) -> [f64; 3] {

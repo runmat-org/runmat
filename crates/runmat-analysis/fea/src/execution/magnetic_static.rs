@@ -139,9 +139,18 @@ impl MagnetostaticWorkload {
             &input.volumes,
             self.relative_residual_target,
         )
-        .map_err(invalid)?;
+        .map_err(magnetic_failure)?;
         drop(input);
         MagnetostaticSolverResult::new(self, mesh, formulation, sampling, response)
+    }
+}
+
+fn magnetic_failure(error: crate::physics::magnetic::MagnetostaticError) -> AnalysisExecutionError {
+    match error {
+        crate::physics::magnetic::MagnetostaticError::Accounting(cause) => {
+            AnalysisExecutionError::Usage(cause)
+        }
+        other => invalid(other),
     }
 }
 

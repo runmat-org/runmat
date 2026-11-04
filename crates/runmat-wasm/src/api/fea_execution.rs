@@ -63,18 +63,26 @@ impl FeaGeometryExecutionHost for BrowserGeometryHost<'_> {
         let mut objects = source.objects;
         objects.push(program.descriptor);
         let json=serde_json::to_string(&serde_json::json!({"operation":"materialize_and_mesh","program":program.program,"objects":objects,"settings":settings})).map_err(|e|e.to_string())?;
-        serde_json::from_str(
-            &exact_execute(
-                &json,
-                self.context
-                    .worker_context(&json)
-                    .await
-                    .map_err(preparation_error_from_js)?,
-            )
+        let response = exact_execute(
+            &json,
+            self.context
+                .worker_context(
+                    &json,
+                    super::fea_run_context::WorkerWorkClass::OcctPreparation,
+                )
+                .await
+                .map_err(preparation_error_from_js)?,
+        )
+        .await
+        .map_err(preparation_error_from_js)?;
+        self.context
+            .retire_finished()
             .await
-            .map_err(preparation_error_from_js)?
-            .as_string()
-            .ok_or("Invalid geometry execution response.")?,
+            .map_err(preparation_error_from_js)?;
+        serde_json::from_str(
+            &response
+                .as_string()
+                .ok_or("Invalid geometry execution response.")?,
         )
         .map_err(|e| e.to_string().into())
     }
@@ -141,6 +149,98 @@ impl RunMatWasm {
             .control
             .renew(lease.budget()?)
             .map_err(super::fea_lease::denied_to_js)
+    }
+    #[wasm_bindgen(js_name=delegateFeaWorker)]
+    pub fn delegate_fea_worker_js(&self, context: JsValue) -> Result<JsValue, JsValue> {
+        let slot = self.active_fea_lease.borrow();
+        slot.as_ref()
+            .ok_or_else(|| {
+                super::fea_lease::denied_to_js(
+                    runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired,
+                )
+            })?
+            .delegate_worker(context)
+    }
+    #[wasm_bindgen(js_name=reportFeaWorker)]
+    pub fn report_fea_worker_js(
+        &self,
+        context: JsValue,
+        usage: JsValue,
+        final_report: bool,
+    ) -> Result<JsValue, JsValue> {
+        let slot = self.active_fea_lease.borrow();
+        slot.as_ref()
+            .ok_or_else(|| {
+                super::fea_lease::denied_to_js(
+                    runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired,
+                )
+            })?
+            .report_worker(context, usage, final_report)
+    }
+    #[wasm_bindgen(js_name=startFeaWorker)]
+    pub fn start_fea_worker_js(&self, context: JsValue) -> Result<(), JsValue> {
+        let slot = self.active_fea_lease.borrow();
+        slot.as_ref()
+            .ok_or_else(|| {
+                super::fea_lease::denied_to_js(
+                    runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired,
+                )
+            })?
+            .start_worker(context)
+    }
+    #[wasm_bindgen(js_name=discardUndispatchedFeaWorker)]
+    pub fn discard_undispatched_fea_worker_js(
+        &self,
+        context: JsValue,
+        receipt: JsValue,
+    ) -> Result<(), JsValue> {
+        let slot = self.active_fea_lease.borrow();
+        slot.as_ref()
+            .ok_or_else(|| {
+                super::fea_lease::denied_to_js(
+                    runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired,
+                )
+            })?
+            .discard_undispatched_worker(context, receipt)
+    }
+    #[wasm_bindgen(js_name=acquireFeaWorkerGrant)]
+    pub async fn acquire_fea_worker_grant_js(
+        &self,
+        context: JsValue,
+        required_ops: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let active = self
+            .active_fea_lease
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| {
+                super::fea_lease::denied_to_js(
+                    runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired,
+                )
+            })?;
+        let host = self
+            .fea_admission
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| {
+                super::fea_lease::denied_to_js(
+                    runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired,
+                )
+            })?;
+        active.acquire_worker(context, required_ops, host).await
+    }
+    #[wasm_bindgen(js_name=retireFeaWorker)]
+    pub fn retire_fea_worker_js(&self, context: JsValue, receipt: JsValue) -> Result<(), JsValue> {
+        let slot = self.active_fea_lease.borrow();
+        slot.as_ref()
+            .ok_or_else(|| {
+                super::fea_lease::denied_to_js(
+                    runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired,
+                )
+            })?
+            .retire_worker(context, receipt)
     }
     #[wasm_bindgen(js_name=planFeaSource)]
     pub async fn plan_fea_source_js(
@@ -303,12 +403,14 @@ impl RunMatWasm {
             }
             let request =
                 serde_json::to_string(&study).map_err(|e| js_error(&e.to_string()))?;
-            let json = execute_prepared(
+            let response = execute_prepared(
                 &request,
                 available_memory as f64,
-                context.worker_context(&request).await?,
+                context.worker_context(&request, super::fea_run_context::WorkerWorkClass::Numerical).await?,
             )
-            .await?
+            .await?;
+            context.retire_finished().await?;
+            let json = response
             .as_string()
             .ok_or_else(|| js_error("Invalid numerical execution response."))?;
             context.check().await?;
@@ -417,25 +519,58 @@ pub async fn execute_prepared_fea_study(
     validate_numerical_input(json.len(), memory_bytes)?;
     let study: PreparedSerialFeaStudy =
         serde_json::from_str(&json).map_err(|error| js_error(&error.to_string()))?;
-    let context = LocalFeaRunContext::for_worker(
-        worker_context,
-        worker_admission,
-        &json,
-        study.authored_study_digest,
-    )
-    .await?;
-    let result = context
+    let context = std::rc::Rc::new(
+        LocalFeaRunContext::for_worker(
+            worker_context,
+            worker_admission,
+            &json,
+            study.authored_study_digest,
+        )
+        .await?,
+    );
+    let capacity = super::fea_async_host::BrowserNumericalCapacity::new(&context);
+    let checked = context
         .scope()
-        .run_checked_sync(|| execute_prepared_fea_study_local(study, memory_bytes))
-        .map_err(super::fea_lease::denied_to_js)
+        .run_checked_result_future(execute_prepared_fea_study_local(
+            study,
+            memory_bytes,
+            &capacity,
+        ))
+        .await;
+    let execution_cancelled = matches!(
+        &checked,
+        Err(runmat_runtime::analysis::fea_run_admission::FeaRunExecutionError::Cancelled)
+    ) || (matches!(&checked, Ok(Err(_)))
+        && context.scope().check().is_ok()
+        && context.scope().cancellation_token().is_cancelled());
+    let result = checked
+        .map_err(|error| match error {
+            runmat_runtime::analysis::fea_run_admission::FeaRunExecutionError::Denied(denied) => {
+                super::fea_lease::denied_to_js(denied)
+            }
+            runmat_runtime::analysis::fea_run_admission::FeaRunExecutionError::Cancelled => {
+                js_error("Simulation cancelled.")
+            }
+        })
         .and_then(|result| result);
-    let outcome = if runmat_runtime::interrupt::is_cancelled() {
+    let result = super::fea_lease::merge_js_lease_error(
+        result,
+        context
+            .scope()
+            .check()
+            .err()
+            .map(super::fea_lease::denied_to_js),
+    );
+    let outcome = if execution_cancelled || runmat_runtime::interrupt::is_cancelled() {
         FeaRunOutcome::Cancelled
     } else if result.is_ok() {
         FeaRunOutcome::Completed
     } else {
         FeaRunOutcome::Failed
     };
+    drop(capacity);
+    let context = std::rc::Rc::try_unwrap(context)
+        .map_err(|_| js_error("Owned worker admission remained active after execution."))?;
     let settled = context.settle(outcome).await;
     super::fea_lease::merge_js_lease_error(result, settled.err())
 }
@@ -458,63 +593,86 @@ pub(super) fn validate_numerical_input(json_len: usize, memory_bytes: f64) -> Re
     Ok(())
 }
 
-fn execute_prepared_fea_study_local(
+async fn execute_prepared_fea_study_local(
     study: PreparedSerialFeaStudy,
     memory_bytes: f64,
+    capacity: &dyn runmat_analysis_execution::AsyncCapacityOwner,
 ) -> Result<String, JsValue> {
-    let available_memory = memory_bytes as u64;
-    runmat_runtime::builtins::wasm_registry::register_all();
-    let _progress = runmat_analysis_fea::replace_fea_progress_context(
-        runmat_analysis_fea::FeaProgressContext {
-            handler: Some(std::sync::Arc::new(forward_progress)),
-            ..Default::default()
-        },
-    );
-    let mut resources = runmat_execution::resource::ResourceInventory {
-        cpu_millicores: 1000,
-        memory_bytes: available_memory,
-        scratch_bytes: 256 << 20,
-        accelerators: Vec::new(),
-        capabilities: runmat_analysis_execution::analysis_worker_capabilities(
-            std::iter::empty(),
-            std::iter::empty(),
-            false,
-        ),
+    let progress = runmat_analysis_fea::FeaProgressContext {
+        handler: Some(std::sync::Arc::new(forward_progress)),
+        cancellation: runmat_runtime::interrupt::current_interrupt()
+            .map(runmat_analysis_fea::FeaCancellationToken::from_token)
+            .unwrap_or_default(),
+        ..Default::default()
     };
-    resources
-        .capabilities
-        .insert(runmat_execution::resource::Capability::BrowserWorker);
-    let inventory = crate::runtime::execution::controlled::inventory()
-        .map_err(|e| js_error(&e))?
-        .host;
-    let mut host =
-        SerialAnalysisHost::new(inventory, resources, Digest::sha256(b"owned-browser-fea"))
-            .map_err(|e| js_error(&e.to_string()))?;
-    let mut store = runmat_execution_artifact::cache::MemoryObjectStore::new(
-        runmat_execution_artifact::object::ObjectInventoryLimits {
-            max_objects: 100_000,
-            max_object_bytes: 64 << 20,
-            max_total_bytes: ARTIFACT_BYTES,
-        },
-    )
-    .map_err(|e| js_error(&e.to_string()))?;
-    let result = study
-        .execute(
-            &mut host,
-            &mut store,
-            &|| js_sys::Date::now() as u64,
-            &runmat_runtime::interrupt::is_cancelled,
+    let future = async {
+        let available_memory = memory_bytes as u64;
+        runmat_runtime::builtins::wasm_registry::register_all();
+        let mut resources = runmat_execution::resource::ResourceInventory {
+            cpu_millicores: 1000,
+            memory_bytes: available_memory,
+            scratch_bytes: 256 << 20,
+            accelerators: Vec::new(),
+            capabilities: runmat_analysis_execution::analysis_worker_capabilities(
+                std::iter::empty(),
+                std::iter::empty(),
+                false,
+            ),
+        };
+        resources
+            .capabilities
+            .insert(runmat_execution::resource::Capability::BrowserWorker);
+        let inventory = crate::runtime::execution::controlled::inventory()
+            .map_err(|e| js_error(&e))?
+            .host;
+        let mut host =
+            SerialAnalysisHost::new(inventory, resources, Digest::sha256(b"owned-browser-fea"))
+                .map_err(|e| js_error(&e.to_string()))?;
+        let mut store = runmat_execution_artifact::cache::MemoryObjectStore::new(
+            runmat_execution_artifact::object::ObjectInventoryLimits {
+                max_objects: 100_000,
+                max_object_bytes: 64 << 20,
+                max_total_bytes: ARTIFACT_BYTES,
+            },
         )
-        .map_err(|e| js_error(&e))?;
+        .map_err(|e| js_error(&e.to_string()))?;
+        let result = study
+            .execute_with_capacity(
+                &mut host,
+                &mut store,
+                &|| js_sys::Date::now() as u64,
+                &runmat_runtime::interrupt::is_cancelled,
+                Some(capacity),
+            )
+            .await
+            .map_err(|error| {
+                if let runmat_core::PreparedSerialFeaExecutionError::Bridge(bridge) = &error {
+                    if let Some(cause) = bridge.accounting_cause() {
+                        return super::fea_lease::denied_to_js(
+                            runmat_runtime::analysis::fea_run_admission::FeaRunDenied::Accounting(
+                                cause.clone(),
+                            ),
+                        );
+                    }
+                }
+                js_error(&error.to_string())
+            })?;
 
-    let runmat_runtime::analysis::StructuralStudyNumericalResult::LinearSequence(numerical) =
-        result.into_parts().4
-    else {
-        return Err(js_error(
-            "Unexpected numerical procedure returned by serial host.",
-        ));
+        let runmat_runtime::analysis::StructuralStudyNumericalResult::LinearSequence(numerical) =
+            result.into_parts().4
+        else {
+            return Err(js_error(
+                "Unexpected numerical procedure returned by serial host.",
+            ));
+        };
+        serde_json::to_string(&numerical).map_err(|e| js_error(&e.to_string()))
     };
-    serde_json::to_string(&numerical).map_err(|e| js_error(&e.to_string()))
+    let mut future = std::pin::pin!(future);
+    std::future::poll_fn(|cx| {
+        let _progress = runmat_analysis_fea::replace_fea_progress_context(progress.clone());
+        std::future::Future::poll(future.as_mut(), cx)
+    })
+    .await
 }
 
 fn ensure_not_cancelled(

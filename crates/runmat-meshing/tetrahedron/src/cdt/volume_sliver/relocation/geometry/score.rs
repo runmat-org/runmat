@@ -81,7 +81,7 @@ pub(super) struct PreparedStar {
     cells: Vec<StarCell>,
 }
 impl PreparedStar {
-    pub(super) fn score(&self, point: [f64; 3]) -> StarScore {
+    pub(super) fn score(&self, point: [f64; 3]) -> Result<StarScore, DelaunayVolumeSliverError> {
         let mut spectrum = Vec::with_capacity(2 * self.cells.len());
         let mut minimum_jacobian = f64::INFINITY;
         for cell in &self.cells {
@@ -94,14 +94,27 @@ impl PreparedStar {
             else {
                 let Some(jacobian) =
                     crate::cdt::volume_quality::evaluate_tetrahedron_jacobian(points, cell.metric)
+                        .map_err(|cause| {
+                            error(
+                                DelaunayVolumeSliverErrorKind::Accounting(cause),
+                                "star score numerical accounting failed",
+                            )
+                        })?
                 else {
-                    return StarScore(vec![u64::MAX]);
+                    return Ok(StarScore(vec![u64::MAX]));
                 };
                 minimum_jacobian = minimum_jacobian.min(jacobian);
                 continue;
             };
-            let Some(geometry) = evaluate_tetrahedron_geometry(points, cell.metric) else {
-                return StarScore(vec![u64::MAX]);
+            let Some(geometry) =
+                evaluate_tetrahedron_geometry(points, cell.metric).map_err(|cause| {
+                    error(
+                        DelaunayVolumeSliverErrorKind::Accounting(cause),
+                        "star geometry numerical accounting failed",
+                    )
+                })?
+            else {
+                return Ok(StarScore(vec![u64::MAX]));
             };
             let (size, shape) = violation_ratios(
                 geometry.maximum_metric_edge_length,
@@ -118,10 +131,10 @@ impl PreparedStar {
             );
         }
         if matches!(self.objective, SmoothingObjective::Shape) {
-            return StarScore(vec![u64::MAX - minimum_jacobian.to_bits()]);
+            return Ok(StarScore(vec![u64::MAX - minimum_jacobian.to_bits()]));
         }
         spectrum.sort_unstable_by(|left, right| right.cmp(left));
-        StarScore(spectrum)
+        Ok(StarScore(spectrum))
     }
 }
 

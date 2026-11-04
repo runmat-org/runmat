@@ -103,7 +103,8 @@ fn local_flip_refill_diagnostics_record_quality_rejections() {
             min_scaled_jacobian: 0.99,
             ..options
         },
-    );
+    )
+    .expect("flip accounting should be admitted");
 
     assert!(improved.is_none());
     assert_eq!(diagnostics.attempted_reconnection_count, 1);

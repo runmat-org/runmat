@@ -304,14 +304,14 @@ fn bounded_restart_at_a_jump_matches_uninterrupted_physical_histories() {
          _: SignalSampleApproach,
          summary: &AssemblySummary,
          state: &state::SecondOrderState| {
-            Ok::<_, Infallible>((summary.clone(), state.clone()))
+            Ok::<_, TransientSolveError<Infallible>>((summary.clone(), state.clone()))
         };
     let mut strategy = advance::DirectTransientStepStrategy::new(
         &summary,
         LinearAlgebraBackendKind::CpuReference,
         options.residual_target,
     );
-    let (state, initial) = advance::initialize::<Infallible, Infallible>(
+    let (state, initial) = advance::initialize::<Infallible>(
         &summary,
         &options,
         &schedule,

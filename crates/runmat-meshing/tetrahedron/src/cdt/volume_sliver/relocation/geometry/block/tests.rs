@@ -17,7 +17,8 @@ fn prepared_neighboring_blocks_escape_the_symmetric_minimax_trap_and_preserve_cp
     let prepared = PreparedBlock::prepare(&topology, &[6, 7], &cells, &|_| {
         calls.set(calls.get() + 1);
         MetricTensor3::isotropic_length_m(1.).unwrap()
-    });
+    })
+    .unwrap();
     let initial = prepared.score(&prepared.start).unwrap();
     let mut previous = None;
     for threads in [1, 4] {
@@ -41,7 +42,8 @@ fn single_point_polls_equal_complete_block_scores_including_inversions() {
     let cells = (0..topology.tetrahedra.len() as u32).collect();
     let prepared = PreparedBlock::prepare(&topology, &[6, 7], &cells, &|_| {
         MetricTensor3::isotropic_length_m(1.).unwrap()
-    });
+    })
+    .unwrap();
     let accepted = prepared.accept(&prepared.start).unwrap();
     assert_eq!(
         aggregate(&accepted.values),

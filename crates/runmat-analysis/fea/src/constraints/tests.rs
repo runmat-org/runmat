@@ -864,7 +864,8 @@ fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(solve.converged, "{:?}", solve.diagnostics);
     assert!(solve.relative_residual.is_some_and(|value| value <= 1e-8));
     assert!((solve.solution[3] - solve.solution[6] - 0.001).abs() <= 1.0e-10);
@@ -922,7 +923,8 @@ fn affine_static_solve_preserves_constraint_displacement_under_stiffness_scaling
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(reference.converged, "{:?}", reference.diagnostics);
 
     let scale = 1.0e-20;
@@ -957,7 +959,8 @@ fn affine_static_solve_preserves_constraint_displacement_under_stiffness_scaling
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(scaled.converged, "{:?}", scaled.diagnostics);
     assert!(scaled.iterations > 0);
     for (actual, expected) in scaled.solution.iter().zip(&reference.solution) {
@@ -1036,7 +1039,8 @@ fn affine_solver_rejects_a_substituted_reduction_before_iteration() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
 
     assert_eq!(solve.iterations, 0);
     assert!(!solve.converged);
@@ -1084,7 +1088,8 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
 
     assert!(solve.converged, "{:?}", solve.diagnostics);
     assert!(solve.relative_residual.is_some_and(|value| value <= 1e-8));
@@ -1211,7 +1216,8 @@ fn multiplier_solver_rejects_an_unremoved_mechanism_before_iteration() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
 
     assert_eq!(solve.iterations, 0);
     assert!(!solve.converged);
@@ -1727,7 +1733,8 @@ fn reference_point_wrench_solves_through_distributing_coupling() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(solve.converged, "{:?}", solve.diagnostics);
     assert!(solve.relative_residual.is_some_and(|value| value <= 1e-8));
     let matrix = summary.constraint_matrix.as_ref().unwrap();

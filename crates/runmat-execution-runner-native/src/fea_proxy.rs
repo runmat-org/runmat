@@ -72,12 +72,17 @@ pub enum Operation {
     },
     Heartbeat {
         root: u64,
-        usage: ResourceUsage,
+        usage: FeaRunUsage,
+    },
+    RequestGrant {
+        root: u64,
+        usage: FeaRunUsage,
+        required: runmat_simulation_usage::OperationCount,
     },
     Settle {
         root: u64,
         outcome: FeaRunOutcome,
-        usage: ResourceUsage,
+        usage: FeaRunUsage,
     },
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

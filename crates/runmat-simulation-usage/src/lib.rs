@@ -12,6 +12,8 @@ mod decimal;
 mod total;
 mod measurement;
 mod context;
+mod async_capacity;
+pub use async_capacity::AsyncCapacityOwner;
 pub use context::{UsageContext, UsageContextGuard};
 pub use ledger::{
     DelegatedReservation, GrantRenewal, LedgerError, LedgerSnapshot, UsageLedger, WorkReservation,

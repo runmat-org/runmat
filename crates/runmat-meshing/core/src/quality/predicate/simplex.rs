@@ -3,6 +3,9 @@ use super::{
     vector::{add, cross, distance, norm, scale, sub},
 };
 use robust::Coord3D;
+use runmat_simulation_usage::{
+    LedgerError, OperationCount, UsageCategory, UsageContext, WorkReservation,
+};
 
 pub fn triangle_centroid(points: Triangle3) -> Point3 {
     scale(add(add(points[0], points[1]), points[2]), 1.0 / 3.0)
@@ -76,48 +79,92 @@ pub fn tetrahedron_edge_aspect_ratio(points: Tetrahedron3) -> f64 {
     max_edge / min_edge.max(f64::EPSILON)
 }
 
-pub fn tetrahedron_scaled_jacobian(points: Tetrahedron3) -> f64 {
+/// Reference work per valid corner: three edge subtractions (9), three
+/// normalized vectors (36), one four-point determinant (23), and sqrt(2)
+/// followed by its product (2), for 70 operations. The adaptive expansion
+/// backend implements the determinant's reference value; its extra-precision
+/// instruction sequence is not a separate reference charge.
+pub fn tetrahedron_scaled_jacobian(points: Tetrahedron3) -> Result<f64, LedgerError> {
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(UsageCategory::Meshing, OperationCount::from_operations(280))
+        })
+        .transpose()?;
+    let (minimum, completed) = tetrahedron_scaled_jacobian_reference(points);
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(completed))?;
+    }
+    Ok(minimum)
+}
+
+/// Evaluate within an already admitted meshing owner. The caller settles the
+/// accumulated prefix before it relinquishes the owner. This permits a larger
+/// score kernel to use one reservation and one completion transaction.
+pub fn tetrahedron_scaled_jacobian_with_owner(
+    points: Tetrahedron3,
+    _owner: &mut WorkReservation<'_>,
+    completed: &mut u64,
+) -> Result<f64, LedgerError> {
+    let (value, work) = tetrahedron_scaled_jacobian_reference(points);
+    *completed = completed
+        .checked_add(work)
+        .ok_or(LedgerError::CountOverflow)?;
+    Ok(value)
+}
+
+fn tetrahedron_scaled_jacobian_reference(points: Tetrahedron3) -> (f64, u64) {
     let corners = [
         (points[0], points[1], points[2], points[3]),
         (points[1], points[0], points[3], points[2]),
         (points[2], points[0], points[1], points[3]),
         (points[3], points[0], points[2], points[1]),
     ];
-    corners
-        .into_iter()
-        .map(|(origin, first, second, third)| {
-            let Some(first) = normalized(sub(first, origin)) else {
-                return 0.0;
+    let mut minimum = f64::INFINITY;
+    let mut completed = 0;
+    for (origin, first, second, third) in corners {
+        let mut unit = [[0.0; 3]; 3];
+        let mut valid = true;
+        for (slot, point) in [first, second, third].into_iter().enumerate() {
+            let (normal, work) = normalized(sub(point, origin));
+            completed += 3 + work;
+            let Some(normal) = normal else {
+                valid = false;
+                break;
             };
-            let Some(second) = normalized(sub(second, origin)) else {
-                return 0.0;
-            };
-            let Some(third) = normalized(sub(third, origin)) else {
-                return 0.0;
-            };
-            // Normalize before evaluating the dimensionless determinant so the
-            // cubic edge product cannot overflow or underflow. The adaptive
-            // determinant retains the sign and magnitude of nearly coplanar unit
-            // vectors far beyond a direct dot/cross evaluation.
-            let determinant = -robust::orient3d(
-                Coord3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                coord(first),
-                coord(second),
-                coord(third),
-            );
-            (2.0_f64.sqrt() * determinant).abs()
-        })
-        .fold(f64::INFINITY, f64::min)
+            unit[slot] = normal;
+        }
+        if !valid {
+            minimum = minimum.min(0.0);
+            continue;
+        }
+        // Normalize before evaluating the dimensionless determinant so the
+        // cubic edge product cannot overflow or underflow. The adaptive
+        // determinant retains the sign and magnitude of nearly coplanar unit
+        // vectors far beyond a direct dot/cross evaluation.
+        let determinant = -robust::orient3d(
+            Coord3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            coord(unit[0]),
+            coord(unit[1]),
+            coord(unit[2]),
+        );
+        minimum = minimum.min((2.0_f64.sqrt() * determinant).abs());
+        completed += 25;
+    }
+    (minimum, completed)
 }
 
-fn normalized(vector: Point3) -> Option<Point3> {
+fn normalized(vector: Point3) -> (Option<Point3>, u64) {
     let scale = vector.into_iter().map(f64::abs).fold(0.0_f64, f64::max);
     if scale == 0.0 || !scale.is_finite() {
-        return None;
+        return (None, 0);
     }
     let scaled = vector.map(|value| value / scale);
     let length = scaled
@@ -125,7 +172,10 @@ fn normalized(vector: Point3) -> Option<Point3> {
         .map(|value| value * value)
         .sum::<f64>()
         .sqrt();
-    (length.is_finite() && length > 0.0).then(|| scaled.map(|value| value / length))
+    if !length.is_finite() || length <= 0.0 {
+        return (None, 9);
+    }
+    (Some(scaled.map(|value| value / length)), 12)
 }
 
 fn coord(point: Point3) -> Coord3D<f64> {

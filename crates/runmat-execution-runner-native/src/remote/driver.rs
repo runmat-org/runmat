@@ -485,22 +485,26 @@ async fn execute_local_direct(
                 &config,
                 request.assignment.clone(),
                 || {
-                    execute_driver_analysis(
-                        &request,
-                        &mut objects,
-                        &crate::NativeAnalysisKernel,
-                        allocation,
-                    )
+                    fea_admission.run_sync(|| {
+                        execute_driver_analysis(
+                            &request,
+                            &mut objects,
+                            &crate::NativeAnalysisKernel,
+                            allocation,
+                        )
+                    })
                 },
             )?
         }
         runmat_execution_artifact::ExecutableForm::GeometryWorkload => {
             let mut objects = objects.clone();
-            crate::execute_geometry_materialization_program_request(
-                &request,
-                &mut objects,
-                crate::NativeGeometryMaterializationLimits::default(),
-            )
+            fea_admission.run_sync(|| {
+                crate::execute_geometry_materialization_program_request(
+                    &request,
+                    &mut objects,
+                    crate::NativeGeometryMaterializationLimits::default(),
+                )
+            })
         }
         _ => {
             request.arguments = request

@@ -27,6 +27,11 @@ pub struct ScalarArithmetic;
 
 impl<T: Scalar> pcg::Arithmetic<T> for ScalarArithmetic {
     const HERMITIAN_EPSILON: f64 = T::EPSILON;
+    const DOMAIN: super::usage::ArithmeticDomain = if T::IS_COMPLEX {
+        super::usage::ArithmeticDomain::Complex
+    } else {
+        super::usage::ArithmeticDomain::Real
+    };
     fn zero() -> T {
         T::zero()
     }
@@ -61,6 +66,11 @@ impl<T: Scalar> pcg::Arithmetic<T> for ScalarArithmetic {
 const SAFE_MINIMUM: f64 = f64::MIN_POSITIVE * (1u64 << 52) as f64;
 
 impl<T: Scalar> gmres::Arithmetic<T> for ScalarArithmetic {
+    const DOMAIN: super::usage::ArithmeticDomain = if T::IS_COMPLEX {
+        super::usage::ArithmeticDomain::Complex
+    } else {
+        super::usage::ArithmeticDomain::Real
+    };
     fn zero() -> T {
         T::zero()
     }
@@ -114,6 +124,7 @@ struct SyncOperations<'a, T: Scalar> {
     distribution: Option<&'a dyn Communicator>,
     /// A communication failure, reported at the next checkpoint.
     failure: Option<SolverError>,
+    capacity_owner: Option<&'a dyn runmat_simulation_usage::AsyncCapacityOwner>,
 }
 
 impl<T: Scalar> SyncOperations<'_, T> {
@@ -206,12 +217,66 @@ impl<T: Scalar> Control for SyncOperations<'_, T> {
 }
 
 impl<T: Scalar> PcgOperations<T> for SyncOperations<'_, T> {
+    async fn measured<R>(
+        &mut self,
+        work: super::usage::VectorWork,
+        run: impl FnOnce(&mut Self) -> (R, super::usage::BatchCompletion),
+    ) -> SolverResult<R> {
+        let count = work
+            .operations()
+            .map_err(runmat_simulation_usage::LedgerError::from)?;
+        if let Some(owner) = self.capacity_owner {
+            owner
+                .ensure_capacity(count)
+                .await
+                .map_err(SolverError::Usage)?;
+        }
+        let Some(context) = runmat_simulation_usage::UsageContext::capture() else {
+            if self.capacity_owner.is_some() {
+                return Err(SolverError::Unsupported(
+                    "capacity owner requires an active usage context".into(),
+                ));
+            }
+            return Ok(run(self).0);
+        };
+        let mut reservation = context
+            .ledger()
+            .reserve(runmat_simulation_usage::UsageCategory::Solve, count)?;
+        let (result, completed) = run(self);
+        match completed {
+            super::usage::BatchCompletion::Skipped => {}
+            super::usage::BatchCompletion::Complete => reservation.complete(count)?,
+            super::usage::BatchCompletion::Prefix(prefix) => reservation.complete(prefix)?,
+        }
+        Ok(result)
+    }
+
     async fn apply(
         &mut self,
         operation: PcgOperation,
         input: &[T],
         output: &mut [T],
     ) -> SolverResult<ApplyStatus> {
+        if let Some(owner) = self.capacity_owner {
+            let work = match operation {
+                PcgOperation::Coefficient => self.operator.reference_apply_work()?,
+                PcgOperation::FirstPreconditioner | PcgOperation::SecondPreconditioner => {
+                    match self.preconditioner {
+                        Some(preconditioner) => preconditioner.reference_apply_work()?,
+                        None => None,
+                    }
+                }
+            }
+            .ok_or_else(|| {
+                SolverError::Unsupported(
+                    "awaited PCG application has no exact reference-work quote".into(),
+                )
+            })?;
+            owner
+                .ensure_capacity(work)
+                .await
+                .map_err(SolverError::Usage)?;
+        }
         match operation {
             PcgOperation::Coefficient => self
                 .coefficient(input, output)
@@ -252,6 +317,13 @@ impl<T: Scalar> PcgOperations<T> for SyncOperations<'_, T> {
 
 impl<T: Scalar> GmresOperations<T> for SyncOperations<'_, T> {
     type Error = SolverError;
+    async fn measured<R>(
+        &mut self,
+        work: super::usage::VectorWork,
+        run: impl FnOnce(&mut Self) -> (R, super::usage::BatchCompletion),
+    ) -> SolverResult<R> {
+        <Self as PcgOperations<T>>::measured(self, work, run).await
+    }
     async fn coefficient(&mut self, input: &[T], output: &mut [T]) -> SolverResult<()> {
         SyncOperations::coefficient(self, input, output)
     }
@@ -412,6 +484,276 @@ pub fn pcg_solve<T: Scalar>(
     pcg_impl(operator, preconditioner, b, x, options, control, None)
 }
 
+/// PCG over the same recurrence with awaited capacity for each measured batch.
+pub async fn pcg_solve_with_capacity<T: Scalar, E>(
+    operator: &dyn LinearOperator<T>,
+    preconditioner: Option<&dyn Preconditioner<T>>,
+    b: &[T],
+    x: &mut [T],
+    options: &KrylovOptions,
+    control: SolveControl<'_>,
+    owner: &dyn runmat_simulation_usage::AsyncCapacityOwner<E>,
+) -> Result<KrylovReport, PcgCapacityError<E>> {
+    pcg_impl_typed(operator, preconditioner, b, x, options, control, owner).await
+}
+
+pub enum PcgCapacityError<E> {
+    Numerical(SolverError),
+    Admission(E),
+}
+
+impl<E> From<SolverError> for PcgCapacityError<E> {
+    fn from(error: SolverError) -> Self {
+        Self::Numerical(error)
+    }
+}
+
+struct OwnedPcgOperations<'a, T: Scalar, E> {
+    inner: SyncOperations<'a, T>,
+    owner: &'a dyn runmat_simulation_usage::AsyncCapacityOwner<E>,
+}
+
+impl<T: Scalar, E> Control for OwnedPcgOperations<'_, T, E> {
+    type Error = PcgCapacityError<E>;
+    fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        <SyncOperations<'_, T> as Control>::checkpoint(&mut self.inner).map_err(Into::into)
+    }
+    async fn cooperate(&mut self, completed: u64) -> Result<(), Self::Error> {
+        <SyncOperations<'_, T> as Control>::cooperate(&mut self.inner, completed)
+            .await
+            .map_err(Into::into)
+    }
+}
+
+impl<T: Scalar, E> PcgOperations<T> for OwnedPcgOperations<'_, T, E> {
+    async fn measured<R>(
+        &mut self,
+        work: super::usage::VectorWork,
+        run: impl FnOnce(&mut Self) -> (R, super::usage::BatchCompletion),
+    ) -> Result<R, Self::Error> {
+        let count = work
+            .operations()
+            .map_err(runmat_simulation_usage::LedgerError::from)
+            .map_err(SolverError::Usage)?;
+        self.owner
+            .ensure_capacity(count)
+            .await
+            .map_err(PcgCapacityError::Admission)?;
+        let context = runmat_simulation_usage::UsageContext::capture().ok_or_else(|| {
+            SolverError::Unsupported("capacity owner requires an active usage context".into())
+        })?;
+        let mut reservation = context
+            .ledger()
+            .reserve(runmat_simulation_usage::UsageCategory::Solve, count)
+            .map_err(SolverError::Usage)?;
+        let (result, completed) = run(self);
+        match completed {
+            super::usage::BatchCompletion::Skipped => {}
+            super::usage::BatchCompletion::Complete => {
+                reservation.complete(count).map_err(SolverError::Usage)?
+            }
+            super::usage::BatchCompletion::Prefix(prefix) => {
+                reservation.complete(prefix).map_err(SolverError::Usage)?
+            }
+        }
+        Ok(result)
+    }
+
+    async fn apply(
+        &mut self,
+        operation: PcgOperation,
+        input: &[T],
+        output: &mut [T],
+    ) -> Result<ApplyStatus, Self::Error> {
+        let work = match operation {
+            PcgOperation::Coefficient => self.inner.operator.reference_apply_work()?,
+            PcgOperation::FirstPreconditioner | PcgOperation::SecondPreconditioner => {
+                match self.inner.preconditioner {
+                    Some(preconditioner) => preconditioner.reference_apply_work()?,
+                    None => None,
+                }
+            }
+        }
+        .ok_or_else(|| {
+            SolverError::Unsupported(
+                "awaited PCG application has no exact reference-work quote".into(),
+            )
+        })?;
+        self.owner
+            .ensure_capacity(work)
+            .await
+            .map_err(PcgCapacityError::Admission)?;
+        <SyncOperations<'_, T> as PcgOperations<T>>::apply(
+            &mut self.inner,
+            operation,
+            input,
+            output,
+        )
+        .await
+        .map_err(Into::into)
+    }
+
+    fn native_dot(&mut self, left: &[T], right: &[T]) -> Option<(f64, f64, f64)> {
+        <SyncOperations<'_, T> as PcgOperations<T>>::native_dot(&mut self.inner, left, right)
+    }
+    fn native_step(
+        &mut self,
+        x: &mut [T],
+        residual: &mut [T],
+        direction: &[T],
+        product: &[T],
+        alpha: f64,
+    ) -> Option<bool> {
+        <SyncOperations<'_, T> as PcgOperations<T>>::native_step(
+            &mut self.inner,
+            x,
+            residual,
+            direction,
+            product,
+            alpha,
+        )
+    }
+    fn native_direction(&mut self, direction: &mut [T], source: &[T], beta: f64) -> bool {
+        <SyncOperations<'_, T> as PcgOperations<T>>::native_direction(
+            &mut self.inner,
+            direction,
+            source,
+            beta,
+        )
+    }
+    fn native_residual(&mut self, rhs: &[T], product: &[T], residual: &mut [T]) -> bool {
+        <SyncOperations<'_, T> as PcgOperations<T>>::native_residual(
+            &mut self.inner,
+            rhs,
+            product,
+            residual,
+        )
+    }
+}
+
+async fn pcg_impl_typed<T: Scalar, E>(
+    operator: &dyn LinearOperator<T>,
+    preconditioner: Option<&dyn Preconditioner<T>>,
+    b: &[T],
+    x: &mut [T],
+    options: &KrylovOptions,
+    control: SolveControl<'_>,
+    owner: &dyn runmat_simulation_usage::AsyncCapacityOwner<E>,
+) -> Result<KrylovReport, PcgCapacityError<E>> {
+    check_dims(operator, b, x)?;
+    let n = b.len();
+    if n == 0 {
+        return Ok(empty_report());
+    }
+    if options.max_iterations == 0 {
+        return Err(SolverError::Unsupported("PCG needs at least one iteration".into()).into());
+    }
+    PcgGeometry::checked(n, options.max_iterations, false)
+        .ok_or_else(|| SolverError::Unsupported("PCG workspace geometry overflows".into()))?;
+    let norm_work = runmat_simulation_usage::OperationCount::from_operations(
+        u64::try_from(n)
+            .map_err(|_| SolverError::Usage(runmat_simulation_usage::LedgerError::CountOverflow))?,
+    )
+    .checked_mul(if T::IS_COMPLEX { 4 } else { 2 })
+    .map_err(runmat_simulation_usage::LedgerError::from)
+    .map_err(SolverError::Usage)?;
+    owner
+        .ensure_capacity(norm_work)
+        .await
+        .map_err(PcgCapacityError::Admission)?;
+    let context = runmat_simulation_usage::UsageContext::capture().ok_or_else(|| {
+        SolverError::Unsupported("capacity owner requires an active usage context".into())
+    })?;
+    let mut reservation = context
+        .ledger()
+        .reserve(runmat_simulation_usage::UsageCategory::Solve, norm_work)
+        .map_err(SolverError::Usage)?;
+    let rhs_norm = rhs_norm(b, None)?;
+    reservation
+        .complete(norm_work)
+        .map_err(SolverError::Usage)?;
+    if rhs_norm == 0.0 {
+        return Ok(zero_rhs_report(x));
+    }
+    let initial = x
+        .iter()
+        .any(|value| *value != T::zero())
+        .then(|| x.to_vec());
+    let mut best = par::try_zeros::<T>(n)?;
+    let mut residual = par::try_zeros::<T>(n)?;
+    let mut direction = par::try_zeros::<T>(n)?;
+    let mut scratch = par::try_zeros::<T>(n)?;
+    let mut history = vec![0.0f64; options.max_iterations + 1];
+    let flexible = preconditioner.is_some_and(|p| p.is_variable());
+    let mut previous = if flexible {
+        par::try_zeros::<T>(n)?
+    } else {
+        Vec::new()
+    };
+    let mut coefficients = super::pcg::PcgCoefficients::default();
+    let inner = SyncOperations {
+        operator,
+        preconditioner,
+        control,
+        operator_applications: 0,
+        preconditioner_applications: 0,
+        distribution: None,
+        failure: None,
+        capacity_owner: None,
+    };
+    let mut operations = OwnedPcgOperations { inner, owner };
+    let outcome = pcg::solve_with::<T, ScalarArithmetic, _>(
+        b,
+        initial.as_deref(),
+        PcgParameters {
+            tolerance: relative_tolerance(options, rhs_norm),
+            maximum_iterations: options.max_iterations,
+            preconditioners: (preconditioner.is_some(), false),
+        },
+        pcg::PcgMode { flexible },
+        PcgWork {
+            x,
+            best: &mut best,
+            residual: &mut residual,
+            direction: &mut direction,
+            intermediate: None,
+            residual_norms: &mut history,
+            coefficients: Some(&mut coefficients),
+        },
+        &mut previous,
+        &mut scratch,
+        &mut operations,
+    )
+    .await
+    .map_err(|failure| match failure {
+        KrylovFailure::Operation(error) => error,
+        KrylovFailure::Invalid(message) => {
+            PcgCapacityError::Numerical(SolverError::Unsupported(message.into()))
+        }
+    })?;
+    history.truncate(outcome.residual_count);
+    Ok(KrylovReport {
+        flag: stop_flag(outcome.flag),
+        iterations: outcome.iterations,
+        relative_residual: outcome.relres,
+        residual_norm: if rhs_norm > 0.0 {
+            outcome.relres * rhs_norm
+        } else {
+            outcome.relres
+        },
+        rhs_norm,
+        residual_history: if options.record_history {
+            history
+        } else {
+            Vec::new()
+        },
+        restart_position: None,
+        operator_applications: operations.inner.operator_applications,
+        preconditioner_applications: operations.inner.preconditioner_applications,
+        spectrum: super::lanczos::PcgSpectrumEstimate::from_coefficients(&coefficients),
+    })
+}
+
 /// Row-distributed PCG: `operator`, `b` and `x` are this rank's owned rows (the operator does
 /// its own halo exchange, e.g. [`crate::distributed::DistributedCsr`]), and every rank calls
 /// collectively. With block-aligned rank boundaries the iterates are bitwise those of the
@@ -453,6 +795,26 @@ fn pcg_impl<T: Scalar>(
     control: SolveControl<'_>,
     distribution: Option<&dyn Communicator>,
 ) -> SolverResult<KrylovReport> {
+    block_on(pcg_impl_async(
+        operator,
+        preconditioner,
+        b,
+        x,
+        options,
+        control,
+        distribution,
+    ))
+}
+
+async fn pcg_impl_async<T: Scalar>(
+    operator: &dyn LinearOperator<T>,
+    preconditioner: Option<&dyn Preconditioner<T>>,
+    b: &[T],
+    x: &mut [T],
+    options: &KrylovOptions,
+    control: SolveControl<'_>,
+    distribution: Option<&dyn Communicator>,
+) -> SolverResult<KrylovReport> {
     check_dims(operator, b, x)?;
     let n = b.len();
     if n == 0 {
@@ -465,7 +827,22 @@ fn pcg_impl<T: Scalar>(
     }
     PcgGeometry::checked(n, options.max_iterations, false)
         .ok_or_else(|| SolverError::Unsupported("PCG workspace geometry overflows".into()))?;
-    let rhs_norm = rhs_norm(b, distribution)?;
+    let norm_work = runmat_simulation_usage::OperationCount::from_operations(
+        u64::try_from(n).map_err(|_| runmat_simulation_usage::LedgerError::CountOverflow)?,
+    )
+    .checked_mul(if T::IS_COMPLEX { 4 } else { 2 })
+    .map_err(runmat_simulation_usage::LedgerError::from)?;
+    let rhs_norm = match runmat_simulation_usage::UsageContext::capture() {
+        Some(context) => {
+            let mut reservation = context
+                .ledger()
+                .reserve(runmat_simulation_usage::UsageCategory::Solve, norm_work)?;
+            let value = rhs_norm(b, distribution)?;
+            reservation.complete(norm_work)?;
+            value
+        }
+        None => rhs_norm(b, distribution)?,
+    };
     if rhs_norm == 0.0 {
         return Ok(zero_rhs_report(x));
     }
@@ -494,8 +871,9 @@ fn pcg_impl<T: Scalar>(
         preconditioner_applications: 0,
         distribution,
         failure: None,
+        capacity_owner: None,
     };
-    let outcome = block_on(pcg::solve_with::<T, ScalarArithmetic, _>(
+    let outcome = pcg::solve_with::<T, ScalarArithmetic, _>(
         b,
         initial.as_deref(),
         PcgParameters {
@@ -516,7 +894,8 @@ fn pcg_impl<T: Scalar>(
         &mut previous,
         &mut scratch,
         &mut operations,
-    ))
+    )
+    .await
     .map_err(failure)?;
     history.truncate(outcome.residual_count);
     Ok(KrylovReport {
@@ -755,6 +1134,7 @@ fn gmres_impl<T: Scalar>(
         preconditioner_applications: 0,
         distribution,
         failure: None,
+        capacity_owner: None,
     };
     let outcome = block_on(gmres::solve_with::<T, ScalarArithmetic, _>(
         b,

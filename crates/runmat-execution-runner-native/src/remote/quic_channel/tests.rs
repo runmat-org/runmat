@@ -214,6 +214,7 @@ async fn foreign_or_late_progress_cannot_allocate_history_or_refresh_a_live_requ
         let registry = Mutex::new(registry);
         let progress = Mutex::new(HashMap::new());
         let collectives = Mutex::new(HashMap::new());
+        let fea_calls = Mutex::new(HashMap::new());
         let ready = receive::ReadyExpectation {
             run_identity: "progress-identity".into(),
             session_id: [23; 16],
@@ -231,6 +232,7 @@ async fn foreign_or_late_progress_cannot_allocate_history_or_refresh_a_live_requ
                 pending: &registry,
                 progress: &progress,
                 collectives: &collectives,
+                fea_calls: &fea_calls,
             },
         )
         .await

@@ -3,6 +3,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub(crate) enum ThermalAssemblyError {
+    #[error("thermal assembly numerical accounting failed: {0}")]
+    Accounting(#[from] runmat_simulation_usage::LedgerError),
     #[error("thermal sparse operator construction failed: {0}")]
     SparseOperator(String),
     #[error("thermal analysis projection is invalid: {0}")]

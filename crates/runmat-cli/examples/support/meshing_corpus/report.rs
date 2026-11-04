@@ -73,6 +73,9 @@ pub enum ObservedFailure {
     Admission {
         category: AdmissionFailureKind,
     },
+    Accounting {
+        cause: runmat_simulation_usage::LedgerError,
+    },
     Meshing {
         category: runmat_meshing_core::MeshingFailureCategory,
         stage: runmat_meshing_core::MeshingStageKind,

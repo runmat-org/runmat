@@ -1,6 +1,7 @@
 use super::scalar::{copy, fill, scaled_axpy, Norm};
 use super::Arithmetic;
 use super::{h_index, GmresOperations, GmresWork, PreconditionerSide, PreconditionerStatus};
+use crate::krylov::usage::{BatchCompletion, ScalarWork, VectorWork};
 
 /// Result of forming the candidate iterate from the projected solution.
 pub(super) enum Candidate {
@@ -16,8 +17,16 @@ pub(super) struct BasisProjection {
 }
 use num_complex::Complex64;
 pub fn rotation(a: Complex64, b: Complex64) -> Option<(f64, Complex64)> {
-    let aa = a.norm();
-    let bb = b.norm();
+    let aa = if a.im == 0.0 {
+        a.re.abs()
+    } else {
+        a.re.hypot(a.im)
+    };
+    let bb = if b.im == 0.0 {
+        b.re.abs()
+    } else {
+        b.re.hypot(b.im)
+    };
     if !aa.is_finite() || !bb.is_finite() {
         return None;
     }
@@ -46,14 +55,19 @@ pub(super) async fn apply_previous_rotations<T, O: GmresOperations<T>>(
                 .cooperate((column - row).min(1024) as u64)
                 .await?;
         }
-        let first = h_index(row, column, restart);
-        let second = first + 1;
-        let a = work.hessenberg[first];
-        let b = work.hessenberg[second];
-        let c = work.cosines[row];
-        let s = work.sines[row];
-        work.hessenberg[first] = c * a + s * b;
-        work.hessenberg[second] = -s.conj() * a + c * b;
+        operations
+            .measured(VectorWork::Scalar(ScalarWork::ComplexRotationPair), |_| {
+                let first = h_index(row, column, restart);
+                let second = first + 1;
+                let a = work.hessenberg[first];
+                let b = work.hessenberg[second];
+                let c = work.cosines[row];
+                let s = work.sines[row];
+                work.hessenberg[first] = c * a + s * b;
+                work.hessenberg[second] = -s.conj() * a + c * b;
+                ((), BatchCompletion::Complete)
+            })
+            .await?;
     }
     Ok(())
 }
@@ -91,13 +105,51 @@ pub(super) async fn candidate_from_basis<
                     .cooperate((completed - column).min(1024) as u64)
                     .await?;
             }
-            value -= work.hessenberg[h_index(row, column, restart)] * work.coefficients[column];
+            value = operations
+                .measured(
+                    VectorWork::Scalar(ScalarWork::ComplexBacksolveUpdate),
+                    |_| {
+                        (
+                            value
+                                - work.hessenberg[h_index(row, column, restart)]
+                                    * work.coefficients[column],
+                            BatchCompletion::Complete,
+                        )
+                    },
+                )
+                .await?;
         }
         let diagonal = work.hessenberg[h_index(row, row, restart)];
-        if diagonal.norm() == 0.0 {
+        let diagonal_zero = operations
+            .measured(
+                VectorWork::Scalar(if diagonal.im == 0.0 {
+                    ScalarWork::Zero
+                } else {
+                    ScalarWork::Hypot
+                }),
+                |_| {
+                    (
+                        if diagonal.im == 0.0 {
+                            diagonal.re.abs() == 0.0
+                        } else {
+                            diagonal.norm() == 0.0
+                        },
+                        BatchCompletion::Complete,
+                    )
+                },
+            )
+            .await?;
+        if diagonal_zero {
             return Ok(Candidate::Breakdown);
         }
-        let (real, imaginary) = A::divide_complex((value.re, value.im), (diagonal.re, diagonal.im));
+        let (real, imaginary) = operations
+            .measured(VectorWork::Scalar(ScalarWork::ComplexDivide), |_| {
+                (
+                    A::divide_complex((value.re, value.im), (diagonal.re, diagonal.im)),
+                    BatchCompletion::Complete,
+                )
+            })
+            .await?;
         let result = Complex64::new(real, imaginary);
         if !result.re.is_finite() || !result.im.is_finite() {
             return Ok(Candidate::Breakdown);

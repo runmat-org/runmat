@@ -1,8 +1,8 @@
 //! Local JS transport stays outside the runtime's Send permit and control ports.
-use runmat_execution::resource::ResourceUsage;
 use runmat_runtime::analysis::fea_run_admission::{
-    FeaRunBudget, FeaRunDenied, FeaRunOutcome, FeaRunPermit,
+    FeaRunBudget, FeaRunDenied, FeaRunOutcome, FeaRunPermit, FeaRunUsage,
 };
+use runmat_simulation_usage::{LedgerError, OperationCount};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::{prelude::*, JsCast};
 
@@ -10,11 +10,20 @@ use wasm_bindgen::{prelude::*, JsCast};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Lease {
     pub lease_id: String,
-    pub held_core_millis: u64,
+    pub state: AdmissionState,
+    pub budget_ops: OperationCount,
+    pub granted_ops: OperationCount,
     pub expires_at: String,
     pub heartbeat_seconds: u64,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) enum AdmissionState {
+    Active,
+    Settled,
+    Expired,
+}
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct LeaseState {
     pub lease: Lease,
@@ -25,7 +34,8 @@ pub(super) struct LeaseState {
 impl Lease {
     pub fn budget(&self) -> Result<FeaRunBudget, JsValue> {
         let expiry = js_sys::Date::parse(&self.expires_at);
-        if self.lease_id.is_empty()
+        if self.state != AdmissionState::Active
+            || self.lease_id.is_empty()
             || self.lease_id.len() > 256
             || !expiry.is_finite()
             || expiry < 0.0
@@ -34,7 +44,8 @@ impl Lease {
             return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
         }
         let budget = FeaRunBudget {
-            held_core_millis: self.held_core_millis,
+            budget_ops: self.budget_ops,
+            granted_ops: self.granted_ops,
             expires_at_unix_millis: expiry as u64,
             heartbeat_millis: self
                 .heartbeat_seconds
@@ -53,10 +64,10 @@ impl FeaRunPermit for ExternalPermit {
     fn budget(&self) -> FeaRunBudget {
         self.0
     }
-    fn heartbeat(&self, _: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+    fn heartbeat(&self, _: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
         Ok(self.0)
     }
-    fn settle(self: Box<Self>, _: FeaRunOutcome, _: &ResourceUsage) -> Result<(), FeaRunDenied> {
+    fn settle(self: Box<Self>, _: FeaRunOutcome, _: &FeaRunUsage) -> Result<(), FeaRunDenied> {
         Ok(())
     }
 }
@@ -85,9 +96,27 @@ pub(super) fn denied_to_js(denied: FeaRunDenied) -> JsValue {
         FeaRunDenied::LeaseExpired => "leaseExpired",
         FeaRunDenied::LicenseInvalid => "licenseInvalid",
         FeaRunDenied::ServerUnreachable => "serverUnreachable",
+        FeaRunDenied::AllowanceUnpublished => "allowanceUnpublished",
+        FeaRunDenied::BudgetUnavailable { .. } => "budgetUnavailable",
+        FeaRunDenied::Accounting(_) => "accountingInvalid",
     };
     let payload = js_sys::Object::new();
     let _ = js_sys::Reflect::set(&payload, &"reason".into(), &reason.into());
+    if let FeaRunDenied::Accounting(cause) = &denied {
+        if let Ok(cause) = crate::wire::json_contract_to_js(cause) {
+            let _ = js_sys::Reflect::set(&payload, &"cause".into(), &cause);
+        }
+    }
+    if let FeaRunDenied::BudgetUnavailable {
+        available_ops: Some(available),
+    } = &denied
+    {
+        let _ = js_sys::Reflect::set(
+            &payload,
+            &"availableOps".into(),
+            &available.to_string().into(),
+        );
+    }
     if let FeaRunDenied::AllowanceUsed {
         refills_at_unix_seconds: Some(seconds),
     } = &denied
@@ -126,7 +155,9 @@ fn field(value: &JsValue, key: &str) -> JsValue {
 }
 pub(super) fn normalize_denial(error: JsValue) -> JsValue {
     let retired = field(&error, "workersRetired").as_bool() == Some(true);
-    let result = denied_to_js(denial_from_js(error));
+    let result = denied_to_js(denial_from_js(error.clone()));
+    // Retain the host error as the cause of the normalized admission error.
+    let _ = js_sys::Reflect::set(&result, &"cause".into(), &error);
     if retired {
         let _ = js_sys::Reflect::set(&result, &"workersRetired".into(), &JsValue::TRUE);
     }
@@ -145,7 +176,7 @@ pub(super) fn denial_from_js(error: JsValue) -> FeaRunDenied {
     let detail = field(if body.is_undefined() { &error } else { &body }, "error");
     let allowance = reason.as_deref() == Some("allowanceUsed")
         || (status == Some(409.0)
-            && field(&detail, "code").as_string().as_deref() == Some("fea.core_hours_used"));
+            && field(&detail, "code").as_string().as_deref() == Some("simulation.allowance_used"));
     if allowance {
         let date = field(&denied, "refillsAt")
             .as_string()
@@ -160,6 +191,28 @@ pub(super) fn denial_from_js(error: JsValue) -> FeaRunDenied {
                         ms.is_finite().then_some((ms / 1000.0) as i64)
                     })
                 }),
+        }
+    } else if reason.as_deref() == Some("accountingInvalid") {
+        FeaRunDenied::Accounting(
+            serde_wasm_bindgen::from_value::<LedgerError>(field(&denied, "cause"))
+                .unwrap_or(LedgerError::InvalidState),
+        )
+    } else if reason.as_deref() == Some("allowanceUnpublished")
+        || field(&detail, "code").as_string().as_deref() == Some("simulation.allowance_unpublished")
+    {
+        FeaRunDenied::AllowanceUnpublished
+    } else if reason.as_deref() == Some("budgetUnavailable")
+        || field(&detail, "code").as_string().as_deref()
+            == Some("simulation.budget_exceeds_available")
+    {
+        let available = field(&denied, "availableOps");
+        let available = if available.is_undefined() {
+            field(&field(&detail, "details"), "availableOps")
+        } else {
+            available
+        };
+        FeaRunDenied::BudgetUnavailable {
+            available_ops: serde_wasm_bindgen::from_value(available).ok(),
         }
     } else if reason.as_deref() == Some("signInRequired") || status == Some(401.0) {
         FeaRunDenied::SignInRequired

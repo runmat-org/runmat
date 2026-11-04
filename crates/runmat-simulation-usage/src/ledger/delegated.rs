@@ -19,6 +19,7 @@ impl UsageLedger {
             ledger: Arc::clone(self),
             maximum,
             completed: CompletedUsage::default(),
+            closed: false,
         })
     }
 }
@@ -35,6 +36,7 @@ pub struct DelegatedReservation {
     ledger: Arc<UsageLedger>,
     maximum: OperationCount,
     completed: CompletedUsage,
+    closed: bool,
 }
 
 impl DelegatedReservation {
@@ -51,6 +53,9 @@ impl DelegatedReservation {
     /// Completed child work already belongs to the parent and remains charged.
     /// The host serializes this owner with authenticated reports and renewals.
     pub fn increase_capacity(&mut self, maximum: OperationCount) -> Result<(), LedgerError> {
+        if self.closed {
+            return Err(LedgerError::Closed);
+        }
         let additional = maximum
             .operations()
             .checked_sub(self.maximum.operations())
@@ -64,6 +69,9 @@ impl DelegatedReservation {
     /// Merge authenticated cumulative completed work into the parent. Validate
     /// every category and all arithmetic before changing either owner's state.
     pub fn report(&mut self, completed: CompletedUsage) -> Result<(), LedgerError> {
+        if self.closed {
+            return Err(LedgerError::Closed);
+        }
         let total = completed.total()?;
         if total > self.maximum {
             return Err(LedgerError::InvalidReservation);
@@ -115,8 +123,9 @@ impl DelegatedReservation {
 
     /// Close after the host has verified the child's physical retirement and
     /// final cumulative report. Release only unused capacity; completed work
-    /// remains in the parent's ledger. Rejected final reports retain the hold.
-    pub fn finish(mut self, completed: CompletedUsage) -> Result<(), LedgerError> {
+    /// remains in the parent's ledger. Rejected final reports retain both the
+    /// hold and this owner so the authenticated host can retry reconciliation.
+    pub fn finish(&mut self, completed: CompletedUsage) -> Result<(), LedgerError> {
         self.report(completed)?;
         let unused = self
             .maximum
@@ -136,6 +145,7 @@ impl DelegatedReservation {
             .ok_or(LedgerError::InvalidState)?;
         state.reserved = reserved;
         state.active = active;
+        self.closed = true;
         Ok(())
     }
 }
@@ -212,7 +222,17 @@ mod tests {
         assert_eq!(child.report(overflow), Err(LedgerError::CountOverflow));
         assert_eq!(ledger.snapshot().unwrap(), before);
         assert_eq!(child.completed(), initial);
+        assert_eq!(child.finish(swapped), Err(LedgerError::NonMonotonicUsage));
+        assert_eq!(ledger.snapshot().unwrap(), before);
         child.finish(initial).unwrap();
+        let closed = ledger.snapshot().unwrap();
+        assert_eq!(child.finish(initial), Err(LedgerError::Closed));
+        assert_eq!(child.report(initial), Err(LedgerError::Closed));
+        assert_eq!(
+            child.increase_capacity(count(u64::MAX)),
+            Err(LedgerError::Closed)
+        );
+        assert_eq!(ledger.snapshot().unwrap(), closed);
         assert_eq!(ledger.finish().unwrap(), initial);
     }
 
@@ -259,7 +279,7 @@ mod tests {
     fn lost_or_invalidly_closed_child_never_releases_live_spending_authority() {
         for invalid_close in [false, true] {
             let ledger = Arc::new(UsageLedger::new(count(10), count(10)).unwrap());
-            let child = ledger.delegate(count(10)).unwrap();
+            let mut child = ledger.delegate(count(10)).unwrap();
             if invalid_close {
                 assert_eq!(
                     child.finish(CompletedUsage {

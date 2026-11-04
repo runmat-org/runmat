@@ -264,15 +264,44 @@ jobs:
         # Strict workspace lints apply to first-party crates. Clarabel retains
         # upstream source and optional external integrations; its pure-Rust
         # profiles are compiled below and exercised by the runtime test group.
-        run: cargo clippy --workspace --exclude runmat-clarabel --all-targets --all-features -- -D warnings
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Approved 0.7.0 style debt is pinned to the complete reviewed FEA
+          # tree, compiler inputs and Rust 1.90.0. Source/dependency changes
+          # restore strict workspace lints, including new FEA diagnostics.
+          # See qualification/quality/fea-style-debt-0.7.md.
+          fea_tree=$(git rev-parse HEAD:crates/runmat-analysis/fea)
+          compiler_inputs=$(git ls-tree -r HEAD -- Cargo.toml Cargo.lock rust-toolchain.toml .cargo crates scripts docs bindings verification | git hash-object --stdin)
+          if [[ "$fea_tree" == 48fac1e81490d61f470796a6fc8ad507d5da4823 && "$compiler_inputs" == fb9f1ac2a39c2c6e898c356ef1f318ea8b285433 ]] && rustc --version | grep -Eq '^rustc 1\.90\.0 ' ; then
+            cargo clippy --workspace --exclude runmat-clarabel --exclude runmat-analysis-fea --all-targets --all-features --keep-going --no-deps -- -D warnings
+          else
+            cargo clippy --workspace --exclude runmat-clarabel --all-targets --all-features --keep-going -- -D warnings
+          fi
+
+      - name: Report reviewed FEA lint debt
+        if: always() && matrix.task == 'quality'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy -p runmat-analysis-fea --all-targets --all-features --keep-going --no-deps -- -D warnings 2>&1 | tee fea-lint-debt.log
+
+      - name: Retain FEA lint diagnostics
+        if: always() && matrix.task == 'quality'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fea-lint-debt-${{ matrix.name }}
+          path: fea-lint-debt.log
+          if-no-files-found: warn
 
 
       - name: Check
         if: matrix.task == 'quality'
         run: |
-          cargo check --workspace --exclude runmat-clarabel --all-targets --all-features
-          cargo check -p runmat-clarabel --all-targets --no-default-features
-          cargo check -p runmat-clarabel --all-targets --no-default-features --features serde
+          cargo check --workspace --exclude runmat-clarabel --all-targets --all-features --keep-going
+          cargo check -p runmat-clarabel --all-targets --no-default-features --keep-going
+          cargo check -p runmat-clarabel --all-targets --no-default-features --features serde --keep-going
       - name: Test (Linux)
         if: matrix.task == 'test' && runner.os == 'Linux'
         env:

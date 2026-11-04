@@ -1,10 +1,12 @@
 use super::{
     scope, FeaRunAdmission, FeaRunBudget, FeaRunDenied, FeaRunOutcome, FeaRunPermit, FeaRunRequest,
-    ScopedFeaRunFuture,
+    FeaRunUsage, ScopedFeaRunFuture,
 };
 use runmat_execution::cancellation::{CancellationSource, CancellationToken};
 use runmat_execution::resource::ResourceUsage;
+use runmat_simulation_usage::{OperationCount, UsageContext, UsageLedger};
 use std::sync::{Arc, Mutex};
+mod accounting;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "heartbeat.rs"]
@@ -13,7 +15,25 @@ mod heartbeat;
 #[derive(Clone, Copy)]
 enum LeaseAuthority {
     Metered(FeaRunBudget),
+    ParentSupervised(FeaRunBudget),
+}
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LeaseRole {
+    Metered,
     ParentSupervised,
+}
+impl LeaseAuthority {
+    fn role(self) -> LeaseRole {
+        match self {
+            Self::Metered(_) => LeaseRole::Metered,
+            Self::ParentSupervised(_) => LeaseRole::ParentSupervised,
+        }
+    }
+    fn budget(self) -> FeaRunBudget {
+        match self {
+            Self::Metered(budget) | Self::ParentSupervised(budget) => budget,
+        }
+    }
 }
 struct LeaseState {
     authority: LeaseAuthority,
@@ -30,10 +50,20 @@ pub(super) struct RunState {
     lease: Mutex<LeaseState>,
     cancellation: CancellationSource,
     inherited: Option<CancellationToken>,
+    pub(super) accounting: UsageContext,
     #[cfg(not(target_arch = "wasm32"))]
     heartbeat: heartbeat::Heartbeat,
 }
 impl RunState {
+    pub(super) fn is_parent_supervised_child(&self) -> bool {
+        matches!(
+            self.lease
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .authority,
+            LeaseAuthority::ParentSupervised(_)
+        )
+    }
     fn allocation(&self) -> u64 {
         self.lease
             .lock()
@@ -46,7 +76,7 @@ impl RunState {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .authority,
-            LeaseAuthority::ParentSupervised
+            LeaseAuthority::ParentSupervised(_)
         );
         if supervised {
             self.deny(FeaRunDenied::LicenseInvalid);
@@ -54,12 +84,18 @@ impl RunState {
         }
         self.check()
     }
-    pub(super) fn usage(&self) -> ResourceUsage {
+    fn resource_usage(&self) -> ResourceUsage {
         let elapsed = self.started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
         allocated_usage(
             self.request.allocated_cpu_millicores,
             self.elapsed_wall_millis.saturating_add(elapsed),
         )
+    }
+    pub(super) fn usage(&self) -> Result<FeaRunUsage, FeaRunDenied> {
+        Ok(FeaRunUsage {
+            completed_ops: self.accounting.ledger().snapshot()?.completed,
+            resources: self.resource_usage(),
+        })
     }
     pub(super) fn deny(&self, denied: FeaRunDenied) {
         let mut lease = self.lease.lock().unwrap_or_else(|e| e.into_inner());
@@ -71,28 +107,19 @@ impl RunState {
             .cancel(runmat_execution::CancellationReason::Deadline);
     }
     pub(super) fn check(&self) -> Result<(), FeaRunDenied> {
-        let usage = self.usage();
+        if let Err(cause) = self.accounting.ledger().snapshot() {
+            let denied = FeaRunDenied::from(cause);
+            self.deny(denied.clone());
+            return Err(denied);
+        }
         let mut lease = self.lease.lock().unwrap_or_else(|e| e.into_inner());
         let denied = lease.denied.clone().or_else(|| {
             if lease.settled {
                 Some(FeaRunDenied::LeaseExpired)
             } else {
-                match lease.authority {
-                    LeaseAuthority::Metered(budget)
-                        if runmat_time::unix_timestamp_ms()
-                            >= u128::from(budget.expires_at_unix_millis) =>
-                    {
-                        Some(FeaRunDenied::LeaseExpired)
-                    }
-                    LeaseAuthority::Metered(budget)
-                        if usage.cpu_core_millis >= budget.held_core_millis =>
-                    {
-                        Some(FeaRunDenied::AllowanceUsed {
-                            refills_at_unix_seconds: None,
-                        })
-                    }
-                    _ => None,
-                }
+                (runmat_time::unix_timestamp_ms()
+                    >= u128::from(lease.authority.budget().expires_at_unix_millis))
+                .then_some(FeaRunDenied::LeaseExpired)
             }
         });
         if let Some(denied) = denied {
@@ -105,19 +132,33 @@ impl RunState {
         Ok(())
     }
     fn renew(&self, budget: FeaRunBudget) -> Result<(), FeaRunDenied> {
-        // A renewal cannot revive an exhausted/expired original hold.
+        self.renew_for_role(budget, LeaseRole::Metered)
+    }
+    pub(super) fn renew_bound_budget(&self, budget: FeaRunBudget) -> Result<(), FeaRunDenied> {
+        let role = self
+            .lease
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .authority
+            .role();
+        self.renew_for_role(budget, role)
+    }
+    fn renew_for_role(&self, budget: FeaRunBudget, role: LeaseRole) -> Result<(), FeaRunDenied> {
+        // Renewal cannot revive an expired lease or change its spending cap.
         self.check()?;
         if let Err(denied) = budget.validate() {
             self.deny(denied.clone());
             return Err(denied);
         }
         let mut lease = self.lease.lock().unwrap_or_else(|e| e.into_inner());
-        let LeaseAuthority::Metered(previous) = lease.authority else {
+        if lease.authority.role() != role {
             drop(lease);
             self.deny(FeaRunDenied::LicenseInvalid);
             return Err(FeaRunDenied::LicenseInvalid);
-        };
-        if budget.held_core_millis < previous.held_core_millis
+        }
+        let previous = lease.authority.budget();
+        if budget.budget_ops != previous.budget_ops
+            || budget.granted_ops < previous.granted_ops
             || budget.expires_at_unix_millis < previous.expires_at_unix_millis
             || budget.heartbeat_millis != previous.heartbeat_millis
         {
@@ -125,7 +166,16 @@ impl RunState {
             self.deny(FeaRunDenied::LicenseInvalid);
             return Err(FeaRunDenied::LicenseInvalid);
         }
-        lease.authority = LeaseAuthority::Metered(budget);
+        if let Err(cause) = self.accounting.ledger().update_grant(budget.granted_ops) {
+            drop(lease);
+            let denied = FeaRunDenied::from(cause);
+            self.deny(denied.clone());
+            return Err(denied);
+        }
+        lease.authority = match role {
+            LeaseRole::Metered => LeaseAuthority::Metered(budget),
+            LeaseRole::ParentSupervised => LeaseAuthority::ParentSupervised(budget),
+        };
         drop(lease);
         self.check()
     }
@@ -138,7 +188,7 @@ impl RunState {
             .authority
         {
             LeaseAuthority::Metered(budget) => budget.heartbeat_millis,
-            LeaseAuthority::ParentSupervised => 30_000,
+            LeaseAuthority::ParentSupervised(budget) => budget.heartbeat_millis,
         }
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -151,36 +201,27 @@ impl RunState {
         else {
             return std::time::Duration::ZERO;
         };
-        let wall = self.usage().wall_millis;
-        // First integral wall millisecond whose rounded CPU charge reaches the hold.
-        let stop_wall = (u128::from(budget.held_core_millis.saturating_sub(1)) * 1000)
-            / u128::from(self.request.allocated_cpu_millicores)
-            + 1;
-        let hold_wait = stop_wall.saturating_sub(u128::from(wall));
         let expiry_wait = u128::from(budget.expires_at_unix_millis)
             .saturating_sub(runmat_time::unix_timestamp_ms());
-        std::time::Duration::from_millis(
-            hold_wait.min(expiry_wait).min(u128::from(u64::MAX)).max(1) as u64,
-        )
+        std::time::Duration::from_millis(expiry_wait.min(u128::from(u64::MAX)).max(1) as u64)
     }
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn report(&self) {
         if self.check().is_err() {
             return;
         }
-        let renewed = {
+        let renewed = (|| {
+            // Serialize both the cumulative snapshot and installing the reply.
+            // An earlier report must not overtake a pre-batch grant request.
             let permit = self.permit.lock().unwrap_or_else(|e| e.into_inner());
-            permit
-                .as_ref()
-                .map(|permit| permit.heartbeat(&self.usage()))
-        };
-        if let Some(result) = renewed {
-            match result {
-                Ok(budget) => {
-                    let _ = self.renew(budget);
-                }
-                Err(denied) => self.deny(denied),
+            if let Some(permit) = permit.as_ref() {
+                let budget = permit.heartbeat(&self.usage()?)?;
+                self.renew(budget)?;
             }
+            Ok::<_, FeaRunDenied>(())
+        })();
+        if let Err(denied) = renewed {
+            self.deny(denied);
         }
     }
     pub(super) fn token(&self) -> CancellationToken {
@@ -197,6 +238,9 @@ impl RunState {
         #[cfg(not(target_arch = "wasm32"))]
         self.heartbeat.stop();
         let checked = self.check();
+        // Outstanding numerical/child owners must retire before final usage
+        // can be certified. A failed close retains the original permit/grant.
+        let completed_ops = self.accounting.ledger().finish()?;
         let outcome = if checked.is_err() && outcome == FeaRunOutcome::Completed {
             FeaRunOutcome::Failed
         } else {
@@ -204,7 +248,11 @@ impl RunState {
         };
         let permit = self.permit.lock().unwrap_or_else(|e| e.into_inner()).take();
         self.lease.lock().unwrap_or_else(|e| e.into_inner()).settled = true;
-        let settled = permit.map_or(Ok(()), |permit| permit.settle(outcome, &self.usage()));
+        let usage = FeaRunUsage {
+            completed_ops,
+            resources: self.resource_usage(),
+        };
+        let settled = permit.map_or(Ok(()), |permit| permit.settle(outcome, &usage));
         checked.and(settled)
     }
 }
@@ -214,29 +262,6 @@ fn allocated_usage(millicores: u64, wall_millis: u64) -> ResourceUsage {
         wall_millis,
         cpu_core_millis: core_millis.min(u128::from(u64::MAX)) as u64,
         ..Default::default()
-    }
-}
-impl super::FeaRunDelegationSource for RunState {
-    fn snapshot(&self) -> Result<super::FeaRunDelegation, FeaRunDenied> {
-        self.check()?;
-        let lease = self.lease.lock().unwrap_or_else(|e| e.into_inner());
-        let LeaseAuthority::Metered(budget) = lease.authority else {
-            return Err(FeaRunDenied::LicenseInvalid);
-        };
-        let grant = super::FeaRunDelegation {
-            origin: lease.origin.clone().ok_or(FeaRunDenied::LicenseInvalid)?,
-            request: self.request.clone(),
-            budget,
-            elapsed_wall_millis: self.usage().wall_millis,
-            observed_at_unix_millis: runmat_time::unix_timestamp_ms().min(u128::from(u64::MAX))
-                as u64,
-            allocation_ceiling_millicores: lease.allocation_ceiling_millicores,
-        };
-        grant.validate()?;
-        Ok(grant)
-    }
-    fn cancellation_token(&self) -> CancellationToken {
-        self.token()
     }
 }
 impl Drop for RunState {
@@ -258,16 +283,48 @@ impl Drop for RunState {
     }
 }
 
-/// One admitted root; nested operations borrow its lease and cumulative CPU clock.
+/// One admitted root; nested operations share its lease and numerical ledger.
 pub struct FeaRunScope {
     state: Arc<RunState>,
-    owns_permit: bool,
+    ownership: ScopeOwnership,
+}
+#[derive(Clone, Copy)]
+enum ScopeOwnership {
+    Ledger,
+    Borrowed,
 }
 #[derive(Clone)]
 pub struct FeaRunControl {
     state: Arc<RunState>,
 }
 impl FeaRunControl {
+    /// Reserve disjoint child capacity under this root outside its scoped poll.
+    /// The host retains the returned owner until authenticated child retirement.
+    pub fn delegate(
+        &self,
+        maximum: OperationCount,
+    ) -> Result<super::FeaRunDelegatedGrant, FeaRunDenied> {
+        super::FeaRunDelegationSource::delegate(self.state.as_ref(), maximum)
+    }
+    /// Completed counts from a closed numerical owner. A live or outstanding
+    /// reservation cannot be certified as final usage by a host adapter.
+    pub fn settled_usage(&self) -> Result<FeaRunUsage, FeaRunDenied> {
+        if !self
+            .state
+            .lease
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .settled
+        {
+            return Err(runmat_simulation_usage::LedgerError::OutstandingWork.into());
+        }
+        self.state.usage()
+    }
+    /// Acquire cumulative capacity before reserving the next numerical batch.
+    /// The required total includes completed work and all parallel reservations.
+    pub fn request_grant(&self, required: OperationCount) -> Result<(), FeaRunDenied> {
+        self.state.request_grant(required)
+    }
     pub fn renew(&self, budget: FeaRunBudget) -> Result<(), FeaRunDenied> {
         self.state.renew(budget)
     }
@@ -277,7 +334,7 @@ impl FeaRunControl {
     pub fn check(&self) -> Result<(), FeaRunDenied> {
         self.state.check()
     }
-    pub fn usage(&self) -> ResourceUsage {
+    pub fn usage(&self) -> Result<FeaRunUsage, FeaRunDenied> {
         self.state.usage()
     }
 }
@@ -323,16 +380,16 @@ impl FeaRunScope {
         if child_cpu_millicores == 0 || child_cpu_millicores > grant.allocation_ceiling_millicores {
             return Err(FeaRunDenied::LicenseInvalid);
         }
-        let now = runmat_time::unix_timestamp_ms().min(u128::from(u64::MAX)) as u64;
-        let elapsed = grant
-            .elapsed_wall_millis
-            .checked_add(now.saturating_sub(grant.observed_at_unix_millis))
-            .ok_or(FeaRunDenied::LicenseInvalid)?;
+        let mut request = grant.request;
+        request.allocated_cpu_millicores = child_cpu_millicores;
+        // The inherited absolute expiry keeps the parent's deadline. Physical
+        // telemetry belongs to this child allocation, not the parent's earlier
+        // elapsed interval or CPU count. Work is charged through its ledger.
         let scope = Self::start(
-            grant.request,
+            request,
             LeaseAuthority::Metered(grant.budget),
             None,
-            elapsed,
+            0,
             false,
         )?;
         {
@@ -341,6 +398,24 @@ impl FeaRunScope {
             lease.allocation_ceiling_millicores = child_cpu_millicores;
         }
         scope.check()?;
+        Ok(scope)
+    }
+    /// Bind the already authenticated child's grant to its private parent
+    /// transport. The child reports usage but owns no second Server lease.
+    pub fn from_private_worker_permit(
+        grant: super::FeaRunDelegation,
+        child_cpu_millicores: u64,
+        permit: Box<dyn FeaRunPermit>,
+    ) -> Result<Self, FeaRunDenied> {
+        if permit.budget() != grant.budget {
+            return Err(FeaRunDenied::LicenseInvalid);
+        }
+        let scope = Self::from_private_worker_delegation(grant, child_cpu_millicores)?;
+        *scope
+            .state
+            .permit
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(permit);
         Ok(scope)
     }
     pub fn run_checked_sync<T>(&self, operation: impl FnOnce() -> T) -> Result<T, FeaRunDenied> {
@@ -432,15 +507,17 @@ impl FeaRunScope {
     /// Trusted WASM numerical-worker boundary only, after the installed parent
     /// validates the original lease/request/payload. The parent owns live quota,
     /// cancellation and physical worker termination. This role cannot publish,
-    /// renew or settle a lease and must be revalidated before returning bytes.
+    /// renew or settle a Server lease and must be revalidated before returning
+    /// bytes. Its authenticated parent may renew only the child numerical grant.
     pub fn from_parent_supervised_delegation(
         request: FeaRunRequest,
+        budget: FeaRunBudget,
         elapsed_wall_millis: u64,
     ) -> Result<Self, FeaRunDenied> {
         request.validate()?;
         Self::start(
             request,
-            LeaseAuthority::ParentSupervised,
+            LeaseAuthority::ParentSupervised(budget),
             None,
             elapsed_wall_millis,
             false,
@@ -451,8 +528,11 @@ impl FeaRunScope {
         authority: LeaseAuthority,
         permit: Option<Box<dyn FeaRunPermit>>,
         elapsed_wall_millis: u64,
-        owns_permit: bool,
+        report_usage: bool,
     ) -> Result<Self, FeaRunDenied> {
+        // Browser reporting is driven by its async host, not the native heartbeat thread.
+        #[cfg(target_arch = "wasm32")]
+        let _ = report_usage;
         let origin = if request.site == super::FeaRunSite::Local {
             Some(super::FeaRunOrigin::LocalLease {
                 run_id: request.run_id.clone(),
@@ -463,37 +543,45 @@ impl FeaRunScope {
                 .and_then(|provider| provider.origin())
         };
         let allocation_ceiling_millicores = request.allocated_cpu_millicores;
-        let state = Arc::new(RunState {
-            request,
-            started: runmat_time::Instant::now(),
-            elapsed_wall_millis,
-            permit: Mutex::new(permit),
-            lease: Mutex::new(LeaseState {
-                authority,
-                origin,
-                allocation_ceiling_millicores,
-                denied: None,
-                settled: false,
-            }),
-            cancellation: CancellationSource::new(),
-            inherited: crate::interrupt::current_interrupt(),
+        let budget = authority.budget();
+        budget.validate()?;
+        let accounting = UsageLedger::new(budget.budget_ops, budget.granted_ops)?;
+        let state = Arc::new_cyclic(move |owner: &std::sync::Weak<RunState>| {
             #[cfg(not(target_arch = "wasm32"))]
-            heartbeat: heartbeat::Heartbeat::default(),
+            let accounting = accounting.with_grant_renewal(owner.clone());
+            #[cfg(target_arch = "wasm32")]
+            let _ = owner; // Browser grant acquisition belongs to its async host.
+            RunState {
+                request,
+                started: runmat_time::Instant::now(),
+                elapsed_wall_millis,
+                permit: Mutex::new(permit),
+                lease: Mutex::new(LeaseState {
+                    authority,
+                    origin,
+                    allocation_ceiling_millicores,
+                    denied: None,
+                    settled: false,
+                }),
+                cancellation: CancellationSource::new(),
+                inherited: crate::interrupt::current_interrupt(),
+                accounting: UsageContext::new(Arc::new(accounting)),
+                #[cfg(not(target_arch = "wasm32"))]
+                heartbeat: heartbeat::Heartbeat::default(),
+            }
         });
-        if let LeaseAuthority::Metered(budget) = authority {
-            budget.validate().inspect_err(|denied| {
-                state.deny(denied.clone());
-            })?;
-        }
         state.check()?;
         #[cfg(not(target_arch = "wasm32"))]
         if matches!(authority, LeaseAuthority::Metered(_)) {
             state
                 .heartbeat
-                .start(Arc::downgrade(&state), owns_permit)
+                .start(Arc::downgrade(&state), report_usage)
                 .map_err(|_| FeaRunDenied::ServerUnreachable)?;
         }
-        Ok(Self { state, owns_permit })
+        Ok(Self {
+            state,
+            ownership: ScopeOwnership::Ledger,
+        })
     }
     fn nested(request: &FeaRunRequest) -> Result<Option<Self>, FeaRunDenied> {
         request.validate()?;
@@ -502,13 +590,14 @@ impl FeaRunScope {
         };
         if request.site != state.request.site
             || request.allocated_cpu_millicores > state.allocation()
+            || request.measurement_version != state.request.measurement_version
         {
             return Err(FeaRunDenied::LicenseInvalid);
         }
         state.check()?;
         Ok(Some(Self {
             state,
-            owns_permit: false,
+            ownership: ScopeOwnership::Borrowed,
         }))
     }
     pub fn current_allocation() -> Option<u64> {
@@ -556,11 +645,18 @@ impl FeaRunScope {
     pub fn check(&self) -> Result<(), FeaRunDenied> {
         self.state.check()
     }
-    pub fn usage(&self) -> ResourceUsage {
+    pub fn usage(&self) -> Result<FeaRunUsage, FeaRunDenied> {
         self.state.usage()
     }
     pub fn renew(&self, budget: FeaRunBudget) -> Result<(), FeaRunDenied> {
         self.state.renew(budget)
+    }
+    /// Trusted parent transport only. The adapter must bind this reply to its
+    /// retained child reservation before allowing more numerical execution.
+    /// This cannot change the root cap or promote the child to publication owner.
+    pub fn renew_parent_supervised(&self, budget: FeaRunBudget) -> Result<(), FeaRunDenied> {
+        self.state
+            .renew_for_role(budget, LeaseRole::ParentSupervised)
     }
     pub fn deny(&self, denied: FeaRunDenied) {
         self.state.deny(denied);
@@ -578,17 +674,15 @@ impl FeaRunScope {
         }
     }
     pub fn settle(mut self, outcome: FeaRunOutcome) -> Result<(), FeaRunDenied> {
-        let owns = std::mem::replace(&mut self.owns_permit, false);
-        if owns {
-            self.state.settle(outcome)
-        } else {
-            self.state.check()
+        match std::mem::replace(&mut self.ownership, ScopeOwnership::Borrowed) {
+            ScopeOwnership::Ledger => self.state.settle(outcome),
+            ScopeOwnership::Borrowed => self.state.check(),
         }
     }
 }
 impl Drop for FeaRunScope {
     fn drop(&mut self) {
-        if self.owns_permit {
+        if matches!(self.ownership, ScopeOwnership::Ledger) {
             let _ = self.state.settle(FeaRunOutcome::Failed);
         }
     }

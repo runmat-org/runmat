@@ -64,6 +64,18 @@ The repository contains substantial structural operator, formulation, observatio
 
 A successful run shows that its numerical acceptance gates passed; it does not by itself validate the formulation for a use. The run's numerical and evidence receipts are authoritative.
 
+### Alpha Scientific Evidence Limits
+
+Three registered refinement checks are outside their acceptance thresholds for the 0.7.0 alpha release:
+
+| Check | Unresolved observation |
+| --- | --- |
+| Local acoustic radiation, quadratic elements | The coarse-grid velocity refinement ratio is 2.954, below the registered requirement of greater than 3. The finer-grid witness does not replace this gate. |
+| Nonlinear solid, Tet4 moving yield front | One coarse accepted-history stress error is 5.43%, above the registered 5% limit. |
+| Nonlinear solid, Tet10 moving yield front | Sampled internal-variable errors are not monotonic over the registered refinement sequence. Independent integral/norm checks do not substitute for the original pointwise gate. |
+
+These are measured fixture limitations, not general error bounds or completed formulation validation. Their assertions are unchanged and remain in the ordinary geometry/analysis test group. Refinement and independent references remain necessary when assessing an engineering use.
+
 ## Meshing Boundary
 
 Exact meshing is available for admitted STEP, IGES, and BREP solids through the qualified OCCT capability. Direct and in-study meshing share canonical request and evidence contracts. The `.fea` language currently exposes global tetrahedral order, target size, chordal deviation, grading ratio, and deterministic seed; it does not expose boundary layers, local refinement fields, hybrid element families, or user-selectable algorithms.

@@ -83,7 +83,7 @@ mod construction_tests;
 #[cfg(test)]
 mod tests;
 pub use algebra::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix};
-pub(crate) use reaction::solve_constraint_multipliers;
+pub(crate) use reaction::{solve_constraint_multipliers_with_owner, ConstraintMultiplierError};
 
 pub use plan::{
     constraint_authored_workspace_profile, constraint_plan_finalization_workspace_profile,

@@ -1,10 +1,11 @@
 //! MINRES (Paige–Saunders) for Hermitian, possibly indefinite systems with an HPD preconditioner.
 
+use super::legacy_usage as measured;
+use super::usage::ScalarWork;
 use super::{
     relative, split_work, tolerance, ApplyStatus, KrylovOps, KrylovOptions, KrylovReport, StopFlag,
 };
 use crate::error::SolverResult;
-use crate::par;
 use crate::scalar::Scalar;
 
 pub fn minres_workspace_len(n: usize, options: &KrylovOptions) -> usize {
@@ -39,8 +40,10 @@ pub async fn minres_async<T: Scalar, O: KrylovOps<T>>(
         operator: 0,
         preconditioner: 0,
     };
-    let rhs_norm = par::norm2(b);
-    let tol = tolerance(options, rhs_norm);
+    let rhs_norm = measured::norm(ops, b).await?;
+    let tol =
+        measured::scalar::<T, _, _>(ops, ScalarWork::NormScale, || tolerance(options, rhs_norm))
+            .await?;
     let mut history = Vec::new();
     let mut iteration = 0usize;
     let mut verification_rounds = 0usize;
@@ -55,9 +58,9 @@ pub async fn minres_async<T: Scalar, O: KrylovOps<T>>(
         } else {
             ops.apply_operator(x, y).await?;
             counters.operator += 1;
-            par::sub_into(b, y, r1);
+            measured::sub(ops, b, y, r1).await?;
         }
-        true_residual = par::norm2(r1);
+        true_residual = measured::norm(ops, r1).await?;
         if options.record_history && history.is_empty() {
             history.push(true_residual);
         }
@@ -85,19 +88,20 @@ pub async fn minres_async<T: Scalar, O: KrylovOps<T>>(
         } else {
             y.copy_from_slice(r1);
         }
-        let beta1_sq = par::dot(r1, y).re();
+        let beta1_sq = measured::dot(ops, r1, y).await?.re();
         if !beta1_sq.is_finite() || beta1_sq < 0.0 {
             flag = StopFlag::PreconditionerFailure;
             break 'restart;
         }
-        let beta1 = beta1_sq.sqrt();
+        let beta1 = measured::scalar::<T, _, _>(ops, ScalarWork::Norm, || beta1_sq.sqrt()).await?;
         if beta1 == 0.0 {
             flag = StopFlag::Converged;
             break 'restart;
         }
         // The preconditioned residual estimate and the true residual are related by
         // ‖r‖ ≈ (‖r₀‖ / β₁) · φ̄; scale the stopping test accordingly.
-        let scale = true_residual / beta1;
+        let scale =
+            measured::scalar::<T, _, _>(ops, ScalarWork::Ratio, || true_residual / beta1).await?;
         r2.copy_from_slice(r1);
         w.iter_mut().for_each(|value| *value = T::zero());
         w2.iter_mut().for_each(|value| *value = T::zero());
@@ -107,20 +111,26 @@ pub async fn minres_async<T: Scalar, O: KrylovOps<T>>(
         let mut first = true;
         while iteration < options.max_iterations {
             iteration += 1;
-            ops.checkpoint(iteration, relative(phibar * scale, rhs_norm))
+            let checkpoint_residual =
+                measured::scalar::<T, _, _>(ops, ScalarWork::MinresCheckpoint, || {
+                    relative(phibar * scale, rhs_norm)
+                })
                 .await?;
-            let s = 1.0 / beta;
-            for i in 0..n {
-                v[i] = y[i].scale(s);
-            }
+            ops.checkpoint(iteration, checkpoint_residual).await?;
+            let s = measured::scalar::<T, _, _>(ops, ScalarWork::Ratio, || 1.0 / beta).await?;
+            measured::real_scale(ops, y, s, v).await?;
             ops.apply_operator(v, y).await?;
             counters.operator += 1;
             if !first {
-                par::axpy(T::from_f64(-beta / oldb), r1, y);
+                let coefficient =
+                    measured::scalar::<T, _, _>(ops, ScalarWork::Ratio, || -beta / oldb).await?;
+                measured::real_axpy(ops, coefficient, r1, y).await?;
             }
             first = false;
-            let alfa = par::dot(v, y).re();
-            par::axpy(T::from_f64(-alfa / beta), r2, y);
+            let alfa = measured::dot(ops, v, y).await?.re();
+            let coefficient =
+                measured::scalar::<T, _, _>(ops, ScalarWork::Ratio, || -alfa / beta).await?;
+            measured::real_axpy(ops, coefficient, r2, y).await?;
             r1.copy_from_slice(r2);
             r2.copy_from_slice(y);
             if ops.has_preconditioner() {
@@ -133,31 +143,46 @@ pub async fn minres_async<T: Scalar, O: KrylovOps<T>>(
                 y.copy_from_slice(r2);
             }
             oldb = beta;
-            let beta_sq = par::dot(r2, y).re();
+            let beta_sq = measured::dot(ops, r2, y).await?.re();
             if !beta_sq.is_finite() || beta_sq < 0.0 {
                 flag = StopFlag::PreconditionerFailure;
                 break 'restart;
             }
-            beta = beta_sq.sqrt();
+            beta = measured::scalar::<T, _, _>(ops, ScalarWork::Norm, || beta_sq.sqrt()).await?;
             let oldeps = epsln;
-            let delta = cs * dbar + sn * alfa;
-            let gbar = sn * dbar - cs * alfa;
-            epsln = sn * beta;
-            dbar = -cs * beta;
-            let gamma = gbar.hypot(beta).max(f64::EPSILON);
-            cs = gbar / gamma;
-            sn = beta / gamma;
-            let phi = cs * phibar;
-            phibar *= sn;
-            let denom = 1.0 / gamma;
+            let (delta, denom, phi) =
+                measured::scalar::<T, _, _>(ops, ScalarWork::MinresRotation, || {
+                    let delta = cs * dbar + sn * alfa;
+                    let gbar = sn * dbar - cs * alfa;
+                    epsln = sn * beta;
+                    dbar = -cs * beta;
+                    let gamma = gbar.hypot(beta).max(f64::EPSILON);
+                    cs = gbar / gamma;
+                    sn = beta / gamma;
+                    let phi = cs * phibar;
+                    phibar *= sn;
+                    (delta, 1.0 / gamma, phi)
+                })
+                .await?;
             // w1 <- w2, w2 <- w, w <- (v - oldeps w1 - delta w2) / gamma
             w1.copy_from_slice(w2);
             w2.copy_from_slice(w);
-            for i in 0..n {
-                w[i] = (v[i] - w1[i].scale(oldeps) - w2[i].scale(delta)).scale(denom);
-            }
-            par::axpy(T::from_f64(phi), w, x);
-            let estimate = phibar * scale;
+            measured::minres_direction(
+                ops,
+                v,
+                w1,
+                w2,
+                measured::MinresDirectionCoefficients {
+                    oldeps,
+                    delta,
+                    denom,
+                },
+                w,
+            )
+            .await?;
+            measured::real_axpy(ops, phi, w, x).await?;
+            let estimate =
+                measured::scalar::<T, _, _>(ops, ScalarWork::NormScale, || phibar * scale).await?;
             if options.record_history {
                 history.push(estimate);
             }
@@ -184,8 +209,8 @@ pub async fn minres_async<T: Scalar, O: KrylovOps<T>>(
             // Compare the last iterate against the best recorded one.
             ops.apply_operator(x, y).await?;
             counters.operator += 1;
-            par::sub_into(b, y, r1);
-            let last = par::norm2(r1);
+            measured::sub(ops, b, y, r1).await?;
+            let last = measured::norm(ops, r1).await?;
             if last > best_residual {
                 x.copy_from_slice(best_x);
                 iteration = best_iteration;
@@ -193,13 +218,22 @@ pub async fn minres_async<T: Scalar, O: KrylovOps<T>>(
         }
         ops.apply_operator(x, y).await?;
         counters.operator += 1;
-        par::sub_into(b, y, r1);
-        true_residual = par::norm2(r1);
+        measured::sub(ops, b, y, r1).await?;
+        true_residual = measured::norm(ops, r1).await?;
     }
     Ok(KrylovReport {
         flag,
         iterations: iteration,
-        relative_residual: relative(true_residual, rhs_norm),
+        relative_residual: measured::scalar::<T, _, _>(
+            ops,
+            if rhs_norm > 0.0 {
+                ScalarWork::Ratio
+            } else {
+                ScalarWork::Zero
+            },
+            || relative(true_residual, rhs_norm),
+        )
+        .await?,
         residual_norm: true_residual,
         rhs_norm,
         residual_history: history,

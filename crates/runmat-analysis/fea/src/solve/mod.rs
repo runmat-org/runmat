@@ -1,5 +1,6 @@
 pub mod accelerator;
 mod affine;
+pub(crate) use affine::{solve_affine_constraint_system_with_kind_owned, AffineOwnedSolveOptions};
 pub mod backend;
 pub mod buckling;
 pub mod certificate;
@@ -20,6 +21,9 @@ pub(crate) mod shared_sparse;
 pub use shared_sparse::with_solver_plan;
 mod static_balance;
 pub use static_balance::StructuralStaticBalanceEvidence;
-pub(crate) use static_balance::{recover_structural_static_balance, StructuralStaticBalance};
+pub(crate) use static_balance::{
+    recover_structural_static_balance, recover_structural_static_balance_with_capacity,
+    StructuralStaticBalance,
+};
 pub mod transient;
 pub mod uniqueness;

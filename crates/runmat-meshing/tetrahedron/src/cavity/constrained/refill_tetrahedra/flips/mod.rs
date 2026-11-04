@@ -27,13 +27,16 @@ pub(in super::super) fn improve_refill_with_local_flips_with_diagnostics(
     node_coordinates: &BTreeMap<u32, Point3>,
     refill: &ConstrainedCavityRefill,
     options: ConstrainedCavityRefillOptions,
-) -> (
-    Option<ConstrainedCavityRefill>,
-    LocalTetrahedronReconnectionDiagnostics,
-) {
+) -> Result<
+    (
+        Option<ConstrainedCavityRefill>,
+        LocalTetrahedronReconnectionDiagnostics,
+    ),
+    ConstrainedCavityValidationError,
+> {
     let mut diagnostics = LocalTetrahedronReconnectionDiagnostics::default();
     if refill.tetrahedra.len() < 2 {
-        return (None, diagnostics);
+        return Ok((None, diagnostics));
     }
     let mut coordinates = node_coordinates.clone();
     for node in &refill.inserted_nodes {
@@ -65,12 +68,15 @@ pub(in super::super) fn improve_refill_with_local_flips_with_diagnostics(
                 &coordinates,
                 thresholds,
             ) {
+                if let LocalTetrahedronFlipError::Accounting(cause) = &err {
+                    return Err(ConstrainedCavityValidationError::Accounting(*cause));
+                }
                 diagnostics.record_rejection(local_tetrahedron_flip_error_reason(&err));
                 continue;
             }
 
             let Some(candidate) =
-                refill_from_local_flip_candidate(cavity, &coordinates, refill, &flip, options)
+                refill_from_local_flip_candidate(cavity, &coordinates, refill, &flip, options)?
             else {
                 diagnostics.record_rejection("refill_validation");
                 continue;
@@ -118,6 +124,9 @@ pub(in super::super) fn improve_refill_with_local_flips_with_diagnostics(
                         &coordinates,
                         thresholds,
                     ) {
+                        if let LocalTetrahedronFlipError::Accounting(cause) = &err {
+                            return Err(ConstrainedCavityValidationError::Accounting(*cause));
+                        }
                         diagnostics.record_rejection(local_tetrahedron_flip_error_reason(&err));
                         continue;
                     }
@@ -127,7 +136,8 @@ pub(in super::super) fn improve_refill_with_local_flips_with_diagnostics(
                         refill,
                         &flip,
                         options,
-                    ) else {
+                    )?
+                    else {
                         diagnostics.record_rejection("refill_validation");
                         continue;
                     };
@@ -149,7 +159,7 @@ pub(in super::super) fn improve_refill_with_local_flips_with_diagnostics(
     if best.is_some() {
         diagnostics.accepted_reconnection_count = 1;
     }
-    (best, diagnostics)
+    Ok((best, diagnostics))
 }
 
 impl LocalTetrahedronReconnectionDiagnostics {
@@ -168,7 +178,7 @@ fn refill_from_local_flip_candidate(
     refill: &ConstrainedCavityRefill,
     flip: &LocalTetrahedronFlipCandidate,
     options: ConstrainedCavityRefillOptions,
-) -> Option<ConstrainedCavityRefill> {
+) -> Result<Option<ConstrainedCavityRefill>, ConstrainedCavityValidationError> {
     let removed_indices = flip
         .removed_tetrahedron_ids
         .iter()
@@ -178,7 +188,7 @@ fn refill_from_local_flip_candidate(
         .iter()
         .any(|index| *index >= refill.tetrahedra.len())
     {
-        return None;
+        return Ok(None);
     }
     let mut candidate_tetrahedra = refill
         .tetrahedra
@@ -197,26 +207,43 @@ fn refill_from_local_flip_candidate(
                 .iter()
                 .any(|tetrahedron| sorted_tetrahedron_nodes(tetrahedron.node_ids) == key)
         {
-            return None;
+            return Ok(None);
         }
         let mut points = [[0.0; 3]; 4];
         for (point, node_id) in points.iter_mut().zip(node_ids) {
-            *point = *coordinates.get(node_id)?;
+            let Some(value) = coordinates.get(node_id) else {
+                return Ok(None);
+            };
+            *point = *value;
         }
         let tetrahedron =
-            raw_refill_tetrahedron_with_rejection_reason(*node_ids, points, options).ok()?;
+            match raw_refill_tetrahedron_with_rejection_reason(*node_ids, points, options) {
+                Ok(tetrahedron) => tetrahedron,
+                Err(RefillTetrahedronError::Rejected(_)) => return Ok(None),
+                Err(RefillTetrahedronError::Accounting(cause)) => {
+                    return Err(ConstrainedCavityValidationError::Accounting(cause))
+                }
+            };
         created_tetrahedra.push(tetrahedron);
     }
     candidate_tetrahedra.extend(created_tetrahedra);
 
-    let mut candidate = refill_from_tetrahedra(
+    let candidate = match refill_from_tetrahedra(
         cavity,
         candidate_tetrahedra,
         options.volume_relative_tolerance,
-    )
-    .ok()?;
+    ) {
+        Ok(candidate) => Some(candidate),
+        Err(ConstrainedCavityValidationError::Accounting(cause)) => {
+            return Err(ConstrainedCavityValidationError::Accounting(cause));
+        }
+        Err(_) => None,
+    };
+    let Some(mut candidate) = candidate else {
+        return Ok(None);
+    };
     candidate.inserted_nodes = refill.inserted_nodes.clone();
-    Some(candidate)
+    Ok(Some(candidate))
 }
 
 pub(in super::super) fn refill_is_better(
@@ -240,6 +267,7 @@ pub(in super::super) fn refill_is_better(
 
 fn local_tetrahedron_flip_error_reason(error: &LocalTetrahedronFlipError) -> &'static str {
     match error {
+        LocalTetrahedronFlipError::Accounting(_) => "accounting_failure",
         LocalTetrahedronFlipError::DegenerateTetrahedron { .. } => "degenerate_tetrahedron",
         LocalTetrahedronFlipError::NoSharedFace => "no_shared_face",
         LocalTetrahedronFlipError::NoSharedEdge => "no_shared_edge",

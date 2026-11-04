@@ -1,6 +1,9 @@
 //! Hermetic production-CLI authentication and the current three-route lease contract.
 //! This is a local test Server, not an admission bypass in the executable.
-use serde_json::{json, Value};
+use serde_json::Value;
+#[path = "fea_admission/operations.rs"]
+mod operations;
+use operations::Lease;
 use std::{
     collections::HashMap,
     io::{Read, Write},
@@ -20,14 +23,6 @@ const ORG: &str = "org_00000000000000000000000000000001";
 pub struct AdmissionServer {
     stop: Arc<AtomicBool>,
     task: Option<thread::JoinHandle<()>>,
-}
-struct Lease {
-    run_id: String,
-    allocation: u64,
-    held: u64,
-    cpu: u64,
-    wall: u64,
-    charged: Option<u64>,
 }
 
 impl AdmissionServer {
@@ -51,6 +46,9 @@ impl AdmissionServer {
             while !stopping.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut socket, _)) => {
+                        // Accepted sockets can inherit the listener's nonblocking mode.
+                        // Request I/O uses the bounded timeouts below instead.
+                        socket.set_nonblocking(false).unwrap();
                         socket
                             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                             .unwrap();
@@ -151,92 +149,11 @@ fn executes_fea(command: &Command) -> bool {
     })
 }
 
-fn error(status: &'static str, code: &str) -> (&'static str, Value) {
-    (status, json!({"error":{"code":code}}))
-}
 fn handle(socket: &mut TcpStream, leases: &mut HashMap<String, Lease>) -> (&'static str, Value) {
     let Some((path, body)) = request(socket) else {
-        return error("400 Bad Request", "fea.invalid_request");
+        return operations::invalid();
     };
-    let expiry = || (chrono::Utc::now() + chrono::Duration::minutes(2)).to_rfc3339();
-    if path == format!("/v1/orgs/{ORG}/fea/leases") {
-        let Some(run_id) = body["runId"].as_str() else {
-            return error("422 Unprocessable Entity", "fea.invalid_request");
-        };
-        let Some(allocation) = body["allocatedCpuMillicores"]
-            .as_u64()
-            .filter(|n| (1..=4_096_000).contains(n))
-        else {
-            return error("422 Unprocessable Entity", "fea.invalid_request");
-        };
-        let id = leases
-            .iter()
-            .find(|(_, lease)| lease.run_id == run_id)
-            .map(|(id, _)| id.clone())
-            .unwrap_or_else(|| {
-                format!("fealease_00000000-0000-0000-0000-{:012x}", leases.len() + 1)
-            });
-        assert!(leases.len() < 128);
-        let lease = leases.entry(id.clone()).or_insert_with(|| Lease {
-            run_id: run_id.into(),
-            allocation,
-            held: allocation * 120,
-            cpu: 0,
-            wall: 0,
-            charged: None,
-        });
-        assert_eq!(
-            lease.allocation, allocation,
-            "idempotent start changed allocation"
-        );
-        return (
-            "200 OK",
-            json!({"leaseId":id,"heldCoreMillis":lease.held,"expiresAt":expiry(),"heartbeatSeconds":30}),
-        );
-    }
-    let Some(tail) = path.strip_prefix("/v1/fea/leases/") else {
-        return error("404 Not Found", "fea.lease_not_found");
-    };
-    let Some((id, operation)) = tail.split_once('/') else {
-        return error("404 Not Found", "fea.lease_not_found");
-    };
-    let Some(lease) = leases.get_mut(id) else {
-        return error("404 Not Found", "fea.lease_not_found");
-    };
-    let (Some(cpu), Some(wall)) = (body["cpuCoreMillis"].as_u64(), body["wallMillis"].as_u64())
-    else {
-        return error("422 Unprocessable Entity", "fea.invalid_request");
-    };
-    assert!(
-        cpu >= lease.cpu && wall >= lease.wall,
-        "usage must be cumulative"
-    );
-    assert_eq!(
-        u128::from(cpu),
-        (u128::from(lease.allocation) * u128::from(wall)).div_ceil(1000),
-        "usage must report allocated CPU times original wall time"
-    );
-    lease.cpu = cpu;
-    lease.wall = wall;
-    match operation {
-        "usage" if lease.charged.is_none() => {
-            lease.held = lease.held.max(cpu + lease.allocation * 120);
-            (
-                "200 OK",
-                json!({"heldCoreMillis":lease.held,"expiresAt":expiry()}),
-            )
-        }
-        "settle"
-            if matches!(
-                body["outcome"].as_str(),
-                Some("completed" | "cancelled" | "failed")
-            ) =>
-        {
-            let charged = *lease.charged.get_or_insert(cpu.min(lease.held));
-            ("200 OK", json!({"chargedCoreMillis":charged}))
-        }
-        _ => error("404 Not Found", "fea.lease_not_found"),
-    }
+    operations::handle(&path, body, leases)
 }
 fn request(socket: &mut TcpStream) -> Option<(String, Value)> {
     let mut bytes = Vec::new();

@@ -10,9 +10,10 @@ use crate::builtins::common::path_search::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{BuiltinErrorDescriptor, RuntestsOption};
 pub use runmat_builtins::{
-    RUNTESTS_DESCRIPTOR, RUNTESTS_ERROR_FILE_READ, RUNTESTS_ERROR_INVALID_INPUT,
-    RUNTESTS_ERROR_REQUIRES_EXECUTOR, RUNTESTS_ERROR_TARGET_NOT_FOUND,
-    RUNTESTS_ERROR_UNSUPPORTED_OPTION, RUNTESTS_INTEGER_CAPABILITIES,
+    RUNTESTS_DESCRIPTOR, RUNTESTS_ERROR_FILE_READ, RUNTESTS_ERROR_INSUFFICIENT_RESOURCE,
+    RUNTESTS_ERROR_INVALID_INPUT, RUNTESTS_ERROR_REQUIRES_EXECUTOR,
+    RUNTESTS_ERROR_TARGET_NOT_FOUND, RUNTESTS_ERROR_UNSUPPORTED_OPTION,
+    RUNTESTS_INTEGER_CAPABILITIES,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::RUNTESTS_BUILTIN_NAME;
@@ -68,10 +69,10 @@ pub async fn resolve_runtests_targets(
         .and_then(|runtime| runtime.service_ports().parallel())
         .is_some_and(|port| port.placement_resources().memory_available_bytes.is_some())
     {
-        return Err(build_runtime_error("runtests: discovery, source, and result storage has no certified finite resource bound")
-            .with_builtin("runtests")
-            .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
-            .build());
+        return Err(runtests_error_detail(
+            &RUNTESTS_ERROR_INSUFFICIENT_RESOURCE,
+            "",
+        ));
     }
     let options = parse_options_retained(&args)?;
     let mut paths = BTreeSet::new();

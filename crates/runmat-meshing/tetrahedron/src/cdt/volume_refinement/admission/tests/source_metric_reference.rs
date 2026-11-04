@@ -22,7 +22,8 @@ pub(super) fn legacy_source_metric_floor(
                 .canonical_value(),
             candidate.node.coordinates_m.canonical_value(),
         ];
-        let Some(geometry) = evaluate_tetrahedron_geometry(points, candidate.resolved_metric)
+        let Some(geometry) =
+            evaluate_tetrahedron_geometry(points, candidate.resolved_metric).unwrap()
         else {
             return false;
         };

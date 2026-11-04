@@ -1,5 +1,7 @@
 //! Physical equilibrium and work balance for a completed structural static solve.
 
+use crate::algebra::{capacity::measured, coercivity::NumericalCapacityError};
+use runmat_simulation_usage::{AsyncCapacityOwner, LedgerError, OperationCount, UsageCategory};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -8,11 +10,13 @@ use crate::{
     assembly::AssemblySummary,
     planning::resource::{LocalExecutionPlan, ScopedLocalExecutionError},
     solve::reaction::{
-        recover_structural_reaction_scoped, ReactionWorkError, StructuralReactionError,
+        recover_structural_reaction_with_capacity, ReactionWorkError, StructuralReactionError,
     },
 };
 
 const RELATIVE_TOLERANCE: f64 = 1.0e-8;
+#[cfg(test)]
+use super::reaction::recover_structural_reaction_scoped;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,6 +41,8 @@ pub(crate) struct StructuralStaticBalance {
 
 #[derive(Debug, Error)]
 pub(crate) enum StructuralStaticBalanceError {
+    #[error("structural balance numerical accounting failed: {0}")]
+    Accounting(#[from] LedgerError),
     #[error("structural static balance state has the wrong dimension or a nonfinite value")]
     InvalidState,
     #[error("structural static reaction recovery failed: {0}")]
@@ -48,20 +54,33 @@ pub(crate) enum StructuralStaticBalanceError {
 }
 
 impl StructuralStaticBalanceError {
+    pub(crate) fn into_run_error(self) -> crate::contracts::FeaRunError {
+        match self {
+            Self::Accounting(cause)
+            | Self::Scoped(ScopedSpmvError::Usage(cause))
+            | Self::Reaction(StructuralReactionError::Accounting(cause)) => {
+                crate::contracts::FeaRunError::Usage(cause)
+            }
+            error if error.is_cancelled() => crate::contracts::FeaRunError::Cancelled,
+            other => crate::contracts::FeaRunError::Assembly(other.to_string()),
+        }
+    }
     pub(crate) fn is_cancelled(&self) -> bool {
         matches!(
             self,
-            Self::Scoped(ScopedSpmvError::Execution(
-                ScopedLocalExecutionError::Work {
-                    source: SpmvWorkError::Cancelled,
-                    ..
-                }
-            )) | Self::Reaction(StructuralReactionError::Scoped(
-                ScopedLocalExecutionError::Work {
-                    source: ReactionWorkError::Cancelled,
-                    ..
-                }
-            ))
+            Self::Reaction(StructuralReactionError::Cancelled)
+                | Self::Scoped(ScopedSpmvError::Execution(
+                    ScopedLocalExecutionError::Work {
+                        source: SpmvWorkError::Cancelled,
+                        ..
+                    }
+                ))
+                | Self::Reaction(StructuralReactionError::Scoped(
+                    ScopedLocalExecutionError::Work {
+                        source: ReactionWorkError::Cancelled,
+                        ..
+                    }
+                ))
         )
     }
 }
@@ -118,43 +137,149 @@ pub(crate) fn recover_structural_static_balance(
     displacement: &[f64],
     local_execution: LocalExecutionPlan,
 ) -> Result<StructuralStaticBalance, StructuralStaticBalanceError> {
+    use futures::FutureExt;
+    recover_structural_static_balance_with_capacity::<std::convert::Infallible>(
+        summary,
+        displacement,
+        local_execution,
+        None,
+    )
+    .now_or_never()
+    .expect("native balance capacity is immediately ready")
+    .map_err(|error| match error {
+        NumericalCapacityError::Numerical(error) => error,
+        NumericalCapacityError::Admission(never) => match never {},
+    })
+}
+
+pub(crate) async fn recover_structural_static_balance_with_capacity<A>(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+    local_execution: LocalExecutionPlan,
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<StructuralStaticBalance, NumericalCapacityError<StructuralStaticBalanceError, A>> {
     if displacement.len() != summary.dof_count
         || summary.physical_load.len() != summary.dof_count
         || displacement.iter().any(|value| !value.is_finite())
         || summary.physical_load.iter().any(|value| !value.is_finite())
     {
-        return Err(StructuralStaticBalanceError::InvalidState);
+        return Err(StructuralStaticBalanceError::InvalidState.into());
     }
     // The structural solve plan already charges whole-vector scratch and scoped
     // CSR output. Reuse it here; there is no second pool or per-worker full vector.
-    let internal_force = spmv_scoped(
-        summary.operator.operators().stiffness(),
-        displacement,
-        local_execution,
-    )?;
-    let equilibrium_residual =
-        vector_sub_scoped(&internal_force, &summary.physical_load, local_execution)?;
-    let reaction =
-        recover_structural_reaction_scoped(summary, &equilibrium_residual, local_execution)?;
-    let free_residual = vector_sub_scoped(&equilibrium_residual, &reaction, local_execution)?;
-    let equilibrium_residual_norm_newtons = norm(&free_residual, local_execution)?;
-    let equilibrium_scale_newtons = norm(&internal_force, local_execution)?
-        .max(norm(&summary.physical_load, local_execution)?)
-        .max(norm(&reaction, local_execution)?);
-    let equilibrium_relative_error =
-        relative_error(equilibrium_residual_norm_newtons, equilibrium_scale_newtons);
-    let internal_work_joules = dot_scoped(displacement, &internal_force, local_execution)?;
-    let applied_load_work_joules =
-        dot_scoped(displacement, &summary.physical_load, local_execution)?;
-    let constraint_work_joules = dot_scoped(displacement, &reaction, local_execution)?;
-    let work_balance_residual_joules =
-        internal_work_joules - applied_load_work_joules - constraint_work_joules;
+    let matrix = summary.operator.operators().stiffness();
+    let mut spmv_work = OperationCount::ZERO;
+    for row in 0..matrix.rows() {
+        spmv_work = spmv_work
+            .checked_add(dot_work(matrix.pattern().row_range(row).len())?)
+            .map_err(LedgerError::from)
+            .map_err(StructuralStaticBalanceError::from)?;
+    }
+    let length = count(displacement.len())?;
+    let dot_work = dot_work(displacement.len())?;
+    let norm_work = dot_work
+        .checked_add(OperationCount::from_operations(1))
+        .map_err(LedgerError::from)
+        .map_err(StructuralStaticBalanceError::from)?;
+    let internal_force = measured(owner, UsageCategory::Solve, spmv_work, || {
+        spmv_scoped(
+            summary.operator.operators().stiffness(),
+            displacement,
+            local_execution,
+        )
+        .map_err(StructuralStaticBalanceError::from)
+    })
+    .await?;
+    let equilibrium_residual = measured(owner, UsageCategory::Solve, length, || {
+        vector_sub_scoped(&internal_force, &summary.physical_load, local_execution)
+            .map_err(StructuralStaticBalanceError::from)
+    })
+    .await?;
+    let reaction = recover_structural_reaction_with_capacity(
+        summary,
+        &equilibrium_residual,
+        Some(local_execution),
+        owner,
+    )
+    .await
+    .map_err(|error| error.map_numerical(StructuralStaticBalanceError::from))?;
+    let free_residual = measured(owner, UsageCategory::Solve, length, || {
+        vector_sub_scoped(&equilibrium_residual, &reaction, local_execution)
+            .map_err(StructuralStaticBalanceError::from)
+    })
+    .await?;
+    let equilibrium_residual_norm_newtons =
+        measured(owner, UsageCategory::Solve, norm_work, || {
+            norm(&free_residual, local_execution).map_err(StructuralStaticBalanceError::from)
+        })
+        .await?;
+    let internal_norm = measured(owner, UsageCategory::Solve, norm_work, || {
+        norm(&internal_force, local_execution).map_err(StructuralStaticBalanceError::from)
+    })
+    .await?;
+    let load_norm = measured(owner, UsageCategory::Solve, norm_work, || {
+        norm(&summary.physical_load, local_execution).map_err(StructuralStaticBalanceError::from)
+    })
+    .await?;
+    let reaction_norm = measured(owner, UsageCategory::Solve, norm_work, || {
+        norm(&reaction, local_execution).map_err(StructuralStaticBalanceError::from)
+    })
+    .await?;
+    let equilibrium_scale_newtons = internal_norm.max(load_norm).max(reaction_norm);
+    let equilibrium_relative_error = measured(
+        owner,
+        UsageCategory::Solve,
+        OperationCount::from_operations(u64::from(equilibrium_scale_newtons != 0.0)),
+        || {
+            Ok::<_, StructuralStaticBalanceError>(relative_error(
+                equilibrium_residual_norm_newtons,
+                equilibrium_scale_newtons,
+            ))
+        },
+    )
+    .await?;
+    let internal_work_joules = measured(owner, UsageCategory::Solve, dot_work, || {
+        dot_scoped(displacement, &internal_force, local_execution)
+            .map_err(StructuralStaticBalanceError::from)
+    })
+    .await?;
+    let applied_load_work_joules = measured(owner, UsageCategory::Solve, dot_work, || {
+        dot_scoped(displacement, &summary.physical_load, local_execution)
+            .map_err(StructuralStaticBalanceError::from)
+    })
+    .await?;
+    let constraint_work_joules = measured(owner, UsageCategory::Solve, dot_work, || {
+        dot_scoped(displacement, &reaction, local_execution)
+            .map_err(StructuralStaticBalanceError::from)
+    })
+    .await?;
+    let work_balance_residual_joules = measured(
+        owner,
+        UsageCategory::Solve,
+        OperationCount::from_operations(2),
+        || {
+            Ok::<_, StructuralStaticBalanceError>(
+                internal_work_joules - applied_load_work_joules - constraint_work_joules,
+            )
+        },
+    )
+    .await?;
     let work_scale = internal_work_joules
         .abs()
         .max(applied_load_work_joules.abs())
         .max(constraint_work_joules.abs());
-    let work_balance_relative_error =
-        relative_error(work_balance_residual_joules.abs(), work_scale);
+    let work_balance_relative_error = measured(
+        owner,
+        UsageCategory::Solve,
+        OperationCount::from_operations(u64::from(work_scale != 0.0)),
+        || {
+            Ok::<_, StructuralStaticBalanceError>(relative_error(
+                work_balance_residual_joules.abs(),
+                work_scale,
+            ))
+        },
+    )
+    .await?;
     let accepted = work_balance_relative_error <= RELATIVE_TOLERANCE
         && equilibrium_relative_error <= RELATIVE_TOLERANCE;
     let evidence = StructuralStaticBalanceEvidence {
@@ -171,6 +296,17 @@ pub(crate) fn recover_structural_static_balance(
     };
     evidence.validate()?;
     Ok(StructuralStaticBalance { evidence, reaction })
+}
+
+fn count(length: usize) -> Result<OperationCount, StructuralStaticBalanceError> {
+    Ok(OperationCount::from_operations(
+        u64::try_from(length).map_err(|_| LedgerError::CountOverflow)?,
+    ))
+}
+fn dot_work(length: usize) -> Result<OperationCount, StructuralStaticBalanceError> {
+    OperationCount::direct_real_dot(count(length)?.operations())
+        .map_err(LedgerError::from)
+        .map_err(StructuralStaticBalanceError::from)
 }
 
 fn norm(values: &[f64], local_execution: LocalExecutionPlan) -> Result<f64, ScopedSpmvError> {
@@ -274,7 +410,8 @@ mod tests {
             LinearAlgebraBackendKind::CpuReference,
             &CpuReferenceBackend,
             None,
-        );
+        )
+        .unwrap();
         assert!(solve.converged, "{:?}", solve.diagnostics);
         let correct = recover_structural_static_balance(
             &summary,
@@ -345,7 +482,8 @@ mod tests {
             LinearAlgebraBackendKind::CpuReference,
             &CpuReferenceBackend,
             None,
-        );
+        )
+        .unwrap();
         assert!(solve.converged, "{:?}", solve.diagnostics);
         let balance = recover_structural_static_balance(
             &summary,

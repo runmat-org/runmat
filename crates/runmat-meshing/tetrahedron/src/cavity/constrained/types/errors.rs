@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConstrainedCavityValidationError {
+    Accounting(runmat_simulation_usage::LedgerError),
     EmptyRemovedTetrahedronSet,
     InvalidTargetVolume {
         target_volume_m3: f64,
@@ -116,6 +117,7 @@ pub enum ConstrainedCavitySolidEmptyBoundaryRecoveryError {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConstrainedCavitySourceEdgeSplitError {
+    Accounting(runmat_simulation_usage::LedgerError),
     MissingBoundaryEdge { node_ids: [u32; 2] },
     MissingBoundaryNode { node_id: u32 },
     MissingSourceNode { node_id: u32 },
@@ -154,6 +156,7 @@ pub enum ConstrainedCavityExtractionError {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConstrainedCavityRefillError {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     ResourceLimit {
         reason: String,
@@ -180,6 +183,7 @@ pub enum ConstrainedCavityRefillError {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConstrainedCavityRefillTetrahedronSplitError {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidBarycentricCoordinates {
         barycentric: [f64; 3],
     },
@@ -199,6 +203,7 @@ pub enum ConstrainedCavityRefillTetrahedronSplitError {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConstrainedCavityRefillTetrahedronFlipError {
+    Accounting(runmat_simulation_usage::LedgerError),
     MissingNode {
         node_id: u32,
     },

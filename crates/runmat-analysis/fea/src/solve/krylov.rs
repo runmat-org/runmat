@@ -22,6 +22,12 @@ pub(crate) struct GmresResult {
     pub breakdown: bool,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum GmresFailure<E> {
+    Operator(E),
+    Usage(runmat_simulation_usage::LedgerError),
+}
+
 /// Restarted GMRES on the shared sparse recurrence for operators supplied as closures (callers
 /// that precondition compose `A M⁻¹` themselves). The true relative residual is formed when the
 /// Arnoldi estimate passes and certifies convergence. Operator failures propagate unchanged;
@@ -32,7 +38,7 @@ pub(crate) fn restarted_gmres<E>(
     policy: GmresPolicy,
     apply: impl Fn(&[f64]) -> Result<Vec<f64>, E>,
     cancelled: impl Fn() -> bool,
-) -> Result<Option<GmresResult>, E> {
+) -> Result<Option<GmresResult>, GmresFailure<E>> {
     use runmat_sparse_solvers::krylov::gmres::{
         self, GmresGeometry, GmresMode, GmresOperations, GmresParameters, PreconditionerSide,
         ResidualCheck,
@@ -53,6 +59,7 @@ pub(crate) fn restarted_gmres<E>(
     }
     enum Stop<E> {
         Operator(E),
+        Usage(runmat_simulation_usage::LedgerError),
         Dimension,
         Cancelled,
     }
@@ -64,6 +71,33 @@ pub(crate) fn restarted_gmres<E>(
         for ClosureOperations<'_, E, A, C>
     {
         type Error = Stop<E>;
+        async fn measured<R>(
+            &mut self,
+            work: runmat_sparse_solvers::krylov::usage::VectorWork,
+            run: impl FnOnce(&mut Self) -> (R, runmat_sparse_solvers::krylov::usage::BatchCompletion),
+        ) -> Result<R, Stop<E>> {
+            let Some(context) = runmat_simulation_usage::UsageContext::capture() else {
+                return Ok(run(self).0);
+            };
+            let count = work
+                .operations()
+                .map_err(|error| Stop::Usage(error.into()))?;
+            let mut reservation = context
+                .ledger()
+                .reserve(runmat_simulation_usage::UsageCategory::Solve, count)
+                .map_err(Stop::Usage)?;
+            let (result, completed) = run(self);
+            match completed {
+                runmat_sparse_solvers::krylov::usage::BatchCompletion::Skipped => {}
+                runmat_sparse_solvers::krylov::usage::BatchCompletion::Complete => {
+                    reservation.complete(count).map_err(Stop::Usage)?
+                }
+                runmat_sparse_solvers::krylov::usage::BatchCompletion::Prefix(prefix) => {
+                    reservation.complete(prefix).map_err(Stop::Usage)?
+                }
+            }
+            Ok(result)
+        }
         async fn coefficient(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Stop<E>> {
             let values = (self.apply)(input).map_err(Stop::Operator)?;
             if values.len() != output.len() {
@@ -194,12 +228,17 @@ pub(crate) fn restarted_gmres<E>(
                 outcome.relres
             },
         ),
-        Err(KrylovFailure::Operation(Stop::Operator(error))) => return Err(error),
+        Err(KrylovFailure::Operation(Stop::Operator(error))) => {
+            return Err(GmresFailure::Operator(error))
+        }
+        Err(KrylovFailure::Operation(Stop::Usage(error))) => {
+            return Err(GmresFailure::Usage(error))
+        }
         Err(KrylovFailure::Operation(Stop::Dimension) | KrylovFailure::Invalid(_)) => {
             return Ok(None)
         }
         Err(KrylovFailure::Operation(Stop::Cancelled)) => {
-            let applied = apply(&solution)?;
+            let applied = apply(&solution).map_err(GmresFailure::Operator)?;
             let residual = runmat_sparse_solvers::par::norm2(
                 &right_hand_side
                     .iter()
@@ -269,6 +308,6 @@ mod tests {
             |_value| Err::<Vec<f64>, _>("scoped worker failed"),
             || false,
         );
-        assert_eq!(result, Err("scoped worker failed"));
+        assert_eq!(result, Err(GmresFailure::Operator("scoped worker failed")));
     }
 }

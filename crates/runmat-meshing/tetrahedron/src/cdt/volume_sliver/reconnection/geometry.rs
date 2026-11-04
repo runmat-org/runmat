@@ -10,18 +10,40 @@ pub(super) fn local_candidates(
     let mut candidates = two_to_three_candidates(topology, source_index)?;
     candidates.extend(three_to_two_candidates(topology, source_index)?);
     candidates.extend(edge_star_candidates(topology, source_index)?);
+    let mut accounting = None;
     candidates.sort_by(|left, right| {
-        crate::cdt::volume_quality::violation_priority_key(candidate_minimum_jacobian(
-            topology, right, metric,
-        ))
-        .cmp(&crate::cdt::volume_quality::violation_priority_key(
-            candidate_minimum_jacobian(topology, left, metric),
-        ))
-        .then_with(|| {
-            candidate_geometry_key(topology, left).cmp(&candidate_geometry_key(topology, right))
-        })
-        .then_with(|| candidate_key(topology, left).cmp(&candidate_key(topology, right)))
+        if accounting.is_some() {
+            return std::cmp::Ordering::Equal;
+        }
+        let right_score = match candidate_minimum_jacobian(topology, right, metric) {
+            Ok(score) => score,
+            Err(cause) => {
+                accounting = Some(cause);
+                return std::cmp::Ordering::Equal;
+            }
+        };
+        let left_score = match candidate_minimum_jacobian(topology, left, metric) {
+            Ok(score) => score,
+            Err(cause) => {
+                accounting = Some(cause);
+                return std::cmp::Ordering::Equal;
+            }
+        };
+        crate::cdt::volume_quality::violation_priority_key(right_score)
+            .cmp(&crate::cdt::volume_quality::violation_priority_key(
+                left_score,
+            ))
+            .then_with(|| {
+                candidate_geometry_key(topology, left).cmp(&candidate_geometry_key(topology, right))
+            })
+            .then_with(|| candidate_key(topology, left).cmp(&candidate_key(topology, right)))
     });
+    if let Some(cause) = accounting {
+        return Err(error(
+            DelaunayVolumeSliverErrorKind::Accounting(cause),
+            "reconnection score numerical accounting failed",
+        ));
+    }
     candidates
         .dedup_by(|left, right| candidate_key(topology, left) == candidate_key(topology, right));
     Ok(candidates)
@@ -327,16 +349,16 @@ fn candidate_minimum_jacobian(
     topology: &(impl crate::cdt::topology::VolumeTopologyRead + ?Sized),
     candidate: &LocalTetrahedronFlipCandidate,
     metric: runmat_meshing_size::metric::MetricTensor3,
-) -> f64 {
+) -> Result<f64, runmat_simulation_usage::LedgerError> {
     candidate
         .created_tetrahedra
         .iter()
-        .filter_map(|vertices| {
+        .try_fold(f64::INFINITY, |minimum, vertices| {
             crate::cdt::volume_quality::evaluate_tetrahedron_jacobian(
                 vertices.map(|vertex| topology.node(vertex).coordinates_m.canonical_value()),
                 metric,
             )
+            .map(|value| value.map_or(minimum, |value| minimum.min(value)))
         })
-        .min_by(f64::total_cmp)
-        .unwrap_or(0.0)
+        .map(|minimum| if minimum.is_infinite() { 0.0 } else { minimum })
 }

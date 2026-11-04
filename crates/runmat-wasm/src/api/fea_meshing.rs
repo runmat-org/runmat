@@ -28,7 +28,7 @@ pub(super) async fn execute(
         .ok_or(runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired)?;
     active.control.check()?;
     let bytes = runmat_filesystem::read(&request.source_path)
-        .map_err(|error| MeshingExecutionError::Provider(error.to_string()))?;
+        .map_err(|error| MeshingExecutionError::Provider(error.to_string().into()))?;
     let expected = Digest::from_bytes(request.expected_source_sha256);
     if Digest::sha256(&bytes) != expected {
         return Err(MeshingExecutionError::Provider(
@@ -56,7 +56,7 @@ pub(super) async fn execute(
         "application/octet-stream",
         bytes,
     )
-    .map_err(|error| MeshingExecutionError::Provider(error.to_string()))?;
+    .map_err(|error| MeshingExecutionError::Provider(error.to_string().into()))?;
     let imported = ImportedSourceMeshingRequest {
         source_name,
         source,
@@ -85,28 +85,29 @@ pub(super) async fn execute(
         },
     }
     let json = serde_json::to_string(&Operation::MeshImportedSource { request: imported })
-        .map_err(|error| MeshingExecutionError::Provider(error.to_string()))?;
+        .map_err(|error| MeshingExecutionError::Provider(error.to_string().into()))?;
     if json.len() > 64 << 20 {
         return Err(MeshingExecutionError::Provider(
             "Geometry preparation exceeds this host's input allowance.".into(),
         ));
     }
     let delegation = active
-        .worker_context(&host, &json)
+        .worker_context(&host, &json, super::fea_run_context::WorkerWorkClass::OcctPreparation)
         .await
         .map_err(|error| MeshingExecutionError::Admission(denial_from_js(error)))?;
     let result = super::fea_execution::exact_execute(&json, delegation)
         .await
         .map_err(host_error)?;
+    active.retire_finished(&host).await.map_err(host_error)?;
     let result: ImportedSourceMeshingResult =
         serde_json::from_str(&result.as_string().ok_or_else(|| {
             MeshingExecutionError::Provider("Invalid owned meshing response.".into())
         })?)
-        .map_err(|error| MeshingExecutionError::Provider(error.to_string()))?;
+        .map_err(|error| MeshingExecutionError::Provider(error.to_string().into()))?;
     result
         .evidence
         .validate(&result.artifact)
-        .map_err(|error| MeshingExecutionError::Provider(error.to_string()))?;
+        .map_err(|error| MeshingExecutionError::Provider(error.to_string().into()))?;
     active.control.check()?;
     Ok(MeshingExecutionOutput {
         artifact: result.artifact,
@@ -120,6 +121,6 @@ fn host_error(error: JsValue) -> MeshingExecutionError {
     if !denied.is_undefined() && !denied.is_null() {
         MeshingExecutionError::Admission(denial_from_js(error))
     } else {
-        MeshingExecutionError::Provider(js_value_to_string(error))
+        MeshingExecutionError::Provider(js_value_to_string(error).into())
     }
 }

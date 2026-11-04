@@ -8,10 +8,10 @@ use super::{
 use crate::{
     assembly::{
         elements::shell::{
-            global_lumped_mass_matrix, global_matrix_for_constitutive_matrices,
-            global_stiffness_matrix, global_stiffness_matrix_for_constitutive,
-            homogeneous_constitutive, homogeneous_mass_moments, ShellElementGeometry,
-            ShellMassMoments, ShellMaterial, SHELL_ELEMENT_DOF_COUNT,
+            admitted_homogeneous_constitutive, global_lumped_mass_matrix,
+            global_matrix_for_constitutive_matrices, global_stiffness_matrix,
+            global_stiffness_matrix_for_constitutive, homogeneous_mass_moments,
+            ShellElementGeometry, ShellMassMoments, ShellMaterial, SHELL_ELEMENT_DOF_COUNT,
         },
         ShellRecoveryElementSummary, StructuralAssemblyError, StructuralDofLayout,
     },
@@ -87,7 +87,13 @@ pub(super) fn compute(
                 ),
                 shear_modulus_pa: material.shear_modulus_pa(),
             };
-            let constitutive = homogeneous_constitutive(section, shell_material);
+            let constitutive =
+                admitted_homogeneous_constitutive(section, shell_material).map_err(|error| {
+                    StructuralAssemblyError::ShellElement {
+                        element_id: element.element_id.clone(),
+                        error,
+                    }
+                })?;
             let stiffness =
                 global_stiffness_matrix(section, shell_material, geometry).map_err(|error| {
                     StructuralAssemblyError::ShellElement {

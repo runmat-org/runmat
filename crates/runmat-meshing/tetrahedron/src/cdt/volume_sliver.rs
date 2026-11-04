@@ -146,6 +146,7 @@ pub struct DelaunayVolumeSliverTreatment {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeSliverErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidInput,
     InvalidTopology,
@@ -342,6 +343,9 @@ pub(super) fn validate_input(
     )
     .map_err(|failure| {
         let kind = match failure.kind {
+            DelaunayVolumeProvenanceErrorKind::Accounting(cause) => {
+                DelaunayVolumeSliverErrorKind::Accounting(cause)
+            }
             DelaunayVolumeProvenanceErrorKind::InvalidOptions => {
                 DelaunayVolumeSliverErrorKind::InvalidOptions
             }
@@ -384,6 +388,9 @@ pub(super) fn checkpoint(
 
 pub(super) fn quality_error(failure: DelaunayVolumeQualityError) -> DelaunayVolumeSliverError {
     let kind = match failure.kind {
+        DelaunayVolumeQualityErrorKind::Accounting(cause) => {
+            DelaunayVolumeSliverErrorKind::Accounting(cause)
+        }
         DelaunayVolumeQualityErrorKind::InvalidOptions => {
             DelaunayVolumeSliverErrorKind::InvalidOptions
         }

@@ -60,12 +60,16 @@ pub fn selected_exact_cover_face_count_blockers(
                     {
                         continue;
                     }
-                    let Ok(tetrahedron) = raw_refill_tetrahedron_with_rejection_reason(
+                    let tetrahedron = match raw_refill_tetrahedron_with_rejection_reason(
                         tetrahedron_node_ids,
                         points,
                         relaxed_options,
-                    ) else {
-                        continue;
+                    ) {
+                        Ok(tetrahedron) => tetrahedron,
+                        Err(RefillTetrahedronError::Rejected(_)) => continue,
+                        Err(RefillTetrahedronError::Accounting(cause)) => {
+                            return Err(ConstrainedCavityRefillError::Accounting(cause));
+                        }
                     };
                     candidate_count += 1;
                     if let Some(blocker) = face_count_blocker_for_candidate(

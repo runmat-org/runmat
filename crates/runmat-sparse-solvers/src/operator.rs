@@ -16,11 +16,19 @@ pub trait LinearOperator<T: Scalar>: Sync {
     fn nrows(&self) -> usize;
     fn ncols(&self) -> usize;
     fn apply(&self, x: &[T], y: &mut [T]) -> SolverResult<()>;
+    /// Exact measured reference work for one application, when the operator owns a
+    /// bounded quote. Async callers reject an absent quote before executing it.
+    fn reference_apply_work(&self) -> SolverResult<Option<runmat_simulation_usage::OperationCount>> {
+        Ok(None)
+    }
 }
 
 /// `z ≈ A⁻¹ r`.
 pub trait Preconditioner<T: Scalar>: Sync {
     fn apply(&self, r: &[T], z: &mut [T]) -> SolverResult<()>;
+    fn reference_apply_work(&self) -> SolverResult<Option<runmat_simulation_usage::OperationCount>> {
+        Ok(None)
+    }
     /// Short label for solver provenance (e.g. `"amg"`, `"ilu0"`).
     fn label(&self) -> &'static str {
         "custom"

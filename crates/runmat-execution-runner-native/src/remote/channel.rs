@@ -231,6 +231,24 @@ pub trait RemoteWorkerChannel: Send + Sync {
         Vec::new()
     }
 
+    fn drain_fea_calls(
+        &self,
+        _attempt_id: runmat_execution::identity::AttemptId,
+    ) -> Vec<crate::fea_proxy::Call> {
+        Vec::new()
+    }
+
+    async fn complete_fea_call(
+        &self,
+        _attempt_id: runmat_execution::identity::AttemptId,
+        _sequence: u64,
+        _reply: crate::fea_proxy::Reply,
+    ) -> NativeExecutionResult<()> {
+        Err(crate::NativeExecutionError::Protocol(
+            "remote worker channel does not support FEA parent control".into(),
+        ))
+    }
+
     async fn complete_collective(
         &self,
         _attempt_id: runmat_execution::identity::AttemptId,

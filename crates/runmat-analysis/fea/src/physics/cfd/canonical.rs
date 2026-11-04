@@ -180,6 +180,8 @@ pub struct CanonicalFluidResult {
 
 #[derive(Debug, Error)]
 pub enum CanonicalFluidError {
+    #[error("canonical fluid numerical accounting failed: {0}")]
+    Accounting(#[from] runmat_simulation_usage::LedgerError),
     #[error("invalid canonical fluid input: {0}")]
     Invalid(&'static str),
     #[error("unsupported canonical fluid envelope: {0}")]

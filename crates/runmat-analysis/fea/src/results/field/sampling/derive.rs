@@ -9,8 +9,12 @@ impl SampledVolumeFieldTopology {
         mesh: &SolverMeshArtifact,
         rule: VolumeFieldSamplingRule,
     ) -> Result<Self, RecoveredFieldError> {
-        let projection =
-            AnalysisProjection::derive(mesh).map_err(|error| invalid(error.to_string()))?;
+        let projection = AnalysisProjection::derive(mesh).map_err(|error| match error {
+            crate::topology::AnalysisProjectionError::Accounting(error) => {
+                RecoveredFieldError::Accounting(error)
+            }
+            other => invalid(other.to_string()),
+        })?;
         Self::derive_from_projection(mesh, &projection, rule)
     }
 
@@ -88,6 +92,7 @@ pub(super) fn visit_geometry(
                     TETRAHEDRON_FOUR_POINT_RULE.map(|barycentric| (barycentric, 1.0 / 24.0)),
                     |point| points.push((point.position_m, point.volume_weight_m3)),
                 )
+                .map_err(RecoveredFieldError::Accounting)?
                 .ok_or_else(|| invalid("invalid four-point volume sampling geometry"))?;
             }
             VolumeFieldSamplingRule::TetrahedronKeastFifteen => {
@@ -95,7 +100,12 @@ pub(super) fn visit_geometry(
                     .visit_element_quadrature(element, |point| {
                         points.push((point.position_m, point.volume_weight_m3))
                     })
-                    .map_err(|error| invalid(error.to_string()))?;
+                    .map_err(|error| match error {
+                        crate::topology::AnalysisProjectionError::Accounting(error) => {
+                            RecoveredFieldError::Accounting(error)
+                        }
+                        other => invalid(other.to_string()),
+                    })?;
             }
         }
         if points.len() != points_per_element {

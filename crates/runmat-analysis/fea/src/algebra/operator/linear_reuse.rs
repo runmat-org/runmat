@@ -80,13 +80,21 @@ impl LinearPreparationReuse {
         }
     }
 
-    pub(super) fn prepare_admitted(
+    pub(super) async fn prepare_admitted_with_owner<O, F, A>(
         &mut self,
         matrix: &RealSparseMatrix,
         rhs: &[f64],
         source: Option<&NullspaceEliminationEvidence>,
         admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
-    ) -> Result<PreparedSolverAdmissibility, CoercivityError> {
+        before_factor: O,
+    ) -> Result<PreparedSolverAdmissibility, crate::algebra::coercivity::NumericalCapacityError<CoercivityError, A>>
+    where
+        O: FnMut(
+            crate::algebra::coercivity::NumericalCapacityPhase,
+            runmat_simulation_usage::OperationCount,
+        ) -> F,
+        F: std::future::Future<Output = Result<(), A>>,
+    {
         if let Some(certificate) = self.certificate.as_ref().filter(|certificate| {
             certificate.validate_for(matrix).is_ok()
                 && admission.is_none_or(|policy| {
@@ -103,7 +111,8 @@ impl LinearPreparationReuse {
                 matrix,
                 rhs,
                 source,
-            );
+            )
+            .map_err(crate::algebra::coercivity::NumericalCapacityError::Numerical);
         }
         // A failed replacement cannot leave a stale proof available for later work.
         let local_energy = self.local_energy.take();
@@ -142,12 +151,16 @@ impl LinearPreparationReuse {
                 // A local-energy bound too weak to separate the assembly error from zero is not
                 // a disproof: the sparse Cholesky proof decides, and its factor serves the solve.
                 Err(CoercivityError::EnergyIndeterminate { .. }) => {
-                    PreparedSolverAdmissibility::prove_admitted(matrix, rhs, source, admission)?
+                    PreparedSolverAdmissibility::prove_admitted_with_owner(
+                        matrix, rhs, source, admission, before_factor,
+                    ).await?
                 }
-                Err(error) => return Err(error),
+                Err(error) => return Err(error.into()),
             }
         } else {
-            PreparedSolverAdmissibility::prove_admitted(matrix, rhs, source, admission)?
+            PreparedSolverAdmissibility::prove_admitted_with_owner(
+                matrix, rhs, source, admission, before_factor,
+            ).await?
         };
         self.certificate = Some(evidence.coercivity().clone());
         self.factor = evidence.factor().cloned();

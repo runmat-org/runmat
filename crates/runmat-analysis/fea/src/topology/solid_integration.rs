@@ -102,6 +102,8 @@ pub struct CanonicalSolidIntegrationPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SolidIntegrationPlanError {
+    #[error("solid integration numerical accounting failed: {0}")]
+    Accounting(runmat_simulation_usage::LedgerError),
     #[error("invalid canonical solid mesh: {0}")]
     Mesh(String),
     #[error("solid integration count exceeds the addressable inventory")]
@@ -255,8 +257,14 @@ fn element_rule(
     if runmat_meshing_core::tetrahedron10_is_affine(&coordinates) {
         return Ok(requested);
     }
-    match runmat_meshing_core::tetrahedron10_stiffness_moments(&coordinates) {
+    match runmat_meshing_core::tetrahedron10_stiffness_moments_for_category(
+        &coordinates,
+        runmat_simulation_usage::UsageCategory::Assembly,
+    ) {
         Ok(moments) => Ok(curved_rule(moments.rule).unwrap_or(requested)),
+        Err(runmat_meshing_core::Tet10ElementInvalidity::Accounting(error)) => {
+            Err(SolidIntegrationPlanError::Accounting(error))
+        }
         Err(invalidity) => Err(SolidIntegrationPlanError::Mesh(format!(
             "element {} fails the shared Tet10 element-validity rule: {invalidity:?}",
             element.element_id

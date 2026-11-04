@@ -87,6 +87,178 @@ fn scoped_beam_and_shell_resultants_match_serial_in_canonical_element_order() {
     }
 }
 
+#[test]
+fn explicit_formulation_recovery_conserves_selected_work_and_preserves_refusals() {
+    use crate::{
+        algebra::coercivity::NumericalCapacityError,
+        planning::resource::LocalThreadCount,
+        post::fields::formulation::{
+            recover_beam_result_fields, recover_beam_result_fields_with_capacity,
+            recover_shell_result_fields_with_capacity,
+        },
+    };
+    use runmat_simulation_usage::{
+        AsyncCapacityOwner, LedgerError, OperationCount, UsageContext, UsageLedger,
+    };
+    use std::{cell::RefCell, future::Future, pin::Pin, sync::Arc};
+
+    struct ProbeOwner {
+        quotes: RefCell<Vec<OperationCount>>,
+        deny: bool,
+    }
+    impl AsyncCapacityOwner<LedgerError> for ProbeOwner {
+        fn ensure_capacity(
+            &self,
+            additional: OperationCount,
+        ) -> Pin<Box<dyn Future<Output = Result<(), LedgerError>> + '_>> {
+            self.quotes.borrow_mut().push(additional);
+            Box::pin(async move {
+                if self.deny {
+                    Err(LedgerError::GrantUnavailable)
+                } else {
+                    Ok(())
+                }
+            })
+        }
+    }
+
+    let mut beam = explicit_recovery_summary(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let original_beam = beam.structural_beam_recovery[0].clone();
+    beam.structural_beam_recovery = vec![original_beam.clone(), original_beam.clone()];
+    let section = original_beam.section;
+    let active_stresses = (section.outer_fiber_z_m.canonical_value() > 0.0
+        && section.iy_m4.canonical_value() > 0.0) as u64
+        + (section.outer_fiber_y_m.canonical_value() > 0.0 && section.iz_m4.canonical_value() > 0.0)
+            as u64
+        + (section.torsion_outer_radius_m.canonical_value() > 0.0
+            && section.torsion_j_m4.canonical_value() > 0.0) as u64;
+    let beam_outer = 552 + 2 * active_stresses;
+    let beam_quote = OperationCount::from_operations(2 * (64 + beam_outer));
+    let beam_ledger = Arc::new(UsageLedger::new(beam_quote, beam_quote).unwrap());
+    let beam_context = UsageContext::new(Arc::clone(&beam_ledger));
+    let beam_owner = ProbeOwner {
+        quotes: RefCell::new(Vec::new()),
+        deny: false,
+    };
+    let beam_solution = vec![1.0e-4; beam.dof_count];
+    let parallel = LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap();
+    let beam_result = beam_context.run_sync(|| {
+        futures::executor::block_on(recover_beam_result_fields_with_capacity(
+            &beam,
+            &beam_solution,
+            parallel,
+            Some(&beam_owner),
+        ))
+    });
+    assert!(matches!(beam_result, Ok(Some(_))));
+    assert_eq!(*beam_owner.quotes.borrow(), vec![beam_quote]);
+    let beam_usage = beam_ledger.snapshot().unwrap();
+    assert_eq!(
+        beam_usage.completed.assembly,
+        OperationCount::from_operations(128)
+    );
+    assert_eq!(
+        beam_usage.completed.solve,
+        OperationCount::from_operations(2 * beam_outer)
+    );
+    assert_eq!(beam_usage.reserved, OperationCount::ZERO);
+
+    let shell = explicit_recovery_summary(FixtureId::StructuralShellPlateMomentReference);
+    assert_eq!(shell.structural_shell_recovery.len(), 1);
+    let layers = shell.structural_shell_recovery[0]
+        .constitutive
+        .recovery_layers
+        .len() as u64;
+    let shell_outer = 442 + 60 * layers;
+    let shell_quote = OperationCount::from_operations(62 + 68 + 597 + shell_outer);
+    let shell_ledger = Arc::new(UsageLedger::new(shell_quote, shell_quote).unwrap());
+    let shell_context = UsageContext::new(Arc::clone(&shell_ledger));
+    let shell_owner = ProbeOwner {
+        quotes: RefCell::new(Vec::new()),
+        deny: false,
+    };
+    let shell_solution = vec![1.0e-4; shell.dof_count];
+    let shell_result = shell_context.run_sync(|| {
+        futures::executor::block_on(recover_shell_result_fields_with_capacity(
+            &shell,
+            &shell_solution,
+            LocalExecutionPlan::serial(),
+            Some(&shell_owner),
+        ))
+    });
+    assert!(matches!(shell_result, Ok(Some(_))));
+    assert_eq!(*shell_owner.quotes.borrow(), vec![shell_quote]);
+    let shell_usage = shell_ledger.snapshot().unwrap();
+    assert_eq!(
+        shell_usage.completed.assembly,
+        OperationCount::from_operations(56 + 68 + 597)
+    );
+    assert_eq!(
+        shell_usage.completed.solve,
+        OperationCount::from_operations(shell_outer)
+    );
+    assert_eq!(shell_usage.reserved, OperationCount::ZERO);
+
+    let refused_ledger = Arc::new(UsageLedger::new(beam_quote, beam_quote).unwrap());
+    let refused_context = UsageContext::new(Arc::clone(&refused_ledger));
+    let refusing_owner = ProbeOwner {
+        quotes: RefCell::new(Vec::new()),
+        deny: true,
+    };
+    let refused = refused_context.run_sync(|| {
+        futures::executor::block_on(recover_beam_result_fields_with_capacity(
+            &beam,
+            &beam_solution,
+            parallel,
+            Some(&refusing_owner),
+        ))
+    });
+    assert!(matches!(
+        refused,
+        Err(NumericalCapacityError::Admission(
+            LedgerError::GrantUnavailable
+        ))
+    ));
+    assert_eq!(
+        refused_ledger
+            .snapshot()
+            .unwrap()
+            .completed
+            .total()
+            .unwrap(),
+        OperationCount::ZERO
+    );
+    assert_eq!(
+        refused_ledger.snapshot().unwrap().reserved,
+        OperationCount::ZERO
+    );
+
+    let mut one_beam = beam;
+    one_beam.structural_beam_recovery.truncate(1);
+    let prefix_limit = OperationCount::from_operations(beam_outer);
+    let prefix_ledger = Arc::new(UsageLedger::new(prefix_limit, prefix_limit).unwrap());
+    let prefix_context = UsageContext::new(Arc::clone(&prefix_ledger));
+    let nested_refusal = prefix_context.run_sync(|| {
+        recover_beam_result_fields(&one_beam, &beam_solution, LocalExecutionPlan::serial())
+    });
+    assert!(matches!(
+        nested_refusal,
+        Err(StructuralFieldRecoveryError::Beam {
+            source: crate::assembly::elements::beam::BeamElementError::Accounting(
+                LedgerError::BudgetExceeded { .. }
+            ),
+            ..
+        })
+    ));
+    let prefix_usage = prefix_ledger.snapshot().unwrap();
+    assert_eq!(
+        prefix_usage.completed.solve,
+        OperationCount::from_operations(276)
+    );
+    assert_eq!(prefix_usage.completed.assembly, OperationCount::ZERO);
+    assert_eq!(prefix_usage.reserved, OperationCount::ZERO);
+}
+
 // witness: FEA-STRUCTURAL-BEAM-001/physical_beam_mixed_dofs @
 //   linear_structural/beam/numerical_kernel; coverage: partial;
 //   boundary: Two-element beam recovery preserves the physical assembly fields.
@@ -281,6 +453,26 @@ fn generic_field_take_does_not_claim_constraint_group_reaction_ownership() {
 
 #[test]
 fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
+    use runmat_simulation_usage::{UsageContext, UsageLedger};
+    use std::{future::Future, pin::Pin, sync::Arc};
+    struct RenewingOwner(Arc<UsageLedger>);
+    impl AsyncCapacityOwner<LedgerError> for RenewingOwner {
+        fn ensure_capacity(
+            &self,
+            additional: OperationCount,
+        ) -> Pin<Box<dyn Future<Output = Result<(), LedgerError>> + '_>> {
+            Box::pin(async move {
+                let snapshot = self.0.snapshot()?;
+                assert_eq!(
+                    snapshot.reserved,
+                    OperationCount::ZERO,
+                    "host wait cannot hold a numerical reservation"
+                );
+                let required = snapshot.completed.total()?.checked_add(additional)?;
+                self.0.update_grant(required.max(snapshot.granted))
+            })
+        }
+    }
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.excitations.clear();
     model.constraints.clear();
@@ -311,6 +503,30 @@ fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
     };
 
     let fields = recover_result_fields(&summary, &solve, LocalExecutionPlan::serial()).unwrap();
+    let budget = OperationCount::from_operations(1_000_000);
+    let ledger = Arc::new(UsageLedger::new(budget, OperationCount::ZERO).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    let owner = RenewingOwner(Arc::clone(&ledger));
+    let owned = futures::executor::block_on(context.scope(recover_result_fields_with_capacity(
+        &summary,
+        &solve,
+        LocalExecutionPlan::serial(),
+        Some(&owner),
+    )))
+    .unwrap_or_else(|error| match error {
+        NumericalCapacityError::Numerical(error) => panic!("numerical recovery: {error}"),
+        NumericalCapacityError::Admission(error) => panic!("capacity recovery: {error}"),
+    });
+    assert_eq!(owned, fields);
+    let completed = ledger.snapshot().unwrap().completed;
+    assert!(completed.total().unwrap() > OperationCount::ZERO);
+    let metrics_from_fields =
+        structural_field_recovery_metrics_from_fields(&summary, &solve.solution, &owned).unwrap();
+    assert_eq!(
+        ledger.snapshot().unwrap().completed,
+        completed,
+        "diagnostics reuse fields without recovering them again"
+    );
     assert_eq!(
         field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
         &[4, 3]
@@ -332,6 +548,7 @@ fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
         .iter()
         .all(|value| (*value - element_von_mises).abs() <= 1.0e-12));
     let metrics = structural_field_recovery_metrics(&summary, &solve.solution).unwrap();
+    assert_eq!(metrics_from_fields, metrics);
     assert_eq!(metrics.basis, "solid_tetrahedron4_constant_strain");
     assert_eq!(metrics.solver_mesh_node_count, 4);
     assert_eq!(metrics.solver_mesh_element_count, 1);

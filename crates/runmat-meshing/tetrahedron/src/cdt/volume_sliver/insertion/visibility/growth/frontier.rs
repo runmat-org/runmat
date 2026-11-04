@@ -122,6 +122,12 @@ impl<'a, T: VolumeTopologyRead + ?Sized> Frontier<'a, T> {
                 [a, b, c, self.node.coordinates_m.canonical_value()],
                 metrics(face.vertices)?,
             )
+            .map_err(|cause| {
+                error(
+                    DelaunayVolumeSliverErrorKind::Accounting(cause),
+                    "frontier score numerical accounting failed",
+                )
+            })?
             .unwrap_or(0.);
             let quality = (value.to_bits(), face.identities, key.0, key.1);
             self.faces

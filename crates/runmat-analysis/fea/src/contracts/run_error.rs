@@ -6,6 +6,8 @@ use super::SolverFormulationCompatibilityError;
 
 #[derive(Debug, Error)]
 pub enum FeaRunError {
+    #[error("FEA_NUMERICAL_USAGE: {0}")]
+    Usage(#[source] runmat_simulation_usage::LedgerError),
     #[error("FEA_MODEL_INVALID: {0}")]
     InvalidModel(String),
     #[error("FEA_ASSEMBLY_FAILED: {0}")]
@@ -30,4 +32,61 @@ pub enum FeaRunError {
     AcceleratorRequired(#[from] super::accelerator_admission::AcceleratorRequiredError),
     #[error("FEA_CANCELLED: execution cancelled by user")]
     Cancelled,
+}
+
+impl From<crate::post::StructuralFieldRecoveryError> for FeaRunError {
+    fn from(error: crate::post::StructuralFieldRecoveryError) -> Self {
+        use crate::{
+            assembly::elements::{
+                beam::BeamElementError,
+                shell::ShellElementError,
+                solid::{
+                    material::SolidMaterialError, Tetrahedron10ElementError,
+                    Tetrahedron4ElementError,
+                },
+            },
+            post::StructuralFieldRecoveryError as Recovery,
+        };
+        match error {
+            Recovery::Accounting(cause)
+            | Recovery::Beam {
+                source: BeamElementError::Accounting(cause),
+                ..
+            }
+            | Recovery::Tetrahedron4 {
+                source: Tetrahedron4ElementError::Accounting(cause),
+                ..
+            }
+            | Recovery::Tetrahedron4 {
+                source:
+                    Tetrahedron4ElementError::InvalidMaterial(SolidMaterialError::Accounting(cause)),
+                ..
+            }
+            | Recovery::Tetrahedron10 {
+                source: Tetrahedron10ElementError::Accounting(cause),
+                ..
+            }
+            | Recovery::Tetrahedron10 {
+                source:
+                    Tetrahedron10ElementError::InvalidMaterial(SolidMaterialError::Accounting(cause)),
+                ..
+            }
+            | Recovery::Shell {
+                source: ShellElementError::Accounting(cause),
+                ..
+            } => Self::Usage(cause),
+            Recovery::Cancelled => Self::Cancelled,
+            other => Self::Assembly(other.to_string()),
+        }
+    }
+}
+
+impl From<crate::constraints::ConstraintResultError> for FeaRunError {
+    fn from(error: crate::constraints::ConstraintResultError) -> Self {
+        match error {
+            crate::constraints::ConstraintResultError::Accounting(cause) => Self::Usage(cause),
+            crate::constraints::ConstraintResultError::Cancelled => Self::Cancelled,
+            other => Self::Assembly(other.to_string()),
+        }
+    }
 }

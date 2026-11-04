@@ -88,10 +88,10 @@ fn tiny_physical_load_keeps_a_unit_sized_relative_dynamic_residual() {
         .position(|constrained| !constrained)
         .unwrap();
     inconsistent.equilibrium_residual[free_dof] = 1.0e-9;
-    assert_eq!(
+    assert!(matches!(
         project_residual(&unloaded, &inconsistent),
         Err(EffectiveDynamicsSolveError::InvalidSolution)
-    );
+    ));
 }
 
 #[test]

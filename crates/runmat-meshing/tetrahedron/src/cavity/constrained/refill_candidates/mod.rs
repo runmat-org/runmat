@@ -50,7 +50,9 @@ pub(super) fn single_tetrahedron_refill_candidate(
         [node_ids[0], node_ids[1], node_ids[2], node_ids[3]],
         points,
         options,
-    ) else {
+    )
+    .map_err(ConstrainedCavityValidationError::Accounting)?
+    else {
         return Ok(None);
     };
     let refill =

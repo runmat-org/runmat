@@ -123,6 +123,40 @@ pub(super) struct SolverOperations<'a, T: MatrixFactorValue> {
 impl<T: IterativeValue + MatrixFactorValue> GmresOperations<T> for SolverOperations<'_, T> {
     type Error = RuntimeError;
 
+    async fn measured<R>(
+        &mut self,
+        work: runmat_sparse_solvers::krylov::usage::VectorWork,
+        run: impl FnOnce(&mut Self) -> (R, runmat_sparse_solvers::krylov::usage::BatchCompletion),
+    ) -> Result<R, RuntimeError> {
+        use crate::analysis::fea_run_admission::{reserve_work, FeaRunDenied};
+        use runmat_simulation_usage::{LedgerError, UsageCategory, UsageContext};
+        self.checkpoint()?;
+        let Some(usage) = UsageContext::capture() else {
+            return Ok(run(self).0);
+        };
+        let maximum = work.operations().map_err(|cause| {
+            FeaRunDenied::from(LedgerError::from(cause)).into_runtime_error("gmres")
+        })?;
+        let mut reservation = reserve_work(&usage, UsageCategory::Solve, maximum, self.context)
+            .await
+            .map_err(|denied| denied.into_runtime_error("gmres"))?;
+        self.checkpoint()?;
+        let (result, completed) = run(self);
+        use runmat_sparse_solvers::krylov::usage::BatchCompletion;
+        let completed = match completed {
+            BatchCompletion::Skipped => None,
+            BatchCompletion::Complete => Some(maximum),
+            BatchCompletion::Prefix(count) => Some(count),
+        };
+        if let Some(completed) = completed {
+            reservation
+                .complete(completed)
+                .map_err(|cause| FeaRunDenied::from(cause).into_runtime_error("gmres"))?;
+        }
+        self.checkpoint()?;
+        Ok(result)
+    }
+
     async fn coefficient(&mut self, input: &[T], output: &mut [T]) -> Result<(), Self::Error> {
         match &self.coefficient {
             Coefficient::Matrix(operator) => {

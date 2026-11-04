@@ -43,6 +43,7 @@ impl<'a> CacheControl<'a> {
         Err(MeshingStageExecutionError::Failure(Box::new(MeshingFailure {
             schema_version: MESHING_FAILURE_SCHEMA_VERSION, category, stage: self.stage, operation: self.stage.operation(),
             entity_ids: Vec::new(), witnesses: Vec::new(), request_values: Vec::new(), achieved_values: Vec::new(),
+            accounting_error: None,
             remediation: "inspect original cancellation or time admission; no cached completion is accepted".into(),
         })))
     }

@@ -85,6 +85,8 @@ struct StructuralLinearizationArtifactData {
 
 #[derive(Debug, Error)]
 pub enum StructuralLinearizationError {
+    #[error("structural linearization numerical accounting failed: {0}")]
+    Accounting(runmat_simulation_usage::LedgerError),
     #[error("structural linearization requires an exact finite full-DOF solution")]
     InvalidSolution,
     #[error("structural linearization currently requires a solid-only structural operator")]

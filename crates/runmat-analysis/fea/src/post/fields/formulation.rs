@@ -1,10 +1,14 @@
 use runmat_analysis_core::AnalysisField;
+use runmat_simulation_usage::{
+    AsyncCapacityOwner, LedgerError, OperationCount, UsageCategory, UsageContext,
+};
 
 use crate::{
+    algebra::coercivity::NumericalCapacityError,
     assembly::{
         dofs::StructuralDofKind,
         elements::{
-            beam::{local_stiffness_matrix, BEAM_ELEMENT_DOF_COUNT},
+            beam::{local_stiffness_matrix, BeamElementError, BEAM_ELEMENT_DOF_COUNT},
             shell::SHELL_ELEMENT_DOF_COUNT,
         },
         AssemblySummary, BeamRecoveryElementSummary, ShellRecoveryElementSummary,
@@ -30,6 +34,70 @@ struct BeamResultValues {
     torsion_stress: Vec<f64>,
 }
 
+/// The grant is for the selected immutable beam schedule. The stiffness kernel
+/// owns its 64 operations; only the two matvecs and active stress ratios are
+/// reserved by this recovery loop.
+pub(super) async fn recover_beam_result_fields_with_capacity<A>(
+    summary: &AssemblySummary,
+    solution: &[f64],
+    plan: LocalExecutionPlan,
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<Option<Vec<AnalysisField>>, NumericalCapacityError<StructuralFieldRecoveryError, A>> {
+    if summary.structural_beam_recovery.is_empty() {
+        return Ok(None);
+    }
+    let mut work = OperationCount::ZERO;
+    for beam in &summary.structural_beam_recovery {
+        validate_beam_recovery_input(beam).map_err(NumericalCapacityError::Numerical)?;
+        work = work
+            .checked_add(OperationCount::from_operations(64 + beam_outer_work(beam)))
+            .map_err(LedgerError::from)
+            .map_err(StructuralFieldRecoveryError::from)
+            .map_err(NumericalCapacityError::Numerical)?;
+    }
+    if let Some(owner) = owner {
+        owner
+            .ensure_capacity(work)
+            .await
+            .map_err(NumericalCapacityError::Admission)?;
+    }
+    recover_beam_result_fields(summary, solution, plan).map_err(NumericalCapacityError::Numerical)
+}
+
+fn validate_beam_recovery_input(
+    beam: &BeamRecoveryElementSummary,
+) -> Result<(), StructuralFieldRecoveryError> {
+    let source = beam
+        .section
+        .validate()
+        .and_then(|()| beam.material.validate())
+        .and_then(|()| {
+            let length = beam.length_m.canonical_value();
+            if length > 0.0 && length.is_finite() {
+                Ok(())
+            } else {
+                Err(BeamElementError::DegenerateLength)
+            }
+        });
+    source.map_err(|source| StructuralFieldRecoveryError::Beam {
+        element_id: beam.element_id.clone(),
+        source,
+    })
+}
+
+/// Two dense 12-term dot products per output: 2 × 12 × (12 products + 11
+/// additions) = 552. Each positive section ratio adds one multiply/divide pair.
+fn beam_outer_work(beam: &BeamRecoveryElementSummary) -> u64 {
+    let section = beam.section;
+    let bending_y = (section.outer_fiber_z_m.canonical_value() > 0.0
+        && section.iy_m4.canonical_value() > 0.0) as u64;
+    let bending_z = (section.outer_fiber_y_m.canonical_value() > 0.0
+        && section.iz_m4.canonical_value() > 0.0) as u64;
+    let torsion = (section.torsion_outer_radius_m.canonical_value() > 0.0
+        && section.torsion_j_m4.canonical_value() > 0.0) as u64;
+    552 + 2 * (bending_y + bending_z + torsion)
+}
+
 pub(super) fn recover_beam_result_fields(
     summary: &AssemblySummary,
     solution: &[f64],
@@ -47,10 +115,12 @@ pub(super) fn recover_beam_result_fields(
             &cancellation,
         )?
     } else {
+        let usage = UsageContext::capture();
         let partitions = execute_scoped_chunks(
             plan,
             summary.structural_beam_recovery.len() as u64,
             |chunk| {
+                let _usage = usage.as_ref().map(UsageContext::enter);
                 recover_beam_result_values(
                     summary,
                     solution,
@@ -134,16 +204,41 @@ fn recover_beam_result_values(
     cancellation: &FeaCancellationToken,
 ) -> Result<BeamResultValues, StructuralFieldRecoveryError> {
     let mut values = BeamResultValues::with_capacity(beams.len());
+    let usage = UsageContext::capture();
 
     for beam in beams {
         if cancellation.is_cancelled() {
             return Err(StructuralFieldRecoveryError::Cancelled);
         }
+        validate_beam_recovery_input(beam)?;
+        let outer_work = beam_outer_work(beam);
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| {
+                usage.ledger().reserve(
+                    UsageCategory::Solve,
+                    OperationCount::from_operations(outer_work),
+                )
+            })
+            .transpose()?;
         let q_global = beam_global_displacement(summary, solution, beam);
         let q_local = multiply_beam_matrix_vector(&beam.transform_global_to_local, &q_global);
-        let k_local =
-            local_stiffness_matrix(beam.section, beam.material, beam.length_m.canonical_value())
-                .unwrap_or([[0.0; BEAM_ELEMENT_DOF_COUNT]; BEAM_ELEMENT_DOF_COUNT]);
+        let k_local = match local_stiffness_matrix(
+            beam.section,
+            beam.material,
+            beam.length_m.canonical_value(),
+        ) {
+            Ok(matrix) => matrix,
+            Err(source) => {
+                if let Some(batch) = &mut batch {
+                    batch.complete(OperationCount::from_operations(276))?;
+                }
+                return Err(StructuralFieldRecoveryError::Beam {
+                    element_id: beam.element_id.clone(),
+                    source,
+                });
+            }
+        };
         let f_local = multiply_beam_matrix_vector(&k_local, &q_local);
 
         let axial = signed_peak_pair(f_local[0], f_local[6]);
@@ -174,6 +269,9 @@ fn recover_beam_result_values(
             beam.section.torsion_outer_radius_m.canonical_value(),
             beam.section.torsion_j_m4.canonical_value(),
         ));
+        if let Some(batch) = &mut batch {
+            batch.complete(OperationCount::from_operations(outer_work))?;
+        }
     }
 
     Ok(values)
@@ -244,6 +342,55 @@ struct ShellResultValues {
     von_mises: Vec<f64>,
 }
 
+/// The constitutive layer count fixes the outer resultants schedule. Geometry
+/// and MITC operators retain their own admitted boundaries (62 + 68 + 597).
+/// Constitutive invariant validation is outside this reference numerical
+/// kernel, as in the other FEA validation boundaries.
+pub(super) async fn recover_shell_result_fields_with_capacity<A>(
+    summary: &AssemblySummary,
+    solution: &[f64],
+    plan: LocalExecutionPlan,
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<Option<Vec<AnalysisField>>, NumericalCapacityError<StructuralFieldRecoveryError, A>> {
+    if summary.structural_shell_recovery.is_empty() {
+        return Ok(None);
+    }
+    let mut work = OperationCount::ZERO;
+    for shell in &summary.structural_shell_recovery {
+        let selected = shell_outer_work(shell)
+            .map_err(StructuralFieldRecoveryError::from)
+            .map_err(NumericalCapacityError::Numerical)?
+            .checked_add(OperationCount::from_operations(62 + 68 + 597))
+            .map_err(LedgerError::from)
+            .map_err(StructuralFieldRecoveryError::from)
+            .map_err(NumericalCapacityError::Numerical)?;
+        work = work
+            .checked_add(selected)
+            .map_err(LedgerError::from)
+            .map_err(StructuralFieldRecoveryError::from)
+            .map_err(NumericalCapacityError::Numerical)?;
+    }
+    if let Some(owner) = owner {
+        owner
+            .ensure_capacity(work)
+            .await
+            .map_err(NumericalCapacityError::Admission)?;
+    }
+    recover_shell_result_fields(summary, solution, plan).map_err(NumericalCapacityError::Numerical)
+}
+
+/// 18 frame dots (90), two B3 contractions (210), B2 (70), four D3 (60),
+/// D2 (6), and two add3 (6) = 442. Each layer has two surfaces; each surface
+/// uses scale3 (3), add3 (3), D3 (15), and von Mises (9) = 30.
+fn shell_outer_work(shell: &ShellRecoveryElementSummary) -> Result<OperationCount, LedgerError> {
+    let layers = u64::try_from(shell.constitutive.recovery_layers.len())
+        .map_err(|_| LedgerError::CountOverflow)?;
+    OperationCount::from_operations(60)
+        .checked_mul(layers)
+        .and_then(|layers| layers.checked_add(OperationCount::from_operations(442)))
+        .map_err(LedgerError::from)
+}
+
 pub(super) fn recover_shell_result_fields(
     summary: &AssemblySummary,
     solution: &[f64],
@@ -261,10 +408,12 @@ pub(super) fn recover_shell_result_fields(
             &cancellation,
         )?
     } else {
+        let usage = UsageContext::capture();
         let partitions = execute_scoped_chunks(
             plan,
             summary.structural_shell_recovery.len() as u64,
             |chunk| {
+                let _usage = usage.as_ref().map(UsageContext::enter);
                 recover_shell_result_values(
                     summary,
                     solution,
@@ -316,11 +465,17 @@ fn recover_shell_result_values(
     cancellation: &FeaCancellationToken,
 ) -> Result<ShellResultValues, StructuralFieldRecoveryError> {
     let mut values = ShellResultValues::with_capacity(shells.len());
+    let usage = UsageContext::capture();
 
     for shell in shells {
         if cancellation.is_cancelled() {
             return Err(StructuralFieldRecoveryError::Cancelled);
         }
+        let outer_work = shell_outer_work(shell)?;
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| usage.ledger().reserve(UsageCategory::Solve, outer_work))
+            .transpose()?;
         let q = shell_node_values(summary, solution, shell);
         let global_displacement =
             std::array::from_fn::<_, SHELL_ELEMENT_DOF_COUNT, _>(|index| q[index / 6][index % 6]);
@@ -339,6 +494,9 @@ fn recover_shell_result_values(
             .transverse_shear
             .extend(result.transverse_shear_n_per_m);
         values.von_mises.push(result.surface_von_mises_pa);
+        if let Some(batch) = &mut batch {
+            batch.complete(outer_work)?;
+        }
     }
 
     Ok(values)
