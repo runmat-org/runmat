@@ -99,3 +99,21 @@ Next steps for the successor:
 6. Post /tmp/sister-comms/fea-pinned-build-<hash>.txt: tag, commit, `runmat --version`,
    `shasum -a 256 ~/fea-cli/runmat-snap5-<hash>`, six snapshot paths + verify results.
 Baseline receipts (T1 CLI runmat-hero-a5906bba1a): ~/runs/q-snapshot-5/out/base*/.
+
+## q-snapshot-6 (2026-11-04)
+- Build of 82d1a8439e compiled clean (test1.log EXIT 0).
+- Tests at 82d1a8439e (logs runmat-build-mac:~/runs/q-snapshot-5/t-*.log):
+  - runmat-analysis-core --lib: 152 passed, 0 failed.
+  - runmat-analysis-fea --lib (QUAL skip list): 2095 passed, 0 failed, 13 ignored.
+  - runmat-runtime --test analysis: 7 passed.
+  - runmat (CLI) --lib snapshot: 20 passed.
+  - runmat-runtime --lib: 17824 passed, 33 failed. 29 are builtins (runtime-sister area); 4 are analysis::tests:
+    native_sparse_fea_cancellation_is_terminal_and_releases_resources (pre-existing per q-thermal-field NOTES),
+    analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields and
+    analysis_run_transient_returns_native_transient_result (scalar component_count Some(1) vs None; contracts.rs:1314
+    from_entry, not touched here), analysis_run_modal_returns_native_modal_result (orthogonality Vector vs Tensor).
+  - runmat-execution-runner-native --lib needs --features occt-native (without it, dead-code lint on a
+    test helper, pre-existing). With it: 459 passed, 4 failed (remote driver_replacement x3, fea_proxy reservation;
+    remote paths, not in this diff).
+- Release snap5-82d1a8439e: six cantilever studies captured + verified (out/final/). modal-harmonic failed at
+  publication; fixed in ae15407493 (defaults_for harmonic ModalReduced) and 8f04be4280 (intent ModalFrequency arm).
