@@ -36,6 +36,9 @@
 #include <BRepLib.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepOffset_MakeOffset.hxx>
+#include <BRepOffset_MakeSimpleOffset.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -60,6 +63,7 @@
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Iterator.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Solid.hxx>
@@ -1914,11 +1918,18 @@ Tracked do_offset_faces(const Exec& x, const KInstr& in) {
   const Tracked& src = x.slot(in.ints[0]);
   const std::int64_t operand = in.ints[1];
   const std::int64_t n = in.ints[2];
-  const double d = in.reals[0];
+  // One distance for every face, or one per face; optional per-face labels follow the faces
+  // in the ints (-1 keeps the face's origin).
+  auto dist = [&](std::int64_t i) {
+    return in.reals.size() == static_cast<std::size_t>(n) ? in.reals[static_cast<std::size_t>(i)]
+                                                           : in.reals[0];
+  };
+  const bool labelled = in.ints.size() == static_cast<std::size_t>(3 + 2 * n);
   BRepOffset_MakeOffset mk;
   mk.Initialize(src.shape, 0.0, 1e-6, BRepOffset_Skin, Standard_True, Standard_False,
                 GeomAbs_Intersection, Standard_False, Standard_False);
-  for (std::int64_t i = 0; i < n; ++i) mk.SetOffsetOnFace(x.face(operand, in.ints[3 + i]), d);
+  for (std::int64_t i = 0; i < n; ++i)
+    mk.SetOffsetOnFace(x.face(operand, in.ints[3 + i]), dist(i));
   mk.MakeOffsetShape();
   if (!mk.IsDone() || mk.Shape().IsNull()) fail("the faces could not be offset");
   Tracked out;
@@ -1928,7 +1939,12 @@ Tracked do_offset_faces(const Exec& x, const KInstr& in) {
   const Body& b = x.operand(operand);
   const BRepAlgo_Image& image = mk.OffsetFacesFromShapes();
   for (std::size_t i = 0; i < b.faces.size(); ++i) {
-    const Origins& o = origins_of(src.faces, b.faces[i]);
+    Origins o = origins_of(src.faces, b.faces[i]);
+    if (labelled) {
+      for (std::int64_t k = 0; k < n; ++k)
+        if (in.ints[3 + k] == static_cast<std::int64_t>(i) && in.ints[3 + n + k] >= 0)
+          o = label(lab(in.ints[3 + n + k]));
+    }
     if (faces.Contains(b.faces[i])) add_origins(out.faces, b.faces[i], o);
     if (image.HasImage(b.faces[i])) {
       TopTools_ListOfShape imgs;
@@ -2088,6 +2104,329 @@ Tracked do_sew(const Exec& x, const KInstr& in) {
   }
   return out;
 }
+
+// ---- direct edits: faces hinged about their own lines (rotate, replace by a tilted plane)
+
+// op 38: ints [slot, operand, n, faces (n), labels (n; -1 keeps the face's origin)]; reals per
+// face: hinge point (3), pull (3), angle. Each planar face turns about the line where it meets
+// the plane through the hinge point normal to the pull; its neighbours extend or trim to follow.
+Tracked do_hinge_faces(const Exec& x, const KInstr& in) {
+  const Tracked& src = x.slot(in.ints[0]);
+  const std::int64_t operand = in.ints[1];
+  const std::int64_t n = in.ints[2];
+  BRepOffsetAPI_DraftAngle mk(src.shape);
+  std::vector<TopoDS_Face> faces;
+  for (std::int64_t i = 0; i < n; ++i) {
+    const TopoDS_Face f = x.face(operand, in.ints[3 + i]);
+    const double* r = in.reals.data() + 7 * i;
+    const gp_Dir pull(r[3], r[4], r[5]);
+    mk.Add(f, pull, r[6], gp_Pln(gp_Pnt(r[0], r[1], r[2]), pull));
+    if (!mk.AddDone()) fail("a face cannot turn about its hinge line");
+    faces.push_back(f);
+  }
+  mk.Build();
+  if (!mk.IsDone()) fail("the turned faces could not be rebuilt with their neighbours");
+  Tracked out;
+  out.shape = mk.Shape();
+  propagate_draft(src, mk, out);
+  for (std::int64_t i = 0; i < n; ++i) {
+    const std::int64_t l = in.ints[3 + n + i];
+    if (l < 0) continue;
+    const TopoDS_Shape m = mk.ModifiedShape(faces[static_cast<std::size_t>(i)]);
+    for (TopExp_Explorer ex(m, TopAbs_FACE); ex.More(); ex.Next())
+      if (Origins* o = out.faces.ChangeSeek(ex.Current())) *o = label(lab(l));
+  }
+  require_labels(out, "the face rotation");
+  return out;
+}
+
+// ---- offset surfaces
+
+namespace {
+// The faces of `operand` adjacent to each of its edges.
+TopTools_IndexedDataMapOfShapeListOfShape edge_faces_of(const Body& b) {
+  TopTools_IndexedDataMapOfShapeListOfShape m;
+  TopExp::MapShapesAndUniqueAncestors(b.shape, TopAbs_EDGE, TopAbs_FACE, m);
+  return m;
+}
+
+int face_index_of(const Body& b, const TopoDS_Shape& f) {
+  for (std::size_t i = 0; i < b.faces.size(); ++i)
+    if (b.faces[i].IsSame(f)) return static_cast<int>(i);
+  return -1;
+}
+
+// The boundary label of an edge of a face set taken out of `b`: the input edge itself where it
+// was already a boundary of `b`, else the face of `b` across it outside the set.
+Origins boundary_origins(const Tracked& src, const Body& b,
+                         const TopTools_IndexedDataMapOfShapeListOfShape& ef,
+                         const TopTools_IndexedMapOfShape& chosen, const TopoDS_Shape& e,
+                         std::int64_t neighbour_base, std::uint32_t none_label) {
+  const TopTools_ListOfShape* fs = ef.Seek(e);
+  if (fs == nullptr || fs->Extent() < 2) {
+    const Origins& o = origins_of(src.edges, e);
+    if (!o.empty()) return o;
+    return label(none_label);
+  }
+  for (const TopoDS_Shape& f : *fs) {
+    if (chosen.Contains(f)) continue;
+    const int k = face_index_of(b, f);
+    if (k >= 0 && neighbour_base >= 0) return label(lab(neighbour_base + k));
+  }
+  return label(none_label);
+}
+}  // namespace
+
+// op 39: ints [slot, operand, offset label base, neighbour label base, none label, n, faces
+// (n; none: every face)]; reals [distance]. A new sheet: the chosen faces of a sheet or solid
+// offset along their normals, topology kept face for face. Faces take the offset label of the
+// face they came from; boundary edges the input boundary edge, or the face across them.
+Tracked do_offset_sheet(const Exec& x, const KInstr& in) {
+  const Tracked& src = x.slot(in.ints[0]);
+  const std::int64_t operand = in.ints[1];
+  const std::int64_t offset_base = in.ints[2];
+  const std::int64_t neighbour_base = in.ints[3];
+  const std::uint32_t none_label = lab(in.ints[4]);
+  const std::int64_t n = in.ints[5];
+  const Body& b = x.operand(operand);
+  TopTools_IndexedMapOfShape chosen;
+  if (n == 0) {
+    for (const TopoDS_Face& f : b.faces) chosen.Add(f);
+  } else {
+    for (std::int64_t i = 0; i < n; ++i) chosen.Add(x.face(operand, in.ints[6 + i]));
+  }
+  // The chosen faces as one shell, oriented as in the body.
+  TopoDS_Shell shell;
+  BRep_Builder bb;
+  bb.MakeShell(shell);
+  for (TopExp_Explorer ex(b.shape, TopAbs_FACE); ex.More(); ex.Next())
+    if (chosen.Contains(ex.Current())) bb.Add(shell, ex.Current());
+  BRepOffset_MakeSimpleOffset mk(shell, in.reals[0]);
+  mk.SetBuildSolidFlag(Standard_False);
+  mk.Perform();
+  if (!mk.IsDone() || mk.GetResultShape().IsNull()) fail("the faces could not be offset");
+  Tracked out;
+  out.shape = mk.GetResultShape();
+  out.sheet = true;
+  TopTools_IndexedMapOfShape present_faces, present_edges;
+  TopExp::MapShapes(out.shape, TopAbs_FACE, present_faces);
+  TopExp::MapShapes(out.shape, TopAbs_EDGE, present_edges);
+  for (int i = 1; i <= chosen.Extent(); ++i) {
+    const int k = face_index_of(b, chosen(i));
+    if (k < 0) fail("an offset face is not a face of its body");
+    const TopoDS_Shape g = mk.Generated(chosen(i));
+    if (g.IsNull()) incomplete("an offset face has no image");
+    for (TopExp_Explorer ex(g, TopAbs_FACE); ex.More(); ex.Next())
+      if (present_faces.Contains(ex.Current()))
+        add_origins(out.faces, ex.Current(), label(lab(offset_base + k)));
+  }
+  const auto ef = edge_faces_of(b);
+  TopTools_IndexedDataMapOfShapeListOfShape shell_ef;
+  TopExp::MapShapesAndUniqueAncestors(shell, TopAbs_EDGE, TopAbs_FACE, shell_ef);
+  for (int i = 1; i <= shell_ef.Extent(); ++i) {
+    if (shell_ef(i).Extent() != 1) continue;
+    const TopoDS_Shape& e = shell_ef.FindKey(i);
+    const TopoDS_Shape g = mk.Generated(e);
+    if (g.IsNull()) incomplete("an offset boundary edge has no image");
+    const Origins o = boundary_origins(src, b, ef, chosen, e, neighbour_base, none_label);
+    for (TopExp_Explorer ex(g, TopAbs_EDGE); ex.More(); ex.Next())
+      if (present_edges.Contains(ex.Current())) add_origins(out.edges, ex.Current(), o);
+  }
+  require_labels(out, "the surface offset");
+  return out;
+}
+
+// ---- up to next over several faces
+
+namespace {
+// The sign of a face's oriented normal along `dir` over its parameter range: +1, -1, 0 when the
+// face runs along `dir`, 2 when it turns both ways.
+int facing(const TopoDS_Face& f, const gp_Dir& dir) {
+  BRepAdaptor_Surface s(f, Standard_True);
+  const bool rev = f.Orientation() == TopAbs_REVERSED;
+  int sign = 0;
+  for (int i = 0; i < 5; ++i) {
+    for (int j = 0; j < 5; ++j) {
+      const double u = s.FirstUParameter() + (s.LastUParameter() - s.FirstUParameter()) * (i + 0.5) / 5.0;
+      const double v = s.FirstVParameter() + (s.LastVParameter() - s.FirstVParameter()) * (j + 0.5) / 5.0;
+      gp_Pnt p;
+      gp_Vec du, dv;
+      s.D1(u, v, p, du, dv);
+      gp_Vec n = du.Crossed(dv);
+      if (n.Magnitude() < 1e-12) continue;
+      if (rev) n.Reverse();
+      const double d = n.Normalized().Dot(gp_Vec(dir));
+      if (std::abs(d) < 1e-9) continue;
+      const int sg = d > 0 ? 1 : -1;
+      if (sign == 0) sign = sg;
+      else if (sign != sg) return 2;
+    }
+  }
+  return sign;
+}
+}  // namespace
+
+// op 41: ints [slot, keep label, cut label, n, operands (n)], reals [direction (3), length].
+// A long tool trimmed where each of its rays along `direction` first meets an operand face:
+// the operand faces inside the tool, swept on along the direction, are cut away, and the piece
+// holding the `keep` face stays. Every face the cut leaves takes the cut label.
+Tracked trim_to_next(const Exec& x, const KInstr& in) {
+  const auto& I = in.ints;
+  const Tracked& src = x.slot(I[0]);
+  const std::uint32_t keep = lab(I[1]);
+  const std::uint32_t cut = lab(I[2]);
+  const std::int64_t n = I[3];
+  const gp_Dir dir(in.reals[0], in.reals[1], in.reals[2]);
+  const double length = in.reals[3];
+  std::vector<Tracked> ops;
+  for (std::int64_t k = 0; k < n; ++k)
+    ops.push_back(track_operand(x.operand(I[4 + k]), static_cast<std::uint32_t>(I[4 + k])));
+  std::vector<const Tracked*> tools;
+  for (const Tracked& t : ops) tools.push_back(&t);
+  const Tracked inside = boolean_op(2, {&src}, tools);
+  TopTools_ListOfShape prisms;
+  for (TopExp_Explorer ex(inside.shape, TopAbs_FACE); ex.More(); ex.Next()) {
+    const Origins& o = origins_of(inside.faces, ex.Current());
+    if (std::none_of(o.begin(), o.end(), [](const Origin& g) { return g.kind == kInput; })) continue;
+    const TopoDS_Face f = TopoDS::Face(ex.Current());
+    const int s = facing(f, dir);
+    if (s == 0) continue;
+    if (s == 2) unsupported("up to next over a face that turns both ways along the extrude");
+    BRepPrimAPI_MakePrism mk(f, gp_Vec(dir) * length, Standard_True);
+    if (!mk.IsDone()) fail("up to next: a face in the way cannot be swept on");
+    prisms.Append(mk.Shape());
+  }
+  if (prisms.IsEmpty()) fail("up to next: the profile does not meet a next face");
+  Tracked shadow;
+  if (prisms.Extent() == 1) {
+    shadow.shape = prisms.First();
+  } else {
+    BRepAlgoAPI_Fuse fu;
+    TopTools_ListOfShape a, b;
+    a.Append(prisms.First());
+    bool first = true;
+    for (const TopoDS_Shape& p : prisms) {
+      if (first) { first = false; continue; }
+      b.Append(p);
+    }
+    fu.SetArguments(a);
+    fu.SetTools(b);
+    fu.SetRunParallel(Standard_False);
+    fu.Build();
+    if (!fu.IsDone() || fu.HasErrors()) fail("up to next: the faces in the way could not be joined");
+    shadow.shape = fu.Shape();
+  }
+  for (TopExp_Explorer ex(shadow.shape, TopAbs_FACE); ex.More(); ex.Next())
+    add_origins(shadow.faces, ex.Current(), label(cut));
+  Tracked cutres = boolean_op(1, {&src}, {&shadow});
+  // The piece holding the kept face.
+  TopoDS_Compound c;
+  BRep_Builder bb;
+  bb.MakeCompound(c);
+  int pieces = 0;
+  for (TopExp_Explorer sx(cutres.shape, TopAbs_SOLID); sx.More(); sx.Next()) {
+    bool has = false;
+    for (TopExp_Explorer fx(sx.Current(), TopAbs_FACE); fx.More() && !has; fx.Next()) {
+      const Origins& o = origins_of(cutres.faces, fx.Current());
+      has = std::any_of(o.begin(), o.end(), [&](const Origin& g) { return g.kind == kLabel && g.a == keep; });
+    }
+    if (!has) continue;
+    for (TopExp_Explorer fx(sx.Current(), TopAbs_FACE); fx.More(); fx.Next()) {
+      const Origins& o = origins_of(cutres.faces, fx.Current());
+      if (std::any_of(o.begin(), o.end(), [](const Origin& g) { return g.kind == kLabel && g.a == 0xfffffffeu; }))
+        fail("up to next: the profile does not meet a next face");
+    }
+    bb.Add(c, sx.Current());
+    ++pieces;
+  }
+  if (pieces == 0) fail("up to next: nothing of the extrude is left before the next face");
+  Tracked out = cutres;
+  out.shape = pieces == 1 ? TopoDS_Iterator(c).Value() : TopoDS_Shape(c);
+  return out;
+}
+
+// ---- mid-surfaces
+
+// op 40: ints [operand, neighbour label base, none label, n pairs, then per pair: face a,
+// face c, face label]. Per pair of opposite parallel planar faces, the patch on the plane
+// halfway between them where the two faces overlap. Its boundary edges take the face of the
+// body across them, measured on face a.
+Tracked do_mid_surface(const Exec& x, const KInstr& in) {
+  const std::int64_t operand = in.ints[0];
+  const std::int64_t neighbour_base = in.ints[1];
+  const std::uint32_t none_label = lab(in.ints[2]);
+  const std::int64_t n = in.ints[3];
+  const Body& b = x.operand(operand);
+  TopTools_IndexedMapOfShape selected;
+  for (std::int64_t i = 0; i < n; ++i) {
+    selected.Add(x.face(operand, in.ints[4 + 3 * i]));
+    selected.Add(x.face(operand, in.ints[5 + 3 * i]));
+  }
+  TopoDS_Compound c;
+  BRep_Builder bb;
+  bb.MakeCompound(c);
+  Tracked out;
+  out.sheet = true;
+  for (std::int64_t i = 0; i < n; ++i) {
+    const TopoDS_Face fa = x.face(operand, in.ints[4 + 3 * i]);
+    const TopoDS_Face fc = x.face(operand, in.ints[5 + 3 * i]);
+    const std::uint32_t face_label = lab(in.ints[6 + 3 * i]);
+    BRepAdaptor_Surface sa(fa), sc(fc);
+    if (sa.GetType() != GeomAbs_Plane || sc.GetType() != GeomAbs_Plane)
+      unsupported("mid-surfaces of curved faces");
+    gp_Dir na = sa.Plane().Axis().Direction();
+    gp_Dir nc = sc.Plane().Axis().Direction();
+    if (!na.IsParallel(nc, 1e-9)) fail("a mid-surface pair must be opposite parallel faces");
+    const double gap = gp_Vec(sa.Plane().Location(), sc.Plane().Location()).Dot(gp_Vec(na));
+    if (std::abs(gap) < 1e-12) fail("a mid-surface pair must be opposite parallel faces");
+    // Both faces moved onto the mid plane, then their overlap.
+    gp_Trsf ta, tc;
+    ta.SetTranslation(gp_Vec(na) * (0.5 * gap));
+    tc.SetTranslation(gp_Vec(na) * (-0.5 * gap));
+    const TopoDS_Shape ma = BRepBuilderAPI_Transform(fa, ta, Standard_True).Shape();
+    const TopoDS_Shape mc = BRepBuilderAPI_Transform(fc, tc, Standard_True).Shape();
+    BRepAlgoAPI_Common common(ma, mc);
+    if (!common.IsDone()) fail("the mid-surface overlap could not be computed");
+    ShapeUpgrade_UnifySameDomain unify(common.Shape(), Standard_True, Standard_True, Standard_False);
+    unify.Build();
+    TopoDS_Face mid;
+    for (TopExp_Explorer ex(unify.Shape(), TopAbs_FACE); ex.More(); ex.Next()) {
+      if (!mid.IsNull()) fail("a mid-surface pair overlaps in several pieces");
+      mid = TopoDS::Face(ex.Current());
+    }
+    if (mid.IsNull()) fail("a mid-surface pair does not overlap");
+    // The patch faces the way face a does.
+    {
+      BRepAdaptor_Surface sm(mid, Standard_True);
+      gp_Dir nm = sm.Plane().Axis().Direction();
+      if (mid.Orientation() == TopAbs_REVERSED) nm.Reverse();
+      gp_Dir nf = na;
+      if (fa.Orientation() == TopAbs_REVERSED) nf.Reverse();
+      if (nm.Dot(nf) < 0) mid.Reverse();
+    }
+    add_origins(out.faces, mid, label(face_label));
+    for (TopExp_Explorer ex(mid, TopAbs_EDGE); ex.More(); ex.Next()) {
+      const TopoDS_Edge e = TopoDS::Edge(ex.Current());
+      BRepAdaptor_Curve ce(e);
+      const gp_Pnt m = ce.Value(0.5 * (ce.FirstParameter() + ce.LastParameter()))
+                           .Translated(gp_Vec(na) * (-0.5 * gap));
+      std::uint32_t l = none_label;
+      const TopoDS_Vertex v = BRepBuilderAPI_MakeVertex(m).Vertex();
+      for (std::size_t k = 0; k < b.faces.size(); ++k) {
+        if (selected.Contains(b.faces[k])) continue;
+        BRepExtrema_DistShapeShape d(v, b.faces[k]);
+        if (d.IsDone() && d.Value() < 1e-7) {
+          l = lab(neighbour_base + static_cast<std::int64_t>(k));
+          break;
+        }
+      }
+      add_origins(out.edges, e, label(l));
+    }
+    bb.Add(c, mid);
+  }
+  out.shape = c;
+  return out;
+}
 }  // namespace
 
 // Implemented in exact_sweep_loft.cc.
@@ -2205,6 +2544,10 @@ KResult kernel_execute(rust::Slice<const KInstr> program,
         case 28: p = offset_profile(x.profile(I[0]), in); prof = true; t = p.tracked; break;
         case 30: t = split_keep(x.slot(I[0]), in, x.operand(I[1])); break;
         case 37: t = do_extend(x, in); break;
+        case 38: t = do_hinge_faces(x, in); break;
+        case 39: t = do_offset_sheet(x, in); break;
+        case 40: t = do_mid_surface(x, in); break;
+        case 41: t = trim_to_next(x, in); break;
         case 35: t = do_delete_hole(x, in); break;
         case 36: t = do_fill(x, in); break;
         case 34: t = do_ruled(x, in); t.sheet = true; break;

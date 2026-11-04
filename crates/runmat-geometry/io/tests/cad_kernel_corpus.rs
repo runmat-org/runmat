@@ -11,6 +11,12 @@
 #[path = "cad_corpus/kernel_under_test.rs"]
 mod kernel_under_test;
 
+#[path = "cad_corpus/k1_ops.rs"]
+mod k1_ops;
+
+#[path = "../../../runmat-cad/tests/common/mod.rs"]
+mod common;
+
 #[path = "../../../runmat-cad/tests/naming_kinds.rs"]
 mod naming_kinds;
 

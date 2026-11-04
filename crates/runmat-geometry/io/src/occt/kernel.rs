@@ -532,11 +532,26 @@ struct Lower<'a> {
 
 /// A bounded end of a prism, trimmed after the long prism is built.
 struct Trim {
-    operand: u32,
-    face: u32,
-    shift: [f64; 3],
+    to: TrimTo,
     keep: i64,
     cut: i64,
+}
+
+enum TrimTo {
+    /// By one operand face's surface, moved by `shift`.
+    Face {
+        operand: u32,
+        face: u32,
+        shift: [f64; 3],
+    },
+    /// Where each ray along `dir` first meets an operand face (up to next over several faces).
+    Next { dir: [f64; 3] },
+}
+
+/// What the rays of an up-to-next bound meet first.
+enum NextHit {
+    One(u32, u32),
+    Several,
 }
 
 impl<'a> Lower<'a> {
@@ -760,6 +775,43 @@ impl<'a> Lower<'a> {
         Ok(None)
     }
 
+    /// What every profile point's ray from `from` (along the frame's z) along `dir` meets
+    /// first among `bodies`.
+    fn next_hit(
+        &self,
+        profile: &CanonicalProfile,
+        bodies: &[u32],
+        from: f64,
+        dir: [f64; 3],
+    ) -> Result<NextHit, KernelError> {
+        let frame = profile.frame;
+        let mut found: Option<(u32, u32)> = None;
+        let mut several = false;
+        for lp in &profile.loops {
+            for seg in lp {
+                for q in [seg.start, mid(seg)] {
+                    let p = add(frame.to_world(q), scale(frame.z, from));
+                    match self.first_face(bodies, p, dir)? {
+                        Some((o, f, _)) => match found {
+                            None => found = Some((o, f)),
+                            Some(x) if x == (o, f) => {}
+                            Some(_) => several = true,
+                        },
+                        None => {
+                            return Err(failed("up to next: the profile does not meet a next face"))
+                        }
+                    }
+                }
+            }
+        }
+        let (o, f) = found.ok_or_else(|| failed("up to next: no face"))?;
+        Ok(if several {
+            NextHit::Several
+        } else {
+            NextHit::One(o, f)
+        })
+    }
+
     // ---- tools
 
     fn tool(
@@ -869,15 +921,61 @@ impl<'a> Lower<'a> {
                 };
                 a_label = INTERNAL;
                 trims.push(Trim {
-                    operand: face.operand,
-                    face: face.entity,
-                    shift: scale(z, offset * start_sense),
+                    to: TrimTo::Face {
+                        operand: face.operand,
+                        face: face.entity,
+                        shift: scale(z, offset * start_sense),
+                    },
                     keep: el,
                     cut: sl,
                 });
             }
-            PrismBound::UpToNext | PrismBound::UpToBody { .. } => {
-                return Err(not_supported("an up-to-next or up-to-body start"));
+            PrismBound::UpToNext => {
+                let (lo, hi) = self.reach(frame.origin, z)?;
+                a = if start_sense > 0.0 { hi } else { lo };
+                a_label = INTERNAL;
+                let dir = scale(z, start_sense);
+                let to = match self.next_hit(profile, &combining, 0.0, dir)? {
+                    NextHit::One(operand, face) => TrimTo::Face {
+                        operand,
+                        face,
+                        shift: [0.0; 3],
+                    },
+                    NextHit::Several => TrimTo::Next { dir },
+                };
+                trims.push(Trim {
+                    to,
+                    keep: el,
+                    cut: sl,
+                });
+            }
+            PrismBound::UpToBody { operand, offset } => {
+                // The far cap's distance is known: build from it back to where the start side
+                // first meets the body (op 31 with the caps' roles swapped).
+                if !end_bound.is_blind() && !matches!(end_bound, PrismBound::ThroughAll)
+                    || thin.is_some()
+                    || draft.is_some()
+                {
+                    return Err(not_supported(
+                        "an up-to-body start with a bounded far end, thin or draft",
+                    ));
+                }
+                self.body(*operand)?;
+                let b = match end_bound {
+                    PrismBound::ThroughAll => {
+                        let (lo, hi) = self.reach(frame.origin, z)?;
+                        if end_sense > 0.0 {
+                            hi
+                        } else {
+                            lo
+                        }
+                    }
+                    _ => end,
+                };
+                let p = self.solid_profile(profile, labels, None)?;
+                let (lo, hi) = self.reach(frame.origin, z)?;
+                let far = if start_sense > 0.0 { hi } else { lo };
+                return Ok(self.push(31, vec![p, el, sl, *operand as i64], vec![b, far, *offset]));
             }
         }
         let from_face = matches!(start_bound, PrismBound::FromFace { .. });
@@ -892,9 +990,11 @@ impl<'a> Lower<'a> {
                 b = far + end;
                 b_label = INTERNAL;
                 trims.push(Trim {
-                    operand: face.operand,
-                    face: face.entity,
-                    shift: scale(z, end),
+                    to: TrimTo::Face {
+                        operand: face.operand,
+                        face: face.entity,
+                        shift: scale(z, end),
+                    },
                     keep: sl,
                     cut: el,
                 });
@@ -909,48 +1009,31 @@ impl<'a> Lower<'a> {
                 b = if end_sense > 0.0 { hi } else { lo };
                 b_label = INTERNAL;
                 trims.push(Trim {
-                    operand: face.operand,
-                    face: face.entity,
-                    shift: scale(z, offset * end_sense),
+                    to: TrimTo::Face {
+                        operand: face.operand,
+                        face: face.entity,
+                        shift: scale(z, offset * end_sense),
+                    },
                     keep: sl,
                     cut: el,
                 });
             }
             PrismBound::UpToNext => {
-                // The face every profile point meets first along the direction.
                 let dir = scale(z, end_sense);
-                let mut found: Option<(u32, u32)> = None;
-                for lp in &profile.loops {
-                    for seg in lp {
-                        for q in [seg.start, mid(seg)] {
-                            let p = add(frame.to_world(q), scale(z, a));
-                            match self.first_face(&combining, p, dir)? {
-                                Some((o, f, _)) => match found {
-                                    None => found = Some((o, f)),
-                                    Some(x) if x == (o, f) => {}
-                                    Some(_) => {
-                                        return Err(not_supported(
-                                            "up to next where the profile meets several faces",
-                                        ))
-                                    }
-                                },
-                                None => {
-                                    return Err(failed(
-                                        "up to next: the profile does not meet a next face",
-                                    ))
-                                }
-                            }
-                        }
-                    }
-                }
-                let (o, f) = found.ok_or_else(|| failed("up to next: no face"))?;
+                let from = if start_bound.is_blind() { a } else { 0.0 };
+                let to = match self.next_hit(profile, &combining, from, dir)? {
+                    NextHit::One(operand, face) => TrimTo::Face {
+                        operand,
+                        face,
+                        shift: [0.0; 3],
+                    },
+                    NextHit::Several => TrimTo::Next { dir },
+                };
                 let (lo, hi) = self.reach(frame.origin, z)?;
                 b = if end_sense > 0.0 { hi } else { lo };
                 b_label = INTERNAL;
                 trims.push(Trim {
-                    operand: o,
-                    face: f,
-                    shift: [0.0; 3],
+                    to,
                     keep: sl,
                     cut: el,
                 });
@@ -971,30 +1054,40 @@ impl<'a> Lower<'a> {
                 return Err(failed("a far cap cannot start from a face"));
             }
         }
-        if draft.is_some() && !trims.is_empty() {
-            return Err(not_supported("drafted extrudes with face end conditions"));
-        }
+        // A drafted prism tapers from the profile plane wherever it is trimmed, so the long
+        // drafted prism trimmed by its end faces is the drafted bounded extrude.
+        let (de, ds) = draft.unwrap_or((0.0, 0.0));
         let tool = match thin {
             None => {
                 let p = self.solid_profile(profile, labels, None)?;
-                let (de, ds) = draft.unwrap_or((0.0, 0.0));
                 self.push(3, vec![p, a_label, b_label], vec![a, b, de, ds])
             }
-            Some(t) => {
-                if draft.is_some() {
-                    return Err(not_supported("drafted thin extrudes"));
-                }
-                self.thin(profile, a, b, a_label, b_label, t, labels)?
-            }
+            Some(t) => self.thin(profile, a, b, a_label, b_label, t, (de, ds), labels)?,
         };
         let mut cur = tool;
         for t in trims {
-            self.body(t.operand)?;
-            cur = self.push(
-                30,
-                vec![cur, t.operand as i64, t.face as i64, t.keep, t.cut],
-                t.shift.to_vec(),
-            );
+            cur = match t.to {
+                TrimTo::Face {
+                    operand,
+                    face,
+                    shift,
+                } => {
+                    self.body(operand)?;
+                    self.push(
+                        30,
+                        vec![cur, operand as i64, face as i64, t.keep, t.cut],
+                        shift.to_vec(),
+                    )
+                }
+                TrimTo::Next { dir } => {
+                    let (lo, hi) = self.reach(frame.origin, dir)?;
+                    let mut ints = vec![cur, t.keep, t.cut, combining.len() as i64];
+                    ints.extend(combining.iter().map(|o| *o as i64));
+                    let mut r = dir.to_vec();
+                    r.push((hi - lo).abs() * 2.0 + 1.0);
+                    self.push(41, ints, r)
+                }
+            };
         }
         Ok(cur)
     }
@@ -1008,6 +1101,7 @@ impl<'a> Lower<'a> {
         a_label: i64,
         b_label: i64,
         t: &runmat_geometry_kernel::op::ThinWallSpec,
+        (de, ds): (f64, f64),
         labels: &ToolLabels<'_>,
     ) -> Result<i64, KernelError> {
         let base = self.profile(profile, true, &|_| None, None, None)?;
@@ -1029,7 +1123,7 @@ impl<'a> Lower<'a> {
         }
         let po = self.push(28, outer, vec![t.outside]);
         let pi = self.push(28, inner, vec![-t.inside]);
-        let wall = self.push(3, vec![po, a_label, b_label], vec![a, b, 0.0, 0.0]);
+        let wall = self.push(3, vec![po, a_label, b_label], vec![a, b, de, ds]);
         let dir = (b - a).signum();
         let (ia, ib, ial, ibl) = match t.cap {
             Some(c) => {
@@ -1038,11 +1132,24 @@ impl<'a> Lower<'a> {
                 (a + dir * c, b - dir * c, l0, l1)
             }
             None => {
+                // The hole runs past both caps. A drafted hole must not cross the profile plane
+                // (each side would taper on its own): an end there stays flush with the wall's.
                 let over = (b - a).abs() * 0.1 + 1e-3;
-                (a - dir * over, b + dir * over, INTERNAL, INTERNAL)
+                let drafted = de != 0.0 || ds != 0.0;
+                // `z` is one end of the wall, `other` the other end.
+                let past = |z: f64, other: f64, s: f64| {
+                    let p = z + s * over;
+                    let crosses = p * other < 0.0 && z * other >= 0.0;
+                    if drafted && crosses {
+                        z
+                    } else {
+                        p
+                    }
+                };
+                (past(a, b, -dir), past(b, a, dir), INTERNAL, INTERNAL)
             }
         };
-        let hole = self.push(3, vec![pi, ial, ibl], vec![ia, ib, 0.0, 0.0]);
+        let hole = self.push(3, vec![pi, ial, ibl], vec![ia, ib, de, ds]);
         Ok(self.push(7, vec![1, 1, wall, 1, hole], vec![]))
     }
 
@@ -1123,23 +1230,44 @@ impl<'a> Lower<'a> {
             return Err(failed("a loft needs two sections"));
         }
         let several = profiles.len() > 2;
-        let mut slots = Vec::new();
-        for (k, p) in profiles.iter().enumerate() {
-            if p.loops.len() != first.loops.len()
-                || p.loops
+        if profiles.iter().any(|p| p.loops.len() != first.loops.len()) {
+            return Err(failed("loft sections need the same number of loops"));
+        }
+        // Sections with fewer curves in a loop are refined to the most curves any section has
+        // there: their longest segments split at the middle, longest first (the earliest of
+        // equal ones). Sides are tagged by the curves of the first section with the most curves
+        // in each loop (the first section when every count agrees), by span.
+        let counts: Vec<usize> = (0..first.loops.len())
+            .map(|li| {
+                profiles
                     .iter()
-                    .zip(&first.loops)
-                    .any(|(a, b)| a.len() != b.len())
-            {
-                return Err(not_supported("loft sections with different curve counts"));
-            }
-            // Sides are tagged by the first section's curves, by span.
+                    .map(|p| p.loops[li].len())
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+        let names: Vec<Vec<SketchEntityId>> = (0..first.loops.len())
+            .map(|li| {
+                let fine = profiles
+                    .iter()
+                    .find(|p| p.loops[li].len() == counts[li])
+                    .expect("a section with the most curves");
+                fine.loops[li].iter().map(|s| s.curve.clone()).collect()
+            })
+            .collect();
+        let refined: Vec<CanonicalProfile> = profiles
+            .iter()
+            .map(|p| {
+                let mut q = p.clone();
+                for (li, l) in q.loops.iter_mut().enumerate() {
+                    *l = refine_loop(l, counts[li]);
+                }
+                q
+            })
+            .collect();
+        let mut slots = Vec::new();
+        for (k, p) in refined.iter().enumerate() {
             let ord = several.then_some(k as u32);
-            let names: Vec<Vec<SketchEntityId>> = first
-                .loops
-                .iter()
-                .map(|l| l.iter().map(|s| s.curve.clone()).collect())
-                .collect();
             let mut q = p.clone();
             for (li, l) in q.loops.iter_mut().enumerate() {
                 for (si, s) in l.iter_mut().enumerate() {
@@ -1644,6 +1772,167 @@ fn mid(seg: &ProfileSegment) -> [f64; 2] {
     }
 }
 
+/// How the faces of a direct edit move: each by an offset along its normal, or each turned
+/// about its own hinge line.
+enum FacePlan {
+    Offset(Vec<f64>),
+    Hinge(Vec<Hinge>),
+}
+
+/// A planar face turned by `angle` about the line where its plane meets the plane through
+/// `point` normal to `pull` (the pull lies in the face's plane, across the line).
+struct Hinge {
+    point: [f64; 3],
+    pull: [f64; 3],
+    angle: f64,
+}
+
+/// A planar face's unit normal and centroid; `what` names the unsupported case otherwise.
+fn plane_of(t: &Topology, face: u32, what: &str) -> Result<([f64; 3], [f64; 3]), KernelError> {
+    let f = t
+        .faces
+        .get(face as usize)
+        .ok_or_else(|| failed("face out of range"))?;
+    match f.geom.surface {
+        SurfaceKind::Plane { normal } => Ok((norm(normal), f.geom.centroid)),
+        _ => Err(not_supported(what)),
+    }
+}
+
+impl Lower<'_> {
+    /// One instruction moving `faces` of `operand` per the plan; `labels` (per face) replace
+    /// the moved faces' origins.
+    fn move_faces(
+        &mut self,
+        slot: i64,
+        operand: u32,
+        faces: &[OperandEntity],
+        plan: &FacePlan,
+        labels: Option<&[i64]>,
+    ) -> i64 {
+        let mut ints = vec![slot, operand as i64, faces.len() as i64];
+        ints.extend(faces.iter().map(|f| f.entity as i64));
+        let (op, reals) = match plan {
+            FacePlan::Offset(d) => {
+                if let Some(ls) = labels {
+                    ints.extend_from_slice(ls);
+                }
+                (21, d.clone())
+            }
+            FacePlan::Hinge(hs) => {
+                match labels {
+                    Some(ls) => ints.extend_from_slice(ls),
+                    None => ints.extend(std::iter::repeat_n(-1, faces.len())),
+                }
+                let mut r = Vec::new();
+                for h in hs {
+                    r.extend_from_slice(&h.point);
+                    r.extend_from_slice(&norm(h.pull));
+                    r.push(h.angle);
+                }
+                (38, r)
+            }
+        };
+        self.push(op, ints, reals)
+    }
+}
+
+/// A segment's length in its frame.
+fn segment_length(seg: &ProfileSegment) -> f64 {
+    match &seg.kind {
+        SegmentKind::Circle { radius, .. } => 2.0 * std::f64::consts::PI * radius,
+        SegmentKind::Arc { center, clockwise } => {
+            let (a0, a1, r) = arc_angles(seg, *center, *clockwise);
+            r * (a1 - a0).abs()
+        }
+        _ => {
+            let d = [seg.end[0] - seg.start[0], seg.end[1] - seg.start[1]];
+            (d[0] * d[0] + d[1] * d[1]).sqrt()
+        }
+    }
+}
+
+/// An arc's start and end angles about its centre, the end past the start in the arc's sense,
+/// and its radius.
+fn arc_angles(seg: &ProfileSegment, c: [f64; 2], clockwise: bool) -> (f64, f64, f64) {
+    let tau = 2.0 * std::f64::consts::PI;
+    let a0 = (seg.start[1] - c[1]).atan2(seg.start[0] - c[0]);
+    let mut a1 = (seg.end[1] - c[1]).atan2(seg.end[0] - c[0]);
+    if clockwise {
+        while a1 >= a0 {
+            a1 -= tau;
+        }
+    } else {
+        while a1 <= a0 {
+            a1 += tau;
+        }
+    }
+    let r = ((seg.start[0] - c[0]).powi(2) + (seg.start[1] - c[1]).powi(2)).sqrt();
+    (a0, a1, r)
+}
+
+/// A segment split at its middle into two of the same curve.
+fn split_segment(seg: &ProfileSegment) -> [ProfileSegment; 2] {
+    let half = |kind: SegmentKind, a: [f64; 2], b: [f64; 2]| ProfileSegment {
+        curve: seg.curve.clone(),
+        kind,
+        start: a,
+        end: b,
+    };
+    match &seg.kind {
+        SegmentKind::Circle { center, radius } => {
+            let c = *center;
+            let r = *radius;
+            let d = [seg.start[0] - c[0], seg.start[1] - c[1]];
+            let l = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            let u = if (l - r).abs() <= 1e-9 * r.max(1.0) && l > 0.0 {
+                [d[0] / l, d[1] / l]
+            } else {
+                [1.0, 0.0]
+            };
+            let p = [c[0] + r * u[0], c[1] + r * u[1]];
+            let q = [c[0] - r * u[0], c[1] - r * u[1]];
+            let arc = SegmentKind::Arc {
+                center: c,
+                clockwise: false,
+            };
+            [half(arc.clone(), p, q), half(arc, q, p)]
+        }
+        SegmentKind::Arc { center, clockwise } => {
+            let (a0, a1, r) = arc_angles(seg, *center, *clockwise);
+            let am = 0.5 * (a0 + a1);
+            let m = [center[0] + r * am.cos(), center[1] + r * am.sin()];
+            [
+                half(seg.kind.clone(), seg.start, m),
+                half(seg.kind.clone(), m, seg.end),
+            ]
+        }
+        _ => {
+            let m = mid(seg);
+            [
+                half(seg.kind.clone(), seg.start, m),
+                half(seg.kind.clone(), m, seg.end),
+            ]
+        }
+    }
+}
+
+/// A loop refined to `count` segments by splitting the longest one, repeatedly.
+fn refine_loop(l: &[ProfileSegment], count: usize) -> Vec<ProfileSegment> {
+    let mut out = l.to_vec();
+    while out.len() < count {
+        let mut best = 0;
+        for (i, s) in out.iter().enumerate() {
+            if segment_length(s) > segment_length(&out[best]) + 1e-12 {
+                best = i;
+            }
+        }
+        let [a, b] = split_segment(&out[best]);
+        out.splice(best..best + 1, [a, b]);
+    }
+    out
+}
+
 fn single_operand(es: &[OperandEntity]) -> Result<u32, KernelError> {
     let first = es
         .first()
@@ -1972,41 +2261,54 @@ impl OcctKernel {
             KernelOp::Import { source, digest } => self.lower_import(source, digest, l),
             KernelOp::MoveFaces { faces, motion } => {
                 let operand = single_operand(faces)?;
-                let t = &l.body(operand)?.topology;
-                let distance = match motion {
-                    FaceMotion::Offset { distance } => *distance,
-                    FaceMotion::Translate { vector } => {
-                        // A translation of planar faces along their common normal is an offset.
-                        let mut d: Option<f64> = None;
-                        for f in faces {
-                            let SurfaceKind::Plane { normal } =
-                                t.faces[f.entity as usize].geom.surface
-                            else {
-                                return Err(not_supported("translating curved faces"));
-                            };
-                            let along = dot(norm(normal), *vector);
-                            let rest = sub(*vector, scale(norm(normal), along));
-                            if dot(rest, rest).sqrt() > 1e-9 {
-                                return Err(not_supported("translating faces across their normal"));
-                            }
-                            match d {
-                                None => d = Some(along),
-                                Some(x) if (x - along).abs() < 1e-12 => {}
-                                Some(_) => {
-                                    return Err(not_supported(
-                                        "translating faces that face different ways",
-                                    ))
-                                }
-                            }
-                        }
-                        d.unwrap_or(0.0)
+                let plan = match motion {
+                    FaceMotion::Offset { distance } => {
+                        FacePlan::Offset(vec![*distance; faces.len()])
                     }
-                    FaceMotion::Rotate { .. } => return Err(not_supported("rotating faces")),
+                    FaceMotion::Translate { vector } => {
+                        // Each planar face's plane moves by the translation's part along its
+                        // normal; the part along the face slides it within its own plane,
+                        // where its neighbours bound it.
+                        let t = &l.body(operand)?.topology;
+                        let mut d = Vec::new();
+                        for f in faces {
+                            let (n, _) = plane_of(t, f.entity, "translating curved faces")?;
+                            d.push(dot(n, *vector));
+                        }
+                        FacePlan::Offset(d)
+                    }
+                    FaceMotion::Rotate {
+                        axis_point,
+                        axis_direction,
+                        angle,
+                    } => {
+                        let t = &l.body(operand)?.topology;
+                        let a = norm(*axis_direction);
+                        let mut hinges = Vec::new();
+                        for f in faces {
+                            let (n, p0) = plane_of(t, f.entity, "rotating curved faces")?;
+                            if dot(n, a).abs() > 1e-9 {
+                                return Err(not_supported(
+                                    "rotating a face about an axis that crosses its plane",
+                                ));
+                            }
+                            // The turned plane meets the face's plane on a line parallel to
+                            // the axis: the face hinges there.
+                            let h = dot(n, sub(p0, *axis_point));
+                            let d = cross(a, n);
+                            let foot = add(*axis_point, scale(n, h));
+                            let hinge = add(foot, scale(d, h * (angle / 2.0).tan()));
+                            hinges.push(Hinge {
+                                point: hinge,
+                                pull: d,
+                                angle: *angle,
+                            });
+                        }
+                        FacePlan::Hinge(hinges)
+                    }
                 };
                 let slot = l.operand(operand)?;
-                let mut ints = vec![slot, operand as i64, faces.len() as i64];
-                ints.extend(faces.iter().map(|f| f.entity as i64));
-                let r = l.push(21, ints, vec![distance]);
+                let r = l.move_faces(slot, operand, faces, &plan, None);
                 l.output(r, false, OutputSpec::default());
                 l.keep_others(operand)
             }
@@ -2019,7 +2321,69 @@ impl OcctKernel {
                 l.output(r, false, OutputSpec::default());
                 l.keep_others(operand)
             }
-            KernelOp::ReplaceFaces { .. } => Err(not_supported("replace face")),
+            KernelOp::ReplaceFaces { faces, with } => {
+                // Each planar face moves onto the replacement plane: a parallel face by an
+                // offset, a tilted one by turning about the line where the two planes meet.
+                if faces.iter().any(|f| f.operand != 0) || with.operand == 0 {
+                    return Err(failed(
+                        "replace face takes faces of operand 0 and a face of another operand",
+                    ));
+                }
+                let sheet = l.body(with.operand)?;
+                let (m, q0) = plane_of(&sheet.topology, with.entity, "replacing by a curved face")?;
+                let t = &l.body(0)?.topology;
+                let mut offsets = Vec::new();
+                let mut hinges = Vec::new();
+                for f in faces {
+                    let (n, p0) = plane_of(t, f.entity, "replacing a curved face")?;
+                    // The replacement's side that faces the same way as the face.
+                    let m = if dot(m, n) < 0.0 { scale(m, -1.0) } else { m };
+                    let c = dot(m, n).clamp(-1.0, 1.0);
+                    let axis = cross(n, m);
+                    let s = dot(axis, axis).sqrt();
+                    if s < 1e-9 {
+                        offsets.push(dot(n, sub(q0, p0)));
+                        continue;
+                    }
+                    let a = scale(axis, 1.0 / s);
+                    let angle = s.atan2(c);
+                    // A point on both planes: from the face centroid towards the replacement
+                    // plane, along the face plane's direction across the axis.
+                    let d = cross(a, n);
+                    let dist = dot(m, sub(q0, p0));
+                    let along = dist / dot(m, d);
+                    hinges.push(Hinge {
+                        point: add(p0, scale(d, along)),
+                        pull: d,
+                        angle,
+                    });
+                }
+                if !offsets.is_empty() && !hinges.is_empty() {
+                    return Err(not_supported(
+                        "replacing faces of which some are parallel to the replacement and some \
+                         are not",
+                    ));
+                }
+                let labels: Vec<i64> = faces
+                    .iter()
+                    .map(|f| {
+                        l.label(gen(
+                            Role::Replacement,
+                            KernelTag::InputFace { face: *f },
+                            None,
+                        ))
+                    })
+                    .collect();
+                let plan = if hinges.is_empty() {
+                    FacePlan::Offset(offsets)
+                } else {
+                    FacePlan::Hinge(hinges)
+                };
+                let slot = l.operand(0)?;
+                let r = l.move_faces(slot, 0, faces, &plan, Some(&labels));
+                l.output(r, false, OutputSpec::default());
+                Ok(())
+            }
             KernelOp::Surface(s) => self.lower_surface(s, l),
         }
     }
@@ -2265,34 +2629,143 @@ impl OcctKernel {
         varied: &[Vec<ToolOp>],
         l: &mut Lower<'_>,
     ) -> Result<(), KernelError> {
-        let combine = seeds
-            .first()
-            .map(|s| s.combine)
-            .ok_or_else(|| failed("pattern with no seeds"))?;
-        if seeds.iter().any(|s| s.combine != combine) || combine == Combine::New {
-            return Err(not_supported("patterns of new-body or mixed tools"));
+        if seeds.is_empty() {
+            return Err(failed("pattern with no seeds"));
         }
         if !varied.is_empty() && varied.len() != instances.len() {
             return Err(failed("a variable pattern needs tools for every instance"));
         }
-        let mut tools = Vec::new();
-        for (ii, inst) in instances.iter().enumerate() {
-            let these = if varied.is_empty() {
-                seeds
+        let seed_at = |ii: usize, si: usize| -> &ToolOp {
+            if varied.is_empty() {
+                &seeds[si]
             } else {
-                &varied[ii]
-            };
-            for (si, seed) in these.iter().enumerate() {
-                let mut labels = ToolLabels::plain(si as u32);
-                labels.seed = Some(si as u32);
-                labels.instance = Some(inst.key.clone());
-                for t in l.tool(&seed.shape, &labels)? {
-                    tools.push(l.push(13, vec![t, -1], transform_reals(&inst.transform)));
+                &varied[ii][si]
+            }
+        };
+        let n = l.operands.len();
+        // One combine mode for every seed: the tools of all instances combine at once.
+        let combine = seeds[0].combine;
+        if combine != Combine::New && seeds.iter().all(|s| s.combine == combine) {
+            let mut tools = Vec::new();
+            for (ii, inst) in instances.iter().enumerate() {
+                let these = if varied.is_empty() {
+                    seeds
+                } else {
+                    &varied[ii]
+                };
+                for (si, seed) in these.iter().enumerate() {
+                    tools.extend(self.instance_tools(seed, si, inst, l)?);
                 }
             }
+            return l.combine(combine, n, &tools, false, None);
         }
-        let n = l.operands.len();
-        l.combine(combine, n, &tools, false, None)
+        if varied.iter().any(|v| v.len() != seeds.len()) {
+            return Err(failed(
+                "a variable pattern's instances need one tool per seed",
+            ));
+        }
+        // Mixed seeds apply in seed order, each over every instance; a new-body seed makes one
+        // body per instance and leaves the operands as they are.
+        let mut current: Option<i64> = None;
+        let mut touched = false;
+        for si in 0..seeds.len() {
+            let mode = seeds[si].combine;
+            if (0..instances.len()).any(|ii| seed_at(ii, si).combine != mode) {
+                return Err(failed(
+                    "a variable pattern's instances must combine as their seed",
+                ));
+            }
+            for (ii, inst) in instances.iter().enumerate() {
+                let tools = self.instance_tools(seed_at(ii, si), si, inst, l)?;
+                if mode == Combine::New {
+                    let all = if tools.len() == 1 {
+                        tools[0]
+                    } else {
+                        let mut ints = vec![0, 1, tools[0], (tools.len() - 1) as i64];
+                        ints.extend_from_slice(&tools[1..]);
+                        l.push(7, ints, vec![])
+                    };
+                    let body = HistorySource::Generated {
+                        role: Role::Body,
+                        tag: KernelTag::None,
+                        ordinal: None,
+                        seed: Some(si as u32),
+                        instance: Some(inst.key.clone()),
+                    };
+                    l.output(
+                        all,
+                        false,
+                        OutputSpec {
+                            body: Some(body),
+                            ..Default::default()
+                        },
+                    );
+                    continue;
+                }
+                if n == 0 && current.is_none() {
+                    if mode != Combine::Add {
+                        return Err(failed("there is no body to combine the tool with"));
+                    }
+                }
+                let op = match mode {
+                    Combine::Add => 0,
+                    Combine::Cut => 1,
+                    Combine::Intersect => 2,
+                    Combine::New => unreachable!(),
+                };
+                let args: Vec<i64> = match current {
+                    Some(c) => vec![c],
+                    None => (0..n as u32)
+                        .map(|i| l.operand(i))
+                        .collect::<Result<_, _>>()?,
+                };
+                let r = if args.is_empty() {
+                    let mut ints = vec![0, 1, tools[0], (tools.len() - 1) as i64];
+                    ints.extend_from_slice(&tools[1..]);
+                    l.push(7, ints, vec![])
+                } else {
+                    let mut ints = vec![op, args.len() as i64];
+                    ints.extend(args);
+                    ints.push(tools.len() as i64);
+                    ints.extend(tools);
+                    l.push(7, ints, vec![])
+                };
+                current = Some(r);
+                touched = true;
+            }
+        }
+        match current {
+            Some(c) if touched => {
+                l.output(
+                    c,
+                    false,
+                    OutputSpec {
+                        body: Some(gen(Role::Body, KernelTag::None, None)),
+                        ..Default::default()
+                    },
+                );
+                Ok(())
+            }
+            _ => l.keep_operands(0..n),
+        }
+    }
+
+    /// One seed's tools placed at one instance, labelled by seed and instance.
+    fn instance_tools(
+        &self,
+        seed: &ToolOp,
+        si: usize,
+        inst: &runmat_geometry_kernel::op::Instance,
+        l: &mut Lower<'_>,
+    ) -> Result<Vec<i64>, KernelError> {
+        let mut labels = ToolLabels::plain(si as u32);
+        labels.seed = Some(si as u32);
+        labels.instance = Some(inst.key.clone());
+        let mut out = Vec::new();
+        for t in l.tool(&seed.shape, &labels)? {
+            out.push(l.push(13, vec![t, -1], transform_reals(&inst.transform)));
+        }
+        Ok(out)
     }
 
     fn lower_import(
@@ -2504,7 +2977,48 @@ impl OcctKernel {
                 }
                 Ok(())
             }
-            SurfaceOp::Offset { .. } => Err(not_supported("offset surfaces")),
+            SurfaceOp::Offset { faces, distance } => {
+                // Operands are kept (sheets first, as they are), then one new sheet per operand
+                // offset, then the solids.
+                let sheets: Vec<u32> = (0..n as u32)
+                    .filter(|i| l.operands[*i as usize].sheet)
+                    .collect();
+                for i in &sheets {
+                    l.keep_operands(*i as usize..*i as usize + 1)?;
+                }
+                for i in 0..n as u32 {
+                    let mine: Vec<i64> = faces
+                        .iter()
+                        .filter(|e| e.operand == i)
+                        .map(|e| e.entity as i64)
+                        .collect();
+                    if !faces.is_empty() && mine.is_empty() {
+                        continue;
+                    }
+                    let s = l.operand(i)?;
+                    let ob = l.face_labels(i, Role::OffsetFace)?;
+                    let nb = l.face_labels(i, Role::Boundary)?;
+                    let none = l.label(gen(Role::Boundary, KernelTag::None, None));
+                    let mut ints = vec![s, i as i64, ob, nb, none, mine.len() as i64];
+                    ints.extend(mine);
+                    let r = l.push(39, ints, vec![*distance]);
+                    l.output(
+                        r,
+                        false,
+                        OutputSpec {
+                            body: Some(gen(Role::Body, KernelTag::None, None)),
+                            material: Some(Vec::new()),
+                            ..Default::default()
+                        },
+                    );
+                }
+                for i in 0..n as u32 {
+                    if !l.operands[i as usize].sheet {
+                        l.keep_operands(i as usize..i as usize + 1)?;
+                    }
+                }
+                Ok(())
+            }
             SurfaceOp::Extend { edges, distance } => {
                 for i in 0..n as u32 {
                     let mine: Vec<&OperandEntity> =
@@ -2528,7 +3042,35 @@ impl OcctKernel {
                 }
                 Ok(())
             }
-            SurfaceOp::MidSurface { .. } => Err(not_supported("mid-surface")),
+            SurfaceOp::MidSurface { pairs } => {
+                if pairs.is_empty() {
+                    return Err(failed("a mid-surface needs face pairs"));
+                }
+                if pairs.iter().any(|(a, c)| a.operand != 0 || c.operand != 0) {
+                    return Err(failed("mid-surface pairs are faces of operand 0"));
+                }
+                let nb = l.face_labels(0, Role::Boundary)?;
+                let none = l.label(gen(Role::Boundary, KernelTag::None, None));
+                let mut ints = vec![0, nb, none, pairs.len() as i64];
+                for (a, c) in pairs {
+                    let fl = l.label(gen(
+                        Role::MidSurface,
+                        KernelTag::InputFace { face: *a },
+                        None,
+                    ));
+                    ints.extend_from_slice(&[a.entity as i64, c.entity as i64, fl]);
+                }
+                let r = l.push(40, ints, vec![]);
+                l.output(
+                    r,
+                    false,
+                    OutputSpec {
+                        body: Some(gen(Role::Body, KernelTag::None, None)),
+                        ..Default::default()
+                    },
+                );
+                l.keep_operands(0..n)
+            }
             SurfaceOp::DeleteHole { edges } => {
                 // Each sheet with selected edges loses those holes; the others come back as
                 // they are.

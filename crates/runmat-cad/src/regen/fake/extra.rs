@@ -456,6 +456,17 @@ impl FakeKernel {
                 entity: f.entity,
             });
         }
+        // The replacement sheet is consumed (history contract rule 3): it and its faces have
+        // no image.
+        out.history.deleted_bodies.push(with.operand);
+        for f in 0..sh.topology.faces.len() as u32 {
+            out.history.deleted_faces.push(OperandEntity {
+                operand: with.operand,
+                entity: f,
+            });
+        }
+        out.history.deleted_faces.sort();
+        out.history.deleted_bodies.sort();
         Ok(out)
     }
 
