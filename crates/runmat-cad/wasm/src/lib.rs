@@ -10,6 +10,9 @@
 //!   `projection` is `{ kind: "part", data: { document, index } }` or
 //!   `{ kind: "assembly", data: <assembly index> }` and `display` is `{ kind, data }` with the
 //!   part display (`part_display` with `sketch_display`) or the assembly display.
+//!   A `.drawing` compiles to `{ kind: "drawing", data: <drawing index> }` with `models`: the
+//!   display of each part or assembly its views show, by the file name the view wrote
+//!   ([`drawing`]).
 //! - `edit(path, text, files, request)` → `{ ok: true, files, summary }` or
 //!   `{ ok: false, message, diagnostics }`: a catalog command run from the canvas, written as
 //!   the smallest text change ([`edit`]).
@@ -20,6 +23,7 @@
 //! through the Tauri host; the JSON shapes stay the same. Malformed input is reported as a
 //! diagnostic, never a panic.
 
+pub mod drawing;
 pub mod edit;
 pub mod runtime;
 

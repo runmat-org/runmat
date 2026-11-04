@@ -1322,12 +1322,18 @@ pub fn eco_edited_design() -> Design {
             }
         }
     }
-    d.net_classes.get_mut("power").unwrap().params.insert("track_width".into(), Param::text("0.40 mm"));
+    d.net_classes
+        .get_mut("power")
+        .unwrap()
+        .params
+        .insert("track_width".into(), Param::text("0.40 mm"));
     d.net_classes.insert(
         "analog".into(),
         NetClass {
             name: "analog".into(),
-            params: [("clearance".to_owned(), Param::text("0.20 mm"))].into_iter().collect(),
+            params: [("clearance".to_owned(), Param::text("0.20 mm"))]
+                .into_iter()
+                .collect(),
             source: Default::default(),
         },
     );
@@ -1336,7 +1342,9 @@ pub fn eco_edited_design() -> Design {
         VariantDef {
             name: "lite".into(),
             base: None,
-            overrides: [("/ch[0]/CD2".to_owned(), Fitting::NotFitted)].into_iter().collect(),
+            overrides: [("/ch[0]/CD2".to_owned(), Fitting::NotFitted)]
+                .into_iter()
+                .collect(),
         },
     );
     stamp_sources(&mut d);
@@ -1354,7 +1362,10 @@ pub fn eco_scenario() -> EcoScenario {
     let synced = eco_synced_design();
     let synced_netlist = elaborate(&synced, &pool, &ElabOptions::default(), None);
     let mut lock = LockSection::default();
-    lock.reconcile(&synced_netlist.lock_items(), &mut DerivedUuids { namespace: 7 });
+    lock.reconcile(
+        &synced_netlist.lock_items(),
+        &mut DerivedUuids { namespace: 7 },
+    );
     let (mut board, _) = large_board_report(&pool, &synced_netlist, &ECO_PARAMS);
     // The first sync is an ECO too: values, parameters, classes and rooms come over.
     {
@@ -1365,17 +1376,39 @@ pub fn eco_scenario() -> EcoScenario {
             lock: &lock,
         };
         let plan = eco::compare(&s, &board, &ComparatorOptions::default());
-        eco::apply(&mut board, &plan, &plan.ids(), &pool, &ApplyOptions::default()).expect("the first sync validates");
+        eco::apply(
+            &mut board,
+            &plan,
+            &plan.ids(),
+            &pool,
+            &ApplyOptions::default(),
+        )
+        .expect("the first sync validates");
         eco::record_sync(&mut board, &s);
     }
     // Board-side edits.
-    let by_path = |nl: &Netlist, p: &str| nl.components.iter().find(|c| c.path.to_string() == p).cloned().unwrap();
+    let by_path = |nl: &Netlist, p: &str| {
+        nl.components
+            .iter()
+            .find(|c| c.path.to_string() == p)
+            .cloned()
+            .unwrap()
+    };
     let u = by_path(&synced_netlist, "/ch[1]/U");
-    let fid = board.footprints.values().find(|f| f.reference == u.designator).unwrap().id;
+    let fid = board
+        .footprints
+        .values()
+        .find(|f| f.reference == u.designator)
+        .unwrap()
+        .id;
     {
         let f = board.footprints.get_mut(&fid).unwrap();
         for pin in u.pins.iter().filter(|p| p.gate == "B") {
-            let other = u.pins.iter().find(|q| q.gate == "C" && q.pin == pin.pin).unwrap();
+            let other = u
+                .pins
+                .iter()
+                .find(|q| q.gate == "C" && q.pin == pin.pin)
+                .unwrap();
             let (a, b) = (&pin.pads[0], &other.pads[0]);
             let (na, nb) = (f.pad_nets.get(a).copied(), f.pad_nets.get(b).copied());
             if let (Some(na), Some(nb)) = (na, nb) {
@@ -1386,10 +1419,18 @@ pub fn eco_scenario() -> EcoScenario {
     }
     for (path, to) in [("/ch[1]/RS", "R40"), ("/ch[0]/RG", "R50")] {
         let d = by_path(&synced_netlist, path).designator;
-        board.footprints.values_mut().find(|f| f.reference == d).unwrap().reference = to.into();
+        board
+            .footprints
+            .values_mut()
+            .find(|f| f.reference == d)
+            .unwrap()
+            .reference = to.into();
     }
     // The schematic renumbered channel 0's RG too.
-    lock.entries.get_mut(&crate::ids::NamePath::parse("/ch[0]/RG")).unwrap().designator = Some("R60".into());
+    lock.entries
+        .get_mut(&crate::ids::NamePath::parse("/ch[0]/RG"))
+        .unwrap()
+        .designator = Some("R60".into());
     let design = eco_edited_design();
     let netlist = elaborate(
         &design,
@@ -1409,4 +1450,18 @@ pub fn eco_scenario() -> EcoScenario {
         lock,
         board,
     }
+}
+
+/// The large design's projection as the Desktop reads it (netlist, schematic and board with its
+/// DRC; no ERC or review findings): the board scale scene's input, `channels` channels strong.
+pub fn large_index(params: &LargeParams) -> crate::index::CircuitIndex {
+    use crate::board_rules::{BoardGraph, BoardRules};
+    let (pool, design, nl, mut board) = large(params);
+    let mut index = crate::index::build_index(&design, &nl, &pool, &nl.diagnostics, &[]);
+    let (mut rules, _) = BoardRules::new(&board.limits, &board.rules);
+    rules.rebuild(&BoardGraph::new(&board, &[]));
+    let fills = crate::zone::fill_zones(&mut board, &rules, &[]);
+    let drc = crate::drc::Drc::run(&board, &rules, &[], &fills);
+    crate::index::add_board(&mut index, &board, &rules, &drc);
+    index
 }

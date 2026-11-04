@@ -125,6 +125,9 @@ fn definitions(doc: &AssemblyDocument) -> Vec<DefinitionRef> {
 
 /// The files `path` needs beyond itself: an assembly's parts and sub-assemblies.
 pub fn dependencies(path: &str, text: &str) -> Vec<String> {
+    if path.ends_with(".drawing") {
+        return crate::drawing::dependencies(path, text);
+    }
     if !is_assembly(path) {
         return Vec::new();
     }
@@ -141,6 +144,7 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
 /// A part regenerated on the reference kernel: its projection and display.
 pub struct CompiledPart {
     pub document: PartDocument,
+    pub index: runmat_cad::index::PartIndex,
     pub projection: Value,
     pub display: PartDisplay,
 }
@@ -173,6 +177,7 @@ pub fn compile_part(path: &str, text: &str) -> Result<CompiledPart, Vec<Diagnost
     let projection = json!({ "document": &document, "index": &index });
     Ok(CompiledPart {
         document,
+        index,
         projection,
         display,
     })
@@ -281,6 +286,9 @@ pub fn compile_assembly(
 
 /// `compile` as JSON.
 pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
+    if path.ends_with(".drawing") {
+        return crate::drawing::compile_json(path, text, files);
+    }
     let out = if is_assembly(path) {
         match compile_assembly(path, text, files) {
             Ok((index, display, diagnostics)) => json!({

@@ -235,3 +235,23 @@ fn geometry_is_deterministic() {
     let (b, _) = scenario_index();
     assert_eq!(to_json(&a), to_json(&b));
 }
+
+#[test]
+fn the_large_board_projection_reaches_the_scale_scene_size() {
+    let params = runmat_circuit::fixture::LargeParams {
+        channels: 400,
+        ..Default::default()
+    };
+    let index = runmat_circuit::fixture::large_index(&params);
+    let board = index.board.as_ref().expect("a board");
+    let primitives =
+        board.pads.len() + board.tracks.len() + board.vias.len() + board.footprints.len();
+    eprintln!(
+        "large board: {} pads, {} tracks, {} vias, {} footprints = {primitives}",
+        board.pads.len(),
+        board.tracks.len(),
+        board.vias.len(),
+        board.footprints.len()
+    );
+    assert!(primitives > 10_000, "{primitives}");
+}

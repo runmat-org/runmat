@@ -118,3 +118,19 @@ mod tests {
             .contains("/p/io.circuit"));
     }
 }
+
+/// The large fixture design (`runmat_circuit::fixture::large`) with `channels` channels on a
+/// routed, poured 8-layer board, as `{ kind: "circuit", data }`: the Desktop's board scale
+/// scene draws it to measure frame times.
+#[wasm_bindgen]
+pub fn large_board(channels: u32) -> String {
+    let params = runmat_circuit::fixture::LargeParams {
+        channels,
+        ..Default::default()
+    };
+    let index = runmat_circuit::fixture::large_index(&params);
+    format!(
+        "{{\"kind\":\"circuit\",\"data\":{}}}",
+        runmat_circuit::index::to_json(&index)
+    )
+}
