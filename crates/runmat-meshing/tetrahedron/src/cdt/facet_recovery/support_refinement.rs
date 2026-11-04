@@ -418,11 +418,13 @@ fn try_insert_support_node(
                         Err(failure) => format!("already invalid: {failure}"),
                     };
                 work.reject(format!(
-                    "support node {:?} conflicts with recovered segment edge {:?} ({} conflicts); \
+                    "support node {:?} conflicts with recovered segment edge {:?} at {:?} ({} conflicts); \
                      splitting it was rejected: {split_rejection}; on-facet insertion was \
                      rejected: {}; the topology before insertion was {source_state}",
                     node.coordinates_m.canonical_value(),
                     conflicts[0],
+                    conflicts[0].map(|identity| node_index(&recovery.topology, identity)
+                        .map(|index| recovery.topology.nodes[index].coordinates_m.canonical_value())),
                     conflicts.len(),
                     conforming_rejection.as_deref().unwrap_or("no reason recorded")
                 ));
