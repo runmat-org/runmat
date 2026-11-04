@@ -182,7 +182,7 @@ pub(in crate::cdt::solver_topology::order_elevation) fn edge_geometry(
         return Err(invalid("exact edge fraction is outside its source domain"));
     }
     if request.exact_edge_id.is_some() {
-        return curve_midpoint(input, evaluation, options, request);
+        return curve_midpoint(input, evaluation, request);
     }
     if !request.surface_uses.is_empty() {
         return surface_midpoint(input, evaluation, options, request);
@@ -230,7 +230,6 @@ pub(in crate::cdt::solver_topology::order_elevation) fn surface_geometry(
 fn curve_midpoint(
     input: &ProjectionInput<'_>,
     evaluation: PreparedEvaluation<'_, '_>,
-    options: DelaunaySolverTopologyOptions,
     request: EdgeGeometryRequest<'_>,
 ) -> Result<Option<ExactEdgePoint>, DelaunaySolverTopologyError> {
     let edge_id = request
@@ -260,13 +259,11 @@ fn curve_midpoint(
         source_edge_id: storage.entity(edge_id)?,
         parameter,
     });
+    // A pcurve image lies on its face's trim boundary by construction, so it is not
+    // trim-classified; the surface point must still agree with the curve point.
     for surface_use in request.surface_uses {
         for evaluator_uv in pcurve_uvs(edge_id, parameter, surface_use, evaluation)? {
-            let Some(surface_point) =
-                evaluate_surface_candidate(surface_use, evaluator_uv, evaluation, options)?
-            else {
-                return Ok(None);
-            };
+            let surface_point = evaluate_surface_point(surface_use, evaluator_uv, evaluation)?;
             if !points_match(input, coordinates_m, surface_point) {
                 return Ok(None);
             }
@@ -308,14 +305,30 @@ fn surface_midpoint(
         .map_err(error::geometry)?;
         let (left_uv, right_uv) =
             compatible_surface_parameters(request.left, request.right, surface_use, periods)?;
-        let evaluator_uv = wrap_into_period(
+        let parametric_uv = wrap_into_period(
             interpolate2(left_uv, right_uv, request.fraction),
             periods,
             bounds,
         );
-        let Some(point) =
-            evaluate_surface_candidate(surface_use, evaluator_uv, evaluation, options)?
-        else {
+        // On a concave trim the parametric interpolant of two trimmed points can leave the
+        // trim; the surface point closest to the chord point is the fallback, if it is inside.
+        let candidate = match evaluate_surface_candidate(
+            surface_use,
+            parametric_uv,
+            evaluation,
+            options,
+        )? {
+            Some(point) => Some((parametric_uv, point)),
+            None => closest_trimmed_chord_point(
+                input,
+                surface_use,
+                [left_uv, right_uv],
+                request.fraction,
+                evaluation,
+                options,
+            )?,
+        };
+        let Some((evaluator_uv, point)) = candidate else {
             return Ok(None);
         };
         if let Some(existing) = coordinates {
@@ -409,6 +422,18 @@ fn evaluate_surface_candidate(
     evaluation: PreparedEvaluation<'_, '_>,
     options: DelaunaySolverTopologyOptions,
 ) -> Result<Option<[f64; 3]>, DelaunaySolverTopologyError> {
+    if !inside_trim(surface_use, evaluator_uv, evaluation, options)? {
+        return Ok(None);
+    }
+    evaluate_surface_point(surface_use, evaluator_uv, evaluation).map(Some)
+}
+
+fn inside_trim(
+    surface_use: &SurfaceUse,
+    evaluator_uv: [f64; 2],
+    evaluation: PreparedEvaluation<'_, '_>,
+    options: DelaunaySolverTopologyOptions,
+) -> Result<bool, DelaunaySolverTopologyError> {
     let face = evaluation.sources.face(surface_use.source_face_id)?;
     let location = ExactTrimClassifier::classify(
         evaluation.evaluator,
@@ -418,9 +443,60 @@ fn evaluate_surface_candidate(
         evaluation.control,
     )
     .map_err(error::geometry)?;
-    if location == TrimDomainLocation::Outside {
+    Ok(location != TrimDomainLocation::Outside)
+}
+
+/// The trimmed surface point closest to the point at `fraction` along the chord between two
+/// surface coordinates, with its coordinate; `None` when that point lies outside the trim.
+fn closest_trimmed_chord_point(
+    input: &ProjectionInput<'_>,
+    surface_use: &SurfaceUse,
+    [left_uv, right_uv]: [[f64; 2]; 2],
+    fraction: f64,
+    evaluation: PreparedEvaluation<'_, '_>,
+    options: DelaunaySolverTopologyOptions,
+) -> Result<Option<([f64; 2], [f64; 3])>, DelaunaySolverTopologyError> {
+    let face = evaluation.sources.face(surface_use.source_face_id)?;
+    let local = |uv| {
+        evaluation.control.checkpoint().map_err(error::geometry)?;
+        ExactSurfaceEvaluator::point(
+            evaluation.evaluator,
+            &face.surface_evaluator_id,
+            uv,
+            evaluation.control,
+        )
+        .map(|point| point.canonical_value())
+        .map_err(error::geometry)
+    };
+    let chord_point = interpolate3(local(left_uv)?, local(right_uv)?, fraction);
+    let projection = ExactSurfaceEvaluator::closest_point(
+        evaluation.evaluator,
+        &face.surface_evaluator_id,
+        runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
+            chord_point,
+        ),
+        runmat_types::physical::Length::new(match_tolerance_m(input)),
+        evaluation.control,
+    )
+    .map_err(error::geometry)?;
+    let evaluator_uv = projection
+        .uv
+        .map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value));
+    if !inside_trim(surface_use, evaluator_uv, evaluation, options)? {
         return Ok(None);
     }
+    Ok(Some((
+        evaluator_uv,
+        evaluate_surface_point(surface_use, evaluator_uv, evaluation)?,
+    )))
+}
+
+fn evaluate_surface_point(
+    surface_use: &SurfaceUse,
+    evaluator_uv: [f64; 2],
+    evaluation: PreparedEvaluation<'_, '_>,
+) -> Result<[f64; 3], DelaunaySolverTopologyError> {
+    let face = evaluation.sources.face(surface_use.source_face_id)?;
     let local = ExactSurfaceEvaluator::point(
         evaluation.evaluator,
         &face.surface_evaluator_id,
@@ -437,7 +513,7 @@ fn evaluate_surface_candidate(
     if point.iter().any(|value| !value.is_finite()) {
         return Err(invalid("exact midpoint evaluation is not finite"));
     }
-    Ok(Some(point))
+    Ok(point)
 }
 
 fn compatible_curve_parameters(
@@ -550,8 +626,8 @@ pub(super) fn require_matching_points(
     Ok(())
 }
 
-fn points_match(input: &ProjectionInput<'_>, left: [f64; 3], right: [f64; 3]) -> bool {
-    let tolerance = input
+fn match_tolerance_m(input: &ProjectionInput<'_>) -> f64 {
+    input
         .request
         .tolerance
         .source_tolerance_m
@@ -563,7 +639,11 @@ fn points_match(input: &ProjectionInput<'_>, left: [f64; 3], right: [f64; 3]) ->
                 .tolerance
                 .maximum_healing_displacement_m
                 .canonical_value(),
-        );
+        )
+}
+
+fn points_match(input: &ProjectionInput<'_>, left: [f64; 3], right: [f64; 3]) -> bool {
+    let tolerance = match_tolerance_m(input);
     let squared_distance = left
         .into_iter()
         .zip(right)
