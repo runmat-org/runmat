@@ -94,7 +94,7 @@ fn every_change_type_with_cause_and_impact() {
     );
     find(&plan, ChangeKind::AddComponentClass, "ch[2]");
     // Its local nets come with it; adds need them.
-    let net = find(&plan, ChangeKind::AddNet, "/ch[2]/INF");
+    let net = find(&plan, ChangeKind::AddNet, "INF (ch[2])");
     assert_eq!(net.cause.sheet, "ch[2]");
     let u3 = adds
         .iter()

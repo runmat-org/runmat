@@ -649,6 +649,18 @@ fn root_cause(root: &str, source: Option<String>, reason: String) -> Cause {
     }
 }
 
+/// A net as the review shows it: a sheet-local net (`/ch[1]/TIE_B`) by its name and sheet
+/// (`TIE_B (ch[1])`), never as a raw path.
+pub fn net_label(name: &str) -> String {
+    match name
+        .strip_prefix('/')
+        .and_then(|rest| rest.rsplit_once('/'))
+    {
+        Some((sheet, leaf)) => format!("{leaf} ({sheet})"),
+        None => name.to_owned(),
+    }
+}
+
 fn package_name(pool: &Pool, u: Option<Uuid>) -> Option<String> {
     u.and_then(|u| pool.packages.get(&u))
         .map(|p| p.name.clone())
@@ -1004,9 +1016,9 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
         b.push(
             ChangeKind::RenameNet,
             old,
-            new.clone(),
-            Some(old.clone()),
-            Some(new.clone()),
+            net_label(new),
+            Some(net_label(old)),
+            Some(net_label(new)),
             Cause {
                 sheet,
                 sheet_path,
@@ -1024,7 +1036,6 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
             },
         );
     }
-    let to_board_name = |sch: &str| -> String { sch.to_owned() };
     // A board net name as the schematic now calls it.
     let board_as_sch = |name: &str| -> String {
         renamed
@@ -1045,14 +1056,18 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
         b.push(
             ChangeKind::AddNet,
             new,
-            (*new).to_owned(),
+            net_label(new),
             None,
-            Some((*new).to_owned()),
+            n.class.as_ref().map(|c| format!("class {c}")),
             Cause {
                 sheet,
                 sheet_path,
                 source: None,
-                reason: format!("{} has {} pins in the schematic", new, n.pins.len()),
+                reason: format!(
+                    "{} has {} pins in the schematic",
+                    net_label(new),
+                    n.pins.len()
+                ),
             },
             Impact {
                 nets: vec![(*new).to_owned()],
@@ -1088,10 +1103,14 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
         let ch = b.push(
             ChangeKind::RemoveNet,
             old,
-            (*old).to_owned(),
-            Some((*old).to_owned()),
+            net_label(old),
+            Some(net_label(old)),
             None,
-            root_cause(&root, None, format!("{old} is no longer in the schematic")),
+            root_cause(
+                &root,
+                None,
+                format!("{} is no longer in the schematic", net_label(old)),
+            ),
             impact,
             Op::RemoveNet {
                 name: (*old).to_owned(),
@@ -1101,7 +1120,7 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
             let n = ch.impact.copper();
             ch.issues.push((
                 Status::Warning,
-                format!("{n} routed items on {old} lose their net"),
+                format!("{n} routed items on {} lose their net", net_label(old)),
             ));
         }
     }
@@ -1551,14 +1570,19 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
                 ChangeKind::ChangePinNet,
                 &format!("{key}#{pad}"),
                 format!("{}.{}", c.designator, pad),
-                have_board.clone(),
-                to.clone().map(|n| to_board_name(&n)),
+                have_board.as_deref().map(net_label),
+                to.as_deref().map(net_label),
                 comp_cause(
                     c,
                     &root,
                     match &to {
                         Some(n) => {
-                            format!("pin {}.{} is on {n} in the schematic", c.designator, pad)
+                            format!(
+                                "pin {}.{} is on {} in the schematic",
+                                c.designator,
+                                pad,
+                                net_label(n)
+                            )
                         }
                         None => format!(
                             "pin {}.{} is unconnected in the schematic",
@@ -1580,7 +1604,10 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
                     format!(
                         "{} routed items on {} touch this pad",
                         ch.impact.copper(),
-                        have_board.as_deref().unwrap_or("no net")
+                        have_board
+                            .as_deref()
+                            .map(net_label)
+                            .unwrap_or_else(|| "no net".into())
                     ),
                 ));
             }
@@ -1711,7 +1738,7 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
             let ch = b.push(
                 ChangeKind::ChangeNetClass,
                 &n.name,
-                n.name.clone(),
+                net_label(&n.name),
                 bn.class.clone(),
                 n.class.clone(),
                 Cause {
@@ -1719,8 +1746,8 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
                     sheet_path,
                     source: None,
                     reason: match &n.class {
-                        Some(c) => format!("{} is in net class {c}", n.name),
-                        None => format!("{} has no net class", n.name),
+                        Some(c) => format!("{} is in net class {c}", net_label(&n.name)),
+                        None => format!("{} has no net class", net_label(&n.name)),
                     },
                 },
                 Impact {
@@ -2277,8 +2304,14 @@ pub fn back_annotate(s: &Schematic, board: &Board, o: &ComparatorOptions) -> Eco
                 ChangeKind::SwapPins,
                 &format!("{key}#{a}#{bp}"),
                 format!("{}.{a} \u{2194} {}.{bp}", f.reference, f.reference),
-                Some(format!("{qa} on {}", wa.clone().unwrap_or_default())),
-                Some(format!("{qa} on {}", want[*bp].clone().unwrap_or_default())),
+                Some(format!(
+                    "{qa} on {}",
+                    net_label(&wa.clone().unwrap_or_default())
+                )),
+                Some(format!(
+                    "{qa} on {}",
+                    net_label(&want[*bp].clone().unwrap_or_default())
+                )),
                 comp_cause(
                     c,
                     &root,
