@@ -140,6 +140,22 @@ async fn three_d_figures_frame_their_data_in_the_exported_image() {
                 Vec3::new(1160.0, 660.0, 180.0),
             ),
         ),
+        ("cad-pack-axis-equal", {
+            // `mesh(part)` previews CAD under `axis equal`: a flat 2.3 m pack must fill the
+            // frame instead of sitting inside a cube of empty limits.
+            let mut figure = cad_box_figure(
+                Vec3::new(-1160.0, -660.0, -40.0),
+                Vec3::new(1160.0, 660.0, 180.0),
+            );
+            figure.set_axes_axis_equal(0, true);
+            figure.set_axes_view(0, -35.0, 30.0);
+            figure
+        }),
+        ("surf-axis-equal", {
+            let mut figure = wire_mesh_figure();
+            figure.set_axes_axis_equal(0, true);
+            figure
+        }),
         (
             "cad-box-m",
             cad_box_figure(Vec3::new(0.01, 0.02, 0.0), Vec3::new(0.09, 0.07, 0.008)),
@@ -153,7 +169,7 @@ async fn three_d_figures_frame_their_data_in_the_exported_image() {
         let height = (y1 - y0) as f32 / HEIGHT as f32;
         println!("{name}: content box ({x0},{y0})-({x1},{y1}) fills {width:.2} x {height:.2}");
         assert!(
-            width > 0.4 || height > 0.4,
+            width > 0.5 || height > 0.5,
             "{name}: content fills only {width:.2} x {height:.2} of the image"
         );
     }

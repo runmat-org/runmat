@@ -1,7 +1,6 @@
 //! Display-limit normalization shared by scene queries and the renderer.
 use super::AxesMetadata;
 use crate::core::BoundingBox;
-use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -113,28 +112,11 @@ pub fn display_bounds_3d(bounds: BoundingBox, metadata: Option<&AxesMetadata>) -
             max[index] += 0.05;
         }
     }
-    if let Some(meta) = metadata {
-        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
-            (min, max) = data_aspect_adjusted_bounds_3d(min, max, meta.data_aspect_ratio);
-        }
-    }
+    // A fixed data aspect (`axis equal`, `daspect`) keeps these limits: as in MATLAB's 3-D
+    // axes, it sets the length of one data unit along each axis, so the plot box takes the
+    // data's shape (see the renderer's per-axes axis scale). Stretching the limits into a cube
+    // instead framed a flat 2.3 m battery pack inside a 2.3 m cube of empty space.
     BoundingBox { min, max }
-}
-
-fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec3, Vec3) {
-    let aspect = Vec3::new(
-        ratio[0].abs().max(1.0e-12) as f32,
-        ratio[1].abs().max(1.0e-12) as f32,
-        ratio[2].abs().max(1.0e-12) as f32,
-    );
-    let center = (min + max) * 0.5;
-    let span = (max - min).abs().max(Vec3::splat(0.1));
-    let units = (span.x / aspect.x)
-        .max(span.y / aspect.y)
-        .max(span.z / aspect.z)
-        .max(0.1);
-    let next = aspect * units;
-    (center - next * 0.5, center + next * 0.5)
 }
 
 pub fn positive_log_bounds(lo: f64, hi: f64) -> (f64, f64) {
@@ -159,6 +141,7 @@ pub fn positive_log_bounds(lo: f64, hi: f64) -> (f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::Vec3;
 
     #[test]
     fn manual_capture_preserves_tiny_and_asymmetric_three_dimensional_display() {

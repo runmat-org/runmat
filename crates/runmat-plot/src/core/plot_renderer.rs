@@ -1255,10 +1255,20 @@ impl PlotRenderer {
                     && matches!(plot, crate::plots::PlotElement::Mesh(_))
             })
         });
-        let fixed_aspect =
-            meta.is_some_and(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual");
-        if fixed_aspect || has_geometry_mesh {
+        if has_geometry_mesh {
             return Vec3::splat(1.0 / largest);
+        }
+        if let Some(meta) =
+            meta.filter(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual")
+        {
+            // One data unit along axis k is `ratio[k]` long relative to the others; the largest
+            // relative extent fills the unit box and the limits stay as they are.
+            let ratio = if meta.data_aspect_ratio_mode == "manual" {
+                meta.data_aspect_ratio.map(|r| (r.abs() as f32).max(1.0e-12))
+            } else {
+                [1.0; 3]
+            };
+            return data_aspect_axis_scale(size, ratio);
         }
         let axis = |extent: f32| {
             if extent > largest * 1.0e-6 {
@@ -4823,8 +4833,20 @@ mod tests {
 
         let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, Some(&figure), 0);
 
-        assert_eq!(display.min, Vec3::new(0.0, 0.0, -1.5));
-        assert_eq!(display.max, Vec3::new(1.0, 2.0, 2.5));
+        // A fixed data aspect keeps the limits; the axis scale carries the aspect.
+        assert_eq!(display.min, Vec3::ZERO);
+        assert_eq!(display.max, Vec3::new(1.0, 2.0, 1.0));
+    }
+
+    #[test]
+    fn data_aspect_scales_one_data_unit_per_axis_without_moving_limits() {
+        // daspect([1 2 4]) over a 1 x 2 x 1 box: units = max(1/1, 2/2, 1/4) = 1, so one data
+        // unit is 1, 2 and 4 box units long along x, y and z.
+        let scale = data_aspect_axis_scale(Vec3::new(1.0, 2.0, 1.0), [1.0, 2.0, 4.0]);
+        assert!((scale - Vec3::new(1.0, 0.5, 0.25)).abs().max_element() < 1.0e-6);
+        // axis equal on a flat 2320 x 1320 x 220 mm pack: one shared scale, no cube.
+        let scale = data_aspect_axis_scale(Vec3::new(2320.0, 1320.0, 220.0), [1.0; 3]);
+        assert!((scale - Vec3::splat(1.0 / 2320.0)).abs().max_element() < 1.0e-9);
     }
 
     #[test]
@@ -5422,6 +5444,20 @@ impl AxisFrame3d {
         }
         ticks
     }
+}
+
+/// The axis scale of a fixed data aspect: one data unit along axis k is `ratio[k]` long relative
+/// to the others, and the largest relative extent of `size` fills the unit box.
+fn data_aspect_axis_scale(size: Vec3, ratio: [f32; 3]) -> Vec3 {
+    let units = (size.x / ratio[0])
+        .max(size.y / ratio[1])
+        .max(size.z / ratio[2])
+        .max(f32::MIN_POSITIVE);
+    Vec3::new(
+        1.0 / (units * ratio[0]),
+        1.0 / (units * ratio[1]),
+        1.0 / (units * ratio[2]),
+    )
 }
 
 /// A 1-2-5 step at or above `raw`.
