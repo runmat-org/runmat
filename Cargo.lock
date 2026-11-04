@@ -7958,7 +7958,10 @@ dependencies = [
 name = "runmat-circuit"
 version = "0.6.2"
 dependencies = [
+ "runmat-cad",
  "runmat-rules",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

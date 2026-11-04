@@ -22,6 +22,7 @@
 //! - [`metering`]: the usage-metering seam (sketch solves, mate solves, regenerations).
 
 pub mod assembly;
+pub mod commands;
 pub mod config;
 pub mod diagnostics;
 pub mod drawing;

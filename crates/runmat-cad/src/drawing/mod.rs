@@ -19,6 +19,7 @@
 
 pub mod bom_table;
 pub mod hole_table;
+pub mod index;
 pub mod merge;
 
 use crate::assembly::bom::{Bom, BomItem, BomKind, IndentedRow};

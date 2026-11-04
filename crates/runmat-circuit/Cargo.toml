@@ -12,3 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 # booleans, ordered maps everywhere, no hashing, so every output is deterministic.
 [dependencies]
 runmat-rules = { path = "../runmat-rules", version = "=0.6.2" }
+# Design-command descriptor types (one schema for CAD and PCB commands) and the JSON writer.
+runmat-cad = { path = "../runmat-cad", version = "=0.6.2" }
+serde = { workspace = true }
+serde_json = { workspace = true }

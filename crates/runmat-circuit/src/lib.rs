@@ -39,6 +39,7 @@
 //! Everything is deterministic: ordered maps, sorted outputs, exact integer predicates.
 
 pub mod board_rules;
+pub mod commands;
 pub mod connectivity;
 pub mod drc;
 pub mod elab;
@@ -49,6 +50,7 @@ pub mod fixture;
 pub mod font;
 pub mod geom;
 pub mod ids;
+pub mod index;
 pub mod ipc2581;
 pub mod ir;
 pub mod kicad;
