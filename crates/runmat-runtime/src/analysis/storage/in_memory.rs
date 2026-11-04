@@ -165,10 +165,13 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             .runs
             .read()
             .map_err(|_| "analysis artifact store lock poisoned")?;
-        let Some(PersistedAnalysisArtifact::Standard(run)) = runs.get(run_id) else {
-            return Ok(None);
-        };
-        Ok(run.render_tiles.clone())
+        Ok(match runs.get(run_id) {
+            Some(PersistedAnalysisArtifact::Standard(run)) => run.render_tiles.clone(),
+            Some(PersistedAnalysisArtifact::StructuralFrequency(artifact)) => {
+                artifact.render_tiles.clone()
+            }
+            _ => None,
+        })
     }
 
     fn plan_render_view(
@@ -176,16 +179,7 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
         run_id: &str,
         view: Option<RenderViewRequest>,
     ) -> Result<Option<RenderViewSelection>, String> {
-        validate_run_id_token(run_id)?;
-        let runs = self
-            .runs
-            .read()
-            .map_err(|_| "analysis artifact store lock poisoned")?;
-        let Some(PersistedAnalysisArtifact::Standard(run)) = runs.get(run_id) else {
-            return Ok(None);
-        };
-        run.render_tiles
-            .as_ref()
+        self.load_render_tile_index(run_id)?
             .map(|index| index.select_view_validated(view))
             .transpose()
     }
@@ -196,18 +190,12 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
         mesh_index: usize,
         tile_index: usize,
     ) -> Result<Option<RenderTile>, String> {
-        validate_run_id_token(run_id)?;
-        let runs = self
-            .runs
-            .read()
-            .map_err(|_| "analysis artifact store lock poisoned")?;
-        let Some(PersistedAnalysisArtifact::Standard(run)) = runs.get(run_id) else {
+        let Some(index) = self.load_render_tile_index(run_id)? else {
             return Ok(None);
         };
-        let Some(descriptor) = run
-            .render_tiles
-            .as_ref()
-            .and_then(|index| index.meshes.get(mesh_index))
+        let Some(descriptor) = index
+            .meshes
+            .get(mesh_index)
             .and_then(|mesh| mesh.tiles.get(tile_index))
         else {
             return Ok(None);
@@ -228,18 +216,12 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
         mesh_index: usize,
         node_index: usize,
     ) -> Result<Option<RenderTile>, String> {
-        validate_run_id_token(run_id)?;
-        let runs = self
-            .runs
-            .read()
-            .map_err(|_| "analysis artifact store lock poisoned")?;
-        let Some(PersistedAnalysisArtifact::Standard(run)) = runs.get(run_id) else {
+        let Some(index) = self.load_render_tile_index(run_id)? else {
             return Ok(None);
         };
-        let Some(descriptor) = run
-            .render_tiles
-            .as_ref()
-            .and_then(|index| index.meshes.get(mesh_index))
+        let Some(descriptor) = index
+            .meshes
+            .get(mesh_index)
             .and_then(|mesh| mesh.lod_nodes.get(node_index))
             .map(|node| &node.tile)
         else {
@@ -359,15 +341,17 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
         step: &AnalysisStudyStepRunData,
         object_catalog: &runmat_execution::value::PublishedObjectCatalog,
         artifact_roots: &crate::analysis::StructuralFrequencyArtifactRootIndex,
+        render_topology: Option<&crate::analysis::AnalysisRenderTopology>,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, String> {
-        let prepared = frequency::prepare_artifact(
+        let (prepared, tile_objects) = frequency::prepare_artifact(
             step,
             object_catalog,
             artifact_roots,
+            render_topology,
             Utc::now().to_rfc3339(),
         )?;
-        let objects = frequency::ingest_objects(&prepared, source)?;
+        let objects = frequency::ingest_objects(&prepared, tile_objects, source)?;
         let mut record = frequency::artifact_record(&prepared);
         record.created_at = self.install_standalone(
             &step.run_id,
