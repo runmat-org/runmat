@@ -927,3 +927,124 @@ impl<'a> Evaluator<'a> {
         Ok(q)
     }
 }
+
+/// One value of each [`ValueExpr`] form, as the Desktop's value editor reads and writes them
+/// (`desktop/src/generated/value-expr-examples.json`). The Desktop's TypeScript mirror parses,
+/// prints and round-trips each one, so the two sides can't drift: a new form fails to compile
+/// here until it has an example, and the Desktop's test fails until it reads it.
+pub fn value_expr_examples() -> Vec<(&'static str, ValueExpr)> {
+    let examples = vec![
+        ("8 mm", ValueExpr::mm(8.0)),
+        ("2.5", ValueExpr::number(2.5)),
+        ("= width", ValueExpr::input("width")),
+        ("= let.half", ValueExpr::let_("half")),
+        (
+            "= -width",
+            ValueExpr::Neg {
+                operand: Box::new(ValueExpr::input("width")),
+            },
+        ),
+        (
+            "= width / 2",
+            ValueExpr::binary(BinaryOp::Div, ValueExpr::input("width"), ValueExpr::number(2.0)),
+        ),
+        (
+            "10 kohm \u{b1} 1 %",
+            ValueExpr::Toleranced {
+                nominal: Box::new(ValueExpr::qty(10.0, "kohm")),
+                minus: Box::new(ValueExpr::qty(1.0, "%")),
+                plus: Box::new(ValueExpr::qty(1.0, "%")),
+            },
+        ),
+        (
+            "= airDensity(altitude = 10 km)",
+            ValueExpr::Dynamic {
+                call: DynamicCall {
+                    function: "airDensity".into(),
+                    arguments: vec![("altitude".into(), ValueExpr::qty(10.0, "km"))],
+                    volatile: false,
+                },
+            },
+        ),
+        (
+            "= rho(2) as kg/m^3",
+            ValueExpr::coerce(
+                ValueExpr::Dynamic {
+                    call: DynamicCall {
+                        function: "rho".into(),
+                        arguments: vec![(String::new(), ValueExpr::number(2.0))],
+                        volatile: false,
+                    },
+                },
+                "kg/m^3",
+            ),
+        ),
+        (
+            "= feature.boss.depth",
+            ValueExpr::Reference {
+                path: vec!["feature".into(), "boss".into(), "depth".into()],
+            },
+        ),
+        (
+            "= part.bracket.mass",
+            ValueExpr::published("bracket.part", "mass", XrefContext::Live),
+        ),
+    ];
+    let mut forms: Vec<&str> = examples.iter().map(|(_, e)| value_form(e)).collect();
+    forms.sort_unstable();
+    forms.dedup();
+    assert_eq!(forms.len(), 11, "one example per form");
+    examples
+}
+
+/// The serde tag of a form; exhaustive, so a new form needs an example above.
+fn value_form(expr: &ValueExpr) -> &'static str {
+    match expr {
+        ValueExpr::Quantity { .. } => "quantity",
+        ValueExpr::Number { .. } => "number",
+        ValueExpr::Input { .. } => "input",
+        ValueExpr::Let { .. } => "let",
+        ValueExpr::Neg { .. } => "neg",
+        ValueExpr::Binary { .. } => "binary",
+        ValueExpr::Toleranced { .. } => "toleranced",
+        ValueExpr::Dynamic { .. } => "dynamic",
+        ValueExpr::Coerce { .. } => "coerce",
+        ValueExpr::Reference { .. } => "reference",
+        ValueExpr::Published(_) => "published",
+    }
+}
+
+#[cfg(test)]
+mod value_expr_example_tests {
+    use super::*;
+
+    /// Writes or checks the Desktop's copy. Set `RUNMAT_VALUE_EXPR_OUT` to the Desktop's
+    /// `src/generated/value-expr-examples.json` to write it.
+    #[test]
+    fn value_expr_examples_json_is_current() {
+        let examples: Vec<serde_json::Value> = value_expr_examples()
+            .into_iter()
+            .map(|(text, expr)| {
+                let json = serde_json::to_value(&expr).expect("value serialises");
+                assert_eq!(serde_json::from_value::<ValueExpr>(json.clone()).unwrap(), expr);
+                serde_json::json!({ "text": text, "form": value_form(&expr), "value": json })
+            })
+            .collect();
+        let mut json = serde_json::to_string_pretty(&serde_json::json!({
+            "format": "runmat.value-expr-examples",
+            "binary_ops": ["add", "sub", "mul", "div"],
+            "examples": examples,
+        }))
+        .unwrap();
+        json.push('\n');
+        if let Ok(out) = std::env::var("RUNMAT_VALUE_EXPR_OUT") {
+            std::fs::write(out, &json).expect("write value-expr-examples.json");
+            return;
+        }
+        let sibling = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../runmat-private-cad/desktop/src/generated/value-expr-examples.json");
+        if let Ok(checked_in) = std::fs::read_to_string(&sibling) {
+            assert!(checked_in == json, "{} is stale; regenerate with RUNMAT_VALUE_EXPR_OUT", sibling.display());
+        }
+    }
+}
