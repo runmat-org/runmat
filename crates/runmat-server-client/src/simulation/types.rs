@@ -55,6 +55,9 @@ pub struct StartSimulationLease {
     /// at admission. Some supplies an explicit lower spending cap.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_ops: Option<OperationCount>,
+    /// Initial reserved capacity; zero defers acquisition to numerical batches.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_grant_ops: Option<OperationCount>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

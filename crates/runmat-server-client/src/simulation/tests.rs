@@ -4,6 +4,8 @@ use runmat_execution::Digest;
 use runmat_simulation_usage::{CompletedUsage, MeasurementVersion, OperationCount};
 use serde_json::{json, Value};
 
+mod driver;
+
 fn count(value: u64) -> OperationCount {
     OperationCount::from_operations(value)
 }
@@ -18,6 +20,7 @@ fn start_request() -> StartSimulationLease {
         study_identity: Digest::from_bytes([1; 32]),
         estimate_ops: None,
         budget_ops: Some(count(u64::MAX)),
+        initial_grant_ops: None,
     }
 }
 
@@ -66,6 +69,18 @@ fn typed_wire_contract_preserves_wide_counts_and_identifier_boundaries() {
 async fn fixture(
     responses: Vec<(String, String)>,
 ) -> (String, tokio::task::JoinHandle<Vec<Value>>) {
+    fixture_authorized(responses, FixtureAuthority::Person).await
+}
+
+enum FixtureAuthority {
+    Person,
+    Driver,
+}
+
+async fn fixture_authorized(
+    responses: Vec<(String, String)>,
+    authority: FixtureAuthority,
+) -> (String, tokio::task::JoinHandle<Vec<Value>>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -86,9 +101,18 @@ async fn fixture(
             };
             let headers = std::str::from_utf8(&bytes[..header_end]).unwrap();
             assert!(headers.starts_with(&format!("{path} HTTP/1.1\r\n")));
-            assert!(headers
-                .to_ascii_lowercase()
-                .contains("authorization: bearer test-key\r\n"));
+            let lower_headers = headers.to_ascii_lowercase();
+            match authority {
+                FixtureAuthority::Person => {
+                    assert!(lower_headers.contains("authorization: bearer test-key\r\n"))
+                }
+                FixtureAuthority::Driver => {
+                    assert!(
+                        lower_headers.contains("x-runmat-driver-credential: scoped-test-key\r\n")
+                    );
+                    assert!(!lower_headers.contains("authorization:"));
+                }
+            }
             let length: usize = headers
                 .lines()
                 .find_map(|line| {
@@ -271,6 +295,55 @@ async fn default_cap_is_snapshotted_by_server_and_invalid_renewals_cannot_author
     assert_eq!(client.start(&org, &request).await.unwrap().budget_ops, cap);
     let bodies = server.await.unwrap();
     assert!(bodies[0].get("budgetOps").is_none());
+
+    let mut incremental = request.clone();
+    incremental.initial_grant_ops = Some(OperationCount::ZERO);
+    let mut zero = valid.clone();
+    zero["grantedOps"] = json!("0");
+    let empty_report = ReportSimulationUsage {
+        measurement_version: request.measurement_version.clone(),
+        used_ops: CompletedUsage::default(),
+        grant_target_ops: None,
+        other_detail: None,
+    };
+    let (endpoint, server) = fixture(vec![
+        (
+            format!("POST /v1/orgs/{org}/simulation/leases"),
+            zero.to_string(),
+        ),
+        (
+            format!("POST /v1/simulation/leases/{lease}/usage"),
+            json!({"state":"active","grantedOps":"0","budgetOps":cap,
+                "totalOps":"0","expiresAt":"2099-01-01T00:00:00Z"})
+            .to_string(),
+        ),
+        // A replay returns current capacity, not the original zero grant.
+        (
+            format!("POST /v1/orgs/{org}/simulation/leases"),
+            valid.to_string(),
+        ),
+    ])
+    .await;
+    let client = SimulationLeaseClient::new(&endpoint, "test-key").unwrap();
+    assert_eq!(
+        client.start(&org, &incremental).await.unwrap().granted_ops,
+        OperationCount::ZERO
+    );
+    assert_eq!(
+        client
+            .usage(&lease, &empty_report)
+            .await
+            .unwrap()
+            .granted_ops,
+        OperationCount::ZERO
+    );
+    assert_eq!(
+        client.start(&org, &incremental).await.unwrap().granted_ops,
+        cap
+    );
+    let bodies = server.await.unwrap();
+    assert_eq!(bodies[0]["initialGrantOps"], "0");
+    assert_eq!(bodies[2]["initialGrantOps"], "0");
 
     let report = ReportSimulationUsage {
         measurement_version: request.measurement_version,

@@ -31,6 +31,25 @@ impl LeaseHttp {
         let mut bearer = HeaderValue::from_str(&format!("Bearer {token}"))?;
         bearer.set_sensitive(true);
         headers.insert(AUTHORIZATION, bearer);
+        Self::with_headers(endpoint, headers)
+    }
+
+    pub(crate) fn driver(
+        server: &str,
+        credential: &str,
+    ) -> Result<Self, ServerLeaseTransportError> {
+        let endpoint = ServerEndpoint::parse(server)?;
+        let mut headers = HeaderMap::new();
+        let mut credential = HeaderValue::from_str(credential)?;
+        credential.set_sensitive(true);
+        headers.insert("x-runmat-driver-credential", credential);
+        Self::with_headers(endpoint, headers)
+    }
+
+    fn with_headers(
+        endpoint: ServerEndpoint,
+        headers: HeaderMap,
+    ) -> Result<Self, ServerLeaseTransportError> {
         let http = reqwest::Client::builder()
             .default_headers(headers)
             .redirect(reqwest::redirect::Policy::none())

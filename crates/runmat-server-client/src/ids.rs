@@ -108,6 +108,7 @@ prefixed_id!(SnapshotId, "snap_");
 prefixed_id!(SimulationRunId, "run_");
 prefixed_id!(SimulationLeaseId, "simlease_");
 prefixed_id!(SimulationReceiptId, "simreceipt_");
+prefixed_id!(ExecutionDriverLeaseId, "drv_");
 
 #[cfg(test)]
 mod tests {

@@ -29,6 +29,10 @@ pub enum SimulationErrorCode {
     SettleConflict,
     #[serde(rename = "simulation.invalid_request")]
     InvalidRequest,
+    #[serde(rename = "simulation.driver_authority_invalid")]
+    DriverAuthorityInvalid,
+    #[serde(rename = "simulation.billing_person_required")]
+    BillingPersonRequired,
     #[serde(other)]
     Unknown,
 }

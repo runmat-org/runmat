@@ -4,6 +4,7 @@
 
 mod errors;
 mod types;
+mod route;
 mod allowance;
 pub use allowance::{
     SimulationAllowance, SimulationBudgetError, SimulationPeriod, SimulationRenewal,
@@ -20,12 +21,33 @@ use chrono::Utc;
 #[derive(Clone)]
 pub struct SimulationLeaseClient {
     transport: LeaseHttp,
+    authority: route::LeaseAuthority,
 }
 
 impl SimulationLeaseClient {
     pub fn new(server: &str, token: &str) -> Result<Self, SimulationLeaseError> {
         Ok(Self {
             transport: LeaseHttp::new(server, token)?,
+            authority: route::LeaseAuthority::Person,
+        })
+    }
+
+    /// Uses only the run-scoped driver credential; no personal bearer is sent.
+    pub fn for_driver(
+        server: &str,
+        lease: crate::ids::ExecutionDriverLeaseId,
+        fencing_token: u64,
+        credential: &str,
+    ) -> Result<Self, SimulationLeaseError> {
+        if fencing_token == 0 || credential.is_empty() || credential.len() > 256 {
+            return Err(SimulationLeaseError::InvalidRequest("driver authority"));
+        }
+        Ok(Self {
+            transport: LeaseHttp::driver(server, credential)?,
+            authority: route::LeaseAuthority::Driver {
+                lease,
+                fencing_token,
+            },
         })
     }
 
@@ -34,6 +56,11 @@ impl SimulationLeaseClient {
         org: &OrgId,
         runmat_version: &str,
     ) -> Result<SimulationAllowance, SimulationLeaseError> {
+        if !matches!(self.authority, route::LeaseAuthority::Person) {
+            return Err(SimulationLeaseError::InvalidRequest(
+                "driver authority has no personal allowance endpoint",
+            ));
+        }
         self.transport
             .response(
                 self.transport
@@ -50,6 +77,11 @@ impl SimulationLeaseClient {
 
     /// Resolve only an unambiguous membership when no organization is selected.
     pub async fn sole_organization(&self) -> Result<OrgId, SimulationLeaseError> {
+        if !matches!(self.authority, route::LeaseAuthority::Person) {
+            return Err(SimulationLeaseError::InvalidRequest(
+                "driver authority cannot enumerate memberships",
+            ));
+        }
         #[derive(serde::Deserialize)]
         struct Org {
             id: OrgId,
@@ -89,6 +121,9 @@ impl SimulationLeaseClient {
                 .is_some_and(|budget| budget.operations() == 0)
             || request.runmat_version.is_empty()
             || request.runmat_version.len() > 64
+            || request
+                .initial_grant_ops
+                .is_some_and(|initial| request.budget_ops.is_some_and(|budget| initial > budget))
         {
             return Err(SimulationLeaseError::InvalidRequest(
                 "attempt, budget or runtime version",
@@ -99,10 +134,10 @@ impl SimulationLeaseClient {
             .response(
                 self.transport
                     .http
-                    .post(format!(
-                        "{}/v1/orgs/{org}/simulation/leases",
-                        self.transport.endpoint.as_str()
-                    ))
+                    .post(
+                        self.authority
+                            .start_url(self.transport.endpoint.as_str(), org),
+                    )
                     .json(request),
                 errors::api_error,
             )
@@ -111,7 +146,9 @@ impl SimulationLeaseClient {
             || request
                 .budget_ops
                 .is_some_and(|budget| lease.budget_ops != budget)
-            || lease.granted_ops.operations() == 0
+            || lease.budget_ops.operations() == 0
+            || (lease.granted_ops.operations() == 0
+                && request.initial_grant_ops != Some(runmat_simulation_usage::OperationCount::ZERO))
             || lease.granted_ops > lease.budget_ops
             || !(1..=120).contains(&lease.heartbeat_seconds)
             || lease.expires_at <= Utc::now()
@@ -134,16 +171,17 @@ impl SimulationLeaseClient {
             .response(
                 self.transport
                     .http
-                    .post(format!(
-                        "{}/v1/simulation/leases/{lease}/usage",
-                        self.transport.endpoint.as_str()
+                    .post(self.authority.lease_url(
+                        self.transport.endpoint.as_str(),
+                        lease,
+                        route::LeaseAction::Usage,
                     ))
                     .json(request),
                 errors::api_error,
             )
             .await?;
         if grant.state != SimulationLeaseState::Active
-            || grant.granted_ops.operations() == 0
+            || grant.budget_ops.operations() == 0
             || grant.granted_ops > grant.budget_ops
             || grant.total_ops > runmat_simulation_usage::OperationTotal::from(grant.granted_ops)
             || grant.total_ops
@@ -170,9 +208,10 @@ impl SimulationLeaseClient {
             .response(
                 self.transport
                     .http
-                    .post(format!(
-                        "{}/v1/simulation/leases/{lease}/settle",
-                        self.transport.endpoint.as_str()
+                    .post(self.authority.lease_url(
+                        self.transport.endpoint.as_str(),
+                        lease,
+                        route::LeaseAction::Settle,
                     ))
                     .json(request),
                 errors::api_error,
