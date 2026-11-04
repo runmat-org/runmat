@@ -197,3 +197,182 @@ fn every_repository_fea_source_parses_and_formats_as_recorded() {
         snapshot.sources.len()
     );
 }
+
+mod tree {
+    use runmat_fea_syntax::tree::{NodeKind, SyntaxNode};
+    use runmat_fea_syntax::*;
+    use runmat_types::Span;
+
+    struct Coverage<'a> {
+        root: &'a SyntaxNode,
+        spans: std::collections::BTreeSet<(usize, usize)>,
+        missing: Vec<String>,
+    }
+
+    impl Coverage<'_> {
+        fn expect(&mut self, what: &str, span: Span, kinds: &[NodeKind]) {
+            let found = self
+                .root
+                .descendants()
+                .into_iter()
+                .any(|node| kinds.contains(&node.kind()) && node.trimmed_span() == span);
+            if !found {
+                self.missing
+                    .push(format!("{what} at {}..{}", span.start, span.end));
+            }
+            self.spans.insert((span.start, span.end));
+        }
+
+        fn expression(&mut self, expression: &FeaExpression) {
+            use FeaExpressionKind::*;
+            let kind = match &expression.kind {
+                Number(_) => NodeKind::NumberLiteral,
+                String(_) => NodeKind::StringLiteral,
+                Reference(_) => NodeKind::Reference,
+                List(values) => {
+                    values.iter().for_each(|value| self.expression(value));
+                    NodeKind::List
+                }
+                Record(entries) => {
+                    for entry in entries {
+                        self.expect("record entry", entry.span, &[NodeKind::RecordEntry]);
+                        self.expression(&entry.value);
+                    }
+                    NodeKind::Record
+                }
+                Group(inner) => {
+                    self.expression(inner);
+                    NodeKind::Group
+                }
+                Unary { operand, .. } => {
+                    self.expression(operand);
+                    NodeKind::Unary
+                }
+                Binary { left, right, .. } => {
+                    self.expression(left);
+                    self.expression(right);
+                    NodeKind::Binary
+                }
+                Call { callee, arguments } => {
+                    self.expression(callee);
+                    for argument in arguments {
+                        match argument {
+                            FeaCallArgument::Positional(value) => self.expression(value),
+                            FeaCallArgument::Named { value, span, .. } => {
+                                self.expect("named argument", *span, &[NodeKind::NamedArgument]);
+                                self.expression(value);
+                            }
+                        }
+                    }
+                    NodeKind::Call
+                }
+                PrefixApplication { callee, argument } => {
+                    self.expression(callee);
+                    self.expression(argument);
+                    NodeKind::PrefixApplication
+                }
+                Quantity { value, unit } => {
+                    self.expression(value);
+                    self.expect("unit", unit.span, &[NodeKind::Unit]);
+                    NodeKind::Quantity
+                }
+                Missing => return,
+            };
+            self.expect("expression", expression.span, &[kind]);
+        }
+
+        fn block(&mut self, block: &FeaBlock) {
+            self.expect("block", block.span, &[NodeKind::Block]);
+            for statement in &block.statements {
+                self.statement(statement);
+            }
+        }
+
+        fn statement(&mut self, statement: &FeaStatement) {
+            use FeaStatementKind::*;
+            self.spans
+                .insert((statement.span.start, statement.span.end));
+            let found =
+                self.root.descendants().into_iter().any(|node| {
+                    node.kind().is_statement() && node.trimmed_span() == statement.span
+                });
+            if !found {
+                self.missing.push(format!(
+                    "statement at {}..{}",
+                    statement.span.start, statement.span.end
+                ));
+            }
+            match &statement.kind {
+                GeneratedByFunction { body, .. }
+                | SignalDefinition { body, .. }
+                | ModelDefinition { body, .. }
+                | Block { body, .. }
+                | OutputDefinition { body, .. } => self.block(body),
+                UniformSample { start, end, rate } => {
+                    self.expression(start);
+                    self.expression(end);
+                    self.expression(rate);
+                }
+                AppliedLoad { target, value, .. } => {
+                    self.expression(target);
+                    self.expression(value);
+                }
+                Input { default, .. } => default.iter().for_each(|value| self.expression(value)),
+                Let { value, .. }
+                | Feature { value, .. }
+                | SourceParameterUpdate { value, .. }
+                | Requirement { value, .. }
+                | Assignment { value, .. }
+                | Output { value, .. } => self.expression(value),
+                PropertyAssignment { property, target } => {
+                    self.expression(property);
+                    self.expression(target);
+                }
+                Include(value) | Retain(value) => self.expression(value),
+                Use(_) | Command { .. } => {}
+            }
+        }
+    }
+
+    #[test]
+    fn the_tree_holds_every_byte_and_every_ast_node_of_every_repository_source() {
+        let mut checked = 0;
+        for (key, source) in super::sources() {
+            let module = parse_fea(source.as_str());
+            let root = module.syntax();
+            assert_eq!(root.text(), source, "{key}: the tree's text is the source");
+            assert_eq!(root.kind(), NodeKind::SourceFile);
+            if !module.is_valid() {
+                continue;
+            }
+            checked += 1;
+            let mut coverage = Coverage {
+                root: &root,
+                spans: Default::default(),
+                missing: Vec::new(),
+            };
+            for item in &module.items {
+                match item {
+                    FeaModuleItem::Import(import) => {
+                        coverage.expect("import", import.span, &[NodeKind::Import]);
+                    }
+                    FeaModuleItem::Declaration(declaration) => {
+                        coverage.expect("declaration", declaration.span, &[NodeKind::Declaration]);
+                        coverage.expect("name", declaration.name.span, &[NodeKind::Name]);
+                        if let Some(value) = &declaration.material_source {
+                            coverage.expression(value);
+                        }
+                        coverage.block(&declaration.body);
+                    }
+                    FeaModuleItem::Error(_) => {}
+                }
+            }
+            assert!(
+                coverage.missing.is_empty(),
+                "{key}: AST nodes without a tree node: {:#?}",
+                coverage.missing
+            );
+        }
+        assert!(checked > 50, "only {checked} valid sources were checked");
+    }
+}

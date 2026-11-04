@@ -1,4 +1,5 @@
 use super::*;
+use crate::tree::NodeKind;
 
 impl FeaParser {
     pub(super) fn parse_import(&mut self, start: usize, end: usize) -> Option<FeaImport> {
@@ -33,6 +34,7 @@ impl FeaParser {
         }
         let source = significant.get(4).and_then(|index| {
             if self.at(*index, FeaTokenKind::String) {
+                self.tree.node(NodeKind::StringLiteral, *index, *index + 1);
                 Some((decode_string(self.lexeme(*index)), self.token(*index).span))
             } else {
                 self.diagnostics.push(FeaSyntaxDiagnostic {
@@ -96,6 +98,9 @@ impl FeaParser {
         let (body, next) = self.parse_block(open);
         let header_start = name_index.map_or(start + 1, |index| index + 1);
         let header = self.token_range(header_start, open);
+        if let Some(range) = self.trimmed_range(header_start, open) {
+            self.tree.node(NodeKind::Header, range.start, range.end);
+        }
         let header_significant = self.significant(header_start, open);
         let source = self.declaration_source(kind, &header_significant, header.span);
         let material_source = self.material_source(kind, &header_significant, header.span);

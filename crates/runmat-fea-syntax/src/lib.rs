@@ -4,6 +4,7 @@ mod diagnostic;
 mod format;
 mod parser;
 pub mod syntax;
+pub mod tree;
 
 pub use diagnostic::*;
 pub use format::*;

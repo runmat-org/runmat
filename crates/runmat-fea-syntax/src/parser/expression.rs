@@ -1,19 +1,22 @@
 use super::{decode_string, is_name_token, is_quantity_value, starts_expression};
 use crate::lexical::{FeaToken, FeaTokenKind, FeaTokenStream};
 use crate::syntax::*;
+use crate::tree::{NodeKind, TreeRecorder};
 use crate::{FeaSyntaxDiagnostic, FeaSyntaxDiagnosticKind};
 use runmat_types::{merge_span, Span};
 
-pub(super) fn parse_expression(
+pub(crate) fn parse_expression(
     stream: &FeaTokenStream,
     indices: &[usize],
     diagnostics: &mut Vec<FeaSyntaxDiagnostic>,
+    tree: &mut TreeRecorder,
 ) -> (FeaExpression, usize) {
     let mut parser = ExpressionParser {
         stream,
         indices,
         cursor: 0,
         diagnostics,
+        tree,
     };
     let expression = parser.parse(0);
     (expression, parser.cursor)
@@ -24,16 +27,27 @@ struct ExpressionParser<'a> {
     indices: &'a [usize],
     cursor: usize,
     diagnostics: &'a mut Vec<FeaSyntaxDiagnostic>,
+    tree: &'a mut TreeRecorder,
 }
 
 impl ExpressionParser<'_> {
+    /// Records a node over the significant tokens `from..self.cursor`.
+    fn record(&mut self, kind: NodeKind, from: usize) {
+        if from < self.cursor && self.cursor <= self.indices.len() {
+            self.tree
+                .node(kind, self.indices[from], self.indices[self.cursor - 1] + 1);
+        }
+    }
+
     fn parse(&mut self, minimum_precedence: u8) -> FeaExpression {
+        let first = self.cursor;
         let mut left = self.parse_prefix();
         loop {
             if matches!(left.kind, FeaExpressionKind::Reference(_))
                 && self.current_kind().is_some_and(starts_expression)
             {
                 let argument = self.parse(7);
+                self.record(NodeKind::PrefixApplication, first);
                 let span = merge_span(left.span, argument.span);
                 left = FeaExpression {
                     kind: FeaExpressionKind::PrefixApplication {
@@ -51,6 +65,8 @@ impl ExpressionParser<'_> {
                     self.cursor += 1;
                 }
                 if self.cursor > unit_start {
+                    self.record(NodeKind::Unit, unit_start);
+                    self.record(NodeKind::Quantity, first);
                     let end = self.indices[self.cursor - 1];
                     left = FeaExpression {
                         span: merge_span(left.span, self.token(end).span),
@@ -80,6 +96,7 @@ impl ExpressionParser<'_> {
             } else {
                 precedence + 1
             });
+            self.record(NodeKind::Binary, first);
             let span = merge_span(left.span, right.span);
             left = FeaExpression {
                 kind: FeaExpressionKind::Binary {
@@ -100,10 +117,13 @@ impl ExpressionParser<'_> {
                 span: Span::default(),
             };
         };
+        let start = self.cursor;
         let mut expression = match self.token(index).kind {
             FeaTokenKind::Plus | FeaTokenKind::Minus => {
+                let first = self.cursor;
                 self.cursor += 1;
                 let operand = self.parse(7);
+                self.record(NodeKind::Unary, first);
                 FeaExpression {
                     span: merge_span(self.token(index).span, operand.span),
                     kind: FeaExpressionKind::Unary {
@@ -118,6 +138,7 @@ impl ExpressionParser<'_> {
             }
             FeaTokenKind::Number => {
                 self.cursor += 1;
+                self.record(NodeKind::NumberLiteral, self.cursor - 1);
                 FeaExpression {
                     kind: FeaExpressionKind::Number(self.lexeme(index).to_string()),
                     span: self.token(index).span,
@@ -125,6 +146,7 @@ impl ExpressionParser<'_> {
             }
             FeaTokenKind::String => {
                 self.cursor += 1;
+                self.record(NodeKind::StringLiteral, self.cursor - 1);
                 FeaExpression {
                     kind: FeaExpressionKind::String(decode_string(self.lexeme(index))),
                     span: self.token(index).span,
@@ -149,11 +171,13 @@ impl ExpressionParser<'_> {
         };
         while self.current_kind() == Some(FeaTokenKind::LeftParen) {
             expression = self.parse_call(expression);
+            self.record(NodeKind::Call, start);
         }
         expression
     }
 
     fn parse_reference(&mut self, first: usize) -> FeaExpression {
+        let from = self.cursor;
         let mut segments = vec![FeaName {
             text: self.lexeme(first).to_string(),
             span: self.token(first).span,
@@ -172,6 +196,7 @@ impl ExpressionParser<'_> {
                 span: self.token(next).span,
             });
         }
+        self.record(NodeKind::Reference, from);
         let span = merge_span(segments[0].span, segments.last().unwrap().span);
         FeaExpression {
             kind: FeaExpressionKind::Reference(FeaReference { segments, span }),
@@ -180,9 +205,11 @@ impl ExpressionParser<'_> {
     }
 
     fn parse_group(&mut self, open: usize) -> FeaExpression {
+        let first = self.cursor;
         self.cursor += 1;
         let expression = self.parse(0);
         let close = self.consume_close(FeaTokenKind::RightParen, open, "`)`");
+        self.record(NodeKind::Group, first);
         FeaExpression {
             span: merge_span(self.token(open).span, close),
             kind: FeaExpressionKind::Group(Box::new(expression)),
@@ -190,6 +217,7 @@ impl ExpressionParser<'_> {
     }
 
     fn parse_list(&mut self, open: usize) -> FeaExpression {
+        let first = self.cursor;
         self.cursor += 1;
         let mut values = Vec::new();
         while self.cursor < self.indices.len()
@@ -204,6 +232,7 @@ impl ExpressionParser<'_> {
             }
         }
         let close = self.consume_close(FeaTokenKind::RightBracket, open, "`]`");
+        self.record(NodeKind::List, first);
         FeaExpression {
             span: merge_span(self.token(open).span, close),
             kind: FeaExpressionKind::List(values),
@@ -211,6 +240,7 @@ impl ExpressionParser<'_> {
     }
 
     fn parse_record(&mut self, open: usize) -> FeaExpression {
+        let first = self.cursor;
         self.cursor += 1;
         let mut entries = Vec::new();
         while self.cursor < self.indices.len()
@@ -227,6 +257,7 @@ impl ExpressionParser<'_> {
                 text: self.lexeme(name_index).to_string(),
                 span: self.token(name_index).span,
             };
+            let entry = self.cursor;
             self.cursor += 1;
             if self.current_kind() != Some(FeaTokenKind::Equal) {
                 self.invalid_at(name_index, "expected `=` after record member name");
@@ -234,6 +265,8 @@ impl ExpressionParser<'_> {
             }
             self.cursor += 1;
             let value = self.parse(0);
+            self.tree.node(NodeKind::Name, name_index, name_index + 1);
+            self.record(NodeKind::RecordEntry, entry);
             let span = merge_span(name.span, value.span);
             entries.push(FeaRecordEntry { name, value, span });
             if self.current_kind() == Some(FeaTokenKind::Comma) {
@@ -244,6 +277,7 @@ impl ExpressionParser<'_> {
             }
         }
         let close = self.consume_close(FeaTokenKind::RightBrace, open, "`}`");
+        self.record(NodeKind::Record, first);
         FeaExpression {
             span: merge_span(self.token(open).span, close),
             kind: FeaExpressionKind::Record(entries),
@@ -271,8 +305,11 @@ impl ExpressionParser<'_> {
                     text: self.lexeme(name_index).to_string(),
                     span: self.token(name_index).span,
                 };
+                let argument = self.cursor;
                 self.cursor += 2;
                 let value = self.parse(0);
+                self.tree.node(NodeKind::Name, name_index, name_index + 1);
+                self.record(NodeKind::NamedArgument, argument);
                 let span = merge_span(name.span, value.span);
                 arguments.push(FeaCallArgument::Named { name, value, span });
             } else {

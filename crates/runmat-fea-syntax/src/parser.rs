@@ -1,6 +1,7 @@
 use super::syntax::*;
 use super::{FeaSyntaxDiagnostic, FeaSyntaxDiagnosticKind};
 use crate::lexical::{tokenize_fea, FeaKeyword, FeaTokenKind, FeaTokenStream, FeaTriviaKind};
+use crate::tree::{NodeKind, TreeRecorder};
 use runmat_types::{merge_span, Span};
 
 mod cursor;
@@ -20,6 +21,7 @@ pub fn parse_fea(source: impl Into<String>) -> FeaSyntaxModule {
 struct FeaParser {
     stream: FeaTokenStream,
     diagnostics: Vec<FeaSyntaxDiagnostic>,
+    tree: TreeRecorder,
 }
 
 impl FeaParser {
@@ -36,6 +38,7 @@ impl FeaParser {
         Self {
             stream,
             diagnostics,
+            tree: TreeRecorder::default(),
         }
     }
 
@@ -59,8 +62,12 @@ impl FeaParser {
                         });
                     }
                     if let Some(import) = self.parse_import(cursor, end) {
+                        if let Some(range) = self.trimmed_range(cursor, end) {
+                            self.tree.node(NodeKind::Import, range.start, range.end);
+                        }
                         items.push(FeaModuleItem::Import(import));
                     } else if let Some(syntax) = self.trimmed_range(cursor, end) {
+                        self.tree.node(NodeKind::Error, syntax.start, syntax.end);
                         items.push(FeaModuleItem::Error(FeaErrorNode { syntax }));
                     }
                     cursor = self.consume_terminator(end);
@@ -69,8 +76,13 @@ impl FeaParser {
                     seen_declaration = true;
                     let (declaration, next) = self.parse_declaration(cursor);
                     if let Some(declaration) = declaration {
+                        if let Some(range) = self.trimmed_range(cursor, next) {
+                            self.tree
+                                .node(NodeKind::Declaration, range.start, range.end);
+                        }
                         items.push(FeaModuleItem::Declaration(declaration));
                     } else if let Some(syntax) = self.trimmed_range(cursor, next) {
+                        self.tree.node(NodeKind::Error, syntax.start, syntax.end);
                         items.push(FeaModuleItem::Error(FeaErrorNode { syntax }));
                     }
                     cursor = next.max(cursor + 1);
@@ -84,16 +96,19 @@ impl FeaParser {
                     });
                     let end = self.statement_end(cursor);
                     if let Some(syntax) = self.trimmed_range(cursor, end) {
+                        self.tree.node(NodeKind::Error, syntax.start, syntax.end);
                         items.push(FeaModuleItem::Error(FeaErrorNode { syntax }));
                     }
                     cursor = self.consume_terminator(end);
                 }
             }
         }
+        let tree = self.tree.finish(&self.stream);
         FeaSyntaxModule {
             tokens: self.stream,
             items,
             diagnostics: self.diagnostics,
+            tree,
         }
     }
 
@@ -103,6 +118,7 @@ impl FeaParser {
         loop {
             cursor = self.skip_trivia(cursor);
             if self.at(cursor, FeaTokenKind::RightBrace) {
+                self.tree.node(NodeKind::Block, open, cursor + 1);
                 let close = self.token(cursor).span;
                 return (
                     FeaBlock {
@@ -116,6 +132,7 @@ impl FeaParser {
                 );
             }
             if self.at(cursor, FeaTokenKind::EndOfFile) {
+                self.tree.node(NodeKind::Block, open, cursor);
                 let eof = self.token(cursor).span;
                 self.diagnostics.push(FeaSyntaxDiagnostic {
                     kind: FeaSyntaxDiagnosticKind::UnclosedBlock,
@@ -143,18 +160,16 @@ impl FeaParser {
                         start: self.token(start).span.start,
                         end: body.span.end,
                     };
-                    statements.push(FeaStatement {
-                        kind: self
-                            .parse_output_definition(start, open_block, body.clone())
-                            .or_else(|| {
-                                self.parse_model_definition(start, open_block, body.clone())
-                            })
-                            .or_else(|| {
-                                self.parse_generated_function(start, open_block, body.clone())
-                            })
-                            .unwrap_or(FeaStatementKind::Block { header, body }),
-                        span,
-                    });
+                    let kind = self
+                        .parse_output_definition(start, open_block, body.clone())
+                        .or_else(|| self.parse_model_definition(start, open_block, body.clone()))
+                        .or_else(|| self.parse_generated_function(start, open_block, body.clone()))
+                        .unwrap_or(FeaStatementKind::Block { header, body });
+                    if let Some(header) = self.trimmed_range(start, open_block) {
+                        self.tree.node(NodeKind::Header, header.start, header.end);
+                    }
+                    self.tree.node(statement_node_kind(&kind), start, next);
+                    statements.push(FeaStatement { kind, span });
                     cursor = next;
                 }
                 BlockMemberEnd::Statement(end) => {
@@ -278,6 +293,8 @@ impl FeaParser {
                 .parse_assignment_statement(&significant, range)
                 .unwrap_or(FeaStatementKind::Command { syntax: range }),
         };
+        self.tree
+            .node(statement_node_kind(&kind), range.start, range.end);
         Some(FeaStatement { kind, span })
     }
 
@@ -305,9 +322,13 @@ impl FeaParser {
         let default = equal.map(|position| {
             self.parse_expression_indices(&significant[position + 1..], range.span)
         });
+        let type_syntax = self.token_range(type_start, type_end);
+        if let Some(range) = self.trimmed_range(type_syntax.start, type_syntax.end) {
+            self.tree.node(NodeKind::Type, range.start, range.end);
+        }
         FeaStatementKind::Input {
             name,
-            type_syntax: self.token_range(type_start, type_end),
+            type_syntax,
             default,
         }
     }
@@ -501,8 +522,12 @@ impl FeaParser {
         if indices.is_empty() {
             return self.missing_expression(fallback, "expected an expression");
         }
-        let (expression, remaining) =
-            expression::parse_expression(&self.stream, indices, &mut self.diagnostics);
+        let (expression, remaining) = expression::parse_expression(
+            &self.stream,
+            indices,
+            &mut self.diagnostics,
+            &mut self.tree,
+        );
         if remaining < indices.len() {
             let span = self.token(indices[remaining]).span;
             self.diagnostics.push(FeaSyntaxDiagnostic {
@@ -526,7 +551,7 @@ impl FeaParser {
         }
     }
 
-    fn parse_reference_indices(&self, indices: &[usize]) -> Option<FeaReference> {
+    fn parse_reference_indices(&mut self, indices: &[usize]) -> Option<FeaReference> {
         if indices.is_empty() {
             return None;
         }
@@ -550,6 +575,7 @@ impl FeaParser {
             }
             cursor += 1;
         }
+        self.tree.node_over(NodeKind::Path, indices);
         Some(FeaReference {
             span: merge_span(segments.first()?.span, segments.last()?.span),
             segments,
@@ -558,6 +584,7 @@ impl FeaParser {
 
     fn name(&mut self, index: usize, kind: FeaSyntaxDiagnosticKind) -> Option<FeaName> {
         if self.at(index, FeaTokenKind::Identifier) {
+            self.tree.node(NodeKind::Name, index, index + 1);
             Some(FeaName {
                 text: self.lexeme(index).to_string(),
                 span: self.token(index).span,
@@ -578,5 +605,29 @@ impl FeaParser {
             });
             None
         }
+    }
+}
+
+/// The tree node kind of a `.fea` statement.
+fn statement_node_kind(kind: &FeaStatementKind) -> NodeKind {
+    match kind {
+        FeaStatementKind::GeneratedByFunction { .. } => NodeKind::GeneratedBy,
+        FeaStatementKind::UniformSample { .. } => NodeKind::UniformSample,
+        FeaStatementKind::AppliedLoad { .. } => NodeKind::AppliedLoad,
+        FeaStatementKind::SignalDefinition { .. } => NodeKind::SignalDefinition,
+        FeaStatementKind::ModelDefinition { .. } => NodeKind::ModelDefinition,
+        FeaStatementKind::Block { .. } => NodeKind::BlockStatement,
+        FeaStatementKind::Input { .. } | FeaStatementKind::Let { .. } => NodeKind::ValueStatement,
+        FeaStatementKind::Feature { .. } => NodeKind::Feature,
+        FeaStatementKind::SourceParameterUpdate { .. } => NodeKind::SourceParameterUpdate,
+        FeaStatementKind::Use(_) => NodeKind::PropertyUse,
+        FeaStatementKind::Requirement { .. } => NodeKind::Requirement,
+        FeaStatementKind::Assignment { .. } => NodeKind::Assignment,
+        FeaStatementKind::PropertyAssignment { .. } => NodeKind::PropertyAssignment,
+        FeaStatementKind::Output { .. } => NodeKind::Output,
+        FeaStatementKind::OutputDefinition { .. } => NodeKind::OutputDefinition,
+        FeaStatementKind::Include(_) => NodeKind::Include,
+        FeaStatementKind::Retain(_) => NodeKind::Retain,
+        FeaStatementKind::Command { .. } => NodeKind::Command,
     }
 }
