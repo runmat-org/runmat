@@ -264,7 +264,11 @@ fn curve_midpoint(
     for surface_use in request.surface_uses {
         for evaluator_uv in pcurve_uvs(edge_id, parameter, surface_use, evaluation)? {
             let surface_point = evaluate_surface_point(surface_use, evaluator_uv, evaluation)?;
-            if !points_match(input, coordinates_m, surface_point) {
+            if !points_match_within(
+                coordinates_m,
+                surface_point,
+                curve_match_tolerance_m(input, edge),
+            ) {
                 return Ok(None);
             }
             let parameter = SolverNodeExactParameter::Surface {
@@ -629,17 +633,28 @@ fn squared_parameter_distance(left: [f64; 2], right: [f64; 2]) -> f64 {
     (left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2)
 }
 
-pub(super) fn require_matching_points(
+/// A curve point and its pcurve image's surface point agree within the request tolerance or
+/// the source edge's own tolerance, the gap its STEP edge admits between curve and pcurves.
+pub(super) fn require_matching_curve_points(
     input: &ProjectionInput<'_>,
-    left: [f64; 3],
-    right: [f64; 3],
+    edge: &runmat_geometry_core::ExactEdge,
+    curve: [f64; 3],
+    surface: [f64; 3],
 ) -> Result<(), DelaunaySolverTopologyError> {
-    if !points_match(input, left, right) {
-        return Err(invalid(
-            "exact curve and surface evaluations disagree beyond tolerance",
-        ));
+    let tolerance = curve_match_tolerance_m(input, edge);
+    if !points_match_within(curve, surface, tolerance) {
+        return Err(invalid(format!(
+            "exact curve and surface evaluations disagree beyond tolerance: edge {} curve \
+             point {curve:?}, surface point {surface:?}, distance {:e} m, admitted {tolerance:e} m",
+            edge.id.source_topology_id,
+            squared_point_distance(curve, surface).sqrt()
+        )));
     }
     Ok(())
+}
+
+fn curve_match_tolerance_m(input: &ProjectionInput<'_>, edge: &runmat_geometry_core::ExactEdge) -> f64 {
+    match_tolerance_m(input).max(edge.tolerance_m.canonical_value())
 }
 
 fn match_tolerance_m(input: &ProjectionInput<'_>) -> f64 {
@@ -659,13 +674,19 @@ fn match_tolerance_m(input: &ProjectionInput<'_>) -> f64 {
 }
 
 fn points_match(input: &ProjectionInput<'_>, left: [f64; 3], right: [f64; 3]) -> bool {
-    let tolerance = match_tolerance_m(input);
-    let squared_distance = left
-        .into_iter()
+    points_match_within(left, right, match_tolerance_m(input))
+}
+
+fn points_match_within(left: [f64; 3], right: [f64; 3], tolerance: f64) -> bool {
+    let squared_distance = squared_point_distance(left, right);
+    squared_distance.is_finite() && squared_distance <= tolerance * tolerance
+}
+
+fn squared_point_distance(left: [f64; 3], right: [f64; 3]) -> f64 {
+    left.into_iter()
         .zip(right)
         .map(|(left, right)| (left - right) * (left - right))
-        .sum::<f64>();
-    squared_distance.is_finite() && squared_distance <= tolerance * tolerance
+        .sum::<f64>()
 }
 
 /// The translate of `image` by whole periods nearest `reference` on each periodic axis: the
