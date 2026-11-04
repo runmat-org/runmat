@@ -13,7 +13,10 @@ use super::{
         resolved_cavity_tolerance,
     },
     exact_cover::{on_demand_interior_mate_faces_for_trace, BoundaryExactCoverSearch},
-    refill_tetrahedra::{raw_refill_tetrahedron_with_rejection_reason, refill_from_tetrahedra},
+    refill_tetrahedra::{
+        raw_refill_tetrahedron_with_rejection_reason, refill_from_tetrahedra,
+        RefillTetrahedronError,
+    },
     topology::{sorted_face, sorted_tetrahedron_nodes},
     validation::{validate_constrained_cavity, validate_refill_options},
     ConstrainedCavity, ConstrainedCavityNode, ConstrainedCavityRefill,
@@ -398,9 +401,12 @@ impl CandidateGenerator<'_> {
                     self.options,
                 ) {
                     Ok(candidate) => candidate,
-                    Err(reason) => {
+                    Err(RefillTetrahedronError::Rejected(reason)) => {
                         *inventory.rejection_counts.entry(reason).or_default() += 1;
                         continue;
+                    }
+                    Err(RefillTetrahedronError::Accounting(cause)) => {
+                        return Err(ConstrainedCavityRefillError::Accounting(cause));
                     }
                 };
                 if candidate.volume_m3 > self.maximum_candidate_volume_m3 {

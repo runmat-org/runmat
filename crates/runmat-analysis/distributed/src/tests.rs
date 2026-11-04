@@ -51,7 +51,7 @@ impl ElementKernel for Conduction {
         material: u32,
         coordinates: &[[f64; 3]],
         matrix: &mut [f64],
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::ElementKernelError> {
         let (g, volume) = gradients(coordinates);
         let k = 1.0 + material as f64;
         for i in 0..4 {
@@ -71,7 +71,7 @@ impl ElementKernel for Conduction {
         coordinates: &[[f64; 3]],
         solution: &[f64],
         result: &mut [f64],
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::ElementKernelError> {
         let (g, _) = gradients(coordinates);
         let k = 1.0 + material as f64;
         for (axis, value) in result.iter_mut().enumerate().take(3) {
@@ -96,7 +96,7 @@ impl ElementKernel for Elastic {
         _material: u32,
         coordinates: &[[f64; 3]],
         matrix: &mut [f64],
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::ElementKernelError> {
         let (g, volume) = gradients(coordinates);
         let (e, nu) = (1000.0, 0.25);
         let lambda = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
@@ -125,7 +125,7 @@ impl ElementKernel for Elastic {
         coordinates: &[[f64; 3]],
         solution: &[f64],
         result: &mut [f64],
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::ElementKernelError> {
         let (g, _) = gradients(coordinates);
         // Volumetric strain.
         result[0] = (0..4)

@@ -1,6 +1,8 @@
 use crate::assembly::SolidRecoveryElementSummary;
 
 use super::error::StructuralFieldRecoveryError;
+use crate::algebra::{capacity::measured, coercivity::NumericalCapacityError};
+use runmat_simulation_usage::{AsyncCapacityOwner, LedgerError, OperationCount, UsageCategory};
 
 /// Nodal stress tensors recovered from each element's own stress field.
 ///
@@ -11,18 +13,41 @@ use super::error::StructuralFieldRecoveryError;
 /// several regions, each region is averaged on its own and the region whose averaged tensor has
 /// the largest von Mises stress supplies the nodal value, so material interfaces are never
 /// blended. Scalars (von Mises, principal stresses) are derived from these averaged tensors.
+#[cfg(test)]
 pub(super) fn recover_volume_weighted_nodal_tensor(
     elements: &[SolidRecoveryElementSummary],
     integration_point_stress: &[f64],
     node_count: usize,
 ) -> Result<Vec<f64>, StructuralFieldRecoveryError> {
+    use futures::FutureExt;
+    recover_volume_weighted_nodal_tensor_with_capacity::<std::convert::Infallible>(
+        elements,
+        integration_point_stress,
+        node_count,
+        None,
+    )
+    .now_or_never()
+    .expect("native nodal recovery capacity is immediately ready")
+    .map_err(|error| match error {
+        NumericalCapacityError::Numerical(error) => error,
+        NumericalCapacityError::Admission(never) => match never {},
+    })
+}
+
+pub(super) async fn recover_volume_weighted_nodal_tensor_with_capacity<A>(
+    elements: &[SolidRecoveryElementSummary],
+    integration_point_stress: &[f64],
+    node_count: usize,
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<Vec<f64>, NumericalCapacityError<StructuralFieldRecoveryError, A>> {
     const POINTS: usize = 4;
     const COMPONENTS: usize = 6;
     if integration_point_stress.len() != elements.len() * POINTS * COMPONENTS {
         return Err(StructuralFieldRecoveryError::ElementValueCountMismatch {
             expected: elements.len() * POINTS * COMPONENTS,
             actual: integration_point_stress.len(),
-        });
+        }
+        .into());
     }
     // Per node, per region: volume-weighted tensor sums. Most nodes touch one region.
     let mut sums: Vec<Vec<(&str, [f64; COMPONENTS], f64)>> = vec![Vec::new(); node_count];
@@ -30,62 +55,99 @@ pub(super) fn recover_volume_weighted_nodal_tensor(
         .iter()
         .zip(integration_point_stress.chunks_exact(POINTS * COMPONENTS))
     {
-        let volume = element.geometry.volume_m3().map_err(|error| {
-            StructuralFieldRecoveryError::NonFiniteResult {
-                element_id: format!("{} ({error})", element.element_id),
-            }
-        })?;
-        let points: [[f64; COMPONENTS]; POINTS] = std::array::from_fn(|point| {
-            std::array::from_fn(|component| samples[point * COMPONENTS + component])
-        });
-        let node_indices = element.geometry.node_indices();
-        let nodal: Vec<[f64; COMPONENTS]> = if node_indices.len() == 10 {
-            crate::assembly::elements::solid::tetrahedron10::extrapolate_quadrature_to_nodes(points)
-                .to_vec()
-        } else {
-            // Constant-strain element: every sample carries the element's stress.
-            vec![points[0]; node_indices.len()]
-        };
-        for (&node_index, tensor) in node_indices.iter().zip(nodal) {
-            let entries = sums.get_mut(node_index).ok_or_else(|| {
-                StructuralFieldRecoveryError::InvalidNodeIndex {
-                    element_id: element.element_id.clone(),
-                    node_index,
-                }
+        let volume = element
+            .geometry
+            .volume_m3_with_capacity(owner)
+            .await
+            .map_err(|error| {
+                error.map_numerical(|error| {
+                    StructuralFieldRecoveryError::geometry(&element.element_id, error)
+                })
             })?;
-            let slot = match entries
-                .iter()
-                .position(|(region, _, _)| *region == element.region_id.as_str())
-            {
-                Some(slot) => slot,
-                None => {
-                    entries.push((element.region_id.as_str(), [0.0; COMPONENTS], 0.0));
-                    entries.len() - 1
-                }
+        let nodes = element.geometry.node_indices().len();
+        // Six component multiply-adds and one volume sum at each node; Tet10
+        // also extrapolates four samples to four corners and six midsides.
+        let operations = nodes * 13 + if nodes == 10 { 217 } else { 0 };
+        measured(owner, UsageCategory::Solve, count(operations)?, || {
+            let points: [[f64; COMPONENTS]; POINTS] = std::array::from_fn(|point| {
+                std::array::from_fn(|component| samples[point * COMPONENTS + component])
+            });
+            let node_indices = element.geometry.node_indices();
+            let nodal: Vec<[f64; COMPONENTS]> = if node_indices.len() == 10 {
+                crate::assembly::elements::solid::tetrahedron10::extrapolate_quadrature_to_nodes(
+                    points,
+                )
+                .to_vec()
+            } else {
+                // Constant-strain element: every sample carries the element's stress.
+                vec![points[0]; node_indices.len()]
             };
-            let (_, sum, weight) = &mut entries[slot];
-            for component in 0..COMPONENTS {
-                sum[component] += tensor[component] * volume;
+            for (&node_index, tensor) in node_indices.iter().zip(nodal) {
+                let entries = sums.get_mut(node_index).ok_or_else(|| {
+                    StructuralFieldRecoveryError::InvalidNodeIndex {
+                        element_id: element.element_id.clone(),
+                        node_index,
+                    }
+                })?;
+                let slot = match entries
+                    .iter()
+                    .position(|(region, _, _)| *region == element.region_id.as_str())
+                {
+                    Some(slot) => slot,
+                    None => {
+                        entries.push((element.region_id.as_str(), [0.0; COMPONENTS], 0.0));
+                        entries.len() - 1
+                    }
+                };
+                let (_, sum, weight) = &mut entries[slot];
+                for component in 0..COMPONENTS {
+                    sum[component] += tensor[component] * volume;
+                }
+                *weight += volume;
             }
-            *weight += volume;
-        }
+            Ok::<_, StructuralFieldRecoveryError>(())
+        })
+        .await?;
     }
     let mut nodal = vec![0.0_f64; node_count * COMPONENTS];
     for (node, entries) in sums.into_iter().enumerate() {
-        let averaged = entries
-            .into_iter()
+        let regions = entries
+            .iter()
             .filter(|(_, _, weight)| *weight > 0.0)
-            .map(|(_, sum, weight)| sum.map(|value| value / weight))
-            .max_by(|left, right| {
-                von_mises(left)
-                    .partial_cmp(&von_mises(right))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-        if let Some(tensor) = averaged {
-            nodal[node * COMPONENTS..(node + 1) * COMPONENTS].copy_from_slice(&tensor);
-        }
+            .count();
+        let comparisons = count(regions.saturating_sub(1))?
+            .checked_mul(34)
+            .map_err(LedgerError::from)
+            .map_err(StructuralFieldRecoveryError::from)?;
+        let operations = count(regions)?
+            .checked_mul(6)
+            .and_then(|work| work.checked_add(comparisons))
+            .map_err(LedgerError::from)
+            .map_err(StructuralFieldRecoveryError::from)?;
+        measured(owner, UsageCategory::Solve, operations, || {
+            let averaged = entries
+                .into_iter()
+                .filter(|(_, _, weight)| *weight > 0.0)
+                .map(|(_, sum, weight)| sum.map(|value| value / weight))
+                .max_by(|left, right| {
+                    von_mises(left)
+                        .partial_cmp(&von_mises(right))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            if let Some(tensor) = averaged {
+                nodal[node * COMPONENTS..(node + 1) * COMPONENTS].copy_from_slice(&tensor);
+            }
+            Ok::<_, StructuralFieldRecoveryError>(())
+        })
+        .await?;
     }
     Ok(nodal)
+}
+
+fn count(length: usize) -> Result<OperationCount, StructuralFieldRecoveryError> {
+    Ok(OperationCount::from_operations(
+        u64::try_from(length).map_err(|_| LedgerError::CountOverflow)?,
+    ))
 }
 
 fn von_mises(tensor: &[f64; 6]) -> f64 {

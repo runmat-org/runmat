@@ -1,4 +1,4 @@
-# Studies, Solves, and Sweeps
+# Solves and studies
 
 A study is the complete placement-neutral definition of one analysis graph. It selects exact geometry, its matching solver mesh, a bound physical model, ordered procedures, and authored outputs. A sweep supplies typed input cases to one study. Execution policy is optional and does not change the physical definition.
 

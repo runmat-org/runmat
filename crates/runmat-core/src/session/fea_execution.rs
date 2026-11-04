@@ -2,7 +2,7 @@
 //! the shared authoring, meshing, numerical and publication owners retain meaning.
 use super::CheckedFeaSessionSource;
 use runmat_analysis_execution::{
-    execute_serial_structural_sequence, GeometryProviderProfile,
+    execute_serial_structural_sequence_with_capacity, AsyncCapacityOwner, GeometryProviderProfile,
     PreparedGeometryMaterializationProgram, PreparedGeometrySource, SerialAnalysisHost,
     StructuralSequencePreparation,
 };
@@ -294,6 +294,39 @@ fn sequence_preparation(
             },
     })
 }
+#[derive(Debug)]
+pub enum PreparedSerialFeaExecutionError {
+    Preparation(String),
+    Bridge(runmat_analysis_execution::AnalysisBridgeError),
+    Result(String),
+}
+impl std::fmt::Display for PreparedSerialFeaExecutionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Preparation(message) | Self::Result(message) => formatter.write_str(message),
+            Self::Bridge(error) => std::fmt::Display::fmt(error, formatter),
+        }
+    }
+}
+impl std::error::Error for PreparedSerialFeaExecutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Bridge(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+impl From<String> for PreparedSerialFeaExecutionError {
+    fn from(message: String) -> Self {
+        Self::Preparation(message)
+    }
+}
+impl From<runmat_analysis_execution::AnalysisBridgeError> for PreparedSerialFeaExecutionError {
+    fn from(error: runmat_analysis_execution::AnalysisBridgeError) -> Self {
+        Self::Bridge(error)
+    }
+}
+
 impl PreparedSerialFeaStudy {
     /// Recompute canonical resource admission for a different thread allocation.
     /// This does not infer speedup or change the physical analysis definition.
@@ -328,6 +361,21 @@ impl PreparedSerialFeaStudy {
         clock: &dyn Fn() -> u64,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<StructuralStudyResult, String> {
+        use futures::FutureExt;
+        self.execute_with_capacity(host, store, clock, cancelled, None)
+            .now_or_never()
+            .ok_or_else(|| "Synchronous simulation requires an immediately ready host.".to_owned())?
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn execute_with_capacity(
+        self,
+        host: &mut SerialAnalysisHost,
+        store: &mut MemoryObjectStore,
+        clock: &dyn Fn() -> u64,
+        cancelled: &dyn Fn() -> bool,
+        capacity: Option<&dyn AsyncCapacityOwner>,
+    ) -> Result<StructuralStudyResult, PreparedSerialFeaExecutionError> {
         let sequence = sequence_preparation(
             &self.workloads,
             &self.mesh,
@@ -345,8 +393,10 @@ impl PreparedSerialFeaStudy {
             None,
             None,
         );
-        let completed = execute_serial_structural_sequence(sequence, store, host, clock, cancelled)
-            .map_err(|e| e.to_string())?;
+        let completed = execute_serial_structural_sequence_with_capacity(
+            sequence, store, host, clock, cancelled, capacity,
+        )
+        .await?;
         runmat_analysis_fea::progress::emit_phase(
             "fea.run",
             runmat_analysis_fea::FeaProgressPhase::Solve,
@@ -384,5 +434,6 @@ impl PreparedSerialFeaStudy {
             self.workloads,
             numerical,
         )
+        .map_err(PreparedSerialFeaExecutionError::Result)
     }
 }

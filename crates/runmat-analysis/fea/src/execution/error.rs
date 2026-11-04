@@ -12,4 +12,8 @@ pub enum AnalysisExecutionError {
     Limit(&'static str),
     #[error("analysis execution codec failure: {0}")]
     Codec(#[from] CanonicalCodecError),
+    #[error("analysis execution numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
+    #[error("analysis execution cancelled")]
+    Cancelled,
 }

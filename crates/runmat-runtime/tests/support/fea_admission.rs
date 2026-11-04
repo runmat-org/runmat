@@ -1,6 +1,6 @@
 //! Explicit finite admission for numerical contract tests, with thread-local restoration.
-use runmat_execution::resource::ResourceUsage;
 use runmat_runtime::analysis::fea_run_admission::*;
+use runmat_simulation_usage::OperationCount;
 pub fn guard() -> FeaRunAdmissionHostGuard {
     struct Host;
     struct Permit {
@@ -12,11 +12,8 @@ pub fn guard() -> FeaRunAdmissionHostGuard {
                 return Err(FeaRunDenied::LicenseInvalid);
             }
             let budget = FeaRunBudget {
-                held_core_millis: request
-                    .allocated_cpu_millicores
-                    .checked_mul(3_600_000)
-                    .ok_or(FeaRunDenied::LicenseInvalid)?
-                    .div_ceil(1000),
+                budget_ops: OperationCount::from_operations(u64::MAX),
+                granted_ops: OperationCount::from_operations(u64::MAX),
                 expires_at_unix_millis: u64::try_from(runmat_time::unix_timestamp_ms() + 3_600_000)
                     .map_err(|_| FeaRunDenied::LicenseInvalid)?,
                 heartbeat_millis: 30_000,
@@ -29,15 +26,11 @@ pub fn guard() -> FeaRunAdmissionHostGuard {
         fn budget(&self) -> FeaRunBudget {
             self.budget
         }
-        fn heartbeat(&self, _: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+        fn heartbeat(&self, _: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
             self.budget.validate()?;
             Ok(self.budget)
         }
-        fn settle(
-            self: Box<Self>,
-            _: FeaRunOutcome,
-            _: &ResourceUsage,
-        ) -> Result<(), FeaRunDenied> {
+        fn settle(self: Box<Self>, _: FeaRunOutcome, _: &FeaRunUsage) -> Result<(), FeaRunDenied> {
             Ok(())
         }
     }

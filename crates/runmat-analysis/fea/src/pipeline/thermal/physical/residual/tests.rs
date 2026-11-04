@@ -54,6 +54,7 @@ fn solve(scale: f64, homogeneous: bool) -> LinearSolveResult {
         &CpuReferenceBackend,
         Some(&guess),
     )
+    .unwrap()
 }
 
 #[test]

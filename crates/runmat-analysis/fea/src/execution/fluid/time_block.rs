@@ -327,7 +327,7 @@ impl<'a> FluidTransientBlock<'a> {
                     previous,
                 )
                 .map_err(invalid)?;
-            let result = interval.solve().map_err(invalid)?;
+            let result = interval.solve().map_err(super::fluid_error)?;
             intervals.push(FluidIntervalEvidence {
                 ordinal,
                 outer_iterations: result.outer_iterations,

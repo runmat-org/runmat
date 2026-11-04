@@ -133,7 +133,7 @@ pub trait ElementKernel: Send + Sync {
         material: u32,
         coordinates: &[[f64; 3]],
         matrix: &mut [f64],
-    ) -> Result<(), String>;
+    ) -> Result<(), crate::ElementKernelError>;
     /// Width of one element's recovered result (stress, heat flux, ...).
     fn result_width(&self) -> usize;
     /// Recover the element result from its nodal solution, ordered node-major.
@@ -143,7 +143,7 @@ pub trait ElementKernel: Send + Sync {
         coordinates: &[[f64; 3]],
         solution: &[f64],
         result: &mut [f64],
-    ) -> Result<(), String>;
+    ) -> Result<(), crate::ElementKernelError>;
 }
 
 /// Complete global problem before partitioning.

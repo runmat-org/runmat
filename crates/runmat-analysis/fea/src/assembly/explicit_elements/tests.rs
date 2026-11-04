@@ -1,6 +1,9 @@
 use runmat_analysis_core::{StructuralElementKind, StructuralNode};
 
-use super::{assemble_explicit_elements, StructuralDofLayout};
+use super::{
+    assemble_explicit_elements, assemble_explicit_elements_with_owner, ExplicitCapacityPhase,
+    StructuralDofLayout,
+};
 use crate::{
     assembly::dofs::StructuralNodeDofSet,
     fixtures::{fixture_model, FixtureId},
@@ -135,6 +138,50 @@ fn scoped_beam_scatter_preserves_interleaved_shell_operators() {
     assert_eq!(parallel.mass, serial.mass);
     assert_eq!(parallel.beam_recovery, serial.beam_recovery);
     assert_eq!(parallel.shell_recovery, serial.shell_recovery);
+    let phases = std::cell::RefCell::new(Vec::new());
+    let awaited = futures::executor::block_on(assemble_explicit_elements_with_owner(
+        structural,
+        &properties,
+        &layout,
+        &node_indices,
+        LocalExecutionPlan::serial(),
+        true,
+        |phase, count| {
+            phases.borrow_mut().push((phase, count));
+            std::future::ready(Ok::<(), super::StructuralAssemblyError>(()))
+        },
+    ))
+    .unwrap();
+    assert_eq!(awaited.stiffness, serial.stiffness);
+    assert_eq!(awaited.mass, serial.mass);
+    assert_eq!(awaited.damping, serial.damping);
+    assert_eq!(awaited.beam_recovery, serial.beam_recovery);
+    assert_eq!(awaited.shell_recovery, serial.shell_recovery);
+    assert!(phases
+        .borrow()
+        .iter()
+        .any(|(phase, _)| matches!(phase, ExplicitCapacityPhase::Element { .. })));
+    assert!(phases
+        .borrow()
+        .iter()
+        .any(|(phase, _)| matches!(phase, ExplicitCapacityPhase::Scatter { .. })));
+    let denied = futures::executor::block_on(assemble_explicit_elements_with_owner(
+        structural,
+        &properties,
+        &layout,
+        &node_indices,
+        LocalExecutionPlan::serial(),
+        true,
+        |_, _| {
+            std::future::ready(Err::<(), _>(
+                super::StructuralAssemblyError::LocalExecution("admission denied".into()),
+            ))
+        },
+    ));
+    assert!(matches!(
+        denied,
+        Err(super::StructuralAssemblyError::LocalExecution(message)) if message == "admission denied"
+    ));
 }
 
 #[test]

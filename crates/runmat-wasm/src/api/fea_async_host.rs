@@ -5,9 +5,10 @@ use runmat_runtime::analysis::fea_run_admission::{
     AsyncFeaRunAdmission, AsyncFeaRunLease, FeaRunDenied, FeaRunOutcome, FeaRunRequest, FeaRunScope,
 };
 use runmat_runtime::context::RuntimeServiceFuture;
+use runmat_simulation_usage::OperationCount;
 use std::{
     cell::{Cell, RefCell},
-    rc::Rc,
+    rc::{Rc, Weak},
 };
 use wasm_bindgen::JsValue;
 
@@ -31,6 +32,140 @@ impl AsyncFeaRunAdmission for BrowserFeaAdmission {
             started
                 .await
                 .map(|lease| lease as Box<dyn AsyncFeaRunLease>)
+        })
+    }
+    fn request_grant(
+        &self,
+        request: FeaRunRequest,
+        usage: runmat_runtime::analysis::fea_run_admission::FeaRunUsage,
+        required: OperationCount,
+    ) -> RuntimeServiceFuture<
+        Result<runmat_runtime::analysis::fea_run_admission::FeaRunBudget, FeaRunDenied>,
+    > {
+        let host = self.host.borrow().clone();
+        let active = self.active.borrow().clone();
+        Box::pin(async move {
+            let host = host.ok_or(FeaRunDenied::SignInRequired)?;
+            let active = active
+                .filter(|active| active.run_id == request.run_id)
+                .ok_or(FeaRunDenied::LicenseInvalid)?;
+            if active.control.usage()?.completed_ops != usage.completed_ops {
+                return Err(FeaRunDenied::LicenseInvalid);
+            }
+            let request_js = crate::wire::json_contract_to_js(&request)
+                .map_err(|_| FeaRunDenied::LicenseInvalid)?;
+            let usage_js = crate::wire::json_contract_to_js(
+                &serde_json::json!({"completedOps": usage.completed_ops}),
+            )
+            .map_err(|_| FeaRunDenied::LicenseInvalid)?;
+            super::fea_lease::call_host(&host, "check", &request_js, &usage_js)
+                .await
+                .map_err(denial_from_js)?;
+            let required_js = crate::wire::json_contract_to_js(&required)
+                .map_err(|_| FeaRunDenied::LicenseInvalid)?;
+            let state: super::fea_lease::LeaseState = serde_wasm_bindgen::from_value(
+                super::fea_lease::call_host(&host, "grant", &request_js, &required_js)
+                    .await
+                    .map_err(denial_from_js)?,
+            )
+            .map_err(|_| FeaRunDenied::LicenseInvalid)?;
+            if state.lease.lease_id != active.lease_id
+                || state.root_started_at_unix_millis != active.root_started_at_unix_millis()
+            {
+                return Err(FeaRunDenied::LicenseInvalid);
+            }
+            let budget = state.lease.budget().map_err(denial_from_js)?;
+            active.control.renew(budget)?;
+            Ok(budget)
+        })
+    }
+}
+
+/// An authenticated child uses its own ledger and asks the UI coordinator for
+/// incremental capacity. This port never starts or settles another root.
+pub(super) struct BrowserWorkerFeaAdmission {
+    pub context: Weak<LocalFeaRunContext>,
+}
+
+pub(super) struct BrowserNumericalCapacity {
+    runtime: runmat_runtime::context::RuntimeContext,
+    control: runmat_runtime::analysis::fea_run_admission::FeaRunControl,
+}
+impl BrowserNumericalCapacity {
+    pub fn new(context: &Rc<LocalFeaRunContext>) -> Self {
+        use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_fea_run_admission(Rc::new(
+                BrowserWorkerFeaAdmission {
+                    context: Rc::downgrade(context),
+                },
+            )),
+        );
+        Self {
+            runtime,
+            control: context.scope().control(),
+        }
+    }
+}
+impl runmat_simulation_usage::AsyncCapacityOwner for BrowserNumericalCapacity {
+    fn ensure_capacity(
+        &self,
+        additional: OperationCount,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<(), runmat_simulation_usage::LedgerError>> + '_,
+        >,
+    > {
+        Box::pin(async move {
+            use runmat_simulation_usage::{LedgerError, UsageContext};
+            let usage = UsageContext::capture().ok_or(LedgerError::GrantUnavailable)?;
+            runmat_runtime::analysis::fea_run_admission::ensure_available_capacity(
+                &usage,
+                additional,
+                Some(&self.runtime),
+            )
+            .await
+            .map_err(|denied| {
+                self.control.deny(denied.clone());
+                let cause = match denied {
+                    FeaRunDenied::Accounting(cause) => cause,
+                    _ => LedgerError::GrantUnavailable,
+                };
+                cause
+            })
+        })
+    }
+}
+impl AsyncFeaRunAdmission for BrowserWorkerFeaAdmission {
+    fn admit(
+        &self,
+        _: FeaRunRequest,
+    ) -> RuntimeServiceFuture<Result<Box<dyn AsyncFeaRunLease>, FeaRunDenied>> {
+        Box::pin(async { Err(FeaRunDenied::LicenseInvalid) })
+    }
+    fn request_grant(
+        &self,
+        request: FeaRunRequest,
+        usage: runmat_runtime::analysis::fea_run_admission::FeaRunUsage,
+        required: OperationCount,
+    ) -> RuntimeServiceFuture<
+        Result<runmat_runtime::analysis::fea_run_admission::FeaRunBudget, FeaRunDenied>,
+    > {
+        let context = self.context.upgrade();
+        Box::pin(async move {
+            let context = context.ok_or(FeaRunDenied::LicenseInvalid)?;
+            if context.request() != &request
+                || context.scope().usage()?.completed_ops != usage.completed_ops
+            {
+                return Err(FeaRunDenied::LicenseInvalid);
+            }
+            context
+                .acquire_worker_grant(required)
+                .await
+                .map_err(denial_from_js)
         })
     }
 }

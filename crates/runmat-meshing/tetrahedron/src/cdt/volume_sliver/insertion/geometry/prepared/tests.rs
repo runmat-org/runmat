@@ -70,13 +70,14 @@ fn split_probes_resolve_each_child_scope_once() {
                 points,
                 metric([endpoint, opposite_vertices[0], opposite_vertices[1]]),
             )
+            .unwrap()
             .unwrap();
             expected = expected.min(value.metric_scaled_jacobian);
         }
     }
     assert!(expected > 0.);
     for _ in 0..128 {
-        assert_eq!(prepared.score(point), expected);
+        assert_eq!(prepared.score(point).unwrap(), expected);
     }
     assert_eq!(
         calls.get(),

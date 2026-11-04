@@ -99,7 +99,7 @@ fn quadratic_location_inverts_a_curved_isoparametric_map() {
         >::new(quantity_coordinates);
     };
     let expected_barycentric = [0.4, 0.2, 0.3, 0.1];
-    let (expected_weights, _) = volume_shape(ElementOrder::Tet10, expected_barycentric);
+    let (expected_weights, _) = volume_shape(ElementOrder::Tet10, expected_barycentric).unwrap();
     let position = std::array::from_fn(|axis| {
         projection.elements[0]
             .node_indices
@@ -137,6 +137,7 @@ fn shared_vertex_ownership_and_heap_are_independent_of_element_inventory_and_ord
             .enumerate()
             .filter_map(|(i, e)| {
                 super::locate_in_element(&projection, e, position)
+                    .unwrap()
                     .map(|weights| (i, e.stable_identity, weights))
             })
             .min_by_key(|(_, identity, _)| *identity)

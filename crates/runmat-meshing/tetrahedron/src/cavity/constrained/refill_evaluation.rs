@@ -93,9 +93,10 @@ pub fn evaluate_constrained_cavity_refill_candidates(
                 ));
             }
             Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
-            Err(err) => {
-                record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
-            }
+            Err(err) => record_refill_rejection(
+                &mut rejected_by_reason,
+                refill_validation_reason(&err).map_err(ConstrainedCavityRefillError::Accounting)?,
+            ),
         }
         match centroid_interior_refill_candidate(
             cavity,
@@ -111,9 +112,10 @@ pub fn evaluate_constrained_cavity_refill_candidates(
                 ));
             }
             Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
-            Err(err) => {
-                record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
-            }
+            Err(err) => record_refill_rejection(
+                &mut rejected_by_reason,
+                refill_validation_reason(&err).map_err(ConstrainedCavityRefillError::Accounting)?,
+            ),
         }
         return Ok(refill_evaluation(
             None,
@@ -170,7 +172,11 @@ pub fn evaluate_constrained_cavity_refill_candidates(
                 continue;
             }
             Err(err) => {
-                record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err));
+                record_refill_rejection(
+                    &mut rejected_by_reason,
+                    refill_validation_reason(&err)
+                        .map_err(ConstrainedCavityRefillError::Accounting)?,
+                );
                 continue;
             }
         };
@@ -191,9 +197,10 @@ pub fn evaluate_constrained_cavity_refill_candidates(
         ) {
             Ok(Ok(refill)) => best = Some(refill),
             Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
-            Err(err) => {
-                record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
-            }
+            Err(err) => record_refill_rejection(
+                &mut rejected_by_reason,
+                refill_validation_reason(&err).map_err(ConstrainedCavityRefillError::Accounting)?,
+            ),
         }
     }
     if best.is_none() && valid_interior_nodes.len() >= 3 {
@@ -206,9 +213,10 @@ pub fn evaluate_constrained_cavity_refill_candidates(
         ) {
             Ok(Ok(refill)) => best = Some(refill),
             Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
-            Err(err) => {
-                record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
-            }
+            Err(err) => record_refill_rejection(
+                &mut rejected_by_reason,
+                refill_validation_reason(&err).map_err(ConstrainedCavityRefillError::Accounting)?,
+            ),
         }
     }
     if best.is_none() && boundary_node_ids.len() > 4 {
@@ -221,9 +229,10 @@ pub fn evaluate_constrained_cavity_refill_candidates(
                 best = Some(candidate.refill);
             }
             Ok(Err(reason)) => record_refill_rejection(&mut rejected_by_reason, reason),
-            Err(err) => {
-                record_refill_rejection(&mut rejected_by_reason, refill_validation_reason(&err))
-            }
+            Err(err) => record_refill_rejection(
+                &mut rejected_by_reason,
+                refill_validation_reason(&err).map_err(ConstrainedCavityRefillError::Accounting)?,
+            ),
         }
     }
 

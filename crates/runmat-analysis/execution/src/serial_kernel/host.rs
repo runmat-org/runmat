@@ -26,6 +26,14 @@ pub struct SerialAnalysisHost {
     pool_id: PoolId,
     resources: ResourceInventory,
 }
+
+#[derive(Clone, Copy)]
+pub struct SerialAnalysisServices<'a> {
+    /// Host clock used for attempt accounting.
+    pub clock: &'a dyn Fn() -> u64,
+    /// Admission owner for additional numerical work.
+    pub capacity: Option<&'a dyn AsyncCapacityOwner>,
+}
 impl SerialAnalysisHost {
     pub fn new(
         host: ExecutionHostInventory,
@@ -86,6 +94,29 @@ impl SerialAnalysisHost {
         store: &mut S,
         clock: &dyn Fn() -> u64,
     ) -> AnalysisBridgeResult<(ProgramExecutionResponse, AttemptSuccess)> {
+        crate::serial::finish_inline(self.execute_with_capacity(
+            host,
+            program,
+            inputs,
+            plan,
+            store,
+            SerialAnalysisServices {
+                clock,
+                capacity: None,
+            },
+        ))
+    }
+
+    pub async fn execute_with_capacity<S: CacheImport + CacheExport>(
+        &mut self,
+        host: &AnalysisHostWorkload,
+        program: &PreparedAnalysisProgram,
+        inputs: &[PreparedAnalysisObjects],
+        plan: &runmat_analysis_fea::planning::resource::FeaResourcePlan,
+        store: &mut S,
+        services: SerialAnalysisServices<'_>,
+    ) -> AnalysisBridgeResult<(ProgramExecutionResponse, AttemptSuccess)> {
+        let SerialAnalysisServices { clock, capacity } = services;
         plan.validate_identity()?;
         // Use the same workload capability binding as native submission. The
         // resource plan owns numeric admission; task placement also requires
@@ -178,14 +209,27 @@ impl SerialAnalysisHost {
             )))
             .map_err(error)?;
         let started = clock();
-        let completed = execute_serial_analysis_host_response(
-            &program.request,
-            store,
-            &SerialStructuralAnalysisKernel,
-            host.output_policy.chunk_bytes(),
-            host.output_policy.inventory_limits(),
-            Some(&attempt.task.resources),
-        )?;
+        let completed = if let Some(capacity) = capacity {
+            execute_serial_analysis_host_response_with_capacity(
+                &program.request,
+                store,
+                &SerialStructuralAnalysisKernel,
+                host.output_policy.chunk_bytes(),
+                host.output_policy.inventory_limits(),
+                Some(&attempt.task.resources),
+                capacity,
+            )
+            .await?
+        } else {
+            execute_serial_analysis_host_response(
+                &program.request,
+                store,
+                &SerialStructuralAnalysisKernel,
+                host.output_policy.chunk_bytes(),
+                host.output_policy.inventory_limits(),
+                Some(&attempt.task.resources),
+            )?
+        };
         let response = completed.program_response();
         let ProgramExecutionResponse::ExternalizedSuccess {
             outputs,
@@ -227,6 +271,24 @@ pub fn execute_serial_structural_sequence<S: CacheImport + CacheExport>(
     clock: &dyn Fn() -> u64,
     cancelled: &dyn Fn() -> bool,
 ) -> AnalysisBridgeResult<CompletedStructuralSequence> {
+    crate::serial::finish_inline(execute_serial_structural_sequence_with_capacity(
+        preparation,
+        store,
+        host,
+        clock,
+        cancelled,
+        None,
+    ))
+}
+
+pub async fn execute_serial_structural_sequence_with_capacity<S: CacheImport + CacheExport>(
+    preparation: StructuralSequencePreparation,
+    store: &mut S,
+    host: &mut SerialAnalysisHost,
+    clock: &dyn Fn() -> u64,
+    cancelled: &dyn Fn() -> bool,
+    capacity: Option<&dyn AsyncCapacityOwner>,
+) -> AnalysisBridgeResult<CompletedStructuralSequence> {
     let mut coordinator = StructuralSequenceCoordinator::new(preparation)?;
     while !coordinator.is_complete() {
         if cancelled() {
@@ -236,14 +298,16 @@ pub fn execute_serial_structural_sequence<S: CacheImport + CacheExport>(
         let mut responses = BTreeMap::new();
         let mut attempts = BTreeMap::new();
         for task in &solve_wave.tasks {
-            let (response, attempt) = host.execute(
-                &task.prepared.host,
-                &task.prepared.program,
-                &task.prepared.inputs,
-                &task.prepared.resource_plan,
-                store,
-                clock,
-            )?;
+            let (response, attempt) = host
+                .execute_with_capacity(
+                    &task.prepared.host,
+                    &task.prepared.program,
+                    &task.prepared.inputs,
+                    &task.prepared.resource_plan,
+                    store,
+                    SerialAnalysisServices { clock, capacity },
+                )
+                .await?;
             responses.insert(task.node.clone(), response);
             attempts.insert(task.node.clone(), attempt);
         }
@@ -255,14 +319,16 @@ pub fn execute_serial_structural_sequence<S: CacheImport + CacheExport>(
             if cancelled() {
                 return Err(AnalysisBridgeError::Invalid("Simulation stopped.".into()));
             }
-            let (response, success) = host.execute(
-                &task.prepared.host,
-                &task.prepared.program,
-                &task.prepared.inputs,
-                &task.prepared.resource_plan,
-                store,
-                clock,
-            )?;
+            let (response, success) = host
+                .execute_with_capacity(
+                    &task.prepared.host,
+                    &task.prepared.program,
+                    &task.prepared.inputs,
+                    &task.prepared.resource_plan,
+                    store,
+                    SerialAnalysisServices { clock, capacity },
+                )
+                .await?;
             let accounting = success.resources().cloned().ok_or_else(|| {
                 AnalysisBridgeError::Invalid("Serial task omitted its accounting.".into())
             })?;

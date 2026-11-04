@@ -1,4 +1,4 @@
-# Geometry features and STEP AP242
+# Geometry features and AP242
 
 ## Feature operations
 

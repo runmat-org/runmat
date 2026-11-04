@@ -6,12 +6,13 @@ use crate::topology::{
     element::{cross, dot, invert},
 };
 use runmat_meshing_core::{ElementOrder, TETRAHEDRON_MIDSIDE_EDGE_CORNERS};
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 
 pub(crate) fn visit_volume_quadrature(
     order: ElementOrder,
     coordinates: &[[f64; 3]],
     visit: impl FnMut(VolumeQuadraturePoint),
-) -> Option<()> {
+) -> Result<Option<()>, LedgerError> {
     visit_volume_rule(order, coordinates, KEAST_FIFTEEN, visit)
 }
 
@@ -20,16 +21,31 @@ pub(crate) fn visit_volume_rule(
     coordinates: &[[f64; 3]],
     rule: impl IntoIterator<Item = ([f64; 4], f64)>,
     mut visit: impl FnMut(VolumeQuadraturePoint),
-) -> Option<()> {
+) -> Result<Option<()>, LedgerError> {
     let node_count = match order {
         ElementOrder::Tet4 => 4,
         ElementOrder::Tet10 => 10,
     };
     if coordinates.len() != node_count {
-        return None;
+        return Ok(None);
     }
     for (barycentric, reference_weight) in rule {
-        let (shape_values, derivatives) = volume_shape(order, barycentric);
+        let (shape_values, derivatives) = volume_shape(order, barycentric)?;
+        // Nine n-term Jacobian dots, cross/dot determinant (14), inverse
+        // cofactors and normalization (42), n physical three-term gradients,
+        // one weighted position, volume scaling, and four barycentric gradients.
+        let full = 39 * node_count as u64 + 105;
+        let determinant_prefix = 9 * (2 * node_count as u64 - 1) + 14;
+        let usage = UsageContext::capture();
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| {
+                usage.ledger().reserve(
+                    UsageCategory::Assembly,
+                    OperationCount::from_operations(full),
+                )
+            })
+            .transpose()?;
         let jacobian = std::array::from_fn::<_, 3, _>(|reference_axis| {
             std::array::from_fn(|physical_axis| {
                 coordinates
@@ -41,9 +57,17 @@ pub(crate) fn visit_volume_rule(
         });
         let determinant = dot(jacobian[0], cross(jacobian[1], jacobian[2]));
         if !determinant.is_finite() || determinant <= 0.0 {
-            return None;
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(determinant_prefix))?;
+            }
+            return Ok(None);
         }
-        let inverse = invert(jacobian)?;
+        let Some(inverse) = invert(jacobian) else {
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(determinant_prefix + 32))?;
+            }
+            return Ok(None);
+        };
         let mut physical_shape_gradients = [[0.0; 3]; 10];
         for node in 0..node_count {
             physical_shape_gradients[node] = std::array::from_fn(|physical_axis| {
@@ -54,7 +78,7 @@ pub(crate) fn visit_volume_rule(
                     .sum()
             });
         }
-        visit(VolumeQuadraturePoint {
+        let point = VolumeQuadraturePoint {
             position_m: weighted_position(coordinates, &shape_values[..node_count]),
             volume_weight_m3: reference_weight * determinant,
             barycentric,
@@ -70,22 +94,37 @@ pub(crate) fn visit_volume_rule(
             shape_values,
             physical_shape_gradients,
             node_count,
-        });
+        };
+        if let Some(batch) = &mut batch {
+            batch.complete(OperationCount::from_operations(full))?;
+        }
+        visit(point);
     }
-    Some(())
+    Ok(Some(()))
 }
 
 pub(crate) fn volume_shape(
     order: ElementOrder,
     barycentric: [f64; 4],
-) -> ([f64; 10], [[f64; 3]; 10]) {
+) -> Result<([f64; 10], [[f64; 3]; 10]), LedgerError> {
     let mut values = [0.0; 10];
     let mut derivatives = [[0.0; 3]; 10];
     if order == ElementOrder::Tet4 {
         values[..4].copy_from_slice(&barycentric);
         derivatives[..4].copy_from_slice(&TETRAHEDRON_DERIVATIVES);
-        return (values, derivatives);
+        return Ok((values, derivatives));
     }
+    // Ten quadratic shape values (24) and ten reference derivatives (92).
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage.ledger().reserve(
+                UsageCategory::Assembly,
+                OperationCount::from_operations(116),
+            )
+        })
+        .transpose()?;
     values = runmat_meshing_core::interpolation::tetrahedron10_lagrange_weights(barycentric);
     for node in 0..4 {
         derivatives[node] = TETRAHEDRON_DERIVATIVES[node]
@@ -97,7 +136,10 @@ pub(crate) fn volume_shape(
                 + barycentric[left] * TETRAHEDRON_DERIVATIVES[right][axis])
         });
     }
-    (values, derivatives)
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(116))?;
+    }
+    Ok((values, derivatives))
 }
 
 // The collapsed tensor rule is owned by meshing core with the Tet10 element-validity rule.

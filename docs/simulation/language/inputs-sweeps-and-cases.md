@@ -1,4 +1,4 @@
-# Inputs, sweeps, and cases
+# Inputs, sweeps and cases
 
 Inputs expose the parameters that a study or reusable model permits callers to change. Sweeps bind
 those inputs into named cases; they do not rewrite source declarations or mutate a model.

@@ -16,7 +16,7 @@ use super::super::{
     tetrahedralize_points, topology::sorted_tetrahedron_nodes, ConnectivityPoint,
     ConstrainedCavity, ConstrainedCavityNode, ConstrainedCavityRefill,
     ConstrainedCavityRefillOptions, ConstrainedCavityRefillTetrahedron,
-    ConstrainedCavityValidationError, MAX_MULTI_INTERIOR_REFILL_CANDIDATES,
+    ConstrainedCavityValidationError, RefillTetrahedronError, MAX_MULTI_INTERIOR_REFILL_CANDIDATES,
     MAX_MULTI_INTERIOR_REFILL_NODES,
 };
 use super::boundary_node_refill_rejection_reason;
@@ -82,10 +82,13 @@ pub(in super::super) fn multi_interior_node_refill_candidate(
         }
         match raw_refill_tetrahedron_with_rejection_reason(node_ids, tetrahedron_points, options) {
             Ok(tetrahedron) => refill_tetrahedra.push(tetrahedron),
-            Err(reason) => {
+            Err(RefillTetrahedronError::Rejected(reason)) => {
                 if first_rejection.is_none() {
                     first_rejection = Some(boundary_node_refill_rejection_reason(reason));
                 }
+            }
+            Err(RefillTetrahedronError::Accounting(error)) => {
+                return Err(ConstrainedCavityValidationError::Accounting(error));
             }
         }
         if refill_tetrahedra.len() > MAX_MULTI_INTERIOR_REFILL_CANDIDATES {

@@ -5,6 +5,7 @@ mod state;
 
 pub trait Arithmetic<T> {
     const HERMITIAN_EPSILON: f64;
+    const DOMAIN: super::usage::ArithmeticDomain;
     fn zero() -> T;
     fn components(value: T) -> (f64, f64);
     fn add_scaled(target: &mut T, scale: f64, value: T);
@@ -91,6 +92,14 @@ impl PcgGeometry {
 }
 
 pub trait PcgOperations<T>: Control {
+    /// Admit a typed batch before running it and complete it only after the
+    /// closure returns. Offline callers explicitly run the closure unchanged.
+    fn measured<R>(
+        &mut self,
+        work: super::usage::VectorWork,
+        run: impl FnOnce(&mut Self) -> (R, super::usage::BatchCompletion),
+    ) -> impl std::future::Future<Output = Result<R, Self::Error>>;
+
     fn apply(
         &mut self,
         operation: PcgOperation,

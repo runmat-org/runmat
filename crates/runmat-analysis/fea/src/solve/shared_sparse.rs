@@ -2,8 +2,11 @@
 //! (`runmat-sparse-solvers`). Every family's linear and eigen solve goes through here, so solver
 //! policy, threading, cancellation and provenance are decided in one place.
 
+use crate::algebra::capacity::PhaseCapacityOwner;
 use std::borrow::Cow;
+use std::future::Future;
 
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 use runmat_sparse_solvers::{control::SolveControl, CsrRef};
 
 use crate::{algebra::RealSparseMatrix, planning::resource::LocalExecutionPlan};
@@ -65,8 +68,12 @@ pub(crate) fn with_plan<R: Send>(plan: LocalExecutionPlan, work: impl FnOnce() -
     }
     // Cancellation and progress are thread-bound; carry them onto the pool worker.
     let context = crate::progress::capture_fea_progress_context();
+    let usage = runmat_simulation_usage::UsageContext::capture();
     match runmat_cpu_execution::with_cpu_pool(threads, move || {
         let _guard = crate::progress::replace_fea_progress_context(context);
+        let _usage = usage
+            .as_ref()
+            .map(runmat_simulation_usage::UsageContext::enter);
         work()
     }) {
         Ok(result) => result,
@@ -139,19 +146,336 @@ pub(crate) struct SpdSolveRequest<'a> {
     pub device: Option<SolverDevice<'a>>,
 }
 
-fn reference_norm(rhs: &[f64], residual: f64) -> f64 {
-    let b = runmat_sparse_solvers::par::norm2(rhs);
-    if b > 0.0 {
-        b
-    } else {
-        residual
+fn measured_solve<R>(work: OperationCount, run: impl FnOnce() -> R) -> Result<R, LedgerError> {
+    let Some(context) = UsageContext::capture() else {
+        return Ok(run());
+    };
+    let mut reservation = context.ledger().reserve(UsageCategory::Solve, work)?;
+    let result = run();
+    reservation.complete(work)?;
+    Ok(result)
+}
+
+fn real_norm_work(n: usize) -> Result<OperationCount, LedgerError> {
+    OperationCount::from_operations(u64::try_from(n).map_err(|_| LedgerError::CountOverflow)?)
+        .checked_mul(2)
+        .map_err(LedgerError::from)
+}
+
+fn real_residual_work(a: &CsrRef<'_, f64>) -> Result<OperationCount, LedgerError> {
+    a.row_ptr()
+        .windows(2)
+        .try_fold(OperationCount::ZERO, |total, row| {
+            // A nonempty row computes a length-k dot, then subtracts it from the RHS:
+            // (2k - 1) + 1 = 2k. An empty row copies the RHS.
+            let entries = u64::try_from(row[1] - row[0]).map_err(|_| LedgerError::CountOverflow)?;
+            let row_work = OperationCount::from_operations(entries)
+                .checked_mul(2)
+                .map_err(LedgerError::from)?;
+            total.checked_add(row_work).map_err(LedgerError::from)
+        })
+}
+
+fn reference_norm(rhs: &[f64], residual: f64) -> Result<f64, LedgerError> {
+    let b = measured_solve(real_norm_work(rhs.len())?, || {
+        runmat_sparse_solvers::par::norm2(rhs)
+    })?;
+    Ok(if b > 0.0 { b } else { residual })
+}
+
+pub(crate) async fn solve_cholesky_with_owner<O, F, A>(
+    a: CsrRef<'_, f64>,
+    rhs: &[f64],
+    initial_guess: Option<&[f64]>,
+    relative_tolerance: f64,
+    factor: Option<&runmat_sparse_solvers::direct::DirectSolver<f64>>,
+    mut before_capacity: O,
+) -> Result<SpdSolveOutcome, crate::algebra::coercivity::NumericalCapacityError<LedgerError, A>>
+where
+    O: FnMut(crate::algebra::NumericalCapacityPhase, OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+{
+    use crate::algebra::{coercivity::NumericalCapacityError, NumericalCapacityPhase};
+    use runmat_sparse_solvers::direct::{
+        DirectOptions, DirectOwnedError, DirectSolver, FactorKind,
+    };
+    let n = a.nrows();
+    let mut x = match initial_guess {
+        Some(guess) if guess.len() == n => guess.to_vec(),
+        _ => vec![0.0; n],
+    };
+    let mut residual = vec![0.0; n];
+    let residual_work = real_residual_work(&a)?;
+    let norm_work = real_norm_work(n)?;
+    before_capacity(NumericalCapacityPhase::SolvePrimitive, residual_work)
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+    measured_solve(residual_work, || a.residual(&x, rhs, &mut residual))?;
+    before_capacity(NumericalCapacityPhase::SolvePrimitive, norm_work)
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+    let initial_norm = measured_solve(norm_work, || runmat_sparse_solvers::par::norm2(&residual))?;
+    before_capacity(NumericalCapacityPhase::SolvePrimitive, norm_work)
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+    let reference = reference_norm(rhs, initial_norm)?;
+    if initial_norm <= relative_tolerance * reference {
+        return Ok(SpdSolveOutcome {
+            converged: true,
+            solution: x,
+            iterations: 0,
+            residual_norm: initial_norm,
+            reference_norm: reference,
+            cancelled: false,
+            failure: None,
+            device_preconditioner: false,
+            spectral_estimate: None,
+        });
+    }
+    let owned;
+    let solver = match factor {
+        Some(solver) => solver,
+        None => {
+            owned = match DirectSolver::<f64>::new(
+                a.into(),
+                DirectOptions {
+                    refinement_steps: 2,
+                    ..DirectOptions::new(FactorKind::Cholesky)
+                },
+                control(),
+            ) {
+                Ok(solver) => solver,
+                Err(runmat_sparse_solvers::SolverError::Usage(error)) => return Err(error.into()),
+                Err(error) => {
+                    return Ok(cholesky_failure(
+                        x,
+                        reference,
+                        format!("sparse Cholesky failed: {error}"),
+                    ))
+                }
+            };
+            &owned
+        }
+    };
+    let mut correction = vec![0.0; n];
+    let refined = solver
+        .solve_refined_with_owner(a.into(), &residual, &mut correction, 1, |phase, count| {
+            before_capacity(NumericalCapacityPhase::DirectSolve(phase), count)
+        })
+        .await;
+    match refined {
+        Ok(_) => {}
+        Err(DirectOwnedError::Numerical(runmat_sparse_solvers::SolverError::Usage(error))) => {
+            return Err(error.into())
+        }
+        Err(DirectOwnedError::Numerical(error)) => {
+            return Ok(cholesky_failure(
+                x,
+                reference,
+                format!("sparse Cholesky solve failed: {error}"),
+            ))
+        }
+        Err(DirectOwnedError::Admission(error)) => {
+            return Err(NumericalCapacityError::Admission(error))
+        }
+    }
+    let update_work =
+        OperationCount::from_operations(u64::try_from(n).map_err(|_| LedgerError::CountOverflow)?);
+    before_capacity(NumericalCapacityPhase::SolvePrimitive, update_work)
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+    measured_solve(update_work, || {
+        for (value, delta) in x.iter_mut().zip(&correction) {
+            *value += delta;
+        }
+    })?;
+    before_capacity(NumericalCapacityPhase::SolvePrimitive, residual_work)
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+    measured_solve(residual_work, || a.residual(&x, rhs, &mut residual))?;
+    before_capacity(NumericalCapacityPhase::SolvePrimitive, norm_work)
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+    let residual_norm = measured_solve(norm_work, || runmat_sparse_solvers::par::norm2(&residual))?;
+    Ok(SpdSolveOutcome {
+        converged: residual_norm <= relative_tolerance.max(1e-14) * reference
+            || residual_norm == 0.0,
+        solution: x,
+        iterations: 1,
+        residual_norm,
+        reference_norm: reference,
+        cancelled: false,
+        failure: None,
+        device_preconditioner: false,
+        spectral_estimate: None,
+    })
+}
+
+pub(crate) async fn solve_pcg_with_owner<O, F, A>(
+    a: CsrRef<'_, f64>,
+    rhs: &[f64],
+    initial_guess: Option<&[f64]>,
+    relative_tolerance: f64,
+    choice: runmat_sparse_solvers::policy::PreconditionerChoice,
+    mut before_capacity: O,
+) -> Result<
+    SpdSolveOutcome,
+    crate::algebra::coercivity::NumericalCapacityError<runmat_sparse_solvers::SolverError, A>,
+>
+where
+    O: FnMut(crate::algebra::NumericalCapacityPhase, OperationCount) -> F,
+    F: Future<Output = Result<(), A>>,
+{
+    use crate::algebra::{coercivity::NumericalCapacityError, NumericalCapacityPhase};
+    use runmat_sparse_solvers::{
+        krylov::{pcg_solve_with_capacity, KrylovOptions, PcgCapacityError},
+        operator::MeteredCsrOperator,
+        policy::PreconditionerChoice,
+        precond::{Amg, AmgOptions, Ilu0, Jacobi},
+        Preconditioner,
+    };
+    let n = a.nrows();
+    let preconditioner: Box<dyn Preconditioner<f64>> = match choice {
+        PreconditionerChoice::Jacobi => {
+            let setup_work = OperationCount::from_operations(
+                u64::try_from(n).map_err(|_| runmat_sparse_solvers::SolverError::IndexOverflow)?,
+            );
+            before_capacity(NumericalCapacityPhase::PcgPreconditionerSetup, setup_work)
+                .await
+                .map_err(NumericalCapacityError::Admission)?;
+            Box::new(Jacobi::new(a)?)
+        }
+        PreconditionerChoice::Ilu0 => {
+            let owner = PhaseCapacityOwner::new(
+                &mut before_capacity,
+                NumericalCapacityPhase::PcgPreconditionerSetup,
+            );
+            let ilu =
+                Ilu0::new_with_capacity(a, true, &owner)
+                    .await
+                    .map_err(|error| match error {
+                        runmat_sparse_solvers::precond::Ilu0CapacityError::Numerical(error) => {
+                            NumericalCapacityError::Numerical(error)
+                        }
+                        runmat_sparse_solvers::precond::Ilu0CapacityError::Admission(error) => {
+                            NumericalCapacityError::Admission(error)
+                        }
+                    })?;
+            Box::new(ilu)
+        }
+        PreconditionerChoice::Amg => {
+            let owner = PhaseCapacityOwner::new(
+                &mut before_capacity,
+                NumericalCapacityPhase::PcgPreconditionerSetup,
+            );
+            let amg = Amg::new_with_capacity(a, AmgOptions::default(), control(), &owner)
+                .await
+                .map_err(|error| match error {
+                    runmat_sparse_solvers::precond::AmgCapacityError::Numerical(error) => {
+                        NumericalCapacityError::Numerical(error)
+                    }
+                    runmat_sparse_solvers::precond::AmgCapacityError::Admission(error) => {
+                        NumericalCapacityError::Admission(error)
+                    }
+                })?;
+            Box::new(amg)
+        }
+        _ => {
+            return Err(NumericalCapacityError::Numerical(
+                runmat_sparse_solvers::SolverError::Unsupported(
+                    "awaited PCG preconditioner has no staged reference-work owner".into(),
+                ),
+            ))
+        }
+    };
+    let context = UsageContext::capture().ok_or_else(|| {
+        runmat_sparse_solvers::SolverError::Unsupported(
+            "awaited PCG requires active usage context".into(),
+        )
+    })?;
+    let operator = MeteredCsrOperator::new(a, context.ledger(), UsageCategory::Solve)?;
+    let mut x = match initial_guess {
+        Some(guess) if guess.len() == n => guess.to_vec(),
+        _ => vec![0.0; n],
+    };
+    let options = KrylovOptions {
+        rtol: relative_tolerance,
+        max_iterations: n.saturating_mul(2).clamp(256, 100_000),
+        ..Default::default()
+    };
+    let owner = PhaseCapacityOwner::new(&mut before_capacity, NumericalCapacityPhase::PcgBatch);
+    let report = pcg_solve_with_capacity(
+        &operator,
+        Some(preconditioner.as_ref()),
+        rhs,
+        &mut x,
+        &options,
+        control(),
+        &owner,
+    )
+    .await
+    .map_err(|error| match error {
+        PcgCapacityError::Numerical(error) => NumericalCapacityError::Numerical(error),
+        PcgCapacityError::Admission(error) => NumericalCapacityError::Admission(error),
+    })?;
+    let norm_work = real_norm_work(rhs.len()).map_err(runmat_sparse_solvers::SolverError::Usage)?;
+    before_capacity(NumericalCapacityPhase::SolvePrimitive, norm_work)
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+    let reference = reference_norm(rhs, report.residual_norm)
+        .map_err(runmat_sparse_solvers::SolverError::Usage)?;
+    let spectral_estimate = match report.spectrum {
+        Some(spectrum) => spectral_error_estimate_with_owner(
+            &a,
+            preconditioner.as_ref(),
+            rhs,
+            &x,
+            spectrum,
+            &mut before_capacity,
+        )
+        .await
+        .map_err(|error| error.map_numerical(runmat_sparse_solvers::SolverError::Usage))?,
+        None => None,
+    };
+    Ok(SpdSolveOutcome {
+        spectral_estimate,
+        converged: report.converged(),
+        solution: x,
+        iterations: u32::try_from(report.iterations).unwrap_or(u32::MAX),
+        residual_norm: report.residual_norm,
+        reference_norm: reference,
+        cancelled: false,
+        failure: (!report.converged()).then(|| {
+            format!(
+                "pcg stopped with flag {} after {} iterations at relative residual {:.3e}",
+                report.flag.code(),
+                report.iterations,
+                report.relative_residual,
+            )
+        }),
+        device_preconditioner: false,
+    })
+}
+
+fn cholesky_failure(solution: Vec<f64>, reference_norm: f64, message: String) -> SpdSolveOutcome {
+    SpdSolveOutcome {
+        solution,
+        iterations: 0,
+        residual_norm: f64::INFINITY,
+        reference_norm,
+        converged: false,
+        cancelled: crate::is_fea_cancelled(),
+        failure: Some(message),
+        device_preconditioner: false,
+        spectral_estimate: None,
     }
 }
 
 /// Solves a prepared SPD system with the requested strategy on the admitted plan.
-pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
+pub(crate) fn solve_spd(
+    request: SpdSolveRequest<'_>,
+) -> Result<SpdSolveOutcome, runmat_simulation_usage::LedgerError> {
     use runmat_sparse_solvers::{
-        direct::{DirectOptions, DirectSolver, FactorKind},
         krylov::{pcg, KrylovOptions},
         policy::PreconditionerChoice,
         precond::{Amg, AmgOptions, BlockJacobi, Ilu0, Jacobi},
@@ -171,84 +495,53 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
     let mut device_preconditioner = false;
     let n = matrix.rows();
     let arrays = CsrArrays::of(matrix);
-    let failure = |message: String| SpdSolveOutcome {
-        solution: vec![0.0; n],
-        iterations: 0,
-        residual_norm: f64::INFINITY,
-        reference_norm: runmat_sparse_solvers::par::norm2(rhs),
-        converged: false,
-        cancelled: crate::is_fea_cancelled(),
-        failure: Some(message),
-        device_preconditioner: false,
-        spectral_estimate: None,
+    let failure = |message: String| -> Result<SpdSolveOutcome, LedgerError> {
+        let reference_norm = measured_solve(real_norm_work(rhs.len())?, || {
+            runmat_sparse_solvers::par::norm2(rhs)
+        })?;
+        Ok(SpdSolveOutcome {
+            solution: vec![0.0; n],
+            iterations: 0,
+            residual_norm: f64::INFINITY,
+            reference_norm,
+            converged: false,
+            cancelled: crate::is_fea_cancelled(),
+            failure: Some(message),
+            device_preconditioner: false,
+            spectral_estimate: None,
+        })
     };
+    let solver_failure =
+        |error: runmat_sparse_solvers::SolverError, context: &'static str| match error {
+            runmat_sparse_solvers::SolverError::Usage(error) => Err(error),
+            other => failure(format!("{context}: {other}")),
+        };
     with_plan(plan, || {
         let a = arrays.view();
         match strategy {
             SpdStrategy::Cholesky => {
-                // Warm starts are corrections: x = x0 + A⁻¹(b − A x0); an initial guess that
-                // already meets the tolerance is returned unchanged (zero iterations).
-                let mut x = match initial_guess {
-                    Some(guess) if guess.len() == n => guess.to_vec(),
-                    _ => vec![0.0; n],
-                };
-                let mut residual = vec![0.0; n];
-                a.residual(&x, rhs, &mut residual);
-                let initial_norm = runmat_sparse_solvers::par::norm2(&residual);
-                let reference = reference_norm(rhs, initial_norm);
-                if initial_norm <= relative_tolerance * reference {
-                    return SpdSolveOutcome {
-                        converged: true,
-                        solution: x,
-                        iterations: 0,
-                        residual_norm: initial_norm,
-                        reference_norm: reference,
-                        cancelled: false,
-                        failure: None,
-                        device_preconditioner: false,
-                        spectral_estimate: None,
-                    };
-                }
-                let owned;
-                let solver = match factor {
-                    Some(solver) => solver,
-                    None => {
-                        owned = match DirectSolver::<f64>::new(
-                            a.into(),
-                            DirectOptions {
-                                refinement_steps: 2,
-                                ..DirectOptions::new(FactorKind::Cholesky)
-                            },
-                            control(),
-                        ) {
-                            Ok(solver) => solver,
-                            Err(error) => {
-                                return failure(format!("sparse Cholesky failed: {error}"))
-                            }
-                        };
-                        &owned
+                let future = solve_cholesky_with_owner(
+                    a,
+                    rhs,
+                    initial_guess,
+                    relative_tolerance,
+                    factor,
+                    |_, _| std::future::ready(Ok::<(), std::convert::Infallible>(())),
+                );
+                let mut future = std::pin::pin!(future);
+                let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+                match std::future::Future::poll(future.as_mut(), &mut context) {
+                    std::task::Poll::Ready(result) => result.map_err(|error| match error {
+                        crate::algebra::coercivity::NumericalCapacityError::Numerical(error) => {
+                            error
+                        }
+                        crate::algebra::coercivity::NumericalCapacityError::Admission(never) => {
+                            match never {}
+                        }
+                    }),
+                    std::task::Poll::Pending => {
+                        unreachable!("immediate Cholesky owner cannot suspend")
                     }
-                };
-                let mut correction = vec![0.0; n];
-                if let Err(error) = solver.solve_refined(a.into(), &residual, &mut correction, 1) {
-                    return failure(format!("sparse Cholesky solve failed: {error}"));
-                }
-                for (value, delta) in x.iter_mut().zip(&correction) {
-                    *value += delta;
-                }
-                a.residual(&x, rhs, &mut residual);
-                let residual_norm = runmat_sparse_solvers::par::norm2(&residual);
-                SpdSolveOutcome {
-                    converged: residual_norm <= relative_tolerance.max(1e-14) * reference
-                        || residual_norm == 0.0,
-                    solution: x,
-                    iterations: 1,
-                    residual_norm,
-                    reference_norm: reference,
-                    cancelled: false,
-                    failure: None,
-                    device_preconditioner: false,
-                    spectral_estimate: None,
                 }
             }
             SpdStrategy::Pcg(choice) => {
@@ -269,23 +562,23 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                             }
                             None => Box::new(amg),
                         },
-                        Err(error) => return failure(format!("multigrid setup failed: {error}")),
+                        Err(error) => return solver_failure(error, "multigrid setup failed"),
                     },
                     PreconditionerChoice::Ilu0 => match Ilu0::new(a, true) {
                         Ok(ilu) => Box::new(ilu),
-                        Err(error) => return failure(format!("ILU(0) setup failed: {error}")),
+                        Err(error) => return solver_failure(error, "ILU(0) setup failed"),
                     },
                     PreconditionerChoice::BlockJacobi if block_size > 1 => {
                         match BlockJacobi::new(a, block_size) {
                             Ok(p) => Box::new(p),
                             Err(error) => {
-                                return failure(format!("block Jacobi setup failed: {error}"))
+                                return solver_failure(error, "block Jacobi setup failed")
                             }
                         }
                     }
                     _ => match Jacobi::new(a) {
                         Ok(p) => Box::new(p),
-                        Err(error) => return failure(format!("Jacobi setup failed: {error}")),
+                        Err(error) => return solver_failure(error, "Jacobi setup failed"),
                     },
                 };
                 let mut x = match initial_guess {
@@ -297,8 +590,28 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                     max_iterations: n.saturating_mul(2).clamp(256, 100_000),
                     ..Default::default()
                 };
+                let usage = runmat_simulation_usage::UsageContext::capture();
+                let metered = match usage
+                    .as_ref()
+                    .map(|context| {
+                        runmat_sparse_solvers::operator::MeteredCsrOperator::new(
+                            a,
+                            context.ledger(),
+                            runmat_simulation_usage::UsageCategory::Solve,
+                        )
+                    })
+                    .transpose()
+                {
+                    Ok(operator) => operator,
+                    Err(error) => return solver_failure(error, "metered CSR operator failed"),
+                };
+                let operator: &dyn runmat_sparse_solvers::LinearOperator<f64> =
+                    match metered.as_ref() {
+                        Some(operator) => operator,
+                        None => &a,
+                    };
                 match pcg(
-                    &a,
+                    operator,
                     Some(preconditioner.as_ref()),
                     rhs,
                     &mut x,
@@ -306,11 +619,18 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                     control(),
                 ) {
                     Ok(report) => {
-                        let reference = reference_norm(rhs, report.residual_norm);
-                        let spectral_estimate = report.spectrum.and_then(|spectrum| {
-                            spectral_error_estimate(&a, preconditioner.as_ref(), rhs, &x, spectrum)
-                        });
-                        SpdSolveOutcome {
+                        let reference = reference_norm(rhs, report.residual_norm)?;
+                        let spectral_estimate = match report.spectrum {
+                            Some(spectrum) => spectral_error_estimate(
+                                &a,
+                                preconditioner.as_ref(),
+                                rhs,
+                                &x,
+                                spectrum,
+                            )?,
+                            None => None,
+                        };
+                        Ok(SpdSolveOutcome {
                             spectral_estimate,
                             converged: report.converged(),
                             solution: x,
@@ -327,13 +647,15 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                                 )
                             }),
                             device_preconditioner,
-                        }
+                        })
                     }
-                    Err(runmat_sparse_solvers::SolverError::Cancelled) => SpdSolveOutcome {
-                        cancelled: true,
-                        ..failure("cancelled".into())
-                    },
-                    Err(error) => failure(error.to_string()),
+                    Err(runmat_sparse_solvers::SolverError::Cancelled) => {
+                        failure("cancelled".into()).map(|mut outcome| {
+                            outcome.cancelled = true;
+                            outcome
+                        })
+                    }
+                    Err(error) => solver_failure(error, "pcg failed"),
                 }
             }
         }
@@ -349,30 +671,160 @@ fn spectral_error_estimate(
     rhs: &[f64],
     x: &[f64],
     spectrum: runmat_sparse_solvers::krylov::lanczos::PcgSpectrumEstimate,
-) -> Option<crate::contracts::SpectralErrorEstimate> {
+) -> Result<Option<crate::contracts::SpectralErrorEstimate>, runmat_simulation_usage::LedgerError> {
+    let future = spectral_error_estimate_with_owner(a, preconditioner, rhs, x, spectrum, |_, _| {
+        std::future::ready(Ok::<(), std::convert::Infallible>(()))
+    });
+    let mut future = std::pin::pin!(future);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    match std::future::Future::poll(future.as_mut(), &mut context) {
+        std::task::Poll::Ready(result) => result.map_err(|error| match error {
+            crate::algebra::coercivity::NumericalCapacityError::Numerical(error) => error,
+            crate::algebra::coercivity::NumericalCapacityError::Admission(never) => match never {},
+        }),
+        std::task::Poll::Pending => unreachable!("immediate spectral owner cannot suspend"),
+    }
+}
+
+async fn spectral_error_estimate_with_owner<O, F, A>(
+    a: &CsrRef<'_, f64>,
+    preconditioner: &dyn runmat_sparse_solvers::Preconditioner<f64>,
+    rhs: &[f64],
+    x: &[f64],
+    spectrum: runmat_sparse_solvers::krylov::lanczos::PcgSpectrumEstimate,
+    mut before_capacity: O,
+) -> Result<
+    Option<crate::contracts::SpectralErrorEstimate>,
+    crate::algebra::coercivity::NumericalCapacityError<LedgerError, A>,
+>
+where
+    O: FnMut(crate::algebra::NumericalCapacityPhase, OperationCount) -> F,
+    F: Future<Output = Result<(), A>>,
+{
+    use crate::algebra::{coercivity::NumericalCapacityError, NumericalCapacityPhase};
+    use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
+    let measured = |count: OperationCount, work: &mut dyn FnMut()| -> Result<(), LedgerError> {
+        let Some(context) = UsageContext::capture() else {
+            work();
+            return Ok(());
+        };
+        let mut reservation = context.ledger().reserve(UsageCategory::Solve, count)?;
+        work();
+        reservation.complete(count)?;
+        Ok(())
+    };
     let n = rhs.len();
     let mut ax = vec![0.0; n];
-    a.spmv(x, &mut ax);
-    let residual: Vec<f64> = rhs.iter().zip(&ax).map(|(b, v)| b - v).collect();
+    if let Some(context) = UsageContext::capture() {
+        use runmat_sparse_solvers::LinearOperator;
+        let operator = match runmat_sparse_solvers::operator::MeteredCsrOperator::new(
+            *a,
+            context.ledger(),
+            UsageCategory::Solve,
+        ) {
+            Ok(operator) => operator,
+            Err(runmat_sparse_solvers::SolverError::Usage(error)) => return Err(error.into()),
+            Err(_) => return Ok(None),
+        };
+        before_capacity(
+            NumericalCapacityPhase::SolvePrimitive,
+            operator.operations_per_apply(),
+        )
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+        match operator.apply(x, &mut ax) {
+            Ok(()) => {}
+            Err(runmat_sparse_solvers::SolverError::Usage(error)) => {
+                return Err(NumericalCapacityError::Numerical(error))
+            }
+            Err(_) => return Ok(None),
+        }
+    } else {
+        a.spmv(x, &mut ax);
+    }
+    let mut residual = vec![0.0; n];
+    let residual_work =
+        OperationCount::from_operations(u64::try_from(n).map_err(|_| LedgerError::CountOverflow)?);
+    before_capacity(NumericalCapacityPhase::SolvePrimitive, residual_work)
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+    measured(residual_work, &mut || {
+        for ((residual, b), v) in residual.iter_mut().zip(rhs).zip(&ax) {
+            *residual = b - v;
+        }
+    })?;
     let mut z = vec![0.0; n];
-    preconditioner.apply(&residual, &mut z).ok()?;
-    let rz: f64 = residual.iter().zip(&z).map(|(r, z)| r * z).sum();
-    let energy_squared: f64 = x.iter().zip(&ax).map(|(x, v)| x * v).sum();
-    let energy_error_estimate = (rz.max(0.0) / spectrum.lambda_min).sqrt();
+    match preconditioner.reference_apply_work() {
+        Ok(Some(work)) => before_capacity(NumericalCapacityPhase::SolvePrimitive, work)
+            .await
+            .map_err(NumericalCapacityError::Admission)?,
+        Ok(None) => {}
+        Err(runmat_sparse_solvers::SolverError::Usage(error)) => {
+            return Err(NumericalCapacityError::Numerical(error))
+        }
+        Err(_) => return Ok(None),
+    }
+    match preconditioner.apply(&residual, &mut z) {
+        Ok(()) => {}
+        Err(runmat_sparse_solvers::SolverError::Usage(error)) => {
+            return Err(NumericalCapacityError::Numerical(error))
+        }
+        Err(_) => return Ok(None),
+    }
+    let dot_work =
+        OperationCount::direct_real_dot(u64::try_from(n).map_err(|_| LedgerError::CountOverflow)?)
+            .map_err(LedgerError::from)?;
+    let mut rz = 0.0;
+    before_capacity(NumericalCapacityPhase::SolvePrimitive, dot_work)
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+    measured(dot_work, &mut || {
+        rz = residual.iter().zip(&z).map(|(r, z)| r * z).sum();
+    })?;
+    let mut energy_squared = 0.0;
+    before_capacity(NumericalCapacityPhase::SolvePrimitive, dot_work)
+        .await
+        .map_err(NumericalCapacityError::Admission)?;
+    measured(dot_work, &mut || {
+        energy_squared = x.iter().zip(&ax).map(|(x, v)| x * v).sum();
+    })?;
+    let mut energy_error_estimate = 0.0;
+    before_capacity(
+        NumericalCapacityPhase::SolvePrimitive,
+        OperationCount::from_operations(2),
+    )
+    .await
+    .map_err(NumericalCapacityError::Admission)?;
+    measured(OperationCount::from_operations(2), &mut || {
+        energy_error_estimate = (rz.max(0.0) / spectrum.lambda_min).sqrt();
+    })?;
     let estimate = crate::contracts::SpectralErrorEstimate {
         lambda_min_estimate: spectrum.lambda_min,
         lambda_max_estimate: spectrum.lambda_max,
         lanczos_steps: u32::try_from(spectrum.lanczos_steps).unwrap_or(u32::MAX),
         flexible: spectrum.flexible,
         energy_error_estimate,
-        relative_energy_error_estimate: (energy_squared > 0.0)
-            .then(|| energy_error_estimate / energy_squared.sqrt()),
+        relative_energy_error_estimate: if energy_squared > 0.0 {
+            let mut value = 0.0;
+            before_capacity(
+                NumericalCapacityPhase::SolvePrimitive,
+                OperationCount::from_operations(2),
+            )
+            .await
+            .map_err(NumericalCapacityError::Admission)?;
+            measured(OperationCount::from_operations(2), &mut || {
+                value = energy_error_estimate / energy_squared.sqrt();
+            })?;
+            Some(value)
+        } else {
+            None
+        },
     };
-    (rz.is_finite()
+    Ok((rz.is_finite()
         && energy_error_estimate.is_finite()
         && spectrum.lambda_min > 0.0
         && spectrum.lambda_max >= spectrum.lambda_min)
-        .then_some(estimate)
+        .then_some(estimate))
 }
 
 /// The accelerator for a multigrid PCG solve on an accelerator backend: the host hierarchy then

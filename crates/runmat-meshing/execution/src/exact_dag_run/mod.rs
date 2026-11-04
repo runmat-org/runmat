@@ -273,6 +273,7 @@ fn validate_run(run: &ExactMeshingDagRun<'_>) -> Result<(), ExactMeshingDagRunEr
                 witnesses: Vec::new(),
                 request_values: Vec::new(),
                 achieved_values: Vec::new(),
+                accounting_error: None,
                 remediation: if run.request.dimension.is_solid() {
                     "select geometry containing at least one closed solid region".into()
                 } else {

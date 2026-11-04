@@ -63,6 +63,9 @@ pub(super) fn segment_error(failure: DelaunaySegmentRecoveryError) -> DelaunayVo
 
 pub(super) fn facet_error(failure: DelaunayFacetRecoveryError) -> DelaunayVolumeMeshError {
     let kind = match failure.kind {
+        DelaunayFacetRecoveryErrorKind::Accounting(cause) => {
+            DelaunayVolumeMeshErrorKind::Accounting(cause)
+        }
         DelaunayFacetRecoveryErrorKind::InvalidOptions => {
             DelaunayVolumeMeshErrorKind::InvalidOptions
         }
@@ -83,6 +86,9 @@ pub(super) fn facet_error(failure: DelaunayFacetRecoveryError) -> DelaunayVolume
 
 pub(super) fn carving_error(failure: DelaunayCarvingError) -> DelaunayVolumeMeshError {
     let kind = match failure.kind {
+        DelaunayCarvingErrorKind::Accounting(cause) => {
+            DelaunayVolumeMeshErrorKind::Accounting(cause)
+        }
         DelaunayCarvingErrorKind::InvalidOptions => DelaunayVolumeMeshErrorKind::InvalidOptions,
         DelaunayCarvingErrorKind::InvalidConstraints => {
             DelaunayVolumeMeshErrorKind::InvalidGeometry
@@ -99,6 +105,9 @@ pub(super) fn carving_error(failure: DelaunayCarvingError) -> DelaunayVolumeMesh
 
 pub(super) fn provenance_error(failure: DelaunayVolumeProvenanceError) -> DelaunayVolumeMeshError {
     let kind = match failure.kind {
+        DelaunayVolumeProvenanceErrorKind::Accounting(cause) => {
+            DelaunayVolumeMeshErrorKind::Accounting(cause)
+        }
         DelaunayVolumeProvenanceErrorKind::InvalidOptions => {
             DelaunayVolumeMeshErrorKind::InvalidOptions
         }
@@ -118,6 +127,9 @@ pub(super) fn provenance_error(failure: DelaunayVolumeProvenanceError) -> Delaun
 
 pub(super) fn quality_error(failure: DelaunayVolumeQualityError) -> DelaunayVolumeMeshError {
     let kind = match failure.kind {
+        DelaunayVolumeQualityErrorKind::Accounting(cause) => {
+            DelaunayVolumeMeshErrorKind::Accounting(cause)
+        }
         DelaunayVolumeQualityErrorKind::InvalidOptions => {
             DelaunayVolumeMeshErrorKind::InvalidOptions
         }
@@ -142,6 +154,9 @@ pub(super) fn refinement_error(
     failure: DelaunayVolumeRefinementStepError,
 ) -> DelaunayVolumeMeshError {
     let kind = match failure.kind {
+        DelaunayVolumeRefinementStepErrorKind::Accounting(cause) => {
+            DelaunayVolumeMeshErrorKind::Accounting(cause)
+        }
         DelaunayVolumeRefinementStepErrorKind::InvalidOptions => {
             DelaunayVolumeMeshErrorKind::InvalidOptions
         }
@@ -164,6 +179,9 @@ pub(super) fn refinement_error(
 
 pub(super) fn sliver_error(failure: DelaunayVolumeSliverError) -> DelaunayVolumeMeshError {
     let kind = match failure.kind {
+        DelaunayVolumeSliverErrorKind::Accounting(cause) => {
+            DelaunayVolumeMeshErrorKind::Accounting(cause)
+        }
         DelaunayVolumeSliverErrorKind::InvalidOptions => {
             DelaunayVolumeMeshErrorKind::InvalidOptions
         }

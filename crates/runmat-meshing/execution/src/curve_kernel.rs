@@ -259,6 +259,7 @@ pub(super) fn curve_failure(
             value: MeshingDiagnosticValue::Text(detail),
             unit: None,
         }],
+        accounting_error: None,
         remediation: remediation.into(),
     })
 }

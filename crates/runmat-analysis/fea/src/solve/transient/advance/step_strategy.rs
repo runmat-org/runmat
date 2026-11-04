@@ -1,8 +1,50 @@
 use super::{
     solve_average_acceleration_step_reusing, solve_initial_acceleration_reusing, AssemblySummary,
-    EffectiveDynamicsSolveResult, LinearAlgebraBackendKind, SecondOrderState, SolverMethod,
-    SolverPreconditioner, StructuralTransientSolverCounters, TransientSolveError,
+    EffectiveDynamicsSolveError, EffectiveDynamicsSolveResult, LinearAlgebraBackendKind,
+    SecondOrderState, SolverMethod, SolverPreconditioner, StructuralTransientSolverCounters,
+    TransientSolveError,
 };
+
+pub(in crate::solve::transient) enum TransientStepFailure {
+    Usage(runmat_simulation_usage::LedgerError),
+    Detail(String),
+}
+
+impl TransientStepFailure {
+    pub(in crate::solve::transient) fn effective(error: EffectiveDynamicsSolveError) -> Self {
+        match error {
+            EffectiveDynamicsSolveError::Usage(error) => Self::Usage(error),
+            EffectiveDynamicsSolveError::DynamicBalance(
+                crate::solve::transient::balance::DynamicBalanceError::Usage(error),
+            ) => Self::Usage(error),
+            EffectiveDynamicsSolveError::SparseSolve(crate::algebra::ScopedSpmvError::Usage(
+                error,
+            )) => Self::Usage(error),
+            EffectiveDynamicsSolveError::Newmark(
+                crate::solve::transient::newmark::NewmarkError::Usage(error),
+            ) => Self::Usage(error),
+            other => Self::Detail(other.to_string()),
+        }
+    }
+
+    pub(in crate::solve::transient) fn projection(
+        error: crate::solve::dynamics::ModalProjectionError,
+    ) -> Self {
+        match error {
+            crate::solve::dynamics::ModalProjectionError::Usage(error) => Self::Usage(error),
+            other => Self::Detail(other.to_string()),
+        }
+    }
+
+    pub(in crate::solve::transient) fn modal(
+        error: crate::solve::dynamics::ModalTransientError,
+    ) -> Self {
+        match error {
+            crate::solve::dynamics::ModalTransientError::Usage(error) => Self::Usage(error),
+            other => Self::Detail(other.to_string()),
+        }
+    }
+}
 
 pub(in crate::solve::transient) struct TransientInitialVectors {
     pub(in crate::solve::transient) displacement: Vec<f64>,
@@ -26,18 +68,18 @@ pub(in crate::solve::transient) trait TransientStepStrategy {
         &mut self,
         summary: &AssemblySummary,
         initial: TransientInitialVectors,
-    ) -> Result<TransientNumericalStepOutcome, String>;
+    ) -> Result<TransientNumericalStepOutcome, TransientStepFailure>;
     fn advance(
         &mut self,
         summary: &AssemblySummary,
         previous: &SecondOrderState,
         time_step_s: f64,
-    ) -> Result<TransientNumericalStepOutcome, String>;
+    ) -> Result<TransientNumericalStepOutcome, TransientStepFailure>;
     fn refresh_acceleration(
         &mut self,
         summary: &AssemblySummary,
         previous: &SecondOrderState,
-    ) -> Result<TransientNumericalStepOutcome, String>;
+    ) -> Result<TransientNumericalStepOutcome, TransientStepFailure>;
 }
 
 pub(in crate::solve::transient) struct DirectTransientStepStrategy<'a> {
@@ -63,11 +105,12 @@ impl<'a> DirectTransientStepStrategy<'a> {
 
     fn outcome(
         solved: EffectiveDynamicsSolveResult,
-    ) -> Result<TransientNumericalStepOutcome, String> {
+    ) -> Result<TransientNumericalStepOutcome, TransientStepFailure> {
         Ok(TransientNumericalStepOutcome {
             state: solved.state().clone(),
             projected_relative_residual: solved.projected_residual().relative_norm(),
-            accounting: TransientSolverAccounting::from_effective(&solved)?,
+            accounting: TransientSolverAccounting::from_effective(&solved)
+                .map_err(TransientStepFailure::Detail)?,
         })
     }
 }
@@ -97,7 +140,7 @@ impl TransientStepStrategy for DirectTransientStepStrategy<'_> {
         &mut self,
         summary: &AssemblySummary,
         initial: TransientInitialVectors,
-    ) -> Result<TransientNumericalStepOutcome, String> {
+    ) -> Result<TransientNumericalStepOutcome, TransientStepFailure> {
         solve_initial_acceleration_reusing(
             summary,
             initial.displacement,
@@ -106,7 +149,7 @@ impl TransientStepStrategy for DirectTransientStepStrategy<'_> {
             self.residual_target,
             &mut self.preparation,
         )
-        .map_err(|error| error.to_string())
+        .map_err(TransientStepFailure::effective)
         .and_then(Self::outcome)
     }
 
@@ -115,7 +158,7 @@ impl TransientStepStrategy for DirectTransientStepStrategy<'_> {
         summary: &AssemblySummary,
         previous: &SecondOrderState,
         time_step_s: f64,
-    ) -> Result<TransientNumericalStepOutcome, String> {
+    ) -> Result<TransientNumericalStepOutcome, TransientStepFailure> {
         solve_average_acceleration_step_reusing(
             summary,
             previous,
@@ -124,7 +167,7 @@ impl TransientStepStrategy for DirectTransientStepStrategy<'_> {
             self.residual_target,
             &mut self.preparation,
         )
-        .map_err(|error| error.to_string())
+        .map_err(TransientStepFailure::effective)
         .and_then(Self::outcome)
     }
 
@@ -132,7 +175,7 @@ impl TransientStepStrategy for DirectTransientStepStrategy<'_> {
         &mut self,
         summary: &AssemblySummary,
         previous: &SecondOrderState,
-    ) -> Result<TransientNumericalStepOutcome, String> {
+    ) -> Result<TransientNumericalStepOutcome, TransientStepFailure> {
         solve_initial_acceleration_reusing(
             summary,
             previous.displacement().to_vec(),
@@ -141,7 +184,7 @@ impl TransientStepStrategy for DirectTransientStepStrategy<'_> {
             self.residual_target,
             &mut self.preparation,
         )
-        .map_err(|error| error.to_string())
+        .map_err(TransientStepFailure::effective)
         .and_then(Self::outcome)
     }
 }

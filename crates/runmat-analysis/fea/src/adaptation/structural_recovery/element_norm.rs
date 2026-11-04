@@ -59,7 +59,9 @@ pub(super) fn integrate(
     if let Some(error) = failure {
         return Err(error);
     }
-    geometry.ok_or(StructuralRecoveryEstimatorError::InvalidElementGeometry)?;
+    geometry
+        .map_err(StructuralRecoveryEstimatorError::Accounting)?
+        .ok_or(StructuralRecoveryEstimatorError::InvalidElementGeometry)?;
     if squared.iter().any(|v| !v.is_finite() || *v < 0.0) {
         return Err(StructuralRecoveryEstimatorError::InvalidStressField);
     }

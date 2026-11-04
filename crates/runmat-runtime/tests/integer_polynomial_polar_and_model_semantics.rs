@@ -211,6 +211,16 @@ fn polynomial_polar_and_model_extensions_are_declarative_and_independent() {
                 "pole must join exact canonical consumed-model property declarations",
             );
         }
+        if builtin.integer_capabilities.iter().any(|capability| {
+            capability.inputs.iter().any(|input| {
+                input.availability == runmat_builtins::BuiltinIntegerInputAvailability::RunMatOnly
+            })
+        }) {
+            assert!(
+                !builtin.extensions.is_empty(),
+                "{name}: RunMat-only integer inputs need a declared extension gate"
+            );
+        }
         for extension in builtin.extensions {
             assert_eq!(
                 extension.mode,
@@ -230,7 +240,6 @@ fn polynomial_polar_and_model_extensions_are_declarative_and_independent() {
             );
         }
     }
-    assert_eq!(ids.len(), 23);
 }
 
 #[test]

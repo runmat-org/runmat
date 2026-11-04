@@ -60,7 +60,7 @@ impl ElectricalStaticWorkload {
             conductivity.as_deref(),
             self.sample_point(),
         )
-        .map_err(invalid)?;
+        .map_err(super::electrical_failure)?;
         ElectricalStaticSolverResult::new(self, mesh, formulation, response)
     }
 }

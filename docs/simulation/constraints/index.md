@@ -1,4 +1,4 @@
-# Constraints, boundaries, connectors, and interfaces
+# Constraints
 
 Constraints state what motion or field values are restricted. They are model objects, not meshing
 options and not solver guesses. Every target is a typed geometry region, so RunMat can reject a

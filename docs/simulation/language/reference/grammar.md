@@ -3,7 +3,7 @@ description: The .fea grammar in EBNF, covering imports, the eight declarations,
 keywords: [.fea grammar, EBNF, syntax, statements, expressions, operator precedence, parser]
 doc_type: language-reference
 ---
-# Grammar reference
+# Grammar
 
 This EBNF gives the syntax the parser accepts. Which members a block takes, their types and units, procedure fields and operation signatures are checked after parsing, against closed registries; they are listed in the [declaration reference](./declarations.md), the [procedure reference](./procedures.md) and [operations and output queries](./operations-and-output-queries.md).
 

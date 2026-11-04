@@ -7,6 +7,7 @@ pub mod elements;
 mod entry_points;
 pub(crate) mod explicit_connectors;
 mod explicit_elements;
+pub(crate) use explicit_elements::ExplicitCapacityPhase;
 mod explicit_loads;
 mod explicit_system;
 pub mod identity;
@@ -41,7 +42,6 @@ use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 use serde::{Deserialize, Serialize};
 pub(crate) use {entry_points::*, mixed_structural::mixed_dof_layout};
 
-use self::explicit_system::assemble_explicit_structural_system;
 use self::{
     constraint_projection::{
         apply_direct_constraints, resolve_constraint_matrix, rotational_row_count,
@@ -57,7 +57,7 @@ use self::{
         ConnectorAssemblyContext, ConnectorTargetRole, ResolvedConnectorTarget,
     },
     explicit_elements::{
-        assemble_explicit_elements, validate_explicit_topology, ExplicitElementAssembly,
+        assemble_explicit_elements_with_owner, validate_explicit_topology, ExplicitElementAssembly,
     },
     solver_solid::{solver_solid_topology, SolverSolidAssemblyError},
     structural_inputs::{
@@ -73,6 +73,41 @@ use self::{
 use crate::physics::structural::topology::explicit_target_node_indices as structural_target_nodes;
 use moment_projection::project_moment;
 use reduced_material_summary::structural_material_summary;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum StructuralCapacityPhase {
+    Solid(solver_solid::SolidCapacityPhase),
+    Explicit(explicit_elements::ExplicitCapacityPhase),
+    ThermoelasticLoadElement { element: usize },
+    SolidRecoveryElement { element: usize },
+}
+
+struct StructuralCouplingContexts {
+    thermo_mechanical: Option<FeaThermoMechanicalContext>,
+    electro_thermal: Option<FeaElectroThermalContext>,
+}
+
+struct StructuralAssemblyBatch {
+    maximum_block_elements: usize,
+    awaited_elements: bool,
+}
+
+fn thermoelastic_capacity_error<A: From<LinearAssemblyError>>(
+    error: thermoelastic_load::ThermoelasticLoadCapacityError<A>,
+) -> A {
+    match error {
+        thermoelastic_load::ThermoelasticLoadCapacityError::Admission(error) => error,
+        thermoelastic_load::ThermoelasticLoadCapacityError::Numerical(
+            thermoelastic_load::ThermoelasticLoadError::Accounting(cause),
+        ) => LinearAssemblyError::Structural(StructuralAssemblyError::Accounting(cause)).into(),
+        thermoelastic_load::ThermoelasticLoadCapacityError::Numerical(
+            thermoelastic_load::ThermoelasticLoadError::Cancelled,
+        ) => LinearAssemblyError::Structural(StructuralAssemblyError::Cancelled).into(),
+        thermoelastic_load::ThermoelasticLoadCapacityError::Numerical(error) => {
+            LinearAssemblyError::CouplingRealization(error.to_string()).into()
+        }
+    }
+}
 
 use crate::algebra::{
     AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
@@ -204,10 +239,23 @@ impl fmt::Display for LinearAssemblyError {
 
 impl std::error::Error for LinearAssemblyError {}
 
+impl From<SolverSolidAssemblyError> for LinearAssemblyError {
+    fn from(error: SolverSolidAssemblyError) -> Self {
+        Self::SolidOperator(error)
+    }
+}
+
+impl From<StructuralAssemblyError> for LinearAssemblyError {
+    fn from(error: StructuralAssemblyError) -> Self {
+        Self::Structural(error)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum StructuralAssemblyError {
     SparseOperator(String),
     LocalExecution(String),
+    Accounting(runmat_simulation_usage::LedgerError),
     Cancelled,
     MissingDiscretization,
     MixedTopology(String),
@@ -414,6 +462,7 @@ impl fmt::Display for StructuralAssemblyError {
                 f,
                 "explicit structural constraint plan is invalid: {message}"
             ),
+            Self::Accounting(error) => write!(f, "structural numerical accounting failed: {error}"),
             Self::InvalidLoadPlan(message) => {
                 write!(f, "canonical structural load plan is invalid: {message}")
             }
@@ -640,7 +689,8 @@ pub struct ShellRecoveryElementSummary {
 }
 
 pub use solid_recovery_types::{
-    SolidRecoveryElementSummary, SolidRecoveryGeometry, SolvedThermalRecoveryQuadrature,
+    SolidRecoveryElementSummary, SolidRecoveryGeometry, SolidRecoveryGeometryError,
+    SolvedThermalRecoveryQuadrature,
 };
 
 pub use moment_projection::MomentProjectionSummary;
@@ -655,6 +705,59 @@ pub(super) fn assemble_linear_system_impl(
     electro_thermal_context: Option<FeaElectroThermalContext>,
     execution: AssemblyExecution<'_>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
+    struct ReadyWake;
+    impl std::task::Wake for ReadyWake {
+        fn wake(self: std::sync::Arc<Self>) {}
+    }
+    let future = assemble_linear_system_impl_with_owner(
+        model,
+        excitations,
+        solver_mesh,
+        StructuralCouplingContexts {
+            thermo_mechanical: thermo_mechanical_context,
+            electro_thermal: electro_thermal_context,
+        },
+        execution,
+        StructuralAssemblyBatch {
+            maximum_block_elements: usize::MAX,
+            awaited_elements: false,
+        },
+        |_, _| std::future::ready(Ok(())),
+    );
+    let mut future = std::pin::pin!(future);
+    let waker = std::task::Waker::from(std::sync::Arc::new(ReadyWake));
+    let mut context = std::task::Context::from_waker(&waker);
+    match std::future::Future::poll(future.as_mut(), &mut context) {
+        std::task::Poll::Ready(result) => result,
+        std::task::Poll::Pending => unreachable!("immediate structural owner cannot suspend"),
+    }
+}
+
+async fn assemble_linear_system_impl_with_owner<O, F, A>(
+    model: &AnalysisModel,
+    excitations: &RealizedExcitations,
+    solver_mesh: Option<&SolverMeshArtifact>,
+    contexts: StructuralCouplingContexts,
+    execution: AssemblyExecution<'_>,
+    batch: StructuralAssemblyBatch,
+    mut before_block: O,
+) -> Result<AssemblySummary, A>
+where
+    O: FnMut(StructuralCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+    A: From<LinearAssemblyError>
+        + From<SolverSolidAssemblyError>
+        + From<StructuralAssemblyError>
+        + Send,
+{
+    let StructuralCouplingContexts {
+        thermo_mechanical: thermo_mechanical_context,
+        electro_thermal: electro_thermal_context,
+    } = contexts;
+    let StructuralAssemblyBatch {
+        maximum_block_elements,
+        awaited_elements,
+    } = batch;
     let AssemblyExecution {
         structural_requirement,
         supplied_constraint_plan,
@@ -665,14 +768,14 @@ pub(super) fn assemble_linear_system_impl(
     if structural_requirement.is_none() {
         return Err(LinearAssemblyError::CouplingRealization(
             "assembly requires an explicit structural formulation; other physics must use their physical assembly operators, not a synthetic shared RHS".into(),
-        ));
+        ).into());
     }
     if electro_thermal_context.is_some()
         && structural_requirement != Some(StructuralFormulationRequirement::SyntheticOperator)
     {
         return Err(LinearAssemblyError::CouplingRealization(
             "electro-thermal structural coupling requires a solved physical electrical/thermal transfer; the legacy synthetic Joule-heating RHS is not a physical formulation".into(),
-        ));
+        ).into());
     }
     // A prescribed temperature profile is applied only by the physical solid temperature-load
     // assembly. Explicit beam/shell connectivity and mesh-free assembly have no such load path,
@@ -687,7 +790,7 @@ pub(super) fn assemble_linear_system_impl(
     {
         return Err(LinearAssemblyError::CouplingRealization(
             "prescribed thermomechanical coupling requires the physical solid temperature-load assembly; other formulations require a solved physical thermal transfer".into(),
-        ));
+        ).into());
     }
     // Temperature fields are coupling inputs, never structural loads: with neither a
     // thermomechanical context nor a solved thermal state to consume them, assembling would
@@ -704,7 +807,7 @@ pub(super) fn assemble_linear_system_impl(
             return Err(LinearAssemblyError::CouplingRealization(format!(
                 "assembly requests Structural, but the active temperature-field coupling ({}) realizes Coupled(Thermomechanical); a prescribed temperature profile must be applied by a thermomechanical step",
                 unrealized.into_iter().collect::<Vec<_>>().join(", ")
-            )));
+            )).into());
         }
     }
     // Terminal voltages are electro-thermal coupling inputs, never structural loads: with
@@ -722,7 +825,7 @@ pub(super) fn assemble_linear_system_impl(
             return Err(LinearAssemblyError::CouplingRealization(format!(
                 "assembly requests Structural, but the active terminal-voltage coupling ({}) realizes Coupled(Electrothermal); a terminal voltage must be applied by an electro-thermal step",
                 unrealized.into_iter().collect::<Vec<_>>().join(", ")
-            )));
+            )).into());
         }
     }
     if solved_nodal_temperature_k.is_some()
@@ -740,7 +843,8 @@ pub(super) fn assemble_linear_system_impl(
         return Err(LinearAssemblyError::CouplingRealization(
             "solved thermal input requires exclusively physical solid thermomechanical assembly"
                 .into(),
-        ));
+        )
+        .into());
     }
     let explicit_element_count = model
         .structural
@@ -749,28 +853,44 @@ pub(super) fn assemble_linear_system_impl(
         .unwrap_or(0);
     if structural_requirement.is_some() && explicit_element_count > 0 {
         if let Some(solver_mesh) = solver_mesh {
-            return mixed_structural::assemble_mixed_structural_system(
+            return mixed_structural::assemble_mixed_structural_system_with_owner(
                 model,
                 excitations,
                 solver_mesh,
                 supplied_constraint_plan,
                 local_execution,
-            );
+                awaited_elements,
+                |phase, required| {
+                    let phase = match phase {
+                        mixed_structural::MixedCapacityPhase::Solid(phase) => {
+                            StructuralCapacityPhase::Solid(phase)
+                        }
+                        mixed_structural::MixedCapacityPhase::Explicit(phase) => {
+                            StructuralCapacityPhase::Explicit(phase)
+                        }
+                    };
+                    before_block(phase, required)
+                },
+            )
+            .await;
         }
-        return assemble_explicit_structural_system(
+        return explicit_system::assemble_explicit_structural_system_with_owner(
             model,
             excitations,
             supplied_constraint_plan,
             local_execution,
+            |phase, required| before_block(StructuralCapacityPhase::Explicit(phase), required),
+            awaited_elements,
         )
-        .map_err(LinearAssemblyError::Structural);
+        .await;
     }
     if solver_mesh.is_none()
         && structural_requirement == Some(StructuralFormulationRequirement::PhysicalDiscretization)
     {
         return Err(LinearAssemblyError::Structural(
             StructuralAssemblyError::MissingDiscretization,
-        ));
+        )
+        .into());
     }
 
     let solid_properties = solid_properties::compile_for_assembly(
@@ -957,9 +1077,19 @@ pub(super) fn assemble_linear_system_impl(
                 "solved thermal input lacks solid material coverage".into(),
             )
         })?;
-        let thermal_load =
-            thermoelastic_load::assemble_solved_temperature_load(mesh, properties, temperatures)
-                .map_err(|error| LinearAssemblyError::CouplingRealization(error.to_string()))?;
+        let thermal_load = thermoelastic_load::assemble_solved_temperature_load_with_owner(
+            mesh,
+            properties,
+            temperatures,
+            &mut |element, count| {
+                before_block(
+                    StructuralCapacityPhase::ThermoelasticLoadElement { element },
+                    count,
+                )
+            },
+        )
+        .await
+        .map_err(thermoelastic_capacity_error)?;
         for (index, value) in thermal_load.into_iter().enumerate() {
             if !constrained[index] {
                 rhs[index] += value;
@@ -969,17 +1099,31 @@ pub(super) fn assemble_linear_system_impl(
     }
 
     if let Some(context) = thermo_mechanical_context.as_ref() {
-        let physical_thermal_load = solver_mesh
+        let physical_thermal_load = if let Some((mesh, properties)) = solver_mesh
             .filter(|_| {
                 structural_requirement
                     == Some(StructuralFormulationRequirement::PhysicalDiscretization)
             })
             .zip(solid_properties.as_ref())
-            .map(|(mesh, properties)| {
-                thermoelastic_load::assemble_prescribed_temperature_load(mesh, properties, context)
-            })
-            .transpose()
-            .map_err(|error| LinearAssemblyError::CouplingRealization(error.to_string()))?;
+        {
+            Some(
+                thermoelastic_load::assemble_prescribed_temperature_load_with_owner(
+                    mesh,
+                    properties,
+                    context,
+                    &mut |element, count| {
+                        before_block(
+                            StructuralCapacityPhase::ThermoelasticLoadElement { element },
+                            count,
+                        )
+                    },
+                )
+                .await
+                .map_err(thermoelastic_capacity_error)?,
+            )
+        } else {
+            None
+        };
         let thermal_strain_scale = (context.thermal_expansion_coefficient.canonical_value()
             * context.applied_temperature_delta_k.canonical_value().abs())
         .clamp(0.0, 0.05);
@@ -1140,37 +1284,67 @@ pub(super) fn assemble_linear_system_impl(
         });
     }
 
-    let structural_solid_recovery = solver_mesh
+    let structural_solid_recovery = match solver_mesh
         .filter(|_| structural_requirement.is_some())
         .zip(solid_properties.as_ref())
-        .map(|(mesh, properties)| {
-            solid_recovery::build(
-                mesh,
-                properties,
-                thermo_mechanical_context.as_ref().filter(|_| {
-                    structural_requirement
-                        == Some(StructuralFormulationRequirement::PhysicalDiscretization)
-                }),
-                solved_nodal_temperature_k,
-            )
-        })
-        .transpose()
-        .map_err(LinearAssemblyError::SolidOperator)?
-        .unwrap_or_default();
-    let solid_operators = solver_mesh
+    {
+        Some((mesh, properties)) => {
+            let thermal_context = thermo_mechanical_context.as_ref().filter(|_| {
+                structural_requirement
+                    == Some(StructuralFormulationRequirement::PhysicalDiscretization)
+            });
+            if awaited_elements {
+                solid_recovery::build_with_owner(
+                    mesh,
+                    properties,
+                    thermal_context,
+                    solved_nodal_temperature_k,
+                    &mut |element, required| {
+                        before_block(
+                            StructuralCapacityPhase::SolidRecoveryElement { element },
+                            required,
+                        )
+                    },
+                )
+                .await
+                .map_err(|error| match error {
+                    crate::algebra::coercivity::NumericalCapacityError::Numerical(error) => {
+                        A::from(error)
+                    }
+                    crate::algebra::coercivity::NumericalCapacityError::Admission(error) => error,
+                })?
+            } else {
+                solid_recovery::build(
+                    mesh,
+                    properties,
+                    thermal_context,
+                    solved_nodal_temperature_k,
+                )?
+            }
+        }
+        None => Vec::new(),
+    };
+    let solid_operators = match solver_mesh
         .filter(|_| structural_requirement.is_some())
         .zip(solid_properties.as_ref())
-        .map(|(mesh, properties)| {
-            solver_solid::assemble_preparing(
+    {
+        Some((mesh, properties)) => Some(
+            solver_solid::assemble_preparing_with_owner(
                 mesh,
                 properties,
-                local_execution,
-                solid_energy,
+                solver_solid::SolidAssemblyExecution {
+                    local_execution,
+                    capture: solid_energy,
+                    maximum_block_elements,
+                    awaited_elements,
+                },
                 (&constrained, affine_constraint_reduction.as_ref()),
+                |phase, required| before_block(StructuralCapacityPhase::Solid(phase), required),
             )
-        })
-        .transpose()
-        .map_err(LinearAssemblyError::SolidOperator)?;
+            .await?,
+        ),
+        None => None,
+    };
     let structural_solid_total_mass_kg = solid_operators
         .as_ref()
         .map_or(0.0, |operators| operators.total_mass_kg);
@@ -1515,7 +1689,7 @@ pub(super) fn assemble_linear_system_impl(
                     Ok(evidence) => Some(evidence),
                     Err(crate::algebra::NullspaceEvidenceError::UnderconstrainedComponent) => None,
                     Err(error) => {
-                        return Err(LinearAssemblyError::SparseOperator(error.to_string()))
+                        return Err(LinearAssemblyError::SparseOperator(error.to_string()).into())
                     }
                 }
             } else {
@@ -2256,7 +2430,8 @@ mod tests {
             crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
             &crate::solve::backend::cpu_reference::CpuReferenceBackend,
             None,
-        );
+        )
+        .unwrap();
         assert!(solve.converged, "{:?}", solve.diagnostics);
         assert!(solve.solution[tip_ux].abs() > 0.0);
         let fields = crate::post::fields::recover_result_fields(
@@ -2467,7 +2642,8 @@ mod tests {
             crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
             &crate::solve::backend::cpu_reference::CpuReferenceBackend,
             None,
-        );
+        )
+        .unwrap();
         assert!(solve.converged, "{:?}", solve.diagnostics);
     }
 

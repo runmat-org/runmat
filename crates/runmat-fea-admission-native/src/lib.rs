@@ -3,21 +3,39 @@
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::Mutex;
 
-use runmat_execution::resource::ResourceUsage;
 use runmat_runtime::analysis::fea_run_admission::{
     FeaLocalOrganization, FeaRunAdmission, FeaRunBudget, FeaRunDenied, FeaRunKind, FeaRunOutcome,
-    FeaRunPermit, FeaRunRequest,
+    FeaRunPermit, FeaRunRequest, FeaRunUsage,
 };
-use runmat_server_client::{auth, fea::*};
+use runmat_server_client::ids::{ExecutionDriverLeaseId, OrgId};
+use runmat_server_client::{auth, simulation::*};
+use runmat_simulation_usage::{MeasurementVersion, OperationCount};
 use uuid::Uuid;
 
 pub struct NativeFeaAdmission {
     org: FeaLocalOrganization,
+    client: SimulationClientKind,
+    lower_cap: Option<OperationCount>,
+    driver: Option<DriverLeaseAuthority>,
+}
+
+#[derive(Clone)]
+struct DriverLeaseAuthority {
+    server: String,
+    org: OrgId,
+    lease: ExecutionDriverLeaseId,
+    fencing_token: u64,
+    credential: String,
 }
 impl NativeFeaAdmission {
     /// A typed host selector; this constructor performs no auth or transport work.
     pub fn from_selection(org: FeaLocalOrganization) -> Self {
-        Self { org }
+        Self {
+            org,
+            client: SimulationClientKind::Cli,
+            lower_cap: None,
+            driver: None,
+        }
     }
     pub fn new(org: Option<Uuid>) -> Self {
         // The existing selector parser reads only the explicit argument and ENV,
@@ -30,21 +48,76 @@ impl NativeFeaAdmission {
             Ok(None) => FeaLocalOrganization::Default,
             Err(_) => FeaLocalOrganization::Invalid,
         };
-        Self { org }
+        Self::from_selection(org)
+    }
+
+    pub fn compiled(org: Option<Uuid>) -> Self {
+        Self {
+            client: SimulationClientKind::Compiled,
+            ..Self::new(org)
+        }
+    }
+
+    pub fn with_spending_cap(mut self, cap: OperationCount) -> Self {
+        self.lower_cap = Some(cap);
+        self
+    }
+
+    /// Trusted cluster driver authority. No personal token, organization discovery,
+    /// or credential/config file is consulted on this route.
+    pub fn for_driver(
+        server: &str,
+        org: OrgId,
+        lease: ExecutionDriverLeaseId,
+        fencing_token: u64,
+        credential: &str,
+    ) -> Result<Self, FeaRunDenied> {
+        SimulationLeaseClient::for_driver(server, lease.clone(), fencing_token, credential)
+            .map_err(denial)?;
+        Ok(Self {
+            org: FeaLocalOrganization::Default,
+            client: SimulationClientKind::Cluster,
+            lower_cap: None,
+            driver: Some(DriverLeaseAuthority {
+                server: server.to_owned(),
+                org,
+                lease,
+                fencing_token,
+                credential: credential.to_owned(),
+            }),
+        })
     }
 }
 
 type Reply<T> = SyncSender<Result<T, FeaRunDenied>>;
 enum Command {
-    Heartbeat(FeaLeaseUsage, Reply<FeaRunBudget>),
-    Settle(FeaLeaseOutcome, FeaLeaseUsage, Reply<()>),
+    Heartbeat(ReportSimulationUsage, Reply<FeaRunBudget>),
+    Settle(SettleSimulationLease, Reply<()>),
 }
 struct Permit {
     commands: Mutex<tokio::sync::mpsc::Sender<Command>>,
     initial: FeaRunBudget,
+    measurement_version: MeasurementVersion,
 }
 
 impl Permit {
+    fn report(
+        &self,
+        value: &FeaRunUsage,
+        target: Option<OperationCount>,
+    ) -> Result<FeaRunBudget, FeaRunDenied> {
+        self.request(|reply| {
+            Command::Heartbeat(
+                ReportSimulationUsage {
+                    measurement_version: self.measurement_version.clone(),
+                    used_ops: value.completed_ops,
+                    grant_target_ops: target,
+                    other_detail: None,
+                },
+                reply,
+            )
+        })
+    }
     fn request<T>(&self, command: impl FnOnce(Reply<T>) -> Command) -> Result<T, FeaRunDenied> {
         // One exchange owns the bounded command slot until its reply arrives.
         // The synchronous host may run inside Tokio, so blocking_send is unsuitable.
@@ -62,21 +135,42 @@ impl Permit {
     }
 }
 
-fn denial(error: FeaLeaseError) -> FeaRunDenied {
+fn denial(error: SimulationLeaseError) -> FeaRunDenied {
     match error {
-        FeaLeaseError::SignInRequired => FeaRunDenied::SignInRequired,
-        FeaLeaseError::LicenseInvalid => FeaRunDenied::LicenseInvalid,
-        FeaLeaseError::AllowanceUsed {
-            refills_at_unix_seconds,
+        SimulationLeaseError::Rejected { status: 401, .. }
+        | SimulationLeaseError::Rejected {
+            code: SimulationErrorCode::SignInRequired,
+            ..
+        } => FeaRunDenied::SignInRequired,
+        SimulationLeaseError::Rejected {
+            code: SimulationErrorCode::AllowanceUsed,
+            details,
+            ..
         } => FeaRunDenied::AllowanceUsed {
-            refills_at_unix_seconds,
+            refills_at_unix_seconds: details.refills_at.map(|date| date.timestamp()),
         },
-        FeaLeaseError::LeaseExpired => FeaRunDenied::LeaseExpired,
-        FeaLeaseError::ServerUnreachable => FeaRunDenied::ServerUnreachable,
+        SimulationLeaseError::Rejected {
+            code: SimulationErrorCode::AllowanceUnpublished,
+            ..
+        } => FeaRunDenied::AllowanceUnpublished,
+        SimulationLeaseError::Rejected {
+            code: SimulationErrorCode::BudgetExceedsAvailable,
+            details,
+            ..
+        } => FeaRunDenied::BudgetUnavailable {
+            available_ops: details.available_ops,
+        },
+        SimulationLeaseError::Rejected {
+            code: SimulationErrorCode::LeaseNotFound,
+            ..
+        } => FeaRunDenied::LeaseExpired,
+        SimulationLeaseError::Transport(_) => FeaRunDenied::ServerUnreachable,
+        _ => FeaRunDenied::LicenseInvalid,
     }
 }
 fn budget(
-    held: u64,
+    cap: OperationCount,
+    granted: OperationCount,
     expiry: chrono::DateTime<chrono::Utc>,
     interval: u64,
 ) -> Result<FeaRunBudget, FeaRunDenied> {
@@ -87,29 +181,33 @@ fn budget(
         .filter(|value| *value > 0 && *value <= 120_000)
         .ok_or(FeaRunDenied::LicenseInvalid)?;
     let budget = FeaRunBudget {
-        held_core_millis: held,
+        budget_ops: cap,
+        granted_ops: granted,
         expires_at_unix_millis,
         heartbeat_millis,
     };
     budget.validate()?;
     Ok(budget)
 }
-fn usage(value: &ResourceUsage) -> FeaLeaseUsage {
-    FeaLeaseUsage {
-        cpu_core_millis: value.cpu_core_millis,
-        wall_millis: value.wall_millis,
-    }
-}
-
 impl FeaRunAdmission for NativeFeaAdmission {
     fn local_organization_hint(&self) -> FeaLocalOrganization {
         self.org
     }
     fn admit(&self, request: &FeaRunRequest) -> Result<Box<dyn FeaRunPermit>, FeaRunDenied> {
-        if request.site != runmat_runtime::analysis::fea_run_admission::FeaRunSite::Local {
+        request.validate()?;
+        let expected_site = if self.driver.is_some() {
+            runmat_runtime::analysis::fea_run_admission::FeaRunSite::Dispatched
+        } else {
+            runmat_runtime::analysis::fea_run_admission::FeaRunSite::Local
+        };
+        if request.site != expected_site {
             return Err(FeaRunDenied::LicenseInvalid);
         }
         let request = request.clone();
+        let measurement_version = request.measurement_version.clone();
+        let client_kind = self.client;
+        let lower_cap = self.lower_cap;
+        let driver = self.driver.clone();
         let org = match self.org {
             FeaLocalOrganization::Default => None,
             FeaLocalOrganization::Selected(org) => Some(org),
@@ -133,7 +231,7 @@ impl FeaRunAdmission for NativeFeaAdmission {
                     }
                 };
                 runtime.block_on(async move {
-                    let opened = open(org, request).await;
+                    let opened = open(org, driver, request, client_kind, lower_cap).await;
                     let (client, lease, initial_budget) = match opened {
                         Ok(value) => value,
                         Err(error) => {
@@ -150,21 +248,22 @@ impl FeaRunAdmission for NativeFeaAdmission {
                         match command {
                             Command::Heartbeat(usage, reply) => {
                                 let result = client
-                                    .usage(&lease.lease_id, usage)
+                                    .usage(&lease.lease_id, &usage)
                                     .await
                                     .map_err(denial)
                                     .and_then(|hold| {
                                         budget(
-                                            hold.held_core_millis,
+                                            hold.budget_ops,
+                                            hold.granted_ops,
                                             hold.expires_at,
                                             lease.heartbeat_seconds,
                                         )
                                     });
                                 let _ = reply.send(result);
                             }
-                            Command::Settle(outcome, usage, reply) => {
+                            Command::Settle(request, reply) => {
                                 let result = client
-                                    .settle(&lease.lease_id, outcome, usage)
+                                    .settle(&lease.lease_id, &request)
                                     .await
                                     .map(|_| ())
                                     .map_err(denial);
@@ -182,50 +281,78 @@ impl FeaRunAdmission for NativeFeaAdmission {
         Ok(Box::new(Permit {
             commands: Mutex::new(commands),
             initial,
+            measurement_version,
         }))
     }
 }
 
 async fn open(
     org: Option<Uuid>,
+    driver: Option<DriverLeaseAuthority>,
     request: FeaRunRequest,
-) -> Result<(FeaLeaseClient, FeaLease, FeaRunBudget), FeaRunDenied> {
-    let mut config = auth::RemoteConfig::load().map_err(|_| FeaRunDenied::LicenseInvalid)?;
-    let server =
-        auth::resolve_server_url(&config, None).map_err(|_| FeaRunDenied::LicenseInvalid)?;
-    let token = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        auth::resolve_auth_token(&mut config, &server),
-    )
-    .await
-    .map_err(|_| FeaRunDenied::ServerUnreachable)?
-    .map_err(auth_denial)?;
-    let client = FeaLeaseClient::new(&server, &token).map_err(denial)?;
-    let org = match auth::configured_public_org_id(&config, org)
-        .map_err(|_| FeaRunDenied::LicenseInvalid)?
-    {
-        Some(org) => org,
-        None => client.sole_organization().await.map_err(denial)?,
+    client_kind: SimulationClientKind,
+    lower_cap: Option<OperationCount>,
+) -> Result<(SimulationLeaseClient, SimulationLease, FeaRunBudget), FeaRunDenied> {
+    let (client, org) = if let Some(driver) = driver {
+        (
+            SimulationLeaseClient::for_driver(
+                &driver.server,
+                driver.lease,
+                driver.fencing_token,
+                &driver.credential,
+            )
+            .map_err(denial)?,
+            driver.org,
+        )
+    } else {
+        let mut config = auth::RemoteConfig::load().map_err(|_| FeaRunDenied::LicenseInvalid)?;
+        let server =
+            auth::resolve_server_url(&config, None).map_err(|_| FeaRunDenied::LicenseInvalid)?;
+        let token = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            auth::resolve_auth_token(&mut config, &server),
+        )
+        .await
+        .map_err(|_| FeaRunDenied::ServerUnreachable)?
+        .map_err(auth_denial)?;
+        let client = SimulationLeaseClient::new(&server, &token).map_err(denial)?;
+        let org = match auth::configured_public_org_id(&config, org)
+            .map_err(|_| FeaRunDenied::LicenseInvalid)?
+        {
+            Some(org) => org,
+            None => client.sole_organization().await.map_err(denial)?,
+        };
+        (client, org)
     };
     let lease = client
         .start(
             &org,
-            &StartFeaLease {
-                run_id: request.run_id,
+            &StartSimulationLease {
+                run_id: runmat_server_client::ids::SimulationRunId::parse(&request.run_id)
+                    .map_err(|_| FeaRunDenied::LicenseInvalid)?,
+                attempt: 1,
+                measurement_version: request.measurement_version,
+                runmat_version: env!("CARGO_PKG_VERSION").to_owned(),
                 kind: match request.kind {
-                    FeaRunKind::Meshing => FeaLeaseKind::Meshing,
-                    FeaRunKind::Solve => FeaLeaseKind::Solve,
-                    FeaRunKind::MeshAndSolve => FeaLeaseKind::MeshAndSolve,
+                    FeaRunKind::Meshing => SimulationKind::Meshing,
+                    FeaRunKind::Solve => SimulationKind::Solve,
+                    FeaRunKind::MeshAndSolve => SimulationKind::MeshAndSolve,
                 },
-                allocated_cpu_millicores: request.allocated_cpu_millicores,
-                study_identity: request.study_identity,
-                client: FeaLeaseClientKind::Cli,
+                study_identity: request
+                    .study_identity
+                    .parse()
+                    .map_err(|_| FeaRunDenied::LicenseInvalid)?,
+                client: client_kind,
+                estimate_ops: None,
+                budget_ops: lower_cap,
+                initial_grant_ops: None,
             },
         )
         .await
         .map_err(denial)?;
     let initial = budget(
-        lease.held_core_millis,
+        lease.budget_ops,
+        lease.granted_ops,
         lease.expires_at,
         lease.heartbeat_seconds,
     )?;
@@ -250,34 +377,58 @@ impl FeaRunPermit for Permit {
     fn budget(&self) -> FeaRunBudget {
         self.initial
     }
-    fn heartbeat(&self, value: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
-        self.request(|reply| Command::Heartbeat(usage(value), reply))
+    fn heartbeat(&self, value: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+        self.report(value, None)
+    }
+    fn request_grant(
+        &self,
+        value: &FeaRunUsage,
+        required: OperationCount,
+    ) -> Result<FeaRunBudget, FeaRunDenied> {
+        self.report(value, Some(required))
     }
     fn settle(
         self: Box<Self>,
         outcome: FeaRunOutcome,
-        value: &ResourceUsage,
+        value: &FeaRunUsage,
     ) -> Result<(), FeaRunDenied> {
         let outcome = match outcome {
-            FeaRunOutcome::Completed => FeaLeaseOutcome::Completed,
-            FeaRunOutcome::Cancelled => FeaLeaseOutcome::Cancelled,
-            FeaRunOutcome::Failed => FeaLeaseOutcome::Failed,
+            FeaRunOutcome::Completed => SimulationOutcome::Completed,
+            FeaRunOutcome::Cancelled => SimulationOutcome::Cancelled,
+            FeaRunOutcome::Failed => SimulationOutcome::Failed,
         };
-        self.request(|reply| Command::Settle(outcome, usage(value), reply))
+        self.request(|reply| {
+            Command::Settle(
+                SettleSimulationLease {
+                    outcome,
+                    measurement_version: self.measurement_version.clone(),
+                    used_ops: value.completed_ops,
+                    other_detail: None,
+                },
+                reply,
+            )
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_execution::resource::ResourceUsage;
+    use runmat_simulation_usage::CompletedUsage;
+    fn ops(value: u64) -> OperationCount {
+        OperationCount::from_operations(value)
+    }
     #[test]
-    fn partial_hold_and_expiry_are_preserved_without_gpu_accounting() {
+    fn fixed_cap_partial_grant_and_expiry_preserve_operation_units() {
         let expiry = chrono::Utc::now() + chrono::Duration::seconds(60);
-        let admitted = budget(1, expiry, 30).unwrap();
-        assert_eq!(admitted.held_core_millis, 1);
+        let admitted = budget(ops(100), ops(1), expiry, 30).unwrap();
+        assert_eq!(admitted.budget_ops, ops(100));
+        assert_eq!(admitted.granted_ops, ops(1));
         assert_eq!(admitted.heartbeat_millis, 30_000);
-        assert!(budget(0, expiry, 30).is_err());
-        assert!(budget(1, expiry, 0).is_err());
+        assert!(budget(ops(0), ops(0), expiry, 30).is_err());
+        assert!(budget(ops(1), ops(2), expiry, 30).is_err());
+        assert!(budget(ops(1), ops(1), expiry, 0).is_err());
     }
 
     #[test]
@@ -289,16 +440,16 @@ mod tests {
             FeaLocalOrganization::Selected(selected)
         );
         assert_eq!(
-            denial(FeaLeaseError::ServerUnreachable),
+            denial(SimulationLeaseError::Transport(
+                runmat_server_client::ServerLeaseTransportError::ServerStatus(503)
+            )),
             FeaRunDenied::ServerUnreachable
         );
         assert_eq!(
             auth_denial(auth::SignInRequired.into()),
             FeaRunDenied::SignInRequired
         );
-        let invalid = NativeFeaAdmission {
-            org: FeaLocalOrganization::Invalid,
-        };
+        let invalid = NativeFeaAdmission::from_selection(FeaLocalOrganization::Invalid);
         let request = FeaRunRequest::local(
             FeaRunKind::Solve,
             1000,
@@ -313,31 +464,51 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn synchronous_permit_reply_does_not_depend_on_the_callers_tokio_lane() {
-        let initial = budget(100, chrono::Utc::now() + chrono::Duration::seconds(60), 30).unwrap();
+        let initial = budget(
+            ops(100),
+            ops(100),
+            chrono::Utc::now() + chrono::Duration::seconds(60),
+            30,
+        )
+        .unwrap();
         let (commands, mut receiver) = tokio::sync::mpsc::channel(1);
         let owner = std::thread::spawn(move || {
             let Command::Heartbeat(usage, reply) = receiver.blocking_recv().unwrap() else {
+                panic!("expected pre-batch grant request")
+            };
+            assert_eq!(usage.grant_target_ops, Some(ops(75)));
+            assert_eq!(usage.used_ops.solve, ops(3));
+            reply.send(Ok(initial)).unwrap();
+            let Command::Heartbeat(usage, reply) = receiver.blocking_recv().unwrap() else {
                 panic!("expected heartbeat")
             };
-            assert_eq!((usage.cpu_core_millis, usage.wall_millis), (2, 1));
+            assert_eq!(usage.grant_target_ops, None);
+            assert_eq!(usage.used_ops.solve, ops(3));
             reply.send(Err(FeaRunDenied::LeaseExpired)).unwrap();
-            let Command::Settle(FeaLeaseOutcome::Cancelled, usage, reply) =
-                receiver.blocking_recv().unwrap()
-            else {
+            let Command::Settle(request, reply) = receiver.blocking_recv().unwrap() else {
                 panic!("expected own-run cancellation settlement")
             };
-            assert_eq!((usage.cpu_core_millis, usage.wall_millis), (2, 1));
+            assert_eq!(request.outcome, SimulationOutcome::Cancelled);
+            assert_eq!(request.used_ops.solve, ops(3));
             reply.send(Ok(())).unwrap();
         });
         let permit = Box::new(Permit {
             commands: Mutex::new(commands),
             initial,
+            measurement_version: MeasurementVersion::reference_v1(),
         });
-        let usage = ResourceUsage {
-            cpu_core_millis: 2,
-            wall_millis: 1,
-            ..Default::default()
+        let usage = FeaRunUsage {
+            completed_ops: CompletedUsage {
+                solve: ops(3),
+                ..Default::default()
+            },
+            resources: ResourceUsage {
+                cpu_core_millis: 2,
+                wall_millis: 1,
+                ..Default::default()
+            },
         };
+        assert_eq!(permit.request_grant(&usage, ops(75)).unwrap(), initial);
         assert_eq!(permit.heartbeat(&usage), Err(FeaRunDenied::LeaseExpired));
         permit.settle(FeaRunOutcome::Cancelled, &usage).unwrap();
         owner.join().unwrap();

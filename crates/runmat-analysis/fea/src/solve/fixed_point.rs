@@ -3,6 +3,8 @@
 //! A proposal is not an accepted solution. The caller retains ownership of its
 //! original equations, admissible set, convergence gate, and iteration budget.
 
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory};
+
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AndersonOnePolicy {
@@ -36,6 +38,8 @@ pub struct AndersonOneProposal {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum FixedPointError {
+    #[error("Anderson depth-one numerical accounting failed: {0}")]
+    Accounting(#[from] LedgerError),
     #[error("invalid Anderson depth-one coefficient policy")]
     InvalidPolicy,
     #[error("invalid Anderson depth-one vector inventory")]
@@ -79,34 +83,74 @@ pub fn propose(
     {
         return Err(FixedPointError::InvalidInventory);
     }
-    let difference = residual
-        .iter()
-        .zip(previous_residual)
-        .map(|(new, previous)| new - previous)
-        .collect::<Vec<_>>();
+    if n == 0 {
+        return Ok(None);
+    }
+    let length = u64::try_from(n).map_err(|_| LedgerError::CountOverflow)?;
+    // The reference schedule is n residual subtractions, two n-term dots
+    // (4n-2), one coefficient division when the denominator is nonzero, and
+    // 3n affine image operations only when that coefficient is admissible.
+    // Each completed logical batch is settled before the next gate; neither
+    // a degenerate denominator nor a declined coefficient charges later work.
+    let difference = crate::algebra::capacity::measured_sync(
+        UsageCategory::Solve,
+        OperationCount::from_operations(length),
+        || -> Result<Vec<f64>, FixedPointError> {
+            Ok(residual
+                .iter()
+                .zip(previous_residual)
+                .map(|(new, previous)| new - previous)
+                .collect())
+        },
+    )?;
     if difference.iter().any(|v| !v.is_finite()) {
         return Err(FixedPointError::NonfiniteArithmetic);
     }
-    let denominator = crate::algebra::dot_canonical(&difference, &difference);
-    let numerator = crate::algebra::dot_canonical(residual, &difference);
+    let dot_work = OperationCount::direct_real_dot(length)
+        .map_err(LedgerError::from)?
+        .checked_mul(2)
+        .map_err(LedgerError::from)?;
+    let (denominator, numerator) = crate::algebra::capacity::measured_sync(
+        UsageCategory::Solve,
+        dot_work,
+        || -> Result<_, FixedPointError> {
+            Ok((
+                crate::algebra::dot_canonical(&difference, &difference),
+                crate::algebra::dot_canonical(residual, &difference),
+            ))
+        },
+    )?;
     if !denominator.is_finite() || !numerator.is_finite() || denominator < 0.0 {
         return Err(FixedPointError::NonfiniteArithmetic);
     }
     if denominator == 0.0 {
         return Ok(None);
     }
-    let coefficient = numerator / denominator;
+    let coefficient = crate::algebra::capacity::measured_sync(
+        UsageCategory::Solve,
+        OperationCount::from_operations(1),
+        || -> Result<_, FixedPointError> { Ok(numerator / denominator) },
+    )?;
     if !coefficient.is_finite() {
         return Err(FixedPointError::NonfiniteArithmetic);
     }
     if coefficient.abs() > policy.maximum_absolute_coefficient {
         return Ok(None);
     }
-    let image = image
-        .iter()
-        .zip(previous_image)
-        .map(|(new, previous)| new - coefficient * (new - previous))
-        .collect::<Vec<_>>();
+    let image_work = OperationCount::from_operations(length)
+        .checked_mul(3)
+        .map_err(LedgerError::from)?;
+    let image = crate::algebra::capacity::measured_sync(
+        UsageCategory::Solve,
+        image_work,
+        || -> Result<Vec<f64>, FixedPointError> {
+            Ok(image
+                .iter()
+                .zip(previous_image)
+                .map(|(new, previous)| new - coefficient * (new - previous))
+                .collect())
+        },
+    )?;
     if image.iter().any(|v| !v.is_finite()) {
         return Err(FixedPointError::NonfiniteArithmetic);
     }

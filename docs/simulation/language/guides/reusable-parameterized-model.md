@@ -1,4 +1,4 @@
-# Build a reusable parameterized model
+# Reusable parameterized model
 
 Use model inputs for values or regions that change between studies while the model's physical
 structure stays the same.

@@ -4,7 +4,7 @@ keywords: [analysis procedures, structural modal, transient analysis, harmonic r
 doc_type: language-reference
 examples: [cantilever-static, tuning-fork-modal]
 ---
-# Procedure reference
+# Procedures
 
 An analysis step is an `analysis <name> { … }` block in a study. It holds exactly one procedure block, `<family> <procedure> { <fields> }`, plus optional `retain`, `accuracy`, `load_cases` and `initial_conditions` members. Steps run in dependency order; `after analysis.<step>` orders a step after another, and a state binding (`basis = analysis.modes.state.basis`) makes one step consume another's result.
 

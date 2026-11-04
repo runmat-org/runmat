@@ -1,13 +1,15 @@
 use std::collections::BTreeMap;
 
+use crate::algebra::{capacity::measured, coercivity::NumericalCapacityError};
 use runmat_analysis_core::{AnalysisField, AnalysisModel};
 use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
+use runmat_simulation_usage::{AsyncCapacityOwner, LedgerError, OperationCount, UsageCategory};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{
-    reaction::solve_constraint_multipliers,
+    reaction::solve_constraint_multipliers_with_owner,
     result_state::{
         dof_component, nodal_vector_field, nodal_vector_field_for_count, owner_dof_index,
         resolve_model_state, translation_component, ConstraintNodeState,
@@ -87,6 +89,10 @@ pub struct ConstraintReferencePointResult {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum ConstraintResultError {
+    #[error("constraint result numerical accounting failed: {0}")]
+    Accounting(#[from] LedgerError),
+    #[error("constraint result recovery cancelled")]
+    Cancelled,
     #[error("constraint result topology differs from its canonical plan")]
     TopologyMismatch,
     #[error("required nodal field `{field_id}` is absent")]
@@ -184,8 +190,21 @@ impl CanonicalStructuralConstraintResult {
         displacement: &[f64],
         reaction: &[f64],
     ) -> Result<Self, ConstraintResultError> {
+        immediate(Self::recover_for_model_from_solver_state_with_capacity::<
+            std::convert::Infallible,
+        >(plan, model, mesh, displacement, reaction, None))
+    }
+
+    pub(crate) async fn recover_for_model_from_solver_state_with_capacity<A>(
+        plan: &CanonicalStructuralConstraintPlan,
+        model: &AnalysisModel,
+        mesh: Option<&SolverMeshArtifact>,
+        displacement: &[f64],
+        reaction: &[f64],
+        owner: Option<&dyn AsyncCapacityOwner<A>>,
+    ) -> Result<Self, NumericalCapacityError<ConstraintResultError, A>> {
         if let CanonicalStructuralTopologyIdentity::Solid { .. } = plan.topology {
-            return Self::recover_from_solver_state(
+            return Self::recover_from_solver_state_with_capacity(
                 plan,
                 mesh.ok_or_else(|| {
                     ConstraintResultError::InvalidPlan(
@@ -194,7 +213,9 @@ impl CanonicalStructuralConstraintResult {
                 })?,
                 displacement,
                 reaction,
-            );
+                owner,
+            )
+            .await;
         }
         plan.validate()
             .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
@@ -204,15 +225,17 @@ impl CanonicalStructuralConstraintResult {
             || !all_finite(displacement)
             || !all_finite(reaction)
         {
-            return Err(ConstraintResultError::GeneralizedStateRequired);
+            return Err(ConstraintResultError::GeneralizedStateRequired.into());
         }
-        Self::recover_resolved(
+        Self::recover_resolved_with_capacity(
             plan,
             &state.nodes,
             state.layout.node_dof_count(),
             displacement,
             reaction,
+            owner,
         )
+        .await
     }
 
     pub fn recover_from_solver_state(
@@ -221,12 +244,24 @@ impl CanonicalStructuralConstraintResult {
         displacement: &[f64],
         reaction: &[f64],
     ) -> Result<Self, ConstraintResultError> {
+        immediate(Self::recover_from_solver_state_with_capacity::<
+            std::convert::Infallible,
+        >(plan, mesh, displacement, reaction, None))
+    }
+
+    async fn recover_from_solver_state_with_capacity<A>(
+        plan: &CanonicalStructuralConstraintPlan,
+        mesh: &SolverMeshArtifact,
+        displacement: &[f64],
+        reaction: &[f64],
+        owner: Option<&dyn AsyncCapacityOwner<A>>,
+    ) -> Result<Self, NumericalCapacityError<ConstraintResultError, A>> {
         plan.validate()
             .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
         mesh.validate()
             .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
         if plan.topology.mesh_digest() != Some(mesh.canonical_digest) {
-            return Err(ConstraintResultError::TopologyMismatch);
+            return Err(ConstraintResultError::TopologyMismatch.into());
         }
         let expected_dofs = mesh.topology.nodes.len() * 3 + plan.reference_points.len() * 6;
         if displacement.len() != expected_dofs
@@ -234,7 +269,7 @@ impl CanonicalStructuralConstraintResult {
             || !all_finite(displacement)
             || !all_finite(reaction)
         {
-            return Err(ConstraintResultError::GeneralizedStateRequired);
+            return Err(ConstraintResultError::GeneralizedStateRequired.into());
         }
         let nodes = mesh
             .topology
@@ -263,13 +298,15 @@ impl CanonicalStructuralConstraintResult {
                 )
             })
             .collect::<BTreeMap<_, _>>();
-        Self::recover_resolved(
+        Self::recover_resolved_with_capacity(
             plan,
             &nodes,
             mesh.topology.nodes.len() * 3,
             displacement,
             reaction,
+            owner,
         )
+        .await
     }
 
     fn recover_resolved(
@@ -279,6 +316,26 @@ impl CanonicalStructuralConstraintResult {
         displacement: &[f64],
         reaction: &[f64],
     ) -> Result<Self, ConstraintResultError> {
+        immediate(Self::recover_resolved_with_capacity::<
+            std::convert::Infallible,
+        >(
+            plan,
+            nodes,
+            reference_dof_offset,
+            displacement,
+            reaction,
+            None,
+        ))
+    }
+
+    async fn recover_resolved_with_capacity<A>(
+        plan: &CanonicalStructuralConstraintPlan,
+        nodes: &BTreeMap<StableDigest, ConstraintNodeState>,
+        reference_dof_offset: usize,
+        displacement: &[f64],
+        reaction: &[f64],
+        owner: Option<&dyn AsyncCapacityOwner<A>>,
+    ) -> Result<Self, NumericalCapacityError<ConstraintResultError, A>> {
         let mut groups = plan
             .groups
             .iter()
@@ -325,21 +382,69 @@ impl CanonicalStructuralConstraintResult {
                     .collect::<Result<BTreeMap<_, _>, ConstraintResultError>>()
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut projected_reaction = vec![0.0; active_rows.len()];
-        for (left, coefficients) in row_coefficients.iter().enumerate() {
-            projected_reaction[left] = coefficients
-                .iter()
-                .map(|(dof, coefficient)| coefficient * reaction[*dof])
-                .sum();
+        let mut projection_work = OperationCount::ZERO;
+        let mut scatter_work = OperationCount::ZERO;
+        for coefficients in &row_coefficients {
+            let length = count(coefficients.len())?;
+            projection_work = projection_work
+                .checked_add(
+                    OperationCount::direct_real_dot(length.operations())
+                        .map_err(LedgerError::from)
+                        .map_err(ConstraintResultError::from)?,
+                )
+                .map_err(LedgerError::from)
+                .map_err(ConstraintResultError::from)?;
+            scatter_work = scatter_work
+                .checked_add(
+                    length
+                        .checked_mul(2)
+                        .map_err(LedgerError::from)
+                        .map_err(ConstraintResultError::from)?,
+                )
+                .map_err(LedgerError::from)
+                .map_err(ConstraintResultError::from)?;
         }
-        let multipliers = solve_constraint_multipliers(&row_coefficients, &projected_reaction)
-            .ok_or(ConstraintResultError::ReactionRecoveryFailed)?;
-        let mut predicted_reaction = BTreeMap::<usize, f64>::new();
-        for (coefficients, multiplier) in row_coefficients.iter().zip(&multipliers) {
-            for (dof, coefficient) in coefficients {
-                *predicted_reaction.entry(*dof).or_insert(0.0) += coefficient * multiplier;
+        let projected_reaction = measured(owner, UsageCategory::Solve, projection_work, || {
+            let mut projected_reaction = vec![0.0; active_rows.len()];
+            for (left, coefficients) in row_coefficients.iter().enumerate() {
+                projected_reaction[left] = coefficients
+                    .iter()
+                    .map(|(dof, coefficient)| coefficient * reaction[*dof])
+                    .sum();
             }
-        }
+            Ok::<_, ConstraintResultError>(projected_reaction)
+        })
+        .await?;
+        let multipliers = solve_constraint_multipliers_with_owner(
+            &row_coefficients,
+            &projected_reaction,
+            |work| async move {
+                match owner {
+                    Some(owner) => owner.ensure_capacity(work).await,
+                    None => Ok::<_, A>(()),
+                }
+            },
+        )
+        .await
+        .map_err(|error| {
+            error.map_numerical(|error| match error {
+                super::ConstraintMultiplierError::Accounting(cause) => {
+                    ConstraintResultError::Accounting(cause)
+                }
+                super::ConstraintMultiplierError::Cancelled => ConstraintResultError::Cancelled,
+            })
+        })?
+        .ok_or(ConstraintResultError::ReactionRecoveryFailed)?;
+        let predicted_reaction = measured(owner, UsageCategory::Solve, scatter_work, || {
+            let mut predicted_reaction = BTreeMap::<usize, f64>::new();
+            for (coefficients, multiplier) in row_coefficients.iter().zip(&multipliers) {
+                for (dof, coefficient) in coefficients {
+                    *predicted_reaction.entry(*dof).or_insert(0.0) += coefficient * multiplier;
+                }
+            }
+            Ok::<_, ConstraintResultError>(predicted_reaction)
+        })
+        .await?;
         let reaction_scale = predicted_reaction
             .values()
             .map(|value| value.abs())
@@ -348,7 +453,7 @@ impl CanonicalStructuralConstraintResult {
             .iter()
             .any(|(dof, predicted)| (reaction[*dof] - predicted).abs() > reaction_scale * 1.0e-7)
         {
-            return Err(ConstraintResultError::ReactionRecoveryFailed);
+            return Err(ConstraintResultError::ReactionRecoveryFailed.into());
         }
 
         for row in &plan.rows {
@@ -359,70 +464,100 @@ impl CanonicalStructuralConstraintResult {
                 group.redundant_row_count += 1;
                 continue;
             }
-            let active_index = active_rows
-                .iter()
-                .position(|active| active.identity == row.identity)
-                .ok_or(ConstraintResultError::InvalidEvidence)?;
-            let multiplier = multipliers[active_index];
-            let equation_value = row
-                .terms
-                .iter()
-                .map(|term| {
-                    Ok(term.coefficient
-                        * displacement[owner_dof_index(
-                            plan,
-                            nodes,
-                            reference_dof_offset,
-                            term.owner,
-                            term.dof,
-                        )?])
-                })
-                .collect::<Result<Vec<_>, ConstraintResultError>>()?
-                .into_iter()
-                .sum::<f64>();
-            let error = (equation_value - row.right_hand_side).abs();
-            group.active_row_count += 1;
+            let mut row_work =
+                OperationCount::direct_real_dot(count(row.terms.len())?.operations())
+                    .and_then(|work| work.checked_add(OperationCount::from_operations(3)))
+                    .map_err(LedgerError::from)
+                    .map_err(ConstraintResultError::from)?;
             for term in &row.terms {
-                if let CanonicalStructuralDofOwner::StructuralNode(identity) = term.owner {
-                    let node = nodes
-                        .get(&identity)
-                        .ok_or(ConstraintResultError::NodeAbsent)?;
-                    let generalized_reaction = term.coefficient * multiplier;
-                    match term.dof {
-                        CanonicalStructuralDof::Translation(_) => {
-                            let component = translation_component(term.dof)?;
-                            group.resultant_force_newtons[component] += generalized_reaction;
-                            add_cross_product(
-                                &mut group.resultant_moment_about_global_origin_newton_meters,
-                                node.coordinates_m.canonical_value(),
-                                component_vector(component, generalized_reaction),
-                            );
-                        }
-                        CanonicalStructuralDof::Rotation(_) => {
-                            group.resultant_moment_about_global_origin_newton_meters
-                                [dof_component(term.dof) - 3] += generalized_reaction;
-                        }
-                    }
+                if matches!(term.owner, CanonicalStructuralDofOwner::StructuralNode(_)) {
+                    // Coefficient product, resultant accumulation, and (for a
+                    // translation) the three-component moment cross product.
+                    let operations = match term.dof {
+                        CanonicalStructuralDof::Translation(_) => 14,
+                        CanonicalStructuralDof::Rotation(_) => 2,
+                    };
+                    row_work = row_work
+                        .checked_add(OperationCount::from_operations(operations))
+                        .map_err(LedgerError::from)
+                        .map_err(ConstraintResultError::from)?;
                 }
             }
-            group.constraint_work_joules += multiplier * row.right_hand_side;
-            let violation = match row.residual_quantity {
-                super::ConstraintResidualQuantity::Displacement => {
-                    group.maximum_displacement_error_meters =
-                        group.maximum_displacement_error_meters.max(error);
-                    ConstraintViolation::DisplacementMeters(error)
-                }
-                super::ConstraintResidualQuantity::Rotation => {
-                    group.maximum_rotation_error_radians =
-                        group.maximum_rotation_error_radians.max(error);
-                    ConstraintViolation::RotationRadians(error)
-                }
-            };
-            group.row_reactions.push(ConstraintRowReaction {
-                row_identity: row.identity,
-                generalized_reaction: multiplier,
-                violation,
-            });
+            measured(
+                owner,
+                UsageCategory::Solve,
+                row_work,
+                || -> Result<(), ConstraintResultError> {
+                    let active_index = active_rows
+                        .iter()
+                        .position(|active| active.identity == row.identity)
+                        .ok_or(ConstraintResultError::InvalidEvidence)?;
+                    let multiplier = multipliers[active_index];
+                    let equation_value = row
+                        .terms
+                        .iter()
+                        .map(|term| {
+                            Ok(term.coefficient
+                                * displacement[owner_dof_index(
+                                    plan,
+                                    nodes,
+                                    reference_dof_offset,
+                                    term.owner,
+                                    term.dof,
+                                )?])
+                        })
+                        .collect::<Result<Vec<_>, ConstraintResultError>>()?
+                        .into_iter()
+                        .sum::<f64>();
+                    let error = (equation_value - row.right_hand_side).abs();
+                    group.active_row_count += 1;
+                    for term in &row.terms {
+                        if let CanonicalStructuralDofOwner::StructuralNode(identity) = term.owner {
+                            let node = nodes
+                                .get(&identity)
+                                .ok_or(ConstraintResultError::NodeAbsent)?;
+                            let generalized_reaction = term.coefficient * multiplier;
+                            match term.dof {
+                                CanonicalStructuralDof::Translation(_) => {
+                                    let component = translation_component(term.dof)?;
+                                    group.resultant_force_newtons[component] +=
+                                        generalized_reaction;
+                                    add_cross_product(
+                                        &mut group
+                                            .resultant_moment_about_global_origin_newton_meters,
+                                        node.coordinates_m.canonical_value(),
+                                        component_vector(component, generalized_reaction),
+                                    );
+                                }
+                                CanonicalStructuralDof::Rotation(_) => {
+                                    group.resultant_moment_about_global_origin_newton_meters
+                                        [dof_component(term.dof) - 3] += generalized_reaction;
+                                }
+                            }
+                        }
+                    }
+                    group.constraint_work_joules += multiplier * row.right_hand_side;
+                    let violation = match row.residual_quantity {
+                        super::ConstraintResidualQuantity::Displacement => {
+                            group.maximum_displacement_error_meters =
+                                group.maximum_displacement_error_meters.max(error);
+                            ConstraintViolation::DisplacementMeters(error)
+                        }
+                        super::ConstraintResidualQuantity::Rotation => {
+                            group.maximum_rotation_error_radians =
+                                group.maximum_rotation_error_radians.max(error);
+                            ConstraintViolation::RotationRadians(error)
+                        }
+                    };
+                    group.row_reactions.push(ConstraintRowReaction {
+                        row_identity: row.identity,
+                        generalized_reaction: multiplier,
+                        violation,
+                    });
+                    Ok(())
+                },
+            )
+            .await?;
         }
 
         let reference_points = plan
@@ -472,21 +607,29 @@ impl CanonicalStructuralConstraintResult {
             maximum_rotation_error_radians: 0.0,
             groups,
         };
-        for group in &result.groups {
-            for component in 0..3 {
-                result.resultant_force_newtons[component] +=
-                    group.resultant_force_newtons[component];
-                result.resultant_moment_about_global_origin_newton_meters[component] +=
-                    group.resultant_moment_about_global_origin_newton_meters[component];
+        let totals_work = count(result.groups.len())?
+            .checked_mul(7)
+            .map_err(LedgerError::from)
+            .map_err(ConstraintResultError::from)?;
+        measured(owner, UsageCategory::Solve, totals_work, || {
+            for group in &result.groups {
+                for component in 0..3 {
+                    result.resultant_force_newtons[component] +=
+                        group.resultant_force_newtons[component];
+                    result.resultant_moment_about_global_origin_newton_meters[component] +=
+                        group.resultant_moment_about_global_origin_newton_meters[component];
+                }
+                result.constraint_work_joules += group.constraint_work_joules;
+                result.maximum_displacement_error_meters = result
+                    .maximum_displacement_error_meters
+                    .max(group.maximum_displacement_error_meters);
+                result.maximum_rotation_error_radians = result
+                    .maximum_rotation_error_radians
+                    .max(group.maximum_rotation_error_radians);
             }
-            result.constraint_work_joules += group.constraint_work_joules;
-            result.maximum_displacement_error_meters = result
-                .maximum_displacement_error_meters
-                .max(group.maximum_displacement_error_meters);
-            result.maximum_rotation_error_radians = result
-                .maximum_rotation_error_radians
-                .max(group.maximum_rotation_error_radians);
-        }
+            Ok::<_, ConstraintResultError>(())
+        })
+        .await?;
         result.validate_against(plan)?;
         Ok(result)
     }
@@ -739,6 +882,27 @@ fn component_vector(component: usize, value: f64) -> [f64; 3] {
     let mut vector = [0.0; 3];
     vector[component] = value;
     vector
+}
+
+fn count(length: usize) -> Result<OperationCount, ConstraintResultError> {
+    Ok(OperationCount::from_operations(
+        u64::try_from(length).map_err(|_| LedgerError::CountOverflow)?,
+    ))
+}
+
+fn immediate<T>(
+    future: impl std::future::Future<
+        Output = Result<T, NumericalCapacityError<ConstraintResultError, std::convert::Infallible>>,
+    >,
+) -> Result<T, ConstraintResultError> {
+    use futures::FutureExt;
+    future
+        .now_or_never()
+        .expect("native constraint result capacity is immediately ready")
+        .map_err(|error| match error {
+            NumericalCapacityError::Numerical(error) => error,
+            NumericalCapacityError::Admission(never) => match never {},
+        })
 }
 
 fn add_cross_product(moment: &mut [f64; 3], position: [f64; 3], force: [f64; 3]) {

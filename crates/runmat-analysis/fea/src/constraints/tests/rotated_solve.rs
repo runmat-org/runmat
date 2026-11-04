@@ -68,7 +68,8 @@ fn rotated_prescription_satisfies_tet4_shear_reaction_and_energy() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(solve.converged, "{:?}", solve.diagnostics);
     let expected_tip = axis * prescribed_m;
     for component in [9, 10] {
@@ -200,7 +201,8 @@ fn quarter_turn_periodicity_preserves_physical_expansion_and_reactions() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(solve.converged, "{:?}", solve.diagnostics);
     let expected_displacement = [
         0.0,

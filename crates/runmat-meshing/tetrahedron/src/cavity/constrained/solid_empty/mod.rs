@@ -13,12 +13,7 @@ pub fn constrained_cavity_solid_empty_boundary_faces(
     validate_constrained_cavity(cavity).map_err(ConstrainedCavityRefillError::Validation)?;
     let boundary_node_map = boundary_node_coordinates(cavity, nodes)?;
     let boundary_triangles = cavity_boundary_triangles(cavity, &boundary_node_map)?;
-    Ok(solid_empty_boundary_faces(
-        cavity,
-        &boundary_node_map,
-        &boundary_triangles,
-        options,
-    ))
+    solid_empty_boundary_faces(cavity, &boundary_node_map, &boundary_triangles, options)
 }
 
 pub fn constrained_cavity_classified_solid_empty_boundary_faces(

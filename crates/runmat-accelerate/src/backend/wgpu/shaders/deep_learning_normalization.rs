@@ -69,15 +69,12 @@ fn epsilon() -> $SCALAR$ { $EPSILON$ }
 fn quiet_nan() -> $SCALAR$ { $NAN$ }
 fn is_special(value: $SCALAR$) -> bool { $SPECIAL$ }
 
-// The divisors used below are finite, positive normal values. Splitting
-// its binary exponent keeps both scale factors normal. Explicit fused
-// operations prevent a reciprocal of a large divisor from becoming a
-// subnormal intermediate even when the quotient itself is normal.
+// Divisors here are finite, positive normal values. Scale in two exponent
+// steps so representable quotients do not depend on a subnormal reciprocal.
+$SCALING_HELPER$
 fn scaled_ratio(value: $SCALAR$, divisor: $SCALAR$) -> $SCALAR$ {
   $RATIO_SCALE$
-  let numerator = fma(fma(value, first, $SCALAR$(0.0)), second, $SCALAR$(0.0));
-  let denominator = fma(fma(divisor, first, $SCALAR$(0.0)), second, $SCALAR$(0.0));
-  return numerator / denominator;
+  $RATIO_EVALUATION$
 }
 
 // Subtract before scaling when signs agree: the difference cannot overflow,
@@ -247,7 +244,7 @@ const ADJOINT_INPUT: &str = r#"
 @group(0) @binding(2) var<storage, read> gamma: Tensor;
 @group(0) @binding(3) var<storage, read> statistics: Tensor;
 @group(0) @binding(4) var<storage, read> sums: Tensor;
-@group(0) @binding(5) var<storage, read_write> dx: Tensor;
+@group(0) @binding(5) var<storage, read_write> input_gradient: Tensor;
 $COMMON$
 
 @compute @workgroup_size($WG$)
@@ -262,13 +259,13 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let count = $SCALAR$(params.group_size);
   let centered = count * dxhat - sums.data[2u * position.x] - xhat * sums.data[2u * position.x + 1u];
   if (statistics.data[base + 2u] == $SCALAR$(0.0)) {
-    dx.data[index] = ($SCALAR$(1.0) / sqrt(epsilon())) / count * centered;
+    input_gradient.data[index] = ($SCALAR$(1.0) / sqrt(epsilon())) / count * centered;
   } else {
     // Reconstitute the physical standard deviation before dividing the complete
     // derivative numerator. Neither inv_std_scaled / maximum nor centered /
     // maximum is necessarily representable when the final derivative is.
     let standard_deviation = scaled_ratio(statistics.data[base], statistics.data[base + 2u]);
-    dx.data[index] = scaled_ratio(centered, standard_deviation) / count;
+    input_gradient.data[index] = scaled_ratio(centered, standard_deviation) / count;
   }
 }
 "#;
@@ -281,9 +278,7 @@ fn common(precision: super::super::types::NumericPrecision, binding: u32) -> Str
             "let nan_bits: u32 = 0x7fc00000u; return bitcast<f32>(nan_bits);",
             "return (bitcast<u32>(value) & 0x7f800000u) == 0x7f800000u;",
             r#"let exponent = i32((bitcast<u32>(divisor) >> 23u) & 0xffu) - 127;
-  let half = exponent / 2;
-  let first = bitcast<f32>(u32(127 - half) << 23u);
-  let second = bitcast<f32>(u32(127 - (exponent - half)) << 23u);"#,
+  let half = exponent / 2;"#,
         ),
         super::super::types::NumericPrecision::F64 => (
             "f64",
@@ -303,6 +298,18 @@ fn common(precision: super::super::types::NumericPrecision, binding: u32) -> Str
         .replace("$NAN$", nan)
         .replace("$SPECIAL$", special)
         .replace("$RATIO_SCALE$", ratio_scale)
+        .replace("$SCALING_HELPER$", match precision {
+            super::super::types::NumericPrecision::F32 => include_str!("../../../wgsl/scaling_f32.wgsl"),
+            super::super::types::NumericPrecision::F64 => "",
+        })
+        .replace("$RATIO_EVALUATION$", match precision {
+            super::super::types::NumericPrecision::F32 => r#"let numerator = runmat_scale_f32_pow2(runmat_scale_f32_pow2(value, -half), -(exponent - half));
+  let denominator = bitcast<f32>((bitcast<u32>(divisor) & 0x007fffffu) | 0x3f800000u);
+  return numerator / denominator;"#,
+            super::super::types::NumericPrecision::F64 => r#"let numerator = fma(fma(value, first, f64(0.0)), second, f64(0.0));
+  let denominator = fma(fma(divisor, first, f64(0.0)), second, f64(0.0));
+  return numerator / denominator;"#,
+        })
 }
 
 fn render(

@@ -32,11 +32,33 @@ use crate::{
         backend::kind::LinearAlgebraBackendKind,
         dynamics::{
             evaluate_harmonic_physical_state, solve_direct_harmonic, solve_modal_harmonic,
-            ModalHarmonicLoad, ModalReducedSystem,
+            DirectHarmonicError, ModalHarmonicError, ModalHarmonicLoad, ModalProjectionError,
+            ModalReducedSystem,
         },
     },
     AnalysisRunIdentity,
 };
+
+fn modal_projection_error(error: ModalProjectionError) -> AnalysisExecutionError {
+    match error {
+        ModalProjectionError::Usage(error) => AnalysisExecutionError::Usage(error),
+        other => AnalysisExecutionError::Invalid(other.to_string()),
+    }
+}
+
+fn modal_harmonic_error(error: ModalHarmonicError) -> AnalysisExecutionError {
+    match error {
+        ModalHarmonicError::Usage(error) => AnalysisExecutionError::Usage(error),
+        other => AnalysisExecutionError::Invalid(other.to_string()),
+    }
+}
+
+fn direct_harmonic_error(error: DirectHarmonicError) -> AnalysisExecutionError {
+    match error {
+        DirectHarmonicError::Usage(error) => AnalysisExecutionError::Usage(error),
+        other => AnalysisExecutionError::Invalid(other.to_string()),
+    }
+}
 
 /// Re-derives the physical formulation and admits a published frequency study directly from its
 /// typed multi-sample result.
@@ -138,8 +160,7 @@ fn admit_structural_frequency_publication_with_state(
                     "modal structural frequency publication names another basis or topology",
                 ));
             }
-            ModalReducedSystem::project(&assembly.real, basis)
-                .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+            ModalReducedSystem::project(&assembly.real, basis).map_err(modal_projection_error)?;
         }
         _ => {
             return Err(AnalysisExecutionError::Invalid(
@@ -408,7 +429,7 @@ fn execute_prepared_entry(
                 }
                 let response =
                     solve_direct_harmonic(&assembly.real, &assembly.imaginary_load, omega, *policy)
-                        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                        .map_err(direct_harmonic_error)?;
                 (
                     response.displacement_real,
                     response.displacement_imaginary,
@@ -436,7 +457,7 @@ fn execute_prepared_entry(
                     )
                 })?;
                 let reduced = ModalReducedSystem::project(&assembly.real, basis)
-                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                    .map_err(modal_projection_error)?;
                 let load = ModalHarmonicLoad {
                     real: (reduced)
                         .load_field(assembly.real.operator.load())
@@ -447,8 +468,8 @@ fn execute_prepared_entry(
                         .and_then(|field| (reduced).project_load(&field))
                         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?,
                 };
-                let response = solve_modal_harmonic(&reduced, omega, &load)
-                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                let response =
+                    solve_modal_harmonic(&reduced, omega, &load).map_err(modal_harmonic_error)?;
                 let real = (reduced)
                     .expand_state(&response.displacement_real)
                     .map(|field| field.into_canonical_storage())

@@ -8,6 +8,8 @@ pub(super) enum DenseSolveError {
     NonFinite,
     #[error("dense solve matrix is numerically singular")]
     Singular,
+    #[error("dense solve numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
 }
 
 pub(super) fn solve_square(
@@ -37,9 +39,16 @@ pub(super) fn solve_square(
         .fold(0.0_f64, f64::max);
     let pivot_floor = f64::EPSILON * size as f64 * scale.max(1.0);
     let lu = runmat_sparse_solvers::dense::DenseLu::from_row_major(matrix, size, pivot_floor)
-        .map_err(|_| DenseSolveError::Singular)?;
+        .map_err(|error| match error {
+            runmat_sparse_solvers::SolverError::Usage(error) => DenseSolveError::Usage(error),
+            _ => DenseSolveError::Singular,
+        })?;
     let mut solution = right_hand_side.to_vec();
-    lu.solve_in_place(&mut solution);
+    lu.solve_in_place(&mut solution)
+        .map_err(|error| match error {
+            runmat_sparse_solvers::SolverError::Usage(error) => DenseSolveError::Usage(error),
+            _ => DenseSolveError::Singular,
+        })?;
     if solution.iter().any(|value| !value.is_finite()) {
         return Err(DenseSolveError::NonFinite);
     }

@@ -1,11 +1,9 @@
 //! Server-owned cluster allocation admission, installed only after bootstrap or
 //! scheduler authority verification. It never starts a second local FEA lease.
 use runmat_execution::cancellation::CancellationToken;
-use runmat_execution::resource::ResourceUsage;
 use runmat_runtime::analysis::fea_run_admission::{
-    FeaRunAdmission, FeaRunAdmissionContext, FeaRunBudget, FeaRunDelegation,
-    FeaRunDelegationSource, FeaRunDenied, FeaRunOrigin, FeaRunOutcome, FeaRunPermit, FeaRunRequest,
-    FeaRunSite,
+    FeaRunAdmission, FeaRunAdmissionContext, FeaRunBudget, FeaRunDenied, FeaRunOrigin,
+    FeaRunOutcome, FeaRunPermit, FeaRunRequest, FeaRunSite, FeaRunUsage,
 };
 use std::sync::Arc;
 
@@ -17,6 +15,8 @@ struct ClusterAdmission {
     origin: FeaRunOrigin,
     deadline_unix_millis: u64,
     cancellation: CancellationToken,
+    lease: Option<Arc<runmat_fea_admission_native::NativeFeaAdmission>>,
+    worker_control: Option<Arc<super::fea_control::WorkerControl>>,
 }
 
 #[derive(Clone, Copy)]
@@ -39,6 +39,13 @@ impl AllocationClock {
     }
 }
 
+struct AllocationWindow {
+    cpu_millicores: u64,
+    maximum_wall_millis: u64,
+    clock: AllocationClock,
+    original_deadline: Option<u64>,
+}
+
 pub(super) fn for_verified_driver(
     authority: &runmat_execution_transport_native::control::DriverAuthority,
     allocation: &runmat_execution_transport_native::control::ResourceRequest,
@@ -48,12 +55,28 @@ pub(super) fn for_verified_driver(
     authority
         .validate()
         .map_err(|_| FeaRunDenied::LicenseInvalid)?;
+    let org = runmat_server_client::ids::OrgId::parse(&authority.org_id)
+        .map_err(|_| FeaRunDenied::LicenseInvalid)?;
+    let driver =
+        runmat_server_client::ids::ExecutionDriverLeaseId::parse(&authority.driver_lease_id)
+            .map_err(|_| FeaRunDenied::LicenseInvalid)?;
+    let lease = runmat_fea_admission_native::NativeFeaAdmission::for_driver(
+        &authority.server_url,
+        org,
+        driver,
+        authority.fencing_token,
+        &authority.credential,
+    )?;
     bounded(
-        allocation.cpu_millicores,
-        allocation.maximum_wall_millis,
-        clock,
-        None,
+        AllocationWindow {
+            cpu_millicores: allocation.cpu_millicores,
+            maximum_wall_millis: allocation.maximum_wall_millis,
+            clock,
+            original_deadline: None,
+        },
         cancellation,
+        Some(Arc::new(lease)),
+        None,
         FeaRunOrigin::ClusterDriver {
             run_id: authority.run_id.clone(),
             allocation_lease_id: authority.allocation_lease_id.clone(),
@@ -68,16 +91,21 @@ pub(super) fn for_verified_attempt(
     attempt: &runmat_execution_runner::AttemptRequest,
     clock: AllocationClock,
     cancellation: CancellationToken,
+    worker_control: Arc<super::fea_control::WorkerControl>,
 ) -> Result<FeaRunAdmissionContext, FeaRunDenied> {
     attempt
         .validate()
         .map_err(|_| FeaRunDenied::LicenseInvalid)?;
     bounded(
-        u64::from(attempt.task.resources.cpu_millicores),
-        attempt.task.resources.max_wall_millis,
-        clock,
-        attempt.task.deadline_unix_millis,
+        AllocationWindow {
+            cpu_millicores: u64::from(attempt.task.resources.cpu_millicores),
+            maximum_wall_millis: attempt.task.resources.max_wall_millis,
+            clock,
+            original_deadline: attempt.task.deadline_unix_millis,
+        },
         cancellation,
+        None,
+        Some(worker_control),
         FeaRunOrigin::ClusterAttempt {
             run_id: run_id.to_owned(),
             scope_id: attempt.scope_id,
@@ -90,13 +118,18 @@ pub(super) fn for_verified_attempt(
 }
 
 fn bounded(
-    cpu_millicores: u64,
-    maximum_wall_millis: u64,
-    clock: AllocationClock,
-    original_deadline: Option<u64>,
+    window: AllocationWindow,
     cancellation: CancellationToken,
+    lease: Option<Arc<runmat_fea_admission_native::NativeFeaAdmission>>,
+    worker_control: Option<Arc<super::fea_control::WorkerControl>>,
     origin: FeaRunOrigin,
 ) -> Result<FeaRunAdmissionContext, FeaRunDenied> {
+    let AllocationWindow {
+        cpu_millicores,
+        maximum_wall_millis,
+        clock,
+        original_deadline,
+    } = window;
     origin.validate(FeaRunSite::Dispatched)?;
     if !(1..=4_096_000).contains(&cpu_millicores)
         || maximum_wall_millis == 0
@@ -122,6 +155,8 @@ fn bounded(
         origin,
         deadline_unix_millis: deadline,
         cancellation,
+        lease,
+        worker_control,
     })))
 }
 
@@ -139,9 +174,6 @@ impl FeaRunAdmission for ClusterAdmission {
     fn origin(&self) -> Option<FeaRunOrigin> {
         Some(self.origin.clone())
     }
-    fn delegation_source(&self) -> Option<Arc<dyn FeaRunDelegationSource>> {
-        Some(Arc::new(self.clone()))
-    }
     fn site(&self) -> FeaRunSite {
         FeaRunSite::Dispatched
     }
@@ -158,88 +190,66 @@ impl FeaRunAdmission for ClusterAdmission {
         {
             return Err(FeaRunDenied::LeaseExpired);
         }
-        // Every root consumes only what remains of the SAME original wall grant.
-        let remaining = self
-            .maximum_wall_millis
-            .saturating_sub(self.clock.elapsed_millis());
-        let held =
-            (u128::from(request.allocated_cpu_millicores) * u128::from(remaining)).div_ceil(1000);
-        let budget = FeaRunBudget {
-            held_core_millis: u64::try_from(held).map_err(|_| FeaRunDenied::LicenseInvalid)?,
-            expires_at_unix_millis: self.deadline_unix_millis,
-            heartbeat_millis: 30_000,
+        // The verified driver holds the only Server credential. Worker attempts
+        // must obtain disjoint capacity from the driver's authenticated private
+        // parent control, never a second lease or a physical-resource conversion.
+        let permit = match (&self.lease, &self.worker_control) {
+            (Some(lease), None) => lease.admit(request)?,
+            (None, Some(control)) => control.admit(request)?,
+            _ => return Err(FeaRunDenied::LicenseInvalid),
         };
-        budget.validate()?;
         Ok(Box::new(ClusterPermit {
-            budget,
+            inner: permit,
+            deadline_unix_millis: self.deadline_unix_millis,
             cancellation: self.cancellation.clone(),
         }))
     }
 }
-impl FeaRunDelegationSource for ClusterAdmission {
-    fn snapshot(&self) -> Result<FeaRunDelegation, FeaRunDenied> {
-        if self.cancellation.is_cancelled()
-            || now() >= self.deadline_unix_millis
-            || self.clock.elapsed_millis() >= self.maximum_wall_millis
-        {
-            return Err(FeaRunDenied::LeaseExpired);
-        }
-        let wall = self.maximum_wall_millis;
-        let held = (u128::from(self.cpu_millicores) * u128::from(wall)).div_ceil(1000);
-        let run_id = match &self.origin {
-            FeaRunOrigin::ClusterDriver { run_id, .. }
-            | FeaRunOrigin::ClusterAttempt { run_id, .. } => run_id.clone(),
-            _ => return Err(FeaRunDenied::LicenseInvalid),
-        };
-        let grant = FeaRunDelegation {
-            origin: self.origin.clone(),
-            request: FeaRunRequest {
-                run_id,
-                kind: runmat_runtime::analysis::fea_run_admission::FeaRunKind::MeshAndSolve,
-                site: FeaRunSite::Dispatched,
-                allocated_cpu_millicores: self.cpu_millicores,
-                estimated_wall_seconds: None,
-                study_identity: "server-owned allocation".into(),
-            },
-            budget: FeaRunBudget {
-                held_core_millis: u64::try_from(held).map_err(|_| FeaRunDenied::LicenseInvalid)?,
-                expires_at_unix_millis: self.deadline_unix_millis,
-                heartbeat_millis: 30_000,
-            },
-            elapsed_wall_millis: self.clock.elapsed_millis(),
-            observed_at_unix_millis: now(),
-            allocation_ceiling_millicores: self.cpu_millicores,
-        };
-        grant.validate()?;
-        Ok(grant)
-    }
-    fn cancellation_token(&self) -> CancellationToken {
-        self.cancellation.clone()
-    }
-}
 struct ClusterPermit {
-    budget: FeaRunBudget,
+    inner: Box<dyn FeaRunPermit>,
+    deadline_unix_millis: u64,
     cancellation: CancellationToken,
+}
+impl ClusterPermit {
+    fn physical_check(&self) -> Result<(), FeaRunDenied> {
+        if self.cancellation.is_cancelled() || now() >= self.deadline_unix_millis {
+            Err(FeaRunDenied::LeaseExpired)
+        } else {
+            Ok(())
+        }
+    }
+    fn bounded(&self, mut budget: FeaRunBudget) -> Result<FeaRunBudget, FeaRunDenied> {
+        budget.expires_at_unix_millis =
+            budget.expires_at_unix_millis.min(self.deadline_unix_millis);
+        budget.validate()?;
+        Ok(budget)
+    }
 }
 impl FeaRunPermit for ClusterPermit {
     fn budget(&self) -> FeaRunBudget {
-        self.budget
+        let mut budget = self.inner.budget();
+        budget.expires_at_unix_millis =
+            budget.expires_at_unix_millis.min(self.deadline_unix_millis);
+        budget
     }
-    fn heartbeat(&self, _: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
-        if self.cancellation.is_cancelled() {
-            return Err(FeaRunDenied::LeaseExpired);
-        }
-        self.budget.validate()?;
-        Ok(self.budget)
+    fn heartbeat(&self, usage: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+        self.physical_check()?;
+        self.bounded(self.inner.heartbeat(usage)?)
     }
-    fn settle(self: Box<Self>, _: FeaRunOutcome, _: &ResourceUsage) -> Result<(), FeaRunDenied> {
-        // The authenticated allocation owner already meters and settles cluster
-        // CPU wall time. This permit owns no local HTTP lease to settle again.
-        if self.cancellation.is_cancelled() {
-            Err(FeaRunDenied::LeaseExpired)
-        } else {
-            self.budget.validate()
-        }
+    fn request_grant(
+        &self,
+        usage: &FeaRunUsage,
+        required: runmat_simulation_usage::OperationCount,
+    ) -> Result<FeaRunBudget, FeaRunDenied> {
+        self.physical_check()?;
+        self.bounded(self.inner.request_grant(usage, required)?)
+    }
+    fn settle(
+        self: Box<Self>,
+        outcome: FeaRunOutcome,
+        usage: &FeaRunUsage,
+    ) -> Result<(), FeaRunDenied> {
+        self.inner.settle(outcome, usage)
     }
 }
 
@@ -247,7 +257,7 @@ impl FeaRunPermit for ClusterPermit {
 mod tests {
     use super::*;
     #[test]
-    fn original_cluster_grant_never_expands_and_rejects_wrong_site_cpu_or_expiry() {
+    fn worker_allocation_cannot_mint_operation_capacity_from_cpu_or_wall_time() {
         let cancellation = runmat_execution::cancellation::CancellationSource::new();
         let deadline = now() + 60_000;
         let admission = ClusterAdmission {
@@ -262,6 +272,8 @@ mod tests {
             },
             deadline_unix_millis: deadline,
             cancellation: cancellation.token(),
+            lease: None,
+            worker_control: None,
         };
         let mut request = FeaRunRequest::local(
             runmat_runtime::analysis::fea_run_admission::FeaRunKind::Solve,
@@ -274,13 +286,10 @@ mod tests {
             Err(FeaRunDenied::LicenseInvalid)
         ));
         request.site = FeaRunSite::Dispatched;
-        let permit = admission.admit(&request).unwrap();
-        assert_eq!(permit.budget().expires_at_unix_millis, deadline);
-        assert!(permit.budget().held_core_millis <= 120_000);
-        assert_eq!(
-            permit.heartbeat(&ResourceUsage::default()).unwrap(),
-            permit.budget()
-        );
+        assert!(matches!(
+            admission.admit(&request),
+            Err(FeaRunDenied::LicenseInvalid)
+        ));
         request.allocated_cpu_millicores = 3000;
         assert!(matches!(
             admission.admit(&request),
@@ -292,6 +301,5 @@ mod tests {
             admission.admit(&request),
             Err(FeaRunDenied::LeaseExpired)
         ));
-        assert!(permit.heartbeat(&ResourceUsage::default()).is_err());
     }
 }

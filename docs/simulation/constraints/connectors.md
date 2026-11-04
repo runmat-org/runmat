@@ -1,4 +1,4 @@
-# Structural connectors
+# Connectors
 
 Connectors add a localized stiffness or damping law to a structural model. They are distinct from
 mesh elements, kinematic constraints, and contact. RunMat exposes four connector kinds whose names

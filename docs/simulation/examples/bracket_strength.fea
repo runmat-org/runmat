@@ -1,10 +1,12 @@
-// Static strength of the demo wall-hook bracket (40 x 50 x 35 mm, steel).
-// The two-kilonewton load presses down on the top face; the countersunk mounting holes are held.
+// Static strength of a wall-hook bracket (40 x 50 x 35 mm, steel).
+// The base plate is bolted to a wall at its three countersunk mounting holes, which are held.
+// A two-kilonewton load hangs from the hook: it presses down the wall (-Y) on the hook seat,
+// the upward-facing flat between the wall and the lip.
 geometry bracket {
     file = "./geometry/bracket.step"
     units = mm
     region body : solid { select name "WallHook_30mm"; expect exactly_one }
-    region top_face : face { select name "Top face"; expect exactly_one }
+    region hook_seat : face { select name "Hook seat"; expect exactly_one }
     region mounting_holes : face { select name "Mounting holes"; expect one_or_more }
     region corner_fillets : face { select name "Corner fillets"; expect one_or_more }
 }
@@ -31,7 +33,7 @@ model loaded_bracket {
         structural.fixed { target = geometry.bracket.region.mounting_holes }
     }
     load hanging_load {
-        force on geometry.bracket.region.top_face = [0, 0, -2] kN
+        force on geometry.bracket.region.hook_seat = [0, -2, 0] kN
     }
     load_case service { include load.hanging_load }
 }

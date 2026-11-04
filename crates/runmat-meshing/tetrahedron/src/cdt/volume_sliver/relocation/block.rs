@@ -37,7 +37,7 @@ pub(super) fn candidate<'ctx>(
             )
             .expect("current star quality")
             .resolved_metric
-    });
+    })?;
     let Some(points) = prepared.optimize(cancellation)? else {
         return Ok(None);
     };

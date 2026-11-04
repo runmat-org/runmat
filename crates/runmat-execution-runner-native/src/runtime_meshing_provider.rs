@@ -7,9 +7,12 @@ use runmat_meshing_core::{
     resolve_meshing_request, CacheAdmissionDecision, CanonicalMeshingContract, MeshingRequest,
     MeshingRequestSettings,
 };
-use runmat_meshing_execution::MeshingRunEvidenceContext;
+use runmat_meshing_execution::{
+    ExactMeshingDagRunError, MeshingRunEvidenceContext, MeshingStageExecutionError,
+};
 use runmat_runtime::meshing::{
-    MeshingExecutionOutput, MeshingExecutionProvider, MeshingExecutionRequest,
+    MeshingExecutionOutput, MeshingExecutionProvider, MeshingExecutionProviderError,
+    MeshingExecutionRequest,
 };
 
 use crate::meshing_platform::{native_meshing_capability_cohort, native_meshing_platform};
@@ -65,6 +68,18 @@ impl NativeMeshingSourceError {
             _ => None,
         }
     }
+
+    fn into_provider_error(self) -> MeshingExecutionProviderError {
+        match self {
+            Self::Meshing(NativeExactMeshingJobError::Executor(
+                MeshingStageExecutionError::Failure(failure),
+            ))
+            | Self::Meshing(NativeExactMeshingJobError::Run(ExactMeshingDagRunError::Stage(
+                MeshingStageExecutionError::Failure(failure),
+            ))) => MeshingExecutionProviderError::Failure(failure),
+            other => MeshingExecutionProviderError::Host(Box::new(other)),
+        }
+    }
 }
 
 impl Default for NativeMeshingPartitionPolicy {
@@ -96,7 +111,7 @@ pub fn native_meshing_execution_provider() -> MeshingExecutionProvider {
             settings: request.settings.clone(),
             partition_policy: NativeMeshingPartitionPolicy::default(),
         })
-        .map_err(|error| error.to_string())
+        .map_err(NativeMeshingSourceError::into_provider_error)
         .map(|result| {
             let NativeExactMeshingResult { dag_result, .. } = result;
             MeshingExecutionOutput {

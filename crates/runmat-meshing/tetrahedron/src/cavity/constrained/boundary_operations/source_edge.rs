@@ -1,6 +1,8 @@
 use runmat_meshing_core::quality::predicate::{
     orient_tetrahedron_node_ids, tetrahedron_edge_aspect_ratio, tetrahedron_scaled_jacobian,
+    tetrahedron_scaled_jacobian_with_owner,
 };
+use runmat_simulation_usage::{OperationCount, UsageCategory, UsageContext};
 
 use super::*;
 
@@ -140,15 +142,54 @@ pub fn split_constrained_cavity_source_edge(
         ];
         for child in child_node_ids {
             let points = child.map(|node_id| node_map_with_split[&node_id]);
-            let (oriented_node_ids, volume_m3) = orient_tetrahedron_node_ids(child, points);
-            if volume_m3 <= 0.0 {
-                return Err(
-                    ConstrainedCavitySourceEdgeSplitError::DegenerateSplitTetrahedron {
-                        tetrahedron_id: tetrahedron.tetrahedron_id,
-                    },
-                );
+            let usage = UsageContext::capture();
+            let mut batch = usage
+                .as_ref()
+                .map(|usage| {
+                    usage
+                        .ledger()
+                        .reserve(UsageCategory::Meshing, OperationCount::from_operations(359))
+                })
+                .transpose()
+                .map_err(ConstrainedCavitySourceEdgeSplitError::Accounting)?;
+            let mut completed = 0;
+            let geometry = (|| {
+                let (oriented_node_ids, volume_m3) = orient_tetrahedron_node_ids(child, points);
+                completed += 24;
+                if volume_m3 <= 0.0 {
+                    return Err(
+                        ConstrainedCavitySourceEdgeSplitError::DegenerateSplitTetrahedron {
+                            tetrahedron_id: tetrahedron.tetrahedron_id,
+                        },
+                    );
+                }
+                let oriented_points =
+                    oriented_node_ids.map(|node_id| node_map_with_split[&node_id]);
+                let aspect_ratio = tetrahedron_edge_aspect_ratio(oriented_points);
+                completed += 55;
+                let exact_scaled_jacobian = match batch.as_mut() {
+                    Some(owner) => tetrahedron_scaled_jacobian_with_owner(
+                        oriented_points,
+                        owner,
+                        &mut completed,
+                    ),
+                    None => tetrahedron_scaled_jacobian(oriented_points),
+                }
+                .map_err(ConstrainedCavitySourceEdgeSplitError::Accounting)?
+                .abs();
+                Ok((
+                    oriented_node_ids,
+                    volume_m3,
+                    aspect_ratio,
+                    exact_scaled_jacobian,
+                ))
+            })();
+            if let Some(batch) = &mut batch {
+                batch
+                    .complete(OperationCount::from_operations(completed))
+                    .map_err(ConstrainedCavitySourceEdgeSplitError::Accounting)?;
             }
-            let oriented_points = oriented_node_ids.map(|node_id| node_map_with_split[&node_id]);
+            let (oriented_node_ids, volume_m3, aspect_ratio, exact_scaled_jacobian) = geometry?;
             let child_tetrahedron = CavityTetrahedron {
                 tetrahedron_id: next_tetrahedron_id,
                 component_id: tetrahedron.component_id,
@@ -156,8 +197,8 @@ pub fn split_constrained_cavity_source_edge(
                 source_surface_element_id: tetrahedron.source_surface_element_id,
                 region_ids: tetrahedron.region_ids.clone(),
                 volume_m3,
-                aspect_ratio: tetrahedron_edge_aspect_ratio(oriented_points),
-                exact_scaled_jacobian: tetrahedron_scaled_jacobian(oriented_points).abs(),
+                aspect_ratio,
+                exact_scaled_jacobian,
             };
             if selected_original_tetrahedron_ids.contains(&tetrahedron.tetrahedron_id) {
                 selected_tetrahedron_ids.insert(child_tetrahedron.tetrahedron_id);

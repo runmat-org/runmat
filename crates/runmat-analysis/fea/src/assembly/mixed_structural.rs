@@ -15,9 +15,14 @@ use super::{
         assemble_connectors_with_resolver, resolve_explicit_surface, resolve_projected_surface,
         ConnectorAssemblyContext, ConnectorTargetRole, ResolvedConnectorTarget,
     },
-    explicit_elements::{assemble_explicit_elements, ExplicitElementAssembly},
+    explicit_elements::{
+        assemble_explicit_elements_with_owner, ExplicitCapacityPhase, ExplicitElementAssembly,
+    },
     requested_moment_norm,
-    solver_solid::assemble_solver_solid_operators_with_execution,
+    solver_solid::{
+        assemble_solver_solid_operators_capturing_with_owner, SolidCapacityPhase,
+        SolverSolidAssemblyError,
+    },
     structural_loads::{
         apply as apply_structural_load_plan, compile_mixed as compile_mixed_load_plan,
     },
@@ -43,6 +48,12 @@ use crate::{
 mod operators;
 use operators::{embed_solid_matrix, sparse_error, sum};
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum MixedCapacityPhase {
+    Solid(SolidCapacityPhase),
+    Explicit(ExplicitCapacityPhase),
+}
+
 pub(crate) fn mixed_dof_layout(
     topology: &CanonicalStructuralNodeSpace,
     reference_point_count: usize,
@@ -63,13 +74,23 @@ pub(crate) fn mixed_dof_layout(
     .with_reference_points(reference_point_count)
 }
 
-pub(super) fn assemble_mixed_structural_system(
+pub(super) async fn assemble_mixed_structural_system_with_owner<O, F, A>(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
     mesh: &SolverMeshArtifact,
     supplied_constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
-) -> Result<AssemblySummary, LinearAssemblyError> {
+    awaited_elements: bool,
+    mut before: O,
+) -> Result<AssemblySummary, A>
+where
+    O: FnMut(MixedCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+    A: From<LinearAssemblyError>
+        + From<StructuralAssemblyError>
+        + From<SolverSolidAssemblyError>
+        + Send,
+{
     let structural = model.structural.as_ref().ok_or({
         LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
     })?;
@@ -95,9 +116,18 @@ pub(super) fn assemble_mixed_structural_system(
                 ),
             )
         })?;
-    let solid =
-        assemble_solver_solid_operators_with_execution(mesh, &solid_properties, local_execution)
-            .map_err(LinearAssemblyError::SolidOperator)?;
+    let solid = assemble_solver_solid_operators_capturing_with_owner(
+        mesh,
+        &solid_properties,
+        super::solver_solid::SolidAssemblyExecution {
+            local_execution,
+            capture: None,
+            maximum_block_elements: usize::MAX,
+            awaited_elements,
+        },
+        |phase, count| before(MixedCapacityPhase::Solid(phase), count),
+    )
+    .await?;
     let ExplicitElementAssembly {
         stiffness: explicit_stiffness,
         damping: explicit_damping,
@@ -107,14 +137,16 @@ pub(super) fn assemble_mixed_structural_system(
         mut formulations,
         beam_count,
         shell_count,
-    } = assemble_explicit_elements(
+    } = assemble_explicit_elements_with_owner(
         structural,
         &solid_properties,
         &layout,
         &topology.explicit_node_indices,
         local_execution,
+        awaited_elements,
+        |phase, count| before(MixedCapacityPhase::Explicit(phase), count),
     )
-    .map_err(LinearAssemblyError::Structural)?;
+    .await?;
     let solid_stiffness = embed_solid_matrix(&solid.stiffness, &layout, topology.solid_node_count)?;
     let solid_mass =
         embed_solid_matrix(&solid.consistent_mass, &layout, topology.solid_node_count)?;
@@ -386,7 +418,8 @@ pub(super) fn assemble_mixed_structural_system(
             Err(error) => {
                 return Err(LinearAssemblyError::Structural(
                     StructuralAssemblyError::SparseOperator(error.to_string()),
-                ))
+                )
+                .into())
             }
         };
     let operator = AssembledRealSystem::try_new_with_nullspace_evidence(

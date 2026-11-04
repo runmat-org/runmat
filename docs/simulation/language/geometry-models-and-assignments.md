@@ -6,6 +6,8 @@ examples: [cantilever-static]
 ---
 # Geometry, models and assignments
 
+This page is the syntax reference for geometry, models and assignments. To set up a study, see [Geometry](../geometry) and [Models](../models).
+
 A study needs a shape and a physical description of it. The `geometry` declaration owns the shape: where it comes from, its unit, and its named regions. The `model` declaration owns the physics placed on those regions: materials, sections, orientations, supports, loads and signals. One CAD revision and one mesh can therefore serve several material or loading studies, and a model can move to a revised CAD file as long as the region names stay the same.
 
 This page covers the tasks in the order a study is written: bring in geometry, name its regions, mesh it, define materials, assign them, and apply supports and loads. The exact members, types and defaults of each declaration are in the [declaration reference](./reference/declarations.md).

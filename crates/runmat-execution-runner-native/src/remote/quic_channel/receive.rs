@@ -19,6 +19,7 @@ pub(super) struct Registries<'a> {
     pub pending: &'a Mutex<ReplyRegistry>,
     pub progress: &'a Mutex<HashMap<AttemptId, VecDeque<crate::ProgramProgress>>>,
     pub collectives: &'a Mutex<HashMap<AttemptId, VecDeque<CollectiveRequest>>>,
+    pub fea_calls: &'a Mutex<HashMap<AttemptId, VecDeque<crate::fea_proxy::Call>>>,
 }
 
 pub(super) async fn run(
@@ -32,6 +33,7 @@ pub(super) async fn run(
         pending,
         progress,
         collectives,
+        fea_calls,
     } = registries;
     let mut progress_sequences = HashMap::new();
     loop {
@@ -123,6 +125,36 @@ pub(super) async fn run(
             request.activity.send_replace(tokio::time::Instant::now());
             continue;
         }
+        if let RemoteWorkerOutcome::FeaAdmissionCall { attempt_id, call } = &reply.outcome {
+            runmat_canonical_codec::encode_json_bounded(call, crate::fea_proxy::MAX_FRAME_BYTES)
+                .map_err(protocol)?;
+            let pending = pending.lock().expect("remote reply registry poisoned");
+            let Some(request) = pending.get(&reply.correlation_id) else {
+                continue;
+            };
+            if request.attempt_id != Some(*attempt_id)
+                || call.assignment.attempt_id != *attempt_id
+                || call.assignment.worker_id != ready.worker_id
+                || call.assignment.pool_id != ready.pool_id
+                || frame.kind != request.frame_kind
+            {
+                return Err(protocol(
+                    "remote FEA admission call differs from its original attempt",
+                ));
+            }
+            let mut queues = fea_calls
+                .lock()
+                .expect("remote FEA request registry poisoned");
+            let queue = queues.entry(*attempt_id).or_default();
+            if !queue.is_empty() {
+                return Err(protocol(
+                    "remote FEA request queue exceeds its single outstanding call",
+                ));
+            }
+            queue.push_back(call.clone());
+            request.activity.send_replace(tokio::time::Instant::now());
+            continue;
+        }
         let mut pending = pending.lock().expect("remote reply registry poisoned");
         if pending
             .get(&reply.correlation_id)
@@ -136,6 +168,10 @@ pub(super) async fn run(
                 collectives
                     .lock()
                     .expect("remote collective registry poisoned")
+                    .remove(&attempt_id);
+                fea_calls
+                    .lock()
+                    .expect("remote FEA request registry poisoned")
                     .remove(&attempt_id);
             }
             let _ = request.sender.send(Ok(reply));

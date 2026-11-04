@@ -232,6 +232,7 @@ impl CanonicalNonlinearSolidBasis {
                     });
                 },
             )
+            .map_err(NonlinearSolidError::Accounting)?
             .ok_or_else(|| {
                 NonlinearSolidError::Authority("invalid physical integration geometry".into())
             })?;

@@ -94,7 +94,8 @@ fn solve_face_normal_offset(angle: f64) {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(solve.converged, "{:?}", solve.diagnostics);
     let global_offset = [0.0, cos * offset_m, sin * offset_m];
     let expected_displacement = [

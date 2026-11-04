@@ -1,3 +1,4 @@
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -21,6 +22,8 @@ pub enum SolidMaterialError {
     InvalidPoissonRatio,
     #[error("solid material density must be positive and finite")]
     InvalidDensity,
+    #[error("solid material numerical accounting failed: {0}")]
+    Accounting(#[from] LedgerError),
 }
 
 impl SolidMaterial {
@@ -46,17 +49,42 @@ impl SolidMaterial {
 
     pub fn lame_lambda_pa(self) -> Result<f64, SolidMaterialError> {
         self.validate()?;
-        Ok(
-            self.youngs_modulus_pa.canonical_value() * self.poisson_ratio.canonical_value()
-                / ((1.0 + self.poisson_ratio.canonical_value())
-                    * (1.0 - 2.0 * self.poisson_ratio.canonical_value())),
-        )
+        let usage = UsageContext::capture();
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| {
+                usage
+                    .ledger()
+                    .reserve(UsageCategory::Assembly, OperationCount::from_operations(6))
+            })
+            .transpose()?;
+        let lambda = self.youngs_modulus_pa.canonical_value()
+            * self.poisson_ratio.canonical_value()
+            / ((1.0 + self.poisson_ratio.canonical_value())
+                * (1.0 - 2.0 * self.poisson_ratio.canonical_value()));
+        if let Some(batch) = &mut batch {
+            batch.complete(OperationCount::from_operations(6))?;
+        }
+        Ok(lambda)
     }
 
     pub fn shear_modulus_pa(self) -> Result<f64, SolidMaterialError> {
         self.validate()?;
-        Ok(self.youngs_modulus_pa.canonical_value()
-            / (2.0 * (1.0 + self.poisson_ratio.canonical_value())))
+        let usage = UsageContext::capture();
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| {
+                usage
+                    .ledger()
+                    .reserve(UsageCategory::Assembly, OperationCount::from_operations(3))
+            })
+            .transpose()?;
+        let shear = self.youngs_modulus_pa.canonical_value()
+            / (2.0 * (1.0 + self.poisson_ratio.canonical_value()));
+        if let Some(batch) = &mut batch {
+            batch.complete(OperationCount::from_operations(3))?;
+        }
+        Ok(shear)
     }
 }
 
@@ -65,6 +93,15 @@ pub(super) fn elasticity_matrix(
 ) -> Result<ElasticityMatrix, SolidMaterialError> {
     let lambda = material.lame_lambda_pa()?;
     let mu = material.shear_modulus_pa()?;
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(UsageCategory::Assembly, OperationCount::from_operations(6))
+        })
+        .transpose()?;
     let mut matrix = [[0.0; 6]; 6];
     for (row, diagonal) in matrix.iter_mut().enumerate().take(3) {
         diagonal[..3].fill(lambda);
@@ -73,5 +110,8 @@ pub(super) fn elasticity_matrix(
     matrix[3][3] = mu;
     matrix[4][4] = mu;
     matrix[5][5] = mu;
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(6))?;
+    }
     Ok(matrix)
 }

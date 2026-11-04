@@ -30,7 +30,7 @@ pub(in crate::cdt::volume_sliver) fn smooth_vertex_star_points_with_metrics(
         .node((source_index) as u32)
         .coordinates_m
         .canonical_value();
-    let initial_score = prepared.score(start);
+    let initial_score = prepared.score(start)?;
     let mut results = Vec::new();
     for step in CAVITY_SMOOTHING_STEPS {
         let mut point = start;
@@ -56,7 +56,7 @@ pub(in crate::cdt::volume_sliver) fn smooth_vertex_star_points_with_metrics(
                 if !point_is_in_vertex_star_kernel(topology, star, source_index, candidate)? {
                     continue;
                 }
-                let candidate_score = prepared.score(candidate);
+                let candidate_score = prepared.score(candidate)?;
                 if candidate_score >= score {
                     continue;
                 }
@@ -148,7 +148,7 @@ pub(in crate::cdt::volume_sliver) fn pattern_search_vertex_star_with_metrics(
     }
 
     let mut point = start;
-    let initial_score = prepared.score(point);
+    let initial_score = prepared.score(point)?;
     let mut score = initial_score.clone();
     let mut radius = local_scale * 0.25;
     let minimum_radius = local_scale * 2_f64.powi(-24);
@@ -177,7 +177,7 @@ pub(in crate::cdt::volume_sliver) fn pattern_search_vertex_star_with_metrics(
                     if !point_is_in_vertex_star_kernel(topology, star, source_index, candidate)? {
                         continue;
                     }
-                    let candidate_score = prepared.score(candidate);
+                    let candidate_score = prepared.score(candidate)?;
                     if candidate_score >= score {
                         continue;
                     }

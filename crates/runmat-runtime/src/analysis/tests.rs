@@ -3000,7 +3000,8 @@ fn native_sparse_fea_cancellation_is_terminal_and_releases_resources() {
         LinearAlgebraBackendKind::Accelerator,
         &runmat_analysis_fea::solve::backend::cpu_reference::CpuReferenceBackend,
         None,
-    );
+    )
+    .expect("cancelled coercivity fixture returns a diagnostic outcome");
 
     assert!(!result.converged);
     assert!(result.solution.iter().all(|value| *value == 0.0));

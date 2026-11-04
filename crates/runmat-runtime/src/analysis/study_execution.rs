@@ -9,7 +9,7 @@ use super::contracts::{AnalysisExecutionStep, AnalysisRunResult, AnalysisSolverO
 use super::{
     execute_acoustic_with_options, execute_cfd_with_options, execute_modal_with_options,
     execute_nonlinear_with_options, execute_transient_with_options,
-    linear_static_execution::execute_linear_static_with_executor,
+    linear_static_execution::execute_linear_static_with_capacity,
     thermal_execution::execute_thermal_with_options, StructuralLinearExecutor,
     ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
 };
@@ -44,35 +44,66 @@ pub(super) fn execute_study_step_with_policy(
     structural_executor: Option<&dyn StructuralLinearExecutor>,
     require_accelerator: bool,
 ) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
-    runmat_analysis_fea::accelerator_admission::with_accelerator_admission_policy(
-        if require_accelerator
-            || crate::context::current_acceleration_policy()
-                .is_some_and(|policy| !policy.allow_host_fallback)
-        {
-            runmat_analysis_fea::accelerator_admission::AcceleratorAdmissionPolicy::Required
-        } else {
-            execution.accelerator_admission
-        },
-        || {
-            execute_admitted_study_step(
-                model,
-                procedure_step,
-                execution,
-                solver_mesh_artifact_path,
-                context,
-                structural_executor,
-            )
-        },
+    use futures::FutureExt;
+    execute_study_step_with_capacity(
+        model,
+        procedure_step,
+        execution,
+        solver_mesh_artifact_path,
+        context,
+        structural_executor,
+        require_accelerator,
+        None,
     )
+    .now_or_never()
+    .expect("the synchronous study host does not await capacity")
 }
 
-fn execute_admitted_study_step(
+pub(super) async fn execute_study_step_with_capacity(
     model: &AnalysisModel,
     procedure_step: &ProcedureStep,
     execution: &AnalysisExecutionStep,
     solver_mesh_artifact_path: Option<&str>,
     context: &OperationContext,
     structural_executor: Option<&dyn StructuralLinearExecutor>,
+    require_accelerator: bool,
+    capacity: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner>,
+) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
+    let policy = if require_accelerator
+        || crate::context::current_acceleration_policy()
+            .is_some_and(|policy| !policy.allow_host_fallback)
+    {
+        runmat_analysis_fea::accelerator_admission::AcceleratorAdmissionPolicy::Required
+    } else {
+        execution.accelerator_admission
+    };
+    let future = execute_admitted_study_step(
+        model,
+        procedure_step,
+        execution,
+        solver_mesh_artifact_path,
+        context,
+        structural_executor,
+        capacity,
+    );
+    let mut future = std::pin::pin!(future);
+    std::future::poll_fn(|cx| {
+        runmat_analysis_fea::accelerator_admission::with_accelerator_admission_policy(
+            policy,
+            || std::future::Future::poll(future.as_mut(), cx),
+        )
+    })
+    .await
+}
+
+async fn execute_admitted_study_step(
+    model: &AnalysisModel,
+    procedure_step: &ProcedureStep,
+    execution: &AnalysisExecutionStep,
+    solver_mesh_artifact_path: Option<&str>,
+    context: &OperationContext,
+    structural_executor: Option<&dyn StructuralLinearExecutor>,
+    capacity: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner>,
 ) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
     let model = solver_model(model, procedure_step);
     match &execution.solver_options {
@@ -108,13 +139,14 @@ fn execute_admitted_study_step(
                 &mut options.solver_mesh_artifact_path,
                 solver_mesh_artifact_path,
             );
-            let run = execute_linear_static_with_executor(
+            let run = execute_linear_static_with_capacity(
                 &model,
                 execution.backend,
                 options.clone(),
                 context.clone(),
                 structural_executor,
-            )?;
+                capacity,
+            ).await?;
             Ok((run, AnalysisSolverOptions::StructuralLinear(options)))
         }
         AnalysisSolverOptions::StructuralFrequency(_) => Err(operation_error(

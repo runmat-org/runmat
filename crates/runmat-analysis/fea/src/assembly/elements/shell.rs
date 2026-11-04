@@ -1,3 +1,4 @@
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -8,7 +9,7 @@ pub(crate) mod laminate;
 
 use frame_math::{cross, dot, norm, positive_finite, scale, sub};
 
-pub(crate) use constitutive::homogeneous_constitutive;
+pub(crate) use constitutive::admitted_homogeneous_constitutive;
 pub use constitutive::{ShellConstitutive, ShellConstitutiveMatrices};
 pub(crate) use inertia::{global_lumped_mass_matrix, homogeneous_mass_moments, ShellMassMoments};
 
@@ -71,6 +72,8 @@ pub enum ShellElementError {
     InvalidMaterial,
     #[error("shell constitutive matrices, recovery layers, or mass properties are invalid")]
     InvalidConstitutive,
+    #[error("shell numerical accounting failed: {0}")]
+    Accounting(#[from] LedgerError),
 }
 
 impl ShellSection {
@@ -103,15 +106,33 @@ impl ShellMaterial {
 
 impl ShellElementGeometry {
     pub fn local_frame(self) -> Result<ShellLocalFrame, ShellElementError> {
+        // Maximum is the fallback-axis path: edges (6), normal (9), norm (6),
+        // normalized z (4), projection (11), projection norm (6), fallback norm
+        // (6), normalized x (4), y cross (9), and area scaling (1).
+        let usage = UsageContext::capture();
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| {
+                usage
+                    .ledger()
+                    .reserve(UsageCategory::Assembly, OperationCount::from_operations(62))
+            })
+            .transpose()?;
         let edge_a = sub(self.nodes_m[1], self.nodes_m[0]);
         let edge_b = sub(self.nodes_m[2], self.nodes_m[0]);
         let normal_area = cross(edge_a, edge_b);
         let normal_norm = norm(normal_area);
         if !positive_finite(normal_norm) {
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(21))?;
+            }
             return Err(ShellElementError::DegenerateArea);
         }
         let z = scale(normal_area, 1.0 / normal_norm);
         if !self.reference_axis.iter().all(|value| value.is_finite()) {
+            if let Some(batch) = &mut batch {
+                batch.complete(OperationCount::from_operations(25))?;
+            }
             return Err(ShellElementError::DegenerateReferenceAxis);
         }
         let reference_projection = sub(self.reference_axis, scale(z, dot(self.reference_axis, z)));
@@ -121,16 +142,29 @@ impl ShellElementGeometry {
         } else {
             let edge_norm = norm(edge_a);
             if !positive_finite(edge_norm) {
+                if let Some(batch) = &mut batch {
+                    batch.complete(OperationCount::from_operations(48))?;
+                }
                 return Err(ShellElementError::DegenerateReferenceAxis);
             }
             scale(edge_a, 1.0 / edge_norm)
         };
         let y = cross(z, x);
+        let area = 0.5 * normal_norm;
+        if let Some(batch) = &mut batch {
+            batch.complete(OperationCount::from_operations(
+                if projection_norm > 1.0e-12 && projection_norm.is_finite() {
+                    56
+                } else {
+                    62
+                },
+            ))?;
+        }
         Ok(ShellLocalFrame {
             x,
             y,
             z,
-            area_m2: runmat_types::physical::Area::new(0.5 * normal_norm),
+            area_m2: runmat_types::physical::Area::new(area),
         })
     }
 }
@@ -143,7 +177,7 @@ pub fn global_stiffness_matrix(
     section.validate()?;
     material.validate()?;
     global_stiffness_matrix_for_constitutive(
-        &constitutive::homogeneous_constitutive(section, material),
+        &admitted_homogeneous_constitutive(section, material)?,
         geometry,
     )
 }
@@ -173,6 +207,24 @@ fn global_stiffness_from_operators(
     operators: &LocalOperators,
     frame: ShellLocalFrame,
 ) -> Result<ShellMatrix18, ShellElementError> {
+    // Four 3x3 BᵀDB contractions: 4 * 18² * 9 * (3 products + 1 add).
+    // Three 2x2 shear contractions: 3 * 18² * 4 * (3 products + 1 add).
+    // Three drilling outers: 3 * 18² * (2 products + 1 add).
+    // Three shear measure divisions, one drilling scale product, three
+    // drilling divisions, two 153-pair symmetrizations (add + product),
+    // and one 18² * 9-term global transform (2 products + 1 add).
+    // Local and assumed-shear operator construction are measured separately.
+    const CONTRACT_OPS: u64 = 74_491;
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage.ledger().reserve(
+                UsageCategory::Assembly,
+                OperationCount::from_operations(CONTRACT_OPS),
+            )
+        })
+        .transpose()?;
     let mut local = [[0.0; SHELL_ELEMENT_DOF_COUNT]; SHELL_ELEMENT_DOF_COUNT];
     add_bdb3(
         &mut local,
@@ -200,17 +252,25 @@ fn global_stiffness_from_operators(
         matrices.bending,
         frame.area_m2.canonical_value(),
     );
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(46_656))?;
+    }
     for shape in [
         [2.0 / 3.0, 1.0 / 6.0, 1.0 / 6.0],
         [1.0 / 6.0, 2.0 / 3.0, 1.0 / 6.0],
         [1.0 / 6.0, 1.0 / 6.0, 2.0 / 3.0],
     ] {
+        let shear =
+            admitted_assumed_shear_operator(operators.dx, operators.dy, operators.jacobian, shape)?;
         add_bdb2(
             &mut local,
-            &assumed_shear_operator(operators.dx, operators.dy, operators.jacobian, shape),
+            &shear,
             matrices.transverse_shear,
             frame.area_m2.canonical_value() / 3.0,
         );
+        if let Some(batch) = &mut batch {
+            batch.complete(OperationCount::from_operations(5_185))?;
+        }
     }
     let drilling_stiffness = matrices.drilling_stiffness_per_area * frame.area_m2.canonical_value();
     for drilling in &operators.drilling {
@@ -223,6 +283,9 @@ fn global_stiffness_from_operators(
     symmetrize(&mut local);
     let mut global = transform_matrix_to_global(local, frame);
     symmetrize(&mut global);
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(12_280))?;
+    }
     Ok(global)
 }
 
@@ -235,7 +298,7 @@ pub fn recover_resultants(
     section.validate()?;
     material.validate()?;
     recover_resultants_for_constitutive(
-        &constitutive::homogeneous_constitutive(section, material),
+        &admitted_homogeneous_constitutive(section, material)?,
         geometry,
         global_displacement,
     )
@@ -296,12 +359,26 @@ fn local_operators(
     geometry: ShellElementGeometry,
     frame: ShellLocalFrame,
 ) -> Result<LocalOperators, ShellElementError> {
+    // Three projected nodes (39), twice-area determinant (3), six shape
+    // derivatives (8), and three drilling rows at each node (18).
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(UsageCategory::Assembly, OperationCount::from_operations(68))
+        })
+        .transpose()?;
     let local = geometry.nodes_m.map(|node| {
         let offset = sub(node, geometry.nodes_m[0]);
         [dot(offset, frame.x), dot(offset, frame.y)]
     });
     let twice_area = local[1][0] * local[2][1] - local[2][0] * local[1][1];
     if !positive_finite(twice_area) {
+        if let Some(batch) = &mut batch {
+            batch.complete(OperationCount::from_operations(42))?;
+        }
         return Err(ShellElementError::DegenerateArea);
     }
     let dx = [
@@ -336,10 +413,14 @@ fn local_operators(
         drilling[node][base + 5] = 1.0;
     }
     let jacobian = [local[1], local[2]];
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(68))?;
+    }
+    let shear = admitted_assumed_shear_operator(dx, dy, jacobian, [1.0 / 3.0; 3])?;
     Ok(LocalOperators {
         membrane,
         bending,
-        shear: assumed_shear_operator(dx, dy, jacobian, [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]),
+        shear,
         drilling,
         dx,
         dy,
@@ -392,6 +473,31 @@ fn assumed_shear_operator(
         })
     });
     physical_shear_operator(covariant, jacobian)
+}
+
+fn admitted_assumed_shear_operator(
+    dx: [f64; SHELL_ELEMENT_NODE_COUNT],
+    dy: [f64; SHELL_ELEMENT_NODE_COUNT],
+    jacobian: [[f64; 2]; 2],
+    shape: [f64; SHELL_ELEMENT_NODE_COUNT],
+) -> Result<[[f64; SHELL_ELEMENT_DOF_COUNT]; 2], ShellElementError> {
+    // Three tying covariant transforms (324), correction (54), interpolated
+    // covariant field (72), determinant (3), physical inverse transform (144).
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage.ledger().reserve(
+                UsageCategory::Assembly,
+                OperationCount::from_operations(597),
+            )
+        })
+        .transpose()?;
+    let shear = assumed_shear_operator(dx, dy, jacobian, shape);
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(597))?;
+    }
+    Ok(shear)
 }
 
 fn covariant_shear_operator(

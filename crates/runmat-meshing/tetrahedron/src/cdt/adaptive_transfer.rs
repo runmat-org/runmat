@@ -46,6 +46,7 @@ impl Default for DelaunayAdaptiveTransferOptions {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayAdaptiveTransferErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidLineage,
     InvalidArtifact,
@@ -114,6 +115,9 @@ pub fn build_refinement_solver_adaptation(
     )
     .map_err(|failure| {
         let kind = match failure.kind {
+            DelaunayAdaptiveRefinementErrorKind::Accounting(cause) => {
+                DelaunayAdaptiveTransferErrorKind::Accounting(cause)
+            }
             DelaunayAdaptiveRefinementErrorKind::InvalidOptions => {
                 DelaunayAdaptiveTransferErrorKind::InvalidOptions
             }
@@ -182,6 +186,9 @@ pub fn build_coarsening_solver_adaptation(
     )
     .map_err(|failure| {
         let kind = match failure.kind {
+            DelaunayAdaptiveCoarseningErrorKind::Accounting(cause) => {
+                DelaunayAdaptiveTransferErrorKind::Accounting(cause)
+            }
             DelaunayAdaptiveCoarseningErrorKind::InvalidOptions => {
                 DelaunayAdaptiveTransferErrorKind::InvalidOptions
             }

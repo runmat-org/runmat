@@ -450,8 +450,7 @@ pub(super) fn solve_prescribed_motion(
         full_summaries.push(snapshot.full_summary);
     }
     result.assembly_snapshots = full_summaries;
-    rebuild_transient_balance(&mut result)
-        .map_err(|detail| TransientSolveError::DynamicBalance { detail })?;
+    rebuild_transient_balance(&mut result)?;
     Ok(result)
 }
 

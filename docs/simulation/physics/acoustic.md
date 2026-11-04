@@ -1,4 +1,4 @@
-# Acoustic FEA in RunMat: cavity modes, harmonic pressure, and boundary impedance
+# Acoustics
 
 Acoustic analysis predicts pressure modes and pressure response in a fluid domain. The physical
 model needs density and sound speed, a pressure/velocity source, and boundary behavior such as a

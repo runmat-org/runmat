@@ -247,8 +247,17 @@ pub(super) fn quality_value(mesh: &SolverMeshArtifact) -> BuiltinResult<Value> {
                 .get(&corners[3])
                 .ok_or_else(|| error(QUALITY_NAME, "missing node"))?,
         ];
+        let jacobian = tetrahedron_scaled_jacobian(points).map_err(|cause| {
+            let identifier =
+                crate::analysis::fea_run_admission::FeaRunDenied::Accounting(cause).error_code();
+            crate::build_runtime_error(format!("{QUALITY_NAME}: {cause}"))
+                .with_builtin(QUALITY_NAME)
+                .with_identifier(identifier)
+                .with_source(cause)
+                .build()
+        })?;
         ids.push(element.element_id);
-        jacobians.push(tetrahedron_scaled_jacobian(points));
+        jacobians.push(jacobian);
         aspects.push(tetrahedron_edge_aspect_ratio(points));
         volumes.push(tetrahedron_volume(points));
     }

@@ -1,6 +1,6 @@
 [package]
 name = "runmat-execution-runner-native"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -14,6 +14,9 @@ gui = ["runmat-core/gui", "runmat-runtime/gui"]
 occt-native = ["runmat-geometry-io/occt-native", "runmat-analysis-execution/occt-native"]
 
 [dependencies]
+runmat-simulation-usage = { workspace = true }
+runmat-fea-admission-native = { workspace = true }
+runmat-server-client = { workspace = true }
 sysinfo = { version = "0.30", default-features = false }
 runmat-cpu-execution = { workspace = true }
 runmat-analysis-core = { workspace = true }

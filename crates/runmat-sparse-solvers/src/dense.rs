@@ -6,6 +6,26 @@ use faer::{MatMut, MatRef};
 use crate::error::{SolverError, SolverResult};
 use crate::par;
 use crate::scalar::Scalar;
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
+
+fn measured_dense<R>(
+    category: UsageCategory,
+    elements: usize,
+    per_element: u64,
+    work: impl FnOnce() -> R,
+) -> SolverResult<R> {
+    let Some(context) = UsageContext::capture() else {
+        return Ok(work());
+    };
+    let elements = u64::try_from(elements).map_err(|_| LedgerError::CountOverflow)?;
+    let count = OperationCount::from_operations(per_element)
+        .checked_mul(elements)
+        .map_err(LedgerError::from)?;
+    let mut reservation = context.ledger().reserve(category, count)?;
+    let result = work();
+    reservation.complete(count)?;
+    Ok(result)
+}
 
 /// Eigen-decomposition of a real symmetric `n × n` matrix (lower triangle read). Returns
 /// ascending eigenvalues and column-major orthonormal eigenvectors.
@@ -116,15 +136,28 @@ impl<T: Scalar> DenseLu<T> {
         assert_eq!(a.len(), n * n);
         let mut pivots = vec![0usize; n];
         for k in 0..n {
-            let mut p = k;
-            let mut best = a[k * n + k].abs();
-            for i in k + 1..n {
-                let v = a[k * n + i].abs();
-                if v > best {
-                    best = v;
-                    p = i;
-                }
-            }
+            let magnitude_evaluations = if T::IS_COMPLEX {
+                (k..n).filter(|&i| a[k * n + i].im() != 0.0).count()
+            } else {
+                0
+            };
+            let (p, best) = measured_dense(
+                UsageCategory::Factorization,
+                magnitude_evaluations,
+                1,
+                || {
+                    let mut p = k;
+                    let mut best = a[k * n + k].abs();
+                    for i in k + 1..n {
+                        let v = a[k * n + i].abs();
+                        if v > best {
+                            best = v;
+                            p = i;
+                        }
+                    }
+                    (p, best)
+                },
+            )?;
             if best <= pivot_floor || best == 0.0 || !best.is_finite() {
                 return Err(SolverError::Singular { pivot: k });
             }
@@ -135,46 +168,91 @@ impl<T: Scalar> DenseLu<T> {
                 }
             }
             let pivot = a[k * n + k];
-            for i in k + 1..n {
-                a[k * n + i] /= pivot;
-            }
+            let remaining = n - k - 1;
+            measured_dense(
+                UsageCategory::Factorization,
+                remaining,
+                if T::IS_COMPLEX { 11 } else { 1 },
+                || {
+                    for i in k + 1..n {
+                        a[k * n + i] /= pivot;
+                    }
+                },
+            )?;
             for c in k + 1..n {
                 let factor = a[c * n + k];
                 if factor != T::zero() {
-                    for i in k + 1..n {
-                        let l = a[k * n + i];
-                        a[c * n + i] -= l * factor;
-                    }
+                    measured_dense(
+                        UsageCategory::Factorization,
+                        remaining,
+                        if T::IS_COMPLEX { 8 } else { 2 },
+                        || {
+                            for i in k + 1..n {
+                                let l = a[k * n + i];
+                                a[c * n + i] -= l * factor;
+                            }
+                        },
+                    )?;
                 }
             }
         }
         Ok(Self { n, lu: a, pivots })
     }
 
-    pub fn solve_in_place(&self, b: &mut [T]) {
+    pub fn solve_in_place(&self, b: &mut [T]) -> SolverResult<()> {
         let n = self.n;
-        for k in 0..n {
-            b.swap(k, self.pivots[k]);
+        if b.len() != n {
+            return Err(SolverError::Dimension(
+                "dense LU right-hand side extent".into(),
+            ));
         }
         for c in 0..n {
-            let value = b[c];
-            for (i, target) in b.iter_mut().enumerate().take(n).skip(c + 1) {
-                *target -= self.lu[c * n + i] * value;
-            }
+            measured_dense(
+                UsageCategory::Solve,
+                n - c - 1,
+                if T::IS_COMPLEX { 8 } else { 2 },
+                || {
+                    if c == 0 {
+                        for k in 0..n {
+                            b.swap(k, self.pivots[k]);
+                        }
+                    }
+                    let value = b[c];
+                    for (i, target) in b.iter_mut().enumerate().take(n).skip(c + 1) {
+                        *target -= self.lu[c * n + i] * value;
+                    }
+                },
+            )?;
         }
         for c in (0..n).rev() {
-            b[c] /= self.lu[c * n + c];
+            measured_dense(
+                UsageCategory::Solve,
+                1,
+                if T::IS_COMPLEX { 11 } else { 1 },
+                || {
+                    b[c] /= self.lu[c * n + c];
+                },
+            )?;
             let value = b[c];
-            for (i, target) in b.iter_mut().enumerate().take(c) {
-                *target -= self.lu[c * n + i] * value;
-            }
+            measured_dense(
+                UsageCategory::Solve,
+                c,
+                if T::IS_COMPLEX { 8 } else { 2 },
+                || {
+                    for (i, target) in b.iter_mut().enumerate().take(c) {
+                        *target -= self.lu[c * n + i] * value;
+                    }
+                },
+            )?;
         }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn dense_kernels_match_known_values() {
@@ -191,8 +269,33 @@ mod tests {
         assert!((x[0] - 1.0).abs() < 1e-12 && (x[1] - 1.0).abs() < 1e-12);
         let lu = DenseLu::new(vec![0.0, 1.0, 2.0, 3.0], 2).unwrap();
         let mut y = vec![2.0, 4.0];
-        lu.solve_in_place(&mut y);
+        lu.solve_in_place(&mut y).unwrap();
         // [[0,2],[1,3]] y = [2,4] -> y = [1, 1]
         assert!((y[0] - 1.0).abs() < 1e-14 && (y[1] - 1.0).abs() < 1e-14);
+    }
+
+    #[test]
+    fn dense_lu_solve_refuses_before_permutation_and_conserves_completed_work() {
+        let lu = DenseLu::new(vec![0.0, 1.0, 2.0, 3.0], 2).unwrap();
+        let count = OperationCount::from_operations;
+        let ledger =
+            Arc::new(runmat_simulation_usage::UsageLedger::new(count(6), count(1)).unwrap());
+        let context = UsageContext::new(Arc::clone(&ledger));
+        let _guard = context.enter();
+        let original = [2.0, 4.0];
+        let mut rhs = original;
+        assert!(matches!(
+            lu.solve_in_place(&mut rhs),
+            Err(SolverError::Usage(LedgerError::MoreGrantRequired { .. }))
+        ));
+        assert_eq!(rhs, original);
+        assert_eq!(
+            ledger.snapshot().unwrap().completed.solve,
+            OperationCount::ZERO
+        );
+        ledger.update_grant(count(6)).unwrap();
+        lu.solve_in_place(&mut rhs).unwrap();
+        assert_eq!(rhs, [1.0, 1.0]);
+        assert_eq!(ledger.snapshot().unwrap().completed.solve, count(6));
     }
 }

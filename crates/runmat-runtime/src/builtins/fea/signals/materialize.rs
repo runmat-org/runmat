@@ -33,6 +33,9 @@ async fn materialize_signals(
     bindings: &FrozenGeneratorInventory,
     maximum_wall_millis: u64,
 ) -> BuiltinResult<Vec<PhysicalSignal>> {
+    if signals.iter().all(|signal| signal.generator().is_none()) {
+        return Ok(signals.to_vec());
+    }
     let by_id = bindings
         .bindings()
         .iter()
@@ -131,4 +134,25 @@ fn elapsed_millis(started: Instant) -> u64 {
 
 fn materialization_error(message: impl Into<String>) -> crate::RuntimeError {
     builtin_error(RUN_NAME, &ERROR_OPERATION, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn precomputed_signals_need_no_generator_host() {
+        let bindings = FrozenGeneratorInventory::default();
+        let empty = futures::executor::block_on(materialize_signals(&[], &bindings, 1));
+        assert!(empty.unwrap().is_empty());
+        let signal = constant_signal(
+            "constant-force".into(),
+            SignalShape::Scalar,
+            SignalValue::Scalar(Force::new(1.0)),
+            PhysicalSignal::Force,
+        );
+        let signals = vec![signal];
+        let materialized = futures::executor::block_on(materialize_signals(&signals, &bindings, 1));
+        assert_eq!(materialized.unwrap(), signals);
+    }
 }

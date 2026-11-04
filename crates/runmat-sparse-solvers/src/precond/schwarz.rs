@@ -14,6 +14,7 @@ use crate::error::{SolverError, SolverResult};
 use crate::operator::Preconditioner;
 use crate::ordering::{edge_bisection, Graph};
 use crate::par;
+use runmat_simulation_usage::{UsageCategory, UsageContext};
 
 /// Solves one subdomain problem `A_i z = r` (local numbering).
 pub trait SubdomainSolver<T>: Send + Sync {
@@ -120,7 +121,9 @@ impl<T: FactorScalar> AdditiveSchwarz<T> {
         let graph = Graph::from_matrix(matrix);
         let assignment = graph_partition(&graph, options.subdomains);
         let sets = overlapping_sets(&graph, &assignment, options.subdomains, options.overlap);
+        let usage = UsageContext::capture();
         let local: Vec<SolverResult<Subdomain<T>>> = par::map_range(sets.len(), 1, |part| {
+            let _usage_guard = usage.as_ref().map(UsageContext::enter);
             control.check()?;
             let (indices, owned) = &sets[part];
             let sub: CsrMatrix<T> = matrix.submatrix(indices, indices);
@@ -220,7 +223,9 @@ fn overlapping_sets(
 
 impl<T: crate::scalar::Scalar> Preconditioner<T> for AdditiveSchwarz<T> {
     fn apply(&self, r: &[T], z: &mut [T]) -> SolverResult<()> {
+        let usage = UsageContext::capture();
         let local: Vec<SolverResult<Vec<T>>> = par::map_range(self.subdomains.len(), 1, |s| {
+            let _usage_guard = usage.as_ref().map(UsageContext::enter);
             let sub = &self.subdomains[s];
             let rl: Vec<T> = sub.indices.iter().map(|&i| r[i]).collect();
             let mut zl = vec![T::zero(); rl.len()];
@@ -231,11 +236,23 @@ impl<T: crate::scalar::Scalar> Preconditioner<T> for AdditiveSchwarz<T> {
         // Fixed subdomain order keeps the accumulation deterministic.
         for (sub, zl) in self.subdomains.iter().zip(local) {
             let zl = zl?;
-            for (k, &i) in sub.indices.iter().enumerate() {
-                if !self.restricted || sub.owned[k] {
-                    z[i] += zl[k];
-                }
-            }
+            let additions = if self.restricted {
+                sub.owned.iter().filter(|owned| **owned).count()
+            } else {
+                sub.indices.len()
+            };
+            super::usage::measured(
+                UsageCategory::Solve,
+                super::usage::count(additions, if T::IS_COMPLEX { 2 } else { 1 })?,
+                || {
+                    for (k, &i) in sub.indices.iter().enumerate() {
+                        if !self.restricted || sub.owned[k] {
+                            z[i] += zl[k];
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
         }
         debug_assert_eq!(z.len(), self.n);
         Ok(())

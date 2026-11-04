@@ -1,8 +1,13 @@
 use super::*;
 use crate::analysis::fea_run_admission::{FeaRunKind, FeaRunSite};
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
+fn ops(value: u64) -> OperationCount {
+    OperationCount::from_operations(value)
+}
 fn budget() -> FeaRunBudget {
     FeaRunBudget {
-        held_core_millis: 1_000_000_000,
+        budget_ops: ops(1_000_000_000),
+        granted_ops: ops(1_000_000_000),
         expires_at_unix_millis: runmat_time::unix_timestamp_ms() as u64 + 60_000,
         heartbeat_millis: 30_000,
     }
@@ -16,7 +21,7 @@ use std::{
 #[derive(Default)]
 struct Events {
     admitted: Vec<FeaRunRequest>,
-    settled: Vec<(FeaRunOutcome, ResourceUsage)>,
+    settled: Vec<(FeaRunOutcome, FeaRunUsage)>,
 }
 struct Host(Arc<Mutex<Events>>);
 struct Permit(Arc<Mutex<Events>>);
@@ -24,13 +29,13 @@ impl FeaRunPermit for Permit {
     fn budget(&self) -> FeaRunBudget {
         budget()
     }
-    fn heartbeat(&self, _: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+    fn heartbeat(&self, _: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
         Ok(budget())
     }
     fn settle(
         self: Box<Self>,
         outcome: FeaRunOutcome,
-        usage: &ResourceUsage,
+        usage: &FeaRunUsage,
     ) -> Result<(), FeaRunDenied> {
         self.0
             .lock()
@@ -58,10 +63,72 @@ fn request() -> FeaRunRequest {
 }
 
 #[test]
+fn retained_parent_control_and_supervised_child_conserve_one_grant() {
+    let events = Arc::new(Mutex::new(Events::default()));
+    let request = FeaRunRequest::local(
+        FeaRunKind::Solve,
+        1000,
+        runmat_execution::Digest::sha256(b"retained-parent"),
+    )
+    .unwrap();
+    let parent = FeaRunScope::admit_with(request.clone(), &Host(Arc::clone(&events))).unwrap();
+    let control = parent.control();
+    // The retained control can delegate outside an installed numerical scope.
+    let mut child_owner = control.delegate(ops(0)).unwrap();
+    assert!(matches!(
+        parent.state.accounting.ledger().finish(),
+        Err(LedgerError::OutstandingWork)
+    ));
+    let initial = child_owner.delegation.budget;
+    let child =
+        FeaRunScope::from_parent_supervised_delegation(request.clone(), initial, 0).unwrap();
+    child_owner.reservation.increase_capacity(ops(7)).unwrap();
+    child
+        .renew_parent_supervised(FeaRunBudget {
+            granted_ops: ops(7),
+            ..initial
+        })
+        .unwrap();
+    child.run_sync(|| {
+        let context = UsageContext::capture().unwrap();
+        let mut work = context
+            .ledger()
+            .reserve(UsageCategory::Solve, ops(5))
+            .unwrap();
+        work.complete(ops(5)).unwrap();
+    });
+    let child_control = child.control();
+    child.settle(FeaRunOutcome::Completed).unwrap();
+    child_owner
+        .reservation
+        .finish(child_control.settled_usage().unwrap().completed_ops)
+        .unwrap();
+    parent.settle(FeaRunOutcome::Completed).unwrap();
+    assert_eq!(control.settled_usage().unwrap().completed_ops.solve, ops(5));
+    assert_eq!(events.lock().unwrap().settled.len(), 1);
+
+    let wrong_role = FeaRunScope::from_parent_supervised_delegation(request, initial, 0).unwrap();
+    assert_eq!(
+        wrong_role.renew(FeaRunBudget {
+            granted_ops: ops(1),
+            ..initial
+        }),
+        Err(FeaRunDenied::LicenseInvalid)
+    );
+}
+
+#[test]
 fn nested_mesh_and_solve_share_one_permit_and_never_raise_its_allocation() {
     let events = Arc::new(Mutex::new(Events::default()));
     let scope = FeaRunScope::admit_with(request(), &Host(Arc::clone(&events))).unwrap();
     scope.run_sync(|| {
+        let context = UsageContext::capture().expect("root installs its numerical ledger");
+        let mut work = context
+            .ledger()
+            .reserve(UsageCategory::Solve, ops(5))
+            .unwrap();
+        work.complete(ops(5)).unwrap();
+        drop(work);
         let nested = crate::analysis::fea_run_admission::entrypoints::run(
             FeaRunKind::Meshing,
             runmat_execution::Digest::sha256(b"nested-mesh"),
@@ -88,11 +155,18 @@ fn nested_mesh_and_solve_share_one_permit_and_never_raise_its_allocation() {
         ));
     });
     assert_eq!(FeaRunScope::current_allocation(), None);
+    let control = scope.control();
+    assert_eq!(
+        control.settled_usage(),
+        Err(FeaRunDenied::Accounting(LedgerError::OutstandingWork))
+    );
     scope.settle(FeaRunOutcome::Cancelled).unwrap();
+    assert_eq!(control.settled_usage().unwrap().completed_ops.solve, ops(5));
     let events = events.lock().unwrap();
     assert_eq!(events.admitted.len(), 1);
     assert_eq!(events.settled.len(), 1);
     assert_eq!(events.settled[0].0, FeaRunOutcome::Cancelled);
+    assert_eq!(events.settled[0].1.completed_ops.solve, ops(5));
 }
 
 #[test]
@@ -115,14 +189,14 @@ fn pending_future_does_not_authorize_unrelated_tasks_and_drop_settles_failed_onc
 }
 
 #[test]
-fn allocated_time_not_utilization_drives_cumulative_usage_and_fractional_rounding() {
+fn physical_resource_telemetry_preserves_allocated_time_without_pricing_it() {
     for (millicores, wall, expected) in [(2000, 123, 246), (1500, 3, 5), (1, 1, 1), (2000, 0, 0)] {
         let usage = allocated_usage(millicores, wall);
         assert_eq!(usage.wall_millis, wall);
         assert_eq!(usage.cpu_core_millis, expected);
         assert!(
             usage.accelerator_millis.is_empty(),
-            "GPU time does not enter FEA core-hour usage"
+            "this CPU allocation observation does not invent GPU usage"
         );
     }
 }
@@ -208,13 +282,15 @@ fn private_worker_bounds_first_root_before_provider_and_keep_original_deadline()
         panic!("finite metered worker root")
     };
     assert_eq!(initial.expires_at_unix_millis, deadline);
-    assert!(initial.held_core_millis <= 5_000);
+    assert_eq!(initial.budget_ops, budget().budget_ops);
+    assert_eq!(initial.granted_ops, budget().granted_ops);
     scope.state.report();
     let LeaseAuthority::Metered(renewed) = scope.state.lease.lock().unwrap().authority else {
         panic!("finite renewed worker root")
     };
     assert_eq!(renewed.expires_at_unix_millis, deadline);
-    assert_eq!(renewed.held_core_millis, initial.held_core_millis);
+    assert_eq!(renewed.budget_ops, initial.budget_ops);
+    assert_eq!(renewed.granted_ops, initial.granted_ops);
     scope.settle(FeaRunOutcome::Completed).unwrap();
     assert_eq!(events.lock().unwrap().settled.len(), 1);
 }
@@ -222,13 +298,13 @@ impl FeaRunPermit for ControlledPermit {
     fn budget(&self) -> FeaRunBudget {
         self.initial
     }
-    fn heartbeat(&self, _: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+    fn heartbeat(&self, _: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
         self.renewal.clone()
     }
     fn settle(
         self: Box<Self>,
         outcome: FeaRunOutcome,
-        usage: &ResourceUsage,
+        usage: &FeaRunUsage,
     ) -> Result<(), FeaRunDenied> {
         self.events
             .lock()
@@ -236,6 +312,55 @@ impl FeaRunPermit for ControlledPermit {
             .settled
             .push((outcome, usage.clone()));
         Ok(())
+    }
+}
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn numerical_batch_renews_the_original_root_and_preserves_a_host_denial() {
+    for unavailable in [false, true] {
+        let events = Arc::new(Mutex::new(Events::default()));
+        let mut initial = budget();
+        initial.granted_ops = ops(2);
+        let mut renewed = initial;
+        renewed.granted_ops = ops(8);
+        let scope = FeaRunScope::from_admitted_permit(
+            request(),
+            Box::new(ControlledPermit {
+                events: events.clone(),
+                initial,
+                renewal: if unavailable {
+                    Err(FeaRunDenied::ServerUnreachable)
+                } else {
+                    Ok(renewed)
+                },
+            }),
+        )
+        .unwrap();
+        scope.run_sync(|| {
+            let context = UsageContext::capture().unwrap();
+            let reserved = context.ledger().reserve(UsageCategory::Solve, ops(8));
+            if unavailable {
+                assert!(matches!(reserved, Err(LedgerError::GrantUnavailable)));
+                assert_eq!(context.ledger().snapshot().unwrap().reserved, ops(0));
+                assert_eq!(scope.check(), Err(FeaRunDenied::ServerUnreachable));
+            } else {
+                let mut reserved = reserved.unwrap();
+                reserved.complete(ops(3)).unwrap();
+                assert_eq!(context.ledger().snapshot().unwrap().granted, ops(8));
+            }
+        });
+        let settled = scope.settle(FeaRunOutcome::Completed);
+        if unavailable {
+            assert_eq!(settled, Err(FeaRunDenied::ServerUnreachable));
+        } else {
+            settled.unwrap();
+        }
+        let events = events.lock().unwrap();
+        assert_eq!(events.settled.len(), 1);
+        assert_eq!(
+            events.settled[0].1.completed_ops.solve,
+            ops(if unavailable { 0 } else { 3 })
+        );
     }
 }
 #[test]
@@ -269,7 +394,7 @@ fn heartbeat_errors_latch_and_cannot_be_revived_or_settled_as_success() {
     }
 }
 #[test]
-fn stale_and_reduced_holds_fail_closed_and_delegation_preserves_elapsed_usage() {
+fn stale_and_reduced_grants_fail_closed_without_converting_elapsed_time_to_work() {
     let mut expired = budget();
     expired.expires_at_unix_millis = 1;
     assert!(matches!(
@@ -277,15 +402,23 @@ fn stale_and_reduced_holds_fail_closed_and_delegation_preserves_elapsed_usage() 
         Err(FeaRunDenied::LeaseExpired)
     ));
     let mut partial = budget();
-    partial.held_core_millis = 20;
-    assert!(matches!(
-        FeaRunScope::from_delegated_budget(request(), partial, 10),
-        Err(FeaRunDenied::AllowanceUsed { .. })
-    ));
+    partial.granted_ops = ops(20);
+    let delegated = FeaRunScope::from_delegated_budget(request(), partial, 10).unwrap();
+    assert_eq!(
+        delegated.usage().unwrap().completed_ops.total().unwrap(),
+        ops(0)
+    );
+    delegated.run_sync(|| {
+        let context = UsageContext::capture().unwrap();
+        assert!(matches!(
+            context.ledger().reserve(UsageCategory::Solve, ops(21)),
+            Err(LedgerError::MoreGrantRequired { .. })
+        ));
+    });
     let scope = FeaRunScope::from_delegated_budget(request(), budget(), 123).unwrap();
-    assert!(scope.usage().cpu_core_millis >= 246);
+    assert!(scope.usage().unwrap().resources.cpu_core_millis >= 246);
     let mut reduced = budget();
-    reduced.held_core_millis = 1;
+    reduced.granted_ops = ops(1);
     assert_eq!(scope.renew(reduced), Err(FeaRunDenied::LicenseInvalid));
 }
 
@@ -315,15 +448,15 @@ fn lease_loss_refuses_a_pending_future_and_never_polls_more_work() {
 
 #[test]
 fn trusted_parent_supervised_role_computes_but_cannot_publish_or_renew() {
-    let scope = FeaRunScope::from_parent_supervised_delegation(request(), 1000).unwrap();
-    assert!(scope.usage().cpu_core_millis >= 2000);
+    let scope = FeaRunScope::from_parent_supervised_delegation(request(), budget(), 1000).unwrap();
+    assert!(scope.usage().unwrap().resources.cpu_core_millis >= 2000);
     assert_eq!(scope.run_checked_sync(|| 7), Ok(7));
     assert_eq!(
         scope.run_sync(FeaRunScope::check_publication),
         Err(FeaRunDenied::LicenseInvalid)
     );
     assert!(scope.settle(FeaRunOutcome::Completed).is_err());
-    let worker = FeaRunScope::from_parent_supervised_delegation(request(), 0).unwrap();
+    let worker = FeaRunScope::from_parent_supervised_delegation(request(), budget(), 0).unwrap();
     assert_eq!(worker.renew(budget()), Err(FeaRunDenied::LicenseInvalid));
 }
 
@@ -389,14 +522,10 @@ fn settlement_failure_preserves_original_typed_solver_error_but_refuses_success(
         fn budget(&self) -> FeaRunBudget {
             budget()
         }
-        fn heartbeat(&self, _: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+        fn heartbeat(&self, _: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
             Ok(budget())
         }
-        fn settle(
-            self: Box<Self>,
-            _: FeaRunOutcome,
-            _: &ResourceUsage,
-        ) -> Result<(), FeaRunDenied> {
+        fn settle(self: Box<Self>, _: FeaRunOutcome, _: &FeaRunUsage) -> Result<(), FeaRunDenied> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Err(FeaRunDenied::ServerUnreachable)
         }
@@ -470,7 +599,7 @@ fn deadline_does_not_wait_for_a_blocked_transport_heartbeat() {
         fn budget(&self) -> FeaRunBudget {
             self.initial
         }
-        fn heartbeat(&self, _: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied> {
+        fn heartbeat(&self, _: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied> {
             self.entered.store(true, Ordering::Release);
             let (lock, wake) = &*self.release;
             let held = lock.lock().unwrap();
@@ -481,18 +610,14 @@ fn deadline_does_not_wait_for_a_blocked_transport_heartbeat() {
                 .unwrap();
             Ok(self.initial)
         }
-        fn settle(
-            self: Box<Self>,
-            _: FeaRunOutcome,
-            _: &ResourceUsage,
-        ) -> Result<(), FeaRunDenied> {
+        fn settle(self: Box<Self>, _: FeaRunOutcome, _: &FeaRunUsage) -> Result<(), FeaRunDenied> {
             Ok(())
         }
     }
     let entered = Arc::new(AtomicBool::new(false));
     let release = Arc::new((Mutex::new(false), Condvar::new()));
     let mut initial = budget();
-    initial.held_core_millis = 200;
+    initial.expires_at_unix_millis = runmat_time::unix_timestamp_ms() as u64 + 100;
     initial.heartbeat_millis = 5;
     let scope = FeaRunScope::from_admitted_permit(
         request(),
@@ -520,12 +645,12 @@ fn deadline_does_not_wait_for_a_blocked_transport_heartbeat() {
 }
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn partial_hold_deadline_cancels_only_its_run_before_first_heartbeat() {
+fn lease_expiry_cancels_only_its_run_before_first_heartbeat() {
     let parent = CancellationSource::new();
     let _interrupt = crate::interrupt::replace_interrupt(Some(parent.token()));
     let events = Arc::new(Mutex::new(Events::default()));
     let mut initial = budget();
-    initial.held_core_millis = 80;
+    initial.expires_at_unix_millis = runmat_time::unix_timestamp_ms() as u64 + 40;
     let scope = FeaRunScope::from_admitted_permit(
         request(),
         Box::new(ControlledPermit {
@@ -542,7 +667,7 @@ fn partial_hold_deadline_cancels_only_its_run_before_first_heartbeat() {
     }
     assert!(
         token.is_cancelled(),
-        "40ms hold must not wait for the 30s heartbeat"
+        "40ms lease expiry must not wait for the 30s heartbeat"
     );
     assert!(
         !parent.token().is_cancelled(),

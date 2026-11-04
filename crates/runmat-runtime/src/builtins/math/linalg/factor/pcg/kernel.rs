@@ -10,6 +10,7 @@ use crate::context::RuntimeContext;
 use crate::RuntimeError;
 
 pub(super) trait PcgScalar: Copy + PartialEq {
+    const DOMAIN: runmat_sparse_solvers::krylov::usage::ArithmeticDomain;
     const HERMITIAN_EPSILON: f64;
     fn zero() -> Self;
     fn add_scaled(&mut self, scale: f64, value: Self);
@@ -21,6 +22,8 @@ pub(super) trait PcgScalar: Copy + PartialEq {
 macro_rules! real_scalar {
     ($scalar:ty) => {
         impl PcgScalar for $scalar {
+            const DOMAIN: runmat_sparse_solvers::krylov::usage::ArithmeticDomain =
+                runmat_sparse_solvers::krylov::usage::ArithmeticDomain::Real;
             const HERMITIAN_EPSILON: f64 = <$scalar>::EPSILON as f64;
             fn zero() -> Self {
                 0.0
@@ -44,6 +47,8 @@ macro_rules! real_scalar {
 macro_rules! complex_scalar {
     ($scalar:ty) => {
         impl PcgScalar for ComplexElement<$scalar> {
+            const DOMAIN: runmat_sparse_solvers::krylov::usage::ArithmeticDomain =
+                runmat_sparse_solvers::krylov::usage::ArithmeticDomain::Complex;
             const HERMITIAN_EPSILON: f64 = <$scalar>::EPSILON as f64;
             fn zero() -> Self {
                 ComplexElement(0.0, 0.0)
@@ -78,6 +83,7 @@ complex_scalar!(f64);
 pub(super) use runmat_sparse_solvers::krylov::pcg::{PcgOutcome, PcgWork};
 pub(super) struct Native<T>(std::marker::PhantomData<T>);
 impl<T: PcgScalar> runmat_sparse_solvers::krylov::pcg::Arithmetic<T> for Native<T> {
+    const DOMAIN: runmat_sparse_solvers::krylov::usage::ArithmeticDomain = T::DOMAIN;
     const HERMITIAN_EPSILON: f64 = T::HERMITIAN_EPSILON;
     fn zero() -> T {
         T::zero()

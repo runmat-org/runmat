@@ -47,14 +47,14 @@ pub struct TetrahedronMeshLocalReconnectionReport {
 pub fn improve_tetrahedron_mesh_with_local_flips(
     mesh: &mut TetrahedronMesh,
     options: TetrahedronMeshLocalReconnectionOptions,
-) -> TetrahedronMeshLocalReconnectionReport {
+) -> Result<TetrahedronMeshLocalReconnectionReport, runmat_simulation_usage::LedgerError> {
     let mut report = TetrahedronMeshLocalReconnectionReport::default();
     if options.max_attempted_reconnections == 0
         || options.max_accepted_reconnections == 0
         || mesh.elements.len() < 2
     {
         record_local_reconnection_evidence(mesh, &report);
-        return report;
+        return Ok(report);
     }
 
     let node_index = mesh_node_index(mesh);
@@ -74,7 +74,7 @@ pub fn improve_tetrahedron_mesh_with_local_flips(
                 &node_coordinates,
                 &boundary_faces,
                 options,
-            ) {
+            )? {
                 report.budget_limited_reconnection_count += 1;
             }
             break;
@@ -85,7 +85,8 @@ pub fn improve_tetrahedron_mesh_with_local_flips(
             &node_coordinates,
             &boundary_faces,
             options,
-        ) else {
+        )?
+        else {
             break;
         };
         report.attempted_reconnection_count += 1;
@@ -105,7 +106,7 @@ pub fn improve_tetrahedron_mesh_with_local_flips(
                         &node_coordinates,
                         &boundary_faces,
                         options,
-                    ) {
+                    )? {
                         report.budget_limited_reconnection_count += 1;
                     }
                     break 'search;
@@ -126,7 +127,7 @@ pub fn improve_tetrahedron_mesh_with_local_flips(
         mesh.quality_optimized = true;
     }
     record_local_reconnection_evidence(mesh, &report);
-    report
+    Ok(report)
 }
 
 enum MeshLocalReconnectionCandidate {
@@ -146,7 +147,7 @@ fn first_local_reconnection_candidate(
     node_coordinates: &BTreeMap<u32, Point3>,
     boundary_faces: &BTreeSet<Vec<TopologyEntityId>>,
     options: TetrahedronMeshLocalReconnectionOptions,
-) -> Option<MeshLocalReconnectionCandidate> {
+) -> Result<Option<MeshLocalReconnectionCandidate>, runmat_simulation_usage::LedgerError> {
     for left_index in 0..mesh.elements.len() {
         for right_index in (left_index + 1)..mesh.elements.len() {
             let left_element = &mesh.elements[left_index];
@@ -161,16 +162,16 @@ fn first_local_reconnection_candidate(
                 continue;
             }
             let Some(left) = local_tetrahedron(left_index, left_element, node_index) else {
-                return Some(MeshLocalReconnectionCandidate::Rejected {
+                return Ok(Some(MeshLocalReconnectionCandidate::Rejected {
                     reason: "missing_node",
-                });
+                }));
             };
             let Some(right) = local_tetrahedron(right_index, right_element, node_index) else {
-                return Some(MeshLocalReconnectionCandidate::Rejected {
+                return Ok(Some(MeshLocalReconnectionCandidate::Rejected {
                     reason: "missing_node",
-                });
+                }));
             };
-            if local_pair_min_scaled_jacobian([left, right], node_coordinates)
+            if local_pair_min_scaled_jacobian([left, right], node_coordinates)?
                 >= options.quality_thresholds.min_scaled_jacobian
             {
                 continue;
@@ -178,9 +179,9 @@ fn first_local_reconnection_candidate(
             let flip = match two_to_three_face_flip_candidate(left, right) {
                 Ok(flip) => flip,
                 Err(err) => {
-                    return Some(MeshLocalReconnectionCandidate::Rejected {
+                    return Ok(Some(MeshLocalReconnectionCandidate::Rejected {
                         reason: local_tetrahedron_flip_error_reason(&err),
-                    });
+                    }));
                 }
             };
             if let Err(err) = evaluate_local_tetrahedron_flip_improvement(
@@ -189,18 +190,21 @@ fn first_local_reconnection_candidate(
                 node_coordinates,
                 options.quality_thresholds,
             ) {
-                return Some(MeshLocalReconnectionCandidate::Rejected {
+                if let LocalTetrahedronFlipError::Accounting(error) = &err {
+                    return Err(*error);
+                }
+                return Ok(Some(MeshLocalReconnectionCandidate::Rejected {
                     reason: local_tetrahedron_flip_error_reason(&err),
-                });
+                }));
             }
-            return Some(MeshLocalReconnectionCandidate::Accepted {
+            return Ok(Some(MeshLocalReconnectionCandidate::Accepted {
                 left_index,
                 right_index,
                 flip,
-            });
+            }));
         }
     }
-    None
+    Ok(None)
 }
 
 fn has_potential_local_reconnection_candidate(
@@ -209,7 +213,7 @@ fn has_potential_local_reconnection_candidate(
     node_coordinates: &BTreeMap<u32, Point3>,
     boundary_faces: &BTreeSet<Vec<TopologyEntityId>>,
     options: TetrahedronMeshLocalReconnectionOptions,
-) -> bool {
+) -> Result<bool, runmat_simulation_usage::LedgerError> {
     for left_index in 0..mesh.elements.len() {
         for right_index in (left_index + 1)..mesh.elements.len() {
             let left_element = &mesh.elements[left_index];
@@ -224,19 +228,19 @@ fn has_potential_local_reconnection_candidate(
                 continue;
             }
             let Some(left) = local_tetrahedron(left_index, left_element, node_index) else {
-                return true;
+                return Ok(true);
             };
             let Some(right) = local_tetrahedron(right_index, right_element, node_index) else {
-                return true;
+                return Ok(true);
             };
-            if local_pair_min_scaled_jacobian([left, right], node_coordinates)
+            if local_pair_min_scaled_jacobian([left, right], node_coordinates)?
                 < options.quality_thresholds.min_scaled_jacobian
             {
-                return true;
+                return Ok(true);
             }
         }
     }
-    false
+    Ok(false)
 }
 
 fn mesh_node_index(mesh: &TetrahedronMesh) -> BTreeMap<TopologyEntityId, u32> {
@@ -299,7 +303,7 @@ fn local_tetrahedron(
 fn local_pair_min_scaled_jacobian(
     tetrahedra: [LocalTetrahedron; 2],
     node_coordinates: &BTreeMap<u32, Point3>,
-) -> f64 {
+) -> Result<f64, runmat_simulation_usage::LedgerError> {
     tetrahedra
         .into_iter()
         .map(|tetrahedron| {
@@ -310,7 +314,9 @@ fn local_pair_min_scaled_jacobian(
                     .unwrap_or([0.0, 0.0, 0.0])
             }))
         })
-        .fold(f64::INFINITY, f64::min)
+        .try_fold(f64::INFINITY, |minimum, value| {
+            value.map(|value| minimum.min(value))
+        })
 }
 
 fn apply_two_to_three_reconnection(
@@ -395,6 +401,7 @@ fn record_local_reconnection_evidence(
 
 fn local_tetrahedron_flip_error_reason(error: &LocalTetrahedronFlipError) -> &'static str {
     match error {
+        LocalTetrahedronFlipError::Accounting(_) => "accounting_failure",
         LocalTetrahedronFlipError::DegenerateTetrahedron { .. } => "degenerate_tetrahedron",
         LocalTetrahedronFlipError::NoSharedFace => "no_shared_face",
         LocalTetrahedronFlipError::NoSharedEdge => "no_shared_edge",

@@ -27,7 +27,7 @@ pub use comm::{
     read_bytes, write_bytes, Communicator, TcpCommunicator, TcpRendezvous, ThreadCommunicator,
 };
 pub use driver::{gather_outputs, solve_in_threads, DistributedSolution};
-pub use error::{DistributedError, DistributedResult};
+pub use error::{DistributedError, DistributedResult, ElementKernelError};
 pub use krylov::{IterationRecord, KrylovSettings, KrylovSummary};
 pub use local_solver::{FaerCholeskyFactory, SubdomainFactorization, SubdomainSolverFactory};
 pub use partition::{partition_elements, PartitionOptions, PartitionQuality};

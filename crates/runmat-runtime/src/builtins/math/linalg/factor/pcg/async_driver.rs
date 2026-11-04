@@ -59,6 +59,39 @@ impl<T: PcgScalar, O: AsyncPcgOperation<T>, F: FnMut() -> Result<(), RuntimeErro
 impl<T: PcgScalar, O: AsyncPcgOperation<T>, F: FnMut() -> Result<(), RuntimeError>>
     runmat_sparse_solvers::krylov::pcg::PcgOperations<T> for Driver<'_, T, O, F>
 {
+    async fn measured<R>(
+        &mut self,
+        work: runmat_sparse_solvers::krylov::usage::VectorWork,
+        run: impl FnOnce(&mut Self) -> (R, runmat_sparse_solvers::krylov::usage::BatchCompletion),
+    ) -> Result<R, RuntimeError> {
+        use crate::analysis::fea_run_admission::{reserve_work, FeaRunDenied};
+        use runmat_simulation_usage::{LedgerError, UsageCategory, UsageContext};
+        self.checkpoint()?;
+        let Some(usage) = UsageContext::capture() else {
+            return Ok(run(self).0);
+        };
+        let maximum = work.operations().map_err(|cause| {
+            FeaRunDenied::from(LedgerError::from(cause)).into_runtime_error("pcg")
+        })?;
+        let mut reservation = reserve_work(&usage, UsageCategory::Solve, maximum, self.context)
+            .await
+            .map_err(|denied| denied.into_runtime_error("pcg"))?;
+        self.checkpoint()?;
+        let (result, completed) = run(self);
+        use runmat_sparse_solvers::krylov::usage::BatchCompletion;
+        let completed = match completed {
+            BatchCompletion::Skipped => None,
+            BatchCompletion::Complete => Some(maximum),
+            BatchCompletion::Prefix(count) => Some(count),
+        };
+        if let Some(completed) = completed {
+            reservation
+                .complete(completed)
+                .map_err(|cause| FeaRunDenied::from(cause).into_runtime_error("pcg"))?;
+        }
+        self.checkpoint()?;
+        Ok(result)
+    }
     async fn apply(
         &mut self,
         operation: PcgOperation,

@@ -1,6 +1,6 @@
 [package]
 name = "runmat-fea-admission-native"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -14,6 +14,7 @@ chrono = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-server-client = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 reqwest = { version = "0.12", default-features = false }
 tokio = { workspace = true, features = ["rt", "net", "time", "sync"] }
 uuid = { workspace = true }

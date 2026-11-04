@@ -689,7 +689,7 @@ fn standalone_runtime(
         match runmat_runtime::analysis::fea_run_admission::capture_fea_run_admission() {
             Ok(originating) => originating,
             Err(runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired) => {
-                std::sync::Arc::new(runmat_fea_admission_native::NativeFeaAdmission::new(None))
+                std::sync::Arc::new(runmat_fea_admission_native::NativeFeaAdmission::compiled(None))
             }
             Err(_) => std::sync::Arc::new(
                 runmat_fea_admission_native::NativeFeaAdmission::from_selection(

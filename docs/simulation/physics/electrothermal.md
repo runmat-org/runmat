@@ -1,4 +1,4 @@
-# Electrothermal FEA in RunMat: current flow, Joule heating, and temperature
+# Joule heating
 
 Electrothermal analysis couples steady current flow to heat transfer. The resistive loss
 $\sigma(T)|\nabla V|^2$ is the volumetric heat source, and the temperature changes the

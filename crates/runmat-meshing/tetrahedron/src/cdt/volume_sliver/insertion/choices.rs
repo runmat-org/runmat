@@ -77,7 +77,7 @@ pub(super) fn edge_star_choices_prepared(
                         _,
                     >::new(midpoint),
                     construction: midpoint_construction,
-                    proposal_score: prepared.score(midpoint),
+                    proposal_score: prepared.score(midpoint)?,
                     strategy: InsertionStrategy::EdgeStar,
                 });
             }
@@ -125,7 +125,7 @@ pub(super) fn edge_star_choices_prepared(
                             _,
                         >::new(coordinates_m),
                         construction,
-                        proposal_score: prepared.score(coordinates_m),
+                        proposal_score: prepared.score(coordinates_m)?,
                         strategy: InsertionStrategy::EdgeStar,
                     });
                 }
@@ -150,7 +150,7 @@ pub(super) fn edge_star_choices_prepared(
                             _,
                         >::new(coordinates_m),
                         construction: Point3Construction::Explicit,
-                        proposal_score: prepared.score(coordinates_m),
+                        proposal_score: prepared.score(coordinates_m)?,
                         strategy: InsertionStrategy::EdgeStar,
                     });
                 }
@@ -169,7 +169,7 @@ pub(super) fn edge_star_choices_prepared(
                             _,
                         >::new(coordinates_m),
                         construction: Point3Construction::Explicit,
-                        proposal_score: prepared.score(coordinates_m),
+                        proposal_score: prepared.score(coordinates_m)?,
                         strategy: InsertionStrategy::EdgeStar,
                     });
                 }

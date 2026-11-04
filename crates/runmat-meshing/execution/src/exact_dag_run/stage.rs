@@ -216,6 +216,7 @@ mod tests {
             witnesses: Vec::new(),
             request_values: Vec::new(),
             achieved_values: Vec::new(),
+            accounting_error: None,
             remediation: "repair the exact boundary".into(),
         };
 

@@ -14,7 +14,8 @@ impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
             return Ok(());
         };
         copy(&mut *self.work.x, &*self.work.best, &mut *checkpoint).await?;
-        let relres = certificate.relative_norm(iteration.rhs_squared);
+        let relres =
+            measured_relative_norm::<T, C>(certificate, iteration.rhs_squared, checkpoint).await?;
         self.phase = Phase::Complete(PcgOutcome {
             flag: if relres <= self.tolerance { 0 } else { flag },
             relres,
@@ -60,15 +61,29 @@ impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
         product: &[T],
         checkpoint: &mut C,
     ) -> Result<ScaledPositive, KrylovFailure<C::Error>> {
-        for (index, (&b, &ax)) in self.rhs.iter().zip(product).enumerate() {
-            if index % 1024 == 0 {
-                checkpoint
-                    .cooperate((self.rhs.len() - index).min(1024) as u64)
-                    .await
-                    .map_err(KrylovFailure::Operation)?;
-            }
-            self.work.residual[index] = b;
-            A::subtract_scaled(&mut self.work.residual[index], 1.0, ax);
+        for start in (0..self.rhs.len()).step_by(1024) {
+            let end = (start + 1024).min(self.rhs.len());
+            checkpoint
+                .cooperate((end - start) as u64)
+                .await
+                .map_err(KrylovFailure::Operation)?;
+            checkpoint
+                .measured(
+                    VectorWork::Residual {
+                        elements: end - start,
+                        domain: A::DOMAIN,
+                    },
+                    |_| {
+                        for (offset, product) in product[start..end].iter().enumerate() {
+                            let index = start + offset;
+                            self.work.residual[index] = self.rhs[index];
+                            A::subtract_scaled(&mut self.work.residual[index], 1.0, *product);
+                        }
+                        ((), BatchCompletion::Complete)
+                    },
+                )
+                .await
+                .map_err(KrylovFailure::Operation)?;
         }
         dot::<T, A, C>(&*self.work.residual, &*self.work.residual, checkpoint)
             .await?
@@ -84,10 +99,12 @@ impl<T: Copy + PartialEq, A: Arithmetic<T>> RecurrenceState<'_, T, A> {
         checkpoint: &mut C,
     ) -> Result<(), KrylovFailure<C::Error>> {
         let actual = self.true_residual(product, &mut *checkpoint).await?;
-        let relres = actual.relative_norm(iteration.rhs_squared);
+        let relres =
+            measured_relative_norm::<T, C>(actual, iteration.rhs_squared, checkpoint).await?;
         // A reliable residual replacement supersedes the optimistic recursive
         // value at this iteration, not the historical values of earlier steps.
-        self.work.residual_norms[iteration.index + 1] = actual.norm();
+        self.work.residual_norms[iteration.index + 1] =
+            measured_norm::<T, C>(actual, checkpoint).await?;
         if actual.less_than(iteration.best_squared) {
             iteration.best_squared = actual;
             iteration.best_iteration = iteration.index + 1;

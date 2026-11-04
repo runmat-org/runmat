@@ -36,6 +36,8 @@ pub(crate) mod tests;
 
 #[derive(Debug, Error)]
 pub(crate) enum NonlinearSolidError {
+    #[error("nonlinear solid numerical accounting failed: {0}")]
+    Accounting(runmat_simulation_usage::LedgerError),
     #[error("nonlinear solid operation cancelled")]
     Cancelled,
     #[error("unsupported nonlinear solid envelope: {0}")]
@@ -54,6 +56,7 @@ impl From<crate::topology::AnalysisProjectionError> for NonlinearSolidError {
     fn from(error: crate::topology::AnalysisProjectionError) -> Self {
         match error {
             crate::topology::AnalysisProjectionError::Cancelled => Self::Cancelled,
+            crate::topology::AnalysisProjectionError::Accounting(error) => Self::Accounting(error),
             other => Self::Authority(other.to_string()),
         }
     }

@@ -79,6 +79,16 @@ pub trait AnalysisStudyStepExecutor: AnalysisStudyStepHost {
 pub fn analysis_execute_study_step(
     request: AnalysisStudyStepRequest,
 ) -> Result<AnalysisStudyStepResult, OperationErrorEnvelope> {
+    use futures::FutureExt;
+    analysis_execute_study_step_with_capacity(request, None)
+        .now_or_never()
+        .expect("the synchronous study-step host does not await capacity")
+}
+
+pub async fn analysis_execute_study_step_with_capacity(
+    request: AnalysisStudyStepRequest,
+    capacity: Option<&dyn runmat_simulation_usage::AsyncCapacityOwner>,
+) -> Result<AnalysisStudyStepResult, OperationErrorEnvelope> {
     if fea_run_admission::FeaRunScope::current_allocation().is_none() {
         return Err(
             fea_run_admission::FeaRunDenied::SignInRequired.into_operation_error(
@@ -107,8 +117,8 @@ pub fn analysis_execute_study_step(
         require_accelerator,
         context,
     } = request;
-    let execute = || {
-        study_execution::execute_study_step_with_policy(
+    let execute = async {
+        study_execution::execute_study_step_with_capacity(
             &model,
             &procedure_step,
             &execution,
@@ -116,7 +126,9 @@ pub fn analysis_execute_study_step(
             &context,
             None,
             require_accelerator,
+            capacity,
         )
+        .await
         .map(|(run, resolved_solver_options)| AnalysisStudyStepResult {
             run,
             resolved_solver_options,
@@ -127,9 +139,9 @@ pub fn analysis_execute_study_step(
             use runmat_meshing_core::CanonicalMeshingContract;
             mesh.validate_canonical()
                 .map_err(|error| study_sequence_contract_error(&context, error))?;
-            solver_mesh_artifact::with_scoped_solver_mesh(path.into(), mesh, execute)
+            solver_mesh_artifact::with_scoped_solver_mesh_future(path.into(), mesh, execute).await
         }
-        (None, None) => execute(),
+        (None, None) => execute.await,
         _ => Err(study_sequence_contract_error(
             &context,
             "owned study mesh path and original input differ",

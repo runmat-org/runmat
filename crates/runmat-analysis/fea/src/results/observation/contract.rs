@@ -429,6 +429,8 @@ pub(super) use validation::{materialized_field_location, validate_output_numeric
 
 #[derive(Debug, thiserror::Error)]
 pub enum ObservationError {
+    #[error("observation numerical accounting failed: {0}")]
+    Accounting(runmat_simulation_usage::LedgerError),
     #[error("invalid observation contract: {0}")]
     Invalid(String),
     #[error("unsupported observation contract: {0}")]

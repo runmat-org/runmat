@@ -1,4 +1,31 @@
 use super::*;
+
+#[test]
+fn gradient_owner_settles_valid_and_invalid_norm_prefixes() {
+    use runmat_simulation_usage::{OperationCount, UsageContext, UsageLedger};
+    use std::sync::Arc;
+
+    let metric = MetricTensor3::isotropic_length_m(1.0).unwrap();
+    let prepared = PreparedJacobian::new(metric).unwrap().unwrap();
+    let budget = OperationCount::from_operations(760 + 75);
+    let ledger = Arc::new(UsageLedger::new(budget, budget).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    context.run_sync(|| {
+        assert!(prepared
+            .corner_gradients([
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ])
+            .unwrap()
+            .is_some());
+        assert!(prepared.corner_gradients([[0.0; 3]; 4]).unwrap().is_none());
+    });
+    let snapshot = ledger.snapshot().unwrap();
+    assert_eq!(snapshot.completed.meshing, budget);
+    assert_eq!(snapshot.reserved, OperationCount::ZERO);
+}
 use runmat_meshing_size::metric::MetricTensor3;
 
 // Independent physical-coordinate metric formula, without Cholesky or derivatives.
@@ -38,7 +65,7 @@ fn corner_derivatives_match_independent_metric_differences_across_orders_and_sca
         xz: 0.25,
         yz: 0.75,
     };
-    let prepared = PreparedJacobian::new(metric).unwrap();
+    let prepared = PreparedJacobian::new(metric).unwrap().unwrap();
     for scale in [1e-3, 1., 1e3] {
         for reverse in [false, true] {
             let mut points = [
@@ -51,7 +78,7 @@ fn corner_derivatives_match_independent_metric_differences_across_orders_and_sca
             if reverse {
                 points.swap(1, 2);
             }
-            let samples = prepared.corner_gradients(points).unwrap();
+            let samples = prepared.corner_gradients(points).unwrap().unwrap();
             for (corner, sample) in samples.into_iter().enumerate() {
                 assert!((sample.value - corner_value(points, corner, metric)).abs() < 1e-12);
                 for vertex in 0..4 {
@@ -73,6 +100,9 @@ fn corner_derivatives_match_independent_metric_differences_across_orders_and_sca
             }
         }
     }
-    assert!(prepared.corner_gradients([[0.; 3]; 4]).is_none());
-    assert!(prepared.corner_gradients([[f64::NAN; 3]; 4]).is_none());
+    assert!(prepared.corner_gradients([[0.; 3]; 4]).unwrap().is_none());
+    assert!(prepared
+        .corner_gradients([[f64::NAN; 3]; 4])
+        .unwrap()
+        .is_none());
 }

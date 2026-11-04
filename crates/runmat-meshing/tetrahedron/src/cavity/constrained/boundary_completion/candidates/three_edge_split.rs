@@ -50,7 +50,8 @@ pub(in super::super::super) fn best_boundary_face_three_edge_split_completion(
             &split_node_coordinates,
             boundary_nodes,
             options,
-        ) else {
+        )?
+        else {
             continue;
         };
         if child_tetrahedra.iter().any(|tetrahedron| {

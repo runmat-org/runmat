@@ -2,6 +2,25 @@
 use super::*;
 use crate::algebra::{MatrixProperties, OperatorRole};
 
+fn prepare_without_host_wait(
+    reuse: &mut LinearPreparationReuse,
+    matrix: &RealSparseMatrix,
+    rhs: &[f64],
+) -> Result<PreparedSolverAdmissibility, CoercivityError> {
+    use crate::algebra::coercivity::NumericalCapacityError;
+    futures::executor::block_on(reuse.prepare_admitted_with_owner(
+        matrix,
+        rhs,
+        None,
+        None,
+        |_, _| std::future::ready(Ok::<(), std::convert::Infallible>(())),
+    ))
+    .map_err(|error| match error {
+        NumericalCapacityError::Numerical(error) => error,
+        NumericalCapacityError::Admission(never) => match never {},
+    })
+}
+
 fn system(diagonal: f64, constrained: Vec<bool>, load: Vec<f64>) -> AssembledRealSystem {
     let matrix = RealSparseMatrix::from_dense(
         &[diagonal, -1.0, -1.0, 3.0],
@@ -168,13 +187,9 @@ fn source_owned_energy_proof_rebinds_rhs_and_invalidates_changed_operator() {
             .copy_from_slice(&[1., -1., -1., 1.]);
     }
     let mut reuse = LinearPreparationReuse::with_local_energy(source, vec![true, false, false], 1.);
-    let before = reuse
-        .prepare_admitted(&operator, &[0., 1., 0.], None, None)
-        .unwrap();
+    let before = prepare_without_host_wait(&mut reuse, &operator, &[0., 1., 0.]).unwrap();
     assert!(reuse.local_energy.is_none());
-    let after = reuse
-        .prepare_admitted(&operator, &[0., 2., 0.], None, None)
-        .unwrap();
+    let after = prepare_without_host_wait(&mut reuse, &operator, &[0., 2., 0.]).unwrap();
     assert_eq!(before.coercivity(), after.coercivity());
     assert_ne!(before, after);
     assert_eq!(
@@ -188,9 +203,7 @@ fn source_owned_energy_proof_rebinds_rhs_and_invalidates_changed_operator() {
         MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
     )
     .unwrap();
-    assert!(reuse
-        .prepare_admitted(&corrupt, &[0., 2., 0.], None, None)
-        .is_err());
+    assert!(prepare_without_host_wait(&mut reuse, &corrupt, &[0., 2., 0.]).is_err());
     assert!(reuse.certificate.is_none() && reuse.local_energy.is_none());
 }
 
@@ -219,9 +232,7 @@ fn uncertifiable_local_energy_falls_back_to_the_factorization_proof() {
         .unwrap()
         .copy_from_slice(&[2., -1., -1., 2.]);
     let mut reuse = LinearPreparationReuse::with_local_energy(source, vec![true, false, false], 1.);
-    let prepared = reuse
-        .prepare_admitted(&operator, &[0., 1., 0.], None, None)
-        .unwrap();
+    let prepared = prepare_without_host_wait(&mut reuse, &operator, &[0., 1., 0.]).unwrap();
     assert!(
         reuse.factor.is_some(),
         "the Cholesky proof certified the operator"

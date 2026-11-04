@@ -63,11 +63,14 @@ pub(crate) fn diagnostic_boundary_exact_cover_face_candidate_sources(
         diagnostic.centroid_inside_count += 1;
         match raw_refill_tetrahedron_with_rejection_reason(node_ids, points, options) {
             Ok(_) => diagnostic.solid_pass_count += 1,
-            Err(reason) => {
+            Err(RefillTetrahedronError::Rejected(reason)) => {
                 *diagnostic
                     .solid_rejected_by_reason
                     .entry(reason)
                     .or_default() += 1
+            }
+            Err(RefillTetrahedronError::Accounting(cause)) => {
+                return Err(ConstrainedCavityRefillError::Accounting(cause))
             }
         }
         match raw_refill_tetrahedron_with_rejection_reason(node_ids, points, relaxed_options) {
@@ -77,11 +80,14 @@ pub(crate) fn diagnostic_boundary_exact_cover_face_candidate_sources(
                     .relaxed_candidate_node_ids
                     .push(sorted_tetrahedron_nodes(tetrahedron.node_ids));
             }
-            Err(reason) => {
+            Err(RefillTetrahedronError::Rejected(reason)) => {
                 *diagnostic
                     .relaxed_rejected_by_reason
                     .entry(reason)
                     .or_default() += 1
+            }
+            Err(RefillTetrahedronError::Accounting(cause)) => {
+                return Err(ConstrainedCavityRefillError::Accounting(cause))
             }
         }
     }

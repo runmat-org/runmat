@@ -149,7 +149,8 @@ pub use study_placement::{
 pub use study_publication::*;
 pub use study_result::*;
 pub use study_step_execution::{
-    analysis_execute_study_step, analysis_execute_study_sweep_with_step_executor,
+    analysis_execute_study_step, analysis_execute_study_step_with_capacity,
+    analysis_execute_study_sweep_with_step_executor,
     analysis_execute_study_with_step_executor, analysis_validate_study_step_transfer,
     AnalysisStudyStepExecutor, AnalysisStudyStepFuture, AnalysisStudyStepHost,
     AnalysisStudyStepRequest, AnalysisStudyStepResult,
@@ -1447,8 +1448,11 @@ fn prepare_study_run(
     context: OperationContext,
 ) -> Result<PreparedStudySequence, OperationErrorEnvelope> {
     let mut prepared = prepare_study_semantics(spec, context)?;
-    let study_mesh = meshing::resolve_study_mesh(spec).map_err(|message| {
-        operation_error(
+    let study_mesh = meshing::resolve_study_mesh(spec).map_err(|error| match error {
+        meshing::StudyMeshingError::Execution(error) => {
+            meshing::async_meshing_error(error, &prepared.context)
+        }
+        meshing::StudyMeshingError::Message(message) => operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
             ANALYSIS_RUN_STUDY_OP_VERSION,
             &prepared.context,
@@ -1460,7 +1464,7 @@ fn prepare_study_run(
             },
             message,
             BTreeMap::new(),
-        )
+        ),
     })?;
     prepared.solver_mesh_artifact_path = study_mesh.artifact_path;
     prepared.meshing_evidence_artifact_path = study_mesh.evidence_path;

@@ -1,4 +1,4 @@
-# FEA Operation Reference
+# Operation reference
 
 This page maps the public command, language, runtime-object, and host-operation surfaces. The typed `.fea` compiler is the source-authoring authority; runtime functions operate on already typed objects and published results.
 

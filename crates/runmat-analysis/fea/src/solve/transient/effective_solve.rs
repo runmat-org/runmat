@@ -1,14 +1,16 @@
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 use thiserror::Error;
 
 use crate::{
     algebra::{
         spmv, LinearPreparationReuse, MatrixProperties, OperatorRole, RealSparseMatrix,
-        RealSystemError,
+        RealSystemError, ScopedSpmvError,
     },
     assembly::AssemblySummary,
     constraints::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix},
     contracts::StructuralDynamicBalanceSnapshot,
     solve::{
+        affine::{affine_rhs_work, affine_scatter_work},
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
         linear::{solve_structural_system_reusing, LinearSolveResult},
         preconditioner::SpdPreconditionerKind,
@@ -18,10 +20,10 @@ use crate::{
 use super::{
     balance::DynamicBalanceError,
     constraint_state::{
-        canonicalize_homogeneous_solution, homogeneous_constraints, physical_load, project_vector,
-        validate_constant_constraint_kinematics,
+        canonicalize_homogeneous_solution, expand_homogeneous_solution, homogeneous_constraints,
+        physical_load, project_vector, validate_constant_constraint_kinematics,
     },
-    newmark::{prepare_average_acceleration_step, NewmarkError},
+    newmark::{count, prepare_average_acceleration_step, spmv_work, NewmarkError},
     state::{SecondOrderState, SecondOrderStateError},
 };
 
@@ -57,7 +59,7 @@ struct NormalizedCorrectionEquation<'a> {
     expansion: Option<std::sync::Arc<AffineConstraintReduction>>,
 }
 
-#[derive(Clone, Debug, Error, PartialEq)]
+#[derive(Debug, Error)]
 pub(super) enum EffectiveDynamicsSolveError {
     #[error("the supplied structural dynamics state is invalid: {0}")]
     InvalidState(SecondOrderStateError),
@@ -78,6 +80,10 @@ pub(super) enum EffectiveDynamicsSolveError {
     DynamicBalance(DynamicBalanceError),
     #[error("the effective structural dynamics solve did not converge (residual={residual_norm})")]
     LinearSolveFailed { residual_norm: f64 },
+    #[error("the effective structural dynamics sparse solve failed: {0}")]
+    SparseSolve(ScopedSpmvError),
+    #[error("simulation usage admission failed: {0}")]
+    Usage(#[from] LedgerError),
     #[error("the effective structural dynamics solve returned an invalid state vector")]
     InvalidSolution,
     #[error("the physical equilibrium target must be finite and positive")]
@@ -86,6 +92,48 @@ pub(super) enum EffectiveDynamicsSolveError {
         "the effective structural dynamics solve did not satisfy physical equilibrium after bounded refinement ({residual_norm} > {target})"
     )]
     EquilibriumRefinementFailed { residual_norm: f64, target: f64 },
+}
+
+pub(super) fn measured<R>(
+    quote: impl FnOnce() -> Result<OperationCount, LedgerError>,
+    run: impl FnOnce() -> Result<R, EffectiveDynamicsSolveError>,
+) -> Result<R, EffectiveDynamicsSolveError> {
+    let Some(context) = UsageContext::capture() else {
+        return run();
+    };
+    drop(context);
+    crate::algebra::capacity::measured_sync(UsageCategory::Solve, quote()?, run)
+}
+
+pub(super) fn measured_affine<R>(
+    quote: impl FnOnce() -> Result<OperationCount, ScopedSpmvError>,
+    run: impl FnOnce() -> Result<R, EffectiveDynamicsSolveError>,
+) -> Result<R, EffectiveDynamicsSolveError> {
+    let Some(context) = UsageContext::capture() else {
+        return run();
+    };
+    drop(context);
+    let work = quote().map_err(EffectiveDynamicsSolveError::SparseSolve)?;
+    crate::algebra::capacity::measured_sync(UsageCategory::Solve, work, run)
+}
+
+fn reduce_sparse_system_measured(
+    reduction: &AffineConstraintReduction,
+    operator: &RealSparseMatrix,
+    right_hand_side: &[f64],
+) -> Result<(RealSparseMatrix, Vec<f64>), EffectiveDynamicsSolveError> {
+    measured_affine(
+        || {
+            affine_rhs_work(reduction, operator)?
+                .checked_add(affine_scatter_work(reduction, operator)?)
+                .map_err(|error| ScopedSpmvError::Usage(error.into()))
+        },
+        || {
+            reduction
+                .reduce_sparse_system(operator, right_hand_side)
+                .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)
+        },
+    )
 }
 
 impl EffectiveDynamicsSolveResult {
@@ -127,28 +175,48 @@ pub(super) fn solve_initial_acceleration_reusing(
             .map_err(EffectiveDynamicsSolveError::InvalidState)?;
     validate_constant_constraint_kinematics(summary, &placeholder, false)?;
     let physical_load = physical_load(summary);
-    let damping_force = spmv(
-        summary.operator.operators().damping(),
-        placeholder.velocity(),
-    )
-    .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)?;
-    let elastic_force = spmv(
-        summary.operator.operators().stiffness(),
-        placeholder.displacement(),
-    )
-    .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)?;
-    let right_hand_side = physical_load
-        .iter()
-        .zip(damping_force)
-        .zip(elastic_force)
-        .map(|((load, damping), elastic)| load - damping - elastic)
-        .collect::<Vec<_>>();
-    let mass_operator = RealSparseMatrix::scaled_sum(
-        &[(1.0, summary.operator.operators().mass())],
-        OperatorRole::EffectiveTangent,
-        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-    )
-    .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)?;
+    let damping_force = measured(
+        || spmv_work(summary.operator.operators().damping()),
+        || {
+            spmv(
+                summary.operator.operators().damping(),
+                placeholder.velocity(),
+            )
+            .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)
+        },
+    )?;
+    let elastic_force = measured(
+        || spmv_work(summary.operator.operators().stiffness()),
+        || {
+            spmv(
+                summary.operator.operators().stiffness(),
+                placeholder.displacement(),
+            )
+            .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)
+        },
+    )?;
+    let right_hand_side = measured(
+        || count(physical_load.len(), 2),
+        || {
+            Ok(physical_load
+                .iter()
+                .zip(damping_force)
+                .zip(elastic_force)
+                .map(|((load, damping), elastic)| load - damping - elastic)
+                .collect::<Vec<_>>())
+        },
+    )?;
+    let mass_operator = measured(
+        || count(summary.operator.operators().mass().values().len(), 1),
+        || {
+            RealSparseMatrix::scaled_sum(
+                &[(1.0, summary.operator.operators().mass())],
+                OperatorRole::EffectiveTangent,
+                MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+            )
+            .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)
+        },
+    )?;
     let effective_summary = effective_system(summary, mass_operator.clone(), right_hand_side)?;
     let linear_solve = solve_effective_system(
         &effective_summary,
@@ -267,11 +335,12 @@ impl EquilibriumRefinement<'_> {
             // The physical imbalance is the right-hand side for an acceleration correction: changing
             // acceleration by da changes displacement by beta*dt^2*da and velocity by gamma*dt*da,
             // exactly the terms already represented by the effective operator.
-            let correction_equation = normalize_correction_equation(
-                self.summary,
-                &self.effective_operator,
-                &full_balance.imbalance(),
+            let imbalance = measured(
+                || count(full_balance.equilibrium_residual.len(), 1),
+                || Ok(full_balance.imbalance()),
             )?;
+            let correction_equation =
+                normalize_correction_equation(self.summary, &self.effective_operator, &imbalance)?;
             let correction = solve_effective_system(
                 &correction_equation.summary,
                 self.backend,
@@ -282,9 +351,7 @@ impl EquilibriumRefinement<'_> {
                 self.preparation,
             )?;
             let mut correction_values = match correction_equation.expansion.as_ref() {
-                Some(reduction) => reduction
-                    .expand_linear(&correction.solution)
-                    .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)?,
+                Some(reduction) => expand_homogeneous_solution(reduction, &correction.solution)?,
                 None => correction.solution.clone(),
             };
             canonicalize_homogeneous_solution(&self.summary.into(), &mut correction_values)?;
@@ -292,12 +359,19 @@ impl EquilibriumRefinement<'_> {
             if !scale.is_finite() || scale <= 0.0 {
                 return Err(EffectiveDynamicsSolveError::InvalidSolution);
             }
-            for value in &mut correction_values {
-                *value *= scale;
-                if !value.is_finite() {
-                    return Err(EffectiveDynamicsSolveError::InvalidSolution);
-                }
-            }
+            let correction_count = correction_values.len();
+            measured(
+                || count(correction_count, 1),
+                || {
+                    for value in &mut correction_values {
+                        *value *= scale;
+                        if !value.is_finite() {
+                            return Err(EffectiveDynamicsSolveError::InvalidSolution);
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
             state = correct_state(state, &correction_values)?;
             linear_solves.push(correction);
         }
@@ -322,10 +396,15 @@ fn normalize_correction_rhs(
     if !scale.is_finite() || scale <= 0.0 {
         return Err(EffectiveDynamicsSolveError::InvalidSolution);
     }
-    Ok((
-        right_hand_side.iter().map(|value| value / scale).collect(),
-        scale,
-    ))
+    measured(
+        || count(right_hand_side.len(), 1),
+        || {
+            Ok((
+                right_hand_side.iter().map(|value| value / scale).collect(),
+                scale,
+            ))
+        },
+    )
 }
 
 fn normalize_correction_equation<'a>(
@@ -362,9 +441,7 @@ fn normalize_correction_equation<'a>(
         }
     }
     let (active_operator, active_rhs) = match reduction.as_ref() {
-        Some(reduction) => reduction
-            .reduce_sparse_system(operator, &constrained_rhs)
-            .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)?,
+        Some(reduction) => reduce_sparse_system_measured(reduction, operator, &constrained_rhs)?,
         None => (operator.clone(), constrained_rhs),
     };
     let (operator_scale, solution_scale) = active_correction_scales(
@@ -373,16 +450,30 @@ fn normalize_correction_equation<'a>(
         &vec![false; active_operator.rows()],
         None,
     )?;
-    let normalized_operator = RealSparseMatrix::scaled_sum(
-        &[(operator_scale.recip(), &active_operator)],
-        OperatorRole::EffectiveTangent,
-        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-    )
-    .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)?;
-    let normalized_rhs = active_rhs
-        .iter()
-        .map(|value| value / operator_scale / solution_scale)
-        .collect::<Vec<_>>();
+    let normalized_operator = measured(
+        || {
+            count(active_operator.values().len(), 1)?
+                .checked_add(OperationCount::from_operations(1))
+                .map_err(LedgerError::from)
+        },
+        || {
+            RealSparseMatrix::scaled_sum(
+                &[(operator_scale.recip(), &active_operator)],
+                OperatorRole::EffectiveTangent,
+                MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+            )
+            .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)
+        },
+    )?;
+    let normalized_rhs = measured(
+        || count(active_rhs.len(), 2),
+        || {
+            Ok(active_rhs
+                .iter()
+                .map(|value| value / operator_scale / solution_scale)
+                .collect::<Vec<_>>())
+        },
+    )?;
     let normalized_summary = if let Some(reduction) = reduction.as_ref() {
         reduced_effective_system(
             summary,
@@ -410,9 +501,8 @@ fn active_correction_scales(
         return Err(EffectiveDynamicsSolveError::InvalidSolution);
     }
     let (operator_scale, active_rhs) = if let Some(reduction) = reduction {
-        let (reduced_operator, reduced_rhs) = reduction
-            .reduce_sparse_system(operator, right_hand_side)
-            .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)?;
+        let (reduced_operator, reduced_rhs) =
+            reduce_sparse_system_measured(reduction, operator, right_hand_side)?;
         (maximum_absolute(reduced_operator.values()), reduced_rhs)
     } else {
         let mut operator_scale = 0.0_f64;
@@ -437,10 +527,15 @@ fn active_correction_scales(
     if !operator_scale.is_finite() || operator_scale <= 0.0 {
         return Err(EffectiveDynamicsSolveError::InvalidSolution);
     }
-    let operator_scaled_rhs = active_rhs
-        .iter()
-        .map(|value| value / operator_scale)
-        .collect::<Vec<_>>();
+    let operator_scaled_rhs = measured(
+        || count(active_rhs.len(), 1),
+        || {
+            Ok(active_rhs
+                .iter()
+                .map(|value| value / operator_scale)
+                .collect::<Vec<_>>())
+        },
+    )?;
     let (_, solution_scale) = normalize_correction_rhs(&operator_scaled_rhs)?;
     Ok((operator_scale, solution_scale))
 }
@@ -460,13 +555,19 @@ fn add_scaled_correction(
     if values.len() != correction.len() || !scale.is_finite() || scale <= 0.0 {
         return Err(EffectiveDynamicsSolveError::InvalidSolution);
     }
-    for (value, correction) in values.iter_mut().zip(correction) {
-        *value += scale * correction;
-        if !value.is_finite() {
-            return Err(EffectiveDynamicsSolveError::InvalidSolution);
-        }
-    }
-    Ok(())
+    let value_count = values.len();
+    measured(
+        || count(value_count, 2),
+        || {
+            for (value, correction) in values.iter_mut().zip(correction) {
+                *value += scale * correction;
+                if !value.is_finite() {
+                    return Err(EffectiveDynamicsSolveError::InvalidSolution);
+                }
+            }
+            Ok(())
+        },
+    )
 }
 
 fn solve_effective_system(
@@ -483,7 +584,8 @@ fn solve_effective_system(
         &CpuReferenceBackend,
         initial_guess,
         preparation,
-    );
+    )
+    .map_err(EffectiveDynamicsSolveError::SparseSolve)?;
     if !result.converged {
         return Err(EffectiveDynamicsSolveError::LinearSolveFailed {
             residual_norm: result.residual_norm,
@@ -506,9 +608,27 @@ fn project_residual(
     let projected_inertia = project_vector(summary, &balance.inertia_force)?;
     let projected_damping = project_vector(summary, &balance.damping_force)?;
     let projected_elastic = project_vector(summary, &balance.elastic_force)?;
-    let absolute_norm = norm(&imbalance);
-    let force_scale = norm(&projected_load)
-        .max(norm(&projected_inertia) + norm(&projected_damping) + norm(&projected_elastic));
+    let absolute_norm = measured(|| count(imbalance.len(), 2), || Ok(norm(&imbalance)))?;
+    let load_norm = measured(
+        || count(projected_load.len(), 2),
+        || Ok(norm(&projected_load)),
+    )?;
+    let inertia_norm = measured(
+        || count(projected_inertia.len(), 2),
+        || Ok(norm(&projected_inertia)),
+    )?;
+    let damping_norm = measured(
+        || count(projected_damping.len(), 2),
+        || Ok(norm(&projected_damping)),
+    )?;
+    let elastic_norm = measured(
+        || count(projected_elastic.len(), 2),
+        || Ok(norm(&projected_elastic)),
+    )?;
+    let force_scale = measured(
+        || Ok(OperationCount::from_operations(2)),
+        || Ok(load_norm.max(inertia_norm + damping_norm + elastic_norm)),
+    )?;
     if imbalance.iter().any(|value| !value.is_finite())
         || !absolute_norm.is_finite()
         || !force_scale.is_finite()
@@ -522,9 +642,14 @@ fn project_residual(
             Err(EffectiveDynamicsSolveError::InvalidSolution)
         };
     }
-    Ok(ProjectedDynamicResidual {
-        relative_norm: absolute_norm / force_scale,
-    })
+    measured(
+        || Ok(OperationCount::from_operations(1)),
+        || {
+            Ok(ProjectedDynamicResidual {
+                relative_norm: absolute_norm / force_scale,
+            })
+        },
+    )
 }
 
 fn norm(values: &[f64]) -> f64 {

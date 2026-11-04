@@ -2,7 +2,7 @@ use futures::executor::block_on;
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
 };
-use runmat_value::Value;
+use runmat_value::{CellArray, Value};
 
 const FORMS: &[(&str, usize)] = &[
     ("ldivide", 2),
@@ -68,7 +68,7 @@ fn zero_outputs_still_execute_input_admission() {
         );
         let error = block_on(runmat_runtime::call_builtin_async_with_outputs(
             name,
-            &vec![Value::String("not numeric".into()); inputs],
+            &vec![Value::Cell(CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap()); inputs],
             0,
         ))
         .expect_err("discarding results must not discard input validation");

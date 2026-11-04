@@ -26,6 +26,9 @@ impl From<DelaunayVolumeSliverOptions> for VolumeStateOptions {
 impl From<VolumeStateError> for DelaunayVolumeSliverError {
     fn from(failure: VolumeStateError) -> Self {
         let kind = match failure.kind {
+            VolumeStateErrorKind::Accounting(cause) => {
+                DelaunayVolumeSliverErrorKind::Accounting(cause)
+            }
             VolumeStateErrorKind::InvalidOptions => DelaunayVolumeSliverErrorKind::InvalidOptions,
             VolumeStateErrorKind::InvalidInput => DelaunayVolumeSliverErrorKind::InvalidInput,
             VolumeStateErrorKind::InvalidTopology => DelaunayVolumeSliverErrorKind::InvalidTopology,

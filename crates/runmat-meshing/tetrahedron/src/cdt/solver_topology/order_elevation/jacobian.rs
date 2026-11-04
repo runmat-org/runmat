@@ -287,10 +287,12 @@ fn certify_element(
         // applies before integrating it, so the mesher never publishes an element it rejects.
         Ok(()) => runmat_meshing_core::tetrahedron10_stiffness_moments(&coordinates)
             .map(|_| ())
-            .map_err(|invalidity| {
-                invalid(format!(
-                    "Tet10 element fails the shared element-validity rule: {invalidity:?}"
-                ))
+            .map_err(|invalidity| match invalidity {
+                runmat_meshing_core::Tet10ElementInvalidity::Accounting(error) =>
+                    error::failure(DelaunaySolverTopologyErrorKind::Accounting(error), error.to_string()),
+                other => invalid(format!(
+                    "Tet10 element fails the shared element-validity rule: {other:?}"
+                )),
             }),
         result => result,
     }

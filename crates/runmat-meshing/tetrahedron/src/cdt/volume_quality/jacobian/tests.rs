@@ -3,6 +3,33 @@
 use super::*;
 
 #[test]
+fn prepared_score_settles_one_owned_batch_and_invalid_edge_prefix() {
+    use runmat_simulation_usage::{OperationCount, UsageContext, UsageLedger};
+    use std::sync::Arc;
+
+    let metric = MetricTensor3::isotropic_length_m(1.0).unwrap();
+    let prepared = PreparedJacobian::new(metric).unwrap().unwrap();
+    let budget = OperationCount::from_operations(382 + 57);
+    let ledger = Arc::new(UsageLedger::new(budget, budget).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    context.run_sync(|| {
+        assert!(prepared
+            .score([
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ])
+            .unwrap()
+            .is_some());
+        assert!(prepared.score([[0.0; 3]; 4]).unwrap().is_none());
+    });
+    let snapshot = ledger.snapshot().unwrap();
+    assert_eq!(snapshot.completed.meshing, budget);
+    assert_eq!(snapshot.reserved, OperationCount::ZERO);
+}
+
+#[test]
 fn search_scores_match_full_quality_reports_bit_for_bit() {
     let metrics = [
         MetricTensor3::isotropic_length_m(1.).unwrap(),
@@ -41,9 +68,12 @@ fn search_scores_match_full_quality_reports_bit_for_bit() {
                 ] {
                     let report =
                         crate::cdt::volume_quality::evaluate_tetrahedron_geometry(ordered, metric)
+                            .unwrap()
                             .map(|quality| quality.metric_scaled_jacobian.to_bits());
                     assert_eq!(
-                        evaluate_tetrahedron_jacobian(ordered, metric).map(f64::to_bits),
+                        evaluate_tetrahedron_jacobian(ordered, metric)
+                            .unwrap()
+                            .map(f64::to_bits),
                         report
                     );
                 }
@@ -57,8 +87,11 @@ fn search_scores_match_full_quality_reports_bit_for_bit() {
                 [value, value, value],
             ];
             assert_eq!(
-                evaluate_tetrahedron_jacobian(points, metric).map(f64::to_bits),
+                evaluate_tetrahedron_jacobian(points, metric)
+                    .unwrap()
+                    .map(f64::to_bits),
                 crate::cdt::volume_quality::evaluate_tetrahedron_geometry(points, metric)
+                    .unwrap()
                     .map(|quality| quality.metric_scaled_jacobian.to_bits())
             );
         }

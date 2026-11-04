@@ -216,7 +216,14 @@ pub(super) fn solve(
                 crate::physics::scalar_constraints::solve(
                     &operator, &rhs, &known, &relations, tolerance, strategy,
                 )
-                .map_err(ElectricalStaticError::Operator)
+                .map_err(|error| match error {
+                    crate::physics::scalar_constraints::ScalarSolveError::Usage(error) => {
+                        ElectricalStaticError::Accounting(error)
+                    }
+                    crate::physics::scalar_constraints::ScalarSolveError::Detail(detail) => {
+                        ElectricalStaticError::Operator(detail)
+                    }
+                })
             };
             let mut reduced = reduced_solve(residual_target)?;
             let mut iterations = reduced.iterations;

@@ -342,6 +342,7 @@ fn workload_failure_must_match_the_requested_stage() {
             witnesses: Vec::new(),
             request_values: Vec::new(),
             achieved_values: Vec::new(),
+            accounting_error: None,
             remediation: "inspect the failed optimization cavity".into(),
         },
     };

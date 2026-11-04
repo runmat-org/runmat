@@ -18,23 +18,30 @@ pub(crate) struct ResolvedStudyMesh {
     pub evidence_path: Option<String>,
 }
 
-pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStudyMesh, String> {
+pub(super) enum StudyMeshingError {
+    Message(String),
+    Execution(crate::meshing::MeshingExecutionError),
+}
+
+pub(super) fn resolve_study_mesh(
+    spec: &AnalysisStudySpec,
+) -> Result<ResolvedStudyMesh, StudyMeshingError> {
     if let Some(path) = spec.solver_mesh_artifact_path.as_deref() {
         solver_mesh_artifact::load_solver_mesh_artifact(Path::new(path))
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| StudyMeshingError::Message(error.to_string()))?;
         return Ok(ResolvedStudyMesh {
             artifact_path: Some(path.to_owned()),
             evidence_path: spec.meshing_evidence_artifact_path.clone(),
         });
     }
-    let Some(request) = study_meshing_request(spec)? else {
+    let Some(request) = study_meshing_request(spec).map_err(StudyMeshingError::Message)? else {
         return Ok(ResolvedStudyMesh {
             artifact_path: None,
             evidence_path: None,
         });
     };
-    let output = crate::meshing::execute_meshing(&request).map_err(|error| error.to_string())?;
-    validate_and_persist_mesh(&output)
+    let output = crate::meshing::execute_meshing(&request).map_err(StudyMeshingError::Execution)?;
+    validate_and_persist_mesh(&output).map_err(StudyMeshingError::Message)
 }
 
 /// Resolve the same original request through the host's owned async mesher.
@@ -65,7 +72,7 @@ pub(super) async fn resolve_study_mesh_async(
             evidence_path: spec.meshing_evidence_artifact_path.clone(),
         });
     }
-    let Some(request) = study_meshing_request(spec).map_err(&rejected)? else {
+    let Some(request) = study_meshing_request(spec).map_err(rejected)? else {
         return Ok(ResolvedStudyMesh {
             artifact_path: None,
             evidence_path: None,
@@ -95,7 +102,7 @@ pub(super) async fn resolve_study_mesh_async(
     .map_err(|error| super::study_step_execution::study_artifact_error(error, context))?
 }
 
-fn async_meshing_error(
+pub(super) fn async_meshing_error(
     error: crate::meshing::MeshingExecutionError,
     context: &crate::operations::OperationContext,
 ) -> crate::operations::OperationErrorEnvelope {
@@ -117,7 +124,19 @@ fn async_meshing_error(
             )
             .expect_err("the original meshing operation failed")
         }
-        MeshingExecutionError::Provider(message) => super::operation_error(
+        MeshingExecutionError::Provider(
+            crate::meshing::MeshingExecutionProviderError::Failure(failure),
+        ) if failure.accounting_error.is_some() => {
+            let cause = failure
+                .accounting_error
+                .expect("accounting cause checked above");
+            super::fea_run_admission::FeaRunDenied::Accounting(cause).into_operation_error(
+                super::ANALYSIS_RUN_STUDY_OPERATION,
+                super::ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+            )
+        }
+        MeshingExecutionError::Provider(error) => super::operation_error(
             super::ANALYSIS_RUN_STUDY_OPERATION,
             super::ANALYSIS_RUN_STUDY_OP_VERSION,
             context,
@@ -131,7 +150,7 @@ fn async_meshing_error(
                 retryable: false,
                 severity: super::OperationErrorSeverity::Error,
             },
-            message,
+            error.to_string(),
             std::collections::BTreeMap::new(),
         ),
     }

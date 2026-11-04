@@ -275,8 +275,14 @@ impl StructuralTransientCheckpointScope {
                         "modal transient state does not contain a modal basis".into(),
                     )
                 })?;
-                let reduced = ModalReducedSystem::project(input.initial_assembly, basis)
-                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                let reduced = ModalReducedSystem::project(input.initial_assembly, basis).map_err(
+                    |error| match error {
+                        crate::solve::dynamics::ModalProjectionError::Usage(error) => {
+                            AnalysisExecutionError::Usage(error)
+                        }
+                        other => AnalysisExecutionError::Invalid(other.to_string()),
+                    },
+                )?;
                 (
                     StructuralTransientCoordinateSpace::ModalReduced {
                         basis_state,

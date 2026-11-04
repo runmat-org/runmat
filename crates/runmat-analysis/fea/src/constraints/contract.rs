@@ -183,6 +183,8 @@ pub struct CanonicalStructuralConstraintPlan {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum ConstraintPlanError {
+    #[error("constraint numerical accounting failed: {0}")]
+    Accounting(#[from] runmat_simulation_usage::LedgerError),
     #[error("constraint compilation {phase:?} requires {required} requested bytes, above caller limit {maximum}")]
     WorkspaceLimit {
         phase: super::compilation::ConstraintCompilationPhase,

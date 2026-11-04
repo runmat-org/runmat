@@ -20,6 +20,7 @@ pub(super) fn diagnostic_split_cap_min_scaled_jacobian(
                 boundary_nodes,
                 diagnostic_options,
             )
+            .expect("diagnostic split accounting should be admitted")
             .map(|tetrahedra| {
                 tetrahedra
                     .iter()
@@ -64,6 +65,7 @@ pub(super) fn diagnostic_edge_split_cap_min_scaled_jacobian(
                 boundary_nodes,
                 diagnostic_options,
             )
+            .expect("diagnostic edge split accounting should be admitted")
             .map(|tetrahedra| {
                 tetrahedra
                     .iter()
@@ -115,6 +117,7 @@ pub(super) fn diagnostic_three_edge_split_cap_min_scaled_jacobian(
         boundary_nodes,
         diagnostic_options,
     )
+    .expect("diagnostic three-edge split accounting should be admitted")
     .map(|tetrahedra| {
         tetrahedra
             .iter()

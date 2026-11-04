@@ -1,4 +1,4 @@
-# Contact and multiphysics interfaces
+# Contact and interfaces
 
 Interfaces pair two typed geometry regions and state how fields cross their common boundary.
 

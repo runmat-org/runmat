@@ -2,16 +2,22 @@ use std::collections::BTreeMap;
 
 use thiserror::Error;
 
+use crate::algebra::{capacity::measured, coercivity::NumericalCapacityError};
 use crate::{
     assembly::AssemblySummary,
-    constraints::solve_constraint_multipliers,
+    constraints::solve_constraint_multipliers_with_owner,
     planning::resource::{
         execute_scoped_slices_mut, LocalExecutionPlan, ScopedLocalExecutionError,
     },
 };
+use runmat_simulation_usage::{AsyncCapacityOwner, LedgerError, OperationCount, UsageCategory};
 
 #[derive(Debug, Error)]
 pub(crate) enum StructuralReactionError {
+    #[error("structural reaction numerical accounting failed: {0}")]
+    Accounting(#[from] LedgerError),
+    #[error("structural reaction recovery cancelled")]
+    Cancelled,
     #[error("structural reaction residual has the wrong dimension or a nonfinite value")]
     InvalidResidual,
     #[error("constraint-row reactions could not be recovered from the structural residual")]
@@ -33,6 +39,7 @@ pub(crate) fn recover_structural_reaction(
     recover_structural_reaction_with_plan(summary, residual, None)
 }
 
+#[cfg(test)]
 pub(crate) fn recover_structural_reaction_scoped(
     summary: &AssemblySummary,
     residual: &[f64],
@@ -46,8 +53,29 @@ fn recover_structural_reaction_with_plan(
     residual: &[f64],
     local_execution: Option<LocalExecutionPlan>,
 ) -> Result<Vec<f64>, StructuralReactionError> {
+    use futures::FutureExt;
+    recover_structural_reaction_with_capacity::<std::convert::Infallible>(
+        summary,
+        residual,
+        local_execution,
+        None,
+    )
+    .now_or_never()
+    .expect("native reaction capacity is immediately ready")
+    .map_err(|error| match error {
+        NumericalCapacityError::Numerical(error) => error,
+        NumericalCapacityError::Admission(never) => match never {},
+    })
+}
+
+pub(crate) async fn recover_structural_reaction_with_capacity<A>(
+    summary: &AssemblySummary,
+    residual: &[f64],
+    local_execution: Option<LocalExecutionPlan>,
+    owner: Option<&dyn AsyncCapacityOwner<A>>,
+) -> Result<Vec<f64>, NumericalCapacityError<StructuralReactionError, A>> {
     if residual.len() != summary.dof_count || residual.iter().any(|value| !value.is_finite()) {
-        return Err(StructuralReactionError::InvalidResidual);
+        return Err(StructuralReactionError::InvalidResidual.into());
     }
     if let Some(matrix) = summary.constraint_matrix.as_ref() {
         let mut rows = Vec::with_capacity(matrix.row_count());
@@ -61,46 +89,101 @@ fn recover_structural_reaction_with_plan(
                 .collect::<BTreeMap<_, _>>();
             rows.push(row);
         }
-        let projected_residual = if let Some(plan) = local_execution {
-            // Rows own disjoint scalar outputs. Each row's ordered sum is unchanged,
-            // and the existing projection vector is the only retained output.
-            let mut projected = vec![0.0; rows.len()];
-            let cancellation = crate::progress::cancellation_token();
-            execute_scoped_slices_mut(plan, &mut projected, |chunk, output| {
-                for (offset, value) in output.iter_mut().enumerate() {
-                    if cancellation.is_cancelled() {
-                        return Err(ReactionWorkError::Cancelled);
-                    }
-                    *value = rows[chunk.start() as usize + offset]
-                        .iter()
-                        .map(|(dof, coefficient)| coefficient * residual[*dof])
-                        .sum();
-                }
-                Ok(())
-            })?;
-            projected
-        } else {
-            rows.iter()
-                .map(|row| {
-                    row.iter()
-                        .map(|(dof, coefficient)| coefficient * residual[*dof])
-                        .sum()
-                })
-                .collect()
-        };
-        let multipliers = solve_constraint_multipliers(&rows, &projected_residual)
-            .ok_or(StructuralReactionError::Recovery)?;
-        let mut reaction = vec![0.0; summary.dof_count];
-        for (row, multiplier) in rows.iter().zip(multipliers) {
-            for (dof, coefficient) in row {
-                reaction[*dof] += coefficient * multiplier;
-            }
+        let mut projection_work = OperationCount::ZERO;
+        let mut scatter_work = OperationCount::ZERO;
+        for row in &rows {
+            let count = u64::try_from(row.len())
+                .map_err(|_| StructuralReactionError::Accounting(LedgerError::CountOverflow))?;
+            projection_work = projection_work
+                .checked_add(
+                    OperationCount::direct_real_dot(count)
+                        .map_err(LedgerError::from)
+                        .map_err(StructuralReactionError::from)?,
+                )
+                .map_err(LedgerError::from)
+                .map_err(StructuralReactionError::from)?;
+            scatter_work = scatter_work
+                .checked_add(
+                    OperationCount::from_operations(count)
+                        .checked_mul(2)
+                        .map_err(LedgerError::from)
+                        .map_err(StructuralReactionError::from)?,
+                )
+                .map_err(LedgerError::from)
+                .map_err(StructuralReactionError::from)?;
         }
+        let projected_residual = measured(
+            owner,
+            UsageCategory::Solve,
+            projection_work,
+            || -> Result<Vec<f64>, StructuralReactionError> {
+                Ok(if let Some(plan) = local_execution {
+                    // Rows own disjoint scalar outputs. Each row's ordered sum is unchanged,
+                    // and the existing projection vector is the only retained output.
+                    let mut projected = vec![0.0; rows.len()];
+                    let cancellation = crate::progress::cancellation_token();
+                    execute_scoped_slices_mut(plan, &mut projected, |chunk, output| {
+                        for (offset, value) in output.iter_mut().enumerate() {
+                            if cancellation.is_cancelled() {
+                                return Err(ReactionWorkError::Cancelled);
+                            }
+                            *value = rows[chunk.start() as usize + offset]
+                                .iter()
+                                .map(|(dof, coefficient)| coefficient * residual[*dof])
+                                .sum();
+                        }
+                        Ok(())
+                    })?;
+                    projected
+                } else {
+                    rows.iter()
+                        .map(|row| {
+                            row.iter()
+                                .map(|(dof, coefficient)| coefficient * residual[*dof])
+                                .sum()
+                        })
+                        .collect()
+                })
+            },
+        )
+        .await?;
+        let multipliers = solve_constraint_multipliers_with_owner(
+            &rows,
+            &projected_residual,
+            |work| async move {
+                match owner {
+                    Some(owner) => owner.ensure_capacity(work).await,
+                    None => Ok::<_, A>(()),
+                }
+            },
+        )
+        .await
+        .map_err(|error| {
+            error.map_numerical(|error| match error {
+                crate::constraints::ConstraintMultiplierError::Accounting(cause) => {
+                    StructuralReactionError::Accounting(cause)
+                }
+                crate::constraints::ConstraintMultiplierError::Cancelled => {
+                    StructuralReactionError::Cancelled
+                }
+            })
+        })?
+        .ok_or(StructuralReactionError::Recovery)?;
+        let reaction = measured(owner, UsageCategory::Solve, scatter_work, || {
+            let mut reaction = vec![0.0; summary.dof_count];
+            for (row, multiplier) in rows.iter().zip(multipliers) {
+                for (dof, coefficient) in row {
+                    reaction[*dof] += coefficient * multiplier;
+                }
+            }
+            Ok::<_, StructuralReactionError>(reaction)
+        })
+        .await?;
         return Ok(reaction);
     }
     let constrained_dofs = summary.operator.constrained_dofs();
     if constrained_dofs.len() != residual.len() {
-        return Err(StructuralReactionError::InvalidResidual);
+        return Err(StructuralReactionError::InvalidResidual.into());
     }
     if let Some(plan) = local_execution {
         // The admitted solve envelope already owns this one reaction vector.
@@ -118,7 +201,8 @@ fn recover_structural_reaction_with_plan(
                 }
             }
             Ok(())
-        })?;
+        })
+        .map_err(StructuralReactionError::from)?;
         Ok(reaction)
     } else {
         Ok(residual

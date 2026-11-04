@@ -1,4 +1,4 @@
-# Electrical and magnetic constraints
+# Electromagnetic constraints
 
 Electric-potential constraints remove the additive nullspace in
 $\nabla\cdot(\sigma\nabla V)=0$. Magnetic vector-potential constraints/gauges remove the gradient

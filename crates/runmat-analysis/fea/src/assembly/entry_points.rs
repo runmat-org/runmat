@@ -105,6 +105,47 @@ pub(crate) fn assemble_structural_system_with_execution(
     )
 }
 
+/// Awaited structural assembly for one exclusive child phase. Solid and authored elements
+/// acquire capacity before each bounded numerical fill; physical temperature loads acquire it
+/// before each element's fixed quadrature rule.
+pub(crate) async fn assemble_structural_system_with_owner<O, F, A>(
+    model: &AnalysisModel,
+    excitations: &RealizedExcitations,
+    solver_mesh: Option<&SolverMeshArtifact>,
+    execution: AssemblyExecution<'_>,
+    maximum_block_elements: usize,
+    before_block: O,
+) -> Result<AssemblySummary, A>
+where
+    O: FnMut(super::StructuralCapacityPhase, runmat_simulation_usage::OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+    A: From<LinearAssemblyError>
+        + From<solver_solid::SolverSolidAssemblyError>
+        + From<super::StructuralAssemblyError>
+        + Send,
+{
+    let has_solved_temperature = execution.solved_nodal_temperature_k.is_some();
+    let (thermo_mechanical_context, electro_thermal_context) =
+        crate::excitation::realize_coupling_contexts(model, excitations)
+            .map_err(LinearAssemblyError::CouplingRealization)?;
+    assemble_linear_system_impl_with_owner(
+        model,
+        excitations,
+        solver_mesh,
+        StructuralCouplingContexts {
+            thermo_mechanical: thermo_mechanical_context.filter(|_| !has_solved_temperature),
+            electro_thermal: electro_thermal_context,
+        },
+        execution,
+        StructuralAssemblyBatch {
+            maximum_block_elements,
+            awaited_elements: true,
+        },
+        before_block,
+    )
+    .await
+}
+
 fn assemble_with_mesh(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
@@ -210,6 +251,23 @@ pub(crate) struct AssemblyExecution<'a> {
     pub(super) local_execution: crate::planning::resource::LocalExecutionPlan,
     pub(super) solved_nodal_temperature_k: Option<&'a crate::execution::SolvedTemperatureField>,
     pub(super) solid_energy: Option<&'a mut solver_solid::SolidEnergyPreparation>,
+}
+
+impl<'a> AssemblyExecution<'a> {
+    pub(crate) fn physical_owned(
+        constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
+        local_execution: crate::planning::resource::LocalExecutionPlan,
+        solved_nodal_temperature_k: Option<&'a crate::execution::SolvedTemperatureField>,
+        solid_energy: Option<&'a mut solver_solid::SolidEnergyPreparation>,
+    ) -> Self {
+        Self {
+            structural_requirement: Some(StructuralFormulationRequirement::PhysicalDiscretization),
+            supplied_constraint_plan: constraint_plan,
+            local_execution,
+            solved_nodal_temperature_k,
+            solid_energy,
+        }
+    }
 }
 
 #[cfg(test)]

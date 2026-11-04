@@ -11,6 +11,12 @@ use crate::{
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, PreparedAnalysisObjects,
 };
 
+pub type AnalysisKernelFuture<'a> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = AnalysisBridgeResult<Vec<AnalysisKernelOutput>>> + 'a>,
+>;
+
+pub use runmat_simulation_usage::AsyncCapacityOwner;
+
 mod output;
 mod reservation;
 pub use output::{
@@ -41,6 +47,22 @@ pub trait AnalysisKernel: Send + Sync {
         &self,
         invocation: AnalysisKernelInvocation<'_>,
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>>;
+
+    fn execute_with_capacity<'a>(
+        &'a self,
+        invocation: AnalysisKernelInvocation<'a>,
+        _capacity: &'a dyn AsyncCapacityOwner,
+    ) -> AnalysisKernelFuture<'a> {
+        Box::pin(async move { self.execute(invocation) })
+    }
+
+    fn execute_reserved_with_capacity<'a>(
+        &'a self,
+        invocation: ReservedAnalysisKernelInvocation<'a>,
+        _capacity: &'a dyn AsyncCapacityOwner,
+    ) -> AnalysisKernelFuture<'a> {
+        Box::pin(async move { self.execute_reserved(invocation) })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -118,6 +140,48 @@ where
     crate::AnalysisHostResponse::completed(&host, &completed)
 }
 
+pub async fn execute_serial_analysis_host_response_with_capacity<S, K>(
+    request: &ProgramExecutionRequest,
+    store: &mut S,
+    kernel: &K,
+    chunk_bytes: usize,
+    limits: ObjectInventoryLimits,
+    resources: Option<&runmat_execution::resource::ResourceRequest>,
+    capacity: &dyn AsyncCapacityOwner,
+) -> AnalysisBridgeResult<crate::AnalysisHostResponse>
+where
+    S: CacheImport + CacheExport,
+    K: AnalysisKernel + ?Sized,
+{
+    let (host, completed) = execute_analysis_with_capacity(
+        request,
+        store,
+        kernel,
+        chunk_bytes,
+        limits,
+        resources,
+        Some(capacity),
+    )
+    .await?;
+    crate::AnalysisHostResponse::completed(&host, &completed)
+}
+
+pub(crate) fn finish_inline<T>(
+    future: impl std::future::Future<Output = AnalysisBridgeResult<T>>,
+) -> AnalysisBridgeResult<T> {
+    use std::task::{Context, Poll, Waker};
+    let mut future = std::pin::pin!(future);
+    match future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+    {
+        Poll::Ready(result) => result,
+        Poll::Pending => Err(AnalysisBridgeError::Identity(
+            "synchronous analysis execution requires an immediately ready host",
+        )),
+    }
+}
+
 fn execute_analysis<S, K>(
     request: &ProgramExecutionRequest,
     store: &mut S,
@@ -125,6 +189,30 @@ fn execute_analysis<S, K>(
     chunk_bytes: usize,
     limits: ObjectInventoryLimits,
     resources: Option<&runmat_execution::resource::ResourceRequest>,
+) -> AnalysisBridgeResult<(AnalysisHostWorkload, CompletedAnalysisWorkload)>
+where
+    S: CacheImport + CacheExport,
+    K: AnalysisKernel + ?Sized,
+{
+    finish_inline(execute_analysis_with_capacity(
+        request,
+        store,
+        kernel,
+        chunk_bytes,
+        limits,
+        resources,
+        None,
+    ))
+}
+
+async fn execute_analysis_with_capacity<S, K>(
+    request: &ProgramExecutionRequest,
+    store: &mut S,
+    kernel: &K,
+    chunk_bytes: usize,
+    limits: ObjectInventoryLimits,
+    resources: Option<&runmat_execution::resource::ResourceRequest>,
+    capacity: Option<&dyn AsyncCapacityOwner>,
 ) -> AnalysisBridgeResult<(AnalysisHostWorkload, CompletedAnalysisWorkload)>
 where
     S: CacheImport + CacheExport,
@@ -220,9 +308,19 @@ where
             if let Some(admission) = &admission {
                 admission.admit_payload_decoding(&inputs)?;
             }
-            kernel.execute_reserved(invocation)?
+            match capacity {
+                Some(capacity) => {
+                    kernel
+                        .execute_reserved_with_capacity(invocation, capacity)
+                        .await?
+                }
+                None => kernel.execute_reserved(invocation)?,
+            }
         }
-        None => kernel.execute(invocation)?,
+        None => match capacity {
+            Some(capacity) => kernel.execute_with_capacity(invocation, capacity).await?,
+            None => kernel.execute(invocation)?,
+        },
     };
     if kernel_outputs.len() != host.workload.outputs.len()
         || kernel_outputs

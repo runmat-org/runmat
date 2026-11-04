@@ -49,6 +49,12 @@ pub enum NativeExecutionError {
     Encoding(#[from] runmat_canonical_codec::CanonicalCodecError),
     #[error("native execution protocol failed: {0}")]
     Protocol(String),
+    #[error("native simulation operation accounting failed: {0}")]
+    Usage(#[from] runmat_simulation_usage::LedgerError),
+    #[error(
+        "cooperative rank solving has no parent-owned operation grants for an admitted FEA run"
+    )]
+    UnsupportedMeteredCooperative,
     #[error("portable execution driver failed: {0}")]
     Driver(#[from] runmat_execution_runner::RunnerError),
 }

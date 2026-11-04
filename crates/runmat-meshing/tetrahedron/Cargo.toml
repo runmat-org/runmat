@@ -1,6 +1,6 @@
 [package]
 name = "runmat-meshing-tetrahedron"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
@@ -22,6 +22,7 @@ runmat-geometry-core = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-curve = { workspace = true }
 runmat-meshing-size = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 runmat-meshing-surface = { workspace = true }
 
 [build-dependencies]

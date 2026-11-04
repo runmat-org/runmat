@@ -37,7 +37,15 @@ pub(super) fn map_volume_codec_error(
 }
 
 pub(super) fn map_solver_error(error: DelaunaySolverTopologyError) -> Box<MeshingFailure> {
+    if let DelaunaySolverTopologyErrorKind::Accounting(cause) = error.kind {
+        let mut failure = failure(MeshingFailureCategory::NumericalAccounting, &error.reason);
+        failure.accounting_error = Some(cause);
+        failure.remediation =
+            "renew the numerical work grant or raise the operation spending cap".into();
+        return failure;
+    }
     let category = match error.kind {
+        DelaunaySolverTopologyErrorKind::Accounting(_) => unreachable!("handled above"),
         DelaunaySolverTopologyErrorKind::InvalidOptions => {
             MeshingFailureCategory::InternalInvariantViolation
         }
@@ -101,6 +109,7 @@ pub(super) fn failure(category: MeshingFailureCategory, detail: &str) -> Box<Mes
             value: MeshingDiagnosticValue::Text(detail),
             unit: None,
         }],
+        accounting_error: None,
         remediation:
             "regenerate terminal inputs, increase the exhausted budget, or repair exact geometry"
                 .into(),
@@ -113,6 +122,17 @@ mod tests {
     use runmat_geometry_core::{
         GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
     };
+    #[test]
+    fn solver_accounting_failure_retains_original_cause() {
+        let cause = runmat_simulation_usage::LedgerError::CountOverflow;
+        let mapped = map_solver_error(DelaunaySolverTopologyError {
+            kind: DelaunaySolverTopologyErrorKind::Accounting(cause),
+            reason: "operation count overflow".into(),
+        });
+        assert_eq!(mapped.category, MeshingFailureCategory::NumericalAccounting);
+        assert_eq!(mapped.accounting_error, Some(cause));
+        mapped.validate().unwrap();
+    }
     struct Control(Option<GeometryEvaluationErrorKind>);
     impl GeometryEvaluationControl for Control {
         fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {

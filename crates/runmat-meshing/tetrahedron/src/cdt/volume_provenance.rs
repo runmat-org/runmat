@@ -76,6 +76,7 @@ impl Default for DelaunayVolumeProvenanceOptions {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeProvenanceErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidTopology,
     InvalidProvenance,

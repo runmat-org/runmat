@@ -57,6 +57,7 @@ fn relocated_star_minimum_jacobian_with_metrics(
                 }
             });
             crate::cdt::volume_quality::evaluate_tetrahedron_jacobian(points, metrics(*tetrahedron))
+                .unwrap()
         })
         .min_by(f64::total_cmp)
         .unwrap_or(0.0)

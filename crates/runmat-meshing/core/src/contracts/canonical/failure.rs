@@ -99,6 +99,7 @@ pub enum MeshingFailureCategory {
     RecursionBudgetExceeded,
     IterationBudgetExceeded,
     Cancelled,
+    NumericalAccounting,
     NumericalFailure,
     InternalInvariantViolation,
 }
@@ -205,6 +206,9 @@ pub struct MeshingFailure {
     pub request_values: Vec<MeshingDiagnosticEntry>,
     #[serde(default)]
     pub achieved_values: Vec<MeshingDiagnosticEntry>,
+    /// The original numerical-admission error, present only for accounting failures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounting_error: Option<runmat_simulation_usage::LedgerError>,
     pub remediation: String,
 }
 
@@ -230,6 +234,14 @@ impl MeshingFailure {
             return Err(MeshingContractError::invalid(
                 "meshing failure operation",
                 "operation does not belong to the reported stage",
+            ));
+        }
+        if (self.category == MeshingFailureCategory::NumericalAccounting)
+            != self.accounting_error.is_some()
+        {
+            return Err(MeshingContractError::invalid(
+                "meshing failure accounting error",
+                "numerical accounting failures must retain exactly one typed accounting cause",
             ));
         }
         for entity in &self.entity_ids {
@@ -344,7 +356,13 @@ fn diagnostic_value(value: &MeshingDiagnosticValue) -> String {
     }
 }
 
-impl std::error::Error for MeshingFailure {}
+impl std::error::Error for MeshingFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.accounting_error
+            .as_ref()
+            .map(|error| error as &(dyn std::error::Error + 'static))
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -365,6 +383,7 @@ mod tests {
                 value: MeshingDiagnosticValue::Text("edge evaluation failed".into()),
                 unit: None,
             }],
+            accounting_error: None,
             remediation: "repair the exact boundary".into(),
         };
 
@@ -386,6 +405,7 @@ mod tests {
             witnesses: Vec::new(),
             request_values: Vec::new(),
             achieved_values: Vec::new(),
+            accounting_error: None,
             remediation: "raise the element budget".into(),
         };
 
@@ -394,5 +414,34 @@ mod tests {
             "ElementBudgetExceeded during Tetrahedralization/Tetrahedralize; \
              remediation: raise the element budget"
         );
+    }
+
+    #[test]
+    fn accounting_failure_keeps_its_typed_cause_across_serialization() {
+        let mut failure = MeshingFailure {
+            schema_version: MESHING_FAILURE_SCHEMA_VERSION,
+            category: MeshingFailureCategory::NumericalAccounting,
+            stage: MeshingStageKind::OrderElevation,
+            operation: MeshingOperation::ElevateOrder,
+            entity_ids: Vec::new(),
+            witnesses: Vec::new(),
+            request_values: Vec::new(),
+            achieved_values: Vec::new(),
+            accounting_error: Some(runmat_simulation_usage::LedgerError::CountOverflow),
+            remediation: "raise the operation spending cap".into(),
+        };
+        failure.validate().unwrap();
+        let encoded = serde_json::to_vec(&failure).unwrap();
+        let decoded: MeshingFailure = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded.accounting_error, failure.accounting_error);
+        assert_eq!(
+            decoded.category,
+            MeshingFailureCategory::NumericalAccounting
+        );
+        failure.accounting_error = None;
+        assert!(failure.validate().is_err());
+        failure.category = MeshingFailureCategory::InvalidGeometry;
+        failure.accounting_error = Some(runmat_simulation_usage::LedgerError::CountOverflow);
+        assert!(failure.validate().is_err());
     }
 }

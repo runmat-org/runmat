@@ -21,6 +21,8 @@ pub enum ModalProjectionError {
     NonPositiveMass,
     #[error("the projected structural operators are not symmetric")]
     AsymmetricOperator,
+    #[error("modal projection numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
 }
 
 /// Dense reduced K/M/C operators derived from one immutable modal basis and full-order assembly.
@@ -207,6 +209,7 @@ impl ModalReducedSystem {
             }
             super::dense::DenseSolveError::NonFinite => ModalProjectionError::NonFinite,
             super::dense::DenseSolveError::Singular => ModalProjectionError::NonPositiveMass,
+            super::dense::DenseSolveError::Usage(error) => ModalProjectionError::Usage(error),
         })?;
         runmat_types::physical::Quantity::try_new(values)
             .map_err(|_| ModalProjectionError::NonFinite)

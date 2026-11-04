@@ -112,6 +112,7 @@ pub(super) fn grow(
                         points,
                         metrics(face)?,
                     )
+                    .unwrap()
                     .unwrap_or(0.);
                     if worst.as_ref().is_none_or(|previous| {
                         score

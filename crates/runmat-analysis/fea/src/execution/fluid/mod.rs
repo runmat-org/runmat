@@ -52,3 +52,25 @@ const MAX_PAYLOAD_BYTES: usize = crate::address_space_power_of_two(44);
 fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(error.to_string())
 }
+
+fn fluid_error(
+    error: crate::physics::cfd::canonical::CanonicalFluidError,
+) -> AnalysisExecutionError {
+    use crate::physics::cfd::canonical::CanonicalFluidError;
+    match error {
+        CanonicalFluidError::Accounting(cause) => AnalysisExecutionError::Usage(cause),
+        CanonicalFluidError::Cancelled => AnalysisExecutionError::Cancelled,
+        other => invalid(other),
+    }
+}
+
+fn fluid_structure_error(
+    error: crate::physics::fluid_structure::FluidStructureError,
+) -> AnalysisExecutionError {
+    use crate::physics::fluid_structure::FluidStructureError;
+    match error {
+        FluidStructureError::Flow(cause) => fluid_error(cause),
+        FluidStructureError::Cancelled => AnalysisExecutionError::Cancelled,
+        other => invalid(other),
+    }
+}

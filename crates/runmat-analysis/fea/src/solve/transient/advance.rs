@@ -3,7 +3,7 @@ use runmat_analysis_core::SignalSampleApproach;
 mod step_strategy;
 pub(super) use step_strategy::{
     DirectTransientStepStrategy, TransientInitialVectors, TransientNumericalStepOutcome,
-    TransientSolverAccounting, TransientStepStrategy,
+    TransientSolverAccounting, TransientStepFailure, TransientStepStrategy,
 };
 
 use crate::{
@@ -22,6 +22,7 @@ use super::{
     balance::{TransientBalanceHistory, TransientBalanceStep},
     effective_solve::{
         solve_average_acceleration_step_reusing, solve_initial_acceleration_reusing,
+        EffectiveDynamicsSolveError,
     },
     require_stable_system,
     state::SecondOrderState,
@@ -103,7 +104,7 @@ pub(super) struct TransientAdvanceContext<'a> {
     pub(super) interval_retention: TransientIntervalRetention,
 }
 
-pub(super) fn initialize<E, M: std::fmt::Display>(
+pub(super) fn initialize<E>(
     summary: &AssemblySummary,
     options: &TransientSolveOptions,
     schedule: &StructuralTransientSchedule,
@@ -115,7 +116,10 @@ pub(super) fn initialize<E, M: std::fmt::Display>(
         SignalSampleApproach,
         &AssemblySummary,
         &SecondOrderState,
-    ) -> Result<(AssemblySummary, SecondOrderState), M>,
+    ) -> Result<
+        (AssemblySummary, SecondOrderState),
+        TransientSolveError<E>,
+    >,
 ) -> Result<(TransientAdvanceState, TransientInitialSample), TransientSolveError<E>> {
     let initial = strategy
         .initialize(
@@ -125,7 +129,12 @@ pub(super) fn initialize<E, M: std::fmt::Display>(
                 velocity: initial_velocity,
             },
         )
-        .map_err(|error| TransientSolveError::InitialAcceleration { detail: error })?;
+        .map_err(|error| match error {
+            TransientStepFailure::Usage(error) => TransientSolveError::Usage(error),
+            TransientStepFailure::Detail(detail) => {
+                TransientSolveError::InitialAcceleration { detail }
+            }
+        })?;
     let initial_time_s = schedule.points[0].time_s.canonical_value();
     require_numerical_residual(
         initial.projected_relative_residual,
@@ -142,16 +151,9 @@ pub(super) fn initialize<E, M: std::fmt::Display>(
         SignalSampleApproach::At,
         summary,
         &numerical_state,
-    )
-    .map_err(|error| TransientSolveError::PhysicalMapping {
-        detail: error.to_string(),
-    })?;
-    let history =
-        TransientBalanceHistory::start(&physical_summary, &physical_state).map_err(|error| {
-            TransientSolveError::DynamicBalance {
-                detail: error.to_string(),
-            }
-        })?;
+    )?;
+    let history = TransientBalanceHistory::start(&physical_summary, &physical_state)
+        .map_err(super::balance::DynamicBalanceError::into_transient_solve)?;
     let sample = TransientInitialSample {
         time_s: runmat_types::physical::Time::new(initial_time_s),
         state: physical_state.clone(),
@@ -224,9 +226,7 @@ pub(super) fn resume<E>(
         &physical_state,
         input.balance.clone(),
     )
-    .map_err(|error| TransientSolveError::DynamicBalance {
-        detail: error.to_string(),
-    })?;
+    .map_err(super::balance::DynamicBalanceError::into_transient_solve)?;
     Ok(TransientAdvanceState {
         schedule_ordinal: input.schedule_ordinal,
         numerical_continuation_state: input.numerical_state,
@@ -248,7 +248,10 @@ pub(super) fn solve_complete<E: std::fmt::Display>(
         SignalSampleApproach,
         &AssemblySummary,
         &SecondOrderState,
-    ) -> Result<(AssemblySummary, SecondOrderState), E>,
+    ) -> Result<
+        (AssemblySummary, SecondOrderState),
+        TransientSolveError<E>,
+    >,
 ) -> Result<(TransientInitialSample, TransientBlockResult), TransientSolveError<E>> {
     let TransientAdvanceContext {
         initial_summary: summary,
@@ -321,7 +324,7 @@ pub(super) fn solve_complete<E: std::fmt::Display>(
     }
 }
 
-pub(super) fn advance<E, M: std::fmt::Display>(
+pub(super) fn advance<E>(
     context: TransientAdvanceContext<'_>,
     mut state: TransientAdvanceState,
     terminal_schedule_ordinal: u64,
@@ -331,7 +334,10 @@ pub(super) fn advance<E, M: std::fmt::Display>(
         SignalSampleApproach,
         &AssemblySummary,
         &SecondOrderState,
-    ) -> Result<(AssemblySummary, SecondOrderState), M>,
+    ) -> Result<
+        (AssemblySummary, SecondOrderState),
+        TransientSolveError<E>,
+    >,
     strategy: &mut impl TransientStepStrategy,
 ) -> Result<TransientBlockResult, TransientSolveError<E>> {
     let TransientAdvanceContext {
@@ -356,9 +362,7 @@ pub(super) fn advance<E, M: std::fmt::Display>(
         &state.physical_continuation_state,
         state.balance.clone(),
     )
-    .map_err(|error| TransientSolveError::DynamicBalance {
-        detail: error.to_string(),
-    })?;
+    .map_err(super::balance::DynamicBalanceError::into_transient_solve)?;
     let mut samples = Vec::with_capacity(terminal - start);
     let progress_operation = options.progress_operation.as_str();
     let final_ordinal = u64::try_from(schedule.points.len() - 1)
@@ -413,9 +417,12 @@ pub(super) fn advance<E, M: std::fmt::Display>(
                 &state.numerical_continuation_state,
                 time_step_s,
             )
-            .map_err(|source| TransientSolveError::Step {
-                time_s: runmat_types::physical::Time::new(next_time_s),
-                detail: source,
+            .map_err(|error| match error {
+                TransientStepFailure::Usage(error) => TransientSolveError::Usage(error),
+                TransientStepFailure::Detail(detail) => TransientSolveError::Step {
+                    time_s: runmat_types::physical::Time::new(next_time_s),
+                    detail,
+                },
             })?;
         require_numerical_residual(
             solved.projected_relative_residual,
@@ -423,11 +430,7 @@ pub(super) fn advance<E, M: std::fmt::Display>(
             options.residual_target,
         )?;
         let (physical_step_summary, physical_step_state) =
-            map_physical_state(next_time_s, approach, &step_summary, &solved.state).map_err(
-                |error| TransientSolveError::PhysicalMapping {
-                    detail: error.to_string(),
-                },
-            )?;
+            map_physical_state(next_time_s, approach, &step_summary, &solved.state)?;
         history
             .push_step(TransientBalanceStep {
                 integration_start_summary: &previous_physical_summary,
@@ -438,9 +441,7 @@ pub(super) fn advance<E, M: std::fmt::Display>(
                 published_state: &physical_step_state,
                 time_step_s,
             })
-            .map_err(|error| TransientSolveError::DynamicBalance {
-                detail: error.to_string(),
-            })?;
+            .map_err(super::balance::DynamicBalanceError::into_transient_solve)?;
         let interval =
             (interval_retention == TransientIntervalRetention::RetainForMotion).then(|| {
                 TransientIntegrationInterval {
@@ -474,9 +475,14 @@ pub(super) fn advance<E, M: std::fmt::Display>(
             require_stable_system(initial_summary, &point_summary)?;
             let point_state = strategy
                 .refresh_acceleration(&point_summary, &state.numerical_continuation_state)
-                .map_err(|error| TransientSolveError::AccelerationRefresh {
-                    time_s: runmat_types::physical::Time::new(next_time_s),
-                    detail: error,
+                .map_err(|error| match error {
+                    TransientStepFailure::Usage(error) => TransientSolveError::Usage(error),
+                    TransientStepFailure::Detail(detail) => {
+                        TransientSolveError::AccelerationRefresh {
+                            time_s: runmat_types::physical::Time::new(next_time_s),
+                            detail,
+                        }
+                    }
                 })?;
             require_numerical_residual(
                 point_state.projected_relative_residual,
@@ -489,25 +495,25 @@ pub(super) fn advance<E, M: std::fmt::Display>(
                 SignalSampleApproach::At,
                 &point_summary,
                 &point_state.state,
-            )
-            .map_err(|error| TransientSolveError::PhysicalMapping {
-                detail: error.to_string(),
-            })?;
+            )?;
             projected_residual_norm = point_state.projected_relative_residual;
             history
                 .refresh_reaction(&public_summary, &public_state)
-                .map_err(|error| TransientSolveError::DynamicBalance {
-                    detail: error.to_string(),
-                })?;
+                .map_err(super::balance::DynamicBalanceError::into_transient_solve)?;
 
             let right_limit_summary = assembly_at(next_time_s, SignalSampleApproach::RightLimit)
                 .map_err(TransientSolveError::Assembly)?;
             require_stable_system(initial_summary, &right_limit_summary)?;
             let right_limit_state = strategy
                 .refresh_acceleration(&right_limit_summary, &state.numerical_continuation_state)
-                .map_err(|error| TransientSolveError::AccelerationRefresh {
-                    time_s: runmat_types::physical::Time::new(next_time_s),
-                    detail: error,
+                .map_err(|error| match error {
+                    TransientStepFailure::Usage(error) => TransientSolveError::Usage(error),
+                    TransientStepFailure::Detail(detail) => {
+                        TransientSolveError::AccelerationRefresh {
+                            time_s: runmat_types::physical::Time::new(next_time_s),
+                            detail,
+                        }
+                    }
                 })?;
             require_numerical_residual(
                 right_limit_state.projected_relative_residual,
@@ -520,10 +526,7 @@ pub(super) fn advance<E, M: std::fmt::Display>(
                 SignalSampleApproach::RightLimit,
                 &right_limit_summary,
                 &right_limit_state.state,
-            )
-            .map_err(|error| TransientSolveError::PhysicalMapping {
-                detail: error.to_string(),
-            })?;
+            )?;
             state.numerical_continuation_state = right_limit_state.state;
             state.integration_continuation_summary = right_limit_summary;
             state.physical_continuation_state = physical_right_state;

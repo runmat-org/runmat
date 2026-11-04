@@ -28,6 +28,8 @@ pub(super) fn map_fea_run_error(
         ])
     };
     match err {
+        FeaRunError::Usage(cause) => super::fea_run_admission::FeaRunDenied::Accounting(cause)
+            .into_operation_error(operation.name(), operation.version(), context),
         FeaRunError::Cancelled => operation_error(
             operation.name(),
             operation.version(),

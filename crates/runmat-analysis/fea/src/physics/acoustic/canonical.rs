@@ -88,6 +88,8 @@ impl AcousticHarmonicPolicy {
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum AcousticHarmonicError {
+    #[error("acoustic assembly numerical accounting failed: {0}")]
+    Accounting(runmat_simulation_usage::LedgerError),
     #[error("invalid canonical acoustic input: {0}")]
     InvalidInput(String),
     #[error("canonical acoustic envelope does not support {0}")]
