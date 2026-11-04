@@ -1,7 +1,7 @@
 //! The `.part`, `.assembly` and `.drawing` front ends on the shared design grammar.
 //!
 //! Each front end is a registry ([`PART`], [`ASSEMBLY`], [`DRAWING`]) for the shared
-//! document engine ([`runmat_fea_syntax::document`]): which statement word fills which model
+//! document engine ([`runmat_design_syntax::document`]): which statement word fills which model
 //! collection. The engine parses a source into the model through serde and prints a model
 //! back; [`value::CadValues`] gives [`ValueExpr`](crate::value::ValueExpr) its text forms.
 //! Every entry and every value inside it is placed in a [`SpanMap`] under its [`Site`] key
@@ -39,12 +39,12 @@ use crate::drawing::DrawingDocument;
 use crate::ids::FilePath;
 use crate::model::PartDocument;
 use crate::scope::UseDecl;
-use runmat_fea_syntax::document::{
+use runmat_design_syntax::document::{
     parse_document, print_document, Collection, DocumentGrammar, DocumentModel, DocumentSyntax,
     LinkGrammar, PrintError, Tagged, UseItem,
 };
-use runmat_fea_syntax::json::Json;
-use runmat_fea_syntax::{Dialect, FeaSyntaxDiagnostic};
+use runmat_design_syntax::json::Json;
+use runmat_design_syntax::{Dialect, FeaSyntaxDiagnostic};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use value::CadValues;

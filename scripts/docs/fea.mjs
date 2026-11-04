@@ -44,7 +44,7 @@ export function collectFea(source, output, register, examples, evidence, validat
     mkdirSync(join(output, "fea"), { recursive: true });
     for (const [name, value] of [["requirements", register], ["manual", manual], ["evidence-index", evidence], ["ledger", ledger], ["pending-features", pendingView(ledger)]])
         writeFileSync(join(output, `fea/${name}.json`), JSON.stringify(value, null, 2) + "\n");
-    // The one `.fea` grammar (committed in runmat-fea-syntax and kept current by fea-grammar.test.mjs),
+    // The one `.fea` grammar (committed in runmat-design-syntax and kept current by fea-grammar.test.mjs),
     // so the site colors code exactly as the language server does. Fixture trees carry no compiler.
     if (existsSync(join(source, COMMITTED_GRAMMAR))) copyFileSync(join(source, COMMITTED_GRAMMAR), join(output, "fea/fea.tmLanguage.json"));
 }

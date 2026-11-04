@@ -1,11 +1,11 @@
 //! The registry-driven document engine over a small serde model.
 
-use runmat_fea_syntax::document::{
+use runmat_design_syntax::document::{
     parse_document, print_document, Collection, DocumentGrammar, DocumentModel, LinkGrammar,
     Tagged, UseItem,
 };
-use runmat_fea_syntax::json::{Json, PlainData};
-use runmat_fea_syntax::Dialect;
+use runmat_design_syntax::json::{Json, PlainData};
+use runmat_design_syntax::Dialect;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

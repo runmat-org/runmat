@@ -1,8 +1,8 @@
 //! The design dialects on the shared grammar: generic forms, the lossless tree and the views.
 
-use runmat_fea_syntax::ast::{self, Expr, Headed, Item, Statement};
-use runmat_fea_syntax::tree::NodeKind;
-use runmat_fea_syntax::{parse_source, Dialect};
+use runmat_design_syntax::ast::{self, Expr, Headed, Item, Statement};
+use runmat_design_syntax::tree::NodeKind;
+use runmat_design_syntax::{parse_source, Dialect};
 
 const PART: &str = r#"// A bracket, written by hand.
 runmat 0.7
@@ -204,26 +204,27 @@ fn design_dialects_report_misplaced_and_malformed_items() {
 fn the_fea_dialect_is_the_fea_parser() {
     let source = "study s {\n    use material.steel\n}\n";
     let syntax = parse_source(Dialect::Fea, source);
-    let module = runmat_fea_syntax::parse_fea(source);
+    let module = runmat_design_syntax::parse_fea(source);
     assert_eq!(syntax.tree, module.tree);
     assert_eq!(syntax.diagnostics, module.diagnostics);
 }
 
 #[test]
 fn the_design_formatter_is_idempotent_and_keeps_comments() {
-    let once = runmat_fea_syntax::format_source(Dialect::Part, PART, Default::default());
+    let once = runmat_design_syntax::format_source(Dialect::Part, PART, Default::default());
     assert!(once.diagnostics.is_empty(), "{:#?}", once.diagnostics);
     assert!(once.source.contains("// the overall width"));
     assert!(once.source.contains("10 mm ± 0.1 mm"), "{}", once.source);
     assert!(once.source.contains("@ \"R3\""), "{}", once.source);
     assert!(once.source.contains("5 %"), "{}", once.source);
-    let twice = runmat_fea_syntax::format_source(Dialect::Part, &once.source, Default::default());
+    let twice =
+        runmat_design_syntax::format_source(Dialect::Part, &once.source, Default::default());
     assert_eq!(once.source, twice.source);
 }
 
 #[test]
 fn design_punctuation_stays_invalid_in_fea_sources() {
-    let module = runmat_fea_syntax::parse_fea("study s {\n    x = 5 %\n}\n");
+    let module = runmat_design_syntax::parse_fea("study s {\n    x = 5 %\n}\n");
     assert!(module
         .tokens
         .diagnostics

@@ -1,10 +1,10 @@
 [package]
-name = "runmat-fea-syntax"
+name = "runmat-design-syntax"
 version = "0.6.2"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
-description = "FEA lexical and lossless syntax contracts for RunMat"
+description = "The RunMat design language: lexer, lossless syntax tree, dialects, document engine, structured edits and projections"
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 

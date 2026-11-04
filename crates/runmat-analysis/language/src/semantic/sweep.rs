@@ -13,7 +13,7 @@ use crate::{
     FeaDiagnosticLocation, FeaDiagnosticPhase, FeaSymbolKey, FeaSymbolKind, FeaType,
     LogicalSourcePath,
 };
-use runmat_fea_syntax::FeaDeclaration;
+use runmat_design_syntax::FeaDeclaration;
 
 pub(super) fn extend_output_scope(
     scope: &mut ExpressionScope,
@@ -22,7 +22,7 @@ pub(super) fn extend_output_scope(
     declaration: &FeaDeclaration,
     known: &BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
 ) {
-    if declaration.kind != runmat_fea_syntax::FeaDeclarationKind::Sweep {
+    if declaration.kind != runmat_design_syntax::FeaDeclarationKind::Sweep {
         return;
     }
     let Some(reference) = declaration.source.as_ref() else {

@@ -11,7 +11,7 @@ use runmat_analysis_core::{
     HomogeneousShellReferenceSurface, HomogeneousShellSection, PlyOrderDirection,
     RectangularBeamSection, ShellReferenceSurface, TubularBeamSection,
 };
-use runmat_fea_syntax::FeaModelDefinitionKind;
+use runmat_design_syntax::FeaModelDefinitionKind;
 
 mod values;
 pub(super) use values::*;
@@ -569,7 +569,7 @@ fn validate_layup_members(
                     );
                     continue;
                 };
-                if *relation != runmat_fea_syntax::FeaAssignmentRelation::Equal
+                if *relation != runmat_design_syntax::FeaAssignmentRelation::Equal
                     || !matches!(
                         name.as_str(),
                         "reference_orientation"

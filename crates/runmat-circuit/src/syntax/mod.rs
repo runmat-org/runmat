@@ -42,9 +42,9 @@ use crate::ir::{
     HarnessDecl, InterfaceDef, NetClass, NetDecl, Param, ParamValue, PartRef, PortDecl, PortDir,
     PortKind, SheetDef, SheetInstance, Tolerance, VariantDef,
 };
-use runmat_fea_syntax::ast::{self, Expr, Headed, Item, Statement};
-use runmat_fea_syntax::json::{format_f64, is_bare_key, is_bare_word, quote, INDENT};
-use runmat_fea_syntax::{parse_source, Dialect, FeaSyntaxDiagnostic, FeaSyntaxDiagnosticKind};
+use runmat_design_syntax::ast::{self, Expr, Headed, Item, Statement};
+use runmat_design_syntax::json::{format_f64, is_bare_key, is_bare_word, quote, INDENT};
+use runmat_design_syntax::{parse_source, Dialect, FeaSyntaxDiagnostic, FeaSyntaxDiagnosticKind};
 use runmat_rules::{parse_quantity, BuiltinUnits, Dim, Quantity, SourceKey};
 use runmat_types::Span;
 use std::collections::BTreeMap;

@@ -1,5 +1,5 @@
 use runmat_analysis_language::*;
-use runmat_fea_syntax::{parse_fea, FeaModuleItem, FeaStatementKind};
+use runmat_design_syntax::{parse_fea, FeaModuleItem, FeaStatementKind};
 use runmat_types::{
     OperationDistribution, OperationEffectFacts, OperationFacts, OperationFrontend,
     OperationIdentity, OperationLoweringId, OperationOverloadFacts, OperationOverloadIdentity,

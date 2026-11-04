@@ -14,7 +14,7 @@ repository = "https://github.com/runmat-org/runmat"
 # so K1, A1, the `.fea` unit registry and the value phase plug in through adapters.
 [dependencies]
 # The shared design grammar: lossless tree, document engine, edits (the syntax front ends).
-runmat-fea-syntax = { workspace = true }
+runmat-design-syntax = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

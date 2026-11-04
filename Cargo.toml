@@ -34,7 +34,7 @@ members = [
     "crates/runmat-builtins",
     "crates/runmat-value",
     "crates/runmat-types",
-    "crates/runmat-fea-syntax",
+    "crates/runmat-design-syntax",
     "crates/runmat-fea-source",
     "crates/runmat-runtime",
     "crates/runmat-clarabel",
@@ -150,7 +150,7 @@ url = { version = "2", features = ["serde"] }
 # Internal workspace crates
 runmat-lexer = { version = "=0.6.2", path = "crates/runmat-lexer" }
 runmat-parser = { version = "=0.6.2", path = "crates/runmat-parser" }
-runmat-fea-syntax = { version = "=0.6.2", path = "crates/runmat-fea-syntax" }
+runmat-design-syntax = { version = "=0.6.2", path = "crates/runmat-design-syntax" }
 runmat-hir = { version = "=0.6.2", path = "crates/runmat-hir" }
 runmat-mir = { version = "=0.6.2", path = "crates/runmat-mir", default-features = false }
 runmat-native-codegen = { version = "=0.6.2", path = "crates/runmat-native-codegen", default-features = false }

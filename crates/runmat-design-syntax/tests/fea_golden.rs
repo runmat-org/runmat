@@ -13,7 +13,7 @@
 //! its new text); a source added since is listed too. Set `RUNMAT_FEA_GOLDEN_WRITE=1` to record
 //! a new snapshot, which is only right when a `.fea` behaviour change is intended.
 
-use runmat_fea_syntax::{format_fea, parse_fea, FeaFormatOptions};
+use runmat_design_syntax::{format_fea, parse_fea, FeaFormatOptions};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -199,8 +199,8 @@ fn every_repository_fea_source_parses_and_formats_as_recorded() {
 }
 
 mod tree {
-    use runmat_fea_syntax::tree::{NodeKind, SyntaxNode};
-    use runmat_fea_syntax::*;
+    use runmat_design_syntax::tree::{NodeKind, SyntaxNode};
+    use runmat_design_syntax::*;
     use runmat_types::Span;
 
     struct Coverage<'a> {

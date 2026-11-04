@@ -1,6 +1,6 @@
 // The `.fea` TextMate grammar, generated from the compiler's own closed tables so that docs, site
 // code cards and any TextMate host color exactly the words the compiler knows:
-//   keywords            runmat-fea-syntax lexer (the fea_keywords! table)
+//   keywords            runmat-design-syntax lexer (the fea_keywords! table)
 //   statement words     `assessment` (procedure/assessment.rs)
 //   families, procedures analysis-core family_label / procedure_label, and the procedure words
 //                       language lowering accepts (`preload`, `steady`, `modal_harmonic`, ...)
@@ -23,7 +23,7 @@ import { SURFACES } from "./ledger.mjs";
 
 /** Word groups, each with the scope it is colored with. Order is match priority. */
 export const VOCABULARY = [
-    { id: "keywords", scope: "keyword.control.fea", source: "crates/runmat-fea-syntax/src/lexical/token.rs", from: /^fea_keywords! \{/m, to: /^\}/m, pattern: /\w+ => "([a-z_]+)"/g },
+    { id: "keywords", scope: "keyword.control.fea", source: "crates/runmat-design-syntax/src/lexical/token.rs", from: /^fea_keywords! \{/m, to: /^\}/m, pattern: /\w+ => "([a-z_]+)"/g },
     { id: "statements", scope: "keyword.control.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/assessment.rs", from: /./, to: /$^/, pattern: /== Some\("([a-z_]+)"\)/g },
     { id: "families", scope: "storage.type.fea", source: "crates/runmat-analysis/core/src/study/compatibility.rs", from: /pub const fn family_label\(/, to: /^}/m, pattern: /=> \{?\s*"([a-z_]+)"/g },
     { id: "procedures", scope: "storage.type.fea", source: "crates/runmat-analysis/core/src/study/compatibility.rs", from: /pub const fn procedure_label\(/, to: /^}/m, pattern: /=> "([a-z_]+)"/g },
@@ -158,8 +158,8 @@ export function knownWords(source) {
     return new Set(vocabulary(source).flatMap(group => group.names));
 }
 
-/** The committed copy the Rust hosts embed (runmat-fea-syntax `FEA_TEXTMATE_GRAMMAR`). */
-export const COMMITTED_GRAMMAR = "crates/runmat-fea-syntax/grammar/fea.tmLanguage.json";
+/** The committed copy the Rust hosts embed (runmat-design-syntax `FEA_TEXTMATE_GRAMMAR`). */
+export const COMMITTED_GRAMMAR = "crates/runmat-design-syntax/grammar/fea.tmLanguage.json";
 
 export function grammarText(source) {
     return JSON.stringify(feaGrammar(source), null, 2) + "\n";
@@ -169,14 +169,14 @@ export function grammarText(source) {
 //
 // `.part`, `.assembly`, `.drawing`, `.circuit` and `.circuit.layout` share the `.fea` lexer and
 // generic forms; each grammar is read from the same two kinds of table:
-//   grammar words     runmat-fea-syntax dialect registry (src/dialect.rs): the dialect's
+//   grammar words     runmat-design-syntax dialect registry (src/dialect.rs): the dialect's
 //                     declaration words, the generic form words, value, clause and literal words
 //   statement words   the dialect's front-end registry (runmat-cad src/syntax/mod.rs grammars,
 //                     runmat-circuit src/syntax/mod.rs `words`)
 //   operations        registry words a dialect applies (`.part` feature kinds: FeatureKind)
 //   units             the `.fea` unit registry, plus `%`
 
-const DIALECT_SOURCE = "crates/runmat-fea-syntax/src/dialect.rs";
+const DIALECT_SOURCE = "crates/runmat-design-syntax/src/dialect.rs";
 const CAD_SYNTAX = "crates/runmat-cad/src/syntax/mod.rs";
 
 /** One entry per design dialect: its registry name, file extension and front-end word tables. */
@@ -269,8 +269,8 @@ export function designGrammar(source, entry) {
     };
 }
 
-/** The committed copy of a design dialect's grammar (runmat-fea-syntax `DESIGN_TEXTMATE_GRAMMARS`). */
-export const committedDesignGrammar = entry => `crates/runmat-fea-syntax/grammar/${entry.extension}.tmLanguage.json`;
+/** The committed copy of a design dialect's grammar (runmat-design-syntax `DESIGN_TEXTMATE_GRAMMARS`). */
+export const committedDesignGrammar = entry => `crates/runmat-design-syntax/grammar/${entry.extension}.tmLanguage.json`;
 
 export function designGrammarText(source, entry) {
     return JSON.stringify(designGrammar(source, entry), null, 2) + "\n";

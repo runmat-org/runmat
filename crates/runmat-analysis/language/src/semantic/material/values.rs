@@ -171,8 +171,8 @@ fn canonical_scalar(value: &CheckedExpression) -> Option<f64> {
         CheckedExpressionKind::Unary { operator, operand } => {
             let value = canonical_scalar(operand)?;
             Some(match operator {
-                runmat_fea_syntax::FeaUnaryOperator::Positive => value,
-                runmat_fea_syntax::FeaUnaryOperator::Negative => -value,
+                runmat_design_syntax::FeaUnaryOperator::Positive => value,
+                runmat_design_syntax::FeaUnaryOperator::Negative => -value,
             })
         }
         _ => None,

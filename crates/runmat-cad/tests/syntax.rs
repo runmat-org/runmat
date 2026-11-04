@@ -17,7 +17,7 @@ use runmat_cad::syntax::{
     parse_assembly, parse_drawing, parse_part, print_assembly, print_drawing, print_part,
 };
 use runmat_cad::value::{value_expr_examples, InputDecl, LetDecl, ValueExpr};
-use runmat_fea_syntax::Dialect;
+use runmat_design_syntax::Dialect;
 use std::collections::BTreeMap;
 
 fn bracket() -> PartDocument {

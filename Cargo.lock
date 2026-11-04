@@ -7811,7 +7811,7 @@ dependencies = [
  "hex",
  "runmat-analysis-core",
  "runmat-analysis-fea",
- "runmat-fea-syntax",
+ "runmat-design-syntax",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-meshing-core",
@@ -7938,7 +7938,7 @@ dependencies = [
  "hex",
  "runmat-constraint",
  "runmat-design-commands",
- "runmat-fea-syntax",
+ "runmat-design-syntax",
  "runmat-geometry-kernel",
  "runmat-rules",
  "runmat-types",
@@ -7963,7 +7963,7 @@ name = "runmat-circuit"
 version = "0.6.2"
 dependencies = [
  "runmat-design-commands",
- "runmat-fea-syntax",
+ "runmat-design-syntax",
  "runmat-rules",
  "runmat-types",
  "serde",
@@ -8118,6 +8118,18 @@ dependencies = [
  "runmat-circuit",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "runmat-design-syntax"
+version = "0.6.2"
+dependencies = [
+ "hex",
+ "runmat-types",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -8299,18 +8311,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "runmat-fea-syntax"
-version = "0.6.2"
-dependencies = [
- "hex",
- "runmat-types",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "sha2 0.11.0",
 ]
 
 [[package]]
@@ -8526,7 +8526,7 @@ name = "runmat-lexer"
 version = "0.6.2"
 dependencies = [
  "logos",
- "runmat-fea-syntax",
+ "runmat-design-syntax",
  "runmat-types",
  "serde",
 ]
@@ -8572,7 +8572,7 @@ dependencies = [
  "runmat-analysis-language",
  "runmat-builtins",
  "runmat-config",
- "runmat-fea-syntax",
+ "runmat-design-syntax",
  "runmat-filesystem",
  "runmat-hir",
  "runmat-lexer",
@@ -8927,7 +8927,7 @@ dependencies = [
 name = "runmat-parser"
 version = "0.6.2"
 dependencies = [
- "runmat-fea-syntax",
+ "runmat-design-syntax",
  "runmat-lexer",
  "runmat-types",
  "serde",

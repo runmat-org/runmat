@@ -8,7 +8,7 @@ use crate::{
 use runmat_analysis_core::{
     AuthoredInputDefinition, AuthoredInputType, AuthoredInputValue, AuthoredMaterialRef,
 };
-use runmat_fea_syntax::{FeaBinaryOperator, FeaUnaryOperator};
+use runmat_design_syntax::{FeaBinaryOperator, FeaUnaryOperator};
 use runmat_geometry_core::{GeometryRegionRef, GeometryRegionRole};
 
 pub(super) fn lower_definitions(

@@ -12,7 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 # booleans, ordered maps everywhere, no hashing, so every output is deterministic.
 [dependencies]
 # The shared design grammar (the `.circuit` front end in `syntax`).
-runmat-fea-syntax = { workspace = true }
+runmat-design-syntax = { workspace = true }
 runmat-types = { workspace = true }
 runmat-rules = { path = "../runmat-rules", version = "=0.6.2" }
 # Design-command descriptor types (one schema for CAD and PCB commands) and the JSON writer.

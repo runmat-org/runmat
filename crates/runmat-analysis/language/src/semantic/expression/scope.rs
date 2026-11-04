@@ -1,5 +1,5 @@
 use crate::FeaType;
-use runmat_fea_syntax::FeaReference;
+use runmat_design_syntax::FeaReference;
 use runmat_types::{OperationParameter, OperationTypePattern};
 use std::collections::BTreeMap;
 

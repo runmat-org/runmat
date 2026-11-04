@@ -23,14 +23,14 @@ use crate::model::{Feature, PartDocument, PublishEntry};
 use crate::refs::lock::{ItemPath, LockError, LockSection, UuidMinter};
 use crate::scope::UseDecl;
 use crate::value::ValueExpr;
-use runmat_fea_syntax::document::{DocumentGrammar, DocumentSyntax, ParsedEntry, PrintError};
-use runmat_fea_syntax::edit::{
+use runmat_design_syntax::document::{DocumentGrammar, DocumentSyntax, ParsedEntry, PrintError};
+use runmat_design_syntax::edit::{
     apply_edits, block_statements, indentation_at, insert_statement, own_lines, remove_statement,
     EditError, TextEdit,
 };
-use runmat_fea_syntax::json::Json;
-use runmat_fea_syntax::tree::SyntaxNode;
-use runmat_fea_syntax::{parse_source, FeaSyntaxDiagnostic};
+use runmat_design_syntax::json::Json;
+use runmat_design_syntax::tree::SyntaxNode;
+use runmat_design_syntax::{parse_source, FeaSyntaxDiagnostic};
 use runmat_types::Span;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -119,9 +119,9 @@ fn statement_node(root: &SyntaxNode, span: Span) -> Option<SyntaxNode> {
 }
 
 fn declaration_block(root: &SyntaxNode, span: Span) -> Option<SyntaxNode> {
-    root.descendants()
-        .into_iter()
-        .find(|node| node.kind() == runmat_fea_syntax::tree::NodeKind::Block && node.span() == span)
+    root.descendants().into_iter().find(|node| {
+        node.kind() == runmat_design_syntax::tree::NodeKind::Block && node.span() == span
+    })
 }
 
 /// Longest increasing subsequence of `values` (indices into it).

@@ -1,12 +1,12 @@
 //! The model projection of a design file: its model in JSON, its `use` lines and the span of
 //! every site, versioned. Servers, indexes and external tools read this instead of parsing
-//! the text; the syntax outline beside it is [`runmat_fea_syntax::projection`].
+//! the text; the syntax outline beside it is [`runmat_design_syntax::projection`].
 //!
 //! The format is `runmat.design-model`, version [`MODEL_PROJECTION_VERSION`]. A field is only
 //! added in a new version; a reader that knows version 1 reads every later version.
 
 use super::Parsed;
-use runmat_fea_syntax::Dialect;
+use runmat_design_syntax::Dialect;
 use serde::Serialize;
 use serde_json::{json, Value};
 

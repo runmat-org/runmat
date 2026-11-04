@@ -65,7 +65,7 @@ GROUPS = {
         "runmat-analysis-language",
         "runmat-analysis-qualification",
         "runmat-fea-source",
-        "runmat-fea-syntax",
+        "runmat-design-syntax",
         "runmat-geometry-core",
         "runmat-geometry-fixtures",
         "runmat-geometry-io",

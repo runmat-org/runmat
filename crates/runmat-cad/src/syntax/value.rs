@@ -18,11 +18,11 @@
 use crate::ids::{FilePath, InputName, LetName, PublishName};
 use crate::refs::reference::XrefContext;
 use crate::value::{BinaryOp, DynamicCall, ValueExpr, ValueXref};
-use runmat_fea_syntax::ast::{self, Argument, Expr};
-use runmat_fea_syntax::json::{
+use runmat_design_syntax::ast::{self, Argument, Expr};
+use runmat_design_syntax::json::{
     format_f64, is_bare_key, is_bare_word, quote, Json, LowerError, ValueSyntax,
 };
-use runmat_fea_syntax::lexical::FeaTokenKind;
+use runmat_design_syntax::lexical::FeaTokenKind;
 
 /// File kinds whose published values a value can read (`part.bracket.mass`).
 pub const PUBLISHING_KINDS: &[&str] = &["part", "assembly", "circuit", "drawing"];
@@ -322,7 +322,7 @@ fn print_at(expr: &ValueExpr, context: u8) -> Option<String> {
 fn unit_ok(unit: &str) -> bool {
     // The unit must read back as the same compact text.
     let source = format!("part p {{\n    x = 1 {unit}\n}}\n");
-    let syntax = runmat_fea_syntax::parse_source(runmat_fea_syntax::Dialect::Part, &source);
+    let syntax = runmat_design_syntax::parse_source(runmat_design_syntax::Dialect::Part, &source);
     if !syntax.diagnostics.is_empty() {
         return false;
     }
@@ -330,7 +330,7 @@ fn unit_ok(unit: &str) -> bool {
         .syntax()
         .descendants()
         .into_iter()
-        .find(|node| node.kind() == runmat_fea_syntax::tree::NodeKind::Unit)
+        .find(|node| node.kind() == runmat_design_syntax::tree::NodeKind::Unit)
         .map(|node| ast::compact_text(&node));
     found.as_deref() == Some(unit)
 }

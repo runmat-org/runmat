@@ -1,5 +1,5 @@
 //! `.fea` semantic token classes from the one generated grammar
-//! (`runmat_fea_syntax::FEA_TEXTMATE_GRAMMAR`, built from the compiler's closed tables).
+//! (`runmat_design_syntax::FEA_TEXTMATE_GRAMMAR`, built from the compiler's closed tables).
 //!
 //! The docs, the site and this server color the same words the same way: the grammar's
 //! `vocabulary` lists each TextMate scope's words in match priority, and this module applies
@@ -64,8 +64,8 @@ fn vocabulary() -> &'static Vocabulary {
     static VOCABULARY: OnceLock<Vocabulary> = OnceLock::new();
     VOCABULARY.get_or_init(|| {
         let grammar: serde_json::Value =
-            serde_json::from_str(runmat_fea_syntax::FEA_TEXTMATE_GRAMMAR)
-                .expect("runmat-fea-syntax grammar/fea.tmLanguage.json is valid JSON");
+            serde_json::from_str(runmat_design_syntax::FEA_TEXTMATE_GRAMMAR)
+                .expect("runmat-design-syntax grammar/fea.tmLanguage.json is valid JSON");
         let vocabulary = &grammar["vocabulary"];
         let mut words = HashMap::new();
         let mut dotted: HashMap<String, Vec<Vec<String>>> = HashMap::new();
@@ -286,7 +286,7 @@ mod tests {
         assert!(vocabulary.units.contains("GPa") && vocabulary.units.contains("mm"));
         assert!(vocabulary.dotted.contains_key("structural"));
         let grammar: serde_json::Value =
-            serde_json::from_str(runmat_fea_syntax::FEA_TEXTMATE_GRAMMAR).unwrap();
+            serde_json::from_str(runmat_design_syntax::FEA_TEXTMATE_GRAMMAR).unwrap();
         for entry in grammar["vocabulary"]["scopes"].as_array().unwrap() {
             let scope = entry["scope"].as_str().unwrap();
             assert!(scope_class(scope).is_some(), "no legend class for {scope}");

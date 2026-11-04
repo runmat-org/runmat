@@ -10,7 +10,7 @@ use runmat_analysis_core::{
     Pressure, SpecificAcousticImpedance, Stiffness, SurfaceEmissivity, Temperature,
     ThermalContactResistance,
 };
-use runmat_fea_syntax::FeaModelDefinitionKind;
+use runmat_design_syntax::FeaModelDefinitionKind;
 
 pub(super) struct LoweredModelPhysics {
     pub boundaries: Vec<AuthoredBoundary>,

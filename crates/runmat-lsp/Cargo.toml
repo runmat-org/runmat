@@ -29,7 +29,7 @@ runmat-hir = { workspace = true }
 runmat-mir = { workspace = true, features = ["compiler"] }
 runmat-builtins = { workspace = true }
 runmat-lexer = { workspace = true }
-runmat-fea-syntax = { workspace = true }
+runmat-design-syntax = { workspace = true }
 runmat-vm = { workspace = true }
 runmat-config = { workspace = true }
 runmat-package = { workspace = true }
