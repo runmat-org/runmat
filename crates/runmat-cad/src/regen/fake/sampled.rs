@@ -17,9 +17,9 @@
 //! curve per span); holes (simple, counterbore, countersink) as revolves of their section; and
 //! images of whole bodies under any rigid motion or reflection.
 
-use super::{gen, FakeSolid, Rect};
-use crate::refs::history::{HistorySource, KernelTag, OperandEntity, SurfaceKind};
-use crate::refs::name::{InstanceKey, Role};
+use super::{FakeSolid, Rect};
+use crate::refs::history::{HistorySource, OperandEntity, SurfaceKind};
+use crate::refs::name::InstanceKey;
 use crate::regen::kernel::{KernelError, ProfileSegment, SegmentKind, Transform};
 use std::f64::consts::{PI, TAU};
 use std::sync::Arc;
@@ -246,6 +246,182 @@ pub(super) enum Shape {
     },
     /// A whole body under a rigid motion or reflection; surface `i` is face `i`.
     Image { solid: Arc<FakeSolid> },
+    /// A prism whose caps follow end conditions (per profile point), with tapered sides and
+    /// an optional thin wall.
+    Extrusion(Box<Extrusion>),
+}
+
+/// Where an extrusion cap lies above a profile point (local z).
+#[derive(Clone, Debug)]
+pub(super) enum ZBound {
+    At(f64),
+    /// The nearest hit, along local z from `from` (`sense` ±1; 0: either way), of a ray
+    /// against world facet rects; then `offset` further along `sense`.
+    Hits {
+        rects: Arc<Vec<(usize, f64, Rect)>>,
+        from: f64,
+        sense: f64,
+        offset: f64,
+    },
+    /// `distance` past another bound (a blind cap measured from a face start).
+    Past {
+        base: Box<ZBound>,
+        distance: f64,
+    },
+}
+
+impl ZBound {
+    fn eval(&self, q: [f64; 2], to_world: &Transform) -> Option<f64> {
+        match self {
+            ZBound::At(z) => Some(*z),
+            ZBound::Hits {
+                rects,
+                from,
+                sense,
+                offset,
+            } => {
+                let o = to_world.apply([q[0], q[1], *from]);
+                let d = to_world.apply_vector([0.0, 0.0, 1.0]);
+                let mut best: Option<f64> = None;
+                for (axis, off, r) in rects.iter() {
+                    let da = d[*axis];
+                    if da.abs() < 1e-12 {
+                        continue;
+                    }
+                    let t = (off - o[*axis]) / da;
+                    if *sense != 0.0 && t * sense <= 1e-9 {
+                        continue;
+                    }
+                    let p = [o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]];
+                    if !(0..3)
+                        .all(|a| a == *axis || (p[a] >= r.lo[a] - 1e-9 && p[a] <= r.hi[a] + 1e-9))
+                    {
+                        continue;
+                    }
+                    if best.map(|b| t.abs() < b.abs()).unwrap_or(true) {
+                        best = Some(t);
+                    }
+                }
+                best.map(|t| {
+                    let s = if *sense == 0.0 { 1.0 } else { *sense };
+                    from + t + s * offset
+                })
+            }
+            ZBound::Past { base, distance } => base.eval(q, to_world).map(|z| z + distance),
+        }
+    }
+    fn fixed(&self) -> Option<f64> {
+        match self {
+            ZBound::At(z) => Some(*z),
+            _ => None,
+        }
+    }
+}
+
+/// A thin wall: inside, outside, and the cap thickness with its two inner cap surfaces
+/// (surface indices, or the labels they are built from).
+pub(super) type ThinBand<S> = (f64, f64, Option<(f64, [S; 2])>);
+
+#[derive(Clone, Debug)]
+pub(super) struct Extrusion {
+    /// Per loop and curve: the curve, its outer side surface and (thin) its inner one.
+    loops: Vec<Vec<(Curve2, usize, Option<usize>)>>,
+    polys: Vec<Vec<[f64; 2]>>,
+    start: ZBound,
+    end: ZBound,
+    caps: [usize; 2],
+    /// +1 when the end cap lies towards +z of the start.
+    end_sign: f64,
+    /// Draft: hinge height, tangent on the end side, on the start side.
+    draft: Option<(f64, f64, f64)>,
+    /// Thin wall: inside, outside, and cap thickness with the inner cap surfaces.
+    thin: Option<ThinBand<usize>>,
+}
+
+impl Extrusion {
+    fn taper(&self, z: f64) -> f64 {
+        match self.draft {
+            None => 0.0,
+            Some((h, te, ts)) => {
+                let t = if (z - h) * self.end_sign >= 0.0 {
+                    te
+                } else {
+                    ts
+                };
+                (z - h).abs() * t
+            }
+        }
+    }
+    fn signed(&self, q: [f64; 2]) -> (f64, bool) {
+        let inside = inside_polys(&self.polys, q);
+        let d = self
+            .loops
+            .iter()
+            .flatten()
+            .map(|(c, _, _)| c.distance(q))
+            .fold(f64::INFINITY, f64::min);
+        (if inside { d } else { -d }, inside)
+    }
+    fn band(&self) -> (f64, f64) {
+        match self.thin {
+            Some((i, o, _)) => (o, i),
+            None => (0.0, f64::INFINITY),
+        }
+    }
+    fn caps_at(&self, q: [f64; 2], to_world: &Transform) -> Option<(f64, f64)> {
+        Some((self.start.eval(q, to_world)?, self.end.eval(q, to_world)?))
+    }
+    fn inside(&self, p: [f64; 3], to_world: &Transform) -> bool {
+        let q = [p[0], p[1]];
+        let Some((zs, ze)) = self.caps_at(q, to_world) else {
+            return false;
+        };
+        let (lo, hi) = (zs.min(ze), zs.max(ze));
+        if p[2] <= lo || p[2] >= hi {
+            return false;
+        }
+        let e = self.signed(q).0 - self.taper(p[2]);
+        let (outside, inside) = self.band();
+        if e > -outside && e < inside {
+            return true;
+        }
+        if let Some((_, _, Some((cap, _)))) = self.thin {
+            return e > -outside && (p[2] - lo < cap || hi - p[2] < cap);
+        }
+        false
+    }
+    fn distances(&self, p: [f64; 3], to_world: &Transform, out: &mut [f64]) {
+        let q = [p[0], p[1]];
+        let Some((zs, ze)) = self.caps_at(q, to_world) else {
+            return;
+        };
+        let (lo, hi) = (zs.min(ze), zs.max(ze));
+        let zr = (lo - p[2]).max(p[2] - hi).max(0.0);
+        let tp = self.taper(p[2]);
+        let (_, inside_profile) = self.signed(q);
+        let (outside, inside) = self.band();
+        for (c, o, inn) in self.loops.iter().flatten() {
+            let d = c.distance(q);
+            let sd = if inside_profile { d } else { -d };
+            out[*o] = out[*o].min((sd - tp + outside).abs() + zr);
+            if let Some(k) = inn {
+                out[*k] = out[*k].min((sd - tp - inside).abs() + zr);
+            }
+        }
+        let e = self.signed(q).0 - tp;
+        let off_band = (-outside - e)
+            .max(if inside.is_finite() { e - inside } else { 0.0 })
+            .max(0.0);
+        let cap_band = (-outside - e).max(0.0);
+        out[self.caps[0]] = out[self.caps[0]].min((p[2] - zs).abs() + cap_band.min(off_band));
+        out[self.caps[1]] = out[self.caps[1]].min((p[2] - ze).abs() + cap_band.min(off_band));
+        if let Some((_, _, Some((cap, [a, b])))) = self.thin {
+            let s = if ze >= zs { 1.0 } else { -1.0 };
+            let hollow = (inside - e).max(0.0);
+            out[a] = out[a].min((p[2] - (zs + s * cap)).abs() + hollow);
+            out[b] = out[b].min((p[2] - (ze - s * cap)).abs() + hollow);
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -325,6 +501,7 @@ impl Sampled {
                 inside_polys(&polys, [p[0], p[1]])
             }
             Shape::Image { solid } => solid.contains(p),
+            Shape::Extrusion(x) => x.inside(p, &self.to_local.inverse()),
         }
     }
 
@@ -511,6 +688,7 @@ impl Sampled {
                     }
                 }
             }
+            Shape::Extrusion(x) => x.distances(p, &self.to_local.inverse(), &mut out),
         }
         out
     }
@@ -562,6 +740,74 @@ impl Sampled {
         }
         for (a, c) in &self.exact {
             out[*a].push(*c);
+        }
+        if let Shape::Extrusion(x) = &self.shape {
+            if x.draft.is_some() {
+                self.draft_breaks(x, out);
+            }
+        }
+    }
+
+    /// Breaks along a drafted extrusion's tapered sides. Each of `RES` slices of the
+    /// extrusion's length gets breaks where the straight sides sit at the slice's middle, so
+    /// cell centres sample the taper by the midpoint rule however small the taper is beside
+    /// the uniform breaks.
+    fn draft_breaks(&self, x: &Extrusion, out: &mut [Vec<f64>; 3]) {
+        let world = self.to_local.inverse();
+        let (mut zlo, mut zhi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for i in 0..8 {
+            let c = [
+                if i & 1 == 0 { self.lo[0] } else { self.hi[0] },
+                if i & 2 == 0 { self.lo[1] } else { self.hi[1] },
+                if i & 4 == 0 { self.lo[2] } else { self.hi[2] },
+            ];
+            let z = self.to_local.apply(c)[2];
+            zlo = zlo.min(z);
+            zhi = zhi.max(z);
+        }
+        let (outside, inside) = x.band();
+        let bands: Vec<f64> = [-outside, inside]
+            .into_iter()
+            .filter(|b| b.is_finite())
+            .collect();
+        let mut push = |p: [f64; 3]| {
+            let w = world.apply(p);
+            for a in 0..3 {
+                out[a].push(w[a]);
+            }
+        };
+        for (c, _, _) in x.loops.iter().flatten() {
+            let Some((a, b)) = c.line() else {
+                continue;
+            };
+            let d = [b[0] - a[0], b[1] - a[1]];
+            let l = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            if l <= 1e-300 {
+                continue;
+            }
+            // The normal into the profile region.
+            let mut n = [-d[1] / l, d[0] / l];
+            let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+            let probe = [m[0] + n[0] * l * 1e-6, m[1] + n[1] * l * 1e-6];
+            if !inside_polys(&x.polys, probe) {
+                n = [-n[0], -n[1]];
+            }
+            for k in 0..=RES {
+                let z = zlo + (zhi - zlo) * k as f64 / RES as f64;
+                push([a[0], a[1], z]);
+                if k == RES {
+                    break;
+                }
+                let zm = zlo + (zhi - zlo) * (k as f64 + 0.5) / RES as f64;
+                let t = x.taper(zm);
+                for band in &bands {
+                    let o = t + band;
+                    // At the slice's own start height: no break inside the slice.
+                    for q in [a, b] {
+                        push([q[0] + n[0] * o, q[1] + n[1] * o, z]);
+                    }
+                }
+            }
         }
     }
 
@@ -688,6 +934,26 @@ impl Sampled {
                     if let Some(r) = f.rects.first() {
                         out[i] = Some(r.lo);
                     }
+                }
+            }
+            Shape::Extrusion(x) => {
+                let hinge = x.draft.map(|d| d.0);
+                for (c, o, inn) in x.loops.iter().flatten() {
+                    if let Some((a, _)) = c.line() {
+                        let z = hinge.or(x.start.fixed()).unwrap_or(0.0);
+                        out[*o] = Some([a[0], a[1], z]);
+                        if let (Some(k), Some((i, _, _)), None) = (inn, x.thin, x.draft) {
+                            if let Some(b) = inner_line(c, i) {
+                                out[*k] = Some([b[0], b[1], z]);
+                            }
+                        }
+                    }
+                }
+                if let Some(z) = x.start.fixed() {
+                    out[x.caps[0]] = Some([0.0, 0.0, z]);
+                }
+                if let Some(z) = x.end.fixed() {
+                    out[x.caps[1]] = Some([0.0, 0.0, z]);
                 }
             }
         }
@@ -1369,63 +1635,212 @@ pub(super) fn image(
     Ok(s)
 }
 
-/// The section of a hole about its own axis (local z up, holes go along −z), in (radius, z):
-/// the hole is the revolve of this polygon. Each segment carries the role its face gets; the
-/// segment on the axis makes no face, and the top lies on the start face.
-pub(super) fn hole_section(
-    key: &str,
-    radius: f64,
-    bottom: f64,
-    counterbore: Option<(f64, f64)>,
-    countersink: Option<(f64, f64)>,
-) -> Vec<(Curve2, HistorySource)> {
-    let k = || KernelTag::Key { key: key.into() };
-    let line = |a: [f64; 2], b: [f64; 2]| Curve2::Line { a, b };
-    let top = 0.0;
-    let mut out = vec![(
-        line([0.0, bottom], [0.0, top]),
-        gen(Role::HoleWall, k(), None),
-    )];
-    let mut at = match (counterbore, countersink) {
-        (Some((d, depth)), _) => {
-            let rc = d / 2.0;
-            out.push((
-                line([0.0, top], [rc, top]),
-                gen(Role::HoleBottom, k(), Some(1)),
-            ));
-            out.push((
-                line([rc, top], [rc, top - depth]),
-                gen(Role::HoleCounterboreWall, k(), None),
-            ));
-            out.push((
-                line([rc, top - depth], [radius, top - depth]),
-                gen(Role::HoleCounterbore, k(), None),
-            ));
-            [radius, top - depth]
+/// The thin wall's inner side of a straight curve: the line moved `inside` into the profile.
+fn inner_line(c: &Curve2, inside: f64) -> Option<[f64; 2]> {
+    let (a, b) = c.line()?;
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let l = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1e-300);
+    // Inward is left of a counter-clockwise outer loop.
+    Some([a[0] - d[1] / l * inside, a[1] + d[0] / l * inside])
+}
+
+/// An extrusion: a prism whose caps follow end conditions, with draft and thin options.
+/// `labels` are the side labels per loop and curve; `inner` the thin inner-wall labels.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn extrusion(
+    to_world: Transform,
+    loops: &[Vec<(Curve2, HistorySource)>],
+    inner: Option<&[Vec<HistorySource>]>,
+    start: ZBound,
+    end: ZBound,
+    cap_labels: [HistorySource; 2],
+    draft: Option<(f64, f64, f64)>,
+    thin: Option<ThinBand<HistorySource>>,
+) -> Result<Sampled, KernelError> {
+    let mut surfaces = Vec::new();
+    let mut l2 = Vec::new();
+    let end_sign = match (start.fixed(), end.fixed()) {
+        (Some(a), Some(b)) => (b - a).signum(),
+        _ => 1.0,
+    };
+    for (li, l) in loops.iter().enumerate() {
+        let mut v = Vec::new();
+        for (ci, (c, lab)) in l.iter().enumerate() {
+            let o = surfaces.len();
+            let hint = match (draft, c) {
+                (None, _) => side_hint(c, &to_world),
+                (Some((h, te, ts)), Curve2::Line { a, b }) => {
+                    let one_side = start
+                        .fixed()
+                        .zip(end.fixed())
+                        .map(|(zs, ze)| (zs - h) * (ze - h) >= -1e-15);
+                    match one_side {
+                        Some(true) => {
+                            let d = [b[0] - a[0], b[1] - a[1]];
+                            let l = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1e-300);
+                            let t = if end
+                                .fixed()
+                                .map(|z| (z - h) * end_sign >= 0.0)
+                                .unwrap_or(true)
+                            {
+                                te
+                            } else {
+                                -ts
+                            };
+                            plane_hint([d[1] / l, -d[0] / l, t * end_sign], &to_world)
+                        }
+                        _ => SurfaceKind::Other,
+                    }
+                }
+                (Some(_), _) => SurfaceKind::Other,
+            };
+            surfaces.push(Surf {
+                label: lab.clone(),
+                hint,
+                plane: None,
+            });
+            let inn = match (inner, thin.as_ref()) {
+                (Some(labels), Some(_)) => {
+                    let k = surfaces.len();
+                    let mut hint = side_hint(c, &to_world);
+                    if let SurfaceKind::Plane { normal } = hint {
+                        hint = SurfaceKind::Plane {
+                            normal: [-normal[0], -normal[1], -normal[2]],
+                        };
+                    }
+                    if draft.is_some() {
+                        hint = SurfaceKind::Other;
+                    }
+                    surfaces.push(Surf {
+                        label: labels[li][ci].clone(),
+                        hint,
+                        plane: None,
+                    });
+                    Some(k)
+                }
+                _ => None,
+            };
+            v.push((c.clone(), o, inn));
         }
-        (None, Some((d, angle))) => {
-            let rc = d / 2.0;
-            let drop = (rc - radius).max(0.0) / (angle / 2.0).tan().max(1e-9);
-            out.push((
-                line([0.0, top], [rc, top]),
-                gen(Role::HoleBottom, k(), Some(1)),
-            ));
-            out.push((
-                line([rc, top], [radius, top - drop]),
-                gen(Role::HoleCountersink, k(), None),
-            ));
-            [radius, top - drop]
-        }
-        (None, None) => {
-            out.push((
-                line([0.0, top], [radius, top]),
-                gen(Role::HoleBottom, k(), Some(1)),
-            ));
-            [radius, top]
+        l2.push(v);
+    }
+    let caps = [surfaces.len(), surfaces.len() + 1];
+    let [c0, c1] = cap_labels;
+    let cap_hint = |b: &ZBound, n: f64| match b {
+        ZBound::At(_) => plane_hint([0.0, 0.0, n], &to_world),
+        _ => SurfaceKind::Other,
+    };
+    surfaces.push(Surf {
+        label: c0,
+        hint: cap_hint(&start, -end_sign),
+        plane: None,
+    });
+    surfaces.push(Surf {
+        label: c1,
+        hint: cap_hint(&end, end_sign),
+        plane: None,
+    });
+    let thin_spec = match thin {
+        None => None,
+        Some((i, o, None)) => Some((i, o, None)),
+        Some((i, o, Some((cap, [a, b])))) => {
+            let k = surfaces.len();
+            surfaces.push(Surf {
+                label: a,
+                hint: plane_hint([0.0, 0.0, end_sign], &to_world),
+                plane: None,
+            });
+            surfaces.push(Surf {
+                label: b,
+                hint: plane_hint([0.0, 0.0, -end_sign], &to_world),
+                plane: None,
+            });
+            Some((i, o, Some((cap, [k, k + 1]))))
         }
     };
-    out.push((line(at, [radius, bottom]), gen(Role::HoleWall, k(), None)));
-    at = [radius, bottom];
-    out.push((line(at, [0.0, bottom]), gen(Role::HoleBottom, k(), None)));
-    out
+    let counts: Vec<Vec<usize>> = l2
+        .iter()
+        .map(|l| l.iter().map(|(c, _, _)| c.samples()).collect())
+        .collect();
+    let curve_loops: Vec<Vec<(Curve2, usize)>> = l2
+        .iter()
+        .map(|l| l.iter().map(|(c, o, _)| (c.clone(), *o)).collect())
+        .collect();
+    let polys = loop_polys(&curve_loops, &counts);
+    let x = Extrusion {
+        loops: l2,
+        polys,
+        start,
+        end,
+        caps,
+        end_sign,
+        draft,
+        thin: thin_spec,
+    };
+    // The extent: caps over sample points of the profile, sides grown by any outward wall.
+    let mut plo = [f64::INFINITY; 2];
+    let mut phi = [f64::NEG_INFINITY; 2];
+    for q in x.polys.iter().flatten() {
+        for a in 0..2 {
+            plo[a] = plo[a].min(q[a]);
+            phi[a] = phi[a].max(q[a]);
+        }
+    }
+    let mut samples: Vec<[f64; 2]> = x.polys.iter().flatten().copied().collect();
+    for i in 0..=8 {
+        for j in 0..=8 {
+            let q = [
+                plo[0] + (phi[0] - plo[0]) * i as f64 / 8.0,
+                plo[1] + (phi[1] - plo[1]) * j as f64 / 8.0,
+            ];
+            if inside_polys(&x.polys, q) {
+                samples.push(q);
+            }
+        }
+    }
+    let (mut zlo, mut zhi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for q in &samples {
+        // Boundary points sit exactly on the profile; nudge them inside for the ray.
+        let Some((a, b)) = x.caps_at(*q, &to_world) else {
+            if inside_polys(&x.polys, *q) {
+                return Err(KernelError::Failed {
+                    message: "no face the extrude can end at intercepts the whole profile".into(),
+                });
+            }
+            continue;
+        };
+        zlo = zlo.min(a.min(b));
+        zhi = zhi.max(a.max(b));
+    }
+    if !zlo.is_finite() || zhi - zlo <= 1e-12 {
+        return Err(KernelError::Failed {
+            message: "the extrude has no length".into(),
+        });
+    }
+    let mut grow = x.thin.map(|t| t.1).unwrap_or(0.0);
+    if let Some((h, te, ts)) = x.draft {
+        let reach = (zhi - h).abs().max((zlo - h).abs());
+        grow += reach * (-te).max(-ts).max(0.0);
+    }
+    let pts: Vec<[f64; 3]> = [
+        [plo[0] - grow, plo[1] - grow],
+        [phi[0] + grow, plo[1] - grow],
+        [plo[0] - grow, phi[1] + grow],
+        [phi[0] + grow, phi[1] + grow],
+    ]
+    .iter()
+    .flat_map(|q| [[q[0], q[1], zlo], [q[0], q[1], zhi]])
+    .map(|p| to_world.apply(p))
+    .collect();
+    let (lo, hi) = bbox(pts);
+    let mut out = Sampled {
+        to_local: to_world.inverse(),
+        shape: Shape::Extrusion(Box::new(x)),
+        surfaces,
+        lo,
+        hi,
+        exact: Vec::new(),
+    };
+    out.recompute_exact();
+    Ok(out)
 }

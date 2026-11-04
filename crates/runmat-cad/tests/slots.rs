@@ -53,9 +53,12 @@ fn two_bodies() -> PartDocument {
                     at: at(115.0, 40.0),
                 },
             ],
-            diameter: mm(4.0),
-            depth: None,
+            diameter: Some(mm(4.0)),
+            end: HoleEnd::ThroughAll,
             form: HoleForm::Simple,
+            spec: None,
+            drill_point: None,
+            series: None,
         }),
     ));
     d.parts.push(PartOutput {
@@ -179,6 +182,10 @@ fn a_body_remade_by_other_features_drifts() {
             },
             reverse: true,
             mode: BodyMode::New,
+            from: Default::default(),
+            second: None,
+            draft: None,
+            thin: None,
         }),
     ));
     redo.parts.last_mut().unwrap().body = Reference::feature_body("tab2");

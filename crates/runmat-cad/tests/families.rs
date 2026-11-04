@@ -511,6 +511,10 @@ fn delete_face_heals_a_pocket_and_a_dimension_edit_is_recorded() {
             extent: Extent::Blind { distance: mm(4.0) },
             reverse: true,
             mode: BodyMode::cut(),
+            from: Default::default(),
+            second: None,
+            draft: None,
+            thin: None,
         }),
     ));
     let pocket_faces = total_faces(&env.regen(&d));
@@ -838,9 +842,12 @@ fn threads_embosses_ribs_curves_connectors_and_library_features() {
                     z: mm(10.0),
                 },
             }],
-            diameter: mm(5.0),
-            depth: None,
+            diameter: Some(mm(5.0)),
+            end: HoleEnd::ThroughAll,
             form: HoleForm::Simple,
+            spec: None,
+            drill_point: None,
+            series: None,
         }),
     ));
     d2.features.push(Feature::new(
@@ -883,6 +890,10 @@ fn threads_embosses_ribs_curves_connectors_and_library_features() {
                     },
                     reverse: true,
                     mode: BodyMode::add(),
+                    from: Default::default(),
+                    second: None,
+                    draft: None,
+                    thin: None,
                 }),
             ),
         ],
@@ -961,5 +972,12 @@ fn mass_properties_and_draft_through_the_analysis_seam() {
         panic!()
     };
     assert_eq!(d.insufficient.len(), 4);
-    assert!(env.kernel.analyze(&AnalysisRequest::Zebra, &[h]).is_err());
+    // A block's edges are all sharp (G0).
+    let AnalysisResult::Zebra { edges } =
+        env.kernel.analyze(&AnalysisRequest::Zebra, &[h]).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(edges.len(), 12);
+    assert!(edges.iter().all(|(_, c)| *c == EdgeContinuity::G0));
 }

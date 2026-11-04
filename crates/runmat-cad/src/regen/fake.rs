@@ -29,7 +29,9 @@
 // Grid code indexes several per-axis arrays in step; index loops read clearer than zips here.
 #![allow(clippy::needless_range_loop)]
 
+mod analysis;
 mod extra;
+mod features;
 mod sampled;
 mod sheet;
 
@@ -190,6 +192,10 @@ struct Decoration {
     pieces: Vec<(f64, f64, u32)>,
     /// For a decoration made by this operation: the label its faces get.
     fresh: Option<HistorySource>,
+    /// A variable-radius, conic or curvature-continuous blend: not a cylinder.
+    curved: bool,
+    /// Curvature-continuous (G2) to its faces.
+    g2: bool,
 }
 
 /// The kernel's body payload.
@@ -767,6 +773,14 @@ struct GridJob<'a> {
 struct ShellSpec {
     open: BTreeSet<u32>,
     thickness: f64,
+    /// Walls with their own thickness.
+    per_face: BTreeMap<u32, f64>,
+}
+
+impl ShellSpec {
+    fn of(&self, face: u32) -> f64 {
+        self.per_face.get(&face).copied().unwrap_or(self.thickness)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -793,6 +807,36 @@ impl DraftSpec {
                 p[a] >= self.lo[a] - EPS && p[a] <= self.hi[a] + EPS
             }
         })
+    }
+
+    /// Within the face's extent along the pull, and across it out to the reach past its side
+    /// edges, at any depth along the face's plane: where the draft's half-space decides the
+    /// material either side of a facet (the far edge of an outward lean, mitred corners).
+    fn flank(&self, p: [f64; 3]) -> bool {
+        (0..3).all(|a| {
+            if a == self.plane.axis {
+                true
+            } else if self.pull[a].abs() > 1e-12 {
+                p[a] >= self.lo[a] - EPS && p[a] <= self.hi[a] + EPS
+            } else {
+                p[a] >= self.lo[a] - self.reach - EPS && p[a] <= self.hi[a] + self.reach + EPS
+            }
+        })
+    }
+
+    /// Past the face's side edges (across the pull, not along it), within reach of its
+    /// plane: where drafts of neighbouring faces that lean out meet in a mitred corner.
+    fn corner(&self, p: [f64; 3]) -> bool {
+        !self.region(p)
+            && (0..3).all(|a| {
+                if a == self.plane.axis {
+                    (p[a] - self.plane.offset).abs() <= self.reach + EPS
+                } else if self.pull[a].abs() > 1e-12 {
+                    p[a] >= self.lo[a] - EPS && p[a] <= self.hi[a] + EPS
+                } else {
+                    p[a] >= self.lo[a] - self.reach - EPS && p[a] <= self.hi[a] + self.reach + EPS
+                }
+            })
     }
 
     /// Whether `p` is material after the draft (near this face).
@@ -929,7 +973,7 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                         continue;
                     }
                     for (pk, _) in f.rect_planes() {
-                        breaks[pk.axis].push(pk.offset - (pk.dir as f64) * sh.thickness);
+                        breaks[pk.axis].push(pk.offset - (pk.dir as f64) * sh.of(fi as u32));
                     }
                 }
             }
@@ -1029,7 +1073,7 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                         let cavity = o.faces.iter().enumerate().all(|(fi, f)| {
                             sh.open.contains(&(fi as u32))
                                 || !f.is_grid()
-                                || face_distance(p, f) > sh.thickness + EPS
+                                || face_distance(p, f) > sh.of(fi as u32) + EPS
                         });
                         if cavity {
                             occ[i] = false;
@@ -1055,6 +1099,20 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                         if let Some(m) = decided {
                             occ[i] = m;
                             if m {
+                                owners[i] |= 1;
+                            }
+                        } else if !occ[i] {
+                            // Past the side edges of faces leaning out, the corner between
+                            // two of them is material where both leave it (a mitre); one
+                            // draft alone adds nothing past its face's edges.
+                            let mut n = 0;
+                            let mut all = true;
+                            for d in ds.iter().filter(|d| d.corner(p)) {
+                                n += 1;
+                                all &= d.material(p);
+                            }
+                            if n >= 2 && all {
+                                occ[i] = true;
                                 owners[i] |= 1;
                             }
                         }
@@ -1252,9 +1310,13 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
         let mut ls: Vec<HistorySource> = Vec::new();
         let mut kind = FacetKind::Planar;
         // A drafted face's tilted surface: the draft deciding either side of the facet whose
-        // material changes across it.
-        for d in drafts.iter().filter(|d| d.region(cin) || d.region(cout)) {
-            let side = |p: [f64; 3]| !d.region(p) || d.material(p);
+        // material changes across it. On the face's flank (see [`DraftSpec::flank`]) the
+        // draft's half-space decides; elsewhere it leaves the facet to the operand's faces.
+        for d in drafts
+            .iter()
+            .filter(|d| d.region(cin) || d.region(cout) || d.corner(cin) || d.corner(cout))
+        {
+            let side = |p: [f64; 3]| !d.flank(p) || d.material(p);
             if side(cin) != side(cout) {
                 ls.push(HistorySource::Input {
                     from: OperandEntity {
@@ -1318,13 +1380,15 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
             }
         }
         if ls.is_empty() && !drafts.is_empty() {
-            // A neighbour of a drafted face, extended or trimmed on its own plane.
+            // A neighbour of a drafted face, extended or trimmed on its own plane (out to a
+            // mitred corner: within the reach along each axis).
             let o = job.operands[0];
             let mut best: Option<(f64, usize)> = None;
             for (fi, face) in o.faces.iter().enumerate() {
                 if face.plane.map(|p| p.same(&plane)).unwrap_or(false) {
                     let d = face_distance(cen, face);
-                    if d <= draft_reach + EPS && best.map(|b| d < b.0).unwrap_or(true) {
+                    if d <= draft_reach * 3f64.sqrt() + EPS && best.map(|b| d < b.0).unwrap_or(true)
+                    {
                         best = Some((d, fi));
                     }
                 }
@@ -1376,7 +1440,7 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                     if sh.open.contains(&(fi as u32)) || !face.is_grid() {
                         continue;
                     }
-                    let d = (face_distance(cen, face) - sh.thickness).abs();
+                    let d = (face_distance(cen, face) - sh.of(fi as u32)).abs();
                     if best.map(|b| d < b.0 - EPS).unwrap_or(true) {
                         best = Some((d, fi));
                     }
@@ -1931,7 +1995,7 @@ fn build_topology(s: &mut FakeSolid) {
                     } else {
                         std::f64::consts::SQRT_2
                     };
-                let surface = if dec.role == Role::Blend {
+                let surface = if dec.role == Role::Blend && !dec.curved {
                     SurfaceKind::Cylinder {
                         axis_point: e.geom.start,
                         axis_direction: dir,
@@ -2296,8 +2360,19 @@ impl FakeKernel {
                 profile,
                 start,
                 end,
-                through_all,
+                start_bound,
+                end_bound,
+                draft,
+                thin,
             } => {
+                let through_all = matches!(end_bound, PrismBound::ThroughAll);
+                let plain = start_bound.is_blind()
+                    && (end_bound.is_blind() || through_all)
+                    && draft.is_none()
+                    && thin.is_none();
+                if !plain {
+                    return self.extrusion(op, solids, profile_index, &reach);
+                }
                 let exact = prism_from_profile(
                     profile,
                     *start,
@@ -2309,7 +2384,7 @@ impl FakeKernel {
                     Ok(p) => Ok(vec![Tool::Exact(p)]),
                     Err(KernelError::NotSupported { .. }) => {
                         let mut e = *end;
-                        if *through_all {
+                        if through_all {
                             let (a, b) = reach(profile.frame.origin, profile.frame.z);
                             e = if end - start >= 0.0 { b } else { a };
                         }
@@ -2428,46 +2503,7 @@ impl FakeKernel {
                     caps(),
                 )?))])
             }
-            ToolShape::Holes {
-                frame,
-                positions,
-                diameter,
-                depth,
-                counterbore,
-                countersink,
-            } => {
-                let mut out = Vec::new();
-                for (key, at) in positions {
-                    let origin = frame.to_world(*at);
-                    // Section plane: x radial (frame x), y along the hole axis (frame z).
-                    let section_frame = Frame {
-                        origin,
-                        x: frame.x,
-                        y: frame.z,
-                        z: [-frame.y[0], -frame.y[1], -frame.y[2]],
-                    };
-                    let bottom = match depth {
-                        Some(d) => -d,
-                        None => reach(origin, frame.z).0,
-                    };
-                    let section = sampled::hole_section(
-                        key,
-                        diameter / 2.0,
-                        bottom,
-                        *counterbore,
-                        *countersink,
-                    );
-                    out.push(Tool::Sampled(Box::new(sampled::revolve(
-                        Transform::from_frame(&section_frame),
-                        &[section],
-                        [0.0, 0.0],
-                        [0.0, 1.0],
-                        std::f64::consts::TAU,
-                        None,
-                    )?)));
-                }
-                Ok(out)
-            }
+            ToolShape::Holes { .. } => self.holes(&op.shape, solids, &reach),
         }
     }
 
@@ -2499,37 +2535,12 @@ impl CadKernel for FakeKernel {
             .collect::<Result<_, _>>()?;
         let ids: Vec<u32> = (0..operands.len() as u32).collect();
         match op {
-            KernelOp::Tool(t) => {
-                let tools = self.tools(t, &solids, 0)?;
-                let mode = Self::mode(t.combine);
-                let ops = if mode == Mode::New {
-                    Vec::new()
-                } else {
-                    solids.clone()
-                };
-                let res = run_grid(GridJob {
-                    operands: ops.clone(),
-                    operand_ids: if mode == Mode::New {
-                        Vec::new()
-                    } else {
-                        ids.clone()
-                    },
-                    tools,
-                    mode,
-                    split: None,
-                    separate_tools: false,
-                    body_label: None,
-                    modifier: None,
-                    merge_collinear: t.shape.merge_collinear(),
-                    carve: Vec::new(),
-                })?;
-                if mode == Mode::New {
-                    self.finish(&[], &[], res, Vec::new(), Vec::new())
-                } else {
-                    self.finish(&ops, &ids, res, Vec::new(), Vec::new())
-                }
-            }
-            KernelOp::PatternTools { seeds, instances } => {
+            KernelOp::Tool(t) => self.tool_op(t, &solids),
+            KernelOp::PatternTools {
+                seeds,
+                instances,
+                varied,
+            } => {
                 let combine =
                     seeds
                         .first()
@@ -2542,11 +2553,20 @@ impl CadKernel for FakeKernel {
                         what: "fake kernel: patterns of new-body or mixed tools".into(),
                     });
                 }
+                if !varied.is_empty() && varied.len() != instances.len() {
+                    return Err(KernelError::Failed {
+                        message: "a variable pattern needs tools for every instance".into(),
+                    });
+                }
                 let mut tools = Vec::new();
-                for (si, seed) in seeds.iter().enumerate() {
-                    let base = self.tools(seed, &solids, si as u32)?;
-                    for inst in instances {
-                        for p in &base {
+                for (ii, inst) in instances.iter().enumerate() {
+                    let these = if varied.is_empty() {
+                        seeds
+                    } else {
+                        &varied[ii]
+                    };
+                    for (si, seed) in these.iter().enumerate() {
+                        for p in &self.tools(seed, &solids, si as u32)? {
                             let mut q = p.transformed(&inst.transform);
                             q.relabel(si as u32, &inst.key);
                             tools.push(q);
@@ -2567,17 +2587,57 @@ impl CadKernel for FakeKernel {
                 })?;
                 self.finish(&solids, &ids, res, Vec::new(), Vec::new())
             }
-            KernelOp::Fillet { edges, radius }
-            | KernelOp::Chamfer {
-                edges,
-                distance: radius,
-                ..
-            } => {
-                let role = if matches!(op, KernelOp::Fillet { .. }) {
-                    Role::Blend
-                } else {
-                    Role::Chamfer
+            KernelOp::FullRound {
+                first,
+                center,
+                second,
+            } => self.full_round(first, center, second, &solids),
+            KernelOp::VertexChamfer {
+                vertices,
+                distances,
+            } => self.vertex_chamfer(vertices, *distances, &solids),
+            KernelOp::Fillet { .. } | KernelOp::Chamfer { .. } | KernelOp::FaceBlend { .. } => {
+                let (role, radius, curved, g2, edges) = match op {
+                    KernelOp::Fillet {
+                        edges,
+                        radius,
+                        variable,
+                        profile,
+                        setbacks,
+                    } => {
+                        if !setbacks.is_empty() {
+                            return Err(KernelError::NotSupported {
+                                what: "fake kernel: setback corner blends".into(),
+                            });
+                        }
+                        let r = variable.iter().map(|v| v.1).fold(*radius, f64::max);
+                        (
+                            Role::Blend,
+                            r,
+                            !variable.is_empty() || !profile.is_circular(),
+                            matches!(profile, BlendProfile::Curvature),
+                            edges.clone(),
+                        )
+                    }
+                    KernelOp::FaceBlend {
+                        first,
+                        second,
+                        radius,
+                        profile,
+                    } => (
+                        Role::Blend,
+                        *radius,
+                        !profile.is_circular(),
+                        matches!(profile, BlendProfile::Curvature),
+                        self.face_blend(first, second, *radius, &solids)?,
+                    ),
+                    KernelOp::Chamfer { edges, size } => {
+                        (Role::Chamfer, size.reach(), false, false, edges.clone())
+                    }
+                    _ => unreachable!("blends only"),
                 };
+                let edges = &edges;
+                let radius = &radius;
                 let mut fresh_all: Vec<Vec<Decoration>> = vec![Vec::new(); solids.len()];
                 for e in edges {
                     let s = solids[e.operand as usize];
@@ -2600,6 +2660,8 @@ impl CadKernel for FakeKernel {
                         planes,
                         pieces: Vec::new(),
                         fresh: Some(gen(role, KernelTag::InputEdge { edge: *e }, None)),
+                        curved,
+                        g2,
                     });
                 }
                 // Each operand is rebuilt alone with its old and new decorations.
@@ -2644,7 +2706,16 @@ impl CadKernel for FakeKernel {
             KernelOp::Shell {
                 open_faces,
                 thickness,
+                faces,
+                outward,
             } => {
+                if *outward {
+                    return Err(KernelError::NotSupported {
+                        what: "fake kernel: shelling outward".into(),
+                    });
+                }
+                let per_face: BTreeMap<u32, f64> =
+                    faces.iter().map(|(e, t)| (e.entity, *t)).collect();
                 if solids.len() != 1 {
                     return Err(KernelError::Failed {
                         message: "a shell works on one body".into(),
@@ -2672,6 +2743,7 @@ impl CadKernel for FakeKernel {
                     modifier: Some(Modifier::Shell(ShellSpec {
                         open,
                         thickness: *thickness,
+                        per_face,
                     })),
                     merge_collinear: false,
                     carve: Vec::new(),
@@ -2682,6 +2754,8 @@ impl CadKernel for FakeKernel {
                 faces,
                 neutral,
                 angle,
+                parting,
+                step: _,
             } => {
                 let pull = neutral.z;
                 let tan = angle.tan();
@@ -2710,6 +2784,28 @@ impl CadKernel for FakeKernel {
                                 hi[a] = hi[a].max(r.hi[a]);
                             }
                         }
+                        // A parting-line draft hinges each face about the parting edges it
+                        // touches: its hinge height is theirs.
+                        let mut hinge_at = neutral.origin;
+                        let hinge: Vec<f64> = parting
+                            .iter()
+                            .filter(|p| p.operand as usize == k)
+                            .filter_map(|p| so.topology.edges.get(p.entity as usize))
+                            .filter(|ed| ed.faces.contains(&e.entity))
+                            .flat_map(|ed| [ed.geom.start, ed.geom.end])
+                            .map(|q| (0..3).map(|a| (q[a] - neutral.origin[a]) * pull[a]).sum())
+                            .collect();
+                        if !parting.is_empty() {
+                            if hinge.is_empty() {
+                                return Err(KernelError::Failed {
+                                    message: "a drafted face touches no parting-line edge".into(),
+                                });
+                            }
+                            let h = hinge.iter().sum::<f64>() / hinge.len() as f64;
+                            for a in 0..3 {
+                                hinge_at[a] += h * pull[a];
+                            }
+                        }
                         let mut max_h: f64 = 0.0;
                         for i in 0..8 {
                             let c = [
@@ -2717,7 +2813,7 @@ impl CadKernel for FakeKernel {
                                 if i & 2 == 0 { lo[1] } else { hi[1] },
                                 if i & 4 == 0 { lo[2] } else { hi[2] },
                             ];
-                            let h: f64 = (0..3).map(|a| (c[a] - neutral.origin[a]) * pull[a]).sum();
+                            let h: f64 = (0..3).map(|a| (c[a] - hinge_at[a]) * pull[a]).sum();
                             max_h = max_h.max(h.abs());
                         }
                         specs.push(DraftSpec {
@@ -2725,7 +2821,7 @@ impl CadKernel for FakeKernel {
                             plane,
                             lo,
                             hi,
-                            origin: neutral.origin,
+                            origin: hinge_at,
                             pull,
                             tan,
                             reach: tan.abs() * max_h + EPS,

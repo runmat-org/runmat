@@ -41,6 +41,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod families;
+mod features;
+mod patterns;
 
 pub struct RegenContext<'a> {
     pub kernel: &'a dyn CadKernel,
@@ -244,6 +246,9 @@ struct Run<'a, 'b> {
     stats: ResolutionStats,
     /// Root diagnostic per failed feature (and per failed value, keyed `input.x` / `let.x`).
     failure_diag: BTreeMap<String, u32>,
+    /// A record the feature being compiled makes alongside its operation (a hole feature's
+    /// holes), stored when the operation succeeds.
+    pending_record: Option<crate::regen::records::FeatureRecord>,
     records: Vec<ReferenceRecord>,
     ref_ids: Vec<(String, Vec<Vec<EntityName>>)>,
     meter: &'a dyn UsageMeter,
@@ -365,6 +370,7 @@ fn regenerate_unexpanded(
         diags,
         stats: ResolutionStats::default(),
         failure_diag,
+        pending_record: None,
         records: Vec::new(),
         ref_ids: Vec::new(),
         meter,
@@ -1525,62 +1531,21 @@ impl<'a, 'b> Run<'a, 'b> {
                 };
                 Ok(Compiled::Datum(DatumValue::Frame { frame }))
             }
-            FeatureKind::Extrude(e) => {
-                let profile = self.profile(i, id, "profile", &e.profile)?;
-                let sign = if e.reverse { -1.0 } else { 1.0 };
-                let (start, end, through_all) = match &e.extent {
-                    Extent::Blind { distance } => {
-                        let d = self.value(id, "distance", distance, Dimension::LENGTH)?;
-                        (0.0, sign * d, false)
-                    }
-                    Extent::Symmetric { distance } => {
-                        let d = self.value(id, "distance", distance, Dimension::LENGTH)?;
-                        (-d / 2.0, d / 2.0, false)
-                    }
-                    Extent::ThroughAll => (0.0, sign, true),
-                    Extent::UpTo { face } => {
-                        let r = self.single(i, id, "up_to", face, Some(TopoKind::Face))?;
-                        let h = *r.entities().iter().next().expect("one");
-                        let c = self.st.bodies[h.body as usize].topology.faces[h.index as usize]
-                            .geom
-                            .centroid;
-                        let d = dot(sub(c, profile.frame.origin), profile.frame.z);
-                        (0.0, d, false)
-                    }
-                };
-                let (combine, operands) = self.mode_operands(i, id, &e.mode)?;
-                let tool = ToolOp {
-                    shape: ToolShape::Prism {
-                        profile,
-                        start,
-                        end,
-                        through_all,
-                    },
-                    combine,
-                };
-                Ok(Compiled::Op {
-                    op: KernelOp::Tool(tool.clone()),
-                    operands,
-                    naming: simple(vec![e.profile.sketch.clone()]),
-                    import: false,
-                    instances: None,
-                    tools: Some(vec![tool]),
-                })
-            }
+            FeatureKind::Extrude(e) => self.extrude(i, id, e),
             FeatureKind::Revolve(r) => {
                 let profile = self.profile(i, id, "profile", &r.profile)?;
                 let (axis_point, axis_direction) = self.axis(i, id, "axis", &r.axis)?;
                 let angle = self.value(id, "angle", &r.angle, Dimension::ANGLE)?;
                 let (combine, operands) = self.mode_operands(i, id, &r.mode)?;
-                let tool = ToolOp {
-                    shape: ToolShape::Revolve {
+                let tool = ToolOp::new(
+                    ToolShape::Revolve {
                         profile,
                         axis_point,
                         axis_direction,
                         angle,
                     },
                     combine,
-                };
+                );
                 Ok(Compiled::Op {
                     op: KernelOp::Tool(tool.clone()),
                     operands,
@@ -1594,14 +1559,14 @@ impl<'a, 'b> Run<'a, 'b> {
                 let profile = self.profile(i, id, "profile", &s.profile)?;
                 let (path, path_curves) = self.path(i, id, "path", &s.path)?;
                 let (combine, operands) = self.mode_operands(i, id, &s.mode)?;
-                let tool = ToolOp {
-                    shape: ToolShape::Sweep {
+                let tool = ToolOp::new(
+                    ToolShape::Sweep {
                         profile,
                         path,
                         path_curves,
                     },
                     combine,
-                };
+                );
                 Ok(Compiled::Op {
                     op: KernelOp::Tool(tool),
                     operands,
@@ -1620,10 +1585,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     .map(|_| ())
                     .or_else(|h| if l.guides.is_empty() { Ok(()) } else { Err(h) })?;
                 let (combine, operands) = self.mode_operands(i, id, &l.mode)?;
-                let tool = ToolOp {
-                    shape: ToolShape::Loft { profiles },
-                    combine,
-                };
+                let tool = ToolOp::new(ToolShape::Loft { profiles }, combine);
                 Ok(Compiled::Op {
                     op: KernelOp::Tool(tool),
                     operands,
@@ -1633,255 +1595,21 @@ impl<'a, 'b> Run<'a, 'b> {
                     tools: None,
                 })
             }
-            FeatureKind::Hole(h) => {
-                let r = self.single(i, id, "face", &h.face, Some(TopoKind::Face))?;
-                let face = *r.entities().iter().next().expect("one");
-                let frame = self.face_frame(&face).ok_or_else(|| {
-                    self.error(
-                        id,
-                        Some("face"),
-                        DiagCode::RefKindMismatch,
-                        "hole face is not planar".into(),
-                        Vec::new(),
-                    )
-                })?;
-                let mut positions = Vec::new();
-                for (k, p) in h.positions.iter().enumerate() {
-                    let w = self.point(i, id, &format!("positions[{}]", k), &p.at)?;
-                    let d = sub(w, frame.origin);
-                    positions.push((p.key.clone(), [dot(d, frame.x), dot(d, frame.y)]));
-                }
-                let diameter = self.value(id, "diameter", &h.diameter, Dimension::LENGTH)?;
-                let depth = match &h.depth {
-                    Some(d) => Some(self.value(id, "depth", d, Dimension::LENGTH)?),
-                    None => None,
-                };
-                let (counterbore, countersink) = match &h.form {
-                    HoleForm::Simple => (None, None),
-                    HoleForm::Counterbore { diameter, depth } => (
-                        Some((
-                            self.value(id, "form.diameter", diameter, Dimension::LENGTH)?,
-                            self.value(id, "form.depth", depth, Dimension::LENGTH)?,
-                        )),
-                        None,
-                    ),
-                    HoleForm::Countersink { diameter, angle } => (
-                        None,
-                        Some((
-                            self.value(id, "form.diameter", diameter, Dimension::LENGTH)?,
-                            self.value(id, "form.angle", angle, Dimension::ANGLE)?,
-                        )),
-                    ),
-                };
-                let operands = vec![face.body as usize];
-                let tool = ToolOp {
-                    shape: ToolShape::Holes {
-                        frame,
-                        positions,
-                        diameter,
-                        depth,
-                        counterbore,
-                        countersink,
-                    },
-                    combine: Combine::Cut,
-                };
-                Ok(Compiled::Op {
-                    op: KernelOp::Tool(tool.clone()),
-                    operands,
-                    naming: simple(Vec::new()),
-                    import: false,
-                    instances: None,
-                    tools: Some(vec![tool]),
-                })
-            }
-            FeatureKind::Fillet(fl) => {
-                let set = self.list(i, id, "edges", &fl.edges, Some(TopoKind::Edge))?;
-                let radius = self.value(id, "radius", &fl.radius, Dimension::LENGTH)?;
-                let operands = Self::bodies_of(&set);
-                let edges = Self::operand_entities(&set, &operands);
-                Ok(Compiled::Op {
-                    op: KernelOp::Fillet { edges, radius },
-                    operands,
-                    naming: simple(Vec::new()),
-                    import: false,
-                    instances: None,
-                    tools: None,
-                })
-            }
-            FeatureKind::Chamfer(c) => {
-                let set = self.list(i, id, "edges", &c.edges, Some(TopoKind::Edge))?;
-                let distance = self.value(id, "distance", &c.distance, Dimension::LENGTH)?;
-                let distance2 = match &c.distance2 {
-                    Some(d) => Some(self.value(id, "distance2", d, Dimension::LENGTH)?),
-                    None => None,
-                };
-                let operands = Self::bodies_of(&set);
-                let edges = Self::operand_entities(&set, &operands);
-                Ok(Compiled::Op {
-                    op: KernelOp::Chamfer {
-                        edges,
-                        distance,
-                        distance2,
-                    },
-                    operands,
-                    naming: simple(Vec::new()),
-                    import: false,
-                    instances: None,
-                    tools: None,
-                })
-            }
-            FeatureKind::Shell(s) => {
-                let b = self.single(i, id, "body", &s.body, Some(TopoKind::Body))?;
-                let body = b.entities().iter().next().expect("one").body as usize;
-                let faces = if s.open_faces.is_empty() {
-                    BTreeSet::new()
-                } else {
-                    self.list(i, id, "open_faces", &s.open_faces, Some(TopoKind::Face))?
-                };
-                let thickness = self.value(id, "thickness", &s.thickness, Dimension::LENGTH)?;
-                let operands = vec![body];
-                if faces.iter().any(|h| h.body as usize != body) {
-                    return Err(self.error(
-                        id,
-                        Some("open_faces"),
-                        DiagCode::RefKindMismatch,
-                        "open faces must be on the shelled body".into(),
-                        Vec::new(),
-                    ));
-                }
-                let open_faces = Self::operand_entities(&faces, &operands);
-                Ok(Compiled::Op {
-                    op: KernelOp::Shell {
-                        open_faces,
-                        thickness,
-                    },
-                    operands,
-                    naming: simple(Vec::new()),
-                    import: false,
-                    instances: None,
-                    tools: None,
-                })
-            }
-            FeatureKind::Draft(d) => {
-                let set = self.list(i, id, "faces", &d.faces, Some(TopoKind::Face))?;
-                let neutral = self.plane(i, id, "neutral", &d.neutral)?;
-                let angle = self.value(id, "angle", &d.angle, Dimension::ANGLE)?;
-                let operands = Self::bodies_of(&set);
-                let faces = Self::operand_entities(&set, &operands);
-                Ok(Compiled::Op {
-                    op: KernelOp::Draft {
-                        faces,
-                        neutral,
-                        angle,
-                    },
-                    operands,
-                    naming: simple(Vec::new()),
-                    import: false,
-                    instances: None,
-                    tools: None,
-                })
-            }
-            FeatureKind::Pattern(p) => {
-                let mut instances = Vec::new();
-                match &p.layout {
-                    PatternLayout::Linear {
-                        direction,
-                        spacing,
-                        count,
-                    } => {
-                        let (_, d) = self.axis(i, id, "direction", direction)?;
-                        let s = self.value(id, "spacing", spacing, Dimension::LENGTH)?;
-                        let n = self.count(id, "count", count)?;
-                        for k in 1..n {
-                            instances.push(Instance {
-                                key: InstanceKey::Linear { step: k },
-                                transform: Transform::translation(scale(d, s * k as f64)),
-                            });
-                        }
-                    }
-                    PatternLayout::Grid {
-                        first,
-                        first_spacing,
-                        first_count,
-                        second,
-                        second_spacing,
-                        second_count,
-                    } => {
-                        let (_, d1) = self.axis(i, id, "first", first)?;
-                        let s1 =
-                            self.value(id, "first_spacing", first_spacing, Dimension::LENGTH)?;
-                        let n1 = self.count(id, "first_count", first_count)?;
-                        let (_, d2) = self.axis(i, id, "second", second)?;
-                        let s2 =
-                            self.value(id, "second_spacing", second_spacing, Dimension::LENGTH)?;
-                        let n2 = self.count(id, "second_count", second_count)?;
-                        for a in 0..n1 {
-                            for b in 0..n2 {
-                                if a == 0 && b == 0 {
-                                    continue;
-                                }
-                                let t = add(scale(d1, s1 * a as f64), scale(d2, s2 * b as f64));
-                                instances.push(Instance {
-                                    key: InstanceKey::Grid {
-                                        first: a,
-                                        second: b,
-                                    },
-                                    transform: Transform::translation(t),
-                                });
-                            }
-                        }
-                    }
-                    PatternLayout::Circular { axis, count, angle } => {
-                        let (pt, dir) = self.axis(i, id, "axis", axis)?;
-                        let n = self.count(id, "count", count)?;
-                        let total = self.value(id, "angle", angle, Dimension::ANGLE)?;
-                        for k in 1..n {
-                            let a = total * k as f64 / n as f64;
-                            let col = |v: [f64; 3]| rotate(v, dir, a);
-                            let (cx, cy, cz) = (
-                                col([1.0, 0.0, 0.0]),
-                                col([0.0, 1.0, 0.0]),
-                                col([0.0, 0.0, 1.0]),
-                            );
-                            let rotation = [
-                                [cx[0], cy[0], cz[0]],
-                                [cx[1], cy[1], cz[1]],
-                                [cx[2], cy[2], cz[2]],
-                            ];
-                            let t = sub(pt, rot_apply(&rotation, pt));
-                            instances.push(Instance {
-                                key: InstanceKey::Circular { step: k },
-                                transform: Transform {
-                                    rotation,
-                                    translation: t,
-                                },
-                            });
-                        }
-                    }
-                    PatternLayout::Table { rows } => {
-                        for r in rows {
-                            let t = [
-                                self.value(id, "rows.dx", &r.dx, Dimension::LENGTH)?,
-                                self.value(id, "rows.dy", &r.dy, Dimension::LENGTH)?,
-                                self.value(id, "rows.dz", &r.dz, Dimension::LENGTH)?,
-                            ];
-                            instances.push(Instance {
-                                key: InstanceKey::Row { key: r.key.clone() },
-                                transform: Transform::translation(t),
-                            });
-                        }
-                    }
-                }
-                instances.retain(|inst| !p.skip.contains(&inst.key));
-                self.pattern_like(i, id, &p.seeds, instances)
-            }
+            FeatureKind::Hole(h) => self.hole(i, id, h),
+            FeatureKind::Fillet(fl) => self.fillet(i, id, fl),
+            FeatureKind::FaceFillet(fl) => self.face_fillet(i, id, fl),
+            FeatureKind::FullRound(fl) => self.full_round(i, id, fl),
+            FeatureKind::Chamfer(c) => self.chamfer(i, id, c),
+            FeatureKind::Shell(s) => self.shell(i, id, s),
+            FeatureKind::Draft(d) => self.draft(i, id, d),
+            FeatureKind::Pattern(p) => self.pattern(i, id, p),
             FeatureKind::Mirror(m) => {
                 let frame = self.plane(i, id, "plane", &m.plane)?;
                 let instances = vec![Instance {
                     key: InstanceKey::Mirror,
                     transform: Transform::reflection(frame.origin, frame.z),
                 }];
-                self.pattern_like(i, id, &m.seeds, instances)
+                self.pattern_like(i, id, &m.seeds, instances, Vec::new())
             }
             FeatureKind::Boolean(b) => {
                 let t = self.single(i, id, "target", &b.target, Some(TopoKind::Body))?;
@@ -1972,12 +1700,15 @@ impl<'a, 'b> Run<'a, 'b> {
         }
     }
 
+    /// A pattern or mirror of seeds at `instances`. `varied`: per instance, the seed tools
+    /// rebuilt with that instance's values (a variable pattern).
     fn pattern_like(
         &mut self,
         i: usize,
         id: &FeatureId,
         seeds: &PatternSeeds,
         instances: Vec<Instance>,
+        varied: Vec<Vec<ToolOp>>,
     ) -> Result<Compiled, Halt> {
         let keys: BTreeSet<InstanceKey> = instances.iter().map(|x| x.key.clone()).collect();
         match seeds {
@@ -1997,7 +1728,11 @@ impl<'a, 'b> Run<'a, 'b> {
                             id,
                             Some(&format!("seeds[{}]", k)),
                             DiagCode::KernelNotSupported,
-                            format!("not supported yet: patterning a {} feature", kind),
+                            format!(
+                    "not supported yet: patterning a {} feature (or one that ends at a chosen \
+                     face or body)",
+                    kind
+                ),
                             Vec::new(),
                         ));
                     };
@@ -2022,6 +1757,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     op: KernelOp::PatternTools {
                         seeds: tools,
                         instances,
+                        varied,
                     },
                     operands,
                     naming,
@@ -2092,6 +1828,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 instances,
                 tools,
             } => {
+                let record = self.pending_record.take();
                 let mut status = FeatureStatus::Regenerated;
                 let mut output = None;
                 if let Some(frozen) = &f.frozen {
@@ -2242,6 +1979,9 @@ impl<'a, 'b> Run<'a, 'b> {
                 }
                 if let Some(t) = tools {
                     self.st.tools.insert(id.clone(), t);
+                }
+                if let Some(r) = record {
+                    self.st.records.insert(id.clone(), r);
                 }
                 Ok(status)
             }

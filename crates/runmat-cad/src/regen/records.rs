@@ -29,6 +29,10 @@ pub struct FaceDraft {
 #[serde(rename_all = "snake_case", tag = "record")]
 pub enum FeatureRecord {
     Curve(CurveValue),
+    /// The holes a hole feature made (by key), for drawings and the hole table.
+    Holes {
+        holes: Vec<crate::drawing::hole_table::HoleInstance>,
+    },
     /// A cosmetic thread on a face (names of the face it resolved to).
     CosmeticThread {
         face: Vec<EntityName>,

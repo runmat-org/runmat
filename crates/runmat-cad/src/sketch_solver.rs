@@ -341,6 +341,47 @@ impl SketchSolver for ConstraintSketchSolver {
                         .eval_as(value, env, Dimension::ANGLE)
                         .map_err(|e| fail(e.to_string()))?,
                 },
+                K::Limit {
+                    dimension,
+                    min,
+                    max,
+                } => {
+                    let dim = if matches!(**dimension, K::Angle { .. }) {
+                        Dimension::ANGLE
+                    } else {
+                        Dimension::LENGTH
+                    };
+                    let range = |v: &crate::value::ValueExpr| {
+                        eval.eval_as(v, env, dim).map_err(|e| fail(e.to_string()))
+                    };
+                    let (lo, hi) = (range(min)?, range(max)?);
+                    let inner = match &**dimension {
+                        K::Distance { a, b, .. } => C::Distance {
+                            a: t(a)?,
+                            b: t(b)?,
+                            value: lo,
+                        },
+                        K::Length { line, .. } => C::Length {
+                            line: t(line)?,
+                            value: lo,
+                        },
+                        K::Radius { curve, .. } => C::Radius {
+                            curve: t(curve)?,
+                            value: lo,
+                        },
+                        K::Angle { a, b, .. } => C::Angle {
+                            a: t(a)?,
+                            b: t(b)?,
+                            value: lo,
+                        },
+                        _ => {
+                            return Err(fail(
+                                "a range limit applies to a distance, length, radius or angle",
+                            ))
+                        }
+                    };
+                    C::limit(inner, lo, hi)
+                }
             };
             let id = sys.constrain(cc).map_err(build)?;
             ours.insert(id, i);

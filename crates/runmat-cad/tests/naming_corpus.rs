@@ -720,6 +720,10 @@ fn with_cut_and_fillet() -> PartDocument {
             extent: Extent::ThroughAll,
             reverse: false,
             mode: BodyMode::cut(),
+            from: Default::default(),
+            second: None,
+            draft: None,
+            thin: None,
         }),
     ));
     d.features.push(fillet(
@@ -874,6 +878,10 @@ fn c23_face_consumed_by_later_cut() {
             extent: Extent::ThroughAll,
             reverse: false,
             mode: BodyMode::cut(),
+            from: Default::default(),
+            second: None,
+            draft: None,
+            thin: None,
         }),
     ));
     let r = env.regen(&d);
@@ -905,6 +913,10 @@ fn c24_consumer_moved_before_consumer_of_its_face() {
             extent: Extent::ThroughAll,
             reverse: false,
             mode: BodyMode::cut(),
+            from: Default::default(),
+            second: None,
+            draft: None,
+            thin: None,
         }),
     ));
     d.features.push(fillet(
@@ -987,9 +999,12 @@ fn holes(d: &mut PartDocument, count: u32, spacing: f64) {
                     z: input("thickness"),
                 },
             }],
-            diameter: mm(4.0),
-            depth: None,
+            diameter: Some(mm(4.0)),
+            end: HoleEnd::ThroughAll,
             form: HoleForm::Simple,
+            spec: None,
+            drill_point: None,
+            series: None,
         }),
     ));
     d.features.push(Feature::new(
@@ -1467,9 +1482,12 @@ fn c41_sketch_on_face_follows_and_hole_by_sketch_point() {
                     role: PointRole::At,
                 },
             }],
-            diameter: mm(6.0),
-            depth: Some(mm(3.0)),
+            diameter: Some(mm(6.0)),
+            end: HoleEnd::Blind { depth: mm(3.0) },
             form: HoleForm::Simple,
+            spec: None,
+            drill_point: None,
+            series: None,
         }),
     ));
     let bottom = Reference::gen_face("h", Role::HoleBottom, SourceTag::Key { key: "p".into() });

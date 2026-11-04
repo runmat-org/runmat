@@ -168,9 +168,14 @@ fn hole_feature(
                     z: input("thickness"),
                 },
             }],
-            diameter: dia,
-            depth,
+            diameter: Some(dia),
+            end: depth
+                .map(|depth| HoleEnd::Blind { depth })
+                .unwrap_or(HoleEnd::ThroughAll),
             form,
+            spec: None,
+            drill_point: None,
+            series: None,
         }),
     )
 }
@@ -1007,6 +1012,8 @@ fn shell() -> Family {
                     body: Reference::feature_body("body"),
                     open_faces: vec![Reference::end_cap("body")],
                     thickness: input("wall"),
+                    faces: Vec::new(),
+                    outward: false,
                 }),
             ));
         },
@@ -1063,6 +1070,8 @@ fn draft() -> Family {
                     faces: vec![side("body", "s1", "l1"), side("body", "s1", "l3")],
                     neutral: PlaneRef::origin_xy(),
                     angle: input("da"),
+                    kind: Default::default(),
+                    flip: false,
                 }),
             ));
         },
@@ -1158,8 +1167,8 @@ fn counterbore() -> Family {
                 mm(6.0),
                 Some(mm(8.0)),
                 HoleForm::Counterbore {
-                    diameter: input("cbd"),
-                    depth: input("cbh"),
+                    diameter: Some(input("cbd")),
+                    depth: Some(input("cbh")),
                 },
             ))
         },
@@ -1208,8 +1217,8 @@ fn countersink() -> Family {
                 mm(6.0),
                 Some(mm(8.0)),
                 HoleForm::Countersink {
-                    diameter: input("csd"),
-                    angle: input("csa"),
+                    diameter: Some(input("csd")),
+                    angle: Some(input("csa")),
                 },
             ))
         },
@@ -1342,6 +1351,7 @@ fn circular_pattern() -> Family {
                         axis: axis_datum("cax"),
                         count: input("n"),
                         angle: ValueExpr::deg(360.0),
+                        equal_spacing: true,
                     },
                     skip: Vec::new(),
                 }),
@@ -1496,6 +1506,7 @@ fn body_pattern() -> Family {
                         axis: axis_datum("cax"),
                         count: input("n"),
                         angle: ValueExpr::deg(360.0),
+                        equal_spacing: true,
                     },
                     skip: Vec::new(),
                 }),
@@ -1563,6 +1574,10 @@ fn fillet_family() -> Family {
                         Reference::end_cap("body"),
                     )],
                     radius: input("fr"),
+                    variable: Vec::new(),
+                    profile: Default::default(),
+                    setbacks: Vec::new(),
+                    propagate: true,
                 }),
             ));
         },
@@ -1610,8 +1625,10 @@ fn chamfer_family() -> Family {
                         side("body", "s1", "l2"),
                         Reference::end_cap("body"),
                     )],
-                    distance: input("cd"),
-                    distance2: None,
+                    form: ChamferForm::Equal {
+                        distance: input("cd"),
+                    },
+                    flip: false,
                 }),
             ));
         },
@@ -2417,8 +2434,8 @@ fn specials() -> Vec<Outcome> {
         let mut d = f.doc(&p);
         if let FeatureKind::Hole(h) = &mut d.feature_mut("h").unwrap().kind {
             h.form = HoleForm::Counterbore {
-                diameter: mm(10.0),
-                depth: mm(2.0),
+                diameter: Some(mm(10.0)),
+                depth: Some(mm(2.0)),
             };
         }
         let floor = face1(
@@ -2449,7 +2466,7 @@ fn specials() -> Vec<Outcome> {
         ));
         let mut d2 = f.doc(&p);
         if let FeatureKind::Hole(h) = &mut d2.feature_mut("h").unwrap().kind {
-            h.depth = None;
+            h.end = HoleEnd::ThroughAll;
         }
         let r2 = env.regen(&d2);
         out.push(special(

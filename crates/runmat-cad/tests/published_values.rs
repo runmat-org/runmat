@@ -365,6 +365,10 @@ fn published_reads_enter_the_dependency_graph_and_change_impact() {
             },
             reverse: true,
             mode: BodyMode::add(),
+            from: Default::default(),
+            second: None,
+            draft: None,
+            thin: None,
         }),
     ));
     // `wide` overrides the published width; `lite` suppresses the let reader.

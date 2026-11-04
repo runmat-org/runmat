@@ -444,7 +444,9 @@ fn suggested_name(r: &Reference) -> String {
                         crate::refs::name::PlaneSide::Negative => "_negative",
                         crate::refs::name::PlaneSide::Positive => "_positive",
                     }),
-                    SourceTag::Edge { .. } | SourceTag::Face { .. } => s.push_str("_of"),
+                    SourceTag::Edge { .. } | SourceTag::Face { .. } | SourceTag::Vertex { .. } => {
+                        s.push_str("_of")
+                    }
                 }
                 s
             }

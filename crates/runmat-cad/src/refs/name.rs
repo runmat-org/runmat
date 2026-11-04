@@ -80,6 +80,14 @@ pub enum Role {
     HoleCountersink,
     /// The rim a shell leaves where it opened a face, tagged by the opened face.
     ShellRim,
+    /// A shell's outer wall when shelled outward, tagged by the face it offsets.
+    ShellOuter,
+    /// A thin feature's inner wall, tagged by profile curve; ordinal 0 and 1 for the inner
+    /// faces of its start and end caps.
+    ThinWall,
+    /// A step face a step draft leaves between faces hinged at different heights, tagged by
+    /// the drafted face.
+    DraftStep,
     /// A face made where a split tool cut a body, tagged by side.
     SplitFace,
     /// A body a feature made.
@@ -156,6 +164,9 @@ impl Role {
             Role::HoleCounterboreWall => "counterbore_wall",
             Role::HoleCountersink => "countersink",
             Role::ShellRim => "rim",
+            Role::ShellOuter => "outer",
+            Role::ThinWall => "thin_wall",
+            Role::DraftStep => "draft_step",
             Role::SplitFace => "split_face",
             Role::Body => "body",
             Role::Replacement => "replacement",
@@ -213,6 +224,24 @@ pub enum InstanceKey {
     },
     /// The single image of a mirror.
     Mirror,
+    /// A sketch-driven instance, by the sketch point it sits on.
+    Point {
+        point: String,
+    },
+    /// A curve-driven instance: the step along the curve.
+    Curve {
+        step: u32,
+    },
+    /// A fill instance: lattice steps from the seed along the fill's two directions.
+    Lattice {
+        i: i32,
+        j: i32,
+    },
+    /// A circular fill instance: ring, then step around it.
+    Ring {
+        ring: u32,
+        step: u32,
+    },
 }
 
 impl fmt::Display for InstanceKey {
@@ -223,6 +252,10 @@ impl fmt::Display for InstanceKey {
             InstanceKey::Circular { step } => write!(f, "@{}", step),
             InstanceKey::Row { key } => write!(f, "{:?}", key),
             InstanceKey::Mirror => f.write_str("mirror"),
+            InstanceKey::Point { point } => write!(f, "pt:{}", point),
+            InstanceKey::Curve { step } => write!(f, "~{}", step),
+            InstanceKey::Lattice { i, j } => write!(f, "[{},{}]", i, j),
+            InstanceKey::Ring { ring, step } => write!(f, "r{}@{}", ring, step),
         }
     }
 }
@@ -297,6 +330,11 @@ pub enum SourceTag {
     Face {
         face: NameToken,
     },
+    /// The vertex a corner blend or vertex chamfer replaced: the vertex where the faces with
+    /// these tokens meet (sorted, distinct).
+    Vertex {
+        faces: Vec<NameToken>,
+    },
 }
 
 impl SourceTag {
@@ -312,11 +350,20 @@ impl SourceTag {
         SourceTag::Face { face: face.token() }
     }
 
+    /// The tag of the vertex where these faces meet (order and repeats do not matter).
+    pub fn vertex_of(faces: &[EntityName]) -> SourceTag {
+        let mut t: Vec<NameToken> = faces.iter().map(|f| f.token()).collect();
+        t.sort();
+        t.dedup();
+        SourceTag::Vertex { faces: t }
+    }
+
     /// Tokens of the names this tag is made from.
     pub fn children(&self) -> Vec<NameToken> {
         match self {
             SourceTag::Edge { between } => between.to_vec(),
             SourceTag::Face { face } => vec![*face],
+            SourceTag::Vertex { faces } => faces.clone(),
             _ => Vec::new(),
         }
     }
@@ -343,6 +390,12 @@ impl SourceTag {
                 }
             }
             SourceTag::Face { face } => SourceTag::Face { face: map(face) },
+            SourceTag::Vertex { faces } => {
+                let mut t: Vec<NameToken> = faces.iter().map(map).collect();
+                t.sort();
+                t.dedup();
+                SourceTag::Vertex { faces: t }
+            }
             other => other.clone(),
         }
     }
@@ -591,6 +644,16 @@ impl EntityName {
                             f.write_str(")")?;
                         }
                         SourceTag::Face { face } => child(f, face)?,
+                        SourceTag::Vertex { faces } => {
+                            f.write_str("vertex_of(")?;
+                            for (k, t) in faces.iter().enumerate() {
+                                if k > 0 {
+                                    f.write_str(", ")?;
+                                }
+                                child(f, t)?;
+                            }
+                            f.write_str(")")?;
+                        }
                     }
                     if let Some(o) = g.ordinal {
                         if g.tag != SourceTag::None {

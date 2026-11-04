@@ -293,10 +293,33 @@ fn feature_value_mut<'a>(
             _ => return None,
         },
         (F::Revolve(r), "angle") => &mut r.angle,
-        (F::Hole(h), "diameter") => &mut h.diameter,
-        (F::Hole(h), "depth") => h.depth.as_mut()?,
+        (F::Extrude(e), "second.distance") => match e.second.as_mut()? {
+            Extent::Blind { distance } => distance,
+            _ => return None,
+        },
+        (F::Extrude(e), "draft.angle") => &mut e.draft.as_mut()?.angle,
+        (F::Extrude(e), "thin.thickness") => &mut e.thin.as_mut()?.thickness,
+        (F::Hole(h), "diameter") => h.diameter.as_mut()?,
+        (F::Hole(h), "depth") => match &mut h.end {
+            HoleEnd::Blind { depth } => depth,
+            _ => return None,
+        },
         (F::Fillet(f), "radius") => &mut f.radius,
-        (F::Chamfer(c), "distance") => &mut c.distance,
+        (F::FaceFillet(f), "radius") => &mut f.radius,
+        (F::Chamfer(c), "distance") => match &mut c.form {
+            ChamferForm::Equal { distance }
+            | ChamferForm::Distances { distance, .. }
+            | ChamferForm::DistanceAngle { distance, .. } => distance,
+            ChamferForm::Vertex { distances } => &mut distances[0],
+        },
+        (F::Chamfer(c), "distance2") => match &mut c.form {
+            ChamferForm::Distances { distance2, .. } => distance2,
+            _ => return None,
+        },
+        (F::Chamfer(c), "angle") => match &mut c.form {
+            ChamferForm::DistanceAngle { angle, .. } => angle,
+            _ => return None,
+        },
         (F::Shell(s), "thickness") => &mut s.thickness,
         (F::Draft(d), "angle") => &mut d.angle,
         (

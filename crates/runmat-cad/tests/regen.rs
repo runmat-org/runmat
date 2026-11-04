@@ -61,8 +61,8 @@ fn revolve_doc() -> PartDocument {
                 Reference::gen_face("round_spin", Role::Blend, SourceTag::None),
                 Reference::end_cap("body"),
             )],
-            distance: mm(0.5),
-            distance2: None,
+            form: ChamferForm::Equal { distance: mm(0.5) },
+            flip: false,
         }),
     ));
     d
@@ -390,8 +390,8 @@ fn g08_open_profile_and_kernel_not_supported_are_specific() {
                 ),
                 Reference::end_cap("body"),
             )],
-            distance: mm(0.5),
-            distance2: None,
+            form: ChamferForm::Equal { distance: mm(0.5) },
+            flip: false,
         }),
     ));
     let r = env.regen(&d);
@@ -524,6 +524,83 @@ fn g10_constraint_solver_adapter_solves_and_maps_back() {
         .solve(&s, &ev, &ValueEnv::default())
         .unwrap_err();
     assert!(bad.constraints.contains(&7), "{:?}", bad);
+}
+
+#[test]
+fn g10b_sketch_range_limits_clamp_and_release() {
+    // A rectangle 80 wide whose height is only limited to [10, 30] mm, drawn 45 high: the
+    // limit pulls it to 30 and leaves it free (one DOF) inside the range; drawn 20 it stays.
+    use runmat_cad::model::SketchConstraintKind as K;
+    let build = |height: f64| {
+        let mut s = rect(
+            PlaneRef::origin_xy(),
+            mm(0.0),
+            mm(0.0),
+            mm(80.0),
+            mm(height),
+        );
+        for i in 0..4 {
+            let prev = format!("l{}", if i == 0 { 4 } else { i });
+            if let SketchGeometry::Line { start, .. } = &mut s.entities[i].geometry {
+                *start = PointExpr::of(&prev, PointRole::End);
+            }
+        }
+        let t = SketchTarget::entity;
+        let c = |kind| SketchConstraint { id: None, kind };
+        s.constraints = vec![
+            c(K::Fix {
+                target: SketchTarget::point("l1", PointRole::Start),
+            }),
+            c(K::Horizontal { line: t("l1") }),
+            c(K::Vertical { line: t("l2") }),
+            c(K::Horizontal { line: t("l3") }),
+            c(K::Vertical { line: t("l4") }),
+            c(K::Length {
+                line: t("l1"),
+                value: mm(80.0),
+            }),
+            c(K::Limit {
+                dimension: Box::new(K::Length {
+                    line: t("l2"),
+                    value: mm(0.0),
+                }),
+                min: mm(10.0),
+                max: mm(30.0),
+            }),
+        ];
+        s
+    };
+    let units = StubUnits;
+    let ev = Evaluator {
+        units: &units,
+        dynamic: &NoDynamicValues,
+    };
+    let tall = ConstraintSketchSolver
+        .solve(&build(45.0), &ev, &ValueEnv::default())
+        .expect("solves");
+    let p = tall.point(&"l2".into(), PointRole::End).unwrap();
+    assert!((p[1] - 0.03).abs() < 1e-7, "clamped to the max: {:?}", p);
+    let mid = ConstraintSketchSolver
+        .solve(&build(20.0), &ev, &ValueEnv::default())
+        .expect("solves");
+    let p = mid.point(&"l2".into(), PointRole::End).unwrap();
+    assert!((p[1] - 0.02).abs() < 1e-7, "free inside the range: {:?}", p);
+    assert_eq!(mid.status, SketchSolveStatus::UnderDefined);
+    // A limit on something that is not a dimension is refused.
+    let mut bad = build(20.0);
+    bad.constraints.push(SketchConstraint {
+        id: None,
+        kind: K::Limit {
+            dimension: Box::new(K::Horizontal {
+                line: SketchTarget::entity("l1"),
+            }),
+            min: mm(0.0),
+            max: mm(1.0),
+        },
+    });
+    assert!(ConstraintSketchSolver
+        .solve(&bad, &ev, &ValueEnv::default())
+        .is_err());
 }
 
 #[test]

@@ -172,6 +172,13 @@ pub enum SketchConstraintKind {
         b: SketchTarget,
         value: ValueExpr,
     },
+    /// A range on a dimension (distance, length, radius or angle; its own value is ignored):
+    /// the solver keeps it within `[min, max]` and leaves it free inside the range.
+    Limit {
+        dimension: Box<SketchConstraintKind>,
+        min: ValueExpr,
+        max: ValueExpr,
+    },
 }
 
 /// The `solved { }` cache: SI coordinates per entity point, keyed by name. Entries the solver

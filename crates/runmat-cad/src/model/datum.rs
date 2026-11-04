@@ -142,12 +142,14 @@ pub enum PlaneDef {
     TangentToFace { face: Reference, at: PointRef },
 }
 
-/// A curve a datum follows: a reference-curve feature or an edge.
+/// A curve a datum or pattern follows: a reference-curve feature, an edge, or a sketch's open
+/// chain (its path).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "curve")]
 pub enum CurveRef {
     Feature { feature: FeatureId },
     Edge { edge: Reference },
+    Sketch { sketch: FeatureId },
 }
 
 // Authored data, built once per edit; variant sizes do not matter here.
@@ -241,6 +243,7 @@ impl CurveRef {
         match self {
             CurveRef::Feature { feature } => v.feature(feature),
             CurveRef::Edge { edge } => v.reference(param, edge),
+            CurveRef::Sketch { sketch } => v.feature(sketch),
         }
     }
 }

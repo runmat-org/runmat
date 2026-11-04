@@ -10,6 +10,8 @@ pub mod datum;
 pub mod detail;
 pub mod direct;
 pub mod feature;
+pub mod feature_params;
+pub mod hole_tables;
 pub mod items;
 pub mod mold;
 pub mod sheet_metal;

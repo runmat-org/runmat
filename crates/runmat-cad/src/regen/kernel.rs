@@ -139,13 +139,22 @@ pub enum Combine {
 #[serde(rename_all = "snake_case", tag = "tool")]
 pub enum ToolShape {
     /// Prism along the frame's Z from `start` (the start cap) to `end` (the end cap), signed
-    /// distances; `end < start` extrudes against the normal. `through_all` extends the end cap
-    /// past every operand, in the direction of `end - start`.
+    /// distances; `end < start` extrudes against the normal. Each cap's [`PrismBound`] can
+    /// replace its distance with an end condition read from the operands (through all, up to
+    /// next, up to a face or body). `draft` tapers the sides; `thin` makes a wall along the
+    /// profile curves instead of filling the profile.
     Prism {
         profile: CanonicalProfile,
         start: f64,
         end: f64,
-        through_all: bool,
+        #[serde(default, skip_serializing_if = "PrismBound::is_blind")]
+        start_bound: PrismBound,
+        #[serde(default, skip_serializing_if = "PrismBound::is_blind")]
+        end_bound: PrismBound,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        draft: Option<PrismDraft>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thin: Option<ThinWallSpec>,
     },
     Revolve {
         profile: CanonicalProfile,
@@ -171,14 +180,178 @@ pub enum ToolShape {
         frame: Frame,
         positions: Vec<(String, [f64; 2])>,
         diameter: f64,
-        /// `None`: through all.
-        depth: Option<f64>,
+        end: HoleDepth,
         counterbore: Option<(f64, f64)>,
+        /// (diameter, included angle).
         countersink: Option<(f64, f64)>,
+        /// A blind hole's drill point (included angle); `None`: a flat bottom.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        drill_point: Option<f64>,
+        /// The wall tapers (half-angle, narrowing with depth): a pipe tap.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        taper: Option<f64>,
+        /// A modelled thread: the threaded wall is its own face ([`Role::ThreadFace`] tagged
+        /// by the hole key).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<HoleThread>,
+        /// A slot: `length` centre to centre along the frame's x turned by `angle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slot: Option<(f64, f64)>,
+        /// A hole series: per operand in order from the start face, the diameter through that
+        /// body (each body's depth range is where the axis crosses it). Empty: one diameter.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        stages: Vec<HoleStage>,
     },
 }
 
+/// How far a hole goes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "end")]
+pub enum HoleDepth {
+    Blind {
+        depth: f64,
+    },
+    ThroughAll,
+    /// To the next face below the start: out of the material it starts in.
+    UpToNext,
+    UpToFace {
+        face: OperandEntity,
+        offset: f64,
+    },
+}
+
+/// A modelled hole thread: `length` from the start (or the counterbore floor); `None`: the
+/// whole wall.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HoleThread {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+}
+
+/// One body of a hole series.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HoleStage {
+    pub operand: u32,
+    pub diameter: f64,
+    /// A modelled thread through this stage.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub thread: bool,
+}
+
+/// Where a prism cap ends, beyond its signed distance.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "bound")]
+pub enum PrismBound {
+    /// At the distance given.
+    #[default]
+    Blind,
+    /// Past every operand.
+    ThroughAll,
+    /// At the next operand face along the direction from the profile plane, which must
+    /// intercept the whole profile; the cap takes that face's shape.
+    UpToNext,
+    /// On an operand face (planar or curved), `offset` beyond it along the direction.
+    UpToFace { face: OperandEntity, offset: f64 },
+    /// Where it first meets an operand body.
+    UpToBody { operand: u32, offset: f64 },
+    /// The start cap lies on this operand face (extrude from a surface); a blind far cap is
+    /// then measured from it.
+    FromFace { face: OperandEntity },
+}
+
+impl PrismBound {
+    pub fn is_blind(&self) -> bool {
+        matches!(self, PrismBound::Blind)
+    }
+    /// The operand faces or bodies this bound reads.
+    pub fn reads_operands(&self) -> bool {
+        !matches!(self, PrismBound::Blind | PrismBound::ThroughAll)
+    }
+}
+
+/// Side taper per direction (radians; positive narrows the profile moving away from the
+/// profile plane).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PrismDraft {
+    pub end: f64,
+    pub start: f64,
+}
+
+/// A thin wall: from `inside` within each profile curve's region to `outside` beyond it.
+/// Inner walls are [`Role::ThinWall`] tagged by curve; `cap` closes both ends.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThinWallSpec {
+    pub inside: f64,
+    pub outside: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap: Option<f64>,
+}
+
+/// A blend's cross-section.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "profile")]
+pub enum BlendProfile {
+    #[default]
+    Circular,
+    Conic {
+        rho: f64,
+    },
+    Curvature,
+}
+
+impl BlendProfile {
+    pub fn is_circular(&self) -> bool {
+        matches!(self, BlendProfile::Circular)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "size")]
+pub enum ChamferSize {
+    Equal {
+        distance: f64,
+    },
+    /// On the edge's first face, then its second (swapped by the design layer for `flip`).
+    Distances {
+        first: f64,
+        second: f64,
+    },
+    /// On the edge's first face (its second with `on_second`), at `angle` from that face.
+    DistanceAngle {
+        distance: f64,
+        angle: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        on_second: bool,
+    },
+}
+
+impl ChamferSize {
+    /// The larger setback, for reach and area.
+    pub fn reach(&self) -> f64 {
+        match *self {
+            ChamferSize::Equal { distance } => distance,
+            ChamferSize::Distances { first, second } => first.max(second),
+            ChamferSize::DistanceAngle {
+                distance, angle, ..
+            } => distance.max(distance * angle.tan().abs()),
+        }
+    }
+}
+
 impl ToolShape {
+    /// A blind prism from `start` to `end` along the profile frame's z.
+    pub fn prism(profile: CanonicalProfile, start: f64, end: f64) -> Self {
+        ToolShape::Prism {
+            profile,
+            start,
+            end,
+            start_bound: PrismBound::Blind,
+            end_bound: PrismBound::Blind,
+            draft: None,
+            thin: None,
+        }
+    }
+
     /// Whether the definition asked collinear profile sides to merge.
     pub fn merge_collinear(&self) -> bool {
         match self {
@@ -195,6 +368,24 @@ impl ToolShape {
 pub struct ToolOp {
     pub shape: ToolShape,
     pub combine: Combine,
+    /// The last `references` operands are read by end conditions only: they are not combined
+    /// and come back unchanged, after the other outputs.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub references: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+impl ToolOp {
+    pub fn new(shape: ToolShape, combine: Combine) -> Self {
+        ToolOp {
+            shape,
+            combine,
+            references: 0,
+        }
+    }
 }
 
 /// A rigid transform `p ↦ R p + t` (rows of `R`, then `t`). Mirrors have `det R = −1`.
@@ -522,28 +713,75 @@ pub struct Instance {
 pub enum KernelOp {
     /// Make a tool and combine it with every operand (none for `Combine::New`).
     Tool(ToolOp),
+    /// Blend edges. `variable`: radii at parameters `(t, r)` along every edge (`radius` at
+    /// both ends where none is given). `setbacks`: vertices where the blends stop short and a
+    /// corner blend ([`Role::Blend`] tagged [`KernelTag::InputVertex`]) joins them.
     Fillet {
         edges: Vec<OperandEntity>,
         radius: f64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        variable: Vec<(f64, f64)>,
+        #[serde(default, skip_serializing_if = "BlendProfile::is_circular")]
+        profile: BlendProfile,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        setbacks: Vec<(OperandEntity, f64)>,
+    },
+    /// A blend tangent to two face sets; blend faces are tagged by the edges they replace.
+    FaceBlend {
+        first: Vec<OperandEntity>,
+        second: Vec<OperandEntity>,
+        radius: f64,
+        #[serde(default, skip_serializing_if = "BlendProfile::is_circular")]
+        profile: BlendProfile,
+    },
+    /// Replace the centre faces by one blend tangent to both side sets ([`Role::Blend`] tagged
+    /// [`KernelTag::InputFace`] by each centre face).
+    FullRound {
+        first: Vec<OperandEntity>,
+        center: Vec<OperandEntity>,
+        second: Vec<OperandEntity>,
     },
     Chamfer {
         edges: Vec<OperandEntity>,
-        distance: f64,
-        distance2: Option<f64>,
+        size: ChamferSize,
     },
+    /// Cut corners through points at these distances along each vertex's edges (in the
+    /// vertex's edge order); faces [`Role::Chamfer`] tagged [`KernelTag::InputVertex`].
+    VertexChamfer {
+        vertices: Vec<OperandEntity>,
+        distances: [f64; 3],
+    },
+    /// Hollow a body: walls `thickness` thick, or the thickness given per face. `outward`
+    /// grows the walls outside the body, which becomes the cavity (outer walls are
+    /// [`Role::ShellOuter`]).
     Shell {
         open_faces: Vec<OperandEntity>,
         thickness: f64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<(OperandEntity, f64)>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        outward: bool,
     },
+    /// Taper faces about the neutral plane (pull along `neutral.z`). With `parting` edges,
+    /// each face hinges about the parting edges it touches instead; `step` adds step faces
+    /// ([`Role::DraftStep`] tagged by the face) where neighbours hinge at different heights.
     Draft {
         faces: Vec<OperandEntity>,
         neutral: Frame,
         angle: f64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parting: Vec<OperandEntity>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        step: bool,
     },
-    /// Re-apply seed tools at each instance (tags carry `seed` and `instance`).
+    /// Re-apply seed tools at each instance (tags carry `seed` and `instance`). `varied`:
+    /// per instance (in step with `instances`), the seed tools rebuilt with that instance's
+    /// values (a variable pattern); empty: `seeds` at every instance.
     PatternTools {
         seeds: Vec<ToolOp>,
         instances: Vec<Instance>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        varied: Vec<Vec<ToolOp>>,
     },
     /// Copy every operand at each instance; the originals are kept.
     PatternBodies {
@@ -654,7 +892,10 @@ impl KernelOp {
         match self {
             KernelOp::Tool(_) => "tool",
             KernelOp::Fillet { .. } => "fillet",
+            KernelOp::FaceBlend { .. } => "face_blend",
+            KernelOp::FullRound { .. } => "full_round",
             KernelOp::Chamfer { .. } => "chamfer",
+            KernelOp::VertexChamfer { .. } => "vertex_chamfer",
             KernelOp::Shell { .. } => "shell",
             KernelOp::Draft { .. } => "draft",
             KernelOp::PatternTools { .. } => "pattern_tools",

@@ -197,6 +197,14 @@ impl FeatureDef {
     }
 }
 
+/// The feature with these inputs' reads replaced by the expressions given (a variable
+/// pattern's per-instance values).
+pub fn substitute_inputs(f: &Feature, values: &BTreeMap<InputName, ValueExpr>) -> Feature {
+    let mut json = serde_json::to_value(f).expect("feature serialises");
+    rewrite(&mut json, values, &BTreeMap::new(), &[], &|id| id.clone());
+    serde_json::from_value(json).expect("rewritten feature")
+}
+
 /// Rewrite a serialised feature: input reads → argument expressions, slot placeholders →
 /// bindings, template feature ids → prefixed ids.
 fn rewrite(

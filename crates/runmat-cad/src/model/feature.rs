@@ -104,21 +104,107 @@ impl ProfileRef {
     }
 }
 
+/// An extrude's end condition in one direction.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "extent")]
 pub enum Extent {
     Blind {
         distance: ValueExpr,
     },
-    /// Both directions, half each way.
+    /// Mid-plane: both directions, half each way. Not valid as a second direction.
+    #[serde(alias = "mid_plane")]
     Symmetric {
         distance: ValueExpr,
     },
     ThroughAll,
-    /// Up to a face.
+    /// Up to a face: the end cap takes the face's shape (planar or curved).
+    #[serde(alias = "up_to_face")]
     UpTo {
         face: Reference,
     },
+    /// Up to the next face the extrude meets past its start, which must intercept the whole
+    /// profile.
+    UpToNext,
+    /// Up to the plane through a vertex (or point), parallel to the profile plane.
+    UpToVertex {
+        vertex: PointRef,
+    },
+    /// Up to a face, `offset` short of it (towards the start) unless `beyond`.
+    OffsetFromFace {
+        face: Reference,
+        offset: ValueExpr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        beyond: bool,
+    },
+    /// Up to where the extrude first meets a body.
+    UpToBody {
+        body: Reference,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        offset: Option<ValueExpr>,
+    },
+}
+
+/// Where an extrude starts.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "from")]
+pub enum ExtrudeFrom {
+    #[default]
+    SketchPlane,
+    /// A plane offset from the sketch plane along its normal.
+    Offset { distance: ValueExpr },
+    /// A face (planar or curved): the start cap takes its shape and blind depths are measured
+    /// from it.
+    Surface { face: Reference },
+    /// The plane through a vertex (or point), parallel to the sketch plane.
+    Vertex { vertex: PointRef },
+}
+
+impl ExtrudeFrom {
+    pub fn is_sketch_plane(&self) -> bool {
+        matches!(self, ExtrudeFrom::SketchPlane)
+    }
+}
+
+/// Draft on an extrude's side faces, per direction. Positive angles taper the profile inward
+/// moving away from the start; `outward` flips it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExtrudeDraft {
+    pub angle: ValueExpr,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outward: bool,
+    /// The second direction's draft (`None`: the same angle and sense).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second_angle: Option<ValueExpr>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub second_outward: bool,
+}
+
+/// Which side of the profile curves a thin feature's wall lies on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinSide {
+    /// Inside the profile (into the region it bounds).
+    #[default]
+    One,
+    /// Outside the profile.
+    Other,
+    /// Centred on the profile curves.
+    Mid,
+    /// `thickness` inside and `second_thickness` outside.
+    Two,
+}
+
+/// A thin feature: a wall along the profile curves instead of a filled profile.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThinWall {
+    pub thickness: ValueExpr,
+    #[serde(default)]
+    pub side: ThinSide,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second_thickness: Option<ValueExpr>,
+    /// Close both ends with caps this thick (a hollow closed profile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap_ends: Option<ValueExpr>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -130,6 +216,31 @@ pub struct Extrude {
     pub reverse: bool,
     #[serde(default)]
     pub mode: BodyMode,
+    #[serde(default, skip_serializing_if = "ExtrudeFrom::is_sketch_plane")]
+    pub from: ExtrudeFrom,
+    /// The second direction (opposite the first), with its own end condition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second: Option<Extent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<ExtrudeDraft>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thin: Option<ThinWall>,
+}
+
+impl Extrude {
+    /// A plain extrude: from the sketch plane, one direction, no draft, not thin.
+    pub fn new(profile: ProfileRef, extent: Extent, mode: BodyMode) -> Self {
+        Extrude {
+            profile,
+            extent,
+            reverse: false,
+            mode,
+            from: ExtrudeFrom::SketchPlane,
+            second: None,
+            draft: None,
+            thin: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -159,17 +270,54 @@ pub struct Loft {
     pub mode: BodyMode,
 }
 
+/// A hole's form. Sizes left out come from the hole's standard [`HoleSpec`] (clearance,
+/// counterbore and countersink for the fastener, tap drill and thread for tapped holes).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "hole")]
 pub enum HoleForm {
     Simple,
     Counterbore {
-        diameter: ValueExpr,
-        depth: ValueExpr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diameter: Option<ValueExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        depth: Option<ValueExpr>,
     },
     Countersink {
-        diameter: ValueExpr,
-        angle: ValueExpr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diameter: Option<ValueExpr>,
+        /// Included angle.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<ValueExpr>,
+    },
+    /// A tapped hole: drilled at the tap drill, threaded for `thread_depth` (the hole's depth
+    /// less one and a half pitches when blind, the full hole when through).
+    Tapped {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_depth: Option<ValueExpr>,
+        /// Model the thread (the threaded wall becomes its own face); otherwise cosmetic.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        modelled: bool,
+        /// A near-side countersink on the tapped hole (included angle; diameter from the
+        /// major diameter when left out).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        near_countersink: Option<ValueExpr>,
+    },
+    /// A tapered pipe tap (NPT/NPTF 1:16 on diameter, BSPT): the drill tapers at the thread
+    /// taper over the thread length.
+    PipeTap {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_depth: Option<ValueExpr>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        modelled: bool,
+    },
+    /// A slot of the hole's width, `length` centre to centre, along the face frame's x turned
+    /// by `angle`; optionally counterbored.
+    Slot {
+        length: ValueExpr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<ValueExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        counterbore: Option<(ValueExpr, ValueExpr)>,
     },
 }
 
@@ -180,35 +328,197 @@ pub struct HolePosition {
     pub at: PointRef,
 }
 
+/// How deep a hole goes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "end")]
+pub enum HoleEnd {
+    /// To a drilled depth (the full-diameter depth; a drill point adds its cone below).
+    Blind {
+        depth: ValueExpr,
+    },
+    ThroughAll,
+    /// Through the material the hole starts in, to the next face it meets.
+    UpToNext,
+    /// To a face (planar or curved), with an offset past it.
+    UpToFace {
+        face: Reference,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        offset: Option<ValueExpr>,
+    },
+}
+
+/// A hole through several bodies of the part (a hole series): the start form on the first
+/// body, clearance through the middle ones and the end form on the last.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HoleSeries {
+    /// The bodies in order from the start face. Empty: every body the hole axis crosses, in
+    /// order along it.
+    #[serde(default)]
+    pub bodies: Vec<Reference>,
+    /// The form in the last body (tapped for a bolted stack, or the same clearance).
+    pub end: HoleForm,
+    /// The middle bodies' diameter (`None`: the start clearance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub middle_diameter: Option<ValueExpr>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Hole {
     /// The planar face the holes start on.
     pub face: Reference,
     pub positions: Vec<HolePosition>,
-    pub diameter: ValueExpr,
-    /// `None`: through all.
+    /// The drilled diameter (`None`: from `spec`: clearance, tap drill or pipe tap drill).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub depth: Option<ValueExpr>,
+    pub diameter: Option<ValueExpr>,
+    pub end: HoleEnd,
     #[serde(default = "simple_hole")]
     pub form: HoleForm,
+    /// The standard size the hole is for (`M6`, `1/4-20`, `1/8 NPT`) and its fit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec: Option<crate::model::hole_tables::HoleSpec>,
+    /// The drill point's included angle for blind holes (`None`: a flat bottom).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drill_point: Option<ValueExpr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series: Option<HoleSeries>,
 }
 
 fn simple_hole() -> HoleForm {
     HoleForm::Simple
 }
 
+/// The cross-section of a blend.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "profile")]
+pub enum FilletProfile {
+    #[default]
+    Circular,
+    /// A conic section of shape `rho` (0.5 a parabola, below an ellipse, above a hyperbola).
+    Conic { rho: ValueExpr },
+    /// Curvature-continuous (G2) to both faces.
+    Curvature,
+}
+
+impl FilletProfile {
+    fn is_circular(&self) -> bool {
+        matches!(self, FilletProfile::Circular)
+    }
+}
+
+/// A radius at a point along each filleted edge (`at` from 0 at its start to 1 at its end).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RadiusAt {
+    pub at: ValueExpr,
+    pub radius: ValueExpr,
+}
+
+/// A setback at a vertex where filleted edges meet: the blends stop `distance` short of it and
+/// a corner blend joins them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Setback {
+    pub vertex: Reference,
+    pub distance: ValueExpr,
+}
+
+/// Edge fillet: constant or variable radius, any profile, with setbacks at corners.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Fillet {
     pub edges: Vec<Reference>,
+    /// The radius; with `variable`, the radius at both ends of each edge where no point gives
+    /// one.
     pub radius: ValueExpr,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variable: Vec<RadiusAt>,
+    #[serde(default, skip_serializing_if = "FilletProfile::is_circular")]
+    pub profile: FilletProfile,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setbacks: Vec<Setback>,
+    /// Extend the selection along tangent-continuous edges.
+    #[serde(default = "yes", skip_serializing_if = "Clone::clone")]
+    pub propagate: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Fillet {
+    pub fn constant(edges: Vec<Reference>, radius: ValueExpr) -> Self {
+        Fillet {
+            edges,
+            radius,
+            variable: Vec::new(),
+            profile: FilletProfile::Circular,
+            setbacks: Vec::new(),
+            propagate: true,
+        }
+    }
+}
+
+/// Face fillet: a blend tangent to two face sets, consuming what lies between them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FaceFillet {
+    pub first: Vec<Reference>,
+    pub second: Vec<Reference>,
+    pub radius: ValueExpr,
+    #[serde(default, skip_serializing_if = "FilletProfile::is_circular")]
+    pub profile: FilletProfile,
+}
+
+/// Full round: the centre faces are replaced by a blend tangent to both side face sets; its
+/// radius follows from the gap.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FullRound {
+    pub first: Vec<Reference>,
+    pub center: Vec<Reference>,
+    pub second: Vec<Reference>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "chamfer")]
+pub enum ChamferForm {
+    /// The same setback on both faces.
+    Equal { distance: ValueExpr },
+    /// `distance` on the first face of each edge, `distance2` on the second.
+    Distances {
+        distance: ValueExpr,
+        distance2: ValueExpr,
+    },
+    /// `distance` on the first face, at `angle` from it.
+    DistanceAngle {
+        distance: ValueExpr,
+        angle: ValueExpr,
+    },
+    /// Vertex chamfer: a corner cut through the points at these distances along each of the
+    /// vertex's three edges (in the vertex's edge order).
+    Vertex { distances: [ValueExpr; 3] },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Chamfer {
+    /// The edges chamfered (for a vertex chamfer, the vertices).
     pub edges: Vec<Reference>,
-    pub distance: ValueExpr,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub distance2: Option<ValueExpr>,
+    pub form: ChamferForm,
+    /// Swap the faces the distances (and angle) are measured on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip: bool,
+}
+
+impl Chamfer {
+    pub fn equal(edges: Vec<Reference>, distance: ValueExpr) -> Self {
+        Chamfer {
+            edges,
+            form: ChamferForm::Equal { distance },
+            flip: false,
+        }
+    }
+}
+
+/// Faces of a shell with their own wall thickness.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FaceThickness {
+    pub faces: Vec<Reference>,
+    pub thickness: ValueExpr,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -218,13 +528,63 @@ pub struct Shell {
     #[serde(default)]
     pub open_faces: Vec<Reference>,
     pub thickness: ValueExpr,
+    /// Walls with their own thickness (multi-thickness shell).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub faces: Vec<FaceThickness>,
+    /// Grow the walls outward: the body becomes the cavity.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outward: bool,
+}
+
+impl Shell {
+    pub fn new(body: Reference, open_faces: Vec<Reference>, thickness: ValueExpr) -> Self {
+        Shell {
+            body,
+            open_faces,
+            thickness,
+            faces: Vec::new(),
+            outward: false,
+        }
+    }
+}
+
+/// How drafted faces hinge.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "draft")]
+pub enum DraftKind {
+    /// About their line on the neutral plane.
+    #[default]
+    NeutralPlane,
+    /// About the parting-line edges each face touches; the neutral plane gives only the pull.
+    PartingLine { edges: Vec<Reference> },
+    /// As a parting-line draft, with step faces where neighbouring faces hinge at different
+    /// heights, so the parting line need not be planar.
+    Step { edges: Vec<Reference> },
+}
+
+impl DraftKind {
+    fn is_neutral(&self) -> bool {
+        matches!(self, DraftKind::NeutralPlane)
+    }
+    pub fn edges(&self) -> &[Reference] {
+        match self {
+            DraftKind::NeutralPlane => &[],
+            DraftKind::PartingLine { edges } | DraftKind::Step { edges } => edges,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Draft {
     pub faces: Vec<Reference>,
+    /// The neutral plane; its normal is the pull direction.
     pub neutral: PlaneRef,
     pub angle: ValueExpr,
+    #[serde(default, skip_serializing_if = "DraftKind::is_neutral")]
+    pub kind: DraftKind,
+    /// Pull the other way.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -256,14 +616,88 @@ pub enum PatternLayout {
         second_spacing: ValueExpr,
         second_count: ValueExpr,
     },
-    /// Instances `1..count` about `axis`, equally spaced over `angle`.
+    /// Instances `1..count` about `axis`: equally spaced over `angle`, or `angle` apart when
+    /// not `equal_spacing`.
     Circular {
         axis: AxisRef,
         count: ValueExpr,
         angle: ValueExpr,
+        #[serde(default = "yes", skip_serializing_if = "Clone::clone")]
+        equal_spacing: bool,
     },
     /// Instances keyed by table row: each row is a key plus an offset.
     Table { rows: Vec<PatternRow> },
+    /// Instances `1..count` along a curve from its start (the seed sits at the start): equally
+    /// spaced over its length, or `spacing` apart.
+    Curve {
+        curve: crate::model::datum::CurveRef,
+        count: ValueExpr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spacing: Option<ValueExpr>,
+        #[serde(default)]
+        orientation: CurveOrientation,
+    },
+    /// One instance per point of a sketch (all its point entities, or `points`), placed by
+    /// the offset from `reference` (default: the first point, where the seed is).
+    Sketch {
+        sketch: FeatureId,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        points: Vec<SketchEntityId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference: Option<SketchEntityId>,
+    },
+    /// Fill a region (a sketch's closed loops) with instances on a lattice through the seed:
+    /// square, staggered (perforation) or concentric rings, kept `margin` inside the boundary.
+    Fill {
+        boundary: ProfileRef,
+        spacing: ValueExpr,
+        #[serde(default)]
+        lattice: FillLattice,
+        /// The lattice's first direction (default: the boundary sketch's x).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        direction: Option<AxisRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        margin: Option<ValueExpr>,
+        /// Where the seed sits (default: the boundary's centroid).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seed: Option<PointRef>,
+    },
+    /// Instances each with their own placement and their own values: the seed features are
+    /// rebuilt per instance with these inputs replaced (a varying depth, a varying size).
+    Variable { instances: Vec<VariableInstance> },
+}
+
+/// How curve-driven instances turn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CurveOrientation {
+    /// Translated only.
+    #[default]
+    Translate,
+    /// Turned with the curve (a rotation-minimizing frame along it).
+    AlignToCurve,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FillLattice {
+    #[default]
+    Square,
+    /// Rows offset by half a pitch, `spacing` between neighbours (60° perforation).
+    Staggered,
+    /// Rings `spacing` apart about the seed, instances `spacing` apart on each ring.
+    Circular,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VariableInstance {
+    pub key: String,
+    pub dx: ValueExpr,
+    pub dy: ValueExpr,
+    pub dz: ValueExpr,
+    /// Inputs read by the seed (and its sketches) replaced for this instance.
+    #[serde(default)]
+    pub values: std::collections::BTreeMap<crate::ids::InputName, ValueExpr>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -351,6 +785,8 @@ pub enum FeatureKind {
     Loft(Loft),
     Hole(Hole),
     Fillet(Fillet),
+    FaceFillet(FaceFillet),
+    FullRound(FullRound),
     Chamfer(Chamfer),
     Shell(Shell),
     Draft(Draft),
@@ -374,9 +810,19 @@ pub enum FeatureKind {
 }
 
 impl FeatureKind {
-    /// The family parameters of the newer feature kinds.
+    /// The parameters of every kind that reports them through [`Params`] (all but sketches,
+    /// the original datum definitions and the plain body operations).
     pub fn family(&self) -> Option<&dyn Params> {
         Some(match self {
+            FeatureKind::Extrude(x) => x,
+            FeatureKind::Hole(x) => x,
+            FeatureKind::Fillet(x) => x,
+            FeatureKind::FaceFillet(x) => x,
+            FeatureKind::FullRound(x) => x,
+            FeatureKind::Chamfer(x) => x,
+            FeatureKind::Shell(x) => x,
+            FeatureKind::Draft(x) => x,
+            FeatureKind::Pattern(x) => x,
             FeatureKind::Direct(x) => x,
             FeatureKind::Surface(x) => x,
             FeatureKind::SheetMetal(x) => x,
@@ -457,6 +903,8 @@ impl FeatureKind {
             FeatureKind::Loft(_) => "loft",
             FeatureKind::Hole(_) => "hole",
             FeatureKind::Fillet(_) => "fillet",
+            FeatureKind::FaceFillet(_) => "face_fillet",
+            FeatureKind::FullRound(_) => "full_round",
             FeatureKind::Chamfer(_) => "chamfer",
             FeatureKind::Shell(_) => "shell",
             FeatureKind::Draft(_) => "draft",
@@ -497,48 +945,11 @@ impl FeatureKind {
                 out.push(z);
             }
         }
-        fn extent<'a>(out: &mut Vec<&'a ValueExpr>, e: &'a Extent) {
-            match e {
-                Extent::Blind { distance } | Extent::Symmetric { distance } => out.push(distance),
-                Extent::ThroughAll | Extent::UpTo { .. } => {}
-            }
-        }
         fn plane_def<'a>(out: &mut Vec<&'a ValueExpr>, p: &'a PlaneDef) {
             match p {
                 PlaneDef::Offset { distance, .. } => out.push(distance),
                 PlaneDef::Angle { angle, .. } => out.push(angle),
                 _ => {}
-            }
-        }
-        fn layout<'a>(out: &mut Vec<&'a ValueExpr>, l: &'a PatternLayout) {
-            match l {
-                PatternLayout::Linear { spacing, count, .. } => {
-                    out.push(spacing);
-                    out.push(count);
-                }
-                PatternLayout::Grid {
-                    first_spacing,
-                    first_count,
-                    second_spacing,
-                    second_count,
-                    ..
-                } => {
-                    out.push(first_spacing);
-                    out.push(first_count);
-                    out.push(second_spacing);
-                    out.push(second_count);
-                }
-                PatternLayout::Circular { count, angle, .. } => {
-                    out.push(count);
-                    out.push(angle);
-                }
-                PatternLayout::Table { rows } => {
-                    for r in rows {
-                        out.push(&r.dx);
-                        out.push(&r.dy);
-                        out.push(&r.dz);
-                    }
-                }
             }
         }
         let mut ptrs: Vec<&ValueExpr> = Vec::new();
@@ -577,6 +988,10 @@ impl FeatureKind {
                         | K::Length { value, .. }
                         | K::Radius { value, .. }
                         | K::Angle { value, .. } => ptrs.push(value),
+                        K::Limit { min, max, .. } => {
+                            ptrs.push(min);
+                            ptrs.push(max);
+                        }
                         _ => {}
                     }
                 }
@@ -597,39 +1012,8 @@ impl FeatureKind {
                 _ => {}
             },
             FeatureKind::Frame(FrameDef::At { origin, .. }) => point(&mut ptrs, origin),
-            FeatureKind::Extrude(e) => extent(&mut ptrs, &e.extent),
             FeatureKind::Revolve(r) => ptrs.push(&r.angle),
             FeatureKind::Sweep(_) | FeatureKind::Loft(_) | FeatureKind::Import(_) => {}
-            FeatureKind::Hole(h) => {
-                ptrs.push(&h.diameter);
-                if let Some(d) = &h.depth {
-                    ptrs.push(d);
-                }
-                match &h.form {
-                    HoleForm::Simple => {}
-                    HoleForm::Counterbore { diameter, depth } => {
-                        ptrs.push(diameter);
-                        ptrs.push(depth);
-                    }
-                    HoleForm::Countersink { diameter, angle } => {
-                        ptrs.push(diameter);
-                        ptrs.push(angle);
-                    }
-                }
-                for p in &h.positions {
-                    point(&mut ptrs, &p.at);
-                }
-            }
-            FeatureKind::Fillet(f) => ptrs.push(&f.radius),
-            FeatureKind::Chamfer(c) => {
-                ptrs.push(&c.distance);
-                if let Some(d) = &c.distance2 {
-                    ptrs.push(d);
-                }
-            }
-            FeatureKind::Shell(s) => ptrs.push(&s.thickness),
-            FeatureKind::Draft(d) => ptrs.push(&d.angle),
-            FeatureKind::Pattern(p) => layout(&mut ptrs, &p.layout),
             FeatureKind::Mirror(_) | FeatureKind::Boolean(_) | FeatureKind::Split(_) => {}
             FeatureKind::BodyOp(BodyOp::Translate { dx, dy, dz, .. }) => {
                 ptrs.push(dx);
@@ -670,22 +1054,6 @@ impl FeatureKind {
         fn mode<'a>(out: &mut Vec<(String, &'a Reference)>, m: &'a BodyMode) {
             list(out, "targets", m.targets());
         }
-        fn seeds<'a>(out: &mut Vec<(String, &'a Reference)>, s: &'a PatternSeeds) {
-            if let PatternSeeds::Bodies { bodies } = s {
-                list(out, "bodies", bodies);
-            }
-        }
-        fn layout<'a>(out: &mut Vec<(String, &'a Reference)>, l: &'a PatternLayout) {
-            match l {
-                PatternLayout::Linear { direction, .. } => axis(out, "direction", direction),
-                PatternLayout::Grid { first, second, .. } => {
-                    axis(out, "first", first);
-                    axis(out, "second", second);
-                }
-                PatternLayout::Circular { axis: a, .. } => axis(out, "axis", a),
-                PatternLayout::Table { .. } => {}
-            }
-        }
         match self {
             FeatureKind::Sketch(s) => plane(&mut out, "on", &s.plane),
             FeatureKind::Plane(p) => match p {
@@ -720,12 +1088,6 @@ impl FeatureKind {
                 }
                 FrameDef::OnFace { face } => out.push(("face".into(), face)),
             },
-            FeatureKind::Extrude(e) => {
-                if let Extent::UpTo { face } = &e.extent {
-                    out.push(("up_to".into(), face));
-                }
-                mode(&mut out, &e.mode);
-            }
             FeatureKind::Revolve(r) => {
                 axis(&mut out, "axis", &r.axis);
                 mode(&mut out, &r.mode);
@@ -735,28 +1097,10 @@ impl FeatureKind {
                 list(&mut out, "guides", &l.guides);
                 mode(&mut out, &l.mode);
             }
-            FeatureKind::Hole(h) => {
-                out.push(("face".into(), &h.face));
-                for (i, p) in h.positions.iter().enumerate() {
-                    point(&mut out, &format!("positions[{}]", i), &p.at);
-                }
-            }
-            FeatureKind::Fillet(f) => list(&mut out, "edges", &f.edges),
-            FeatureKind::Chamfer(c) => list(&mut out, "edges", &c.edges),
-            FeatureKind::Shell(s) => {
-                out.push(("body".into(), &s.body));
-                list(&mut out, "open_faces", &s.open_faces);
-            }
-            FeatureKind::Draft(d) => {
-                list(&mut out, "faces", &d.faces);
-                plane(&mut out, "neutral", &d.neutral);
-            }
-            FeatureKind::Pattern(p) => {
-                seeds(&mut out, &p.seeds);
-                layout(&mut out, &p.layout);
-            }
             FeatureKind::Mirror(m) => {
-                seeds(&mut out, &m.seeds);
+                if let PatternSeeds::Bodies { bodies } = &m.seeds {
+                    list(&mut out, "bodies", bodies);
+                }
                 plane(&mut out, "plane", &m.plane);
             }
             FeatureKind::Boolean(b) => {
@@ -843,7 +1187,6 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Frame(_) => {}
-            FeatureKind::Extrude(e) => profile(&mut out, &e.profile),
             FeatureKind::Revolve(r) => {
                 profile(&mut out, &r.profile);
                 axis(&mut out, &r.axis);
@@ -853,31 +1196,12 @@ impl FeatureKind {
                 profile(&mut out, &s.path);
             }
             FeatureKind::Loft(l) => l.profiles.iter().for_each(|p| profile(&mut out, p)),
-            FeatureKind::Hole(h) => h.positions.iter().for_each(|p| point(&mut out, &p.at)),
-            FeatureKind::Draft(d) => plane(&mut out, &d.neutral),
-            FeatureKind::Pattern(p) => {
-                seeds(&mut out, &p.seeds);
-                match &p.layout {
-                    PatternLayout::Linear { direction, .. } => axis(&mut out, direction),
-                    PatternLayout::Grid { first, second, .. } => {
-                        axis(&mut out, first);
-                        axis(&mut out, second);
-                    }
-                    PatternLayout::Circular { axis: a, .. } => axis(&mut out, a),
-                    PatternLayout::Table { .. } => {}
-                }
-            }
             FeatureKind::Mirror(m) => {
                 seeds(&mut out, &m.seeds);
                 plane(&mut out, &m.plane);
             }
             FeatureKind::Split(s) => plane(&mut out, &s.tool),
-            FeatureKind::Fillet(_)
-            | FeatureKind::Chamfer(_)
-            | FeatureKind::Shell(_)
-            | FeatureKind::Boolean(_)
-            | FeatureKind::BodyOp(_)
-            | FeatureKind::Import(_) => {}
+            FeatureKind::Boolean(_) | FeatureKind::BodyOp(_) | FeatureKind::Import(_) => {}
             _ => {}
         }
         out.sort();
@@ -892,8 +1216,6 @@ impl FeatureKind {
             FeatureKind::Revolve(r) => &r.mode,
             FeatureKind::Sweep(s) => &s.mode,
             FeatureKind::Loft(l) => &l.mode,
-            FeatureKind::Hole(_) => return true,
-            FeatureKind::Pattern(p) => return matches!(p.seeds, PatternSeeds::Features { .. }),
             FeatureKind::Mirror(m) => return matches!(m.seeds, PatternSeeds::Features { .. }),
             other => {
                 return other

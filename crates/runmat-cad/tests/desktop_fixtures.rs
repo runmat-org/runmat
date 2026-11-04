@@ -73,6 +73,10 @@ fn bracket() -> PartDocument {
             extent: Extent::ThroughAll,
             reverse: false,
             mode: BodyMode::cut(),
+            from: Default::default(),
+            second: None,
+            draft: None,
+            thin: None,
         }),
     ));
     d.features.push(Feature::new(
@@ -87,9 +91,12 @@ fn bracket() -> PartDocument {
                     z: mm(10.0),
                 },
             }],
-            diameter: mm(4.0),
-            depth: None,
+            diameter: Some(mm(4.0)),
+            end: HoleEnd::ThroughAll,
             form: HoleForm::Simple,
+            spec: None,
+            drill_point: None,
+            series: None,
         }),
     ));
     d.features.push(fillet(

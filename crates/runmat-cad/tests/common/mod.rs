@@ -92,6 +92,10 @@ pub fn extrude(id: &str, sketch: &str, distance: ValueExpr, mode: BodyMode) -> F
             extent: Extent::Blind { distance },
             reverse: false,
             mode,
+            from: Default::default(),
+            second: None,
+            draft: None,
+            thin: None,
         }),
     )
 }
@@ -104,6 +108,10 @@ pub fn extrude_reverse(id: &str, sketch: &str, distance: ValueExpr, mode: BodyMo
             extent: Extent::Blind { distance },
             reverse: true,
             mode,
+            from: Default::default(),
+            second: None,
+            draft: None,
+            thin: None,
         }),
     )
 }
@@ -114,6 +122,10 @@ pub fn fillet(id: &str, edges: Vec<Reference>, r: f64) -> Feature {
         FeatureKind::Fillet(Fillet {
             edges,
             radius: mm(r),
+            variable: Vec::new(),
+            profile: Default::default(),
+            setbacks: Vec::new(),
+            propagate: true,
         }),
     )
 }

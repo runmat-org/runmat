@@ -505,11 +505,15 @@ pub(super) fn swept(tool: &LabeledTool) -> Result<SheetBuild, KernelError> {
             profile,
             start,
             end,
-            through_all,
+            start_bound,
+            end_bound,
+            draft,
+            thin,
         } => {
-            if *through_all {
+            if !start_bound.is_blind() || !end_bound.is_blind() || draft.is_some() || thin.is_some()
+            {
                 return Err(KernelError::NotSupported {
-                    what: "fake kernel: through-all surface extrudes".into(),
+                    what: "fake kernel: surface extrudes with end conditions, draft or thin".into(),
                 });
             }
             let z = profile.frame.z;

@@ -75,6 +75,10 @@ pub enum KernelTag {
     InputFace {
         face: OperandEntity,
     },
+    /// The input vertex a corner blend or vertex chamfer replaced.
+    InputVertex {
+        vertex: OperandEntity,
+    },
     /// A name read from an imported CAD file.
     CadName {
         name: String,

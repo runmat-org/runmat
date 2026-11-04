@@ -65,14 +65,7 @@ impl FakeKernel {
         let solids = Self::solids(operands)?;
         let ids: Vec<u32> = (0..solids.len() as u32).collect();
         let build = |lt: &LabeledTool| -> Result<Vec<Tool>, KernelError> {
-            let base = self.tools(
-                &ToolOp {
-                    shape: lt.shape.clone(),
-                    combine,
-                },
-                &solids,
-                0,
-            )?;
+            let base = self.tools(&ToolOp::new(lt.shape.clone(), combine), &solids, 0)?;
             let remap = |l: &HistorySource| -> Option<HistorySource> {
                 let HistorySource::Generated { role, tag, .. } = l else {
                     return None;
@@ -1152,8 +1145,8 @@ fn scale_solid(s: &mut FakeSolid, c: [f64; 3], k: [f64; 3]) {
 }
 
 impl crate::evaluate::GeometryAnalyzer for FakeKernel {
-    /// Mass properties exactly from grid occupancy (orthogonal cells) and draft from face
-    /// normals; the other analyses are not supported by the fake kernel.
+    /// Mass properties exactly from grid occupancy (orthogonal cells), draft from face normals,
+    /// and the rest from the grid and its faces ([`super::analysis`]).
     fn analyze(
         &self,
         request: &crate::evaluate::AnalysisRequest,
@@ -1238,9 +1231,14 @@ impl crate::evaluate::GeometryAnalyzer for FakeKernel {
                     *min,
                 )))
             }
-            other => Err(KernelError::NotSupported {
-                what: format!("fake kernel: {:?} analysis", std::mem::discriminant(other)),
-            }),
+            R::SectionProperties { origin, normal } => {
+                super::analysis::section(bodies, *origin, *normal)
+            }
+            R::Thickness { min, max } => super::analysis::thickness(bodies, *min, *max),
+            R::Curvature => super::analysis::curvature(bodies),
+            R::Zebra => super::analysis::zebra(bodies),
+            R::Deviation => super::analysis::deviation(bodies),
+            R::Undercut { pull } => super::analysis::undercut(bodies, *pull),
         }
     }
 }

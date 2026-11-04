@@ -361,29 +361,7 @@ impl<'a, 'b> Run<'a, 'b> {
         c: &CurveRef,
         t: f64,
     ) -> Result<([f64; 3], [f64; 3]), Halt> {
-        let pts: Vec<[f64; 3]> = match c {
-            CurveRef::Feature { feature } => {
-                self.gate_feature(i, id, feature, "curve")?;
-                match self.st.records.get(feature) {
-                    Some(FeatureRecord::Curve(v)) => v.points.clone(),
-                    _ => {
-                        return Err(self.error(
-                            id,
-                            Some("curve"),
-                            DiagCode::RefKindMismatch,
-                            format!("`{}` is not a curve", feature),
-                            Vec::new(),
-                        ))
-                    }
-                }
-            }
-            CurveRef::Edge { edge } => {
-                let r = self.single(i, id, "curve", edge, Some(TopoKind::Edge))?;
-                let h = *r.entities().iter().next().expect("one");
-                let g = self.st.bodies[h.body as usize].topology.edges[h.index as usize].geom;
-                vec![g.start, g.end]
-            }
-        };
+        let pts = self.curve_points(i, id, c)?;
         let total: f64 = pts
             .windows(2)
             .map(|w| dot(sub(w[1], w[0]), sub(w[1], w[0])).sqrt())
@@ -979,16 +957,15 @@ impl<'a, 'b> Run<'a, 'b> {
                     self.value(id, "start", start, Dimension::LENGTH)?,
                     self.value(id, "end", end, Dimension::LENGTH)?,
                 );
-                let shape = ToolShape::Prism {
-                    profile: CanonicalProfile {
+                let shape = ToolShape::prism(
+                    CanonicalProfile {
                         frame,
                         loops: vec![segs],
                         merge_collinear: profile.merge_collinear,
                     },
-                    start: a,
-                    end: b,
-                    through_all: false,
-                };
+                    a,
+                    b,
+                );
                 op(
                     KernelOp::Surface(SurfaceOp::Swept {
                         tool: LabeledTool::new(shape),
@@ -1239,12 +1216,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 let Some(depth) = depth else {
                     // A closed profile: a flat plate.
                     let p = self.profile(i, id, "profile", profile)?;
-                    let mut tool = LabeledTool::new(ToolShape::Prism {
-                        profile: p.clone(),
-                        start: 0.0,
-                        end: t,
-                        through_all: false,
-                    });
+                    let mut tool = LabeledTool::new(ToolShape::prism(p.clone(), 0.0, t));
                     for seg in p.loops.iter().flatten() {
                         tool.sides.push((
                             seg.curve.clone(),
@@ -1307,12 +1279,8 @@ impl<'a, 'b> Run<'a, 'b> {
                         (format!("{}.far", c), off(f.end, f.far)),
                         (format!("{}.a", c), off(f.start, f.far)),
                     ];
-                    let mut tool = LabeledTool::new(ToolShape::Prism {
-                        profile: polygon(frame, &corners),
-                        start: 0.0,
-                        end: depth,
-                        through_all: false,
-                    });
+                    let mut tool =
+                        LabeledTool::new(ToolShape::prism(polygon(frame, &corners), 0.0, depth));
                     let sid = |s: &str| crate::ids::SketchEntityId::new(format!("{}.{}", c, s));
                     tool.sides.push((
                         sid("near"),
@@ -1428,18 +1396,22 @@ impl<'a, 'b> Run<'a, 'b> {
                             KernelOp::Fillet {
                                 edges: es,
                                 radius: self.value(id, "kind.radius", radius, Dimension::LENGTH)?,
+                                variable: Vec::new(),
+                                profile: BlendProfile::Circular,
+                                setbacks: Vec::new(),
                             }
                         }
                         crate::model::sheet_metal::BreakKind::Chamfer { distance } => {
                             KernelOp::Chamfer {
                                 edges: es,
-                                distance: self.value(
-                                    id,
-                                    "kind.distance",
-                                    distance,
-                                    Dimension::LENGTH,
-                                )?,
-                                distance2: None,
+                                size: ChamferSize::Equal {
+                                    distance: self.value(
+                                        id,
+                                        "kind.distance",
+                                        distance,
+                                        Dimension::LENGTH,
+                                    )?,
+                                },
                             }
                         }
                     },
@@ -1536,12 +1508,8 @@ impl<'a, 'b> Run<'a, 'b> {
                         (format!("{}.y1", key), [start + len, depth]),
                         (format!("{}.x0", key), [start, depth]),
                     ];
-                    let mut tool = LabeledTool::new(ToolShape::Prism {
-                        profile: polygon(fr, &corners),
-                        start: 0.0,
-                        end: thick,
-                        through_all: false,
-                    });
+                    let mut tool =
+                        LabeledTool::new(ToolShape::prism(polygon(fr, &corners), 0.0, thick));
                     let sid = |s: &str| crate::ids::SketchEntityId::new(format!("{}.{}", key, s));
                     for (s, o) in [("y0", 2), ("y1", 3), ("x0", 0), ("x1", 1)] {
                         tool.sides.push((
@@ -1737,12 +1705,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 ]],
                 merge_collinear: false,
             };
-            let mut bend = LabeledTool::new(ToolShape::Prism {
-                profile: bend_profile,
-                start: z0,
-                end: z1,
-                through_all: false,
-            });
+            let mut bend = LabeledTool::new(ToolShape::prism(bend_profile, z0, z1));
             bend.sides.push((sid("in"), lab(Role::BendFace, 0)));
             bend.sides.push((sid("out"), lab(Role::BendFace, 1)));
             bend.sides.push((sid("e1"), lab(Role::SheetEdge, 6)));
@@ -1760,12 +1723,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     ("out".to_string(), fwd(co)),
                     ("root".to_string(), co),
                 ];
-                let mut ft = LabeledTool::new(ToolShape::Prism {
-                    profile: polygon(fr, &corners),
-                    start: z0,
-                    end: z1,
-                    through_all: false,
-                });
+                let mut ft = LabeledTool::new(ToolShape::prism(polygon(fr, &corners), z0, z1));
                 ft.sides.push((sid("in"), lab(Role::SheetFace, 0)));
                 ft.sides.push((sid("out"), lab(Role::SheetFace, 1)));
                 ft.sides.push((sid("tip"), lab(Role::SheetEdge, 1)));
@@ -1782,12 +1740,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     ("c2".to_string(), [-shift + 1e-9, 1e-6]),
                     ("c3".to_string(), [0.0, 1e-6]),
                 ];
-                let mut ct = LabeledTool::new(ToolShape::Prism {
-                    profile: polygon(fr, &corners),
-                    start: z0,
-                    end: z1,
-                    through_all: false,
-                });
+                let mut ct = LabeledTool::new(ToolShape::prism(polygon(fr, &corners), z0, z1));
                 ct.sides.push((sid("c0"), lab(Role::Relief, 0)));
                 carve.push(ct);
             }
@@ -1917,16 +1870,15 @@ impl<'a, 'b> Run<'a, 'b> {
                                 CornerTreatment::None => {}
                             }
                         }
-                        let mut tool = LabeledTool::new(ToolShape::Prism {
-                            profile: CanonicalProfile {
+                        let mut tool = LabeledTool::new(ToolShape::prism(
+                            CanonicalProfile {
                                 frame: mf,
                                 loops,
                                 merge_collinear: false,
                             },
-                            start: -ext[0],
-                            end: l + ext[1],
-                            through_all: false,
-                        });
+                            -ext[0],
+                            l + ext[1],
+                        ));
                         for lp in &outline {
                             for (cid, _) in lp {
                                 if !tool.sides.iter().any(|(c, _)| c == cid) {
@@ -1989,12 +1941,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 };
                 let g = self.st.bodies[h.body as usize].topology.faces[h.index as usize].geom;
                 let corners = face_box(&fr, &g, inset);
-                let mut tool = LabeledTool::new(ToolShape::Prism {
-                    profile: polygon(fr, &corners),
-                    start: 0.0,
-                    end: t,
-                    through_all: false,
-                });
+                let mut tool = LabeledTool::new(ToolShape::prism(polygon(fr, &corners), 0.0, t));
                 for (c, _) in &corners {
                     tool.sides.push((
                         crate::ids::SketchEntityId::new(c.clone()),
@@ -2057,12 +2004,8 @@ impl<'a, 'b> Run<'a, 'b> {
                     ("hyp".to_string(), [leg, 0.0]),
                     ("leg_b".to_string(), [0.0, leg]),
                 ];
-                let mut tool = LabeledTool::new(ToolShape::Prism {
-                    profile: polygon(fr, &corners),
-                    start: -t / 2.0,
-                    end: t / 2.0,
-                    through_all: false,
-                });
+                let mut tool =
+                    LabeledTool::new(ToolShape::prism(polygon(fr, &corners), -t / 2.0, t / 2.0));
                 for (s, _) in &corners {
                     tool.sides.push((
                         crate::ids::SketchEntityId::new(s.clone()),
@@ -2111,12 +2054,11 @@ impl<'a, 'b> Run<'a, 'b> {
                         ("face".to_string(), [leg, 0.0]),
                         ("b".to_string(), [0.0, leg]),
                     ];
-                    let mut tool = LabeledTool::new(ToolShape::Prism {
-                        profile: polygon(fr, &corners),
-                        start: s1.min(0.0),
-                        end: s1.max(0.0),
-                        through_all: false,
-                    });
+                    let mut tool = LabeledTool::new(ToolShape::prism(
+                        polygon(fr, &corners),
+                        s1.min(0.0),
+                        s1.max(0.0),
+                    ));
                     let tag = KernelTag::InputEdge {
                         edge: OperandEntity {
                             operand: 0,
@@ -2343,12 +2285,7 @@ impl<'a, 'b> Run<'a, 'b> {
         // From the face plane, along the face normal (raise) or into the body (sink).
         let start = dot(sub(g.centroid, p.frame.origin), p.frame.z) * dot(n, p.frame.z).signum();
         let s = dot(n, p.frame.z).signum();
-        let mut tool = LabeledTool::new(ToolShape::Prism {
-            profile: p,
-            start: s * start,
-            end: s * (start + height),
-            through_all: false,
-        });
+        let mut tool = LabeledTool::new(ToolShape::prism(p, s * start, s * (start + height)));
         tool.end = Some(FaceLabel::key(Role::EmbossTop, "top"));
         let combine = if height >= 0.0 {
             Combine::Add
@@ -2387,12 +2324,11 @@ impl<'a, 'b> Run<'a, 'b> {
                 (format!("{}.l", c), p(s.end, e, e)),
                 (format!("{}.start", c), p(s.start, -e, e)),
             ];
-            let mut tool = LabeledTool::new(ToolShape::Prism {
-                profile: polygon(frame, &corners),
-                start: 0.0,
-                end: if r.reverse { -depth } else { depth },
-                through_all: false,
-            });
+            let mut tool = LabeledTool::new(ToolShape::prism(
+                polygon(frame, &corners),
+                0.0,
+                if r.reverse { -depth } else { depth },
+            ));
             let sid = |x: &str| crate::ids::SketchEntityId::new(format!("{}.{}", c, x));
             tool.sides.push((
                 sid("r"),
@@ -2508,12 +2444,7 @@ fn bend_tool(
         ]],
         merge_collinear: false,
     };
-    let mut tool = LabeledTool::new(ToolShape::Prism {
-        profile,
-        start: 0.0,
-        end: depth,
-        through_all: false,
-    });
+    let mut tool = LabeledTool::new(ToolShape::prism(profile, 0.0, depth));
     tool.sides.push((
         sid("in"),
         FaceLabel::key(Role::BendFace, b.key.clone()).with_ordinal(0),

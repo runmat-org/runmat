@@ -614,6 +614,26 @@ fn translate_tag(
                 })?;
             SourceTag::face_of(n)
         }
+        KernelTag::InputVertex { vertex } => {
+            let bad = NamingError::BadOperand {
+                operand: vertex.operand,
+                entity: vertex.entity,
+            };
+            let o = operands.get(vertex.operand as usize).ok_or(bad.clone())?;
+            let v = o
+                .topology
+                .vertices
+                .get(vertex.entity as usize)
+                .ok_or(bad.clone())?;
+            let mut faces = Vec::new();
+            for e in &v.edges {
+                let edge = o.topology.edges.get(*e as usize).ok_or(bad.clone())?;
+                for f in edge.faces {
+                    faces.push(o.names.primary(f).ok_or(bad.clone())?.clone());
+                }
+            }
+            SourceTag::vertex_of(&faces)
+        }
         KernelTag::CadName { name } => SourceTag::Key { key: name.clone() },
     })
 }
