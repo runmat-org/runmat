@@ -236,6 +236,18 @@ pub fn parse_layout(path: &str, source: &str) -> ParsedLayout {
     out
 }
 
+/// Reads the statements of a `sync { }` section (spanning `span`): the section, when it reads
+/// without errors, and the errors.
+pub(crate) fn read_sync_section(
+    statements: &[Statement],
+    span: Span,
+) -> (Option<SyncSection>, Vec<FeaSyntaxDiagnostic>) {
+    let mut reader = SectionReader::default();
+    reader.read(statements, span);
+    let ok = reader.diagnostics.is_empty();
+    (ok.then_some(reader.section), reader.diagnostics)
+}
+
 #[derive(Default)]
 struct SectionReader {
     section: SyncSection,

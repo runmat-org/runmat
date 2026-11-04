@@ -2745,7 +2745,9 @@ pub fn apply(
         .iter()
         .filter(|c| selected.contains(&c.id) && c.direction == Direction::Forward)
         .collect();
-    changes.sort_by_key(|c| c.kind);
+    // Net renames run first: an added part's pads look their nets up by the new names, and
+    // would otherwise create a second net under a name a rename is about to take.
+    changes.sort_by_key(|c| (c.kind != ChangeKind::RenameNet, c.kind));
     let mut removed_nets: BTreeSet<NetId> = BTreeSet::new();
     let mut touched_nets: BTreeSet<NetId> = BTreeSet::new();
     let mut moved_pads: Vec<(String, String)> = Vec::new();

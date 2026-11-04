@@ -555,6 +555,21 @@ pub struct Dimension {
     pub precision: u8,
 }
 
+/// A fiducial: a bare copper dot inside a solder-mask opening, which assembly machines use to
+/// register the board.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Fiducial {
+    pub id: ItemId,
+    pub name: String,
+    pub at: Point,
+    pub side: Side,
+    /// Diameter of the copper dot.
+    pub diameter: Coord,
+    /// Diameter of the mask opening around it.
+    pub opening: Coord,
+    pub locked: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Footprint {
     pub id: ItemId,
@@ -768,6 +783,12 @@ pub struct Board {
     pub graphics: BTreeMap<ItemId, BoardGraphic>,
     pub dimensions: BTreeMap<ItemId, Dimension>,
     pub limits: FabLimits,
+    pub fiducials: BTreeMap<ItemId, Fiducial>,
+    /// The board's design rules, in source order.
+    pub rules: Vec<crate::board_rules::RuleSpec>,
+    /// Board-side parameters per net class (`track_width`, `clearance`, …). They override the
+    /// schematic's net-class parameters and compile to rules on `:net-class(<name>)`.
+    pub net_class_rules: BTreeMap<String, Vec<(String, crate::board_rules::RuleValue)>>,
     pub next_id: u64,
     /// What the board last took from the schematic: the ECO's base for three-way compares.
     pub sync: crate::eco::BoardSync,
@@ -792,6 +813,9 @@ impl Board {
             graphics: BTreeMap::new(),
             dimensions: BTreeMap::new(),
             limits: FabLimits::default(),
+            fiducials: BTreeMap::new(),
+            rules: Vec::new(),
+            net_class_rules: BTreeMap::new(),
             next_id: 1,
             sync: Default::default(),
         }
@@ -898,6 +922,23 @@ impl Board {
             },
         );
         id
+    }
+    /// The board's rules as compiled specs: each net class's parameters as a rule on
+    /// `:net-class(<name>)` (priority 0), then the board's own rules.
+    pub fn rule_specs(&self) -> Vec<crate::board_rules::RuleSpec> {
+        let mut specs: Vec<crate::board_rules::RuleSpec> = self
+            .net_class_rules
+            .iter()
+            .map(|(class, decls)| crate::board_rules::RuleSpec {
+                decls: decls.clone(),
+                ..crate::board_rules::RuleSpec::single(
+                    &format!("net_class.{class}"),
+                    &format!(":net-class({class})"),
+                )
+            })
+            .collect();
+        specs.extend(self.rules.iter().cloned());
+        specs
     }
     pub fn footprint_by_ref(&self, r: &str) -> Option<&Footprint> {
         self.footprints.values().find(|f| f.reference == r)
