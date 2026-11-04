@@ -2451,6 +2451,19 @@ mod tests {
             Ok(AnalysisSolverOptions::StructuralFrequency(_))
         ));
 
+        // A modal -> harmonic consumer runs in the modal-reduced space with the frequency
+        // options its publication operation is dispatched with.
+        let modal_frequency =
+            ProcedureStep::structural_modal_harmonic("modal_frequency", "modes", "basis");
+        assert_eq!(modal_frequency.solution_space, SolutionSpace::ModalReduced);
+        let options = AnalysisSolverOptions::defaults_for(&modal_frequency)
+            .expect("modal-reduced harmonic defaults");
+        assert!(matches!(
+            options,
+            AnalysisSolverOptions::StructuralFrequency(_)
+        ));
+        assert!(options.supports(&modal_frequency));
+
         let thermal_static = ProcedureStep::thermal_steady("thermal_static");
         assert!(matches!(
             AnalysisSolverOptions::defaults_for(&thermal_static),

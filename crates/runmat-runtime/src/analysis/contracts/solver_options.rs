@@ -87,16 +87,14 @@ impl AnalysisSolverOptions {
             (Structural, EigenvalueBuckling, SolutionSpace::Direct) => Ok(
                 Self::StructuralBuckling(AnalysisBucklingRunOptions::default()),
             ),
+            // Direct and modal-reduced (modal -> harmonic) sweeps share the frequency options.
             (
                 Structural,
-                PrestressedHarmonicResponse,
+                HarmonicResponse | PrestressedHarmonicResponse,
                 SolutionSpace::Direct | SolutionSpace::ModalReduced,
             ) => Ok(Self::StructuralFrequency(
                 AnalysisStructuralFrequencyRunOptions::default(),
             )),
-            (Structural, HarmonicResponse, SolutionSpace::Direct) => Ok(
-                Self::StructuralFrequency(AnalysisStructuralFrequencyRunOptions::default()),
-            ),
             (Acoustic, ModalExtraction | TransientResponse, SolutionSpace::Direct) => Ok(
                 Self::AcousticResponse(super::super::AnalysisAcousticResponseRunOptions::default()),
             ),
