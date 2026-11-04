@@ -175,10 +175,17 @@ fn pending_family_procedures_are_refused_by_check_and_run_alike() {
         "fea.admission.family_procedure",
         Some("acoustic.static"),
     );
-    let fluid_harmonic = example("fluid-plane-poiseuille.fea").replace(
-        "analysis flow { fluid steady {} }",
-        "analysis flow { fluid harmonic { frequencies = [10] Hz } }",
-    );
+    // A harmonic field is complex and has no spatial maximum, so the steady example's
+    // extrema outputs leave; the study still asks for the pending procedure.
+    let fluid_harmonic = example("fluid-plane-poiseuille.fea")
+        .replace(
+            "analysis flow { fluid steady {} }",
+            "analysis flow { fluid harmonic { frequencies = [10] Hz } }",
+        )
+        .lines()
+        .filter(|line| !line.contains("= max("))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert_check_and_run_agree(
         &fluid_harmonic,
         "fea.admission.family_procedure",

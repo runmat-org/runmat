@@ -38,6 +38,10 @@ fn heated_die() -> (AnalysisModel, SolverMeshArtifact) {
             element_ids,
         })
         .collect();
+    // The mesh contract keeps regions in canonical (identifier) order.
+    mesh.topology
+        .regions
+        .sort_by(|a, b| a.region_id.cmp(&b.region_id));
     mesh.seal_canonical_digest().unwrap();
 
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);

@@ -44,7 +44,11 @@ fn reconstruct(
         entry.sample,
         AnalysisField::host_f64(
             &field.field_id,
-            entry.definition.layout(),
+            // The staged field keeps the published state (ordinal) its producer stored.
+            entry
+                .definition
+                .layout()
+                .with_ordinal(field.template.layout.ordinal),
             field.shape.clone(),
             values,
         ),

@@ -80,7 +80,11 @@ fn layered(cells: usize, frequency: f64) -> (AcousticHarmonicWorkload, SolverMes
     }));
     // The incident wave replaces the fixture's loads; its signal was pushed above.
     model.excitations.clear();
-    model.excitation_cases.clear();
+    model.excitation_cases = vec![ExcitationCase {
+        case_id: ExcitationCaseId("incident-case".into()),
+        action_ids: vec![ExcitationId("engine".into())],
+        activation: ExcitationCaseActivation::Always,
+    }];
     model
         .excitations
         .extend([ExcitationAction::AcousticIncidentPressure(
