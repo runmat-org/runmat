@@ -22,7 +22,7 @@ use crate::refs::history::{FaceGeom, KernelTag};
 use crate::refs::name::Role;
 use crate::regen::records::{FaceDraft, FeatureRecord, SheetRules};
 
-fn line_seg(curve: &str, a: [f64; 2], b: [f64; 2]) -> ProfileSegment {
+pub(super) fn line_seg(curve: &str, a: [f64; 2], b: [f64; 2]) -> ProfileSegment {
     ProfileSegment {
         curve: crate::ids::SketchEntityId::new(curve),
         kind: SegmentKind::Line,
@@ -31,7 +31,7 @@ fn line_seg(curve: &str, a: [f64; 2], b: [f64; 2]) -> ProfileSegment {
     }
 }
 
-fn polygon(frame: Frame, pts: &[(String, [f64; 2])]) -> CanonicalProfile {
+pub(super) fn polygon(frame: Frame, pts: &[(String, [f64; 2])]) -> CanonicalProfile {
     let n = pts.len();
     CanonicalProfile {
         frame,
@@ -42,7 +42,7 @@ fn polygon(frame: Frame, pts: &[(String, [f64; 2])]) -> CanonicalProfile {
     }
 }
 
-fn frame_of(origin: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Frame {
+pub(super) fn frame_of(origin: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Frame {
     let x = normalize(x);
     let y = normalize(sub(y, scale(x, dot(y, x))));
     Frame {
@@ -53,7 +53,7 @@ fn frame_of(origin: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Frame {
     }
 }
 
-fn op(op: KernelOp, operands: Vec<usize>, naming: NamingContext) -> Compiled {
+pub(super) fn op(op: KernelOp, operands: Vec<usize>, naming: NamingContext) -> Compiled {
     Compiled::Op {
         op,
         operands,
@@ -64,7 +64,7 @@ fn op(op: KernelOp, operands: Vec<usize>, naming: NamingContext) -> Compiled {
     }
 }
 
-fn labeled(
+pub(super) fn labeled(
     tools: Vec<LabeledTool>,
     carve: Vec<LabeledTool>,
     combine: Combine,
@@ -123,7 +123,7 @@ impl<'a, 'b> Run<'a, 'b> {
         }))
     }
 
-    fn not_lowered(&mut self, id: &FeatureId, what: &str) -> Halt {
+    pub(super) fn not_lowered(&mut self, id: &FeatureId, what: &str) -> Halt {
         self.error(
             id,
             None,
@@ -133,7 +133,7 @@ impl<'a, 'b> Run<'a, 'b> {
         )
     }
 
-    fn face_handle(
+    pub(super) fn face_handle(
         &mut self,
         i: usize,
         id: &FeatureId,
@@ -144,7 +144,7 @@ impl<'a, 'b> Run<'a, 'b> {
         Ok(*res.entities().iter().next().expect("one"))
     }
 
-    fn face_normal(&self, h: &EntityHandle) -> Option<[f64; 3]> {
+    pub(super) fn face_normal(&self, h: &EntityHandle) -> Option<[f64; 3]> {
         match self.st.bodies[h.body as usize].topology.faces[h.index as usize]
             .geom
             .surface
@@ -154,7 +154,7 @@ impl<'a, 'b> Run<'a, 'b> {
         }
     }
 
-    fn chain(
+    pub(super) fn chain(
         &mut self,
         i: usize,
         f: &FeatureId,
@@ -1291,7 +1291,7 @@ impl<'a, 'b> Run<'a, 'b> {
     }
 
     /// The sheet record of the base flange that made a body.
-    fn sheet_of(
+    pub(super) fn sheet_of(
         &self,
         body: usize,
     ) -> Option<(
@@ -1573,6 +1573,9 @@ impl<'a, 'b> Run<'a, 'b> {
             }
             SheetMetalFeature::FlatPattern { fixed_face, .. } => {
                 let h = self.face_handle(i, id, "fixed_face", fixed_face)?;
+                if let Some((maker, rules, None, _)) = self.sheet_of(h.body as usize) {
+                    return self.plate_flat(i, id, &h, &maker, &rules, &simple);
+                }
                 let Some((maker, rules, Some(sec), depth)) = self.sheet_of(h.body as usize) else {
                     return Err(self.error(
                         id,
@@ -1673,11 +1676,50 @@ impl<'a, 'b> Run<'a, 'b> {
                     tool.end = Some(FaceLabel::key(role, key.clone()).with_ordinal(1));
                     tools.push(tool);
                 }
+                // The layout: the strip in `fr`, its bend lines across it.
+                let up_side = dot(fr.z, n3) >= 0.0;
+                let corner = |x: f64, y: f64| [x, y];
+                let outline = [
+                    ("y0", corner(0.0, 0.0), corner(dev.length, 0.0)),
+                    ("x1", corner(dev.length, 0.0), corner(dev.length, depth)),
+                    ("y1", corner(dev.length, depth), corner(0.0, depth)),
+                    ("x0", corner(0.0, depth), corner(0.0, 0.0)),
+                ];
+                let layout = crate::model::sheet_metal::FlatLayout {
+                    frame: fr,
+                    depth: thick,
+                    loops: vec![outline
+                        .iter()
+                        .map(|(c, a, b)| line_seg(c, *a, *b))
+                        .collect()],
+                    bend_lines: dev
+                        .bend_lines
+                        .iter()
+                        .map(|b| crate::model::sheet_metal::FlatBendLine {
+                            key: b.key.clone(),
+                            feature: maker.clone(),
+                            start: [b.position, 0.0],
+                            end: [b.position, depth],
+                            angle: b.angle,
+                            inner_radius: b.inner_radius,
+                            allowance: b.allowance,
+                            deduction: b.deduction,
+                            direction: if (b.direction
+                                == crate::model::sheet_metal::BendDirection::Up)
+                                == up_side
+                            {
+                                crate::model::sheet_metal::BendDirection::Up
+                            } else {
+                                crate::model::sheet_metal::BendDirection::Down
+                            },
+                        })
+                        .collect(),
+                };
                 self.st.records.insert(
                     id.clone(),
                     FeatureRecord::FlatPattern {
-                        development: dev,
-                        width: depth,
+                        layout,
+                        development: Some(dev),
                     },
                 );
                 Ok(op(
@@ -1686,7 +1728,11 @@ impl<'a, 'b> Run<'a, 'b> {
                     simple,
                 ))
             }
-            SheetMetalFeature::MiterFlange { .. } => Err(self.not_lowered(id, "miter flanges")),
+            SheetMetalFeature::MiterFlange {
+                profile,
+                edges,
+                gap,
+            } => self.miter_flange(i, id, profile, edges, gap, &simple),
             SheetMetalFeature::Jog {
                 face,
                 line,
@@ -1728,7 +1774,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 }
                 let h = self.face_handle(i, id, "fixed_face", fixed_face)?;
                 let body = h.body as usize;
-                let Some((maker, ..)) = self.sheet_of(body) else {
+                let Some((maker, _, sec, _)) = self.sheet_of(body) else {
                     return Err(self.error(
                         id,
                         Some("fixed_face"),
@@ -1737,7 +1783,10 @@ impl<'a, 'b> Run<'a, 'b> {
                         Vec::new(),
                     ));
                 };
-                self.only_made_by(id, body, &[maker], "unfold")?;
+                // A plate's flat pattern checks that only its bends changed it.
+                if sec.is_some() {
+                    self.only_made_by(id, body, &[maker], "unfold")?;
+                }
                 // The flat pattern's strip, in place of the bent sheet.
                 let flat = SheetMetalFeature::FlatPattern {
                     fixed_face: fixed_face.clone(),
@@ -1802,7 +1851,10 @@ impl<'a, 'b> Run<'a, 'b> {
                     )
                 });
                 let Some(maker) = maker else {
-                    return Err(self.not_lowered(id, "folding this sheet"));
+                    return Err(self.not_lowered(
+                        id,
+                        "folding a plate's sketched bends and jogs back (suppress the unfold to see the bent plate)",
+                    ));
                 };
                 // Faces the rebuild kept may still carry the base flange's names.
                 self.only_made_by(id, body, &[unfold, maker.clone()], "fold")?;
@@ -2621,6 +2673,42 @@ impl<'a, 'b> Run<'a, 'b> {
         flat.start = Some(FaceLabel::key(Role::SheetFace, moved_key.clone()).with_ordinal(0));
         flat.end = Some(FaceLabel::key(Role::SheetFace, moved_key).with_ordinal(1));
         tools.push(flat);
+        // The bend lines on the developed plate, for its flat pattern.
+        let to2d = |p: [f64; 3]| {
+            let q = sub(p, pf.origin);
+            [dot(q, pf.x), dot(q, pf.y)]
+        };
+        let bd = crate::model::sheet_metal::bend_deduction(&rules.rule, t, r, a)
+            .map_err(|m| invalid(self, "angle", m))?;
+        let first_up = dot(b, n) > 0.0;
+        let mut lines = Vec::new();
+        for (k, at) in std::iter::once(0.0)
+            .chain(middle.map(|f| ba + f))
+            .enumerate()
+        {
+            let up = first_up == (k == 0);
+            lines.push(crate::model::sheet_metal::FlatBendLine {
+                key: if k == 0 {
+                    key.clone()
+                } else {
+                    format!("{key}.2")
+                },
+                feature: id.clone(),
+                start: to2d(add(l0, add(scale(m, at), scale(u, wa)))),
+                end: to2d(add(l0, add(scale(m, at), scale(u, wb)))),
+                angle: a,
+                inner_radius: r,
+                allowance: ba,
+                deduction: bd,
+                direction: if up {
+                    crate::model::sheet_metal::BendDirection::Up
+                } else {
+                    crate::model::sheet_metal::BendDirection::Down
+                },
+            });
+        }
+        let moved = (to2d(add(l0, scale(m, s0))), [dot(m, pf.x), dot(m, pf.y)]);
+        self.record_plate_bend(id, body, &maker, &plate, lines, moved)?;
         // Carve everything of the plate past the fixed flat.
         let cf = frame_of(add(l0, scale(m, s0)), m, u);
         let csign = if dot(cf.z, b) >= 0.0 { 1.0 } else { -1.0 };
@@ -3257,7 +3345,7 @@ fn dist3(a: [f64; 3], b: [f64; 3]) -> f64 {
     dot(sub(a, b), sub(a, b)).sqrt()
 }
 
-fn plane_normal(g: &FaceGeom) -> Option<[f64; 3]> {
+pub(super) fn plane_normal(g: &FaceGeom) -> Option<[f64; 3]> {
     match g.surface {
         SurfaceKind::Plane { normal } => Some(normalize(normal)),
         _ => None,
@@ -3306,7 +3394,7 @@ fn face_box(fr: &Frame, g: &FaceGeom, inset: f64) -> Vec<(String, [f64; 2])> {
 /// along the sheet, y the inner face's normal for an upward bend; z along the bend line):
 /// `up` turns towards y about a centre `r` above the face, otherwise away from it about a
 /// centre `r` below the outer face. Prism over `w` along z.
-fn sheet_bend_tool(
+pub(super) fn sheet_bend_tool(
     fr: Frame,
     up: bool,
     r: f64,
@@ -3374,7 +3462,7 @@ fn sheet_bend_tool(
     tool
 }
 
-fn bend_tool(
+pub(super) fn bend_tool(
     frame: Frame,
     b: &crate::model::sheet_metal::SectionBend,
     depth: f64,

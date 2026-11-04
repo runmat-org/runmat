@@ -17,6 +17,7 @@ use runmat_cad::refs::*;
 use runmat_cad::regen::records::FeatureRecord;
 use runmat_cad::regen::RegenResult;
 use runmat_cad::value::{InputDecl, ValueExpr};
+use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
 fn ids(v: &[&str]) -> Vec<SketchEntityId> {
@@ -267,12 +268,22 @@ fn base_flange_flat_pattern_and_edge_flange_on_the_kernel() {
     ));
     let r = env.regen(&d);
     assert_clean(&r);
-    let Some(FeatureRecord::FlatPattern { development, .. }) = r.state.records.get(&fid("flat"))
+    let Some(FeatureRecord::FlatPattern {
+        development: Some(development),
+        layout,
+    }) = r.state.records.get(&fid("flat"))
     else {
         panic!("no flat record")
     };
     let ba = PI / 2.0 * (0.003 + 0.44 * 0.002);
     assert!(close(development.length, 0.025 + 0.045 + ba, 1e-12));
+    // The layout: the strip, developed length by the depth, one bend line across it.
+    let (lo, hi) = layout.extents();
+    assert!(close(hi[0] - lo[0], development.length, 1e-12));
+    assert!(close(hi[1] - lo[1], 0.04, 1e-12));
+    assert_eq!(layout.bend_lines.len(), 1);
+    assert!(close(layout.bend_lines[0].allowance, ba, 1e-12));
+    assert!(close(layout.depth.abs(), 0.002, 1e-15));
     assert_eq!(r.state.bodies.len(), 2);
 
     // An edge flange on the far end of the base flat: the edge between its far side face and
@@ -602,6 +613,301 @@ fn bends_outside_the_lowered_cases_say_why() {
     ));
     let r = env.regen(&d);
     assert!(has(&r, DiagCode::RegenInvalid), "{:?}", r.diagnostics);
+}
+
+/// [`plate_doc`] with a second line `bl2` at x = 20, a 90° bend up along `bl` (moving x > 50)
+/// and a 60° jog of 12 mm along `bl2` (moving x < 20).
+pub fn bent_plate_doc() -> PartDocument {
+    let mut d = plate_doc();
+    if let FeatureKind::Sketch(s) = &mut d.features[2].kind {
+        s.entities.push(SketchEntity {
+            id: SketchEntityId::new("bl2"),
+            geometry: SketchGeometry::Line {
+                start: PointExpr::mm(20.0, -5.0),
+                end: PointExpr::mm(20.0, 45.0),
+            },
+            construction: false,
+        });
+    }
+    d.features.push(Feature::new(
+        "bend",
+        FeatureKind::SheetMetal(SheetMetalFeature::SketchedBend {
+            face: plate_top(),
+            line: (fid("s_line"), SketchEntityId::new("bl")),
+            angle: ValueExpr::deg(90.0),
+            radius: None,
+            fixed: PlaneSide::Positive,
+        }),
+    ));
+    d.features.push(Feature::new(
+        "jog",
+        FeatureKind::SheetMetal(SheetMetalFeature::Jog {
+            face: plate_top(),
+            line: (fid("s_line"), SketchEntityId::new("bl2")),
+            offset: mm(12.0),
+            angle: ValueExpr::deg(60.0),
+        }),
+    ));
+    d
+}
+
+#[test]
+fn a_plate_with_a_bend_and_a_jog_flattens_to_its_plate_with_the_bend_lines() {
+    let env = Env::new();
+    let mut d = bent_plate_doc();
+    d.features.push(Feature::new(
+        "flat",
+        FeatureKind::SheetMetal(SheetMetalFeature::FlatPattern {
+            fixed_face: plate_top(),
+            grain: None,
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 2);
+    let Some(FeatureRecord::FlatPattern {
+        layout,
+        development: None,
+    }) = r.state.records.get(&fid("flat"))
+    else {
+        panic!("no plate flat record")
+    };
+    let (lo, hi) = layout.extents();
+    assert!(close(hi[0] - lo[0], 0.08, 1e-12) && close(hi[1] - lo[1], 0.04, 1e-12));
+    assert!(close(layout.depth, 0.002, 1e-15));
+    // The bend's line at x = 50, the jog's first at x = 20 and its second one allowance and
+    // the middle flat further out: middle = (12 − (2R + t)(1 − cos 60°)) / sin 60°.
+    let (r_, t, k) = (3.0, 2.0, 0.44);
+    let ba = |deg: f64| deg.to_radians() * (r_ + k * t) * 1e-3;
+    let middle = (12.0 - (2.0 * r_ + t) * (1.0 - 60f64.to_radians().cos()))
+        / 60f64.to_radians().sin()
+        * 1e-3;
+    let lines: Vec<_> = layout
+        .bend_lines
+        .iter()
+        .map(|l| (l.key.as_str(), l.start[0], l.direction, l.allowance))
+        .collect();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    let want = [
+        ("bl", 0.05, BendDirection::Up, ba(90.0)),
+        ("bl2", 0.02, BendDirection::Up, ba(60.0)),
+        (
+            "bl2.2",
+            0.02 - ba(60.0) - middle,
+            BendDirection::Down,
+            ba(60.0),
+        ),
+    ];
+    for (got, want) in lines.iter().zip(want) {
+        assert_eq!(got.0, want.0);
+        assert!(close(got.1, want.1, 1e-12), "{got:?} vs {want:?}");
+        assert_eq!(got.2, want.2, "{got:?}");
+        assert!(close(got.3, want.3, 1e-12), "{got:?} vs {want:?}");
+    }
+    for l in &layout.bend_lines {
+        assert!(close((l.end[1] - l.start[1]).abs(), 0.04, 1e-12), "{l:?}");
+    }
+    // The drawing's sheet and DXF: four outline lines, three bend lines with notes.
+    let sheet = runmat_cad::drawing::flat_pattern::flat_pattern_sheet(layout);
+    assert_eq!(sheet.bend_table.len(), 3);
+    assert_eq!(sheet.bend_lines[0].note, "B1 UP 90° R3 BA 6.095");
+    assert!(close(sheet.max[0] - sheet.min[0], 80.0, 1e-9));
+    let dxf = sheet.to_dxf();
+    assert_eq!(dxf.matches("\nLINE\n").count(), 7, "{dxf}");
+    assert_eq!(dxf.matches("\nBEND_DOWN\n").count(), 2);
+    assert!(dxf.contains("B3 DOWN 60%%d R3 BA 4.063") && dxf.ends_with("0\nEOF\n"));
+    // A bend table gives the allowance directly.
+    let mut tabled = d.clone();
+    if let FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { rules, .. }) =
+        &mut tabled.features[1].kind
+    {
+        rules.rule = BendRule::Table {
+            table: BendTable {
+                name: "shop".into(),
+                rows: vec![BendTableRow {
+                    thickness: 0.002,
+                    radius: 0.003,
+                    angle: PI / 2.0,
+                    allowance: 0.0057,
+                }],
+            },
+        };
+    }
+    let r = env.regen(&tabled);
+    assert_clean(&r);
+    let Some(FeatureRecord::FlatPattern { layout, .. }) = r.state.records.get(&fid("flat")) else {
+        panic!()
+    };
+    assert!(close(layout.bend_lines[0].allowance, 0.0057, 1e-15));
+    assert!(close(
+        layout.bend_lines[1].allowance,
+        0.0057 * 2.0 / 3.0,
+        1e-15
+    ));
+    // Unfold in place: the plate again, one body.
+    let mut unfolded = bent_plate_doc();
+    unfolded.features.push(Feature::new(
+        "unfold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Unfold {
+            fixed_face: plate_top(),
+            bends: Vec::new(),
+        }),
+    ));
+    let r = env.regen(&unfolded);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 1);
+    let (lo, hi) = body_box(&r);
+    let tol = 2e-4;
+    assert!(
+        close(hi[0] - lo[0], 0.08, tol) && close(hi[2] - lo[2], 0.002, tol),
+        "{lo:?} {hi:?}"
+    );
+    // Folding the plate back is named as not lowered.
+    unfolded.features.push(Feature::new(
+        "fold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Fold { bends: Vec::new() }),
+    ));
+    let r = env.regen(&unfolded);
+    let d0 = diag(&r, DiagCode::KernelNotSupported);
+    assert!(d0.message.contains("plate"), "{}", d0.message);
+}
+
+#[test]
+fn a_bend_of_plate_material_another_bend_moved_is_refused() {
+    let env = Env::new();
+    let mut d = plate_doc();
+    if let FeatureKind::Sketch(s) = &mut d.features[2].kind {
+        s.entities.push(SketchEntity {
+            id: SketchEntityId::new("bl2"),
+            geometry: SketchGeometry::Line {
+                start: PointExpr::mm(65.0, -5.0),
+                end: PointExpr::mm(65.0, 45.0),
+            },
+            construction: false,
+        });
+    }
+    // The first bend's wall stands clear of the second line; the plate past it is gone.
+    for (name, line) in [("first", "bl"), ("second", "bl2")] {
+        d.features.push(Feature::new(
+            name,
+            FeatureKind::SheetMetal(SheetMetalFeature::SketchedBend {
+                face: plate_top(),
+                line: (fid("s_line"), SketchEntityId::new(line)),
+                angle: ValueExpr::deg(90.0),
+                radius: None,
+                fixed: PlaneSide::Positive,
+            }),
+        ));
+    }
+    let r = env.regen(&d);
+    assert!(r.status("first").unwrap().ran(), "{:?}", r.diagnostics);
+    let d0 = diag(&r, DiagCode::KernelNotSupported);
+    assert!(d0.message.contains("already moved"), "{}", d0.message);
+}
+
+/// The plate of [`plate_doc`] with a miter flange `height` mm high (from the top face) along
+/// the top edges of the plate sides `edges`, drawn on the yz plane at the start of `e1`.
+pub fn miter_doc(edges: &[&str], height: f64, gap: f64) -> PartDocument {
+    let mut d = plate_doc();
+    d.features.push(chain_sketch_on(
+        "s_miter",
+        OriginPlane::Yz,
+        &[(0.0, 2.0), (0.0, 2.0 + height)],
+        &["wall"],
+    ));
+    d.features.push(Feature::new(
+        "miter",
+        FeatureKind::SheetMetal(SheetMetalFeature::MiterFlange {
+            profile: ProfileRef::sketch("s_miter"),
+            edges: edges
+                .iter()
+                .map(|e| {
+                    Reference::edges_between(
+                        plate_top(),
+                        Reference::face(EntityName::Generated(GenerationName {
+                            feature: fid("base"),
+                            role: Role::SheetEdge,
+                            tag: SourceTag::Key { key: (*e).into() },
+                            ordinal: None,
+                        })),
+                    )
+                })
+                .collect(),
+            gap: mm(gap),
+        }),
+    ));
+    d
+}
+
+/// The distinct names `feature` gave faces, counted by role, and whether a name is on two
+/// faces. The grid kernel can split a mitred curved face; exact kernels do not.
+pub fn made_by(r: &RegenResult, feature: &str) -> (BTreeMap<String, usize>, bool) {
+    let mut by_role = BTreeMap::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut repeated = false;
+    for names in r.state.bodies.iter().flat_map(|b| b.names.faces.iter()) {
+        for n in names {
+            if let EntityName::Generated(g) = n {
+                if g.feature.0 == feature {
+                    if seen.insert(format!("{n:?}")) {
+                        *by_role.entry(format!("{:?}", g.role)).or_insert(0) += 1;
+                    } else {
+                        repeated = true;
+                    }
+                }
+            }
+        }
+    }
+    (by_role, repeated)
+}
+
+#[test]
+fn a_miter_flange_runs_along_an_edge_chain_and_mitres_its_corners() {
+    let env = Env::new();
+    // Two sides of the plate: one corner.
+    let r = env.regen(&miter_doc(&["e1", "e2"], 15.0, 0.0));
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 1);
+    let (roles, _) = made_by(&r, "miter");
+    assert_eq!(roles.get("BendFace"), Some(&4), "{roles:?}");
+    assert_eq!(roles.get("SheetFace"), Some(&4), "{roles:?}");
+    // The wall stands R + t out of each side: x reaches 80 + 5, y reaches −5, z the 15 mm.
+    let (lo, hi) = body_box(&r);
+    let tol = 2e-4;
+    assert!(
+        close(hi[0], 0.085, tol) && close(lo[1], -0.005, tol),
+        "{lo:?} {hi:?}"
+    );
+    assert!(close(hi[2], 0.017, tol), "{hi:?}");
+    // All four sides close the loop; the gap leaves the corners open.
+    let r = env.regen(&miter_doc(&["e1", "e2", "e3", "e4"], 15.0, 0.5));
+    assert_clean(&r);
+    let (roles, _) = made_by(&r, "miter");
+    assert_eq!(roles.get("BendFace"), Some(&8), "{roles:?}");
+    // The order the edges are given in does not matter, and names follow the edges.
+    let a = made_by(
+        &env.regen(&miter_doc(&["e3", "e1", "e4", "e2"], 15.0, 0.5)),
+        "miter",
+    );
+    assert_eq!(a.0, roles);
+    // Edges that do not join end to end, and a profile off the edges, are refused.
+    let r = env.regen(&miter_doc(&["e1", "e3"], 15.0, 0.0));
+    let d0 = diag(&r, DiagCode::RegenInvalid);
+    assert!(d0.message.contains("end to end"), "{}", d0.message);
+    let mut d = miter_doc(&["e1", "e2"], 15.0, 0.0);
+    if let FeatureKind::Sketch(s) = &mut d.features[3].kind {
+        s.entities[0].geometry = SketchGeometry::Line {
+            start: PointExpr::mm(10.0, 2.0),
+            end: PointExpr::mm(10.0, 17.0),
+        };
+    }
+    let r = env.regen(&d);
+    let d0 = diag(&r, DiagCode::RegenInvalid);
+    assert!(
+        d0.message.contains("start on one of the edges"),
+        "{}",
+        d0.message
+    );
 }
 
 /// A hem of `kind` on the far end of the L bracket's base flat.

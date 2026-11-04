@@ -9,6 +9,7 @@
 //!   regeneration, an occurrence's part inside a resolved assembly).
 //!
 //! - [`bom_table`]: BOM-table rendering data (columns, sort, groups, kept item numbers);
+//! - [`flat_pattern`]: sheet metal flat patterns as 2D sheets, bend tables and DXF;
 //! - [`hole_table`]: hole-table rows through the [`hole_table::HoleGeometry`] seam;
 //! - [`merge`]: three-way drawing merges by stable id, with reference re-resolution.
 //!
@@ -18,6 +19,7 @@
 //! than dropped.
 
 pub mod bom_table;
+pub mod flat_pattern;
 pub mod hole_table;
 pub mod index;
 pub mod merge;

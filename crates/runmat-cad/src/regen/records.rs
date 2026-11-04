@@ -4,7 +4,7 @@
 
 use crate::model::curves::CurveValue;
 use crate::model::detail::ThreadSpec;
-use crate::model::sheet_metal::{BendRuleValue, Development, Section};
+use crate::model::sheet_metal::{BendRuleValue, Development, FlatBendLine, FlatLayout, Section};
 use crate::model::weldment::{CutListRow, MemberCut};
 use crate::refs::EntityName;
 use serde::{Deserialize, Serialize};
@@ -47,10 +47,21 @@ pub enum FeatureRecord {
         section: Option<Section>,
         depth: f64,
     },
-    /// A flat pattern: the development, the bend table rows and the flat's extents.
+    /// A flat pattern: the layout (outline and bend lines, for drawings and cutting) and, for
+    /// a bent section, its development along the strip.
     FlatPattern {
-        development: Development,
-        width: f64,
+        layout: FlatLayout,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        development: Option<Development>,
+    },
+    /// The bends a sketched bend or jog made in a flat plate (the base flange `base`), as bend
+    /// lines in the plate's own frame: the plate keeps its developed outline.
+    PlateBend {
+        base: crate::ids::FeatureId,
+        lines: Vec<FlatBendLine>,
+        /// The part of the plate the bends moved, in the plate's frame: the half-plane
+        /// `(p − origin)·normal ≥ 0`, for later bends to keep clear of.
+        moved: ([f64; 2], [f64; 2]),
     },
     /// Structural members and their cut list.
     Weldment {

@@ -30,6 +30,7 @@ use crate::model::feature::ProfileRef;
 use crate::model::visit::{Params, Visit};
 use crate::refs::Reference;
 use crate::value::ValueExpr;
+use runmat_geometry_kernel::op::{ProfileSegment, SegmentKind};
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
@@ -847,4 +848,87 @@ pub fn develop(section: &Section, rule: &BendRuleValue) -> Result<Development, S
         regions,
         bend_lines,
     })
+}
+
+// ------------------------------------------------------------------------ flat layouts
+
+/// A bend line of a flat layout: the centre line of the bend zone, from edge to edge.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FlatBendLine {
+    /// The bend's key: the sketch line (`<line>.2` for a jog's second bend), or `<curve
+    /// before>+<curve after>` for a bend of a section.
+    pub key: String,
+    /// The feature that made the bend.
+    pub feature: FeatureId,
+    pub start: [f64; 2],
+    pub end: [f64; 2],
+    /// The bend's angle (unsigned, radians) and inner radius.
+    pub angle: f64,
+    pub inner_radius: f64,
+    /// The bend zone's width (half each side of the line) and the bend deduction.
+    pub allowance: f64,
+    pub deduction: f64,
+    /// Up: the bend turns towards the layout frame's +z side.
+    pub direction: BendDirection,
+}
+
+/// A flat pattern laid out for drawings and cutting: the outline loops (the first is the
+/// outer boundary) and the bend lines in `frame`'s xy plane, in metres. The material spans
+/// `0..depth` along the frame's z (`depth` is plus or minus the thickness).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FlatLayout {
+    pub frame: crate::model::datum::Frame,
+    pub depth: f64,
+    pub loops: Vec<Vec<ProfileSegment>>,
+    pub bend_lines: Vec<FlatBendLine>,
+}
+
+impl FlatLayout {
+    /// The outline's extents in the layout frame, `([x_min, y_min], [x_max, y_max])`. Lines,
+    /// arcs and circles are exact; an ellipse counts its whole ellipse and a spline its
+    /// control polygon, so their extents can be larger than the curve's.
+    pub fn extents(&self) -> ([f64; 2], [f64; 2]) {
+        let mut lo = [f64::INFINITY; 2];
+        let mut hi = [f64::NEG_INFINITY; 2];
+        let mut take = |p: [f64; 2]| {
+            for k in 0..2 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        };
+        for seg in self.loops.iter().flatten() {
+            take(seg.start);
+            take(seg.end);
+            match &seg.kind {
+                SegmentKind::Line => {}
+                SegmentKind::Arc { center, clockwise } => {
+                    let (s, e) = (seg.start, seg.end);
+                    let r = (s[0] - center[0]).hypot(s[1] - center[1]);
+                    let a0 = (s[1] - center[1]).atan2(s[0] - center[0]);
+                    let a1 = (e[1] - center[1]).atan2(e[0] - center[0]);
+                    // The counter-clockwise span from `from` to `to`.
+                    let (from, to) = if *clockwise { (a1, a0) } else { (a0, a1) };
+                    let span = (to - from).rem_euclid(2.0 * PI);
+                    let span = if span < 1e-15 { 2.0 * PI } else { span };
+                    for q in 0..4 {
+                        let a = q as f64 * PI / 2.0;
+                        if (a - from).rem_euclid(2.0 * PI) <= span {
+                            take([center[0] + r * a.cos(), center[1] + r * a.sin()]);
+                        }
+                    }
+                }
+                SegmentKind::Circle { center, radius } => {
+                    take([center[0] - radius, center[1] - radius]);
+                    take([center[0] + radius, center[1] + radius]);
+                }
+                SegmentKind::Ellipse { center, major, .. } => {
+                    let a = major[0].hypot(major[1]);
+                    take([center[0] - a, center[1] - a]);
+                    take([center[0] + a, center[1] + a]);
+                }
+                SegmentKind::Spline { poles, .. } => poles.iter().for_each(|p| take(*p)),
+            }
+        }
+        (lo, hi)
+    }
 }

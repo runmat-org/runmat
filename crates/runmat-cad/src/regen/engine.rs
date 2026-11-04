@@ -43,6 +43,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod families;
 mod features;
 mod patterns;
+mod sheet;
 
 pub struct RegenContext<'a> {
     pub kernel: &'a dyn CadKernel,
