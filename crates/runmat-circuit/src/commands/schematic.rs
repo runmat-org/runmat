@@ -8,6 +8,24 @@ fn sch(id: &str, label: &str, icon: &str, desc: &str) -> CommandDescriptor {
     cmd(id, label, icon, CIRCUIT).desc(desc).kw(&["schematic"])
 }
 
+/// Update board's inputs: the change list, the comparator's ignore setting per difference type
+/// (Altium's *Ignore Differences*; saved with the board when the update is applied) and orphan
+/// copper removal.
+pub(super) fn eco_inputs() -> Vec<Field> {
+    let mut inputs = vec![checklist("changes", "Changes to apply", &[K::EcoChange])];
+    inputs.extend(
+        crate::eco::Difference::ALL
+            .into_iter()
+            .map(|d| flag(&d.input_id(), d.label(), false).help(d.help())),
+    );
+    inputs.push(flag(
+        "remove_orphaned_copper",
+        "Remove orphaned copper",
+        false,
+    ));
+    inputs
+}
+
 fn place(item: &str, section: Section) -> ModelEdit {
     edit(EditOp::Add, section).item(item)
 }
@@ -264,10 +282,7 @@ pub(super) fn add(c: &mut Catalog) {
             "Send schematic changes to the board; review each line.",
         )
         .kw(&["eco", "engineering change", "sync", "update pcb"])
-        .inputs(vec![
-            checklist("changes", "Changes to apply", &[K::EcoChange]),
-            flag("remove_orphaned_copper", "Remove orphaned copper", false),
-        ])
+        .inputs(eco_inputs())
         .when(has(Facet::PendingEco))
         .on(&[K::EcoChange])
         .edit(edit(EditOp::Sync, Section::Placement).item("eco")),

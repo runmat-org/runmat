@@ -148,6 +148,11 @@ pub struct EcoIndex {
     pub errors: u32,
     pub warnings: u32,
     pub groups: Vec<EcoGroupRow>,
+    /// The difference types the board's saved comparator settings ignore (`rooms`, `values`):
+    /// the review's starting choices. Rows any of them hides ([`EcoRow::ignored_by`]) are not shown, and a
+    /// compare with those settings does not produce them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignored: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -189,6 +194,9 @@ pub struct EcoRow {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issues: Vec<EcoIssue>,
     pub impact: EcoImpact,
+    /// The difference types whose ignore setting hides this row (any one of them does).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignored_by: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -428,6 +436,12 @@ pub fn eco_index(plan: &EcoPlan, board: &Board) -> EcoIndex {
                     staged: p.staged,
                 }),
             },
+            ignored_by: c
+                .kind
+                .ignored_by()
+                .iter()
+                .map(|d| d.as_str().to_owned())
+                .collect(),
         });
     }
     EcoIndex {
@@ -440,6 +454,13 @@ pub fn eco_index(plan: &EcoPlan, board: &Board) -> EcoIndex {
         errors,
         warnings,
         groups,
+        ignored: board
+            .sync
+            .options
+            .ignored()
+            .iter()
+            .map(|d| d.as_str().to_owned())
+            .collect(),
     }
 }
 

@@ -36,6 +36,10 @@
       "match": "(?<![\\w])(?:constrain|property|publish|layout|runmat|solved|check|input|link|when|let|std|use)(?![\\w])"
     },
     {
+      "name": "storage.type.circuit-layout",
+      "match": "(?<![\\w])(?:component_class|component|diff_pair|footprint|net_class|compare|version|layout|sync)(?![\\w])"
+    },
+    {
       "name": "keyword.other.circuit-layout",
       "match": "(?<![\\w])(?:from|over|for|as|at|in|of|on|to)(?![\\w])"
     },
@@ -75,6 +79,20 @@
           "std",
           "use",
           "when"
+        ]
+      },
+      {
+        "scope": "storage.type.circuit-layout",
+        "words": [
+          "compare",
+          "component",
+          "component_class",
+          "diff_pair",
+          "footprint",
+          "layout",
+          "net_class",
+          "sync",
+          "version"
         ]
       },
       {

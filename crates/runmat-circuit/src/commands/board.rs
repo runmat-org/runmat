@@ -167,6 +167,26 @@ pub(super) fn add(c: &mut Catalog) {
             .when(selected(&[K::Net, K::Track, K::Pad, K::Via]))
             .on(&[K::Net, K::Track, K::Pad, K::Via])
             .edit(view_action("highlight_net")),
+        brd(
+            "board.copy-room-formats",
+            "Copy room formats",
+            "room",
+            "Copy one channel room's placement and routing into the other channels' rooms.",
+        )
+        .kw(&["multi-channel", "channel", "replicate", "room", "copy placement", "copy routing"])
+        .inputs(vec![
+            pick("source", "From room", &[K::Room]),
+            picks("targets", "To rooms", &[K::Room])
+                .optional()
+                .help("Empty: every other room of the same repeated sheet."),
+            flag("placement", "Copy placement", true),
+            flag("routing", "Copy routing", true)
+                .help("Replaces the routing on the matching nets inside each target room."),
+            flag("room_shape", "Copy room shape", true),
+        ])
+        .when(selected(&[K::Room]))
+        .on(&[K::Room])
+        .edit(edit(EditOp::Set, Section::Placement).item("room_formats")),
         brd("board.lock", "Lock", "lock", "Lock components or copper so they don't move.")
             .when(selected(&[K::Component, K::Track, K::Via, K::Zone]))
             .on(&[K::Component, K::Track, K::Via, K::Zone])
@@ -213,6 +233,7 @@ pub(super) fn tab() -> DomainTab {
                         ],
                     ),
                     c("board.room"),
+                    c("board.copy-room-formats"),
                 ],
             ),
             group(

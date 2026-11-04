@@ -172,7 +172,7 @@ export function grammarText(source) {
 //   grammar words     runmat-design-syntax dialect registry (src/dialect.rs): the dialect's
 //                     declaration words, the generic form words, value, clause and literal words
 //   statement words   the dialect's front-end registry (runmat-cad src/syntax/mod.rs grammars,
-//                     runmat-circuit src/syntax/mod.rs `words`)
+//                     runmat-circuit src/syntax/mod.rs and src/syntax/layout.rs `words`)
 //   operations        registry words a dialect applies (`.part` feature kinds: FeatureKind)
 //   units             the `.fea` unit registry, plus `%`
 
@@ -185,7 +185,7 @@ export const DESIGN_DIALECTS = [
     { dialect: "Assembly", name: "assembly", extension: "assembly", statements: { source: CAD_SYNTAX, from: /^pub const ASSEMBLY: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g } },
     { dialect: "Drawing", name: "drawing", extension: "drawing", statements: { source: CAD_SYNTAX, from: /^pub const DRAWING: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g } },
     { dialect: "Circuit", name: "circuit", extension: "circuit", statements: { source: "crates/runmat-circuit/src/syntax/mod.rs", from: /^pub mod words \{/m, to: /pub const ALL/, pattern: /: &str = "([a-z_]+)"/g } },
-    { dialect: "CircuitLayout", name: "circuit-layout", extension: "circuit.layout" },
+    { dialect: "CircuitLayout", name: "circuit-layout", extension: "circuit.layout", statements: { source: "crates/runmat-circuit/src/syntax/layout.rs", from: /^pub mod words \{/m, to: /pub const ALL/, pattern: /: &str = "([a-z_]+)"/g } },
 ];
 
 const snakeCase = name => name.replace(/[A-Z]/g, (letter, index) => (index ? "_" : "") + letter.toLowerCase());

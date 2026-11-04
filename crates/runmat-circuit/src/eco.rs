@@ -50,9 +50,13 @@ use std::collections::{BTreeMap, BTreeSet};
  * --------------------------------------------------------------------------------------------- */
 
 /// What the board last took from the schematic: the base of the three-way compare. Updated per
-/// applied change, so a partial ECO leaves the rest pending.
+/// applied change, so a partial ECO leaves the rest pending. A `.circuit.layout` file keeps it
+/// in its `sync { }` section ([`crate::syntax::layout`]), with the footprints' component links.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BoardSync {
+    /// The comparator settings the board was last updated with; [`compare_saved`] and
+    /// [`back_annotate_saved`] compare with them, and [`apply`] saves the plan's.
+    pub options: ComparatorOptions,
     /// By component path.
     pub components: BTreeMap<String, SyncedComponent>,
     /// Net class → rule parameter → display value.
@@ -160,6 +164,27 @@ impl ChangeKind {
             }
             AddRoom | ChangeRoom | RemoveRoom => ChangeGroup::Rooms,
             ChangeRule => ChangeGroup::Rules,
+        }
+    }
+    /// The difference types whose ignore setting hides this kind of change: any one of them
+    /// does. Rules are net-class parameters, so ignoring net classes ignores rules too.
+    pub fn ignored_by(self) -> &'static [Difference] {
+        use ChangeKind::*;
+        use Difference as D;
+        match self {
+            ChangeFootprint => &[D::Footprints],
+            ChangeValue => &[D::Values],
+            ChangeParameter => &[D::Parameters],
+            ChangeFitted => &[D::Fitting],
+            AddNetClass | RemoveNetClass | ChangeNetClass => &[D::NetClasses],
+            ChangeRule => &[D::Rules, D::NetClasses],
+            AddDiffPair | RemoveDiffPair => &[D::DiffPairs],
+            AddComponentClass | RemoveComponentClass | ChangeComponentClass => {
+                &[D::ComponentClasses]
+            }
+            AddRoom | ChangeRoom | RemoveRoom => &[D::Rooms],
+            RemoveComponent | AddComponent | ChangeDesignator | RenameNet | AddNet
+            | ChangePinNet | SwapPins | SwapGates | RemoveNet => &[],
         }
     }
     /// The verb the review shows (`Add`, `Rename`…).
@@ -474,6 +499,8 @@ pub struct Change {
 pub struct EcoPlan {
     pub direction: Direction,
     pub changes: Vec<Change>,
+    /// The comparator settings the plan was made with; [`apply`] saves them on the board.
+    pub options: ComparatorOptions,
 }
 
 impl EcoPlan {
@@ -500,6 +527,90 @@ impl EcoPlan {
             }
         }
         out
+    }
+}
+
+/// A type of difference the comparator can ignore (Altium's Comparator tab: *Find
+/// Differences* or *Ignore Differences* per type). An ignored type produces no ECO lines in
+/// either direction, and [`apply`] leaves what it covers on the board as it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Difference {
+    Parameters,
+    Values,
+    Footprints,
+    Fitting,
+    NetClasses,
+    Rules,
+    DiffPairs,
+    ComponentClasses,
+    Rooms,
+}
+
+impl Difference {
+    pub const ALL: [Difference; 9] = [
+        Difference::Parameters,
+        Difference::Values,
+        Difference::Footprints,
+        Difference::Fitting,
+        Difference::NetClasses,
+        Difference::Rules,
+        Difference::DiffPairs,
+        Difference::ComponentClasses,
+        Difference::Rooms,
+    ];
+
+    /// The written word (`.circuit.layout` sync section, projection, command inputs).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Difference::Parameters => "parameters",
+            Difference::Values => "values",
+            Difference::Footprints => "footprints",
+            Difference::Fitting => "fitting",
+            Difference::NetClasses => "net_classes",
+            Difference::Rules => "rules",
+            Difference::DiffPairs => "diff_pairs",
+            Difference::ComponentClasses => "component_classes",
+            Difference::Rooms => "rooms",
+        }
+    }
+
+    pub fn parse(word: &str) -> Option<Difference> {
+        Difference::ALL.into_iter().find(|d| d.as_str() == word)
+    }
+
+    /// The command input's label in Properties.
+    pub fn label(self) -> &'static str {
+        match self {
+            Difference::Parameters => "Ignore parameters",
+            Difference::Values => "Ignore values",
+            Difference::Footprints => "Ignore footprints",
+            Difference::Fitting => "Ignore fitting",
+            Difference::NetClasses => "Ignore net classes",
+            Difference::Rules => "Ignore rules",
+            Difference::DiffPairs => "Ignore differential pairs",
+            Difference::ComponentClasses => "Ignore component classes",
+            Difference::Rooms => "Ignore rooms",
+        }
+    }
+
+    /// What ignoring it leaves alone, for the input's help text.
+    pub fn help(self) -> &'static str {
+        match self {
+            Difference::Parameters => "Component parameters are not compared.",
+            Difference::Values => "Component values are not compared.",
+            Difference::Footprints => "Footprint changes are not sent; the board keeps its footprints.",
+            Difference::Fitting => "Fitted and not-fitted changes from variants are not sent.",
+            Difference::NetClasses => "Net classes, net class membership and their rules are not compared.",
+            Difference::Rules => "Net class rule parameters are not compared.",
+            Difference::DiffPairs => "Differential pairs are not compared.",
+            Difference::ComponentClasses => "Component classes, including one per channel, are not compared.",
+            Difference::Rooms => "Rooms are not added, changed or removed, and their outlines and members stay as they are.",
+        }
+    }
+
+    /// The command input id (`ignore_rooms`).
+    pub fn input_id(self) -> String {
+        format!("ignore_{}", self.as_str())
     }
 }
 
@@ -547,6 +658,74 @@ impl Default for ComparatorOptions {
             rooms_per_channel: true,
             classes_per_channel: true,
         }
+    }
+}
+
+impl ComparatorOptions {
+    /// The setting for one difference type, as stored.
+    pub fn ignore(&self, d: Difference) -> bool {
+        match d {
+            Difference::Parameters => self.ignore_parameters,
+            Difference::Values => self.ignore_values,
+            Difference::Footprints => self.ignore_footprints,
+            Difference::Fitting => self.ignore_fitting,
+            Difference::NetClasses => self.ignore_net_classes,
+            Difference::Rules => self.ignore_rules,
+            Difference::DiffPairs => self.ignore_diff_pairs,
+            Difference::ComponentClasses => self.ignore_component_classes,
+            Difference::Rooms => self.ignore_rooms,
+        }
+    }
+
+    pub fn set_ignore(&mut self, d: Difference, on: bool) {
+        let field = match d {
+            Difference::Parameters => &mut self.ignore_parameters,
+            Difference::Values => &mut self.ignore_values,
+            Difference::Footprints => &mut self.ignore_footprints,
+            Difference::Fitting => &mut self.ignore_fitting,
+            Difference::NetClasses => &mut self.ignore_net_classes,
+            Difference::Rules => &mut self.ignore_rules,
+            Difference::DiffPairs => &mut self.ignore_diff_pairs,
+            Difference::ComponentClasses => &mut self.ignore_component_classes,
+            Difference::Rooms => &mut self.ignore_rooms,
+        };
+        *field = on;
+    }
+
+    /// The ignored difference types, in [`Difference::ALL`] order.
+    pub fn ignored(&self) -> Vec<Difference> {
+        Difference::ALL
+            .into_iter()
+            .filter(|d| self.ignore(*d))
+            .collect()
+    }
+
+    /// The same settings finding every difference type. The review compares this way and
+    /// hides the rows the chosen settings ignore, so changing a setting in Properties needs no
+    /// new compare; the hidden rows are exactly the ones a compare with the setting leaves out.
+    pub fn finding_all(&self) -> ComparatorOptions {
+        let mut out = self.clone();
+        for d in Difference::ALL {
+            out.set_ignore(d, false);
+        }
+        out
+    }
+
+    /// Whether these settings hide changes of `kind`.
+    pub fn hides(&self, kind: ChangeKind) -> bool {
+        kind.ignored_by().iter().any(|d| self.ignore(*d))
+    }
+
+    /// The settings with the difference types the command inputs set (`ignore_rooms = true`);
+    /// inputs that are not given keep the stored setting.
+    pub fn with_inputs(&self, inputs: &BTreeMap<String, bool>) -> ComparatorOptions {
+        let mut out = self.clone();
+        for d in Difference::ALL {
+            if let Some(on) = inputs.get(&d.input_id()) {
+                out.set_ignore(d, *on);
+            }
+        }
+        out
     }
 }
 
@@ -680,27 +859,28 @@ fn channel_of(c: &CompInst) -> Option<String> {
  * --------------------------------------------------------------------------------------------- */
 
 fn copper_on_net(board: &Board, net: NetId) -> Impact {
-    let mut i = Impact::default();
-    i.tracks = board
-        .tracks
-        .values()
-        .filter(|t| t.net == Some(net))
-        .map(|t| t.id.0)
-        .collect();
-    i.vias = board
-        .vias
-        .values()
-        .filter(|v| v.net == Some(net))
-        .map(|v| v.id.0)
-        .collect();
-    i.zones = board
-        .zones
-        .values()
-        .filter(|z| z.net == Some(net))
-        .map(|z| z.id.0)
-        .collect();
-    i.nets.push(board.net_name(net).to_owned());
-    i
+    Impact {
+        tracks: board
+            .tracks
+            .values()
+            .filter(|t| t.net == Some(net))
+            .map(|t| t.id.0)
+            .collect(),
+        vias: board
+            .vias
+            .values()
+            .filter(|v| v.net == Some(net))
+            .map(|v| v.id.0)
+            .collect(),
+        zones: board
+            .zones
+            .values()
+            .filter(|z| z.net == Some(net))
+            .map(|z| z.id.0)
+            .collect(),
+        nets: vec![board.net_name(net).to_owned()],
+        ..Impact::default()
+    }
 }
 
 /// Tracks and vias touching a pad on its net (the copper a pin change disconnects).
@@ -903,7 +1083,9 @@ fn natural(s: &str) -> (String, u64, String) {
     )
 }
 
-fn finish(direction: Direction, mut changes: Vec<Change>) -> EcoPlan {
+fn finish(direction: Direction, mut changes: Vec<Change>, o: &ComparatorOptions) -> EcoPlan {
+    // An ignored difference type produces no lines, whichever part of the compare found it.
+    changes.retain(|c| !o.hides(c.kind));
     changes.sort_by(|a, b| {
         (a.kind.group(), a.kind, natural(&a.item), &a.id).cmp(&(
             b.kind.group(),
@@ -918,7 +1100,11 @@ fn finish(direction: Direction, mut changes: Vec<Change>) -> EcoPlan {
         c.requires.sort();
         c.requires.dedup();
     }
-    EcoPlan { direction, changes }
+    EcoPlan {
+        direction,
+        changes,
+        options: o.clone(),
+    }
 }
 
 /// The schematic's net names per component pad (`pad → net`).
@@ -930,6 +1116,16 @@ fn sch_pads(nl: &Netlist, c: &CompInst) -> BTreeMap<String, Option<String>> {
         }
     }
     out
+}
+
+/// [`compare`] with the comparator settings saved on the board (its `sync { }` section).
+pub fn compare_saved(s: &Schematic, board: &Board) -> EcoPlan {
+    compare(s, board, &board.sync.options)
+}
+
+/// [`back_annotate`] with the comparator settings saved on the board.
+pub fn back_annotate_saved(s: &Schematic, board: &Board) -> EcoPlan {
+    back_annotate(s, board, &board.sync.options)
 }
 
 /// Schematic → board: everything the board would change to match the schematic.
@@ -1187,7 +1383,7 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
                 c.designator.clone(),
                 None,
                 Some(match &pkg {
-                    Some(p) => format!("{p}"),
+                    Some(p) => p.clone(),
                     None => "no footprint".to_owned(),
                 }),
                 comp_cause(
@@ -1563,7 +1759,7 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
                 synced.is_some() && synced_net != to && synced_net.as_ref() != have_board.as_ref();
             let impact = copper_at_pad(board, *fid, &pad);
             let mut requires = Vec::new();
-            if let Some(r) = to.as_deref().and_then(|n| add_net_req(n)) {
+            if let Some(r) = to.as_deref().and_then(add_net_req) {
                 requires.push(r);
             }
             let ch = b.push(
@@ -2052,7 +2248,7 @@ pub fn compare(s: &Schematic, board: &Board, o: &ComparatorOptions) -> EcoPlan {
         }
     }
 
-    finish(Direction::Forward, b.changes)
+    finish(Direction::Forward, b.changes, o)
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -2343,7 +2539,7 @@ pub fn back_annotate(s: &Schematic, board: &Board, o: &ComparatorOptions) -> Eco
             }
         }
     }
-    finish(Direction::Back, b.changes)
+    finish(Direction::Back, b.changes, o)
 }
 
 fn qualified(p: &crate::elab::PinInst) -> String {
@@ -2542,6 +2738,8 @@ pub fn apply(
     }
     let before = board.clone();
     let mut next = board.clone();
+    // The settings this update was compared with are the board's from now on.
+    next.sync.options = plan.options.clone();
     let mut changes: Vec<&Change> = plan
         .changes
         .iter()
@@ -2566,8 +2764,11 @@ pub fn apply(
                     if let Some(p) = &f.component {
                         next.sync.components.remove(p);
                     }
-                    for r in next.rooms.iter_mut() {
-                        r.members.retain(|m| m != reference);
+                    // Ignore rooms leaves every room as it is, members included.
+                    if !plan.options.ignore_rooms {
+                        for r in next.rooms.iter_mut() {
+                            r.members.retain(|m| m != reference);
+                        }
                     }
                 }
             }

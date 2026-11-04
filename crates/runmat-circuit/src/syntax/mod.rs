@@ -37,6 +37,8 @@
 //! the same text quoted when a name is not a word (`"C1.1"`, `"net.+3V3"`,
 //! `"instance.ch.VIN#2"` for one channel).
 
+pub mod layout;
+
 use crate::ir::{
     Binding, BusDecl, ComponentDecl, Connection, Design, DiffPairDecl, Endpoint, Fitting,
     HarnessDecl, InterfaceDef, NetClass, NetDecl, Param, ParamValue, PartRef, PortDecl, PortDir,

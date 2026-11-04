@@ -22,6 +22,8 @@
 //! - [`drc`]: the incremental DRC kernel.
 //! - [`eco`]: engineering change orders: schematic ↔ board sync as a typed, validated, undoable
 //!   change list with cause and board impact, back-annotation and agent change sets.
+//! - [`room_formats`]: Copy Room Formats, one channel's placement and routing replicated into
+//!   the other channels' rooms.
 //! - [`route`]: ratsnest, any-angle walkaround, checked insertion, tuning lengths.
 //! - [`router`]: interactive-routing primitives: 45°/90° shaping, mitred and arc corners,
 //!   clearance hulls, shortest and hugging walkaround.
@@ -60,6 +62,7 @@ pub mod kicad;
 pub mod layout;
 pub mod library;
 pub mod review;
+pub mod room_formats;
 pub mod route;
 pub mod router;
 pub mod spatial;

@@ -1,4 +1,4 @@
-//! Right-click menus for circuit components and nets (UI target decision 12), in the schematic
+//! Right-click menus for circuit components, nets and rooms (UI target decision 12), in the schematic
 //! and on the board alike, and the commands only those menus reach.
 
 use super::CIRCUIT;
@@ -107,6 +107,21 @@ pub(super) fn add(catalog: &mut Catalog) {
                 vec![c("circuit.cross-probe"), c("circuit.locate")],
                 vec![c("library.open-part"), change, footprint, c("circuit.edit-value")],
                 vec![c("circuit.swap-pins"), c("board.lock"), fitted],
+                vec![c("design.show-source"), c("design.copy-reference")],
+                vec![c("circuit.delete")],
+            ],
+        ),
+        context_menu(
+            K::Room,
+            CIRCUIT,
+            &[
+                "board.copy-room-formats",
+                "design.show-source",
+                "design.copy-reference",
+                "circuit.delete",
+            ],
+            vec![
+                vec![c("board.copy-room-formats")],
                 vec![c("design.show-source"), c("design.copy-reference")],
                 vec![c("circuit.delete")],
             ],
