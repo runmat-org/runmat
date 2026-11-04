@@ -174,3 +174,74 @@ async fn three_d_figures_frame_their_data_in_the_exported_image() {
         );
     }
 }
+
+/// Pixels in `(x0, y0)..(x1, y1)` that differ from the background by more than `threshold`.
+fn changed_pixels(rgba: &[u8], region: (u32, u32, u32, u32), threshold: i32) -> usize {
+    let background = &rgba[((WIDTH / 2) * 4) as usize..((WIDTH / 2) * 4 + 3) as usize];
+    let (x0, y0, x1, y1) = region;
+    let mut count = 0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let index = ((y * WIDTH + x) * 4) as usize;
+            let delta: i32 = (0..3)
+                .map(|c| (rgba[index + c] as i32 - background[c] as i32).abs())
+                .sum();
+            if delta > threshold {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+#[tokio::test]
+async fn axis_off_hides_the_3d_axes_and_orientation_triad() {
+    let pack = || {
+        cad_box_figure(
+            Vec3::new(-1160.0, -660.0, -40.0),
+            Vec3::new(1160.0, 660.0, 180.0),
+        )
+    };
+    // The orientation triad sits in the lower-left corner.
+    let triad = (0, HEIGHT - 160, 140, HEIGHT);
+    let shown = render("cad-axis-on", pack()).await;
+    assert!(
+        changed_pixels(&shown, triad, 90) > 50,
+        "the orientation triad is drawn while the axes are visible"
+    );
+    let mut hidden_figure = pack();
+    let mut style = hidden_figure
+        .axes_metadata(0)
+        .map(|meta| meta.axes_style.clone())
+        .unwrap_or_default();
+    style.visible = false;
+    hidden_figure.set_axes_style(0, style);
+    let hidden = render("cad-axis-off", hidden_figure).await;
+    assert_eq!(
+        changed_pixels(&hidden, triad, 40),
+        0,
+        "`axis off` leaves no orientation triad"
+    );
+    assert!(content_box(&hidden).is_some(), "`axis off` still draws the model");
+}
+
+#[tokio::test]
+async fn a_3d_plot_grid_stays_on_the_floor_of_its_axis_limits() {
+    // MATLAB draws a surface's grid inside its plot box. The view-filling ground grid that
+    // CAD views use reached the image's left edge, beside the spot-axis floor.
+    let rgba = render("surf-finance-grid", finance_figure()).await;
+    let left_band = (0, 280, 90, 440);
+    let stray = changed_pixels(&rgba, left_band, 24);
+    assert!(
+        stray < 20,
+        "{stray} grid pixels outside the axis limits at the image's left edge"
+    );
+    // Tick marks on the spot axis extend along the expiry axis by a fraction of the expiry
+    // span. Sized in spot units (a quarter of a 20-unit step), they ran 5 years past the box.
+    let below_spot_axis = (560, 560, 720, HEIGHT);
+    let tick_overrun = changed_pixels(&rgba, below_spot_axis, 60);
+    assert!(
+        tick_overrun < 20,
+        "{tick_overrun} tick-mark pixels past the expiry axis below the spot axis"
+    );
+}

@@ -37,3 +37,21 @@ Build Mac: ~/src/q-hero-pack, ~/targets/q-hero-pack, ~/runs/q-hero-pack, logs ~/
 ## Module mesh
 - 8 mm run on hero-943c19ab1e failed after 37 min (Delaunay insertion invariant). q-mesh-fix-6
   fix 830c112746 cherry-picked (ec4a5a07fa); the mesh-fix helper verifies on its own CLI.
+
+## q-hero-pack-2 (successor, 2026-11-04)
+- Merged integration/0.7.1 (7507f51f46) → 631b652acd.
+- Prior receipts (build Mac ~/runs/q-hero-pack/study): 8 mm full module Delaunay InvalidTopology
+  at 2213 s (run1.json); 12/8 mm reruns and snap8 killed by the restart (-15); 20 mm snapshot
+  hit the 8 GiB guard at 44 min (snap20.json); lid variant failed only on ServerUnreachable.
+- q-mesh-fix-9 (agent a5bbc68e9b4a6a644) owns the mesher fix: past the point set, then a facet
+  recovery ResourceLimit (O(nodes) plane-sign pass). It will send branch+commit; hold full-module rerun.
+- New first-result studies: study/m01-4cell-thermal.fea (cells 1-4, barriers 0-2, -x endplate+shoe,
+  full TIM+lid, 12 mm, lid underside h_eff 582 W/m^2/K, 80 W) via scripts/make_module_4cell.py;
+  and m01-module-lid-thermal.fea (10 mm, 160 W). Both launched detached on the build Mac via
+  study/snap2.sh (waits for the RunMat server stable 3 min, then `runmat snapshot`); outputs c4.out, lid10.out.
+- Load as power per cell: the language has `heat_generation` (W/m^3) only; docs prescribe
+  Q_i = P_i / V_i (loads/thermal.md "split total power"). 20 W / 1.615e-3 m^3 = 12383.9 W/m^3.
+- Rendering round 2 (uncommitted until tests pass): 3-D plot grid confined to the floor of the axis
+  limits with per-axis steps (GridUniforms major/minor_step_x/_y); `axis off` hides 3-D axis lines,
+  ticks, labels and the orientation triad (user text stays); plots keep axis lines under `grid off`;
+  3-D colorbar inset 10% top/bottom. Tests added in tests/three_d_framing.rs.

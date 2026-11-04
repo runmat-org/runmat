@@ -689,6 +689,17 @@ impl PlotOverlay {
         )
     }
 
+    /// The vertical span of a 3-D axes' colorbar. A 3-D plot area reaches the panel edges, so
+    /// the bar keeps a tenth of the height clear above and below, as MATLAB's 3-D axes position
+    /// does, and its end tick labels stay inside the figure.
+    fn colorbar_span_3d(plot_rect: Rect) -> Rect {
+        let inset = plot_rect.height() * 0.1;
+        Rect::from_min_max(
+            egui::pos2(plot_rect.min.x, plot_rect.min.y + inset),
+            egui::pos2(plot_rect.max.x, plot_rect.max.y - inset),
+        )
+    }
+
     /// Width reserved to the right of an axes for its colorbar and tick labels.
     fn colorbar_band_width(scale: f32) -> f32 {
         68.0 * scale.max(0.75)
@@ -1367,11 +1378,23 @@ impl PlotOverlay {
                             config.font_scale,
                         );
                     }
-                    self.draw_3d_orientation_gizmo(ui, r, plot_renderer, i, config.font_scale);
+                    // `axis off` hides the orientation triad, axis ticks and their labels.
+                    let axes_visible = Self::axes_visible(plot_renderer, i);
+                    if axes_visible {
+                        self.draw_3d_orientation_gizmo(ui, r, plot_renderer, i, config.font_scale);
+                    }
                     let show_world_grid_overlay = plot_renderer.geometry_overlay().is_none()
                         || plot_renderer.overlay_show_grid_for_axes(i);
                     if show_world_grid_overlay {
-                        self.draw_3d_origin_axis_ticks(ui, r, plot_renderer, i, config.font_scale);
+                        if axes_visible {
+                            self.draw_3d_origin_axis_ticks(
+                                ui,
+                                r,
+                                plot_renderer,
+                                i,
+                                config.font_scale,
+                            );
+                        }
                         self.draw_projected_world_texts(ui, r, plot_renderer, i, config.font_scale);
                     }
                     for (label, pos) in plot_renderer.pie_labels_for_axes(i) {
@@ -1389,7 +1412,13 @@ impl PlotOverlay {
                         let entries = plot_renderer.overlay_legend_entries_for_axes(i);
                         self.draw_legend(ui, r, &entries, config.font_scale);
                     }
-                    self.draw_colorbar(ui, r, plot_renderer, i, config.font_scale);
+                    self.draw_colorbar(
+                        ui,
+                        Self::colorbar_span_3d(r),
+                        plot_renderer,
+                        i,
+                        config.font_scale,
+                    );
                     continue;
                 }
                 // `axis off` hides the box, grid, ticks and axis labels; the title stays.
@@ -1543,23 +1572,29 @@ impl PlotOverlay {
                 cam.projection,
                 crate::core::camera::ProjectionType::Perspective { .. }
             ) {
-                self.draw_3d_orientation_gizmo(
-                    ui,
-                    centered_plot_rect,
-                    plot_renderer,
-                    0,
-                    config.font_scale,
-                );
-                let show_world_grid_overlay = plot_renderer.geometry_overlay().is_none()
-                    || plot_renderer.overlay_show_grid_for_axes(0);
-                if show_world_grid_overlay {
-                    self.draw_3d_origin_axis_ticks(
+                // `axis off` hides the orientation triad, axis ticks and their labels.
+                let axes_visible = Self::axes_visible(plot_renderer, 0);
+                if axes_visible {
+                    self.draw_3d_orientation_gizmo(
                         ui,
                         centered_plot_rect,
                         plot_renderer,
                         0,
                         config.font_scale,
                     );
+                }
+                let show_world_grid_overlay = plot_renderer.geometry_overlay().is_none()
+                    || plot_renderer.overlay_show_grid_for_axes(0);
+                if show_world_grid_overlay {
+                    if axes_visible {
+                        self.draw_3d_origin_axis_ticks(
+                            ui,
+                            centered_plot_rect,
+                            plot_renderer,
+                            0,
+                            config.font_scale,
+                        );
+                    }
                     self.draw_projected_world_texts(
                         ui,
                         centered_plot_rect,
@@ -1568,7 +1603,13 @@ impl PlotOverlay {
                         config.font_scale,
                     );
                 }
-                self.draw_colorbar(ui, centered_plot_rect, plot_renderer, 0, config.font_scale);
+                self.draw_colorbar(
+                    ui,
+                    Self::colorbar_span_3d(centered_plot_rect),
+                    plot_renderer,
+                    0,
+                    config.font_scale,
+                );
             } else {
                 // `axis off` hides the box, grid, ticks and axis labels; the title stays.
                 let axes_visible = Self::axes_visible(plot_renderer, 0);

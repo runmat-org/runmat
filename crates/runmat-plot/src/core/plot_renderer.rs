@@ -2421,8 +2421,17 @@ impl PlotRenderer {
         );
 
         // 3D helpers: a horizontal world grid and world-axis ticks. Keeping the
-        // grid on XY gives it a stable meaning as the camera moves.
-        if !is_2d && self.overlay_show_grid_for_axes(axes_index) {
+        // grid on XY gives it a stable meaning as the camera moves. `axis off` hides them all;
+        // a plot keeps its axis lines under `grid off`, while CAD geometry's world triad follows
+        // the grid toggle.
+        let axes_visible = self
+            .overlay_axes_style_for_axes(axes_index)
+            .is_none_or(|style| style.visible);
+        if !is_2d
+            && axes_visible
+            && (self.overlay_show_grid_for_axes(axes_index)
+                || !self.axes_shows_geometry(axes_index))
+        {
             let view_proj = view_proj_matrix * model_matrix;
             let inv_view_proj = view_proj.inverse();
             // The camera lives in axis-scaled space (3-D axes stretch to a cube); this helper is
@@ -2590,6 +2599,19 @@ impl PlotRenderer {
                 helper_vertices.push(Vertex::new(b, color));
             };
 
+            // World-axis helper for spatial awareness at model scale. Each axis has its own
+            // tick step, since 3-D axes may scale each data axis differently.
+            // Each axis reaches the far edge of the data from the origin, with about four
+            // ticks; without data bounds, the step follows the on-screen scale instead.
+            let frame = self.axis_frame_3d(axes_index).unwrap_or_else(|| {
+                // No finite bounds: size the triad from the on-screen scale at the origin.
+                let steps = Self::world_axis_steps(&project_to_px, center, &nice_step);
+                let lens = steps.map(|step| {
+                    (step as f32 * 5.0)
+                        .clamp((step as f32).min(0.5), (dx.max(dy) * 0.6).max(step as f32))
+                });
+                AxisFrame3d::origin_triad(steps, lens)
+            });
             // Procedural ground grid (depth-tested, no depth writes).
             let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
             let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
@@ -2618,29 +2640,53 @@ impl PlotRenderer {
                 if !show_minor_grid {
                     minor_alpha = 0.0;
                 }
+                // A plot's grid fills the floor of its axis limits with lines at its tick values,
+                // as MATLAB's plot box does. CAD geometry keeps the view-filling ground grid that
+                // fades out around the model.
+                let grid_steps = if frame.world_origin {
+                    GridPlaneExtent {
+                        min: (min_x, min_y),
+                        max: (max_x, max_y),
+                        major: [major_step as f32; 2],
+                        minor: [minor_step as f32; 2],
+                        fade: [
+                            (0.85 * dx.max(dy)).max(major_step as f32),
+                            (1.40 * dx.max(dy)).max((major_step as f32) * 2.0),
+                        ],
+                    }
+                } else {
+                    let major = [frame.steps[0] as f32, frame.steps[1] as f32];
+                    GridPlaneExtent {
+                        min: (frame.origin.x, frame.origin.y),
+                        max: (frame.origin.x + frame.lens[0], frame.origin.y + frame.lens[1]),
+                        major,
+                        minor: major.map(|step| step / 5.0),
+                        fade: [f32::MAX * 0.5, f32::MAX],
+                    }
+                };
                 self.wgpu_renderer.ensure_grid_plane_pipeline(emission);
                 self.wgpu_renderer.update_grid_uniforms_for_axes(
                     emission,
                     axes_index,
                     crate::core::renderer::GridUniforms {
-                        major_step: major_step as f32,
-                        minor_step: minor_step as f32,
-                        fade_start: (0.85 * dx.max(dy)).max(major_step as f32),
-                        fade_end: (1.40 * dx.max(dy)).max((major_step as f32) * 2.0),
+                        major_step_x: grid_steps.major[0],
+                        minor_step_x: grid_steps.minor[0],
+                        fade_start: grid_steps.fade[0],
+                        fade_end: grid_steps.fade[1],
                         camera_pos: position_data.to_array(),
-                        _pad0: 0.0,
+                        major_step_y: grid_steps.major[1],
                         target_pos: [target_data.x, target_data.y, plane_level],
-                        _pad1: 0.0,
+                        minor_step_y: grid_steps.minor[1],
                         major_color: [major_rgb[0], major_rgb[1], major_rgb[2], major_alpha],
                         minor_color: [minor_rgb[0], minor_rgb[1], minor_rgb[2], minor_alpha],
                     },
                 );
 
                 let quad_vertices = [
-                    Vertex::new(on_grid(min_x, min_y), Vec4::ONE),
-                    Vertex::new(on_grid(max_x, min_y), Vec4::ONE),
-                    Vertex::new(on_grid(max_x, max_y), Vec4::ONE),
-                    Vertex::new(on_grid(min_x, max_y), Vec4::ONE),
+                    Vertex::new(on_grid(grid_steps.min.0, grid_steps.min.1), Vec4::ONE),
+                    Vertex::new(on_grid(grid_steps.max.0, grid_steps.min.1), Vec4::ONE),
+                    Vertex::new(on_grid(grid_steps.max.0, grid_steps.max.1), Vec4::ONE),
+                    Vertex::new(on_grid(grid_steps.min.0, grid_steps.max.1), Vec4::ONE),
                 ];
                 let quad_indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
                 let vb = self
@@ -2652,19 +2698,6 @@ impl PlotRenderer {
                 grid_plane_buffers = Some((vb, ib));
             }
 
-            // World-axis helper for spatial awareness at model scale. Each axis has its own
-            // tick step, since 3-D axes may scale each data axis differently.
-            // Each axis reaches the far edge of the data from the origin, with about four
-            // ticks; without data bounds, the step follows the on-screen scale instead.
-            let frame = self.axis_frame_3d(axes_index).unwrap_or_else(|| {
-                // No finite bounds: size the triad from the on-screen scale at the origin.
-                let steps = Self::world_axis_steps(&project_to_px, center, &nice_step);
-                let lens = steps.map(|step| {
-                    (step as f32 * 5.0)
-                        .clamp((step as f32).min(0.5), (dx.max(dy) * 0.6).max(step as f32))
-                });
-                AxisFrame3d::origin_triad(steps, lens)
-            });
             let origin = frame.origin;
             let col_x = Vec4::new(0.92, 0.25, 0.25, 0.85);
             let col_y = Vec4::new(0.35, 0.90, 0.45, 0.85);
@@ -2679,20 +2712,22 @@ impl PlotRenderer {
 
             // Tick marks on the axis lines (major step only). Labels are drawn in the overlay
             // from the same frame so they stay crisp; these marks anchor them in depth.
-            for (axis_index, (axis, perp, col)) in [
-                (Vec3::X, Vec3::Y, col_x),
-                (Vec3::Y, Vec3::X, col_y),
-                (Vec3::Z, Vec3::X, col_z),
+            for (axis_index, (axis, perp, perp_index, col)) in [
+                (Vec3::X, Vec3::Y, 1, col_x),
+                (Vec3::Y, Vec3::X, 0, col_y),
+                (Vec3::Z, Vec3::X, 0, col_z),
             ]
             .into_iter()
             .enumerate()
             {
-                let axis_len = frame.lens[axis_index];
-                let step = frame.steps[axis_index] as f32;
+                // A tick mark extends along the perpendicular axis, so its length is measured in
+                // that axis's units: 3-D axes may scale x, y and z differently.
+                let perp_len = frame.lens[perp_index];
+                let perp_step = frame.steps[perp_index] as f32;
                 // `f32::clamp` panics if min > max; keep the minimum below the maximum.
-                let tick_max = (step * 0.25).max(1.0e-6);
-                let tick_min = (axis_len * 0.002).min(tick_max);
-                let tick_len = (axis_len * 0.02).clamp(tick_min, tick_max);
+                let tick_max = (perp_step * 0.25).max(1.0e-6);
+                let tick_min = (perp_len * 0.002).min(tick_max);
+                let tick_len = (perp_len * 0.02).clamp(tick_min, tick_max);
                 for (offset, _value) in frame.ticks(axis_index) {
                     let p = frame.axis_start(axis_index) + axis * offset;
                     push_line(
@@ -5356,6 +5391,16 @@ pub mod plot_utils {
 
         lines
     }
+}
+
+/// The floor rectangle and line spacing of a 3-D grid plane, in data units.
+struct GridPlaneExtent {
+    min: (f32, f32),
+    max: (f32, f32),
+    major: [f32; 2],
+    minor: [f32; 2],
+    /// Distances from the view target where the grid starts and finishes fading out.
+    fade: [f32; 2],
 }
 
 /// One axes' 3-D axis lines: the shared origin, each line's length in data units, and its tick
