@@ -1,5 +1,5 @@
 use super::{parse_fea, FeaSyntaxDiagnostic};
-use crate::lexical::{FeaToken, FeaTokenKind, FeaTriviaKind};
+use crate::lexical::{FeaToken, FeaTokenKind, FeaTokenStream, FeaTriviaKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeaFormatOptions {
@@ -20,15 +20,34 @@ pub struct FeaFormatResult {
 
 pub fn format_fea(source: &str, options: FeaFormatOptions) -> FeaFormatResult {
     let module = parse_fea(source);
-    let mut formatter = Formatter::new(&module.tokens.source, options);
-    for (index, token) in module.tokens.tokens.iter().copied().enumerate() {
-        let next = module.tokens.tokens.get(index + 1).copied();
+    format_tokens(&module.tokens, module.diagnostics, options)
+}
+
+/// Formats a source of any dialect with the same token formatter as `.fea`: indentation from
+/// braces, canonical spacing, comments and blank lines kept.
+pub fn format_source(
+    dialect: crate::Dialect,
+    source: &str,
+    options: FeaFormatOptions,
+) -> FeaFormatResult {
+    let syntax = crate::parse_source(dialect, source);
+    format_tokens(&syntax.tokens, syntax.diagnostics, options)
+}
+
+fn format_tokens(
+    tokens: &FeaTokenStream,
+    diagnostics: Vec<FeaSyntaxDiagnostic>,
+    options: FeaFormatOptions,
+) -> FeaFormatResult {
+    let mut formatter = Formatter::new(&tokens.source, options);
+    for (index, token) in tokens.tokens.iter().copied().enumerate() {
+        let next = tokens.tokens.get(index + 1).copied();
         formatter.token(token, next);
     }
     formatter.finish();
     FeaFormatResult {
         source: formatter.output,
-        diagnostics: module.diagnostics,
+        diagnostics,
     }
 }
 
@@ -402,11 +421,15 @@ fn is_word(kind: FeaTokenKind) -> bool {
             | FeaTokenKind::Identifier
             | FeaTokenKind::Number
             | FeaTokenKind::String
+            | FeaTokenKind::Percent
     )
 }
 
 fn is_name(kind: FeaTokenKind) -> bool {
-    matches!(kind, FeaTokenKind::Keyword(_) | FeaTokenKind::Identifier)
+    matches!(
+        kind,
+        FeaTokenKind::Keyword(_) | FeaTokenKind::Identifier | FeaTokenKind::Percent
+    )
 }
 
 fn is_unary_predecessor(kind: FeaTokenKind) -> bool {
@@ -430,13 +453,17 @@ fn is_unary_predecessor(kind: FeaTokenKind) -> bool {
             | FeaTokenKind::Caret
             | FeaTokenKind::Range
             | FeaTokenKind::Colon
+            | FeaTokenKind::PlusMinus
+            | FeaTokenKind::At
     )
 }
 
 fn is_spaced_operator(kind: FeaTokenKind) -> bool {
     matches!(
         kind,
-        FeaTokenKind::Equal
+        FeaTokenKind::PlusMinus
+            | FeaTokenKind::At
+            | FeaTokenKind::Equal
             | FeaTokenKind::EqualEqual
             | FeaTokenKind::BangEqual
             | FeaTokenKind::Less

@@ -304,6 +304,28 @@ impl SyntaxToken {
     }
 }
 
+impl SyntaxNode {
+    /// An indented outline of the subtree: one node per line with its span, and each
+    /// significant token with its text. Trivia is left out. For tests and debugging.
+    pub fn dump(&self) -> String {
+        fn walk(node: &SyntaxNode, depth: usize, out: &mut String) {
+            out.push_str(&format!("{}{:?}\n", "  ".repeat(depth), node));
+            for element in node.children_with_tokens() {
+                match element {
+                    SyntaxElement::Node(child) => walk(&child, depth + 1, out),
+                    SyntaxElement::Token(token) if !token.kind().is_trivia() => {
+                        out.push_str(&format!("{}{:?}\n", "  ".repeat(depth + 1), token));
+                    }
+                    SyntaxElement::Token(_) => {}
+                }
+            }
+        }
+        let mut out = String::new();
+        walk(self, 0, &mut out);
+        out
+    }
+}
+
 impl fmt::Debug for SyntaxNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

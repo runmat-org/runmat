@@ -1,14 +1,19 @@
+pub mod ast;
+pub mod dialect;
 pub mod lexical;
+pub mod tree;
 
 mod diagnostic;
 mod format;
 mod parser;
+mod source;
 pub mod syntax;
-pub mod tree;
 
 pub use diagnostic::*;
+pub use dialect::{Dialect, GenericForm};
 pub use format::*;
 pub use parser::*;
+pub use source::SourceSyntax;
 pub use syntax::*;
 
 #[cfg(test)]

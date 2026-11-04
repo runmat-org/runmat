@@ -96,6 +96,8 @@ pub enum NodeKind {
     Unit,
     /// A version or pin literal (`0.7`, `1`).
     Version,
+    /// `<word> <expr>` in a block header (`on plane.base`, `of assembly.top`).
+    Clause,
 
     // ---------------------------------------------------------------- expressions
     NumberLiteral,
@@ -170,6 +172,7 @@ impl NodeKind {
             Reference => 8,
             Path => 9,
             Type | Unit | Version => 10,
+            Clause => 6,
             NumberLiteral | StringLiteral => 11,
             Name => 12,
         }

@@ -6,22 +6,49 @@ use runmat_types::{merge_span, Span};
 
 mod cursor;
 mod declaration;
+mod design;
 mod exchange;
 mod expression;
 mod grammar;
 mod model;
 mod signal;
 
+pub(crate) use grammar::decode_string;
 use grammar::*;
 
 pub fn parse_fea(source: impl Into<String>) -> FeaSyntaxModule {
     FeaParser::new(tokenize_fea(source)).parse()
 }
 
+/// Parses a source of any dialect into its lossless tree and syntax diagnostics. `.fea` goes
+/// through [`parse_fea`] (its AST is on [`FeaSyntaxModule`]); the design dialects through the
+/// generic forms.
+pub fn parse_source(dialect: crate::Dialect, source: impl Into<String>) -> crate::SourceSyntax {
+    if dialect == crate::Dialect::Fea {
+        let module = parse_fea(source);
+        return crate::SourceSyntax {
+            dialect,
+            tree: module.tree,
+            diagnostics: module.diagnostics,
+            tokens: module.tokens,
+        };
+    }
+    let mut parser = FeaParser::new(crate::lexical::tokenize_design(source));
+    parser.parse_design_file(dialect);
+    let tree = parser.tree.finish(&parser.stream);
+    crate::SourceSyntax {
+        dialect,
+        tree,
+        diagnostics: parser.diagnostics,
+        tokens: parser.stream,
+    }
+}
+
 struct FeaParser {
     stream: FeaTokenStream,
     diagnostics: Vec<FeaSyntaxDiagnostic>,
     tree: TreeRecorder,
+    expression_mode: expression::ExpressionMode,
 }
 
 impl FeaParser {
@@ -39,6 +66,7 @@ impl FeaParser {
             stream,
             diagnostics,
             tree: TreeRecorder::default(),
+            expression_mode: expression::ExpressionMode::Fea,
         }
     }
 
@@ -527,6 +555,7 @@ impl FeaParser {
             indices,
             &mut self.diagnostics,
             &mut self.tree,
+            self.expression_mode,
         );
         if remaining < indices.len() {
             let span = self.token(indices[remaining]).span;

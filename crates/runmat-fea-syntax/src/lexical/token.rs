@@ -64,6 +64,12 @@ pub enum FeaTokenKind {
     Star,
     Slash,
     Caret,
+    /// `±`: a symmetric tolerance (design dialects).
+    PlusMinus,
+    /// `@`: a pin on a cross-partition `use` or published value.
+    At,
+    /// `%`: the percent unit.
+    Percent,
     Semicolon,
     Invalid,
     EndOfFile,

@@ -79,6 +79,7 @@ pub(super) fn continues_on_next_line(kind: FeaTokenKind) -> bool {
             | FeaTokenKind::Range
             | FeaTokenKind::Comma
             | FeaTokenKind::Colon
+            | FeaTokenKind::PlusMinus
     )
 }
 
@@ -89,7 +90,7 @@ pub(super) fn missing_name(span: Span) -> FeaName {
     }
 }
 
-pub(super) fn decode_string(source: &str) -> String {
+pub(crate) fn decode_string(source: &str) -> String {
     let value = source
         .strip_prefix(['"', '\''])
         .and_then(|value| value.strip_suffix(['"', '\'']))

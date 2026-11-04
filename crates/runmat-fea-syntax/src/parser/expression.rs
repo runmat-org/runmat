@@ -5,11 +5,23 @@ use crate::tree::{NodeKind, TreeRecorder};
 use crate::{FeaSyntaxDiagnostic, FeaSyntaxDiagnosticKind};
 use runmat_types::{merge_span, Span};
 
+/// Which expression forms are in force.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExpressionMode {
+    /// The `.fea` forms, exactly as before the design dialects.
+    Fea,
+    /// Adds the design value forms: `a ± t`, `a as <unit>`, `a @ "<pin>"` and `%` units.
+    /// Their results are read from the tree; the returned [`FeaExpression`] only drives
+    /// precedence.
+    Design,
+}
+
 pub(crate) fn parse_expression(
     stream: &FeaTokenStream,
     indices: &[usize],
     diagnostics: &mut Vec<FeaSyntaxDiagnostic>,
     tree: &mut TreeRecorder,
+    mode: ExpressionMode,
 ) -> (FeaExpression, usize) {
     let mut parser = ExpressionParser {
         stream,
@@ -17,6 +29,7 @@ pub(crate) fn parse_expression(
         cursor: 0,
         diagnostics,
         tree,
+        mode,
     };
     let expression = parser.parse(0);
     (expression, parser.cursor)
@@ -28,6 +41,7 @@ struct ExpressionParser<'a> {
     cursor: usize,
     diagnostics: &'a mut Vec<FeaSyntaxDiagnostic>,
     tree: &'a mut TreeRecorder,
+    mode: ExpressionMode,
 }
 
 impl ExpressionParser<'_> {
@@ -45,6 +59,7 @@ impl ExpressionParser<'_> {
         loop {
             if matches!(left.kind, FeaExpressionKind::Reference(_))
                 && self.current_kind().is_some_and(starts_expression)
+                && !self.at_design_postfix()
             {
                 let argument = self.parse(7);
                 self.record(NodeKind::PrefixApplication, first);
@@ -82,6 +97,61 @@ impl ExpressionParser<'_> {
                             },
                         },
                     };
+                }
+            }
+            if self.mode == ExpressionMode::Design
+                && minimum_precedence <= 2
+                && self.current_kind() == Some(FeaTokenKind::PlusMinus)
+            {
+                self.cursor += 1;
+                let tolerance = self.parse(3);
+                self.record(NodeKind::Toleranced, first);
+                let span = merge_span(left.span, tolerance.span);
+                left = FeaExpression {
+                    kind: FeaExpressionKind::Group(Box::new(left)),
+                    span,
+                };
+                continue;
+            }
+            if self.mode == ExpressionMode::Design && minimum_precedence == 0 {
+                if self.current_lexeme() == Some("as") {
+                    self.cursor += 1;
+                    let unit_start = self.cursor;
+                    while self.cursor < self.indices.len() && self.is_unit_token(self.cursor) {
+                        self.cursor += 1;
+                    }
+                    if self.cursor == unit_start {
+                        let index = self.indices[unit_start - 1];
+                        self.invalid_at(index, "expected a unit after `as`");
+                    }
+                    self.record(NodeKind::Unit, unit_start);
+                    self.record(NodeKind::Coerce, first);
+                    let span = self.span_from(first);
+                    left = FeaExpression {
+                        kind: FeaExpressionKind::Group(Box::new(left)),
+                        span,
+                    };
+                    continue;
+                }
+                if self.current_kind() == Some(FeaTokenKind::At) {
+                    self.cursor += 1;
+                    match self.current_kind() {
+                        Some(FeaTokenKind::String) => {
+                            self.cursor += 1;
+                            self.record(NodeKind::Version, self.cursor - 1);
+                        }
+                        _ => {
+                            let index = self.indices[self.cursor - 1];
+                            self.invalid_at(index, "expected a quoted revision after `@`");
+                        }
+                    }
+                    self.record(NodeKind::Pinned, first);
+                    let span = self.span_from(first);
+                    left = FeaExpression {
+                        kind: FeaExpressionKind::Group(Box::new(left)),
+                        span,
+                    };
+                    continue;
                 }
             }
             let Some((operator, precedence, right_associative)) = self.binary_operator() else {
@@ -249,12 +319,18 @@ impl ExpressionParser<'_> {
             let Some(name_index) = self.indices.get(self.cursor).copied() else {
                 break;
             };
-            if !is_name_token(self.token(name_index).kind) {
+            let quoted_key = self.mode == ExpressionMode::Design
+                && self.token(name_index).kind == FeaTokenKind::String;
+            if !is_name_token(self.token(name_index).kind) && !quoted_key {
                 self.invalid_at(name_index, "expected a record member name");
                 break;
             }
             let name = FeaName {
-                text: self.lexeme(name_index).to_string(),
+                text: if quoted_key {
+                    decode_string(self.lexeme(name_index))
+                } else {
+                    self.lexeme(name_index).to_string()
+                },
                 span: self.token(name_index).span,
             };
             let entry = self.cursor;
@@ -368,7 +444,32 @@ impl ExpressionParser<'_> {
     }
 
     fn can_start_unit(&self) -> bool {
-        self.current_kind().is_some_and(is_name_token)
+        if self.at_design_postfix() {
+            return false;
+        }
+        self.current_kind().is_some_and(|kind| {
+            is_name_token(kind)
+                || (self.mode == ExpressionMode::Design && kind == FeaTokenKind::Percent)
+        })
+    }
+
+    /// In design mode, `as` and `@` end an operand: they start a coercion or a pin.
+    fn at_design_postfix(&self) -> bool {
+        self.mode == ExpressionMode::Design
+            && (self.current_lexeme() == Some("as")
+                || self.current_kind() == Some(FeaTokenKind::At))
+    }
+
+    fn current_lexeme(&self) -> Option<&str> {
+        self.indices
+            .get(self.cursor)
+            .map(|index| self.lexeme(*index))
+    }
+
+    fn span_from(&self, from: usize) -> Span {
+        let start = self.token(self.indices[from]).span.start;
+        let end = self.token(self.indices[self.cursor - 1]).span.end;
+        Span { start, end }
     }
 
     fn is_unit_token(&self, cursor: usize) -> bool {
@@ -382,6 +483,15 @@ impl ExpressionParser<'_> {
                     .indices
                     .get(cursor + 1)
                     .is_some_and(|index| self.token(*index).kind == FeaTokenKind::Number);
+        }
+        if self.mode == ExpressionMode::Design {
+            if kind == FeaTokenKind::Percent {
+                return true;
+            }
+            let lexeme = self.lexeme(self.indices[cursor]);
+            if lexeme == "as" {
+                return false;
+            }
         }
         is_name_token(kind)
             || matches!(

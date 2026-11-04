@@ -5,10 +5,19 @@ use super::{
 use runmat_types::Span;
 
 pub fn tokenize_fea(source: impl Into<String>) -> FeaTokenStream {
-    FeaLexer::new(source.into()).tokenize()
+    FeaLexer::new(source.into(), false).tokenize()
+}
+
+/// Tokenizes a design-dialect source (`.part`, `.assembly`, `.drawing`, `.circuit`,
+/// `.circuit.layout`). It adds the design value punctuation to the `.fea` tokens: `±` and
+/// `+/-` (a tolerance), `@` (a pin) and `%` (the percent unit). In `.fea` sources these
+/// characters stay invalid.
+pub fn tokenize_design(source: impl Into<String>) -> FeaTokenStream {
+    FeaLexer::new(source.into(), true).tokenize()
 }
 
 struct FeaLexer {
+    design: bool,
     source: String,
     cursor: usize,
     tokens: Vec<FeaToken>,
@@ -16,8 +25,9 @@ struct FeaLexer {
 }
 
 impl FeaLexer {
-    fn new(source: String) -> Self {
+    fn new(source: String, design: bool) -> Self {
         Self {
+            design,
             source,
             cursor: 0,
             tokens: Vec::new(),
@@ -86,11 +96,18 @@ impl FeaLexer {
             ':' => self.single(FeaTokenKind::Colon, start),
             ',' => self.single(FeaTokenKind::Comma, start),
             ';' => self.single(FeaTokenKind::Semicolon, start),
+            '+' if self.design && self.source[self.cursor..].starts_with("+/-") => {
+                self.cursor += 3;
+                self.push(FeaTokenKind::PlusMinus, start);
+            }
             '+' => self.single(FeaTokenKind::Plus, start),
             '-' => self.single(FeaTokenKind::Minus, start),
             '*' => self.single(FeaTokenKind::Star, start),
             '/' => self.single(FeaTokenKind::Slash, start),
             '^' => self.single(FeaTokenKind::Caret, start),
+            '±' if self.design => self.single(FeaTokenKind::PlusMinus, start),
+            '@' if self.design => self.single(FeaTokenKind::At, start),
+            '%' if self.design => self.single(FeaTokenKind::Percent, start),
             '.' if self.peek_second() == Some('.') => {
                 self.advance();
                 self.advance();
@@ -119,7 +136,11 @@ impl FeaLexer {
                         start,
                         end: self.cursor,
                     },
-                    message: format!("invalid character `{current}` in FEA source"),
+                    message: if self.design {
+                        format!("invalid character `{current}` in design source")
+                    } else {
+                        format!("invalid character `{current}` in FEA source")
+                    },
                 });
             }
         }
