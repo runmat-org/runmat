@@ -60,6 +60,7 @@ impl ExpressionParser<'_> {
             if matches!(left.kind, FeaExpressionKind::Reference(_))
                 && self.current_kind().is_some_and(starts_expression)
                 && !self.at_design_postfix()
+                && !self.at_design_sign()
             {
                 let argument = self.parse(7);
                 self.record(NodeKind::PrefixApplication, first);
@@ -458,6 +459,16 @@ impl ExpressionParser<'_> {
         self.mode == ExpressionMode::Design
             && (self.current_lexeme() == Some("as")
                 || self.current_kind() == Some(FeaTokenKind::At))
+    }
+
+    /// In design mode a sign after a reference is arithmetic (`input.width - 2 mm`), never
+    /// the start of a prefix application's argument.
+    fn at_design_sign(&self) -> bool {
+        self.mode == ExpressionMode::Design
+            && matches!(
+                self.current_kind(),
+                Some(FeaTokenKind::Plus | FeaTokenKind::Minus)
+            )
     }
 
     fn current_lexeme(&self) -> Option<&str> {

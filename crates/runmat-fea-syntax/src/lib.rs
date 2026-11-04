@@ -1,6 +1,10 @@
 pub mod ast;
 pub mod dialect;
+pub mod document;
+pub mod edit;
+pub mod json;
 pub mod lexical;
+pub mod projection;
 pub mod tree;
 
 mod diagnostic;
