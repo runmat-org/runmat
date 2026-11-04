@@ -1,0 +1,829 @@
+runmat 0.7
+std 1
+
+use circuit io from "./io.circuit"
+
+layout io {
+    stackup rigid {
+        finish = ENIG
+        layer "F.Mask" = { kind = mask, thickness = 0.02, material = solder_mask }
+        layer "F.Cu" = { kind = copper, thickness = 0.03479, weight = 1, material = copper }
+        layer "dielectric 1" = { kind = prepreg, thickness = 0.48521, material = { name = "FR-4 prepreg", dk = 4.1, df = 0.02, conductivity = 0, k_inplane = 0.8, k_through = 0.3, density = 1850, cp = 1100, cte_ppm = 14 } }
+        layer "In1.Cu" = { kind = copper, thickness = 0.017395, weight = 0.5, material = copper }
+        layer "dielectric 2" = { kind = core, thickness = 0.48521, material = fr4 }
+        layer "In2.Cu" = { kind = copper, thickness = 0.017395, weight = 0.5, material = copper }
+        layer "dielectric 3" = { kind = prepreg, thickness = 0.48521, material = { name = "FR-4 prepreg", dk = 4.1, df = 0.02, conductivity = 0, k_inplane = 0.8, k_through = 0.3, density = 1850, cp = 1100, cte_ppm = 14 } }
+        layer "B.Cu" = { kind = copper, thickness = 0.03479, weight = 1, material = copper }
+        layer "B.Mask" = { kind = mask, thickness = 0.02, material = solder_mask }
+    }
+    outline = [[0, 0], [107, 0], [107, 49], [0, 49]]
+    limits = { clearance = 0.15, track = 0.15, via_diameter = 0.45, drill = 0.2, annular = 0.1, hole_to_hole = 0.25, copper_to_edge = 0.3, silk_to_pad = 0.1, microvia_drill = 0.1 }
+    net "+5V" : power
+    net "-5V" : power
+    net "/ch[0]/FBK"
+    net "/ch[0]/INF"
+    net "/ch[0]/TIE_B"
+    net "/ch[0]/TIE_C"
+    net "/ch[0]/TIE_D"
+    net "/ch[1]/FBK"
+    net "/ch[1]/INF"
+    net "/ch[1]/TIE_B"
+    net "/ch[1]/TIE_C"
+    net "/ch[1]/TIE_D"
+    net ADC0
+    net ADC1
+    net AIN0
+    net AIN1
+    net GND : power
+    room "ch[0]" = { outline = [[33.21, 16.32], [46.79, 16.32], [46.79, 23.68], [33.21, 23.68]], members = [C1, C2, C3, R1, R2, R3, U1] }
+    room "ch[1]" = { outline = [[47.21, 16.32], [60.79, 16.32], [60.79, 23.68], [47.21, 23.68]], members = [C4, C5, C6, R4, R5, R6, U2] }
+    footprint U9000 = { package = "BGA-256_16x16_17x17mm_Layout16x16_P1mm_Ball0.5mm_IPCN", at = [15, 30], pads = { A1 = ADC0, A2 = ADC1, N10 = "+5V", N11 = "+5V", N12 = "+5V", N13 = "+5V", N14 = "+5V", N15 = "+5V", N16 = "+5V", N9 = "+5V", P1 = "+5V", P10 = "+5V", P11 = "+5V", P12 = "+5V", P13 = "+5V", P14 = "+5V", P15 = "+5V", P16 = "+5V", P2 = "+5V", P3 = "+5V", P4 = "+5V", P5 = "+5V", P6 = "+5V", P7 = "+5V", P8 = "+5V", P9 = "+5V", R1 = "+5V", R10 = "+5V", R11 = "+5V", R12 = "+5V", R13 = GND, R14 = GND, R15 = GND, R16 = GND, R2 = "+5V", R3 = "+5V", R4 = "+5V", R5 = "+5V", R6 = "+5V", R7 = "+5V", R8 = "+5V", R9 = "+5V", T1 = GND, T10 = GND, T11 = GND, T12 = GND, T13 = GND, T14 = GND, T15 = GND, T16 = GND, T2 = GND, T3 = GND, T4 = GND, T5 = GND, T6 = GND, T7 = GND, T8 = GND, T9 = GND } }
+    footprint J100 = { package = "PinHeader_2x05_P2.54mm_Vertical", at = [97, 10], pads = { "1" = AIN0, "10" = GND, "2" = AIN1, "9" = GND } }
+    footprint C900 = { package = C_0402_1005Metric_IPCN, at = [97, 24], value = "100 nF ±10%", pads = { "1" = "+5V", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint R900 = { package = R_0402_1005Metric_IPCN, at = [88, 10], value = "10 kΩ ±1%", pads = { "1" = "+5V", "2" = GND }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint U1 = { package = "TSSOP-14_4.4x4.85mm_P0.65mm_IPCN", at = [40, 20], pads = { "1" = ADC0, "10" = GND, "11" = "-5V", "12" = GND, "13" = "/ch[0]/TIE_D", "14" = "/ch[0]/TIE_D", "2" = "/ch[0]/FBK", "3" = "/ch[0]/INF", "4" = "+5V", "5" = GND, "6" = "/ch[0]/TIE_B", "7" = "/ch[0]/TIE_B", "8" = "/ch[0]/TIE_C", "9" = "/ch[0]/TIE_C" } }
+    footprint R50 = { package = R_0402_1005Metric_IPCN, at = [45, 22], value = "10 kΩ ±1%", pads = { "1" = "/ch[0]/FBK", "2" = GND }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint R1 = { package = R_0402_1005Metric_IPCN, at = [45, 20], value = "10 kΩ ±1%", pads = { "1" = "/ch[0]/FBK", "2" = ADC0 }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint R3 = { package = R_0402_1005Metric_IPCN, at = [35, 22], value = "10 kΩ ±1%", pads = { "1" = AIN0, "2" = "/ch[0]/INF" }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint C3 = { package = C_0402_1005Metric_IPCN, at = [35, 20], value = "100 nF ±10%", pads = { "1" = "/ch[0]/INF", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C1 = { package = C_0402_1005Metric_IPCN, at = [45, 18], value = "100 nF ±10%", pads = { "1" = "+5V", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C2 = { package = C_0402_1005Metric_IPCN, at = [35, 18], value = "100 nF ±10%", pads = { "1" = GND, "2" = "-5V" }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint U2 = { package = "TSSOP-14_4.4x4.85mm_P0.65mm_IPCN", at = [54, 20], pads = { "1" = ADC1, "10" = GND, "11" = "-5V", "12" = GND, "13" = "/ch[1]/TIE_D", "14" = "/ch[1]/TIE_D", "2" = "/ch[1]/FBK", "3" = "/ch[1]/INF", "4" = "+5V", "5" = GND, "6" = "/ch[1]/TIE_C", "7" = "/ch[1]/TIE_C", "8" = "/ch[1]/TIE_B", "9" = "/ch[1]/TIE_B" } }
+    footprint R5 = { package = R_0402_1005Metric_IPCN, at = [59, 22], value = "10 kΩ ±1%", pads = { "1" = "/ch[1]/FBK", "2" = GND }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint R4 = { package = R_0402_1005Metric_IPCN, at = [59, 20], value = "10 kΩ ±1%", pads = { "1" = "/ch[1]/FBK", "2" = ADC1 }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint R40 = { package = R_0402_1005Metric_IPCN, at = [49, 22], value = "10 kΩ ±1%", pads = { "1" = AIN1, "2" = "/ch[1]/INF" }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
+    footprint C6 = { package = C_0402_1005Metric_IPCN, at = [49, 20], value = "100 nF ±10%", pads = { "1" = "/ch[1]/INF", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C4 = { package = C_0402_1005Metric_IPCN, at = [59, 18], value = "100 nF ±10%", pads = { "1" = "+5V", "2" = GND }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    footprint C5 = { package = C_0402_1005Metric_IPCN, at = [49, 18], value = "100 nF ±10%", pads = { "1" = GND, "2" = "-5V" }, properties = { "param:capacitance" = "100 nF ±10%", "param:voltage_rating" = "16 V" } }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [15.5, 25.5], to = [16, 25] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [16.5, 25.5], to = [17, 25] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [17.5, 25.5], to = [18, 25] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [18.5, 25.5], to = [19, 25] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [19.5, 25.5], to = [20, 25] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [20.5, 25.5], to = [21, 25] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [21.5, 25.5], to = [22, 25] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [22.5, 25.5], to = [23, 25] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [7.5, 24.5], to = [7, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [8.5, 24.5], to = [8, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [9.5, 24.5], to = [9, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [10.5, 24.5], to = [10, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [11.5, 24.5], to = [11, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [12.5, 24.5], to = [12, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [13.5, 24.5], to = [13, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [14.5, 24.5], to = [14, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [15.5, 24.5], to = [16, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [16.5, 24.5], to = [17, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [17.5, 24.5], to = [18, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [18.5, 24.5], to = [19, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [19.5, 24.5], to = [20, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [20.5, 24.5], to = [21, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [21.5, 24.5], to = [22, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [22.5, 24.5], to = [23, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [7.5, 23.5], to = [7, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [8.5, 23.5], to = [8, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [9.5, 23.5], to = [9, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [10.5, 23.5], to = [10, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [11.5, 23.5], to = [11, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [12.5, 23.5], to = [12, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [13.5, 23.5], to = [13, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [14.5, 23.5], to = [14, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [15.5, 23.5], to = [16, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [16.5, 23.5], to = [17, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [17.5, 23.5], to = [18, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [18.5, 23.5], to = [19, 23] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [96.6225, 24], to = [95.7225, 24] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [87.6225, 10], to = [86.7225, 10] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [37.175, 20], to = [36.275, 20] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [44.6225, 18], to = [44.6225, 18.7] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [51.175, 20], to = [50.275, 20] }
+    track "+5V" = { layer = F.Cu, width = 0.3, from = [58.6225, 18], to = [58.6225, 18.7] }
+    track "-5V" = { layer = F.Cu, width = 0.3, from = [42.825, 20], to = [43.725, 20] }
+    track "-5V" = { layer = F.Cu, width = 0.3, from = [35.3775, 18], to = [35.3775, 18.7] }
+    track "-5V" = { layer = F.Cu, width = 0.3, from = [56.825, 20], to = [57.725, 20] }
+    track "-5V" = { layer = F.Cu, width = 0.3, from = [49.3775, 18], to = [49.3775, 18.7] }
+    track GND = { layer = F.Cu, width = 0.3, from = [19.5, 23.5], to = [20, 23] }
+    track GND = { layer = F.Cu, width = 0.3, from = [20.5, 23.5], to = [21, 23] }
+    track GND = { layer = F.Cu, width = 0.3, from = [21.5, 23.5], to = [22, 23] }
+    track GND = { layer = F.Cu, width = 0.3, from = [22.5, 23.5], to = [23, 23] }
+    track GND = { layer = F.Cu, width = 0.3, from = [7.5, 22.5], to = [7, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [8.5, 22.5], to = [8, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [9.5, 22.5], to = [9, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [10.5, 22.5], to = [10, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [11.5, 22.5], to = [11, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [12.5, 22.5], to = [12, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [13.5, 22.5], to = [13, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [14.5, 22.5], to = [14, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [15.5, 22.5], to = [16, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [16.5, 22.5], to = [17, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [17.5, 22.5], to = [18, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [18.5, 22.5], to = [19, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [19.5, 22.5], to = [20, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [20.5, 22.5], to = [21, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [21.5, 22.5], to = [22, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [22.5, 22.5], to = [23, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [97.3775, 24], to = [98.9775, 24] }
+    track GND = { layer = F.Cu, width = 0.3, from = [88.3775, 10], to = [89.9775, 10] }
+    track GND = { layer = F.Cu, width = 0.3, from = [37.175, 19.35], to = [35.925, 19.35] }
+    track GND = { layer = F.Cu, width = 0.3, from = [42.825, 19.35], to = [44.075, 19.35] }
+    track GND = { layer = F.Cu, width = 0.3, from = [42.825, 20.65], to = [44.075, 20.65] }
+    track GND = { layer = F.Cu, width = 0.3, from = [45.3775, 22], to = [46.9775, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [35.3775, 20], to = [35.3775, 20.7] }
+    track GND = { layer = F.Cu, width = 0.3, from = [45.3775, 18], to = [46.9775, 18] }
+    track GND = { layer = F.Cu, width = 0.3, from = [34.6225, 18], to = [33.7225, 18] }
+    track GND = { layer = F.Cu, width = 0.3, from = [51.175, 19.35], to = [49.925, 19.35] }
+    track GND = { layer = F.Cu, width = 0.3, from = [56.825, 19.35], to = [58.075, 19.35] }
+    track GND = { layer = F.Cu, width = 0.3, from = [56.825, 20.65], to = [58.075, 20.65] }
+    track GND = { layer = F.Cu, width = 0.3, from = [59.3775, 22], to = [60.9775, 22] }
+    track GND = { layer = F.Cu, width = 0.3, from = [49.3775, 20], to = [49.3775, 20.7] }
+    track GND = { layer = F.Cu, width = 0.3, from = [59.3775, 18], to = [60.9775, 18] }
+    track GND = { layer = F.Cu, width = 0.3, from = [48.6225, 18], to = [47.7225, 18] }
+    track "/ch[0]/INF" = { layer = F.Cu, width = 0.15, from = [35.3775, 22], to = [35.3775, 22.7] }
+    track "/ch[0]/INF" = { layer = F.Cu, width = 0.15, from = [34.6225, 20], to = [33.7225, 20] }
+    track "/ch[0]/INF" = { layer = F.Cu, width = 0.15, from = [35.3775, 22.7], to = [33.7225, 22.7] }
+    track "/ch[0]/INF" = { layer = B.Cu, width = 0.15, from = [33.7225, 22.7], to = [33.7225, 20] }
+    track "/ch[0]/TIE_C" = { layer = F.Cu, width = 0.15, from = [42.825, 18.05], to = [43.725, 18.05] }
+    track "/ch[0]/TIE_C" = { layer = F.Cu, width = 0.15, from = [42.825, 18.7], to = [43.725, 18.7] }
+    track "/ch[0]/TIE_C" = { layer = B.Cu, width = 0.15, from = [43.725, 18.05], to = [43.725, 18.7] }
+    track "/ch[1]/FBK" = { layer = F.Cu, width = 0.15, from = [51.175, 21.3], to = [48.875, 21.3] }
+    track "/ch[1]/FBK" = { layer = F.Cu, width = 0.15, from = [58.6225, 22], to = [58.6225, 22.7] }
+    track "/ch[1]/FBK" = { layer = F.Cu, width = 0.15, from = [58.6225, 20], to = [58.6225, 21.2] }
+    track "/ch[1]/FBK" = { layer = B.Cu, width = 0.15, from = [48.875, 21.3], to = [48.875, 23.25] }
+    track "/ch[1]/FBK" = { layer = F.Cu, width = 0.15, from = [48.875, 23.25], to = [58.6225, 23.25] }
+    track "/ch[1]/FBK" = { layer = B.Cu, width = 0.15, from = [58.6225, 23.25], to = [58.6225, 21.2] }
+    track "/ch[1]/FBK" = { layer = B.Cu, width = 0.15, from = [58.6225, 21.2], to = [58.6225, 22.7] }
+    track "/ch[1]/TIE_B" = { layer = F.Cu, width = 0.15, from = [51.175, 18.7], to = [50.275, 18.7] }
+    track "/ch[1]/TIE_B" = { layer = F.Cu, width = 0.15, from = [51.175, 18.05], to = [50.275, 18.05] }
+    track "/ch[1]/TIE_B" = { layer = B.Cu, width = 0.15, from = [50.275, 18.7], to = [50.275, 18.05] }
+    track "/ch[1]/TIE_D" = { layer = F.Cu, width = 0.15, from = [56.825, 21.3], to = [57.725, 21.3] }
+    track "/ch[1]/TIE_D" = { layer = F.Cu, width = 0.15, from = [56.825, 21.95], to = [57.725, 21.95] }
+    track "/ch[1]/TIE_D" = { layer = B.Cu, width = 0.15, from = [57.725, 21.3], to = [57.725, 21.95] }
+    track ADC1 = { layer = F.Cu, width = 0.15, from = [8.5, 37.5], to = [8, 38] }
+    track ADC1 = { layer = F.Cu, width = 0.15, from = [51.175, 21.95], to = [50.275, 21.95] }
+    track ADC1 = { layer = F.Cu, width = 0.15, from = [59.3775, 20], to = [60.9775, 20] }
+    track ADC1 = { layer = F.Cu, width = 0.15, from = [8, 38], to = [50.275, 38] }
+    track ADC1 = { layer = B.Cu, width = 0.15, from = [50.275, 38], to = [50.275, 21.95] }
+    track AIN1 = { layer = F.Cu, width = 0.15, from = [48.6225, 22], to = [47.7225, 22] }
+    via "+5V" = { at = [16, 25], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [17, 25], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [18, 25], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [19, 25], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [20, 25], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [21, 25], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [22, 25], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [23, 25], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [7, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [8, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [9, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [10, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [11, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [12, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [13, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [14, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [16, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [17, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [18, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [19, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [20, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [21, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [22, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [23, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [7, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [8, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [9, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [10, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [11, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [12, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [13, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [14, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [16, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [17, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [18, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [19, 23], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [95.7225, 24], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [86.7225, 10], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [36.275, 20], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [44.6225, 18.7], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [50.275, 20], size = 0.5, drill = 0.25 }
+    via "+5V" = { at = [58.6225, 18.7], size = 0.5, drill = 0.25 }
+    via "-5V" = { at = [43.725, 20], size = 0.5, drill = 0.25 }
+    via "-5V" = { at = [35.3775, 18.7], size = 0.5, drill = 0.25 }
+    via "-5V" = { at = [57.725, 20], size = 0.5, drill = 0.25 }
+    via "-5V" = { at = [49.3775, 18.7], size = 0.5, drill = 0.25 }
+    via GND = { at = [20, 23], size = 0.5, drill = 0.25 }
+    via GND = { at = [21, 23], size = 0.5, drill = 0.25 }
+    via GND = { at = [22, 23], size = 0.5, drill = 0.25 }
+    via GND = { at = [23, 23], size = 0.5, drill = 0.25 }
+    via GND = { at = [7, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [8, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [9, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [10, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [11, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [12, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [13, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [14, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [16, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [17, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [18, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [19, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [20, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [21, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [22, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [23, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [98.9775, 24], size = 0.5, drill = 0.25 }
+    via GND = { at = [89.9775, 10], size = 0.5, drill = 0.25 }
+    via GND = { at = [35.925, 19.35], size = 0.5, drill = 0.25 }
+    via GND = { at = [44.075, 19.35], size = 0.5, drill = 0.25 }
+    via GND = { at = [44.075, 20.65], size = 0.5, drill = 0.25 }
+    via GND = { at = [46.9775, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [35.3775, 20.7], size = 0.5, drill = 0.25 }
+    via GND = { at = [46.9775, 18], size = 0.5, drill = 0.25 }
+    via GND = { at = [33.7225, 18], size = 0.5, drill = 0.25 }
+    via GND = { at = [49.925, 19.35], size = 0.5, drill = 0.25 }
+    via GND = { at = [58.075, 19.35], size = 0.5, drill = 0.25 }
+    via GND = { at = [58.075, 20.65], size = 0.5, drill = 0.25 }
+    via GND = { at = [60.9775, 22], size = 0.5, drill = 0.25 }
+    via GND = { at = [49.3775, 20.7], size = 0.5, drill = 0.25 }
+    via GND = { at = [60.9775, 18], size = 0.5, drill = 0.25 }
+    via GND = { at = [47.7225, 18], size = 0.5, drill = 0.25 }
+    via "/ch[0]/INF" = { at = [35.3775, 22.7], size = 0.45, drill = 0.2 }
+    via "/ch[0]/INF" = { at = [33.7225, 20], size = 0.45, drill = 0.2 }
+    via "/ch[0]/INF" = { at = [33.7225, 22.7], size = 0.45, drill = 0.2 }
+    via "/ch[0]/TIE_C" = { at = [43.725, 18.05], size = 0.45, drill = 0.2 }
+    via "/ch[0]/TIE_C" = { at = [43.725, 18.7], size = 0.45, drill = 0.2 }
+    via "/ch[1]/FBK" = { at = [48.875, 21.3], size = 0.45, drill = 0.2 }
+    via "/ch[1]/FBK" = { at = [58.6225, 22.7], size = 0.45, drill = 0.2 }
+    via "/ch[1]/FBK" = { at = [58.6225, 21.2], size = 0.45, drill = 0.2 }
+    via "/ch[1]/FBK" = { at = [48.875, 23.25], size = 0.45, drill = 0.2 }
+    via "/ch[1]/FBK" = { at = [58.6225, 23.25], size = 0.45, drill = 0.2 }
+    via "/ch[1]/TIE_B" = { at = [50.275, 18.7], size = 0.45, drill = 0.2 }
+    via "/ch[1]/TIE_B" = { at = [50.275, 18.05], size = 0.45, drill = 0.2 }
+    via "/ch[1]/TIE_D" = { at = [57.725, 21.3], size = 0.45, drill = 0.2 }
+    via "/ch[1]/TIE_D" = { at = [57.725, 21.95], size = 0.45, drill = 0.2 }
+    via ADC1 = { at = [8, 38], size = 0.45, drill = 0.2 }
+    via ADC1 = { at = [50.275, 21.95], size = 0.45, drill = 0.2 }
+    via ADC1 = { at = [60.9775, 20], size = 0.45, drill = 0.2 }
+    via ADC1 = { at = [50.275, 38], size = 0.45, drill = 0.2 }
+    via AIN1 = { at = [47.7225, 22], size = 0.45, drill = 0.2 }
+    pour GND = { name = GND, layers = [In1.Cu, In2.Cu], outline = [[1, 1], [106, 1], [106, 48], [1, 48]] }
+    pour "+5V" = { name = "+5V", layers = [In2.Cu], outline = [[1, 1], [106, 1], [106, 48], [1, 48]], priority = 1 }
+    package "BGA-256_16x16_17x17mm_Layout16x16_P1mm_Ball0.5mm_IPCN" {
+        uuid = "37422b17-a5c7-8f2d-a36c-52abbcd37f5c"
+        description = "BGA 256 balls, 16x16 at 1 mm"
+        smd = true
+        pad A1 = { shape = circle, d = 0.4, at = [-7.5, 7.5] }
+        pad A2 = { shape = circle, d = 0.4, at = [-6.5, 7.5] }
+        pad A3 = { shape = circle, d = 0.4, at = [-5.5, 7.5] }
+        pad A4 = { shape = circle, d = 0.4, at = [-4.5, 7.5] }
+        pad A5 = { shape = circle, d = 0.4, at = [-3.5, 7.5] }
+        pad A6 = { shape = circle, d = 0.4, at = [-2.5, 7.5] }
+        pad A7 = { shape = circle, d = 0.4, at = [-1.5, 7.5] }
+        pad A8 = { shape = circle, d = 0.4, at = [-0.5, 7.5] }
+        pad A9 = { shape = circle, d = 0.4, at = [0.5, 7.5] }
+        pad A10 = { shape = circle, d = 0.4, at = [1.5, 7.5] }
+        pad A11 = { shape = circle, d = 0.4, at = [2.5, 7.5] }
+        pad A12 = { shape = circle, d = 0.4, at = [3.5, 7.5] }
+        pad A13 = { shape = circle, d = 0.4, at = [4.5, 7.5] }
+        pad A14 = { shape = circle, d = 0.4, at = [5.5, 7.5] }
+        pad A15 = { shape = circle, d = 0.4, at = [6.5, 7.5] }
+        pad A16 = { shape = circle, d = 0.4, at = [7.5, 7.5] }
+        pad B1 = { shape = circle, d = 0.4, at = [-7.5, 6.5] }
+        pad B2 = { shape = circle, d = 0.4, at = [-6.5, 6.5] }
+        pad B3 = { shape = circle, d = 0.4, at = [-5.5, 6.5] }
+        pad B4 = { shape = circle, d = 0.4, at = [-4.5, 6.5] }
+        pad B5 = { shape = circle, d = 0.4, at = [-3.5, 6.5] }
+        pad B6 = { shape = circle, d = 0.4, at = [-2.5, 6.5] }
+        pad B7 = { shape = circle, d = 0.4, at = [-1.5, 6.5] }
+        pad B8 = { shape = circle, d = 0.4, at = [-0.5, 6.5] }
+        pad B9 = { shape = circle, d = 0.4, at = [0.5, 6.5] }
+        pad B10 = { shape = circle, d = 0.4, at = [1.5, 6.5] }
+        pad B11 = { shape = circle, d = 0.4, at = [2.5, 6.5] }
+        pad B12 = { shape = circle, d = 0.4, at = [3.5, 6.5] }
+        pad B13 = { shape = circle, d = 0.4, at = [4.5, 6.5] }
+        pad B14 = { shape = circle, d = 0.4, at = [5.5, 6.5] }
+        pad B15 = { shape = circle, d = 0.4, at = [6.5, 6.5] }
+        pad B16 = { shape = circle, d = 0.4, at = [7.5, 6.5] }
+        pad C1 = { shape = circle, d = 0.4, at = [-7.5, 5.5] }
+        pad C2 = { shape = circle, d = 0.4, at = [-6.5, 5.5] }
+        pad C3 = { shape = circle, d = 0.4, at = [-5.5, 5.5] }
+        pad C4 = { shape = circle, d = 0.4, at = [-4.5, 5.5] }
+        pad C5 = { shape = circle, d = 0.4, at = [-3.5, 5.5] }
+        pad C6 = { shape = circle, d = 0.4, at = [-2.5, 5.5] }
+        pad C7 = { shape = circle, d = 0.4, at = [-1.5, 5.5] }
+        pad C8 = { shape = circle, d = 0.4, at = [-0.5, 5.5] }
+        pad C9 = { shape = circle, d = 0.4, at = [0.5, 5.5] }
+        pad C10 = { shape = circle, d = 0.4, at = [1.5, 5.5] }
+        pad C11 = { shape = circle, d = 0.4, at = [2.5, 5.5] }
+        pad C12 = { shape = circle, d = 0.4, at = [3.5, 5.5] }
+        pad C13 = { shape = circle, d = 0.4, at = [4.5, 5.5] }
+        pad C14 = { shape = circle, d = 0.4, at = [5.5, 5.5] }
+        pad C15 = { shape = circle, d = 0.4, at = [6.5, 5.5] }
+        pad C16 = { shape = circle, d = 0.4, at = [7.5, 5.5] }
+        pad D1 = { shape = circle, d = 0.4, at = [-7.5, 4.5] }
+        pad D2 = { shape = circle, d = 0.4, at = [-6.5, 4.5] }
+        pad D3 = { shape = circle, d = 0.4, at = [-5.5, 4.5] }
+        pad D4 = { shape = circle, d = 0.4, at = [-4.5, 4.5] }
+        pad D5 = { shape = circle, d = 0.4, at = [-3.5, 4.5] }
+        pad D6 = { shape = circle, d = 0.4, at = [-2.5, 4.5] }
+        pad D7 = { shape = circle, d = 0.4, at = [-1.5, 4.5] }
+        pad D8 = { shape = circle, d = 0.4, at = [-0.5, 4.5] }
+        pad D9 = { shape = circle, d = 0.4, at = [0.5, 4.5] }
+        pad D10 = { shape = circle, d = 0.4, at = [1.5, 4.5] }
+        pad D11 = { shape = circle, d = 0.4, at = [2.5, 4.5] }
+        pad D12 = { shape = circle, d = 0.4, at = [3.5, 4.5] }
+        pad D13 = { shape = circle, d = 0.4, at = [4.5, 4.5] }
+        pad D14 = { shape = circle, d = 0.4, at = [5.5, 4.5] }
+        pad D15 = { shape = circle, d = 0.4, at = [6.5, 4.5] }
+        pad D16 = { shape = circle, d = 0.4, at = [7.5, 4.5] }
+        pad E1 = { shape = circle, d = 0.4, at = [-7.5, 3.5] }
+        pad E2 = { shape = circle, d = 0.4, at = [-6.5, 3.5] }
+        pad E3 = { shape = circle, d = 0.4, at = [-5.5, 3.5] }
+        pad E4 = { shape = circle, d = 0.4, at = [-4.5, 3.5] }
+        pad E5 = { shape = circle, d = 0.4, at = [-3.5, 3.5] }
+        pad E6 = { shape = circle, d = 0.4, at = [-2.5, 3.5] }
+        pad E7 = { shape = circle, d = 0.4, at = [-1.5, 3.5] }
+        pad E8 = { shape = circle, d = 0.4, at = [-0.5, 3.5] }
+        pad E9 = { shape = circle, d = 0.4, at = [0.5, 3.5] }
+        pad E10 = { shape = circle, d = 0.4, at = [1.5, 3.5] }
+        pad E11 = { shape = circle, d = 0.4, at = [2.5, 3.5] }
+        pad E12 = { shape = circle, d = 0.4, at = [3.5, 3.5] }
+        pad E13 = { shape = circle, d = 0.4, at = [4.5, 3.5] }
+        pad E14 = { shape = circle, d = 0.4, at = [5.5, 3.5] }
+        pad E15 = { shape = circle, d = 0.4, at = [6.5, 3.5] }
+        pad E16 = { shape = circle, d = 0.4, at = [7.5, 3.5] }
+        pad F1 = { shape = circle, d = 0.4, at = [-7.5, 2.5] }
+        pad F2 = { shape = circle, d = 0.4, at = [-6.5, 2.5] }
+        pad F3 = { shape = circle, d = 0.4, at = [-5.5, 2.5] }
+        pad F4 = { shape = circle, d = 0.4, at = [-4.5, 2.5] }
+        pad F5 = { shape = circle, d = 0.4, at = [-3.5, 2.5] }
+        pad F6 = { shape = circle, d = 0.4, at = [-2.5, 2.5] }
+        pad F7 = { shape = circle, d = 0.4, at = [-1.5, 2.5] }
+        pad F8 = { shape = circle, d = 0.4, at = [-0.5, 2.5] }
+        pad F9 = { shape = circle, d = 0.4, at = [0.5, 2.5] }
+        pad F10 = { shape = circle, d = 0.4, at = [1.5, 2.5] }
+        pad F11 = { shape = circle, d = 0.4, at = [2.5, 2.5] }
+        pad F12 = { shape = circle, d = 0.4, at = [3.5, 2.5] }
+        pad F13 = { shape = circle, d = 0.4, at = [4.5, 2.5] }
+        pad F14 = { shape = circle, d = 0.4, at = [5.5, 2.5] }
+        pad F15 = { shape = circle, d = 0.4, at = [6.5, 2.5] }
+        pad F16 = { shape = circle, d = 0.4, at = [7.5, 2.5] }
+        pad G1 = { shape = circle, d = 0.4, at = [-7.5, 1.5] }
+        pad G2 = { shape = circle, d = 0.4, at = [-6.5, 1.5] }
+        pad G3 = { shape = circle, d = 0.4, at = [-5.5, 1.5] }
+        pad G4 = { shape = circle, d = 0.4, at = [-4.5, 1.5] }
+        pad G5 = { shape = circle, d = 0.4, at = [-3.5, 1.5] }
+        pad G6 = { shape = circle, d = 0.4, at = [-2.5, 1.5] }
+        pad G7 = { shape = circle, d = 0.4, at = [-1.5, 1.5] }
+        pad G8 = { shape = circle, d = 0.4, at = [-0.5, 1.5] }
+        pad G9 = { shape = circle, d = 0.4, at = [0.5, 1.5] }
+        pad G10 = { shape = circle, d = 0.4, at = [1.5, 1.5] }
+        pad G11 = { shape = circle, d = 0.4, at = [2.5, 1.5] }
+        pad G12 = { shape = circle, d = 0.4, at = [3.5, 1.5] }
+        pad G13 = { shape = circle, d = 0.4, at = [4.5, 1.5] }
+        pad G14 = { shape = circle, d = 0.4, at = [5.5, 1.5] }
+        pad G15 = { shape = circle, d = 0.4, at = [6.5, 1.5] }
+        pad G16 = { shape = circle, d = 0.4, at = [7.5, 1.5] }
+        pad H1 = { shape = circle, d = 0.4, at = [-7.5, 0.5] }
+        pad H2 = { shape = circle, d = 0.4, at = [-6.5, 0.5] }
+        pad H3 = { shape = circle, d = 0.4, at = [-5.5, 0.5] }
+        pad H4 = { shape = circle, d = 0.4, at = [-4.5, 0.5] }
+        pad H5 = { shape = circle, d = 0.4, at = [-3.5, 0.5] }
+        pad H6 = { shape = circle, d = 0.4, at = [-2.5, 0.5] }
+        pad H7 = { shape = circle, d = 0.4, at = [-1.5, 0.5] }
+        pad H8 = { shape = circle, d = 0.4, at = [-0.5, 0.5] }
+        pad H9 = { shape = circle, d = 0.4, at = [0.5, 0.5] }
+        pad H10 = { shape = circle, d = 0.4, at = [1.5, 0.5] }
+        pad H11 = { shape = circle, d = 0.4, at = [2.5, 0.5] }
+        pad H12 = { shape = circle, d = 0.4, at = [3.5, 0.5] }
+        pad H13 = { shape = circle, d = 0.4, at = [4.5, 0.5] }
+        pad H14 = { shape = circle, d = 0.4, at = [5.5, 0.5] }
+        pad H15 = { shape = circle, d = 0.4, at = [6.5, 0.5] }
+        pad H16 = { shape = circle, d = 0.4, at = [7.5, 0.5] }
+        pad J1 = { shape = circle, d = 0.4, at = [-7.5, -0.5] }
+        pad J2 = { shape = circle, d = 0.4, at = [-6.5, -0.5] }
+        pad J3 = { shape = circle, d = 0.4, at = [-5.5, -0.5] }
+        pad J4 = { shape = circle, d = 0.4, at = [-4.5, -0.5] }
+        pad J5 = { shape = circle, d = 0.4, at = [-3.5, -0.5] }
+        pad J6 = { shape = circle, d = 0.4, at = [-2.5, -0.5] }
+        pad J7 = { shape = circle, d = 0.4, at = [-1.5, -0.5] }
+        pad J8 = { shape = circle, d = 0.4, at = [-0.5, -0.5] }
+        pad J9 = { shape = circle, d = 0.4, at = [0.5, -0.5] }
+        pad J10 = { shape = circle, d = 0.4, at = [1.5, -0.5] }
+        pad J11 = { shape = circle, d = 0.4, at = [2.5, -0.5] }
+        pad J12 = { shape = circle, d = 0.4, at = [3.5, -0.5] }
+        pad J13 = { shape = circle, d = 0.4, at = [4.5, -0.5] }
+        pad J14 = { shape = circle, d = 0.4, at = [5.5, -0.5] }
+        pad J15 = { shape = circle, d = 0.4, at = [6.5, -0.5] }
+        pad J16 = { shape = circle, d = 0.4, at = [7.5, -0.5] }
+        pad K1 = { shape = circle, d = 0.4, at = [-7.5, -1.5] }
+        pad K2 = { shape = circle, d = 0.4, at = [-6.5, -1.5] }
+        pad K3 = { shape = circle, d = 0.4, at = [-5.5, -1.5] }
+        pad K4 = { shape = circle, d = 0.4, at = [-4.5, -1.5] }
+        pad K5 = { shape = circle, d = 0.4, at = [-3.5, -1.5] }
+        pad K6 = { shape = circle, d = 0.4, at = [-2.5, -1.5] }
+        pad K7 = { shape = circle, d = 0.4, at = [-1.5, -1.5] }
+        pad K8 = { shape = circle, d = 0.4, at = [-0.5, -1.5] }
+        pad K9 = { shape = circle, d = 0.4, at = [0.5, -1.5] }
+        pad K10 = { shape = circle, d = 0.4, at = [1.5, -1.5] }
+        pad K11 = { shape = circle, d = 0.4, at = [2.5, -1.5] }
+        pad K12 = { shape = circle, d = 0.4, at = [3.5, -1.5] }
+        pad K13 = { shape = circle, d = 0.4, at = [4.5, -1.5] }
+        pad K14 = { shape = circle, d = 0.4, at = [5.5, -1.5] }
+        pad K15 = { shape = circle, d = 0.4, at = [6.5, -1.5] }
+        pad K16 = { shape = circle, d = 0.4, at = [7.5, -1.5] }
+        pad L1 = { shape = circle, d = 0.4, at = [-7.5, -2.5] }
+        pad L2 = { shape = circle, d = 0.4, at = [-6.5, -2.5] }
+        pad L3 = { shape = circle, d = 0.4, at = [-5.5, -2.5] }
+        pad L4 = { shape = circle, d = 0.4, at = [-4.5, -2.5] }
+        pad L5 = { shape = circle, d = 0.4, at = [-3.5, -2.5] }
+        pad L6 = { shape = circle, d = 0.4, at = [-2.5, -2.5] }
+        pad L7 = { shape = circle, d = 0.4, at = [-1.5, -2.5] }
+        pad L8 = { shape = circle, d = 0.4, at = [-0.5, -2.5] }
+        pad L9 = { shape = circle, d = 0.4, at = [0.5, -2.5] }
+        pad L10 = { shape = circle, d = 0.4, at = [1.5, -2.5] }
+        pad L11 = { shape = circle, d = 0.4, at = [2.5, -2.5] }
+        pad L12 = { shape = circle, d = 0.4, at = [3.5, -2.5] }
+        pad L13 = { shape = circle, d = 0.4, at = [4.5, -2.5] }
+        pad L14 = { shape = circle, d = 0.4, at = [5.5, -2.5] }
+        pad L15 = { shape = circle, d = 0.4, at = [6.5, -2.5] }
+        pad L16 = { shape = circle, d = 0.4, at = [7.5, -2.5] }
+        pad M1 = { shape = circle, d = 0.4, at = [-7.5, -3.5] }
+        pad M2 = { shape = circle, d = 0.4, at = [-6.5, -3.5] }
+        pad M3 = { shape = circle, d = 0.4, at = [-5.5, -3.5] }
+        pad M4 = { shape = circle, d = 0.4, at = [-4.5, -3.5] }
+        pad M5 = { shape = circle, d = 0.4, at = [-3.5, -3.5] }
+        pad M6 = { shape = circle, d = 0.4, at = [-2.5, -3.5] }
+        pad M7 = { shape = circle, d = 0.4, at = [-1.5, -3.5] }
+        pad M8 = { shape = circle, d = 0.4, at = [-0.5, -3.5] }
+        pad M9 = { shape = circle, d = 0.4, at = [0.5, -3.5] }
+        pad M10 = { shape = circle, d = 0.4, at = [1.5, -3.5] }
+        pad M11 = { shape = circle, d = 0.4, at = [2.5, -3.5] }
+        pad M12 = { shape = circle, d = 0.4, at = [3.5, -3.5] }
+        pad M13 = { shape = circle, d = 0.4, at = [4.5, -3.5] }
+        pad M14 = { shape = circle, d = 0.4, at = [5.5, -3.5] }
+        pad M15 = { shape = circle, d = 0.4, at = [6.5, -3.5] }
+        pad M16 = { shape = circle, d = 0.4, at = [7.5, -3.5] }
+        pad N1 = { shape = circle, d = 0.4, at = [-7.5, -4.5] }
+        pad N2 = { shape = circle, d = 0.4, at = [-6.5, -4.5] }
+        pad N3 = { shape = circle, d = 0.4, at = [-5.5, -4.5] }
+        pad N4 = { shape = circle, d = 0.4, at = [-4.5, -4.5] }
+        pad N5 = { shape = circle, d = 0.4, at = [-3.5, -4.5] }
+        pad N6 = { shape = circle, d = 0.4, at = [-2.5, -4.5] }
+        pad N7 = { shape = circle, d = 0.4, at = [-1.5, -4.5] }
+        pad N8 = { shape = circle, d = 0.4, at = [-0.5, -4.5] }
+        pad N9 = { shape = circle, d = 0.4, at = [0.5, -4.5] }
+        pad N10 = { shape = circle, d = 0.4, at = [1.5, -4.5] }
+        pad N11 = { shape = circle, d = 0.4, at = [2.5, -4.5] }
+        pad N12 = { shape = circle, d = 0.4, at = [3.5, -4.5] }
+        pad N13 = { shape = circle, d = 0.4, at = [4.5, -4.5] }
+        pad N14 = { shape = circle, d = 0.4, at = [5.5, -4.5] }
+        pad N15 = { shape = circle, d = 0.4, at = [6.5, -4.5] }
+        pad N16 = { shape = circle, d = 0.4, at = [7.5, -4.5] }
+        pad P1 = { shape = circle, d = 0.4, at = [-7.5, -5.5] }
+        pad P2 = { shape = circle, d = 0.4, at = [-6.5, -5.5] }
+        pad P3 = { shape = circle, d = 0.4, at = [-5.5, -5.5] }
+        pad P4 = { shape = circle, d = 0.4, at = [-4.5, -5.5] }
+        pad P5 = { shape = circle, d = 0.4, at = [-3.5, -5.5] }
+        pad P6 = { shape = circle, d = 0.4, at = [-2.5, -5.5] }
+        pad P7 = { shape = circle, d = 0.4, at = [-1.5, -5.5] }
+        pad P8 = { shape = circle, d = 0.4, at = [-0.5, -5.5] }
+        pad P9 = { shape = circle, d = 0.4, at = [0.5, -5.5] }
+        pad P10 = { shape = circle, d = 0.4, at = [1.5, -5.5] }
+        pad P11 = { shape = circle, d = 0.4, at = [2.5, -5.5] }
+        pad P12 = { shape = circle, d = 0.4, at = [3.5, -5.5] }
+        pad P13 = { shape = circle, d = 0.4, at = [4.5, -5.5] }
+        pad P14 = { shape = circle, d = 0.4, at = [5.5, -5.5] }
+        pad P15 = { shape = circle, d = 0.4, at = [6.5, -5.5] }
+        pad P16 = { shape = circle, d = 0.4, at = [7.5, -5.5] }
+        pad R1 = { shape = circle, d = 0.4, at = [-7.5, -6.5] }
+        pad R2 = { shape = circle, d = 0.4, at = [-6.5, -6.5] }
+        pad R3 = { shape = circle, d = 0.4, at = [-5.5, -6.5] }
+        pad R4 = { shape = circle, d = 0.4, at = [-4.5, -6.5] }
+        pad R5 = { shape = circle, d = 0.4, at = [-3.5, -6.5] }
+        pad R6 = { shape = circle, d = 0.4, at = [-2.5, -6.5] }
+        pad R7 = { shape = circle, d = 0.4, at = [-1.5, -6.5] }
+        pad R8 = { shape = circle, d = 0.4, at = [-0.5, -6.5] }
+        pad R9 = { shape = circle, d = 0.4, at = [0.5, -6.5] }
+        pad R10 = { shape = circle, d = 0.4, at = [1.5, -6.5] }
+        pad R11 = { shape = circle, d = 0.4, at = [2.5, -6.5] }
+        pad R12 = { shape = circle, d = 0.4, at = [3.5, -6.5] }
+        pad R13 = { shape = circle, d = 0.4, at = [4.5, -6.5] }
+        pad R14 = { shape = circle, d = 0.4, at = [5.5, -6.5] }
+        pad R15 = { shape = circle, d = 0.4, at = [6.5, -6.5] }
+        pad R16 = { shape = circle, d = 0.4, at = [7.5, -6.5] }
+        pad T1 = { shape = circle, d = 0.4, at = [-7.5, -7.5] }
+        pad T2 = { shape = circle, d = 0.4, at = [-6.5, -7.5] }
+        pad T3 = { shape = circle, d = 0.4, at = [-5.5, -7.5] }
+        pad T4 = { shape = circle, d = 0.4, at = [-4.5, -7.5] }
+        pad T5 = { shape = circle, d = 0.4, at = [-3.5, -7.5] }
+        pad T6 = { shape = circle, d = 0.4, at = [-2.5, -7.5] }
+        pad T7 = { shape = circle, d = 0.4, at = [-1.5, -7.5] }
+        pad T8 = { shape = circle, d = 0.4, at = [-0.5, -7.5] }
+        pad T9 = { shape = circle, d = 0.4, at = [0.5, -7.5] }
+        pad T10 = { shape = circle, d = 0.4, at = [1.5, -7.5] }
+        pad T11 = { shape = circle, d = 0.4, at = [2.5, -7.5] }
+        pad T12 = { shape = circle, d = 0.4, at = [3.5, -7.5] }
+        pad T13 = { shape = circle, d = 0.4, at = [4.5, -7.5] }
+        pad T14 = { shape = circle, d = 0.4, at = [5.5, -7.5] }
+        pad T15 = { shape = circle, d = 0.4, at = [6.5, -7.5] }
+        pad T16 = { shape = circle, d = 0.4, at = [7.5, -7.5] }
+        courtyard = [[-8.75, -8.75], [8.75, -8.75], [8.75, 8.75], [-8.75, 8.75]]
+        silk line = { points = [[-8.61, -8.61], [8.61, -8.61]], width = 0.12 }
+        silk line = { points = [[8.61, -8.61], [8.61, 8.61]], width = 0.12 }
+        silk line = { points = [[-8.61, 8.61], [8.61, 8.61]], width = 0.12 }
+        silk line = { points = [[-8.61, -8.61], [-8.61, 8.61]], width = 0.12 }
+        silk circle = { center = [-8.8, 8.8], radius = 0.1, width = 0.12, fill = true }
+        fab rect = { from = [-8.5, -8.5], to = [8.5, 8.5], width = 0.1 }
+        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
+        model = { path = "${RUNMAT_3DMODELS}/BGA-256_16x16_17x17mm_Layout16x16_P1mm_Ball0.5mm_IPCN.step" }
+        body = { width = 17, length = 17, height = 1.2 }
+    }
+    package "PinHeader_2x05_P2.54mm_Vertical" {
+        uuid = "ca180fef-a45e-87dd-9522-689bb1ab7d7e"
+        description = "Pin header 2x5, pitch 2.54 mm"
+        pad "1" = { kind = tht, shape = rect, size = [1.7, 1.7], at = [-1.27, 5.08], drill = 1 }
+        pad "2" = { kind = tht, shape = oval, size = [1.7, 1.7], at = [1.27, 5.08], drill = 1 }
+        pad "3" = { kind = tht, shape = oval, size = [1.7, 1.7], at = [-1.27, 2.54], drill = 1 }
+        pad "4" = { kind = tht, shape = oval, size = [1.7, 1.7], at = [1.27, 2.54], drill = 1 }
+        pad "5" = { kind = tht, shape = oval, size = [1.7, 1.7], at = [-1.27, 0], drill = 1 }
+        pad "6" = { kind = tht, shape = oval, size = [1.7, 1.7], at = [1.27, 0], drill = 1 }
+        pad "7" = { kind = tht, shape = oval, size = [1.7, 1.7], at = [-1.27, -2.54], drill = 1 }
+        pad "8" = { kind = tht, shape = oval, size = [1.7, 1.7], at = [1.27, -2.54], drill = 1 }
+        pad "9" = { kind = tht, shape = oval, size = [1.7, 1.7], at = [-1.27, -5.08], drill = 1 }
+        pad "10" = { kind = tht, shape = oval, size = [1.7, 1.7], at = [1.27, -5.08], drill = 1 }
+        courtyard = [[-3.04, -6.85], [3.04, -6.85], [3.04, 6.85], [-3.04, 6.85]]
+        silk line = { points = [[-2.65, -6.46], [2.65, -6.46]], width = 0.12 }
+        silk line = { points = [[2.65, -6.46], [2.65, 6.46]], width = 0.12 }
+        silk line = { points = [[-2.65, 6.46], [2.65, 6.46]], width = 0.12 }
+        silk line = { points = [[-2.65, -6.46], [-2.65, 6.46]], width = 0.12 }
+        fab rect = { from = [-2.54, -6.35], to = [2.54, 6.35], width = 0.1 }
+        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
+        model = { path = "${RUNMAT_3DMODELS}/PinHeader_2x05_P2.54mm_Vertical.step" }
+        body = { width = 5.08, length = 12.7, height = 8.5 }
+    }
+    package C_0402_1005Metric_IPCN {
+        uuid = "b946e4d1-883a-8666-8192-3154a77b8ac8"
+        description = "C chip 0402 (1005 metric), IPC-7351B density B"
+        smd = true
+        pad "1" = { shape = roundrect, size = [0.515, 0.57], ratio = 0.25, at = [-0.3775, 0] }
+        pad "2" = { shape = roundrect, size = [0.515, 0.57], ratio = 0.25, at = [0.3775, 0] }
+        courtyard = [[-0.79, -0.44], [0.79, -0.44], [0.79, 0.44], [-0.79, 0.44]]
+        fab rect = { from = [-0.5, -0.25], to = [0.5, 0.25], width = 0.1 }
+        fab text = { at = [0, 0], text = "${REFERENCE}", size = 0.2 }
+        model = { path = "${RUNMAT_3DMODELS}/C_0402_1005Metric_IPCN.step" }
+        body = { width = 1, length = 0.5, height = 0.35 }
+    }
+    package R_0402_1005Metric_IPCN {
+        uuid = "d2538180-97a8-835d-a51e-55aa0e963a21"
+        description = "R chip 0402 (1005 metric), IPC-7351B density B"
+        smd = true
+        pad "1" = { shape = roundrect, size = [0.515, 0.57], ratio = 0.25, at = [-0.3775, 0] }
+        pad "2" = { shape = roundrect, size = [0.515, 0.57], ratio = 0.25, at = [0.3775, 0] }
+        courtyard = [[-0.79, -0.44], [0.79, -0.44], [0.79, 0.44], [-0.79, 0.44]]
+        fab rect = { from = [-0.5, -0.25], to = [0.5, 0.25], width = 0.1 }
+        fab text = { at = [0, 0], text = "${REFERENCE}", size = 0.2 }
+        model = { path = "${RUNMAT_3DMODELS}/R_0402_1005Metric_IPCN.step" }
+        body = { width = 1, length = 0.5, height = 0.35 }
+    }
+    package "TSSOP-14_4.4x4.85mm_P0.65mm_IPCN" {
+        uuid = "48aaa59e-df89-854b-9c4a-da71389e1a9e"
+        description = "TSSOP 14 pins, pitch 0.65 mm, IPC-7351B density B"
+        smd = true
+        pad "1" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [-2.825, 1.95] }
+        pad "2" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [-2.825, 1.3] }
+        pad "3" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [-2.825, 0.65] }
+        pad "4" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [-2.825, 0] }
+        pad "5" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [-2.825, -0.65] }
+        pad "6" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [-2.825, -1.3] }
+        pad "7" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [-2.825, -1.95] }
+        pad "8" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [2.825, -1.95] }
+        pad "9" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [2.825, -1.3] }
+        pad "10" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [2.825, -0.65] }
+        pad "11" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [2.825, 0] }
+        pad "12" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [2.825, 0.65] }
+        pad "13" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [2.825, 1.3] }
+        pad "14" = { shape = roundrect, size = [1.66, 0.38], ratio = 0.25, at = [2.825, 1.95] }
+        courtyard = [[-3.91, -2.68], [3.91, -2.68], [3.91, 2.68], [-3.91, 2.68]]
+        silk line = { points = [[-2.31, -2.535], [2.31, -2.535]], width = 0.12 }
+        silk line = { points = [[2.31, -2.535], [2.31, -2.4]], width = 0.12 }
+        silk line = { points = [[2.31, 2.4], [2.31, 2.535]], width = 0.12 }
+        silk line = { points = [[-2.31, 2.535], [2.31, 2.535]], width = 0.12 }
+        silk line = { points = [[-2.31, -2.535], [-2.31, -2.4]], width = 0.12 }
+        silk line = { points = [[-2.31, 2.4], [-2.31, 2.535]], width = 0.12 }
+        silk circle = { center = [-3.955, 1.95], radius = 0.1, width = 0.12, fill = true }
+        fab rect = { from = [-2.2, -2.425], to = [2.2, 2.425], width = 0.1 }
+        fab text = { at = [0, 0], text = "${REFERENCE}", size = 1 }
+        model = { path = "${RUNMAT_3DMODELS}/TSSOP-14_4.4x4.85mm_P0.65mm_IPCN.step" }
+        body = { width = 4.4, length = 4.85, height = 1.2 }
+    }
+    sync {
+        version = 1
+        compare = {
+            ignore = [],
+            ignored_parameters = [],
+            remove_unlinked_footprints = true,
+            relink_by_designator = true,
+            rooms_per_channel = true,
+            classes_per_channel = true
+        }
+        footprint C1 = "/ch[0]/CD1"
+        footprint C2 = "/ch[0]/CD2"
+        footprint C3 = "/ch[0]/CF"
+        footprint C4 = "/ch[1]/CD1"
+        footprint C5 = "/ch[1]/CD2"
+        footprint C6 = "/ch[1]/CF"
+        footprint C900 = "/C900"
+        footprint J100 = "/J100"
+        footprint R1 = "/ch[0]/RF"
+        footprint R3 = "/ch[0]/RS"
+        footprint R4 = "/ch[1]/RF"
+        footprint R40 = "/ch[1]/RS"
+        footprint R5 = "/ch[1]/RG"
+        footprint R50 = "/ch[0]/RG"
+        footprint R900 = "/R900"
+        footprint U1 = "/ch[0]/U"
+        footprint U2 = "/ch[1]/U"
+        footprint U9000 = "/U9000"
+        component "/C900" = {
+            designator = C900,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+5V", "2" = GND }
+        }
+        component "/J100" = {
+            designator = J100,
+            package = "PinHeader_2x05_P2.54mm_Vertical",
+            pads = { "1" = AIN0, "10" = GND, "2" = AIN1, "9" = GND }
+        }
+        component "/R900" = {
+            designator = R900,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "+5V", "2" = GND }
+        }
+        component "/U9000" = {
+            designator = U9000,
+            package = "BGA-256_16x16_17x17mm_Layout16x16_P1mm_Ball0.5mm_IPCN",
+            pads = {
+                A1 = ADC0,
+                A2 = ADC1,
+                N10 = "+5V",
+                N11 = "+5V",
+                N12 = "+5V",
+                N13 = "+5V",
+                N14 = "+5V",
+                N15 = "+5V",
+                N16 = "+5V",
+                N9 = "+5V",
+                P1 = "+5V",
+                P10 = "+5V",
+                P11 = "+5V",
+                P12 = "+5V",
+                P13 = "+5V",
+                P14 = "+5V",
+                P15 = "+5V",
+                P16 = "+5V",
+                P2 = "+5V",
+                P3 = "+5V",
+                P4 = "+5V",
+                P5 = "+5V",
+                P6 = "+5V",
+                P7 = "+5V",
+                P8 = "+5V",
+                P9 = "+5V",
+                R1 = "+5V",
+                R10 = "+5V",
+                R11 = "+5V",
+                R12 = "+5V",
+                R13 = GND,
+                R14 = GND,
+                R15 = GND,
+                R16 = GND,
+                R2 = "+5V",
+                R3 = "+5V",
+                R4 = "+5V",
+                R5 = "+5V",
+                R6 = "+5V",
+                R7 = "+5V",
+                R8 = "+5V",
+                R9 = "+5V",
+                T1 = GND,
+                T10 = GND,
+                T11 = GND,
+                T12 = GND,
+                T13 = GND,
+                T14 = GND,
+                T15 = GND,
+                T16 = GND,
+                T2 = GND,
+                T3 = GND,
+                T4 = GND,
+                T5 = GND,
+                T6 = GND,
+                T7 = GND,
+                T8 = GND,
+                T9 = GND
+            }
+        }
+        component "/ch[0]/CD1" = {
+            designator = C1,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+5V", "2" = GND }
+        }
+        component "/ch[0]/CD2" = {
+            designator = C2,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = GND, "2" = "-5V" }
+        }
+        component "/ch[0]/CF" = {
+            designator = C3,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "/ch[0]/INF", "2" = GND }
+        }
+        component "/ch[0]/RF" = {
+            designator = R1,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/ch[0]/FBK", "2" = ADC0 }
+        }
+        component "/ch[0]/RG" = {
+            designator = R2,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/ch[0]/FBK", "2" = GND }
+        }
+        component "/ch[0]/RS" = {
+            designator = R3,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = AIN0, "2" = "/ch[0]/INF" }
+        }
+        component "/ch[0]/U" = {
+            designator = U1,
+            package = "TSSOP-14_4.4x4.85mm_P0.65mm_IPCN",
+            pads = {
+                "1" = ADC0,
+                "10" = GND,
+                "11" = "-5V",
+                "12" = GND,
+                "13" = "/ch[0]/TIE_D",
+                "14" = "/ch[0]/TIE_D",
+                "2" = "/ch[0]/FBK",
+                "3" = "/ch[0]/INF",
+                "4" = "+5V",
+                "5" = GND,
+                "6" = "/ch[0]/TIE_B",
+                "7" = "/ch[0]/TIE_B",
+                "8" = "/ch[0]/TIE_C",
+                "9" = "/ch[0]/TIE_C"
+            }
+        }
+        component "/ch[1]/CD1" = {
+            designator = C4,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "+5V", "2" = GND }
+        }
+        component "/ch[1]/CD2" = {
+            designator = C5,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = GND, "2" = "-5V" }
+        }
+        component "/ch[1]/CF" = {
+            designator = C6,
+            package = C_0402_1005Metric_IPCN,
+            pads = { "1" = "/ch[1]/INF", "2" = GND }
+        }
+        component "/ch[1]/RF" = {
+            designator = R4,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/ch[1]/FBK", "2" = ADC1 }
+        }
+        component "/ch[1]/RG" = {
+            designator = R5,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = "/ch[1]/FBK", "2" = GND }
+        }
+        component "/ch[1]/RS" = {
+            designator = R6,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = AIN1, "2" = "/ch[1]/INF" }
+        }
+        component "/ch[1]/U" = {
+            designator = U2,
+            package = "TSSOP-14_4.4x4.85mm_P0.65mm_IPCN",
+            pads = {
+                "1" = ADC1,
+                "10" = GND,
+                "11" = "-5V",
+                "12" = GND,
+                "13" = "/ch[1]/TIE_D",
+                "14" = "/ch[1]/TIE_D",
+                "2" = "/ch[1]/FBK",
+                "3" = "/ch[1]/INF",
+                "4" = "+5V",
+                "5" = GND,
+                "6" = "/ch[1]/TIE_B",
+                "7" = "/ch[1]/TIE_B",
+                "8" = "/ch[1]/TIE_C",
+                "9" = "/ch[1]/TIE_C"
+            }
+        }
+        net_class power = {}
+        component_class "ch[0]" = [C1, C2, C3, R1, R2, R3, U1]
+        component_class "ch[1]" = [C4, C5, C6, R4, R5, R6, U2]
+    }
+}

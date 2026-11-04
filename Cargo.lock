@@ -7979,6 +7979,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-circuit-wasm"
+version = "0.6.2"
+dependencies = [
+ "runmat-circuit",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "runmat-clarabel"
 version = "0.6.2"
 dependencies = [

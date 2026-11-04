@@ -2751,6 +2751,8 @@ pub fn apply(
     let mut removed_nets: BTreeSet<NetId> = BTreeSet::new();
     let mut touched_nets: BTreeSet<NetId> = BTreeSet::new();
     let mut moved_pads: Vec<(String, String)> = Vec::new();
+    // Designators re-designated earlier in this apply: later lines name the part by its old one.
+    let mut renamed: BTreeMap<String, String> = BTreeMap::new();
     let by_ref = |b: &Board, r: &str| {
         b.footprints
             .values()
@@ -2760,7 +2762,7 @@ pub fn apply(
     for c in &changes {
         match &c.op {
             Op::RemoveComponent { reference } => {
-                if let Some(id) = by_ref(&next, reference) {
+                if let Some(id) = by_ref(&next, renamed.get(reference).unwrap_or(reference)) {
                     let f = next.footprints.remove(&id).unwrap();
                     touched_nets.extend(f.pad_nets.values().copied());
                     if let Some(p) = &f.component {
@@ -2814,9 +2816,10 @@ pub fn apply(
                 to,
                 path,
             } => {
-                if let Some(id) = by_ref(&next, reference) {
+                if let Some(id) = by_ref(&next, renamed.get(reference).unwrap_or(reference)) {
                     let f = next.footprints.get_mut(&id).unwrap();
                     f.reference = to.clone();
+                    renamed.insert(reference.clone(), to.clone());
                     let old_link = f.component.replace(path.clone());
                     let mut rec = old_link
                         .and_then(|p| next.sync.components.remove(&p))
@@ -2838,7 +2841,7 @@ pub fn apply(
                 let Some(pkg) = package.and_then(|u| pool.packages.get(&u)) else {
                     continue;
                 };
-                if let Some(id) = by_ref(&next, reference) {
+                if let Some(id) = by_ref(&next, renamed.get(reference).unwrap_or(reference)) {
                     let f = next.footprints.get_mut(&id).unwrap();
                     f.package = pkg.clone();
                     f.pad_nets.retain(|pad, _| pkg.pad(pad).is_some());
@@ -2852,7 +2855,7 @@ pub fn apply(
                 }
             }
             Op::SetValue { reference, value } => {
-                if let Some(id) = by_ref(&next, reference) {
+                if let Some(id) = by_ref(&next, renamed.get(reference).unwrap_or(reference)) {
                     next.footprints.get_mut(&id).unwrap().value = value.clone();
                 }
             }
@@ -2861,7 +2864,7 @@ pub fn apply(
                 key,
                 value,
             } => {
-                if let Some(id) = by_ref(&next, reference) {
+                if let Some(id) = by_ref(&next, renamed.get(reference).unwrap_or(reference)) {
                     let props = &mut next.footprints.get_mut(&id).unwrap().properties;
                     match value {
                         Some(v) => props.insert(format!("param:{key}"), v.clone()),
@@ -2870,7 +2873,7 @@ pub fn apply(
                 }
             }
             Op::SetFitted { reference, fitted } => {
-                if let Some(id) = by_ref(&next, reference) {
+                if let Some(id) = by_ref(&next, renamed.get(reference).unwrap_or(reference)) {
                     next.footprints.get_mut(&id).unwrap().fitted = *fitted;
                 }
             }
@@ -2893,7 +2896,7 @@ pub fn apply(
                 pad,
                 net,
             } => {
-                if let Some(id) = by_ref(&next, reference) {
+                if let Some(id) = by_ref(&next, renamed.get(reference).unwrap_or(reference)) {
                     let new = net.as_deref().map(|n| net_or_add(&mut next, n));
                     let f = next.footprints.get_mut(&id).unwrap();
                     let old = match new {

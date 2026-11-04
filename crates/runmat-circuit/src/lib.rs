@@ -38,6 +38,8 @@
 //!   clean-room implementation has not used; IPC-2581 carries the same data set.
 //! - [`review`]: design-review suites with typed fixes.
 //! - [`fea`]: the board → FEA `pcb` source contract.
+//! - [`runtime`]: the document runtime the Desktop and browser call: compile, review and edit
+//!   a circuit's files, with minimal text edits.
 //! - [`fixture`]: a standard pool and a large-board generator for tests and benchmarks.
 //!
 //! Everything is deterministic: ordered maps, sorted outputs, exact integer predicates.
@@ -63,6 +65,7 @@ pub mod layout;
 pub mod library;
 pub mod review;
 pub mod room_formats;
+pub mod runtime;
 pub mod route;
 pub mod router;
 pub mod spatial;

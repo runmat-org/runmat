@@ -39,6 +39,7 @@
 
 pub mod board;
 pub mod board_edit;
+pub mod circuit_edit;
 pub mod layout;
 pub(crate) mod values;
 
@@ -1438,6 +1439,43 @@ pub fn print_circuit(design: &Design) -> Print {
     Ok(out)
 }
 
+/// One `component` statement, as the sheet prints it.
+pub(crate) fn component_statement(component: &ComponentDecl) -> Print {
+    let mut entries = part_entries(&component.part);
+    if !component.classes.is_empty() {
+        entries.push(("classes".into(), names(&component.classes)));
+    }
+    if let Some(power) = &component.power {
+        entries.push(("power".into(), si(power)?));
+    }
+    if let Some(renamed) = &component.renamed_from {
+        entries.push(("renamed_from".into(), name(renamed)));
+    }
+    if !component.variants.is_empty() {
+        entries.push(("variants".into(), fittings(&component.variants)?));
+    }
+    if !component.properties.is_empty() {
+        let properties: Vec<(String, String)> = component
+            .properties
+            .iter()
+            .map(|(k, v)| (k.clone(), quote(v)))
+            .collect();
+        entries.push(("properties".into(), record(&properties)));
+    }
+    entries.extend(params_entries(&component.params, COMPONENT_FIELDS)?);
+    Ok(format!(
+        "component {} = {}",
+        name(&component.name),
+        record(&entries)
+    ))
+}
+
+/// One `connect = [...]` statement.
+pub(crate) fn connection_statement(connection: &Connection) -> Print {
+    let ends: Result<Vec<String>, _> = connection.ends.iter().map(endpoint).collect();
+    Ok(format!("connect = {}", list(&ends?)))
+}
+
 fn print_sheet(sheet: &SheetDef) -> Print {
     let mut lines = Vec::new();
     for (k, param) in &sheet.params {
@@ -1457,33 +1495,7 @@ fn print_sheet(sheet: &SheetDef) -> Print {
         lines.push(format!("port {} : {dir}{kind}", name(&port.name)));
     }
     for component in &sheet.components {
-        let mut entries = part_entries(&component.part);
-        if !component.classes.is_empty() {
-            entries.push(("classes".into(), names(&component.classes)));
-        }
-        if let Some(power) = &component.power {
-            entries.push(("power".into(), si(power)?));
-        }
-        if let Some(renamed) = &component.renamed_from {
-            entries.push(("renamed_from".into(), name(renamed)));
-        }
-        if !component.variants.is_empty() {
-            entries.push(("variants".into(), fittings(&component.variants)?));
-        }
-        if !component.properties.is_empty() {
-            let properties: Vec<(String, String)> = component
-                .properties
-                .iter()
-                .map(|(k, v)| (k.clone(), quote(v)))
-                .collect();
-            entries.push(("properties".into(), record(&properties)));
-        }
-        entries.extend(params_entries(&component.params, COMPONENT_FIELDS)?);
-        lines.push(format!(
-            "component {} = {}",
-            name(&component.name),
-            record(&entries)
-        ));
+        lines.push(component_statement(component)?);
     }
     for net in &sheet.nets {
         let mut entries = Vec::new();
@@ -1553,8 +1565,7 @@ fn print_sheet(sheet: &SheetDef) -> Print {
         ));
     }
     for connection in &sheet.connections {
-        let ends: Result<Vec<String>, _> = connection.ends.iter().map(endpoint).collect();
-        lines.push(format!("connect = {}", list(&ends?)));
+        lines.push(connection_statement(connection)?);
     }
     if !sheet.no_erc.is_empty() {
         let ends: Result<Vec<String>, _> = sheet.no_erc.iter().map(endpoint).collect();
