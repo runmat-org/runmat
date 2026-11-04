@@ -95,6 +95,7 @@ const GRAMMAR: DocumentGrammar = DocumentGrammar {
             value_field: Some("default"),
             tagged: None,
             site: "input",
+            unique: true,
         },
         Collection {
             word: "feature",
@@ -108,6 +109,7 @@ const GRAMMAR: DocumentGrammar = DocumentGrammar {
                 extras: &["suppressed"],
             }),
             site: "feature",
+            unique: true,
         },
         Collection {
             word: "material",
@@ -117,6 +119,7 @@ const GRAMMAR: DocumentGrammar = DocumentGrammar {
             value_field: None,
             tagged: None,
             site: "material",
+            unique: true,
         },
     ],
     links: Some(LinkGrammar {

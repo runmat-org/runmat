@@ -1,6 +1,6 @@
 // The `.fea` TextMate grammar, generated from the compiler's own closed tables so that docs, site
 // code cards and any TextMate host color exactly the words the compiler knows:
-//   keywords            runmat-fea-syntax lexer (FeaKeyword::from_source)
+//   keywords            runmat-fea-syntax lexer (the fea_keywords! table)
 //   statement words     `assessment` (procedure/assessment.rs)
 //   families, procedures analysis-core family_label / procedure_label, and the procedure words
 //                       language lowering accepts (`preload`, `steady`, `modal_harmonic`, ...)
@@ -9,7 +9,8 @@
 //   types, units        the registries in registry-coverage.mjs and ledger.mjs (SURFACES)
 //
 //   node scripts/docs/fea-grammar.mjs [--out <file>]   # write the grammar JSON (default: stdout)
-//   node scripts/docs/fea-grammar.mjs --write          # refresh the committed copy the Rust hosts embed
+//   node scripts/docs/fea-grammar.mjs --write          # refresh the committed copies the Rust hosts embed
+//                                                       (`.fea` and every design dialect)
 //
 // The docs export writes it to fea/fea.tmLanguage.json in the docs artifact; the website loads it
 // from there. `lintFeaHighlighting` checks every ```fea block in the docs tokenizes with no known
@@ -22,7 +23,7 @@ import { SURFACES } from "./ledger.mjs";
 
 /** Word groups, each with the scope it is colored with. Order is match priority. */
 export const VOCABULARY = [
-    { id: "keywords", scope: "keyword.control.fea", source: "crates/runmat-fea-syntax/src/lexical/token.rs", from: /pub fn from_source\(/, to: /_ => return None/, pattern: /"([a-z_]+)" => Self::/g },
+    { id: "keywords", scope: "keyword.control.fea", source: "crates/runmat-fea-syntax/src/lexical/token.rs", from: /^fea_keywords! \{/m, to: /^\}/m, pattern: /\w+ => "([a-z_]+)"/g },
     { id: "statements", scope: "keyword.control.fea", source: "crates/runmat-analysis/language/src/semantic/procedure/assessment.rs", from: /./, to: /$^/, pattern: /== Some\("([a-z_]+)"\)/g },
     { id: "families", scope: "storage.type.fea", source: "crates/runmat-analysis/core/src/study/compatibility.rs", from: /pub const fn family_label\(/, to: /^}/m, pattern: /=> \{?\s*"([a-z_]+)"/g },
     { id: "procedures", scope: "storage.type.fea", source: "crates/runmat-analysis/core/src/study/compatibility.rs", from: /pub const fn procedure_label\(/, to: /^}/m, pattern: /=> "([a-z_]+)"/g },
@@ -164,11 +165,125 @@ export function grammarText(source) {
     return JSON.stringify(feaGrammar(source), null, 2) + "\n";
 }
 
+// ---------------------------------------------------------------------------- design dialects
+//
+// `.part`, `.assembly`, `.drawing`, `.circuit` and `.circuit.layout` share the `.fea` lexer and
+// generic forms; each grammar is read from the same two kinds of table:
+//   grammar words     runmat-fea-syntax dialect registry (src/dialect.rs): the dialect's
+//                     declaration words, the generic form words, value, clause and literal words
+//   statement words   the dialect's front-end registry (runmat-cad src/syntax/mod.rs grammars,
+//                     runmat-circuit src/syntax/mod.rs `words`)
+//   operations        registry words a dialect applies (`.part` feature kinds: FeatureKind)
+//   units             the `.fea` unit registry, plus `%`
+
+const DIALECT_SOURCE = "crates/runmat-fea-syntax/src/dialect.rs";
+const CAD_SYNTAX = "crates/runmat-cad/src/syntax/mod.rs";
+
+/** One entry per design dialect: its registry name, file extension and front-end word tables. */
+export const DESIGN_DIALECTS = [
+    { dialect: "Part", name: "part", extension: "part", statements: { source: CAD_SYNTAX, from: /^pub const PART: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g }, operations: { source: "crates/runmat-cad/src/model/feature.rs", from: /^pub enum FeatureKind \{/m, to: /^\}/m, pattern: /^\s+([A-Z][A-Za-z]*)\(/gm, snake: true } },
+    { dialect: "Assembly", name: "assembly", extension: "assembly", statements: { source: CAD_SYNTAX, from: /^pub const ASSEMBLY: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g } },
+    { dialect: "Drawing", name: "drawing", extension: "drawing", statements: { source: CAD_SYNTAX, from: /^pub const DRAWING: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g } },
+    { dialect: "Circuit", name: "circuit", extension: "circuit", statements: { source: "crates/runmat-circuit/src/syntax/mod.rs", from: /^pub mod words \{/m, to: /pub const ALL/, pattern: /: &str = "([a-z_]+)"/g } },
+    { dialect: "CircuitLayout", name: "circuit-layout", extension: "circuit.layout" },
+];
+
+const snakeCase = name => name.replace(/[A-Z]/g, (letter, index) => (index ? "_" : "") + letter.toLowerCase());
+
+function wordsIn(source, table) {
+    if (!table) return [];
+    const names = registryNames(source, table);
+    return table.snake ? names.map(snakeCase).sort() : names;
+}
+
+/** The grammar words of one dialect, from the dialect registry. */
+function dialectWords(source, dialect) {
+    const text = readFileSync(join(source, DIALECT_SOURCE), "utf8");
+    const between = (from, to) => {
+        const start = text.search(from);
+        if (start < 0) return "";
+        const rest = text.slice(start);
+        const end = rest.search(to);
+        return end < 0 ? rest : rest.slice(0, end);
+    };
+    const quoted = body => [...body.matchAll(/"([a-z_]+)"/g)].map(match => match[1]);
+    const spec = between(new RegExp(`dialect: Dialect::${dialect},`), /\n    \},/);
+    return {
+        declarations: spec.includes("declarations") ? quoted(spec.slice(spec.indexOf("declarations")).split("]")[0]) : [],
+        forms: [...between(/pub const fn word\(self\)/, /^    \}/m).matchAll(/=> "([a-z_]+)"/g)].map(match => match[1]),
+        header: quoted(between(/pub const STD_HEADER_WORD/, /;/)),
+        values: quoted(between(/pub const VALUE_WORDS/, /;/)),
+        clauses: quoted(between(/pub const CLAUSE_WORDS/, /;/)),
+        literals: quoted(between(/pub const VALUE_LITERALS/, /;/)),
+    };
+}
+
+/** { id, scope, names } groups of one design dialect. */
+export function designVocabulary(source, entry) {
+    const words = dialectWords(source, entry.dialect);
+    const suffix = entry.name;
+    const groups = [
+        { id: "declarations", scope: `keyword.control.${suffix}`, names: words.declarations },
+        { id: "generic forms", scope: `keyword.control.${suffix}`, names: [...words.forms, ...words.header, ...words.values] },
+        { id: "clauses", scope: `keyword.other.${suffix}`, names: words.clauses },
+        { id: "literals", scope: `constant.language.${suffix}`, names: words.literals },
+        { id: "statements", scope: `storage.type.${suffix}`, names: wordsIn(source, entry.statements) },
+        { id: "operations", scope: `support.function.${suffix}`, names: wordsIn(source, entry.operations) },
+    ];
+    return groups.map(group => ({ ...group, names: [...new Set(group.names)].sort() }));
+}
+
+export function designGrammar(source, entry) {
+    const suffix = entry.name;
+    const groups = designVocabulary(source, entry).filter(group => group.names.length);
+    const units = [...registryNames(source, UNITS), "%"];
+    const order = ["support.function", "keyword.control", "storage.type", "keyword.other", "constant.language"].map(scope => `${scope}.${suffix}`);
+    const byScope = new Map();
+    for (const group of groups) {
+        const names = byScope.get(group.scope) ?? new Set();
+        for (const name of group.names) names.add(name);
+        byScope.set(group.scope, names);
+    }
+    const number = "-?\\b\\d+(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?\\b";
+    const unitWord = units => `(?:${[...units].sort((a, b) => b.length - a.length).map(escape).join("|")})`;
+    const unit = `${unitWord(units)}(?:\\s*[/*]\\s*${unitWord(units)}|\\^-?\\d+)*`;
+    return {
+        name: suffix,
+        scopeName: `source.${suffix}`,
+        fileTypes: [entry.extension],
+        generated: "scripts/docs/fea-grammar.mjs from the RunMat dialect registry and front-end registries; do not edit by hand",
+        patterns: [
+            { name: `comment.line.double-slash.${suffix}`, match: "//.*$" },
+            { name: `string.quoted.double.${suffix}`, begin: "\"", end: "\"" },
+            { match: `(${number}|\\])(\\s*)(${unit})(?![\\w%])`, captures: { 1: { patterns: [{ name: `constant.numeric.${suffix}`, match: "-?\\d.*" }] }, 3: { name: `support.type.unit.${suffix}` } } },
+            ...order.filter(scope => byScope.has(scope)).map(scope => ({ name: scope, match: words(byScope.get(scope)) })),
+            { name: `variable.other.assignment.${suffix}`, match: "\\b[a-zA-Z_]\\w*(?=\\s*=(?!=))" },
+            { name: `constant.numeric.${suffix}`, match: number },
+            { name: `keyword.operator.${suffix}`, match: "±|\\+/-|@|[=:;]" },
+        ],
+        repository: {},
+        vocabulary: {
+            scopes: order.filter(scope => byScope.has(scope)).map(scope => ({ scope, words: [...byScope.get(scope)].sort() })),
+            units: { scope: `support.type.unit.${suffix}`, words: [...units].sort() },
+        },
+    };
+}
+
+/** The committed copy of a design dialect's grammar (runmat-fea-syntax `DESIGN_TEXTMATE_GRAMMARS`). */
+export const committedDesignGrammar = entry => `crates/runmat-fea-syntax/grammar/${entry.extension}.tmLanguage.json`;
+
+export function designGrammarText(source, entry) {
+    return JSON.stringify(designGrammar(source, entry), null, 2) + "\n";
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const source = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
     const text = grammarText(source);
     const out = process.argv.indexOf("--out");
-    if (process.argv.includes("--write")) writeFileSync(join(source, COMMITTED_GRAMMAR), text);
+    if (process.argv.includes("--write")) {
+        writeFileSync(join(source, COMMITTED_GRAMMAR), text);
+        for (const entry of DESIGN_DIALECTS) writeFileSync(join(source, committedDesignGrammar(entry)), designGrammarText(source, entry));
+    }
     else if (out > 0) writeFileSync(process.argv[out + 1], text);
     else process.stdout.write(text);
 }

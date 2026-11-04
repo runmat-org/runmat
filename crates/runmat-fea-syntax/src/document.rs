@@ -69,6 +69,9 @@ pub struct Collection {
     pub tagged: Option<Tagged>,
     /// The site key prefix (`feature` → `feature.<id>`, `material` → `material[0]`).
     pub site: &'static str,
+    /// Names are unique. When false (alternatives sharing a name), a repeated name's site key
+    /// takes its ordinal: `occurrence.engine~2`.
+    pub unique: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -553,26 +556,32 @@ impl Parse<'_> {
     ) {
         let entries = self.collections.entry(collection.field).or_default();
         let index = entries.len();
+        let same_name = name.as_ref().map_or(0, |name| {
+            entries
+                .iter()
+                .filter(|entry| {
+                    collection
+                        .id
+                        .and_then(|id| entry.get(id))
+                        .and_then(Json::as_str)
+                        == Some(name.as_str())
+                })
+                .count()
+        });
         let site = match &name {
+            Some(name) if same_name > 0 && !collection.unique => {
+                format!("{}.{name}~{}", collection.site, same_name + 1)
+            }
             Some(name) => format!("{}.{name}", collection.site),
             None => format!("{}[{index}]", collection.site),
         };
         let json_path = format!("{}[{index}]", collection.field);
-        if let Some(name) = &name {
-            let duplicate = entries.iter().any(|entry| {
-                collection
-                    .id
-                    .and_then(|id| entry.get(id))
-                    .and_then(Json::as_str)
-                    == Some(name.as_str())
-            });
-            if duplicate {
-                self.diagnostics.push(diagnostic(
-                    span,
-                    format!("`{} {name}` is declared twice", collection.word),
-                ));
-                return;
-            }
+        if let Some(name) = name.as_ref().filter(|_| same_name > 0 && collection.unique) {
+            self.diagnostics.push(diagnostic(
+                span,
+                format!("`{} {name}` is declared twice", collection.word),
+            ));
+            return;
         }
         self.spans.insert(site.clone(), span);
         self.json_spans.push((json_path.clone(), span));
@@ -1044,14 +1053,12 @@ fn print_entry(
                     collection.word
                 )));
             };
-            if !is_bare_word(name) {
-                return Err(PrintError(format!(
-                    "`{name}` cannot be written as a `{}` name",
-                    collection.word
-                )));
-            }
             head.push(' ');
-            head.push_str(name);
+            head.push_str(&if is_bare_word(name) {
+                name.clone()
+            } else {
+                quote(name)
+            });
             continue;
         }
         if Some(key.as_str()) == collection.type_field {

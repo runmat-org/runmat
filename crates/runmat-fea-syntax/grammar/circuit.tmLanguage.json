@@ -1,0 +1,186 @@
+{
+  "name": "circuit",
+  "scopeName": "source.circuit",
+  "fileTypes": [
+    "circuit"
+  ],
+  "generated": "scripts/docs/fea-grammar.mjs from the RunMat dialect registry and front-end registries; do not edit by hand",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash.circuit",
+      "match": "//.*$"
+    },
+    {
+      "name": "string.quoted.double.circuit",
+      "begin": "\"",
+      "end": "\""
+    },
+    {
+      "match": "(-?\\b\\d+(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?\\b|\\])(\\s*)((?:delta_degC|degC|gram|inch|GHz|GPa|GiB|KiB|MHz|MPa|MiB|deg|kHz|kPa|rad|Hz|MV|MW|Pa|cm|ft|in|kA|kN|kV|kW|kg|km|mA|mT|mV|mW|mm|ms|nm|ns|um|us|A|B|C|J|K|N|T|V|W|g|m|s|%)(?:\\s*[/*]\\s*(?:delta_degC|degC|gram|inch|GHz|GPa|GiB|KiB|MHz|MPa|MiB|deg|kHz|kPa|rad|Hz|MV|MW|Pa|cm|ft|in|kA|kN|kV|kW|kg|km|mA|mT|mV|mW|mm|ms|nm|ns|um|us|A|B|C|J|K|N|T|V|W|g|m|s|%)|\\^-?\\d+)*)(?![\\w%])",
+      "captures": {
+        "1": {
+          "patterns": [
+            {
+              "name": "constant.numeric.circuit",
+              "match": "-?\\d.*"
+            }
+          ]
+        },
+        "3": {
+          "name": "support.type.unit.circuit"
+        }
+      }
+    },
+    {
+      "name": "keyword.control.circuit",
+      "match": "(?<![\\w])(?:constrain|property|circuit|publish|runmat|solved|sheet|check|input|link|when|let|std|use)(?![\\w])"
+    },
+    {
+      "name": "storage.type.circuit",
+      "match": "(?<![\\w])(?:component|diff_pair|interface|net_class|instance|circuit|connect|harness|variant|no_erc|param|sheet|port|root|bus|net)(?![\\w])"
+    },
+    {
+      "name": "keyword.other.circuit",
+      "match": "(?<![\\w])(?:from|over|for|as|at|in|of|on|to)(?![\\w])"
+    },
+    {
+      "name": "constant.language.circuit",
+      "match": "(?<![\\w])(?:false|none|true)(?![\\w])"
+    },
+    {
+      "name": "variable.other.assignment.circuit",
+      "match": "\\b[a-zA-Z_]\\w*(?=\\s*=(?!=))"
+    },
+    {
+      "name": "constant.numeric.circuit",
+      "match": "-?\\b\\d+(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?\\b"
+    },
+    {
+      "name": "keyword.operator.circuit",
+      "match": "±|\\+/-|@|[=:;]"
+    }
+  ],
+  "repository": {},
+  "vocabulary": {
+    "scopes": [
+      {
+        "scope": "keyword.control.circuit",
+        "words": [
+          "check",
+          "circuit",
+          "constrain",
+          "input",
+          "let",
+          "link",
+          "property",
+          "publish",
+          "runmat",
+          "sheet",
+          "solved",
+          "std",
+          "use",
+          "when"
+        ]
+      },
+      {
+        "scope": "storage.type.circuit",
+        "words": [
+          "bus",
+          "circuit",
+          "component",
+          "connect",
+          "diff_pair",
+          "harness",
+          "instance",
+          "interface",
+          "net",
+          "net_class",
+          "no_erc",
+          "param",
+          "port",
+          "root",
+          "sheet",
+          "variant"
+        ]
+      },
+      {
+        "scope": "keyword.other.circuit",
+        "words": [
+          "as",
+          "at",
+          "for",
+          "from",
+          "in",
+          "of",
+          "on",
+          "over",
+          "to"
+        ]
+      },
+      {
+        "scope": "constant.language.circuit",
+        "words": [
+          "false",
+          "none",
+          "true"
+        ]
+      }
+    ],
+    "units": {
+      "scope": "support.type.unit.circuit",
+      "words": [
+        "%",
+        "A",
+        "B",
+        "C",
+        "GHz",
+        "GPa",
+        "GiB",
+        "Hz",
+        "J",
+        "K",
+        "KiB",
+        "MHz",
+        "MPa",
+        "MV",
+        "MW",
+        "MiB",
+        "N",
+        "Pa",
+        "T",
+        "V",
+        "W",
+        "cm",
+        "deg",
+        "degC",
+        "delta_degC",
+        "ft",
+        "g",
+        "gram",
+        "in",
+        "inch",
+        "kA",
+        "kHz",
+        "kN",
+        "kPa",
+        "kV",
+        "kW",
+        "kg",
+        "km",
+        "m",
+        "mA",
+        "mT",
+        "mV",
+        "mW",
+        "mm",
+        "ms",
+        "nm",
+        "ns",
+        "rad",
+        "s",
+        "um",
+        "us"
+      ]
+    }
+  }
+}

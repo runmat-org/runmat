@@ -1,0 +1,218 @@
+{
+  "name": "part",
+  "scopeName": "source.part",
+  "fileTypes": [
+    "part"
+  ],
+  "generated": "scripts/docs/fea-grammar.mjs from the RunMat dialect registry and front-end registries; do not edit by hand",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash.part",
+      "match": "//.*$"
+    },
+    {
+      "name": "string.quoted.double.part",
+      "begin": "\"",
+      "end": "\""
+    },
+    {
+      "match": "(-?\\b\\d+(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?\\b|\\])(\\s*)((?:delta_degC|degC|gram|inch|GHz|GPa|GiB|KiB|MHz|MPa|MiB|deg|kHz|kPa|rad|Hz|MV|MW|Pa|cm|ft|in|kA|kN|kV|kW|kg|km|mA|mT|mV|mW|mm|ms|nm|ns|um|us|A|B|C|J|K|N|T|V|W|g|m|s|%)(?:\\s*[/*]\\s*(?:delta_degC|degC|gram|inch|GHz|GPa|GiB|KiB|MHz|MPa|MiB|deg|kHz|kPa|rad|Hz|MV|MW|Pa|cm|ft|in|kA|kN|kV|kW|kg|km|mA|mT|mV|mW|mm|ms|nm|ns|um|us|A|B|C|J|K|N|T|V|W|g|m|s|%)|\\^-?\\d+)*)(?![\\w%])",
+      "captures": {
+        "1": {
+          "patterns": [
+            {
+              "name": "constant.numeric.part",
+              "match": "-?\\d.*"
+            }
+          ]
+        },
+        "3": {
+          "name": "support.type.unit.part"
+        }
+      }
+    },
+    {
+      "name": "support.function.part",
+      "match": "(?<![\\w])(?:mate_connector|face_fillet|sheet_metal|full_round|weldment|body_op|boolean|chamfer|extrude|library|pattern|revolve|surface|direct|emboss|fillet|import|mirror|sketch|thread|curve|draft|frame|plane|point|shell|split|sweep|axis|hole|loft|mold|rib)(?![\\w])"
+    },
+    {
+      "name": "keyword.control.part",
+      "match": "(?<![\\w])(?:constrain|property|publish|runmat|solved|check|input|part|link|when|let|std|use)(?![\\w])"
+    },
+    {
+      "name": "storage.type.part",
+      "match": "(?<![\\w])(?:configuration|feature_def|material|feature|publish|output|region)(?![\\w])"
+    },
+    {
+      "name": "keyword.other.part",
+      "match": "(?<![\\w])(?:from|over|for|as|at|in|of|on|to)(?![\\w])"
+    },
+    {
+      "name": "constant.language.part",
+      "match": "(?<![\\w])(?:false|none|true)(?![\\w])"
+    },
+    {
+      "name": "variable.other.assignment.part",
+      "match": "\\b[a-zA-Z_]\\w*(?=\\s*=(?!=))"
+    },
+    {
+      "name": "constant.numeric.part",
+      "match": "-?\\b\\d+(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?\\b"
+    },
+    {
+      "name": "keyword.operator.part",
+      "match": "±|\\+/-|@|[=:;]"
+    }
+  ],
+  "repository": {},
+  "vocabulary": {
+    "scopes": [
+      {
+        "scope": "support.function.part",
+        "words": [
+          "axis",
+          "body_op",
+          "boolean",
+          "chamfer",
+          "curve",
+          "direct",
+          "draft",
+          "emboss",
+          "extrude",
+          "face_fillet",
+          "fillet",
+          "frame",
+          "full_round",
+          "hole",
+          "import",
+          "library",
+          "loft",
+          "mate_connector",
+          "mirror",
+          "mold",
+          "pattern",
+          "plane",
+          "point",
+          "revolve",
+          "rib",
+          "sheet_metal",
+          "shell",
+          "sketch",
+          "split",
+          "surface",
+          "sweep",
+          "thread",
+          "weldment"
+        ]
+      },
+      {
+        "scope": "keyword.control.part",
+        "words": [
+          "check",
+          "constrain",
+          "input",
+          "let",
+          "link",
+          "part",
+          "property",
+          "publish",
+          "runmat",
+          "solved",
+          "std",
+          "use",
+          "when"
+        ]
+      },
+      {
+        "scope": "storage.type.part",
+        "words": [
+          "configuration",
+          "feature",
+          "feature_def",
+          "material",
+          "output",
+          "publish",
+          "region"
+        ]
+      },
+      {
+        "scope": "keyword.other.part",
+        "words": [
+          "as",
+          "at",
+          "for",
+          "from",
+          "in",
+          "of",
+          "on",
+          "over",
+          "to"
+        ]
+      },
+      {
+        "scope": "constant.language.part",
+        "words": [
+          "false",
+          "none",
+          "true"
+        ]
+      }
+    ],
+    "units": {
+      "scope": "support.type.unit.part",
+      "words": [
+        "%",
+        "A",
+        "B",
+        "C",
+        "GHz",
+        "GPa",
+        "GiB",
+        "Hz",
+        "J",
+        "K",
+        "KiB",
+        "MHz",
+        "MPa",
+        "MV",
+        "MW",
+        "MiB",
+        "N",
+        "Pa",
+        "T",
+        "V",
+        "W",
+        "cm",
+        "deg",
+        "degC",
+        "delta_degC",
+        "ft",
+        "g",
+        "gram",
+        "in",
+        "inch",
+        "kA",
+        "kHz",
+        "kN",
+        "kPa",
+        "kV",
+        "kW",
+        "kg",
+        "km",
+        "m",
+        "mA",
+        "mT",
+        "mV",
+        "mW",
+        "mm",
+        "ms",
+        "nm",
+        "ns",
+        "rad",
+        "s",
+        "um",
+        "us"
+      ]
+    }
+  }
+}

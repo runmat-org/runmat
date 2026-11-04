@@ -1,0 +1,180 @@
+{
+  "name": "assembly",
+  "scopeName": "source.assembly",
+  "fileTypes": [
+    "assembly"
+  ],
+  "generated": "scripts/docs/fea-grammar.mjs from the RunMat dialect registry and front-end registries; do not edit by hand",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash.assembly",
+      "match": "//.*$"
+    },
+    {
+      "name": "string.quoted.double.assembly",
+      "begin": "\"",
+      "end": "\""
+    },
+    {
+      "match": "(-?\\b\\d+(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?\\b|\\])(\\s*)((?:delta_degC|degC|gram|inch|GHz|GPa|GiB|KiB|MHz|MPa|MiB|deg|kHz|kPa|rad|Hz|MV|MW|Pa|cm|ft|in|kA|kN|kV|kW|kg|km|mA|mT|mV|mW|mm|ms|nm|ns|um|us|A|B|C|J|K|N|T|V|W|g|m|s|%)(?:\\s*[/*]\\s*(?:delta_degC|degC|gram|inch|GHz|GPa|GiB|KiB|MHz|MPa|MiB|deg|kHz|kPa|rad|Hz|MV|MW|Pa|cm|ft|in|kA|kN|kV|kW|kg|km|mA|mT|mV|mW|mm|ms|nm|ns|um|us|A|B|C|J|K|N|T|V|W|g|m|s|%)|\\^-?\\d+)*)(?![\\w%])",
+      "captures": {
+        "1": {
+          "patterns": [
+            {
+              "name": "constant.numeric.assembly",
+              "match": "-?\\d.*"
+            }
+          ]
+        },
+        "3": {
+          "name": "support.type.unit.assembly"
+        }
+      }
+    },
+    {
+      "name": "keyword.control.assembly",
+      "match": "(?<![\\w])(?:constrain|assembly|property|publish|runmat|solved|check|input|link|when|let|std|use)(?![\\w])"
+    },
+    {
+      "name": "storage.type.assembly",
+      "match": "(?<![\\w])(?:configuration|occurrence|connector|fasteners|envelope|exploded|property|pattern|publish|mirror|mate)(?![\\w])"
+    },
+    {
+      "name": "keyword.other.assembly",
+      "match": "(?<![\\w])(?:from|over|for|as|at|in|of|on|to)(?![\\w])"
+    },
+    {
+      "name": "constant.language.assembly",
+      "match": "(?<![\\w])(?:false|none|true)(?![\\w])"
+    },
+    {
+      "name": "variable.other.assignment.assembly",
+      "match": "\\b[a-zA-Z_]\\w*(?=\\s*=(?!=))"
+    },
+    {
+      "name": "constant.numeric.assembly",
+      "match": "-?\\b\\d+(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?\\b"
+    },
+    {
+      "name": "keyword.operator.assembly",
+      "match": "±|\\+/-|@|[=:;]"
+    }
+  ],
+  "repository": {},
+  "vocabulary": {
+    "scopes": [
+      {
+        "scope": "keyword.control.assembly",
+        "words": [
+          "assembly",
+          "check",
+          "constrain",
+          "input",
+          "let",
+          "link",
+          "property",
+          "publish",
+          "runmat",
+          "solved",
+          "std",
+          "use",
+          "when"
+        ]
+      },
+      {
+        "scope": "storage.type.assembly",
+        "words": [
+          "configuration",
+          "connector",
+          "envelope",
+          "exploded",
+          "fasteners",
+          "mate",
+          "mirror",
+          "occurrence",
+          "pattern",
+          "property",
+          "publish"
+        ]
+      },
+      {
+        "scope": "keyword.other.assembly",
+        "words": [
+          "as",
+          "at",
+          "for",
+          "from",
+          "in",
+          "of",
+          "on",
+          "over",
+          "to"
+        ]
+      },
+      {
+        "scope": "constant.language.assembly",
+        "words": [
+          "false",
+          "none",
+          "true"
+        ]
+      }
+    ],
+    "units": {
+      "scope": "support.type.unit.assembly",
+      "words": [
+        "%",
+        "A",
+        "B",
+        "C",
+        "GHz",
+        "GPa",
+        "GiB",
+        "Hz",
+        "J",
+        "K",
+        "KiB",
+        "MHz",
+        "MPa",
+        "MV",
+        "MW",
+        "MiB",
+        "N",
+        "Pa",
+        "T",
+        "V",
+        "W",
+        "cm",
+        "deg",
+        "degC",
+        "delta_degC",
+        "ft",
+        "g",
+        "gram",
+        "in",
+        "inch",
+        "kA",
+        "kHz",
+        "kN",
+        "kPa",
+        "kV",
+        "kW",
+        "kg",
+        "km",
+        "m",
+        "mA",
+        "mT",
+        "mV",
+        "mW",
+        "mm",
+        "ms",
+        "nm",
+        "ns",
+        "rad",
+        "s",
+        "um",
+        "us"
+      ]
+    }
+  }
+}

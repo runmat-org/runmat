@@ -373,21 +373,10 @@ pub fn format_f64(value: f64) -> String {
 /// Words that read back as something other than a string.
 const NOT_BARE: &[&str] = &["true", "false", "none", "as", "volatile"];
 
-/// Whether `text` lexes as one plain identifier, so it can be printed without quotes.
+/// Whether `text` lexes as one word (an identifier or keyword), so it can be printed without
+/// quotes and reads back as the same string.
 pub fn is_bare_word(text: &str) -> bool {
-    if text.is_empty() || NOT_BARE.contains(&text) {
-        return false;
-    }
-    let stream = tokenize_design(text);
-    let tokens: Vec<_> = stream
-        .tokens
-        .iter()
-        .filter(|token| token.kind != FeaTokenKind::EndOfFile)
-        .collect();
-    stream.diagnostics.is_empty()
-        && tokens.len() == 1
-        && tokens[0].kind == FeaTokenKind::Identifier
-        && tokens[0].span.end == text.len()
+    !NOT_BARE.contains(&text) && is_bare_key(text)
 }
 
 /// Whether `text` can be a record key without quotes (keywords are allowed there).

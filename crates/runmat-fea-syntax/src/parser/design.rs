@@ -228,10 +228,9 @@ impl FeaParser {
         if declaration {
             self.required_name(&significant, 1, "a declaration requires a name");
             position = 2;
-        } else if significant
-            .get(1)
-            .is_some_and(|index| self.at(*index, FeaTokenKind::Identifier))
-            && !CLAUSE_WORDS.contains(&self.lexeme(significant[1]))
+        } else if significant.get(1).is_some_and(|index| {
+            self.at(*index, FeaTokenKind::Identifier) || self.at(*index, FeaTokenKind::String)
+        }) && !CLAUSE_WORDS.contains(&self.lexeme(significant[1]))
         {
             self.tree
                 .node(NodeKind::Name, significant[1], significant[1] + 1);
@@ -346,9 +345,9 @@ impl FeaParser {
                 NodeKind::Constrain
             }
             w if (w == GenericForm::Publish.word() || w == GenericForm::Check.word())
-                && significant
-                    .get(1)
-                    .is_some_and(|index| is_name_token_at(self, *index)) =>
+                && significant.get(1).is_some_and(|index| {
+                    is_name_token_at(self, *index) || self.at(*index, FeaTokenKind::String)
+                }) =>
             {
                 self.tree
                     .node(NodeKind::Name, significant[1], significant[1] + 1);
@@ -444,7 +443,13 @@ impl FeaParser {
         let [first, second, rest @ ..] = significant else {
             return false;
         };
-        if !is_name_token_at(self, *first) || !self.at(*second, FeaTokenKind::Identifier) {
+        // A name that is not a word is quoted (`sheet "1" = { … }`).
+        let named = self.at(*second, FeaTokenKind::Identifier)
+            || (self.at(*second, FeaTokenKind::String)
+                && rest.first().is_some_and(|index| {
+                    self.at(*index, FeaTokenKind::Colon) || self.at(*index, FeaTokenKind::Equal)
+                }));
+        if !is_name_token_at(self, *first) || !named {
             return false;
         }
         if VALUE_WORDS.contains(&self.lexeme(*first)) {
@@ -593,7 +598,10 @@ impl FeaParser {
 
     fn required_name(&mut self, significant: &[usize], position: usize, message: &str) {
         match significant.get(position) {
-            Some(index) if is_name_token_at(self, *index) => {
+            // A name that is not a word is quoted (`circuit "sensor-node" { … }`).
+            Some(index)
+                if is_name_token_at(self, *index) || self.at(*index, FeaTokenKind::String) =>
+            {
                 self.tree.node(NodeKind::Name, *index, *index + 1);
             }
             Some(index) => {
