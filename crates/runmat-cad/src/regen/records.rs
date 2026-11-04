@@ -62,6 +62,15 @@ pub enum FeatureRecord {
         /// The part of the plate the bends moved, in the plate's frame: the half-plane
         /// `(p − origin)·normal ≥ 0`, for later bends to keep clear of.
         moved: ([f64; 2], [f64; 2]),
+        /// The rigid motion that carries the moved part from the developed plate to where the
+        /// bends put it (world coordinates).
+        motion: crate::regen::kernel::Transform,
+        /// The flat the bend moved, as a profile whose frame puts the sheet between `z = 0`
+        /// and `z = t` (world coordinates): a later bend of that flat bends this profile.
+        flat: crate::regen::kernel::CanonicalProfile,
+        /// The bend whose moved flat this bend bent (none: the plate's unmoved part).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<crate::ids::FeatureId>,
     },
     /// Structural members and their cut list.
     Weldment {

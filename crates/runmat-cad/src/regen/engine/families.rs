@@ -20,6 +20,7 @@ use crate::model::surface::SurfaceFeature;
 use crate::model::weldment::{cut_list, member_cuts, CornerTreatment, WeldmentFeature};
 use crate::refs::history::{FaceGeom, KernelTag};
 use crate::refs::name::Role;
+use crate::refs::naming::Restore;
 use crate::regen::records::{FaceDraft, FeatureRecord, SheetRules};
 
 pub(super) fn line_seg(curve: &str, a: [f64; 2], b: [f64; 2]) -> ProfileSegment {
@@ -1574,7 +1575,7 @@ impl<'a, 'b> Run<'a, 'b> {
             SheetMetalFeature::FlatPattern { fixed_face, .. } => {
                 let h = self.face_handle(i, id, "fixed_face", fixed_face)?;
                 if let Some((maker, rules, None, _)) = self.sheet_of(h.body as usize) {
-                    return self.plate_flat(i, id, &h, &maker, &rules, &simple);
+                    return self.plate_flat(i, id, &h, &maker, &rules, &simple, true);
                 }
                 let Some((maker, rules, Some(sec), depth)) = self.sheet_of(h.body as usize) else {
                     return Err(self.error(
@@ -1766,14 +1767,11 @@ impl<'a, 'b> Run<'a, 'b> {
             SheetMetalFeature::TabAndSlot { .. } => Err(self.not_lowered(id, "tabs and slots")),
             SheetMetalFeature::FormTool { .. } => Err(self.not_lowered(id, "form tools")),
             SheetMetalFeature::Unfold { fixed_face, bends } => {
-                if !bends.is_empty() {
-                    return Err(self.not_lowered(
-                        id,
-                        "unfolding some of a sheet's bends (unfold all of them: leave `bends` empty)",
-                    ));
-                }
                 let h = self.face_handle(i, id, "fixed_face", fixed_face)?;
                 let body = h.body as usize;
+                if !bends.is_empty() {
+                    return self.unfold_some(i, id, &h, bends, &simple);
+                }
                 let Some((maker, _, sec, _)) = self.sheet_of(body) else {
                     return Err(self.error(
                         id,
@@ -1783,9 +1781,11 @@ impl<'a, 'b> Run<'a, 'b> {
                         Vec::new(),
                     ));
                 };
-                // A plate's flat pattern checks that only its bends changed it.
+                // A plate's flat pattern checks that only its bends changed it; a bent
+                // sheet's faces come from its base flange and the unfolds and folds since.
                 if sec.is_some() {
-                    self.only_made_by(id, body, &[maker], "unfold")?;
+                    let rebuilders = self.sheet_rebuilders(i, &maker);
+                    self.only_made_by(id, body, &rebuilders, "unfold")?;
                 }
                 // The flat pattern's strip, in place of the bent sheet.
                 let flat = SheetMetalFeature::FlatPattern {
@@ -1796,19 +1796,17 @@ impl<'a, 'b> Run<'a, 'b> {
                 Ok(self.in_place(compiled, body))
             }
             SheetMetalFeature::Fold { bends } => {
-                if !bends.is_empty() {
-                    return Err(self.not_lowered(
-                        id,
-                        "folding some of a sheet's bends (fold all of them: leave `bends` empty)",
-                    ));
-                }
                 // The latest unfold before this feature, and the sheet it flattened.
-                let unfold = self.doc.features[..i].iter().rev().find(|f| {
-                    matches!(
-                        f.kind,
-                        FeatureKind::SheetMetal(SheetMetalFeature::Unfold { .. })
-                    ) && self.st.records.contains_key(&f.id)
-                });
+                let unfold =
+                    self.doc.features[..i].iter().rev().find(|f| {
+                        matches!(
+                            f.kind,
+                            FeatureKind::SheetMetal(SheetMetalFeature::Unfold { .. })
+                        ) && (self.st.records.contains_key(&f.id)
+                            || self.st.bodies.iter().any(|b| {
+                                b.names.faces.iter().flatten().any(|n| n.maker() == &f.id)
+                            }))
+                    });
                 let Some(unfold) = unfold.map(|f| f.id.clone()) else {
                     return Err(self.error(
                         id,
@@ -1818,11 +1816,25 @@ impl<'a, 'b> Run<'a, 'b> {
                         Vec::new(),
                     ));
                 };
-                let body = self
-                    .st
-                    .bodies
-                    .iter()
-                    .position(|b| b.names.faces.iter().flatten().any(|n| n.maker() == &unfold));
+                // The sheet: the body the unfold, or a fold since, last rebuilt.
+                let mut rebuilt = vec![unfold.clone()];
+                let from = self.doc.feature_index(&unfold).unwrap_or(i);
+                for f in &self.doc.features[from..i] {
+                    if matches!(
+                        f.kind,
+                        FeatureKind::SheetMetal(SheetMetalFeature::Fold { .. })
+                    ) && !rebuilt.contains(&f.id)
+                    {
+                        rebuilt.push(f.id.clone());
+                    }
+                }
+                let body = self.st.bodies.iter().position(|b| {
+                    b.names
+                        .faces
+                        .iter()
+                        .flatten()
+                        .any(|n| rebuilt.contains(n.maker()))
+                });
                 let Some(body) = body else {
                     return Err(self.error(
                         id,
@@ -1842,39 +1854,74 @@ impl<'a, 'b> Run<'a, 'b> {
                     _ => None,
                 };
                 let maker = self.sheet_of(body).map(|s| s.0).or(from_face).filter(|m| {
-                    matches!(
-                        self.st.records.get(m),
-                        Some(FeatureRecord::Sheet {
-                            section: Some(_),
-                            ..
-                        })
-                    )
+                    matches!(self.st.records.get(m), Some(FeatureRecord::Sheet { .. }))
                 });
                 let Some(maker) = maker else {
-                    return Err(self.not_lowered(
-                        id,
-                        "folding a plate's sketched bends and jogs back (suppress the unfold to see the bent plate)",
-                    ));
+                    return Err(self.not_lowered(id, "folding this sheet"));
                 };
+                // A partial fold of a bent sheet: the bends left flat stay flat.
+                if !bends.is_empty() {
+                    if let Some(FeatureRecord::Sheet {
+                        section: Some(sec), ..
+                    }) = self.st.records.get(&maker).cloned()
+                    {
+                        let keys = Self::strip_bend_keys(&sec, bends).ok_or_else(|| {
+                            self.error(
+                                id,
+                                Some("bends"),
+                                DiagCode::RefKindMismatch,
+                                "each entry of `bends` names a bend face of the sheet".into(),
+                                Vec::new(),
+                            )
+                        })?;
+                        return self.strip_some(i, id, body, &maker, None, &[], &keys, &simple);
+                    }
+                }
                 // Faces the rebuild kept may still carry the base flange's names.
-                self.only_made_by(id, body, &[unfold, maker.clone()], "fold")?;
+                rebuilt.push(maker.clone());
+                self.only_made_by(id, body, &rebuilt, "fold")?;
                 let Some(base) = self.doc.feature(&maker).cloned() else {
                     return Err(self.not_lowered(id, "folding this sheet"));
                 };
                 let FeatureKind::SheetMetal(base_kind) = &base.kind else {
                     return Err(self.not_lowered(id, "folding this sheet"));
                 };
-                // The base flange's own tools and names: references to the bent sheet's
-                // faces resolve again after the fold.
-                let compiled = self.sheet_metal(i, &maker, base_kind)?;
-                Ok(self.in_place(compiled, body))
+                // Step one rebuilds the base flange in place with the base flange's tools;
+                // its faces answer to the base flange's names again, so references to the
+                // bent sheet's faces resolve after the fold.
+                let rebuilt = self.sheet_metal(i, &maker, base_kind)?;
+                let Compiled::Op {
+                    op: rebuilt,
+                    operands,
+                    ..
+                } = self.in_place(rebuilt, body)
+                else {
+                    return Err(self.not_lowered(id, "folding this sheet"));
+                };
+                let mut steps = vec![Step {
+                    op: rebuilt,
+                    operands,
+                    naming: simple.at_step(None, vec![Restore::all(&maker)]),
+                }];
+                // Then each sketched bend and jog that stays bent after this fold, replayed in
+                // order: its faces answer to that bend's names again.
+                let mut flat = self.flattened_bends(i, &maker);
+                if bends.is_empty() {
+                    flat.clear();
+                } else {
+                    let folded = self.plate_bend_ids(id, &maker, bends)?;
+                    let folded = self.with_parents(folded);
+                    flat.retain(|b| !folded.contains(b));
+                }
+                steps.extend(self.replay_bends(&maker, &flat, body, &simple));
+                Ok(Compiled::Steps(steps))
             }
         }
     }
 
     /// Refuses a whole-sheet rebuild (unfold, fold) of a body that features besides `makers`
     /// changed: the rebuild comes from the base flange's section and would drop them.
-    fn only_made_by(
+    pub(super) fn only_made_by(
         &mut self,
         id: &FeatureId,
         body: usize,
@@ -1899,7 +1946,36 @@ impl<'a, 'b> Run<'a, 'b> {
 
     /// A new-body sheet op turned into a rebuild of `body` in place: the body is carved away
     /// whole and the op's tools take its place.
-    fn in_place(&self, compiled: Compiled, body: usize) -> Compiled {
+    pub(super) fn in_place(&self, compiled: Compiled, body: usize) -> Compiled {
+        if let Compiled::Steps(mut steps) = compiled {
+            // The first step rebuilds the body in place; later steps read it where it is.
+            let new_body = self.st.bodies.len();
+            if let Some(first) = steps.first_mut() {
+                let naming = first.naming.clone();
+                if let Compiled::Op { op, operands, .. } = self.in_place(
+                    Compiled::Op {
+                        op: first.op.clone(),
+                        operands: first.operands.clone(),
+                        naming,
+                        import: false,
+                        instances: None,
+                        tools: None,
+                    },
+                    body,
+                ) {
+                    first.op = op;
+                    first.operands = operands;
+                }
+            }
+            for s in steps.iter_mut().skip(1) {
+                for o in s.operands.iter_mut() {
+                    if *o == new_body {
+                        *o = body;
+                    }
+                }
+            }
+            return Compiled::Steps(steps);
+        }
         let Compiled::Op {
             op: KernelOp::Labeled { tools, .. },
             naming,
@@ -1943,7 +2019,7 @@ impl<'a, 'b> Run<'a, 'b> {
         )
     }
 
-    fn sketch_of(&self, base: &FeatureId) -> FeatureId {
+    pub(super) fn sketch_of(&self, base: &FeatureId) -> FeatureId {
         match self.doc.feature(base).map(|f| &f.kind) {
             Some(FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. })) => {
                 profile.sketch.clone()
@@ -2233,8 +2309,43 @@ impl<'a, 'b> Run<'a, 'b> {
         let Some((maker, rules, None, _)) = self.sheet_of(body) else {
             return Err(self.not_lowered(
                 id,
-                "bends of an already bent sheet (bend a flat plate, or add the bend to the base flange's chain)",
+                "bends of a sheet made by a bent base flange (bend a flat plate, or add the bend to the base flange's chain)",
             ));
+        };
+        // The flat being bent: the plate's unmoved part, or a flat an earlier bend moved
+        // (its parent), whose own outline and place that bend recorded.
+        let face_names = self.st.entity_names(&h);
+        let parent: Option<(FeatureId, CanonicalProfile, Transform)> = if face_names
+            .iter()
+            .any(|n| n.maker() == &maker)
+        {
+            None
+        } else {
+            let found = face_names.iter().find_map(|n| match n {
+                EntityName::Generated(g) if g.role == Role::SheetFace => {
+                    match (&g.tag, self.st.records.get(&g.feature)) {
+                        (
+                            crate::refs::name::SourceTag::Key { key },
+                            Some(FeatureRecord::PlateBend {
+                                base, flat, motion, ..
+                            }),
+                        ) if base == &maker && key.ends_with(".flat") => {
+                            Some((g.feature.clone(), flat.clone(), *motion))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            });
+            match found {
+                    Some(p) => Some(p),
+                    None => {
+                        return Err(self.not_lowered(
+                            id,
+                            "bends of a bend face or of a jog's middle flat (bend the plate or a flat a bend moved)",
+                        ))
+                    }
+                }
         };
         let Some(n_face) = self.face_normal(&h) else {
             return Err(invalid(self, "face", "the bend face is not flat".into()));
@@ -2290,7 +2401,13 @@ impl<'a, 'b> Run<'a, 'b> {
             }
             _ => return Err(self.not_lowered(id, "bends of this sheet")),
         };
-        let plate = self.profile(i, id, "face", &profile_ref)?;
+        let base_plate = self.profile(i, id, "face", &profile_ref)?;
+        let plate = match &parent {
+            Some((_, flat, _)) => flat.clone(),
+            None => base_plate.clone(),
+        };
+        // World to the developed plate: undo the parent's motion.
+        let back = parent.as_ref().map(|(_, _, m)| inverse(m));
         let pf = plate.frame;
         let n = pf.z;
         // The bend turns towards b; the face whose outward normal is b is the inner face.
@@ -2389,10 +2506,24 @@ impl<'a, 'b> Run<'a, 'b> {
         };
         // Faces other features made (earlier bends, flanges, cuts) must lie wholly on the
         // fixed side: the moved part is rebuilt from the plate's outline.
+        let own = |n: &EntityName| match &parent {
+            None => n.maker() == &maker,
+            // The parent's moved flat: its two faces and its sides.
+            Some((p, _, _)) => match n {
+                EntityName::Generated(g) if &g.feature == p => match (&g.role, &g.tag) {
+                    (Role::SheetFace, crate::refs::name::SourceTag::Key { key }) => {
+                        key.ends_with(".flat")
+                    }
+                    (Role::SheetEdge, _) => matches!(g.ordinal, Some(0) | Some(9)),
+                    _ => false,
+                },
+                _ => false,
+            },
+        };
         let foreign = {
             let live = &self.st.bodies[body];
             live.names.faces.iter().enumerate().any(|(index, names)| {
-                if names.iter().any(|n| n.maker() == &maker) {
+                if names.iter().any(own) {
                     return false;
                 }
                 let g = &live.topology.faces[index].geom;
@@ -2674,9 +2805,15 @@ impl<'a, 'b> Run<'a, 'b> {
         flat.end = Some(FaceLabel::key(Role::SheetFace, moved_key).with_ordinal(1));
         tools.push(flat);
         // The bend lines on the developed plate, for its flat pattern.
+        let bf = base_plate.frame;
         let to2d = |p: [f64; 3]| {
-            let q = sub(p, pf.origin);
-            [dot(q, pf.x), dot(q, pf.y)]
+            let p = back.as_ref().map_or(p, |b| b.apply(p));
+            let q = sub(p, bf.origin);
+            [dot(q, bf.x), dot(q, bf.y)]
+        };
+        let dir2d = |v: [f64; 3]| {
+            let v = back.as_ref().map_or(v, |b| apply_rotation(b, v));
+            [dot(v, bf.x), dot(v, bf.y)]
         };
         let bd = crate::model::sheet_metal::bend_deduction(&rules.rule, t, r, a)
             .map_err(|m| invalid(self, "angle", m))?;
@@ -2707,8 +2844,48 @@ impl<'a, 'b> Run<'a, 'b> {
                 },
             });
         }
-        let moved = (to2d(add(l0, scale(m, s0))), [dot(m, pf.x), dot(m, pf.y)]);
-        self.record_plate_bend(id, body, &maker, &plate, lines, moved)?;
+        let moved = (to2d(add(l0, scale(m, s0))), dir2d(m));
+        // Developed to bent: m, u and b (the inner face's normal) turn to x, u and y, and the
+        // developed point where the moved flat starts goes to the last cursor.
+        let motion = {
+            let mut rotation = [[0.0; 3]; 3];
+            for (r, row) in rotation.iter_mut().enumerate() {
+                for (c, v) in row.iter_mut().enumerate() {
+                    *v = x[r] * m[c] + u[r] * u[c] + y[r] * b[c];
+                }
+            }
+            let start = add(l0, scale(m, s1));
+            let moved_start = Transform {
+                rotation,
+                translation: [0.0; 3],
+            }
+            .apply(start);
+            let local = Transform {
+                rotation,
+                translation: sub(o, moved_start),
+            };
+            // After the parent's motion when this bend bends a moved flat.
+            match &parent {
+                Some((_, _, pm)) => compose(&local, pm),
+                None => local,
+            }
+        };
+        // The moved flat, with the sheet between z = 0 and z = t of its frame.
+        let mut moved_flat = profile.clone();
+        if sign > 0.0 {
+            moved_flat.frame.origin = add(moved_flat.frame.origin, scale(moved_flat.frame.z, -t));
+        }
+        self.record_plate_bend(
+            id,
+            body,
+            &maker,
+            &base_plate,
+            lines,
+            moved,
+            motion,
+            moved_flat,
+            parent.map(|p| p.0),
+        )?;
         // Carve everything of the plate past the fixed flat.
         let cf = frame_of(add(l0, scale(m, s0)), m, u);
         let csign = if dot(cf.z, b) >= 0.0 { 1.0 } else { -1.0 };
@@ -2727,11 +2904,9 @@ impl<'a, 'b> Run<'a, 'b> {
             crate::ids::SketchEntityId::new("c0"),
             FaceLabel::key(Role::Relief, key).with_ordinal(0),
         ));
-        Ok(op(
-            labeled(tools, vec![carve], Combine::Add, false),
-            vec![body],
-            naming.clone(),
-        ))
+        let bend = labeled(tools, vec![carve], Combine::Add, false);
+        self.st.replays.insert(id.clone(), bend.clone());
+        Ok(op(bend, vec![body], naming.clone()))
     }
 
     // --------------------------------------------------------------------- weldments
@@ -3338,6 +3513,49 @@ impl<'a, 'b> Run<'a, 'b> {
             operands,
             NamingContext::simple(id, Vec::new()),
         ))
+    }
+}
+
+/// `R v` for a rigid motion's rotation.
+pub(super) fn apply_rotation(t: &Transform, v: [f64; 3]) -> [f64; 3] {
+    let r = &t.rotation;
+    [
+        r[0][0] * v[0] + r[0][1] * v[1] + r[0][2] * v[2],
+        r[1][0] * v[0] + r[1][1] * v[1] + r[1][2] * v[2],
+        r[2][0] * v[0] + r[2][1] * v[1] + r[2][2] * v[2],
+    ]
+}
+
+/// The inverse of a rigid motion: `p ↦ Rᵀ (p − t)`.
+pub(super) fn inverse(t: &Transform) -> Transform {
+    let mut r = [[0.0; 3]; 3];
+    for (i, row) in r.iter_mut().enumerate() {
+        for (j, v) in row.iter_mut().enumerate() {
+            *v = t.rotation[j][i];
+        }
+    }
+    let rt = Transform {
+        rotation: r,
+        translation: [0.0; 3],
+    };
+    let tt = apply_rotation(&rt, t.translation);
+    Transform {
+        rotation: r,
+        translation: [-tt[0], -tt[1], -tt[2]],
+    }
+}
+
+/// `a ∘ b`: `b` first, then `a`.
+pub(super) fn compose(a: &Transform, b: &Transform) -> Transform {
+    let mut r = [[0.0; 3]; 3];
+    for (i, row) in r.iter_mut().enumerate() {
+        for (j, v) in row.iter_mut().enumerate() {
+            *v = (0..3).map(|k| a.rotation[i][k] * b.rotation[k][j]).sum();
+        }
+    }
+    Transform {
+        rotation: r,
+        translation: add(apply_rotation(a, b.translation), a.translation),
     }
 }
 

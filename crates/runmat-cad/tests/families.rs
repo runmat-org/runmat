@@ -179,7 +179,7 @@ fn chain_sketch_on(id: &str, plane: OriginPlane, pts: &[(f64, f64)], names: &[&s
     sketch(id, s)
 }
 
-fn sheet_doc(chain: &[(f64, f64)], names: &[&str]) -> PartDocument {
+pub fn sheet_doc(chain: &[(f64, f64)], names: &[&str]) -> PartDocument {
     let mut d = PartDocument::new("bracket_sm.part");
     d.features.push(chain_sketch("s_chain", chain, names));
     d.features.push(Feature::new(
@@ -194,12 +194,13 @@ fn sheet_doc(chain: &[(f64, f64)], names: &[&str]) -> PartDocument {
     d
 }
 
-fn sheet_face(curve: &str, side: u32) -> Reference {
+pub fn sheet_face(curve: &str, side: u32) -> Reference {
     Reference::face(EntityName::Generated(GenerationName {
         feature: FeatureId::new("base"),
         role: Role::SheetFace,
         tag: SourceTag::Key { key: curve.into() },
         ordinal: Some(side),
+        step: None,
     }))
 }
 
@@ -207,7 +208,7 @@ fn resolves(r: &RegenResult, site: &str) -> bool {
     r.parts.get(&site.into()).map(|o| o.ok).unwrap_or(false)
 }
 
-fn count_faces(r: &RegenResult, d: &PartDocument, refs: &[Reference]) -> Vec<usize> {
+pub fn count_faces(r: &RegenResult, d: &PartDocument, refs: &[Reference]) -> Vec<usize> {
     let _ = d;
     refs.iter()
         .map(|x| {
@@ -240,6 +241,7 @@ fn base_flange_flat_pattern_and_edge_flange_on_the_kernel() {
                 key: "up+base".into(),
             },
             ordinal: Some(o),
+            step: None,
         }))
     };
     let refs = vec![
@@ -293,6 +295,7 @@ fn base_flange_flat_pattern_and_edge_flange_on_the_kernel() {
         role: Role::SheetEdge,
         tag: SourceTag::Key { key: "base".into() },
         ordinal: Some(1),
+        step: None,
     }));
     d.features.push(Feature::new(
         "lip",
@@ -400,15 +403,68 @@ fn unfold_and_fold_in_place_keep_the_sheet_and_its_names() {
     }
     let refs = vec![sheet_face("up", 0), sheet_face("base", 1)];
     assert_eq!(count_faces(&r, &d, &refs), vec![1, 1]);
-    // Unfolding some bends only is not lowered.
-    let mut partial = d.clone();
-    partial.features.truncate(3);
-    if let FeatureKind::SheetMetal(SheetMetalFeature::Unfold { bends, .. }) =
-        &mut partial.features[2].kind
-    {
-        bends.push(sheet_face("up", 0));
-    }
-    assert!(has(&env.regen(&partial), DiagCode::KernelNotSupported));
+}
+
+pub fn unfold_of(fixed: Reference, bends: Vec<Reference>) -> Feature {
+    Feature::new(
+        "unfold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Unfold {
+            fixed_face: fixed,
+            bends,
+        }),
+    )
+}
+
+pub fn bend_face(feature: &str, key: &str) -> Reference {
+    generated_face(feature, Role::BendFace, key, 0)
+}
+
+#[test]
+fn partial_unfolds_and_folds_of_a_bent_strip() {
+    let env = Env::new();
+    // A channel: up, base and down flats, two bends.
+    let chain = [(0.0, 30.0), (0.0, 0.0), (50.0, 0.0), (50.0, 20.0)];
+    let d = sheet_doc(&chain, &["up", "base", "down"]);
+    let bent = env.regen(&d);
+    assert_clean(&bent);
+    // Both bends named: the same strip as the full unfold.
+    let mut full = d.clone();
+    full.features
+        .push(unfold_of(sheet_face("base", 0), Vec::new()));
+    let full = env.regen(&full);
+    assert_clean(&full);
+    let mut both = d.clone();
+    both.features.push(unfold_of(
+        sheet_face("base", 0),
+        vec![bend_face("base", "up+base"), bend_face("base", "base+down")],
+    ));
+    let r = env.regen(&both);
+    assert_clean(&r);
+    assert_same_box(&r, &full);
+    // One bend: the other stays bent with its names; the flats keep theirs.
+    let mut one = d.clone();
+    one.features.push(unfold_of(
+        sheet_face("base", 0),
+        vec![bend_face("base", "base+down")],
+    ));
+    let r = env.regen(&one);
+    assert_clean(&r);
+    // The bend left bent keeps its names (checked on the kernel in the K1 corpus, where
+    // the bent and flattened regions are exact).
+    assert!(count_faces(&r, &one, &[bend_face("unfold", "base+down")])[0] >= 1);
+    // Fold it back: the channel again, with the base flange's names.
+    let mut back = one.clone();
+    back.features.push(Feature::new(
+        "fold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Fold {
+            bends: vec![bend_face("unfold", "base+down")],
+        }),
+    ));
+    let r = env.regen(&back);
+    assert_clean(&r);
+    assert_same_box(&r, &bent);
+    // The names after the fold are checked exactly on the kernel (K1 corpus): the fake
+    // kernel keeps stale sampled bend faces through an in-place rebuild.
 }
 
 /// An 80 × 40 plate (t = 2, R = 3, K = 0.44) and a sketch line `bl` across it at x = 50.
@@ -461,6 +517,7 @@ pub fn plate_top() -> Reference {
             key: "plate".into(),
         },
         ordinal: Some(1),
+        step: None,
     }))
 }
 
@@ -470,6 +527,7 @@ pub fn generated_face(feature: &str, role: Role, key: &str, ordinal: u32) -> Ref
         role,
         tag: SourceTag::Key { key: key.into() },
         ordinal: Some(ordinal),
+        step: None,
     }))
 }
 
@@ -716,6 +774,17 @@ fn a_plate_with_a_bend_and_a_jog_flattens_to_its_plate_with_the_bend_lines() {
     assert_eq!(dxf.matches("\nLINE\n").count(), 7, "{dxf}");
     assert_eq!(dxf.matches("\nBEND_DOWN\n").count(), 2);
     assert!(dxf.contains("B3 DOWN 60%%d R3 BA 4.063") && dxf.ends_with("0\nEOF\n"));
+    // A flat-pattern drawing view draws the same sheet; it can leave the notes and the
+    // bend table out.
+    let kind = runmat_cad::drawing::ViewKind::FlatPattern {
+        feature: fid("flat"),
+        bend_notes: false,
+        bend_table: false,
+    };
+    let drawn = runmat_cad::drawing::flat_pattern::view_sheet(&kind, layout).expect("a sheet");
+    assert_eq!(drawn.outline, sheet.outline);
+    assert!(drawn.bend_table.is_empty() && drawn.bend_lines.iter().all(|l| l.note.is_empty()));
+    assert_eq!(drawn.bend_lines.len(), 3);
     // A bend table gives the allowance directly.
     let mut tabled = d.clone();
     if let FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { rules, .. }) =
@@ -762,14 +831,210 @@ fn a_plate_with_a_bend_and_a_jog_flattens_to_its_plate_with_the_bend_lines() {
         close(hi[0] - lo[0], 0.08, tol) && close(hi[2] - lo[2], 0.002, tol),
         "{lo:?} {hi:?}"
     );
-    // Folding the plate back is named as not lowered.
+    // While flat, the bends' faces are buried by the unfold.
+    let bend_faces = vec![
+        generated_face("bend", Role::BendFace, "bl", 0),
+        generated_face("bend", Role::SheetFace, "bl.flat", 1),
+        generated_face("jog", Role::BendFace, "bl2", 1),
+        generated_face("jog", Role::BendFace, "bl2.2", 0),
+        generated_face("jog", Role::SheetFace, "bl2.mid", 0),
+        plate_top(),
+    ];
+    // (Whether the plate's top keeps its name where the flat lies on it is the kernel's
+    // call: the fake kernel continues the coincident face, OCCT makes a new one.)
+    assert_eq!(
+        count_faces(&r, &unfolded, &bend_faces[..5]),
+        vec![0, 0, 0, 0, 0]
+    );
+    // Folding the plate back is a compound feature: the plate rebuilt in place, then the bend
+    // and the jog replayed. The bent plate's box comes back and every face answers to the
+    // name its bend gave it.
     unfolded.features.push(Feature::new(
         "fold",
         FeatureKind::SheetMetal(SheetMetalFeature::Fold { bends: Vec::new() }),
     ));
     let r = env.regen(&unfolded);
-    let d0 = diag(&r, DiagCode::KernelNotSupported);
-    assert!(d0.message.contains("plate"), "{}", d0.message);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 1);
+    let bent = env.regen(&bent_plate_doc());
+    assert_same_box(&r, &bent);
+    assert_eq!(
+        count_faces(&r, &unfolded, &bend_faces),
+        vec![1, 1, 1, 1, 1, 1]
+    );
+    // The fold owns its own names, one step per replayed bend.
+    let stepped = Reference::face(EntityName::Generated(GenerationName {
+        feature: fid("fold"),
+        role: Role::BendFace,
+        tag: SourceTag::Key { key: "bl".into() },
+        ordinal: Some(0),
+        step: Some("bend".into()),
+    }));
+    assert_eq!(
+        count_faces(&r, &unfolded, std::slice::from_ref(&stepped)),
+        vec![1]
+    );
+    // Its text form reads back.
+    let text = runmat_cad::syntax::refs::print_reference(&stepped).expect("text form");
+    assert_eq!(text, "feature.fold.face.bend(bl, ordinal = 0, step = bend)");
+    // Every face's names are distinct across the body.
+    let mut seen = std::collections::BTreeSet::new();
+    for n in r.state.bodies[0].names.faces.iter().flatten() {
+        assert!(seen.insert(n.clone()), "{n} twice");
+    }
+}
+
+fn assert_same_box(a: &RegenResult, b: &RegenResult) {
+    let (alo, ahi) = body_box(a);
+    let (blo, bhi) = body_box(b);
+    for k in 0..3 {
+        assert!(
+            close(alo[k], blo[k], 1e-9) && close(ahi[k], bhi[k], 1e-9),
+            "{alo:?} {ahi:?} vs {blo:?} {bhi:?}"
+        );
+    }
+}
+
+/// [`bent_plate_doc`] with the jog suppressed: the plate with its 90° bend only.
+pub fn bend_only_doc() -> PartDocument {
+    let mut d = bent_plate_doc();
+    d.features.retain(|f| f.id.0 != "jog");
+    d
+}
+
+#[test]
+fn partial_unfolds_and_folds_of_a_plate_keep_the_other_bends() {
+    let env = Env::new();
+    let bend_only = env.regen(&bend_only_doc());
+    assert_clean(&bend_only);
+    let jog_face = generated_face("jog", Role::BendFace, "bl2", 0);
+    let bend_face = generated_face("bend", Role::BendFace, "bl", 0);
+    // Unfold the jog only: the plate with the bend alone, the bend's names kept.
+    let mut d = bent_plate_doc();
+    d.features.push(Feature::new(
+        "unfold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Unfold {
+            fixed_face: plate_top(),
+            bends: vec![jog_face.clone()],
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_same_box(&r, &bend_only);
+    assert_eq!(
+        count_faces(&r, &d, &[bend_face.clone(), jog_face.clone()]),
+        vec![1, 0]
+    );
+    let Some(FeatureRecord::FlatPattern { layout, .. }) = r.state.records.get(&fid("unfold"))
+    else {
+        panic!("no unfold record")
+    };
+    let keys: Vec<&str> = layout.bend_lines.iter().map(|l| l.key.as_str()).collect();
+    assert_eq!(keys, vec!["bl2", "bl2.2"]);
+    // Fold everything back: the bent plate.
+    let mut all = d.clone();
+    all.features.push(Feature::new(
+        "fold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Fold { bends: Vec::new() }),
+    ));
+    let r = env.regen(&all);
+    assert_clean(&r);
+    assert_same_box(&r, &env.regen(&bent_plate_doc()));
+    assert_eq!(
+        count_faces(&r, &all, &[bend_face.clone(), jog_face.clone()]),
+        vec![1, 1]
+    );
+    // Unfold everything, then fold the bend only: the plate with the bend alone again.
+    let mut d = bent_plate_doc();
+    d.features.push(Feature::new(
+        "unfold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Unfold {
+            fixed_face: plate_top(),
+            bends: Vec::new(),
+        }),
+    ));
+    d.features.push(Feature::new(
+        "fold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Fold {
+            bends: vec![bend_face.clone()],
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_same_box(&r, &bend_only);
+    assert_eq!(
+        count_faces(&r, &d, &[bend_face.clone(), jog_face.clone()]),
+        vec![1, 0]
+    );
+    // A second fold folds the jog as well.
+    d.features.push(Feature::new(
+        "fold2",
+        FeatureKind::SheetMetal(SheetMetalFeature::Fold { bends: Vec::new() }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_same_box(&r, &env.regen(&bent_plate_doc()));
+    assert_eq!(count_faces(&r, &d, &[bend_face, jog_face]), vec![1, 1]);
+}
+
+#[test]
+fn a_flat_pattern_fixed_on_a_moved_flat_lies_in_that_flat() {
+    let env = Env::new();
+    let mut d = bend_only_doc();
+    let moved = generated_face("bend", Role::SheetFace, "bl.flat", 0);
+    d.features.push(Feature::new(
+        "flat",
+        FeatureKind::SheetMetal(SheetMetalFeature::FlatPattern {
+            fixed_face: moved.clone(),
+            grain: None,
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 2);
+    // The bend turns the far side (x > 50) up 90°: the moved flat is vertical, so the flat
+    // pattern stands in its plane, one thickness thick along x, the plate's 40 mm along y.
+    let flat = &r.state.bodies[1];
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for f in &flat.topology.faces {
+        for k in 0..3 {
+            lo[k] = lo[k].min(f.geom.bbox_min[k]);
+            hi[k] = hi[k].max(f.geom.bbox_max[k]);
+        }
+    }
+    let tol = 2e-4;
+    assert!(close(hi[0] - lo[0], 0.002, tol), "{lo:?} {hi:?}");
+    assert!(close(hi[1] - lo[1], 0.04, tol), "{lo:?} {hi:?}");
+    assert!(close(hi[2] - lo[2], 0.08, tol), "{lo:?} {hi:?}");
+    // The moved flat's face lies inside the pattern's box: it stayed put.
+    let bent = &r.state.bodies[0];
+    let face = bent
+        .names
+        .faces
+        .iter()
+        .position(|n| {
+            n.iter().any(|x| match (&moved, x) {
+                (Reference::Name { name, .. }, y) => name.matches(y),
+                _ => false,
+            })
+        })
+        .expect("moved flat");
+    let g = &bent.topology.faces[face].geom;
+    for k in 0..3 {
+        assert!(
+            g.bbox_min[k] >= lo[k] - tol && g.bbox_max[k] <= hi[k] + tol,
+            "{g:?}"
+        );
+    }
+    let Some(FeatureRecord::FlatPattern { layout, .. }) = r.state.records.get(&fid("flat")) else {
+        panic!("no flat record")
+    };
+    assert!(
+        close(layout.frame.z[0].abs(), 1.0, 1e-12),
+        "{:?}",
+        layout.frame
+    );
 }
 
 #[test]
@@ -829,6 +1094,7 @@ pub fn miter_doc(edges: &[&str], height: f64, gap: f64) -> PartDocument {
                             role: Role::SheetEdge,
                             tag: SourceTag::Key { key: (*e).into() },
                             ordinal: None,
+                            step: None,
                         })),
                     )
                 })
@@ -1069,6 +1335,7 @@ fn a_mitred_frame_makes_four_members_and_a_two_row_cut_list() {
             key: "top/top".into(),
         },
         ordinal: None,
+        step: None,
     }));
     // The top member's top face (the mitred ends may leave it in pieces on the grid): every
     // face with the name lies on the member's top plane.
@@ -1256,6 +1523,7 @@ fn planar_patch_thickens_and_boundary_edges_resolve_by_name() {
                 entity: SketchEntityId::new("b"),
             },
             ordinal: None,
+            step: None,
         }),
     };
     d.features.push(Feature::new(
@@ -1416,6 +1684,7 @@ fn boundary_edge(feature: &str, sketch: &str, curve: &str) -> Reference {
                 entity: SketchEntityId::new(curve),
             },
             ordinal: None,
+            step: None,
         }),
     }
 }
@@ -2014,4 +2283,133 @@ fn mass_properties_and_draft_through_the_analysis_seam() {
     };
     assert_eq!(edges.len(), 12);
     assert!(edges.iter().all(|(_, c)| *c == EdgeContinuity::G0));
+}
+
+/// [`bend_only_doc`] with a line `bl3` drawn on the yz plane at z = 15 mm, across the flat
+/// the bend turned up, and a 90° sketched bend `nested` along it that turns the flat's upper
+/// part back over the plate.
+pub fn nested_bend_doc() -> PartDocument {
+    let mut d = bend_only_doc();
+    let mut line = Sketch {
+        plane: PlaneRef::Datum {
+            datum: runmat_cad::model::datum::DatumRef::OriginPlane {
+                plane: runmat_cad::model::datum::OriginPlane::Yz,
+            },
+        },
+        entities: Vec::new(),
+        constraints: Vec::new(),
+        solved: Default::default(),
+    };
+    line.entities.push(SketchEntity {
+        id: SketchEntityId::new("bl3"),
+        geometry: SketchGeometry::Line {
+            start: PointExpr::mm(-5.0, 15.0),
+            end: PointExpr::mm(45.0, 15.0),
+        },
+        construction: false,
+    });
+    d.features.push(sketch("s_line3", line));
+    d.features.push(Feature::new(
+        "nested",
+        FeatureKind::SheetMetal(SheetMetalFeature::SketchedBend {
+            face: generated_face("bend", Role::SheetFace, "bl.flat", 0),
+            line: (fid("s_line3"), SketchEntityId::new("bl3")),
+            angle: ValueExpr::deg(90.0),
+            radius: None,
+            fixed: PlaneSide::Negative,
+        }),
+    ));
+    d
+}
+
+#[test]
+fn a_bend_of_a_flat_another_bend_moved_bends_that_flat() {
+    let env = Env::new();
+    let mut d = nested_bend_doc();
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 1);
+    let nested = generated_face("nested", Role::BendFace, "bl3", 0);
+    assert_eq!(count_faces(&r, &d, std::slice::from_ref(&nested)), vec![1]);
+    // The flat pattern: the 80 × 40 plate with both bend lines. On the developed plate the
+    // nested line lies where the flat's inner face meets z = 15 mm: past the first bend's
+    // strip (x = 50 + BA/2) by 15 − (t + R) = 10 mm.
+    let mut flat = d.clone();
+    flat.features.push(Feature::new(
+        "flat",
+        FeatureKind::SheetMetal(SheetMetalFeature::FlatPattern {
+            fixed_face: plate_top(),
+            grain: None,
+        }),
+    ));
+    let rf = env.regen(&flat);
+    assert_clean(&rf);
+    let Some(FeatureRecord::FlatPattern { layout, .. }) = rf.state.records.get(&fid("flat")) else {
+        panic!("no flat record")
+    };
+    let ba = PI / 2.0 * (3.0 + 0.44 * 2.0) * 1e-3;
+    let lines: Vec<(&str, f64, f64)> = layout
+        .bend_lines
+        .iter()
+        .map(|l| (l.key.as_str(), l.start[0], l.end[0]))
+        .collect();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(lines[1].0, "bl3");
+    let want = 0.05 + ba / 2.0 + 0.010;
+    assert!(
+        close(lines[1].1, want, 1e-9) && close(lines[1].2, want, 1e-9),
+        "{lines:?} vs {want}"
+    );
+    // Unfold the first bend only: the nested bend lies on its flat, so it unfolds too and
+    // the plate comes back flat.
+    d.features.push(Feature::new(
+        "unfold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Unfold {
+            fixed_face: plate_top(),
+            bends: vec![generated_face("bend", Role::BendFace, "bl", 0)],
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    let (lo, hi) = body_box(&r);
+    let tol = 2e-4;
+    assert!(
+        close(hi[0] - lo[0], 0.08, tol) && close(hi[2] - lo[2], 0.002, tol),
+        "{lo:?} {hi:?}"
+    );
+    // Folding the nested bend folds its parent as well: the doubly bent plate again.
+    d.features.push(Feature::new(
+        "fold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Fold {
+            bends: vec![nested.clone()],
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_same_box(&r, &env.regen(&nested_bend_doc()));
+    assert_eq!(count_faces(&r, &d, &[nested]), vec![1]);
+}
+
+#[test]
+fn a_twice_bent_plate_and_its_flat_pattern_read_back_from_their_text() {
+    let mut d = nested_bend_doc();
+    d.features.push(Feature::new(
+        "flat",
+        FeatureKind::SheetMetal(SheetMetalFeature::FlatPattern {
+            fixed_face: plate_top(),
+            grain: None,
+        }),
+    ));
+    let text = runmat_cad::syntax::print_part(&d, &[]).expect("prints");
+    let back = runmat_cad::syntax::parse_part(d.path.as_str(), &text);
+    assert_eq!(
+        back.document.as_ref().map(|b| &b.features),
+        Some(&d.features),
+        "{text}\n{:?}",
+        back.diagnostics
+    );
+    // The text of the Desktop's sheet metal scene.
+    if let Ok(path) = std::env::var("RUNMAT_SHEET_SCENE") {
+        std::fs::write(path, &text).expect("scene written");
+    }
 }
