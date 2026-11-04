@@ -539,7 +539,14 @@ fn copy_room_formats_is_a_board_command_on_rooms() {
     let ids: Vec<&str> = command.inputs.iter().map(|f| f.id.as_str()).collect();
     assert_eq!(
         ids,
-        ["source", "targets", "placement", "routing", "room_shape"]
+        [
+            "source",
+            "targets",
+            "placement",
+            "routing",
+            "pours",
+            "room_shape"
+        ]
     );
     let menu = catalog
         .context_menu(
@@ -548,4 +555,105 @@ fn copy_room_formats_is_a_board_command_on_rooms() {
         )
         .expect("rooms have a context menu");
     assert_eq!(menu.quick[0], "board.copy-room-formats");
+}
+
+/// A rectangle `inset` inside the room's bounding box.
+fn inside_room(board: &Board, room: &str, inset: f64) -> runmat_circuit::geom::poly::Polygon {
+    let b = board
+        .rooms
+        .iter()
+        .find(|r| r.name == room)
+        .unwrap()
+        .outline
+        .bbox();
+    let (x0, y0, x1, y1) = (
+        b.min.x + mm(inset),
+        b.min.y + mm(inset),
+        b.max.x - mm(inset),
+        b.max.y - mm(inset),
+    );
+    runmat_circuit::geom::poly::Polygon {
+        outer: vec![
+            Point::new(x0, y0),
+            Point::new(x1, y0),
+            Point::new(x1, y1),
+            Point::new(x0, y1),
+        ],
+        holes: Vec::new(),
+    }
+}
+
+#[test]
+fn copy_room_formats_copies_pours_on_the_mapped_nets() {
+    use runmat_circuit::layout::Zone;
+    let sc = eco_scenario();
+    let mut board = sc.board.clone();
+    let (net, (path, pad)) = route_in_room(&mut board, "ch[0]");
+    let other = path.replacen("/ch[0]/", "/ch[1]/", 1);
+    let target_net = board
+        .footprints
+        .values()
+        .find(|f| f.component.as_deref() == Some(&other))
+        .and_then(|f| f.pad_nets.get(&pad).copied())
+        .unwrap();
+    let source_net = board.net(&net);
+    // A pour on the channel's own net and a keep-clear pour with no net in ch[0]; in ch[1] a
+    // stale unlocked pour on the counterpart net and a locked one.
+    let add = |board: &mut Board, room: &str, net, inset: f64, locked: bool| {
+        let id = board.alloc();
+        let mut z = Zone::new(id, "", net, vec![0], inside_room(board, room, inset));
+        z.locked = locked;
+        board.zones.insert(id, z);
+        id
+    };
+    add(&mut board, "ch[0]", source_net, 0.5, false);
+    add(&mut board, "ch[0]", None, 1.0, false);
+    let stale = add(&mut board, "ch[1]", Some(target_net), 0.7, false);
+    let kept = add(&mut board, "ch[1]", Some(target_net), 0.9, true);
+    let o = RoomFormatOptions {
+        placement: false,
+        routing: false,
+        room_shape: false,
+        pours: true,
+    };
+    let report = copy_room_formats(&mut board, "ch[0]", &["ch[1]".to_owned()], &o).unwrap();
+    let copy = &report.copies[0];
+    assert_eq!(copy.pours_added.len(), 2, "{copy:?}");
+    assert!(copy.pours_removed.contains(&stale.0));
+    assert!(!board.zones.contains_key(&stale));
+    assert!(board.zones.contains_key(&kept), "a locked pour stays");
+    let src = board
+        .rooms
+        .iter()
+        .find(|r| r.name == "ch[0]")
+        .unwrap()
+        .outline
+        .bbox();
+    let dst = board
+        .rooms
+        .iter()
+        .find(|r| r.name == "ch[1]")
+        .unwrap()
+        .outline
+        .bbox();
+    let d = dst.min - src.min;
+    let added: Vec<&Zone> = copy
+        .pours_added
+        .iter()
+        .map(|id| &board.zones[&runmat_circuit::layout::ItemId(*id)])
+        .collect();
+    assert!(added.iter().any(|z| z.net == Some(target_net)
+        && z.outline.outer[0] == inside_room(&board, "ch[0]", 0.5).outer[0] + d));
+    assert!(added.iter().any(|z| z.net.is_none()));
+
+    // Without the option the pours stay.
+    let mut again = sc.board.clone();
+    add(&mut again, "ch[0]", None, 1.0, false);
+    let zones = again.zones.len();
+    let o = RoomFormatOptions {
+        pours: false,
+        ..RoomFormatOptions::default()
+    };
+    copy_room_formats(&mut again, "ch[0]", &["ch[1]".to_owned()], &o).unwrap();
+    assert_eq!(again.zones.len(), zones);
 }

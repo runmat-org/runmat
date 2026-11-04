@@ -33,7 +33,7 @@ pub struct PlacedFootprint {
     pub path: Option<String>,
 }
 
-fn graphic(node: &SExpr, local: &dyn Fn(Point) -> Point) -> Option<(String, Graphic)> {
+pub(crate) fn graphic(node: &SExpr, local: &dyn Fn(Point) -> Point) -> Option<(String, Graphic)> {
     let layer = node.child_arg("layer")?.to_string();
     let width = node
         .child("stroke")
@@ -518,7 +518,12 @@ fn stroke(w: Coord) -> SExpr {
     )
 }
 
-fn graphic_node(g: &Graphic, layer: &str, local: &dyn Fn(Point) -> Point, seed: &str) -> SExpr {
+pub(crate) fn graphic_node(
+    g: &Graphic,
+    layer: &str,
+    local: &dyn Fn(Point) -> Point,
+    seed: &str,
+) -> SExpr {
     let l = SExpr::list("layer", vec![SExpr::str(layer)]);
     let fill = |f: bool| SExpr::list("fill", vec![SExpr::sym(if f { "solid" } else { "none" })]);
     match g {

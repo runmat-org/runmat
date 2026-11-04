@@ -16,8 +16,9 @@ use crate::review::ReviewFinding;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Bumped on any change to the projection's shape.
-pub const CIRCUIT_INDEX_FORMAT_VERSION: u32 = 3;
+/// The projection's format version. This release's shape is version 1; a later release that
+/// changes the shape bumps it.
+pub const CIRCUIT_INDEX_FORMAT_VERSION: u32 = 1;
 
 /// The parameters that carry a component's shown value, in order of preference.
 const VALUE_PARAMS: [&str; 4] = ["resistance", "capacitance", "inductance", "frequency"];

@@ -182,6 +182,8 @@ pub(super) fn add(c: &mut Catalog) {
             flag("placement", "Copy placement", true),
             flag("routing", "Copy routing", true)
                 .help("Replaces the routing on the matching nets inside each target room."),
+            flag("pours", "Copy pours", true)
+                .help("Replaces the pours on the matching nets inside each target room."),
             flag("room_shape", "Copy room shape", true),
         ])
         .when(selected(&[K::Room]))

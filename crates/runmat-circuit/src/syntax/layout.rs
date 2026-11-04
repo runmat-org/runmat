@@ -29,9 +29,8 @@
 //!   whatever a later release's defaults are.
 //!
 //! **Versions.** `version` is the section's format version, [`SYNC_VERSION`]. The writer always
-//! writes the current version. A reader takes the current version and migrates each older one
-//! it knows; version 1 is the first, so there is nothing to migrate yet. A newer version is an
-//! error, and the board then has no sync record rather than a misread one. A layout without the
+//! writes it, and the reader reads only it. Any other version is an error, and the board then
+//! has no sync record rather than a misread one. A layout without the
 //! section (a KiCad import, a board laid out before its first ECO) has an empty record: its
 //! first compare is two-way, and footprints link to components by designator when
 //! `relink_by_designator` is on. Applying that ECO writes the section.
@@ -364,14 +363,13 @@ impl SectionReader {
                 ));
                 return;
             }
-            Some((v, at)) if v < 1 => {
+            Some((v, at)) if v != SYNC_VERSION => {
                 self.diagnostics.push(diagnostic(
                     at,
-                    format!("there is no sync section version {v}"),
+                    format!("there is no sync section version {v}; this release reads version {SYNC_VERSION}"),
                 ));
                 return;
             }
-            // Version 1 is the first; older versions would migrate here.
             Some(_) => {}
         }
         for statement in statements {

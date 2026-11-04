@@ -502,3 +502,237 @@ fn custom_pad_primitives_union_with_the_anchor() {
     };
     assert_eq!(h2.len(), 1);
 }
+
+/// Text, graphics, dimensions and fiducials: exported, re-imported and edited in place.
+#[test]
+fn board_text_graphics_dimensions_and_fiducials_map_both_ways() {
+    use runmat_circuit::library::Graphic;
+    let p = runmat_circuit::fixture::LargeParams {
+        channels: 1,
+        copper_layers: 2,
+        route_every: 0,
+        pours: false,
+    };
+    let (_, _, _, mut board) = runmat_circuit::fixture::large(&p);
+    let id = board.alloc();
+    board.texts.insert(
+        id,
+        BoardText {
+            id,
+            layer: Layer::Silk(Side::Top),
+            at: Point::new(mm(5.0), mm(6.0)),
+            text: "REV A".into(),
+            size: mm(1.2),
+            thickness: mm(0.18),
+            angle: 90.0,
+            mirrored: false,
+        },
+    );
+    let id = board.alloc();
+    board.texts.insert(
+        id,
+        BoardText {
+            id,
+            layer: Layer::Silk(Side::Bottom),
+            at: Point::new(mm(5.0), mm(9.0)),
+            text: "BOTTOM".into(),
+            size: mm(1.0),
+            thickness: mm(0.15),
+            angle: 0.0,
+            mirrored: true,
+        },
+    );
+    let id = board.alloc();
+    board.graphics.insert(
+        id,
+        BoardGraphic {
+            id,
+            layer: Layer::Fab(Side::Top),
+            graphic: Graphic::Rect {
+                a: Point::new(0, 0),
+                b: Point::new(mm(3.0), mm(2.0)),
+                width: mm(0.1),
+                fill: false,
+            },
+        },
+    );
+    let id = board.alloc();
+    board.graphics.insert(
+        id,
+        BoardGraphic {
+            id,
+            layer: Layer::User(2),
+            graphic: Graphic::Line {
+                points: vec![Point::new(0, 0), Point::new(mm(4.0), 0)],
+                width: mm(0.2),
+            },
+        },
+    );
+    let id = board.alloc();
+    board.dimensions.insert(
+        id,
+        Dimension {
+            id,
+            layer: Layer::User(0),
+            a: Point::new(0, 0),
+            b: Point::new(mm(20.0), 0),
+            offset: mm(3.0),
+            precision: 3,
+        },
+    );
+    let id = board.alloc();
+    board.fiducials.insert(
+        id,
+        Fiducial {
+            id,
+            name: "FID1".into(),
+            at: Point::new(mm(2.0), mm(2.0)),
+            side: Side::Top,
+            diameter: mm(1.0),
+            opening: mm(2.0),
+            locked: true,
+        },
+    );
+
+    let text = pcb::write_board(&board);
+    assert!(
+        text.contains("(gr_text \"REV A\""),
+        "{}",
+        &text[..400.min(text.len())]
+    );
+    assert!(
+        text.contains("(gr_rect") && text.contains("\"User.2\"") && text.contains("(dimension")
+    );
+    assert!(text.contains("Fiducial:Fiducial_1mm_Mask2mm"));
+    let back = pcb::read(&text).unwrap();
+    let b = &back.board;
+    let texts: Vec<_> = b
+        .texts
+        .values()
+        .map(|t| {
+            (
+                t.layer,
+                t.at,
+                t.text.clone(),
+                t.size,
+                t.thickness,
+                t.angle,
+                t.mirrored,
+            )
+        })
+        .collect();
+    let want: Vec<_> = board
+        .texts
+        .values()
+        .map(|t| {
+            (
+                t.layer,
+                t.at,
+                t.text.clone(),
+                t.size,
+                t.thickness,
+                t.angle,
+                t.mirrored,
+            )
+        })
+        .collect();
+    assert_eq!(texts, want);
+    let graphics: Vec<_> = b
+        .graphics
+        .values()
+        .map(|g| (g.layer, g.graphic.clone()))
+        .collect();
+    assert_eq!(
+        graphics,
+        board
+            .graphics
+            .values()
+            .map(|g| (g.layer, g.graphic.clone()))
+            .collect::<Vec<_>>()
+    );
+    let dims: Vec<_> = b
+        .dimensions
+        .values()
+        .map(|d| (d.layer, d.a, d.b, d.offset, d.precision))
+        .collect();
+    assert_eq!(
+        dims,
+        board
+            .dimensions
+            .values()
+            .map(|d| (d.layer, d.a, d.b, d.offset, d.precision))
+            .collect::<Vec<_>>()
+    );
+    let fids: Vec<_> = b
+        .fiducials
+        .values()
+        .map(|f| {
+            (
+                f.name.clone(),
+                f.at,
+                f.side,
+                f.diameter,
+                f.opening,
+                f.locked,
+            )
+        })
+        .collect();
+    assert_eq!(
+        fids,
+        board
+            .fiducials
+            .values()
+            .map(|f| (
+                f.name.clone(),
+                f.at,
+                f.side,
+                f.diameter,
+                f.opening,
+                f.locked
+            ))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        b.footprints.len(),
+        board.footprints.len(),
+        "a fiducial is not a part"
+    );
+    assert_eq!(back.write(), text, "unchanged: identical");
+
+    // An edit lands on the original node and keeps the tokens RunMat doesn't model.
+    let marked = text.replacen(
+        "(gr_text \"REV A\"",
+        "(gr_text \"REV A\" (custom_token kept)",
+        1,
+    );
+    let mut doc = pcb::read(&marked).unwrap();
+    let tid = *doc
+        .board
+        .texts
+        .iter()
+        .find(|(_, t)| t.text == "REV A")
+        .unwrap()
+        .0;
+    doc.board.texts.get_mut(&tid).unwrap().at = Point::new(mm(7.0), mm(6.0));
+    let fid = *doc.board.fiducials.keys().next().unwrap();
+    doc.board.fiducials.get_mut(&fid).unwrap().at = Point::new(mm(3.0), mm(3.0));
+    let did = *doc.board.dimensions.keys().next().unwrap();
+    doc.board.dimensions.get_mut(&did).unwrap().precision = 1;
+    let out = doc.write();
+    assert!(out.contains("(custom_token kept)"));
+    let again = pcb::read(&out).unwrap();
+    assert!(again
+        .board
+        .texts
+        .values()
+        .any(|t| t.text == "REV A" && t.at == Point::new(mm(7.0), mm(6.0))));
+    assert_eq!(
+        again.board.fiducials.values().next().unwrap().at,
+        Point::new(mm(3.0), mm(3.0))
+    );
+    assert_eq!(again.board.dimensions.values().next().unwrap().precision, 1);
+    // A deleted text is dropped.
+    let mut doc = pcb::read(&text).unwrap();
+    doc.board.texts.retain(|_, t| t.text != "BOTTOM");
+    assert!(!doc.write().contains("BOTTOM"));
+}

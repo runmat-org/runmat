@@ -13,6 +13,9 @@
 //!   side (a locked counterpart stays where it is and is reported);
 //! - copies the tracks and vias inside the source room on mapped nets, onto the mapped nets,
 //!   after removing the unlocked copper on those nets inside the target room;
+//! - copies the pours inside the source room the same way: a pour on a mapped net goes onto
+//!   the mapped net, a pour with no net goes as it is, and the target room's unlocked pours on
+//!   those nets are removed first;
 //! - optionally gives the target room the source room's shape.
 //!
 //! Copper whose net maps to more than one target net is not copied and is reported. The edit
@@ -21,7 +24,7 @@
 
 use crate::geom::poly::Polygon;
 use crate::geom::Point;
-use crate::layout::{Board, ItemId, NetId, Room, Track, TrackGeom, Via};
+use crate::layout::{Board, ItemId, NetId, Room, Track, TrackGeom, Via, Zone};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// What to copy.
@@ -33,6 +36,9 @@ pub struct RoomFormatOptions {
     pub routing: bool,
     /// The source room's outline, moved to the target room's lower-left corner.
     pub room_shape: bool,
+    /// Copper pours on the mapped nets (and pours with no net) that lie inside the source room,
+    /// replacing the target room's unlocked pours on those nets.
+    pub pours: bool,
 }
 
 impl Default for RoomFormatOptions {
@@ -41,6 +47,7 @@ impl Default for RoomFormatOptions {
             placement: true,
             routing: true,
             room_shape: true,
+            pours: true,
         }
     }
 }
@@ -55,6 +62,8 @@ pub struct RoomCopy {
     pub vias_added: Vec<u64>,
     pub tracks_removed: Vec<u64>,
     pub vias_removed: Vec<u64>,
+    pub pours_added: Vec<u64>,
+    pub pours_removed: Vec<u64>,
     /// Items left as they were, with why (`R12: locked`).
     pub skipped: Vec<String>,
 }
@@ -108,6 +117,15 @@ fn within<'a>(room: &str, path: &'a str) -> Option<&'a str> {
 
 fn inside(room: &Polygon, p: Point) -> bool {
     room.contains(p) != Some(false)
+}
+
+/// A pour lies inside a room when every vertex of its outline does.
+fn zone_inside(room: &Polygon, z: &Zone) -> bool {
+    z.outline
+        .outer
+        .iter()
+        .chain(z.outline.holes.iter().flatten())
+        .all(|p| inside(room, *p))
 }
 
 fn track_inside(room: &Polygon, t: &Track) -> bool {
@@ -328,6 +346,46 @@ pub fn copy_room_formats(
                 v.id = next.alloc();
                 copy.vias_added.push(v.id.0);
                 next.vias.insert(v.id, v);
+            }
+        }
+        if o.pours {
+            // Pours on a net that maps to more than one target net are not copied (reported
+            // with the net above); pours with no net copy as they are.
+            let target_nets: BTreeSet<NetId> = mapped.values().copied().collect();
+            let stale: Vec<ItemId> = next
+                .zones
+                .values()
+                .filter(|z| {
+                    !z.locked
+                        && z.net.is_none_or(|n| target_nets.contains(&n))
+                        && zone_inside(&outline, z)
+                })
+                .map(|z| z.id)
+                .collect();
+            for id in &stale {
+                next.zones.remove(id);
+                copy.pours_removed.push(id.0);
+            }
+            let pours: Vec<Zone> = before
+                .zones
+                .values()
+                .filter(|z| zone_inside(&src.outline, z))
+                .filter_map(|z| match z.net {
+                    None => Some((z, None)),
+                    Some(n) => mapped.get(&n).map(|t| (z, Some(*t))),
+                })
+                .map(|(z, net)| Zone {
+                    id: ItemId(0),
+                    net,
+                    outline: moved_outline(&z.outline, d),
+                    fill: BTreeMap::new(),
+                    ..z.clone()
+                })
+                .collect();
+            for mut z in pours {
+                z.id = next.alloc();
+                copy.pours_added.push(z.id.0);
+                next.zones.insert(z.id, z);
             }
         }
         if o.room_shape {

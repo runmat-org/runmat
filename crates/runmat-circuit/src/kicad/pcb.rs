@@ -4,9 +4,13 @@
 //! `setup`/`stackup`, `net`, `footprint`, `segment`, `arc`, `via` (through, `blind`,
 //! `micro`), `zone` (copper pours with priority, clearance, minimum thickness, thermal
 //! settings, island removal, filled polygons; keepout zones become [`Keepout`]s), and the
-//! `Edge.Cuts` graphics that form the outline and cutouts, and the board-level
-//! [`SYNC_PROPERTY`] holding the sync record. Everything else (text, dimensions,
-//! groups, plot settings, generator data, unknown future tokens) stays in the tree.
+//! `Edge.Cuts` graphics that form the outline and cutouts, board text (`gr_text`) and
+//! graphics (`gr_line`, `gr_rect`, `gr_circle`, `gr_arc`, `gr_poly`) on the layers RunMat
+//! models, aligned dimensions, fiducials (one-pad footprints from a `Fiducial` library entry),
+//! and the board-level [`SYNC_PROPERTY`] holding the sync record (KiCad 8 and 9 read a
+//! top-level `(property "name" "value")` as a board property and write it back). Design rules
+//! travel in the project's `.kicad_dru` ([`super::dru`]). Everything else (other dimension
+//! types, groups, plot settings, generator data, unknown future tokens) stays in the tree.
 //!
 //! [`KicadPcb::write`] walks the original tree: each mapped item that is unchanged is written
 //! verbatim; an edited item is regenerated *onto its original node*, replacing only the
@@ -28,6 +32,10 @@ enum Key {
     Via(ItemId),
     Zone(ItemId),
     Keepout(ItemId),
+    Text(ItemId),
+    Graphic(ItemId),
+    Dimension(ItemId),
+    Fiducial(ItemId),
     Edge,
     Net,
     Setup,
@@ -275,6 +283,13 @@ pub fn read(text: &str) -> Result<KicadPcb, String> {
             Some("setup") => {
                 origin.insert(idx, Key::Setup);
             }
+            Some("footprint") if fiducial_of(node, ItemId(0)).is_some() => {
+                let id = board.alloc();
+                if let Some(f) = fiducial_of(node, id) {
+                    board.fiducials.insert(id, f);
+                    origin.insert(idx, Key::Fiducial(id));
+                }
+            }
             Some("footprint") => {
                 let f = footprint::read(node, true);
                 let id = board.alloc();
@@ -482,6 +497,30 @@ pub fn read(text: &str) -> Result<KicadPcb, String> {
                     _ => {}
                 }
             }
+            Some("gr_text") => {
+                let id = ItemId(board.next_id);
+                if let Some(t) = text_of(node, id, n_copper) {
+                    board.alloc();
+                    board.texts.insert(id, t);
+                    origin.insert(idx, Key::Text(id));
+                }
+            }
+            Some(h) if h.starts_with("gr_") => {
+                let id = ItemId(board.next_id);
+                if let Some(g) = graphic_of(node, id, n_copper) {
+                    board.alloc();
+                    board.graphics.insert(id, g);
+                    origin.insert(idx, Key::Graphic(id));
+                }
+            }
+            Some("dimension") => {
+                let id = ItemId(board.next_id);
+                if let Some(d) = dimension_of(node, id, n_copper) {
+                    board.alloc();
+                    board.dimensions.insert(id, d);
+                    origin.insert(idx, Key::Dimension(id));
+                }
+            }
             _ => {}
         }
     }
@@ -515,6 +554,268 @@ pub fn read(text: &str) -> Result<KicadPcb, String> {
 }
 
 type Codes = BTreeMap<NetId, String>;
+
+/// A non-copper layer by its KiCad name; copper layers by [`copper_index`].
+fn layer_of(name: &str, n: u8) -> Option<Layer> {
+    if let Some(i) = copper_index(name, n) {
+        return Some(Layer::Copper(i));
+    }
+    let side = |f: bool| if f { Side::Top } else { Side::Bottom };
+    Some(match name {
+        "F.Mask" | "B.Mask" => Layer::Mask(side(name.starts_with('F'))),
+        "F.Paste" | "B.Paste" => Layer::Paste(side(name.starts_with('F'))),
+        "F.SilkS" | "B.SilkS" => Layer::Silk(side(name.starts_with('F'))),
+        "F.Fab" | "B.Fab" => Layer::Fab(side(name.starts_with('F'))),
+        "F.CrtYd" | "B.CrtYd" => Layer::Courtyard(side(name.starts_with('F'))),
+        "Edge.Cuts" => Layer::Edge,
+        "Dwgs.User" => Layer::User(0),
+        _ => Layer::User(
+            name.strip_prefix("User.")?
+                .parse()
+                .ok()
+                .filter(|k| *k > 0)?,
+        ),
+    })
+}
+
+/// The KiCad name of a layer.
+fn layer_name(l: Layer, n: u8) -> String {
+    let f =
+        |s: Side, front: &str, back: &str| (if s == Side::Top { front } else { back }).to_owned();
+    match l {
+        Layer::Copper(i) => copper_layer(i, n),
+        Layer::Mask(s) => f(s, "F.Mask", "B.Mask"),
+        Layer::Paste(s) => f(s, "F.Paste", "B.Paste"),
+        Layer::Silk(s) => f(s, "F.SilkS", "B.SilkS"),
+        Layer::Fab(s) => f(s, "F.Fab", "B.Fab"),
+        Layer::Courtyard(s) => f(s, "F.CrtYd", "B.CrtYd"),
+        Layer::Edge => "Edge.Cuts".into(),
+        Layer::User(0) => "Dwgs.User".into(),
+        Layer::User(k) => format!("User.{k}"),
+    }
+}
+
+fn font_size(node: &SExpr) -> (Option<Coord>, Option<Coord>) {
+    let font = node.child("effects").and_then(|e| e.child("font"));
+    (
+        font.and_then(|f| mm_of(f.child("size"))),
+        font.and_then(|f| mm_of(f.child("thickness"))),
+    )
+}
+
+fn text_of(node: &SExpr, id: ItemId, n: u8) -> Option<BoardText> {
+    let layer = layer_of(node.child_arg("layer")?, n)?;
+    let (at, angle) = at_of(node.child("at"));
+    let (size, thickness) = font_size(node);
+    let size = size.unwrap_or(mm(1.0));
+    let mirrored = node
+        .child("effects")
+        .and_then(|e| e.child("justify"))
+        .is_some_and(|j| j.items().iter().skip(1).any(|x| x.atom() == Some("mirror")));
+    Some(BoardText {
+        id,
+        layer,
+        at,
+        text: node.arg(0)?.to_owned(),
+        size,
+        thickness: thickness.unwrap_or(size / 7),
+        angle,
+        mirrored,
+    })
+}
+
+fn text_node(t: &BoardText, n: u8) -> SExpr {
+    let mut effects = vec![SExpr::list(
+        "font",
+        vec![
+            SExpr::list("size", vec![len(t.size), len(t.size)]),
+            SExpr::list("thickness", vec![len(t.thickness)]),
+        ],
+    )];
+    if t.mirrored {
+        effects.push(SExpr::list("justify", vec![SExpr::sym("mirror")]));
+    }
+    SExpr::list(
+        "gr_text",
+        vec![
+            SExpr::str(&t.text),
+            SExpr::list("at", vec![len(t.at.x), len(-t.at.y), SExpr::num(t.angle)]),
+            SExpr::list("layer", vec![SExpr::str(&layer_name(t.layer, n))]),
+            uuid_node(&format!("x{}", t.id.0)),
+            SExpr::list("effects", effects),
+        ],
+    )
+}
+
+fn graphic_of(node: &SExpr, id: ItemId, n: u8) -> Option<BoardGraphic> {
+    let (layer, graphic) = footprint::graphic(node, &|p| p)?;
+    Some(BoardGraphic {
+        id,
+        layer: layer_of(&layer, n)?,
+        graphic,
+    })
+}
+
+fn board_graphic_node(g: &BoardGraphic, n: u8) -> SExpr {
+    let mut node = footprint::graphic_node(
+        &g.graphic,
+        &layer_name(g.layer, n),
+        &|p| p,
+        &format!("g{}", g.id.0),
+    );
+    if let Some(head) = node.items_mut().and_then(|v| v.first_mut()) {
+        if let Some(name) = head.atom() {
+            *head = SExpr::sym(&name.replacen("fp_", "gr_", 1));
+        }
+    }
+    node
+}
+
+/// An aligned dimension (`(dimension (type aligned) … (pts a b) (height h))`); other types stay
+/// in the tree.
+fn dimension_of(node: &SExpr, id: ItemId, n: u8) -> Option<Dimension> {
+    if node.child_arg("type") != Some("aligned") {
+        return None;
+    }
+    let pts = super::pts_of(node.child("pts"));
+    let (a, b) = (*pts.first()?, *pts.get(1)?);
+    Some(Dimension {
+        id,
+        layer: layer_of(node.child_arg("layer")?, n)?,
+        a,
+        b,
+        // KiCad's height is measured to the left of a → b with y down: RunMat's offset sign.
+        offset: -mm_of(node.child("height")).unwrap_or(0),
+        precision: node
+            .child("format")
+            .and_then(|f| f.child_f("precision"))
+            .map_or(2, |p| p as u8),
+    })
+}
+
+fn dimension_node(d: &Dimension, n: u8) -> SExpr {
+    SExpr::list(
+        "dimension",
+        vec![
+            SExpr::list("type", vec![SExpr::sym("aligned")]),
+            SExpr::list("layer", vec![SExpr::str(&layer_name(d.layer, n))]),
+            uuid_node(&format!("d{}", d.id.0)),
+            SExpr::list("pts", vec![xy("xy", d.a), xy("xy", d.b)]),
+            SExpr::list("height", vec![len(-d.offset)]),
+            SExpr::list(
+                "format",
+                vec![
+                    SExpr::list("units", vec![SExpr::sym("2")]),
+                    SExpr::list("units_format", vec![SExpr::sym("1")]),
+                    SExpr::list("precision", vec![SExpr::sym(&d.precision.to_string())]),
+                ],
+            ),
+            SExpr::list(
+                "style",
+                vec![
+                    SExpr::list("thickness", vec![SExpr::num(0.15)]),
+                    SExpr::list("arrow_length", vec![SExpr::num(1.27)]),
+                    SExpr::list("text_position_mode", vec![SExpr::sym("0")]),
+                    SExpr::list("extension_height", vec![SExpr::num(0.58642)]),
+                    SExpr::list("keep_text_aligned", vec![SExpr::sym("yes")]),
+                ],
+            ),
+        ],
+    )
+}
+
+/// A fiducial: a footprint from a `Fiducial` library entry with one round pad and no net. The
+/// mask opening is the pad plus twice its `solder_mask_margin` (the pad itself without one).
+fn fiducial_of(node: &SExpr, id: ItemId) -> Option<Fiducial> {
+    let lib = node.arg(0)?;
+    if !lib.to_ascii_lowercase().contains("fiducial") {
+        return None;
+    }
+    let pads: Vec<&SExpr> = node.children("pad").collect();
+    let [pad] = pads.as_slice() else { return None };
+    if pad.child("net").is_some() || pad.arg(2) != Some("circle") {
+        return None;
+    }
+    let diameter = mm_of(pad.child("size"))?;
+    let margin = mm_of(pad.child("solder_mask_margin")).unwrap_or(0);
+    let side = if node.child_arg("layer") == Some("B.Cu") {
+        Side::Bottom
+    } else {
+        Side::Top
+    };
+    let name = node
+        .children("property")
+        .find(|p| p.arg(0) == Some("Reference"))
+        .and_then(|p| p.arg(1))
+        .or_else(|| {
+            node.children("fp_text")
+                .find(|t| t.arg(0) == Some("reference"))
+                .and_then(|t| t.arg(1))
+        })
+        .unwrap_or("FID")
+        .to_owned();
+    Some(Fiducial {
+        id,
+        name,
+        at: at_of(node.child("at")).0,
+        side,
+        diameter,
+        opening: diameter + 2 * margin,
+        locked: node.has_flag("locked") || node.child("locked").is_some(),
+    })
+}
+
+fn fiducial_node(f: &Fiducial) -> SExpr {
+    let (cu, mask, silk) = if f.side == Side::Top {
+        ("F.Cu", "F.Mask", "F.SilkS")
+    } else {
+        ("B.Cu", "B.Mask", "B.SilkS")
+    };
+    let mm_text = crate::syntax::values::mm_text;
+    let mut items = vec![
+        SExpr::str(&format!(
+            "Fiducial:Fiducial_{}mm_Mask{}mm",
+            mm_text(f.diameter),
+            mm_text(f.opening)
+        )),
+        SExpr::list("layer", vec![SExpr::str(cu)]),
+        uuid_node(&format!("f{}", f.id.0)),
+        SExpr::list("at", vec![len(f.at.x), len(-f.at.y)]),
+        SExpr::list(
+            "property",
+            vec![
+                SExpr::str("Reference"),
+                SExpr::str(&f.name),
+                SExpr::list("at", vec![SExpr::num(0.0), SExpr::num(-1.5)]),
+                SExpr::list("layer", vec![SExpr::str(silk)]),
+                SExpr::list("hide", vec![SExpr::sym("yes")]),
+            ],
+        ),
+        SExpr::list(
+            "attr",
+            vec![SExpr::sym("smd"), SExpr::sym("exclude_from_bom")],
+        ),
+        SExpr::list(
+            "pad",
+            vec![
+                SExpr::str("1"),
+                SExpr::sym("smd"),
+                SExpr::sym("circle"),
+                SExpr::list("at", vec![SExpr::num(0.0), SExpr::num(0.0)]),
+                SExpr::list("size", vec![len(f.diameter), len(f.diameter)]),
+                SExpr::list("layers", vec![SExpr::str(cu), SExpr::str(mask)]),
+                SExpr::list(
+                    "solder_mask_margin",
+                    vec![len((f.opening - f.diameter) / 2)],
+                ),
+            ],
+        ),
+    ];
+    if f.locked {
+        items.insert(1, SExpr::sym("locked"));
+    }
+    SExpr::list("footprint", items)
+}
 
 fn net_ref(n: Option<NetId>, codes: &Codes) -> SExpr {
     match n.and_then(|id| codes.get(&id)) {
@@ -1000,6 +1301,83 @@ impl KicadPcb {
                     }
                     (None, _) => {}
                 },
+                Some(Key::Text(id)) => match (b.texts.get(id), s.texts.get(id)) {
+                    (Some(t), Some(o)) if t == o => out.push(node.clone()),
+                    (Some(t), _) => out.push(merge(
+                        Some(node),
+                        text_node(t, n),
+                        &["at", "layer", "effects"],
+                    )),
+                    (None, _) => {}
+                },
+                Some(Key::Graphic(id)) => match (b.graphics.get(id), s.graphics.get(id)) {
+                    (Some(g), Some(o)) if g == o => out.push(node.clone()),
+                    (Some(g), Some(o))
+                        if std::mem::discriminant(&g.graphic)
+                            == std::mem::discriminant(&o.graphic) =>
+                    {
+                        out.push(merge(
+                            Some(node),
+                            board_graphic_node(g, n),
+                            &[
+                                "start", "mid", "end", "center", "pts", "stroke", "width", "fill",
+                                "layer",
+                            ],
+                        ))
+                    }
+                    (Some(g), _) => out.push(board_graphic_node(g, n)),
+                    (None, _) => {}
+                },
+                Some(Key::Dimension(id)) => match (b.dimensions.get(id), s.dimensions.get(id)) {
+                    (Some(d), Some(o)) if d == o => out.push(node.clone()),
+                    (Some(d), _) => {
+                        let mut m = merge(
+                            Some(node),
+                            dimension_node(d, n),
+                            &["layer", "pts", "height"],
+                        );
+                        if let Some(f) = m
+                            .items_mut()
+                            .and_then(|v| v.iter_mut().find(|c| c.head() == Some("format")))
+                        {
+                            f.set_child(SExpr::list(
+                                "precision",
+                                vec![SExpr::sym(&d.precision.to_string())],
+                            ));
+                        }
+                        out.push(m);
+                    }
+                    (None, _) => {}
+                },
+                Some(Key::Fiducial(id)) => match (b.fiducials.get(id), s.fiducials.get(id)) {
+                    (Some(f), Some(o)) if f == o => out.push(node.clone()),
+                    (Some(f), Some(o))
+                        if f.diameter == o.diameter
+                            && f.opening == o.opening
+                            && f.side == o.side =>
+                    {
+                        let mut m = node.clone();
+                        m.set_child(SExpr::list("at", vec![len(f.at.x), len(-f.at.y)]));
+                        if let Some(v) = m.items_mut() {
+                            v.retain(|x| x.atom() != Some("locked"));
+                            if f.locked {
+                                v.insert(2, SExpr::sym("locked"));
+                            }
+                            for p in v.iter_mut().filter(|p| {
+                                p.head() == Some("property") && p.arg(0) == Some("Reference")
+                            }) {
+                                if let Some(items) = p.items_mut() {
+                                    if items.len() > 2 {
+                                        items[2] = SExpr::str(&f.name);
+                                    }
+                                }
+                            }
+                        }
+                        out.push(m);
+                    }
+                    (Some(f), _) => out.push(fiducial_node(f)),
+                    (None, _) => {}
+                },
                 Some(Key::Keepout(id)) => match (b.keepouts.get(id), s.keepouts.get(id)) {
                     (Some(k), Some(o)) if k == o => out.push(node.clone()),
                     (Some(k), _) => out.push(merge(
@@ -1047,6 +1425,10 @@ impl KicadPcb {
                     | Key::Via(i)
                     | Key::Zone(i)
                     | Key::Keepout(i)
+                    | Key::Text(i)
+                    | Key::Graphic(i)
+                    | Key::Dimension(i)
+                    | Key::Fiducial(i)
                     | Key::Footprint(i) => *i,
                     _ => ItemId(0),
                 })
@@ -1067,6 +1449,22 @@ impl KicadPcb {
         }
         for k in b.keepouts.values().filter(|k| !kk.contains(&k.id)) {
             out.push(keepout_node(k, n));
+        }
+        let kx = has(&|k| matches!(k, Key::Text(_)));
+        let kg = has(&|k| matches!(k, Key::Graphic(_)));
+        let kd = has(&|k| matches!(k, Key::Dimension(_)));
+        let kf = has(&|k| matches!(k, Key::Fiducial(_)));
+        for f in b.fiducials.values().filter(|f| !kf.contains(&f.id)) {
+            out.push(fiducial_node(f));
+        }
+        for t in b.texts.values().filter(|t| !kx.contains(&t.id)) {
+            out.push(text_node(t, n));
+        }
+        for g in b.graphics.values().filter(|g| !kg.contains(&g.id)) {
+            out.push(board_graphic_node(g, n));
+        }
+        for d in b.dimensions.values().filter(|d| !kd.contains(&d.id)) {
+            out.push(dimension_node(d, n));
         }
         if outline_changed && !edge_written {
             out.extend(edge_nodes(&b.outline));

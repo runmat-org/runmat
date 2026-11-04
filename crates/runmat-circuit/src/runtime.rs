@@ -920,15 +920,17 @@ fn room_formats(project: &Project, request: &EditRequest) -> Result<EditOutput, 
         placement: flag(&request.values, "placement", true),
         routing: flag(&request.values, "routing", true),
         room_shape: flag(&request.values, "room_shape", true),
+        pours: flag(&request.values, "pours", true),
     };
     let (change, report) =
         board_edit::copy_room_formats(&layout.path, &layout.text, &source, &targets, &options)
             .map_err(failure)?;
     let placed: usize = report.copies.iter().map(|c| c.placed.len()).sum();
     let tracks: usize = report.copies.iter().map(|c| c.tracks_added.len()).sum();
+    let pours: usize = report.copies.iter().map(|c| c.pours_added.len()).sum();
     Ok(EditOutput {
         summary: format!(
-            "copied {source} into {} room(s): {placed} part(s) placed, {tracks} track(s) copied",
+            "copied {source} into {} room(s): {placed} part(s) placed, {tracks} track(s) and {pours} pour(s) copied",
             report.copies.len()
         ),
         files: vec![file_change(&layout.path, &layout.text, change)],
