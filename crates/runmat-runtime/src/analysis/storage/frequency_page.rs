@@ -248,6 +248,7 @@ mod tests {
     };
 
     use super::*;
+    use runmat_analysis_core::{AnalysisFieldLayout, ComplexRepresentation};
 
     struct PartitionedFieldFixture {
         entry: RecoveredFieldArtifactEntry,
@@ -275,9 +276,14 @@ mod tests {
             .map(|index| index as f64 + value_bias)
             .collect::<Vec<_>>();
         RecoveredField::new(
-            definition,
+            definition.clone(),
             sample,
-            AnalysisField::host_f64("structural.displacement", vec![entity_count, 3, 2], values),
+            AnalysisField::host_f64(
+                "structural.displacement",
+                definition.layout(),
+                vec![entity_count, 3, 2],
+                values,
+            ),
         )
         .unwrap()
     }
@@ -417,7 +423,16 @@ mod tests {
             )
             .unwrap(),
             RecoveredFieldSample::FrequencyHertz(10.0),
-            AnalysisField::host_f64("beam.displacement", vec![1, 3, 2], vec![0.0; 6]),
+            AnalysisField::host_f64(
+                "beam.displacement",
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::Displacement,
+                    FieldLocation::Node,
+                )
+                .representation(ComplexRepresentation::Complex),
+                vec![1, 3, 2],
+                vec![0.0; 6],
+            ),
         )
         .unwrap();
         let solid = artifact_entry(&solid);

@@ -821,6 +821,12 @@ kind: "recovery" }
   ties: AuthoredExtremaTiePolicy;
 kind: "spatial_reduction" }
   | {
+  reduction: AuthoredPortReduction;
+  source: AuthoredOutputExpression;
+  first: AuthoredRegionSource;
+  second: AuthoredRegionSource;
+kind: "port_reduction" }
+  | {
   source: AuthoredOutputExpression;
   target: AuthoredRegionSource;
 kind: "spatial_selection" }
@@ -888,6 +894,9 @@ export interface AuthoredPly {
   thickness_m: number;
   angle_rad: number;
 }
+
+export type AuthoredPortReduction = "mean_difference"
+  | "transmission_loss";
 
 export interface AuthoredPrescribedStructuralMotion {
   target: AuthoredConstraintTarget;
@@ -1994,12 +2003,6 @@ export interface GeometryFeatureRegionSelection {
   cardinality: GeometryRegionCardinality;
 }
 
-export interface GeometryNamedSelections {
-  schema_version: WireU16;
-  source_digest: GeometryDigest;
-  regions: GeometryRegionDefinition[];
-}
-
 export interface GeometryParameterDefinition {
   parameter_id: string;
   parameter_type: GeometryParameterType;
@@ -2182,7 +2185,6 @@ export interface ImportedFunctionIdentity {
 }
 
 export interface ImportedGeometryDefinition {
-  named_selections?: GeometryNamedSelections;
   logical_path: string;
   format: GeometrySourceFormat;
   authored_units: LengthUnit | null;
@@ -2617,7 +2619,9 @@ export type ObservationQuantity = "displacement"
   | "acoustic_pressure"
   | "acoustic_particle_velocity"
   | "acoustic_intensity"
+  | "acoustic_port_intensity"
   | "sound_pressure_level"
+  | "transmission_loss"
   | "fluid_pressure"
   | "fluid_velocity"
   | "vorticity"
@@ -2631,7 +2635,32 @@ export type ObservationQuantity = "displacement"
   | "balance"
   | "constraint_violation"
   | "contact_gap"
-  | "contact_pressure";
+  | "contact_pressure"
+  | "connector_force"
+  | "traction"
+  | "strain_energy_density"
+  | "kinetic_energy"
+  | "external_work"
+  | "support_work"
+  | "damping_dissipation"
+  | "acoustic_energy"
+  | "absorbed_energy"
+  | "angular_velocity"
+  | "angular_acceleration"
+  | "plastic_strain"
+  | "equivalent_plastic_strain"
+  | "modal_mass"
+  | "modal_stiffness"
+  | "mass_ratio"
+  | "mass_orthogonality"
+  | "frequency_separation"
+  | "load_factor"
+  | "equation_scale"
+  | "reynolds_number"
+  | "temperature_jump"
+  | "iteration_count"
+  | "time"
+  | "frequency";
 
 export type ObservationRequest = { field: ObservationSpec }
   | { history: ObservationSpec }
@@ -2667,6 +2696,10 @@ export interface ObservationStoragePolicy {
 }
 
 export type ObservationTarget = { spatial: ExcitationTarget }
+  | { region_pair: {
+  first: RegionTarget;
+  second: RegionTarget;
+} }
   | { point: {
   position: Position;
 } }
@@ -2757,6 +2790,7 @@ export type PhysicalSignal = { displacement: Signal<Displacement> }
   | { temperature_difference: Signal<TemperatureDifference> }
   | { heat_flux: Signal<HeatFlux> }
   | { heat_generation_density: Signal<HeatGenerationDensity> }
+  | { heat_rate: Signal<Power> }
   | { electric_potential: Signal<ElectricPotential> }
   | { electric_current: Signal<ElectricCurrent> }
   | { electric_charge: Signal<ElectricCharge> }
@@ -3396,7 +3430,9 @@ export type SpatialReduction = "none"
   | { moment: {
   about: Position;
 } }
-  | "normal_flux";
+  | "normal_flux"
+  | "mean_difference"
+  | "transmission_loss";
 
 export interface SpecificAcousticImpedance {
   pascal_seconds_per_meter: number;

@@ -69,7 +69,3 @@ pub use units::LengthUnit;
 
 #[cfg(test)]
 mod exact_topology_tests;
-mod named_selections;
-pub use named_selections::{
-    geometry_selection_metadata_path, is_geometry_selection_metadata_path, GeometryNamedSelections,
-};

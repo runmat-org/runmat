@@ -26,6 +26,7 @@ fn script_route_and_request_futures_keep_bounded_inline_state() {
                 function: None,
                 emit_bytecode_path: None,
                 json: false,
+                fea_root: crate::cli::FeaRootArgs::default(),
                 execution: ExecutionTargetArgs::default(),
             },
             &cli,

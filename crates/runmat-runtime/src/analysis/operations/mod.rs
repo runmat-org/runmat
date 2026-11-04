@@ -9,6 +9,7 @@ use super::{diagnostic_metric, AnalysisRunResult};
 pub use compare::analysis_results_compare_op;
 pub use query::{
     analysis_field_page_by_run_id_op, analysis_results_by_run_id_op, analysis_results_op,
+    bounded_default_results_query, RESULTS_INLINE_FIELD_BYTES,
 };
 pub(crate) use query::{
     analysis_run_field_ids, collect_analysis_result_fields, visit_analysis_result_fields,

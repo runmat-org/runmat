@@ -6,9 +6,9 @@ This page maps the public command, language, runtime-object, and host-operation 
 
 | Command | Purpose |
 | --- | --- |
-| `runmat fea check <file>` | Resolve and type-check one complete source graph without execution |
-| `runmat fea plan <file>` | Print canonical logical phases and the selected study or sweep definition |
-| `runmat fea run <file>` | Realize geometry, mesh, compile, solve, and publish one study or sweep |
+| `runmat check <file>` | Resolve and type-check one complete source graph without execution |
+| `runmat plan <file>` | Print canonical logical phases and the selected study or sweep definition |
+| `runmat run <file>` | Realize geometry, mesh, compile, solve, and publish one study or sweep |
 | `runmat check <file.fea>` | Shorthand for typed FEA check |
 | `runmat run <file.fea>` | Shorthand for typed FEA run |
 | `runmat mesh <cad-file>` | Produce a canonical solver mesh plus bound meshing evidence |

@@ -224,19 +224,37 @@ pub fn build_structural_modal_resource_plan_from_compilation(
         workload.model(),
         admission,
     )?;
-    let workspace_bytes = checked_add(
-        modal_workspace_bytes(
-            full_dimension,
-            reduced_dimension,
-            maximum_subspace_dimension,
-            residual_vector_count,
-            reduced_tangent_nonzeros,
-            reduced_mass_nonzeros,
-            admission.resident_bytes_limit(),
-        )?,
-        source_bytes,
-        "modal original energy source",
+    let shifted_nonzeros = count(
+        reduced_tangent
+            .union(&reduced_mass)
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+            .column_indices()
+            .len(),
+        "shifted operator nonzeros",
     )?;
+    // The local-energy proof holds the operator's entry intervals plus its block-derived
+    // storage, which the source inventory bounds (capture or proof additions, the larger).
+    let energy_proof_bytes = if source_bytes == 0 {
+        0
+    } else {
+        checked_add(
+            admission.energy_resident_limit(),
+            source_bytes,
+            "modal local-energy proof",
+        )?
+    };
+    let workspace_bytes = modal_workspace_bytes(
+        full_dimension,
+        reduced_dimension,
+        maximum_subspace_dimension,
+        residual_vector_count,
+        reduced_tangent_nonzeros,
+        reduced_mass_nonzeros,
+        shifted_nonzeros,
+        admission.factor_resident_limit(),
+        energy_proof_bytes,
+    )?;
+
     let modal_output_values = modal_output_value_count(
         full_dimension,
         maximum_subspace_dimension,

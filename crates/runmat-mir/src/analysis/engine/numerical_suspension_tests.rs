@@ -24,6 +24,7 @@ fn original_layout_and_acoustic_programs_have_typed_local_suspension_not_erased_
     for source in [
         "function y=pulse(t)\narguments\nt(:,1) double\nend\nscale=[1,11,21,31,2,12,22,32,3,13,23,33];\ny=reshape(t*scale,numel(t),4,3);\nend",
         "function y=pulse(f)\narguments\nf(:,1) double\nend\ny=complex(1+2*f,0.5-f);\nend",
+        "function y=pulse(t,p,d)\narguments\nt(:,1) double\np(1,1) double\nd(1,1) double\nend\ninside=t<=d;\nphase=min(t./d,1);\ny=p.*sin(pi.*phase).*inside;\nend",
     ] {
         let function = facts(source);
         assert_eq!(function.convergence, FunctionConvergence::Exact);
@@ -109,7 +110,7 @@ fn ambient_unknown_and_possible_object_dispatch_cannot_inherit_builtin_locality(
             .unwrap()
             .cooperative_suspension
     );
-    let lhs = lower("function y=pulse(t)\narguments\nt(:,1) double\nend\ny=complex(t,t);\ny(selector(end))=0;\nend\nfunction i=selector(n)\narguments\nn(1,1) double\nend\ni=n+0*sin(n);\nend");
+    let lhs = lower("function y=pulse(t)\narguments\nt(:,1) double\nend\ny=complex(t,t);\ny(selector(end))=0;\nend\nfunction i=selector(n)\narguments\nn(1,1) double\nend\ni=n+0*cos(n);\nend");
     let (helper, _) = lhs
         .functions
         .iter()
@@ -142,7 +143,7 @@ fn ambient_unknown_and_possible_object_dispatch_cannot_inherit_builtin_locality(
             .function_for_local(*helper)
             .unwrap()
             .cooperative_suspension,
-        "ordinary MaySuspend on sin is not an approved local-suspension origin"
+        "ordinary MaySuspend on cos is not an approved local-suspension origin"
     );
     assert!(
         !analysis

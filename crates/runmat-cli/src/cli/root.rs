@@ -14,7 +14,7 @@ use crate::cli::value_types::{
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
 use crate::cli::{
-    BatchCommand, ClusterCommand, ExecutionTargetArgs, FeaCommand, JobCommand, MexArgs,
+    BatchCommand, ClusterCommand, ExecutionTargetArgs, FeaRootArgs, JobCommand, MexArgs,
     NativeInterfaceCommand, NodeArgs, PackageCommand,
 };
 
@@ -251,10 +251,12 @@ pub enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-    /// Execute MATLAB script file
+    /// Run a MATLAB script or a .fea study or sweep
     Run {
-        /// Script file to execute
+        /// .m script or .fea document to run
         file: PathBuf,
+        #[command(flatten)]
+        root: FeaRootArgs,
         #[command(flatten)]
         execution: ExecutionTargetArgs,
         /// Select a declared function for remote execution
@@ -354,10 +356,12 @@ pub enum Commands {
         #[command(subcommand)]
         command: NativeInterfaceCommand,
     },
-    /// Check a MATLAB script or FEA document without running it
+    /// Check a MATLAB script or .fea document without running it
     Check {
         /// .m or .fea file to check
         file: PathBuf,
+        #[command(flatten)]
+        root: FeaRootArgs,
         /// Emit structured JSON
         #[arg(long)]
         json: bool,
@@ -371,10 +375,70 @@ pub enum Commands {
         #[arg(long = "path", value_name = "DIRECTORY")]
         search_paths: Vec<PathBuf>,
     },
-    /// Check, plan, or run a typed finite-element analysis
-    Fea {
-        #[command(subcommand)]
-        fea_command: FeaCommand,
+    /// Print the logical phases and analysis definition for one .fea study or sweep
+    Plan {
+        /// Root .fea document
+        file: PathBuf,
+        #[command(flatten)]
+        root: FeaRootArgs,
+        /// Emit structured JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run one .fea study and capture portable scenes and previews for an example package
+    Snapshot {
+        /// Root .fea document in the example project
+        file: PathBuf,
+        /// Select one study declared by the root module
+        #[arg(long)]
+        study: Option<String>,
+        /// Capture this analysis step of a multi-step study (default: the final step)
+        #[arg(long)]
+        step: Option<String>,
+        /// Capture only this execution case (and its sub-cases), for a study that publishes
+        /// several, such as one per harmonic frequency (default: every case)
+        #[arg(long)]
+        case: Option<String>,
+        /// Capture only this view (repeatable), by the id the capture gives it, such as
+        /// `geometry`, `stress` or `mode-2` (default: every view the study offers)
+        #[arg(long = "view")]
+        views: Vec<String>,
+        /// Snapshot metadata output; scenes and previews are written beside it
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Render an original saved numerical result without meshing or solving
+    #[command(hide = true)]
+    RenderSnapshot {
+        snapshot: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Verify a documentation project's original saved field pages without execution
+    #[command(hide = true)]
+    VerifySnapshot {
+        /// Original snapshot metadata, relative to the project working directory
+        snapshot: PathBuf,
+        /// Cold field replay receipt
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Evaluate checked .fea criteria against an immutable saved result without solving again
+    Reassess {
+        /// Checked .fea source containing the revised assessment declarations
+        file: PathBuf,
+        /// Select one study declared by the root module
+        #[arg(long)]
+        study: Option<String>,
+        /// Original saved study definition (sha256: followed by 64 lowercase hex digits)
+        #[arg(long)]
+        original_definition: runmat_execution::Digest,
+        /// Content-addressed whole-study result manifest
+        #[arg(long)]
+        result_manifest: PathBuf,
+        /// Emit the typed reassessment publication as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Show version information
     Version {
@@ -594,7 +658,7 @@ mod tests {
 
     use super::{Cli, Commands};
     use crate::cli::{
-        AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, FeaCommand, MeshSourceUnitsArg,
+        AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, MeshSourceUnitsArg,
     };
     use clap::Parser;
 
@@ -621,6 +685,7 @@ mod tests {
                     .unwrap();
             let Some(Commands::Run {
                 file: explicit_file,
+                root,
                 execution,
                 function,
                 json,
@@ -634,6 +699,7 @@ mod tests {
             assert_eq!(shorthand.script_function, function);
             assert_eq!(shorthand.script_json, json);
             assert_eq!(shorthand.script_args, args);
+            assert!(root.is_empty());
             assert_eq!(
                 shorthand.execution.resolve().unwrap(),
                 execution.resolve().unwrap()
@@ -714,14 +780,20 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_is_no_longer_a_cli_command() {
-        let cli = Cli::try_parse_from(["runmat", "snapshot"])
-            .expect("ordinary positional input must continue to parse as a script path");
-        assert!(cli.command.is_none());
-        assert_eq!(
-            cli.script.as_deref(),
-            Some(std::path::Path::new("snapshot"))
-        );
+    fn snapshot_is_a_study_command_and_scripts_stay_positional() {
+        let cli = Cli::try_parse_from(["runmat", "snapshot", "main.fea", "--out", "x.json"])
+            .expect("snapshot parses as the study capture command");
+        let Some(Commands::Snapshot { file, out, .. }) = cli.command else {
+            panic!("expected the snapshot command");
+        };
+        assert_eq!(file, std::path::Path::new("main.fea"));
+        assert_eq!(out, std::path::Path::new("x.json"));
+        for script in ["main.m", "analysis/run_case.m"] {
+            let cli = Cli::try_parse_from(["runmat", script])
+                .expect("other positional input parses as a script path");
+            assert!(cli.command.is_none());
+            assert_eq!(cli.script.as_deref(), Some(std::path::Path::new(script)));
+        }
     }
 
     #[test]
@@ -850,7 +922,6 @@ mod tests {
         let encoded = digest.to_string();
         let cli = Cli::try_parse_from([
             "runmat",
-            "fea",
             "reassess",
             "revised.fea",
             "--study",
@@ -862,15 +933,12 @@ mod tests {
             "--json",
         ])
         .unwrap();
-        let Some(Commands::Fea {
-            fea_command:
-                FeaCommand::Reassess {
-                    original_definition,
-                    result_manifest,
-                    study,
-                    json,
-                    ..
-                },
+        let Some(Commands::Reassess {
+            original_definition,
+            result_manifest,
+            study,
+            json,
+            ..
         }) = cli.command
         else {
             panic!("expected reassessment command")
@@ -881,7 +949,6 @@ mod tests {
         assert!(json);
         assert!(Cli::try_parse_from([
             "runmat",
-            "fea",
             "reassess",
             "revised.fea",
             "--original-definition",
@@ -893,10 +960,9 @@ mod tests {
     }
 
     #[test]
-    fn typed_fea_run_selects_one_root_and_reuses_shared_placement() {
+    fn run_selects_one_fea_root_and_reuses_shared_placement() {
         let cli = Cli::try_parse_from([
             "runmat",
-            "fea",
             "run",
             "model.fea",
             "--study",
@@ -908,17 +974,15 @@ mod tests {
             "--json",
         ])
         .unwrap();
-        let Some(Commands::Fea {
-            fea_command:
-                FeaCommand::Run {
-                    file,
-                    root,
-                    execution,
-                    json,
-                },
+        let Some(Commands::Run {
+            file,
+            root,
+            execution,
+            json,
+            ..
         }) = cli.command
         else {
-            panic!("expected typed FEA run command");
+            panic!("expected run command");
         };
         assert_eq!(file, PathBuf::from("model.fea"));
         assert_eq!(root.study.as_deref(), Some("static_case"));
@@ -927,17 +991,35 @@ mod tests {
         assert_eq!(execution.workers, Some(4));
         assert!(json);
 
-        assert!(Cli::try_parse_from([
-            "runmat",
-            "fea",
-            "check",
-            "model.fea",
-            "--study",
-            "a",
-            "--sweep",
-            "b",
-        ])
-        .is_err());
+        for command in ["check", "plan", "run"] {
+            assert!(Cli::try_parse_from([
+                "runmat",
+                command,
+                "model.fea",
+                "--study",
+                "a",
+                "--sweep",
+                "b",
+            ])
+            .is_err());
+        }
+        let Some(Commands::Check { root, .. }) =
+            Cli::try_parse_from(["runmat", "check", "model.fea", "--sweep", "cases"])
+                .unwrap()
+                .command
+        else {
+            panic!("expected check command");
+        };
+        assert_eq!(root.sweep.as_deref(), Some("cases"));
+        let Some(Commands::Plan { root, json, .. }) =
+            Cli::try_parse_from(["runmat", "plan", "model.fea", "--study", "a", "--json"])
+                .unwrap()
+                .command
+        else {
+            panic!("expected plan command");
+        };
+        assert_eq!(root.study.as_deref(), Some("a"));
+        assert!(json);
     }
 
     #[test]

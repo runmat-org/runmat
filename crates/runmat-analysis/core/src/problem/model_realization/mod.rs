@@ -77,10 +77,15 @@ pub fn realize_analysis_model(
             let Some(spec) = observation.spec_mut() else {
                 continue;
             };
-            if let crate::ObservationTarget::Spatial(crate::ExcitationTarget::Region(target)) =
-                &mut spec.target
-            {
-                target_resolver.bind_existing_region_target(target)?;
+            match &mut spec.target {
+                crate::ObservationTarget::Spatial(crate::ExcitationTarget::Region(target)) => {
+                    target_resolver.bind_existing_region_target(target)?;
+                }
+                crate::ObservationTarget::RegionPair { first, second } => {
+                    target_resolver.bind_existing_region_target(first)?;
+                    target_resolver.bind_existing_region_target(second)?;
+                }
+                _ => {}
             }
         }
     }

@@ -55,6 +55,23 @@ jobs:
           bindings/ts/scripts/sync-wasm-artifacts.test.cjs
           scripts/runtime/builtin-example-verifier/protocol.test.mjs
 
+  docs-lint:
+    # FEA docs: capability ledger (ledger↔code↔docs), pending flags, fea highlighting, front matter, links, and generated pages.
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --prefix scripts/docs
+      - name: Lint the FEA docs
+        run: node scripts/docs/docs-lint.mjs
+      - name: Generated docs pages are current
+        run: node scripts/docs/generate-pages.mjs --check
+      - name: Docs tooling tests
+        run: node --test scripts/docs/docs-lint.test.mjs scripts/docs/check-snippets.test.mjs scripts/docs/registry-coverage.test.mjs scripts/docs/fea-grammar.test.mjs
+
   builtin-example-closure:
     # Public-product verification builds native and browser products and is too
     # expensive for every topic branch push. Full cross-product closure, including

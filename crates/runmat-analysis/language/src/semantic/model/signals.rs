@@ -63,6 +63,22 @@ fn signal(
             CheckedFeaStatementKind::GeneratedByFunction { .. }
         )
     });
+    if let Some(samples) = assignment(body, "samples").filter(|samples| {
+        matches!(&samples.kind, CheckedExpressionKind::FunctionCall { function, .. } if function.last().is_some_and(|name| name == "file"))
+            || matches!(&samples.kind, CheckedExpressionKind::OperationCall { operation, .. } if operation.as_str() == "file")
+            || matches!(samples.kind, CheckedExpressionKind::Missing)
+    }) {
+        diagnostic(
+            declaration,
+            samples.span,
+            crate::semantic::pending::with_pending(
+                "signal samples are an inline table of (abscissa, value) pairs; samples read from a file are not accepted yet",
+                Some(crate::semantic::pending::SIGNAL_TABULATED_FILE),
+            ),
+            diagnostics,
+        );
+        return None;
+    }
     let tabulated = assignment(body, "samples").is_some() || assignment(body, "jumps").is_some();
     let waveform = assignment(body, "waveform").is_some();
     let constant = assignment(body, "value").is_some();
@@ -212,6 +228,8 @@ fn signal_kind(
         "heat_generation_density" => (K::HeatGenerationDensity, |value| {
             convert(value, PhysicalSignal::HeatGenerationDensity)
         }),
+        // A total heat rate (W) of a heat-generation region.
+        "heat_rate" => (K::Power, |value| convert(value, PhysicalSignal::HeatRate)),
         "electric_potential" => (K::ElectricPotential, |value| {
             convert(value, PhysicalSignal::ElectricPotential)
         }),
@@ -502,10 +520,20 @@ fn invalid_signal_value(
     value: &CheckedExpression,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) {
+    // A value computed from another analysis (a state reference or an operation) is planned.
+    let expression = matches!(
+        value.kind,
+        CheckedExpressionKind::Reference(_)
+            | CheckedExpressionKind::OperationCall { .. }
+            | CheckedExpressionKind::FunctionCall { .. }
+    );
     diagnostic(
         declaration,
         value.span,
-        "signal value must be a constant scalar or three-component vector of its declared quantity",
+        crate::semantic::pending::with_pending(
+            "signal value must be a constant scalar or three-component vector of its declared quantity",
+            expression.then_some(crate::semantic::pending::SIGNAL_HARMONIC_NONCONSTANT_VALUE),
+        ),
         diagnostics,
     );
 }

@@ -25,17 +25,25 @@ pub struct CanonicalFluidReservation {
     pub linear_iterations_upper_bound: u64,
 }
 
-pub(super) fn reserve(
+/// The admitted reservation once the momentum pattern exists: its exact block-column count
+/// replaces the tetrahedral per-row bound.
+pub(super) fn reserve_exact(
     source: &AnalysisProjection,
     t: &FiniteVolumeTopology,
     p: CanonicalFluidPolicy,
+    momentum_block_columns: u64,
 ) -> Result<CanonicalFluidReservation, Error> {
     let geometry = FiniteVolumeTopology::reserve(source, t.policy, &t.selection)
         .map_err(|_| Error::Resource("source geometry admission"))?;
     if geometry.cell_count != t.cells.len() {
         return Err(Error::Invalid("finite-volume source count"));
     }
-    CanonicalFluidReservation::for_counts(&geometry, t.faces.len(), p)
+    CanonicalFluidReservation::for_counts_with_momentum(
+        &geometry,
+        t.faces.len(),
+        p,
+        Some(momentum_block_columns),
+    )
 }
 
 /// Borrowed source/authority work admission. The public count-only reservation
@@ -65,7 +73,7 @@ pub(super) fn admit_authority_profile(
             | FluidConstraintKind::Symmetry { target }
             | FluidConstraintKind::PressureReference { target, .. } => target,
             FluidConstraintKind::Periodic(_) => {
-                return Err(Error::Unsupported("periodic fluid boundary"))
+                return Err(Error::Unsupported(crate::admission::FLUID_PERIODIC.message))
             }
         };
         profile.target(target)?;
@@ -245,6 +253,18 @@ impl CanonicalFluidReservation {
         face_count: usize,
         p: CanonicalFluidPolicy,
     ) -> Result<Self, Error> {
+        Self::for_counts_with_momentum(geometry, face_count, p, None)
+    }
+
+    /// As `for_counts`, with the coupled momentum block's block-column count (the sum over
+    /// cells of their two-ring stencil sizes) when the derived pattern exists; without it the
+    /// tetrahedral bound of 41 cells per row applies.
+    pub fn for_counts_with_momentum(
+        geometry: &FiniteVolumeReservation,
+        face_count: usize,
+        p: CanonicalFluidPolicy,
+        momentum_block_columns: Option<u64>,
+    ) -> Result<Self, Error> {
         if let Some(acceleration) = p.fixed_point_acceleration {
             acceleration
                 .validate()
@@ -284,15 +304,19 @@ impl CanonicalFluidReservation {
         // Three coexisting CSR operators/pattern clones plus assembly/output temporaries,
         // immutable boundary/bodyforce, all cell vectors/gradients/3x3 LS stencils, and
         // shared GMRES peak. Includes doubled Vec payload/header growth allowances.
-        // Per cell: velocity, pressure triple, two gradient fields (96 B), retained residual
-        // and vorticity (≈100 B), momentum right-hand sides and diagonal, one evaluation's
-        // coexisting copy of each, doubled for growth: well under 4 KiB.
+        // Per cell: velocity (24 B), pressure triple (24), two gradient fields (96), retained
+        // residual and vorticity (100), momentum right-hand sides and diagonal (32) and the
+        // 3x3 least-squares stencil (72): 348 B, one evaluation's coexisting copy of each,
+        // doubled for Vec growth: 1392 B.
+        const CELL_STATE_BYTES: u64 = (24 + 24 + 96 + 100 + 32 + 72) * 2 * 2;
         let baseline_bytes = add(
             add(
-                add(mul(nnz, 192)?, mul(n, 4096)?)?,
+                add(mul(nnz, 192)?, mul(n, CELL_STATE_BYTES)?)?,
                 add(mul(f, 1024)?, gmres.resident_bytes_upper_bound)?,
             )?,
-            add(geometry.scratch_bytes as u64, 128 * 1024 * 1024)?,
+            // Finite-volume derivation scratch belongs to source preparation, which the
+            // caller admits separately; it is released before any numerical storage exists.
+            128 * 1024 * 1024,
         )?;
         // Current component/reference, original action, defect and correction
         // coexist with the existing shared Krylov peak in a correction solve.
@@ -304,12 +328,20 @@ impl CanonicalFluidReservation {
         // most 41 cells per row for tetrahedra), its 3 × 3-block values and the linear
         // reconstruction terms, plus one AMG hierarchy per velocity component (each within
         // the per-system envelope).
+        // The coupled velocity-pressure step runs flexible GMRES on 4n unknowns: the Arnoldi
+        // basis keeps r + 1 vectors and the preconditioned basis r more, each 4n values.
+        let restart = p.gmres_restart as u64;
+        let coupled_basis = mul(mul(n, 4 * 8)?, add(mul(restart, 2)?, 1)?)?;
+        let block_columns = match momentum_block_columns {
+            Some(columns) => columns,
+            None => mul(n, 41)?,
+        };
         let solve_workspace = add(
             add(
                 ilu.resident_bytes_upper_bound,
-                mul(n, 9 * 41 * (8 + 8 + 8) + 5 * 216 + 41 * 8)?,
+                add(mul(block_columns, 9 * (8 + 8 + 8) + 8)?, mul(n, 5 * 216)?)?,
             )?,
-            mul(ilu.resident_bytes_upper_bound, 3)?,
+            add(mul(ilu.resident_bytes_upper_bound, 3)?, coupled_basis)?,
         )?;
         bytes = add(bytes, solve_workspace)?;
         // The shared GMRES peak is part of the baseline above.

@@ -125,13 +125,17 @@ impl ThermalOperatorResourceFacts {
     ) -> Result<ByteCount, ResourcePlanningError> {
         let workspace = self.workspace.reservation_bytes()?.0;
         let history_bytes = history.reservation_bytes()?.0;
-        self.csr_payload_bytes
+        // Support derivation finishes (and frees its row sets and symbolic analysis) before any
+        // operator is assembled or factored; only the derived support and history persist.
+        let numerical = self
+            .csr_payload_bytes
             .0
             .checked_add(self.admission.resident_bytes_upper_bound.0)
+            .and_then(|bytes| bytes.checked_add(workspace));
+        numerical
+            .map(|bytes| bytes.max(self.planning_resident_bytes.0))
             .and_then(|bytes| bytes.checked_add(self.support_payload_bytes.0))
             .and_then(|bytes| bytes.checked_add(history_bytes))
-            .and_then(|bytes| bytes.checked_add(workspace))
-            .and_then(|bytes| bytes.checked_add(self.planning_resident_bytes.0))
             .map(ByteCount)
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal numerical reservation",

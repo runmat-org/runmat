@@ -1297,8 +1297,42 @@ fn analysis_results_op_with_field_inventory(
     ))
 }
 
-/// Field payload a results object holds inline; larger runs page values through `fea.field`.
-const RESULTS_INLINE_FIELD_BYTES: u64 = 16 * 1024 * 1024;
+/// Field payload a default results object holds inline; larger runs page values through
+/// `fea.field`.
+pub const RESULTS_INLINE_FIELD_BYTES: u64 = 16 * 1024 * 1024;
+
+/// The default results view of a stored run: values of the selected fields inline when they fit
+/// [`RESULTS_INLINE_FIELD_BYTES`], descriptors only otherwise. Only a caller that chose no
+/// field-value option applies this; an explicit field-value request is never narrowed.
+pub fn bounded_default_results_query(
+    run_id: &str,
+    mut query: AnalysisResultsQuery,
+) -> Result<AnalysisResultsQuery, String> {
+    if !query.include_field_values {
+        return Ok(query);
+    }
+    let run_id = storage::resolve_run_attempt(run_id)?;
+    let Some(inventory) = storage::load_field_inventory(&run_id)? else {
+        return Ok(query);
+    };
+    let payload = inventory
+        .iter()
+        .filter(|field| {
+            query.include_fields.is_empty() || query.include_fields.contains(&field.field_id)
+        })
+        .map(|field| {
+            field
+                .shape
+                .iter()
+                .try_fold(8u64, |bytes, extent| bytes.checked_mul(*extent as u64))
+                .unwrap_or(u64::MAX)
+        })
+        .fold(0u64, u64::saturating_add);
+    if payload > RESULTS_INLINE_FIELD_BYTES {
+        query.include_field_values = false;
+    }
+    Ok(query)
+}
 
 pub fn analysis_results_by_run_id_op(
     run_id: &str,
@@ -1323,27 +1357,8 @@ pub fn analysis_results_by_run_id_op(
         )
     })?;
     let run_id = resolved_run_id.as_str();
-    // A results object opens bounded: when a run's field payload exceeds the inline budget, it
-    // carries field descriptors and shells, and `fea.field` pages values from the artifact.
-    let mut query = query;
-    if query.include_field_values {
-        let inventory = storage::load_field_inventory(run_id).ok().flatten();
-        let payload = inventory.as_ref().map_or(0u64, |fields| {
-            fields
-                .iter()
-                .map(|field| {
-                    field
-                        .shape
-                        .iter()
-                        .try_fold(8u64, |bytes, extent| bytes.checked_mul(*extent as u64))
-                        .unwrap_or(u64::MAX)
-                })
-                .fold(0u64, u64::saturating_add)
-        });
-        if payload > RESULTS_INLINE_FIELD_BYTES {
-            query.include_field_values = false;
-        }
-    }
+    // The query is answered exactly: requested field values are returned whatever their size.
+    // Bounded default views are chosen by the caller (`bounded_default_results_query`).
     let field_inventory = if query.include_field_values {
         None
     } else {

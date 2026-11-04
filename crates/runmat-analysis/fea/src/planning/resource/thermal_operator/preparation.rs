@@ -54,8 +54,10 @@ impl ThermalOperatorResourceFacts {
         let row_trees = tree::<usize>(entries)?;
         let offsets = mul(add(nodes, 1)?, size_of::<u64>() as u64)?;
         let columns = mul(entries.max(4), 2 * size_of::<u64>() as u64)?;
-        // Shared CoercivityWorkEnvelope counts unique undirected edges with one BTreeSet.
-        let coercivity_graph = tree::<(usize, usize)>(entries)?;
+        // The shared CoercivityWorkEnvelope counts undirected edges in place; its symbolic
+        // analysis (ordering, elimination tree, column counts) holds a few index words per
+        // stored entry of the support.
+        let coercivity_graph = mul(entries, 4 * size_of::<u64>() as u64)?;
         [
             projection,
             rows,
@@ -74,10 +76,13 @@ fn count(value: usize) -> Result<u64, ResourcePlanningError> {
     u64::try_from(value).map_err(|_| overflow())
 }
 fn tree<T>(entries: u64) -> Result<u64, ResourcePlanningError> {
-    // Conservative spare BTree slots and pointer/build allowance, not allocator-exact.
+    // A B-tree node holds up to eleven keys and never fewer than five outside the root; a key
+    // therefore costs at most a fifth of a leaf (eleven slots, parent link and lengths) plus its
+    // share of internal-node edges: under two key widths plus two words. Repeated entries are
+    // counted, so unique keys are bounded from above.
     mul(
         entries,
-        3 * (size_of::<T>() + 4 * size_of::<usize>()) as u64,
+        2 * (size_of::<T>() + 2 * size_of::<usize>()) as u64,
     )
 }
 fn add(left: u64, right: u64) -> Result<u64, ResourcePlanningError> {

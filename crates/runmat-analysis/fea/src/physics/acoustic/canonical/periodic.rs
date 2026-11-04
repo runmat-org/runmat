@@ -55,7 +55,7 @@ impl AcousticAssembly {
                 )
             {
                 return Err(AcousticHarmonicError::Unsupported(
-                    "nonmatching or rotated periodic pressure relation".into(),
+                    crate::admission::ACOUSTIC_ROTATED_PERIODIC.message.into(),
                 ));
             }
             for target in [&periodic.pair.primary, &periodic.pair.secondary] {

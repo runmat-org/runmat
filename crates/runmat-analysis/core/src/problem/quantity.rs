@@ -5,7 +5,7 @@ pub use runmat_types::physical::{
     ElectricCurrent, ElectricCurrentDensity, ElectricPotential, FiniteQuantity, Force,
     FoundationModulus, Frequency, FrictionCoefficient, HeatFlux, HeatGenerationDensity,
     HeatTransferCoefficient, Length, MagneticVectorPotential, MassDensity, MassFlowRate, Moment,
-    Position, Pressure, RayleighMassCoefficient, RayleighStiffnessCoefficient, Rotation,
+    Position, Power, Pressure, RayleighMassCoefficient, RayleighStiffnessCoefficient, Rotation,
     SpecificAcousticImpedance, Stiffness, SurfaceEmissivity, Temperature, TemperatureDifference,
     ThermalContactResistance, Traction, Translation, TurbulenceIntensity, Velocity, VolumeFlowRate,
 };

@@ -8,6 +8,14 @@ use std::collections::{BTreeMap, VecDeque};
 mod admission;
 mod local;
 pub(crate) use admission::SourceEnergyDemand;
+/// Resident bytes the check holds per stored operator entry: its reconstructed interval.
+pub(crate) const ENTRY_RESIDENT_BYTES: u64 = std::mem::size_of::<outward::Interval>() as u64;
+/// Resident bytes per projected vertex: graph adjacency header, BFS distance and queue slot,
+/// and the row/column error accumulators of `finish`.
+pub(crate) const VERTEX_RESIDENT_BYTES: u64 = 80;
+/// Resident bytes per distinct missing pair: the B-tree entry (16 B key, 16 B interval) at
+/// minimum node occupancy including its share of internal-node edges.
+pub(crate) const MISSING_PAIR_RESIDENT_BYTES: u64 = 96;
 use admission::{EnergyAdmission, LOCAL_PROOF_CACHE_CAPACITY};
 mod projection;
 use projection::EnergyProjection;
@@ -144,8 +152,10 @@ impl<'a> AnchoredEnergyCheck<'a> {
             }
         }
         let resident = (matrix.values().len() as u64)
-            .checked_mul(128)
-            .and_then(|v| v.checked_add((projection.len() as u64).checked_mul(80)?))
+            .checked_mul(ENTRY_RESIDENT_BYTES)
+            .and_then(|v| {
+                v.checked_add((projection.len() as u64).checked_mul(VERTEX_RESIDENT_BYTES)?)
+            })
             .and_then(|v| v.checked_add(retained_bytes))
             .ok_or(EnergyError::Arithmetic)?;
         if resident > admitted.resident_bytes_limit() {
@@ -374,7 +384,7 @@ impl<'a> AnchoredEnergyCheck<'a> {
                     if !self.missing.contains_key(&(row, column)) {
                         self.resident = self
                             .resident
-                            .checked_add(512)
+                            .checked_add(MISSING_PAIR_RESIDENT_BYTES)
                             .ok_or(EnergyError::Arithmetic)?;
                         if self.resident > self.admitted.resident_bytes_limit() {
                             return Err(self.admission_error());

@@ -47,7 +47,6 @@ fn full_and_progressive_cad_preview_publish_exact_occurrence_ids() {
         source: runmat_geometry_core::GeometryDefinitionSource::Imported(Box::new(
             runmat_geometry_core::ImportedGeometryDefinition {
                 preview_extent_m: None,
-                named_selections: None,
                 logical_path: "assembly.step".into(),
                 format: runmat_geometry_core::GeometrySourceFormat::Step,
                 authored_units: None,

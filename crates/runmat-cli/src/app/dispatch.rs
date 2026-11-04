@@ -70,6 +70,7 @@ pub(crate) async fn dispatch_with_graphics(
                         function: cli.script_function.clone(),
                         emit_bytecode_path: emit_bytecode,
                         json: cli.script_json,
+                        fea_root: crate::cli::FeaRootArgs::default(),
                         execution: cli.execution.clone(),
                     },
                     cli,
@@ -110,6 +111,7 @@ async fn execute_command(
         }
         Commands::Run {
             file,
+            root,
             execution,
             function,
             json,
@@ -123,6 +125,7 @@ async fn execute_command(
                         function,
                         emit_bytecode_path: cli.emit_bytecode.clone(),
                         json,
+                        fea_root: root,
                         execution,
                     },
                     cli,
@@ -211,18 +214,64 @@ async fn execute_command(
         Commands::NativeInterface { command } => native_interface::execute(command),
         Commands::Check {
             file,
+            root,
             json,
             verbose,
             deny,
             search_paths,
         } => {
             boxed_command(|| {
-                check::execute_check(file, cli, config, json, verbose, deny, search_paths)
+                check::execute_check(
+                    file,
+                    cli,
+                    config,
+                    check::CheckRequest {
+                        root,
+                        json,
+                        verbose,
+                        deny,
+                        search_paths,
+                    },
+                )
             })
             .await
         }
-        Commands::Fea { fea_command } => {
-            boxed_command(|| fea::execute_command(fea_command, cli, config)).await
+        Commands::Plan { file, root, json } => {
+            boxed_command(|| fea::plan(file, root, json, cli, config)).await
+        }
+        Commands::Snapshot {
+            file,
+            study,
+            step,
+            case,
+            views,
+            out,
+        } => {
+            boxed_command(|| fea::snapshot(file, study, step, case, views, out, cli, config)).await
+        }
+        Commands::RenderSnapshot { snapshot, out } => {
+            boxed_command(|| fea::render_snapshot(snapshot, out)).await
+        }
+        Commands::VerifySnapshot { snapshot, out } => fea::verify_snapshot(snapshot, out),
+        Commands::Reassess {
+            file,
+            study,
+            original_definition,
+            result_manifest,
+            json,
+        } => {
+            boxed_command(|| {
+                fea::reassess(
+                    file,
+                    study,
+                    original_definition,
+                    result_manifest,
+                    json,
+                    cli,
+                    config,
+                )
+            })
+            .await
         }
         Commands::Version { detailed } => {
             version::show_version(detailed);

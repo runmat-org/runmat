@@ -11,6 +11,7 @@ pub mod context;
 pub mod core;
 pub mod data;
 pub mod event;
+pub mod field_volume;
 pub mod geometry;
 pub mod geometry_scene;
 pub mod geometry_observation;

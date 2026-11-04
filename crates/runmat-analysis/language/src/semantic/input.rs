@@ -354,13 +354,52 @@ fn invalid_value<T>(
     expected: AuthoredInputType,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<T> {
+    let found = match &expression.kind {
+        CheckedExpressionKind::Quantity {
+            source_unit_symbol, ..
+        } => match expression.value_type.quantity_descriptor() {
+            Some(found) => format!(
+                "; found {} written in {source_unit_symbol}",
+                super::units::describe_quantity_type(found)
+            ),
+            None => String::new(),
+        },
+        _ => String::new(),
+    };
     diagnostic(
         declaration,
         expression.span,
-        format!("input value must be a constant {expected:?}"),
+        format!(
+            "input value must be a constant {}{found}",
+            describe_input_type(&expected)
+        ),
         diagnostics,
     );
     None
+}
+
+/// The input type as the `.fea` author writes it.
+fn describe_input_type(expected: &AuthoredInputType) -> String {
+    match expected {
+        AuthoredInputType::Boolean => "boolean".into(),
+        AuthoredInputType::Integer => "integer".into(),
+        AuthoredInputType::Real => "real number".into(),
+        AuthoredInputType::Complex => "complex number".into(),
+        AuthoredInputType::String => "string".into(),
+        AuthoredInputType::Quantity(quantity) => super::units::describe_quantity_type(*quantity),
+        AuthoredInputType::Material => "material reference".into(),
+        AuthoredInputType::Region(role) => format!("{} region reference", region_role_name(*role)),
+    }
+}
+
+fn region_role_name(role: GeometryRegionRole) -> &'static str {
+    match role {
+        GeometryRegionRole::Vertex => "vertex",
+        GeometryRegionRole::Edge => "edge",
+        GeometryRegionRole::Face => "face",
+        GeometryRegionRole::Solid => "solid",
+        GeometryRegionRole::Cell => "cell",
+    }
 }
 
 fn diagnostic(

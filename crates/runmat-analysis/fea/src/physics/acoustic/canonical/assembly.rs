@@ -42,7 +42,20 @@ pub(super) struct AcousticAssembly {
     >,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
     pub incident_faces: Vec<(crate::topology::ProjectedBoundaryFace, f64)>,
+    /// Port faces of the plane-wave power decomposition: incident-pressure faces with their
+    /// authored incident wave, and anechoic (radiation) faces.
+    pub port_faces: Vec<AcousticPortFace>,
     pub reduction: Option<crate::constraints::AffineConstraintReduction>,
+}
+
+/// One face of an acoustic port: `incident` is the authored incident pressure phasor on an
+/// incident-pressure face, `None` on an anechoic face. `admittance` is the real plane-wave
+/// admittance 1/(ρc) of the owning medium.
+#[derive(Debug, Clone)]
+pub(super) struct AcousticPortFace {
+    pub face: crate::topology::ProjectedBoundaryFace,
+    pub admittance: f64,
+    pub incident: Option<crate::excitation::ComplexScalar>,
 }
 
 impl AcousticAssembly {
@@ -189,6 +202,7 @@ impl AcousticAssembly {
             prescribed: runmat_types::physical::Quantity::new(vec![None; size]),
             source_evidence: Vec::new(),
             incident_faces: Vec::new(),
+            port_faces: Vec::new(),
             reduction: None,
         })
     }
@@ -201,6 +215,7 @@ impl AcousticAssembly {
         self.prescribed = runmat_types::physical::Quantity::new(vec![None; size]);
         self.source_evidence.clear();
         self.incident_faces.clear();
+        self.port_faces.clear();
         self
     }
 

@@ -100,6 +100,36 @@ pub(super) fn required_source_indices(
             }
             entities.into_iter().collect()
         }
+        ObservationPartitionTarget::BoundaryPair { face_indices, .. } => {
+            let projection =
+                topology
+                    .solid_projection
+                    .as_ref()
+                    .ok_or(ObservationError::Unsupported(
+                        "boundary observations require admitted solid topology",
+                    ))?;
+            let mut entities = BTreeSet::new();
+            match observation.spec.source_location {
+                FieldLocation::Face => {
+                    entities.extend(oriented_faces_of_boundary(topology, face_indices)?);
+                }
+                location => {
+                    for index in face_indices {
+                        let face = projection.boundary_faces.get(*index).ok_or(
+                            ObservationError::Identity(
+                                "observation partition exceeds boundary-face topology",
+                            ),
+                        )?;
+                        if location == FieldLocation::Node {
+                            entities.extend(face.node_indices.iter().copied());
+                        } else {
+                            entities.extend(face.adjacent_element_indices.iter().copied());
+                        }
+                    }
+                }
+            }
+            entities.into_iter().collect()
+        }
     };
     if indices.is_empty() {
         return Err(ObservationError::Invalid(
@@ -107,6 +137,138 @@ pub(super) fn required_source_indices(
         ));
     }
     Ok(indices)
+}
+
+/// The oriented mesh face carrying each boundary face's value in a finite-volume face field.
+fn oriented_faces_of_boundary(
+    topology: &ObservationTopology,
+    face_indices: &[usize],
+) -> Result<Vec<usize>, ObservationError> {
+    let mut oriented = vec![None; face_indices.len()];
+    let position = face_indices
+        .iter()
+        .enumerate()
+        .map(|(position, &face)| (face, position))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for (index, source) in topology.face_boundary_sources.iter().enumerate() {
+        if let Some(position) = source.and_then(|face| position.get(&face)) {
+            oriented[*position] = Some(index);
+        }
+    }
+    oriented
+        .into_iter()
+        .map(|index| {
+            index.ok_or(ObservationError::Identity(
+                "a boundary face has no oriented face in the finite-volume field topology",
+            ))
+        })
+        .collect()
+}
+
+/// Area integrals and areas of a scalar over the two regions of a paired boundary target.
+/// Nodal fields are integrated at face quadrature; element and cell fields take the owner's
+/// value over the face; finite-volume face fields take the face value.
+pub(super) fn paired_boundary_contribution(
+    observation: &ResolvedObservation,
+    field: &RecoveredFieldPartitionSet,
+    face_indices: &[usize],
+    first_count: usize,
+    topology: &ObservationTopology,
+) -> Result<ObservationPartitionPayload, ObservationError> {
+    let projection = topology
+        .solid_projection
+        .as_ref()
+        .ok_or(ObservationError::Unsupported(
+            "boundary observations require admitted solid topology",
+        ))?;
+    let oriented = if observation.spec.source_location == FieldLocation::Face {
+        Some(oriented_faces_of_boundary(topology, face_indices)?)
+    } else {
+        None
+    };
+    let mut sums = [CompensatedSum::default(), CompensatedSum::default()];
+    let mut measures = [CompensatedSum::default(), CompensatedSum::default()];
+    for (position, &face_index) in face_indices.iter().enumerate() {
+        let side = usize::from(position >= first_count);
+        let face = projection.boundary_faces.get(face_index).ok_or_else(|| {
+            ObservationError::Invalid("resolved boundary-face index is out of bounds".into())
+        })?;
+        let scalar = |value: &[f64]| -> Result<f64, ObservationError> {
+            match project_observation_value(field, value, observation)?.as_slice() {
+                [value] if value.is_finite() => Ok(*value),
+                _ => Err(ObservationError::Invalid(
+                    "a paired reduction reads one finite real value per face".into(),
+                )),
+            }
+        };
+        match observation.spec.source_location {
+            FieldLocation::Node => {
+                let mut error = None;
+                projection.visit_boundary_quadrature(
+                    face,
+                    |point| match interpolate_and_project(
+                        field,
+                        &face.node_indices,
+                        point.shape_values(),
+                        observation,
+                    ) {
+                        Ok(projected) if projected.len() == 1 && projected[0].is_finite() => {
+                            sums[side].add(projected[0] * point.area_weight_m2);
+                            measures[side].add(point.area_weight_m2);
+                        }
+                        Ok(_) => {
+                            error = Some(ObservationError::Invalid(
+                                "a paired reduction reads one finite real value per point".into(),
+                            ))
+                        }
+                        Err(failure) => error = Some(failure),
+                    },
+                )?;
+                if let Some(error) = error {
+                    return Err(error);
+                }
+            }
+            location => {
+                let source = match (location, &oriented) {
+                    (FieldLocation::Face, Some(oriented)) => oriented[position],
+                    (FieldLocation::Element | FieldLocation::Cell, _) => {
+                        let [owner] = face.adjacent_element_indices.as_slice() else {
+                            return Err(ObservationError::Unsupported(
+                                "element fields on a boundary need faces with one owning element",
+                            ));
+                        };
+                        *owner
+                    }
+                    _ => {
+                        return Err(ObservationError::Unsupported(
+                            "a paired reduction reads nodal, element, cell, or face fields",
+                        ))
+                    }
+                };
+                let value = field.value(source).ok_or(ObservationError::Identity(
+                    "observation source partition is missing a boundary-face value",
+                ))?;
+                let value = scalar(value)?;
+                let mut area = 0.0;
+                projection.visit_boundary_quadrature(face, |point| area += point.area_weight_m2)?;
+                if !(area.is_finite() && area > 0.0) {
+                    return Err(ObservationError::Invalid(
+                        "boundary face has no area".into(),
+                    ));
+                }
+                sums[side].add(value * area);
+                measures[side].add(area);
+            }
+        }
+    }
+    let [first_sum, second_sum] = sums.map(CompensatedSum::total);
+    let [first_measure, second_measure] = measures.map(CompensatedSum::total);
+    Ok(ObservationPartitionPayload::PairedWeightedReduction {
+        first_sum,
+        first_measure,
+        second_sum,
+        second_measure,
+    })
 }
 
 pub(super) fn interpolate_values(
@@ -318,10 +480,7 @@ fn project_observation_value(
                 ComplexRepresentation::SoundPressureLevel => value
                     .chunks_exact(2)
                     .map(|pair| {
-                        20.0 * (pair[0].hypot(pair[1])
-                            / (std::f64::consts::SQRT_2
-                                * runmat_analysis_core::SOUND_PRESSURE_LEVEL_REFERENCE_PA))
-                            .log10()
+                        runmat_analysis_core::sound_pressure_level_db(pair[0].hypot(pair[1]))
                     })
                     .collect(),
                 ComplexRepresentation::Complex => value.to_vec(),

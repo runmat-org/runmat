@@ -13,19 +13,43 @@ use crate::diagnostics::parser_compat;
 use crate::presentation::{self, StreamStyles, Tone};
 use crate::AlreadyReportedCliError;
 
+/// Options for `runmat check`, shared by `.m` and `.fea` sources.
+pub struct CheckRequest {
+    pub root: crate::cli::FeaRootArgs,
+    pub json: bool,
+    pub verbose: bool,
+    pub deny: Vec<String>,
+    pub search_paths: Vec<PathBuf>,
+}
+
 pub async fn execute_check(
     file: PathBuf,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
-    json: bool,
-    verbose: bool,
-    deny: Vec<String>,
-    search_paths: Vec<PathBuf>,
+    request: CheckRequest,
 ) -> Result<()> {
+    let CheckRequest {
+        root,
+        json,
+        verbose,
+        deny,
+        search_paths,
+    } = request;
     let deny_warnings = parse_denied_levels(&deny)?;
     let file = resolve_script_input(file)?;
     if crate::commands::fea::source::is_fea_source_path(&file) {
-        return check_fea_file(file, cli, config, json).await;
+        if !search_paths.is_empty() {
+            anyhow::bail!(
+                "--path adds MATLAB lookup roots; .fea documents import their functions explicitly"
+            );
+        }
+        return check_fea_file(file, cli, config, root, json, deny_warnings).await;
+    }
+    if !root.is_empty() {
+        anyhow::bail!(
+            "--study and --sweep select a root of a .fea document; {} is not one",
+            file.display()
+        );
     }
     if is_matlab_file(&file) {
         return check_m_file(
@@ -69,26 +93,54 @@ fn parse_denied_levels(levels: &[String]) -> Result<bool> {
     Ok(deny_warnings)
 }
 
+/// Checks a `.fea` document with every rule its run applies before meshing (the runtime's
+/// checked source carries the static run admission), and resolves `--study`/`--sweep` exactly
+/// as `runmat run` does.
 async fn check_fea_file(
     path: PathBuf,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
+    root: crate::cli::FeaRootArgs,
     json: bool,
+    deny_warnings: bool,
 ) -> Result<()> {
     let checked = crate::commands::fea::source::check_source(&path, cli, config).await?;
-    let valid = checked.program.is_valid() && checked.program.diagnostics.is_empty();
+    let report = checked.check_result();
+    let roots = checked.root_selectors();
+    let selection = if report.status.is_valid() {
+        crate::commands::fea::command::root_selector(&root)
+            .map(|selector| checked.resolve_root(Some(&selector)).map(|_| selector))
+            .transpose()
+    } else {
+        Ok(None)
+    };
+    let selection_error = selection.as_ref().err().map(ToString::to_string);
+    let warnings = report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.severity == runmat_analysis_language::FeaDiagnosticSeverity::Warning
+    });
+    let valid =
+        report.status.is_valid() && selection_error.is_none() && !(deny_warnings && warnings);
     if json {
-        println!(
-            "{}",
-            serde_json::to_string(&json!({
-                "kind": "fea",
-                "status": if valid { "valid" } else { "invalid" },
-                "root_module": checked.root_module,
-                "studies": checked.program.studies.len(),
-                "sweeps": checked.program.sweeps.len(),
-                "diagnostics": checked.program.diagnostics,
-            }))?
+        // The full checked-source report (program, source index, previews, diagnostics) plus
+        // the root summary and selection; `status` reflects the selection and `-D warnings`.
+        let mut payload = serde_json::to_value(&report)?;
+        let object = payload
+            .as_object_mut()
+            .context("FEA check report serializes as an object")?;
+        object.insert("kind".into(), json!("fea"));
+        object.insert(
+            "status".into(),
+            json!(if valid { "valid" } else { "invalid" }),
         );
+        object.insert("studies".into(), json!(checked.program.studies.len()));
+        object.insert("sweeps".into(), json!(checked.program.sweeps.len()));
+        object.insert("roots".into(), json!(roots));
+        object.insert(
+            "selected".into(),
+            json!(selection.as_ref().ok().cloned().flatten()),
+        );
+        object.insert("selection_error".into(), json!(selection_error));
+        println!("{}", serde_json::to_string(&payload)?);
         return if valid {
             Ok(())
         } else {
@@ -97,9 +149,30 @@ async fn check_fea_file(
     }
     let styles = presentation::stdout();
     let sources = FeaDiagnosticSources::new(&path, &checked.root_module, &checked.source_root);
-    let counts = print_fea_diagnostics(&checked.program.diagnostics, &sources, &styles, false);
+    let counts = print_fea_diagnostics(&report.diagnostics, &sources, &styles, false);
+    if let Some(error) = &selection_error {
+        println!("{}", styles.error(format!("error: {error}")));
+    }
+    if let Ok(Some(selected)) = &selection {
+        println!(
+            "  {} {} {}",
+            styles.label("selected:"),
+            selected.kind(),
+            styles.identifier(selected.id())
+        );
+    } else if roots.len() > 1 {
+        println!(
+            "  {} {}",
+            styles.label("runnable roots:"),
+            roots
+                .iter()
+                .map(|root| format!("--{} {}", root.kind(), root.id()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
     println!("{}", counts.summary(&path, &styles));
-    if counts.errors > 0 || !valid {
+    if !valid {
         return Err(AlreadyReportedCliError.into());
     }
     Ok(())

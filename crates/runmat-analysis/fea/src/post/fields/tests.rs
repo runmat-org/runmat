@@ -16,6 +16,7 @@ use runmat_analysis_core::{
     PrescribedStructuralDofs, PrescribedValue, RegionTarget, StructuralConstraint,
     StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation};
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
 fn explicit_recovery_summary(fixture: FixtureId) -> AssemblySummary {
@@ -255,11 +256,16 @@ fn generic_field_take_does_not_claim_constraint_group_reaction_ownership() {
     let mut fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![1, VECTOR_COMPONENT_COUNT],
             vec![1.0, 2.0, 3.0],
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_CONSTRAINT_REACTION_FORCE,
+            AnalysisFieldLayout::vector3(
+                ObservationQuantity::ReactionForce,
+                FieldLocation::Constraint,
+            ),
             vec![1, VECTOR_COMPONENT_COUNT],
             vec![4.0, 5.0, 6.0],
         ),

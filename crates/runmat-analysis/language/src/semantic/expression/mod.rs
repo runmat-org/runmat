@@ -221,7 +221,14 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
                         )
                     }
                     Err(error) => {
-                        self.error("fea.semantic.invalid_unit", error.to_string(), unit.span);
+                        self.error(
+                            "fea.semantic.invalid_unit",
+                            super::pending::with_pending(
+                                error.to_string(),
+                                super::pending::unit(unit_source),
+                            ),
+                            unit.span,
+                        );
                         (CheckedExpressionKind::Missing, FeaType::Error)
                     }
                 }
@@ -272,7 +279,10 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
         }
         self.error(
             "fea.semantic.unresolved_reference",
-            format!("unresolved reference `{}`", path.join(".")),
+            super::pending::with_pending(
+                format!("unresolved reference `{}`", path.join(".")),
+                super::pending::reference(&path),
+            ),
             reference.span,
         );
         (CheckedExpressionKind::Reference(path), FeaType::Error)
@@ -404,7 +414,12 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
         }) {
             Ok(operation) => operation.operation,
             Err(error) => {
-                self.error(error.code, error.message, span);
+                let pending = super::pending::operation(&reference.segments[0].text);
+                self.error(
+                    error.code,
+                    super::pending::with_pending(error.message, pending),
+                    span,
+                );
                 return CheckedExpression {
                     kind: CheckedExpressionKind::Missing,
                     value_type: FeaType::Error,
@@ -421,11 +436,19 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
         let overload = match matches.as_slice() {
             [overload] => *overload,
             [] => {
+                // `mean(x, over = time)`: a time mean over a transient step is planned.
+                let time_mean = operation.identity.as_str() == "mean"
+                    && checked_arguments.iter().any(|argument| {
+                        matches!(argument, CheckedCallArgument::Named { name, .. } if name == "over")
+                    });
                 self.error(
                     "fea.semantic.no_matching_overload",
-                    format!(
-                        "no FEA overload of `{}` accepts these arguments",
-                        operation.identity
+                    super::pending::with_pending(
+                        format!(
+                            "no FEA overload of `{}` accepts these arguments",
+                            operation.identity
+                        ),
+                        time_mean.then_some(super::pending::TIME_MEAN),
                     ),
                     span,
                 );

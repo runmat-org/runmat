@@ -80,6 +80,8 @@ impl Serialize for Fields<'_> {
                         .viscous_traction_n
                         .canonical_values(),
                 ),
+                // The face pressure has one value per face, the width of the face flux.
+                Values::Scalar(original.face_volume_flux_m3_per_s.canonical_values()),
             ];
             if let Some(extra) = &self.extra {
                 values.push(match extra {
@@ -93,8 +95,13 @@ impl Serialize for Fields<'_> {
                 let shape = definition
                     .storage_shape(*count)
                     .map_err(serde::ser::Error::custom)?;
-                let storage =
-                    AnalysisField::host_f64_serialization(definition.field_id(), &shape, &values);
+                let layout = definition.layout();
+                let storage = AnalysisField::host_f64_serialization(
+                    definition.field_id(),
+                    &layout,
+                    &shape,
+                    &values,
+                );
                 seq.serialize_element(&FieldWire {
                     identity: Digest::from_bytes([0; 32]),
                     definition,
@@ -123,12 +130,12 @@ fn artifact_profile(
     extra: Option<Values<'_>>,
     entity_counts: RecoveredFieldEntityCounts,
 ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
-    let expected = 5 + usize::from(extra.is_some());
+    let expected = 6 + usize::from(extra.is_some());
     if definitions.len() != expected
         || counts.len() != expected
         || extra.as_ref().is_some_and(|values| match values {
-            Values::Velocity(v) => v.len() != counts[5],
-            Values::Scalar(v) => v.len() != counts[5],
+            Values::Velocity(v) => v.len() != counts[6],
+            Values::Scalar(v) => v.len() != counts[6],
         })
         || samples.iter().any(|(_, original)| {
             original.velocity_m_per_s.canonical_values().len() != counts[0]
@@ -148,6 +155,13 @@ fn artifact_profile(
                     .canonical_values()
                     .len()
                     != counts[4]
+                || original
+                    .residual
+                    .face_forces
+                    .pressure_traction_n
+                    .canonical_values()
+                    .len()
+                    != counts[5]
         })
     {
         return Err(invalid("fluid native profile original cardinality"));
@@ -198,7 +212,7 @@ pub(super) fn requested_bytes(
         Some(Values::Scalar(_)) => 1,
         None => 0,
     };
-    let mut counts = vec![cells, cells, faces, cells, faces];
+    let mut counts = vec![cells, cells, faces, cells, faces, faces];
     if extra.is_some() {
         counts.push(nodes);
     }
@@ -275,6 +289,7 @@ pub(super) fn requested_bytes(
                 .checked_mul(3)
                 .ok_or_else(|| invalid("fluid face shear count overflow"))?,
         )?)?,
+        per_sample(vector_bytes::<f64>(faces)?)?,
         vector_bytes::<f64>(
             nodes
                 .checked_mul(extra_components)
@@ -313,6 +328,7 @@ pub(super) fn admit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
     use runmat_canonical_codec::profile_serialized;
 
     #[test]
@@ -320,9 +336,15 @@ mod tests {
         let original = [[f64::MAX, -f64::MAX, f64::MIN_POSITIVE], [1.0, 2.0, 3.0]];
         let values = Values::Velocity(&original);
         let shape = [2, 3];
-        let borrowed = AnalysisField::host_f64_serialization("cfd.velocity", &shape, &values);
+        let layout = runmat_analysis_core::AnalysisFieldLayout::vector3(
+            runmat_analysis_core::ObservationQuantity::FluidVelocity,
+            runmat_analysis_core::FieldLocation::Cell,
+        );
+        let borrowed =
+            AnalysisField::host_f64_serialization("cfd.velocity", &layout, &shape, &values);
         let actual = AnalysisField::host_f64(
             "cfd.velocity",
+            AnalysisFieldLayout::vector3(ObservationQuantity::FluidVelocity, FieldLocation::Cell),
             shape.to_vec(),
             original.iter().flatten().copied().collect(),
         );
@@ -393,7 +415,7 @@ mod tests {
                     pressure_traction_n: runmat_types::physical::Quantity::<
                         runmat_types::physical::kind::Force,
                         _,
-                    >::new(vec![]),
+                    >::new(vec![[0.0, 0.0, -2.0]; 7]),
                     pressure_fluctuation_traction_n: runmat_types::physical::Quantity::<
                         runmat_types::physical::kind::Force,
                         _,
@@ -427,7 +449,7 @@ mod tests {
                 flux_constitutive_relative: 0.0,
             },
         };
-        let counts = [2, 2, 7, 2, 7];
+        let counts = [2, 2, 7, 2, 7, 7];
         let entity_counts = RecoveredFieldEntityCounts {
             nodes: 5,
             volume_elements: 2,
@@ -470,6 +492,7 @@ mod tests {
                 .flatten()
                 .copied()
                 .collect(),
+            vec![1.0; 7],
         ]
         .into_iter();
         let fields = definitions
@@ -481,6 +504,7 @@ mod tests {
                     RecoveredFieldSample::Final,
                     AnalysisField::host_f64(
                         definition.field_id(),
+                        definition.layout(),
                         definition.storage_shape(count).unwrap(),
                         values.next().unwrap(),
                     ),

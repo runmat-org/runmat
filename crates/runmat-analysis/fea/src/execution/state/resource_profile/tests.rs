@@ -1,4 +1,5 @@
 use super::*;
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 use runmat_analysis_core::{ProcedureStep, StateId};
 
 fn primary_request() -> SemanticStatePublicationRequest {
@@ -18,9 +19,15 @@ fn primary_request() -> SemanticStatePublicationRequest {
 #[test]
 fn primary_profile_matches_selected_state_and_tracks_declaration_length() {
     let fields = vec![
-        AnalysisField::host_f64("unpublished", vec![256], vec![4.0; 256]),
+        AnalysisField::host_f64(
+            "unpublished",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![256],
+            vec![4.0; 256],
+        ),
         AnalysisField::host_f64(
             crate::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![3],
             vec![0.0, -1.25, 1.0e100],
         ),
@@ -63,6 +70,7 @@ fn primary_profile_rejects_missing_duplicate_and_mismatched_sources() {
         .is_err());
     let field = AnalysisField::host_f64(
         crate::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        AnalysisFieldLayout::scalar(ObservationQuantity::Displacement, FieldLocation::Node),
         vec![1],
         vec![0.0],
     );
@@ -72,8 +80,18 @@ fn primary_profile_rejects_missing_duplicate_and_mismatched_sources() {
         .is_err());
     let unrelated_duplicates = [
         fields[0].clone(),
-        AnalysisField::host_f64("other", vec![1], vec![1.0]),
-        AnalysisField::host_f64("other", vec![1], vec![2.0]),
+        AnalysisField::host_f64(
+            "other",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![1],
+            vec![1.0],
+        ),
+        AnalysisField::host_f64(
+            "other",
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
+            vec![1],
+            vec![2.0],
+        ),
     ];
     assert!(request
         .encoding_profile(
@@ -96,16 +114,19 @@ fn primary_profile_rejects_invalid_storage_and_canonical_metadata_limits() {
     for field in [
         AnalysisField::host_f64(
             crate::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![2],
             vec![1.0],
         ),
         AnalysisField::host_f64(
             crate::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![0],
             vec![],
         ),
         AnalysisField::host_f64(
             crate::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Displacement, FieldLocation::Node),
             vec![1],
             vec![f64::NAN],
         ),
@@ -121,6 +142,7 @@ fn primary_profile_rejects_invalid_storage_and_canonical_metadata_limits() {
     }
     let field = AnalysisField::host_f64(
         crate::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        AnalysisFieldLayout::scalar(ObservationQuantity::Displacement, FieldLocation::Node),
         vec![1],
         vec![0.0],
     );

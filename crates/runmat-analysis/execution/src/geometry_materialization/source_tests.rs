@@ -100,7 +100,6 @@ fn imported_source_is_chunked_and_bound_to_declared_bytes_and_units() {
         parameters: Vec::new(),
         source: GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
             preview_extent_m: None,
-            named_selections: None,
             unit_evidence: Default::default(),
             logical_path: "project/part.brep".into(),
             format: GeometrySourceFormat::Brep,
@@ -168,7 +167,6 @@ fn definition_and_prepared_source_kind_must_converge() {
         parameters: Vec::new(),
         source: GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
             preview_extent_m: None,
-            named_selections: None,
             unit_evidence: Default::default(),
             logical_path: "project/part.brep".into(),
             format: GeometrySourceFormat::Brep,

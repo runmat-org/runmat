@@ -16,6 +16,7 @@ runmat-meshing-core = { workspace = true }
 runmat-fea-syntax = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 thiserror = { workspace = true }
@@ -23,7 +24,9 @@ thiserror = { workspace = true }
 [dev-dependencies]
 runmat-analysis-fea = { workspace = true }
 runmat-geometry-fixtures = { workspace = true }
-serde_json = { workspace = true }
 
 [features]
 tool-schema = ["dep:schemars", "runmat-types/tool-schema"]
+
+[build-dependencies]
+serde_json = { workspace = true }

@@ -21,7 +21,12 @@ fn measure(blocks: usize) -> (u64, u64) {
         RecoveredFieldNumericRepresentation::Real,
     )
     .unwrap();
-    let storage = AnalysisField::host_f64(definition.field_id(), vec![count], vec![300.0; count]);
+    let storage = AnalysisField::host_f64(
+        definition.field_id(),
+        definition.layout(),
+        vec![count],
+        vec![300.0; count],
+    );
     // Identity encoding is measured separately: it still grows with the full field.
     let identity_profile =
         runmat_analysis_fea::results::field::RecoveredField::identity_profile_shape(

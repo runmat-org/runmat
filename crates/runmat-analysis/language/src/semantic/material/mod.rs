@@ -436,10 +436,20 @@ fn validate_authored_shape(
             _ => None,
         };
         let Some(member) = member else {
+            let pending = match &statement.kind {
+                crate::CheckedFeaStatementKind::Block { header, .. } => header
+                    .split_whitespace()
+                    .next()
+                    .and_then(crate::semantic::pending::material_member),
+                _ => None,
+            };
             material_shape_error(
                 declaration,
                 statement.span,
-                "authored material contains an unknown or misplaced member",
+                crate::semantic::pending::with_pending(
+                    "authored material contains an unknown or misplaced member",
+                    pending,
+                ),
                 diagnostics,
             );
             continue;
@@ -594,7 +604,10 @@ fn fluid_law(
             _ => {
                 error(
                     declaration,
-                    "power-law consistency is required in SI units (Pa*s^n) as a number",
+                    crate::semantic::pending::with_pending(
+                        "power-law consistency is required in SI units (Pa*s^n) as a number",
+                        Some(crate::semantic::pending::FLUID_NON_NEWTONIAN),
+                    ),
                     diagnostics,
                 );
                 None

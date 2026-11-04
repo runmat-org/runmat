@@ -135,6 +135,13 @@ pub enum ResolvedObservationTarget {
         face_indices: Vec<usize>,
         face_identities: Vec<StableDigest>,
     },
+    /// Boundary faces of two disjoint face regions in canonical order: the first region's faces
+    /// occupy `[0, first_count)`, the second region's the rest.
+    BoundaryPair {
+        face_indices: Vec<usize>,
+        face_identities: Vec<StableDigest>,
+        first_count: usize,
+    },
     Connectors {
         indices: Vec<usize>,
         identities: Vec<StableDigest>,
@@ -153,7 +160,9 @@ impl ResolvedObservationTarget {
             Self::Volume {
                 element_indices, ..
             } => element_indices.len(),
-            Self::Boundary { face_indices, .. } => face_indices.len(),
+            Self::Boundary { face_indices, .. } | Self::BoundaryPair { face_indices, .. } => {
+                face_indices.len()
+            }
             Self::Connectors { indices, .. } => indices.len(),
             Self::ConstraintGroups { indices, .. } => indices.len(),
         }

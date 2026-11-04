@@ -1,17 +1,28 @@
 //! Display scaling respects the distinction between physical displacement and
 //! arbitrarily normalized modal vectors. Neither changes the retained field.
-pub(super) fn is_modal_field(id: &str) -> bool {
-    id.strip_prefix("modal.mode_shape.")
-        .and_then(|number| number.parse::<usize>().ok())
-        .is_some_and(|number| number > 0)
+/// A published mode shape, recognized from its declared state ordinal. Its amplitude is a
+/// normalization, not a physical value.
+pub(super) fn is_mode_shape(descriptor: &crate::analysis::AnalysisFieldDescriptor) -> bool {
+    matches!(
+        descriptor.layout.ordinal,
+        runmat_analysis_core::FieldOrdinal::Mode(_)
+    )
 }
 
-pub(super) fn automatic_scale(diagonal: f64, amplitude: f64, field_id: &str) -> f64 {
+/// A nodal 3-vector displacement (static, stepped or modal) that can displace the shape.
+pub(super) fn displaces(descriptor: &crate::analysis::AnalysisFieldDescriptor) -> bool {
+    descriptor.layout.quantity == runmat_analysis_core::ObservationQuantity::Displacement
+        && descriptor.layout.location == runmat_analysis_core::FieldLocation::Node
+        && descriptor.layout.value_shape == runmat_analysis_core::ObservationValueShape::Vector3
+        && descriptor.layout.representation == runmat_analysis_core::ComplexRepresentation::Real
+}
+
+pub(super) fn automatic_scale(diagonal: f64, amplitude: f64, normalized: bool) -> f64 {
     if !diagonal.is_finite() || amplitude <= 0.0 || !amplitude.is_finite() {
         return 0.0;
     }
     let scale = 0.12 * diagonal / amplitude;
-    if is_modal_field(field_id) {
+    if normalized {
         scale
     } else {
         // Physical displacement remains visible at true scale when it already
@@ -27,12 +38,12 @@ mod tests {
     #[test]
     fn modal_display_is_invariant_under_eigenvector_normalization() {
         for amplitude in [1e-100, 1e-6, 1.0, 1e6, 1e100] {
-            let scale = automatic_scale(0.1, amplitude, "modal.mode_shape.1");
+            let scale = automatic_scale(0.1, amplitude, true);
             assert!((scale * amplitude - 0.012).abs() < 1e-16);
         }
-        assert_eq!(automatic_scale(0.1, 7.0, "structural.displacement"), 1.0);
-        assert!(automatic_scale(0.1, 1e-6, "structural.displacement") > 1.0);
-        assert_eq!(automatic_scale(0.1, 0.0, "modal.mode_shape.2"), 0.0);
+        assert_eq!(automatic_scale(0.1, 7.0, false), 1.0);
+        assert!(automatic_scale(0.1, 1e-6, false) > 1.0);
+        assert_eq!(automatic_scale(0.1, 0.0, true), 0.0);
     }
 }
 
@@ -71,7 +82,8 @@ mod scene_tests {
                 vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, amplitude, 0.0, 0.0],
                 "modal.mode_shape.1",
                 "m",
-            );
+            )
+            .mode_shape();
             let (scene, scale) = scene_from_topology(
                 "run",
                 &topology,

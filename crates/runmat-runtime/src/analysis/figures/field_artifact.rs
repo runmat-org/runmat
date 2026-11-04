@@ -97,7 +97,16 @@ fn materialize_visualization_field(
     if values.len() != descriptor.value_count {
         return Err("persisted FEA field visualization is incomplete".into());
     }
-    let field = AnalysisField::host_f64(descriptor.field_id, descriptor.shape, values);
+    // Complex pages materialize as magnitudes, so the field is the quantity's magnitude.
+    let layout = if complex_magnitude == Some(true) {
+        descriptor
+            .layout
+            .clone()
+            .representation(runmat_analysis_core::ComplexRepresentation::Magnitude)
+    } else {
+        descriptor.layout.clone()
+    };
+    let field = AnalysisField::host_f64(descriptor.field_id, layout, descriptor.shape, values);
     Ok(MaterializedVisualizationField {
         field,
         complex_magnitude: complex_magnitude.unwrap_or(false),

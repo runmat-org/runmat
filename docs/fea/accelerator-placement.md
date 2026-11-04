@@ -25,7 +25,7 @@ The fallback applies when:
 | Structural static, modal, buckling, frequency response, nonlinear | no | always |
 | Acoustic, electromagnetic, fluid, conjugate heat transfer, fluid-structure interaction | no | always |
 
-A study planned on the CPU before submission (the `runmat fea run` command admits one backend for
+A study planned on the CPU before submission (the `runmat run` command admits one backend for
 the whole sequence) prints the warning and records it in the published study's `diagnostics`.
 
 ## Strict placement: `accelerators = required`

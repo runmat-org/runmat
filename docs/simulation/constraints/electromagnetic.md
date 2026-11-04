@@ -13,10 +13,10 @@ phase-shifted pair enforces $\mathbf A_s=e^{i\phi}\mathcal T(\mathbf A_p)$.
 | `electrical.integral_current` | `target`, `value` | Constrain integrated normal current |
 | `electrical.potential_reference` | `target` | Establish the electrical reference |
 | `electrical.periodic` | periodic pair/transform | Pair periodic electric regions |
-| `magnetic.vector_potential` | `target`, `value` | Prescribe magnetic vector potential |
+| `magnetic.vector_potential` | `target`, `value` | Prescribe magnetic vector potential (a nonzero value [not yet in the current release](pending:magnetic.harmonic.vector-potential)) |
 | `magnetic.vector_potential_ground` | `target` | Ground tangential vector-potential DOFs |
 | `magnetic.coulomb_gauge` | `target` | Apply $\nabla\cdot\mathbf A=0$ gauge intent |
-| `magnetic.periodic` | periodic pair/transform | Pair periodic magnetic regions |
+| `magnetic.periodic` | periodic pair/transform | Pair periodic magnetic regions [not yet in the current release](pending:magnetic.periodic) |
 | `magnetic.phase_shifted_periodic` | periodic pair/transform plus `phase` | Complex phase relation across the pair |
 
 All targets and pair members are CAD region references. `value` on the current

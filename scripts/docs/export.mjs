@@ -6,24 +6,26 @@ import { execFileSync } from "node:child_process";
 import { readJson, copyInput, collectDocuments } from "./documents.mjs";
 import { collectExamples } from "./examples.mjs";
 import { collectFea } from "./fea.mjs";
+import { loadLedger, registerExport } from "./ledger.mjs";
 import { writeManifest } from "./manifest.mjs";
 import { collectGraphics } from "./graphics.mjs";
 import { productionDocumentation } from "./production-documentation.mjs";
-export function buildSourceDocs({ source, output, requirementsPath, builtinDescriptorsPath, builtinDocumentationPath, verifiedBuiltinDocumentation, evidencePath, snapshotsRoot, graphicsRoot }) {
+export function buildSourceDocs({ source, output, builtinDescriptorsPath, builtinDocumentationPath, verifiedBuiltinDocumentation, evidencePath, snapshotsRoot, graphicsRoot }) {
     source = resolve(source);
     output = resolve(output);
     if (!output.startsWith(source + "/target/"))
         throw new Error("Docs export output must be inside the source target directory");
     const ajv = new Ajv({ allErrors: true });
     const schemas = new Map();
-    for (const name of ["document", "fea-manual", "evidence-index", "example-package"])
+    for (const name of ["document", "fea-manual", "evidence-index", "example-package", "ledger"])
         schemas.set(name, ajv.compile(readJson(join(source, `docs/schema/${name}.schema.json`))));
     const validate = (name, value) => { const check = schemas.get(name); if (!check(value))
         throw new Error(`${name}: ${ajv.errorsText(check.errors)}`); };
     mkdirSync(dirname(output), { recursive: true });
     const staging = mkdtempSync(join(dirname(output), ".docs-staging-"));
     try {
-        const register = readJson(requirementsPath);
+        // The requirement register is part of the capability ledger.
+        const register = registerExport(loadLedger(source).ledger);
         const requirements = new Map(register.requirements.map(requirement => [requirement.id, requirement]));
         const examples = collectExamples(source, staging, validate, requirements, snapshotsRoot);
         if (examples.some(example => example.playback)) collectGraphics(graphicsRoot, staging);
@@ -78,11 +80,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
             throw new Error("Invalid export arguments");
         options.set(args[index], args[index + 1]);
     }
-    for (const required of ["--requirements", "--builtin-descriptors", "--out"])
+    for (const required of ["--builtin-descriptors", "--out"])
         if (!options.has(required))
             throw new Error(`Missing ${required}`);
     const source = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
     const verifiedBuiltinDocumentation = productionDocumentation(source, { exportPath: options.get("--builtin-documentation") });
-    const manifest = buildSourceDocs({ source, output: options.get("--out"), requirementsPath: options.get("--requirements"), builtinDescriptorsPath: options.get("--builtin-descriptors"), verifiedBuiltinDocumentation, evidencePath: options.get("--evidence-manifest"), snapshotsRoot: options.get("--example-snapshots"), graphicsRoot: options.get("--graphics-runtime") });
+    const manifest = buildSourceDocs({ source, output: options.get("--out"), builtinDescriptorsPath: options.get("--builtin-descriptors"), verifiedBuiltinDocumentation, evidencePath: options.get("--evidence-manifest"), snapshotsRoot: options.get("--example-snapshots"), graphicsRoot: options.get("--graphics-runtime") });
     console.log(`Source docs: ${manifest.content_hash} (${manifest.files.length} files)`);
 }

@@ -25,7 +25,7 @@ pub const MIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             inference::infer,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::MaySuspend,
+        async_behavior: BuiltinAsyncBehavior::MaySuspendLocally,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,

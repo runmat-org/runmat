@@ -93,14 +93,7 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
     fs::write(project.path().join("src/main.fea"), source).unwrap();
     let output = runmat(
         &project,
-        &[
-            "fea",
-            "run",
-            "src/main.fea",
-            "--study",
-            "response",
-            "--json",
-        ],
+        &["run", "src/main.fea", "--study", "response", "--json"],
     );
     if !output.status.success() {
         let evidence_path = project.keep();

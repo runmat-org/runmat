@@ -278,6 +278,7 @@ fn assembly(phase: f64, amplitude: f64) -> AcousticAssembly {
         prescribed: runmat_types::physical::Quantity::new(prescribed),
         source_evidence: Vec::new(),
         incident_faces: Vec::new(),
+        port_faces: Vec::new(),
         reduction: Some(reduction),
     }
 }

@@ -20,7 +20,9 @@ pub(super) fn modal_workspace_bytes(
     residual_vector_count: u64,
     reduced_stiffness_nonzeros: u64,
     reduced_mass_nonzeros: u64,
-    coercivity_bytes: u64,
+    shifted_nonzeros: u64,
+    factor_bytes: u64,
+    energy_proof_bytes: u64,
 ) -> Result<u64, ResourcePlanningError> {
     let reduced_row_offsets = checked_bytes(
         checked_mul(
@@ -90,12 +92,29 @@ pub(super) fn modal_workspace_bytes(
         8,
         "modal numerical workspace",
     )?;
-    // The coercivity-proving Cholesky factor is the shift-invert operator; the Sturm check
-    // factors K − σ'M once more (Bunch–Kaufman, same symbolic size up to pivoting headroom).
+    // The coercivity-proving Cholesky factor is the shift-invert operator. After the Lanczos
+    // iteration the Sturm check assembles K − σ'M on the union pattern and factors it
+    // (Bunch–Kaufman, same symbolic size) while the Cholesky factor is still held. A
+    // local-energy proof, when the original source is captured, runs before either factor
+    // exists and releases its storage when it returns.
+    let shifted_operator = checked_add(
+        checked_bytes(
+            checked_add(reduced_dimension, 1, "shifted row offsets")?,
+            8,
+            "shifted row offsets",
+        )?,
+        checked_bytes(shifted_nonzeros, 16, "shifted operator entries")?,
+        "shifted operator",
+    )?;
+    let factors = checked_add(
+        checked_mul(factor_bytes, 2, "Cholesky and Sturm factors")?,
+        shifted_operator,
+        "Sturm factorization",
+    )?;
     checked_add(
         checked_add(
             reduced_operator_bytes,
-            checked_mul(coercivity_bytes, 3, "Cholesky and Sturm factors")?,
+            factors.max(energy_proof_bytes),
             "reduced operators and factors",
         )?,
         vector_and_dense,

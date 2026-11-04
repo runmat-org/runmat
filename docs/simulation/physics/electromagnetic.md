@@ -5,7 +5,7 @@ flux density, field intensity, and frequency-dependent loss. RunMat uses typed q
 amperes, coulombs, current density, and vector potential; it never passes them to a solver as
 unitless numbers.
 
-Four electromagnetic analyses run from a `.fea` study with `runmat fea run`:
+Four electromagnetic analyses run from a `.fea` study with `runmat run`:
 
 | Analysis | Selected by | Unknown | Elements |
 | --- | --- | --- | --- |
@@ -174,4 +174,4 @@ Resolve the skin depth $\delta=\sqrt{2/(\omega\mu\sigma)}$ with several elements
 
 See [electromagnetic constraints](../constraints/electromagnetic),
 [electromagnetic loads](../loads/electromagnetic), [electrothermal analysis](./electrothermal),
-[typed units](../language/types-units-and-expressions), and [current status](../status).
+[typed units](../language/types-units-and-expressions), and [current status](../validation/status.md).

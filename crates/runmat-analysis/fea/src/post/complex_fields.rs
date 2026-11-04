@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisFieldLayout, ComplexRepresentation, FieldLocation};
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisField, ObservationQuantity};
@@ -323,12 +324,19 @@ fn project_nodal_reaction(
     Ok(NodalReactionFields {
         force: AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node)
+                .representation(ComplexRepresentation::Complex),
             vec![layout.node_count(), 3],
             force,
         ),
         moment: has_rotation.then(|| {
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+                AnalysisFieldLayout::vector3(
+                    ObservationQuantity::ReactionMoment,
+                    FieldLocation::Node,
+                )
+                .representation(ComplexRepresentation::Complex),
                 vec![layout.node_count(), 3],
                 moment,
             )
@@ -356,6 +364,9 @@ pub(super) fn interleave(
     shape.push(2);
     Ok(AnalysisField::host_f64(
         &real.field_id,
+        real.layout
+            .clone()
+            .representation(ComplexRepresentation::Complex),
         shape,
         real_values
             .iter()

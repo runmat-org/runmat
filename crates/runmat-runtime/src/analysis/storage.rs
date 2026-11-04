@@ -526,7 +526,12 @@ fn validate_persisted_run(
             .ok_or_else(|| "analysis field byte length overflow".to_string())?;
         if field.manifest.encoded_length != expected_bytes as u64
             || field_logical_identity(
-                &AnalysisField::host_f64(&field.field_id, field.shape.clone(), Vec::new()),
+                &AnalysisField::host_f64(
+                    &field.field_id,
+                    field.template.layout.clone(),
+                    field.shape.clone(),
+                    Vec::new(),
+                ),
                 field.manifest.payload_digest,
             ) != field.manifest.logical_identity
         {
@@ -741,6 +746,17 @@ pub fn next_run_id() -> String {
 pub fn persist_run_result(run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
     crate::analysis::fea_run_admission::FeaRunScope::check_publication_checked()
         .map_err(|denied| denied.to_string())?;
+    // Every published field declares its layout; a layout that does not fit the stored
+    // shape is a publisher defect and is never persisted.
+    let mut layout_error = None;
+    crate::analysis::operations::visit_analysis_result_fields(run, |field| {
+        if layout_error.is_none() {
+            layout_error = field.validate_layout().err();
+        }
+    });
+    if let Some(error) = layout_error {
+        return Err(format!("published field layout is invalid: {error}"));
+    }
     let guard = capture_artifact_store()?;
     guard.persist_run(run)
 }

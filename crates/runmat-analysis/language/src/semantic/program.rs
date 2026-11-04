@@ -259,8 +259,10 @@ impl<C: AnalysisOperationCatalog + ?Sized> InputCheck<'_, C> {
             diagnostics.push(FeaDiagnostic::error(
                 "fea.semantic.input_value_type",
                 format!(
-                    "{member} for input `{}` has an incompatible type",
-                    input.name
+                    "{member} for input `{}` has an incompatible type: the input is {}, the value is {}",
+                    input.name,
+                    super::units::describe_fea_type(&input.value_type),
+                    super::units::describe_fea_type(&checked.value_type),
                 ),
                 FeaDiagnosticPhase::Semantic,
                 Some(FeaDiagnosticLocation {
@@ -540,14 +542,37 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                         statements,
                     }
                 }
-                FeaStatementKind::Include(value) => CheckedFeaStatementKind::Include(check_value(
-                    catalog,
-                    path,
-                    source,
-                    scope,
-                    value,
-                    diagnostics,
-                )),
+                FeaStatementKind::Include(value) => {
+                    // `include model.m(name = value, ...)`: the model reference checks as usual;
+                    // binding its inputs by name is a planned feature.
+                    let value = match &value.kind {
+                        runmat_fea_syntax::FeaExpressionKind::Call { callee, .. } => {
+                            diagnostics.push(FeaDiagnostic::error(
+                                "fea.semantic.include_arguments",
+                                super::pending::with_pending(
+                                    "an include binds no inputs yet; include the model by reference \
+                                     and set its inputs inside it",
+                                    Some(super::pending::INCLUDE_PARAMETERIZED),
+                                ),
+                                FeaDiagnosticPhase::Semantic,
+                                Some(FeaDiagnosticLocation {
+                                    path: path.clone(),
+                                    span: value.span,
+                                }),
+                            ));
+                            callee.as_ref()
+                        }
+                        _ => value,
+                    };
+                    CheckedFeaStatementKind::Include(check_value(
+                        catalog,
+                        path,
+                        source,
+                        scope,
+                        value,
+                        diagnostics,
+                    ))
+                }
                 FeaStatementKind::Retain(value) => CheckedFeaStatementKind::Retain(check_value(
                     catalog,
                     path,

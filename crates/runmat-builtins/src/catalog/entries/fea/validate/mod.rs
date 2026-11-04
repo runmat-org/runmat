@@ -44,7 +44,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "Problems are reported, not thrown: the result's `valid` is `false` and `issue_codes` lists stable codes such as `RM.FEA.STUDY.MODEL_INVALID`. The matching entry in `issues` carries a readable message; for a model failure, the message includes the specific validation detail.",
             "Each call records a content-addressed validation evidence artifact for the study and returns its path in `evidence_artifact_path`. The artifact root is taken from the analysis artifact store configuration (for example `RUNMAT_FEA_STUDY_ARTIFACT_ROOT`).",
             "For a sweep, the result has the sweep id, an overall `valid`, sweep-level `issue_codes`, and `study_entries` in the order the studies were given.",
-            "The input must be a `fea.Study` or `fea.Sweep` object. Paths to `.fea` files are not accepted; check `.fea` sources with `runmat fea check`.",
+            "The input must be a `fea.Study` or `fea.Sweep` object. Paths to `.fea` files are not accepted; check `.fea` sources with `runmat check`.",
         ] },
         BuiltinDocumentationSection { heading: "Use in a study", paragraphs: &[
             "Call `fea.validate` after `fea.study` or `fea.sweep` and before `fea.plan` or `fea.run`. The same object can then be planned and run unchanged.",

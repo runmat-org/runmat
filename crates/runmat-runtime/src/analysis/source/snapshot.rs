@@ -201,7 +201,8 @@ impl PreparedFeaSourceSnapshot {
         }
         let root_module = self.graph.root.clone();
         let bound = bind_program(&host, self.graph);
-        let program = check_program(&host, bound);
+        let mut program = check_program(&host, bound);
+        super::admission::append_admission_diagnostics(&mut program, &root_module);
         Ok(CheckedFeaSource {
             program,
             root_module,
@@ -320,20 +321,7 @@ impl GeometryInspectionSource for SnapshotFeaHost<'_> {
                 SourceAvailability::Unavailable,
             ));
         };
-        let metadata_path =
-            runmat_geometry_core::geometry_selection_metadata_path(request.logical_path.as_str())
-                .map_err(|e| {
-                diagnostic(
-                    "fea.geometry.invalid_selections",
-                    e.to_string(),
-                    SourceAvailability::Available,
-                )
-            })?;
-        let path = LogicalSourcePath::file(metadata_path).expect("confined metadata path");
-        super::geometry_resolver::attach_named_selections(
-            inspect_geometry_bytes(bytes, request)?,
-            self.geometry.get(&path).map(Vec::as_slice),
-        )
+        inspect_geometry_bytes(bytes, request)
     }
 }
 

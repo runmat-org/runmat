@@ -266,4 +266,4 @@ A study binds every required parameter when selecting the model. `include model.
 
 ## Validation Boundary
 
-`runmat fea check` validates authored types, units, references, topology roles, composition, procedure compatibility, and required capabilities. Exact execution adds geometry realization, region binding, mesh projection, complete property coverage, solver well-posedness checks, and numerical evidence. A valid source file is necessary but does not by itself validate a formulation for a given use.
+`runmat check` validates authored types, units, references, topology roles, composition, procedure compatibility, and required capabilities. Exact execution adds geometry realization, region binding, mesh projection, complete property coverage, solver well-posedness checks, and numerical evidence. A valid source file is necessary but does not by itself validate a formulation for a given use.

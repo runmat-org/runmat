@@ -390,6 +390,7 @@ pub(super) fn artifact_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::analysis::storage::{
         AnalysisArtifactStore, FilesystemAnalysisArtifactStore, InMemoryAnalysisArtifactStore,
     };
@@ -434,7 +435,12 @@ mod tests {
             let original = RecoveredField::new(
                 definition.clone(),
                 sample,
-                AnalysisField::host_f64("native", shape.clone(), accepted.clone()),
+                AnalysisField::host_f64(
+                    "native",
+                    definition.layout(),
+                    shape.clone(),
+                    accepted.clone(),
+                ),
             )
             .unwrap();
             assert!(native_values_match(
@@ -448,7 +454,7 @@ mod tests {
                 let tampered = RecoveredField::new(
                     definition.clone(),
                     sample,
-                    AnalysisField::host_f64("native", shape.clone(), altered),
+                    AnalysisField::host_f64("native", definition.layout(), shape.clone(), altered),
                 )
                 .unwrap();
                 tampered.validate().unwrap();
@@ -461,7 +467,12 @@ mod tests {
             let mut reordered = accepted.clone();
             reordered.swap(0, 1);
             assert!(!native_values_match(
-                &AnalysisField::host_f64("native", shape.clone(), reordered),
+                &AnalysisField::host_f64(
+                    "native",
+                    original.storage().layout.clone(),
+                    shape.clone(),
+                    reordered
+                ),
                 accepted.iter().copied()
             ));
             assert!(!native_values_match(
@@ -477,7 +488,15 @@ mod tests {
 
     #[test]
     fn native_value_comparison_preserves_signed_zero_bits() {
-        let field = runmat_analysis_core::AnalysisField::host_f64("native", vec![1], vec![0.0]);
+        let field = runmat_analysis_core::AnalysisField::host_f64(
+            "native",
+            runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Residual,
+                runmat_analysis_core::FieldLocation::Global,
+            ),
+            vec![1],
+            vec![0.0],
+        );
         assert!(native_values_match(&field, [0.0].into_iter()));
         assert!(!native_values_match(&field, [-0.0].into_iter()));
     }

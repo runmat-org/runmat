@@ -1,11 +1,27 @@
-# Electromagnetic and electrothermal validation
+---
+description: How RunMat checks its electromagnetics results: reference cases with their errors and receipts, and the tests behind each requirement, generated from the capability ledger.
+keywords: [electromagnetics validation, verification, reference cases, convergence, FEA accuracy]
+doc_type: validation
+generated: node scripts/docs/generate-pages.mjs
+---
+# Electromagnetics validation
 
-These checks compare RunMat's electromagnetic and electrothermal solutions with closed-form
-references. Each reference is independent of RunMat's element matrices. The kernel checks run in
-the `runmat-analysis-fea` test suite; the study checks run complete `.fea` studies with
-`runmat fea run`.
+<!-- Generated from docs/simulation/ledger.json by scripts/docs/generate-pages.mjs; do not edit by hand. -->
 
-## Skin effect in a driven conductor (harmonic fields)
+Each case below compares a RunMat result with an independent reference: a closed-form solution, a manufactured solution or a published benchmark. Values link to their run receipts. The [validation methodology](./methodology.md) explains how to read them, and [Status](./status.md) lists what the release runs.
+
+## Capabilities
+
+| Capability | In this release | Cases |
+| --- | --- | --- |
+| Electromagnetic static | yes | [Magnetostatic field of a current-carrying bar](#magnetostatic-field-of-a-current-carrying-bar), [Electrostatics and steady current flow](#electrostatics-and-steady-current-flow), [Complete electromagnetic and electrothermal studies](#complete-electromagnetic-and-electrothermal-studies) |
+| Electromagnetic harmonic | yes | [Skin effect in a driven conductor](#skin-effect-in-a-driven-conductor) |
+| Electromagnetic transient (eddy-current A–φ time stepping) | [not yet in the current release](pending:electromagnetic.transient) | — |
+| Nonlinear magnetics with B–H curves | [not yet in the current release](pending:electromagnetic.nonlinear) | — |
+
+## Reference cases
+
+### Skin effect in a driven conductor
 
 A conducting strip of thickness $t$ under an air gap $g$, returned through a grounded plane, with
 uniform fields across its width $W$ and along its length $L$ (a parallel-plate line), has the
@@ -41,43 +57,27 @@ A gap-fed bar inside air, whose terminals do not touch a grounded boundary, clos
 current through the air. The delivered power, $1.8750\times10^{-3}$ W, equals
 $\tfrac12 I^2R_{dc}$ = $1.875\times10^{-3}$ W, and the Joule loss matches it to $6\times10^{-5}$.
 
-## Magnetostatic field of a current-carrying bar
+- References: Parallel-plate line impedance with skin depth δ = √(2/ωμ₀σ).
+
+### Magnetostatic field of a current-carrying bar
 
 A square conductor carrying uniform current density, grounded on every exterior face, is compared
 with an independent full-volume solution. The vector potential, flux density and magnetic energy
 errors fall with refinement (cells 1, 2, 4: flux-density error 0.166, 0.116, 0.064; energy error
 0.80, 0.39, 0.12).
 
-## Electrostatics and steady current flow
+- References: Independent full-volume vector-potential solution.
+
+### Electrostatics and steady current flow
 
 A charged dielectric slab (Tet4) has potential, field and energy errors that fall by four, two and
 four per refinement: potential 4.6e-2, 1.1e-2, 2.9e-3; field 0.29, 0.14, 0.072; energy 0.25, 0.063,
 0.016. Steady current flow uses the same operator with conductivity in place of permittivity. The
 terminal power, $\sum V_iI_i$, equals the Joule integral on every solve.
 
-## Two-way Joule heating
+- References: Charged dielectric slab, closed form; terminal power against the Joule integral.
 
-A bar with resistivity $\rho(T)=\rho_0(1+\alpha(T-T_0))$ carries a fixed current, with its ends held
-at $T_0$ and its sides insulated. The temperature rise $\theta$ solves
-$\theta''+\beta(1+\alpha\theta)=0$ with $\beta=J^2\rho_0/k$. The closed form is
-
-$$
-\theta(x)=\frac{1}{\alpha}\left(\frac{\cos\big(m(x-L/2)\big)}{\cos(mL/2)}-1\right),\qquad m^2=\alpha\beta .
-$$
-
-With $\sigma_0$ = 3 S/m, $\alpha$ = 0.004 /K, $k$ = 1 W/m/K, $I$ = 34.64 A on a unit cube (Tet10):
-
-| cells | sweeps | max $\lvert T-T_{exact}\rvert$ (K) | peak rise (K) | Joule power (W) | $\int I^2\rho(T)/A\,dx$ (W) |
-| --- | --- | --- | --- | --- | --- |
-| 2 | 8 | 2.21 | 59.95 | 461.47 | 463.52 |
-| 4 | 9 | 0.575 | 59.95 | 462.88 | 463.52 |
-| 8 | 9 | 0.150 | 59.95 | 463.35 | 463.52 |
-
-The coupling iterates until no element temperature changes by more than $10^{-6}$ of the rise.
-Each element takes its conductivity at its mean temperature, so the temperature error falls
-fourfold per refinement.
-
-## Study checks with `runmat fea run`
+### Complete electromagnetic and electrothermal studies
 
 These are complete `.fea` studies on a 1000 x 100 x 100 mm bar (quadratic tetrahedra, 50 mm), read
 from their published authored outputs.
@@ -98,5 +98,26 @@ The steady-current row and the two-way Joule-heating bar are also run as tests o
 The electrothermal study publishes two cases, `operating_point` (temperature) and
 `operating_point/conduction` (potential, current density and loss at the converged temperatures).
 
-See [electromagnetics](../physics/electromagnetic), [electrothermal analysis](../physics/electrothermal)
-and [validation methodology](../validation).
+- References: σV/L and V²/R for a copper bar; closed-form two-way Joule-heated bar.
+- Held in CI by: `copper_bar_carries_sigma_v_over_l_and_dissipates_v_squared_over_r`, `two_way_joule_heating_matches_the_closed_form_bar`.
+
+## Test evidence by requirement
+
+Each requirement lists acceptance obligations, and each obligation must hold in stated envelopes: formulation, element order and execution provider. Tests declare the obligation and envelope they support at the test; the counts are envelope cells from the latest evidence run. PASS covers the obligation fully, PARTIAL passes with a narrower boundary than the criterion, and OPEN has no supporting test yet.
+
+| Requirement | Title | Obligations | PASS | PARTIAL | FAIL | OPEN |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| FEA-EM-SCALAR-001 | Distinct electrostatic and conducting scalar-potential operators | 2 | 0 | 8 | 0 | 0 |
+| FEA-EM-INPUT-001 | Typed electrical and magnetic sources and rank-correct constraints | 3 | 0 | 6 | 0 | 8 |
+| FEA-EM-MAGNETOSTATIC-001 | Documented magnetostatic formulation and physical recovery | 2 | 0 | 3 | 0 | 1 |
+| FEA-EM-QUALIFICATION-001 | Independent per-formulation evidence and governed electromagnetic execution | 3 | 0 | 11 | 0 | 64 |
+| FEA-EM-INPUTS-002 | Every declared electromagnetic input runs | 2 | 0 | 2 | 0 | 10 |
+| FEA-EM-OUTPUTS-001 | Electromagnetic outputs and fields | 2 | 0 | 0 | 0 | 24 |
+| FEA-PUBLIC-STUDIES-001 | Published studies run from the public command | 9 | 0 | 0 | 1 | 68 |
+| FEA-SCALE-PARALLEL-001 | Every family saturates the machine through one thread plan | 6 | 0 | 2 | 0 | 114 |
+| FEA-SCALE-DISTRIBUTED-001 | Remote and cooperative execution for every family | 5 | 0 | 0 | 0 | 118 |
+| FEA-SCALE-SIZE-001 | Millions of degrees of freedom at stated time and memory | 5 | 0 | 0 | 0 | 94 |
+| FEA-EM-MAXWELL-001 | Integrated harmonic edge-element Maxwell analysis | 3 | 0 | 1 | 0 | 2 |
+| FEA-EM-FREQUENCY-001 | Multi-frequency harmonic electromagnetics and fields | 4 | 0 | 2 | 0 | 6 |
+| FEA-EM-TRANSIENT-001 | Transient electromagnetics | 3 | 0 | 0 | 0 | 6 |
+| FEA-EM-NONLINEAR-001 | Saturating iron | 3 | 0 | 0 | 0 | 6 |

@@ -51,6 +51,7 @@ pub fn publish_observation(
             .collect(),
         ResolvedObservationTarget::Volume { .. }
         | ResolvedObservationTarget::Boundary { .. }
+        | ResolvedObservationTarget::BoundaryPair { .. }
         | ResolvedObservationTarget::ConstraintGroups { .. } => Vec::new(),
     };
     let spatial_extrema = planned.spec.reduction.as_ref().is_some_and(|reduction| {

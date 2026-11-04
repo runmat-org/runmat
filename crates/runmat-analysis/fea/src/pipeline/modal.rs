@@ -1,4 +1,5 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
+use runmat_analysis_core::{AnalysisFieldLayout, FieldLocation, ObservationQuantity};
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
@@ -372,6 +373,7 @@ fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
     vec![
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_FREQUENCY_HZ,
+            AnalysisFieldLayout::scalar(ObservationQuantity::ModalFrequency, FieldLocation::Mode),
             vec![mode_count],
             basis
                 .modes()
@@ -381,6 +383,7 @@ fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_EIGENVALUE,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Eigenvalue, FieldLocation::Mode),
             vec![mode_count],
             basis
                 .modes()
@@ -390,11 +393,13 @@ fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_MODAL_MASS,
+            AnalysisFieldLayout::scalar(ObservationQuantity::ModalMass, FieldLocation::Mode),
             vec![mode_count],
             basis.modes().iter().map(|mode| mode.modal_mass()).collect(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_MODAL_STIFFNESS,
+            AnalysisFieldLayout::scalar(ObservationQuantity::ModalStiffness, FieldLocation::Mode),
             vec![mode_count],
             basis
                 .modes()
@@ -404,31 +409,40 @@ fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
+            AnalysisFieldLayout::vector3(
+                ObservationQuantity::ModalParticipation,
+                FieldLocation::Mode,
+            ),
             vec![mode_count, 3],
             directional(|metric| metric.participation_factor()),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_EFFECTIVE_MASS,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ModalMass, FieldLocation::Mode),
             vec![mode_count, 3],
             directional(|metric| metric.effective_mass()),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ModalMass, FieldLocation::Mode),
             vec![mode_count, 3],
             directional(|metric| metric.cumulative_effective_mass()),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
+            AnalysisFieldLayout::vector3(ObservationQuantity::MassRatio, FieldLocation::Mode),
             vec![mode_count, 3],
             directional(|metric| metric.cumulative_mass_ratio()),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_TOTAL_FREE_MASS,
+            AnalysisFieldLayout::vector3(ObservationQuantity::ModalMass, FieldLocation::Global),
             vec![3],
             basis.total_free_mass().to_vec(),
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_RESIDUAL_NORM,
+            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Mode),
             vec![mode_count],
             basis
                 .modes()
@@ -438,6 +452,10 @@ fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
+            AnalysisFieldLayout::scalar(
+                ObservationQuantity::FrequencySeparation,
+                FieldLocation::Mode,
+            ),
             vec![mode_count],
             basis
                 .modes()
@@ -447,6 +465,11 @@ fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
         ),
         AnalysisField::host_f64(
             FEA_FIELD_MODAL_M_ORTHOGONALITY,
+            AnalysisFieldLayout::components(
+                ObservationQuantity::MassOrthogonality,
+                FieldLocation::Mode,
+                mode_count,
+            ),
             vec![mode_count, mode_count],
             basis.mass_orthogonality().to_vec(),
         ),

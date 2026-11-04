@@ -126,6 +126,7 @@ fn final_observation_selects_only_the_authored_terminal_time_without_relabeling(
                 sample,
                 runmat_analysis_core::AnalysisField::host_f64(
                     definition.field_id(),
+                    definition.layout(),
                     vec![projection.nodes.len()],
                     vec![293.15; projection.nodes.len()],
                 ),
@@ -172,8 +173,12 @@ fn catalog_at_sample(
     shape: Vec<usize>,
     values: Vec<f64>,
 ) -> RecoveredFieldCatalog {
-    let storage =
-        runmat_analysis_core::AnalysisField::host_f64(definition.field_id(), shape, values);
+    let storage = runmat_analysis_core::AnalysisField::host_f64(
+        definition.field_id(),
+        definition.layout(),
+        shape,
+        values,
+    );
     RecoveredFieldCatalog::new(
         projection,
         vec![RecoveredField::new(definition.clone(), sample, storage).unwrap()],
@@ -326,20 +331,22 @@ fn constraint_reaction_resultant_uses_canonical_group_ownership() {
                 )]
     ));
     let force_field = RecoveredField::new(
-        force_definition,
+        force_definition.clone(),
         RecoveredFieldSample::Final,
         runmat_analysis_core::AnalysisField::host_f64(
             "structural.constraint_reaction_force",
+            force_definition.layout(),
             vec![1, 3],
             vec![125.0, -250.0, 375.0],
         ),
     )
     .unwrap();
     let moment_field = RecoveredField::new(
-        moment_definition,
+        moment_definition.clone(),
         RecoveredFieldSample::Final,
         runmat_analysis_core::AnalysisField::host_f64(
             "structural.constraint_reaction_moment_about_global_origin",
+            moment_definition.layout(),
             vec![1, 3],
             vec![12.5, -25.0, 37.5],
         ),
@@ -460,10 +467,11 @@ fn connector_observation_binds_exact_identity_and_partition_source() {
             if indices == &[0] && identities == &[connector_identity]
     ));
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
         runmat_analysis_core::AnalysisField::host_f64(
             crate::contracts::FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+            definition.layout(),
             vec![1, 3],
             vec![10.0, -20.0, 30.0],
         ),
@@ -1521,6 +1529,7 @@ fn series_source_validation_does_not_recompute_payload() {
     };
     *field = runmat_analysis_core::AnalysisField::host_f64(
         field.field_id.clone(),
+        field.layout.clone(),
         field.shape.clone(),
         vec![99.0],
     );
@@ -2478,10 +2487,11 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
     .unwrap();
     let values = (0..node_count * 3).map(|value| value as f64).collect();
     let field = RecoveredField::new(
-        definition,
+        definition.clone(),
         RecoveredFieldSample::Final,
         runmat_analysis_core::AnalysisField::host_f64(
             "structural.displacement",
+            definition.layout(),
             vec![node_count, 3],
             values,
         ),

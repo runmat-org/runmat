@@ -3258,20 +3258,28 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
         ),
     ];
 
-    for (field_id, family, quantity, unit, location) in cases {
+    // Family and unit follow the field id; location and quantity are the publisher's
+    // declared layout (see `field_descriptors_project_the_declared_layout`).
+    for (field_id, family, _published_name, unit, _location) in cases {
         let descriptor = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
             &field_id,
+            runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Residual,
+                runmat_analysis_core::FieldLocation::Global,
+            ),
             vec![1],
             vec![0.0],
         ));
         assert_eq!(descriptor.family, family, "{field_id} family");
-        assert_eq!(descriptor.quantity, quantity, "{field_id} quantity");
         assert_eq!(descriptor.unit.as_deref(), unit, "{field_id} unit");
-        assert_eq!(descriptor.location, location, "{field_id} location");
     }
 
     let membrane = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+        runmat_analysis_core::AnalysisFieldLayout::canonical(
+            runmat_analysis_core::ObservationQuantity::ShellMembraneForce,
+            runmat_analysis_core::FieldLocation::Element,
+        ),
         vec![1, 3],
         vec![0.0, 0.0, 0.0],
     ));
@@ -3279,6 +3287,10 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(membrane.component_count, Some(3));
     let shear = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+        runmat_analysis_core::AnalysisFieldLayout::canonical(
+            runmat_analysis_core::ObservationQuantity::ShellTransverseShear,
+            runmat_analysis_core::FieldLocation::Element,
+        ),
         vec![1, 2],
         vec![0.0, 0.0],
     ));
@@ -3286,14 +3298,22 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(shear.component_count, Some(2));
     let von_mises = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::ShellVonMises,
+            runmat_analysis_core::FieldLocation::Element,
+        ),
         vec![1],
         vec![0.0],
     ));
     assert_eq!(von_mises.kind, AnalysisFieldKind::Scalar);
-    assert_eq!(von_mises.component_count, None);
+    assert_eq!(von_mises.component_count, Some(1));
 
     let displacement = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        runmat_analysis_core::AnalysisFieldLayout::vector3(
+            runmat_analysis_core::ObservationQuantity::Displacement,
+            runmat_analysis_core::FieldLocation::Node,
+        ),
         vec![4, 3],
         vec![0.0; 12],
     ));
@@ -3306,6 +3326,10 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(displacement.component_count, Some(3));
     let nodal_von_mises = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::VonMisesStress,
+            runmat_analysis_core::FieldLocation::Node,
+        ),
         vec![4],
         vec![0.0; 4],
     ));
@@ -3318,9 +3342,13 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(nodal_von_mises.entity_count, 4);
     assert_eq!(nodal_von_mises.value_count, 4);
     assert_eq!(nodal_von_mises.element_count, 4);
-    assert_eq!(nodal_von_mises.component_count, None);
+    assert_eq!(nodal_von_mises.component_count, Some(1));
     let solid_stress = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_STRESS,
+        runmat_analysis_core::AnalysisFieldLayout::symmetric_tensor3(
+            runmat_analysis_core::ObservationQuantity::Stress,
+            runmat_analysis_core::FieldLocation::Element,
+        ),
         vec![1, 6],
         vec![0.0; 6],
     ));
@@ -3333,6 +3361,10 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(solid_stress.component_count, Some(6));
     let strain_energy_density = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::StrainEnergyDensity,
+            runmat_analysis_core::FieldLocation::Element,
+        ),
         vec![1],
         vec![0.0],
     ));
@@ -3356,6 +3388,10 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
     assert_eq!(membrane.value_count, 3);
     let energy = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::StrainEnergy,
+            runmat_analysis_core::FieldLocation::Global,
+        ),
         vec![1],
         vec![0.0],
     ));
@@ -3397,17 +3433,85 @@ fn statistical_field_descriptors_preserve_statistic_units_and_locations() {
             AnalysisFieldLocation::Element,
         ),
     ];
-    for (field_id, quantity, statistic, unit, location) in cases {
+    for (field_id, _published_name, statistic, unit, location) in cases {
+        let field_location = match location {
+            AnalysisFieldLocation::Node => runmat_analysis_core::FieldLocation::Node,
+            _ => runmat_analysis_core::FieldLocation::Element,
+        };
         let descriptor = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
             field_id,
+            runmat_analysis_core::AnalysisFieldLayout::vector3(
+                runmat_analysis_core::ObservationQuantity::Displacement,
+                field_location,
+            ),
             vec![2, 3],
             vec![0.0; 6],
         ));
         assert_eq!(descriptor.statistic, statistic, "{field_id}");
-        assert_eq!(descriptor.quantity, quantity, "{field_id}");
         assert_eq!(descriptor.unit.as_deref(), unit, "{field_id}");
         assert_eq!(descriptor.location, location, "{field_id}");
     }
+}
+
+/// A descriptor reports exactly what the publisher declared: quantity, location, components,
+/// representation and ordinal, and counts entities from the declared layout. The same field
+/// id published with different layouts (element-constant vs nodal temperature) is described
+/// by each publisher's declaration, never by its name.
+#[test]
+fn field_descriptors_project_the_declared_layout() {
+    use runmat_analysis_core::{
+        AnalysisFieldLayout, ComplexRepresentation, FieldLocation, FieldOrdinal,
+        ObservationQuantity as Q,
+    };
+    let element_temperature = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "thermo_mechanical.temperature.0",
+        AnalysisFieldLayout::scalar(Q::Temperature, FieldLocation::Element).step(0),
+        vec![3],
+        vec![300.0; 3],
+    ));
+    assert_eq!(element_temperature.location, AnalysisFieldLocation::Element);
+    assert_eq!(element_temperature.entity_count, 3);
+    assert_eq!(element_temperature.component_count, Some(1));
+    assert_eq!(element_temperature.layout.ordinal, FieldOrdinal::Step(0));
+    let nodal_temperature = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "thermo_mechanical.temperature.0",
+        AnalysisFieldLayout::scalar(Q::Temperature, FieldLocation::Node).step(0),
+        vec![5],
+        vec![300.0; 5],
+    ));
+    assert_eq!(nodal_temperature.location, AnalysisFieldLocation::Node);
+    assert_eq!(nodal_temperature.entity_count, 5);
+    let acoustic_mode = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "acoustic.mode_shape.1",
+        AnalysisFieldLayout::scalar(Q::AcousticPressure, FieldLocation::Node).mode(0),
+        vec![4],
+        vec![1.0; 4],
+    ));
+    assert_eq!(acoustic_mode.kind, AnalysisFieldKind::Scalar);
+    assert_eq!(acoustic_mode.component_count, Some(1));
+    assert_eq!(acoustic_mode.entity_count, 4);
+    assert_eq!(acoustic_mode.layout.quantity, Q::AcousticPressure);
+    let phasor = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "acoustic.pressure",
+        AnalysisFieldLayout::scalar(Q::AcousticPressure, FieldLocation::Node)
+            .representation(ComplexRepresentation::Complex),
+        vec![4, 2],
+        vec![1.0; 8],
+    ));
+    assert_eq!(phasor.entity_count, 4);
+    assert_eq!(phasor.component_count, Some(1));
+    let points = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "structural.integration_point_stress",
+        AnalysisFieldLayout::symmetric_tensor3(Q::Stress, FieldLocation::IntegrationPoint),
+        vec![8, 6],
+        vec![0.0; 48],
+    ));
+    assert_eq!(points.location, AnalysisFieldLocation::IntegrationPoint);
+    assert_eq!(points.entity_count, 8);
+    assert_eq!(points.kind, AnalysisFieldKind::Tensor);
+    let json = serde_json::to_value(&acoustic_mode).unwrap();
+    assert_eq!(json["layout"]["quantity"], "acoustic_pressure");
+    assert_eq!(json["layout"]["ordinal"]["kind"], "mode");
 }
 
 #[test]
@@ -3646,6 +3750,80 @@ fn analysis_results_unavailable_beam_continuum_field_maps_typed_error() {
         err.context.get("requested_field"),
         Some(&FEA_FIELD_STRUCTURAL_STRAIN.to_string())
     );
+}
+
+#[test]
+fn explicit_field_values_are_returned_beyond_the_default_inline_budget() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let model = sample_model();
+    let mut run = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        Default::default(),
+        OperationContext::new(Some("trace-results-explicit-values".to_string()), None),
+    )
+    .expect("run should pass")
+    .data;
+    // One field past the default inline budget, as a large mesh produces.
+    let entries = (RESULTS_INLINE_FIELD_BYTES / 8 + 1) as usize;
+    run.run_id = format!("{}-large", run.run_id);
+    run.run.fields.push(AnalysisField::host_f64(
+        "test.large_nodal_field",
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::Temperature,
+            runmat_analysis_core::FieldLocation::Node,
+        ),
+        vec![entries],
+        (0..entries).map(|index| index as f64).collect(),
+    ));
+    storage::persist_run_result(&run).expect("large run should persist");
+    let field_count = run.run.fields.len();
+
+    let bounded =
+        bounded_default_results_query(&run.run_id, AnalysisResultsQuery::default()).unwrap();
+    assert!(
+        !bounded.include_field_values,
+        "the default view opens bounded"
+    );
+    let default_view =
+        analysis_results_by_run_id_op(&run.run_id, bounded, OperationContext::new(None, None))
+            .expect("bounded results");
+    assert!(default_view.data.fields.is_empty());
+    assert_eq!(default_view.data.field_descriptors.len(), field_count);
+
+    // A selection that fits the budget keeps its values in the default view.
+    let small = bounded_default_results_query(
+        &run.run_id,
+        AnalysisResultsQuery {
+            include_fields: vec![FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()],
+            ..AnalysisResultsQuery::default()
+        },
+    )
+    .unwrap();
+    assert!(small.include_field_values);
+
+    let explicit = analysis_results_by_run_id_op(
+        &run.run_id,
+        AnalysisResultsQuery {
+            include_field_values: true,
+            ..AnalysisResultsQuery::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("explicit field values");
+    assert_eq!(explicit.data.fields.len(), field_count);
+    let large = explicit
+        .data
+        .fields
+        .iter()
+        .find(|field| field.field_id == "test.large_nodal_field")
+        .expect("the large field is returned");
+    let AnalysisFieldValues::HostF64(values) = &large.values else {
+        panic!("host values expected");
+    };
+    assert_eq!(values.len(), entries);
+    assert_eq!(values[entries - 1], (entries - 1) as f64);
 }
 
 #[test]

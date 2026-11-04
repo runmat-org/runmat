@@ -215,7 +215,6 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
             },
             source: GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
                 preview_extent_m: None,
-                named_selections: None,
                 unit_evidence: document.source.unit_evidence.clone(),
                 logical_path: "project/part.brep".into(),
                 format: document.source.format,

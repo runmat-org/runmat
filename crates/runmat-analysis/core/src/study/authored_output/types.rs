@@ -62,6 +62,14 @@ pub enum AuthoredOutputExpression {
         target: AuthoredRegionSource,
         ties: AuthoredExtremaTiePolicy,
     },
+    /// One analysis field reduced over two face regions into one scalar per sample:
+    /// `pressure_drop(analysis, from, to)` and `transmission_loss(analysis, incident, transmitted)`.
+    PortReduction {
+        reduction: AuthoredPortReduction,
+        source: Box<AuthoredOutputExpression>,
+        first: AuthoredRegionSource,
+        second: AuthoredRegionSource,
+    },
     SpatialSelection {
         source: Box<AuthoredOutputExpression>,
         target: AuthoredRegionSource,
@@ -127,6 +135,15 @@ pub enum AuthoredSpatialReduction {
     },
     /// ∫ v·n dA of a vector field through a face region.
     NormalFlux,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthoredPortReduction {
+    /// Area-weighted mean over the first region minus that over the second (pressure drop).
+    MeanDifference,
+    /// 10·log10 of the incident port power over the transmitted port power, dB.
+    TransmissionLoss,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

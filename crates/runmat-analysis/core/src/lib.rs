@@ -61,14 +61,15 @@ pub use study::{
     AuthoredGeometryArgumentValue, AuthoredGeometryInstance, AuthoredMeshRef,
     AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
     AuthoredObservationError, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
-    AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPrincipalSelection,
-    AuthoredSeriesDomain, AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredStudy,
-    AuthoredStudyError, AuthoredStudyInputBinding, AuthoredStudyInputRef,
-    AuthoredStudyRealizationError, AuthoredStudyRef, AuthoredSweep, AuthoredSweepAxis,
-    AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase, AuthoredSweepDefinition,
-    AuthoredSweepError, AuthoredSweepOutput, AuthoredSweepOutputExpression,
-    AuthoredVectorComponent, CaseOutputProjection, LoweredAuthoredObservation,
-    RealizedGeometryInstance, RealizedStudy, SweepAxisCombination, SweepExtremum,
+    AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPortReduction,
+    AuthoredPrincipalSelection, AuthoredSeriesDomain, AuthoredSeriesReduction,
+    AuthoredSpatialReduction, AuthoredStudy, AuthoredStudyError, AuthoredStudyInputBinding,
+    AuthoredStudyInputRef, AuthoredStudyRealizationError, AuthoredStudyRef, AuthoredSweep,
+    AuthoredSweepAxis, AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase,
+    AuthoredSweepDefinition, AuthoredSweepError, AuthoredSweepOutput,
+    AuthoredSweepOutputExpression, AuthoredVectorComponent, CaseOutputProjection,
+    LoweredAuthoredObservation, RealizedGeometryInstance, RealizedStudy, SweepAxisCombination,
+    SweepExtremum,
 };
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;
@@ -79,7 +80,9 @@ pub use validate_outputs::{
 };
 pub use validate_signals::validate_physical_signals;
 
-pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
+pub use field::{
+    AnalysisField, AnalysisFieldLayout, AnalysisFieldValues, DeviceFieldRef, FieldOrdinal,
+};
 pub use problem::acoustic_impedance::AcousticImpedanceLaw;
 pub use problem::authored_constraints::{
     authored_motion_acceleration_is_compatible, materialized_motion_acceleration_is_compatible,
@@ -186,7 +189,7 @@ pub use problem::quantity::{
     ComplexPhase, Damping, Displacement, DynamicViscosity, ElectricCharge, ElectricChargeDensity,
     ElectricCurrent, ElectricCurrentDensity, ElectricPotential, Force, FoundationModulus,
     Frequency, FrictionCoefficient, HeatFlux, HeatGenerationDensity, HeatTransferCoefficient,
-    Length, MagneticVectorPotential, MassDensity, MassFlowRate, Moment, Position, Pressure,
+    Length, MagneticVectorPotential, MassDensity, MassFlowRate, Moment, Position, Power, Pressure,
     RayleighMassCoefficient, RayleighStiffnessCoefficient, Rotation, SpecificAcousticImpedance,
     Stiffness, SurfaceEmissivity, Temperature, TemperatureDifference, ThermalContactResistance,
     Traction, Translation, TurbulenceIntensity, Velocity, VolumeFlowRate,
@@ -230,17 +233,16 @@ pub use study::accuracy::{
     AccuracyTarget, AccuracyTolerance, ErrorContributionKind, NumericalEquivalencePolicy,
     RequiredAccuracyEvidence, UnavailableEvidencePolicy,
 };
-pub use study::is_exposed_analysis_identity;
 pub use study::output::{
-    AccuracyObservationEvent, ComplexRepresentation, CompressionPolicy, DiagnosticKind,
-    DiagnosticObservation, ExtremaTiePolicy, FieldLocation, MonitorCadence, MonitorObservation,
-    MonitorStopCondition, ObservationComponent, ObservationCostEstimate, ObservationCostPolicy,
-    ObservationEvent, ObservationId, ObservationPurpose, ObservationQuantity, ObservationRequest,
-    ObservationResultQuantity, ObservationSpec, ObservationStoragePolicy, ObservationTarget,
-    ObservationThreshold, ObservationValueShape, PartialAccessPolicy, RecoveryPolicy,
-    ReductionPolicy, RetentionPolicy, SamplingPolicy, SeriesObservationEvent, SeriesReduction,
-    SeriesWeighting, SignConvention, SolverObservationEvent, SpatialReduction,
-    SOUND_PRESSURE_LEVEL_REFERENCE_PA,
+    sound_pressure_level_db, AccuracyObservationEvent, ComplexRepresentation, CompressionPolicy,
+    DiagnosticKind, DiagnosticObservation, ExtremaTiePolicy, FieldLocation, MonitorCadence,
+    MonitorObservation, MonitorStopCondition, ObservationComponent, ObservationCostEstimate,
+    ObservationCostPolicy, ObservationEvent, ObservationId, ObservationPurpose,
+    ObservationQuantity, ObservationRequest, ObservationResultQuantity, ObservationSpec,
+    ObservationStoragePolicy, ObservationTarget, ObservationThreshold, ObservationValueShape,
+    PartialAccessPolicy, RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy,
+    SeriesObservationEvent, SeriesReduction, SeriesWeighting, SignConvention,
+    SolverObservationEvent, SpatialReduction, SOUND_PRESSURE_LEVEL_REFERENCE_PA,
 };
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, ExcitationCaseSelection, IndependentDomain,
@@ -251,6 +253,10 @@ pub use study::sequence::{
     StepObjectActivation, StepObjectRef, StructuralKinematics, StructuralNonlinearSettings,
     StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
     ValidatedAnalysisSequence,
+};
+pub use study::{
+    analysis_identity_status, family_label, is_exposed_analysis_identity, procedure_label,
+    AnalysisIdentity, AnalysisIdentityStatus, ANALYSIS_IDENTITIES,
 };
 pub use study::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,

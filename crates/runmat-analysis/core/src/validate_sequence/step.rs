@@ -9,8 +9,8 @@ use crate::{
 use super::step_error;
 
 pub(super) fn validate(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
-    validate_family_procedure(step)?;
     validate_solution_space(step)?;
+    validate_family_procedure(step)?;
     validate_independent_domain(step)?;
     validate_settings(step)?;
     validate_state_declarations(step)?;
@@ -57,32 +57,10 @@ fn validate_settings(step: &ProcedureStep) -> Result<(), AnalysisValidationError
 }
 
 fn validate_family_procedure(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
-    let supported = match step.family {
-        PhysicsFamily::Structural => true,
-        PhysicsFamily::Thermal | PhysicsFamily::Fluid => matches!(
-            step.procedure,
-            AnalysisProcedure::Static
-                | AnalysisProcedure::TransientResponse
-                | AnalysisProcedure::Nonlinear
-                | AnalysisProcedure::Adaptive
-        ),
-        PhysicsFamily::Electromagnetic => matches!(
-            step.procedure,
-            AnalysisProcedure::Static
-                | AnalysisProcedure::TransientResponse
-                | AnalysisProcedure::HarmonicResponse
-                | AnalysisProcedure::Nonlinear
-                | AnalysisProcedure::Adaptive
-        ),
-        PhysicsFamily::Acoustic => matches!(
-            step.procedure,
-            AnalysisProcedure::TransientResponse
-                | AnalysisProcedure::HarmonicResponse
-                | AnalysisProcedure::ModalExtraction
-                | AnalysisProcedure::Adaptive
-        ),
-        PhysicsFamily::Coupled(family) => coupled_procedure_is_supported(family, step.procedure),
-    };
+    // The closed family x procedure registry is the one authority: a pending identity is
+    // defined (admission reports its pending id); an absent one is not a procedure of the family.
+    let supported =
+        crate::analysis_identity_status(step.family, step.procedure, step.solution_space).is_some();
     if supported {
         Ok(())
     } else {
@@ -93,30 +71,6 @@ fn validate_family_procedure(step: &ProcedureStep) -> Result<(), AnalysisValidat
                 step.procedure, step.family
             ),
         ))
-    }
-}
-
-fn coupled_procedure_is_supported(
-    family: CoupledPhysicsFamily,
-    procedure: AnalysisProcedure,
-) -> bool {
-    match family {
-        CoupledPhysicsFamily::Thermomechanical
-        | CoupledPhysicsFamily::Electrothermal
-        | CoupledPhysicsFamily::ConjugateHeatTransfer => matches!(
-            procedure,
-            AnalysisProcedure::Static
-                | AnalysisProcedure::TransientResponse
-                | AnalysisProcedure::Nonlinear
-                | AnalysisProcedure::Adaptive
-        ),
-        CoupledPhysicsFamily::FluidStructureInteraction => matches!(
-            procedure,
-            AnalysisProcedure::Static
-                | AnalysisProcedure::TransientResponse
-                | AnalysisProcedure::Nonlinear
-                | AnalysisProcedure::Adaptive
-        ),
     }
 }
 

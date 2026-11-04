@@ -406,7 +406,7 @@ L1 sums of storage, applied heat and prescribed reactions, and the integral of a
 transfer, before global signed cancellation. Each balance also retains the gross heat entering
 and leaving through prescribed-temperature nodes, so a body held between two fixed temperatures
 reports its through-flow (for a bar, `k A (T_hot - T_cold) / L`) even though the net prescribed
-reaction is zero; `runmat fea run` prints it as `heat through prescribed temperatures`. Exactly zero transfers have zero relative residual;
+reaction is zero; `runmat run` prints it as `heat through prescribed temperatures`. Exactly zero transfers have zero relative residual;
 uniformly scaling all powers does not improve acceptance. All terms must be finite, each scale
 must bound its signed power, the recorded
 arithmetic must agree, and both linear and normalized energy residuals must meet the target.
@@ -433,7 +433,7 @@ before multiplication and retains the original nullspace/anchor checks. Reconstr
 authoritative prescribed temperatures exactly; free-node increments are not clamped or overwritten.
 Thermal solver stopping uses the tighter of the shared default and authored acceptance target;
 the latter cannot relax the established numerical stopping policy. The shared sparse solver layer
-(see [Linear solvers](../linear-solvers)) propagates this tolerance through its direct-refinement,
+propagates this tolerance through its direct-refinement,
 CG and accelerator final-residual checks. Fixed-step transients reuse one Cholesky factorization
 for every step whose effective operator is unchanged. No new successful
 GPU execution envelope is inferred. Linear and global energy normalizations differ, so converged
@@ -822,4 +822,4 @@ $\Delta L/L=\alpha\Delta T$ and the fully restrained one-dimensional limit
 $\sigma\approx-E\alpha\Delta T$ where those assumptions apply.
 
 See [heat transfer](./thermal), [structural analysis](./structural),
-[structural constraints](../constraints/structural), and [current status](../status).
+[structural constraints](../constraints/structural), and [current status](../validation/status.md).

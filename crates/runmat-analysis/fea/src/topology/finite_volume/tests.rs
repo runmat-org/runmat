@@ -293,3 +293,239 @@ fn count_reservations_reject_checked_overflow_without_allocating() {
         FiniteVolumeProjectionError::Overflow
     );
 }
+
+/// Diagnostic over persisted solver meshes: `RUNMAT_FV_DIAG_MESHES=a.cbor:b.cbor`.
+#[test]
+#[ignore]
+fn diagnose_persisted_mesh_closure() {
+    use super::super::element::{dot, subtract, tetrahedron_geometry};
+    use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+    let paths = std::env::var("RUNMAT_FV_DIAG_MESHES").unwrap_or_default();
+    for path in paths.split(':').filter(|p| !p.is_empty()) {
+        let bytes = std::fs::read(path).unwrap();
+        let mesh = match SolverMeshArtifact::canonical_decode(&bytes) {
+            Ok(mesh) => mesh,
+            Err(error) => {
+                println!("== {path}: undecodable ({error})");
+                continue;
+            }
+        };
+        let source = AnalysisProjection::derive(&mesh).unwrap();
+        let mut regions = source
+            .elements
+            .iter()
+            .map(|e| e.region_id.clone())
+            .collect::<Vec<_>>();
+        regions.sort();
+        regions.dedup();
+        println!(
+            "== {path}\n nodes {} cells {} boundary {} bounds {:?} order {:?} regions {:?}",
+            source.nodes.len(),
+            source.elements.len(),
+            source.boundary_faces.len(),
+            source.bounds_m,
+            source.elements[0].order,
+            regions
+                .iter()
+                .map(|r| &r.source_topology_id)
+                .collect::<Vec<_>>()
+        );
+        let mut rows = Vec::new();
+        for (index, element) in source.elements.iter().enumerate() {
+            let cell = geometry::corners(&source, index).unwrap();
+            let (volume, centroid, _) = tetrahedron_geometry(cell.points).unwrap();
+            let mut area_sum = [0.0; 3];
+            let mut area_scale = 0.0;
+            let mut divergence = 0.0;
+            for local in geometry::FACE_CORNERS {
+                let (c, a, m) =
+                    geometry::face_geometry(local.map(|i| cell.points[i]), centroid).unwrap();
+                for axis in 0..3 {
+                    area_sum[axis] += a[axis];
+                }
+                area_scale += m;
+                divergence += dot(subtract(c, centroid), a) / 3.0;
+            }
+            let edge = runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS
+                .iter()
+                .map(|[a, b]| geometry::length(subtract(cell.points[*a], cell.points[*b])))
+                .fold(0.0_f64, f64::max);
+            let x = cell
+                .points
+                .iter()
+                .flatten()
+                .fold(0.0_f64, |m, v| m.max(v.abs()));
+            let area_ratio = geometry::length(area_sum) / area_scale / f64::EPSILON;
+            let volume_ratio = (divergence - volume).abs() / volume / f64::EPSILON;
+            rows.push((
+                volume_ratio,
+                area_ratio,
+                volume / edge.powi(3),
+                x / edge,
+                element.element_id,
+                (element.signed_volume_m3 - volume).abs() / volume / f64::EPSILON,
+            ));
+        }
+        let limit = 4096.0;
+        println!(
+            " volume>tol {} area>tol {} minimum V/L^3 {:e}",
+            rows.iter().filter(|r| r.0 > limit).count(),
+            rows.iter().filter(|r| r.1 > limit).count(),
+            rows.iter().map(|r| r.2).fold(f64::INFINITY, f64::min)
+        );
+        rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+        for r in rows.iter().take(6) {
+            println!(
+                "  vol/eps {:.0} area/eps {:.0} V/L^3 {:.3e} X/L {:.0} element {} srcvol/eps {:.0}",
+                r.0, r.1, r.2, r.3, r.4, r.5
+            );
+        }
+        let all = FiniteVolumeTopology::derive(&source, FiniteVolumeProjectionPolicy::default());
+        println!(
+            " derive all: {:?}",
+            all.as_ref()
+                .map(|t| t.cells.len())
+                .map_err(|e| e.to_string())
+        );
+        for region in &regions {
+            let selected = FiniteVolumeTopology::derive_selected(
+                &source,
+                FiniteVolumeProjectionPolicy::default(),
+                FiniteVolumeCellSelection::regions(vec![region.clone()]).unwrap(),
+            );
+            println!(
+                " derive {}: {:?}",
+                region.source_topology_id,
+                selected.map(|t| t.cells.len()).map_err(|e| e.to_string())
+            );
+        }
+    }
+}
+
+/// The flattest cells of the cht-plate-channel, fsi-compliant-tube and fluid-cavity-re100 meshes
+/// (element 299299, 116309 and 152370 of their default meshes): valid, closed, positive cells
+/// with V/L³ of 5e-4, 6e-4 and 2e-4 at 250, 160 and 40 edge lengths from the origin. Their
+/// divergence-theorem volume differs from the corner determinant by 2e4, 2e4 and 5e3 ε·V from
+/// rounding alone, which a tolerance relative to V had rejected as "cell closure or
+/// conservative volume".
+fn flat_study_cells() -> [[[f64; 3]; 4]; 3] {
+    [
+        [
+            [
+                0.2703240944345575,
+                0.014837542820181687,
+                0.0029361822594769246,
+            ],
+            [
+                0.27074992383287905,
+                0.01436665392339019,
+                0.0031065135267128387,
+            ],
+            [
+                0.2706811327174461,
+                0.013838443675568954,
+                0.0027213622749574897,
+            ],
+            [
+                0.2699491569348651,
+                0.014584541772600445,
+                0.0023765873696541596,
+            ],
+        ],
+        [
+            [
+                0.2971650907484167,
+                -0.007463709771425251,
+                -0.003483843067396201,
+            ],
+            [
+                0.296438346632368,
+                -0.006850637605723358,
+                -0.005066920317002789,
+            ],
+            [
+                0.2963943473871062,
+                -0.006425615263212107,
+                -0.003791464681184605,
+            ],
+            [
+                0.29718784259388153,
+                -0.007819866439350185,
+                -0.004709278240842538,
+            ],
+        ],
+        [
+            [0.060546875, 0.576171875, 0.05],
+            [
+                0.05089771259382207,
+                0.5681421237191052,
+                0.039730286038129455,
+            ],
+            [0.05710946929066528, 0.5765492555751789, 0.03807009134139609],
+            [0.052978515625, 0.566650390625, 0.05],
+        ],
+    ]
+}
+
+// witness: FEA-FLUID-TOPOLOGY-001/quality @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel; coverage: partial;
+//   boundary: The flattest cells of three study meshes at their study offsets; the closure check
+//   admits them and still resolves a reversed face (V/2) by more than four orders of magnitude.
+#[test]
+fn flat_study_cells_close_within_the_rounding_bound_and_keep_face_errors_detectable() {
+    use super::super::element::{dot, subtract, tetrahedron_geometry};
+    for corners in flat_study_cells() {
+        let mut mesh = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        let element = &mesh.topology.volume_elements[0];
+        let order = element.node_ids.clone();
+        // Keep the canonical element's corner order; orient positively.
+        let mut points = corners;
+        if tetrahedron_geometry(points).is_none() {
+            points.swap(1, 2);
+        }
+        for (local, node_id) in order.iter().enumerate() {
+            let node = mesh
+                .topology
+                .nodes
+                .iter_mut()
+                .find(|n| n.node_id == *node_id)
+                .unwrap();
+            node.coordinates_m = runmat_types::physical::Quantity::<
+                runmat_types::physical::kind::Position,
+                _,
+            >::new(points[local]);
+        }
+        mesh.seal_canonical_digest().unwrap();
+        let source = AnalysisProjection::derive(&mesh).unwrap();
+        let fv = FiniteVolumeTopology::derive(&source, policy()).unwrap();
+        let cell = &fv.cells[0];
+        let (volume, centroid, _) = tetrahedron_geometry(points).unwrap();
+        let edge = runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS
+            .iter()
+            .map(|[a, b]| geometry::length(subtract(points[*a], points[*b])))
+            .fold(0.0_f64, f64::max);
+        assert!(volume / edge.powi(3) < 1e-3, "the fixture is a flat cell");
+        assert_eq!(cell.volume_m3, volume);
+        let mut divergence = 0.0;
+        let mut scale = 0.0;
+        for face in &fv.faces {
+            divergence += dot(
+                subtract(face.centroid_m, centroid),
+                face.owner_area_vector_m2,
+            ) / 3.0;
+            scale += geometry::divergence_term_scale(
+                face.centroid_m,
+                centroid,
+                face.area_m2.canonical_value(),
+            );
+        }
+        let rounding = (divergence - volume).abs();
+        assert!(
+            rounding > 1e3 * f64::EPSILON * volume,
+            "rounding is relative to the terms"
+        );
+        assert!(rounding <= geometry::RELATIVE_TOLERANCE * scale);
+        // One reversed face moves the sum by 2·V/4; the admitted band stays far below it.
+        assert!(geometry::RELATIVE_TOLERANCE * scale < 1e-4 * volume / 2.0);
+    }
+}

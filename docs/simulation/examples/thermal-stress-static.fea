@@ -53,4 +53,7 @@ study heated_static {
     output displacement = analysis.coupled.field.node.displacement
     output stress = analysis.coupled.field.element.stress
     output von_mises = analysis.coupled.field.element.von_mises_stress
+    output mid_von_mises = interpolate(analysis.coupled.field.node.von_mises_stress, at = [500 mm, 50 mm, 50 mm])
+    output clamp_reaction = resultant(analysis.coupled.field.node.reaction_force, over = geometry.bar.region.end_a)
+    output largest_displacement = max(magnitude(analysis.coupled.field.node.displacement), over = geometry.bar.region.body)
 }

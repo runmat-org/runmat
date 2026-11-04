@@ -104,4 +104,4 @@ Before treating a result as reliable, ask:
 7. Is there V&V evidence for this model class, not just a successful run?
 8. Are artifacts available for review and reproduction?
 
-Use [Evidence & Artifacts](/docs/simulation/evidence) for the record flow, [Verification & Validation](/docs/simulation/validation) for correctness criteria, and [Current Status](/docs/simulation/status) for current family boundaries.
+Use [Evidence & Artifacts](/docs/simulation/evidence) for the record flow, [Verification & Validation](/docs/simulation/validation) for correctness criteria, and [Status](/docs/simulation/validation/status) for what the current release runs.

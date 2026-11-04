@@ -14,8 +14,8 @@ use super::{
         Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, Displacement,
         ElectricCharge, ElectricChargeDensity, ElectricCurrent, ElectricCurrentDensity,
         ElectricPotential, Force, HeatFlux, HeatGenerationDensity, MagneticVectorPotential,
-        MassFlowRate, Moment, Pressure, Rotation, Temperature, TemperatureDifference, Traction,
-        Velocity, VolumeFlowRate,
+        MassFlowRate, Moment, Power, Pressure, Rotation, Temperature, TemperatureDifference,
+        Traction, Velocity, VolumeFlowRate,
     },
 };
 
@@ -52,6 +52,9 @@ pub enum PhysicalSignal {
     TemperatureDifference(Signal<TemperatureDifference>),
     HeatFlux(Signal<HeatFlux>),
     HeatGenerationDensity(Signal<HeatGenerationDensity>),
+    /// Total heat rate (W) of a heat-generation region; compiled to a uniform density over the
+    /// meshed region volume.
+    HeatRate(Signal<Power>),
     ElectricPotential(Signal<ElectricPotential>),
     ElectricCurrent(Signal<ElectricCurrent>),
     ElectricCharge(Signal<ElectricCharge>),

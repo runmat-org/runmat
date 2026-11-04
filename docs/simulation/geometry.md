@@ -116,7 +116,7 @@ Selectors are resolved at exact realization and then projected onto the solver m
 - a face name written on the STEP face (`ADVANCED_FACE('Fixed end', ...)`);
 - a solid name written on the STEP solid (`MANIFOLD_SOLID_BREP('Coil', ...)`), or else the name of the part (product) that holds the solid. A `cell` region selects by its solid's name.
 
-`runmat fea check` rejects a `select name` that the file does not carry and lists the names it does carry for that role. A file without names (such as a native BREP) selects entities by their canonical `persistent-entity:sha256:` ID from geometry inspection. Source aliases such as `face_000001` are rejected.
+`runmat check` rejects a `select name` that the file does not carry and lists the names it does carry for that role. A file without names (such as a native BREP) selects entities by their canonical `persistent-entity:sha256:` ID from geometry inspection. Source aliases such as `face_000001` are rejected.
 
 ## Multi-Body Geometry And Shared Interfaces
 

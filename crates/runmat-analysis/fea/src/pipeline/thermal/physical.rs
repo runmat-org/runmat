@@ -2,8 +2,6 @@ use runmat_analysis_core::{AnalysisModel, IndependentDomain, SignalSampleApproac
 
 use crate::{
     contracts::{
-        fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
-        fea_thermal_temperature_field_id, fea_thermal_temperature_gradient_field_id,
         ComputeBackend, ExecutionBackend, FeaRunError, FeaRunResult, FeaThermalRunResult,
         ThermalEnergyBalance, ThermalProcedureControl, ThermalSolveOptions,
     },
@@ -39,7 +37,7 @@ mod relation_tests;
 #[cfg(test)]
 mod interface_tests;
 use diagnostics::{diagnostics, ThermalDiagnosticsInput};
-use snapshots::{scalar_snapshots, vector_snapshots};
+use snapshots::snapshots;
 use transient::{solve_transient, TransientSolveInput};
 
 pub(super) fn run(
@@ -201,27 +199,19 @@ pub(super) fn run(
             interface_temperatures.push(second.into_iter().map(|(_, value)| value).collect());
         }
     }
-    let temperature_snapshots =
-        scalar_snapshots(nodal_temperatures, fea_thermal_temperature_field_id);
-    let interface_temperature_snapshots = scalar_snapshots(
+    let temperature_snapshots = snapshots(nodal_temperatures, 0)?;
+    let interface_temperature_snapshots = snapshots(
         interface_temperatures,
-        crate::contracts::fea_thermal_interface_temperature_field_id,
-    );
+        crate::physics::thermal::history_fields::INTERFACE,
+    )?;
     let interface_node_ids = dofs
         .second()
         .iter()
         .map(|&(node, _)| initial_assembly.projection.nodes[node].node_id)
         .collect();
-    let temperature_gradient_snapshots = vector_snapshots(
-        outcome.recovered.gradients,
-        fea_thermal_temperature_gradient_field_id,
-    );
-    let heat_flux_snapshots =
-        vector_snapshots(outcome.recovered.heat_flux, fea_thermal_heat_flux_field_id);
-    let energy_storage_rate_snapshots = scalar_snapshots(
-        outcome.recovered.storage_rates,
-        fea_thermal_energy_storage_rate_field_id,
-    );
+    let temperature_gradient_snapshots = snapshots(outcome.recovered.gradients, 1)?;
+    let heat_flux_snapshots = snapshots(outcome.recovered.heat_flux, 2)?;
+    let energy_storage_rate_snapshots = snapshots(outcome.recovered.storage_rates, 3)?;
     facts.sources.verify(&outcome.source_evidence)?;
     let run = FeaRunResult {
         identity,

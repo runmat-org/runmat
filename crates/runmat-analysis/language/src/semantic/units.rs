@@ -111,6 +111,61 @@ pub(crate) fn dimension_requirement(
         .map(|(_, description, unit)| (description, unit))
 }
 
+/// A quantity type as an author reads it: the semantic kind when known (`temperature difference`),
+/// else the dimension's description (`power per volume`), with its SI unit when the dimension
+/// has one (`temperature difference (K)`). Never a Rust debug rendering.
+pub(crate) fn describe_quantity_type(quantity: runmat_types::physical::DynamicDimension) -> String {
+    use runmat_types::physical::QuantitySpec;
+    let requirement = dimension_requirement(quantity.physical_dimension());
+    // QuantityKind variant names are the authored type names in CamelCase.
+    let kind = quantity.semantic_kind().map(|kind| {
+        let mut words = String::new();
+        for character in format!("{kind:?}").chars() {
+            if character.is_ascii_uppercase() && !words.is_empty() {
+                words.push(' ');
+            }
+            words.push(character.to_ascii_lowercase());
+        }
+        words
+    });
+    let name = kind
+        .or_else(|| requirement.map(|(description, _)| description.to_string()))
+        .unwrap_or_else(|| "physical quantity".to_string());
+    match requirement {
+        Some((_, unit)) => format!("{name} ({unit})"),
+        None => name,
+    }
+}
+
+/// A checked value type as an author reads it, for type-mismatch diagnostics.
+pub(crate) fn describe_fea_type(value_type: &crate::FeaType) -> String {
+    use crate::FeaType;
+    match value_type {
+        FeaType::Quantity(quantity) => describe_quantity_type(*quantity),
+        FeaType::Vector { element, length } => match length {
+            Some(length) => format!(
+                "{length}-component vector of {}",
+                describe_fea_type(element)
+            ),
+            None => format!("vector of {}", describe_fea_type(element)),
+        },
+        FeaType::Integer => "integer".into(),
+        FeaType::Real => "real number".into(),
+        FeaType::Boolean => "boolean".into(),
+        FeaType::String => "string".into(),
+        FeaType::Error => "an invalid value".into(),
+        other => type_word(other),
+    }
+}
+
+fn type_word(value_type: &crate::FeaType) -> String {
+    // Remaining variants are declaration and structural types; their variant name is the
+    // author-facing word (`Material`, `Region`, ...), never a nested debug structure.
+    let debug = format!("{value_type:?}");
+    let word = debug.split(['(', ' ', '{']).next().unwrap_or("value");
+    word.to_ascii_lowercase()
+}
+
 /// When `value` is a quantity whose authored unit measures something other than `expected`,
 /// returns the message (`<subject> must be <what>, found <unit>`) and the caret label
 /// (`expected <SI unit>`) for a diagnostic located at the value.
@@ -146,6 +201,14 @@ pub(crate) fn unit_mismatch(
         ),
         format!("expected {expected_unit}"),
     ))
+}
+
+/// Whether `value` is a quantity (or quantity vector) of exactly `dimension`.
+pub(crate) fn is_dimension(value: &crate::CheckedExpression, dimension: PhysicalDimension) -> bool {
+    match &value.value_type {
+        crate::FeaType::Quantity(found) => found.dimension() == dimension,
+        _ => false,
+    }
 }
 
 #[cfg(test)]

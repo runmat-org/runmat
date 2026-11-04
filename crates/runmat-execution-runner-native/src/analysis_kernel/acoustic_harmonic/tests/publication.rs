@@ -101,8 +101,8 @@ fn acoustic_result_to_shared_publication_reopens_cold_fields_for_both_orders() {
                     payload.ordered_element_ids,
                     imported.result.ordered_element_ids()
                 );
-                // Pressure, particle velocity and active intensity.
-                assert_eq!(payload.fields.fields().len(), 3);
+                // Pressure, particle velocity, active intensity and plane-wave port intensity.
+                assert_eq!(payload.fields.fields().len(), 4);
                 assert_eq!(payload.fields.entity_counts.volume_integration_points, 0);
                 if let Some(expected) = expected_identity {
                     assert_eq!(state.identity, expected);

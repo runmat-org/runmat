@@ -57,17 +57,17 @@ export function captureExampleSnapshots(source, executable, selectedIds, output,
         if (!existsSync(join(project, checkpoint))) throw new Error("Capture has no accepted numerical checkpoint to render");
         // Explicit presentation resume: native authenticates the original saved
         // study and field metadata. This does not qualify changed numerical code.
-        execFileSync(retained, ["fea", "render-snapshot", checkpoint, "--out", join(project, ".snapshot/snapshot.json")], { cwd: project, stdio: "inherit" });
+        execFileSync(retained, ["render-snapshot", checkpoint, "--out", join(project, ".snapshot/snapshot.json")], { cwd: project, stdio: "inherit" });
         rmSync(join(project, ".snapshot/accepted-solve.json"), { force: true });
       } else {
-        execFileSync(retained, ["fea", "snapshot", join(project, example.entry), "--out", join(project, ".snapshot/snapshot.json")], { cwd: project, stdio: "inherit" });
+        execFileSync(retained, ["snapshot", join(project, example.entry), "--out", join(project, ".snapshot/snapshot.json")], { cwd: project, stdio: "inherit" });
       }
       const snapshot = readJson(join(project, ".snapshot/snapshot.json"));
       requireCompleteSnapshot(snapshot);
       writeSnapshotProject(project, example, snapshot);
       // A separate process reads every original field page from this project's
       // relative artifact root. Warm solver/cache state cannot satisfy this gate.
-      execFileSync(retained, ["fea", "verify-snapshot", ".snapshot/snapshot.json", "--out", ".snapshot/cold-field-replay.json"], { cwd: project, stdio: "inherit" });
+      execFileSync(retained, ["verify-snapshot", ".snapshot/snapshot.json", "--out", ".snapshot/cold-field-replay.json"], { cwd: project, stdio: "inherit" });
     }
     rmSync(join(stage, ".native-executable"), { recursive: true, force: true });
     renameSync(stage, output);

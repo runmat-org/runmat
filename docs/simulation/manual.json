@@ -3,7 +3,7 @@
   "topics": [
     {
       "id": "linear-static",
-      "route": "/docs/simulation/physics/structural",
+      "route": "/docs/simulation/guides/linear-static",
       "title": "Linear static analysis",
       "summary": "Predict deformation and stress under steady loading. Create a structural study, explore its results, and open the complete example in RunMat Desktop.",
       "keywords": [
@@ -17,12 +17,7 @@
       ],
       "group": "Guides",
       "order": 1,
-      "narrative": "docs/simulation/physics/structural-static.md",
-      "requirements": [
-        "FEA-STRUCTURAL-SOLID-001",
-        "FEA-STRUCTURAL-REFERENCE-001",
-        "FEA-STRUCTURAL-EXECUTION-001"
-      ],
+      "narrative": "docs/simulation/guides/linear-static.md",
       "examples": [
         "cantilever-static"
       ],
@@ -63,12 +58,11 @@
       "group": "Validation",
       "order": 0,
       "narrative": "docs/simulation/validation/methodology.md",
-      "requirements": [],
       "examples": [],
       "related_topics": [
         {
           "title": "Linear static analysis guide",
-          "href": "/docs/simulation/physics/structural"
+          "href": "/docs/simulation/guides/linear-static"
         }
       ],
       "scope": {
@@ -76,41 +70,6 @@
         "example_mesh": "Not applicable"
       },
       "verification_labels": {}
-    },
-    {
-      "id": "structural-validation",
-      "title": "Structural validation",
-      "route": "/docs/simulation/validation/structural",
-      "summary": "Explore structural mechanics requirements, reference problems, and available assessment records.",
-      "keywords": [
-        "validation",
-        "verification",
-        "finite element"
-      ],
-      "group": "Validation",
-      "order": 1,
-      "narrative": "docs/simulation/validation/structural.md",
-      "requirements": [
-        "FEA-STRUCTURAL-SOLID-001",
-        "FEA-STRUCTURAL-REFERENCE-001",
-        "FEA-STRUCTURAL-EXECUTION-001"
-      ],
-      "examples": [],
-      "related_topics": [
-        {
-          "title": "Linear static analysis guide",
-          "href": "/docs/simulation/physics/structural"
-        }
-      ],
-      "scope": {
-        "procedure": "Structural",
-        "example_mesh": "Not applicable"
-      },
-      "verification_labels": {
-        "FEA-STRUCTURAL-SOLID-001": "Element formulation and integration",
-        "FEA-STRUCTURAL-REFERENCE-001": "Physical references and mesh convergence",
-        "FEA-STRUCTURAL-EXECUTION-001": "Execution and durable results"
-      }
     },
     {
       "id": "steady-heat-transfer",
@@ -125,12 +84,6 @@
       "group": "Guides",
       "order": 2,
       "narrative": "docs/simulation/guides/steady-heat-transfer.md",
-      "requirements": [
-        "FEA-THERMAL-DOMAIN-001",
-        "FEA-THERMAL-FIELDS-001",
-        "FEA-THERMAL-ACCURACY-001",
-        "FEA-THERMAL-EXECUTION-001"
-      ],
       "examples": [
         "heatsink-steady"
       ],
@@ -141,7 +94,7 @@
         },
         {
           "title": "Linear static analysis",
-          "href": "/docs/simulation/physics/structural"
+          "href": "/docs/simulation/guides/linear-static"
         }
       ],
       "scope": {
@@ -163,21 +116,17 @@
       "group": "Guides",
       "order": 3,
       "narrative": "docs/simulation/guides/modal-analysis.md",
-      "requirements": [
-        "FEA-DYNAMICS-MODAL-001",
-        "FEA-DYNAMICS-GOVERNANCE-001"
-      ],
       "examples": [
         "tuning-fork-modal"
       ],
       "related_topics": [
         {
-          "title": "Validation: modal",
-          "href": "/docs/simulation/validation/modal"
+          "title": "Validation: structural",
+          "href": "/docs/simulation/validation/structural"
         },
         {
           "title": "Linear static analysis",
-          "href": "/docs/simulation/physics/structural"
+          "href": "/docs/simulation/guides/linear-static"
         }
       ],
       "scope": {
@@ -199,9 +148,6 @@
       "group": "Guides",
       "order": 4,
       "narrative": "docs/simulation/guides/mesh-refinement.md",
-      "requirements": [
-        "FEA-STRUCTURAL-REFERENCE-001"
-      ],
       "examples": [
         "cantilever-coarse",
         "cantilever-medium",
@@ -214,7 +160,7 @@
         },
         {
           "title": "Linear static analysis",
-          "href": "/docs/simulation/physics/structural"
+          "href": "/docs/simulation/guides/linear-static"
         }
       ],
       "scope": {
@@ -224,62 +170,36 @@
       "verification_labels": {}
     },
     {
-      "id": "thermal-validation",
-      "route": "/docs/simulation/validation/thermal",
-      "title": "Thermal validation",
-      "summary": "Explore the thermal requirements, acceptance criteria and available assessment records.",
+      "id": "thermal-stress",
+      "route": "/docs/simulation/guides/thermal-stress",
+      "title": "Thermal stress",
+      "summary": "Find the stress and support force in a clamped steel bar heated by 80 K, from the restrained-bar formula and a thermomechanical finite-element solution in RunMat.",
       "keywords": [
-        "validation",
-        "thermal"
+        "thermal stress",
+        "thermal expansion",
+        "thermomechanical",
+        "restrained bar",
+        "finite element"
       ],
-      "group": "Validation",
-      "order": 2,
-      "narrative": "docs/simulation/validation/thermal.md",
-      "requirements": [
-        "FEA-THERMAL-DOMAIN-001",
-        "FEA-THERMAL-FIELDS-001",
-        "FEA-THERMAL-ACCURACY-001",
-        "FEA-THERMAL-EXECUTION-001"
+      "group": "Guides",
+      "order": 5,
+      "narrative": "docs/simulation/guides/thermal-stress.md",
+      "examples": [
+        "heated-bar-thermal-stress"
       ],
-      "examples": [],
       "related_topics": [
         {
-          "title": "Validation methodology",
-          "href": "/docs/simulation/validation"
+          "title": "Thermomechanical validation",
+          "href": "/docs/simulation/validation/thermomechanical"
+        },
+        {
+          "title": "Linear static analysis",
+          "href": "/docs/simulation/guides/linear-static"
         }
       ],
       "scope": {
-        "procedure": "Thermal",
-        "example_mesh": "Assessment-specific"
-      },
-      "verification_labels": {}
-    },
-    {
-      "id": "modal-validation",
-      "route": "/docs/simulation/validation/modal",
-      "title": "Modal validation",
-      "summary": "Explore the modal requirements, acceptance criteria and available assessment records.",
-      "keywords": [
-        "validation",
-        "modal"
-      ],
-      "group": "Validation",
-      "order": 3,
-      "narrative": "docs/simulation/validation/modal.md",
-      "requirements": [
-        "FEA-DYNAMICS-MODAL-001",
-        "FEA-DYNAMICS-GOVERNANCE-001"
-      ],
-      "examples": [],
-      "related_topics": [
-        {
-          "title": "Validation methodology",
-          "href": "/docs/simulation/validation"
-        }
-      ],
-      "scope": {
-        "procedure": "Modal",
-        "example_mesh": "Assessment-specific"
+        "procedure": "Thermomechanical steady",
+        "example_mesh": "Quadratic tetrahedra"
       },
       "verification_labels": {}
     }

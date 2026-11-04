@@ -43,7 +43,7 @@ Evidence kind: PhysicalBalance. Criterion: Cycle-averaged harmonic loss from the
 
 ## public_route
 
-Evidence kind: PublicRun. Criterion: Electrothermal studies are admitted at `fea run` and run remotely.
+Evidence kind: PublicRun. Criterion: Electrothermal studies are admitted at `runmat run` and run remotely.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|

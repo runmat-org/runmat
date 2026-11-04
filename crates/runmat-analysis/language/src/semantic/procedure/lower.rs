@@ -225,9 +225,12 @@ fn reject_unknown_members(
             error(
                 declaration,
                 statement.span,
-                format!(
-                    "`{name}` is not a member of `{} {}`",
-                    header.family, header.procedure
+                crate::semantic::pending::with_pending(
+                    format!(
+                        "`{name}` is not a member of `{} {}`",
+                        header.family, header.procedure
+                    ),
+                    crate::semantic::pending::procedure_member(name),
                 ),
                 diagnostics,
             );

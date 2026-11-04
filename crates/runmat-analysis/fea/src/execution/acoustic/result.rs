@@ -54,6 +54,9 @@ struct ResultData {
         Vec<[f64; 3]>,
     >,
     #[serde(with = "runmat_types::physical::canonical_storage")]
+    port_intensity_w_per_m2:
+        runmat_types::physical::Quantity<runmat_types::physical::kind::AcousticIntensity, Vec<f64>>,
+    #[serde(with = "runmat_types::physical::canonical_storage")]
     energy_density_j_per_m3:
         runmat_types::physical::Quantity<runmat_types::physical::kind::EnergyDensity, Vec<f64>>,
     iterations: u32,
@@ -142,6 +145,7 @@ impl AcousticHarmonicSolverResult {
             pressure_pa: response.pressure_pa,
             velocity_m_per_s: response.element_velocity_m_per_s,
             intensity_w_per_m2: response.element_mean_intensity_w_per_m2,
+            port_intensity_w_per_m2: response.element_port_intensity_w_per_m2,
             energy_density_j_per_m3: response.element_mean_energy_density_j_per_m3,
             iterations: response.iterations,
             relative_residual: response.relative_residual,
@@ -214,6 +218,11 @@ impl AcousticHarmonicSolverResult {
             || d.pressure_pa.canonical_values().len() != nodes
             || d.velocity_m_per_s.canonical_values().len() != elements
             || d.intensity_w_per_m2.canonical_values().len() != elements
+            || d.port_intensity_w_per_m2.canonical_values().len() != elements
+            || d.port_intensity_w_per_m2
+                .canonical_values()
+                .iter()
+                .any(|x| !x.is_finite() || *x < 0.0)
             || d.energy_density_j_per_m3.canonical_values().len() != elements
             || d.pressure_pa
                 .canonical_values()
@@ -312,6 +321,11 @@ impl AcousticHarmonicSolverResult {
     }
     pub fn intensity_w_per_m2(&self) -> &[[f64; 3]] {
         self.data.intensity_w_per_m2.canonical_values()
+    }
+    /// Element plane-wave port intensity (incident wave on incident faces, outgoing wave on
+    /// anechoic faces), W/m².
+    pub fn port_intensity_w_per_m2(&self) -> &[f64] {
+        self.data.port_intensity_w_per_m2.canonical_values()
     }
     pub fn energy_density_j_per_m3(&self) -> &[f64] {
         self.data.energy_density_j_per_m3.canonical_values()

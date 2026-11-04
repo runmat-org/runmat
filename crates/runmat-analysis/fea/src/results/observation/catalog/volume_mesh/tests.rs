@@ -81,7 +81,7 @@ fn source(
     let field = RecoveredField::new(
         definition.clone(),
         sample,
-        AnalysisField::host_f64(definition.field_id(), shape, values),
+        AnalysisField::host_f64(definition.field_id(), definition.layout(), shape, values),
     )
     .unwrap();
     let artifact = RecoveredFieldArtifact::new(
@@ -307,4 +307,67 @@ fn sound_pressure_level_peak_is_the_rms_level_of_the_largest_pressure_phasor() {
     let level = authority_round_trip(&step, &source, &mesh, &projection);
     let expected = 20.0 * (10.0 / (std::f64::consts::SQRT_2 * 20.0e-6)).log10();
     assert!((level - expected).abs() < 1e-10, "{level} vs {expected}");
+}
+
+// The reduced acoustic result path publishes nodal levels and the distributed observation path
+// evaluates them from the complex pressure; both use the one RMS definition, with no clamp.
+#[test]
+fn reduced_nodal_and_distributed_sound_pressure_levels_agree() {
+    let mesh = slab_mesh(2);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let mut step = ProcedureStep::acoustic_harmonic("sound");
+    step.independent_domain = IndependentDomain::FrequencyHertz(vec![100.0]);
+    step.observations = vec![maximum_as(
+        "peak_level",
+        ObservationQuantity::AcousticPressure,
+        Some(ComplexRepresentation::SoundPressureLevel),
+    )];
+    let definition = RecoveredFieldDefinition::new(
+        "acoustic.pressure",
+        ObservationQuantity::AcousticPressure,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::Nodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::ComplexInterleaved,
+    )
+    .unwrap();
+    // Peaks above and below the 20 uPa reference: the second level is negative.
+    for (peak_pa, expected_db) in [
+        (10.0, 110.969_100_130_080_56),
+        (1.0e-5, -9.030_899_869_919_436),
+    ] {
+        let phasors = projection
+            .nodes
+            .iter()
+            .map(|node| {
+                let scale = 0.1 * peak_pa * (1.0 + node.coordinates_m.canonical_value()[0]);
+                [3.0 * scale, 4.0 * scale]
+            })
+            .collect::<Vec<_>>();
+        let magnitudes = phasors
+            .iter()
+            .map(|[real, imaginary]| real.hypot(*imaginary))
+            .collect::<Vec<_>>();
+        let reduced = crate::physics::acoustic::nodal_sound_pressure_levels_db(&magnitudes)
+            .into_iter()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let source = source(
+            &step,
+            &definition,
+            RecoveredFieldSample::FrequencyHertz(100.0),
+            &projection,
+            &mesh,
+            phasors.into_iter().flatten().collect(),
+            2,
+        );
+        let distributed = authority_round_trip(&step, &source, &mesh, &projection);
+        assert!(
+            (reduced - distributed).abs() < 1e-10,
+            "reduced {reduced} dB vs distributed {distributed} dB at {peak_pa} Pa"
+        );
+        assert!(
+            (distributed - expected_db).abs() < 1e-9,
+            "{distributed} vs {expected_db}"
+        );
+    }
 }

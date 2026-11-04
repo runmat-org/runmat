@@ -8,18 +8,16 @@ import { hash, verifyArtifact, inventory, writeManifest } from "./manifest.mjs";
 function fixture() {
     const root = mkdtempSync(join(tmpdir(), "runmat-docs-export-test-"));
     const source = resolve(import.meta.dirname, "../..");
-    for (const file of ["docs/catalog.json", "docs/simulation/manual.json", "docs/simulation/examples/catalog.json", "docs/simulation/physics/structural-static.md", "docs/simulation/validation/methodology.md", "docs/simulation/validation/structural.md", "docs/simulation/examples/structural-static.fea", "docs/simulation/examples/geometry/two-box-assembly.step"]) {
+    for (const file of ["docs/catalog.json", "docs/simulation/manual.json", "docs/simulation/ledger.json", "docs/simulation/examples/catalog.json", "docs/simulation/guides/linear-static.md", "docs/simulation/validation/methodology.md", "docs/simulation/validation/structural.md", "docs/simulation/examples/structural-static.fea", "docs/simulation/examples/geometry/two-box-assembly.step"]) {
         mkdirSync(join(root, file, ".."), { recursive: true });
         cpSync(join(source, file), join(root, file));
     }
     cpSync(join(source, "docs/schema"), join(root, "docs/schema"), { recursive: true });
     mkdirSync(join(root, "docs/builtins/reference"), { recursive: true });
     writeFileSync(join(root, "docs/builtins/reference/disp.json"), '{"title":"disp"}');
-    writeFileSync(join(root, "docs/catalog.json"), JSON.stringify({ schema_version: 1, documents: [{ id: "manual", path: "docs/simulation/physics/structural-static.md" }] }));
+    writeFileSync(join(root, "docs/catalog.json"), JSON.stringify({ schema_version: 1, documents: [{ id: "manual", path: "docs/simulation/guides/linear-static.md" }] }));
     const manual = JSON.parse(readFileSync(join(root, "docs/simulation/manual.json")));
-    manual.topics = manual.topics.filter(topic => ["linear-static", "validation-methodology", "structural-validation"].includes(topic.id));
-    const register = { schema_version: 1, posture: "discovery_only", requirements: manual.topics[0].requirements.map(id => ({ id, obligations: [], witnesses: [] })) };
-    writeFileSync(join(root, "requirements.json"), JSON.stringify(register));
+    manual.topics = manual.topics.filter(topic => ["linear-static", "validation-methodology"].includes(topic.id));
     writeFileSync(join(root, "builtins.json"), '{"builtins":[]}');
     writeFileSync(join(root, "builtin-documentation.json"), JSON.stringify({ schema_version: 2, inventory: { documents: 2, catalog_identities: 2, legacy_sidecars: 0, missing_catalog_documentation: [] }, builtins: [
         { key: "abs", module_stem: "abs", authority: "catalog", title: "abs", examples: [{ input: "assert(abs(-1) == 1)", verification: "Succeeds" }] },
@@ -30,7 +28,7 @@ function fixture() {
     manual.topics[0].examples = ["two-body-static"];
     writeFileSync(join(root, "docs/simulation/manual.json"), JSON.stringify(manual));
     writeFileSync(catalogPath, JSON.stringify(catalog));
-    const options = { source: root, output: join(root, "target/docs/source"), requirementsPath: join(root, "requirements.json"), builtinDescriptorsPath: join(root, "builtins.json"), builtinDocumentationPath: join(root, "builtin-documentation.json") };
+    const options = { source: root, output: join(root, "target/docs/source"), builtinDescriptorsPath: join(root, "builtins.json"), builtinDocumentationPath: join(root, "builtin-documentation.json") };
     return { root, options };
 }
 test("repeat exports preserve exact manifests and complete deterministic example archives", () => {
@@ -60,11 +58,12 @@ test("unknown contract references reject without replacing a valid export", () =
     const { root, options } = fixture();
     try {
         const first = buildSourceDocs(options);
-        const path = join(root, "docs/simulation/manual.json");
-        const manual = JSON.parse(readFileSync(path));
-        manual.topics[0].requirements.push("unknown");
-        writeFileSync(path, JSON.stringify(manual));
-        assert.throws(() => buildSourceDocs(options), /Unknown manual requirement/);
+        // Requirement ids come from the capability ledger; an example naming another one rejects.
+        const path = join(root, "docs/simulation/examples/catalog.json");
+        const catalog = JSON.parse(readFileSync(path));
+        catalog.examples[0].requirements.push("FEA-UNKNOWN-001");
+        writeFileSync(path, JSON.stringify(catalog));
+        assert.throws(() => buildSourceDocs(options), /FEA-UNKNOWN-001|Unknown/);
         assert.equal(verifyArtifact(options.output).content_hash, first.content_hash);
     }
     finally {
@@ -127,7 +126,7 @@ test("evidence outside a requirement's declared scope rejects", () => {
     const { root, options } = fixture();
     try {
         const evidencePath = join(root, "evidence.json");
-        const register = JSON.parse(readFileSync(options.requirementsPath));
+        const register = JSON.parse(readFileSync(join(root, "docs/simulation/ledger.json")));
         writeFileSync(evidencePath, JSON.stringify({ schema_version: 1, records: [{
                     requirement: register.requirements[0].id,
                     obligation: "undeclared",

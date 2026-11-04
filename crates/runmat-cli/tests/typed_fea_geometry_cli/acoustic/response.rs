@@ -18,7 +18,7 @@ fn project(study: &str) -> TempDir {
 fn run(project: &TempDir, study: &str) -> (Value, AnalysisRunResultView) {
     let output = runmat(
         project,
-        &["fea", "run", "src/main.fea", "--study", study, "--json"],
+        &["run", "src/main.fea", "--study", study, "--json"],
     );
     assert!(
         output.status.success(),

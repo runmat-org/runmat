@@ -247,6 +247,45 @@ pub(super) fn validate_resolved_observation(
                 ));
             }
         }
+        ResolvedObservationTarget::BoundaryPair {
+            face_indices,
+            face_identities,
+            first_count,
+        } => {
+            let readable = matches!(
+                (
+                    materialized_field_location(&observation.spec),
+                    observation.source_entity_domain
+                ),
+                (FieldLocation::Node, RecoveredFieldEntityDomain::Nodes)
+                    | (
+                        FieldLocation::Element | FieldLocation::Cell,
+                        RecoveredFieldEntityDomain::VolumeElements
+                    )
+                    | (
+                        FieldLocation::Face,
+                        RecoveredFieldEntityDomain::OrientedFaces
+                    )
+            );
+            let (first, second) = face_indices.split_at((*first_count).min(face_indices.len()));
+            if !readable
+                || !observation.spec.spatial_reduction().is_paired()
+                || first.is_empty()
+                || second.is_empty()
+                || !strictly_increasing(first)
+                || !strictly_increasing(second)
+                || first
+                    .iter()
+                    .any(|index| second.binary_search(index).is_ok())
+                || face_indices.len() != face_identities.len()
+                || !all_unique(face_identities)
+            {
+                return Err(ObservationError::Invalid(
+                    "resolved paired boundary target is empty, unordered, overlapping, or semantically inconsistent"
+                        .into(),
+                ));
+            }
+        }
     }
     if observation.resolved_cost.operation_count == 0
         || observation.resolved_cost.peak_resident_bytes == 0

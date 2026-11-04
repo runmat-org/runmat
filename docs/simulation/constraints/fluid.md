@@ -13,7 +13,7 @@ outlet flux law.
 | `fluid.slip_wall` | `target` | Prevent normal flow while permitting tangential slip |
 | `fluid.symmetry` | `target` | Apply a symmetry-plane condition |
 | `fluid.pressure_reference` | `target`, `value` | Establish the pressure datum |
-| `fluid.periodic` | periodic pair/transform | Pair periodic flow boundaries |
+| `fluid.periodic` | periodic pair/transform | Pair periodic flow boundaries [not yet in the current release](pending:fluid.periodic) |
 
 ```fea
 signal inlet_speed : velocity over constant {

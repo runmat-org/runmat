@@ -12,7 +12,7 @@ Evidence kind: PublicRun. Criterion: A MATLAB script runs a `.fea` study by path
 
 ## verdicts_and_reassess
 
-Evidence kind: AccuracyAcceptance. Criterion: Each published example shows a verdict of passed, failed or indeterminate against its stated criteria with evidence in the results pane and CLI; an unconverged case returns indeterminate; `fea reassess` re-evaluates criteria without re-solving.
+Evidence kind: AccuracyAcceptance. Criterion: Each published example shows a verdict of passed, failed or indeterminate against its stated criteria with evidence in the results pane and CLI; an unconverged case returns indeterminate; `runmat reassess` re-evaluates criteria without re-solving.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
@@ -28,7 +28,7 @@ Evidence kind: IndependentReference. Criterion: The field result is shown beside
 
 ## saved_scene_capture
 
-Evidence kind: PublicationIntegrity. Criterion: `fea snapshot` captures each hero study into a saved scene with the views the page shows: fields with cut planes and caps, field lines, arrows, isosurfaces, per-body transparency, AC-cycle playback, one view per frequency or mode, transient playback and streamlines, and the scene replays faithfully after save (NaN, colormaps, legends, units).
+Evidence kind: PublicationIntegrity. Criterion: `runmat snapshot` captures each hero study into a saved scene with the views the page shows: fields with cut planes and caps, field lines, arrows, isosurfaces, per-body transparency, AC-cycle playback, one view per frequency or mode, transient playback and streamlines, and the scene replays faithfully after save (NaN, colormaps, legends, units).
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|

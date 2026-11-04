@@ -60,7 +60,7 @@ This complete model assigns steel to both solids in a STEP assembly, fixes one f
 disconnected occurrence, applies a resultant force to the left part, and requests displacement and
 von Mises stress:
 
-The complete example package includes its CAD file and machine-managed named-selection metadata. The study stays in one readable source file; exporting the project preserves its selections.
+The included STEP file carries the authored body and end-face names the study selects; `select name` resolves only names authored in the CAD file. The study stays in one readable source file; exporting the project preserves its CAD names.
 
 ```fea
 geometry bracket {
@@ -121,9 +121,9 @@ quadrature distributes it consistently over the face mesh. A face target alone d
 arbitrary traction vector onto that face normal.
 
 ```sh
-runmat fea check bracket.fea
-runmat fea plan bracket.fea
-runmat fea run bracket.fea
+runmat check bracket.fea
+runmat plan bracket.fea
+runmat run bracket.fea
 ```
 
 For isotropic linear elasticity, $\mathsf C=\mathsf C(E,\nu)$ is assembled from `youngs_modulus`

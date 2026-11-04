@@ -66,6 +66,7 @@ pub async fn execute_script_with_args(
             function: None,
             emit_bytecode_path,
             json,
+            fea_root: crate::cli::FeaRootArgs::default(),
             execution,
         },
         cli,
@@ -81,6 +82,8 @@ pub(crate) struct ScriptInvocation {
     pub(crate) function: Option<String>,
     pub(crate) emit_bytecode_path: Option<PathBuf>,
     pub(crate) json: bool,
+    /// `--study`/`--sweep` selection; only `.fea` documents accept it.
+    pub(crate) fea_root: crate::cli::FeaRootArgs,
     pub(crate) execution: ExecutionTargetArgs,
 }
 
@@ -96,6 +99,7 @@ pub(crate) async fn execute_script_with_graphics(
         function,
         emit_bytecode_path,
         json,
+        fea_root,
         execution,
     } = invocation;
     if function.is_some()
@@ -124,7 +128,13 @@ pub(crate) async fn execute_script_with_graphics(
         if !args.is_empty() {
             anyhow::bail!(".fea files do not accept positional script arguments");
         }
-        return boxed_command(|| execute_fea_path(script, cli, config, json, execution)).await;
+        return boxed_command(|| execute_fea_path(script, fea_root, cli, config, json, execution))
+            .await;
+    }
+    if !fea_root.is_empty() {
+        anyhow::bail!(
+            "--study and --sweep select a root of a .fea document; {script:?} is not one"
+        );
     }
 
     if let ExecutionTarget::Remote(target) = execution.resolve()? {

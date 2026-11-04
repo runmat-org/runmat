@@ -134,6 +134,17 @@ impl AcceleratorFamily {
     }
 }
 
+/// The first family of a study with no device solve path. Under `accelerators = required` such a
+/// study fails before meshing; this is the static half of accelerator admission that
+/// `runmat check` reports, while device availability is decided on the executing host.
+pub fn first_family_without_device_path(
+    families: impl IntoIterator<Item = AcceleratorFamily>,
+) -> Option<AcceleratorFamily> {
+    families
+        .into_iter()
+        .find(|family| family.unavailable_reason().is_some())
+}
+
 /// Admits one placement for a whole authored sequence, where one backend serves every step.
 /// The first step whose family has no device path decides the fallback (or the strict failure);
 /// otherwise `device` reports whether an accelerator can be allocated for the study.
@@ -147,6 +158,7 @@ pub fn admit_study_accelerator<'a>(
         .into_iter()
         .map(AcceleratorFamily::of_step)
         .collect::<Vec<_>>();
+    let without_device_path = first_family_without_device_path(families.iter().copied());
     if requested == ComputeBackend::Cpu {
         return Ok(AcceleratorAdmission {
             requested,
@@ -154,11 +166,7 @@ pub fn admit_study_accelerator<'a>(
             fallback: None,
         });
     }
-    if let Some(family) = families
-        .iter()
-        .copied()
-        .find(|family| family.unavailable_reason().is_some())
-    {
+    if let Some(family) = without_device_path {
         return admit_accelerator_with_policy(family, requested, policy);
     }
     let fallback = match (device(), families.first()) {

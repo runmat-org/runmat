@@ -4,7 +4,7 @@ geometry plate {
     file = "./geometry/cold-plate.step"
     units = m
     interfaces = shared
-    region coolant : cell { select name "Coolant"; expect exactly_one }
+    region coolant : cell { select name "Coolant"; expect one_or_more }
     region plate : solid { select name "Plate"; expect exactly_one }
     region inlet : face { select name "Inlet"; expect one_or_more }
     region outlet : face { select name "Outlet"; expect one_or_more }

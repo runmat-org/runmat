@@ -415,6 +415,16 @@ fn substitute_output_regions(
             substitute_output_regions(source, inputs)?;
             substitute_region(target, inputs)
         }
+        crate::AuthoredOutputExpression::PortReduction {
+            source,
+            first,
+            second,
+            ..
+        } => {
+            substitute_output_regions(source, inputs)?;
+            substitute_region(first, inputs)?;
+            substitute_region(second, inputs)
+        }
         crate::AuthoredOutputExpression::AnalysisField { .. }
         | crate::AuthoredOutputExpression::OutputReference { .. } => Ok(()),
     }

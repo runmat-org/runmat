@@ -13,7 +13,7 @@ Evidence kind: SemanticRealization. Criterion: `runmat check` on a `.fea` file p
 
 ## default_load_case
 
-Evidence kind: SemanticRealization. Criterion: A model with loads and no `load_case` applies them in one default case and `fea check` accepts it; a model with several loads and an explicit case set is unchanged.
+Evidence kind: SemanticRealization. Criterion: A model with loads and no `load_case` applies them in one default case and `runmat check` accepts it; a model with several loads and an explicit case set is unchanged.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
@@ -31,7 +31,7 @@ Evidence kind: SemanticRealization. Criterion: Unit prefixes kW, MW, kA, kV, mA,
 
 ## check_matches_run
 
-Evidence kind: RejectionInvariant. Criterion: `fea check` validates procedure members, state references and name selectors so that a study it accepts cannot fail at run for those reasons.
+Evidence kind: RejectionInvariant. Criterion: `runmat check` validates procedure members, state references and name selectors so that a study it accepts cannot fail at run for those reasons.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|

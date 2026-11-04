@@ -9,10 +9,33 @@ use std::collections::{BTreeMap, HashMap};
 #[cfg(test)]
 mod tests;
 
+/// How finely a quadratic (Tri6) boundary face is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceDetail {
+    /// Four triangles through the corner and midside nodes: every node is drawn where it is.
+    Full,
+    /// One triangle through the corners: a quarter of the triangles, for a scene that must fit
+    /// a payload budget. The midside nodes are dropped; [`DroppedMidsides`] lists them so the
+    /// caller can state the position and value error.
+    Corners,
+}
+
+/// The midside nodes a [`SurfaceDetail::Corners`] surface leaves out: (corner, corner, midside)
+/// node indices per face edge.
+pub type DroppedMidsides = Vec<[u32; 3]>;
+
 pub(super) fn render_topology_from_solver_mesh(
     mesh: Option<&SolverMeshArtifact>,
 ) -> Option<AnalysisRenderTopology> {
+    render_topology_from_solver_mesh_at(mesh, SurfaceDetail::Full).map(|(topology, _)| topology)
+}
+
+pub(super) fn render_topology_from_solver_mesh_at(
+    mesh: Option<&SolverMeshArtifact>,
+    detail: SurfaceDetail,
+) -> Option<(AnalysisRenderTopology, DroppedMidsides)> {
     let mesh = mesh?;
+    let mut dropped = DroppedMidsides::new();
     if mesh.topology.nodes.is_empty() || mesh.topology.boundary_faces.is_empty() {
         return None;
     }
@@ -22,9 +45,9 @@ pub(super) fn render_topology_from_solver_mesh(
         .boundary_faces
         .iter()
         .try_fold(0_usize, |count, face| {
-            count.checked_add(match face.node_ids.len() {
-                3 => 1,
-                6 => 4,
+            count.checked_add(match (face.node_ids.len(), detail) {
+                (3, _) | (6, SurfaceDetail::Corners) => 1,
+                (6, SurfaceDetail::Full) => 4,
                 _ => return None,
             })
         })?;
@@ -50,7 +73,12 @@ pub(super) fn render_topology_from_solver_mesh(
     // Project one face at a time. Do not retain a second complete boundary
     // inventory or grow buffers from a linear-face capacity for quadratic faces.
     for face in &mesh.topology.boundary_faces {
-        let mut face_triangles = boundary_triangles(&face.node_ids, &node_index_by_id)?;
+        let mut face_triangles = boundary_triangles(&face.node_ids, &node_index_by_id, detail)?;
+        if detail == SurfaceDetail::Corners && face.node_ids.len() == 6 {
+            for [a, b, midside] in [[0, 1, 3], [1, 2, 4], [2, 0, 5]] {
+                dropped.push([a, b, midside].map(|k| node_index_by_id[&face.node_ids[k]]));
+            }
+        }
         let volume_element_index = face
             .adjacent_volume_element_ids
             .iter()
@@ -88,24 +116,27 @@ pub(super) fn render_topology_from_solver_mesh(
     }
     let regions = render_regions_from_triangle_indices(region_triangles);
 
-    Some(AnalysisRenderTopology {
-        schema_version: "analysis_render_topology/v1".to_string(),
-        source: AnalysisRenderTopologySource::AnalysisMesh,
-        volume_element_count: mesh.topology.volume_elements.len(),
-        meshes: vec![AnalysisRenderMesh {
-            mesh_id: "solver_mesh_boundary".to_string(),
-            vertices: mesh
-                .topology
-                .nodes
-                .iter()
-                .map(|node| node.coordinates_m.canonical_value())
-                .collect(),
-            triangles,
-            regions,
-            vertex_volume_node_indices: (0..mesh.topology.nodes.len()).map(Some).collect(),
-            triangle_volume_element_indices,
-        }],
-    })
+    Some((
+        AnalysisRenderTopology {
+            schema_version: "analysis_render_topology/v1".to_string(),
+            source: AnalysisRenderTopologySource::AnalysisMesh,
+            volume_element_count: mesh.topology.volume_elements.len(),
+            meshes: vec![AnalysisRenderMesh {
+                mesh_id: "solver_mesh_boundary".to_string(),
+                vertices: mesh
+                    .topology
+                    .nodes
+                    .iter()
+                    .map(|node| node.coordinates_m.canonical_value())
+                    .collect(),
+                triangles,
+                regions,
+                vertex_volume_node_indices: (0..mesh.topology.nodes.len()).map(Some).collect(),
+                triangle_volume_element_indices,
+            }],
+        },
+        dropped,
+    ))
 }
 
 /// Whether the face's corner winding normal points into its adjacent element (towards the
@@ -161,10 +192,14 @@ fn faces_into_element(
 
 /// Tri6 midside order is 01, 12, 20. Render four consistently oriented pieces
 /// using original nodes; field recovery remains owned by the numerical result.
-fn boundary_triangles(ids: &[u64], node_indices: &HashMap<u64, u32>) -> Option<Vec<[u32; 3]>> {
-    let patterns: &[[usize; 3]] = match ids.len() {
-        3 => &[[0, 1, 2]],
-        6 => &[[0, 3, 5], [3, 1, 4], [5, 4, 2], [3, 4, 5]],
+fn boundary_triangles(
+    ids: &[u64],
+    node_indices: &HashMap<u64, u32>,
+    detail: SurfaceDetail,
+) -> Option<Vec<[u32; 3]>> {
+    let patterns: &[[usize; 3]] = match (ids.len(), detail) {
+        (3, _) | (6, SurfaceDetail::Corners) => &[[0, 1, 2]],
+        (6, SurfaceDetail::Full) => &[[0, 3, 5], [3, 1, 4], [5, 4, 2], [3, 4, 5]],
         _ => return None,
     };
     patterns

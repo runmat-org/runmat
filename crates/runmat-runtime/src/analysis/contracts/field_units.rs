@@ -38,7 +38,7 @@ pub(super) fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     if normalized.contains("temperature") || normalized.contains("temperature_jump") {
         return Some("K");
     }
-    if normalized.contains("electric_potential") {
+    if normalized.contains("electric_potential") || normalized.ends_with("electrical.potential") {
         return Some("V");
     }
     if normalized.contains("electric_field") {
@@ -60,6 +60,7 @@ pub(super) fn infer_field_unit(field_id: &str) -> Option<&'static str> {
         return Some("A/m");
     }
     if normalized.contains("poynting_vector")
+        || normalized.ends_with("acoustic.intensity")
         || normalized.contains("boundary_heat_flux")
         || normalized.contains("interface_heat_flux")
         || normalized.ends_with(".heat_flux")
@@ -68,6 +69,7 @@ pub(super) fn infer_field_unit(field_id: &str) -> Option<&'static str> {
         return Some("W/m^2");
     }
     if normalized.contains("power_loss_density")
+        || normalized.contains("joule_power_density")
         || normalized.contains("joule_heat")
         || normalized.contains("heat_source")
         || normalized.contains("energy_storage_rate")

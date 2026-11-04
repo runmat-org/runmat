@@ -1,32 +1,30 @@
 //! Presentation-only resume of authenticated original fields. A saved solve
 //! remains an original solve, never a fresh qualification of changed numerics.
 use anyhow::{anyhow, ensure, Context, Result};
-use runmat_runtime::analysis::{
-    analysis_results_by_run_id_op, AnalysisResultsData, AnalysisResultsQuery, AnalysisStudyRunData,
-};
 use serde::Deserialize;
 use std::{io::Read, path::Path};
 
 #[derive(Deserialize)]
 struct SavedSnapshot {
     schema_version: u16,
-    run_id: String,
-    publication: AnalysisStudyRunData,
-    results: AnalysisResultsData,
+    #[serde(flatten)]
+    primary: super::CapturedRun,
+    #[serde(default)]
+    runs: Vec<super::CapturedRun>,
+    /// The saved views; a render redraws the same ones.
+    views: Vec<SavedView>,
 }
-pub(in crate::commands::fea) async fn render_saved(input: &Path, output: &Path) -> Result<()> {
-    let mut bytes = Vec::new();
-    std::fs::File::open(input)?
-        .take(16 * 1024 * 1024 + 1)
-        .read_to_end(&mut bytes)?;
+
+#[derive(Deserialize)]
+struct SavedView {
+    id: String,
+}
+
+/// Check one saved run against its authenticated publication manifest and original results.
+fn authenticate(saved: &super::CapturedRun) -> Result<()> {
     ensure!(
-        bytes.len() <= 16 * 1024 * 1024,
-        "saved snapshot metadata exceeds project limit"
-    );
-    let saved: SavedSnapshot = serde_json::from_slice(&bytes)?;
-    ensure!(
-        saved.schema_version == 1 && saved.publication.steps.len() == 1,
-        "saved snapshot must contain one original study step"
+        !saved.publication.steps.is_empty(),
+        "saved snapshot must contain its original study steps"
     );
     let definition: runmat_execution::Digest = saved
         .publication
@@ -49,40 +47,39 @@ pub(in crate::commands::fea) async fn render_saved(input: &Path, output: &Path) 
         publication == saved.publication && publication.numerically_acceptable,
         "saved snapshot differs from original accepted study publication"
     );
+    let step = publication
+        .steps
+        .iter()
+        .find(|step| step.run_id == saved.run_id)
+        .context("saved run does not belong to the original study")?;
     ensure!(
-        publication.steps[0].run_id == saved.run_id,
-        "saved run does not belong to the original study"
+        step.procedure_step.step_id.as_str() == saved.step,
+        "saved step differs from the original study step of its run"
     );
-    let profile = super::views::CaptureProfile::for_step(&publication.steps[0].procedure_step)?;
-    let results = analysis_results_by_run_id_op(
-        &saved.run_id,
-        AnalysisResultsQuery {
-            include_field_values: matches!(&profile, super::views::CaptureProfile::Modal { .. }),
-            ..Default::default()
-        },
-        runmat_runtime::operations::OperationContext::new(None, None),
-    )
-    .map_err(|error| anyhow!("{}: {}", error.error_code, error.message))?
-    .data;
+    let results = super::step_results(&saved.run_id)?;
     ensure!(
         results == saved.results && results.numerically_acceptable,
         "saved presentation metadata differs from authenticated original results"
     );
-    let parent = output
-        .parent()
-        .context("snapshot output requires a parent directory")?;
-    std::fs::create_dir_all(parent)?;
-    let views = super::views::capture(&saved.run_id, parent, profile, &results).await?;
-    std::fs::write(
-        output,
-        serde_json::to_vec_pretty(&super::Snapshot {
-            schema_version: 1,
-            run_id: &saved.run_id,
-            publication: &publication,
-            views,
-            results: &results,
-        })?,
-    )?;
-    println!("{}", output.display());
     Ok(())
+}
+
+pub(in crate::commands::fea) async fn render_saved(input: &Path, output: &Path) -> Result<()> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(input)?
+        .take(16 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        bytes.len() <= 16 * 1024 * 1024,
+        "saved snapshot metadata exceeds project limit"
+    );
+    let saved: SavedSnapshot = serde_json::from_slice(&bytes)?;
+    ensure!(saved.schema_version == 1, "unsupported snapshot schema");
+    let mut runs = vec![saved.primary];
+    runs.extend(saved.runs);
+    for run in &runs {
+        authenticate(run)?;
+    }
+    let views: Vec<String> = saved.views.into_iter().map(|view| view.id).collect();
+    super::write_snapshot(&runs, &views, output).await
 }

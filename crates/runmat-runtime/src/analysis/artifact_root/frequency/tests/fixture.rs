@@ -3,6 +3,7 @@ use super::*;
 use runmat_analysis_core::{
     AnalysisField, FieldLocation, ObservationQuantity, ObservationValueShape, RecoveryPolicy,
 };
+use runmat_analysis_core::{AnalysisFieldLayout, ComplexRepresentation};
 use runmat_analysis_fea::{execution::*, frequency::FrequencyResponsePlan, results::field::*};
 use runmat_execution::value::{artifact_object_value_id, ValueRefKind};
 use std::collections::BTreeMap;
@@ -162,6 +163,11 @@ pub(super) fn fixture() -> Fixture {
             RecoveredFieldSample::FrequencyHertz(numerical.entry.frequency_hz()),
             AnalysisField::host_f64(
                 "pressure",
+                AnalysisFieldLayout::scalar(
+                    ObservationQuantity::AcousticPressure,
+                    FieldLocation::Node,
+                )
+                .representation(ComplexRepresentation::Complex),
                 vec![count, 2],
                 (0..count * 2)
                     .map(|index| numerical.entry.frequency_hz() * 100_000.0 + index as f64)

@@ -126,7 +126,7 @@ immutable assessment report. It does not solve again, replace the original repor
 or apply revised geometry, materials or loads to the old numerical result.
 
 ```sh
-runmat fea reassess bracket.fea --study bracket \
+runmat reassess bracket.fea --study bracket \
     --original-definition sha256:<original-definition-digest> \
     --result-manifest <saved-study-result-manifest> --json
 ```

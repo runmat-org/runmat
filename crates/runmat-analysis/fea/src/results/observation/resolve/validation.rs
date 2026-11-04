@@ -113,6 +113,8 @@ pub(super) fn validate_supported_spec(
                 | SpatialReduction::Resultant
                 | SpatialReduction::Moment { .. }
                 | SpatialReduction::NormalFlux
+                | SpatialReduction::MeanDifference
+                | SpatialReduction::TransmissionLoss
         ) {
             return Err(ObservationError::Unsupported(
                 "unsupported spatial reduction",
@@ -167,11 +169,32 @@ pub(super) fn validate_resolved_spatial_reduction(
             | SpatialReduction::Resultant
             | SpatialReduction::Moment { .. }
             | SpatialReduction::NormalFlux
+            | SpatialReduction::MeanDifference
+            | SpatialReduction::TransmissionLoss
     ) && spec.output_location != FieldLocation::Global
     {
         return Err(ObservationError::Invalid(
             "integrated spatial reductions require global output location".into(),
         ));
+    }
+    if operation.is_paired() {
+        if source.value_shape() != &ObservationValueShape::Scalar
+            || source.numeric_representation() != RecoveredFieldNumericRepresentation::Real
+            || spec.component != ObservationComponent::All
+            || !matches!(target, ResolvedObservationTarget::BoundaryPair { .. })
+        {
+            return Err(ObservationError::Unsupported(
+                "a paired reduction reads a real scalar field over two boundary face regions",
+            ));
+        }
+        if operation == SpatialReduction::TransmissionLoss
+            && spec.quantity != ObservationQuantity::AcousticPortIntensity
+        {
+            return Err(ObservationError::Unsupported(
+                "transmission loss reads the acoustic port intensity",
+            ));
+        }
+        return Ok(());
     }
     if operation == SpatialReduction::NormalFlux {
         if source.value_shape() != &ObservationValueShape::Vector3
