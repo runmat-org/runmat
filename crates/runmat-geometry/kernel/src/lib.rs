@@ -18,6 +18,7 @@ pub mod ids;
 pub mod names;
 pub mod op;
 pub mod queries;
+pub mod sections;
 
 pub use analysis::GeometryAnalyzer;
 pub use frame::Frame;

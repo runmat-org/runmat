@@ -718,10 +718,8 @@ fn normalize3(a: [f64; 3]) -> [f64; 3] {
     [a[0] / l, a[1] / l, a[2] / l]
 }
 
-/// A hole's section about its axis in (radius, z), z up and the hole going down: the top
-/// (on the start face), any counterbore or countersink, the wall spans (by series stage, with
-/// a modelled thread's span its own face, tapering for a pipe tap), then the bottom or drill
-/// point. The segment on the axis makes no face.
+/// A hole's section about its axis, from the kernel contract's one definition
+/// ([`runmat_geometry_kernel::sections::hole_section`]), as grid curves.
 #[allow(clippy::too_many_arguments)]
 fn hole_section(
     key: &str,
@@ -734,79 +732,28 @@ fn hole_section(
     thread: Option<Option<f64>>,
     stages: &[(f64, f64, bool, Option<u32>)],
 ) -> Vec<(Curve2, HistorySource)> {
-    let k = || KernelTag::Key { key: key.into() };
-    let line = |a: [f64; 2], b: [f64; 2]| Curve2::Line { a, b };
-    let mut pts: Vec<([f64; 2], HistorySource)> = Vec::new();
-    // Each point carries the label of the segment from it to the next point.
-    pts.push(([0.0, 0.0], gen(Role::HoleBottom, k(), Some(1))));
-    let z0 = match (counterbore, countersink) {
-        (Some((d, depth)), _) => {
-            pts.push(([d / 2.0, 0.0], gen(Role::HoleCounterboreWall, k(), None)));
-            pts.push(([d / 2.0, -depth], gen(Role::HoleCounterbore, k(), None)));
-            -depth
-        }
-        (None, Some((d, angle))) => {
-            let rc = d / 2.0;
-            let drop = (rc - radius).max(0.0) / (angle / 2.0).tan().max(1e-9);
-            pts.push(([rc, 0.0], gen(Role::HoleCountersink, k(), None)));
-            -drop
-        }
-        (None, None) => 0.0,
-    };
-    let tan = taper.map(f64::tan).unwrap_or(0.0);
-    let r_at = |r0: f64, z: f64| (r0 - (z0 - z) * tan).max(radius * 0.05);
-    // Wall spans: (bottom z, radius, label).
-    let mut spans: Vec<(f64, f64, HistorySource)> = Vec::new();
-    if stages.is_empty() {
-        let threaded_to = thread.map(|l| l.map(|l| (z0 - l).max(bottom)).unwrap_or(bottom));
-        match threaded_to {
-            Some(t) if t > bottom + 1e-12 => {
-                spans.push((t, radius, gen(Role::ThreadFace, k(), None)));
-                spans.push((bottom, radius, gen(Role::HoleWall, k(), None)));
-            }
-            Some(_) => spans.push((bottom, radius, gen(Role::ThreadFace, k(), None))),
-            None => spans.push((bottom, radius, gen(Role::HoleWall, k(), None))),
-        }
-    } else {
-        let n = stages.len();
-        for (i, (exit, r, threaded, _)) in stages.iter().enumerate() {
-            let zb = if i + 1 == n { bottom } else { -exit };
-            let ord = (i > 0).then_some(i as u32);
-            let role = if *threaded {
-                Role::ThreadFace
-            } else {
-                Role::HoleWall
-            };
-            spans.push((zb, *r, gen(role, k(), ord)));
-        }
-    }
-    let mut z = z0;
-    let mut last_r = spans.first().map(|s| s.1).unwrap_or(radius);
-    for (i, (zb, r, label)) in spans.iter().enumerate() {
-        if (r - last_r).abs() > 1e-12 && i > 0 {
-            pts.push((
-                [r_at(last_r, z), z],
-                gen(Role::HoleBottom, k(), Some(10 + i as u32)),
-            ));
-        }
-        pts.push(([r_at(*r, z), z], label.clone()));
-        z = *zb;
-        last_r = *r;
-    }
-    let rb = r_at(last_r, z);
-    match drill_point {
-        Some(a) if a > 0.0 && a < std::f64::consts::PI => {
-            pts.push(([rb, z], gen(Role::HoleBottom, k(), None)));
-            let tip = z - rb / (a / 2.0).tan();
-            pts.push(([0.0, tip], gen(Role::HoleWall, k(), None)));
-        }
-        _ => {
-            pts.push(([rb, z], gen(Role::HoleBottom, k(), None)));
-            pts.push(([0.0, z], gen(Role::HoleWall, k(), None)));
-        }
-    }
-    let n = pts.len();
-    (0..n)
-        .map(|i| (line(pts[i].0, pts[(i + 1) % n].0), pts[i].1.clone()))
-        .collect()
+    let stages: Vec<runmat_geometry_kernel::sections::StageSpan> = stages
+        .iter()
+        .map(
+            |(exit, radius, threaded, _)| runmat_geometry_kernel::sections::StageSpan {
+                exit: *exit,
+                radius: *radius,
+                threaded: *threaded,
+            },
+        )
+        .collect();
+    runmat_geometry_kernel::sections::hole_section(
+        key,
+        radius,
+        bottom,
+        counterbore,
+        countersink,
+        drill_point,
+        taper,
+        thread,
+        &stages,
+    )
+    .into_iter()
+    .map(|s| (Curve2::Line { a: s.a, b: s.b }, s.label))
+    .collect()
 }
