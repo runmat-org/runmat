@@ -395,6 +395,56 @@ fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
     );
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Curve midpoints whose pcurve images a trim classifier reports outside (the
+//   pin fitting v1 STEP) are admitted by curve/surface agreement; concave-trim surface
+//   fallback is exercised by the site CAD runs.
+#[test]
+fn tet10_curve_midpoints_do_not_trim_classify_their_own_pcurve_images() {
+    let (exact_topology, exact_surface) = crate::cdt::constraints::tests::tetrahedron();
+    let request = request(ElementOrder::Tet10);
+    let volume_options = volume_options();
+    let volume_mesh = super::super::construct_delaunay_volume_mesh(
+        &exact_topology,
+        &exact_surface,
+        &request.metric,
+        volume_options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    let topology = build_delaunay_solver_topology(
+        DelaunaySolverTopologyInput {
+            exact_topology: &exact_topology,
+            exact_surface: &exact_surface,
+            volume_mesh: &volume_mesh,
+            volume_options,
+            volume_metric: &request.metric,
+            request: &request,
+            exact_evaluation: Some(DelaunayExactEvaluation {
+                evaluator: &super::test_evaluator::BOUNDARY_OUTSIDE_EVALUATOR,
+                control: &super::test_evaluator::CONTROL,
+            }),
+        },
+        DelaunaySolverTopologyOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    let curve_midpoints = topology
+        .nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.exact_parameters.first(),
+                Some(runmat_meshing_core::SolverNodeExactParameter::Curve { .. })
+            ) && node.exact_parameters.len() == 3
+        })
+        .count();
+    assert_eq!(curve_midpoints, 6);
+    runmat_meshing_core::validate_solver_mesh_topology(&topology, &request).unwrap();
+}
+
 #[test]
 fn curved_tet10_nodes_optimize_deterministically() {
     let (exact_topology, exact_surface) = crate::cdt::constraints::tests::tetrahedron();

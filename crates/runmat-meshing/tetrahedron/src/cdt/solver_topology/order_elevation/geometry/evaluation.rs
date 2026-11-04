@@ -328,6 +328,32 @@ fn surface_midpoint(
                 options,
             )?,
         };
+        // A surface edge whose ends both lie on a concave trim boundary (a hole's rim) can
+        // leave the trim by up to the chordal deviation the linear surface mesh admitted.
+        // The untrimmed surface point within that deviation of the chord point keeps the
+        // elevated face as close to the exact face as its linear edge.
+        let candidate = match candidate {
+            Some(candidate) => Some(candidate),
+            None => {
+                let point = evaluate_surface_point(surface_use, parametric_uv, evaluation)?;
+                let chord = interpolate3(
+                    request.left.coordinates_m.canonical_value(),
+                    request.right.coordinates_m.canonical_value(),
+                    request.fraction,
+                );
+                let deviation = input
+                    .request
+                    .quality
+                    .surface
+                    .maximum_chordal_deviation_m
+                    .canonical_value()
+                    .max(match_tolerance_m(input));
+                let squared = (0..3)
+                    .map(|axis| (point[axis] - chord[axis]).powi(2))
+                    .sum::<f64>();
+                (squared <= deviation * deviation).then_some((parametric_uv, point))
+            }
+        };
         let Some((evaluator_uv, point)) = candidate else {
             return Ok(None);
         };
@@ -406,16 +432,6 @@ impl Iterator for PcurveImages<'_> {
     }
 }
 
-pub(super) fn evaluate_surface(
-    surface_use: &SurfaceUse,
-    evaluator_uv: [f64; 2],
-    evaluation: PreparedEvaluation<'_, '_>,
-    options: DelaunaySolverTopologyOptions,
-) -> Result<[f64; 3], DelaunaySolverTopologyError> {
-    evaluate_surface_candidate(surface_use, evaluator_uv, evaluation, options)?
-        .ok_or_else(|| invalid("elevated surface point leaves the exact trim domain"))
-}
-
 fn evaluate_surface_candidate(
     surface_use: &SurfaceUse,
     evaluator_uv: [f64; 2],
@@ -491,7 +507,7 @@ fn closest_trimmed_chord_point(
     )))
 }
 
-fn evaluate_surface_point(
+pub(super) fn evaluate_surface_point(
     surface_use: &SurfaceUse,
     evaluator_uv: [f64; 2],
     evaluation: PreparedEvaluation<'_, '_>,
