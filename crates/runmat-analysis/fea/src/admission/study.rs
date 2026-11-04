@@ -7,11 +7,11 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{
-    AuthoredMaterialRef, AuthoredMaterialSource, MaterialModel,
     analysis_identity_status, family_label, procedure_label, AnalysisIdentityStatus,
     AnalysisProcedure, AnalysisSequence, AuthoredConstraintKind, AuthoredInitialConditionKind,
-    AuthoredPairingPolicy, AuthoredPeriodicTransform, CoupledPhysicsFamily, ElectromagneticDomain,
-    PhysicsFamily, RealizedStudy, RestartPolicy, SolutionSpace,
+    AuthoredMaterialRef, AuthoredMaterialSource, AuthoredPairingPolicy, AuthoredPeriodicTransform,
+    CoupledPhysicsFamily, ElectromagneticDomain, MaterialModel, PhysicsFamily, RealizedStudy,
+    RestartPolicy, SolutionSpace,
 };
 
 /// One static admission rule: a stable diagnostic code, the pending-feature id when the
