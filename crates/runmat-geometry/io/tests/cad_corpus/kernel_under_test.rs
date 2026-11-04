@@ -92,7 +92,8 @@ fn record(case: &str, outcome: &str) {
             .append(true)
             .open(path)
         {
-            let _ = writeln!(f, "{case}\t{outcome}");
+            // One write per line: tests run in parallel and append to the same file.
+            let _ = f.write_all(format!("{case}\t{outcome}\n").as_bytes());
         }
     }
 }

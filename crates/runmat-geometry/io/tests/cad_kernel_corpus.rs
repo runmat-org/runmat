@@ -5,6 +5,9 @@
 //! Per-operation outcomes are appended to `$RUNMAT_K1_STATS` (one `op<TAB>outcome` line per
 //! kernel call) when it is set, for failure-rate reports.
 
+// Each included runmat-cad suite declares its own `mod common;`, as it does in runmat-cad.
+#![allow(clippy::duplicate_mod)]
+
 #[path = "cad_corpus/kernel_under_test.rs"]
 mod kernel_under_test;
 

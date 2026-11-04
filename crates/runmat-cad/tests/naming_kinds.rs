@@ -1640,7 +1640,12 @@ fn chamfer_family() -> Family {
                     "chf_face",
                     blend_face("chf", Role::Chamfer, &right, &top),
                     "chf",
-                    centroid_near([Some(p["width"]), Some(p["depth"] / 2.0), Some(10.0)], 1e-6),
+                    // The grid kernel puts a blend face on its edge; the exact chamfer face's
+                    // centroid sits cd/2 in from each adjoining face, so allow the reach.
+                    centroid_near(
+                        [Some(p["width"]), Some(p["depth"] / 2.0), Some(10.0)],
+                        p["cd"] / 2.0 + 1e-6,
+                    ),
                 ),
                 face1(
                     "chf_right",

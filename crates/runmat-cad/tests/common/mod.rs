@@ -276,12 +276,30 @@ pub fn assert_clean(r: &RegenResult) {
     }
 }
 
-/// Face geometry for a region's entities (faces only), via the final state.
+/// Face geometry for a region's entities (faces only), via the final state: the faces its
+/// references resolved to (two pieces of a split face share their names, so the names alone do
+/// not tell them apart), else the faces bearing its resolved names.
 pub fn region_faces(r: &RegenResult, name: &str) -> Vec<FaceGeom> {
     let o = r
         .regions
         .get(&RegionName::new(name))
         .unwrap_or_else(|| panic!("no region {}", name));
+    let mut handles = std::collections::BTreeSet::new();
+    for rec in &o.references {
+        if let ResolveOutcome::Resolved(res) = &rec.outcome {
+            handles.extend(
+                res.entities()
+                    .into_iter()
+                    .filter(|h| h.kind == TopoKind::Face),
+            );
+        }
+    }
+    if !handles.is_empty() {
+        return handles
+            .iter()
+            .map(|h| r.state.bodies[h.body as usize].topology.faces[h.index as usize].geom)
+            .collect();
+    }
     let mut out = Vec::new();
     for names in &o.entities {
         for b in &r.state.bodies {
