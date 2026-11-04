@@ -1,0 +1,18 @@
+[package]
+name = "runmat-geometry-kernel"
+version = "0.6.2"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../../LICENSE.md"
+description = "The kernel-neutral geometry-engine contract for RunMat CAD: canonical operations in, opaque bodies plus a per-entity history record out"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+# No kernel types and no geometry dependency: the OCCT backend (runmat-geometry-io) and the
+# design layer's test kernel both implement these traits over their own bodies.
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

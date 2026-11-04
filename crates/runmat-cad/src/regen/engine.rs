@@ -1031,7 +1031,7 @@ impl<'a, 'b> Run<'a, 'b> {
         d: &DatumRef,
     ) -> Result<Frame, Halt> {
         match d {
-            DatumRef::OriginPlane { plane } => Ok(Frame::origin_plane(*plane)),
+            DatumRef::OriginPlane { plane } => Ok(plane.frame()),
             DatumRef::OriginFrame => Ok(Frame::WORLD),
             DatumRef::Feature { feature } => {
                 self.gate_feature(i, f, feature, param)?;
@@ -2180,7 +2180,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     },
                     DatumRef::OriginPlane { plane } => Ok(ForeignTarget {
                         datum: Some(DatumValue::Plane {
-                            frame: Frame::origin_plane(*plane),
+                            frame: plane.frame(),
                         }),
                         ..target
                     }),

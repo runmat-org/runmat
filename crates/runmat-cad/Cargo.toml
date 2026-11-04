@@ -9,7 +9,8 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 # Kernel-free and deliberately light: no geometry, syntax, unit or solver crate is a dependency.
-# The kernel, sketch solver, unit authority and dynamic-value evaluator are traits in this crate,
+# The sketch solver, unit authority and dynamic-value evaluator are traits in this crate, and the
+# kernel trait is the kernel-neutral runmat-geometry-kernel contract,
 # so K1, A1, the `.fea` unit registry and the value phase plug in through adapters.
 [dependencies]
 serde = { workspace = true }
@@ -21,5 +22,8 @@ thiserror = { workspace = true }
 runmat-constraint = { path = "../runmat-constraint" }
 # Selector, precedence and explain engine for `check` packs (dependency-free).
 runmat-rules = { path = "../runmat-rules" }
+# The kernel contract (kernel-neutral: serde and thiserror only). `regen::kernel`,
+# `refs::history` and the analysis seam re-export it; K1's OCCT backend implements it.
+runmat-geometry-kernel = { workspace = true }
 # The design-command descriptor schema shared with runmat-circuit.
 runmat-design-commands = { path = "../runmat-design-commands", version = "=0.6.2" }

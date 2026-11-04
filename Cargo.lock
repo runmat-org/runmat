@@ -7938,6 +7938,7 @@ dependencies = [
  "hex",
  "runmat-constraint",
  "runmat-design-commands",
+ "runmat-geometry-kernel",
  "runmat-rules",
  "serde",
  "serde_json",
@@ -8413,6 +8414,15 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "runmat-geometry-kernel"
+version = "0.6.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

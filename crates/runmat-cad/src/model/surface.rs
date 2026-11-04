@@ -9,18 +9,7 @@ use crate::refs::Reference;
 use crate::value::ValueExpr;
 use serde::{Deserialize, Serialize};
 
-/// Continuity a fill or boundary surface keeps with the faces along an edge.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Continuity {
-    /// Position only.
-    #[default]
-    G0,
-    /// Tangent.
-    G1,
-    /// Curvature.
-    G2,
-}
+pub use runmat_geometry_kernel::names::Continuity;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BoundaryEdge {

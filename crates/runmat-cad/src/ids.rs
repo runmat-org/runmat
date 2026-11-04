@@ -42,10 +42,9 @@ name_id!(
     /// features too, so one id space covers the whole history.
     FeatureId
 );
-name_id!(
-    /// A sketch entity's authored name within its sketch (`l1`, `a1`).
-    SketchEntityId
-);
+/// A sketch entity's authored name within its sketch (`l1`, `a1`). The kernel echoes it in
+/// history tags, so it is defined with the kernel contract.
+pub use runmat_geometry_kernel::ids::SketchEntityId;
 name_id!(
     /// A sketch constraint's authored name, when it has one.
     ConstraintId

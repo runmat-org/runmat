@@ -248,25 +248,12 @@ impl CurveRef {
     }
 }
 
-/// An evaluated frame in part coordinates (SI). Right-handed and orthonormal.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Frame {
-    pub origin: [f64; 3],
-    pub x: [f64; 3],
-    pub y: [f64; 3],
-    pub z: [f64; 3],
-}
+pub use runmat_geometry_kernel::frame::Frame;
 
-impl Frame {
-    pub const WORLD: Frame = Frame {
-        origin: [0.0; 3],
-        x: [1.0, 0.0, 0.0],
-        y: [0.0, 1.0, 0.0],
-        z: [0.0, 0.0, 1.0],
-    };
-
-    pub fn origin_plane(plane: OriginPlane) -> Frame {
-        match plane {
+impl OriginPlane {
+    /// The frame of an origin plane.
+    pub fn frame(self) -> Frame {
+        match self {
             OriginPlane::Xy => Frame::WORLD,
             OriginPlane::Yz => Frame {
                 origin: [0.0; 3],
@@ -281,18 +268,6 @@ impl Frame {
                 z: [0.0, 1.0, 0.0],
             },
         }
-    }
-
-    pub fn offset(&self, distance: f64) -> Frame {
-        Frame {
-            origin: add(self.origin, scale(self.z, distance)),
-            ..*self
-        }
-    }
-
-    /// Map sketch coordinates to part coordinates.
-    pub fn to_world(&self, p: [f64; 2]) -> [f64; 3] {
-        add(self.origin, add(scale(self.x, p[0]), scale(self.y, p[1])))
     }
 }
 
