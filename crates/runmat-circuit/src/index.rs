@@ -6,8 +6,8 @@
 
 use crate::board_rules::{props, BItem, BoardGraph, BoardRules, RuleValue};
 use crate::drc::Drc;
-use crate::elab::{FitState, Netlist, Severity};
 use crate::eco::{Direction, EcoPlan, Origin};
+use crate::elab::{FitState, Netlist, Severity};
 use crate::ir::{Design, Param, ParamValue, Tolerance};
 use crate::layout::{Board, NetId, PadConnect, Side, StackKind};
 use crate::library::PadShape;
@@ -45,6 +45,8 @@ pub struct CircuitIndex {
     pub last_eco: Option<EcoApplied>,
     pub erc: Vec<CheckRow>,
     pub review: Vec<CheckRow>,
+    /// The schematic as drawn: a page per sheet instance with placed symbols, wires and labels.
+    pub schematic: crate::schematic::SchematicIndex,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board: Option<BoardIndex>,
 }
@@ -276,6 +278,23 @@ pub struct BoardIndex {
     /// Placement rooms in board order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rooms: Vec<RoomRow>,
+    /// The board edge: outer boundary first, then cut-outs.
+    pub outline: crate::display::OutlineGeometry,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keepouts: Vec<crate::display::KeepoutRow>,
+    /// Board-level texts (footprint texts are on their footprint).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub texts: Vec<crate::display::TextGeometry>,
+    /// Board-level graphics (silkscreen art, fabrication and user drawings).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graphics: Vec<crate::display::GraphicRow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dimensions: Vec<crate::display::DimensionRow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fiducials: Vec<crate::display::FiducialRow>,
+    /// The ratsnest: links still needed to join each net's copper islands.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unrouted: Vec<crate::display::AirwireRow>,
 }
 
 /// A placement room: its members and its outline's bounding box.
@@ -287,6 +306,8 @@ pub struct RoomRow {
     pub y_mm: f64,
     pub width_mm: f64,
     pub height_mm: f64,
+    /// The room's outline (closed).
+    pub outline: Vec<crate::display::Xy>,
 }
 
 /// One design rule (`rule power-width { track:net-class(power) { track_width: 0.4mm } }`).
@@ -317,6 +338,26 @@ pub struct PadRow {
     pub shape: String,
     pub values: BTreeMap<String, f64>,
     pub explain: BTreeMap<String, String>,
+    /// Centre in board coordinates.
+    pub x_mm: f64,
+    pub y_mm: f64,
+    /// Absolute rotation: the footprint's and the pad's.
+    pub rotation: f64,
+    /// Size along the pad's own axes.
+    pub size_x_mm: f64,
+    pub size_y_mm: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drill_mm: Option<f64>,
+    /// A slotted hole's length along the pad's x axis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot_mm: Option<f64>,
+    /// Rounded rectangles and ovals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner_radius_mm: Option<f64>,
+    /// The exact outline (outer ring, then holes) of shapes the parameters don't describe:
+    /// trapezoids, chamfered and custom pads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<Vec<Vec<crate::display::Xy>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -342,6 +383,16 @@ pub struct FootprintRow {
     pub rotation: f64,
     pub side: String,
     pub locked: bool,
+    /// Courtyard rings, closed, in board coordinates.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub courtyard: Vec<Vec<crate::display::Xy>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub silkscreen: Vec<crate::display::Stroke>,
+    /// Fabrication-layer outline (the component body as drawn on the assembly drawing).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fab: Vec<crate::display::Stroke>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub texts: Vec<crate::display::TextGeometry>,
 }
 
 /// A track, via or pour, with its rule-driven values and where each came from.
@@ -358,6 +409,20 @@ pub struct CopperRow {
     /// Property → a value that isn't a length (a pour's name and pad connection).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub text: BTreeMap<String, String>,
+    /// A track's centreline (arcs flattened within 5 µm).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub points: Vec<crate::display::Xy>,
+    /// A track authored as an arc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc: Option<crate::display::ArcGeometry>,
+    /// A via's centre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_mm: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_mm: Option<f64>,
+    /// A pour, per copper layer: its outline and the copper left after clearances.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub polygons: Vec<crate::display::PourLayer>,
 }
 
 fn mm(nm: i64) -> f64 {
@@ -733,6 +798,7 @@ pub fn build_index(
         last_eco: None,
         erc: erc_rows,
         review: review_rows,
+        schematic: crate::schematic::layout(netlist),
         board: None,
     }
 }
@@ -794,6 +860,7 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
             if let Some(line) = explain(it, props::TRACK_WIDTH, "width", required) {
                 explain_map.insert("width".to_owned(), line);
             }
+            let (points, arc) = crate::display::track_points(&t.geom);
             CopperRow {
                 id: t.id.0,
                 net: net_name(t.net),
@@ -801,6 +868,11 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
                 values,
                 explain: explain_map,
                 text: BTreeMap::new(),
+                points,
+                arc,
+                x_mm: None,
+                y_mm: None,
+                polygons: Vec::new(),
             }
         })
         .collect();
@@ -824,6 +896,11 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
                 values,
                 explain: explain_map,
                 text: BTreeMap::new(),
+                points: Vec::new(),
+                arc: None,
+                x_mm: Some(mm(v.at.x)),
+                y_mm: Some(mm(v.at.y)),
+                polygons: Vec::new(),
             }
         })
         .collect();
@@ -876,6 +953,11 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
                 values,
                 explain: explain_map,
                 text,
+                points: Vec::new(),
+                arc: None,
+                x_mm: None,
+                y_mm: None,
+                polygons: crate::display::pour_layers(board, z),
             }
         })
         .collect();
@@ -909,7 +991,17 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
                     Some(PadShape::Chamfered { .. }) => "chamfered",
                     _ => "custom",
                 };
+                let g = crate::display::pad(f, p.index, copper).unwrap_or_default();
                 PadRow {
+                    x_mm: g.x_mm,
+                    y_mm: g.y_mm,
+                    rotation: g.rotation,
+                    size_x_mm: g.size_x_mm,
+                    size_y_mm: g.size_y_mm,
+                    drill_mm: g.drill_mm,
+                    slot_mm: g.slot_mm,
+                    corner_radius_mm: g.corner_radius_mm,
+                    outline: g.outline,
                     id: format!("{}.{}", f.reference, p.name),
                     component: f.reference.clone(),
                     net: net_name(p.net),
@@ -945,7 +1037,12 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
     let footprints = board
         .footprints
         .values()
-        .map(|f| FootprintRow {
+        .map(|f| (f, crate::display::footprint(f)))
+        .map(|(f, g)| FootprintRow {
+            courtyard: g.courtyard,
+            silkscreen: g.silkscreen,
+            fab: g.fab,
+            texts: g.texts,
             reference: f.reference.clone(),
             value: f.value.clone(),
             x_mm: mm(f.at.x),
@@ -1042,9 +1139,22 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
                     y_mm: mm(b.min.y),
                     width_mm: mm(b.max.x - b.min.x),
                     height_mm: mm(b.max.y - b.min.y),
+                    outline: r
+                        .outline
+                        .outer
+                        .iter()
+                        .map(|p| crate::display::xy(*p))
+                        .collect(),
                 }
             })
             .collect(),
+        outline: crate::display::outline(board),
+        keepouts: crate::display::keepouts(board),
+        texts: crate::display::board_texts(board),
+        graphics: crate::display::board_graphics(board),
+        dimensions: crate::display::dimensions(board),
+        fiducials: crate::display::fiducials(board),
+        unrouted: crate::display::unrouted(board),
     });
 }
 

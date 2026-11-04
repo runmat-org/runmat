@@ -39,6 +39,13 @@ const FAB: &[(&str, &str)] = &[
     ("step", "STEP"),
 ];
 
+/// Points clicked in the board view (`point:x,y` picks), in click order.
+fn points(label: &str, help: &str) -> Field {
+    picks("points", label, &[K::Point])
+        .drag(Manipulator::Point)
+        .help(help)
+}
+
 pub(super) fn add(c: &mut Catalog) {
     let layer = || text("layer", "Layer", Some("Top"));
     c.add_commands(vec![
@@ -58,12 +65,13 @@ pub(super) fn add(c: &mut Catalog) {
             .preview()
             .edit(edit(EditOp::Set, Section::Placement).item("align")),
         brd("board.room", "Room", "room", "Define a room that keeps a group of components together.")
-            .inputs(vec![text("name", "Room", Some("power")), picks("components", "Components", &[K::Component]), flag("keep_inside", "Keep components inside", true)])
+            .inputs(vec![text("name", "Room", Some("power")), picks("components", "Components", &[K::Component]), points("Outline", "Click the room's corners, or leave empty to fit the components.").optional(), flag("keep_inside", "Keep components inside", true)])
             .edit(add_to("room", Section::Placement)),
         brd("board.route", "Route", "route", "Route a track interactively; walkaround now, push and shove later behind the same button.")
             .kw(&["track", "trace", "interactive route"])
             .inputs(vec![
                 pick("net", "Net", &[K::Net, K::Pad, K::Track, K::Via]),
+                points("Points", "Click the start, then each corner."),
                 qty("width", "Width", "length", Some(0.15)).min(0.0),
                 text("via", "Via", Some("0.3/0.6")),
                 layer(),
@@ -85,7 +93,7 @@ pub(super) fn add(c: &mut Catalog) {
             .preview()
             .edit(edit(EditOp::Edit, Section::Copper).item("tuning")),
         brd("board.place-via", "Via", "via", "Place a via.")
-            .inputs(vec![text("size", "Size", Some("0.3/0.6")), pick("net", "Net", &[K::Net]).optional(), choice("span", "Span", &[("through", "Through"), ("blind", "Blind"), ("buried", "Buried"), ("micro", "Microvia")])])
+            .inputs(vec![points("Location", "Click where the via goes."), text("size", "Size", Some("0.3/0.6")), pick("net", "Net", &[K::Net]).optional(), choice("span", "Span", &[("through", "Through"), ("blind", "Blind"), ("buried", "Buried"), ("micro", "Microvia")])])
             .preview()
             .edit(add_to("via", Section::Copper)),
         brd("board.stitch", "Stitch/shield", "stitch", "Stitch a pour with vias, or shield a net with a row of them.")
@@ -103,6 +111,7 @@ pub(super) fn add(c: &mut Catalog) {
             .inputs(vec![
                 radio("action", "Action", &[("draw", "Draw pour"), ("repour", "Repour all"), ("shelve", "Shelve"), ("split_plane", "Split plane")]),
                 pick("net", "Net", &[K::Net]).shown("action", &["draw", "split_plane"]),
+                points("Outline", "Click the pour's corners.").shown("action", &["draw"]),
                 layer().shown("action", &["draw", "split_plane"]),
                 qty("clearance", "Clearance", "length", Some(0.25)).shown("action", &["draw"]),
                 choice("connect", "Pad connection", &[("relief", "Thermal relief"), ("solid", "Solid"), ("none", "None")]).shown("action", &["draw"]),
@@ -110,13 +119,13 @@ pub(super) fn add(c: &mut Catalog) {
             .preview()
             .edit(add_to("zone", Section::Copper)),
         brd("board.fill", "Fill", "fill", "Draw a solid copper fill.")
-            .inputs(vec![pick("net", "Net", &[K::Net]).optional(), layer()])
+            .inputs(vec![points("Outline", "Click the fill's corners."), pick("net", "Net", &[K::Net]).optional(), layer()])
             .edit(add_to("fill", Section::Copper)),
         brd("board.keepout", "Keepout", "keepout", "Draw an area where copper, vias or components may not go.")
-            .inputs(vec![choice("applies", "Keep out", &[("all", "Everything"), ("copper", "Copper"), ("tracks", "Tracks"), ("vias", "Vias"), ("components", "Components")]), layer()])
+            .inputs(vec![points("Outline", "Click the keepout's corners."), choice("applies", "Keep out", &[("all", "Everything"), ("copper", "Copper"), ("tracks", "Tracks"), ("vias", "Vias"), ("components", "Components")]), layer()])
             .edit(add_to("keepout", Section::Copper)),
         brd("board.dimension", "Dimension", "dimension", "Add a board dimension annotation.")
-            .inputs(vec![picks("items", "Between", &[K::Pad, K::Track, K::Via, K::Component]), text("layer", "Layer", Some("Mech1"))])
+            .inputs(vec![points("Points", "Click the two ends, then where the dimension line goes.").optional(), picks("items", "Between", &[K::Pad, K::Track, K::Via, K::Component]).optional(), text("layer", "Layer", Some("Mech1"))])
             .edit(add_to("dimension", Section::Outline)),
         brd(
             "board.update-schematic",
@@ -143,7 +152,7 @@ pub(super) fn add(c: &mut Catalog) {
         cmd("board.outline", "Outline", "outline", CIRCUIT)
             .desc("Draw the board outline, or take it from an enclosure part.")
             .kw(&["board shape", "edge cuts"])
-            .inputs(vec![radio("source", "From", &[("draw", "Draw"), ("enclosure", "Enclosure part")]), text("part", "Part", Some("enclosure.part")).shown("source", &["enclosure"]), pick("face", "Face", &[K::Face]).shown("source", &["enclosure"])])
+            .inputs(vec![radio("source", "From", &[("draw", "Draw"), ("enclosure", "Enclosure part")]), points("Outline", "Click the board's corners.").shown("source", &["draw"]), text("part", "Part", Some("enclosure.part")).shown("source", &["enclosure"]), pick("face", "Face", &[K::Face]).shown("source", &["enclosure"])])
             .edit(add_to("outline", Section::Outline)),
         brd("board.panelize", "Panelize", "panel", "Step the board into a manufacturing panel.")
             .inputs(vec![count("columns", "Columns", 2, 1), count("rows", "Rows", 2, 1), qty("spacing", "Spacing", "length", Some(2.0)), choice("break", "Breakaway", &[("tabs", "Tabs with mouse bites"), ("v_score", "V-score")])])

@@ -11,6 +11,8 @@
 //! - [`elab`]: hierarchy flattening, net extraction across sheets, buses and harnesses,
 //!   annotation, variants.
 //! - [`erc`]: electrical rules check with a pin-type matrix.
+//! - [`schematic`]: the schematic as drawn, a page per sheet instance with placed symbols,
+//!   wires, junctions and labels.
 //!
 //! Physical design:
 //! - [`geom`]: integer-nanometre geometry, exact polygon booleans and offsets, primitives.
@@ -38,6 +40,10 @@
 //!   clean-room implementation has not used; IPC-2581 carries the same data set.
 //! - [`review`]: design-review suites with typed fixes.
 //! - [`fea`]: the board → FEA `pcb` source contract.
+//! - [`display`]: board display geometry (pads, tracks, pours, outline, keepouts, text,
+//!   dimensions, ratsnest) for the projection.
+//! - [`drawn`]: board commands drawn in the board view (route, via, pour, keepout, room,
+//!   outline, dimension) from canvas point picks.
 //! - [`runtime`]: the document runtime the Desktop and browser call: compile, review and edit
 //!   a circuit's files, with minimal text edits.
 //! - [`fixture`]: a standard pool and a large-board generator for tests and benchmarks.
@@ -47,6 +53,8 @@
 pub mod board_rules;
 pub mod commands;
 pub mod connectivity;
+pub mod display;
+pub mod drawn;
 pub mod drc;
 pub mod eco;
 pub mod elab;
@@ -66,6 +74,7 @@ pub mod library;
 pub mod review;
 pub mod room_formats;
 pub mod runtime;
+pub mod schematic;
 pub mod route;
 pub mod router;
 pub mod spatial;

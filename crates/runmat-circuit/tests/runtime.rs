@@ -424,3 +424,86 @@ fn copy_room_formats_and_board_commands_run_on_the_text() {
     assert!(unknown.message.contains("isn't a model edit"));
     assert!(LAYOUT.ends_with(LAYOUT_SUFFIX));
 }
+
+#[test]
+fn drawn_board_commands_take_canvas_points() {
+    let files = files();
+    let board = parse_board(LAYOUT, &files[LAYOUT]).board.unwrap();
+    let pad = board
+        .footprints
+        .values()
+        .flat_map(|f| {
+            f.pad_nets
+                .keys()
+                .map(move |p| format!("pad:{}.{p}", f.reference))
+        })
+        .next()
+        .unwrap();
+    let run = |command: &str, values: Value, selection: Vec<String>| {
+        let mut r = request(command, values);
+        r.selection = selection;
+        runtime::edit(LAYOUT, &files[LAYOUT], &files, &r)
+            .unwrap_or_else(|e| panic!("{command}: {}", e.message))
+    };
+    let added = |out: &runtime::EditOutput, word: &str| {
+        let layout = changed(out, LAYOUT);
+        assert!(!layout.reprinted, "minimal edits");
+        assert!(
+            layout.edits.iter().any(|e| e.text.contains(word)),
+            "{word}: {:?}",
+            layout.edits
+        );
+    };
+    // Route from a pad: the net comes from the pad, the points from the clicks.
+    let out = run(
+        "board.route",
+        json!({ "width": 0.2, "layer": "Top" }),
+        vec![
+            pad.clone(),
+            "point:5,5".into(),
+            "point:8,5".into(),
+            "point:10,7".into(),
+        ],
+    );
+    added(&out, "track");
+    // The points field wins over the selection.
+    let out = run(
+        "board.place-via",
+        json!({ "points": [[6.0, 6.0]], "size": "0.3/0.6" }),
+        vec![],
+    );
+    added(&out, "via");
+    let square = json!([[2.0, 2.0], [12.0, 2.0], [12.0, 9.0], [2.0, 9.0]]);
+    let out = run(
+        "board.pour",
+        json!({ "action": "draw", "points": square, "layer": "Bottom", "net": "net:GND" }),
+        vec![],
+    );
+    added(&out, "pour");
+    let out = run(
+        "board.keepout",
+        json!({ "points": square, "applies": "vias" }),
+        vec![],
+    );
+    added(&out, "keepout");
+    let out = run(
+        "board.room",
+        json!({ "name": "drawn", "points": square }),
+        vec![],
+    );
+    added(&out, "room");
+    let out = run(
+        "board.dimension",
+        json!({ "points": [[0.0, 0.0], [20.0, 0.0], [10.0, -3.0]] }),
+        vec![],
+    );
+    added(&out, "dimension");
+    // Too few points say what to click.
+    let mut r = request(
+        "board.pour",
+        json!({ "action": "draw", "points": [[0.0, 0.0], [1.0, 1.0]] }),
+    );
+    r.selection = vec![];
+    let err = runtime::edit(LAYOUT, &files[LAYOUT], &files, &r).unwrap_err();
+    assert!(err.message.contains("three points"), "{}", err.message);
+}

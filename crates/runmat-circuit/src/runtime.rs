@@ -1051,9 +1051,10 @@ fn board_edit(
             })
         }
         "board.route" | "board.place-via" | "board.pour" | "board.keepout" | "board.room"
-        | "board.dimension" | "board.outline" | "board.fill" => Err(EditError::new(format!(
-            "{command} takes its points from the board view; draw it there"
-        ))),
+        | "board.dimension" | "board.outline" | "board.fill" => {
+            crate::drawn::drawn_edit(board, command, values, &request.selection)
+                .map_err(EditError::new)
+        }
         other => Err(EditError::new(format!(
             "{other} isn't a model edit the circuit runtime runs"
         ))),

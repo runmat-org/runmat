@@ -26,9 +26,7 @@ use crate::geom::{Coord, Point};
 use crate::library::{PinType, Pool};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-const GRID: Coord = 1_270_000;
-const PIN_PITCH: Coord = 2_540_000;
-const PIN_LEN: Coord = 2_540_000;
+use crate::schematic::{UnitLayout, GRID, PIN_LEN};
 const STUB: Coord = 2_540_000;
 /// Usable A3 area (mm): x 25…395, y 25…270.
 const PAGE: (Coord, Coord, Coord, Coord) = (25_400_000, 25_400_000, 393_700_000, 269_240_000);
@@ -98,23 +96,6 @@ fn hidden_effects() -> SExpr {
     )
 }
 
-fn pin_type(k: PinType) -> &'static str {
-    match k {
-        PinType::Input => "input",
-        PinType::Output => "output",
-        PinType::Bidirectional => "bidirectional",
-        PinType::TriState => "tri_state",
-        PinType::Passive => "passive",
-        PinType::PowerIn => "power_in",
-        PinType::PowerOut => "power_out",
-        PinType::OpenCollector => "open_collector",
-        PinType::OpenEmitter => "open_emitter",
-        PinType::NotConnected => "no_connect",
-        PinType::Free => "free",
-        _ => "unspecified",
-    }
-}
-
 fn sanitize(s: &str) -> String {
     s.chars()
         .map(|c| {
@@ -133,65 +114,6 @@ type UnitPins = (
     Vec<(String, Vec<String>, PinType)>,
     Vec<Option<usize>>,
 );
-
-/// One generated unit: pins on the left and right, in library coordinates (y up).
-#[derive(Clone, Debug)]
-struct UnitLayout {
-    /// (pin name, pad numbers, type, left side, library y of the pin row).
-    pins: Vec<(String, Vec<String>, PinType, bool, Coord)>,
-    half_w: Coord,
-    half_h: Coord,
-}
-
-impl UnitLayout {
-    fn new(pins: &[(String, Vec<String>, PinType)]) -> UnitLayout {
-        let passive: Vec<usize> = (0..pins.len())
-            .filter(|&i| pins[i].2 == PinType::Passive)
-            .collect();
-        let left_of = |i: usize| match pins[i].2 {
-            PinType::Input | PinType::PowerIn => true,
-            PinType::Passive => {
-                passive.iter().position(|&p| p == i).unwrap() < passive.len().div_ceil(2)
-            }
-            _ => false,
-        };
-        let (mut left, mut right): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
-        for i in 0..pins.len() {
-            if left_of(i) {
-                left.push(i)
-            } else {
-                right.push(i)
-            }
-        }
-        if right.is_empty() && left.len() > 1 {
-            right = left.split_off(left.len().div_ceil(2));
-        }
-        let rows = left.len().max(right.len()).max(1) as Coord;
-        let half_h = (rows * PIN_PITCH) / 2 + GRID;
-        let name_len = pins.iter().map(|p| p.0.chars().count()).max().unwrap_or(1) as Coord;
-        let half_w =
-            ((((name_len * GRID + 5 * GRID) / 2) + GRID - 1) / GRID * GRID).max(2 * PIN_PITCH);
-        let mut out = Vec::new();
-        for (side, list) in [(true, &left), (false, &right)] {
-            let top = (list.len() as Coord - 1) * PIN_PITCH / 2;
-            for (k, &i) in list.iter().enumerate() {
-                // Rows on the 2.54 mm grid from the top, centred.
-                let y = (top - k as Coord * PIN_PITCH).div_euclid(GRID) * GRID;
-                out.push((pins[i].0.clone(), pins[i].1.clone(), pins[i].2, side, y));
-            }
-        }
-        UnitLayout {
-            pins: out,
-            half_w,
-            half_h,
-        }
-    }
-    /// Pin tip in library coordinates.
-    fn tip(&self, left: bool, y: Coord) -> Point {
-        let x = self.half_w + PIN_LEN;
-        Point::new(if left { -x } else { x }, y)
-    }
-}
 
 /// Exports the netlist as a root sheet plus one file per page. Returns file name → text;
 /// the root file is `{project}.kicad_sch`.
@@ -755,7 +677,7 @@ fn lib_symbol(lib: &str, units: &[UnitLayout]) -> SExpr {
                 body.push(SExpr::list(
                     "pin",
                     vec![
-                        SExpr::sym(pin_type(*kind)),
+                        SExpr::sym(crate::schematic::pin_kind(*kind)),
                         SExpr::sym("line"),
                         SExpr::list(
                             "at",
