@@ -4,6 +4,7 @@ mod header;
 mod initial_conditions;
 mod load_cases;
 mod lower;
+mod modal_reduction;
 mod output;
 mod prestressed_harmonic;
 mod requirements;

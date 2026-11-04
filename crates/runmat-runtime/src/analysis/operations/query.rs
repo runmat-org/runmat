@@ -729,6 +729,8 @@ fn analysis_results_op_with_field_inventory(
         available_frequencies_hz: Vec::new(),
         max_frequency_solver_residual: None,
         max_frequency_balance_error: None,
+        modal_truncation_balance_error: None,
+        modal_truncation_balance_frequency_hz: None,
         snapshot_count,
         time_start_s,
         time_end_s,

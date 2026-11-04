@@ -285,6 +285,15 @@ impl StructuralFrequencyEntrySolverEvidence {
     }
 }
 
+/// Largest full-space relative balance error of a modal-reduced sweep and the sample (in plan
+/// order) where it occurs. See [`StructuralFrequencyNumericalReceipt::modal_truncation_balance`].
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModalTruncationBalance {
+    pub maximum_relative_balance_error: f64,
+    pub sample_index: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     deny_unknown_fields,
@@ -370,6 +379,31 @@ impl StructuralFrequencyNumericalReceipt {
 
     pub fn samples(&self) -> &[StructuralFrequencyEntrySolverEvidence] {
         &self.samples
+    }
+
+    /// Full-space balance of a modal-reduced sweep, named for what it measures: the error of
+    /// truncating the response to the reduced space (retained modes plus any residual vectors and
+    /// static corrections). A modal-reduced solve is accepted on its reduced-space residual; this
+    /// measure is published beside it. `None` for a direct solve, whose balance error is its
+    /// acceptance criterion.
+    pub fn modal_truncation_balance(&self) -> Option<ModalTruncationBalance> {
+        if !matches!(
+            self.solution_space,
+            StructuralFrequencySolutionSpace::ModalReduced { .. }
+        ) {
+            return None;
+        }
+        self.samples
+            .iter()
+            .enumerate()
+            .map(|(sample_index, sample)| ModalTruncationBalance {
+                maximum_relative_balance_error: sample.physical_relative_balance_error,
+                sample_index,
+            })
+            .max_by(|left, right| {
+                left.maximum_relative_balance_error
+                    .total_cmp(&right.maximum_relative_balance_error)
+            })
     }
 
     pub fn validate_for_result(

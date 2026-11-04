@@ -1399,7 +1399,17 @@ pub struct AnalysisResultsSummary {
     pub frequency_sample_count: usize,
     pub available_frequencies_hz: Vec<f64>,
     pub max_frequency_solver_residual: Option<f64>,
+    /// Largest full-space physical balance error of a direct frequency solve (its acceptance
+    /// criterion). `None` for a modal-reduced solve, which reports its truncation measure below.
     pub max_frequency_balance_error: Option<f64>,
+    /// Largest full-space relative balance error of a modal-reduced frequency solve: the error of
+    /// truncating the response to the reduced space. The solve is accepted on its reduced-space
+    /// residual (`max_frequency_solver_residual`); this measure is published, never gated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modal_truncation_balance_error: Option<f64>,
+    /// Frequency of the largest modal truncation balance error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modal_truncation_balance_frequency_hz: Option<f64>,
     pub snapshot_count: usize,
     pub time_start_s: Option<f64>,
     pub time_end_s: Option<f64>,

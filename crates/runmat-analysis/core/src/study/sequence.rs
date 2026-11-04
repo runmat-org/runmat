@@ -115,6 +115,35 @@ pub enum ProcedureSettings {
     None,
     StructuralRandomResponse(StructuralRandomResponseSettings),
     StructuralNonlinear(StructuralNonlinearSettings),
+    /// Static-correction (residual) vectors a structural modal extraction appends to its basis.
+    StructuralModalBasis(StructuralModalBasisSettings),
+    /// Enrichment of the reduced space a modal-reduced frequency sweep solves in.
+    StructuralModalFrequency(StructuralModalFrequencySettings),
+}
+
+/// Inertia residual vectors of a structural modal basis: for each global direction, the static
+/// response to a unit acceleration load in that direction with the retained modes removed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralModalBasisSettings {
+    pub residual_vector_directions: Vec<crate::SpectrumDirection>,
+}
+
+/// Static correction of a modal-reduced frequency sweep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModalStaticCorrection {
+    /// Solve in the retained modes (and any residual vectors of the basis) only.
+    None,
+    /// Also span the static response to the sweep's applied load, so the reduced space contains
+    /// the exact quasi-static solution and the modal truncation error falls with frequency.
+    AppliedLoads,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralModalFrequencySettings {
+    pub static_correction: ModalStaticCorrection,
 }
 
 /// Kinematic description of a structural nonlinear step. Small strain keeps the reference
@@ -142,6 +171,24 @@ pub struct StructuralRandomResponseSettings {
 }
 
 impl ProcedureStep {
+    /// Residual-vector directions an authored structural modal extraction requests.
+    pub fn modal_residual_vector_directions(&self) -> &[crate::SpectrumDirection] {
+        match &self.settings {
+            ProcedureSettings::StructuralModalBasis(settings) => {
+                &settings.residual_vector_directions
+            }
+            _ => &[],
+        }
+    }
+
+    /// Static correction of a modal-reduced frequency step; every other step has none.
+    pub fn modal_static_correction(&self) -> ModalStaticCorrection {
+        match self.settings {
+            ProcedureSettings::StructuralModalFrequency(settings) => settings.static_correction,
+            _ => ModalStaticCorrection::None,
+        }
+    }
+
     /// Kinematics of a structural nonlinear step; every other step is small strain.
     pub fn structural_kinematics(&self) -> StructuralKinematics {
         match self.settings {

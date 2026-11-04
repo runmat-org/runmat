@@ -39,18 +39,49 @@ pub struct ModalReducedSystem {
 }
 
 impl ModalReducedSystem {
+    /// Project onto the retained eigenmodes of `basis` only.
     pub fn project(
         summary: &AssemblySummary,
         basis: &ModalBasisArtifact,
     ) -> Result<Self, ModalProjectionError> {
-        basis
-            .validate_for(summary)
-            .map_err(|error| ModalProjectionError::IncompatibleBasis(error.to_string()))?;
         let mode_shapes = basis
             .modes()
             .iter()
             .map(|mode| mode.dof_shape().to_vec())
             .collect::<Vec<_>>();
+        Self::project_shapes(summary, basis, mode_shapes)
+    }
+
+    /// Project onto the retained eigenmodes, then the basis residual vectors, then
+    /// `static_corrections` (mass-orthonormal static responses appended by the caller).
+    pub fn project_enriched(
+        summary: &AssemblySummary,
+        basis: &ModalBasisArtifact,
+        static_corrections: Vec<Vec<f64>>,
+    ) -> Result<Self, ModalProjectionError> {
+        let mode_shapes = basis
+            .modes()
+            .iter()
+            .map(|mode| mode.dof_shape().to_vec())
+            .chain(
+                basis
+                    .residual_vectors()
+                    .iter()
+                    .map(|residual| residual.dof_shape().to_vec()),
+            )
+            .chain(static_corrections)
+            .collect::<Vec<_>>();
+        Self::project_shapes(summary, basis, mode_shapes)
+    }
+
+    fn project_shapes(
+        summary: &AssemblySummary,
+        basis: &ModalBasisArtifact,
+        mode_shapes: Vec<Vec<f64>>,
+    ) -> Result<Self, ModalProjectionError> {
+        basis
+            .validate_for(summary)
+            .map_err(|error| ModalProjectionError::IncompatibleBasis(error.to_string()))?;
         let stiffness = project_operator(summary.operator.operators().stiffness(), &mode_shapes)?;
         let mass = project_operator(summary.operator.operators().mass(), &mode_shapes)?;
         let mass_applied_mode_shapes =
@@ -540,6 +571,99 @@ mod tests {
             }
         }
     }
+    /// Full-space relative balance of a modal-reduced harmonic solve at `omega` (rad/s).
+    fn reduced_balance(summary: &AssemblySummary, reduced: &ModalReducedSystem, omega: f64) -> f64 {
+        let zeros = vec![0.0; summary.dof_count];
+        let load = super::super::ModalHarmonicLoad {
+            real: reduced
+                .project_load(&reduced.load_field(summary.operator.load()).unwrap())
+                .unwrap(),
+            imaginary: reduced
+                .project_load(&reduced.load_field(&zeros).unwrap())
+                .unwrap(),
+        };
+        let response = super::super::solve_modal_harmonic(reduced, omega, &load).unwrap();
+        assert!(response.relative_residual <= 1.0e-12);
+        let real = reduced
+            .expand_state(&response.displacement_real)
+            .unwrap()
+            .into_canonical_storage();
+        let imaginary = reduced
+            .expand_state(&response.displacement_imaginary)
+            .unwrap()
+            .into_canonical_storage();
+        let physical = super::super::harmonic_balance::evaluate_harmonic_physical_state(
+            summary,
+            omega,
+            &real,
+            &imaginary,
+            summary.operator.load(),
+            &zeros,
+        )
+        .unwrap();
+        physical
+            .balance
+            .closure_metrics(&physical.reaction)
+            .unwrap()
+            .1
+    }
+
+    // witness: FEA-DYNAMICS-RESPONSE-001/direct_modal_procedures @ linear_structural_dynamics/tet4/numerical_kernel; coverage: partial; boundary: applied-load static correction cuts the full-space truncation balance of a modal-reduced harmonic solve below the first mode
+    #[test]
+    fn applied_load_static_correction_collapses_the_modal_truncation_balance() {
+        let mut model =
+            crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+        model.sequence.steps = vec![ProcedureStep::structural_modal("projection")];
+        let modal = crate::run_modal_with_options(
+            &model,
+            crate::ComputeBackend::Cpu,
+            crate::ModalSolveOptions::default(),
+        )
+        .unwrap();
+        let excitations = crate::excitation::realize_step_excitations(
+            &model,
+            &model.sequence.steps[0],
+            crate::excitation::ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let summary = crate::assembly::assemble_structural_system(
+            &model,
+            &excitations,
+            None,
+            crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
+        )
+        .unwrap();
+        assert!(summary.operator.load().iter().any(|value| *value != 0.0));
+        let omega =
+            0.25 * 2.0 * std::f64::consts::PI * modal.basis.modes()[0].frequency_hz();
+
+        let modes_only = ModalReducedSystem::project(&summary, &modal.basis).unwrap();
+        let truncated = reduced_balance(&summary, &modes_only, omega);
+
+        let retained = modal
+            .basis
+            .modes()
+            .iter()
+            .map(|mode| mode.dof_shape())
+            .collect::<Vec<_>>();
+        let corrections = crate::pipeline::modal_residual::applied_load_static_corrections(
+            &summary,
+            &retained,
+            &[summary.operator.load()],
+        )
+        .unwrap();
+        assert_eq!(corrections.len(), 1);
+        let corrected = ModalReducedSystem::project_enriched(&summary, &modal.basis, corrections)
+            .unwrap();
+        assert_eq!(corrected.mode_count(), modes_only.mode_count() + 1);
+        let enriched = reduced_balance(&summary, &corrected, omega);
+
+        assert!(truncated > 1.0e-4, "modes-only truncation balance={truncated}");
+        assert!(
+            enriched <= 1.0e-2 * truncated,
+            "static correction must cut the truncation balance by 100x: {truncated} -> {enriched}"
+        );
+    }
 }
 
 /// Closed semantic roles admitted by modal state projection/reconstruction.
@@ -554,4 +678,5 @@ impl ModalCoordinateQuantity for runmat_types::physical::kind::Velocity {
 }
 impl ModalCoordinateQuantity for runmat_types::physical::kind::Acceleration {
     const DERIVATIVE_ORDER: u8 = 2;
+
 }

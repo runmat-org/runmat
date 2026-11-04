@@ -46,17 +46,41 @@ Each family's [physics reference](../../physics/index.md) states its weak form, 
 | --- | --- | --- |
 | `structural static` | none | `primary` (displacement state) |
 | `structural preload` | none; the step's loads are the preload | `geometric_stiffness` |
-| `structural modal` | `modes` (positive integer) | `modal_basis` |
+| `structural modal` | `modes` (positive integer); optional `residual_vectors` (one to three global directions, `[[0, 0, 1]]`) | `modal_basis` |
 | `structural transient` | `start_time`, `end_time`, `time_step` | `primary` |
 | `structural modal_transient` | `basis`, `start_time`, `end_time`, `time_step` | `primary` |
 | `structural harmonic` | `frequencies` | `primary` |
-| `structural modal_harmonic` | `basis`, `frequencies` | `primary` |
-| `structural prestressed_modal` | `prestress`, `modes` | `modal_basis` |
+| `structural modal_harmonic` | `basis`, `frequencies`; optional `static_correction = applied_loads` or `none` (default) | `primary` |
+| `structural prestressed_modal` | `prestress`, `modes`; optional `residual_vectors` | `modal_basis` |
 | `structural buckling` | `prestress`, `modes` | buckling modes |
-| `structural prestressed_harmonic` | `prestress`, `frequencies`; optional `basis` (modal reduction instead of a direct solve) | `primary` |
+| `structural prestressed_harmonic` | `prestress`, `frequencies`; optional `basis` (modal reduction instead of a direct solve) and, with `basis`, `static_correction` | `primary` |
 | `structural modal_response_spectrum` | `basis`, `spectra = [model.response_spectrum.<name>, …]` | `primary` |
 | `structural random_response` | `basis`, `excitation = model.random_excitation.<name>`, `modal_damping_ratio` (number), `minimum_cumulative_mass_ratio` (number) | `primary` |
 | `structural nonlinear` | `start_load_factor`, `end_load_factor`; optional `kinematics = small_strain` (default) or `large_deformation` | `primary` |
+
+### Modal truncation and residual vectors
+
+A modal-reduced step solves in the space its basis spans: the retained modes, then any residual vectors, then any static correction. RunMat accepts the step when the reduced equations meet the step's relative accuracy tolerance. It then evaluates the full-order equilibrium of the expanded response and publishes the largest relative imbalance as the modal truncation measure (`modal_truncation_balance_error` in `fea.results`, with the frequency where it occurs). That measure reports how much response the reduced space leaves out. It is published for every modal-reduced sweep and is not compared with the algebraic tolerance. A direct solve is accepted on its full-order balance and reports it as `max_frequency_balance_error`.
+
+Two enrichments shrink the truncation measure:
+
+- `residual_vectors = [[0, 0, 1], …]` on `structural modal` or `structural prestressed_modal` adds, for each global direction, the static response to a unit acceleration in that direction with the retained modes removed. Use it for base excitation and inertia loading.
+- `static_correction = applied_loads` on a modal-reduced frequency step adds the static response to the step's applied load (real and imaginary parts at the sweep's reference frequency), with the retained shapes removed. The reduced space then contains the exact quasi-static response, so the truncation measure falls sharply below the first retained mode. Use it for concentrated or surface loads.
+
+```fea fragment
+analysis modes {
+    structural modal { modes = 8 }
+    retain basis
+}
+
+analysis response after analysis.modes {
+    structural modal_harmonic {
+        basis = analysis.modes.state.basis
+        frequencies = [20, 40, 60] Hz
+        static_correction = applied_loads
+    }
+}
+```
 
 `structural nonlinear` runs as a study's single step, and inside a procedure graph (after a preload, before a modal step) [not yet in the current release](pending:structural.nonlinear.sequence).
 

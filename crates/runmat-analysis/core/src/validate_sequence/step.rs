@@ -53,7 +53,66 @@ fn validate_settings(step: &ProcedureStep) -> Result<(), AnalysisValidationError
             step,
             "structural nonlinear kinematics require a structural nonlinear step",
         )),
+        (
+            ProcedureSettings::StructuralModalBasis(settings),
+            AnalysisProcedure::ModalExtraction | AnalysisProcedure::PrestressedModalExtraction,
+        ) if step.family == PhysicsFamily::Structural => {
+            validate_residual_vector_directions(step, &settings.residual_vector_directions)
+        }
+        (ProcedureSettings::StructuralModalBasis(_), _) => Err(step_error(
+            step,
+            "residual vectors require a structural modal extraction step",
+        )),
+        (
+            ProcedureSettings::StructuralModalFrequency(_),
+            AnalysisProcedure::HarmonicResponse | AnalysisProcedure::PrestressedHarmonicResponse,
+        ) if step.family == PhysicsFamily::Structural
+            && step.solution_space == SolutionSpace::ModalReduced =>
+        {
+            Ok(())
+        }
+        (ProcedureSettings::StructuralModalFrequency(_), _) => Err(step_error(
+            step,
+            "static correction requires a modal-reduced structural frequency step",
+        )),
     }
+}
+
+/// At most three distinct, finite, nonzero global directions (one per translational axis span).
+fn validate_residual_vector_directions(
+    step: &ProcedureStep,
+    directions: &[crate::SpectrumDirection],
+) -> Result<(), AnalysisValidationError> {
+    if directions.is_empty() || directions.len() > 3 {
+        return Err(step_error(
+            step,
+            "residual vectors name one to three directions",
+        ));
+    }
+    let mut unit = Vec::with_capacity(directions.len());
+    for direction in directions {
+        let norm = direction.vector.iter().map(|value| value * value).sum::<f64>().sqrt();
+        if direction.frame != crate::CoordinateFrame::Global
+            || !norm.is_finite()
+            || norm <= f64::EPSILON
+        {
+            return Err(step_error(
+                step,
+                "residual-vector directions are finite, nonzero and global",
+            ));
+        }
+        let candidate = direction.vector.map(|value| value / norm);
+        if unit.iter().any(|existing: &[f64; 3]| {
+            existing
+                .iter()
+                .zip(candidate)
+                .all(|(left, right)| (left - right).abs() <= 1.0e-12)
+        }) {
+            return Err(step_error(step, "residual-vector directions are distinct"));
+        }
+        unit.push(candidate);
+    }
+    Ok(())
 }
 
 fn validate_family_procedure(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {

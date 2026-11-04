@@ -305,6 +305,7 @@ fn lower_procedure(
                     diagnostics,
                 )?,
             };
+            super::modal_reduction::residual_vectors(declaration, statements, &mut step, diagnostics)?;
             step
         }
         ("structural", "transient") => {
@@ -333,6 +334,7 @@ fn lower_procedure(
             let mut step = ProcedureStep::structural_modal_harmonic(id, state.0, state.1);
             step.independent_domain =
                 requirements::frequencies(declaration, procedure, statements, diagnostics)?;
+            super::modal_reduction::static_correction(declaration, statements, &mut step, diagnostics)?;
             step
         }
         ("structural", "prestressed_modal") => {
@@ -347,6 +349,7 @@ fn lower_procedure(
                     diagnostics,
                 )?,
             };
+            super::modal_reduction::residual_vectors(declaration, statements, &mut step, diagnostics)?;
             step
         }
         ("structural", "buckling") => {
