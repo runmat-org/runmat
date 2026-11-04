@@ -384,11 +384,12 @@ fn fresh_schematic_export_reimports_with_the_same_connectivity() {
         &pool,
         &SchExportOptions {
             project: "large".into(),
-            ..Default::default()
         },
     );
-    // Root plus one page per channel and the top level (which spills onto more pages).
-    assert!(files.len() >= 26, "{} files", files.len());
+    // One file per sheet instance, as the schematic canvas pages it.
+    let drawn = runmat_circuit::schematic::layout(&nl);
+    assert_eq!(files.len(), drawn.sheets.len());
+    assert!(files.len() >= 25, "{} files", files.len());
     assert_eq!(
         files,
         export(
@@ -396,7 +397,6 @@ fn fresh_schematic_export_reimports_with_the_same_connectivity() {
             &pool,
             &SchExportOptions {
                 project: "large".into(),
-                ..Default::default()
             }
         )
     );
@@ -443,14 +443,119 @@ fn fresh_schematic_export_reimports_with_the_same_connectivity() {
         .map(|c| c.designator.clone())
         .collect();
     assert_eq!(designators, back_d);
-    // Readability: no wire longer than a stub; nets are carried by labels.
-    for (f, text) in &files {
-        let tree = runmat_circuit::kicad::sexpr::parse(text).unwrap();
-        for w in tree.children("wire") {
-            let pts = runmat_circuit::kicad::pts_of(w.child("pts"));
-            assert!(pts[0].dist(pts[1]) <= 2.54e6 + 1.0, "{f}");
+    // The export draws the canvas's schematic: each page's wire segments and labels are the
+    // layout's, flipped to KiCad's y-down page.
+    for sheet in &drawn.sheets {
+        let file = if sheet.path == "/" {
+            "large.kicad_sch".to_owned()
+        } else {
+            format!(
+                "large-{}.kicad_sch",
+                sheet
+                    .path
+                    .trim_start_matches('/')
+                    .replace('/', "_")
+                    .replace(['[', ']'], "_")
+            )
+        };
+        let tree = runmat_circuit::kicad::sexpr::parse(&files[&file]).unwrap();
+        let key = |x: f64, y: f64| ((x * 1.0e3).round() as i64, (y * 1.0e3).round() as i64);
+        let mut want: BTreeSet<((i64, i64), (i64, i64))> = BTreeSet::new();
+        for w in &sheet.wires {
+            for s in w.points.windows(2) {
+                let a = key(s[0][0], sheet.height_mm - s[0][1]);
+                let b = key(s[1][0], sheet.height_mm - s[1][1]);
+                want.insert((a.min(b), a.max(b)));
+            }
+        }
+        let got: BTreeSet<((i64, i64), (i64, i64))> = tree
+            .children("wire")
+            .map(|w| {
+                let pts = runmat_circuit::kicad::pts_of(w.child("pts"));
+                // `pts_of` reads KiCad's y-down page into y-up points.
+                let a = key(pts[0].x as f64 * 1e-6, -(pts[0].y as f64) * 1e-6);
+                let b = key(pts[1].x as f64 * 1e-6, -(pts[1].y as f64) * 1e-6);
+                (a.min(b), a.max(b))
+            })
+            .collect();
+        assert_eq!(got, want, "{file}");
+        let labels = ["label", "global_label", "hierarchical_label"]
+            .iter()
+            .map(|h| tree.children(h).count())
+            .sum::<usize>();
+        assert_eq!(labels, sheet.labels.len(), "{file}");
+        assert_eq!(
+            tree.children("sheet").count(),
+            sheet.sheet_symbols.len(),
+            "{file}"
+        );
+        assert_eq!(
+            tree.children("symbol").count(),
+            sheet.symbols.len(),
+            "{file}"
+        );
+    }
+}
+
+#[test]
+fn a_large_part_exports_as_the_units_the_canvas_draws() {
+    use runmat_circuit::kicad::sch_export::{export, SchExportOptions};
+    let p = runmat_circuit::fixture::LargeParams {
+        channels: 2,
+        copper_layers: 4,
+        route_every: 0,
+        pours: false,
+    };
+    let (pool, _, nl, _) = runmat_circuit::fixture::large(&p);
+    let fpga = nl
+        .components
+        .iter()
+        .find(|c| c.pins.len() > runmat_circuit::schematic::SPLIT_ABOVE)
+        .expect("the large design has an FPGA");
+    let units = runmat_circuit::schematic::units(fpga);
+    let drawn = runmat_circuit::schematic::layout(&nl);
+    let placed: Vec<_> = drawn
+        .sheets
+        .iter()
+        .flat_map(|s| s.symbols.iter())
+        .filter(|s| s.designator == fpga.designator)
+        .collect();
+    assert_eq!(placed.len(), units.len());
+    let files = export(
+        &nl,
+        &pool,
+        &SchExportOptions {
+            project: "large".into(),
+        },
+    );
+    let all: String = files.values().cloned().collect();
+    for u in &units {
+        assert!(placed
+            .iter()
+            .any(|s| s.unit.as_deref() == Some(u.name.as_str())));
+        if let Some(label) = &u.label {
+            assert!(all.contains(&format!("(unit_name \"{label}\")")), "{label}");
         }
     }
+    // Each unit is placed once, as its own KiCad unit of the one symbol.
+    let mut seen: BTreeSet<u64> = BTreeSet::new();
+    for text in files.values() {
+        let tree = sexpr::parse(text).unwrap();
+        for sym in tree.children("symbol") {
+            let reference = sym
+                .children("property")
+                .find(|p| p.arg(0) == Some("Reference"))
+                .and_then(|p| p.arg(1));
+            if reference == Some(fpga.designator.as_str()) {
+                let unit = sym
+                    .child_arg("unit")
+                    .and_then(|u| u.parse::<f64>().ok())
+                    .unwrap() as u64;
+                assert!(seen.insert(unit), "unit {unit} twice");
+            }
+        }
+    }
+    assert_eq!(seen, (1..=units.len() as u64).collect());
 }
 
 #[test]

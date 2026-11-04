@@ -13,12 +13,17 @@
 //!   component, so connected parts sit side by side.
 //! - **Placement.** Shelf packing in rows from the top left, on the 1.27 mm grid; each cell
 //!   reserves room for the symbol, its pins and its labels.
-//! - **Symbols.** A box per gate: inputs, power inputs and the first half of passive pins on the
-//!   left, the rest on the right; pins numbered by pad.
+//! - **Symbols.** A box per unit: inputs, power inputs and the first half of passive pins on the
+//!   left, the rest on the right; pins numbered by pad. A unit is a library gate, and a gate with
+//!   more than 64 pins (an FPGA, a large MCU) splits into units as KiCad and Altium draw them:
+//!   its signal pins by bank (a `_34` suffix or `BANK3` token in the pin name), else by port
+//!   prefix (`PA`, `PB`), in units of at most 48 pins; its power pins in units of their own,
+//!   last. [`units`] is the one split; the canvas and the KiCad export both draw it.
 //! - **Connections.** A two-pin net between facing pins of neighbouring symbols in a row is
 //!   drawn as a wire. Every other connected pin gets a 2.54 mm stub and a label: a power port
 //!   for a power rail, a global label for other global nets, a hierarchical label for a net that
-//!   leaves the sheet through a port, and a local label otherwise. Unconnected pins get a
+//!   leaves the sheet through a port (it reaches a sheet outside this page's subtree), and a
+//!   local label otherwise (which also joins the pins of child sheets drawn on the page). Unconnected pins get a
 //!   no-connect marker. Junctions mark where three or more wire ends meet or a wire ends on
 //!   another wire.
 //!
@@ -145,9 +150,12 @@ pub struct SchematicSheet {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SchematicSymbol {
     pub designator: String,
-    /// The gate, when the component has more than one.
+    /// The unit, when the component has more than one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
+    /// What a split unit holds (`bank 34`, `power`, `IO0–IO47`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_label: Option<String>,
     /// The component's instance path.
     pub path: String,
     pub sheet_path: String,
@@ -258,7 +266,148 @@ pub fn is_rail(name: &str, class: Option<&str>) -> bool {
         .any(|r| leaf == *r || leaf.starts_with(&format!("{r}_")))
 }
 
-/// One placed cell: a component's gate or a child sheet.
+/// A gate with more pins than this splits into units.
+pub const SPLIT_ABOVE: usize = 64;
+/// The most pins a split unit holds.
+pub const UNIT_PINS: usize = 48;
+
+/// One schematic unit of a component: its name (`A`, `B`… for a split gate, else the gate's
+/// name), what it holds when split, and its pins (indices into the component's pins).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unit {
+    pub name: String,
+    pub label: Option<String>,
+    pub pins: Vec<usize>,
+}
+
+/// The bank a pin name declares: a trailing `_34` (`IO_L1P_T0_34`) or a `BANK3` token.
+fn bank_of(name: &str) -> Option<String> {
+    let upper = name.to_ascii_uppercase();
+    for token in upper.split(['_', '.', '-']) {
+        if let Some(n) = token.strip_prefix("BANK") {
+            if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
+                return Some(n.to_owned());
+            }
+        }
+    }
+    let (head, tail) = upper.rsplit_once('_')?;
+    (!head.is_empty() && !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()))
+        .then(|| tail.to_owned())
+}
+
+/// A pin name's leading letters (`PA` of `PA12`, `IO` of `IO7`).
+fn prefix_of(name: &str) -> String {
+    name.chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect()
+}
+
+fn letters(mut k: usize) -> String {
+    let mut out = Vec::new();
+    loop {
+        out.push((b'A' + (k % 26) as u8) as char);
+        if k < 26 {
+            break;
+        }
+        k = k / 26 - 1;
+    }
+    out.iter().rev().collect()
+}
+
+/// A component's units, in drawing order: one per gate, a large gate split as the module
+/// docs describe. Deterministic: the same pins give the same units.
+pub fn units(c: &crate::elab::CompInst) -> Vec<Unit> {
+    let mut gates: Vec<&str> = Vec::new();
+    for p in &c.pins {
+        if !gates.contains(&p.gate.as_str()) {
+            gates.push(&p.gate);
+        }
+    }
+    let single = gates.len() == 1;
+    let mut out = Vec::new();
+    for g in &gates {
+        let idx: Vec<usize> = (0..c.pins.len())
+            .filter(|i| c.pins[*i].gate == *g)
+            .collect();
+        if idx.len() <= SPLIT_ABOVE {
+            out.push(Unit {
+                name: (*g).to_owned(),
+                label: None,
+                pins: idx,
+            });
+            continue;
+        }
+        let power = |i: &usize| matches!(c.pins[*i].kind, PinType::PowerIn | PinType::PowerOut);
+        let (pwr, signal): (Vec<usize>, Vec<usize>) = idx.iter().partition(|i| power(i));
+        // Groups of signal pins: by bank when every pin names one, else by port prefix.
+        let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+        let banks: Vec<Option<String>> = signal.iter().map(|i| bank_of(&c.pins[*i].pin)).collect();
+        let by_bank = banks.iter().all(Option::is_some);
+        for (k, &pin) in signal.iter().enumerate() {
+            let label = match &banks[k] {
+                Some(b) if by_bank => format!("bank {b}"),
+                _ => prefix_of(&c.pins[pin].pin),
+            };
+            match groups.iter_mut().find(|(l, _)| *l == label) {
+                Some((_, v)) => v.push(pin),
+                None => groups.push((label, vec![pin])),
+            }
+        }
+        if !pwr.is_empty() {
+            groups.push(("power".to_owned(), pwr));
+        }
+        let mut n = 0;
+        for (label, pins) in groups {
+            let chunks = pins.len().div_ceil(UNIT_PINS);
+            for (k, chunk) in pins.chunks(UNIT_PINS).enumerate() {
+                let label = if chunks == 1 {
+                    label.clone()
+                } else {
+                    let first = &c.pins[chunk[0]].pin;
+                    let last = &c.pins[chunk[chunk.len() - 1]].pin;
+                    if label == "power" || label.starts_with("bank ") {
+                        format!("{label} ({}/{chunks})", k + 1)
+                    } else {
+                        format!("{first}–{last}")
+                    }
+                };
+                let name = if single {
+                    letters(n)
+                } else {
+                    format!("{g}{}", letters(n))
+                };
+                out.push(Unit {
+                    name,
+                    label: Some(label),
+                    pins: chunk.to_vec(),
+                });
+                n += 1;
+            }
+        }
+    }
+    out
+}
+
+/// A unit's pins as the symbol layout reads them: (name, pads, type).
+pub(crate) fn unit_pins(
+    c: &crate::elab::CompInst,
+    unit: &Unit,
+) -> Vec<(String, Vec<String>, PinType)> {
+    unit.pins
+        .iter()
+        .map(|i| {
+            let p = &c.pins[*i];
+            let pads = if p.pads.is_empty() {
+                vec![p.pin.clone()]
+            } else {
+                p.pads.clone()
+            };
+            (p.pin.clone(), pads, p.kind)
+        })
+        .collect()
+}
+
+/// One placed cell: a component's unit or a child sheet.
 enum Cell {
     Unit { comp: usize, gate: usize },
     Sheet { child: usize },
@@ -266,36 +415,17 @@ enum Cell {
 
 /// Lays out the whole design.
 pub fn layout(nl: &Netlist) -> SchematicIndex {
-    // Gates per component: (gate name, pins (name, pads, type), pin indices).
-    let gates: Vec<Vec<(String, UnitLayout, Vec<usize>)>> = nl
+    // Units per component: (unit, symbol layout, pin indices).
+    let gates: Vec<Vec<(Unit, UnitLayout, Vec<usize>)>> = nl
         .components
         .iter()
         .map(|c| {
-            let mut names: Vec<&str> = Vec::new();
-            for p in &c.pins {
-                if !names.contains(&p.gate.as_str()) {
-                    names.push(&p.gate);
-                }
-            }
-            names
-                .iter()
-                .map(|g| {
-                    let idx: Vec<usize> = (0..c.pins.len())
-                        .filter(|i| c.pins[*i].gate == *g)
-                        .collect();
-                    let pins: Vec<_> = idx
-                        .iter()
-                        .map(|i| {
-                            let p = &c.pins[*i];
-                            let pads = if p.pads.is_empty() {
-                                vec![p.pin.clone()]
-                            } else {
-                                p.pads.clone()
-                            };
-                            (p.pin.clone(), pads, p.kind)
-                        })
-                        .collect();
-                    ((*g).to_owned(), UnitLayout::new(&pins), idx)
+            units(c)
+                .into_iter()
+                .map(|u| {
+                    let lay = UnitLayout::new(&unit_pins(c, &u));
+                    let idx = u.pins.clone();
+                    (u, lay, idx)
                 })
                 .collect()
         })
@@ -440,7 +570,7 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
             match cell {
                 Cell::Unit { comp, gate } => {
                     let c = &nl.components[*comp];
-                    let (gname, lay, idx) = &gates[*comp][*gate];
+                    let (unit, lay, idx) = &gates[*comp][*gate];
                     let (hw, hh) = (lay.half_w, lay.half_h);
                     let corner = |dx: Coord, dy: Coord| xy(Point::new(o.x + dx, o.y + dy));
                     let mut body = vec![vec![
@@ -480,7 +610,8 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
                     }
                     page.symbols.push(SchematicSymbol {
                         designator: c.designator.clone(),
-                        unit: (gates[*comp].len() > 1).then(|| gname.clone()),
+                        unit: (gates[*comp].len() > 1).then(|| unit.name.clone()),
+                        unit_label: unit.label.clone(),
                         path: c.path.to_string(),
                         sheet_path: path.to_string(),
                         x_mm: mm(o.x),
@@ -535,7 +666,7 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
             }
         }
         let mut wired: BTreeSet<usize> = BTreeSet::new();
-        let mut loops: BTreeMap<usize, Coord> = BTreeMap::new();
+        let mut loops: BTreeMap<usize, (Coord, Coord)> = BTreeMap::new();
         for (n, ts) in &on_page {
             let net = &nl.nets[*n];
             let local = net_sheets[*n].len() == 1 && !net.global;
@@ -550,18 +681,27 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
                     (y, x)
                 }
             };
-            // A loop on one symbol (an amplifier's feedback): over the top of the body.
+            // A loop on one symbol (an amplifier's feedback): over the top of the body. Its
+            // sides run clear of the label points at the stub ends (a wire through a label
+            // would join its net): the first loop between the pin tips and the stub ends, later
+            // ones outside them.
             if a.3 == b.3 && a.2 != b.2 {
-                let top = loops.entry(a.3).or_insert(cell_tops[a.3] + 3 * GRID);
+                let (top, count) = loops.entry(a.3).or_insert((cell_tops[a.3] + 3 * GRID, 0));
                 let y = *top;
+                let out = if *count == 0 {
+                    GRID
+                } else {
+                    STUB + *count * GRID
+                };
                 *top += GRID;
+                *count += 1;
                 let (l, r) = if a.2 { (a.1, b.1) } else { (b.1, a.1) };
                 let pts = [
                     r,
-                    Point::new(r.x + STUB, r.y),
-                    Point::new(r.x + STUB, y),
-                    Point::new(l.x - STUB, y),
-                    Point::new(l.x - STUB, l.y),
+                    Point::new(r.x + out, r.y),
+                    Point::new(r.x + out, y),
+                    Point::new(l.x - out, y),
+                    Point::new(l.x - out, l.y),
                     l,
                 ];
                 page.wires.push(SchematicWire {
@@ -603,7 +743,7 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
                 "power"
             } else if ni.global {
                 "global"
-            } else if net_sheets[*n].len() > 1 {
+            } else if net_sheets[*n].iter().any(|s| !s.starts_with(path)) {
                 "hier"
             } else {
                 "local"
@@ -731,4 +871,21 @@ fn junctions(wires: &[SchematicWire]) -> Vec<Xy> {
     out.into_iter()
         .map(|(x, y)| [x as f64 / 1.0e4, y as f64 / 1.0e4])
         .collect()
+}
+
+#[cfg(test)]
+mod unit_split_tests {
+    use super::*;
+
+    #[test]
+    fn banks_come_from_the_pin_name() {
+        assert_eq!(bank_of("IO_L1P_T0_34").as_deref(), Some("34"));
+        assert_eq!(bank_of("BANK3_IO7").as_deref(), Some("3"));
+        assert_eq!(bank_of("IO12"), None);
+        assert_eq!(bank_of("VCC_"), None);
+        assert_eq!(prefix_of("PA12"), "PA");
+        assert_eq!(letters(0), "A");
+        assert_eq!(letters(25), "Z");
+        assert_eq!(letters(26), "AA");
+    }
 }

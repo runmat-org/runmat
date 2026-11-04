@@ -1,49 +1,39 @@
-//! Fresh `.kicad_sch` export of an elaborated design, with automatic placement.
+//! Fresh `.kicad_sch` export of an elaborated design: the schematic the Desktop draws.
 //!
-//! Layout rules, chosen for a readable sheet rather than a wiring diagram:
+//! The pages, symbols, units, wires, labels, junctions and no-connect markers all come from
+//! [`crate::schematic::layout`], so the KiCad project and the schematic canvas show the same
+//! drawing; nothing is placed here.
 //!
-//! - **Pages.** Components are grouped by their top-level hierarchy instance (`ch[3]`,
-//!   `power`, …; top-level components form one group), each group starting a new page; a
-//!   group too large for one page continues on the next. The root sheet holds one
-//!   hierarchical sheet per page.
-//! - **Order.** Inside a group, components follow connectivity: a breadth-first walk over
-//!   shared signal nets (rails and nets with more than eight pins are ignored for ordering),
-//!   starting from the most connected component, so connected parts sit side by side.
-//! - **Placement.** Shelf packing in rows on the 1.27 mm grid; each cell reserves room for
-//!   the symbol, its pins and its labels.
-//! - **Connections are labels, not wires.** Every connected pin gets a 2.54 mm wire stub and a
-//!   label naming its net: a local label for a net that stays on its page, a global label for
-//!   global nets and nets spanning pages. Unconnected pins get a no-connect marker.
-//! - **Symbols.** One library symbol per entity, generated as a box: one KiCad unit per gate;
-//!   inputs, power inputs and the first half of passive pins on the left, the rest on the
-//!   right; pins numbered by pad (a pin on several pads becomes stacked pins).
+//! - **Files.** One `.kicad_sch` per sheet instance: the root page is `{project}.kicad_sch`,
+//!   each instance `/a/b` is `{project}-a_b.kicad_sch`, drawn on its parent as a sheet with a
+//!   sheet pin per net crossing it. Page numbers follow the hierarchy's order.
+//! - **Symbols.** One library symbol per entity and unit layout, one KiCad unit per schematic
+//!   unit ([`crate::schematic::units`]: a large part's banks and power units included, with
+//!   their names); pins numbered by pad (a pin on several pads becomes stacked pins).
+//! - **Labels.** Local labels, global labels (global nets and power rails) and hierarchical
+//!   labels, where and as the layout draws them; label and sheet pin text is the net's name.
+//! - **Coordinates.** The layout's page millimetres (y up, origin bottom left) flip to KiCad's
+//!   (y down, origin top left).
 //!
 //! Reading the files back with [`super::sch::read_hierarchy`] gives the same connectivity.
 
 use super::sexpr::{self, SExpr};
 use crate::elab::Netlist;
-use crate::geom::{Coord, Point};
-use crate::library::{PinType, Pool};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-
-use crate::schematic::{UnitLayout, GRID, PIN_LEN};
-const STUB: Coord = 2_540_000;
-/// Usable A3 area (mm): x 25…395, y 25…270.
-const PAGE: (Coord, Coord, Coord, Coord) = (25_400_000, 25_400_000, 393_700_000, 269_240_000);
+use crate::geom::Coord;
+use crate::library::Pool;
+use crate::schematic::{layout, unit_pins, units, NetLabel, SchematicSheet, UnitLayout, PIN_LEN};
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SchExportOptions {
     /// Project name (file prefix and instance paths).
     pub project: String,
-    /// Nets with more pins than this are not used to order components.
-    pub ordering_fanout: usize,
 }
 
 impl Default for SchExportOptions {
     fn default() -> Self {
         SchExportOptions {
             project: "design".into(),
-            ordering_fanout: 8,
         }
     }
 }
@@ -58,9 +48,9 @@ fn mm(v: Coord) -> SExpr {
     SExpr::num(v as f64 * 1e-6)
 }
 
-/// Schematic point (y down) from page coordinates (y down, nm).
-fn at(x: Coord, y: Coord, angle: f64) -> SExpr {
-    SExpr::list("at", vec![mm(x), mm(y), SExpr::num(angle)])
+/// A length in millimetres, on the 0.1 µm grid.
+fn len(v: f64) -> SExpr {
+    SExpr::num((v * 1.0e4).round() / 1.0e4)
 }
 
 fn effects(justify: Option<&str>) -> SExpr {
@@ -108,83 +98,136 @@ fn sanitize(s: &str) -> String {
         .collect()
 }
 
-/// A gate's pins `(name, pads, type)` and each pin's net.
-type UnitPins = (
-    String,
-    Vec<(String, Vec<String>, PinType)>,
-    Vec<Option<usize>>,
-);
+fn uuid_node(seed: &str) -> SExpr {
+    SExpr::list("uuid", vec![SExpr::str(&uuid(seed))])
+}
 
-/// Exports the netlist as a root sheet plus one file per page. Returns file name → text;
-/// the root file is `{project}.kicad_sch`.
+/// Page millimetres (y up) → KiCad's `(at x y angle)` (y down).
+struct Page {
+    height: f64,
+}
+
+impl Page {
+    fn xy(&self, x: f64, y: f64) -> (SExpr, SExpr) {
+        (len(x), len(self.height - y))
+    }
+    fn at(&self, x: f64, y: f64, angle: f64) -> SExpr {
+        let (x, y) = self.xy(x, y);
+        SExpr::list("at", vec![x, y, SExpr::num(angle)])
+    }
+    fn pt(&self, x: f64, y: f64) -> SExpr {
+        let (x, y) = self.xy(x, y);
+        SExpr::list("xy", vec![x, y])
+    }
+}
+
+/// `(paper …)` for a layout frame: the ISO size, or a user size when A0 grew taller.
+fn paper(sheet: &SchematicSheet) -> SExpr {
+    let standard = match sheet.frame.as_str() {
+        "A3" => Some(297.0),
+        "A2" => Some(420.0),
+        "A1" => Some(594.0),
+        "A0" => Some(841.0),
+        _ => None,
+    };
+    match standard {
+        Some(h) if (h - sheet.height_mm).abs() < 1e-6 => {
+            SExpr::list("paper", vec![SExpr::str(&sheet.frame)])
+        }
+        _ => SExpr::list(
+            "paper",
+            vec![
+                SExpr::str("User"),
+                len(sheet.width_mm),
+                len(sheet.height_mm),
+            ],
+        ),
+    }
+}
+
+fn file_of(project: &str, path: &str) -> String {
+    if path == "/" {
+        format!("{project}.kicad_sch")
+    } else {
+        format!(
+            "{project}-{}.kicad_sch",
+            sanitize(path.trim_start_matches('/').replace('/', "_").as_str())
+        )
+    }
+}
+
+/// The instance path KiCad writes for symbols on page `path`: the root's UUID, then each
+/// sheet instance's UUID down to the page.
+fn instance_path(project: &str, path: &str) -> String {
+    let mut out = format!("/{}", uuid(&format!("{project}|root")));
+    let mut prefix = String::new();
+    for seg in path.split('/').filter(|s| !s.is_empty()) {
+        prefix.push('/');
+        prefix.push_str(seg);
+        out.push('/');
+        out.push_str(&uuid(&format!("{project}|sheet|{prefix}")));
+    }
+    out
+}
+
+fn stroke() -> SExpr {
+    SExpr::list(
+        "stroke",
+        vec![
+            SExpr::list("width", vec![SExpr::num(0.0)]),
+            SExpr::list("type", vec![SExpr::sym("default")]),
+        ],
+    )
+}
+
+fn label_node(page: &Page, label: &NetLabel, seed: &str) -> SExpr {
+    let left = label.side == "left";
+    let (head, shaped) = match label.kind.as_str() {
+        "local" => ("label", false),
+        "hier" => ("hierarchical_label", true),
+        _ => ("global_label", true),
+    };
+    let mut v = vec![SExpr::str(&label.net)];
+    if shaped {
+        v.push(SExpr::list("shape", vec![SExpr::sym("passive")]));
+    }
+    v.push(page.at(label.x_mm, label.y_mm, if left { 180.0 } else { 0.0 }));
+    v.push(effects(Some(if left { "right" } else { "left" })));
+    v.push(uuid_node(seed));
+    SExpr::list(head, v)
+}
+
+/// Exports the netlist as one file per sheet instance. Returns file name → text; the root
+/// file is `{project}.kicad_sch`.
 pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<String, String> {
     let project = sanitize(&opts.project);
-    // Units per component: gate → pins (name, pads, type).
-    struct Comp {
-        idx: usize,
-        lib: String,
-        units: Vec<UnitPins>,
-    }
-    let mut libs: BTreeMap<String, Vec<UnitLayout>> = BTreeMap::new();
-    let mut comps: Vec<Comp> = Vec::new();
-    for (idx, c) in nl.components.iter().enumerate() {
+    let drawn = layout(nl);
+    // Library symbols: one per entity and unit layouts; each component's units by name.
+    let mut libs: BTreeMap<String, Vec<(UnitLayout, Option<String>)>> = BTreeMap::new();
+    let mut lib_of: Vec<String> = Vec::new();
+    let mut unit_index: Vec<BTreeMap<String, usize>> = Vec::new();
+    for c in &nl.components {
         let ename = c
             .entity
             .and_then(|u| pool.entities.get(&u))
             .map(|e| e.name.clone())
             .unwrap_or_else(|| c.designator.trim_end_matches(char::is_numeric).to_string());
-        let mut gates: Vec<String> = Vec::new();
-        for p in &c.pins {
-            if !gates.contains(&p.gate) {
-                gates.push(p.gate.clone());
-            }
-        }
-        let units: Vec<_> = gates
+        let us = units(c);
+        let layouts: Vec<(UnitLayout, Option<String>)> = us
             .iter()
-            .map(|g| {
-                let pins: Vec<_> = c
-                    .pins
-                    .iter()
-                    .filter(|p| &p.gate == g)
-                    .map(|p| {
-                        let pads = if p.pads.is_empty() {
-                            vec![p.pin.clone()]
-                        } else {
-                            p.pads.clone()
-                        };
-                        (p.pin.clone(), pads, p.kind)
-                    })
-                    .collect();
-                let nets = c
-                    .pins
-                    .iter()
-                    .filter(|p| &p.gate == g)
-                    .map(|p| p.net)
-                    .collect();
-                (g.clone(), pins, nets)
-            })
+            .map(|u| (UnitLayout::new(&unit_pins(c, u)), u.label.clone()))
             .collect();
-        // One library symbol per entity and pin signature.
-        let sig: String = units
-            .iter()
-            .map(|u| {
-                u.1.iter()
-                    .map(|p| format!("{}={}", p.0, p.1.join("+")))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            })
-            .collect::<Vec<_>>()
-            .join("|");
         let mut lib = format!("RunMat:{}", sanitize(&ename));
-        let layouts: Vec<UnitLayout> = units.iter().map(|u| UnitLayout::new(&u.1)).collect();
         let mut k = 1;
         while let Some(existing) = libs.get(&lib) {
             let same = existing.len() == layouts.len()
                 && existing.iter().zip(&layouts).all(|(a, b)| {
-                    a.pins
-                        .iter()
-                        .map(|p| (&p.0, &p.1))
-                        .eq(b.pins.iter().map(|p| (&p.0, &p.1)))
+                    a.1 == b.1
+                        && a.0.pins.iter().map(|p| (&p.0, &p.1)).eq(b
+                            .0
+                            .pins
+                            .iter()
+                            .map(|p| (&p.0, &p.1)))
                 });
             if same {
                 break;
@@ -192,172 +235,147 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
             k += 1;
             lib = format!("RunMat:{}_{}", sanitize(&ename), k);
         }
-        let _ = sig;
         libs.entry(lib.clone()).or_insert(layouts);
-        comps.push(Comp { idx, lib, units });
-    }
-    // Groups by top-level instance, in netlist order.
-    let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    for (k, c) in comps.iter().enumerate() {
-        let path = &nl.components[c.idx].path;
-        let key = if path.depth() > 1 {
-            path.0[0].clone()
-        } else {
-            String::new()
-        };
-        groups.entry(key).or_default().push(k);
-    }
-    // Ordering nets: signal nets with few pins.
-    let ordering: Vec<Vec<usize>> = nl
-        .nets
-        .iter()
-        .map(|n| {
-            if n.global || n.pins.len() > opts.ordering_fanout {
-                return vec![];
-            }
-            let mut v: Vec<usize> = n.pins.iter().map(|p| p.0).collect();
-            v.dedup();
-            v
-        })
-        .collect();
-    let mut comp_k: BTreeMap<usize, usize> = BTreeMap::new();
-    for (k, c) in comps.iter().enumerate() {
-        comp_k.insert(c.idx, k);
-    }
-    let mut neighbours: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); comps.len()];
-    for comps_on in &ordering {
-        for &a in comps_on {
-            for &b in comps_on {
-                if a != b {
-                    neighbours[comp_k[&a]].insert(comp_k[&b]);
-                }
-            }
-        }
-    }
-    // Pages: (group name, ordered components with their cell positions).
-    struct Placed {
-        k: usize,
-        unit: usize,
-        origin: Point,
-    }
-    let mut pages: Vec<(String, Vec<Placed>)> = Vec::new();
-    for (gname, members) in &groups {
-        let set: BTreeSet<usize> = members.iter().copied().collect();
-        let mut order = Vec::new();
-        let mut seen = BTreeSet::new();
-        let mut rest: Vec<usize> = members.clone();
-        rest.sort_by_key(|k| {
-            (
-                std::cmp::Reverse(neighbours[*k].intersection(&set).count()),
-                *k,
-            )
-        });
-        for &start in &rest {
-            if !seen.insert(start) {
-                continue;
-            }
-            let mut q = VecDeque::from([start]);
-            while let Some(k) = q.pop_front() {
-                order.push(k);
-                for &n in &neighbours[k] {
-                    if set.contains(&n) && seen.insert(n) {
-                        q.push_back(n);
-                    }
-                }
-            }
-        }
-        // Shelf packing of every unit.
-        let label_room = |k: usize| -> Coord {
-            let longest = comps[k]
-                .units
-                .iter()
-                .flat_map(|u| u.2.iter())
-                .filter_map(|n| n.map(|n| nl.nets[n].name.chars().count()))
-                .max()
-                .unwrap_or(4) as Coord;
-            STUB + (longest + 4) * GRID
-        };
-        let mut page: Vec<Placed> = Vec::new();
-        let (mut x, mut y, mut row_h) = (PAGE.0, PAGE.1, 0);
-        let mut part = 0;
-        for k in order {
-            for (u, _) in comps[k].units.iter().enumerate() {
-                let lay = &libs[&comps[k].lib][u];
-                let room = label_room(k);
-                let w = 2 * (lay.half_w + PIN_LEN + room);
-                let h = 2 * lay.half_h + 4 * GRID;
-                if x + w > PAGE.2 && x > PAGE.0 {
-                    x = PAGE.0;
-                    y += row_h;
-                    row_h = 0;
-                }
-                if y + h > PAGE.3 && !page.is_empty() {
-                    let name = if part == 0 {
-                        gname.clone()
-                    } else {
-                        format!("{gname}~{part}")
-                    };
-                    pages.push((name, std::mem::take(&mut page)));
-                    part += 1;
-                    x = PAGE.0;
-                    y = PAGE.1;
-                    row_h = 0;
-                }
-                let origin = Point::new(
-                    (x + w / 2).div_euclid(GRID) * GRID,
-                    (y + h / 2).div_euclid(GRID) * GRID,
-                );
-                page.push(Placed { k, unit: u, origin });
-                x += w;
-                row_h = row_h.max(h);
-            }
-        }
-        if !page.is_empty() {
-            let name = if part == 0 {
-                gname.clone()
-            } else {
-                format!("{gname}~{part}")
-            };
-            pages.push((name, page));
-        }
-    }
-    // Which pages each net appears on.
-    let mut net_pages: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); nl.nets.len()];
-    for (pi, (_, placed)) in pages.iter().enumerate() {
-        for p in placed {
-            for n in comps[p.k].units[p.unit].2.iter().flatten() {
-                net_pages[*n].insert(pi);
-            }
-        }
-    }
-    let root_uuid = uuid(&format!("{project}|root"));
-    let mut files = BTreeMap::new();
-    let mut root_items = vec![
-        SExpr::list("version", vec![SExpr::sym("20231120")]),
-        SExpr::list("generator", vec![SExpr::str("runmat")]),
-        SExpr::list("uuid", vec![SExpr::str(&root_uuid)]),
-        SExpr::list("paper", vec![SExpr::str("A3")]),
-        SExpr::list("lib_symbols", vec![]),
-    ];
-    for (pi, (gname, placed)) in pages.iter().enumerate() {
-        let title = if gname.is_empty() {
-            "top".to_string()
-        } else {
-            gname.clone()
-        };
-        let file = format!("{project}-{}.kicad_sch", sanitize(&title));
-        let sheet_uuid = uuid(&format!("{project}|sheet|{title}"));
-        let path = format!("/{root_uuid}/{sheet_uuid}");
-        // The sheet box on the root page.
-        let (sx, sy) = (
-            PAGE.0 + (pi as Coord % 6) * 60 * GRID,
-            PAGE.1 + (pi as Coord / 6) * 24 * GRID,
+        lib_of.push(lib);
+        unit_index.push(
+            us.iter()
+                .enumerate()
+                .map(|(k, u)| (u.name.clone(), k))
+                .collect(),
         );
-        root_items.push(SExpr::list(
-            "sheet",
-            vec![
-                at(sx, sy, 0.0),
-                SExpr::list("size", vec![mm(50 * GRID), mm(16 * GRID)]),
+    }
+    let comp_of: BTreeMap<String, usize> = nl
+        .components
+        .iter()
+        .enumerate()
+        .map(|(k, c)| (c.path.to_string(), k))
+        .collect();
+    let page_no: BTreeMap<&str, usize> = drawn
+        .sheets
+        .iter()
+        .enumerate()
+        .map(|(k, s)| (s.path.as_str(), k + 1))
+        .collect();
+    let mut files = BTreeMap::new();
+    for sheet in &drawn.sheets {
+        let page = Page {
+            height: sheet.height_mm,
+        };
+        let here = instance_path(&project, &sheet.path);
+        let seed = |what: &str| format!("{project}|{}|{what}", sheet.path);
+        let mut used: BTreeSet<&str> = BTreeSet::new();
+        let mut items: Vec<SExpr> = Vec::new();
+        for symbol in &sheet.symbols {
+            let Some(&ci) = comp_of.get(&symbol.path) else {
+                continue;
+            };
+            let c = &nl.components[ci];
+            let lib = &lib_of[ci];
+            used.insert(lib);
+            let u = symbol
+                .unit
+                .as_ref()
+                .and_then(|n| unit_index[ci].get(n).copied())
+                .unwrap_or(0);
+            let lay = &libs[lib][u].0;
+            let sseed = format!("{project}|{}|{u}", c.designator);
+            let package = c
+                .package
+                .and_then(|k| pool.packages.get(&k))
+                .map(|pk| format!("RunMat:{}", pk.name))
+                .unwrap_or_default();
+            let value = c
+                .properties
+                .get("Value")
+                .cloned()
+                .or_else(|| {
+                    c.part
+                        .and_then(|k| pool.parts.get(&k))
+                        .map(|pt| pt.mpn.clone())
+                })
+                .unwrap_or_else(|| c.path.leaf().to_string());
+            let mut sym = vec![
+                SExpr::list("lib_id", vec![SExpr::str(lib)]),
+                page.at(symbol.x_mm, symbol.y_mm, 0.0),
+                SExpr::list("unit", vec![SExpr::num((u + 1) as f64)]),
+                SExpr::list("in_bom", vec![SExpr::sym("yes")]),
+                SExpr::list("on_board", vec![SExpr::sym("yes")]),
+                uuid_node(&sseed),
+                SExpr::list(
+                    "property",
+                    vec![
+                        SExpr::str("Reference"),
+                        SExpr::str(&c.designator),
+                        page.at(symbol.designator_at[0], symbol.designator_at[1], 0.0),
+                        effects(None),
+                    ],
+                ),
+                SExpr::list(
+                    "property",
+                    vec![
+                        SExpr::str("Value"),
+                        SExpr::str(&value),
+                        page.at(symbol.value_at[0], symbol.value_at[1], 0.0),
+                        effects(None),
+                    ],
+                ),
+                SExpr::list(
+                    "property",
+                    vec![
+                        SExpr::str("Footprint"),
+                        SExpr::str(&package),
+                        page.at(symbol.x_mm, symbol.y_mm, 0.0),
+                        hidden_effects(),
+                    ],
+                ),
+            ];
+            for (k, v) in &c.properties {
+                if k != "Value" {
+                    sym.push(SExpr::list(
+                        "property",
+                        vec![
+                            SExpr::str(k),
+                            SExpr::str(v),
+                            page.at(symbol.x_mm, symbol.y_mm, 0.0),
+                            hidden_effects(),
+                        ],
+                    ));
+                }
+            }
+            for (_, pads, _, _, _) in &lay.pins {
+                for pad in pads {
+                    sym.push(SExpr::list(
+                        "pin",
+                        vec![SExpr::str(pad), uuid_node(&format!("{sseed}|pin|{pad}"))],
+                    ));
+                }
+            }
+            sym.push(SExpr::list(
+                "instances",
+                vec![SExpr::list(
+                    "project",
+                    vec![
+                        SExpr::str(&project),
+                        SExpr::list(
+                            "path",
+                            vec![
+                                SExpr::str(&here),
+                                SExpr::list("reference", vec![SExpr::str(&c.designator)]),
+                                SExpr::list("unit", vec![SExpr::num((u + 1) as f64)]),
+                            ],
+                        ),
+                    ],
+                )],
+            ));
+            items.push(SExpr::list("symbol", sym));
+        }
+        for child in &sheet.sheet_symbols {
+            let leaf = child.path.rsplit('/').next().unwrap_or(&child.path);
+            let file = file_of(&project, &child.path);
+            let top = child.y_mm + child.h_mm;
+            let mut v = vec![
+                page.at(child.x_mm, top, 0.0),
+                SExpr::list("size", vec![len(child.w_mm), len(child.h_mm)]),
                 SExpr::list(
                     "stroke",
                     vec![
@@ -377,13 +395,13 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
                         ],
                     )],
                 ),
-                SExpr::list("uuid", vec![SExpr::str(&sheet_uuid)]),
+                uuid_node(&format!("{project}|sheet|{}", child.path)),
                 SExpr::list(
                     "property",
                     vec![
                         SExpr::str("Sheetname"),
-                        SExpr::str(&title),
-                        at(sx, sy - GRID, 0.0),
+                        SExpr::str(leaf),
+                        page.at(child.x_mm, top + 1.27, 0.0),
                         effects(Some("left bottom")),
                     ],
                 ),
@@ -392,116 +410,25 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
                     vec![
                         SExpr::str("Sheetfile"),
                         SExpr::str(&file),
-                        at(sx, sy + 17 * GRID, 0.0),
+                        page.at(child.x_mm, child.y_mm - 1.27, 0.0),
                         effects(Some("left top")),
                     ],
                 ),
-                SExpr::list(
-                    "instances",
-                    vec![SExpr::list(
-                        "project",
-                        vec![
-                            SExpr::str(&project),
-                            SExpr::list(
-                                "path",
-                                vec![
-                                    SExpr::str(&format!("/{root_uuid}")),
-                                    SExpr::list("page", vec![SExpr::str(&(pi + 2).to_string())]),
-                                ],
-                            ),
-                        ],
-                    )],
-                ),
-            ],
-        ));
-        // The page itself.
-        let mut used_libs: BTreeSet<String> = BTreeSet::new();
-        let mut items: Vec<SExpr> = Vec::new();
-        for p in placed {
-            let c = &comps[p.k];
-            let ci = &nl.components[c.idx];
-            used_libs.insert(c.lib.clone());
-            let lay = &libs[&c.lib][p.unit];
-            let seed = format!("{project}|{}|{}", ci.designator, p.unit);
-            let package = ci
-                .package
-                .and_then(|u| pool.packages.get(&u))
-                .map(|pk| format!("RunMat:{}", pk.name))
-                .unwrap_or_default();
-            let value = ci
-                .properties
-                .get("Value")
-                .cloned()
-                .or_else(|| {
-                    ci.part
-                        .and_then(|u| pool.parts.get(&u))
-                        .map(|pt| pt.mpn.clone())
-                })
-                .unwrap_or_else(|| ci.path.leaf().to_string());
-            let o = p.origin;
-            let mut sym = vec![
-                SExpr::list("lib_id", vec![SExpr::str(&c.lib)]),
-                at(o.x, o.y, 0.0),
-                SExpr::list("unit", vec![SExpr::num((p.unit + 1) as f64)]),
-                SExpr::list("in_bom", vec![SExpr::sym("yes")]),
-                SExpr::list("on_board", vec![SExpr::sym("yes")]),
-                SExpr::list("uuid", vec![SExpr::str(&uuid(&seed))]),
-                SExpr::list(
-                    "property",
-                    vec![
-                        SExpr::str("Reference"),
-                        SExpr::str(&ci.designator),
-                        at(o.x, o.y - lay.half_h - GRID, 0.0),
-                        effects(None),
-                    ],
-                ),
-                SExpr::list(
-                    "property",
-                    vec![
-                        SExpr::str("Value"),
-                        SExpr::str(&value),
-                        at(o.x, o.y + lay.half_h + GRID, 0.0),
-                        effects(None),
-                    ],
-                ),
-                SExpr::list(
-                    "property",
-                    vec![
-                        SExpr::str("Footprint"),
-                        SExpr::str(&package),
-                        at(o.x, o.y, 0.0),
-                        hidden_effects(),
-                    ],
-                ),
             ];
-            for (k, v) in &ci.properties {
-                if k != "Value" {
-                    sym.push(SExpr::list(
-                        "property",
-                        vec![
-                            SExpr::str(k),
-                            SExpr::str(v),
-                            at(o.x, o.y, 0.0),
-                            hidden_effects(),
-                        ],
-                    ));
-                }
+            for pin in &child.pins {
+                let left = pin.side == "left";
+                v.push(SExpr::list(
+                    "pin",
+                    vec![
+                        SExpr::str(&pin.net),
+                        SExpr::sym("passive"),
+                        page.at(pin.x_mm, pin.y_mm, if left { 180.0 } else { 0.0 }),
+                        effects(Some(if left { "left" } else { "right" })),
+                        uuid_node(&format!("{project}|sheetpin|{}|{}", child.path, pin.net)),
+                    ],
+                ));
             }
-            for (_, pads, _, _, _) in &lay.pins {
-                for pad in pads {
-                    sym.push(SExpr::list(
-                        "pin",
-                        vec![
-                            SExpr::str(pad),
-                            SExpr::list(
-                                "uuid",
-                                vec![SExpr::str(&uuid(&format!("{seed}|pin|{pad}")))],
-                            ),
-                        ],
-                    ));
-                }
-            }
-            sym.push(SExpr::list(
+            v.push(SExpr::list(
                 "instances",
                 vec![SExpr::list(
                     "project",
@@ -510,115 +437,112 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
                         SExpr::list(
                             "path",
                             vec![
-                                SExpr::str(&path),
-                                SExpr::list("reference", vec![SExpr::str(&ci.designator)]),
-                                SExpr::list("unit", vec![SExpr::num((p.unit + 1) as f64)]),
+                                SExpr::str(&here),
+                                SExpr::list(
+                                    "page",
+                                    vec![SExpr::str(
+                                        &page_no
+                                            .get(child.path.as_str())
+                                            .copied()
+                                            .unwrap_or(0)
+                                            .to_string(),
+                                    )],
+                                ),
                             ],
                         ),
                     ],
                 )],
             ));
-            items.push(SExpr::list("symbol", sym));
-            // Stubs and labels, matched to pins by name.
-            let unit = &c.units[p.unit];
-            for (pi_, (name, _, _, left, ly)) in lay.pins.iter().enumerate() {
-                let Some(ui) = unit.1.iter().position(|q| &q.0 == name) else {
-                    continue;
-                };
-                let tip = lay.tip(*left, *ly);
-                // Library y up → page y down.
-                let (tx, ty) = (o.x + tip.x, o.y - tip.y);
-                let pseed = format!("{seed}|{pi_}");
-                match unit.2[ui] {
-                    None => items.push(SExpr::list(
-                        "no_connect",
-                        vec![
-                            SExpr::list("at", vec![mm(tx), mm(ty)]),
-                            SExpr::list("uuid", vec![SExpr::str(&uuid(&format!("{pseed}|nc")))]),
-                        ],
-                    )),
-                    Some(n) => {
-                        let net = &nl.nets[n];
-                        let ex = if *left { tx - STUB } else { tx + STUB };
-                        items.push(SExpr::list(
-                            "wire",
-                            vec![
-                                SExpr::list(
-                                    "pts",
-                                    vec![
-                                        SExpr::list("xy", vec![mm(tx), mm(ty)]),
-                                        SExpr::list("xy", vec![mm(ex), mm(ty)]),
-                                    ],
-                                ),
-                                SExpr::list(
-                                    "stroke",
-                                    vec![
-                                        SExpr::list("width", vec![SExpr::num(0.0)]),
-                                        SExpr::list("type", vec![SExpr::sym("default")]),
-                                    ],
-                                ),
-                                SExpr::list("uuid", vec![SExpr::str(&uuid(&format!("{pseed}|w")))]),
-                            ],
-                        ));
-                        let global = net.global || net_pages[n].len() > 1;
-                        let angle = if *left { 180.0 } else { 0.0 };
-                        let justify = if *left { "right" } else { "left" };
-                        let mut l = vec![SExpr::str(&net.name)];
-                        if global {
-                            let shape = match unit.1[ui].2 {
-                                PinType::Input => "output",
-                                PinType::Output | PinType::PowerOut => "input",
-                                PinType::Bidirectional | PinType::TriState => "bidirectional",
-                                _ => "passive",
-                            };
-                            l.push(SExpr::list("shape", vec![SExpr::sym(shape)]));
-                        }
-                        l.push(at(ex, ty, angle));
-                        l.push(effects(Some(justify)));
-                        l.push(SExpr::list(
-                            "uuid",
-                            vec![SExpr::str(&uuid(&format!("{pseed}|l")))],
-                        ));
-                        items.push(SExpr::list(
-                            if global { "global_label" } else { "label" },
-                            l,
-                        ));
-                    }
-                }
+            items.push(SExpr::list("sheet", v));
+        }
+        for (w, wire) in sheet.wires.iter().enumerate() {
+            for (k, seg) in wire.points.windows(2).enumerate() {
+                items.push(SExpr::list(
+                    "wire",
+                    vec![
+                        SExpr::list(
+                            "pts",
+                            vec![page.pt(seg[0][0], seg[0][1]), page.pt(seg[1][0], seg[1][1])],
+                        ),
+                        stroke(),
+                        uuid_node(&seed(&format!("w{w}.{k}"))),
+                    ],
+                ));
             }
         }
-        let mut lib_nodes = Vec::new();
-        for lib in &used_libs {
-            lib_nodes.push(lib_symbol(lib, &libs[lib]));
+        for (k, j) in sheet.junctions.iter().enumerate() {
+            items.push(SExpr::list(
+                "junction",
+                vec![
+                    {
+                        let (x, y) = page.xy(j[0], j[1]);
+                        SExpr::list("at", vec![x, y])
+                    },
+                    SExpr::list("diameter", vec![SExpr::num(0.0)]),
+                    SExpr::list(
+                        "color",
+                        vec![
+                            SExpr::num(0.0),
+                            SExpr::num(0.0),
+                            SExpr::num(0.0),
+                            SExpr::num(0.0),
+                        ],
+                    ),
+                    uuid_node(&seed(&format!("j{k}"))),
+                ],
+            ));
         }
+        for (k, nc) in sheet.no_connects.iter().enumerate() {
+            let (x, y) = page.xy(nc[0], nc[1]);
+            items.push(SExpr::list(
+                "no_connect",
+                vec![
+                    SExpr::list("at", vec![x, y]),
+                    uuid_node(&seed(&format!("nc{k}"))),
+                ],
+            ));
+        }
+        for (k, label) in sheet.labels.iter().enumerate() {
+            items.push(label_node(&page, label, &seed(&format!("l{k}"))));
+        }
+        let lib_nodes = used
+            .iter()
+            .map(|lib| lib_symbol(lib, &libs[*lib]))
+            .collect();
+        let root = sheet.path == "/";
         let mut page_items = vec![
             SExpr::list("version", vec![SExpr::sym("20231120")]),
             SExpr::list("generator", vec![SExpr::str("runmat")]),
             SExpr::list(
                 "uuid",
-                vec![SExpr::str(&uuid(&format!("{project}|page|{title}")))],
+                vec![SExpr::str(&uuid(&if root {
+                    format!("{project}|root")
+                } else {
+                    format!("{project}|page|{}", sheet.path)
+                }))],
             ),
-            SExpr::list("paper", vec![SExpr::str("A3")]),
+            paper(sheet),
             SExpr::list("lib_symbols", lib_nodes),
         ];
         page_items.extend(items);
-        files.insert(file, sexpr::write(&SExpr::list("kicad_sch", page_items)));
+        if root {
+            page_items.push(SExpr::list(
+                "sheet_instances",
+                vec![SExpr::list(
+                    "path",
+                    vec![SExpr::str("/"), SExpr::list("page", vec![SExpr::str("1")])],
+                )],
+            ));
+        }
+        files.insert(
+            file_of(&project, &sheet.path),
+            sexpr::write(&SExpr::list("kicad_sch", page_items)),
+        );
     }
-    root_items.push(SExpr::list(
-        "sheet_instances",
-        vec![SExpr::list(
-            "path",
-            vec![SExpr::str("/"), SExpr::list("page", vec![SExpr::str("1")])],
-        )],
-    ));
-    files.insert(
-        format!("{project}.kicad_sch"),
-        sexpr::write(&SExpr::list("kicad_sch", root_items)),
-    );
     files
 }
 
-fn lib_symbol(lib: &str, units: &[UnitLayout]) -> SExpr {
+fn lib_symbol(lib: &str, units: &[(UnitLayout, Option<String>)]) -> SExpr {
     let short = lib.split_once(':').map(|x| x.1).unwrap_or(lib);
     let mut v = vec![
         SExpr::str(lib),
@@ -649,28 +573,29 @@ fn lib_symbol(lib: &str, units: &[UnitLayout]) -> SExpr {
             ],
         ),
     ];
-    for (u, lay) in units.iter().enumerate() {
-        let mut body = vec![
-            SExpr::str(&format!("{short}_{}_1", u + 1)),
-            SExpr::list(
-                "rectangle",
-                vec![
-                    SExpr::list("start", vec![mm(-lay.half_w), mm(lay.half_h)]),
-                    SExpr::list("end", vec![mm(lay.half_w), mm(-lay.half_h)]),
-                    SExpr::list(
-                        "stroke",
-                        vec![
-                            SExpr::list("width", vec![SExpr::num(0.254)]),
-                            SExpr::list("type", vec![SExpr::sym("default")]),
-                        ],
-                    ),
-                    SExpr::list(
-                        "fill",
-                        vec![SExpr::list("type", vec![SExpr::sym("background")])],
-                    ),
-                ],
-            ),
-        ];
+    for (u, (lay, label)) in units.iter().enumerate() {
+        let mut body = vec![SExpr::str(&format!("{short}_{}_1", u + 1))];
+        if let Some(label) = label {
+            body.push(SExpr::list("unit_name", vec![SExpr::str(label)]));
+        }
+        body.extend([SExpr::list(
+            "rectangle",
+            vec![
+                SExpr::list("start", vec![mm(-lay.half_w), mm(lay.half_h)]),
+                SExpr::list("end", vec![mm(lay.half_w), mm(-lay.half_h)]),
+                SExpr::list(
+                    "stroke",
+                    vec![
+                        SExpr::list("width", vec![SExpr::num(0.254)]),
+                        SExpr::list("type", vec![SExpr::sym("default")]),
+                    ],
+                ),
+                SExpr::list(
+                    "fill",
+                    vec![SExpr::list("type", vec![SExpr::sym("background")])],
+                ),
+            ],
+        )]);
         for (name, pads, kind, left, y) in &lay.pins {
             let tip = lay.tip(*left, *y);
             for pad in pads {
