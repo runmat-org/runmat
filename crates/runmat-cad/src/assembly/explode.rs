@@ -165,6 +165,22 @@ pub struct ExplodedView {
     pub steps: Vec<ExplodeStep>,
     #[serde(default)]
     pub lines: Vec<ExplodeLine>,
+    /// Sub-assemblies' own exploded views composed into this one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<IncludedView>,
+}
+
+/// A sub-assembly occurrence exploded by one of its own views: the view's steps run in the
+/// sub-assembly's frame (as it stands when they run), moving its subtree, after the step
+/// `after` of this view (`None`: before this view's own steps).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct IncludedView {
+    /// Stable across edits and merges.
+    pub id: String,
+    pub occurrence: RelPath,
+    pub view: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
 }
 
 impl ExplodedView {
@@ -174,6 +190,7 @@ impl ExplodedView {
             base: None,
             steps: Vec::new(),
             lines: Vec::new(),
+            include: Vec::new(),
         }
     }
 }
@@ -431,6 +448,8 @@ struct Eval<'a, 'b> {
     rep: DiagnosticReport,
     /// Resolved paths per writing site, memoised (each site's diagnostics reported once).
     found: BTreeMap<(RelPath, String), Option<NodeId>>,
+    /// Where paths start: the root, or a sub-assembly whose included view is running.
+    root: NodeId,
 }
 
 impl Eval<'_, '_> {
@@ -478,7 +497,7 @@ impl Eval<'_, '_> {
 
     fn walk(&mut self, path: &RelPath, param: &str) -> Option<NodeId> {
         let tree = self.tree;
-        let mut cur: NodeId = 0;
+        let mut cur: NodeId = self.root;
         let mut rewritten: Vec<PathSegment> = Vec::new();
         let mut renamed = false;
         for (i, seg) in path.0.iter().enumerate() {
@@ -676,6 +695,7 @@ pub fn evaluate_exploded(
         view: name.to_owned(),
         rep: DiagnosticReport::default(),
         found: BTreeMap::new(),
+        root: 0,
     };
     let mut world: Vec<Transform> = tree.nodes.iter().map(|n| n.world).collect();
     let mut moved: BTreeSet<NodeId> = BTreeSet::new();
@@ -728,60 +748,21 @@ pub fn evaluate_exploded(
         }
     }
 
-    for w in &views {
-        for s in &w.steps {
-            let p = |x: &str| format!("steps.{}.{}", s.id, x);
-            let mut targets: Vec<NodeId> = Vec::new();
-            for o in &s.occurrences {
-                if let Some(n) = e.node(o, &p("occurrences")) {
-                    if !targets.contains(&n) {
-                        targets.push(n);
-                    }
-                }
-            }
-            // Ancestor and descendant in one step.
-            let set: BTreeSet<NodeId> = targets.iter().copied().collect();
-            for &t in &targets {
-                let mut a = tree.node(t).parent;
-                while let Some(x) = a {
-                    if set.contains(&x) {
-                        push(
-                            &mut e.rep,
-                            DiagCode::ExplodeNested,
-                            Severity::Info,
-                            site(name, &p("occurrences")),
-                            format!(
-                                "step `{}` moves `{}` and its assembly `{}`; `{}` moves twice",
-                                s.id,
-                                tree.path(t),
-                                tree.path(x),
-                                tree.path(t)
-                            ),
-                        );
-                        break;
-                    }
-                    a = tree.node(x).parent;
-                }
-            }
-            // Order: ancestors first, so a nested child's own motion composes after.
-            targets.sort_by_key(|t| tree.node(*t).depth);
-            let motions = step_motions(&mut e, &world, s, &targets, &p);
-            for (t, m) in motions {
-                let mut nodes = Vec::new();
-                subtree(tree, t, &mut nodes);
-                for n in nodes {
-                    world[n as usize] = m.compose(&world[n as usize]);
-                    moved.insert(n);
-                }
-            }
-            for tr in &mut trails {
-                let now = world[tr.node as usize].apply(tr.anchor);
-                let last = *tr.points.last().expect("a trail starts with a point");
-                if norm(sub(now, last)) > 1e-12 {
-                    tr.points.push(now);
-                }
-            }
-        }
+    let mut points: Vec<(NodeId, [f64; 3], Vec<[f64; 3]>)> = trails
+        .iter()
+        .map(|t| (t.node, t.anchor, t.points.clone()))
+        .collect();
+    run_views(
+        &mut e,
+        &views,
+        &Transform::IDENTITY,
+        &mut world,
+        &mut moved,
+        &mut points,
+        0,
+    );
+    for (tr, (_, _, pts)) in trails.iter_mut().zip(points) {
+        tr.points = pts;
     }
 
     // Jogs on the view's own lines (their segments are in the final trail).
@@ -852,6 +833,186 @@ pub fn evaluate_exploded(
         moved: moved.into_iter().collect(),
         lines,
         diagnostics: e.rep,
+    }
+}
+
+type TrailPoints = Vec<(NodeId, [f64; 3], Vec<[f64; 3]>)>;
+
+/// Run a view chain's steps (and the sub-assembly views they include) from the poses in
+/// `world`. `frame` is the view's own frame in the top assembly (identity at the top): motions
+/// are evaluated in it and applied to the world poses.
+fn run_views(
+    e: &mut Eval<'_, '_>,
+    views: &[&ExplodedView],
+    frame: &Transform,
+    world: &mut [Transform],
+    moved: &mut BTreeSet<NodeId>,
+    trails: &mut TrailPoints,
+    depth: u32,
+) {
+    let tree = e.tree;
+    let inv = frame.inverse();
+    let record = |world: &[Transform], trails: &mut TrailPoints| {
+        for (node, anchor, pts) in trails.iter_mut() {
+            let now = world[*node as usize].apply(*anchor);
+            let last = *pts.last().expect("a trail starts with a point");
+            if norm(sub(now, last)) > 1e-12 {
+                pts.push(now);
+            }
+        }
+    };
+    for w in views {
+        run_includes(e, w, None, world, moved, trails, depth);
+        for s in &w.steps {
+            let p = |x: &str| format!("steps.{}.{}", s.id, x);
+            let mut targets: Vec<NodeId> = Vec::new();
+            for o in &s.occurrences {
+                if let Some(n) = e.node(o, &p("occurrences")) {
+                    if !targets.contains(&n) {
+                        targets.push(n);
+                    }
+                }
+            }
+            // Ancestor and descendant in one step.
+            let set: BTreeSet<NodeId> = targets.iter().copied().collect();
+            for &t in &targets {
+                let mut a = tree.node(t).parent;
+                while let Some(x) = a {
+                    if set.contains(&x) {
+                        let view = e.view.clone();
+                        push(
+                            &mut e.rep,
+                            DiagCode::ExplodeNested,
+                            Severity::Info,
+                            site(&view, &p("occurrences")),
+                            format!(
+                                "step `{}` moves `{}` and its assembly `{}`; `{}` moves twice",
+                                s.id,
+                                tree.path(t),
+                                tree.path(x),
+                                tree.path(t)
+                            ),
+                        );
+                        break;
+                    }
+                    a = tree.node(x).parent;
+                }
+            }
+            // Order: ancestors first, so a nested child's own motion composes after.
+            targets.sort_by_key(|t| tree.node(*t).depth);
+            // Poses in the view's frame, motions there, then back to the top frame.
+            let local: Vec<Transform> = world.iter().map(|w| inv.compose(w)).collect();
+            let motions = step_motions(e, &local, s, &targets, &p);
+            for (t, m) in motions {
+                let mw = frame.compose(&m).compose(&inv);
+                let mut nodes = Vec::new();
+                subtree(tree, t, &mut nodes);
+                for n in nodes {
+                    world[n as usize] = mw.compose(&world[n as usize]);
+                    moved.insert(n);
+                }
+            }
+            record(world, trails);
+            run_includes(e, w, Some(&s.id), world, moved, trails, depth);
+        }
+    }
+}
+
+/// Run the views a view includes after one of its steps (`None`: before them).
+fn run_includes(
+    e: &mut Eval<'_, '_>,
+    w: &ExplodedView,
+    after: Option<&str>,
+    world: &mut [Transform],
+    moved: &mut BTreeSet<NodeId>,
+    trails: &mut TrailPoints,
+    depth: u32,
+) {
+    for inc in w.include.iter().filter(|i| i.after.as_deref() == after) {
+        let param = format!("include.{}", inc.id);
+        let Some(n) = e.node(&inc.occurrence, &param) else {
+            continue;
+        };
+        let view = e.view.clone();
+        let def = e.tree.node(n).definition.clone();
+        let sub_doc = match (
+            def.kind == crate::assembly::model::DefinitionKind::Assembly,
+            e.ctx
+                .source
+                .map(|s| s.assembly(&def.file, e.tree.node(n).revision.as_ref())),
+        ) {
+            (true, Some(Ok(d))) => d,
+            (false, _) => {
+                push(
+                    &mut e.rep,
+                    DiagCode::ExplodeUnknownView,
+                    Severity::Error,
+                    site(&view, &param),
+                    format!(
+                        "`{}` is a part; only sub-assemblies have exploded views",
+                        e.tree.path(n)
+                    ),
+                );
+                continue;
+            }
+            (true, other) => {
+                push(
+                    &mut e.rep,
+                    DiagCode::ExplodeUnknownView,
+                    Severity::Error,
+                    site(&view, &param),
+                    format!(
+                        "cannot read `{}` for its exploded view `{}`{}",
+                        def.file,
+                        inc.view,
+                        match other {
+                            Some(Err(err)) => format!(": {}", err),
+                            _ => " (no design source)".into(),
+                        }
+                    ),
+                );
+                continue;
+            }
+        };
+        if depth > 32 {
+            push(
+                &mut e.rep,
+                DiagCode::ExplodeCycle,
+                Severity::Error,
+                site(&view, &param),
+                "included exploded views nest too deep".into(),
+            );
+            continue;
+        }
+        let mut st = DiagnosticReport::default();
+        let Some(chain_views) = chain(&sub_doc, &inc.view, &mut st) else {
+            e.rep.append(&st);
+            continue;
+        };
+        let ev = e.ev();
+        let env = top_env(&sub_doc, e.tree, &ev);
+        let mut child = Eval {
+            doc: &sub_doc,
+            tree: e.tree,
+            ctx: e.ctx,
+            env,
+            view: format!("{}/{}:{}", view, e.tree.path(n), inc.view),
+            rep: DiagnosticReport::default(),
+            found: BTreeMap::new(),
+            root: n,
+        };
+        // The sub-assembly's frame as it stands now.
+        let frame = world[n as usize];
+        run_views(
+            &mut child,
+            &chain_views,
+            &frame,
+            world,
+            moved,
+            trails,
+            depth + 1,
+        );
+        e.rep.append(&child.rep);
     }
 }
 

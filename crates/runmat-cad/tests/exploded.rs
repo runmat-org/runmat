@@ -668,3 +668,77 @@ fn e06_serde_and_projection_are_deterministic() {
         .lookup(&item_path(&doc.path, "exploded", "service"))
         .is_some());
 }
+
+#[test]
+fn e07_sub_assembly_views_compose_into_the_parent() {
+    let (mut src, mut doc) = gearbox();
+    // The shaft's own exploded view: the gear slides 30 mm along the shaft's Z.
+    let mut shaft = (*src
+        .assembly(&FilePath::new("shaft.assembly"), None)
+        .unwrap())
+    .clone();
+    let mut apart = ExplodedView::new("apart");
+    apart.steps.push(translate(
+        "gear_off",
+        vec![RelPath::new(&["gear"])],
+        [0.0, 0.0, 1.0],
+        30.0,
+    ));
+    shaft.exploded.push(apart);
+    src.add_assembly(shaft);
+    // The top moves the shaft out, then runs the shaft's view in its new place.
+    let mut composed = ExplodedView::new("composed");
+    composed.steps.push(translate(
+        "shaft_out",
+        vec![RelPath::new(&["shaft"])],
+        [1.0, 0.0, 0.0],
+        100.0,
+    ));
+    composed.include.push(IncludedView {
+        id: "shaft_apart".into(),
+        occurrence: RelPath::new(&["shaft"]),
+        view: "apart".into(),
+        after: Some("shaft_out".into()),
+    });
+    composed.lines.push(ExplodeLine {
+        id: "gear_trail".into(),
+        occurrence: RelPath::new(&["shaft", "gear"]),
+        anchor: Some([mm(0.0), mm(0.0), mm(0.0)]),
+        jogs: vec![],
+    });
+    doc.exploded.push(composed);
+    src.add_assembly(doc.clone());
+    let tree = resolve_with(&src, None);
+    let st = explode(&src, &doc, &tree, "composed", None);
+    assert!(
+        st.diagnostics.diagnostics.is_empty(),
+        "{:#?}",
+        st.diagnostics
+    );
+    let id = |p: &str| tree.find_display(p).unwrap();
+    let a = |p: &str| tree.node(id(p)).world;
+    let z = a("shaft").apply_vector([0.0, 0.0, 1.0]);
+    let g0 = a("shaft/gear").translation;
+    let want = [
+        g0[0] + 0.1 + 0.03 * z[0],
+        g0[1] + 0.03 * z[1],
+        g0[2] + 0.03 * z[2],
+    ];
+    assert!(close(st.world[id("shaft/gear") as usize].translation, want));
+    // The bearing moved with the shaft only.
+    let b0 = a("shaft/bearing").translation;
+    assert!(close(
+        st.world[id("shaft/bearing") as usize].translation,
+        [b0[0] + 0.1, b0[1], b0[2]]
+    ));
+    // The gear's trail has a corner: out with the shaft, then along it.
+    assert_eq!(st.lines[0].points.len(), 3);
+    // An included view the sub-assembly lacks is diagnosed.
+    doc.exploded.last_mut().unwrap().include[0].view = "missing".into();
+    let st = explode(&src, &doc, &tree, "composed", None);
+    assert!(st
+        .diagnostics
+        .diagnostics
+        .iter()
+        .any(|d| d.code == DiagCode::ExplodeUnknownView));
+}
