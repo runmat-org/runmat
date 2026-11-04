@@ -11,3 +11,8 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 runmat-types = { workspace = true }
 serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
