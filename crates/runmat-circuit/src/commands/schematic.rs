@@ -18,6 +18,14 @@ pub(super) fn eco_inputs() -> Vec<Field> {
             .into_iter()
             .map(|d| flag(&d.input_id(), d.label(), false).help(d.help())),
     );
+    inputs.push(
+        list(
+            "ignored_parameters",
+            "Ignored parameters",
+            text("parameter", "Parameter", Some("datasheet")),
+        )
+        .help("Parameters never compared, by name. Saved with the board."),
+    );
     inputs.push(flag(
         "remove_orphaned_copper",
         "Remove orphaned copper",

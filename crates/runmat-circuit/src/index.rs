@@ -153,6 +153,9 @@ pub struct EcoIndex {
     /// compare with those settings does not produce them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignored: Vec<String>,
+    /// Parameters the saved settings never compare (`datasheet`): the review's starting list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignored_parameters: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -269,6 +272,20 @@ pub struct BoardIndex {
     /// The design rules in source order: what each selects and sets, and where it is written.
     pub rules: Vec<RuleRow>,
     pub drc: Vec<CheckRow>,
+    /// Placement rooms in board order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rooms: Vec<RoomRow>,
+}
+
+/// A placement room: its members and its outline's bounding box.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RoomRow {
+    pub name: String,
+    pub members: Vec<String>,
+    pub x_mm: f64,
+    pub y_mm: f64,
+    pub width_mm: f64,
+    pub height_mm: f64,
 }
 
 /// One design rule (`rule power-width { track:net-class(power) { track_width: 0.4mm } }`).
@@ -460,6 +477,13 @@ pub fn eco_index(plan: &EcoPlan, board: &Board) -> EcoIndex {
             .ignored()
             .iter()
             .map(|d| d.as_str().to_owned())
+            .collect(),
+        ignored_parameters: board
+            .sync
+            .options
+            .ignored_parameters
+            .iter()
+            .cloned()
             .collect(),
     }
 }
@@ -1005,6 +1029,21 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
         zones,
         rules: rule_rows,
         drc: drc_rows,
+        rooms: board
+            .rooms
+            .iter()
+            .map(|r| {
+                let b = r.outline.bbox();
+                RoomRow {
+                    name: r.name.clone(),
+                    members: r.members.clone(),
+                    x_mm: mm(b.min.x),
+                    y_mm: mm(b.min.y),
+                    width_mm: mm(b.max.x - b.min.x),
+                    height_mm: mm(b.max.y - b.min.y),
+                }
+            })
+            .collect(),
     });
 }
 
