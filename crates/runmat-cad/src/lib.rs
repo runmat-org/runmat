@@ -8,6 +8,8 @@
 //! - [`props`]: property schemas, check packs over `runmat-rules` selectors, typed links,
 //!   the release gate.
 //! - [`drawing`]: sheets, views by reference, associative annotations, tables, HLR seam.
+//! - [`dfm`]: design-for-manufacture check packs (machining, sheet metal, molding, additive)
+//!   over a part's manufacturing features.
 //! - [`evaluate`]: Evaluate-tab analysis requests and results behind a kernel seam; the cost
 //!   estimate seam.
 //! - [`model`]: the part document (inputs, sketches, datums, features, part outputs, regions,
@@ -24,6 +26,7 @@
 pub mod assembly;
 pub mod commands;
 pub mod config;
+pub mod dfm;
 pub mod diagnostics;
 pub mod drawing;
 pub mod evaluate;

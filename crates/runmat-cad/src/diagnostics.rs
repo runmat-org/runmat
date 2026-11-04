@@ -192,6 +192,9 @@ pub enum DiagCode {
     AsmClearance,
     #[serde(rename = "cad.asm.check_failed")]
     AsmCheckFailed,
+    /// A design-for-manufacture check failed on a part.
+    #[serde(rename = "cad.dfm.check_failed")]
+    DfmCheckFailed,
     #[serde(rename = "cad.asm.bad_pattern")]
     AsmBadPattern,
     #[serde(rename = "cad.fastener.path_missing")]

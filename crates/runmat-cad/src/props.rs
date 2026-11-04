@@ -467,11 +467,43 @@ fn show(v: &rules::AttrValue) -> String {
     }
 }
 
+/// An item graph check packs run over: the resolved assembly, or a part's manufacturing
+/// features (design-for-manufacture packs).
+pub trait CheckGraph: rules::ItemGraph<Id = u32> {
+    /// The item as reports name it.
+    fn label(&self, id: u32) -> String;
+    /// Where a failing item's diagnostic sits.
+    fn site(&self, id: u32) -> Site;
+    fn fail_code(&self) -> DiagCode {
+        DiagCode::AsmCheckFailed
+    }
+}
+
+impl CheckGraph for AssemblyGraph<'_> {
+    fn label(&self, id: u32) -> String {
+        self.tree.path(id)
+    }
+    fn site(&self, id: u32) -> Site {
+        Site::of(Subject::Occurrence {
+            path: self.tree.path(id),
+        })
+    }
+}
+
 pub fn run_checks(
     packs: &[CheckPack],
     graph: &AssemblyGraph<'_>,
 ) -> (Vec<CheckResult>, DiagnosticReport) {
-    let units = AuthorityUnits(graph.units);
+    run_checks_on(packs, graph, graph.units)
+}
+
+/// Run check packs over any [`CheckGraph`], with units from the one authority.
+pub fn run_checks_on<G: CheckGraph>(
+    packs: &[CheckPack],
+    graph: &G,
+    authority: &dyn UnitAuthority,
+) -> (Vec<CheckResult>, DiagnosticReport) {
+    let units = AuthorityUnits(authority);
     let mut results = Vec::new();
     let mut diags = DiagnosticReport::default();
     for pack in packs {
@@ -524,7 +556,7 @@ pub fn run_checks(
                 Expected::None => None,
             };
             for (id, _) in sel.select(graph) {
-                let label = graph.tree.path(id);
+                let label = graph.label(id);
                 let found = rules::ItemGraph::attr(graph, id, &c.attribute);
                 let outcome = match (&found, &expected, c.op) {
                     (Some(_), _, CompareOp::Present) => ItemOutcome::Pass,
@@ -543,15 +575,13 @@ pub fn run_checks(
                 };
                 if let ItemOutcome::Fail { found } = &outcome {
                     diags.push(
-                        DiagCode::AsmCheckFailed,
+                        graph.fail_code(),
                         if c.gate == Gate::None {
                             Severity::Warning
                         } else {
                             Severity::Error
                         },
-                        Site::of(Subject::Occurrence {
-                            path: label.clone(),
-                        }),
+                        graph.site(id),
                         format!(
                             "check `{}` ({}): `{}` {:?} expected, found {}",
                             c.name, pack.name, c.attribute, c.op, found
