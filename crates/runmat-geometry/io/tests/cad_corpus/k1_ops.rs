@@ -1463,3 +1463,123 @@ fn k1_closed_and_open_hems_name_their_faces_as_the_reference_kernel_does() {
         assert!(close(added, want, 1e-6), "{kind:?}: {added} vs {want}");
     }
 }
+
+// ------------------------------------------------- sheet metal: rolls, bends and jogs
+
+/// The volume of the first body of a regeneration on the kernel under test.
+fn regen_volume(r: &runmat_cad::regen::RegenResult) -> f64 {
+    let k = KernelUnderTest::new();
+    assert_eq!(r.state.bodies.len(), 1);
+    volume(
+        &k,
+        &KernelBody {
+            handle: r.state.bodies[0].handle.clone(),
+            topology: r.state.bodies[0].topology.clone(),
+        },
+    )
+    .0
+}
+
+#[test]
+fn k1_teardrop_and_rolled_hems_add_their_roll_and_leg_exactly() {
+    use crate::common::{mm, Env};
+    use crate::families::hem_doc;
+    use runmat_cad::model::sheet_metal::*;
+    use runmat_cad::value::ValueExpr;
+    let env = Env::new();
+    let mut plain = hem_doc(HemKind::Closed, 8.0);
+    plain.features.pop();
+    let before = regen_volume(&env.regen(&plain));
+    let (t, r, w) = (0.002, 0.002, 0.04);
+    for (kind, theta, leg) in [
+        (
+            HemKind::Teardrop {
+                radius: mm(2.0),
+                angle: ValueExpr::deg(250.0),
+            },
+            250f64.to_radians(),
+            0.0025,
+        ),
+        (
+            HemKind::Rolled {
+                radius: mm(2.0),
+                angle: ValueExpr::deg(270.0),
+            },
+            270f64.to_radians(),
+            0.0,
+        ),
+    ] {
+        let d = hem_doc(kind.clone(), leg * 1e3);
+        let out = env.regen(&d);
+        assert!(
+            out.status("hem").unwrap().ran(),
+            "{kind:?} {:?}",
+            out.diagnostics
+        );
+        // The roll's annulus sector, then the straight leg.
+        let want = w * (theta / 2.0 * ((r + t) * (r + t) - r * r) + leg * t);
+        let added = regen_volume(&out) - before;
+        assert!(close(added, want, 1e-6), "{kind:?}: {added} vs {want}");
+    }
+}
+
+#[test]
+fn k1_sketched_bends_and_jogs_keep_the_developed_plate() {
+    use crate::common::{mm, Env};
+    use crate::families::{plate_doc, plate_top};
+    use runmat_cad::ids::{FeatureId, SketchEntityId};
+    use runmat_cad::model::sheet_metal::*;
+    use runmat_cad::model::*;
+    use runmat_cad::refs::name::PlaneSide;
+    use runmat_cad::value::ValueExpr;
+    let env = Env::new();
+    let (t, k, w) = (0.002, 0.44, 0.04);
+    let plate = 0.08 * 0.04 * t;
+    assert!(close(regen_volume(&env.regen(&plate_doc())), plate, 1e-9));
+    // Each bend of angle θ swaps its strip (the allowance θ (R + K t), t thick) for its
+    // sector θ t (R + t/2): the volume moves by w t² θ (1/2 − K).
+    let per_bend = |theta: f64| w * t * t * theta * (0.5 - k);
+    for (theta, fixed) in [
+        (90.0, PlaneSide::Positive),
+        (-90.0, PlaneSide::Positive),
+        (45.0, PlaneSide::Negative),
+        (135.0, PlaneSide::Positive),
+    ] {
+        let mut d = plate_doc();
+        d.features.push(Feature::new(
+            "bend",
+            FeatureKind::SheetMetal(SheetMetalFeature::SketchedBend {
+                face: plate_top(),
+                line: (FeatureId::new("s_line"), SketchEntityId::new("bl")),
+                angle: ValueExpr::deg(theta),
+                radius: None,
+                fixed,
+            }),
+        ));
+        let out = env.regen(&d);
+        assert!(
+            out.status("bend").unwrap().ran(),
+            "{theta}: {:?}",
+            out.diagnostics
+        );
+        let want = plate + per_bend(f64::to_radians(theta).abs());
+        let v = regen_volume(&out);
+        assert!(close(v, want, 1e-7), "{theta}: {v} vs {want}");
+    }
+    // A jog: two bends and the middle flat, which keeps its own length.
+    let mut d = plate_doc();
+    d.features.push(Feature::new(
+        "jog",
+        FeatureKind::SheetMetal(SheetMetalFeature::Jog {
+            face: plate_top(),
+            line: (FeatureId::new("s_line"), SketchEntityId::new("bl")),
+            offset: mm(12.0),
+            angle: ValueExpr::deg(60.0),
+        }),
+    ));
+    let out = env.regen(&d);
+    assert!(out.status("jog").unwrap().ran(), "{:?}", out.diagnostics);
+    let want = plate + 2.0 * per_bend(60f64.to_radians());
+    let v = regen_volume(&out);
+    assert!(close(v, want, 1e-7), "jog: {v} vs {want}");
+}

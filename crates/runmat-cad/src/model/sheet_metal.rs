@@ -178,9 +178,21 @@ pub enum LengthReference {
 #[serde(rename_all = "snake_case", tag = "hem")]
 pub enum HemKind {
     Closed,
-    Open { gap: ValueExpr },
-    Teardrop { radius: ValueExpr, angle: ValueExpr },
-    Rolled { radius: ValueExpr, angle: ValueExpr },
+    Open {
+        gap: ValueExpr,
+    },
+    /// A roll of more than 180° at inner radius `radius`, then the hem's `length` as a
+    /// straight leg running back towards the sheet.
+    Teardrop {
+        radius: ValueExpr,
+        angle: ValueExpr,
+    },
+    /// A roll of `angle` at inner radius `radius`; the hem's `length` is a straight leg after
+    /// it (zero for a plain curl).
+    Rolled {
+        radius: ValueExpr,
+        angle: ValueExpr,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

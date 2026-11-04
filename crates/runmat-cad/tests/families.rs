@@ -349,6 +349,349 @@ fn sheet_references_survive_a_segment_added_to_the_chain() {
     assert_eq!(count_faces(&r, &d3, &refs), vec![1, 1, 1]);
 }
 
+#[test]
+fn unfold_and_fold_in_place_keep_the_sheet_and_its_names() {
+    let env = Env::new();
+    let mut d = sheet_doc(&[(0.0, 30.0), (0.0, 0.0), (50.0, 0.0)], &["up", "base"]);
+    let bent = env.regen(&d);
+    assert_clean(&bent);
+    let (blo, bhi) = body_box(&bent);
+    d.features.push(Feature::new(
+        "unfold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Unfold {
+            fixed_face: sheet_face("base", 0),
+            bends: Vec::new(),
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 1);
+    // The flat strip: the developed length along the base flat's direction, t thick.
+    let ba = PI / 2.0 * (0.003 + 0.44 * 0.002);
+    let (lo, hi) = body_box(&r);
+    let along = (hi[0] - lo[0]).max(hi[2] - lo[2]);
+    assert!(close(along, 0.025 + 0.045 + ba, 2e-4), "{lo:?} {hi:?}");
+    let flat_bend = generated_face("unfold", Role::BendFace, "up+base", 0);
+    assert_eq!(count_faces(&r, &d, &[flat_bend]), vec![1]);
+    d.features.push(Feature::new(
+        "fold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Fold { bends: Vec::new() }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    // Folded back: the bent sheet's box, and the base flange's face names resolve again.
+    let (lo, hi) = body_box(&r);
+    for k in 0..3 {
+        assert!(
+            close(lo[k], blo[k], 1e-9) && close(hi[k], bhi[k], 1e-9),
+            "{lo:?} {hi:?}"
+        );
+    }
+    let refs = vec![sheet_face("up", 0), sheet_face("base", 1)];
+    assert_eq!(count_faces(&r, &d, &refs), vec![1, 1]);
+    // Unfolding some bends only is not lowered.
+    let mut partial = d.clone();
+    partial.features.truncate(3);
+    if let FeatureKind::SheetMetal(SheetMetalFeature::Unfold { bends, .. }) =
+        &mut partial.features[2].kind
+    {
+        bends.push(sheet_face("up", 0));
+    }
+    assert!(has(&env.regen(&partial), DiagCode::KernelNotSupported));
+}
+
+/// An 80 × 40 plate (t = 2, R = 3, K = 0.44) and a sketch line `bl` across it at x = 50.
+pub fn plate_doc() -> PartDocument {
+    let mut d = PartDocument::new("plate_sm.part");
+    d.features.push(sketch(
+        "s_plate",
+        rect_names(
+            PlaneRef::origin_xy(),
+            0.0,
+            0.0,
+            80.0,
+            40.0,
+            ["e1", "e2", "e3", "e4"],
+        ),
+    ));
+    d.features.push(Feature::new(
+        "base",
+        FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange {
+            profile: ProfileRef::sketch("s_plate"),
+            depth: None,
+            side: MaterialSide::Left,
+            rules: rules(),
+        }),
+    ));
+    let mut line = Sketch {
+        plane: PlaneRef::origin_xy(),
+        entities: Vec::new(),
+        constraints: Vec::new(),
+        solved: Default::default(),
+    };
+    line.entities.push(SketchEntity {
+        id: SketchEntityId::new("bl"),
+        geometry: SketchGeometry::Line {
+            start: PointExpr::mm(50.0, -5.0),
+            end: PointExpr::mm(50.0, 45.0),
+        },
+        construction: false,
+    });
+    d.features.push(sketch("s_line", line));
+    d
+}
+
+/// The plate's top face (its end cap).
+pub fn plate_top() -> Reference {
+    Reference::face(EntityName::Generated(GenerationName {
+        feature: FeatureId::new("base"),
+        role: Role::SheetFace,
+        tag: SourceTag::Key {
+            key: "plate".into(),
+        },
+        ordinal: Some(1),
+    }))
+}
+
+pub fn generated_face(feature: &str, role: Role, key: &str, ordinal: u32) -> Reference {
+    Reference::face(EntityName::Generated(GenerationName {
+        feature: FeatureId::new(feature),
+        role,
+        tag: SourceTag::Key { key: key.into() },
+        ordinal: Some(ordinal),
+    }))
+}
+
+fn body_box(r: &RegenResult) -> ([f64; 3], [f64; 3]) {
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for f in r.state.bodies.iter().flat_map(|b| b.topology.faces.iter()) {
+        for k in 0..3 {
+            lo[k] = lo[k].min(f.geom.bbox_min[k]);
+            hi[k] = hi[k].max(f.geom.bbox_max[k]);
+        }
+    }
+    (lo, hi)
+}
+
+#[test]
+fn a_sketched_bend_turns_the_far_side_of_a_plate_up() {
+    let env = Env::new();
+    let mut d = plate_doc();
+    d.features.push(Feature::new(
+        "bend",
+        FeatureKind::SheetMetal(SheetMetalFeature::SketchedBend {
+            face: plate_top(),
+            line: (fid("s_line"), SketchEntityId::new("bl")),
+            angle: ValueExpr::deg(90.0),
+            radius: None,
+            fixed: PlaneSide::Positive,
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 1);
+    let refs = vec![
+        generated_face("bend", Role::BendFace, "bl", 0),
+        generated_face("bend", Role::BendFace, "bl", 1),
+        generated_face("bend", Role::SheetFace, "bl.flat", 0),
+        generated_face("bend", Role::SheetFace, "bl.flat", 1),
+        generated_face("bend", Role::SheetEdge, "e2", 0),
+        plate_top(),
+    ];
+    assert_eq!(count_faces(&r, &d, &refs), vec![1; 6]);
+    // The flange stands at x = 50 − BA/2 + R .. + t and rises to t + R + (30 − BA/2).
+    let ba = PI / 2.0 * (3.0 + 0.44 * 2.0);
+    let (_, hi) = body_box(&r);
+    let tol = 2e-4;
+    assert!(
+        close(hi[0], (50.0 - ba / 2.0 + 3.0 + 2.0) * 1e-3, tol),
+        "{hi:?}"
+    );
+    assert!(
+        close(hi[2], (2.0 + 3.0 + 30.0 - ba / 2.0) * 1e-3, tol),
+        "{hi:?}"
+    );
+    // Downward (a negative angle) mirrors it below the plate.
+    if let FeatureKind::SheetMetal(SheetMetalFeature::SketchedBend { angle, .. }) =
+        &mut d.features[3].kind
+    {
+        *angle = ValueExpr::deg(-90.0);
+    }
+    let r = env.regen(&d);
+    assert_clean(&r);
+    let (lo, _) = body_box(&r);
+    assert!(close(lo[2], -(3.0 + 30.0 - ba / 2.0) * 1e-3, tol), "{lo:?}");
+}
+
+#[test]
+fn a_jog_offsets_the_far_side_by_its_offset() {
+    let env = Env::new();
+    let mut d = plate_doc();
+    d.features.push(Feature::new(
+        "jog",
+        FeatureKind::SheetMetal(SheetMetalFeature::Jog {
+            face: plate_top(),
+            line: (fid("s_line"), SketchEntityId::new("bl")),
+            offset: mm(12.0),
+            angle: ValueExpr::deg(90.0),
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    let refs = vec![
+        generated_face("jog", Role::BendFace, "bl", 0),
+        generated_face("jog", Role::BendFace, "bl.2", 0),
+        generated_face("jog", Role::SheetFace, "bl.mid", 0),
+        generated_face("jog", Role::SheetFace, "bl.flat", 1),
+    ];
+    assert_eq!(count_faces(&r, &d, &refs), vec![1; 4]);
+    // The moved flat sits 12 mm higher: top at t + 12.
+    let (_, hi) = body_box(&r);
+    assert!(close(hi[2], 14.0e-3, 2e-4), "{hi:?}");
+    // An offset smaller than the two bends' rise (2R + t at 90°) is refused.
+    if let FeatureKind::SheetMetal(SheetMetalFeature::Jog { offset, .. }) = &mut d.features[3].kind
+    {
+        *offset = mm(5.0);
+    }
+    let r = env.regen(&d);
+    assert!(has(&r, DiagCode::RegenInvalid), "{:?}", r.diagnostics);
+}
+
+#[test]
+fn bends_outside_the_lowered_cases_say_why() {
+    let env = Env::new();
+    // A slanted line crosses the plate's edges at an angle.
+    let mut d = plate_doc();
+    if let FeatureKind::Sketch(s) = &mut d.features[2].kind {
+        s.entities[0].geometry = SketchGeometry::Line {
+            start: PointExpr::mm(40.0, -5.0),
+            end: PointExpr::mm(60.0, 45.0),
+        };
+    }
+    d.features.push(Feature::new(
+        "bend",
+        FeatureKind::SheetMetal(SheetMetalFeature::SketchedBend {
+            face: plate_top(),
+            line: (fid("s_line"), SketchEntityId::new("bl")),
+            angle: ValueExpr::deg(90.0),
+            radius: None,
+            fixed: PlaneSide::Positive,
+        }),
+    ));
+    let r = env.regen(&d);
+    let d0 = diag(&r, DiagCode::KernelNotSupported);
+    assert!(d0.message.contains("square to the line"), "{}", d0.message);
+    // A line that misses the plate.
+    let mut d = plate_doc();
+    if let FeatureKind::Sketch(s) = &mut d.features[2].kind {
+        s.entities[0].geometry = SketchGeometry::Line {
+            start: PointExpr::mm(90.0, -5.0),
+            end: PointExpr::mm(90.0, 45.0),
+        };
+    }
+    d.features.push(Feature::new(
+        "bend",
+        FeatureKind::SheetMetal(SheetMetalFeature::SketchedBend {
+            face: plate_top(),
+            line: (fid("s_line"), SketchEntityId::new("bl")),
+            angle: ValueExpr::deg(90.0),
+            radius: None,
+            fixed: PlaneSide::Positive,
+        }),
+    ));
+    let r = env.regen(&d);
+    assert!(has(&r, DiagCode::RegenInvalid), "{:?}", r.diagnostics);
+}
+
+/// A hem of `kind` on the far end of the L bracket's base flat.
+pub fn hem_doc(kind: HemKind, length: f64) -> PartDocument {
+    let mut d = sheet_doc(&[(0.0, 30.0), (0.0, 0.0), (50.0, 0.0)], &["up", "base"]);
+    let end_face = generated_face("base", Role::SheetEdge, "base", 1);
+    d.features.push(Feature::new(
+        "hem",
+        FeatureKind::SheetMetal(SheetMetalFeature::Hem {
+            edges: vec![Reference::edges_between(sheet_face("base", 0), end_face)],
+            kind,
+            length: mm(length),
+        }),
+    ));
+    d
+}
+
+#[test]
+fn teardrop_and_rolled_hems_roll_past_a_half_turn() {
+    let env = Env::new();
+    for kind in [
+        HemKind::Teardrop {
+            radius: mm(2.0),
+            angle: ValueExpr::deg(250.0),
+        },
+        HemKind::Rolled {
+            radius: mm(2.0),
+            angle: ValueExpr::deg(270.0),
+        },
+    ] {
+        let d = hem_doc(
+            kind.clone(),
+            if matches!(kind, HemKind::Rolled { .. }) {
+                0.0
+            } else {
+                2.5
+            },
+        );
+        let r = env.regen(&d);
+        assert!(
+            r.status("hem").unwrap().ran(),
+            "{kind:?} {:?}",
+            r.diagnostics
+        );
+        let bends = r
+            .state
+            .bodies
+            .iter()
+            .flat_map(|b| b.names.faces.iter())
+            .filter(|ns| {
+                ns.iter().any(|n| {
+                    matches!(n, EntityName::Generated(g) if g.feature.0 == "hem" && g.role == Role::BendFace)
+                })
+            })
+            .count();
+        assert_eq!(bends, 2, "{kind:?}");
+    }
+    // A teardrop under a half turn, a roll into the sheet, and a leg into the sheet.
+    for (kind, length) in [
+        (
+            HemKind::Teardrop {
+                radius: mm(2.0),
+                angle: ValueExpr::deg(170.0),
+            },
+            3.0,
+        ),
+        (
+            HemKind::Rolled {
+                radius: mm(2.0),
+                angle: ValueExpr::deg(330.0),
+            },
+            0.0,
+        ),
+        (
+            HemKind::Teardrop {
+                radius: mm(2.0),
+                angle: ValueExpr::deg(270.0),
+            },
+            9.0,
+        ),
+    ] {
+        let r = env.regen(&hem_doc(kind.clone(), length));
+        assert!(
+            has(&r, DiagCode::RegenInvalid),
+            "{kind:?} {:?}",
+            r.diagnostics
+        );
+    }
+}
+
 // ===================================================================== weldments
 
 fn frame_doc(corner: CornerTreatment) -> PartDocument {
@@ -1307,8 +1650,14 @@ fn not_lowered_cases_fail_with_the_named_case() {
     let env = Env::new();
     let mut d = sheet_doc(&[(0.0, 30.0), (0.0, 0.0), (50.0, 0.0)], &["up", "base"]);
     d.features.push(Feature::new(
-        "jog",
-        FeatureKind::SheetMetal(SheetMetalFeature::Fold { bends: Vec::new() }),
+        "relief",
+        FeatureKind::SheetMetal(SheetMetalFeature::TabAndSlot {
+            edge: sheet_face("base", 0),
+            slot_face: sheet_face("up", 0),
+            count: ValueExpr::number(2.0),
+            length: mm(5.0),
+            clearance: mm(0.1),
+        }),
     ));
     let r = env.regen(&d);
     assert!(has(&r, DiagCode::KernelNotSupported));

@@ -1481,8 +1481,43 @@ impl<'a, 'b> Run<'a, 'b> {
                     HemKind::Open { gap } => {
                         Some(self.value(id, "kind.gap", gap, Dimension::LENGTH)?)
                     }
-                    HemKind::Teardrop { .. } | HemKind::Rolled { .. } => {
-                        return Err(self.not_lowered(id, "teardrop and rolled hems"))
+                    HemKind::Teardrop { radius, angle } | HemKind::Rolled { radius, angle } => {
+                        // A roll of `angle` at inner radius `radius`, then the straight leg
+                        // of `length` (a teardrop's leg runs back towards the sheet).
+                        let r = self.value(id, "kind.radius", radius, Dimension::LENGTH)?;
+                        let theta = self.value(id, "kind.angle", angle, Dimension::ANGLE)?;
+                        if r <= 0.0 {
+                            return Err(self.error(
+                                id,
+                                Some("kind.radius"),
+                                DiagCode::RegenInvalid,
+                                "a rolled or teardrop hem needs a positive radius".into(),
+                                Vec::new(),
+                            ));
+                        }
+                        if matches!(kind, HemKind::Teardrop { .. })
+                            && theta <= std::f64::consts::PI + 1e-12
+                        {
+                            return Err(self.error(
+                                id,
+                                Some("kind.angle"),
+                                DiagCode::RegenInvalid,
+                                "a teardrop hem turns more than 180°; use an open hem".into(),
+                                Vec::new(),
+                            ));
+                        }
+                        return self.flange_with(
+                            i,
+                            id,
+                            edges,
+                            l,
+                            theta,
+                            LengthReference::Tangent,
+                            crate::model::sheet_metal::FlangePosition::BendOutside,
+                            Some(r),
+                            &simple,
+                            true,
+                        );
                     }
                 };
                 // A closed hem folds flat on the sheet: an inner radius of a hundredth of the
@@ -1652,8 +1687,30 @@ impl<'a, 'b> Run<'a, 'b> {
                 ))
             }
             SheetMetalFeature::MiterFlange { .. } => Err(self.not_lowered(id, "miter flanges")),
-            SheetMetalFeature::Jog { .. } => Err(self.not_lowered(id, "jogs")),
-            SheetMetalFeature::SketchedBend { .. } => Err(self.not_lowered(id, "sketched bends")),
+            SheetMetalFeature::Jog {
+                face,
+                line,
+                offset,
+                angle,
+            } => {
+                let theta = self.value(id, "angle", angle, Dimension::ANGLE)?;
+                let rise = self.value(id, "offset", offset, Dimension::LENGTH)?;
+                self.bend_chain(i, id, face, line, theta, None, Some(rise), None, &simple)
+            }
+            SheetMetalFeature::SketchedBend {
+                face,
+                line,
+                angle,
+                radius,
+                fixed,
+            } => {
+                let theta = self.value(id, "angle", angle, Dimension::ANGLE)?;
+                let r = match radius {
+                    Some(r) => Some(self.value(id, "radius", r, Dimension::LENGTH)?),
+                    None => None,
+                };
+                self.bend_chain(i, id, face, line, theta, r, None, Some(*fixed), &simple)
+            }
             SheetMetalFeature::LoftedBend { .. } => Err(self.not_lowered(id, "lofted bends")),
             SheetMetalFeature::ConvertToSheetMetal { .. } => {
                 Err(self.not_lowered(id, "convert to sheet metal"))
@@ -1662,11 +1719,157 @@ impl<'a, 'b> Run<'a, 'b> {
             SheetMetalFeature::CornerRelief { .. } => Err(self.not_lowered(id, "corner reliefs")),
             SheetMetalFeature::TabAndSlot { .. } => Err(self.not_lowered(id, "tabs and slots")),
             SheetMetalFeature::FormTool { .. } => Err(self.not_lowered(id, "form tools")),
-            SheetMetalFeature::Unfold { .. } => {
-                Err(self.not_lowered(id, "unfold in place (use the flat pattern)"))
+            SheetMetalFeature::Unfold { fixed_face, bends } => {
+                if !bends.is_empty() {
+                    return Err(self.not_lowered(
+                        id,
+                        "unfolding some of a sheet's bends (unfold all of them: leave `bends` empty)",
+                    ));
+                }
+                let h = self.face_handle(i, id, "fixed_face", fixed_face)?;
+                let body = h.body as usize;
+                let Some((maker, ..)) = self.sheet_of(body) else {
+                    return Err(self.error(
+                        id,
+                        Some("fixed_face"),
+                        DiagCode::RefKindMismatch,
+                        "the fixed face is not on a sheet metal body".into(),
+                        Vec::new(),
+                    ));
+                };
+                self.only_made_by(id, body, &[maker], "unfold")?;
+                // The flat pattern's strip, in place of the bent sheet.
+                let flat = SheetMetalFeature::FlatPattern {
+                    fixed_face: fixed_face.clone(),
+                    grain: None,
+                };
+                let compiled = self.sheet_metal(i, id, &flat)?;
+                Ok(self.in_place(compiled, body))
             }
-            SheetMetalFeature::Fold { .. } => Err(self.not_lowered(id, "fold")),
+            SheetMetalFeature::Fold { bends } => {
+                if !bends.is_empty() {
+                    return Err(self.not_lowered(
+                        id,
+                        "folding some of a sheet's bends (fold all of them: leave `bends` empty)",
+                    ));
+                }
+                // The latest unfold before this feature, and the sheet it flattened.
+                let unfold = self.doc.features[..i].iter().rev().find(|f| {
+                    matches!(
+                        f.kind,
+                        FeatureKind::SheetMetal(SheetMetalFeature::Unfold { .. })
+                    ) && self.st.records.contains_key(&f.id)
+                });
+                let Some(unfold) = unfold.map(|f| f.id.clone()) else {
+                    return Err(self.error(
+                        id,
+                        None,
+                        DiagCode::RefKindMismatch,
+                        "there is no unfolded sheet to fold".into(),
+                        Vec::new(),
+                    ));
+                };
+                let body = self
+                    .st
+                    .bodies
+                    .iter()
+                    .position(|b| b.names.faces.iter().flatten().any(|n| n.maker() == &unfold));
+                let Some(body) = body else {
+                    return Err(self.error(
+                        id,
+                        None,
+                        DiagCode::RefKindMismatch,
+                        format!("the sheet `{unfold}` unfolded is gone"),
+                        Vec::new(),
+                    ));
+                };
+                self.only_made_by(id, body, &[unfold], "fold")?;
+                let Some((maker, ..)) = self.sheet_of(body) else {
+                    return Err(self.not_lowered(id, "folding this sheet"));
+                };
+                let Some(base) = self.doc.feature(&maker).cloned() else {
+                    return Err(self.not_lowered(id, "folding this sheet"));
+                };
+                let FeatureKind::SheetMetal(base_kind) = &base.kind else {
+                    return Err(self.not_lowered(id, "folding this sheet"));
+                };
+                // The base flange's own tools and names: references to the bent sheet's
+                // faces resolve again after the fold.
+                let compiled = self.sheet_metal(i, &maker, base_kind)?;
+                Ok(self.in_place(compiled, body))
+            }
         }
+    }
+
+    /// Refuses a whole-sheet rebuild (unfold, fold) of a body that features besides `makers`
+    /// changed: the rebuild comes from the base flange's section and would drop them.
+    fn only_made_by(
+        &mut self,
+        id: &FeatureId,
+        body: usize,
+        makers: &[FeatureId],
+        what: &str,
+    ) -> Result<(), Halt> {
+        let changed = self.st.bodies[body]
+            .names
+            .faces
+            .iter()
+            .any(|names| !names.iter().any(|n| makers.contains(n.maker())));
+        if changed {
+            return Err(self.not_lowered(
+                id,
+                &format!(
+                    "{what} of a sheet that features after its base flange changed (flanges, hems, cuts)"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// A new-body sheet op turned into a rebuild of `body` in place: the body is carved away
+    /// whole and the op's tools take its place.
+    fn in_place(&self, compiled: Compiled, body: usize) -> Compiled {
+        let Compiled::Op {
+            op: KernelOp::Labeled { tools, .. },
+            naming,
+            ..
+        } = compiled
+        else {
+            return compiled;
+        };
+        let mut lo = [f64::INFINITY; 3];
+        let mut hi = [f64::NEG_INFINITY; 3];
+        for f in &self.st.bodies[body].topology.faces {
+            for k in 0..3 {
+                lo[k] = lo[k].min(f.geom.bbox_min[k]);
+                hi[k] = hi[k].max(f.geom.bbox_max[k]);
+            }
+        }
+        let margin = 1e-3 + 0.01 * (0..3).map(|k| hi[k] - lo[k]).fold(0.0, f64::max);
+        let fr = frame_of([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let corners = vec![
+            ("c0".to_string(), [lo[0] - margin, lo[1] - margin]),
+            ("c1".to_string(), [hi[0] + margin, lo[1] - margin]),
+            ("c2".to_string(), [hi[0] + margin, hi[1] + margin]),
+            ("c3".to_string(), [lo[0] - margin, hi[1] + margin]),
+        ];
+        let carve = LabeledTool::new(ToolShape::prism(
+            polygon(fr, &corners),
+            lo[2] - margin,
+            hi[2] + margin,
+        ));
+        let tools = tools
+            .into_iter()
+            .map(|mut t| {
+                t.body = None;
+                t
+            })
+            .collect();
+        op(
+            labeled(tools, vec![carve], Combine::Add, false),
+            vec![body],
+            naming,
+        )
     }
 
     fn sketch_of(&self, base: &FeatureId) -> FeatureId {
@@ -1693,6 +1896,27 @@ impl<'a, 'b> Run<'a, 'b> {
         radius: Option<f64>,
         naming: &NamingContext,
     ) -> Result<Compiled, Halt> {
+        self.flange_with(
+            i, id, edges, length, theta, reference, position, radius, naming, false,
+        )
+    }
+
+    /// [`Self::flange`]; `roll` lets the bend turn past 180° (rolled and teardrop hems), up
+    /// to where its outer face would meet the sheet.
+    #[allow(clippy::too_many_arguments)]
+    fn flange_with(
+        &mut self,
+        i: usize,
+        id: &FeatureId,
+        edges: &[Reference],
+        length: f64,
+        theta: f64,
+        reference: LengthReference,
+        position: crate::model::sheet_metal::FlangePosition,
+        radius: Option<f64>,
+        naming: &NamingContext,
+        roll: bool,
+    ) -> Result<Compiled, Halt> {
         use crate::model::sheet_metal::FlangePosition as P;
         let set = self.list(i, id, "edges", edges, Some(TopoKind::Edge))?;
         let operands = Self::bodies_of(&set);
@@ -1717,12 +1941,25 @@ impl<'a, 'b> Run<'a, 'b> {
         };
         let t = rules.thickness;
         let r = radius.unwrap_or(rules.bend_radius);
-        if theta <= 0.0 || theta > std::f64::consts::PI + 1e-12 {
+        // A roll's outer face meets the sheet's outer face where r + (r + t) sin a = 0.
+        let max = if roll {
+            1.5 * std::f64::consts::PI + (r / (r + t)).asin()
+        } else {
+            std::f64::consts::PI
+        };
+        if theta <= 0.0 || theta > max + 1e-12 {
             return Err(self.error(
                 id,
-                Some("angle"),
+                Some(if roll { "kind.angle" } else { "angle" }),
                 DiagCode::RegenInvalid,
-                "a flange angle lies in (0°, 180°]".into(),
+                if roll {
+                    format!(
+                        "this roll turns at most {:.1}° before it meets the sheet",
+                        max.to_degrees()
+                    )
+                } else {
+                    "a flange angle lies in (0°, 180°]".into()
+                },
                 Vec::new(),
             ));
         }
@@ -1765,6 +2002,27 @@ impl<'a, 'b> Run<'a, 'b> {
                 LengthReference::OuterVirtualSharp => length - ossb(r + t),
                 LengthReference::InnerVirtualSharp => length - ossb(r),
             };
+            if roll && flat > 0.0 {
+                // The straight leg must stay off the sheet (y ≥ 0 over the sheet, x ≤ 0).
+                let d = [theta.cos(), theta.sin()];
+                let c = [0.0, r];
+                for rad in [r, r + t] {
+                    let a1 = -std::f64::consts::FRAC_PI_2 + theta;
+                    let tip = [
+                        c[0] + rad * a1.cos() + flat * d[0],
+                        c[1] + rad * a1.sin() + flat * d[1],
+                    ];
+                    if tip[0] <= 1e-9 && tip[1] < -1e-9 {
+                        return Err(self.error(
+                            id,
+                            Some("length"),
+                            DiagCode::RegenInvalid,
+                            "the hem's straight leg runs into the sheet; shorten it".into(),
+                            Vec::new(),
+                        ));
+                    }
+                }
+            }
             if flat <= 0.0 && theta < std::f64::consts::PI - 1e-9 {
                 return Err(self.error(
                     id,
@@ -1865,6 +2123,506 @@ impl<'a, 'b> Run<'a, 'b> {
         Ok(op(
             labeled(tools, carve, Combine::Add, false),
             operands,
+            naming.clone(),
+        ))
+    }
+
+    /// A sketched bend (one bend) or a jog (a bend, a flat and the opposite bend) of a flat
+    /// plate along a sketch line.
+    ///
+    /// The line is the first bend's centre line in the flat, so the plate's developed length
+    /// is kept: the strip each bend consumes is its bend allowance, centred on the line for
+    /// the first bend and following it for the rest. The side `fixed` (by the line's left
+    /// normal; the jog keeps the negative side) stays; the rest turns by `angle` towards the
+    /// face's outward normal (away from it when negative). A jog's offset is how far the
+    /// moved flat's faces move along the sheet normal; its middle flat is what is left of
+    /// the offset after the two bends.
+    ///
+    /// The plate is the base flange's closed profile, unchanged by later features; its
+    /// edges cross the bend strip square to the line, and holes stay clear of the strip.
+    #[allow(clippy::too_many_arguments)]
+    fn bend_chain(
+        &mut self,
+        i: usize,
+        id: &FeatureId,
+        face: &Reference,
+        line: &(FeatureId, crate::ids::SketchEntityId),
+        theta: f64,
+        radius: Option<f64>,
+        jog: Option<f64>,
+        fixed: Option<crate::refs::name::PlaneSide>,
+        naming: &NamingContext,
+    ) -> Result<Compiled, Halt> {
+        use crate::refs::name::PlaneSide;
+        let h = self.face_handle(i, id, "face", face)?;
+        let body = h.body as usize;
+        let invalid = |me: &mut Self, param: &str, message: String| {
+            me.error(id, Some(param), DiagCode::RegenInvalid, message, Vec::new())
+        };
+        let Some((maker, rules, None, _)) = self.sheet_of(body) else {
+            return Err(self.not_lowered(
+                id,
+                "bends of an already bent sheet (bend a flat plate, or add the bend to the base flange's chain)",
+            ));
+        };
+        let Some(n_face) = self.face_normal(&h) else {
+            return Err(invalid(self, "face", "the bend face is not flat".into()));
+        };
+        let t = rules.thickness;
+        let r = radius.unwrap_or(rules.bend_radius);
+        if r <= 0.0 {
+            return Err(invalid(
+                self,
+                "radius",
+                "a bend needs a positive radius".into(),
+            ));
+        }
+        let a = theta.abs();
+        if a <= 1e-9 || a > std::f64::consts::PI + 1e-12 {
+            return Err(invalid(
+                self,
+                "angle",
+                "a bend angle lies in (0°, 180°]".into(),
+            ));
+        }
+        let ba = crate::model::sheet_metal::bend_allowance(&rules.rule, t, r, a)
+            .map_err(|m| invalid(self, "angle", m))?;
+        // The middle flat of a jog: the rise left after two bends.
+        let middle = match jog {
+            None => None,
+            Some(rise) => {
+                if a >= std::f64::consts::PI - 1e-9 {
+                    return Err(invalid(
+                        self,
+                        "angle",
+                        "a jog's angle lies in (0°, 180°)".into(),
+                    ));
+                }
+                let flat = (rise.abs() - (2.0 * r + t) * (1.0 - a.cos())) / a.sin();
+                if flat < -1e-12 {
+                    return Err(invalid(
+                        self,
+                        "offset",
+                        format!(
+                            "the offset is less than the two bends rise ({:.3} mm at this angle and radius)",
+                            (2.0 * r + t) * (1.0 - a.cos()) * 1e3
+                        ),
+                    ));
+                }
+                Some(flat.max(0.0))
+            }
+        };
+        // The plate: the base flange's profile, between z = 0 and z = t of its frame.
+        let profile_ref = match self.doc.feature(&maker).map(|f| &f.kind) {
+            Some(FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. })) => {
+                profile.clone()
+            }
+            _ => return Err(self.not_lowered(id, "bends of this sheet")),
+        };
+        let plate = self.profile(i, id, "face", &profile_ref)?;
+        let pf = plate.frame;
+        let n = pf.z;
+        // The bend turns towards b; the face whose outward normal is b is the inner face.
+        let toward = if theta > 0.0 {
+            n_face
+        } else {
+            scale(n_face, -1.0)
+        };
+        let b = if dot(toward, n) >= 0.0 {
+            n
+        } else {
+            scale(n, -1.0)
+        };
+        let inner_height = if dot(b, n) > 0.0 { t } else { 0.0 };
+        // The line, in world coordinates on the inner face.
+        self.gate_feature(i, id, &line.0, "line")?;
+        let Some((solved, sframe)) = self.st.sketches.get(&line.0).cloned() else {
+            return Err(self.error(
+                id,
+                Some("line"),
+                DiagCode::RefKindMismatch,
+                format!("`{}` is not a sketch", line.0),
+                Vec::new(),
+            ));
+        };
+        use crate::model::sketch::PointRole;
+        let (Some(p0), Some(p1)) = (
+            solved
+                .points
+                .get(&(line.1.clone(), PointRole::Start))
+                .copied(),
+            solved
+                .points
+                .get(&(line.1.clone(), PointRole::End))
+                .copied(),
+        ) else {
+            return Err(self.error(
+                id,
+                Some("line"),
+                DiagCode::RefKindMismatch,
+                format!("`{}` has no line `{}`", line.0, line.1),
+                Vec::new(),
+            ));
+        };
+        let (w0, w1) = (sframe.to_world(p0), sframe.to_world(p1));
+        let on_inner = |p: [f64; 3]| {
+            let h = dot(sub(p, pf.origin), n);
+            add(p, scale(n, inner_height - h))
+        };
+        let l0 = on_inner(w0);
+        let u = sub(on_inner(w1), l0);
+        if dot(u, u).sqrt() < 1e-9 {
+            return Err(invalid(
+                self,
+                "line",
+                "the bend line does not lie across the plate".into(),
+            ));
+        }
+        let u = normalize(u);
+        // Left normal of the line in the sketch, in world coordinates; `fixed` keeps a side.
+        let d2 = [p1[0] - p0[0], p1[1] - p0[1]];
+        let left = normalize(add(scale(sframe.x, -d2[1]), scale(sframe.y, d2[0])));
+        let left = normalize(sub(left, scale(n, dot(left, n))));
+        let m = match fixed.unwrap_or(PlaneSide::Negative) {
+            PlaneSide::Positive => scale(left, -1.0),
+            PlaneSide::Negative => left,
+        };
+        let sw = |p: [f64; 3]| {
+            let q = sub(on_inner(p), l0);
+            [dot(q, m), dot(q, u)]
+        };
+        // The strip the bends consume, in developed length along m.
+        let s0 = -ba / 2.0;
+        let s1 = s0 + ba + middle.map_or(0.0, |f| f + ba);
+        let tol = 1e-9;
+        let to_sw = |seg: &ProfileSegment| (sw(pf.to_world(seg.start)), sw(pf.to_world(seg.end)));
+        let reach = |seg: &ProfileSegment| -> (f64, f64) {
+            let (a, b) = to_sw(seg);
+            match seg.kind {
+                SegmentKind::Line => (a[0].min(b[0]), a[0].max(b[0])),
+                SegmentKind::Arc { center, .. } => {
+                    let c = sw(pf.to_world(center));
+                    let rad = ((a[0] - c[0]).powi(2) + (a[1] - c[1]).powi(2)).sqrt();
+                    (c[0] - rad, c[0] + rad)
+                }
+                SegmentKind::Circle { center, radius } => {
+                    let c = sw(pf.to_world(center));
+                    (c[0] - radius, c[0] + radius)
+                }
+                // Ellipses and splines: anywhere, so they count as crossing the strip.
+                _ => (f64::NEG_INFINITY, f64::INFINITY),
+            }
+        };
+        let Some(outer) = plate.loops.first() else {
+            return Err(invalid(self, "face", "the plate has no outline".into()));
+        };
+        // Faces other features made (earlier bends, flanges, cuts) must lie wholly on the
+        // fixed side: the moved part is rebuilt from the plate's outline.
+        let foreign = {
+            let live = &self.st.bodies[body];
+            live.names.faces.iter().enumerate().any(|(index, names)| {
+                if names.iter().any(|n| n.maker() == &maker) {
+                    return false;
+                }
+                let g = &live.topology.faces[index].geom;
+                (0..8).any(|k| {
+                    let c = [
+                        if k & 1 == 0 {
+                            g.bbox_min[0]
+                        } else {
+                            g.bbox_max[0]
+                        },
+                        if k & 2 == 0 {
+                            g.bbox_min[1]
+                        } else {
+                            g.bbox_max[1]
+                        },
+                        if k & 4 == 0 {
+                            g.bbox_min[2]
+                        } else {
+                            g.bbox_max[2]
+                        },
+                    ];
+                    dot(sub(c, l0), m) > s0 - tol
+                })
+            })
+        };
+        if foreign {
+            return Err(self.not_lowered(
+                id,
+                "bends whose moving side holds faces of other features (bend the plate before adding them there)",
+            ));
+        }
+        let big = 2.0
+            * outer
+                .iter()
+                .map(|g| {
+                    let (a2, b2) = to_sw(g);
+                    a2[0]
+                        .abs()
+                        .max(a2[1].abs())
+                        .max(b2[0].abs())
+                        .max(b2[1].abs())
+                })
+                .fold(0.0, f64::max)
+            + 10.0 * t;
+        // Square crossings: every outline segment over the strip is a line of constant w.
+        let mut chord: Vec<f64> = Vec::new();
+        for seg in outer {
+            let (lo, hi) = reach(seg);
+            if hi <= s0 + tol || lo >= s1 - tol {
+                continue;
+            }
+            let (a2, b2) = to_sw(seg);
+            if !matches!(seg.kind, SegmentKind::Line) || (a2[1] - b2[1]).abs() > tol {
+                return Err(self.not_lowered(
+                    id,
+                    "bends whose strip the plate's edges cross at an angle or along a curve (edges must cross the bend zone square to the line)",
+                ));
+            }
+            if !chord.iter().any(|w| (w - a2[1]).abs() <= tol) {
+                chord.push(a2[1]);
+            }
+        }
+        if chord.len() != 2 {
+            return Err(invalid(
+                self,
+                "line",
+                "the bend line must cross the plate once, from edge to edge".into(),
+            ));
+        }
+        let (wa, wb) = (chord[0].min(chord[1]), chord[0].max(chord[1]));
+        for inner in plate.loops.iter().skip(1) {
+            let lo = inner
+                .iter()
+                .map(|g| reach(g).0)
+                .fold(f64::INFINITY, f64::min);
+            let hi = inner
+                .iter()
+                .map(|g| reach(g).1)
+                .fold(f64::NEG_INFINITY, f64::max);
+            if !(hi < s0 - tol || lo > s1 + tol) {
+                return Err(self.not_lowered(id, "bends through a hole or cut-out of the plate"));
+            }
+        }
+        // The moved flat: the outline beyond s1 (shifted to start at 0) and the holes there.
+        let mut moved: Vec<ProfileSegment> = Vec::new();
+        let n_out = outer.len();
+        let start_at = (0..n_out).find(|k| {
+            let (a2, b2) = to_sw(&outer[*k]);
+            a2[0] < s1 - tol && b2[0] >= s1 - tol
+        });
+        let Some(start_at) = start_at else {
+            return Err(invalid(
+                self,
+                "line",
+                "nothing of the plate lies past the bend".into(),
+            ));
+        };
+        let cut = |a2: [f64; 2], b2: [f64; 2]| {
+            let f = (s1 - a2[0]) / (b2[0] - a2[0]);
+            [s1, a2[1] + f * (b2[1] - a2[1])]
+        };
+        let local = |p: [f64; 2]| [p[0] - s1, p[1]];
+        let mut entry = None;
+        let mut exit = None;
+        for step in 0..n_out {
+            let seg = &outer[(start_at + step) % n_out];
+            let (a2, b2) = to_sw(seg);
+            let (ina, inb) = (a2[0] >= s1 - tol, b2[0] >= s1 - tol);
+            if step == 0 {
+                let e = cut(a2, b2);
+                entry = Some(e);
+                moved.push(line_seg(&seg.curve.0, local(e), local(b2)));
+                continue;
+            }
+            match (ina, inb) {
+                (true, true) => {
+                    let mut g = seg.clone();
+                    g.start = local(a2);
+                    g.end = local(b2);
+                    if let SegmentKind::Arc { center, clockwise } = seg.kind {
+                        // Developed coordinates keep the sketch's handedness only when (m, u)
+                        // is right-handed with the plate normal.
+                        let c = local(sw(pf.to_world(center)));
+                        let flip = dot(cross(m, u), n) < 0.0;
+                        g.kind = SegmentKind::Arc {
+                            center: c,
+                            clockwise: clockwise ^ flip,
+                        };
+                    }
+                    moved.push(g);
+                }
+                (true, false) => {
+                    if !matches!(seg.kind, SegmentKind::Line) {
+                        return Err(self.not_lowered(id, "bends whose strip a curved edge crosses"));
+                    }
+                    let e = cut(a2, b2);
+                    exit = Some(e);
+                    moved.push(line_seg(&seg.curve.0, local(a2), local(e)));
+                    break;
+                }
+                _ => {
+                    return Err(invalid(
+                        self,
+                        "line",
+                        "the bend line must cross the plate once, from edge to edge".into(),
+                    ))
+                }
+            }
+        }
+        let (Some(entry), Some(exit)) = (entry, exit) else {
+            return Err(invalid(
+                self,
+                "line",
+                "the plate does not cross the bend line".into(),
+            ));
+        };
+        let close_id = format!("{}.root", line.1 .0);
+        moved.push(line_seg(&close_id, local(exit), local(entry)));
+        let mut loops = vec![moved];
+        for inner in plate.loops.iter().skip(1) {
+            let lo = inner
+                .iter()
+                .map(|g| reach(g).0)
+                .fold(f64::INFINITY, f64::min);
+            if lo > s1 + tol {
+                let flip = dot(cross(m, u), n) < 0.0;
+                loops.push(
+                    inner
+                        .iter()
+                        .map(|seg| {
+                            let (a2, b2) = to_sw(seg);
+                            let mut g = seg.clone();
+                            g.start = local(a2);
+                            g.end = local(b2);
+                            if let SegmentKind::Arc { center, clockwise } = seg.kind {
+                                g.kind = SegmentKind::Arc {
+                                    center: local(sw(pf.to_world(center))),
+                                    clockwise: clockwise ^ flip,
+                                };
+                            }
+                            g
+                        })
+                        .collect(),
+                );
+            }
+        }
+        // Walk the section: a cursor on the inner (b-side) face, x along the developed
+        // direction, y the face normal; z is the line direction for every local frame.
+        let key = line.1 .0.clone();
+        let mut o = add(l0, scale(m, s0));
+        let (mut x, mut y) = (m, b);
+        let mut tools = Vec::new();
+        let span = (wa, wb);
+        let mut turns = vec![(true, key.clone())];
+        if middle.is_some() {
+            turns.push((false, format!("{key}.2")));
+        }
+        for (k, (up, bend_key)) in turns.iter().enumerate() {
+            let fr = Frame {
+                origin: o,
+                x,
+                y,
+                z: cross(x, y),
+            };
+            let (wz0, wz1) = {
+                let along = dot(u, fr.z);
+                let (p, q) = (span.0 * along, span.1 * along);
+                let base = dot(sub(l0, o), fr.z);
+                (base + p.min(q), base + p.max(q))
+            };
+            tools.push(sheet_bend_tool(fr, *up, r, t, a, bend_key, (wz0, wz1)));
+            // The cursor after the bend.
+            let (c, s) = (a.cos(), a.sin());
+            let (dx, dy, nx, ny) = if *up {
+                (r * s, r - r * c, [c, s], [-s, c])
+            } else {
+                ((r + t) * s, -t - r + (r + t) * c, [c, -s], [s, c])
+            };
+            o = add(o, add(scale(x, dx), scale(y, dy)));
+            let (x2, y2) = (
+                add(scale(x, nx[0]), scale(y, nx[1])),
+                add(scale(x, ny[0]), scale(y, ny[1])),
+            );
+            x = normalize(x2);
+            y = normalize(y2);
+            if k == 0 {
+                if let Some(flat) = middle {
+                    if flat > 1e-12 {
+                        let fr = frame_of(o, x, u);
+                        let sign = if dot(fr.z, y) >= 0.0 { 1.0 } else { -1.0 };
+                        let corners = vec![
+                            ("y0".to_string(), [0.0, wa]),
+                            ("x1".to_string(), [flat, wa]),
+                            ("y1".to_string(), [flat, wb]),
+                            ("x0".to_string(), [0.0, wb]),
+                        ];
+                        let mut tool = LabeledTool::new(ToolShape::prism(
+                            polygon(fr, &corners),
+                            0.0,
+                            -t * sign,
+                        ));
+                        let mid = format!("{key}.mid");
+                        for (side, o) in [("y0", 2), ("y1", 3), ("x0", 4), ("x1", 5)] {
+                            tool.sides.push((
+                                crate::ids::SketchEntityId::new(side),
+                                FaceLabel::key(Role::SheetEdge, mid.clone()).with_ordinal(o),
+                            ));
+                        }
+                        tool.start =
+                            Some(FaceLabel::key(Role::SheetFace, mid.clone()).with_ordinal(0));
+                        tool.end = Some(FaceLabel::key(Role::SheetFace, mid).with_ordinal(1));
+                        tools.push(tool);
+                        o = add(o, scale(x, flat));
+                    }
+                }
+            }
+        }
+        // The moved flat, from the last cursor.
+        let fr = frame_of(o, x, u);
+        let sign = if dot(fr.z, y) >= 0.0 { 1.0 } else { -1.0 };
+        let profile = CanonicalProfile {
+            frame: fr,
+            loops,
+            merge_collinear: false,
+        };
+        let mut flat = LabeledTool::new(ToolShape::prism(profile.clone(), 0.0, -t * sign));
+        for lp in &profile.loops {
+            for seg in lp {
+                let label = if seg.curve.0 == close_id {
+                    FaceLabel::key(Role::SheetEdge, key.clone()).with_ordinal(9)
+                } else {
+                    FaceLabel::key(Role::SheetEdge, seg.curve.0.clone()).with_ordinal(0)
+                };
+                flat.sides.push((seg.curve.clone(), label));
+            }
+        }
+        let moved_key = format!("{key}.flat");
+        flat.start = Some(FaceLabel::key(Role::SheetFace, moved_key.clone()).with_ordinal(0));
+        flat.end = Some(FaceLabel::key(Role::SheetFace, moved_key).with_ordinal(1));
+        tools.push(flat);
+        // Carve everything of the plate past the fixed flat.
+        let cf = frame_of(add(l0, scale(m, s0)), m, u);
+        let csign = if dot(cf.z, b) >= 0.0 { 1.0 } else { -1.0 };
+        let corners = vec![
+            ("c0".to_string(), [0.0, -big]),
+            ("c1".to_string(), [big, -big]),
+            ("c2".to_string(), [big, big]),
+            ("c3".to_string(), [0.0, big]),
+        ];
+        let mut carve = LabeledTool::new(ToolShape::prism(
+            polygon(cf, &corners),
+            1e-6 * csign,
+            -(t + 1e-6) * csign,
+        ));
+        carve.sides.push((
+            crate::ids::SketchEntityId::new("c0"),
+            FaceLabel::key(Role::Relief, key).with_ordinal(0),
+        ));
+        Ok(op(
+            labeled(tools, vec![carve], Combine::Add, false),
+            vec![body],
             naming.clone(),
         ))
     }
@@ -2525,6 +3283,78 @@ fn face_box(fr: &Frame, g: &FaceGeom, inset: f64) -> Vec<(String, [f64; 2])> {
 }
 
 /// The annular sector of a bend swept along the sketch normal, labelled by the bend key.
+/// A bend of a sheet section in `fr` (origin on the inner face where the bend starts, x
+/// along the sheet, y the inner face's normal for an upward bend; z along the bend line):
+/// `up` turns towards y about a centre `r` above the face, otherwise away from it about a
+/// centre `r` below the outer face. Prism over `w` along z.
+fn sheet_bend_tool(
+    fr: Frame,
+    up: bool,
+    r: f64,
+    t: f64,
+    angle: f64,
+    key: &str,
+    w: (f64, f64),
+) -> LabeledTool {
+    use std::f64::consts::FRAC_PI_2;
+    let (c, from, to) = if up {
+        ([0.0, r], -FRAC_PI_2, -FRAC_PI_2 + angle)
+    } else {
+        ([0.0, -t - r], FRAC_PI_2 - angle, FRAC_PI_2)
+    };
+    let (ri, ro) = (r, r + t);
+    let at = |rad: f64, a: f64| [c[0] + rad * a.cos(), c[1] + rad * a.sin()];
+    let sid = |s: &str| crate::ids::SketchEntityId::new(s);
+    let profile = CanonicalProfile {
+        frame: fr,
+        loops: vec![vec![
+            ProfileSegment {
+                curve: sid("in"),
+                kind: SegmentKind::Arc {
+                    center: c,
+                    clockwise: false,
+                },
+                start: at(ri, from),
+                end: at(ri, to),
+            },
+            line_seg("e1", at(ri, to), at(ro, to)),
+            ProfileSegment {
+                curve: sid("out"),
+                kind: SegmentKind::Arc {
+                    center: c,
+                    clockwise: true,
+                },
+                start: at(ro, to),
+                end: at(ro, from),
+            },
+            line_seg("e0", at(ro, from), at(ri, from)),
+        ]],
+        merge_collinear: false,
+    };
+    let mut tool = LabeledTool::new(ToolShape::prism(profile, w.0, w.1));
+    // Inner and outer as the bend sees them: an upward bend's inner face is on y's side.
+    let (inner, outer) = if up { ("in", "out") } else { ("out", "in") };
+    tool.sides.push((
+        sid(inner),
+        FaceLabel::key(Role::BendFace, key).with_ordinal(0),
+    ));
+    tool.sides.push((
+        sid(outer),
+        FaceLabel::key(Role::BendFace, key).with_ordinal(1),
+    ));
+    tool.sides.push((
+        sid("e0"),
+        FaceLabel::key(Role::SheetEdge, key).with_ordinal(4),
+    ));
+    tool.sides.push((
+        sid("e1"),
+        FaceLabel::key(Role::SheetEdge, key).with_ordinal(5),
+    ));
+    tool.start = Some(FaceLabel::key(Role::SheetEdge, key).with_ordinal(2));
+    tool.end = Some(FaceLabel::key(Role::SheetEdge, key).with_ordinal(3));
+    tool
+}
+
 fn bend_tool(
     frame: Frame,
     b: &crate::model::sheet_metal::SectionBend,
