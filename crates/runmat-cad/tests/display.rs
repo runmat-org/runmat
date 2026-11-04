@@ -2,7 +2,7 @@
 
 mod common;
 use common::*;
-use runmat_cad::display::{part_display, PartDisplay};
+use runmat_cad::display::{part_display, sketch_display, PartDisplay};
 use runmat_cad::model::*;
 use runmat_cad::refs::*;
 use runmat_cad::regen::engine::RegenResult;
@@ -167,4 +167,22 @@ fn foreign_body_is_refused() {
         .kernel
         .tessellate(&handle, &TessellationOptions::default())
         .is_err());
+}
+
+/// Sketch mode draws each solved sketch on its plane: entities with their solved points.
+#[test]
+fn sketches_draw_on_their_planes() {
+    let d = block();
+    let env = Env::new();
+    let r = env.regen(&d);
+    let sketches = sketch_display(&d, &r);
+    assert_eq!(sketches.len(), 1);
+    let s1 = &sketches[0];
+    assert_eq!(s1.id, "s1");
+    assert_eq!(s1.frame.z, [0.0, 0.0, 1.0]);
+    assert_eq!(s1.entities.len(), 4);
+    let l1 = s1.entities.iter().find(|e| e.id == "l1").unwrap();
+    assert_eq!(l1.kind, "line");
+    assert_eq!(l1.points["start"], [0.0, 0.0]);
+    assert!((l1.points["end"][0] - 0.08).abs() < 1e-6);
 }

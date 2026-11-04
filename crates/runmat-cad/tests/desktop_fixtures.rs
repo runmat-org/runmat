@@ -13,7 +13,7 @@ use runmat_cad::assembly::model::{DefinitionRef, RelPath};
 use runmat_cad::assembly::resolve::{resolve, ResolveContext, ResolveRequest};
 use runmat_cad::assembly::synth::{generate, SynthSpec};
 use runmat_cad::display::{
-    assembly_display, assembly_display_json, part_display, part_display_json,
+    assembly_display, assembly_display_json, part_display, part_display_json, sketch_display,
 };
 use runmat_cad::drawing::index::{build_drawing_index, to_json as drawing_json, AnnotationValues};
 use runmat_cad::drawing::*;
@@ -164,7 +164,8 @@ fn part_fixture() {
     serde_json::from_str::<serde_json::Value>(&json).unwrap();
     emit("bracket.part.json", &json);
     // What the part viewport draws: the test kernel's tessellation, joined with the names.
-    let display = part_display(&r, &env.kernel, &TessellationOptions::default());
+    let mut display = part_display(&r, &env.kernel, &TessellationOptions::default());
+    display.sketches = sketch_display(&d, &r);
     assert!(display.problems.is_empty(), "{:?}", display.problems);
     emit(
         "bracket.part.display.json",

@@ -16,6 +16,8 @@
 use crate::assembly::model::DefinitionKind;
 use crate::assembly::resolve::ResolvedAssembly;
 use crate::assembly::source::DesignSource;
+use crate::model::sketch::{PointRole, SketchGeometry};
+use crate::model::{FeatureKind, PartDocument};
 use crate::refs::name::{EntityName, TopoKind};
 use crate::refs::Reference;
 use crate::regen::engine::RegenResult;
@@ -87,6 +89,51 @@ pub struct PartDisplay {
     pub bounds: Option<Bounds>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub problems: Vec<DisplayProblem>,
+    /// Solved sketches on their planes (see [`sketch_display`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketches: Vec<SketchDisplay>,
+}
+
+/// A sketch plane in part coordinates.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FrameDisplay {
+    pub origin: [f32; 3],
+    pub x: [f32; 3],
+    pub y: [f32; 3],
+    pub z: [f32; 3],
+}
+
+/// One solved sketch entity, in sketch-plane coordinates (metres).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SketchEntityDisplay {
+    pub id: String,
+    /// `point`, `line`, `arc` or `circle`.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub construction: bool,
+    /// Solved points by role (`at`, `start`, `end`, `center`).
+    pub points: BTreeMap<String, [f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f32>,
+    /// Remaining degrees of freedom, where the solver reports them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dof: Option<u32>,
+}
+
+/// A sketch as sketch mode draws it: the plane, the solved entities and the constraints as
+/// authored (dimensions carry their value expressions).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SketchDisplay {
+    pub id: String,
+    pub frame: FrameDisplay,
+    pub status: String,
+    pub entities: Vec<SketchEntityDisplay>,
+    pub constraints: Vec<serde_json::Value>,
+    /// Constraint indices the solver reported redundant or conflicting.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redundant: Vec<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conflicting: Vec<usize>,
 }
 
 fn flat(points: &[[f64; 3]]) -> Vec<f32> {
@@ -393,6 +440,75 @@ fn prototype_bounds(shape: &PrototypeShape) -> Option<Bounds> {
         PrototypeShape::Box { bounds } => Some(bounds.clone()),
         PrototypeShape::Empty => None,
     }
+}
+
+/// The solved sketches of a regenerated part, in document order.
+pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<SketchDisplay> {
+    let f32s = |v: [f64; 3]| v.map(|x| x as f32);
+    document
+        .features
+        .iter()
+        .filter_map(|feature| {
+            let FeatureKind::Sketch(sketch) = &feature.kind else {
+                return None;
+            };
+            let (solved, frame) = result.state.sketches.get(&feature.id)?;
+            let entities = sketch
+                .entities
+                .iter()
+                .map(|entity| {
+                    let kind = match entity.geometry {
+                        SketchGeometry::Point { .. } => "point",
+                        SketchGeometry::Line { .. } => "line",
+                        SketchGeometry::Arc { .. } => "arc",
+                        SketchGeometry::Circle { .. } => "circle",
+                    };
+                    let points = [
+                        (PointRole::At, "at"),
+                        (PointRole::Start, "start"),
+                        (PointRole::End, "end"),
+                        (PointRole::Center, "center"),
+                    ]
+                    .into_iter()
+                    .filter_map(|(role, name)| {
+                        solved
+                            .point(&entity.id, role)
+                            .map(|p| (name.to_string(), p.map(|x| x as f32)))
+                    })
+                    .collect();
+                    SketchEntityDisplay {
+                        id: entity.id.0.clone(),
+                        kind: kind.into(),
+                        construction: entity.construction,
+                        points,
+                        radius: solved.radii.get(&entity.id).map(|r| *r as f32),
+                        dof: solved.entity_dof.get(&entity.id).copied(),
+                    }
+                })
+                .collect();
+            Some(SketchDisplay {
+                id: feature.id.0.clone(),
+                frame: FrameDisplay {
+                    origin: f32s(frame.origin),
+                    x: f32s(frame.x),
+                    y: f32s(frame.y),
+                    z: f32s(frame.z),
+                },
+                status: serde_json::to_value(solved.status)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .unwrap_or_default(),
+                entities,
+                constraints: sketch
+                    .constraints
+                    .iter()
+                    .filter_map(|c| serde_json::to_value(c).ok())
+                    .collect(),
+                redundant: solved.redundant.clone(),
+                conflicting: solved.conflicting.clone(),
+            })
+        })
+        .collect()
 }
 
 /// The part display as JSON, for the Desktop.
