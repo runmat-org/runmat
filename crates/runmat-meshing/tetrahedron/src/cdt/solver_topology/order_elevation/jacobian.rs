@@ -45,13 +45,14 @@ pub(super) fn validate_elements(
     cancellation: &dyn MeshingCancellationSignal,
     work: ValidationWork<'_, '_>,
 ) -> Result<(), DelaunaySolverTopologyError> {
+    let mut certified = Vec::new();
     for element_index in element_indices {
         let element = topology
             .volume_elements
             .get(element_index)
             .ok_or_else(|| invalid("Tet10 Jacobian element index is out of bounds"))?;
         let coordinates = element_coordinates_from_topology(element, topology)?;
-        certify_element(
+        let jacobian = certify_jacobian(
             coordinates,
             maximum_search_work,
             maximum_recursion_depth,
@@ -61,8 +62,19 @@ pub(super) fn validate_elements(
                 counter: work.counter,
                 storage: work.storage,
             },
-        )
-        .map_err(|failure| DelaunaySolverTopologyError {
+        );
+        let failed = jacobian.is_err();
+        certified.push((element_index, coordinates, jacobian));
+        // The first failing element ends certification; earlier elements still need the
+        // shared rule, so the first failure in input order is the one reported.
+        if failed {
+            break;
+        }
+    }
+    let rule = shared_rule_results(&certified, cancellation)?;
+    for ((element_index, _, jacobian), rule) in certified.into_iter().zip(rule) {
+        let element = &topology.volume_elements[element_index];
+        jacobian.and(rule).map_err(|failure| DelaunaySolverTopologyError {
             kind: failure.kind,
             reason: format!(
                 "Tet10 element {} (stable identity {:?}) failed certification: {}",
@@ -71,6 +83,31 @@ pub(super) fn validate_elements(
         })?;
     }
     Ok(())
+}
+
+/// The shared Tet10 element rule (Jacobian margin and stiffness-quadrature convergence) for
+/// every element whose Jacobian was certified, on all admitted cores, in input order.
+fn shared_rule_results(
+    certified: &[(
+        usize,
+        [[f64; 3]; 10],
+        Result<(), DelaunaySolverTopologyError>,
+    )],
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Vec<Result<(), DelaunaySolverTopologyError>>, DelaunaySolverTopologyError> {
+    if cancellation.is_cancelled() {
+        return Err(DelaunaySolverTopologyError {
+            kind: DelaunaySolverTopologyErrorKind::Cancelled,
+            reason: "Tet10 element certification was cancelled".to_owned(),
+        });
+    }
+    Ok(runmat_cpu_execution::ordered_map(
+        certified,
+        |(_, coordinates, jacobian)| match jacobian {
+            Ok(()) => shared_element_rule(coordinates),
+            Err(_) => Ok(()),
+        },
+    ))
 }
 
 pub(super) fn invalid_element_indices<'storage>(
@@ -82,9 +119,10 @@ pub(super) fn invalid_element_indices<'storage>(
     work: ValidationWork<'storage, '_>,
 ) -> Result<ReservedBuffer<'storage, usize>, DelaunaySolverTopologyError> {
     let mut invalid_indices = ReservedBuffer::new(topology.volume_elements.len(), work.storage)?;
+    let mut certified = Vec::with_capacity(topology.volume_elements.len());
     for (element_index, element) in topology.volume_elements.iter().enumerate() {
         let coordinates = element_coordinates_from_topology(element, topology)?;
-        match certify_element(
+        let jacobian = certify_jacobian(
             coordinates,
             maximum_search_work,
             maximum_recursion_depth,
@@ -94,12 +132,18 @@ pub(super) fn invalid_element_indices<'storage>(
                 counter: work.counter,
                 storage: work.storage,
             },
-        ) {
-            Ok(()) => {}
-            Err(failure) if failure.kind == DelaunaySolverTopologyErrorKind::InvalidMesh => {
-                invalid_indices.push(element_index)?;
+        );
+        match jacobian {
+            Err(failure) if failure.kind != DelaunaySolverTopologyErrorKind::InvalidMesh => {
+                return Err(failure)
             }
-            Err(failure) => return Err(failure),
+            jacobian => certified.push((element_index, coordinates, jacobian)),
+        }
+    }
+    let rule = shared_rule_results(&certified, cancellation)?;
+    for ((element_index, _, jacobian), rule) in certified.into_iter().zip(rule) {
+        if jacobian.is_err() || rule.is_err() {
+            invalid_indices.push(element_index)?;
         }
     }
     Ok(invalid_indices)
@@ -244,7 +288,7 @@ fn margin_checkpoint(
 /// within it is not admitted (and goes to repair) on every host alike.
 pub(super) const ELEMENT_SEARCH_WORK: u64 = 1 << 16;
 
-fn certify_element(
+fn certify_jacobian(
     coordinates: [[f64; 3]; 10],
     maximum_search_work: u64,
     maximum_recursion_depth: u32,
@@ -282,18 +326,42 @@ fn certify_element(
                 "Tet10 isoparametric Jacobian could not be certified positive within the element's search work of {maximum_search_work}"
             )))
         }
-        // A positive Jacobian is necessary but not sufficient: the element must also pass the
-        // shared Tet10 rule (Jacobian margin and stiffness-quadrature convergence) that analysis
-        // applies before integrating it, so the mesher never publishes an element it rejects.
-        Ok(()) => runmat_meshing_core::tetrahedron10_stiffness_moments(&coordinates)
-            .map(|_| ())
-            .map_err(|invalidity| {
-                invalid(format!(
-                    "Tet10 element fails the shared element-validity rule: {invalidity:?}"
-                ))
-            }),
         result => result,
     }
+}
+
+/// Jacobian certification followed by the shared Tet10 element rule, for one element.
+#[cfg(test)]
+fn certify_element(
+    coordinates: [[f64; 3]; 10],
+    maximum_search_work: u64,
+    maximum_recursion_depth: u32,
+    cancellation_check_interval: u64,
+    cancellation: &dyn MeshingCancellationSignal,
+    work: ValidationWork<'_, '_>,
+) -> Result<(), DelaunaySolverTopologyError> {
+    certify_jacobian(
+        coordinates,
+        maximum_search_work,
+        maximum_recursion_depth,
+        cancellation_check_interval,
+        cancellation,
+        work,
+    )?;
+    shared_element_rule(&coordinates)
+}
+
+/// A positive Jacobian is necessary but not sufficient: the element must also pass the shared
+/// Tet10 rule (Jacobian margin and stiffness-quadrature convergence) that analysis applies
+/// before integrating it, so the mesher never publishes an element it rejects.
+fn shared_element_rule(coordinates: &[[f64; 3]; 10]) -> Result<(), DelaunaySolverTopologyError> {
+    runmat_meshing_core::tetrahedron10_stiffness_moments(coordinates)
+        .map(|_| ())
+        .map_err(|invalidity| {
+            invalid(format!(
+                "Tet10 element fails the shared element-validity rule: {invalidity:?}"
+            ))
+        })
 }
 
 fn certify_element_within(
