@@ -178,9 +178,11 @@ pub(in crate::semantic::model) fn required_quantity(
     let value = required_assignment(declaration, statements, name, diagnostics)?;
     let expected = dimension.into();
     if !(value.value_type).is_quantity(expected) {
-        use runmat_types::physical::QuantitySpec;
+        let angle = runmat_types::physical::DynamicDimension::quantity_type(
+            runmat_types::physical::QuantityKind::Angle,
+        );
         let requirement =
-            if expected.semantic_kind() == Some(runmat_types::physical::QuantityKind::Angle) {
+            if expected == angle {
                 "quantity with an angle unit (deg or rad)"
             } else {
                 "quantity of the required dimension"

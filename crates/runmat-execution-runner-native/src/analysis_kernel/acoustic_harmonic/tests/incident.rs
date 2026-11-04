@@ -199,8 +199,8 @@ fn native_incident_pressure_source_and_cold_publication_are_transport_independen
             assert_eq!(payload.ordered_node_ids, result.ordered_node_ids());
             assert_eq!(payload.ordered_element_ids, result.ordered_element_ids());
             let fields = payload.fields.fields();
-            // Pressure, particle velocity and active intensity.
-            assert_eq!(fields.len(), 3);
+            // Pressure, particle velocity, active intensity and plane-wave port intensity.
+            assert_eq!(fields.len(), 4);
             let original_pressure = result
                 .pressure_pa()
                 .iter()
