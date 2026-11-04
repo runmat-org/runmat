@@ -129,3 +129,32 @@ Baseline receipts (T1 CLI runmat-hero-a5906bba1a): ~/runs/q-snapshot-5/out/base*
   report balance as a truncation measure, or add residual (static-correction) vectors to the basis
   (residual_vector_directions exists in the runtime options but not in the .fea language).
   Receipt: out/final3/modal-harmonic/, run manifest in studies/cantilever-modal-harmonic/.artifacts.
+
+## q-snapshot-7 (2026-11-04, branch q-snapshot-7 from integration/0.7.1 = eb3dacbd25)
+Work dirs on runmat-build-mac: src ~/src/q-snapshot-5, target ~/targets/q-snapshot-5 (pruned to the
+two newest hashes per workspace crate: 109 GB -> 47 GB), runs ~/runs/q-snapshot-7/.
+1. Modal-reduced frequency acceptance:
+   - runtime frequency_result/admission.rs: `classify_structural_frequency_quality` — Direct is
+     gated on solver residual and full-order balance (unchanged 1e-8); ModalReduced on the
+     reduced-space residual only. Full-space balance is published, never gated:
+     `ModalTruncationBalance` (fea receipt accessor `modal_truncation_balance()`) and
+     `AnalysisResultsSummary.modal_truncation_balance_error` / `_frequency_hz`
+     (`max_frequency_balance_error` is None for modal-reduced).
+   - Language: `structural modal|prestressed_modal { residual_vectors = [[0,0,1], ...] }`
+     (inertia residual vectors, existed in runtime) and modal-reduced frequency steps
+     `static_correction = applied_loads | none` (new: K^-1 f at the plan's reference frequency,
+     mass-orthogonalized against modes + residual vectors). Core: ProcedureSettings::
+     StructuralModalBasis / StructuralModalFrequency. Grammar group "modal static corrections";
+     LSP hover; ledger capability structural.modal-reduced.residual-vectors; procedures.md section.
+   - ModalReducedSystem::project_enriched (modes + basis residual vectors + static corrections)
+     is used by the frequency path only; transient/RS/random keep project().
+2. analysis::tests failures (exist at 7507f51f46: typed layouts came in a38ce761ae, in T1.1):
+   - component_count scalar Some(1): tests held the stale truth (producer from_entry/from_field
+     derive it from the typed value shape) -> tests updated.
+   - orthogonality kind: producer defect (Tensor{[n]} per mode classified Vector when n=3) ->
+     modal.m_orthogonality is one Global Tensor{[n,n]}; test expects component_count n*n.
+   - cancellation: producer defect, coercivity symbolic analysis mapped SolverError::Cancelled to
+     SymbolicOrdering -> FEA_INVALID_REAL_SYSTEM; now CoercivityError::Cancelled.
+3. Snapshot profiles: PRIMARY_RESPONSES picks a transient's instant per family (displacement,
+   acoustic pressure, fluid velocity at peak; temperature at the final state); new real
+   "sound-pressure" display for acoustic transients; 6 family tests.
