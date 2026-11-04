@@ -6,25 +6,73 @@
 //! omitted keys, selected parts, digest); the instance columns stay in the artifact cache.
 
 use crate::assembly::bom::{flat_bom, Bom, BomOptions};
-use crate::assembly::model::{DefinitionKind, DefinitionRef, Representation};
+use crate::assembly::model::{DefinitionKind, DefinitionRef, RelPath, Representation};
 use crate::assembly::resolve::{
-    MateStatus, NodeOrigin, PoseStatus, Prototype, ResolveStats, ResolvedAssembly,
+    MateStatus, NodeId, NodeOrigin, PoseStatus, Prototype, ResolveStats, ResolvedAssembly,
 };
 use crate::assembly::source::DesignSource;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::ids::{FilePath, ItemUuid, MaterialRef, RevisionId};
+use crate::refs::InstanceKey;
 use crate::regen::kernel::Transform;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-pub const ASSEMBLY_INDEX_FORMAT_VERSION: u32 = 1;
+pub const ASSEMBLY_INDEX_FORMAT_VERSION: u32 = 2;
+
+/// How an occurrence is positioned, as the tree prefixes it (SolidWorks' `(f)`, `(-)`, `(+)`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefinitionState {
+    /// Positioned by its placement: `(f)`.
+    Fixed,
+    /// Mates position it fully.
+    FullyDefined,
+    /// Mates leave it degrees of freedom: `(-)`.
+    UnderDefined,
+    /// A mate on it contradicts the others: `(+)`.
+    OverDefined,
+    /// Its placement or mate solve failed; it keeps its last good placement.
+    Failed,
+}
+
+/// The pattern, mirror or fastener set that made an occurrence, and its key in it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstanceRow {
+    pub by: String,
+    /// The key as occurrence paths write it (`2`, `@2`, `r1@3`).
+    pub key: String,
+    /// The key for people: the copy's number (`2`), or its row, point or grid position.
+    pub label: String,
+}
+
+fn instance_label(key: &InstanceKey) -> String {
+    match key {
+        InstanceKey::Linear { step }
+        | InstanceKey::Circular { step }
+        | InstanceKey::Curve { step } => step.to_string(),
+        InstanceKey::Grid { first, second } => format!("{first},{second}"),
+        InstanceKey::Lattice { i, j } => format!("{i},{j}"),
+        InstanceKey::Ring { ring, step } => format!("{ring}.{step}"),
+        InstanceKey::Row { key } | InstanceKey::Point { point: key } => key.clone(),
+        InstanceKey::Mirror => "mirror".into(),
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OccurrenceRow {
     pub uuid: ItemUuid,
     pub path: String,
+    /// The occurrence's own name, without its instance: `clip` for `clip@clips[2]`.
+    pub name: String,
+    /// Set for a copy made by a pattern, mirror or fastener set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance: Option<InstanceRow>,
+    /// Absent for the root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<DefinitionState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<ItemUuid>,
     pub definition: DefinitionRef,
@@ -53,6 +101,9 @@ pub struct MateRow {
     pub status: MateStatus,
     #[serde(default)]
     pub active_limits: Vec<f64>,
+    /// The occurrences its two connectors sit on (the assembly's own frame is left out).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub occurrences: Vec<ItemUuid>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -82,10 +133,83 @@ pub struct AssemblyIndex {
     pub stats: ResolveStats,
 }
 
+/// The child of `from` reached by walking `path` segment by segment.
+fn walk(tree: &ResolvedAssembly, from: NodeId, path: &RelPath) -> Option<NodeId> {
+    let mut at = from;
+    for segment in &path.0 {
+        at = *tree
+            .node(at)
+            .children
+            .iter()
+            .find(|c| &tree.node(**c).segment == segment)?;
+    }
+    Some(at)
+}
+
+/// The occurrences each mate's connectors sit on, in mate order.
+fn mate_occurrences(
+    tree: &ResolvedAssembly,
+    source: Option<&dyn DesignSource>,
+) -> Vec<Vec<NodeId>> {
+    tree.mates
+        .iter()
+        .map(|m| {
+            let owner = tree.node(m.owner);
+            let Some(doc) = source.and_then(|s| {
+                s.assembly(&owner.definition.file, owner.revision.as_ref())
+                    .ok()
+            }) else {
+                return Vec::new();
+            };
+            let Some(def) = doc.mates.iter().find(|d| d.name == m.name) else {
+                return Vec::new();
+            };
+            let mut hosts = Vec::new();
+            for connector in [&def.a, &def.b] {
+                let Some(c) = doc.connector(connector) else {
+                    continue;
+                };
+                if c.occurrence.0.is_empty() {
+                    continue;
+                }
+                if let Some(host) = walk(tree, m.owner, &c.occurrence) {
+                    if !hosts.contains(&host) {
+                        hosts.push(host);
+                    }
+                }
+            }
+            hosts
+        })
+        .collect()
+}
+
 pub fn build_assembly_index(
     tree: &ResolvedAssembly,
     source: Option<&dyn DesignSource>,
 ) -> AssemblyIndex {
+    let hosts = mate_occurrences(tree, source);
+    let over: std::collections::BTreeSet<NodeId> = tree
+        .mates
+        .iter()
+        .zip(&hosts)
+        .filter(|(m, _)| matches!(m.status, MateStatus::Conflicting { .. }))
+        .flat_map(|(_, h)| h.iter().copied())
+        .collect();
+    let state = |i: NodeId| -> Option<DefinitionState> {
+        let n = tree.node(i);
+        n.parent?;
+        Some(if over.contains(&i) {
+            DefinitionState::OverDefined
+        } else if n.pose == PoseStatus::Failed {
+            DefinitionState::Failed
+        } else if n.fixed {
+            DefinitionState::Fixed
+        } else if n.pose == PoseStatus::Floating || n.dof.is_some_and(|d| d > 0) {
+            DefinitionState::UnderDefined
+        } else {
+            DefinitionState::FullyDefined
+        })
+    };
     let occurrences = tree
         .nodes
         .iter()
@@ -93,6 +217,13 @@ pub fn build_assembly_index(
         .map(|(i, n)| OccurrenceRow {
             uuid: n.uuid,
             path: tree.path(i as u32),
+            name: n.segment.name.clone(),
+            instance: n.segment.instance.as_ref().map(|r| InstanceRow {
+                by: r.by.clone(),
+                key: r.key.to_string(),
+                label: instance_label(&r.key),
+            }),
+            state: state(i as NodeId),
             parent: n.parent.map(|p| tree.nodes[p as usize].uuid),
             definition: n.definition.clone(),
             revision: n.revision.clone(),
@@ -111,12 +242,14 @@ pub fn build_assembly_index(
     let mates = tree
         .mates
         .iter()
-        .map(|m| MateRow {
+        .zip(&hosts)
+        .map(|(m, h)| MateRow {
             assembly: tree.path(m.owner),
             name: m.name.clone(),
             kind: m.kind.clone(),
             status: m.status.clone(),
             active_limits: m.active_limits.clone(),
+            occurrences: h.iter().map(|n| tree.node(*n).uuid).collect(),
         })
         .collect();
     let fasteners = tree

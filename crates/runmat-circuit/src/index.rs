@@ -17,7 +17,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Bumped on any change to the projection's shape.
-pub const CIRCUIT_INDEX_FORMAT_VERSION: u32 = 1;
+pub const CIRCUIT_INDEX_FORMAT_VERSION: u32 = 2;
+
+/// The parameters that carry a component's shown value, in order of preference.
+const VALUE_PARAMS: [&str; 4] = ["resistance", "capacitance", "inductance", "frequency"];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CircuitIndex {
@@ -58,6 +61,10 @@ pub struct ComponentRow {
     pub manufacturer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The value a schematic and BOM show (`10 kΩ ±1%`): the `Value` property, else the first of
+    /// resistance, capacitance, inductance and frequency.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
     /// Parameter name → display value (`10 kΩ ±1 %`).
     pub params: BTreeMap<String, String>,
     pub fitting: String,
@@ -329,6 +336,11 @@ pub fn build_index(
                 part: part.as_ref().map(|p| p.0.clone()),
                 manufacturer: part.as_ref().map(|p| p.1.clone()).filter(|s| !s.is_empty()),
                 description: part.as_ref().map(|p| p.2.clone()).filter(|s| !s.is_empty()),
+                value: c.properties.get("Value").cloned().or_else(|| {
+                    VALUE_PARAMS
+                        .iter()
+                        .find_map(|k| c.params.get(*k).map(param_display))
+                }),
                 params: c
                     .params
                     .iter()

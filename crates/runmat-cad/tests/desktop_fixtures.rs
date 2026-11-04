@@ -12,7 +12,7 @@ use runmat_cad::assembly::index::{assembly_index_json, build_assembly_index};
 use runmat_cad::assembly::model::{DefinitionRef, RelPath};
 use runmat_cad::assembly::resolve::{resolve, ResolveContext, ResolveRequest};
 use runmat_cad::assembly::synth::{generate, SynthSpec};
-use runmat_cad::drawing::index::{build_drawing_index, to_json as drawing_json};
+use runmat_cad::drawing::index::{build_drawing_index, to_json as drawing_json, AnnotationValues};
 use runmat_cad::drawing::*;
 use runmat_cad::ids::{FilePath, PropertyName};
 use runmat_cad::index::{build_index, to_json};
@@ -243,12 +243,27 @@ fn add_frame_mates(source: &mut runmat_cad::assembly::source::MemorySource) {
 
 #[test]
 fn drawing_fixture() {
-    let index = build_drawing_index(&drawing(), &Model);
+    let index = build_drawing_index(&drawing(), &Model, &Model);
     assert!(!index.document.views.is_empty());
     emit("bracket.drawing.json", &drawing_json(&index));
 }
 
 struct Model;
+
+/// The bracket's plate is 10 mm thick, and its top is parallel to datum A within 0.05 mm.
+impl AnnotationValues for Model {
+    fn dimension(
+        &self,
+        _: &ModelRef,
+        _: DimensionStyle,
+        entities: &[Vec<EntityName>],
+    ) -> Option<String> {
+        (!entities.is_empty()).then(|| "10 mm".into())
+    }
+    fn tolerance_frame(&self, _: &ModelRef, tolerance: &str) -> Option<String> {
+        (tolerance == "top_parallel").then(|| "∥ 0.05 A".into())
+    }
+}
 
 impl ModelReferences for Model {
     fn resolve(&self, _: &ModelRef, r: &Reference) -> Result<Vec<Vec<EntityName>>, String> {
@@ -382,15 +397,18 @@ fn drawing() -> DrawingDocument {
                     aligned: false,
                 },
             ),
-            view(
-                "b",
-                ViewKind::Detail {
-                    from: "a_a".into(),
-                    center: Reference::end_cap("body"),
-                    radius: mm(20.0),
-                    label: "B".into(),
-                },
-            ),
+            View {
+                scale: Some((2, 1)),
+                ..view(
+                    "b",
+                    ViewKind::Detail {
+                        from: "a_a".into(),
+                        center: Reference::end_cap("body"),
+                        radius: mm(20.0),
+                        label: "B".into(),
+                    },
+                )
+            },
         ],
         annotations: vec![
             Annotation {
