@@ -90,7 +90,7 @@ impl Dimension {
 /// Format name written into the JSON file.
 pub const FORMAT: &str = "runmat.design-commands";
 /// Bumped on any change to the JSON shape (not on new commands).
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 /// File kinds commands target: the extension without the dot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -534,6 +534,8 @@ pub enum EditOp {
     View,
     /// Synchronise two views of a design (schematic to board).
     Sync,
+    /// Ask the agent about the selection (explain, fix, change); its answer is a reviewed change set.
+    Agent,
 }
 
 /// What distinguishes the edited item within its kind: the model's serde tag for a sub-kind
@@ -689,6 +691,43 @@ pub struct Catalog {
     pub commands: Vec<CommandDescriptor>,
     pub rows: Vec<EditorRows>,
     pub items: Vec<ItemSchema>,
+    /// Right-click menus per item kind: the single source of what each item offers.
+    pub context_menus: Vec<ContextMenu>,
+}
+
+/// The right-click menu of one item kind in some editors (tree rows and canvas picks alike):
+/// a row of quick icon actions, grouped commands (separated in the menu; `▸` submenus are
+/// [`RowItem::Menu`]s) and the Agent submenu. Commands that don't apply to the selection stay in
+/// the menu, disabled, with their predicate's reason.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ContextMenu {
+    pub kind: SelectKind,
+    pub editors: Vec<EditorKind>,
+    /// Four to six commands drawn as icons across the top of the menu.
+    pub quick: Vec<String>,
+    pub groups: Vec<Vec<RowItem>>,
+    /// The Agent submenu's commands (explain, fix, change).
+    pub agent: Vec<String>,
+}
+
+impl ContextMenu {
+    /// Every command the menu names, in menu order, once each.
+    pub fn command_ids(&self) -> Vec<&str> {
+        let mut ids: Vec<&str> = Vec::new();
+        let groups = self.groups.iter().flatten().flat_map(|item| item.command_ids());
+        for id in self
+            .quick
+            .iter()
+            .map(String::as_str)
+            .chain(groups)
+            .chain(self.agent.iter().map(String::as_str))
+        {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids
+    }
 }
 
 impl Catalog {
@@ -700,6 +739,7 @@ impl Catalog {
             commands: Vec::new(),
             rows: Vec::new(),
             items: Vec::new(),
+            context_menus: Vec::new(),
         }
     }
 
@@ -720,24 +760,33 @@ impl Catalog {
     }
 
     /// Merges another catalog into this one. A command both catalogs carry (the shared commands
-    /// of [`common`]) must be the same descriptor in each; it is kept once.
+    /// of [`common`]) must be the same descriptor in each; it is kept once. Placements and the
+    /// kinds it is offered on come from each catalog's rows and menus, so those are combined.
     pub fn merge(&mut self, other: Catalog) {
         for mut command in other.commands {
-            if let Some(existing) = self.command(&command.id) {
+            if let Some(existing) = self.commands.iter_mut().find(|c| c.id == command.id) {
                 let mut mine = existing.clone();
                 mine.placements.clear();
+                mine.context.clear();
+                let kinds = std::mem::take(&mut command.context);
                 command.placements.clear();
                 assert!(
                     mine == command,
                     "command {} differs between the merged catalogs",
                     command.id
                 );
+                for kind in kinds {
+                    if !existing.context.contains(&kind) {
+                        existing.context.push(kind);
+                    }
+                }
                 continue;
             }
             self.commands.push(command);
         }
         self.rows.extend(other.rows);
         self.items.extend(other.items);
+        self.context_menus.extend(other.context_menus);
         self.finish();
     }
 
@@ -764,10 +813,25 @@ impl Catalog {
                 }
             }
         }
+        // A command a menu names is offered on that menu's kind: `context` follows the menus.
+        let mut offered: BTreeMap<String, Vec<SelectKind>> = BTreeMap::new();
+        for menu in &self.context_menus {
+            for id in menu.command_ids() {
+                let kinds = offered.entry(id.to_owned()).or_default();
+                if !kinds.contains(&menu.kind) {
+                    kinds.push(menu.kind);
+                }
+            }
+        }
         for command in &mut self.commands {
             let mut list = placements.remove(&command.id).unwrap_or_default();
             list.sort();
             command.placements = list;
+            for kind in offered.remove(&command.id).unwrap_or_default() {
+                if !command.context.contains(&kind) {
+                    command.context.push(kind);
+                }
+            }
         }
         self.commands.sort_by(|a, b| a.id.cmp(&b.id));
         let mut names: Vec<String> = Vec::new();
@@ -794,6 +858,8 @@ impl Catalog {
         self.quantities = names.iter().map(|n| quantity_spec(n)).collect();
         self.rows.sort_by_key(|r| (r.editor, r.mode));
         self.items
+            .sort_by(|a, b| (a.kind, &a.editors).cmp(&(b.kind, &b.editors)));
+        self.context_menus
             .sort_by(|a, b| (a.kind, &a.editors).cmp(&(b.kind, &b.editors)));
     }
 
@@ -883,6 +949,9 @@ impl Catalog {
                     problems.push(format!("{}.{}: {problem}", command.id, field.id));
                 }
             }
+            if command.edit.op == EditOp::Agent && !command.id.starts_with("agent.") {
+                problems.push(format!("{} asks the agent but is not an agent.* command", command.id));
+            }
             let ids: Vec<&str> = command.inputs.iter().map(|f| f.id.as_str()).collect();
             let mut unique = ids.clone();
             unique.sort();
@@ -891,7 +960,61 @@ impl Catalog {
                 problems.push(format!("{} has duplicate field ids", command.id));
             }
         }
+        for menu in &self.context_menus {
+            let name = format!("{} menu", menu.kind.noun());
+            if !(4..=6).contains(&menu.quick.len()) {
+                problems.push(format!("{name} has {} quick actions, not 4 to 6", menu.quick.len()));
+            }
+            if menu.agent.is_empty() {
+                problems.push(format!("{name} has no Agent submenu"));
+            }
+            for item in menu.groups.iter().flatten() {
+                if let RowItem::Menu { entries, id, .. } = item {
+                    for entry in entries {
+                        if let Some(command) = self.command(&entry.command) {
+                            for key in entry.values.keys() {
+                                if !command.inputs.iter().any(|f| &f.id == key) {
+                                    problems.push(format!("{name} submenu {id} presets unknown field {key} of {}", command.id));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for id in menu.command_ids() {
+                let Some(command) = self.command(id) else {
+                    problems.push(format!("{name} names unknown command {id}"));
+                    continue;
+                };
+                for editor in &menu.editors {
+                    if !command.editors.contains(editor) {
+                        problems.push(format!("{name} offers {id} in {}, where it is not declared", editor.as_str()));
+                    }
+                }
+            }
+            if menu.agent.iter().any(|id| self.command(id).is_some_and(|c| c.edit.op != EditOp::Agent)) {
+                problems.push(format!("{name} Agent submenu names a command that does not ask the agent"));
+            }
+        }
+        let mut keys: Vec<(SelectKind, &EditorKind)> = self
+            .context_menus
+            .iter()
+            .flat_map(|m| m.editors.iter().map(move |e| (m.kind, e)))
+            .collect();
+        let before = keys.len();
+        keys.sort();
+        keys.dedup();
+        if keys.len() != before {
+            problems.push("two context menus share an item kind and editor".to_owned());
+        }
         problems
+    }
+
+    /// The menu for an item of `kind` in `editor`, if one is declared.
+    pub fn context_menu(&self, kind: SelectKind, editor: EditorKind) -> Option<&ContextMenu> {
+        self.context_menus
+            .iter()
+            .find(|m| m.kind == kind && m.editors.contains(&editor))
     }
 
     pub fn to_json(&self) -> String {

@@ -6,6 +6,7 @@
 //! Desktop's `design-commands.json`.
 
 mod assembly;
+mod context;
 mod drawing;
 mod items;
 mod part;
@@ -23,6 +24,7 @@ pub fn catalog() -> Catalog {
     assembly::add(&mut c);
     drawing::add(&mut c);
     items::add(&mut c);
+    context::add(&mut c);
     c.finish();
     c
 }
@@ -151,6 +153,6 @@ mod tests {
         assert_eq!(a, b);
         let back: Catalog = serde_json::from_str(&a).unwrap();
         assert_eq!(back.to_json(), a);
-        assert!(a.contains("\"format_version\": 1"));
+        assert!(a.contains("\"format_version\": 2"));
     }
 }

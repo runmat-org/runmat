@@ -4,6 +4,7 @@
 //! the CAD one into the Desktop's `design-commands.json`.
 
 mod board;
+mod context;
 mod items;
 mod schematic;
 
@@ -15,6 +16,7 @@ pub fn catalog() -> Catalog {
     schematic::add(&mut c);
     board::add(&mut c);
     items::add(&mut c);
+    context::add(&mut c);
     rows(&mut c);
     c.finish();
     c

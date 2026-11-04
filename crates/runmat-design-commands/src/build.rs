@@ -546,3 +546,51 @@ pub fn choice_pairs(command: &CommandDescriptor, field: &str) -> Vec<(String, St
         })
         .unwrap_or_default()
 }
+
+/* ----------------------------------------------------------------------------------------- */
+/* Context menus                                                                             */
+/* ----------------------------------------------------------------------------------------- */
+
+/// The Agent submenu every design item offers.
+pub const AGENT_ACTIONS: [&str; 3] = ["agent.explain", "agent.fix", "agent.change"];
+
+/// A right-click menu: quick icon actions, then groups of commands, then Agent ▸.
+pub fn context_menu(
+    kind: SelectKind,
+    editors: &[EditorKind],
+    quick: &[&str],
+    groups: Vec<Vec<RowItem>>,
+) -> ContextMenu {
+    ContextMenu {
+        kind,
+        editors: editors.to_vec(),
+        quick: quick.iter().map(|q| (*q).to_owned()).collect(),
+        groups,
+        agent: AGENT_ACTIONS.iter().map(|a| (*a).to_owned()).collect(),
+    }
+}
+
+/// A `▸` submenu presetting each option of `command`'s choice field `field`.
+pub fn choice_submenu(
+    catalog: &Catalog,
+    id: &str,
+    label: &str,
+    icon: &str,
+    command: &str,
+    field: &str,
+) -> RowItem {
+    let descriptor = catalog
+        .command(command)
+        .unwrap_or_else(|| panic!("submenu {id} names unknown {command}"));
+    let pairs = choice_pairs(descriptor, field);
+    assert!(!pairs.is_empty(), "submenu {id}: {command}.{field} is not a choice");
+    menu(
+        id,
+        label,
+        icon,
+        pairs
+            .iter()
+            .map(|(value, label)| preset(command, label, field, value))
+            .collect(),
+    )
+}

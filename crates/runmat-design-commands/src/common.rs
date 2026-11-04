@@ -170,6 +170,26 @@ pub fn common() -> Catalog {
                 "Nothing nested is being edited",
             ))
             .edit(edit(EditOp::ExitMode, Section::None)),
+        cmd("design.show-source", "Show in source", "source", DESIGN)
+            .desc("Show the selected item's text in the file.")
+            .kw(&["go to source", "code", "text"])
+            .edit(view_action("show_source")),
+        cmd("design.copy-reference", "Copy reference", "copy", DESIGN)
+            .desc("Copy the selected items' references (feature.boss.depth) for a value field or a script.")
+            .kw(&["link", "path", "id"])
+            .edit(view_action("copy_reference")),
+        cmd("agent.explain", "Explain", "agent", DESIGN)
+            .desc("Ask the agent what the selected items do and why they are built this way.")
+            .kw(&["ai", "assistant", "why"])
+            .edit(edit(EditOp::Agent, Section::None).item("explain")),
+        cmd("agent.fix", "Fix", "agent", DESIGN)
+            .desc("Ask the agent to fix the selected items' errors and warnings as a reviewed change set.")
+            .kw(&["ai", "assistant", "repair"])
+            .edit(edit(EditOp::Agent, Section::None).item("fix")),
+        cmd("agent.change", "Change…", "agent", DESIGN)
+            .desc("Describe a change to the selected items; the agent proposes it as a reviewed change set.")
+            .kw(&["ai", "assistant", "edit", "modify"])
+            .edit(edit(EditOp::Agent, Section::None).item("change")),
     ];
     for command in &mut commands {
         if command.edit.op == EditOp::View && command.inputs.is_empty() {
