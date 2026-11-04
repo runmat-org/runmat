@@ -19,6 +19,8 @@
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepOffsetAPI_MakeFilling.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -35,6 +37,7 @@
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepOffset_MakeOffset.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakeHalfSpace.hxx>
 #include <BRepTools.hxx>
@@ -1539,6 +1542,312 @@ Tracked do_cut_with_sheet(const Tracked& solid, const Tracked& sheet, bool keep_
   return out;
 }
 
+// ---- ruled strips along sheet edges
+
+// op 34: ints [n, then per edge: operand, edge, face label, boundary labels 0..3], reals
+// [distance, angle]. Each strip runs from its edge along the bounded face's normal turned
+// `angle` outward across the edge. Boundary labels: 0 the edge itself, 1 the far edge, 2 and 3
+// the edges from the edge's start and end vertices (as the face's loop runs).
+Tracked do_ruled(const Exec& x, const KInstr& in) {
+  const auto& I = in.ints;
+  const std::int64_t n = I[0];
+  const double dist = in.reals[0], ang = in.reals[1];
+  BRepBuilderAPI_Sewing sew(1e-7);
+  struct Strip {
+    TopoDS_Face face;
+    std::uint32_t face_label;
+    std::array<std::pair<TopoDS_Shape, std::uint32_t>, 4> edges;
+  };
+  std::vector<Strip> strips;
+  for (std::int64_t k = 0; k < n; ++k) {
+    const std::int64_t* e7 = &I[1 + 7 * k];
+    const Body& b = x.operand(e7[0]);
+    const TopoDS_Edge e = x.edge(e7[0], e7[1]);
+    TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
+    TopExp::MapShapesAndUniqueAncestors(b.shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+    const TopTools_ListOfShape* fs = edge_faces.Seek(e);
+    if (fs == nullptr || fs->Extent() != 1) fail("a ruled surface runs along boundary edges of a sheet");
+    const TopoDS_Face f = TopoDS::Face(fs->First());
+    BRepAdaptor_Surface surf(f);
+    if (surf.GetType() != GeomAbs_Plane) unsupported("ruled surfaces along edges of curved faces");
+    gp_Dir nrm = surf.Plane().Axis().Direction();
+    if (!surf.Plane().Direct()) nrm.Reverse();
+    if (f.Orientation() == TopAbs_REVERSED) nrm.Reverse();
+    TopoDS_Edge eo;
+    for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next())
+      if (ex.Current().IsSame(e)) eo = TopoDS::Edge(ex.Current());
+    TopoDS_Vertex va, vc;
+    TopExp::Vertices(eo, va, vc, Standard_True);
+    const gp_Pnt a = BRep_Tool::Pnt(va), c = BRep_Tool::Pnt(vc);
+    gp_Vec w = gp_Vec(nrm) * std::cos(ang);
+    if (std::abs(std::sin(ang)) > 1e-15) {
+      if (BRepAdaptor_Curve(eo).GetType() != GeomAbs_Line)
+        unsupported("ruled surfaces turned off the face normal along curved edges");
+      const gp_Vec out = gp_Vec(a, c).Crossed(gp_Vec(nrm)).Normalized();
+      w += out * std::sin(ang);
+    }
+    w *= dist;
+    BRepPrimAPI_MakePrism mk(eo, w, Standard_True);
+    if (!mk.IsDone()) fail("the ruled strip could not be built");
+    Strip st;
+    TopExp_Explorer fx(mk.Shape(), TopAbs_FACE);
+    if (!fx.More()) fail("the ruled strip has no face");
+    st.face = TopoDS::Face(fx.Current());
+    st.face_label = lab(e7[2]);
+    st.edges[0] = {mk.FirstShape(), lab(e7[3])};
+    st.edges[1] = {mk.LastShape(), lab(e7[4])};
+    st.edges[2] = {mk.Generated(va).IsEmpty() ? TopoDS_Shape() : mk.Generated(va).First(), lab(e7[5])};
+    st.edges[3] = {mk.Generated(vc).IsEmpty() ? TopoDS_Shape() : mk.Generated(vc).First(), lab(e7[6])};
+    sew.Add(st.face);
+    strips.push_back(std::move(st));
+  }
+  sew.Perform();
+  Tracked out;
+  out.shape = sew.SewedShape();
+  out.sheet = true;
+  auto image = [&](const TopoDS_Shape& s) {
+    if (s.IsNull()) return s;
+    return sew.IsModifiedSubShape(s) ? sew.ModifiedSubShape(s) : s;
+  };
+  for (const Strip& st : strips) {
+    add_origins(out.faces, image(st.face), label(st.face_label));
+    for (const auto& [edge, l] : st.edges) {
+      if (edge.IsNull()) continue;
+      for (TopExp_Explorer ex(image(edge), TopAbs_EDGE); ex.More(); ex.Next())
+        add_origins(out.edges, ex.Current(), label(l));
+    }
+  }
+  require_labels(out, "the ruled surface");
+  return out;
+}
+
+namespace {
+// Two edges with the same end points (a fill's boundary edge as the patch rebuilt it).
+bool same_edge_ends(const TopoDS_Edge& e, const TopoDS_Edge& f) {
+  TopoDS_Vertex e0, e1, f0, f1;
+  TopExp::Vertices(e, e0, e1);
+  TopExp::Vertices(f, f0, f1);
+  if (e0.IsNull() || e1.IsNull() || f0.IsNull() || f1.IsNull()) return false;
+  const gp_Pnt a0 = BRep_Tool::Pnt(e0), a1 = BRep_Tool::Pnt(e1);
+  const gp_Pnt b0 = BRep_Tool::Pnt(f0), b1 = BRep_Tool::Pnt(f1);
+  return (a0.Distance(b0) < 1e-7 && a1.Distance(b1) < 1e-7) ||
+         (a0.Distance(b1) < 1e-7 && a1.Distance(b0) < 1e-7);
+}
+}  // namespace
+
+// ---- delete holes, fill loops
+
+// op 35: ints [slot, operand, n, edges...]. Inner loops of a face whose edges are all selected
+// are dropped; the face keeps its origin. A selected edge on a face's outer loop is a hole
+// whose rim runs over several faces, which needs a patch.
+Tracked do_delete_hole(const Exec& x, const KInstr& in) {
+  const Tracked& src = x.slot(in.ints[0]);
+  const std::int64_t operand = in.ints[1];
+  const std::int64_t n = in.ints[2];
+  TopTools_IndexedMapOfShape picked;
+  for (std::int64_t i = 0; i < n; ++i) picked.Add(x.edge(operand, in.ints[3 + i]));
+  Handle(BRepTools_ReShape) re = new BRepTools_ReShape();
+  Tracked out = src;
+  int closed = 0;
+  for (TopExp_Explorer fx(src.shape, TopAbs_FACE); fx.More(); fx.Next()) {
+    const TopoDS_Face f = TopoDS::Face(fx.Current());
+    const TopoDS_Face ff = TopoDS::Face(f.Oriented(TopAbs_FORWARD));
+    const TopoDS_Wire outer = BRepTools::OuterWire(ff);
+    std::vector<TopoDS_Wire> keep;
+    bool dropped = false;
+    for (TopExp_Explorer wx(ff, TopAbs_WIRE); wx.More(); wx.Next()) {
+      const TopoDS_Wire w = TopoDS::Wire(wx.Current());
+      int total = 0, sel = 0;
+      for (TopExp_Explorer ex(w, TopAbs_EDGE); ex.More(); ex.Next()) {
+        ++total;
+        sel += picked.Contains(ex.Current()) ? 1 : 0;
+      }
+      if (w.IsSame(outer)) {
+        if (sel > 0) unsupported("closing a hole whose rim runs over several faces");
+        continue;
+      }
+      if (sel == total && total > 0) {
+        dropped = true;
+        ++closed;
+        continue;
+      }
+      if (sel > 0) fail("a hole's rim is only partly selected");
+      keep.push_back(w);
+    }
+    if (!dropped) continue;
+    BRepBuilderAPI_MakeFace mf(BRep_Tool::Surface(ff), outer, Standard_True);
+    for (const TopoDS_Wire& w : keep) mf.Add(w);
+    if (!mf.IsDone()) fail("the face could not be rebuilt without its hole");
+    TopoDS_Face nf = mf.Face();
+    nf.Orientation(f.Orientation());
+    re->Replace(f, nf);
+    add_origins(out.faces, nf, origins_of(src.faces, f));
+  }
+  if (closed == 0) fail("the selected edges close no hole of a sheet face");
+  out.shape = re->Apply(src.shape);
+  require_labels(out, "the hole deletion");
+  return out;
+}
+
+// op 36: ints [face label, n, then per edge: operand, edge, continuity (0 G0, 1 G1, 2 G2),
+// boundary label]. A planar loop is patched by its plane; any other loop, or one that must meet
+// its faces tangentially or with curvature, by a filling surface.
+Tracked do_fill(const Exec& x, const KInstr& in) {
+  const auto& I = in.ints;
+  const std::uint32_t face_label = lab(I[0]);
+  const std::int64_t n = I[1];
+  struct Bound {
+    TopoDS_Edge edge;
+    TopoDS_Face face;
+    int continuity;
+    std::uint32_t label;
+  };
+  std::vector<Bound> bounds;
+  bool smooth = false;
+  for (std::int64_t k = 0; k < n; ++k) {
+    const std::int64_t* q = &I[2 + 4 * k];
+    Bound b;
+    b.edge = x.edge(q[0], q[1]);
+    b.continuity = static_cast<int>(q[2]);
+    b.label = lab(q[3]);
+    smooth |= b.continuity > 0;
+    if (b.continuity > 0) {
+      TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
+      TopExp::MapShapesAndUniqueAncestors(x.operand(q[0]).shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+      const TopTools_ListOfShape* fs = edge_faces.Seek(b.edge);
+      if (fs == nullptr || fs->IsEmpty()) fail("a smooth fill edge needs a face to meet");
+      b.face = TopoDS::Face(fs->First());
+    }
+    bounds.push_back(b);
+  }
+  // Chain the edges into one loop.
+  BRepBuilderAPI_MakeWire mw;
+  std::vector<bool> used(bounds.size(), false);
+  TopoDS_Vertex start, tip;
+  for (std::size_t added = 0; added < bounds.size(); ++added) {
+    bool found = false;
+    for (std::size_t i = 0; i < bounds.size() && !found; ++i) {
+      if (used[i]) continue;
+      TopoDS_Vertex v0, v1;
+      TopExp::Vertices(bounds[i].edge, v0, v1);
+      if (added > 0) {
+        const gp_Pnt t = BRep_Tool::Pnt(tip);
+        if (BRep_Tool::Pnt(v0).Distance(t) < 1e-7) {
+          tip = v1;
+        } else if (BRep_Tool::Pnt(v1).Distance(t) < 1e-7) {
+          tip = v0;
+        } else {
+          continue;
+        }
+      } else {
+        start = v0;
+        tip = v1;
+      }
+      mw.Add(bounds[i].edge);
+      if (!mw.IsDone()) fail("the fill edges do not chain into a loop");
+      used[i] = true;
+      found = true;
+    }
+    if (!found) fail("the fill edges do not chain into one loop");
+  }
+  if (BRep_Tool::Pnt(start).Distance(BRep_Tool::Pnt(tip)) > 1e-7) fail("the fill edges do not close a loop");
+  TopoDS_Face patch;
+  if (!smooth) {
+    BRepBuilderAPI_MakeFace mf(mw.Wire(), Standard_True);
+    if (mf.IsDone()) patch = mf.Face();
+  }
+  if (patch.IsNull()) {
+    BRepOffsetAPI_MakeFilling fill;
+    for (const Bound& b : bounds) {
+      if (b.continuity == 0) {
+        fill.Add(b.edge, GeomAbs_C0);
+      } else {
+        fill.Add(b.edge, b.face, b.continuity == 1 ? GeomAbs_G1 : GeomAbs_G2);
+      }
+    }
+    fill.Build();
+    if (!fill.IsDone()) fail("the loop could not be filled");
+    TopExp_Explorer ex(fill.Shape(), TopAbs_FACE);
+    if (!ex.More()) fail("the fill made no face");
+    patch = TopoDS::Face(ex.Current());
+  }
+  Tracked out;
+  BRep_Builder bb;
+  TopoDS_Shell sh;
+  bb.MakeShell(sh);
+  bb.Add(sh, patch);
+  out.shape = sh;
+  out.sheet = true;
+  add_origins(out.faces, patch, label(face_label));
+  for (TopExp_Explorer ex(patch, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge e = TopoDS::Edge(ex.Current());
+    for (const Bound& b : bounds)
+      if (e.IsSame(b.edge) || same_edge_ends(e, b.edge)) add_origins(out.edges, e, label(b.label));
+  }
+  require_labels(out, "the fill");
+  return out;
+}
+
+// ---- extend sheet edges
+
+// op 37: ints [slot, operand, n, then per edge: edge, extension label], reals [distance]. Each
+// straight boundary edge of a planar face grows a strip of the face's plane outward across it;
+// the strip shares the edge and holds no origin of its own, so the output's same-domain merge
+// makes it part of the face. Its new boundary edges take the edge's extension label.
+Tracked do_extend(const Exec& x, const KInstr& in) {
+  const Tracked& src = x.slot(in.ints[0]);
+  const std::int64_t operand = in.ints[1];
+  const std::int64_t n = in.ints[2];
+  const double dist = in.reals[0];
+  const Body& body = x.operand(operand);
+  TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
+  TopExp::MapShapesAndUniqueAncestors(body.shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+  BRep_Builder bb;
+  TopoDS_Shell sh;
+  bb.MakeShell(sh);
+  for (TopExp_Explorer fx(src.shape, TopAbs_FACE); fx.More(); fx.Next()) bb.Add(sh, fx.Current());
+  Tracked out = src;
+  for (std::int64_t k = 0; k < n; ++k) {
+    const TopoDS_Edge e = x.edge(operand, in.ints[3 + 2 * k]);
+    const std::uint32_t l = lab(in.ints[4 + 2 * k]);
+    const TopTools_ListOfShape* fs = edge_faces.Seek(e);
+    if (fs == nullptr || fs->Extent() != 1) fail("extend needs boundary edges of a sheet");
+    const TopoDS_Face f = TopoDS::Face(fs->First());
+    BRepAdaptor_Surface surf(f);
+    if (surf.GetType() != GeomAbs_Plane) unsupported("extending edges of curved faces");
+    TopoDS_Edge eo;
+    for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next())
+      if (ex.Current().IsSame(e)) eo = TopoDS::Edge(ex.Current());
+    if (BRepAdaptor_Curve(eo).GetType() != GeomAbs_Line) unsupported("extending curved edges");
+    gp_Dir nrm = surf.Plane().Axis().Direction();
+    if (!surf.Plane().Direct()) nrm.Reverse();
+    if (f.Orientation() == TopAbs_REVERSED) nrm.Reverse();
+    TopoDS_Vertex va, vc;
+    TopExp::Vertices(eo, va, vc, Standard_True);
+    const gp_Vec along(BRep_Tool::Pnt(va), BRep_Tool::Pnt(vc));
+    const gp_Vec w = along.Crossed(gp_Vec(nrm)).Normalized() * dist;
+    BRepPrimAPI_MakePrism mk(eo, w, Standard_False);
+    if (!mk.IsDone()) fail("the extension strip could not be built");
+    TopExp_Explorer sx(mk.Shape(), TopAbs_FACE);
+    if (!sx.More()) fail("the extension strip has no face");
+    TopoDS_Face strip = TopoDS::Face(sx.Current());
+    // Orient the strip with the face it extends.
+    BRepAdaptor_Surface ss(strip);
+    gp_Dir sn = ss.Plane().Axis().Direction();
+    if (!ss.Plane().Direct()) sn.Reverse();
+    if (strip.Orientation() == TopAbs_REVERSED) sn.Reverse();
+    if (sn.Dot(nrm) < 0) strip.Reverse();
+    bb.Add(sh, strip);
+    for (const TopoDS_Shape& g : {mk.LastShape(), mk.Generated(va).IsEmpty() ? TopoDS_Shape() : mk.Generated(va).First(),
+                                  mk.Generated(vc).IsEmpty() ? TopoDS_Shape() : mk.Generated(vc).First()})
+      if (!g.IsNull())
+        for (TopExp_Explorer ex(g, TopAbs_EDGE); ex.More(); ex.Next()) add_origins(out.edges, ex.Current(), label(l));
+  }
+  out.shape = sh;
+  out.sheet = true;
+  return out;
+}
+
 // ---- named boxes (imports of box fixtures)
 
 Tracked do_box(const KInstr& in) {
@@ -1895,6 +2204,10 @@ KResult kernel_execute(rust::Slice<const KInstr> program,
         }
         case 28: p = offset_profile(x.profile(I[0]), in); prof = true; t = p.tracked; break;
         case 30: t = split_keep(x.slot(I[0]), in, x.operand(I[1])); break;
+        case 37: t = do_extend(x, in); break;
+        case 35: t = do_delete_hole(x, in); break;
+        case 36: t = do_fill(x, in); break;
+        case 34: t = do_ruled(x, in); t.sheet = true; break;
         case 33: t = do_full_round(x.slot(I[0]), lab(I[1]), R.data()); break;
         case 32: t = do_cut_with_sheet(x.slot(I[0]), x.slot(I[1]), I[2] != 0, lab(I[3])); break;
         case 31: t = prism_to_body(x.profile(I[0]), in, x.operand(I[3])); break;

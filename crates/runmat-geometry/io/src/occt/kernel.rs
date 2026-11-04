@@ -2505,11 +2505,106 @@ impl OcctKernel {
                 Ok(())
             }
             SurfaceOp::Offset { .. } => Err(not_supported("offset surfaces")),
-            SurfaceOp::Extend { .. } => Err(not_supported("extend surface")),
+            SurfaceOp::Extend { edges, distance } => {
+                for i in 0..n as u32 {
+                    let mine: Vec<&OperandEntity> =
+                        edges.iter().filter(|e| e.operand == i).collect();
+                    if mine.is_empty() {
+                        l.keep_operands(i as usize..i as usize + 1)?;
+                        continue;
+                    }
+                    let s = l.operand(i)?;
+                    let mut ints = vec![s, i as i64, mine.len() as i64];
+                    for e in mine {
+                        let lb = l.label(gen(
+                            Role::Extension,
+                            KernelTag::InputEdge { edge: *e },
+                            None,
+                        ));
+                        ints.extend_from_slice(&[e.entity as i64, lb]);
+                    }
+                    let r = l.push(37, ints, vec![*distance]);
+                    l.output(r, false, OutputSpec::default());
+                }
+                Ok(())
+            }
             SurfaceOp::MidSurface { .. } => Err(not_supported("mid-surface")),
-            SurfaceOp::DeleteHole { .. } => Err(not_supported("delete hole")),
-            SurfaceOp::Fill { .. } => Err(not_supported("fill surface")),
-            SurfaceOp::Ruled { .. } => Err(not_supported("ruled surface")),
+            SurfaceOp::DeleteHole { edges } => {
+                // Each sheet with selected edges loses those holes; the others come back as
+                // they are.
+                for i in 0..n as u32 {
+                    let mine: Vec<i64> = edges
+                        .iter()
+                        .filter(|e| e.operand == i)
+                        .map(|e| e.entity as i64)
+                        .collect();
+                    if mine.is_empty() {
+                        l.keep_operands(i as usize..i as usize + 1)?;
+                        continue;
+                    }
+                    let s = l.operand(i)?;
+                    let mut ints = vec![s, i as i64, mine.len() as i64];
+                    ints.extend(mine);
+                    let r = l.push(35, ints, vec![]);
+                    l.output(r, false, OutputSpec::default());
+                }
+                Ok(())
+            }
+            SurfaceOp::Fill { edges } => {
+                // The operands come back as they are, then the patch as a sheet of its own.
+                l.keep_operands(0..n)?;
+                let face = l.label(gen(Role::SurfacePatch, KernelTag::None, None));
+                let mut ints = vec![face, edges.len() as i64];
+                for (e, c) in edges {
+                    let continuity = match c {
+                        runmat_geometry_kernel::names::Continuity::G0 => 0,
+                        runmat_geometry_kernel::names::Continuity::G1 => 1,
+                        runmat_geometry_kernel::names::Continuity::G2 => 2,
+                    };
+                    let b = l.label(gen(Role::Boundary, KernelTag::InputEdge { edge: *e }, None));
+                    ints.extend_from_slice(&[e.operand as i64, e.entity as i64, continuity, b]);
+                }
+                let r = l.push(36, ints, vec![]);
+                l.output(
+                    r,
+                    false,
+                    OutputSpec {
+                        body: Some(gen(Role::Body, KernelTag::None, None)),
+                        ..Default::default()
+                    },
+                );
+                Ok(())
+            }
+            SurfaceOp::Ruled {
+                edges,
+                distance,
+                angle,
+            } => {
+                // The operands come back as they are, then one sheet of strips.
+                l.keep_operands(0..n)?;
+                let mut ints = vec![edges.len() as i64];
+                for e in edges {
+                    let face = l.label(gen(Role::Ruled, KernelTag::InputEdge { edge: *e }, None));
+                    ints.extend_from_slice(&[e.operand as i64, e.entity as i64, face]);
+                    for k in 0..4 {
+                        ints.push(l.label(gen(
+                            Role::Boundary,
+                            KernelTag::InputEdge { edge: *e },
+                            Some(k),
+                        )));
+                    }
+                }
+                let r = l.push(34, ints, vec![*distance, *angle]);
+                l.output(
+                    r,
+                    false,
+                    OutputSpec {
+                        body: Some(gen(Role::Body, KernelTag::None, None)),
+                        ..Default::default()
+                    },
+                );
+                Ok(())
+            }
             SurfaceOp::CutWithSurface { keep } => {
                 if n != 2 {
                     return Err(failed("cut with surface needs a solid and a sheet"));
