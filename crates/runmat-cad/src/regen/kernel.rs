@@ -879,6 +879,24 @@ pub enum SurfaceOp {
     MidSurface {
         pairs: Vec<(OperandEntity, OperandEntity)>,
     },
+    /// Close holes of sheets: each closed loop of the boundary edges is filled with its
+    /// face's surface.
+    DeleteHole { edges: Vec<OperandEntity> },
+    /// A new sheet patching the closed loop of edges (of sheets or solids), meeting each edge
+    /// with its continuity. The operands are kept.
+    Fill {
+        edges: Vec<(OperandEntity, crate::model::surface::Continuity)>,
+    },
+    /// A new sheet of ruled strips, one face per edge, `distance` wide: along the bounded
+    /// face's normal turned `angle` outward across the edge. The operands are kept.
+    Ruled {
+        edges: Vec<OperandEntity>,
+        distance: f64,
+        angle: f64,
+    },
+    /// Cut the solid operand (0) with the sheet operand (1), keeping the side `keep` of the
+    /// sheet's normal; the sheet is kept.
+    CutWithSurface { keep: PlaneSide },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

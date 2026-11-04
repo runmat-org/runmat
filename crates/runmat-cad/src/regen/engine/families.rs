@@ -1105,17 +1105,134 @@ impl<'a, 'b> Run<'a, 'b> {
                     simple(Vec::new()),
                 )
             }
-            SurfaceFeature::Sweep { .. } => return Err(self.not_lowered(id, "swept surfaces")),
-            SurfaceFeature::Loft { .. } => return Err(self.not_lowered(id, "lofted surfaces")),
+            SurfaceFeature::Sweep { profile, path } => {
+                let (frame, segs) = self.chain(i, id, "profile", profile)?;
+                let (path_points, path_curves) = self.path(i, id, "path", path)?;
+                let shape = ToolShape::Sweep {
+                    profile: CanonicalProfile {
+                        frame,
+                        loops: vec![segs],
+                        merge_collinear: false,
+                    },
+                    path: path_points,
+                    path_curves,
+                };
+                op(
+                    KernelOp::Surface(SurfaceOp::Swept {
+                        tool: LabeledTool::new(shape),
+                    }),
+                    Vec::new(),
+                    simple(vec![profile.sketch.clone(), path.sketch.clone()]),
+                )
+            }
+            SurfaceFeature::Loft { profiles, guides } => {
+                if !guides.is_empty() {
+                    return Err(self.not_lowered(id, "lofts along guide curves"));
+                }
+                let mut sections = Vec::new();
+                for (k, p) in profiles.iter().enumerate() {
+                    let (frame, segs) = self.chain(i, id, &format!("profiles[{}]", k), p)?;
+                    sections.push(CanonicalProfile {
+                        frame,
+                        loops: vec![segs],
+                        merge_collinear: false,
+                    });
+                }
+                op(
+                    KernelOp::Surface(SurfaceOp::Swept {
+                        tool: LabeledTool::new(ToolShape::Loft { profiles: sections }),
+                    }),
+                    Vec::new(),
+                    simple(profiles.iter().map(|p| p.sketch.clone()).collect()),
+                )
+            }
             SurfaceFeature::Boundary { .. } => {
                 return Err(self.not_lowered(id, "boundary surfaces"))
             }
-            SurfaceFeature::Fill { .. } => return Err(self.not_lowered(id, "fill surfaces")),
-            SurfaceFeature::Ruled { .. } => return Err(self.not_lowered(id, "ruled surfaces")),
+            SurfaceFeature::Fill { boundary } => {
+                let refs: Vec<Reference> = boundary.iter().map(|b| b.edge.clone()).collect();
+                let mut edges = Vec::new();
+                let mut operands: Vec<usize> = Vec::new();
+                for (k, (r, b)) in refs.iter().zip(boundary).enumerate() {
+                    let h =
+                        self.single(i, id, &format!("boundary[{}]", k), r, Some(TopoKind::Edge))?;
+                    let e = *h.entities().iter().next().expect("one");
+                    let body = e.body as usize;
+                    let operand = match operands.iter().position(|x| *x == body) {
+                        Some(p) => p,
+                        None => {
+                            operands.push(body);
+                            operands.len() - 1
+                        }
+                    };
+                    edges.push((
+                        OperandEntity {
+                            operand: operand as u32,
+                            entity: e.index,
+                        },
+                        b.continuity,
+                    ));
+                }
+                op(
+                    KernelOp::Surface(SurfaceOp::Fill { edges }),
+                    operands,
+                    simple(Vec::new()),
+                )
+            }
+            SurfaceFeature::Ruled {
+                edges,
+                distance,
+                angle,
+            } => {
+                let set = self.list(i, id, "edges", edges, Some(TopoKind::Edge))?;
+                let operands = Self::bodies_of(&set);
+                let edges = Self::operand_entities(&set, &operands);
+                let distance = self.value(id, "distance", distance, Dimension::LENGTH)?;
+                let angle = self.value(id, "angle", angle, Dimension::ANGLE)?;
+                op(
+                    KernelOp::Surface(SurfaceOp::Ruled {
+                        edges,
+                        distance,
+                        angle,
+                    }),
+                    operands,
+                    simple(Vec::new()),
+                )
+            }
             SurfaceFeature::Untrim { .. } => return Err(self.not_lowered(id, "untrim")),
-            SurfaceFeature::DeleteHole { .. } => return Err(self.not_lowered(id, "delete hole")),
-            SurfaceFeature::CutWithSurface { .. } => {
-                return Err(self.not_lowered(id, "cut with surface"))
+            SurfaceFeature::DeleteHole { edges } => {
+                let set = self.list(i, id, "edges", edges, Some(TopoKind::Edge))?;
+                let operands = Self::bodies_of(&set);
+                let edges = Self::operand_entities(&set, &operands);
+                op(
+                    KernelOp::Surface(SurfaceOp::DeleteHole { edges }),
+                    operands,
+                    simple(Vec::new()),
+                )
+            }
+            SurfaceFeature::CutWithSurface {
+                body,
+                surface,
+                keep,
+            } => {
+                let b = self.single(i, id, "body", body, Some(TopoKind::Body))?;
+                let s = self.single(i, id, "surface", surface, Some(TopoKind::Body))?;
+                let solid = b.entities().iter().next().expect("one").body as usize;
+                let sheet = s.entities().iter().next().expect("one").body as usize;
+                if solid == sheet {
+                    return Err(self.error(
+                        id,
+                        Some("surface"),
+                        DiagCode::RefKindMismatch,
+                        "a body cannot be cut with itself".into(),
+                        Vec::new(),
+                    ));
+                }
+                op(
+                    KernelOp::Surface(SurfaceOp::CutWithSurface { keep: *keep }),
+                    vec![solid, sheet],
+                    simple(Vec::new()),
+                )
             }
         })
     }

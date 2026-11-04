@@ -25,6 +25,29 @@ fn grid_job<'a>(
     }
 }
 
+/// A solid operand passed through an operation unchanged.
+fn kept_solid(operands: &[&BodyHandle], i: usize) -> Result<sheet::ExtraBody, KernelError> {
+    let so = operands[i]
+        .downcast::<FakeSolid>()
+        .ok_or(KernelError::ForeignOperand { operand: i as u32 })?;
+    let input = |entity: u32| {
+        vec![HistorySource::Input {
+            from: OperandEntity {
+                operand: i as u32,
+                entity,
+            },
+        }]
+    };
+    Ok((
+        KernelBody {
+            handle: operands[i].clone(),
+            topology: so.topology.clone(),
+        },
+        (0..so.faces.len() as u32).map(input).collect(),
+        input(0),
+    ))
+}
+
 impl FakeKernel {
     /// Operations handled here; `None` for the rest.
     pub(super) fn execute_extra(
@@ -895,6 +918,292 @@ impl FakeKernel {
                     ));
                 }
                 sheet::output(&kernel, builds, Vec::new(), Vec::new())
+            }
+            SurfaceOp::DeleteHole { edges } => {
+                let mut builds = Vec::new();
+                let mut extra = Vec::new();
+                for (i, h) in operands.iter().enumerate() {
+                    let mine: Vec<u32> = edges
+                        .iter()
+                        .filter(|e| e.operand as usize == i)
+                        .map(|e| e.entity)
+                        .collect();
+                    let Some(s) = h.downcast::<FakeSheet>() else {
+                        if mine.is_empty() {
+                            extra.push(kept_solid(operands, i)?);
+                            continue;
+                        }
+                        return Err(KernelError::Failed {
+                            message: "delete hole works on sheets".into(),
+                        });
+                    };
+                    let mut b = s.as_input(i as u32);
+                    // Inner loops of a facet close by dropping the loop; a hole whose rim runs
+                    // over several facets of one face gets a patch on that face.
+                    let mut drop: BTreeSet<(usize, usize)> = BTreeSet::new();
+                    let mut loose = Vec::new();
+                    for e in &mine {
+                        let segs =
+                            s.boundary_segments
+                                .get(e)
+                                .ok_or_else(|| KernelError::Failed {
+                                    message: "delete hole needs boundary edges".into(),
+                                })?;
+                        for &(fi, li, si) in segs {
+                            if li > 0 {
+                                drop.insert((fi, li));
+                            } else {
+                                let l = &s.facets[fi].loops[li];
+                                loose.push((l[si], l[(si + 1) % l.len()], s.face_of[fi]));
+                            }
+                        }
+                    }
+                    for &(fi, li) in drop.iter().rev() {
+                        b.facets[fi].loops.remove(li);
+                        b.facets[fi].labels.remove(li);
+                    }
+                    for lp in sheet::chain_loops(loose)? {
+                        let face = lp[0].1;
+                        if lp.iter().any(|(_, f)| *f != face) {
+                            return Err(KernelError::Failed {
+                                message: "the hole's rim runs over more than one face".into(),
+                            });
+                        }
+                        let inner = gen(Role::SurfacePatch, KernelTag::None, None);
+                        let tagged: Vec<_> = lp.iter().map(|(p, _)| (*p, inner.clone())).collect();
+                        // The rim was traced round the hole; the patch faces the other way.
+                        let rev: Vec<_> = tagged.into_iter().rev().collect();
+                        for f in sheet::patch_facets(&rev, &inner) {
+                            b.facets.push(f);
+                            b.face_of.push(face);
+                        }
+                    }
+                    builds.push((
+                        b,
+                        vec![HistorySource::Input {
+                            from: OperandEntity {
+                                operand: i as u32,
+                                entity: 0,
+                            },
+                        }],
+                    ));
+                }
+                sheet::output(&kernel, builds, extra, Vec::new())
+            }
+            SurfaceOp::Fill { edges } => {
+                if edges
+                    .iter()
+                    .any(|(_, c)| *c != crate::model::surface::Continuity::G0)
+                {
+                    return Err(KernelError::NotSupported {
+                        what: "fake kernel: fill surfaces tangent or curvature continuous \
+                               with their faces"
+                            .into(),
+                    });
+                }
+                let mut segs = Vec::new();
+                for (e, _) in edges {
+                    let h = operands
+                        .get(e.operand as usize)
+                        .ok_or(KernelError::Failed {
+                            message: "edge operand out of range".into(),
+                        })?;
+                    let label = gen(Role::Boundary, KernelTag::InputEdge { edge: *e }, None);
+                    for (a, c) in sheet::edge_segments(h, e.entity)? {
+                        segs.push((a, c, label.clone()));
+                    }
+                }
+                let loops = sheet::chain_loops(segs)?;
+                if loops.len() != 1 {
+                    return Err(KernelError::Failed {
+                        message: "a fill needs one closed loop of edges".into(),
+                    });
+                }
+                let inner = gen(Role::SurfacePatch, KernelTag::None, Some(1));
+                let facets = sheet::patch_facets(&loops[0], &inner);
+                let hint = match facets.as_slice() {
+                    [f] => SurfaceKind::Plane { normal: f.normal },
+                    _ => SurfaceKind::Other,
+                };
+                let b = SheetBuild {
+                    face_of: vec![0; facets.len()],
+                    facets,
+                    face_sources: vec![vec![gen(Role::SurfacePatch, KernelTag::None, None)]],
+                    hints: vec![hint],
+                };
+                let mut builds = keep_all(operands.len());
+                builds.push((b, vec![gen(Role::Body, KernelTag::None, None)]));
+                let extra = (0..operands.len())
+                    .filter(|i| operands[*i].downcast::<FakeSolid>().is_some())
+                    .map(|i| kept_solid(operands, i))
+                    .collect::<Result<Vec<_>, _>>()?;
+                sheet::output(&kernel, builds, extra, Vec::new())
+            }
+            SurfaceOp::Ruled {
+                edges,
+                distance,
+                angle,
+            } => {
+                let mut b = SheetBuild {
+                    facets: Vec::new(),
+                    face_of: Vec::new(),
+                    face_sources: Vec::new(),
+                    hints: Vec::new(),
+                };
+                for e in edges {
+                    let h = operands
+                        .get(e.operand as usize)
+                        .ok_or(KernelError::Failed {
+                            message: "edge operand out of range".into(),
+                        })?;
+                    let s = h
+                        .downcast::<FakeSheet>()
+                        .ok_or_else(|| KernelError::NotSupported {
+                            what: "fake kernel: ruled surfaces along solid edges".into(),
+                        })?;
+                    let segs =
+                        s.boundary_segments
+                            .get(&e.entity)
+                            .ok_or_else(|| KernelError::Failed {
+                                message: "a ruled surface runs along boundary edges".into(),
+                            })?;
+                    let face = b.face_sources.len() as u32;
+                    b.face_sources.push(vec![gen(
+                        Role::Ruled,
+                        KernelTag::InputEdge { edge: *e },
+                        None,
+                    )]);
+                    let edge_label =
+                        |k: u32| gen(Role::Boundary, KernelTag::InputEdge { edge: *e }, Some(k));
+                    let mut normals = Vec::new();
+                    for &(fi, li, si) in segs {
+                        use crate::model::datum::{add, cross, normalize, scale, sub};
+                        let f = &s.facets[fi];
+                        let l = &f.loops[li];
+                        let (a, c) = (l[si], l[(si + 1) % l.len()]);
+                        // Outward from the face across the edge, in the face's plane.
+                        let out_dir = normalize(cross(sub(c, a), f.normal));
+                        let dir = add(scale(f.normal, angle.cos()), scale(out_dir, angle.sin()));
+                        let w = scale(dir, *distance);
+                        let q = vec![c, a, add(a, w), add(c, w)];
+                        let n = normalize(cross(sub(q[1], q[0]), sub(q[3], q[0])));
+                        normals.push(n);
+                        b.facets.push(Facet {
+                            loops: vec![q],
+                            normal: n,
+                            labels: vec![vec![
+                                edge_label(0),
+                                edge_label(2),
+                                edge_label(1),
+                                edge_label(3),
+                            ]],
+                        });
+                        b.face_of.push(face);
+                    }
+                    b.hints.push(match normals.first() {
+                        Some(n0)
+                            if normals
+                                .iter()
+                                .all(|n| (0..3).all(|k| (n[k] - n0[k]).abs() < 1e-9)) =>
+                        {
+                            SurfaceKind::Plane { normal: *n0 }
+                        }
+                        _ => SurfaceKind::Other,
+                    });
+                }
+                let mut builds = keep_all(operands.len());
+                builds.push((b, vec![gen(Role::Body, KernelTag::None, None)]));
+                let extra = (0..operands.len())
+                    .filter(|i| operands[*i].downcast::<FakeSolid>().is_some())
+                    .map(|i| kept_solid(operands, i))
+                    .collect::<Result<Vec<_>, _>>()?;
+                sheet::output(&kernel, builds, extra, Vec::new())
+            }
+            SurfaceOp::CutWithSurface { keep } => {
+                let so = Self::solid(operands, 0)?;
+                let sh = operands
+                    .get(1)
+                    .and_then(|h| h.downcast::<FakeSheet>())
+                    .ok_or(KernelError::Failed {
+                        message: "cut with surface needs a solid and a sheet".into(),
+                    })?;
+                let f0 = sh.facets.first().ok_or(KernelError::Failed {
+                    message: "the surface is empty".into(),
+                })?;
+                let (n, o) = (f0.normal, f0.loops[0][0]);
+                let on_plane = |p: [f64; 3]| {
+                    ((p[0] - o[0]) * n[0] + (p[1] - o[1]) * n[1] + (p[2] - o[2]) * n[2]).abs()
+                        < 1e-9
+                };
+                let planar = sh.facets.iter().all(|f| {
+                    (0..3).all(|k| (f.normal[k] - n[k]).abs() < 1e-9)
+                        && f.loops.iter().flatten().all(|p| on_plane(*p))
+                });
+                if !planar {
+                    return Err(KernelError::NotSupported {
+                        what: "fake kernel: cutting with a curved surface".into(),
+                    });
+                }
+                let (lo, hi) = so.bounds().ok_or(KernelError::Failed {
+                    message: "the body is empty".into(),
+                })?;
+                // The surface must reach across the body: every bounding corner, dropped onto
+                // its plane, lies on it.
+                for k in 0..8 {
+                    let c = [
+                        if k & 1 == 0 { lo[0] } else { hi[0] },
+                        if k & 2 == 0 { lo[1] } else { hi[1] },
+                        if k & 4 == 0 { lo[2] } else { hi[2] },
+                    ];
+                    let d = (c[0] - o[0]) * n[0] + (c[1] - o[1]) * n[1] + (c[2] - o[2]) * n[2];
+                    let p = [c[0] - d * n[0], c[1] - d * n[1], c[2] - d * n[2]];
+                    if !sh.facets.iter().any(|f| f.covers(p)) {
+                        return Err(KernelError::Failed {
+                            message: "the surface does not cut through the body".into(),
+                        });
+                    }
+                }
+                // Remove the other side: the body's box clipped to it.
+                let away = match keep {
+                    PlaneSide::Positive => n,
+                    PlaneSide::Negative => [-n[0], -n[1], -n[2]],
+                };
+                let label = gen(Role::SplitFace, KernelTag::Side { side: *keep }, None);
+                let pad = 1e-3;
+                let boxed = Prism {
+                    k: 2,
+                    u: 0,
+                    v: 1,
+                    loops: vec![vec![
+                        [lo[0] - pad, lo[1] - pad],
+                        [hi[0] + pad, lo[1] - pad],
+                        [hi[0] + pad, hi[1] + pad],
+                        [lo[0] - pad, hi[1] + pad],
+                    ]],
+                    edge_labels: vec![vec![label.clone(); 4]],
+                    lo: lo[2] - pad,
+                    hi: hi[2] + pad,
+                    lo_label: label.clone(),
+                    hi_label: label.clone(),
+                };
+                let tool = Tool::Clipped(Box::new(Tool::Exact(boxed)), vec![(o, away, label)]);
+                let res = run_grid(grid_job(vec![so], vec![0], vec![tool], Mode::Cut))?;
+                let cut = self.finish(&[so], &[0], res, Vec::new(), Vec::new())?;
+                let kept = sheet::output(
+                    &kernel,
+                    vec![(
+                        sh.as_input(1),
+                        vec![HistorySource::Input {
+                            from: OperandEntity {
+                                operand: 1,
+                                entity: 0,
+                            },
+                        }],
+                    )],
+                    Vec::new(),
+                    Vec::new(),
+                )?;
+                Ok(super::features::concat(vec![cut, kept]))
             }
             SurfaceOp::MidSurface { pairs } => {
                 let so = Self::solid(operands, 0)?;

@@ -113,6 +113,17 @@ impl Facet {
         inside
     }
 
+    /// Whether `p` (on the facet's plane) is inside the polygon or on its boundary.
+    pub(super) fn covers(&self, p: P3) -> bool {
+        self.contains(p)
+            || self.segments().any(|(_, _, a, b)| {
+                let d = sub(b, a);
+                let l2 = dot(d, d).max(1e-300);
+                let t = (dot(sub(p, a), d) / l2).clamp(0.0, 1.0);
+                norm(sub(p, add(a, scale(d, t)))) < 1e-9
+            })
+    }
+
     fn offset_of(&self) -> f64 {
         dot(self.normal, self.loops[0][0])
     }
@@ -348,11 +359,14 @@ impl FakeSheet {
     }
 }
 
+/// A finished body passed alongside sheet builds: the body, its faces' sources and its own.
+pub(super) type ExtraBody = (KernelBody, Vec<Vec<HistorySource>>, Vec<HistorySource>);
+
 /// Finish sheet builds into kernel output: one body per build.
 pub(super) fn output(
     kernel: &KernelId,
     builds: Vec<(SheetBuild, Vec<HistorySource>)>,
-    extra: Vec<(KernelBody, Vec<Vec<HistorySource>>, Vec<HistorySource>)>,
+    extra: Vec<ExtraBody>,
     deleted_bodies: Vec<u32>,
 ) -> Result<KernelOutput, KernelError> {
     let mut bodies = Vec::new();
@@ -481,7 +495,10 @@ pub(super) fn planar(patches: &[SurfacePatch]) -> Vec<(SheetBuild, Vec<HistorySo
         .collect()
 }
 
-/// A swept sheet: each profile curve of open or closed chains makes one face; no caps.
+/// A swept sheet: each profile curve of open or closed chains makes one face (one per path
+/// curve of a sweep along several); no caps. Extrudes and revolves move the profile by
+/// transforms, sweeps translate it along the path, lofts run through the sections' matching
+/// curves (sections need not be parallel).
 pub(super) fn swept(tool: &LabeledTool) -> Result<SheetBuild, KernelError> {
     let label_for = |c: &crate::ids::SketchEntityId| -> HistorySource {
         tool.sides
@@ -499,8 +516,29 @@ pub(super) fn swept(tool: &LabeledTool) -> Result<SheetBuild, KernelError> {
                 )
             })
     };
-    // (profile, sweep: point -> (start-cap point, end-cap point) generator)
-    let (profile, steps): (&CanonicalProfile, Vec<Transform>) = match &tool.shape {
+    // Per profile curve: its polyline at each step (rows), and the path curve of each span.
+    type Rows = Vec<Vec<P3>>;
+    let moved = |profile: &CanonicalProfile, steps: &[Transform]| -> Vec<Rows> {
+        let fr = profile.frame;
+        profile
+            .loops
+            .iter()
+            .flatten()
+            .map(|seg| {
+                let c = Curve2::from_segment(seg);
+                let poly: Vec<P3> = c
+                    .polyline(c.samples())
+                    .into_iter()
+                    .map(|q| fr.to_world(q))
+                    .collect();
+                steps
+                    .iter()
+                    .map(|t| poly.iter().map(|p| t.apply(*p)).collect())
+                    .collect()
+            })
+            .collect()
+    };
+    let (profile, rows, span_curve): (&CanonicalProfile, Vec<Rows>, Vec<u32>) = match &tool.shape {
         ToolShape::Prism {
             profile,
             start,
@@ -517,13 +555,11 @@ pub(super) fn swept(tool: &LabeledTool) -> Result<SheetBuild, KernelError> {
                 });
             }
             let z = profile.frame.z;
-            (
-                profile,
-                vec![
-                    Transform::translation(scale(z, *start)),
-                    Transform::translation(scale(z, *end)),
-                ],
-            )
+            let steps = [
+                Transform::translation(scale(z, *start)),
+                Transform::translation(scale(z, *end)),
+            ];
+            (profile, moved(profile, &steps), vec![0])
         }
         ToolShape::Revolve {
             profile,
@@ -532,87 +568,164 @@ pub(super) fn swept(tool: &LabeledTool) -> Result<SheetBuild, KernelError> {
             angle,
         } => {
             let n = ((angle.abs() / (std::f64::consts::PI / 24.0)).ceil() as usize).max(2);
-            (
-                profile,
-                (0..=n)
-                    .map(|k| {
-                        Transform::rotation_about(
-                            *axis_point,
-                            *axis_direction,
-                            angle * k as f64 / n as f64,
-                        )
-                    })
-                    .collect(),
-            )
+            let steps: Vec<Transform> = (0..=n)
+                .map(|k| {
+                    Transform::rotation_about(
+                        *axis_point,
+                        *axis_direction,
+                        angle * k as f64 / n as f64,
+                    )
+                })
+                .collect();
+            (profile, moved(profile, &steps), vec![0; n])
+        }
+        ToolShape::Sweep {
+            profile,
+            path,
+            path_curves,
+        } => {
+            if path.len() < 2 {
+                return Err(KernelError::Failed {
+                    message: "a sweep path needs at least two points".into(),
+                });
+            }
+            let steps: Vec<Transform> = path
+                .iter()
+                .map(|p| Transform::translation(sub(*p, path[0])))
+                .collect();
+            let n = path.len() - 1;
+            let curves = if path_curves.len() == n {
+                path_curves.clone()
+            } else {
+                (0..n as u32).collect()
+            };
+            (profile, moved(profile, &steps), curves)
+        }
+        ToolShape::Loft { profiles } => {
+            let first = profiles.first().ok_or_else(|| KernelError::Failed {
+                message: "a loft needs profiles".into(),
+            })?;
+            if profiles.len() < 2 {
+                return Err(KernelError::Failed {
+                    message: "a loft needs at least two sections".into(),
+                });
+            }
+            let shape =
+                |p: &CanonicalProfile| -> Vec<usize> { p.loops.iter().map(|l| l.len()).collect() };
+            if profiles.iter().any(|p| shape(p) != shape(first)) {
+                return Err(KernelError::Failed {
+                    message: "loft sections need the same number of chains and curves".into(),
+                });
+            }
+            let segs = |p: &CanonicalProfile| -> Vec<Curve2> {
+                p.loops.iter().flatten().map(Curve2::from_segment).collect()
+            };
+            let all: Vec<Vec<Curve2>> = profiles.iter().map(segs).collect();
+            let rows = (0..all[0].len())
+                .map(|ci| {
+                    let n = all.iter().map(|s| s[ci].samples()).max().unwrap_or(1);
+                    profiles
+                        .iter()
+                        .zip(&all)
+                        .map(|(p, s)| {
+                            s[ci]
+                                .polyline(n)
+                                .into_iter()
+                                .map(|q| p.frame.to_world(q))
+                                .collect()
+                        })
+                        .collect()
+                })
+                .collect();
+            (first, rows, vec![0; profiles.len() - 1])
         }
         _ => {
             return Err(KernelError::NotSupported {
-                what: "fake kernel: swept or lofted surface bodies".into(),
+                what: "fake kernel: surface bodies from this shape".into(),
             })
         }
     };
+    let distinct = span_curve.iter().collect::<BTreeSet<_>>().len();
     let mut b = SheetBuild {
         facets: Vec::new(),
         face_of: Vec::new(),
         face_sources: Vec::new(),
         hints: Vec::new(),
     };
-    let fr = profile.frame;
-    for chain in &profile.loops {
-        for seg in chain {
-            let face = b.face_sources.len() as u32;
-            b.face_sources.push(vec![label_for(&seg.curve)]);
-            b.hints.push(SurfaceKind::Other);
-            let c = Curve2::from_segment(seg);
-            let poly: Vec<P3> = c
-                .polyline(c.samples())
-                .into_iter()
-                .map(|q| fr.to_world(q))
-                .collect();
-            let curve_tag = || KernelTag::Curve {
-                profile: 0,
-                curve: seg.curve.clone(),
-            };
-            for s in 0..steps.len() - 1 {
-                for i in 0..poly.len() - 1 {
-                    let (t0, t1) = (&steps[s], &steps[s + 1]);
-                    let q = [
-                        t0.apply(poly[i]),
-                        t0.apply(poly[i + 1]),
-                        t1.apply(poly[i + 1]),
-                        t1.apply(poly[i]),
-                    ];
-                    let n = unit(cross(sub(q[1], q[0]), sub(q[3], q[0])));
-                    if norm(n) < 0.5 {
-                        continue; // degenerate (a point on the revolve axis)
+    for (seg, rows) in profile.loops.iter().flatten().zip(&rows) {
+        let curve_tag = || KernelTag::Curve {
+            profile: 0,
+            curve: seg.curve.clone(),
+        };
+        let mut face_of_curve: BTreeMap<u32, u32> = BTreeMap::new();
+        for s in 0..rows.len() - 1 {
+            let pc = span_curve.get(s).copied().unwrap_or(0);
+            let face = *face_of_curve.entry(pc).or_insert_with(|| {
+                let mut label = label_for(&seg.curve);
+                if distinct > 1 {
+                    if let HistorySource::Generated { ordinal, .. } = &mut label {
+                        *ordinal = Some(pc);
                     }
-                    // Segment order: start-cap line, along the sweep at the curve's end
-                    // point, end-cap line, along the sweep at its start point. Only boundary
-                    // segments keep their label (shared ones become edges between faces).
-                    let labels = vec![
-                        gen_boundary(curve_tag(), Some(0)),
-                        gen_boundary(curve_tag(), Some(3)),
-                        gen_boundary(curve_tag(), Some(1)),
-                        gen_boundary(curve_tag(), Some(2)),
-                    ];
+                }
+                b.face_sources.push(vec![label]);
+                b.hints.push(SurfaceKind::Other);
+                (b.face_sources.len() - 1) as u32
+            });
+            let (r0, r1) = (&rows[s], &rows[s + 1]);
+            for i in 0..r0.len() - 1 {
+                let q = [r0[i], r0[i + 1], r1[i + 1], r1[i]];
+                // Segment order: start-cap line, along the sweep at the curve's end point,
+                // end-cap line, along the sweep at its start point. Only boundary segments
+                // keep their label (shared ones become edges between faces).
+                let [l0, l3, l1, l2] = [0, 3, 1, 2].map(|o| gen_boundary(curve_tag(), Some(o)));
+                let n = unit(cross(sub(q[1], q[0]), sub(q[3], q[0])));
+                let planar = norm(n) > 0.5 && {
+                    let d = dot(sub(q[2], q[0]), n);
+                    d.abs() <= 1e-9 * (1.0 + norm(sub(q[2], q[0])))
+                };
+                if planar {
                     b.facets.push(Facet {
                         loops: vec![q.to_vec()],
                         normal: n,
-                        labels: vec![labels],
+                        labels: vec![vec![l0, l3, l1, l2]],
+                    });
+                    b.face_of.push(face);
+                    continue;
+                }
+                // A twisted quad: two triangles across its diagonal (degenerate ones, at a
+                // revolve axis, are skipped).
+                let ta = unit(cross(sub(q[1], q[0]), sub(q[2], q[0])));
+                let tb = unit(cross(sub(q[2], q[0]), sub(q[3], q[0])));
+                let diag = gen_boundary(curve_tag(), Some(4));
+                if norm(ta) > 0.5 {
+                    b.facets.push(Facet {
+                        loops: vec![vec![q[0], q[1], q[2]]],
+                        normal: ta,
+                        labels: vec![vec![l0.clone(), l3.clone(), diag.clone()]],
+                    });
+                    b.face_of.push(face);
+                }
+                if norm(tb) > 0.5 {
+                    b.facets.push(Facet {
+                        loops: vec![vec![q[0], q[2], q[3]]],
+                        normal: tb,
+                        labels: vec![vec![diag, l1, l2]],
                     });
                     b.face_of.push(face);
                 }
             }
+        }
+        for face in face_of_curve.values() {
             let ns: Vec<P3> = b
                 .facets
                 .iter()
                 .zip(&b.face_of)
-                .filter(|(_, f)| **f == face)
+                .filter(|(_, f)| *f == face)
                 .map(|(x, _)| x.normal)
                 .collect();
             if let Some(n0) = ns.first() {
                 if ns.iter().all(|n| norm(sub(*n, *n0)) < 1e-9) {
-                    b.hints[face as usize] = SurfaceKind::Plane { normal: *n0 };
+                    b.hints[*face as usize] = SurfaceKind::Plane { normal: *n0 };
                 }
             }
         }
@@ -924,4 +1037,113 @@ impl PolyTool {
             )
         })
     }
+}
+
+/// The straight segments of an edge of a sheet (its boundary segments) or of a solid (the
+/// edge itself).
+pub(super) fn edge_segments(h: &BodyHandle, edge: u32) -> Result<Vec<(P3, P3)>, KernelError> {
+    if let Some(s) = h.downcast::<FakeSheet>() {
+        let segs = s
+            .boundary_segments
+            .get(&edge)
+            .ok_or_else(|| KernelError::Failed {
+                message: "the edge is not a boundary edge of the sheet".into(),
+            })?;
+        return Ok(segs
+            .iter()
+            .map(|&(fi, li, si)| {
+                let l = &s.facets[fi].loops[li];
+                (l[si], l[(si + 1) % l.len()])
+            })
+            .collect());
+    }
+    if let Some(s) = h.downcast::<FakeSolid>() {
+        let e = s
+            .topology
+            .edges
+            .get(edge as usize)
+            .ok_or(KernelError::Failed {
+                message: "edge out of range".into(),
+            })?;
+        return Ok(vec![(e.geom.start, e.geom.end)]);
+    }
+    Err(KernelError::Failed {
+        message: "not a fake-kernel body".into(),
+    })
+}
+
+/// Closed loops through tagged segments, joined end to end (either way round). Each loop is
+/// its points with the tag of the segment from each point to the next.
+pub(super) fn chain_loops<T: Clone>(
+    segs: Vec<(P3, P3, T)>,
+) -> Result<Vec<Vec<(P3, T)>>, KernelError> {
+    let mut left = segs;
+    let mut loops = Vec::new();
+    while let Some((a, b, t)) = left.pop() {
+        let start = key(a);
+        let mut lp = vec![(a, t)];
+        let mut at = b;
+        while key(at) != start {
+            let k = key(at);
+            let Some(j) = left
+                .iter()
+                .position(|(p, q, _)| key(*p) == k || key(*q) == k)
+            else {
+                return Err(KernelError::Failed {
+                    message: "the edges do not form a closed loop".into(),
+                });
+            };
+            let (p, q, t) = left.swap_remove(j);
+            let (from, to) = if key(p) == k { (p, q) } else { (q, p) };
+            lp.push((from, t));
+            at = to;
+        }
+        loops.push(lp);
+    }
+    Ok(loops)
+}
+
+/// Facets patching a closed loop: one polygon where it is planar, else a fan of triangles
+/// about its centroid (`inner` labels the fan's spokes).
+pub(super) fn patch_facets(lp: &[(P3, HistorySource)], inner: &HistorySource) -> Vec<Facet> {
+    let pts: Vec<P3> = lp.iter().map(|(p, _)| *p).collect();
+    // Newell's normal: oriented with the loop.
+    let mut n = [0.0; 3];
+    for i in 0..pts.len() {
+        let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+        n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+        n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+        n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    let n = unit(n);
+    let size = pts
+        .iter()
+        .map(|p| norm(sub(*p, pts[0])))
+        .fold(0.0, f64::max)
+        .max(1e-300);
+    let planar = pts
+        .iter()
+        .all(|p| dot(sub(*p, pts[0]), n).abs() <= 1e-9 * size);
+    if planar {
+        return vec![Facet {
+            loops: vec![pts],
+            normal: n,
+            labels: vec![lp.iter().map(|(_, l)| l.clone()).collect()],
+        }];
+    }
+    let c = scale(
+        pts.iter().fold([0.0; 3], |acc, p| add(acc, *p)),
+        1.0 / pts.len() as f64,
+    );
+    (0..pts.len())
+        .filter_map(|i| {
+            let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+            let tn = unit(cross(sub(b, a), sub(c, a)));
+            (norm(tn) > 0.5).then(|| Facet {
+                loops: vec![vec![a, b, c]],
+                normal: tn,
+                labels: vec![vec![lp[i].1.clone(), inner.clone(), inner.clone()]],
+            })
+        })
+        .collect()
 }

@@ -10,6 +10,7 @@ use common::*;
 use runmat_cad::diagnostics::DiagCode;
 use runmat_cad::ids::{FeatureId, InputName, SketchEntityId};
 use runmat_cad::model::sheet_metal::*;
+use runmat_cad::model::surface::{BoundaryEdge, Continuity};
 use runmat_cad::model::weldment::*;
 use runmat_cad::model::*;
 use runmat_cad::refs::*;
@@ -151,12 +152,14 @@ fn rules() -> SheetMetalRules {
 }
 
 fn chain_sketch(id: &str, pts: &[(f64, f64)], names: &[&str]) -> Feature {
+    chain_sketch_on(id, OriginPlane::Zx, pts, names)
+}
+
+fn chain_sketch_on(id: &str, plane: OriginPlane, pts: &[(f64, f64)], names: &[&str]) -> Feature {
     let n = names.len();
     let mut s = Sketch {
         plane: PlaneRef::Datum {
-            datum: DatumRef::OriginPlane {
-                plane: OriginPlane::Zx,
-            },
+            datum: DatumRef::OriginPlane { plane },
         },
         entities: Vec::new(),
         constraints: Vec::new(),
@@ -667,6 +670,305 @@ fn a_swept_open_sheet_names_a_face_per_curve() {
     // Two faces, one shared edge, six boundary edges.
     assert_eq!(t.edges.iter().filter(|e| !e.laminar).count(), 1);
     assert_eq!(t.edges.iter().filter(|e| e.laminar).count(), 6);
+}
+
+#[test]
+fn a_swept_sheet_names_a_face_per_profile_and_path_curve() {
+    let env = Env::new();
+    let mut d = PartDocument::new("duct.part");
+    // The profile in the ZX plane; the path in XY: 25 mm along +y, then 20 mm diagonally.
+    d.features.push(chain_sketch(
+        "c",
+        &[(0.0, 0.0), (30.0, 0.0), (30.0, 20.0)],
+        &["floor", "wall"],
+    ));
+    d.features.push(chain_sketch_on(
+        "p",
+        OriginPlane::Xy,
+        &[(0.0, 0.0), (0.0, 25.0), (20.0, 45.0)],
+        &["run", "turn"],
+    ));
+    d.features.push(Feature::new(
+        "skin",
+        FeatureKind::Surface(SurfaceFeature::Sweep {
+            profile: ProfileRef::sketch("c"),
+            path: ProfileRef::sketch("p"),
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    let t = &r.state.bodies[0].topology;
+    assert_eq!(t.faces.len(), 4);
+    // Shared: floor/wall along each path curve, and each curve across the path's corner.
+    assert_eq!(t.edges.iter().filter(|e| !e.laminar).count(), 4);
+    assert_eq!(t.edges.iter().filter(|e| e.laminar).count(), 8);
+    // The floor (along z) swept 25 mm along y is a 30 × 25 plane.
+    let names = &r.state.bodies[0].names;
+    let floor_run = names
+        .faces
+        .iter()
+        .position(|n| {
+            n.iter().any(|x| {
+                matches!(x, EntityName::Generated(g) if g.ordinal == Some(0)
+                    && matches!(&g.tag, SourceTag::Curve { entity, .. } if entity.as_str() == "floor"))
+            })
+        })
+        .expect("the floor's first path piece is named");
+    assert!(close(t.faces[floor_run].geom.area, 30e-3 * 25e-3, 1e-12));
+}
+
+#[test]
+fn surface_lofts_run_between_sections_on_planes_that_are_not_parallel() {
+    let env = Env::new();
+    let loft = |b: [(f64, f64); 2]| {
+        let mut d = PartDocument::new("skin.part");
+        // A: along x on the XY plane. B: on the ZX plane (u = z, v = x).
+        d.features.push(chain_sketch_on(
+            "a",
+            OriginPlane::Xy,
+            &[(0.0, 0.0), (30.0, 0.0)],
+            &["edge"],
+        ));
+        d.features.push(chain_sketch("b", &b, &["edge"]));
+        d.features.push(Feature::new(
+            "skin",
+            FeatureKind::Surface(SurfaceFeature::Loft {
+                profiles: vec![ProfileRef::sketch("a"), ProfileRef::sketch("b")],
+                guides: Vec::new(),
+            }),
+        ));
+        env.regen(&d)
+    };
+    // B lies 20 mm up, over A: a flat 30 × 20 strip in the y = 0 plane.
+    let r = loft([(20.0, 0.0), (20.0, 30.0)]);
+    assert_clean(&r);
+    let t = &r.state.bodies[0].topology;
+    assert_eq!(t.faces.len(), 1);
+    assert_eq!(t.edges.iter().filter(|e| e.laminar).count(), 4);
+    let f = &t.faces[0].geom;
+    assert!(close(f.area, 30e-3 * 20e-3, 1e-12));
+    assert!(matches!(f.surface, SurfaceKind::Plane { normal } if normal[1].abs() > 0.999));
+    // B rising from 20 to 25 mm along x: a twisted ruled strip, still one face.
+    let r = loft([(20.0, 0.0), (25.0, 30.0)]);
+    assert_clean(&r);
+    let t = &r.state.bodies[0].topology;
+    assert_eq!(t.faces.len(), 1);
+    assert!(t.faces[0].geom.area > 30e-3 * 20e-3);
+}
+
+fn boundary_edge(feature: &str, sketch: &str, curve: &str) -> Reference {
+    Reference::Name {
+        kind: TopoKind::Edge,
+        name: EntityName::Generated(GenerationName {
+            feature: fid(feature),
+            role: Role::Boundary,
+            tag: SourceTag::Curve {
+                sketch: fid(sketch),
+                entity: SketchEntityId::new(curve),
+            },
+            ordinal: None,
+        }),
+    }
+}
+
+/// A 40 × 20 planar patch with a 10 × 10 hole, its edges named a, b, c, e and h1..h4.
+fn holed_patch() -> PartDocument {
+    let mut d = PartDocument::new("skin.part");
+    let mut s = rect_names(
+        PlaneRef::origin_xy(),
+        0.0,
+        0.0,
+        40.0,
+        20.0,
+        ["a", "b", "c", "e"],
+    );
+    let h = rect_names(
+        PlaneRef::origin_xy(),
+        10.0,
+        5.0,
+        20.0,
+        15.0,
+        ["h1", "h2", "h3", "h4"],
+    );
+    s.entities.extend(h.entities);
+    s.constraints.extend(h.constraints);
+    d.features.push(sketch("s", s));
+    d.features.push(Feature::new(
+        "patch",
+        FeatureKind::Surface(SurfaceFeature::Planar {
+            profile: ProfileRef::sketch("s"),
+        }),
+    ));
+    d
+}
+
+fn hole_edges() -> Vec<Reference> {
+    ["h1", "h2", "h3", "h4"]
+        .iter()
+        .map(|c| boundary_edge("patch", "s", c))
+        .collect()
+}
+
+#[test]
+fn delete_hole_and_fill_close_a_sheet_hole() {
+    let env = Env::new();
+    let r = env.regen(&holed_patch());
+    assert_clean(&r);
+    assert!(close(
+        r.state.bodies[0].topology.faces[0].geom.area,
+        700e-6,
+        1e-12
+    ));
+
+    let mut d = holed_patch();
+    d.features.push(Feature::new(
+        "close",
+        FeatureKind::Surface(SurfaceFeature::DeleteHole {
+            edges: hole_edges(),
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    let t = &r.state.bodies[0].topology;
+    assert_eq!(t.faces.len(), 1);
+    assert_eq!(t.edges.iter().filter(|e| e.laminar).count(), 4);
+    assert!(close(t.faces[0].geom.area, 800e-6, 1e-12));
+
+    // A fill patches the same loop as a sheet of its own; the holed patch stays.
+    let mut d = holed_patch();
+    d.features.push(Feature::new(
+        "plug",
+        FeatureKind::Surface(SurfaceFeature::Fill {
+            boundary: hole_edges()
+                .into_iter()
+                .map(|edge| BoundaryEdge {
+                    edge,
+                    continuity: Continuity::G0,
+                })
+                .collect(),
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 2);
+    let areas: Vec<f64> = r
+        .state
+        .bodies
+        .iter()
+        .map(|b| b.topology.faces.iter().map(|f| f.geom.area).sum())
+        .collect();
+    assert!(
+        areas.iter().any(|a| close(*a, 100e-6, 1e-12)),
+        "{:?}",
+        areas
+    );
+    assert!(
+        areas.iter().any(|a| close(*a, 700e-6, 1e-12)),
+        "{:?}",
+        areas
+    );
+}
+
+#[test]
+fn ruled_strips_stand_on_a_sheet_edge() {
+    let env = Env::new();
+    let strip = |angle: f64| {
+        let mut d = holed_patch();
+        d.features.push(Feature::new(
+            "fence",
+            FeatureKind::Surface(SurfaceFeature::Ruled {
+                edges: vec![boundary_edge("patch", "s", "b")],
+                distance: mm(10.0),
+                angle: ValueExpr::deg(angle),
+            }),
+        ));
+        let r = env.regen(&d);
+        assert_clean(&r);
+        assert_eq!(r.state.bodies.len(), 2);
+        let f = r
+            .state
+            .bodies
+            .iter()
+            .flat_map(|b| b.topology.faces.iter())
+            .find(|f| close(f.geom.area, 200e-6, 1e-12))
+            .expect("a 20 × 10 strip")
+            .geom;
+        f
+    };
+    // Along the patch's normal: a wall standing on the x = 40 edge.
+    let f = strip(0.0);
+    assert!(matches!(f.surface, SurfaceKind::Plane { normal } if normal[0].abs() > 0.999));
+    assert!(close(f.centroid[0], 0.04, 1e-12) && close(f.centroid[2].abs(), 0.005, 1e-12));
+    // Turned 90° outward: the patch's own plane, beyond the edge.
+    let f = strip(90.0);
+    assert!(matches!(f.surface, SurfaceKind::Plane { normal } if normal[2].abs() > 0.999));
+    assert!(close(f.centroid[0], 0.045, 1e-12) && close(f.centroid[2], 0.0, 1e-12));
+}
+
+#[test]
+fn cut_with_surface_keeps_one_side_of_a_sheet() {
+    let env = Env::new();
+    let cut = |keep: PlaneSide| {
+        let mut d = block();
+        d.features.push(Feature::new(
+            "level",
+            FeatureKind::Plane(PlaneDef::Offset {
+                base: PlaneRef::origin_xy(),
+                distance: mm(4.0),
+            }),
+        ));
+        d.features.push(sketch(
+            "s_sheet",
+            rect_names(
+                PlaneRef::datum("level"),
+                -10.0,
+                -10.0,
+                90.0,
+                60.0,
+                ["a", "b", "c", "e"],
+            ),
+        ));
+        d.features.push(Feature::new(
+            "sheet",
+            FeatureKind::Surface(SurfaceFeature::Planar {
+                profile: ProfileRef::sketch("s_sheet"),
+            }),
+        ));
+        d.features.push(Feature::new(
+            "trim",
+            FeatureKind::Surface(SurfaceFeature::CutWithSurface {
+                body: Reference::feature_body("body"),
+                surface: Reference::feature_body("sheet"),
+                keep,
+            }),
+        ));
+        let r = env.regen(&d);
+        assert_clean(&r);
+        assert_eq!(r.state.bodies.len(), 2, "the sheet stays");
+        let solid = r
+            .state
+            .bodies
+            .iter()
+            .find(|b| b.topology.edges.iter().all(|e| !e.laminar))
+            .expect("the cut solid");
+        let top = solid
+            .topology
+            .faces
+            .iter()
+            .map(|f| f.geom.bbox_max[2])
+            .fold(f64::MIN, f64::max);
+        let bottom = solid
+            .topology
+            .faces
+            .iter()
+            .map(|f| f.geom.bbox_min[2])
+            .fold(f64::MAX, f64::min);
+        (bottom, top)
+    };
+    let (b, t) = cut(PlaneSide::Negative);
+    assert!(approx(b, 0.0) && approx(t, 0.004));
+    let (b, t) = cut(PlaneSide::Positive);
+    assert!(approx(b, 0.004) && approx(t, 0.01));
 }
 
 // ===================================================================== mold
