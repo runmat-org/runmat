@@ -1,7 +1,7 @@
 //! Schematic commands (§9.1) and the circuit view cluster.
 
 use super::CIRCUIT;
-use runmat_cad::commands::*;
+use runmat_design_commands::*;
 use SelectKind as K;
 
 fn sch(id: &str, label: &str, icon: &str, desc: &str) -> CommandDescriptor {
@@ -264,7 +264,13 @@ pub(super) fn add(c: &mut Catalog) {
             "Send schematic changes to the board; review each line.",
         )
         .kw(&["eco", "engineering change", "sync", "update pcb"])
+        .inputs(vec![checklist(
+            "changes",
+            "Changes to apply",
+            &[K::EcoChange],
+        )])
         .when(has(Facet::PendingEco))
+        .on(&[K::EcoChange])
         .edit(edit(EditOp::Sync, Section::Placement).item("eco")),
         sch(
             "library.place",
@@ -538,5 +544,5 @@ pub(super) fn tab() -> DomainTab {
 }
 
 fn tab_of(groups: Vec<RowGroup>) -> DomainTab {
-    runmat_cad::commands::tab("schematic", "Schematic", groups)
+    runmat_design_commands::tab("schematic", "Schematic", groups)
 }

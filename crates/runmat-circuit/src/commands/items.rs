@@ -2,7 +2,7 @@
 //! pads and pours. Values set by rules carry the rule's explain line in the projection.
 
 use super::CIRCUIT;
-use runmat_cad::commands::*;
+use runmat_design_commands::*;
 use SelectKind as K;
 
 fn prop(field: Field, section: Section, property: &str) -> ItemField {
@@ -204,11 +204,21 @@ pub(super) fn add(c: &mut Catalog) {
                     shown(text("component", "Component", None), "component"),
                     shown(text("net", "Net", None), "net"),
                     shown(text("shape", "Shape", None), "shape"),
+                    shown(text("layer", "Layers", None), "layer"),
                     shown(qty("clearance", "Clearance", "length", None), "clearance"),
-                    shown(
-                        qty("mask_expansion", "Mask expansion", "length", None),
-                        "mask_expansion",
-                    ),
+                ],
+            )],
+        ),
+        schema(
+            K::Rule,
+            "Design rule",
+            vec![section(
+                "Rule",
+                vec![
+                    shown(text("selector", "Applies to", None), "selector"),
+                    shown(text("other", "Against", None), "other"),
+                    shown(count("priority", "Priority", 0, 0), "priority"),
+                    shown(text("source", "Written at", None), "source"),
                 ],
             )],
         ),
@@ -231,6 +241,7 @@ pub(super) fn add(c: &mut Catalog) {
                             "Pad connection",
                             &[
                                 ("relief", "Thermal relief"),
+                                ("relief_tht", "Thermal relief, through-hole only"),
                                 ("solid", "Solid"),
                                 ("none", "None"),
                             ],
@@ -243,7 +254,21 @@ pub(super) fn add(c: &mut Catalog) {
                         Section::Copper,
                         "priority",
                     ),
-                    shown(count("islands", "Islands", 0, 0), "islands"),
+                    prop(
+                        qty("min_width", "Minimum width", "length", None),
+                        Section::Copper,
+                        "min_width",
+                    ),
+                    prop(
+                        qty("thermal_gap", "Relief gap", "length", None),
+                        Section::Copper,
+                        "thermal_gap",
+                    ),
+                    prop(
+                        qty("spoke_width", "Spoke width", "length", None),
+                        Section::Copper,
+                        "spoke_width",
+                    ),
                 ],
             )],
         ),

@@ -64,7 +64,20 @@ fn circuit_fixture() {
     };
     let pool = fixture::standard_pool();
     let design = fixture::large_design(&params);
-    let nl = elaborate(&design, &pool, &ElabOptions::default(), None);
+    let mut nl = elaborate(&design, &pool, &ElabOptions::default(), None);
+    // The FPGA's unused IO carry no-ERC markers, as a designer places them; two are still unmarked.
+    if let Some(ci) = nl.components.iter().position(|c| c.designator == "U9000") {
+        let unused: Vec<usize> = nl.components[ci]
+            .pins
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.net.is_none())
+            .map(|(pi, _)| pi)
+            .collect();
+        for pi in unused.into_iter().skip(2) {
+            nl.no_erc.insert((ci, pi));
+        }
+    }
     // The lock as of the last board sync (two channels); the third channel is pending ECO.
     let mut lock = LockSection::default();
     let old = elaborate(
@@ -75,7 +88,19 @@ fn circuit_fixture() {
     );
     lock.reconcile(&old.lock_items(), &mut DerivedUuids { namespace: 7 });
     let eco = lock.reconcile(&nl.lock_items(), &mut DerivedUuids { namespace: 7 });
-    let erc = erc::run(&nl, &ErcOptions::default());
+    // +5 V and ground come in on J100 (power flags); the -5 V rail has no source yet.
+    let erc = erc::run(
+        &nl,
+        &ErcOptions {
+            power_flags: ["+5V", "GND"].iter().map(|n| (*n).to_owned()).collect(),
+            ..ErcOptions::default()
+        },
+    );
+    assert!(
+        erc.len() < 12,
+        "a realistic ERC list, not noise: {} entries",
+        erc.len()
+    );
     let findings = review::run_all(&nl, &pool, &ReviewOptions::default());
     let mut index = build_index(&design, &nl, &pool, &erc, &findings, &eco);
 
@@ -93,6 +118,12 @@ fn circuit_fixture() {
         "the third channel waits for the board"
     );
     let board_index = index.board.as_ref().unwrap();
+    assert!(board_index.layers.iter().any(|l| l.kind == "copper"));
+    assert!(!board_index.pads.is_empty() && !board_index.rules.is_empty());
+    assert!(board_index
+        .zones
+        .iter()
+        .all(|z| z.text.contains_key("connect") && z.values.contains_key("clearance")));
     assert!(
         !board_index.drc.is_empty(),
         "seeded violations are reported"

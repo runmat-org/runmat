@@ -156,7 +156,8 @@ fn part_fixture() {
 
 #[test]
 fn assembly_fixture() {
-    let p = generate(&SynthSpec::small());
+    let mut p = generate(&SynthSpec::small());
+    add_frame_mates(&mut p.source);
     let units = StubUnits;
     let dynamic = NoDynamicValues;
     let ctx = ResolveContext {
@@ -171,7 +172,66 @@ fn assembly_fixture() {
     let r = resolve(&p.top, &ResolveRequest::default(), &ctx);
     let index = build_assembly_index(&r, Some(&p.source));
     assert!(!index.occurrences.is_empty());
+    let statuses: BTreeSet<String> = index
+        .mates
+        .iter()
+        .map(|m| {
+            format!("{:?}", m.status)
+                .split([' ', '{'])
+                .next()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert!(
+        statuses.contains("Conflicting") && statuses.contains("Failed"),
+        "the Mates folder shows an over-constrained and a failed mate: {statuses:?}"
+    );
     emit("rig.assembly.json", &assembly_index_json(&index));
+}
+
+/// The frame's web and first clip as mate connectors: the clip fastened to the web although
+/// its placement already fixes it (over-constrained), and a hinge naming a connector that was
+/// renamed away (failed, with its repair).
+fn add_frame_mates(source: &mut runmat_cad::assembly::source::MemorySource) {
+    use runmat_cad::assembly::model::*;
+    let key = source
+        .assemblies
+        .keys()
+        .find(|(path, _)| path.as_str() == "fuselage/frame.assembly")
+        .cloned()
+        .expect("synth frame assembly");
+    let mut frame = (*source.assemblies[&key]).clone();
+    let connector = |name: &str, occurrence: &str| MateConnector {
+        name: name.into(),
+        occurrence: RelPath::new(&[occurrence]),
+        anchor: AnchorRef::Origin,
+        offset: None,
+        flip: false,
+    };
+    frame.connectors.push(connector("web_root", "web"));
+    frame.connectors.push(connector("clip_seat", "clip"));
+    let mate = |name: &str, kind: MateKind, a: &str, b: &str| MateDef {
+        name: name.into(),
+        kind,
+        a: a.into(),
+        b: b.into(),
+        when: None,
+        suppressed: false,
+    };
+    frame.mates.push(mate(
+        "clip_to_web",
+        MateKind::Fasten,
+        "clip_seat",
+        "web_root",
+    ));
+    frame.mates.push(mate(
+        "clip_hinge",
+        MateKind::Revolute { angle: None },
+        "clip_seat",
+        "web_flange",
+    ));
+    source.assemblies.insert(key, std::sync::Arc::new(frame));
 }
 
 #[test]

@@ -4,12 +4,13 @@
 //! The Desktop's Outline tree and Properties panel read this; so can agents and the server
 //! index. Every list is sorted, so identical inputs give identical bytes.
 
-use crate::board_rules::{props, BItem, BoardGraph, BoardRules};
+use crate::board_rules::{props, BItem, BoardGraph, BoardRules, RuleValue};
 use crate::drc::Drc;
 use crate::elab::{FitState, Netlist, Severity};
 use crate::ids::IdChange;
 use crate::ir::{Design, Param, ParamValue, Tolerance};
-use crate::layout::{Board, NetId};
+use crate::layout::{Board, NetId, PadConnect, Side, StackKind};
+use crate::library::PadShape;
 use crate::library::Pool;
 use crate::review::ReviewFinding;
 use serde::{Deserialize, Serialize};
@@ -120,17 +121,57 @@ pub struct BoardIndex {
     pub name: String,
     pub layers: Vec<LayerRow>,
     pub footprints: Vec<FootprintRow>,
+    pub pads: Vec<PadRow>,
     pub tracks: Vec<CopperRow>,
     pub vias: Vec<CopperRow>,
     pub zones: Vec<CopperRow>,
+    /// The design rules in source order: what each selects and sets, and where it is written.
+    pub rules: Vec<RuleRow>,
     pub drc: Vec<CheckRow>,
+}
+
+/// One design rule (`rule power-width { track:net-class(power) { track_width: 0.4mm } }`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RuleRow {
+    pub id: String,
+    pub selector: String,
+    /// The second selector of a pair rule (clearance between two kinds of copper).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other: Option<String>,
+    pub priority: i32,
+    /// Property → value as written (`0.40 mm`).
+    pub values: BTreeMap<String, String>,
+    /// `io.circuit:120..168`.
+    pub source: String,
+}
+
+/// A placed pad, with its rule-driven clearance and where it came from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PadRow {
+    /// `R1.2`: footprint reference and pad name.
+    pub id: String,
+    pub component: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net: Option<String>,
+    pub layer: String,
+    /// `circle`, `rect`, `round_rect`, `oval`, `trapezoid` or `custom`.
+    pub shape: String,
+    pub values: BTreeMap<String, f64>,
+    pub explain: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LayerRow {
     pub name: String,
+    /// `copper`, `dielectric`, `soldermask`, `silkscreen` or `paste`.
     pub kind: String,
     pub thickness_mm: f64,
+    /// Copper weight, oz/ft² (informative; the thickness is authoritative).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight_oz: Option<f64>,
+    /// Dielectric: a core rather than prepreg.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -155,6 +196,9 @@ pub struct CopperRow {
     pub values: BTreeMap<String, f64>,
     /// Property → the rule that set its required value (`clearance 0.10 mm from rule power-clear at board.circuit:120..180`).
     pub explain: BTreeMap<String, String>,
+    /// Property → a value that isn't a length (a pour's name and pad connection).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub text: BTreeMap<String, String>,
 }
 
 fn mm(nm: i64) -> f64 {
@@ -497,6 +541,7 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
                 layer: layer_name(t.layer),
                 values,
                 explain: explain_map,
+                text: BTreeMap::new(),
             }
         })
         .collect();
@@ -519,6 +564,7 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
                 layer: format!("{}-{}", layer_name(v.from), layer_name(v.to)),
                 values,
                 explain: explain_map,
+                text: BTreeMap::new(),
             }
         })
         .collect();
@@ -527,10 +573,27 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
         .values()
         .map(|z| {
             let mut values = BTreeMap::new();
-            if let Some(c) = z.clearance {
-                values.insert("clearance".to_owned(), mm(c));
-            }
+            let required = rules.pair_len(BItem::Zone(z.id), BItem::Edge, props::CLEARANCE);
+            values.insert(
+                "clearance".to_owned(),
+                mm(z.clearance.map_or(required, |c| c.max(required))),
+            );
             values.insert("priority".to_owned(), z.priority as f64);
+            values.insert("min_width".to_owned(), mm(z.min_width));
+            values.insert("thermal_gap".to_owned(), mm(z.thermal_gap));
+            values.insert("spoke_width".to_owned(), mm(z.spoke_width));
+            let mut text = BTreeMap::new();
+            text.insert("name".to_owned(), z.name.clone());
+            text.insert(
+                "connect".to_owned(),
+                match z.connect {
+                    PadConnect::Solid => "solid",
+                    PadConnect::Thermal => "relief",
+                    PadConnect::ThermalThtOnly => "relief_tht",
+                    PadConnect::None => "none",
+                }
+                .to_owned(),
+            );
             let (rule, source) =
                 rules.pair_origin(BItem::Zone(z.id), BItem::Edge, props::CLEARANCE);
             let mut explain_map = BTreeMap::new();
@@ -553,7 +616,71 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
                     .join(", "),
                 values,
                 explain: explain_map,
+                text,
             }
+        })
+        .collect();
+    let pads = board
+        .footprints
+        .values()
+        .flat_map(|f| {
+            f.pads(copper).into_iter().map(move |p| {
+                let it = BItem::Pad(f.id, p.index as u32);
+                let mut values = BTreeMap::new();
+                values.insert(
+                    "clearance".to_owned(),
+                    mm(rules.pair_len(it, BItem::Edge, props::CLEARANCE)),
+                );
+                let (rule, source) = rules.pair_origin(it, BItem::Edge, props::CLEARANCE);
+                let mut explain_map = BTreeMap::new();
+                explain_map.insert(
+                    "clearance".to_owned(),
+                    if rule == "default" {
+                        "clearance from the board defaults".to_owned()
+                    } else {
+                        format!("clearance from rule {rule} at {source}")
+                    },
+                );
+                let shape = match f.package.pads.get(p.index).map(|d| &d.shape) {
+                    Some(PadShape::Circle { .. }) => "circle",
+                    Some(PadShape::Rect { .. }) => "rect",
+                    Some(PadShape::RoundRect { .. }) => "round_rect",
+                    Some(PadShape::Oval { .. }) => "oval",
+                    Some(PadShape::Trapezoid { .. }) => "trapezoid",
+                    Some(PadShape::Chamfered { .. }) => "chamfered",
+                    _ => "custom",
+                };
+                PadRow {
+                    id: format!("{}.{}", f.reference, p.name),
+                    component: f.reference.clone(),
+                    net: net_name(p.net),
+                    layer: p
+                        .layers
+                        .iter()
+                        .map(|l| layer_name(*l))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    shape: shape.to_owned(),
+                    values,
+                    explain: explain_map,
+                }
+            })
+        })
+        .collect();
+    let rule_rows = rules
+        .specs
+        .iter()
+        .map(|r| RuleRow {
+            id: r.id.clone(),
+            selector: r.selector.clone(),
+            other: r.other.clone(),
+            priority: r.priority,
+            values: r
+                .decls
+                .iter()
+                .map(|(k, v)| (k.clone(), rule_value_display(v)))
+                .collect(),
+            source: r.source.to_string(),
         })
         .collect();
     let footprints = board
@@ -565,7 +692,11 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
             x_mm: mm(f.at.x),
             y_mm: mm(f.at.y),
             rotation: f.rotation,
-            side: format!("{:?}", f.side).to_lowercase(),
+            side: match f.side {
+                Side::Top => "top",
+                Side::Bottom => "bottom",
+            }
+            .to_owned(),
             locked: f.locked,
         })
         .collect();
@@ -616,18 +747,47 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
             .stackup
             .layers
             .iter()
-            .map(|l| LayerRow {
-                name: l.name.clone(),
-                kind: format!("{:?}", l.kind).to_lowercase(),
-                thickness_mm: mm(l.thickness),
+            .map(|l| {
+                let (kind, weight_oz, core) = match l.kind {
+                    StackKind::Copper { weight_oz } => ("copper", Some(weight_oz), None),
+                    StackKind::Dielectric { core } => ("dielectric", None, Some(core)),
+                    StackKind::SolderMask => ("soldermask", None, None),
+                    StackKind::Silkscreen => ("silkscreen", None, None),
+                    StackKind::Paste => ("paste", None, None),
+                };
+                LayerRow {
+                    name: l.name.clone(),
+                    kind: kind.to_owned(),
+                    thickness_mm: mm(l.thickness),
+                    weight_oz,
+                    core,
+                }
             })
             .collect(),
         footprints,
+        pads,
         tracks,
         vias,
         zones,
+        rules: rule_rows,
         drc: drc_rows,
     });
+}
+
+/// A rule value as written: lengths in mm, the rest as they are.
+fn rule_value_display(v: &RuleValue) -> String {
+    match v {
+        RuleValue::Len(c) => format!("{} mm", trim(mm(*c))),
+        RuleValue::Num(n) => trim(*n),
+        RuleValue::Int(i) => i.to_string(),
+        RuleValue::Bool(b) => b.to_string(),
+        RuleValue::Text(t) => t.clone(),
+        RuleValue::ViaKinds(kinds) => kinds
+            .iter()
+            .map(|k| format!("{k:?}").to_lowercase())
+            .collect::<Vec<_>>()
+            .join(", "),
+    }
 }
 
 /// Sort key that orders `R2` before `R10`.
