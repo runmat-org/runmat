@@ -117,3 +117,15 @@ Baseline receipts (T1 CLI runmat-hero-a5906bba1a): ~/runs/q-snapshot-5/out/base*
     remote paths, not in this diff).
 - Release snap5-82d1a8439e: six cantilever studies captured + verified (out/final/). modal-harmonic failed at
   publication; fixed in ae15407493 (defaults_for harmonic ModalReduced) and 8f04be4280 (intent ModalFrequency arm).
+- 8f04be4280 runtime --lib analysis:: : 428 passed, 4 failed (same 4 as above); new assertion in
+  solver_defaults_admit_only_implemented_exact_procedures passes.
+- PINNED BUILD: snap5-8f04be4280 (runmat-build-mac ~/fea-cli, sha256 7b9a654f…578c0f, `runmat 0.6.2`).
+  Six studies recaptured + verified with it: studies/cantilever-<s>/snapshot-pinned/, receipts out/pinned/<s>/.
+  16/16 scenes import with the :1001 renderer 6c140ff499d2. Posted sister-comms/fea-pinned-build-8f04be4280.txt.
+- OPEN: modal -> modal_harmonic now solves and publishes, but it is rejected by the strict gate in
+  runtime frequency_result/admission.rs: the physical balance error is 0.0923 (8-mode truncation) against the
+  1e-8 tolerance, while the reduced solver residual is about 5e-17. The same gate applies to prestressed
+  modal-reduced sweeps. A decision is needed on the modal-reduced criterion: gate the reduced residual and
+  report balance as a truncation measure, or add residual (static-correction) vectors to the basis
+  (residual_vector_directions exists in the runtime options but not in the .fea language).
+  Receipt: out/final3/modal-harmonic/, run manifest in studies/cantilever-modal-harmonic/.artifacts.
