@@ -637,6 +637,10 @@ pub struct EditorRows {
     pub default_tab: String,
     /// Row 1, right side.
     pub view_cluster: Vec<RowItem>,
+    /// The bottom strip: document context (sheets, standard and layer; configuration; options,
+    /// representation and working set; variant). Replaces the Command Window in design editors.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub document_bar: Vec<RowItem>,
     /// Commands the S box offers first.
     pub shortcut_box: Vec<String>,
     /// Row 1 status text the mode shows (sketch definition state and DOF).
@@ -792,7 +796,11 @@ impl Catalog {
     pub fn lint(&self) -> Vec<String> {
         let mut problems = Vec::new();
         for rows in &self.rows {
-            let mut items: Vec<&RowItem> = rows.view_cluster.iter().collect();
+            let mut items: Vec<&RowItem> = rows
+                .view_cluster
+                .iter()
+                .chain(rows.document_bar.iter())
+                .collect();
             for tab in &rows.tabs {
                 for group in &tab.groups {
                     items.extend(group.items.iter());

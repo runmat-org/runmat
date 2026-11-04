@@ -52,8 +52,8 @@ mod tests {
         assert_eq!(
             tabs(EditorKind::Part, EditMode::Model),
             [
-                "Sketch",
                 "Features",
+                "Sketch",
                 "Direct",
                 "Surfaces",
                 "Sheet Metal",
@@ -93,6 +93,7 @@ mod tests {
         let reachable = |id: &str| {
             c.rows.iter().any(|r| {
                 r.view_cluster.iter().any(|i| i.command_ids().contains(&id))
+                    || r.document_bar.iter().any(|i| i.command_ids().contains(&id))
                     || r.shortcut_box.iter().any(|s| s == id)
                     || r.mode_actions.iter().any(|s| s == id)
             })

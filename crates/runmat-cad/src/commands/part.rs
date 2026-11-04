@@ -2261,6 +2261,7 @@ fn rows(catalog: &Catalog) -> EditorRows {
         mode: EditMode::Model,
         default_tab: "features".into(),
         view_cluster: cluster_3d(vec![]),
+        document_bar: vec![c("view.configuration")],
         shortcut_box: [
             "part.sketch",
             "part.extrude",
@@ -2278,41 +2279,6 @@ fn rows(catalog: &Catalog) -> EditorRows {
         .collect(),
         mode_actions: Vec::new(),
         tabs: vec![
-            tab(
-                "sketch",
-                "Sketch",
-                vec![
-                    group(
-                        "sketch",
-                        "Sketch",
-                        vec![c("part.sketch"), c("part.sketch-3d")],
-                    ),
-                    group(
-                        "reference",
-                        "Reference",
-                        vec![
-                            variants(
-                                "part.plane.menu",
-                                "Plane",
-                                "plane",
-                                "part.plane",
-                                "type",
-                                &[
-                                    ("offset", "Offset plane"),
-                                    ("angle", "Plane at angle"),
-                                    ("three_point", "Plane through 3 points"),
-                                    ("mid", "Mid-plane"),
-                                    ("normal_to_curve", "Plane normal to curve"),
-                                    ("tangent_to_face", "Plane tangent to surface"),
-                                ],
-                            ),
-                            c("part.axis"),
-                            c("part.point"),
-                            c("part.coordinate-system"),
-                        ],
-                    ),
-                ],
-            ),
             tab(
                 "features",
                 "Features",
@@ -2488,6 +2454,41 @@ fn rows(catalog: &Catalog) -> EditorRows {
                             "library",
                             vec![e("part.library")],
                         )],
+                    ),
+                ],
+            ),
+            tab(
+                "sketch",
+                "Sketch",
+                vec![
+                    group(
+                        "sketch",
+                        "Sketch",
+                        vec![c("part.sketch"), c("part.sketch-3d")],
+                    ),
+                    group(
+                        "reference",
+                        "Reference",
+                        vec![
+                            variants(
+                                "part.plane.menu",
+                                "Plane",
+                                "plane",
+                                "part.plane",
+                                "type",
+                                &[
+                                    ("offset", "Offset plane"),
+                                    ("angle", "Plane at angle"),
+                                    ("three_point", "Plane through 3 points"),
+                                    ("mid", "Mid-plane"),
+                                    ("normal_to_curve", "Plane normal to curve"),
+                                    ("tangent_to_face", "Plane tangent to surface"),
+                                ],
+                            ),
+                            c("part.axis"),
+                            c("part.point"),
+                            c("part.coordinate-system"),
+                        ],
                     ),
                 ],
             ),

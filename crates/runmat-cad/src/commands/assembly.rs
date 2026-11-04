@@ -851,11 +851,13 @@ pub(super) fn add(catalog: &mut Catalog) {
         editor: Assembly,
         mode: EditMode::Model,
         default_tab: "assemble".into(),
-        view_cluster: cluster_3d(vec![
+        document_bar: vec![
+            c("view.configuration"),
             c("assembly.options"),
             c("view.representation"),
             c("view.working-set"),
-        ]),
+        ],
+        view_cluster: cluster_3d(vec![]),
         shortcut_box: [
             "assembly.insert",
             "assembly.mate",

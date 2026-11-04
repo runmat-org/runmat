@@ -315,6 +315,7 @@ pub(super) fn add(catalog: &mut Catalog) {
             editor,
             mode: EditMode::Sketch,
             default_tab: "sketch".into(),
+            document_bar: Vec::new(),
             view_cluster: vec![
                 menu(
                     "sketch.view.menu",

@@ -196,7 +196,6 @@ pub(super) fn cluster_3d(extra: Vec<RowItem>) -> Vec<RowItem> {
         ),
     ];
     items.extend(extra);
-    items.push(c("view.configuration"));
     items.push(c("view.measure"));
     items
 }

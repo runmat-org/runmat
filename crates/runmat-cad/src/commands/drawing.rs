@@ -873,7 +873,7 @@ pub(super) fn add(catalog: &mut Catalog) {
         editor: Drawing,
         mode: EditMode::Model,
         default_tab: "views".into(),
-        view_cluster: vec![
+        document_bar: vec![
             c("drawing.sheet"),
             variants(
                 "drawing.standard.menu",
@@ -889,6 +889,8 @@ pub(super) fn add(catalog: &mut Catalog) {
                 ],
             ),
             c("drawing.layer"),
+        ],
+        view_cluster: vec![
             variants(
                 "drawing.zoom.menu",
                 "Zoom",

@@ -24,8 +24,8 @@ pub(crate) const CIRCUIT: &[EditorKind] = &[EditorKind::Circuit, EditorKind::Cir
 
 fn rows(c: &mut Catalog) {
     let tabs = vec![schematic::tab(), board::tab(), board::tab_3d()];
+    let document_bar = vec![c_item("circuit.variant")];
     let cluster = vec![
-        c_item("circuit.variant"),
         variants(
             "circuit.select.menu",
             "Select",
@@ -77,6 +77,7 @@ fn rows(c: &mut Catalog) {
             tabs: tabs.clone(),
             default_tab: default_tab.into(),
             view_cluster: cluster.clone(),
+            document_bar: document_bar.clone(),
             shortcut_box: [
                 "schematic.place-part",
                 "schematic.place-wire",
