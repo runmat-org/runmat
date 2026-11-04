@@ -2568,15 +2568,20 @@ impl FakeKernel {
                 })?;
                 let to_world = Transform::from_frame(&first.frame);
                 let inv = to_world.inverse();
+                let tilted = |p: &CanonicalProfile| {
+                    let zl = inv.apply_vector(p.frame.z);
+                    zl[0].abs() > 1e-7 || zl[1].abs() > 1e-7
+                };
+                if profiles.iter().any(tilted) {
+                    // Sections in any orientation: a closed polyhedron through them.
+                    return Ok(vec![Tool::Polys(Box::new(sheet::loft_tool(
+                        profiles,
+                        &side,
+                        caps(),
+                    )?))]);
+                }
                 let mut sections = Vec::new();
                 for p in profiles {
-                    let zl = inv.apply_vector(p.frame.z);
-                    if zl[0].abs() > 1e-7 || zl[1].abs() > 1e-7 {
-                        return Err(KernelError::NotSupported {
-                            what: "fake kernel: lofts through sections that are not parallel"
-                                .into(),
-                        });
-                    }
                     let z = inv.apply(p.frame.origin)[2];
                     let map = |q: [f64; 2]| {
                         let l = inv.apply(p.frame.to_world(q));

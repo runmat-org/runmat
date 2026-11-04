@@ -1147,3 +1147,91 @@ pub(super) fn patch_facets(lp: &[(P3, HistorySource)], inner: &HistorySource) ->
         })
         .collect()
 }
+
+/// A closed polyhedron through loft sections in any orientation: each curve's polylines
+/// joined section to section (twisted spans split into triangles), capped by the first and
+/// last sections' regions. Sides take `side` of the first section's curves.
+pub(super) fn loft_tool(
+    profiles: &[CanonicalProfile],
+    side: &dyn Fn(&crate::ids::SketchEntityId) -> HistorySource,
+    caps: [HistorySource; 2],
+) -> Result<PolyTool, KernelError> {
+    if profiles.len() < 2 {
+        return Err(KernelError::Failed {
+            message: "a loft needs at least two sections".into(),
+        });
+    }
+    let shape = |p: &CanonicalProfile| -> Vec<usize> { p.loops.iter().map(|l| l.len()).collect() };
+    if profiles.iter().any(|p| shape(p) != shape(&profiles[0])) {
+        return Err(KernelError::Failed {
+            message: "loft sections need the same number of loops and curves".into(),
+        });
+    }
+    let mut facets: Vec<(Facet, HistorySource)> = Vec::new();
+    // Per section, per loop: the closed polyline (shared sample counts per curve).
+    let mut rings: Vec<Vec<Vec<P3>>> = vec![Vec::new(); profiles.len()];
+    for (li, l0) in profiles[0].loops.iter().enumerate() {
+        for k in 0..profiles.len() {
+            rings[k].push(Vec::new());
+        }
+        for (ci, seg0) in l0.iter().enumerate() {
+            let curves: Vec<Curve2> = profiles
+                .iter()
+                .map(|p| Curve2::from_segment(&p.loops[li][ci]))
+                .collect();
+            let n = curves.iter().map(|c| c.samples()).max().unwrap_or(1);
+            let rows: Vec<Vec<P3>> = profiles
+                .iter()
+                .zip(&curves)
+                .map(|(p, c)| {
+                    c.polyline(n)
+                        .into_iter()
+                        .map(|q| p.frame.to_world(q))
+                        .collect()
+                })
+                .collect();
+            let label = side(&seg0.curve);
+            for (k, r) in rows.iter().enumerate() {
+                rings[k][li].extend_from_slice(&r[..r.len() - 1]);
+            }
+            for k in 0..rows.len() - 1 {
+                let (r0, r1) = (&rows[k], &rows[k + 1]);
+                for i in 0..r0.len() - 1 {
+                    let q = [r0[i], r0[i + 1], r1[i + 1], r1[i]];
+                    let n = unit(cross(sub(q[1], q[0]), sub(q[3], q[0])));
+                    let size = norm(sub(q[2], q[0])).max(1e-300);
+                    let planar = norm(n) > 0.5 && dot(sub(q[2], q[0]), n).abs() <= 1e-9 * size;
+                    let poly = |pts: Vec<P3>, normal: P3| Facet {
+                        labels: vec![vec![label.clone(); pts.len()]],
+                        loops: vec![pts],
+                        normal,
+                    };
+                    if planar {
+                        facets.push((poly(q.to_vec(), n), label.clone()));
+                        continue;
+                    }
+                    for tri in [[q[0], q[1], q[2]], [q[0], q[2], q[3]]] {
+                        let tn = unit(cross(sub(tri[1], tri[0]), sub(tri[2], tri[0])));
+                        if norm(tn) > 0.5 {
+                            facets.push((poly(tri.to_vec(), tn), label.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let [start, end] = caps;
+    for (k, label) in [(0, start), (profiles.len() - 1, end)] {
+        let normal = profiles[k].frame.z;
+        let loops = rings[k].clone();
+        facets.push((
+            Facet {
+                labels: loops.iter().map(|l| vec![label.clone(); l.len()]).collect(),
+                loops,
+                normal,
+            },
+            label,
+        ));
+    }
+    Ok(PolyTool::new(facets))
+}

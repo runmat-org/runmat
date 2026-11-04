@@ -971,6 +971,83 @@ fn cut_with_surface_keeps_one_side_of_a_sheet() {
     assert!(approx(b, 0.004) && approx(t, 0.01));
 }
 
+#[test]
+fn solid_lofts_run_to_a_tilted_section() {
+    let env = Env::new();
+    let mut d = PartDocument::new("chute.part");
+    d.features.push(sketch(
+        "s0",
+        rect_names(
+            PlaneRef::origin_xy(),
+            0.0,
+            0.0,
+            20.0,
+            20.0,
+            ["a", "b", "c", "e"],
+        ),
+    ));
+    // A plane rising 1 in 2 along x from 30 mm up: x' = (2, 0, 1)/√5, y' = y.
+    let at = |x: f64, z: f64| PointRef::Coords {
+        x: mm(x),
+        y: mm(0.0),
+        z: mm(z),
+    };
+    d.features.push(Feature::new(
+        "slope",
+        FeatureKind::Plane(PlaneDef::ThreePoint {
+            a: at(0.0, 30.0),
+            b: at(20.0, 40.0),
+            c: PointRef::Coords {
+                x: mm(0.0),
+                y: mm(20.0),
+                z: mm(30.0),
+            },
+        }),
+    ));
+    // The base square seen from above on that plane: 20√5/2 along x', 20 along y'.
+    let run = 10.0 * 5f64.sqrt();
+    d.features.push(sketch(
+        "s1",
+        rect_names(
+            PlaneRef::datum("slope"),
+            0.0,
+            0.0,
+            run,
+            20.0,
+            ["a", "b", "c", "e"],
+        ),
+    ));
+    d.features.push(Feature::new(
+        "body",
+        FeatureKind::Loft(Loft {
+            profiles: vec![ProfileRef::sketch("s0"), ProfileRef::sketch("s1")],
+            guides: Vec::new(),
+            mode: BodyMode::New,
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    let t = &r.state.bodies[0].topology;
+    assert_eq!(t.faces.len(), 6, "four sides and two caps");
+    // A square prism cut by the slope: 400 mm² times the 35 mm mean height.
+    use runmat_cad::evaluate::*;
+    let AnalysisResult::MassProperties(m) = env
+        .kernel
+        .analyze(
+            &AnalysisRequest::MassProperties { density: 1.0 },
+            &[&r.state.bodies[0].handle],
+        )
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert!(
+        close(m.volume, 14_000e-9, 0.03 * 14_000e-9),
+        "{}",
+        m.volume * 1e9
+    );
+}
+
 // ===================================================================== mold
 
 #[test]
