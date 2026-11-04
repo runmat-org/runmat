@@ -184,12 +184,31 @@ pub enum ViewKind {
         from: String,
         configuration: ConfigurationName,
     },
+    /// The flat-pattern sheet of a sheet metal part: the developed outline of the flat
+    /// pattern (or unfold) feature `feature`, its bend lines with notes ("B1 UP 90° R3 BA
+    /// 6.095") and, with `bend_table`, the bend table beside it
+    /// ([`flat_pattern::flat_pattern_sheet`]).
+    FlatPattern {
+        feature: crate::ids::FeatureId,
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        bend_notes: bool,
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        bend_table: bool,
+    },
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(b: &bool) -> bool {
+    *b
 }
 
 impl ViewKind {
     pub fn parent(&self) -> Option<&str> {
         match self {
-            ViewKind::Standard { .. } => None,
+            ViewKind::Standard { .. } | ViewKind::FlatPattern { .. } => None,
             ViewKind::Projected { from, .. }
             | ViewKind::Section { from, .. }
             | ViewKind::Detail { from, .. }
@@ -439,6 +458,15 @@ pub trait ModelReferences {
     fn exploded_views(&self, _model: &ModelRef) -> BTreeSet<String> {
         BTreeSet::new()
     }
+    /// The developed layout a flat pattern or unfold feature of the model made (a part's;
+    /// `None` when the feature made none).
+    fn flat_layout(
+        &self,
+        _model: &ModelRef,
+        _feature: &crate::ids::FeatureId,
+    ) -> Option<crate::model::sheet_metal::FlatLayout> {
+        None
+    }
     /// The indented BOM of the model, for indented BOM tables.
     fn indented_bom(&self, _model: &ModelRef) -> Option<Vec<IndentedRow>> {
         None
@@ -593,6 +621,19 @@ pub fn check_drawing_with(
                     DiagCode::DrawingReference,
                     s(param),
                     format!("view `{}` {}: `{}` {}", v.name, param, r, m),
+                );
+            }
+        }
+        if let ViewKind::FlatPattern { feature, .. } = &v.kind {
+            if model.flat_layout(&v.model, feature).is_none() {
+                err(
+                    &mut rep,
+                    DiagCode::DrawingReference,
+                    s("feature"),
+                    format!(
+                        "view `{}` shows the flat pattern of `{}`, which made none in `{}`",
+                        v.name, feature, v.model.file
+                    ),
                 );
             }
         }

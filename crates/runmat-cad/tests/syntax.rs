@@ -281,6 +281,14 @@ fn drawing() -> DrawingDocument {
                     },
                 )
             },
+            view(
+                "flat",
+                ViewKind::FlatPattern {
+                    feature: runmat_cad::ids::FeatureId::new("flat"),
+                    bend_notes: true,
+                    bend_table: false,
+                },
+            ),
         ],
         annotations: vec![
             Annotation {

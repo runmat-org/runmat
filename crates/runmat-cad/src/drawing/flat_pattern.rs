@@ -381,3 +381,26 @@ impl FlatPatternSheet {
         out
     }
 }
+
+/// The sheet a flat-pattern view draws: the layout's sheet, without the bend notes or the
+/// bend table when the view leaves them out. `None` for any other view kind.
+pub fn view_sheet(kind: &super::ViewKind, layout: &FlatLayout) -> Option<FlatPatternSheet> {
+    let super::ViewKind::FlatPattern {
+        bend_notes,
+        bend_table,
+        ..
+    } = kind
+    else {
+        return None;
+    };
+    let mut sheet = flat_pattern_sheet(layout);
+    if !bend_notes {
+        for l in &mut sheet.bend_lines {
+            l.note.clear();
+        }
+    }
+    if !bend_table {
+        sheet.bend_table.clear();
+    }
+    Some(sheet)
+}
