@@ -125,9 +125,9 @@ pub(super) fn add(c: &mut Catalog) {
             "Send board changes (renumbering, pin and gate swaps, footprints) back to the schematic; review each line.",
         )
         .kw(&["eco", "back annotate", "back-annotation", "swap", "renumber"])
-        .inputs(vec![checklist("changes", "Changes to apply", &[K::EcoChange])])
+        .inputs(vec![checklist("changes", "Changes to apply", &[K::EcoBackChange])])
         .when(has(Facet::PendingBackAnnotation))
-        .on(&[K::EcoChange])
+        .on(&[K::EcoBackChange])
         .edit(edit(EditOp::Sync, Section::Components).item("back_annotation")),
         brd("board.drc", "DRC", "drc", "Run the design rule check (also runs live while editing).")
             .kw(&["design rule check", "clearance"])

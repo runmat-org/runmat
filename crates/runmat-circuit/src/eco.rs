@@ -732,7 +732,7 @@ fn copper_at_pad(board: &Board, fid: ItemId, pad: &str) -> Impact {
             i.vias.push(v.id.0);
         }
     }
-    i.nets.push(board.net_name(net).to_owned());
+    // The pad and the copper on it, not its whole net (that would light up all of GND).
     i
 }
 

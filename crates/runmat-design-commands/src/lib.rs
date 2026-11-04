@@ -183,6 +183,8 @@ pub enum SelectKind {
     Wire,
     /// One line of a pending schematic-to-board change (ECO).
     EcoChange,
+    /// One line of a pending board-to-schematic change (back-annotation).
+    EcoBackChange,
     Pad,
     Track,
     Via,
@@ -234,6 +236,7 @@ impl SelectKind {
             SheetSymbol => "sheet symbol",
             Wire => "wire",
             EcoChange => "change",
+            EcoBackChange => "change",
             Pad => "pad",
             Track => "track",
             Via => "via",
