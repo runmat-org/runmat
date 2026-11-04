@@ -120,6 +120,15 @@ factorization. Column sizes come from the stored symbolic fill, including the
 lower-triangular blocks and trailing patterns of supernodes. Counts use checked
 integers rather than the solver's floating-point performance estimate.
 
+An LLT numeric factorization, refactorization or substitution is one reference
+batch. The solver reserves its count before numeric allocation or changes to
+the right-hand side, then records it when that batch succeeds. A refused batch
+leaves the factor and right-hand side unchanged. A factorization that fails
+before producing a factor does not complete that batch; earlier completed
+batches retain their counts. Cancellation observed after a batch completes
+does not erase its work. These boundaries apply to admitted simulation work;
+ordinary math execution without a simulation ledger needs no spending grant.
+
 ## Reuse, interrupted runs and retries
 
 Loading, viewing or reusing an existing output does not charge its construction

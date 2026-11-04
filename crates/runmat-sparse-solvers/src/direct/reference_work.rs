@@ -1,6 +1,45 @@
 use super::{FactorKind, SymbolicFactorization, SymbolicInner};
 use runmat_simulation_usage::{CountOverflow, OperationCount};
 
+pub(super) enum LltPhase {
+    Factorization,
+    Solve { rhs_columns: usize },
+}
+
+/// One completed reference batch. Numerical buffers stay with their existing
+/// solver owner; the reservation borrows the admitted run's shared ledger.
+pub(super) fn with_llt_usage<R>(
+    symbolic: &SymbolicFactorization,
+    phase: LltPhase,
+    work: impl FnOnce() -> crate::SolverResult<R>,
+) -> crate::SolverResult<R> {
+    use runmat_simulation_usage::{LedgerError, UsageCategory, UsageContext};
+    let Some(context) = UsageContext::capture() else {
+        return work();
+    };
+    let reference = symbolic.llt_reference_work().map_err(|error| match error {
+        ReferenceWorkError::Overflow(error) => crate::SolverError::Usage(error.into()),
+        error => crate::SolverError::Unsupported(error.to_string()),
+    })?;
+    let (category, operations) = match phase {
+        LltPhase::Factorization => (
+            UsageCategory::Factorization,
+            reference.factorization_operations(),
+        ),
+        LltPhase::Solve { rhs_columns } => (
+            UsageCategory::Solve,
+            reference.solve_operations(
+                u64::try_from(rhs_columns).map_err(|_| crate::SolverError::IndexOverflow)?,
+            ),
+        ),
+    };
+    let operations = operations.map_err(LedgerError::from)?;
+    let mut reservation = context.ledger().reserve(category, operations)?;
+    let result = work()?;
+    reservation.complete(operations)?;
+    Ok(result)
+}
+
 /// Reference arithmetic for a complete LLT factorization and its substitutions,
 /// derived from symbolic columns rather than a floating-point planning estimate.
 /// Numerical execution owners determine which work actually completed.
@@ -251,5 +290,72 @@ mod tests {
             symbolic.llt_reference_work(),
             Err(ReferenceWorkError::FactorKind(FactorKind::Ldlt))
         ));
+    }
+
+    #[test]
+    fn admitted_llt_batches_preserve_buffers_on_refusal_and_count_factor_reuse() {
+        use crate::{direct::DirectSolver, SolverError};
+        use runmat_simulation_usage::{LedgerError, UsageContext, UsageLedger};
+        use std::sync::Arc;
+        let count = OperationCount::from_operations;
+        let mut entries = TripletBuilder::<f64>::new(3, 3);
+        for row in 0..3 {
+            for column in 0..3 {
+                entries.push(row, column, if row == column { 4.0 } else { 1.0 });
+            }
+        }
+        let matrix = entries.build();
+        for workspace in [
+            DirectWorkspacePolicy::CallerOwned,
+            DirectWorkspacePolicy::BackendManaged,
+        ] {
+            let ledger = Arc::new(UsageLedger::new(count(64), count(14)).unwrap());
+            let context = UsageContext::new(Arc::clone(&ledger));
+            context.run_sync(|| {
+                let mut solver = DirectSolver::<f64>::new(
+                    matrix.as_ref().into(),
+                    DirectOptions {
+                        workspace,
+                        ordering: Ordering::Identity,
+                        ..DirectOptions::new(FactorKind::Cholesky)
+                    },
+                    SolveControl::NONE,
+                )
+                .unwrap();
+                let mut rhs = [6.0; 3];
+                assert!(matches!(
+                    solver.solve_in_place(&mut rhs, 1),
+                    Err(SolverError::Usage(LedgerError::MoreGrantRequired { .. }))
+                ));
+                assert_eq!(rhs, [6.0; 3]);
+                assert!(solver.solve_transpose_in_place(&mut rhs, 1).is_err());
+                assert_eq!(rhs, [6.0; 3]);
+                assert!(solver
+                    .refactorize(matrix.as_ref().into(), SolveControl::NONE)
+                    .is_err());
+                assert!(matches!(
+                    solver.solve_in_place(&mut [], usize::MAX),
+                    Err(SolverError::IndexOverflow)
+                ));
+                assert!(matches!(
+                    solver.solve_transpose_in_place(&mut [], usize::MAX),
+                    Err(SolverError::IndexOverflow)
+                ));
+                ledger.update_grant(count(64)).unwrap();
+                // The rejected refactorization must retain the existing factor.
+                solver.solve_in_place(&mut rhs, 1).unwrap();
+                assert!(rhs.iter().all(|value| (value - 1.0).abs() < 1e-12));
+                solver
+                    .refactorize(matrix.as_ref().into(), SolveControl::NONE)
+                    .unwrap();
+                rhs.fill(6.0);
+                solver.solve_transpose_in_place(&mut rhs, 1).unwrap();
+                assert!(rhs.iter().all(|value| (value - 1.0).abs() < 1e-12));
+            });
+            let usage = ledger.finish().unwrap();
+            assert_eq!(usage.factorization, count(28));
+            assert_eq!(usage.solve, count(36));
+            assert_eq!(usage.total().unwrap(), count(64));
+        }
     }
 }

@@ -433,6 +433,11 @@ impl<T: FactorScalar> DirectSolver<T> {
             converged: 0,
         });
         let (numeric, regularized) = match symbolic.kind {
+            FactorKind::Cholesky => reference_work::with_llt_usage(
+                &symbolic,
+                reference_work::LltPhase::Factorization,
+                || cholesky::factorize::<T>(&symbolic, matrix, &options, None),
+            )?,
             FactorKind::Lu => (lu::factorize::<T>(&symbolic, matrix, None)?, 0),
             _ => cholesky::factorize::<T>(&symbolic, matrix, &options, None)?,
         };
@@ -459,6 +464,18 @@ impl<T: FactorScalar> DirectSolver<T> {
             residual: 0.0,
             converged: 0,
         });
+        if self.symbolic.kind == FactorKind::Cholesky {
+            let symbolic = Arc::clone(&self.symbolic);
+            return reference_work::with_llt_usage(
+                &symbolic,
+                reference_work::LltPhase::Factorization,
+                || self.refactorize_numeric(matrix),
+            );
+        }
+        self.refactorize_numeric(matrix)
+    }
+
+    fn refactorize_numeric(&mut self, matrix: SparseInput<'_, T>) -> SolverResult<()> {
         let previous = std::mem::replace(&mut self.numeric, NumericInner::Llt(Vec::new()));
         let (numeric, regularized) = match self.symbolic.kind {
             FactorKind::Lu => (
@@ -491,17 +508,26 @@ impl<T: FactorScalar> DirectSolver<T> {
     /// Solves `A X = B` in place for `k` column-major right-hand sides.
     pub fn solve_in_place(&self, rhs: &mut [T], k: usize) -> SolverResult<()> {
         let n = self.dimension();
-        if rhs.len() != n * k {
+        let expected = n.checked_mul(k).ok_or(SolverError::IndexOverflow)?;
+        if rhs.len() != expected {
             return Err(SolverError::Dimension(format!(
                 "rhs has {} entries, expected {}",
                 rhs.len(),
-                n * k
+                expected
             )));
         }
         if n == 0 || k == 0 {
             return Ok(());
         }
         match &self.numeric {
+            numeric @ NumericInner::Llt(_) => reference_work::with_llt_usage(
+                &self.symbolic,
+                reference_work::LltPhase::Solve { rhs_columns: k },
+                || {
+                    cholesky::solve(&self.symbolic, numeric, rhs, k);
+                    Ok(())
+                },
+            )?,
             NumericInner::Lu(numeric) => lu::solve(&self.symbolic, numeric, rhs, k)?,
             numeric => cholesky::solve(&self.symbolic, numeric, rhs, k),
         }
@@ -511,10 +537,27 @@ impl<T: FactorScalar> DirectSolver<T> {
     /// Solves `Aᵀ X = B` in place (for condition estimation and adjoint problems).
     pub fn solve_transpose_in_place(&self, rhs: &mut [T], k: usize) -> SolverResult<()> {
         let n = self.dimension();
-        if rhs.len() != n * k {
+        if rhs.len() != n.checked_mul(k).ok_or(SolverError::IndexOverflow)? {
             return Err(SolverError::Dimension("transpose rhs length".into()));
         }
+        if n == 0 || k == 0 {
+            return Ok(());
+        }
         match &self.numeric {
+            numeric @ NumericInner::Llt(_) => reference_work::with_llt_usage(
+                &self.symbolic,
+                reference_work::LltPhase::Solve { rhs_columns: k },
+                || {
+                    for value in rhs.iter_mut() {
+                        *value = value.conj();
+                    }
+                    cholesky::solve(&self.symbolic, numeric, rhs, k);
+                    for value in rhs.iter_mut() {
+                        *value = value.conj();
+                    }
+                    Ok(())
+                },
+            ),
             NumericInner::Lu(numeric) => lu::solve_transpose(&self.symbolic, numeric, rhs, k),
             _ => {
                 // Hermitian A: Aᵀ = conj(A), so Aᵀ x = b  ⇔  A conj(x) = conj(b).
