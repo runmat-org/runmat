@@ -731,7 +731,7 @@ fn adding_removing_and_moving_features_keep_comments() {
         "{}",
         change.source
     );
-    assert_eq!(check(&change).features[2].suppressed, true);
+    assert!(check(&change).features[2].suppressed);
 }
 
 #[test]

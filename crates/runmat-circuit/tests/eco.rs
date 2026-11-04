@@ -597,7 +597,7 @@ fn back_annotation_takes_board_edits_into_the_schematic() {
     let sel: BTreeSet<String> = [rs.id.clone()].into();
     let mut board = sc.board.clone();
     let applied = eco::apply_back(&mut sc.design, &mut sc.lock, &mut board, &plan, &sel).unwrap();
-    assert_eq!(applied, [rs.id.clone()]);
+    assert_eq!(applied, std::slice::from_ref(&rs.id));
     sc.board = board;
     sc.netlist = elaborate(
         &sc.design,
