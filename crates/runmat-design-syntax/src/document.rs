@@ -115,7 +115,7 @@ pub trait EntryForms {
     }
 
     /// Turns a call's arguments into the tagged value's fields (`distance = 10 mm` →
-    /// `extent = { extent = blind, distance = 10 mm }`). Also returns, for each argument that
+    /// `extent = blind(distance = 10 mm)`). Also returns, for each argument that
     /// moved, its key and the model path it now fills (`("distance", "extent.distance")`).
     #[allow(clippy::type_complexity)]
     fn desugar(

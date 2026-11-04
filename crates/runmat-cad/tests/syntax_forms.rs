@@ -241,10 +241,7 @@ fn hand_written_features_read_their_readable_forms() {
             "feature body = extrude(profile = sketch.s1, distance = input.t)",
             "feature body = extrude(profile = { sketch = s1 }, extent = blind(distance = input.t))",
         )
-        .replace(
-            "mode = cut, reverse)",
-            "mode = { mode = cut }, reverse = true)",
-        );
+        .replace("mode = cut, reverse)", "mode = cut(), reverse = true)");
     let long = parse_part("p.part", &long);
     assert!(long.diagnostics.is_empty(), "{:#?}", long.diagnostics);
     assert_eq!(long.document.as_ref(), Some(&d));
@@ -376,6 +373,14 @@ fn record_forms_of_call_form_entries_are_refused() {
         (
             "p.part",
             "part p {\n    feature body = { kind = { feature = extrude } }\n}\n",
+        ),
+        (
+            "p.part",
+            "part p {\n    feature body = extrude(profile = sketch.s1, extent = { extent = blind, distance = 10 mm })\n}\n",
+        ),
+        (
+            "p.part",
+            "part p {\n    feature cut = extrude(profile = sketch.s1, through_all, mode = { mode = cut })\n}\n",
         ),
         (
             "rig.assembly",

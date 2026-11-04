@@ -214,9 +214,9 @@ pub trait ValueSyntax {
     /// generic rules.
     fn print(&self, value: &Json) -> Option<String>;
 
-    /// The tag key of the internally tagged values the field `key` holds, when it is written
-    /// in the call form: `extent = blind(distance = 10 mm)` for `{ extent = blind, distance
-    /// = 10 mm }`, and `mode = cut` for `{ mode = cut }`. `scope` is the tag of the entry whose
+    /// The tag key of the internally tagged values the field `key` holds. Such a value is
+    /// written only in the call form: `extent = blind(distance = 10 mm)` for the model value
+    /// `{"extent": "blind", "distance": 10 mm}`, and `mode = cut` for `{"mode": "cut"}`. `scope` is the tag of the entry whose
     /// arguments are read (`extrude`), or `None` inside nested values.
     fn tag_field(&self, _scope: Option<&str>, _key: &str) -> Option<&'static str> {
         None
@@ -336,23 +336,10 @@ pub fn lower_record(
             ));
         };
         let child = join_path(path, &key);
-        // A record's first entry may be its own tag (`{ extent = blind, distance = 1 mm }`).
-        let lowered = match bare_word(&value) {
-            Some(word) if entries.is_empty() && is_own_tag(hook, &key) => {
-                spans.push((child, value.span()));
-                Json::String(word)
-            }
-            _ => lower_field(&key, &value, hook, None, &child, spans)?,
-        };
+        let lowered = lower_field(&key, &value, hook, None, &child, spans)?;
         entries.push((key, lowered));
     }
     Ok(entries)
-}
-
-/// The field `key` holds tagged values whose tag key is `key` itself, so a record's first
-/// entry `key = <word>` is that record's tag.
-fn is_own_tag(hook: &dyn ValueSyntax, key: &str) -> bool {
-    hook.tag_field(None, key) == Some(key)
 }
 
 /// Lowers the value of the field `key`: its own form, the call form of a tagged value, or a
@@ -616,25 +603,8 @@ pub fn print_record(entries: &[(String, Json)], hook: &dyn ValueSyntax, depth: u
     }
     let printed: Vec<String> = entries
         .iter()
-        .enumerate()
-        .map(|(index, (key, value))| {
-            let text = match value {
-                // The first entry's word reads as the record's own tag (see `lower_record`).
-                Json::String(word)
-                    if index == 0 && is_own_tag(hook, key) && is_identifier(word) =>
-                {
-                    word.clone()
-                }
-                Json::Object(inner) if index == 0 && is_own_tag(hook, key) && inner.len() == 1 => {
-                    match &inner[0] {
-                        (tag, Json::String(word)) if tag == key && is_identifier(word) => {
-                            format!("{word}()")
-                        }
-                        _ => print_field(key, value, hook, None, depth + 1),
-                    }
-                }
-                _ => print_field(key, value, hook, None, depth + 1),
-            };
+        .map(|(key, value)| {
+            let text = print_field(key, value, hook, None, depth + 1);
             format!("{} = {text}", print_key(key))
         })
         .collect();
