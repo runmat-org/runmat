@@ -51,7 +51,9 @@ pub const VALUE_CHOICES: ValueChoices = ValueChoices {
     seeded_random_is_deterministic: true,
 };
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Serialised with a `form` tag. Deserialisation also takes a bare JSON number as
+/// [`ValueExpr::Number`], which is how the syntax layer writes a dimensionless value.
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "form")]
 pub enum ValueExpr {
     /// A number with a unit as written (`80 mm`).
@@ -107,6 +109,60 @@ pub enum ValueExpr {
     /// partition, pinned to a released revision across partitions, renames through the lock
     /// ([`DynamicValueEvaluator::published`], [`crate::refs::values::PublishedValues`]).
     Published(Box<ValueXref>),
+}
+
+/// The tagged form of [`ValueExpr`], derived from the enum itself (the compiler checks the two
+/// agree field for field).
+#[derive(Deserialize)]
+#[serde(remote = "ValueExpr", rename_all = "snake_case", tag = "form")]
+enum ValueExprForm {
+    Quantity {
+        value: f64,
+        unit: String,
+    },
+    Number {
+        value: f64,
+    },
+    Input {
+        name: InputName,
+    },
+    Let {
+        name: LetName,
+    },
+    Neg {
+        operand: Box<ValueExpr>,
+    },
+    Binary {
+        op: BinaryOp,
+        lhs: Box<ValueExpr>,
+        rhs: Box<ValueExpr>,
+    },
+    Toleranced {
+        nominal: Box<ValueExpr>,
+        minus: Box<ValueExpr>,
+        plus: Box<ValueExpr>,
+    },
+    Dynamic {
+        call: DynamicCall,
+    },
+    Coerce {
+        expr: Box<ValueExpr>,
+        unit: String,
+    },
+    Reference {
+        path: Vec<String>,
+    },
+    Published(Box<ValueXref>),
+}
+
+impl<'de> Deserialize<'de> for ValueExpr {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if let Some(number) = value.as_f64().filter(|_| value.is_number()) {
+            return Ok(ValueExpr::Number { value: number });
+        }
+        ValueExprForm::deserialize(value).map_err(serde::de::Error::custom)
+    }
 }
 
 /// The target of a [`ValueExpr::Published`] read: a publish name in another file, live or
@@ -946,7 +1002,11 @@ pub fn value_expr_examples() -> Vec<(&'static str, ValueExpr)> {
         ),
         (
             "= width / 2",
-            ValueExpr::binary(BinaryOp::Div, ValueExpr::input("width"), ValueExpr::number(2.0)),
+            ValueExpr::binary(
+                BinaryOp::Div,
+                ValueExpr::input("width"),
+                ValueExpr::number(2.0),
+            ),
         ),
         (
             "10 kohm \u{b1} 1 %",
@@ -1026,7 +1086,10 @@ mod value_expr_example_tests {
             .into_iter()
             .map(|(text, expr)| {
                 let json = serde_json::to_value(&expr).expect("value serialises");
-                assert_eq!(serde_json::from_value::<ValueExpr>(json.clone()).unwrap(), expr);
+                assert_eq!(
+                    serde_json::from_value::<ValueExpr>(json.clone()).unwrap(),
+                    expr
+                );
                 serde_json::json!({ "text": text, "form": value_form(&expr), "value": json })
             })
             .collect();
@@ -1044,7 +1107,11 @@ mod value_expr_example_tests {
         let sibling = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../runmat-private-cad/desktop/src/generated/value-expr-examples.json");
         if let Ok(checked_in) = std::fs::read_to_string(&sibling) {
-            assert!(checked_in == json, "{} is stale; regenerate with RUNMAT_VALUE_EXPR_OUT", sibling.display());
+            assert!(
+                checked_in == json,
+                "{} is stale; regenerate with RUNMAT_VALUE_EXPR_OUT",
+                sibling.display()
+            );
         }
     }
 }

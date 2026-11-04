@@ -21,6 +21,8 @@
 //! - [`index`]: the deterministic JSON projection.
 //! - [`units`], [`value`], [`sketch_solver`]: seams to the unit authority, the value phase and
 //!   the constraint solver.
+//! - [`syntax`]: the `.part`, `.assembly` and `.drawing` front ends on the shared design
+//!   grammar: parse, print, structured edits and the model projection.
 //! - [`metering`]: the usage-metering seam (sketch solves, mate solves, regenerations).
 
 pub mod assembly;
@@ -42,5 +44,6 @@ pub mod regen;
 pub mod scope;
 mod serde_rows;
 pub mod sketch_solver;
+pub mod syntax;
 pub mod units;
 pub mod value;
