@@ -181,12 +181,11 @@ pub(in crate::semantic::model) fn required_quantity(
         let angle = runmat_types::physical::DynamicDimension::quantity_type(
             runmat_types::physical::QuantityKind::Angle,
         );
-        let requirement =
-            if expected == angle {
-                "quantity with an angle unit (deg or rad)"
-            } else {
-                "quantity of the required dimension"
-            };
+        let requirement = if expected == angle {
+            "quantity with an angle unit (deg or rad)"
+        } else {
+            "quantity of the required dimension"
+        };
         invalid(declaration, value, name, requirement, diagnostics);
         return None;
     }
