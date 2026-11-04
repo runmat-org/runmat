@@ -7963,7 +7963,9 @@ name = "runmat-circuit"
 version = "0.6.2"
 dependencies = [
  "runmat-design-commands",
+ "runmat-fea-syntax",
  "runmat-rules",
+ "runmat-types",
  "serde",
  "serde_json",
 ]

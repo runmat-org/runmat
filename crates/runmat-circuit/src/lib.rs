@@ -63,4 +63,5 @@ pub mod review;
 pub mod route;
 pub mod router;
 pub mod spatial;
+pub mod syntax;
 pub mod zone;
