@@ -1,8 +1,16 @@
 //! The feature list: typed parameters plus the references each feature makes.
 
 use crate::ids::{FeatureId, SketchEntityId};
+use crate::model::curves::{CurveDef, MateConnectorDef};
 use crate::model::datum::{AxisDef, AxisRef, FrameDef, PlaneDef, PlaneRef, PointDef, PointRef};
+use crate::model::detail::{Emboss, LibraryInstance, Rib, Thread};
+use crate::model::direct::DirectEdit;
+use crate::model::mold::MoldFeature;
+use crate::model::sheet_metal::SheetMetalFeature;
 use crate::model::sketch::Sketch;
+use crate::model::surface::SurfaceFeature;
+use crate::model::visit::{Params, Visit};
+use crate::model::weldment::WeldmentFeature;
 use crate::refs::{InstanceKey, Reference};
 use crate::regen::hash::CacheKey;
 use crate::value::ValueExpr;
@@ -352,6 +360,87 @@ pub enum FeatureKind {
     Split(Split),
     BodyOp(BodyOp),
     Import(Import),
+    Direct(DirectEdit),
+    Surface(SurfaceFeature),
+    SheetMetal(SheetMetalFeature),
+    Weldment(WeldmentFeature),
+    Mold(MoldFeature),
+    Thread(Thread),
+    Emboss(Emboss),
+    Rib(Rib),
+    Library(LibraryInstance),
+    Curve(CurveDef),
+    MateConnector(MateConnectorDef),
+}
+
+impl FeatureKind {
+    /// The family parameters of the newer feature kinds.
+    pub fn family(&self) -> Option<&dyn Params> {
+        Some(match self {
+            FeatureKind::Direct(x) => x,
+            FeatureKind::Surface(x) => x,
+            FeatureKind::SheetMetal(x) => x,
+            FeatureKind::Weldment(x) => x,
+            FeatureKind::Mold(x) => x,
+            FeatureKind::Thread(x) => x,
+            FeatureKind::Emboss(x) => x,
+            FeatureKind::Rib(x) => x,
+            FeatureKind::Library(x) => x,
+            FeatureKind::Curve(x) => x,
+            FeatureKind::MateConnector(x) => x,
+            _ => return None,
+        })
+    }
+
+    fn family_visit(&self) -> Option<Visit<'_>> {
+        let f = self.family()?;
+        let mut v = Visit::default();
+        f.visit(&mut v);
+        Some(v)
+    }
+
+    /// The datum-definition variants added with reference geometry.
+    fn datum_visit(&self) -> Option<Visit<'_>> {
+        let mut v = Visit::default();
+        match self {
+            FeatureKind::Plane(PlaneDef::ThreePoint { a, b, c }) => {
+                v.point("a", a);
+                v.point("b", b);
+                v.point("c", c);
+            }
+            FeatureKind::Plane(PlaneDef::Mid { a, b }) => {
+                v.plane("a", a);
+                v.plane("b", b);
+            }
+            FeatureKind::Plane(PlaneDef::NormalToCurve { curve, parameter }) => {
+                curve.visit(&mut v, "curve");
+                v.value(parameter);
+            }
+            FeatureKind::Plane(PlaneDef::TangentToFace { face, at }) => {
+                v.reference("face", face);
+                v.point("at", at);
+            }
+            FeatureKind::Axis(AxisDef::TwoPlanes { a, b }) => {
+                v.plane("a", a);
+                v.plane("b", b);
+            }
+            FeatureKind::Axis(AxisDef::Normal { plane, through }) => {
+                v.plane("plane", plane);
+                v.point("through", through);
+            }
+            FeatureKind::Point(PointDef::CenterOf { of }) => v.reference("of", of),
+            FeatureKind::Point(PointDef::OnCurve { curve, parameter }) => {
+                curve.visit(&mut v, "curve");
+                v.value(parameter);
+            }
+            FeatureKind::Point(PointDef::Intersection { axis, plane }) => {
+                v.axis("axis", axis);
+                v.plane("plane", plane);
+            }
+            _ => return None,
+        }
+        Some(v)
+    }
 }
 
 impl FeatureKind {
@@ -377,11 +466,15 @@ impl FeatureKind {
             FeatureKind::Split(_) => "split",
             FeatureKind::BodyOp(_) => "body_op",
             FeatureKind::Import(_) => "import",
+            other => other.family().map(|f| f.kind_name()).unwrap_or("feature"),
         }
     }
 
     /// Whether the feature produces or changes bodies (as opposed to sketches and datums).
     pub fn is_body_feature(&self) -> bool {
+        if let Some(f) = self.family() {
+            return f.body_feature();
+        }
         !matches!(
             self,
             FeatureKind::Sketch(_)
@@ -394,6 +487,9 @@ impl FeatureKind {
 
     /// Every value expression in the feature's parameters, for dependency analysis.
     pub fn values(&self) -> Vec<&ValueExpr> {
+        if let Some(v) = self.family_visit().or_else(|| self.datum_visit()) {
+            return v.values;
+        }
         fn point<'a>(out: &mut Vec<&'a ValueExpr>, p: &'a PointRef) {
             if let PointRef::Coords { x, y, z } = p {
                 out.push(x);
@@ -411,6 +507,7 @@ impl FeatureKind {
             match p {
                 PlaneDef::Offset { distance, .. } => out.push(distance),
                 PlaneDef::Angle { angle, .. } => out.push(angle),
+                _ => {}
             }
         }
         fn layout<'a>(out: &mut Vec<&'a ValueExpr>, l: &'a PatternLayout) {
@@ -485,11 +582,9 @@ impl FeatureKind {
                 }
             }
             FeatureKind::Plane(p) => plane_def(&mut ptrs, p),
-            FeatureKind::Axis(a) => {
-                if let AxisDef::Through { a, b } = a {
-                    point(&mut ptrs, a);
-                    point(&mut ptrs, b);
-                }
+            FeatureKind::Axis(AxisDef::Through { a, b }) => {
+                point(&mut ptrs, a);
+                point(&mut ptrs, b);
             }
             FeatureKind::Point(p) => match p {
                 PointDef::At { at } => point(&mut ptrs, at),
@@ -499,12 +594,9 @@ impl FeatureKind {
                     ptrs.push(dy);
                     ptrs.push(dz);
                 }
+                _ => {}
             },
-            FeatureKind::Frame(f) => {
-                if let FrameDef::At { origin, .. } = f {
-                    point(&mut ptrs, origin);
-                }
-            }
+            FeatureKind::Frame(FrameDef::At { origin, .. }) => point(&mut ptrs, origin),
             FeatureKind::Extrude(e) => extent(&mut ptrs, &e.extent),
             FeatureKind::Revolve(r) => ptrs.push(&r.angle),
             FeatureKind::Sweep(_) | FeatureKind::Loft(_) | FeatureKind::Import(_) => {}
@@ -539,19 +631,21 @@ impl FeatureKind {
             FeatureKind::Draft(d) => ptrs.push(&d.angle),
             FeatureKind::Pattern(p) => layout(&mut ptrs, &p.layout),
             FeatureKind::Mirror(_) | FeatureKind::Boolean(_) | FeatureKind::Split(_) => {}
-            FeatureKind::BodyOp(op) => {
-                if let BodyOp::Translate { dx, dy, dz, .. } = op {
-                    ptrs.push(dx);
-                    ptrs.push(dy);
-                    ptrs.push(dz);
-                }
+            FeatureKind::BodyOp(BodyOp::Translate { dx, dy, dz, .. }) => {
+                ptrs.push(dx);
+                ptrs.push(dy);
+                ptrs.push(dz);
             }
+            _ => {}
         }
         ptrs
     }
 
     /// Every topological reference the feature makes, with the parameter it sits in.
     pub fn references(&self) -> Vec<(String, &Reference)> {
+        if let Some(v) = self.family_visit().or_else(|| self.datum_visit()) {
+            return v.references;
+        }
         let mut out: Vec<(String, &Reference)> = Vec::new();
         fn list<'a>(out: &mut Vec<(String, &'a Reference)>, name: &str, refs: &'a [Reference]) {
             for (i, r) in refs.iter().enumerate() {
@@ -600,6 +694,7 @@ impl FeatureKind {
                     plane(&mut out, "base", base);
                     axis(&mut out, "axis", a);
                 }
+                _ => {}
             },
             FeatureKind::Axis(a) => match a {
                 AxisDef::Through { a, b } => {
@@ -608,10 +703,12 @@ impl FeatureKind {
                 }
                 AxisDef::OfFace { face } => out.push(("face".into(), face)),
                 AxisDef::OfEdge { edge } => out.push(("edge".into(), edge)),
+                _ => {}
             },
             FeatureKind::Point(p) => match p {
                 PointDef::At { at } => point(&mut out, "at", at),
                 PointDef::Offset { base, .. } => point(&mut out, "base", base),
+                _ => {}
             },
             FeatureKind::Frame(f) => match f {
                 FrameDef::At { origin, z, x } => {
@@ -676,6 +773,7 @@ impl FeatureKind {
                 }
             },
             FeatureKind::Import(_) => {}
+            _ => {}
         }
         out
     }
@@ -683,6 +781,12 @@ impl FeatureKind {
     /// Features this feature names directly, other than through topological references:
     /// profiles, pattern seeds, datum features and sketch points.
     pub fn feature_dependencies(&self) -> Vec<FeatureId> {
+        if let Some(v) = self.family_visit().or_else(|| self.datum_visit()) {
+            let mut out = v.features;
+            out.sort();
+            out.dedup();
+            return out;
+        }
         let mut out = Vec::new();
         fn datum(out: &mut Vec<FeatureId>, d: &crate::model::datum::DatumRef) {
             if let crate::model::datum::DatumRef::Feature { feature } = d {
@@ -722,6 +826,7 @@ impl FeatureKind {
                     plane(&mut out, base);
                     axis(&mut out, a);
                 }
+                _ => {}
             },
             FeatureKind::Axis(AxisDef::Through { a, b }) => {
                 point(&mut out, a);
@@ -773,6 +878,7 @@ impl FeatureKind {
             | FeatureKind::Boolean(_)
             | FeatureKind::BodyOp(_)
             | FeatureKind::Import(_) => {}
+            _ => {}
         }
         out.sort();
         out.dedup();
@@ -789,7 +895,12 @@ impl FeatureKind {
             FeatureKind::Hole(_) => return true,
             FeatureKind::Pattern(p) => return matches!(p.seeds, PatternSeeds::Features { .. }),
             FeatureKind::Mirror(m) => return matches!(m.seeds, PatternSeeds::Features { .. }),
-            _ => return false,
+            other => {
+                return other
+                    .family()
+                    .map(|f| f.implicit_targets())
+                    .unwrap_or(false)
+            }
         };
         !matches!(mode, BodyMode::New) && mode.targets().is_empty()
     }

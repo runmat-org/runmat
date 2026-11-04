@@ -20,6 +20,8 @@ use crate::regen::kernel::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 type P3 = [f64; 3];
+/// A polygon segment by its rounded end points (sorted).
+type SegKey = ([i64; 3], [i64; 3]);
 
 fn sub(a: P3, b: P3) -> P3 {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -83,9 +85,10 @@ impl Facet {
     }
 
     fn segments(&self) -> impl Iterator<Item = (usize, usize, P3, P3)> + '_ {
-        self.loops.iter().enumerate().flat_map(|(li, l)| {
-            (0..l.len()).map(move |i| (li, i, l[i], l[(i + 1) % l.len()]))
-        })
+        self.loops
+            .iter()
+            .enumerate()
+            .flat_map(|(li, l)| (0..l.len()).map(move |i| (li, i, l[i], l[(i + 1) % l.len()])))
     }
 
     /// Whether `p` (on the facet's plane) is inside the polygon (even-odd over all loops).
@@ -148,7 +151,7 @@ impl FakeSheet {
     pub(super) fn build(b: SheetBuild) -> (FakeSheet, BTreeMap<u32, Vec<HistorySource>>) {
         let nfaces = b.face_sources.len();
         // Segment occurrences.
-        let mut occ: BTreeMap<([i64; 3], [i64; 3]), Vec<(usize, usize, usize)>> = BTreeMap::new();
+        let mut occ: BTreeMap<SegKey, Vec<(usize, usize, usize)>> = BTreeMap::new();
         for (fi, f) in b.facets.iter().enumerate() {
             for (li, i, a, c) in f.segments() {
                 let (ka, kc) = (key(a), key(c));
@@ -373,9 +376,7 @@ pub(super) fn output(
         for (e, l) in labels {
             let sources: Vec<HistorySource> = l
                 .into_iter()
-                .filter(|s| {
-                    !matches!(s, HistorySource::Input { from } if from.entity == u32::MAX)
-                })
+                .filter(|s| !matches!(s, HistorySource::Input { from } if from.entity == u32::MAX))
                 .collect();
             if sources.is_empty() {
                 return Err(KernelError::HistoryIncomplete {
@@ -745,8 +746,17 @@ pub(super) fn offset_facets(facets: &[Facet], distance: f64) -> Vec<Facet> {
 }
 
 /// Clip facets by a plane, keeping `keep`; segments on the plane get `cut` as their label.
-pub(super) fn clip(facets: &[Facet], frame: &Frame, keep: PlaneSide, cut: HistorySource) -> Vec<Facet> {
-    let sgn = if keep == PlaneSide::Positive { 1.0 } else { -1.0 };
+pub(super) fn clip(
+    facets: &[Facet],
+    frame: &Frame,
+    keep: PlaneSide,
+    cut: HistorySource,
+) -> Vec<Facet> {
+    let sgn = if keep == PlaneSide::Positive {
+        1.0
+    } else {
+        -1.0
+    };
     let side = |p: P3| sgn * dot(sub(p, frame.origin), frame.z);
     let mut out = Vec::new();
     for f in facets {
@@ -856,7 +866,8 @@ impl PolyTool {
             for a in 0..3 {
                 for k in 0..=super::sampled::RES {
                     out[a].push(
-                        self.lo[a] + (self.hi[a] - self.lo[a]) * k as f64 / super::sampled::RES as f64,
+                        self.lo[a]
+                            + (self.hi[a] - self.lo[a]) * k as f64 / super::sampled::RES as f64,
                     );
                 }
             }
@@ -864,11 +875,20 @@ impl PolyTool {
     }
 
     /// The label of a boundary facet between cell centres `a` and `b` on `plane` at `cen`.
-    pub fn label(&self, plane: &PlaneKey, cen: P3, a: P3, b: P3) -> Option<(HistorySource, FacetKind)> {
+    pub fn label(
+        &self,
+        plane: &PlaneKey,
+        cen: P3,
+        a: P3,
+        b: P3,
+    ) -> Option<(HistorySource, FacetKind)> {
         // Exact: a polygon on the facet's plane holding its centre.
         for (f, l) in &self.facets {
             if let Some((ax, s)) = super::axis_of(f.normal) {
-                if ax == plane.axis && (f.offset_of() * s - plane.offset).abs() < 1e-9 && f.contains(cen) {
+                if ax == plane.axis
+                    && (f.offset_of() * s - plane.offset).abs() < 1e-9
+                    && f.contains(cen)
+                {
                     return Some((l.clone(), FacetKind::Planar));
                 }
             }

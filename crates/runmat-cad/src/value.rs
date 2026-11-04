@@ -217,6 +217,29 @@ impl ValueExpr {
         }))
     }
 
+    /// This expression with every read of input `name` replaced by `with`.
+    pub fn substitute_input(&self, name: &InputName, with: &ValueExpr) -> ValueExpr {
+        let mut j = serde_json::to_value(self).expect("value serialises");
+        fn walk(v: &mut serde_json::Value, name: &str, with: &serde_json::Value) {
+            match v {
+                serde_json::Value::Object(m) => {
+                    if m.get("form").and_then(|x| x.as_str()) == Some("input")
+                        && m.get("name").and_then(|x| x.as_str()) == Some(name)
+                    {
+                        *v = with.clone();
+                        return;
+                    }
+                    m.values_mut().for_each(|x| walk(x, name, with));
+                }
+                serde_json::Value::Array(a) => a.iter_mut().for_each(|x| walk(x, name, with)),
+                _ => {}
+            }
+        }
+        let w = serde_json::to_value(with).expect("value serialises");
+        walk(&mut j, name.as_str(), &w);
+        serde_json::from_value(j).expect("substituted value")
+    }
+
     /// Every published value this expression reads, in order.
     pub fn collect_published<'a>(&'a self, out: &mut Vec<&'a ValueXref>) {
         match self {

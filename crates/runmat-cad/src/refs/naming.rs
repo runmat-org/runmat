@@ -365,12 +365,13 @@ pub fn name_outputs(
             for src in &rec.sources {
                 match src {
                     HistorySource::Input { from } => {
-                        let o = operands.get(from.operand as usize).ok_or(
-                            NamingError::BadOperand {
-                                operand: from.operand,
-                                entity: from.entity,
-                            },
-                        )?;
+                        let o =
+                            operands
+                                .get(from.operand as usize)
+                                .ok_or(NamingError::BadOperand {
+                                    operand: from.operand,
+                                    entity: from.entity,
+                                })?;
                         names.extend(
                             o.names
                                 .boundaries

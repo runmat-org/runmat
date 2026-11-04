@@ -469,6 +469,30 @@ pub struct LabeledTool {
     /// The body's label when this tool alone makes a new body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<FaceLabel>,
+    /// Half-spaces the tool is clipped to (mitred member ends): material is kept where
+    /// `(p − origin)·normal ≤ 0`; the cut face takes the label.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clip: Vec<ClipPlane>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ClipPlane {
+    pub origin: [f64; 3],
+    pub normal: [f64; 3],
+    pub label: FaceLabel,
+}
+
+impl LabeledTool {
+    pub fn new(shape: ToolShape) -> Self {
+        LabeledTool {
+            shape,
+            sides: Vec::new(),
+            start: None,
+            end: None,
+            body: None,
+            clip: Vec::new(),
+        }
+    }
 }
 
 /// How the moved faces of a direct edit move.
@@ -582,6 +606,8 @@ pub enum KernelOp {
 /// Surface-body operations. Faces of surface bodies follow the same history contract;
 /// a surface body's boundary edges name their one face twice ([`crate::refs::history::EdgeTopo`]
 /// with `faces[0] == faces[1]`, `laminar`).
+// One per operation; variant sizes do not matter here.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "surface")]
 pub enum SurfaceOp {
@@ -612,7 +638,9 @@ pub enum SurfaceOp {
         distance: f64,
     },
     /// The mid-surface of a thin solid: one patch per pair of opposite parallel faces.
-    MidSurface { pairs: Vec<(OperandEntity, OperandEntity)> },
+    MidSurface {
+        pairs: Vec<(OperandEntity, OperandEntity)>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

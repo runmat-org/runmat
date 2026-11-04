@@ -737,6 +737,9 @@ fn max_abs(r: &[f64]) -> f64 {
 }
 
 /// Component diagnostics.
+/// Sparse null-space rows per component variable: `(basis vector, value)`.
+type NullRows = Vec<Vec<(usize, f64)>>;
+
 struct Diagnosis {
     rank: usize,
     dof: usize,
@@ -744,7 +747,7 @@ struct Diagnosis {
     dependent: Vec<(usize, Vec<usize>, bool)>,
     /// Sparse null-space rows per component variable, `(basis vector, value)` (`None` when
     /// skipped for size).
-    null_rows: Option<Vec<Vec<(usize, f64)>>>,
+    null_rows: Option<NullRows>,
     /// The row-normalised Jacobian (for per-entity DOF of large entities).
     jn: SparseRows,
 }
@@ -1097,7 +1100,7 @@ fn run(sys: &System, opts: &SolveOptions, drag_request: Option<&DragRequest>) ->
     let mut determined = is_free.iter().map(|f| !f).collect::<Vec<bool>>();
     // Per free variable: (component index, local column).
     let mut var_comp = vec![(NONE, NONE); nv];
-    let mut null_by_comp: Vec<Option<Vec<Vec<(usize, f64)>>>> = Vec::with_capacity(comps.len());
+    let mut null_by_comp: Vec<Option<NullRows>> = Vec::with_capacity(comps.len());
     let mut jn_by_comp: Vec<Option<(SparseRows, usize)>> = Vec::with_capacity(comps.len());
     let mut comp_dof = Vec::with_capacity(comps.len());
     let mut total_dof = 0;

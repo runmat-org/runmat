@@ -8,6 +8,8 @@
 //! - [`props`]: property schemas, check packs over `runmat-rules` selectors, typed links,
 //!   the release gate.
 //! - [`drawing`]: sheets, views by reference, associative annotations, tables, HLR seam.
+//! - [`evaluate`]: Evaluate-tab analysis requests and results behind a kernel seam; the cost
+//!   estimate seam.
 //! - [`model`]: the part document (inputs, sketches, datums, features, part outputs, regions,
 //!   publish entries, materials, links, configurations).
 //! - [`refs`]: the reference and naming system and the history contract kernels emit.
@@ -23,6 +25,7 @@ pub mod assembly;
 pub mod config;
 pub mod diagnostics;
 pub mod drawing;
+pub mod evaluate;
 pub mod ids;
 pub mod index;
 pub mod metering;

@@ -43,6 +43,9 @@ pub enum DiagCode {
     /// longer resolves while live bodies carry its lineage.
     #[serde(rename = "cad.ref.body_slot_drift")]
     RefBodySlotDrift,
+    /// A direct edit would break a live relation it was asked to keep.
+    #[serde(rename = "cad.direct.relation_broken")]
+    DirectRelationBroken,
     /// Two different one-level names produced the same token (never expected; reported, not
     /// overwritten).
     #[serde(rename = "cad.ref.token_collision")]

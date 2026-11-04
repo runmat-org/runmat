@@ -194,13 +194,21 @@ pub fn materialize(
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "because")]
 pub enum Because {
-    Default { input: InputName },
-    Override { input: InputName },
-    Feature { feature: FeatureId },
+    Default {
+        input: InputName,
+    },
+    Override {
+        input: InputName,
+    },
+    Feature {
+        feature: FeatureId,
+    },
     Suppression,
     New,
     /// A value published by another file that the configuration reads changed.
-    Published { value: crate::value::ValueXref },
+    Published {
+        value: crate::value::ValueXref,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

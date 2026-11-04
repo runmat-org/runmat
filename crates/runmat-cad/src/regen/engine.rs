@@ -40,6 +40,8 @@ use crate::value::{DynamicValueEvaluator, Evaluator, ValueEnv, ValueExpr};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod families;
+
 pub struct RegenContext<'a> {
     pub kernel: &'a dyn CadKernel,
     pub solver: &'a dyn SketchSolver,
@@ -84,6 +86,9 @@ pub struct PartState {
     /// Tool operations each tool feature applied, for patterns and mirrors of features.
     pub tools: BTreeMap<FeatureId, Vec<ToolOp>>,
     pub table: FeatureTable,
+    /// Typed records of geometry-free features and derived data (reference curves, threads,
+    /// sheet metal rules and developments, mold analyses), by feature.
+    pub records: BTreeMap<FeatureId, crate::regen::records::FeatureRecord>,
 }
 
 impl PartState {
@@ -210,7 +215,12 @@ enum Halt {
     Block(FeatureId, u32),
 }
 
+// Built once per feature per regeneration; variant sizes do not matter here.
+#[allow(clippy::large_enum_variant)]
 enum Compiled {
+    /// Geometry-free records (reference curves, cosmetic threads, mold analyses, sheet
+    /// metal developments): stored on the state as typed records.
+    Record(crate::regen::records::FeatureRecord),
     Datum(DatumValue),
     Sketch(SolvedSketch, Frame),
     Op {
@@ -251,6 +261,38 @@ pub fn regenerate(
 /// [`regenerate`], reporting sketch solves, feature regenerations and the part regeneration
 /// to `meter`.
 pub fn regenerate_metered(
+    doc: &PartDocument,
+    ctx: &RegenContext<'_>,
+    req: &RegenRequest,
+    cache: &mut RegenCache,
+    meter: &dyn UsageMeter,
+) -> RegenResult {
+    if doc
+        .features
+        .iter()
+        .any(|f| matches!(f.kind, FeatureKind::Library(_)))
+    {
+        let (expanded, errors) = doc.expand_library();
+        if expanded.features == doc.features && errors.is_empty() {
+            return regenerate_unexpanded(doc, ctx, req, cache, meter);
+        }
+        let mut r = regenerate_unexpanded(&expanded, ctx, req, cache, meter);
+        for (f, e) in errors {
+            r.diagnostics.push(
+                DiagCode::RegenInvalid,
+                Severity::Error,
+                Site::feature(&f, None),
+                e.to_string(),
+                Cause::Root,
+                Vec::new(),
+            );
+        }
+        return r;
+    }
+    regenerate_unexpanded(doc, ctx, req, cache, meter)
+}
+
+fn regenerate_unexpanded(
     doc: &PartDocument,
     ctx: &RegenContext<'_>,
     req: &RegenRequest,
@@ -379,6 +421,9 @@ pub fn regenerate_metered(
                                 serde_json::to_value(op).expect("op serializes")
                             }
                             Compiled::Delete(_) => serde_json::Value::String("delete".into()),
+                            Compiled::Record(r) => {
+                                serde_json::to_value(r).expect("record serializes")
+                            }
                         };
                         chain(KeyInputs {
                             previous: &prev,
@@ -1324,6 +1369,9 @@ impl<'a, 'b> Run<'a, 'b> {
                 self.value(id, "values", v, Dimension::DIMENSIONLESS)?;
             }
         }
+        if let Some(c) = self.compile_family(i, f)? {
+            return Ok(c);
+        }
         let simple = |profiles: Vec<FeatureId>| NamingContext::simple(id, profiles);
         match &f.kind {
             FeatureKind::Sketch(s) => {
@@ -1389,6 +1437,7 @@ impl<'a, 'b> Run<'a, 'b> {
                             z: rot(b.z),
                         }
                     }
+                    _ => unreachable!("handled by compile_family"),
                 };
                 Ok(Compiled::Datum(DatumValue::Plane { frame }))
             }
@@ -1425,6 +1474,7 @@ impl<'a, 'b> Run<'a, 'b> {
                             }
                         }
                     }
+                    _ => unreachable!("handled by compile_family"),
                 };
                 Ok(Compiled::Datum(DatumValue::Axis { point, direction }))
             }
@@ -1442,6 +1492,7 @@ impl<'a, 'b> Run<'a, 'b> {
                             ],
                         )
                     }
+                    _ => unreachable!("handled by compile_family"),
                 };
                 Ok(Compiled::Datum(DatumValue::Point { at }))
             }
@@ -1896,6 +1947,17 @@ impl<'a, 'b> Run<'a, 'b> {
                     })
                 }
             },
+            FeatureKind::Direct(_)
+            | FeatureKind::Surface(_)
+            | FeatureKind::SheetMetal(_)
+            | FeatureKind::Weldment(_)
+            | FeatureKind::Mold(_)
+            | FeatureKind::Thread(_)
+            | FeatureKind::Emboss(_)
+            | FeatureKind::Rib(_)
+            | FeatureKind::Library(_)
+            | FeatureKind::Curve(_)
+            | FeatureKind::MateConnector(_) => unreachable!("handled by compile_family"),
             FeatureKind::Import(imp) => Ok(Compiled::Op {
                 op: KernelOp::Import {
                     source: imp.source.clone(),
@@ -1992,6 +2054,10 @@ impl<'a, 'b> Run<'a, 'b> {
     ) -> Result<FeatureStatus, Halt> {
         let id = &f.id;
         match compiled {
+            Compiled::Record(r) => {
+                self.st.records.insert(id.clone(), r);
+                Ok(FeatureStatus::Regenerated)
+            }
             Compiled::Datum(d) => {
                 self.st.datums.insert(id.clone(), d);
                 Ok(FeatureStatus::Regenerated)

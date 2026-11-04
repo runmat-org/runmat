@@ -93,7 +93,23 @@ impl FakeKernel {
                 .into_iter()
                 .map(|mut t| {
                     t.map_labels(&remap);
-                    t
+                    if lt.clip.is_empty() {
+                        t
+                    } else {
+                        Tool::Clipped(
+                            Box::new(t),
+                            lt.clip
+                                .iter()
+                                .map(|c| {
+                                    (
+                                        c.origin,
+                                        c.normal,
+                                        gen(c.label.role, c.label.tag.clone(), c.label.ordinal),
+                                    )
+                                })
+                                .collect(),
+                        )
+                    }
                 })
                 .collect())
         };
@@ -200,7 +216,7 @@ impl FakeKernel {
                 origin,
                 pull,
                 tan,
-                reach: tan.abs() * max_h + shift.abs() + EPS,
+                reach: tan.abs() * max_h + 1.5 * shift.abs() + EPS,
                 shift,
             });
         }
@@ -237,8 +253,11 @@ impl FakeKernel {
                     continue;
                 }
                 let face = b.face_sources.len() as u32;
-                let mut fs =
-                    sheet::solid_face_facets(so, fi as u32, gen(Role::Boundary, KernelTag::None, None))?;
+                let mut fs = sheet::solid_face_facets(
+                    so,
+                    fi as u32,
+                    gen(Role::Boundary, KernelTag::None, None),
+                )?;
                 b.face_sources.push(vec![HistorySource::Input {
                     from: OperandEntity {
                         operand: 0,
@@ -364,9 +383,12 @@ impl FakeKernel {
         let mut current = handles;
         for e in faces {
             let solid = current[0].downcast::<FakeSolid>().expect("fake solid");
-            let face = solid.faces.get(e.entity as usize).ok_or(KernelError::Failed {
-                message: "face out of range".into(),
-            })?;
+            let face = solid
+                .faces
+                .get(e.entity as usize)
+                .ok_or(KernelError::Failed {
+                    message: "face out of range".into(),
+                })?;
             let plane = face.plane.ok_or_else(|| KernelError::NotSupported {
                 what: "fake kernel: replacing a curved face".into(),
             })?;
@@ -560,7 +582,13 @@ impl FakeKernel {
                                 *f,
                                 gen(Role::Boundary, KernelTag::None, None),
                             )?;
-                            sheet::label_by_neighbour(so, &selected, &mut fs, Role::Boundary, i as u32);
+                            sheet::label_by_neighbour(
+                                so,
+                                &selected,
+                                &mut fs,
+                                Role::Boundary,
+                                i as u32,
+                            );
                             owner.extend(std::iter::repeat_n(*f, fs.len()));
                             all.extend(fs);
                         }
@@ -669,7 +697,12 @@ impl FakeKernel {
                     }
                     return Ok(out);
                 }
-                sheet::output(&kernel, vec![(merged, body_sources)], Vec::new(), Vec::new())
+                sheet::output(
+                    &kernel,
+                    vec![(merged, body_sources)],
+                    Vec::new(),
+                    Vec::new(),
+                )
             }
             SurfaceOp::Thicken { distance, both } => {
                 let mut tools = Vec::new();
@@ -704,18 +737,16 @@ impl FakeKernel {
                     let near_facets = sheet::offset_facets(&s.facets, d0);
                     let far_facets = sheet::offset_facets(&s.facets, d1);
                     let mut polys: Vec<(Facet, HistorySource)> = Vec::new();
-                    let (base_lab, far_lab): (Box<dyn Fn(u32) -> HistorySource>, Box<dyn Fn(u32) -> HistorySource>) =
-                        if *both {
-                            (Box::new(far), Box::new(face_src))
-                        } else {
-                            (Box::new(face_src), Box::new(far))
-                        };
-                    let _ = &base_lab;
+                    // Centred: the side along +normal continues the sheet's faces; one-sided:
+                    // the near side does.
+                    let lab_near = |f: u32| if *both { far(f) } else { face_src(f) };
+                    let lab_far = |f: u32| if *both { face_src(f) } else { far(f) };
+
                     for (k, f) in near_facets.iter().enumerate() {
-                        polys.push((f.clone(), base_lab(s.face_of[k])));
+                        polys.push((f.clone(), lab_near(s.face_of[k])));
                     }
                     for (k, f) in far_facets.iter().enumerate() {
-                        polys.push((f.clone(), far_lab(s.face_of[k])));
+                        polys.push((f.clone(), lab_far(s.face_of[k])));
                     }
                     // Rims along boundary edges.
                     for (e, segs) in &s.boundary_segments {
@@ -732,7 +763,10 @@ impl FakeKernel {
                                 Facet {
                                     loops: vec![q],
                                     normal: nrm,
-                                    labels: vec![vec![gen(Role::Boundary, KernelTag::None, None); 4]],
+                                    labels: vec![vec![
+                                        gen(Role::Boundary, KernelTag::None, None);
+                                        4
+                                    ]],
                                 },
                                 gen(
                                     Role::ThickenRim,
@@ -842,11 +876,8 @@ impl FakeKernel {
                                 crate::model::datum::add(c, w),
                                 c,
                             ];
-                            let strip_label = gen(
-                                Role::Extension,
-                                KernelTag::InputEdge { edge: *e },
-                                None,
-                            );
+                            let strip_label =
+                                gen(Role::Extension, KernelTag::InputEdge { edge: *e }, None);
                             b.facets.push(Facet {
                                 loops: vec![q],
                                 normal: f.normal,
@@ -880,8 +911,10 @@ impl FakeKernel {
                     face_sources: Vec::new(),
                     hints: Vec::new(),
                 };
-                let selected: BTreeSet<u32> =
-                    pairs.iter().flat_map(|(a, c)| [a.entity, c.entity]).collect();
+                let selected: BTreeSet<u32> = pairs
+                    .iter()
+                    .flat_map(|(a, c)| [a.entity, c.entity])
+                    .collect();
                 for (a, c) in pairs {
                     let (fa, fc) = (
                         so.faces.get(a.entity as usize),
@@ -942,7 +975,13 @@ impl FakeKernel {
                                         }
                                     }
                                 }
-                                sheet::label_by_neighbour(so, &selected, &mut fs, Role::Boundary, 0);
+                                sheet::label_by_neighbour(
+                                    so,
+                                    &selected,
+                                    &mut fs,
+                                    Role::Boundary,
+                                    0,
+                                );
                                 for f in &mut fs {
                                     for l in &mut f.loops {
                                         for p in l.iter_mut() {
@@ -1086,7 +1125,11 @@ fn scale_solid(s: &mut FakeSolid, c: [f64; 3], k: [f64; 3]) {
                     axis_direction,
                     radius,
                 } if uniform => SurfaceKind::Cylinder {
-                    axis_point: [m(0, axis_point[0]), m(1, axis_point[1]), m(2, axis_point[2])],
+                    axis_point: [
+                        m(0, axis_point[0]),
+                        m(1, axis_point[1]),
+                        m(2, axis_point[2]),
+                    ],
                     axis_direction,
                     radius: radius * k[0],
                 },
@@ -1104,6 +1147,100 @@ fn scale_solid(s: &mut FakeSolid, c: [f64; 3], k: [f64; 3]) {
                 r.lo[a] = m(a, r.lo[a]);
                 r.hi[a] = m(a, r.hi[a]);
             }
+        }
+    }
+}
+
+impl crate::evaluate::GeometryAnalyzer for FakeKernel {
+    /// Mass properties exactly from grid occupancy (orthogonal cells) and draft from face
+    /// normals; the other analyses are not supported by the fake kernel.
+    fn analyze(
+        &self,
+        request: &crate::evaluate::AnalysisRequest,
+        bodies: &[&BodyHandle],
+    ) -> Result<crate::evaluate::AnalysisResult, KernelError> {
+        use crate::evaluate::{AnalysisRequest as R, AnalysisResult, MassProperties};
+        match request {
+            R::MassProperties { density } => {
+                let mut v = 0.0;
+                let mut m1 = [0.0; 3];
+                // Second moments about the origin: ∫ x_i x_j dV.
+                let mut m2 = [[0.0; 3]; 3];
+                for (k, h) in bodies.iter().enumerate() {
+                    let s = h
+                        .downcast::<FakeSolid>()
+                        .ok_or(KernelError::ForeignOperand { operand: k as u32 })?;
+                    let d = s.dims();
+                    for z in 0..d[2] {
+                        for y in 0..d[1] {
+                            for x in 0..d[0] {
+                                if !s.occ[x + d[0] * (y + d[1] * z)] {
+                                    continue;
+                                }
+                                let c = [x, y, z];
+                                let lo: Vec<f64> = (0..3).map(|a| s.grid[a][c[a]]).collect();
+                                let hi: Vec<f64> = (0..3).map(|a| s.grid[a][c[a] + 1]).collect();
+                                let w: Vec<f64> = (0..3).map(|a| hi[a] - lo[a]).collect();
+                                let dv = w[0] * w[1] * w[2];
+                                v += dv;
+                                let mid: Vec<f64> = (0..3).map(|a| (lo[a] + hi[a]) / 2.0).collect();
+                                for i in 0..3 {
+                                    m1[i] += dv * mid[i];
+                                    for j in 0..3 {
+                                        m2[i][j] += if i == j {
+                                            dv * (mid[i] * mid[i] + w[i] * w[i] / 12.0)
+                                        } else {
+                                            dv * mid[i] * mid[j]
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if v <= 0.0 {
+                    return Err(KernelError::Failed {
+                        message: "no volume".into(),
+                    });
+                }
+                let c = [m1[0] / v, m1[1] / v, m1[2] / v];
+                // Central second moments, then the inertia tensor.
+                let mut cm = [[0.0; 3]; 3];
+                for i in 0..3 {
+                    for j in 0..3 {
+                        cm[i][j] = m2[i][j] - v * c[i] * c[j];
+                    }
+                }
+                let tr = cm[0][0] + cm[1][1] + cm[2][2];
+                let mut inertia = [[0.0; 3]; 3];
+                for i in 0..3 {
+                    for j in 0..3 {
+                        inertia[i][j] = density * (if i == j { tr } else { 0.0 } - cm[i][j]);
+                    }
+                }
+                Ok(AnalysisResult::MassProperties(MassProperties {
+                    volume: v,
+                    mass: v * density,
+                    centroid: c,
+                    inertia,
+                }))
+            }
+            R::Draft { pull, min } => {
+                let first = bodies.first().ok_or(KernelError::Failed {
+                    message: "no body".into(),
+                })?;
+                let s = first
+                    .downcast::<FakeSolid>()
+                    .ok_or(KernelError::ForeignOperand { operand: 0 })?;
+                Ok(AnalysisResult::Draft(crate::evaluate::draft_analysis(
+                    &s.topology,
+                    *pull,
+                    *min,
+                )))
+            }
+            other => Err(KernelError::NotSupported {
+                what: format!("fake kernel: {:?} analysis", std::mem::discriminant(other)),
+            }),
         }
     }
 }

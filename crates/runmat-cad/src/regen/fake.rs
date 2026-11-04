@@ -442,6 +442,12 @@ enum Tool {
     Sampled(Box<sampled::Sampled>),
     /// A closed set of labelled polygons (thickened or knitted sheets).
     Polys(Box<sheet::PolyTool>),
+    /// A tool clipped to half-spaces `(p − origin)·normal ≤ 0`, the cuts labelled.
+    Clipped(Box<Tool>, Vec<([f64; 3], [f64; 3], HistorySource)>),
+}
+
+fn half(o: [f64; 3], n: [f64; 3], p: [f64; 3]) -> f64 {
+    (p[0] - o[0]) * n[0] + (p[1] - o[1]) * n[1] + (p[2] - o[2]) * n[2]
 }
 
 impl Tool {
@@ -450,6 +456,9 @@ impl Tool {
             Tool::Exact(t) => t.inside(p),
             Tool::Sampled(t) => t.inside(p),
             Tool::Polys(t) => t.inside(p),
+            Tool::Clipped(t, planes) => {
+                t.inside(p) && planes.iter().all(|(o, n, _)| half(*o, *n, p) < 0.0)
+            }
         }
     }
 
@@ -458,6 +467,27 @@ impl Tool {
             Tool::Exact(t) => t.breaks(out),
             Tool::Sampled(t) => t.breaks(out),
             Tool::Polys(t) => t.breaks(out),
+            Tool::Clipped(t, planes) => {
+                t.breaks(out);
+                for (o, n, _) in planes {
+                    for a in 0..3 {
+                        out[a].push(o[a]);
+                    }
+                    if axis_of(*n).is_none() {
+                        let mut tmp: [Vec<f64>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+                        t.breaks(&mut tmp);
+                        for a in 0..3 {
+                            let lo = tmp[a].iter().cloned().fold(f64::INFINITY, f64::min);
+                            let hi = tmp[a].iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                            if lo.is_finite() && hi.is_finite() {
+                                for k in 0..=sampled::RES {
+                                    out[a].push(lo + (hi - lo) * k as f64 / sampled::RES as f64);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -485,6 +515,28 @@ impl Tool {
                 (s.label.clone(), kind)
             }),
             Tool::Polys(t) => t.label(plane, cen, a, b),
+            Tool::Clipped(t, planes) => {
+                for (o, n, l) in planes {
+                    let (da, db) = (half(*o, *n, a), half(*o, *n, b));
+                    if (da <= 0.0) != (db <= 0.0) {
+                        let s = da / (da - db);
+                        let x = [
+                            a[0] + s * (b[0] - a[0]),
+                            a[1] + s * (b[1] - a[1]),
+                            a[2] + s * (b[2] - a[2]),
+                        ];
+                        let inside_other = t.inside(x) || t.inside(if da <= 0.0 { a } else { b });
+                        if inside_other {
+                            let kind = match axis_of(*n) {
+                                Some((ax, _)) if ax == plane.axis => FacetKind::Planar,
+                                _ => FacetKind::Faceted(SurfaceKind::Plane { normal: *n }),
+                            };
+                            return Some((l.clone(), kind));
+                        }
+                    }
+                }
+                t.label(plane, cen, a, b)
+            }
         }
     }
 
@@ -511,6 +563,12 @@ impl Tool {
                     fix(l);
                 }
             }
+            Tool::Clipped(t, planes) => {
+                t.map_labels(f);
+                for (_, _, l) in planes {
+                    fix(l);
+                }
+            }
         }
     }
 
@@ -518,6 +576,7 @@ impl Tool {
         match self {
             Tool::Exact(t) => t.relabel(seed, instance),
             Tool::Sampled(t) => t.relabel(seed, instance),
+            Tool::Clipped(t, _) => t.relabel(seed, instance),
             Tool::Polys(t) => {
                 for (_, l) in &mut t.facets {
                     if let HistorySource::Generated {
@@ -558,6 +617,13 @@ impl Tool {
                     .collect();
                 Tool::Polys(Box::new(sheet::PolyTool::new(facets)))
             }
+            Tool::Clipped(inner, planes) => Tool::Clipped(
+                Box::new(inner.transformed(t)),
+                planes
+                    .iter()
+                    .map(|(o, n, l)| (t.apply(*o), t.apply_vector(*n), l.clone()))
+                    .collect(),
+            ),
         }
     }
 }
@@ -876,6 +942,8 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
         }
         Some(Modifier::Draft(ds)) => {
             for d in ds {
+                // The moved plane of an offset face.
+                breaks[d.plane.axis].push(d.plane.offset + (d.plane.dir as f64) * d.shift);
                 for a in 0..3 {
                     let (lo, hi) = if a == d.plane.axis {
                         (d.plane.offset - d.reach, d.plane.offset + d.reach)

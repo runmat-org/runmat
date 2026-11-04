@@ -12,6 +12,7 @@ pub mod engine;
 pub mod fake;
 pub mod hash;
 pub mod kernel;
+pub mod records;
 pub mod slots;
 
 pub use deps::{Affected, DependencyGraph};

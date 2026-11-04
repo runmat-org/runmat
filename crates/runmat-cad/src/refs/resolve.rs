@@ -796,8 +796,7 @@ impl<'a> Resolver<'a> {
                         }
                     }
                 }
-                if out.is_empty() && !self.bodies.iter().any(|b| !b.names.boundaries.is_empty())
-                {
+                if out.is_empty() && !self.bodies.iter().any(|b| !b.names.boundaries.is_empty()) {
                     return Err(Stop::Fail(RefProblem::KindMismatch {
                         expected: TopoKind::Face,
                         found: kind,

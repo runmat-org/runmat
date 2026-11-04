@@ -112,6 +112,8 @@ impl AxisRef {
     }
 }
 
+// Authored data, built once per edit; variant sizes do not matter here.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "plane")]
 pub enum PlaneDef {
@@ -123,6 +125,29 @@ pub enum PlaneDef {
         axis: AxisRef,
         angle: ValueExpr,
     },
+    /// Through three points (normal by the right hand from `a→b` to `a→c`).
+    ThreePoint {
+        a: PointRef,
+        b: PointRef,
+        c: PointRef,
+    },
+    /// Midway between two parallel planes.
+    Mid { a: PlaneRef, b: PlaneRef },
+    /// Normal to a reference curve or a linear edge at a parameter in `[0, 1]` along it.
+    NormalToCurve {
+        curve: CurveRef,
+        parameter: ValueExpr,
+    },
+    /// Tangent to a cylindrical face at the point of it nearest `at`.
+    TangentToFace { face: Reference, at: PointRef },
+}
+
+/// A curve a datum follows: a reference-curve feature or an edge.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "curve")]
+pub enum CurveRef {
+    Feature { feature: FeatureId },
+    Edge { edge: Reference },
 }
 
 // Authored data, built once per edit; variant sizes do not matter here.
@@ -136,6 +161,10 @@ pub enum AxisDef {
     OfFace { face: Reference },
     /// Along a linear edge.
     OfEdge { edge: Reference },
+    /// Where two planes meet.
+    TwoPlanes { a: PlaneRef, b: PlaneRef },
+    /// Through a point, normal to a plane.
+    Normal { plane: PlaneRef, through: PointRef },
 }
 
 /// A point-taking parameter.
@@ -176,6 +205,20 @@ pub enum PointDef {
         dy: ValueExpr,
         dz: ValueExpr,
     },
+    /// The centre of a circular edge or cylindrical face (on its axis, at its centroid).
+    CenterOf {
+        of: Reference,
+    },
+    /// At a parameter in `[0, 1]` along a curve or edge.
+    OnCurve {
+        curve: CurveRef,
+        parameter: ValueExpr,
+    },
+    /// Where an axis meets a plane.
+    Intersection {
+        axis: AxisRef,
+        plane: PlaneRef,
+    },
 }
 
 // Authored data, built once per edit; variant sizes do not matter here.
@@ -191,6 +234,15 @@ pub enum FrameDef {
     },
     /// The frame of a planar face (mate-connector style).
     OnFace { face: Reference },
+}
+
+impl CurveRef {
+    pub(crate) fn visit<'a>(&'a self, v: &mut crate::model::visit::Visit<'a>, param: &str) {
+        match self {
+            CurveRef::Feature { feature } => v.feature(feature),
+            CurveRef::Edge { edge } => v.reference(param, edge),
+        }
+    }
 }
 
 /// An evaluated frame in part coordinates (SI). Right-handed and orthonormal.

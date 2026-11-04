@@ -172,7 +172,15 @@ fn scaling_conditions_mixed_length_angle_systems() {
 
 #[test]
 fn dog_leg_solves_and_diagnoses_like_newton() {
-    let (s, p2) = big_triangle();
+    let (mut s, p2) = big_triangle();
+    // The pre-pass would construct this triangle exactly; numerically, from a start the trust
+    // region can reach.
+    // p1 where the oriented-cluster rule puts it (the start the older pre-pass gave).
+    let p1 = EntityId::from_index(1);
+    let v1 = s.entity_vars(p1);
+    s.set_value(v1[0], 1e7);
+    s.set_value(v1[1], 0.0);
+    let _ = p2;
     let o = SolveOptions {
         algorithm: Algorithm::DogLeg,
         clusters: false,
@@ -462,6 +470,8 @@ fn clusters_close_a_hinge_with_an_angle() {
     assert_eq!(rep.iterations, 0, "the construction is exact");
     assert_eq!(rep.components[0].clusters, 1);
     assert_pt(pt(&rep, &s, a), [40.0, 0.0], 1e-9);
+    let t = 60f64.to_radians();
+    assert_pt(pt(&rep, &s, b), [25.0 * t.cos(), 25.0 * t.sin()], 1e-9);
     // And the 1e7 triangle of the scaling test.
     let (big, p2) = big_triangle();
     let rep = solve(&big, &opts());
@@ -471,8 +481,6 @@ fn clusters_close_a_hinge_with_an_angle() {
         [1e7 * 0.7f64.cos(), 1e7 * 0.7f64.sin()],
         1e-6,
     );
-    let t = 60f64.to_radians();
-    assert_pt(pt(&rep, &s, b), [25.0 * t.cos(), 25.0 * t.sin()], 1e-9);
 }
 
 /// A free-floating two-bar hinge (nothing fixed): the hinge rule still merges the bars, and
@@ -500,7 +508,10 @@ fn clusters_merge_a_floating_hinge() {
     assert!(rep.converged);
     assert_eq!(rep.components[0].clusters, 1, "{rep:#?}");
     let (ph, pa, pb) = (pt(&rep, &s, h), pt(&rep, &s, a), pt(&rep, &s, b));
-    let (u, v) = ([pa[0] - ph[0], pa[1] - ph[1]], [pb[0] - ph[0], pb[1] - ph[1]]);
+    let (u, v) = (
+        [pa[0] - ph[0], pa[1] - ph[1]],
+        [pb[0] - ph[0], pb[1] - ph[1]],
+    );
     assert_close(u[0].hypot(u[1]), 4.0, 1e-9);
     assert_close(v[0].hypot(v[1]), 3.0, 1e-9);
     assert_close(u[0] * v[0] + u[1] * v[1], 0.0, 1e-9);
@@ -696,7 +707,8 @@ fn sparse_null_space_gives_entity_dof_next_to_a_large_spline() {
     // A short line whose start is pinned to the spline's first control point.
     let q = s.point2(-5.0, 2.0);
     let line = s.line(pts[0], q).unwrap();
-    s.constrain(Constraint::Length { line, value: 5.0 }).unwrap();
+    s.constrain(Constraint::Length { line, value: 5.0 })
+        .unwrap();
     let mut o = opts();
     o.max_null_space_entries = 200_000;
     let t = Instant::now();

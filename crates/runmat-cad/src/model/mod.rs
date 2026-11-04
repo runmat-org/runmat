@@ -5,20 +5,35 @@
 //! materials, links, configurations and semantic PMI. The syntax layer (M1) builds it from the lossless tree;
 //! nothing here parses text.
 
+pub mod curves;
 pub mod datum;
+pub mod detail;
+pub mod direct;
 pub mod feature;
 pub mod items;
+pub mod mold;
+pub mod sheet_metal;
 pub mod sketch;
+pub mod surface;
+pub mod visit;
+pub mod weldment;
 
 use crate::ids::{ConfigurationName, FeatureId, FilePath, PublishName};
 use crate::pmi::PmiSet;
 use crate::value::{InputDecl, LetDecl};
 use serde::{Deserialize, Serialize};
 
+pub use curves::*;
 pub use datum::*;
+pub use detail::*;
+pub use direct::*;
 pub use feature::*;
 pub use items::*;
+pub use mold::MoldFeature;
+pub use sheet_metal::SheetMetalFeature;
 pub use sketch::*;
+pub use surface::SurfaceFeature;
+pub use weldment::WeldmentFeature;
 
 /// The language and std version header (`runmat 0.7` / `std 1`). Old versions compile forever.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +86,9 @@ pub struct PartDocument {
     /// The owner marked the file closed: auto-publish is refused.
     #[serde(default)]
     pub closed: bool,
+    /// `feature def` templates defined in this file (library features).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub feature_defs: Vec<FeatureDef>,
 }
 
 impl PartDocument {
@@ -91,6 +109,7 @@ impl PartDocument {
             configuration_tables: Vec::new(),
             pmi: PmiSet::default(),
             closed: false,
+            feature_defs: Vec::new(),
         }
     }
 
@@ -123,6 +142,37 @@ impl PartDocument {
         self.all_configurations()
             .into_iter()
             .find(|c| &c.name == name)
+    }
+
+    /// Replace every library instance by its definition's features (pure: the same document
+    /// expands the same way). Instances whose definition is not in this file stay, and fail
+    /// at regeneration with a diagnostic; an expansion error is returned with the instance.
+    pub fn expand_library(
+        &self,
+    ) -> (
+        PartDocument,
+        Vec<(FeatureId, crate::model::detail::ExpandError)>,
+    ) {
+        let mut out = self.clone();
+        let mut errors = Vec::new();
+        let mut features = Vec::new();
+        for f in &self.features {
+            if let FeatureKind::Library(inst) = &f.kind {
+                let name = inst.def.rsplit("feature_def.").next().unwrap_or(&inst.def);
+                if let Some(def) = self.feature_defs.iter().find(|d| d.name == name) {
+                    match def.expand(&f.id, inst) {
+                        Ok(fs) => {
+                            features.extend(fs);
+                            continue;
+                        }
+                        Err(e) => errors.push((f.id.clone(), e)),
+                    }
+                }
+            }
+            features.push(f.clone());
+        }
+        out.features = features;
+        (out, errors)
     }
 
     /// Move a feature to just after `after` (or to the front). Returns false if either is

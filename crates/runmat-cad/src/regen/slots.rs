@@ -115,9 +115,11 @@ fn resolved_body(result: &RegenResult, o: &ItemOutcome) -> Option<usize> {
         return None;
     }
     let want: BTreeSet<&EntityName> = o.entities[0].iter().collect();
-    result.state.bodies.iter().position(|b| {
-        !want.is_empty() && want.iter().all(|n| b.names.body.contains(*n))
-    })
+    result
+        .state
+        .bodies
+        .iter()
+        .position(|b| !want.is_empty() && want.iter().all(|n| b.names.body.contains(*n)))
 }
 
 fn items<'a>(

@@ -73,7 +73,12 @@ fn regen_with(env: &Env, d: &PartDocument, slots: &SlotTable) -> RegenResult {
         slots: Some(slots),
         ..env.ctx()
     };
-    regenerate(d, &ctx, &RegenRequest::default(), &mut RegenCache::default())
+    regenerate(
+        d,
+        &ctx,
+        &RegenRequest::default(),
+        &mut RegenCache::default(),
+    )
 }
 
 #[test]
@@ -126,7 +131,10 @@ fn a_broken_item_is_offered_the_body_carrying_its_lineage() {
         panic!("{:?}", row.status)
     };
     assert_eq!(candidates.len(), 1, "{candidates:?}");
-    assert_eq!(candidates[0].1, runmat_cad::refs::naming::SIGNATURE_LEN as u32);
+    assert_eq!(
+        candidates[0].1,
+        runmat_cad::refs::naming::SIGNATURE_LEN as u32
+    );
     assert!(r.state.bodies[candidates[0].0]
         .names
         .body
