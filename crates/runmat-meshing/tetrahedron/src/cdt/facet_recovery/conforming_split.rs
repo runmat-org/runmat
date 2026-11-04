@@ -19,7 +19,9 @@ use crate::cdt::{
         topology_access::TetrahedralTopology, validate_constrained_delaunay_volume_topology,
     },
     mutation::{TopologyMutation, TopologyMutationErrorKind},
-    segment_recovery::{record_recovered_segment_split, recovered_segment_midpoint},
+    segment_recovery::{
+        record_recovered_segment_split, recovered_segment_midpoint, recovered_segment_midpoint_on,
+    },
     topology::{orient_materialized_volume_nodes, orient_volume_nodes},
     DelaunayInsertionErrorKind, DelaunayVolumeNode, DelaunayVolumeTopology,
 };
@@ -131,8 +133,580 @@ pub(super) fn try_split_recovered_segment_edge(
     )
 }
 
+/// Splits a recovered segment edge directly on the working topology: the split, Lawson flips in
+/// the new node's link and an exact admission of every changed cell run in a cavity trial, so
+/// the cost follows the size of the change. Returns `None` with the topology unchanged when the
+/// local repair cannot finish; the caller then runs the canonical split with complete
+/// legalization.
+///
+/// The constrained Bowyer-Watson cavity of the midpoint can contain the whole star of another
+/// recovered segment edge. The midpoint then lies strictly inside every circumsphere around
+/// that edge, so the edge has no empty circumsphere once the midpoint exists and no
+/// constrained-Delaunay complex contains both. That encroached edge is split first (bounded
+/// cascade), and the original split is retried on the refined segments.
+pub(super) fn split_recovered_segment_edge_in_place(
+    working: &mut super::working::FacetRecoveryWorking,
+    edge: [StableDigest; 2],
+    protected: &[DelaunayRecoveredFacetTriangle],
+    protected_edges: &[[StableDigest; 2]],
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<Option<Vec<ProtectedFacetSplit>>, DelaunayFacetRecoveryError> {
+    let protected = protected.to_vec();
+    let protected_edges = protected_edges.to_vec();
+    let mut trial_splits = Vec::new();
+    // The cascade edits the working topology through committed splits; a declined cascade
+    // leaves those committed encroachment splits in place, which are themselves valid
+    // constrained-Delaunay refinements of recovered segments.
+    let result = split_with_encroachment_cascade(
+        working,
+        edge,
+        protected,
+        protected_edges,
+        0,
+        constraint_index,
+        work,
+        &mut trial_splits,
+    )?;
+    Ok(if result || !trial_splits.is_empty() {
+        Some(trial_splits)
+    } else {
+        None
+    })
+}
+
+const MAXIMUM_ENCROACHMENT_DEPTH: u8 = 8;
+
+/// Returns whether `edge` itself was split; `splits` receives every protected-facet split made,
+/// in application order, including those of encroached edges split first.
+#[allow(clippy::too_many_arguments)]
+fn split_with_encroachment_cascade(
+    working: &mut super::working::FacetRecoveryWorking,
+    edge: [StableDigest; 2],
+    mut protected: Vec<DelaunayRecoveredFacetTriangle>,
+    mut protected_edges: Vec<[StableDigest; 2]>,
+    depth: u8,
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+    splits: &mut Vec<ProtectedFacetSplit>,
+) -> Result<bool, DelaunayFacetRecoveryError> {
+    let insertion = work.options.segment_recovery.insertion;
+    let cancellation = work.cancellation;
+    let mut attempts = 0_u32;
+    let mut reasons = Vec::new();
+    'retry: loop {
+        work.support_step(constraint_index)?;
+        attempts += 1;
+        if attempts > u32::from(MAXIMUM_ENCROACHMENT_DEPTH) + 1 {
+            reasons.push("encroachment retries exhausted".to_owned());
+            work.reject(reasons.join("; "));
+            return Ok(false);
+        }
+        let Some((segment_index, interval_index)) = segment_edge_location(&working.segments, edge)
+        else {
+            work.reject("the edge is not an interval of a recovered segment");
+            return Ok(false);
+        };
+        let (node, recovered) = recovered_segment_midpoint_on(
+            working.topology(),
+            &working.segments,
+            segment_index,
+            interval_index,
+        )
+        .map_err(super::segment_error)?;
+        if working.topology().nodes.iter().any(|existing| {
+            crate::cdt::segment_recovery::coordinates_share_representable_location(
+                existing.coordinates_m.canonical_value(),
+                node.coordinates_m.canonical_value(),
+            )
+        }) {
+            work.reject("conflicting segment midpoint duplicates an existing node position");
+            return Ok(false);
+        }
+        for strategy in [SplitStrategy::ConstrainedCavity, SplitStrategy::EdgeStar] {
+            let outcome = working.edit(|topology| {
+                let mut trial = topology.cavity_trial();
+                let outcome = split_and_admit_locally(
+                    &mut trial,
+                    node,
+                    edge,
+                    &protected,
+                    &protected_edges,
+                    strategy,
+                    constraint_index,
+                    insertion,
+                    cancellation,
+                )?;
+                let changed = matches!(outcome, LocalSplit::Accepted(_));
+                if changed {
+                    trial.commit();
+                }
+                Ok::<_, DelaunayFacetRecoveryError>((outcome, changed))
+            })?;
+            match outcome {
+                LocalSplit::Accepted(accepted) => {
+                    working.record_segment_split(segment_index, interval_index, recovered)?;
+                    splits.extend(accepted);
+                    return Ok(true);
+                }
+                LocalSplit::Encroached(encroached)
+                    if encroached.iter().any(|node| edge.contains(node)) =>
+                {
+                    // Midpoint splits of two segments meeting at an acute vertex encroach each
+                    // other without end. Split both at the same distance from the shared vertex
+                    // in one admitted edit: neither new sub-edge at that vertex then holds the
+                    // other's point in its diametral ball.
+                    match split_pair_at_shared_vertex(
+                        working,
+                        edge,
+                        encroached,
+                        &protected,
+                        &protected_edges,
+                        constraint_index,
+                        work,
+                    )? {
+                        Ok(accepted) => {
+                            splits.extend(accepted);
+                            return Ok(true);
+                        }
+                        Err(reason) => reasons.push(format!(
+                            "shared-vertex pair split with encroached edge declined: {reason}"
+                        )),
+                    }
+                }
+                LocalSplit::Encroached(encroached) if depth < MAXIMUM_ENCROACHMENT_DEPTH => {
+                    let first = splits.len();
+                    if !split_with_encroachment_cascade(
+                        working,
+                        encroached,
+                        protected.clone(),
+                        protected_edges.clone(),
+                        depth + 1,
+                        constraint_index,
+                        work,
+                        splits,
+                    )? {
+                        reasons.push(format!(
+                            "in-place split of encroached edge at depth {} declined: {}",
+                            depth + 1,
+                            work.last_rejection().unwrap_or("no reason recorded")
+                        ));
+                        continue;
+                    }
+                    // Refresh the caller-side constraint views with the encroached split.
+                    let applied = &splits[first..];
+                    apply_protected_facet_splits(
+                        &mut [],
+                        &mut protected,
+                        applied
+                            .iter()
+                            .map(|split| ProtectedFacetSplit {
+                                source: split.source,
+                                children: split.children.clone(),
+                            })
+                            .collect(),
+                    );
+                    protected_edges = working
+                        .segments
+                        .iter()
+                        .flat_map(|segment| segment.nodes.windows(2))
+                        .map(|pair| {
+                            let mut key = [pair[0].identity, pair[1].identity];
+                            key.sort_unstable();
+                            key
+                        })
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect();
+                    continue 'retry;
+                }
+                LocalSplit::Encroached(encroached) => reasons.push(format!(
+                    "in-place {strategy:?} split: the midpoint encroaches recovered segment edge \
+                     {:?} beyond the cascade depth or its split was declined",
+                    encroached.map(|identity| working.topology().node_index(identity).map(
+                        |index| working.topology().nodes[index as usize].coordinates_m.canonical_value()
+                    ))
+                )),
+                LocalSplit::Declined(reason) => {
+                    reasons.push(format!("in-place {strategy:?} split declined: {reason}"))
+                }
+            }
+        }
+        work.reject(reasons.join("; "));
+        return Ok(false);
+    }
+}
+
+/// Splits `edge` at its midpoint and `other`, which shares one endpoint with it, at the dyadic
+/// point nearest the same distance from that endpoint, in one cavity trial. `other` is split
+/// through its edge star first, so `edge` survives for its constrained Bowyer-Watson split; link
+/// flips around both nodes and the exact admission of every changed cell decide the edit.
+#[allow(clippy::too_many_arguments)]
+fn split_pair_at_shared_vertex(
+    working: &mut super::working::FacetRecoveryWorking,
+    edge: [StableDigest; 2],
+    other: [StableDigest; 2],
+    protected: &[DelaunayRecoveredFacetTriangle],
+    protected_edges: &[[StableDigest; 2]],
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<Result<Vec<ProtectedFacetSplit>, String>, DelaunayFacetRecoveryError> {
+    let Some(shared) = other.iter().copied().find(|node| edge.contains(node)) else {
+        return Ok(Err("the edges share no endpoint".to_owned()));
+    };
+    let (Some(edge_location), Some(other_location)) = (
+        segment_edge_location(&working.segments, edge),
+        segment_edge_location(&working.segments, other),
+    ) else {
+        return Ok(Err("an edge is not a recovered segment interval".to_owned()));
+    };
+    let (edge_node, edge_recovered) = recovered_segment_midpoint_on(
+        working.topology(),
+        &working.segments,
+        edge_location.0,
+        edge_location.1,
+    )
+    .map_err(super::segment_error)?;
+    let shared_point = working
+        .topology()
+        .node_index(shared)
+        .map(|index| working.topology().nodes[index as usize].coordinates_m.canonical_value())
+        .ok_or_else(|| invalid(constraint_index, "shared segment vertex is missing"))?;
+    let distance_m = (0..3)
+        .map(|axis| (edge_node.coordinates_m.canonical_value()[axis] - shared_point[axis]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let Some((other_node, other_recovered)) = crate::cdt::segment_recovery::recovered_segment_point_on(
+        working.topology(),
+        &working.segments,
+        other_location.0,
+        other_location.1,
+        Some((shared, distance_m)),
+    )
+    .map_err(super::segment_error)?
+    else {
+        return Ok(Err(format!(
+            "no dyadic point lies {distance_m} m from the shared vertex inside the encroached edge"
+        )));
+    };
+    if [edge_node, other_node].iter().any(|candidate| {
+        working.topology().nodes.iter().any(|existing| {
+            crate::cdt::segment_recovery::coordinates_share_representable_location(
+                existing.coordinates_m.canonical_value(),
+                candidate.coordinates_m.canonical_value(),
+            )
+        })
+    }) {
+        return Ok(Err("a split point duplicates an existing node position".to_owned()));
+    }
+    let insertion = work.options.segment_recovery.insertion;
+    let cancellation = work.cancellation;
+    let outcome = working.edit(|topology| {
+        let mut trial = topology.cavity_trial();
+        let outcome = (|| -> Result<Result<Vec<ProtectedFacetSplit>, String>, DelaunayFacetRecoveryError> {
+            let mut observed = trial.observe_edge_changes();
+            let mut protected = protected.to_vec();
+            let mut all_splits = Vec::new();
+            let mut inserted = Vec::new();
+            for (node, split, strategy) in [
+                (other_node, other, SplitStrategy::EdgeStar),
+                (edge_node, edge, SplitStrategy::ConstrainedCavity),
+            ] {
+                let Ok(index) = observed.append_node(node) else {
+                    return Ok(Err("a split node was rejected".to_owned()));
+                };
+                let (removed, created, splits) =
+                    split_edge(&observed, index, split, &protected, strategy, constraint_index)?;
+                let (removed, created, splits) = if removed.is_empty() {
+                    split_edge(
+                        &observed,
+                        index,
+                        split,
+                        &protected,
+                        SplitStrategy::EdgeStar,
+                        constraint_index,
+                    )?
+                } else {
+                    (removed, created, splits)
+                };
+                if removed.is_empty() {
+                    return Ok(Err("a split produced no replacement".to_owned()));
+                }
+                if let Err(failure) = observed.replace_cavity(&removed, created) {
+                    return Ok(Err(format!("a split replacement was rejected: {failure}")));
+                }
+                apply_protected_facet_splits(
+                    &mut [],
+                    &mut protected,
+                    splits
+                        .iter()
+                        .map(|split| ProtectedFacetSplit {
+                            source: split.source,
+                            children: split.children.clone(),
+                        })
+                        .collect(),
+                );
+                all_splits.extend(splits);
+                inserted.push(index);
+            }
+            let protected_faces = protected
+                .iter()
+                .map(|triangle| {
+                    let mut face = triangle.node_identities;
+                    face.sort_unstable();
+                    face
+                })
+                .collect::<BTreeSet<_>>();
+            if let Err(failure) = crate::cdt::insertion::legalize_inserted_nodes(
+                &mut observed,
+                &inserted,
+                &protected_faces,
+                insertion,
+                cancellation,
+            ) {
+                return Ok(Err(format!("link flips failed: {failure}")));
+            }
+            let mut replaced = [edge, other];
+            for key in &mut replaced {
+                key.sort_unstable();
+            }
+            let halves = [
+                [edge[0], edge_node.identity],
+                [edge[1], edge_node.identity],
+                [other[0], other_node.identity],
+                [other[1], other_node.identity],
+            ];
+            let mut checkpoint = || Ok::<(), DelaunayFacetRecoveryError>(());
+            let removed_edges = observed.removed_edge_candidates(&mut checkpoint)?;
+            let lost = protected_edges
+                .iter()
+                .filter(|candidate| !replaced.contains(candidate))
+                .copied()
+                .map(|candidate| (candidate, false))
+                .chain(halves.into_iter().map(|half| (half, true)))
+                .find(|(candidate, half)| {
+                    let [Some(first), Some(second)] =
+                        candidate.map(|identity| observed.node_index(identity))
+                    else {
+                        return true;
+                    };
+                    let mut key = [first, second];
+                    key.sort_unstable();
+                    (*half || removed_edges.contains(&key)) && !observed.has_edge(key)
+                });
+            if let Some((lost, _)) = lost {
+                return Ok(Err(format!(
+                    "the pair split lost recovered segment edge {:?}",
+                    lost.map(|identity| observed.node_index(identity).map(
+                        |index| observed.nodes[index as usize].coordinates_m.canonical_value()
+                    ))
+                )));
+            }
+            match crate::cdt::insertion::observed_change_violation(
+                &observed,
+                &observed.changed_cells(),
+                &protected_faces,
+                insertion,
+                cancellation,
+            ) {
+                Ok(None) => Ok(Ok(all_splits)),
+                Ok(Some(violation)) => Ok(Err(violation)),
+                Err(failure) => Err(insertion_error(
+                    failure.kind,
+                    failure.to_string(),
+                    constraint_index,
+                )),
+            }
+        })()?;
+        let changed = outcome.is_ok();
+        if changed {
+            trial.commit();
+        }
+        Ok::<_, DelaunayFacetRecoveryError>((outcome, changed))
+    })?;
+    if outcome.is_ok() {
+        working.record_segment_split(other_location.0, other_location.1, other_recovered)?;
+        let edge_location = segment_edge_location(&working.segments, edge)
+            .ok_or_else(|| invalid(constraint_index, "split edge left its recovered segment"))?;
+        working.record_segment_split(edge_location.0, edge_location.1, edge_recovered)?;
+    }
+    Ok(outcome)
+}
+
+enum LocalSplit {
+    Accepted(Vec<ProtectedFacetSplit>),
+    /// The cavity holds the whole star of this other recovered segment edge.
+    Encroached([StableDigest; 2]),
+    Declined(String),
+}
+
+#[allow(clippy::too_many_arguments)]
+fn split_and_admit_locally(
+    topology: &mut TopologyMutation,
+    node: DelaunayVolumeNode,
+    edge: [StableDigest; 2],
+    protected: &[DelaunayRecoveredFacetTriangle],
+    protected_edges: &[[StableDigest; 2]],
+    strategy: SplitStrategy,
+    constraint_index: u32,
+    options: crate::cdt::DelaunayInsertionOptions,
+    cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
+) -> Result<LocalSplit, DelaunayFacetRecoveryError> {
+    let mut observed = topology.observe_edge_changes();
+    let Ok(inserted) = observed.append_node(node) else {
+        return Ok(LocalSplit::Declined("duplicate node".to_owned()));
+    };
+    let mut split_edge_key = edge;
+    split_edge_key.sort_unstable();
+    let (removed, created, splits) =
+        split_edge(&observed, inserted, edge, protected, strategy, constraint_index)?;
+    if removed.is_empty() {
+        return Ok(LocalSplit::Declined("empty replacement".to_owned()));
+    }
+    if let Some(encroached) =
+        encroached_segment_edge(&observed, &removed, protected_edges, split_edge_key)
+    {
+        return Ok(LocalSplit::Encroached(encroached));
+    }
+    if created.iter().any(|(tetrahedron, _)| {
+        orient_materialized_volume_nodes(tetrahedron.map(|index| observed.nodes[index as usize]))
+            .is_ok_and(|sign| sign == PredicateSign::Zero)
+    }) || observed.replace_cavity(&removed, created).is_err()
+    {
+        return Ok(LocalSplit::Declined("zero-volume or rejected cavity replacement".to_owned()));
+    }
+    let protected_faces = updated_protected_faces(protected, &splits)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    match legalize_inserted_node_and_check_star(
+        &mut observed,
+        inserted,
+        &protected_faces,
+        options,
+        cancellation,
+    ) {
+        Ok(true) => {}
+        Ok(false) => return Ok(LocalSplit::Declined("an illegal face remains in the new node's star after link flips".to_owned())),
+        Err(failure)
+            if matches!(
+                failure.kind,
+                DelaunayInsertionErrorKind::ResourceLimit | DelaunayInsertionErrorKind::Cancelled
+            ) =>
+        {
+            return Err(insertion_error(
+                failure.kind,
+                failure.to_string(),
+                constraint_index,
+            ))
+        }
+        Err(failure) => return Ok(LocalSplit::Declined(format!("link flips failed: {failure}"))),
+    }
+    // The split edge is replaced by its two halves; every other recovered segment edge that a
+    // removed cell carried must survive.
+    let halves = edge.map(|endpoint| [endpoint, node.identity]);
+    let mut checkpoint = || Ok::<(), DelaunayFacetRecoveryError>(());
+    let removed_edges = observed.removed_edge_candidates(&mut checkpoint)?;
+    let segment_edge_lost = protected_edges
+        .iter()
+        .filter(|candidate| **candidate != split_edge_key)
+        .copied()
+        .chain(halves)
+        .any(|candidate| {
+            let [Some(first), Some(second)] =
+                candidate.map(|identity| observed.node_index(identity))
+            else {
+                return true;
+            };
+            let mut key = [first, second];
+            key.sort_unstable();
+            (removed_edges.contains(&key) || candidate.contains(&node.identity))
+                && !observed.has_edge(key)
+        });
+    if segment_edge_lost {
+        return Ok(LocalSplit::Declined("a recovered segment edge was lost".to_owned()));
+    }
+    let violation = crate::cdt::insertion::observed_change_violation(
+        &observed,
+        &observed.changed_cells(),
+        &protected_faces,
+        options,
+        cancellation,
+    )
+    .map_err(|failure| insertion_error(failure.kind, failure.to_string(), constraint_index))?;
+    Ok(match violation {
+        None => LocalSplit::Accepted(splits),
+        Some(violation) => LocalSplit::Declined(violation),
+    })
+}
+
+/// A recovered segment edge, other than the split edge, whose every incident cell lies in the
+/// replacement cavity.
+fn encroached_segment_edge(
+    topology: &TopologyMutation,
+    removed: &BTreeSet<u32>,
+    protected_edges: &[[StableDigest; 2]],
+    split_edge: [StableDigest; 2],
+) -> Option<[StableDigest; 2]> {
+    let mut candidates = BTreeSet::new();
+    for index in removed {
+        let vertices = topology
+            .tetrahedron(*index)
+            .expect("cavity cells are active")
+            .vertex_indices;
+        for first in 0..4 {
+            for second in first + 1..4 {
+                let mut key = [
+                    topology.nodes[vertices[first] as usize].identity,
+                    topology.nodes[vertices[second] as usize].identity,
+                ];
+                key.sort_unstable();
+                if key != split_edge {
+                    candidates.insert((key, [vertices[first], vertices[second]]));
+                }
+            }
+        }
+    }
+    let keys = candidates.iter().map(|(key, _)| *key).collect::<BTreeSet<_>>();
+    let segment_edges = protected_edges
+        .iter()
+        .filter(|edge| keys.contains(*edge))
+        .copied()
+        .collect::<BTreeSet<_>>();
+    candidates
+        .into_iter()
+        .filter(|(key, _)| segment_edges.contains(key))
+        .find(|(_, vertices)| {
+            topology
+                .edge_tetrahedra(*vertices)
+                .iter()
+                .all(|cell| removed.contains(cell))
+        })
+        .map(|(key, _)| key)
+}
+
+fn segment_edge_location(
+    segments: &[crate::cdt::DelaunayRecoveredSegment],
+    mut edge: [StableDigest; 2],
+) -> Option<(usize, usize)> {
+    edge.sort_unstable();
+    segments
+        .iter()
+        .enumerate()
+        .find_map(|(segment_index, segment)| {
+            segment
+                .nodes
+                .windows(2)
+                .enumerate()
+                .find_map(|(interval_index, interval)| {
+                    let mut candidate = [interval[0].identity, interval[1].identity];
+                    candidate.sort_unstable();
+                    (candidate == edge).then_some((segment_index, interval_index))
+                })
+        })
+}
+
 /// How a recovered segment edge is split before legalization.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SplitStrategy {
     /// The constrained Bowyer-Watson cavity of the new node, corrected to stay star-shaped
     /// from it; the edge star when the corrected cavity is not star-shaped.
@@ -377,24 +951,9 @@ fn finish_conforming_insertion(
 
 fn recovered_segment_edge_location(
     recovery: &DelaunaySegmentRecovery,
-    mut edge: [StableDigest; 2],
+    edge: [StableDigest; 2],
 ) -> Option<(usize, usize)> {
-    edge.sort_unstable();
-    recovery
-        .segments
-        .iter()
-        .enumerate()
-        .find_map(|(segment_index, segment)| {
-            segment
-                .nodes
-                .windows(2)
-                .enumerate()
-                .find_map(|(interval_index, interval)| {
-                    let mut candidate = [interval[0].identity, interval[1].identity];
-                    candidate.sort_unstable();
-                    (candidate == edge).then_some((segment_index, interval_index))
-                })
-        })
+    segment_edge_location(&recovery.segments, edge)
 }
 
 fn point_location(

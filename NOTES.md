@@ -148,3 +148,45 @@ Harness note: qmf-mesh debug build is too slow for site CAD; use release CLI run
 - Detached on build Mac: chain-p9.sh (build qmf-mesh example, tet lib -> ~/logs/qmf6/p9.out; harness subsets ->
   ~/runs/qmf6/p9/summary.txt, volume dumps ~/runs/qmf6/dumps/p9), then chain-p10.sh (hero replay -> ~/logs/qmf6/p10.out,
   samples prof/p10-*.txt).
+
+## q-mesh-fix-10 (2026-11-04, handed back)
+Commit: see `git log -1` on q-mesh-fix-6 ("Facet recovery: in-place support-edge, segment-split and facet-patch paths ...").
+- p9 (46a1d228f5): tet lib 588/0/7 ign. p9 subset harness used a STALE qmf-mesh binary (example build used
+  `-p runmat-cli`; the package is `runmat`), so p9 has no subset evidence. Fixed in p11.steps (`-p runmat --example qmf-mesh`).
+- p10 hero replay (46a1d228f5): fails at constraint 8566 after 867 s, peak RSS 14.0 GB (~/logs/qmf6/p10-rss.txt).
+  The constrained cavity of the midpoint swallows the whole star of another recovered segment edge.
+- Profile p8-4/p11-3: facet recovery time is dominated by canonical_call snapshots (snapshot_parts, about 80-96% of
+  samples), first from the per-constraint facet-patch cavity, then from conversions.
+- This round (committed, tet lib 588/0/7 ign at ~/logs/qmf6/p11.out):
+  1. FacetRecoveryWorking keeps the canonical form until an edit touches the mutation; topology is private behind
+     topology()/edit(). canonical_call takes providers' topology directly (no second adopt/from_canonical).
+  2. Exact local admission: insertion::observed_change_violation checks every face of every created cell (the
+     validator's insphere/region rules) and the protected faces of removed cells, using the new
+     mutation::EdgeChangeObserver::changed_cells.
+  3. In-place O(change) paths run in cavity trials with rollback, in this order: the facet-patch cavity
+     (try_recover_facet_patch_in_place; the analysis in cavity.rs/sides/star/footprint is now generic over
+     TetrahedralTopology, and PlaneSigns caches lazily in a map instead of a node-count vector); support-edge local
+     flips; the temporary support segment (one pass, link flips, admission); and the conflicting segment-edge split.
+     A declined in-place step falls back to the old canonical provider. Final errors append "in-place path: ...".
+  4. In-place split cascade: if the midpoint's constrained cavity holds a whole recovered-segment-edge star
+     (encroachment), split that edge first (depth <= 8). If the two edges share a vertex (acute corner, here 46
+     degrees), split both atomically at the same distance from the vertex (recovered_segment_point_on: nearest dyadic
+     parameter). The other edge uses its edge star; the conflicting edge uses the constrained cavity.
+  5. local_flip_can_connect_endpoints no longer allocates a node-count vector per call. Removed the stray
+     conforming_split.rs.orig.
+- p11 hero replay (this commit): still fails at 8566 after 985 s, peak RSS 15.5 GB (~/logs/qmf6/p11-rss.txt; debug).
+  The in-place pair split now gets to admission, then fails: the cell [(-1.00725,.28743,.029), (-1.00597,.28508,.026),
+  (-1.00725,.28853,.029), P=(-1.00820,.28721,.026)] has the neighbor apex Q=(-1.00597,.28817,.026) (the shell point on
+  the other edge) strictly inside its circumsphere. Link flips (2-3 only) cannot remove it.
+  Wall time did not improve: the remaining canonical calls (try_recover_facet_with_cavity, refine_support_triangle_interior,
+  and canonical fallbacks after in-place declines) still snapshot, and the first in-place declines re-run on the
+  canonical path. Profile samples are in ~/runs/qmf6/prof/p11-*.txt (the last run is the newest set).
+- Next steps:
+  a. In the pair split, insert Q with the constrained Bowyer-Watson cavity as well (not edge star). Or add 3-2 and 4-4
+     flips to legalize_inserted_node: the current Lawson loop only does 2-3, so non-convex link faces stall.
+  b. Move try_recover_facet_with_cavity and refine_support_triangle_interior onto the working mutation. They are the
+     remaining snapshot sources. The pattern is plan on the generic topology, then replace_cavity in a trial with
+     observed_change_violation.
+  c. Fix 8566, then add a regression test from a sub-a or sub-b dump (RUNMAT_DEBUG_VOLUME_DUMP_DIR with the qmf-mesh
+     harness), run release CLIs on m01 at 8 mm and on lid10, and notify q-hero-pack-2 (a3654a9036a5ac106).
+- Harness: chain-p11.sh, p11.steps, rssmax.sh in ~/runs/qmf6 (hero replay with peak RSS; qmf-mesh example; subsets).

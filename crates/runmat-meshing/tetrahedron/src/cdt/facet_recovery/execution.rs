@@ -27,7 +27,7 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
         // Recovery mutates the tetrahedral topology. Deriving every support up front would leave
         // later facets holding diagonals that an earlier recovery may legitimately remove.
         let initial_support = facet_support_on(
-            &working.topology,
+            working.topology(),
             &working.segments,
             constraints,
             constraint_index as u32,
@@ -36,25 +36,21 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
         let support_is_topological = initial_support.iter().all(|triangle| {
             triangle_edges(triangle.node_identities)
                 .into_iter()
-                .all(|edge| support_edge_exists(&working.topology, edge))
+                .all(|edge| support_edge_exists(working.topology(), edge))
         });
         if !support_is_topological {
             let footprint = constraints.facets[constraint_index]
                 .vertex_indices
                 .map(|index| constraints.nodes[index as usize].identity);
-            if let Some(topology) =
-                working.canonical_call(constraint_index as u32, &mut work, |source, work| {
-                    try_recover_facet_patch_with_cavity(
-                        source,
-                        footprint,
-                        &initial_support,
-                        &protection.triangles,
-                        constraint_index as u32,
-                        work,
-                    )
-                })?
-            {
-                working.topology = crate::cdt::mutation::TopologyMutation::from_canonical(topology);
+            if try_recover_facet_patch_in_place(
+                &mut working,
+                footprint,
+                &initial_support,
+                &protection.triangles,
+                &protected_edges,
+                constraint_index as u32,
+                &mut work,
+            )? {
                 for triangle in &initial_support {
                     protection.insert(*triangle);
                 }
@@ -82,7 +78,7 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
         let mut refinement_rank = 0_u64;
         while let Some(pending_triangle) = pending.pop_front() {
             if !triangle_has_positive_area_on(
-                &working.topology,
+                working.topology(),
                 pending_triangle.triangle.node_identities,
                 constraint_index as u32,
             )? {
@@ -94,20 +90,47 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                 if working.support_edges_exist(pending_triangle.triangle.node_identities) {
                     SupportTriangleEdgeState::Ready
                 } else {
-                    working.canonical_call(constraint_index as u32, &mut work, |source, work| {
-                        ensure_support_triangle_edges(
-                            source,
-                            &pending_triangle,
-                            SupportRefinementContext {
-                                protected_triangles: &protection.triangles,
-                                protected_faces: &protection.ordered_faces(),
-                                protected_edges: &protected_edges,
-                                constraint_index: constraint_index as u32,
-                                refinement_rank,
-                            },
-                            work,
-                        )
-                    })?
+                    let protected_faces = protection.ordered_faces();
+                    let context = || SupportRefinementContext {
+                        protected_triangles: &protection.triangles,
+                        protected_faces: &protected_faces,
+                        protected_edges: &protected_edges,
+                        constraint_index: constraint_index as u32,
+                        refinement_rank,
+                    };
+                    match ensure_support_triangle_edges_in_place(
+                        &mut working,
+                        &pending_triangle,
+                        context(),
+                        &mut work,
+                    )? {
+                        Some(state) => state,
+                        None => {
+                            let in_place = work.last_rejection().map(str::to_owned);
+                            let state = working.canonical_call(
+                                constraint_index as u32,
+                                &mut work,
+                                |source, work| {
+                                    ensure_support_triangle_edges(
+                                        source,
+                                        &pending_triangle,
+                                        context(),
+                                        work,
+                                    )
+                                },
+                            )?;
+                            if let (SupportTriangleEdgeState::Unavailable, Some(in_place)) =
+                                (&state, in_place)
+                            {
+                                let canonical = work
+                                    .last_rejection()
+                                    .unwrap_or("no reason recorded")
+                                    .to_owned();
+                                work.reject(format!("{canonical}; in-place path: {in_place}"));
+                            }
+                            state
+                        }
+                    }
                 };
             match edge_state {
                 SupportTriangleEdgeState::Ready => {}
@@ -175,37 +198,45 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
             }
             let triangle = pending_triangle.triangle;
             if !triangle_has_positive_area_on(
-                &working.topology,
+                working.topology(),
                 triangle.node_identities,
                 constraint_index as u32,
             )? {
                 continue;
             }
             if !face_exists(
-                &working.topology,
+                working.topology(),
                 triangle.node_identities,
                 constraint_index as u32,
                 &mut work,
-            )? && !try_recover_facet_with_local_edge_flip(
-                &mut working.topology,
-                triangle.node_identities,
-                &protected_edges,
-                &protection.faces,
-                constraint_index as u32,
-                &mut work,
-            )? {
-                let updated = if let Some(updated) =
+            )? && !working.edit(|topology| {
+                try_recover_facet_with_local_edge_flip(
+                    topology,
+                    triangle.node_identities,
+                    &protected_edges,
+                    &protection.faces,
+                    constraint_index as u32,
+                    &mut work,
+                )
+                .map(|recovered| (recovered, recovered))
+            })? {
+                // The provider's topology becomes the working topology inside canonical_call.
+                if let Some(insertions) =
                     working.canonical_call(constraint_index as u32, &mut work, |source, work| {
-                        try_recover_facet_with_cavity(
+                        Ok(try_recover_facet_with_cavity(
                             source,
                             triangle.node_identities,
                             &protection.triangles,
                             constraint_index as u32,
                             work,
-                        )
-                    })? {
-                    steiner_insertions.extend_from_slice(&updated.steiner_insertions);
-                    updated.topology
+                        )?
+                        .map(|updated| {
+                            source.topology = updated.topology;
+                            updated.steiner_insertions
+                        }))
+                    })?
+                {
+                    steiner_insertions.extend(insertions);
                 } else {
                     let recovery_rejection = work.last_rejection().map(str::to_owned);
                     match working.canonical_call(
@@ -294,8 +325,8 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                         },
                     );
                     let coordinates = triangle.node_identities.map(|identity| {
-                        node_index(&working.topology, identity).map(|index| {
-                            working.topology.nodes()[index]
+                        node_index(working.topology(), identity).map(|index| {
+                            working.topology().nodes()[index]
                                 .coordinates_m
                                 .canonical_value()
                         })
@@ -308,8 +339,7 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                             triangle.node_identities,
                         ),
                     ));
-                };
-                working.topology = crate::cdt::mutation::TopologyMutation::from_canonical(updated);
+                }
             }
             protection.insert(triangle);
             support.push(triangle);

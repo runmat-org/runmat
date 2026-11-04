@@ -290,6 +290,115 @@ pub(in crate::cdt) fn legalize_inserted_node_and_check_star(
     Ok(true)
 }
 
+/// Lawson flips in the link of each listed node, on the working topology.
+pub(in crate::cdt) fn legalize_inserted_nodes(
+    topology: &mut TopologyMutation,
+    inserted: &[u32],
+    protected_faces: &BTreeSet<[StableDigest; 3]>,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), DelaunayInsertionError> {
+    validate_options(options)?;
+    let mut work = InsertionWork::new(options, cancellation);
+    for node in inserted {
+        legalize_inserted_node(topology, *node, protected_faces, true, &mut work)?;
+    }
+    Ok(())
+}
+
+/// Admits a local edit of a constrained-Delaunay complex with the validator's exact rules,
+/// without a whole-mesh pass. A face that no created cell owns is a face of two unchanged
+/// cells, so it kept its legality; checking every face of every created cell therefore covers
+/// each face the edit can affect. A protected face can only disappear with a removed cell, so
+/// the protected faces of removed cells must still exist. Returns the first violation.
+pub(in crate::cdt) fn observed_change_violation(
+    topology: &TopologyMutation,
+    changes: &crate::cdt::mutation::ObservedCellChanges,
+    protected_faces: &BTreeSet<[StableDigest; 3]>,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Option<String>, DelaunayInsertionError> {
+    use super::topology_access::TetrahedralTopology;
+    validate_options(options)?;
+    let mut work = InsertionWork::new(options, cancellation);
+    for corners in &changes.removed {
+        for opposite in 0..4 {
+            work.checkpoint()?;
+            if !protected_faces.contains(&stable_face(topology, *corners, opposite)) {
+                continue;
+            }
+            let mut face = [0_u32; 3];
+            for (cursor, slot) in (0..4).filter(|slot| *slot != opposite).enumerate() {
+                face[cursor] = corners[slot];
+            }
+            if topology.face_incidence(face).is_empty() {
+                return Ok(Some(format!(
+                    "the edit removed protected face {:?}",
+                    face.map(|node| topology.nodes[node as usize].coordinates_m.canonical_value())
+                )));
+            }
+        }
+    }
+    for left_index in &changes.created {
+        let left = topology
+            .tetrahedron(*left_index)
+            .expect("created cells are active");
+        for (opposite, neighbor) in left.neighbors.iter().enumerate() {
+            let Some(right_index) = *neighbor else {
+                continue;
+            };
+            work.checkpoint()?;
+            let right = topology.tetrahedron(right_index).ok_or_else(|| {
+                error(
+                    DelaunayInsertionErrorKind::InvalidTopology,
+                    "local admission neighbor is inactive",
+                )
+            })?;
+            let face = stable_face(topology, left.vertex_indices, opposite);
+            if protected_faces.contains(&face) {
+                continue;
+            }
+            if left.region_id != right.region_id {
+                return Ok(Some(
+                    "assigned region boundary is missing protected facet provenance".to_owned(),
+                ));
+            }
+            let Some(apex) = right
+                .vertex_indices
+                .iter()
+                .copied()
+                .find(|vertex| !left.vertex_indices.contains(vertex))
+            else {
+                return Ok(Some(
+                    "neighbors do not share exactly one triangular face".to_owned(),
+                ));
+            };
+            work.predicate()?;
+            let points = left
+                .vertex_indices
+                .map(|vertex| topology.nodes[vertex as usize]);
+            if topology
+                .insphere_nodes([
+                    points[0],
+                    points[1],
+                    points[2],
+                    points[3],
+                    topology.nodes[apex as usize],
+                ])
+                .map_err(super::predicate_error)?
+                == PredicateSign::Positive
+            {
+                return Ok(Some(format!(
+                    "tetrahedron {:?} has neighbor apex {:?} strictly inside its circumsphere",
+                    points.map(|node| node.coordinates_m.canonical_value()),
+                    topology.nodes[apex as usize].coordinates_m.canonical_value(),
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
 fn legalize_inserted_node(
     topology: &mut TopologyMutation,
     inserted: u32,

@@ -6,7 +6,8 @@ use runmat_meshing_core::{
 };
 
 use super::conforming_split::{
-    try_insert_on_protected_facets, try_split_recovered_segment_edge, ProtectedFacetSplit,
+    split_recovered_segment_edge_in_place, try_insert_on_protected_facets,
+    try_split_recovered_segment_edge, ProtectedFacetSplit,
 };
 use super::{
     cavity::{
@@ -18,8 +19,9 @@ use super::{
     DelaunaySegmentRecovery, FacetRecoveryWork,
 };
 use crate::cdt::segment_recovery::{
-    recover_temporary_delaunay_segment, try_recover_delaunay_edges_with_local_flips,
-    TemporarySegmentRequest,
+    recover_delaunay_edges_with_local_flips_in_place, recover_temporary_delaunay_segment,
+    recover_temporary_delaunay_segment_in_place, try_recover_delaunay_edges_with_local_flips,
+    InPlaceTemporarySegment, TemporarySegmentRequest,
 };
 
 pub(super) struct PendingSupportTriangle {
@@ -56,6 +58,179 @@ pub(super) struct SupportRefinementContext<'a> {
     pub(super) protected_edges: &'a [[StableDigest; 2]],
     pub(super) constraint_index: u32,
     pub(super) refinement_rank: u64,
+}
+
+/// Recovers a support triangle's missing edges on the working topology. Local flips, the
+/// temporary support segment and a conflicting segment edge's split each run in a cavity trial
+/// with an exact admission of the changed cells. Returns `None`, with every declined edit rolled
+/// back, when a step needs the complete repair; the caller then runs
+/// [`ensure_support_triangle_edges`] on the canonical topology.
+pub(super) fn ensure_support_triangle_edges_in_place(
+    working: &mut super::working::FacetRecoveryWorking,
+    pending: &PendingSupportTriangle,
+    context: SupportRefinementContext<'_>,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<Option<SupportTriangleEdgeState>, DelaunayFacetRecoveryError> {
+    let SupportRefinementContext {
+        protected_triangles,
+        protected_faces,
+        protected_edges,
+        constraint_index,
+        refinement_rank,
+    } = context;
+    let triangle = pending.triangle.node_identities;
+    let missing_edges = triangle_edges(triangle)
+        .into_iter()
+        .filter(|endpoints| !support_edge_exists(working.topology(), *endpoints))
+        .collect::<Vec<_>>();
+    if missing_edges.is_empty() {
+        return Ok(Some(SupportTriangleEdgeState::Ready));
+    }
+    let segment_options = work.options.segment_recovery;
+    let cancellation = work.cancellation;
+    working.edit(|topology| {
+        recover_delaunay_edges_with_local_flips_in_place(
+            topology,
+            &missing_edges,
+            protected_edges,
+            protected_faces,
+            constraint_index,
+            segment_options,
+            cancellation,
+        )
+        .map(|changed| ((), changed))
+        .map_err(segment_error)
+    })?;
+    let Some(missing_edge_slot) = triangle_edges(triangle)
+        .into_iter()
+        .position(|edge| !support_edge_exists(working.topology(), edge))
+    else {
+        return Ok(Some(SupportTriangleEdgeState::Ready));
+    };
+    let edge = triangle_edges(triangle)[missing_edge_slot];
+    let insertion_round = 0;
+    let mut lineage = Vec::new();
+    let mut segment_options = work.options.segment_recovery;
+    segment_options.maximum_steiner_nodes = segment_options
+        .maximum_steiner_nodes
+        .min(work.options.maximum_cavity_steiner_nodes);
+    segment_options.maximum_split_depth = segment_options.maximum_split_depth.min(16);
+    let outcome = working.edit(|topology| {
+        recover_temporary_delaunay_segment_in_place(
+            topology,
+            TemporarySegmentRequest {
+                endpoints: edge,
+                protected_edges,
+                protected_faces,
+                constraint_index,
+                options: segment_options,
+                cancellation,
+            },
+            |numerator, exponent, _coordinates_m| {
+                let candidate_rank =
+                    temporary_segment_candidate_rank(refinement_rank, numerator, exponent);
+                let identity = super::facet_steiner_identity(
+                    pending.lineage_support,
+                    insertion_round,
+                    candidate_rank,
+                );
+                lineage.push((identity, candidate_rank));
+                identity
+            },
+        )
+        .map(|outcome| {
+            let changed = matches!(outcome, InPlaceTemporarySegment::Recovered { .. });
+            (outcome, changed)
+        })
+        .map_err(segment_error)
+    })?;
+    match outcome {
+        InPlaceTemporarySegment::Declined(reason) => {
+            work.reject(format!("in-place temporary support segment declined: {reason}"));
+            Ok(None)
+        }
+        InPlaceTemporarySegment::Conflicts(conflicts) => {
+            let Some(splits) = split_recovered_segment_edge_in_place(
+                working,
+                conflicts[0],
+                protected_triangles,
+                protected_edges,
+                constraint_index,
+                work,
+            )?
+            else {
+                let reason = work
+                    .last_rejection()
+                    .unwrap_or("no reason recorded")
+                    .to_owned();
+                work.reject(format!(
+                    "in-place split of conflicting recovered segment edge declined: {reason}"
+                ));
+                return Ok(None);
+            };
+            work.cavity_steiner_node(constraint_index)?;
+            Ok(Some(SupportTriangleEdgeState::RefinedSegment {
+                protected_splits: splits,
+            }))
+        }
+        InPlaceTemporarySegment::Recovered {
+            chain,
+            inserted_nodes,
+        } => {
+            for _ in &inserted_nodes {
+                work.cavity_steiner_node(constraint_index)?;
+            }
+            let insertions = temporary_insertions(
+                &inserted_nodes,
+                &lineage,
+                pending,
+                constraint_index,
+                insertion_round,
+            )?;
+            Ok(Some(SupportTriangleEdgeState::Split {
+                triangles: fan_support_triangle(
+                    working.topology(),
+                    pending,
+                    missing_edge_slot,
+                    &chain,
+                    constraint_index,
+                )?,
+                insertions,
+                protected_splits: Vec::new(),
+            }))
+        }
+    }
+}
+
+fn temporary_insertions(
+    inserted_nodes: &[crate::cdt::DelaunayVolumeNode],
+    lineage: &[(StableDigest, u64)],
+    pending: &PendingSupportTriangle,
+    constraint_index: u32,
+    insertion_round: u64,
+) -> Result<Vec<DelaunayFacetSteinerInsertion>, DelaunayFacetRecoveryError> {
+    inserted_nodes
+        .iter()
+        .map(|node| {
+            let candidate_rank = lineage
+                .iter()
+                .find_map(|(identity, rank)| (*identity == node.identity).then_some(*rank))
+                .ok_or_else(|| {
+                    error(
+                        DelaunayFacetRecoveryErrorKind::InvalidTopology,
+                        Some(constraint_index),
+                        "temporary support node is missing facet lineage",
+                    )
+                })?;
+            Ok(steiner_lineage(
+                pending.lineage_support,
+                constraint_index,
+                insertion_round,
+                candidate_rank,
+                node.identity,
+            ))
+        })
+        .collect()
 }
 
 pub(super) fn ensure_support_triangle_edges(
@@ -175,32 +350,16 @@ pub(super) fn ensure_support_triangle_edges(
         work.cavity_steiner_node(constraint_index)?;
     }
     recovery.topology = temporary.topology;
-    let insertions = temporary
-        .inserted_nodes
-        .iter()
-        .map(|node| {
-            let candidate_rank = lineage
-                .iter()
-                .find_map(|(identity, rank)| (*identity == node.identity).then_some(*rank))
-                .ok_or_else(|| {
-                    error(
-                        DelaunayFacetRecoveryErrorKind::InvalidTopology,
-                        Some(constraint_index),
-                        "temporary support node is missing facet lineage",
-                    )
-                })?;
-            Ok(steiner_lineage(
-                pending.lineage_support,
-                constraint_index,
-                insertion_round,
-                candidate_rank,
-                node.identity,
-            ))
-        })
-        .collect::<Result<Vec<_>, DelaunayFacetRecoveryError>>()?;
+    let insertions = temporary_insertions(
+        &temporary.inserted_nodes,
+        &lineage,
+        pending,
+        constraint_index,
+        insertion_round,
+    )?;
     Ok(SupportTriangleEdgeState::Split {
         triangles: fan_support_triangle(
-            recovery,
+            &recovery.topology,
             pending,
             missing_edge_slot,
             &temporary.chain,
@@ -465,7 +624,7 @@ fn try_insert_support_node(
 }
 
 fn fan_support_triangle(
-    recovery: &DelaunaySegmentRecovery,
+    topology: &impl crate::cdt::insertion::topology_access::TetrahedralTopology,
     pending: &PendingSupportTriangle,
     edge_slot: usize,
     chain: &[crate::cdt::DelaunayRecoveredSegmentNode],
@@ -477,7 +636,7 @@ fn fan_support_triangle(
         .windows(2)
         .map(|pair| [pair[0].identity, pair[1].identity, opposite])
         .filter_map(|node_identities| {
-            match triangle_has_positive_area(recovery, node_identities, constraint_index) {
+            match triangle_has_positive_area_on(topology, node_identities, constraint_index) {
                 Ok(true) => Some(Ok(PendingSupportTriangle {
                     triangle: DelaunayRecoveredFacetTriangle { node_identities },
                     lineage_support: pending.lineage_support,
@@ -487,14 +646,6 @@ fn fan_support_triangle(
             }
         })
         .collect()
-}
-
-pub(super) fn triangle_has_positive_area(
-    recovery: &DelaunaySegmentRecovery,
-    triangle: [StableDigest; 3],
-    constraint_index: u32,
-) -> Result<bool, DelaunayFacetRecoveryError> {
-    triangle_has_positive_area_on(&recovery.topology, triangle, constraint_index)
 }
 
 pub(super) fn triangle_has_positive_area_on(

@@ -42,7 +42,7 @@ pub(in crate::cdt) use mutable::{
     apply_prepared_delaunay_volume_node_insertion, insert_delaunay_volume_node_into_mutation,
     insert_delaunay_volume_node_into_mutation_with_barriers,
     insert_delaunay_volume_node_into_mutation_with_prepared_barriers_from_hint,
-    legalize_inserted_node_and_check_star,
+    legalize_inserted_node_and_check_star, legalize_inserted_nodes, observed_change_violation,
 };
 use topology_access::TetrahedralTopology;
 #[cfg(test)]

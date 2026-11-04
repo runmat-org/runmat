@@ -24,11 +24,11 @@ use execution::support_edge_exists;
 use protection::FacetProtection;
 use working::FacetRecoveryWorking;
 
-use cavity::{try_recover_facet_patch_with_cavity, try_recover_facet_with_cavity};
+use cavity::{try_recover_facet_patch_in_place, try_recover_facet_with_cavity};
 use flip::try_recover_facet_with_local_edge_flip;
 use support::facet_support_on;
 use support_refinement::{
-    ensure_support_triangle_edges, recovered_segment_edges, refine_support_triangle_interior,
+    ensure_support_triangle_edges, ensure_support_triangle_edges_in_place, recovered_segment_edges, refine_support_triangle_interior,
     triangle_has_positive_area_on, PendingSupportTriangle, SupportRefinementContext,
     SupportTriangleEdgeState,
 };

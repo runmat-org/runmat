@@ -142,7 +142,7 @@ impl DyadicNode {
         Ok(Some(canonical(accepted)))
     }
 
-    fn search_near_parameter(
+    pub(super) fn search_near_parameter(
         self,
         right: Self,
         parameter: f64,
