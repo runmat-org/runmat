@@ -1417,11 +1417,15 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 other => other,
             };
         }
-        let revision = match &o.source.context {
+        let source = match here.get("replace").map(|p| &p.kind) {
+            Some(OverrideKind::Replace { source }) => source,
+            _ => &o.source,
+        };
+        let revision = match &source.context {
             XrefContext::Pinned { revision } => Some(revision.clone()),
             XrefContext::Live => None,
         };
-        let def = o.source.definition.clone();
+        let def = source.definition.clone();
         let site = Site::with_param(
             Subject::Occurrence {
                 path: child_path.clone(),

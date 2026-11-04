@@ -1,0 +1,14 @@
+runmat 0.7
+std 1
+
+part duct {
+    sketch c on origin.zx {
+        floor = line(start = [0 mm, 0 mm], end = [30 mm, 0 mm])
+        wall = line(start = [30 mm, 0 mm], end = [30 mm, 20 mm])
+    }
+    sketch p on origin.xy {
+        run = line(start = [0 mm, 0 mm], end = [0 mm, 25 mm])
+        turn = line(start = [0 mm, 25 mm], end = [20 mm, 45 mm])
+    }
+    feature skin = surface.sweep(profile = sketch.c, path = sketch.p)
+}

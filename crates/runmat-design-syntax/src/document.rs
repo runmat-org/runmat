@@ -138,6 +138,13 @@ pub trait EntryForms {
         None
     }
 
+    /// Whether entries of `word` read from a record value (`<word> <name> = { … }`, and for
+    /// a tagged collection `<word> <name> = <tag> { … }`). A front end whose final form for
+    /// these entries is another one (the call form, a `use` statement) returns `false`.
+    fn record_forms(&self, _word: &str, _tagged: bool) -> bool {
+        true
+    }
+
     /// A block statement of the front end's own (`sketch s1 on origin.xy { … }`).
     fn lower_block(
         &self,
@@ -864,6 +871,27 @@ impl Parse<'_> {
         if let (Some(tagged), Expr::Call(call)) = (collection.tagged, value) {
             return self.tagged_call(collection, tagged, call, site, json_path);
         }
+        let record = matches!(value, Expr::Record(_) | Expr::PrefixApplication(_));
+        if record
+            && !self.hook.entry_forms().is_none_or(|forms| {
+                forms.record_forms(collection.word, collection.tagged.is_some())
+            })
+        {
+            return Err(diagnostic(
+                value.span(),
+                if collection.tagged.is_some() {
+                    format!(
+                        "write `{}` entries in the call form: `{} <name> = <kind>(<field> = <value>, …)`",
+                        collection.word, collection.word
+                    )
+                } else {
+                    format!(
+                        "`{}` entries are not written as records here",
+                        collection.word
+                    )
+                },
+            ));
+        }
         if let (Some(tagged), Expr::PrefixApplication(application)) = (collection.tagged, value) {
             let tag = match application.callee() {
                 Some(Expr::Reference(reference)) if reference.segments().len() == 1 => {
@@ -1586,6 +1614,9 @@ fn print_entry(
             return Ok(text);
         }
     }
+    if let Some(text) = print_check_block(collection, &head, type_text.is_some(), &rest, hook) {
+        return Ok(text);
+    }
     if let Some(type_text) = type_text {
         head.push_str(&format!(" : {type_text}"));
     }
@@ -1611,6 +1642,32 @@ fn print_entry(
         "{head} = {}",
         crate::json::print_record(&rest, hook, 0)
     ))
+}
+
+/// `check <name> { <field> = <value> … }`: a named `check` entry of plain fields in its block
+/// form, one field per line; `None` for entries the block form cannot write.
+fn print_check_block(
+    collection: &Collection,
+    head: &str,
+    typed: bool,
+    rest: &[(String, Json)],
+    hook: &dyn ValueSyntax,
+) -> Option<String> {
+    let plain = collection.word == "check"
+        && collection.id.is_some()
+        && collection.tagged.is_none()
+        && collection.value_field.is_none()
+        && !typed;
+    if !plain || rest.is_empty() || !rest.iter().all(|(key, _)| is_identifier(key)) {
+        return None;
+    }
+    let mut out = format!("{head} {{\n");
+    for (key, value) in rest {
+        let text = crate::json::print_field(key, value, hook, None, 1);
+        out.push_str(&format!("{INDENT}{key} = {text}\n"));
+    }
+    out.push('}');
+    Some(out)
 }
 
 /// A tagged entry in the call form (`feature body = extrude(…)`), or in the record form

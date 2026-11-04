@@ -616,6 +616,35 @@ fn lower_plane(expr: &Expr, hook: &dyn ValueSyntax) -> Result<PlaneRef, LowerErr
         .map_err(|(_, message)| error(expr.span(), format!("expected a plane: {message}")))
 }
 
+/// A constraint's key among the sketch's written lines, for structured edits: its id, or
+/// what it constrains (its dimension values left out, so a value edit keeps the key). A
+/// repeated key takes its ordinal.
+fn constraint_key(constraint: &SketchConstraint, written: &[(String, Json, Span)]) -> String {
+    fn strip(value: &mut serde_json::Value) {
+        if let serde_json::Value::Object(map) = value {
+            for key in ["value", "min", "max"] {
+                map.remove(key);
+            }
+            map.values_mut().for_each(strip);
+        }
+    }
+    let base = match &constraint.id {
+        Some(id) => format!("constrain.{}", id.0),
+        None => {
+            let mut value = serde_json::to_value(&constraint.kind).unwrap_or_default();
+            strip(&mut value);
+            format!("constrain {value}")
+        }
+    };
+    let mut key = base.clone();
+    let mut ordinal = 1;
+    while written.iter().any(|(k, _, _)| *k == key) {
+        ordinal += 1;
+        key = format!("{base}~{ordinal}");
+    }
+    key
+}
+
 /// Reads `sketch <name> on <plane> { … }` as a feature.
 pub fn lower(
     block: &ast::BlockStatement,
@@ -689,11 +718,8 @@ pub fn lower(
                 let (kind, id) = lower_kind(&expr, constrain.equals().as_ref())?;
                 let constraint = SketchConstraint { id, kind };
                 spans.push((format!("kind.constraints[{}]", constraints.len()), at));
-                written.push((
-                    format!("constrain[{}]", constraints.len()),
-                    encode(&constraint, at)?,
-                    at,
-                ));
+                let key = constraint_key(&constraint, &written);
+                written.push((key, encode(&constraint, at)?, at));
                 widen(&mut constraint_span, at);
                 constraints.push(constraint);
             }

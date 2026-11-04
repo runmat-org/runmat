@@ -189,6 +189,9 @@ pub fn diff_source<T: Serialize + DeserializeOwned + PartialEq>(
     let old_sites = by_site(old_syntax);
     let mut matched: BTreeSet<&str> = BTreeSet::new();
     let mut edits: Vec<TextEdit> = Vec::new();
+    // Line-by-line edits inside block entries (a sketch's entities), and the whole-value
+    // edits tried when those do not read back.
+    let (mut fine, mut coarse): (Vec<TextEdit>, Vec<TextEdit>) = (Vec::new(), Vec::new());
     let new_indent = indentation_at(
         &printed,
         new_syntax.entries.first().map_or(0, |e| e.span.start),
@@ -270,7 +273,14 @@ pub fn diff_source<T: Serialize + DeserializeOwned + PartialEq>(
             ));
             continue;
         }
-        edits.extend(entry_edits(source, &printed, previous, entry, &new_indent));
+        let plain = entry_edits(source, &printed, previous, entry, &new_indent);
+        match line_edits(source, &tree, &printed, previous, entry, &new_indent) {
+            Some(lines) => {
+                fine.extend(lines);
+                coarse.extend(plain);
+            }
+            None => edits.extend(plain),
+        }
     }
     // Removed entries.
     for entry in &old_syntax.entries {
@@ -318,14 +328,31 @@ pub fn diff_source<T: Serialize + DeserializeOwned + PartialEq>(
     let old_printed = print_with(grammar, old_document, uses).map_err(EditFailure::Print)?;
     edits.extend(header_edits(source, &old_printed, &printed));
 
-    let edited = apply_edits(source, &edits).map_err(EditFailure::Apply)?;
-    let check = grammar_parse::<T>(grammar, path, &edited);
-    if check.document.as_ref() == Some(new) && check.diagnostics.is_empty() {
-        return Ok(SourceChange {
-            edits,
-            source: edited,
-            reprinted: false,
-        });
+    let mut attempts = vec![[edits.clone(), fine].concat()];
+    if !coarse.is_empty() {
+        attempts.push([edits, coarse].concat());
+    }
+    let tries = attempts.len();
+    let mut failures = Vec::new();
+    for edits in attempts {
+        let edited = match apply_edits(source, &edits) {
+            Ok(edited) => edited,
+            Err(error) => {
+                failures.push(error);
+                continue;
+            }
+        };
+        let check = grammar_parse::<T>(grammar, path, &edited);
+        if check.document.as_ref() == Some(new) && check.diagnostics.is_empty() {
+            return Ok(SourceChange {
+                edits,
+                source: edited,
+                reprinted: false,
+            });
+        }
+    }
+    if failures.len() == tries {
+        return Err(EditFailure::Apply(failures.remove(0)));
     }
     Ok(SourceChange {
         edits: vec![TextEdit::replace(
@@ -423,46 +450,203 @@ fn entry_edits(
     edits
 }
 
-/// The `runmat` and `std` lines at the top of a source.
+/// Whether the written value at `span` is a line of its own in `text`: nothing but
+/// indentation before it, and nothing but a `//` comment after it.
+fn is_line(text: &str, span: Span) -> bool {
+    let start = text[..span.start].rfind('\n').map_or(0, |i| i + 1);
+    let end = text[span.end..]
+        .find('\n')
+        .map_or(text.len(), |i| span.end + i);
+    let after = text[span.end..end].trim();
+    text[start..span.start].trim().is_empty() && (after.is_empty() || after.starts_with("//"))
+}
+
+fn inside(span: Span, outer: Option<Span>) -> bool {
+    outer.is_some_and(|outer| outer.start < span.start && span.end < outer.end)
+}
+
+/// The edits for a block entry whose lines were added or removed (a sketch's entities and
+/// constraints): kept lines stay with their comments, changed lines are replaced, removed
+/// lines go with their own comments, and added lines go next to their neighbours. `None`
+/// when the entry is not written as lines of a block, or nothing was added or removed.
+fn line_edits(
+    source: &str,
+    tree: &SyntaxNode,
+    printed: &str,
+    old: &ParsedEntry,
+    new: &ParsedEntry,
+    new_indent: &str,
+) -> Option<Vec<TextEdit>> {
+    let (a, b) = (old.written.as_ref()?, new.written.as_ref()?);
+    if a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0 == y.0) {
+        return None;
+    }
+    let old_keys: BTreeMap<&str, usize> = a
+        .iter()
+        .enumerate()
+        .map(|(i, x)| (x.0.as_str(), i))
+        .collect();
+    let new_keys: BTreeMap<&str, usize> = b
+        .iter()
+        .enumerate()
+        .map(|(i, y)| (y.0.as_str(), i))
+        .collect();
+    if old_keys.len() != a.len() || new_keys.len() != b.len() {
+        return None;
+    }
+    // Pairs in new order; the longest run in old order stays where it is.
+    let pairs: Vec<(usize, usize)> = b
+        .iter()
+        .enumerate()
+        .filter_map(|(j, y)| old_keys.get(y.0.as_str()).map(|i| (*i, j)))
+        .collect();
+    let stable: BTreeSet<usize> =
+        stable_indices(&pairs.iter().map(|(i, _)| *i).collect::<Vec<_>>())
+            .into_iter()
+            .map(|k| pairs[k].1)
+            .collect();
+    let kept_old: BTreeMap<usize, usize> = pairs
+        .iter()
+        .filter(|(_, j)| stable.contains(j))
+        .map(|(i, j)| (*j, *i))
+        .collect();
+    let kept: BTreeSet<usize> = kept_old.values().copied().collect();
+    if kept.is_empty() {
+        return None;
+    }
+    // Every line that moves is a line of the block, in both texts.
+    for (i, x) in a.iter().enumerate() {
+        let line = inside(x.2, old.value_span) && is_line(source, x.2);
+        if !kept.contains(&i) && !line {
+            return None;
+        }
+    }
+    for (j, y) in b.iter().enumerate() {
+        let line = inside(y.2, new.value_span) && is_line(printed, y.2);
+        if !kept_old.contains_key(&j) && !line {
+            return None;
+        }
+    }
+    let indent = indentation_at(source, old.span.start).to_string();
+    let take = |span: Span| reindent(&printed[span.start..span.end], new_indent, &indent);
+    let mut edits = Vec::new();
+    if old.head != new.head {
+        edits.push(TextEdit::replace(old.head_span, take(new.head_span)));
+    }
+    for (j, i) in &kept_old {
+        if a[*i].1.to_value() != b[*j].1.to_value() {
+            edits.push(TextEdit::replace(a[*i].2, take(b[*j].2)));
+        }
+    }
+    for (i, x) in a.iter().enumerate() {
+        if !kept.contains(&i) {
+            let node = statement_node(tree, x.2)?;
+            edits.push(remove_statement(source, &node));
+        }
+    }
+    // Added lines, in runs: each run goes on the lines after the kept line before it, or
+    // before the first kept line.
+    let mut j = 0;
+    while j < b.len() {
+        if kept_old.contains_key(&j) {
+            j += 1;
+            continue;
+        }
+        let run_start = j;
+        while j < b.len() && !kept_old.contains_key(&j) {
+            j += 1;
+        }
+        // Anchors are kept lines of the block (not values in the head, such as the plane).
+        let anchor = |i: &usize| inside(a[*i].2, old.value_span) && is_line(source, a[*i].2);
+        let before = kept_old
+            .range(..run_start)
+            .rev()
+            .map(|(_, i)| *i)
+            .find(&anchor);
+        let (at, neighbour) = match before {
+            Some(i) => {
+                let span = a[i].2;
+                let end = source[span.end..]
+                    .find('\n')
+                    .map_or(source.len(), |k| span.end + k + 1);
+                (end, span)
+            }
+            None => {
+                let i = kept_old.range(j..).map(|(_, i)| *i).find(&anchor)?;
+                let span = a[i].2;
+                let node = statement_node(tree, span)?;
+                (own_lines(source, &node)?.start, span)
+            }
+        };
+        if at == source.len() && !source.ends_with('\n') {
+            return None;
+        }
+        let line_indent = indentation_at(source, neighbour.start).to_string();
+        let mut text = String::new();
+        for y in &b[run_start..j] {
+            text.push_str(&line_indent);
+            text.push_str(&take(y.2));
+            text.push('\n');
+        }
+        edits.push(TextEdit::insert(at, text));
+    }
+    Some(edits)
+}
+
+fn is_header_line(line: &str) -> bool {
+    line.starts_with("runmat ") || line.starts_with("std ")
+}
+
+/// Blank lines and `//` comments, which may come before the version header.
+fn is_leading_trivia(line: &str) -> bool {
+    line.is_empty() || line.starts_with("//")
+}
+
+/// The `runmat` and `std` lines at the top of a source (after any leading comments).
 fn version_lines(text: &str) -> Vec<&str> {
     text.lines()
-        .take_while(|line| {
-            let line = line.trim();
-            line.is_empty() || line.starts_with("runmat ") || line.starts_with("std ")
-        })
         .map(str::trim)
+        .skip_while(|line| is_leading_trivia(line))
+        .take_while(|line| line.is_empty() || is_header_line(line))
         .filter(|line| !line.is_empty())
         .collect()
 }
 
 /// Rewrites the version header when the model's header changed: the whole header block is
 /// replaced (or added at the top, or removed), so the result has exactly the new header lines
-/// followed by one blank line.
+/// followed by one blank line. A header below leading comments is found there and edited in
+/// place; the comments stay above it.
 fn header_edits(source: &str, old_printed: &str, new_printed: &str) -> Vec<TextEdit> {
     let wanted = version_lines(new_printed);
     if version_lines(old_printed) == wanted {
         return Vec::new();
     }
+    // The header block: its first line through the blank lines after its last line.
+    let mut offset = 0;
+    let mut start = None;
     let mut end = 0;
-    let mut has_header = false;
     for line in source.split_inclusive('\n') {
         let trimmed = line.trim();
-        if trimmed.starts_with("runmat ") || trimmed.starts_with("std ") {
-            has_header = true;
-        } else if !trimmed.is_empty() {
-            break;
+        match start {
+            None if is_header_line(trimmed) => {
+                start = Some(offset);
+                end = offset + line.len();
+            }
+            None if is_leading_trivia(trimmed) => {}
+            None => break,
+            Some(_) if is_header_line(trimmed) || trimmed.is_empty() => end = offset + line.len(),
+            Some(_) => break,
         }
-        end += line.len();
+        offset += line.len();
     }
     let text = if wanted.is_empty() {
         String::new()
     } else {
         format!("{}\n\n", wanted.join("\n"))
     };
-    if has_header {
-        vec![TextEdit::replace(Span { start: 0, end }, text)]
-    } else {
-        vec![TextEdit::insert(0, text)]
+    match start {
+        Some(start) => vec![TextEdit::replace(Span { start, end }, text)],
+        None => vec![TextEdit::insert(0, text)],
     }
 }
 

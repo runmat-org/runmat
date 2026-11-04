@@ -14,12 +14,13 @@
 //! Every kind has the call form `<kind>(<field> = <value>, …)`; a kind with a second tag is
 //! written `<kind>.<variant>(…)`. The kinds below also take shorter arguments that stand for a
 //! nested value (`distance = 10 mm` for `extent = blind(distance = 10 mm)`); each is a
-//! one-to-one rewrite, so the long form reads too. The record form `extrude { … }` still reads.
+//! one-to-one rewrite, so the long form reads too.
 
 use super::{occurrence, sketch};
 use runmat_design_syntax::ast;
 use runmat_design_syntax::document::{BlockEntry, EntryForms};
 use runmat_design_syntax::json::{Json, LowerError, ValueSyntax};
+use std::collections::BTreeSet;
 
 /// Fields that hold internally tagged values whose tag key is the field's name, anywhere in
 /// the CAD models: `mode = cut`, `extent = blind(distance = 10 mm)`.
@@ -384,6 +385,11 @@ impl EntryForms for CadForms {
         Some(out)
     }
 
+    fn record_forms(&self, word: &str, tagged: bool) -> bool {
+        // The call form and the `use` statement are the final forms.
+        !tagged && word != "occurrence"
+    }
+
     fn lower_block(
         &self,
         block: &ast::BlockStatement,
@@ -417,9 +423,42 @@ impl EntryForms for CadForms {
                 (tag == "sketch").then(|| sketch::print(name, fields, hook))?
             }
             "occurrence" => occurrence::print(name, fields, hook),
+            "pattern" => print_occurrence_pattern(name, fields, hook),
             _ => None,
         }
     }
+}
+
+/// `pattern <name> = <layout>(seeds = [ … ], <layout fields>, skip = [ … ], when = …)`: an
+/// occurrence pattern in its call form, the seeds first.
+fn print_occurrence_pattern(
+    name: &str,
+    fields: &[(String, Json)],
+    hook: &dyn ValueSyntax,
+) -> Option<String> {
+    use runmat_design_syntax::json::{is_bare_word, is_identifier, print_arguments};
+    let (tag, layout) = tagged(get(fields, "layout")?, "layout")?;
+    if !is_identifier(tag) || !is_bare_word(name) {
+        return None;
+    }
+    let mut arguments: Fields = Vec::new();
+    arguments.extend(get(fields, "seeds").map(|v| ("seeds".to_string(), v.clone())));
+    arguments.extend(layout.iter().cloned());
+    for (key, value) in fields {
+        match key.as_str() {
+            "layout" | "seeds" => {}
+            "skip" | "when" => arguments.push((key.clone(), value.clone())),
+            _ => return None,
+        }
+    }
+    let keys: BTreeSet<&str> = arguments.iter().map(|(k, _)| k.as_str()).collect();
+    if keys.len() != arguments.len() || !arguments.iter().all(|(k, _)| is_identifier(k)) {
+        return None;
+    }
+    Some(format!(
+        "pattern {name} = {tag}{}",
+        print_arguments(&arguments, hook, Some(tag), 0)
+    ))
 }
 
 /// The surface forms' own words, for the highlighter (`scripts/docs/fea-grammar.mjs` reads

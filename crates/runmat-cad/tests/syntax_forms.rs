@@ -1,6 +1,7 @@
-//! The canonical surface forms: every feature kind, sketch entity and constraint, and
-//! assembly occurrence round-trips through text, and files in the old generic forms still
-//! read and format to the canonical forms.
+//! The final surface forms: every feature kind, sketch entity and constraint, and assembly
+//! occurrence round-trips through text, the document corpus reads as its models and prints
+//! back unchanged, and record forms of entries that have a call form or a `use` form are
+//! refused.
 
 mod common;
 use common::*;
@@ -34,8 +35,13 @@ fn round_trip(document: &PartDocument) -> String {
 /// Features harvested from the crate's test models: one or more of every kind and every
 /// variant of the values inside them.
 fn corpus_features() -> Vec<Feature> {
-    let text = std::fs::read_to_string(corpus().join("features.json")).unwrap();
-    let mut features: Vec<Feature> = serde_json::from_str(&text).unwrap();
+    let text = std::fs::read_to_string(corpus().join("features.part")).unwrap();
+    let parsed = parse_part("features.part", &text);
+    assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+    let document = parsed.document.unwrap();
+    // The corpus file is in the printed form.
+    assert_eq!(print_part(&document, &[]).unwrap(), text);
+    let mut features = document.features;
     // Kinds the harvest did not reach.
     features.push(Feature::new(
         "p_at",
@@ -306,11 +312,11 @@ fn occurrences_are_use_statements_with_overrides() {
     assert!(back.spans.spans.contains_key("occurrence.left"));
 }
 
-/// Old-form files (the generic record forms, as printed before the surface forms) read as
-/// the same model and format to the canonical forms.
+/// The document corpus: parts, assemblies and a drawing in the final forms. Each reads as
+/// its model (`<file>.json`) and prints back to the same text.
 #[test]
-fn old_form_files_read_and_format_to_the_canonical_forms() {
-    let dir = corpus().join("old-form");
+fn the_document_corpus_reads_as_its_models_and_prints_back() {
+    let dir = corpus().join("documents");
     let mut count = 0;
     let mut entries: Vec<_> = std::fs::read_dir(&dir)
         .unwrap()
@@ -328,43 +334,69 @@ fn old_form_files_read_and_format_to_the_canonical_forms() {
         )
         .unwrap();
         let file = model["path"].as_str().unwrap().to_string();
-        let formatted = syntax::format(&file, &source).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert_eq!(
-            syntax::format(&file, &formatted).unwrap(),
-            formatted,
-            "{name}"
-        );
-        let check = |text: &str| -> serde_json::Value {
-            if name.ends_with(".part") {
-                let p = parse_part(&file, text);
-                assert!(p.is_valid(), "{name}: {:#?}", p.diagnostics);
-                serde_json::to_value(p.document.unwrap()).unwrap()
-            } else if name.ends_with(".assembly") {
-                let p = parse_assembly(&file, text);
-                assert!(p.is_valid(), "{name}: {:#?}", p.diagnostics);
-                serde_json::to_value(p.document.unwrap()).unwrap()
-            } else {
-                let p = parse_drawing(&file, text);
-                assert!(p.is_valid(), "{name}: {:#?}", p.diagnostics);
-                serde_json::to_value::<DrawingDocument>(p.document.unwrap()).unwrap()
-            }
+        let (read, printed) = if name.ends_with(".part") {
+            let p = parse_part(&file, &source);
+            assert!(p.is_valid(), "{name}: {:#?}", p.diagnostics);
+            let d = p.document.unwrap();
+            (
+                serde_json::to_value(&d).unwrap(),
+                print_part(&d, &p.uses).unwrap(),
+            )
+        } else if name.ends_with(".assembly") {
+            let p = parse_assembly(&file, &source);
+            assert!(p.is_valid(), "{name}: {:#?}", p.diagnostics);
+            let d = p.document.unwrap();
+            (
+                serde_json::to_value(&d).unwrap(),
+                syntax::print_assembly(&d, &p.uses).unwrap(),
+            )
+        } else {
+            let p = parse_drawing(&file, &source);
+            assert!(p.is_valid(), "{name}: {:#?}", p.diagnostics);
+            let d: DrawingDocument = p.document.unwrap();
+            (
+                serde_json::to_value(&d).unwrap(),
+                syntax::print_drawing(&d, &p.uses).unwrap(),
+            )
         };
-        assert_eq!(
-            check(&source),
-            model,
-            "{name}: the old form reads as the model"
-        );
-        assert_eq!(
-            check(&formatted),
-            model,
-            "{name}: the formatted file reads as the model"
-        );
-        if source.contains("= extrude {") {
-            assert!(formatted.contains("= extrude("), "{name}\n{formatted}");
-        }
+        assert_eq!(read, model, "{name}: the file reads as its model");
+        assert_eq!(printed, source, "{name}: the file is in the printed form");
         count += 1;
     }
     assert!(count >= 35, "{count}");
+}
+
+#[test]
+fn record_forms_of_call_form_entries_are_refused() {
+    for (path, text) in [
+        (
+            "p.part",
+            "part p {\n    feature body = extrude { profile = sketch.s1, extent = { extent = blind, distance = 10 mm } }\n}\n",
+        ),
+        (
+            "p.part",
+            "part p {\n    feature body = { kind = { feature = extrude } }\n}\n",
+        ),
+        (
+            "rig.assembly",
+            "assembly rig {\n    occurrence left = { source = { definition = { kind = part, file = \"b.part\" } } }\n}\n",
+        ),
+        (
+            "rig.assembly",
+            "assembly rig {\n    use part clip from \"c.part\" as clip\n    pattern clips = { seeds = [clip], layout = { layout = linear, direction = [1, 0, 0], spacing = 10 mm, count = 2 } }\n}\n",
+        ),
+        (
+            "rig.assembly",
+            "assembly rig {\n    use part b from \"b.part\" as left {\n        overrides = []\n    }\n}\n",
+        ),
+    ] {
+        let diagnostics = if path.ends_with(".part") {
+            parse_part(path, text).diagnostics
+        } else {
+            parse_assembly(path, text).diagnostics
+        };
+        assert!(!diagnostics.is_empty(), "{text}");
+    }
 }
 
 const PLATE: &str = r#"runmat 0.7
@@ -514,4 +546,259 @@ fn the_version_header_is_rewritten_whole() {
         change.source
     );
     edited(&change);
+}
+
+#[test]
+fn occurrence_patterns_read_and_print_in_their_call_form() {
+    let text = r#"assembly rig {
+    use part clip from "parts/clip.part" as clip
+    pattern clips = linear(seeds = [clip], direction = [0, 1, 0], spacing = 750 mm, count = 4)
+    pattern ring = circular(seeds = [clip], axis_point = [0 mm, 0 mm, 0 mm], axis = [0, 0, 1], count = 6, angle = 360 deg, skip = [{ instance = circular, step = 2 }])
+    pattern old = linear(count = 2, spacing = 10 mm, direction = [1, 0, 0], seeds = [clip])
+}
+"#;
+    let parsed = parse_assembly("rig.assembly", text);
+    assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+    let d: AssemblyDocument = parsed.document.unwrap();
+    assert_eq!(d.patterns.len(), 3);
+    assert_eq!(d.patterns[1].skip.len(), 1);
+    // The spans of a call argument point at the argument.
+    let span = &parsed.spans.spans["pattern.clips#spacing"];
+    assert_eq!(&text[span.start as usize..span.end as usize], "750 mm");
+    let printed = runmat_cad::syntax::print_assembly(&d, &[]).unwrap();
+    assert!(
+        printed.contains(
+            "    pattern clips = linear(seeds = [clip], direction = [0, 1, 0], spacing = 750 mm, count = 4)\n"
+        ),
+        "{printed}"
+    );
+    assert!(
+        printed.contains(
+            "    pattern old = linear(seeds = [clip], direction = [1, 0, 0], spacing = 10 mm, count = 2)\n"
+        ),
+        "{printed}"
+    );
+    assert!(!printed.contains("layout ="), "{printed}");
+    let back = parse_assembly("rig.assembly", &printed);
+    assert_eq!(back.document.as_ref(), Some(&d), "{printed}");
+}
+
+const OVERRIDES: &str = r#"assembly rig {
+    use assembly wing from "wing.assembly" @ "R3" as port {
+        fixed = false
+        // The heavy clip on the third rib.
+        override "rib@ribs[3]/clip" {
+            configuration = { select = named, name = heavy }
+            input.thickness = 2 mm
+        }
+        override spar {
+            replace = part("parts/spar_b.part", part = spar, revision = "B")
+        }
+        override "rib@ribs[7]" {
+            suppressed = true
+        }
+        override "box@grid[1,2]/lid" {
+            representation = envelope
+            flexible = true
+        }
+    }
+}
+"#;
+
+#[test]
+fn occurrence_overrides_read_and_print_as_override_blocks() {
+    use runmat_cad::assembly::{OverrideKind, RelPath};
+    let parsed = parse_assembly("rig.assembly", OVERRIDES);
+    assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+    let d: AssemblyDocument = parsed.document.unwrap();
+    let o = &d.occurrences[0];
+    assert!(!o.fixed);
+    assert_eq!(o.overrides.len(), 6);
+    assert_eq!(o.overrides[0].target.to_string(), "rib@ribs[3]/clip");
+    assert!(matches!(
+        &o.overrides[0].set,
+        OverrideKind::Configuration { .. }
+    ));
+    let OverrideKind::Input { name, .. } = &o.overrides[1].set else {
+        panic!("{:?}", o.overrides[1])
+    };
+    assert_eq!(name.0, "thickness");
+    let OverrideKind::Replace { source } = &o.overrides[2].set else {
+        panic!("{:?}", o.overrides[2])
+    };
+    assert_eq!(source.definition.file.0, "parts/spar_b.part");
+    assert_eq!(o.overrides[2].target, RelPath::new(&["spar"]));
+    assert!(matches!(
+        o.overrides[3].set,
+        OverrideKind::Suppress { suppressed: true }
+    ));
+    assert_eq!(o.overrides[4].target.to_string(), "box@grid[1,2]/lid");
+    let printed = runmat_cad::syntax::print_assembly(&d, &[]).unwrap();
+    for line in [
+        "        override \"rib@ribs[3]/clip\" {\n",
+        "            input.thickness = 2 mm\n",
+        "        override spar {\n            replace = part(\"parts/spar_b.part\", part = spar, revision = \"B\")\n        }\n",
+        "        override \"rib@ribs[7]\" {\n            suppressed = true\n        }\n",
+    ] {
+        assert!(printed.contains(line), "{line}\n---\n{printed}");
+    }
+    assert!(!printed.contains("overrides ="), "{printed}");
+    let back = parse_assembly("rig.assembly", &printed);
+    assert_eq!(back.document.as_ref(), Some(&d), "{printed}");
+    for bad in [
+        "override \"rib@ribs[x]\" {\n            suppressed = true\n        }",
+        "override spar {\n            colour = red\n        }",
+        "override spar {\n        }",
+        "override spar {\n            replace = part(spar)\n        }",
+    ] {
+        let text = OVERRIDES.replace(
+            "override \"rib@ribs[7]\" {\n            suppressed = true\n        }",
+            bad,
+        );
+        assert!(
+            !parse_assembly("rig.assembly", &text).diagnostics.is_empty(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn an_override_edit_keeps_the_comments_of_the_occurrence() {
+    use runmat_cad::assembly::OverrideKind;
+    let parsed = parse_assembly("rig.assembly", OVERRIDES);
+    let mut d: AssemblyDocument = parsed.document.clone().unwrap();
+    d.occurrences[0].overrides[3].set = OverrideKind::Suppress { suppressed: false };
+    let change = syntax::edit::diff_source(
+        &syntax::ASSEMBLY,
+        "rig.assembly",
+        OVERRIDES,
+        &d,
+        &parsed.uses,
+        &[],
+    )
+    .unwrap();
+    assert!(!change.reprinted, "{}", change.source);
+    assert_eq!(
+        change.source,
+        OVERRIDES.replace(
+            "override \"rib@ribs[7]\" {\n            suppressed = true",
+            "override \"rib@ribs[7]\" {\n            suppressed = false"
+        )
+    );
+}
+
+#[test]
+fn adding_or_removing_a_sketch_line_changes_only_that_line() {
+    use syntax::edit;
+    let circle = SketchEntity {
+        id: "c1".into(),
+        geometry: SketchGeometry::Circle {
+            center: PointExpr::mm(10.0, 10.0),
+            radius: mm(2.0),
+        },
+        construction: false,
+    };
+    // Added after the last entity, at its indentation; the comments stay.
+    let change = edit::edit_part(PLATE, "plate.part", |d| {
+        let FeatureKind::Sketch(s) = &mut d.features[0].kind else {
+            panic!()
+        };
+        s.entities.push(circle.clone());
+        Ok(())
+    })
+    .unwrap();
+    let added = PLATE.replace(
+        "        l2 = line(start = l1.end, end = [80 mm, 50 mm])\n",
+        "        l2 = line(start = l1.end, end = [80 mm, 50 mm])\n        c1 = circle(center = [10 mm, 10 mm], radius = 2 mm)\n",
+    );
+    assert_eq!(change.source, added);
+    assert_eq!(change.edits.len(), 1);
+    edited(&change);
+    // Added first: before the first line and the comment above it.
+    let change = edit::edit_part(PLATE, "plate.part", |d| {
+        let FeatureKind::Sketch(s) = &mut d.features[0].kind else {
+            panic!()
+        };
+        s.entities.insert(0, circle.clone());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        change.source,
+        PLATE.replace(
+            "        // The outline.\n",
+            "        c1 = circle(center = [10 mm, 10 mm], radius = 2 mm)\n        // The outline.\n",
+        )
+    );
+    edited(&change);
+    // Removed: the line goes; the other lines and their comments stay.
+    let change = edit::edit_part(&added, "plate.part", |d| {
+        let FeatureKind::Sketch(s) = &mut d.features[0].kind else {
+            panic!()
+        };
+        s.entities.retain(|e| e.id.0 != "c1");
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(change.source, PLATE);
+    // A constraint is added and another removed in one edit.
+    let change = edit::edit_part(PLATE, "plate.part", |d| {
+        let FeatureKind::Sketch(s) = &mut d.features[0].kind else {
+            panic!()
+        };
+        s.constraints.remove(0);
+        s.constraints.push(SketchConstraint {
+            id: None,
+            kind: SketchConstraintKind::Vertical {
+                line: SketchTarget::Entity {
+                    entity: "l2".into(),
+                },
+            },
+        });
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        change.source,
+        PLATE
+            .replace("        constrain horizontal(l1)\n", "")
+            .replace(
+                "= 60 mm // checked\n",
+                "= 60 mm // checked\n        constrain vertical(l2)\n"
+            )
+    );
+    edited(&change);
+}
+
+#[test]
+fn a_version_header_below_leading_comments_is_edited_in_place() {
+    use syntax::edit;
+    let commented = format!("// Copyright line.\n// Second line.\n\n{PLATE}");
+    assert!(parse_part("plate.part", &commented).is_valid());
+    let change = edit::edit_part(&commented, "plate.part", |d| {
+        d.header.std = "2".into();
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        change.source,
+        commented.replacen("std 1\n", "std 2\n", 1),
+        "{}",
+        change.source
+    );
+    assert_eq!(change.source.matches("runmat 0.7").count(), 1);
+    edited(&change);
+    // An edit that leaves the header alone does not touch it.
+    let change = edit::set_feature_param(
+        &commented,
+        "plate.part",
+        "round",
+        "radius",
+        serde_json::to_value(mm(3.0)).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        change.source,
+        commented.replace("radius = 2 mm", "radius = 3 mm")
+    );
 }

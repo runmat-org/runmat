@@ -18,7 +18,8 @@
 //!     input width : length = 80 mm
 //!     let half = input.width / 2
 //!
-//!     feature body = extrude { profile = { … }, extent = { … } }
+//!     sketch s1 on origin.xy { … }
+//!     feature body = extrude(profile = sketch.s1, distance = 10 mm)
 //!     region mount : face = { select = [ … ], expect = exactly_one }
 //!     publish hardpoint = region { region = mount }
 //!     link verifies feature.body to "checks/mass.fea#check.mass_budget"
@@ -26,6 +27,10 @@
 //! ```
 //!
 //! Round trip: `parse(print(model)) == model` for every model the printer accepts.
+//!
+//! `std 1` is the first released form of these dialects. Each entry has one written form (the
+//! call form, a sketch block, a `use` statement); later forms will take a new `std` number
+//! and files keep the number they were written for.
 //!
 //! [`Site`]: crate::diagnostics::Site
 
@@ -153,7 +158,15 @@ pub const ASSEMBLY: DocumentGrammar = DocumentGrammar {
         },
         named("connector", "connectors", "connector"),
         named("mate", "mates", "mate"),
-        named("pattern", "patterns", "pattern"),
+        // `pattern ribs = linear(seeds = [rib], direction = [1, 0, 0], spacing = 50 mm, count = 4)`
+        Collection {
+            tagged: Some(Tagged {
+                field: "layout",
+                tag: "layout",
+                extras: &["seeds", "skip", "when"],
+            }),
+            ..named("pattern", "patterns", "pattern")
+        },
         named("mirror", "mirrors", "mirror"),
         named("fasteners", "fasteners", "fasteners"),
         named("envelope", "envelopes", "envelope"),
@@ -356,58 +369,5 @@ pub fn grammar(dialect: Dialect) -> Option<&'static DocumentGrammar> {
         Dialect::Assembly => Some(&ASSEMBLY),
         Dialect::Drawing => Some(&DRAWING),
         _ => None,
-    }
-}
-
-/// Why a source could not be formatted.
-#[derive(Debug, Clone, PartialEq)]
-pub enum FormatError {
-    /// The file is not a part, assembly or drawing.
-    Dialect,
-    /// The source has errors; nothing is rewritten.
-    Invalid(Vec<FeaSyntaxDiagnostic>),
-    Print(PrintError),
-}
-
-impl std::fmt::Display for FormatError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FormatError::Dialect => f.write_str("not a .part, .assembly or .drawing file"),
-            FormatError::Invalid(diagnostics) => write!(
-                f,
-                "the source has {} error(s); the first: {}",
-                diagnostics.len(),
-                diagnostics.first().map_or("", |d| d.message.as_str())
-            ),
-            FormatError::Print(error) => write!(f, "{error}"),
-        }
-    }
-}
-
-impl std::error::Error for FormatError {}
-
-fn format_with<T: Serialize + DeserializeOwned>(
-    grammar: &DocumentGrammar,
-    path: &str,
-    source: &str,
-) -> Result<String, FormatError> {
-    let parsed = grammar_parse::<T>(grammar, path, source);
-    match parsed.document {
-        Some(document) if parsed.diagnostics.is_empty() => {
-            print_with(grammar, &document, &parsed.uses).map_err(FormatError::Print)
-        }
-        _ => Err(FormatError::Invalid(parsed.diagnostics)),
-    }
-}
-
-/// Rewrites a `.part`, `.assembly` or `.drawing` source in the canonical form: the migration
-/// path for files written in the generic record forms (`feature body = extrude { … }`), which
-/// still read. Comments are not kept; use the structured edits to change a file in place.
-pub fn format(path: &str, source: &str) -> Result<String, FormatError> {
-    match Dialect::for_path(path) {
-        Some(Dialect::Part) => format_with::<PartDocument>(&PART, path, source),
-        Some(Dialect::Assembly) => format_with::<AssemblyDocument>(&ASSEMBLY, path, source),
-        Some(Dialect::Drawing) => format_with::<DrawingDocument>(&DRAWING, path, source),
-        _ => Err(FormatError::Dialect),
     }
 }

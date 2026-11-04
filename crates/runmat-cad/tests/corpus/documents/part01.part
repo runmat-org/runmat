@@ -1,0 +1,15 @@
+runmat 0.7
+std 1
+
+part bracket_sm {
+    sketch s_chain on origin.zx {
+        up = line(start = [0 mm, 30 mm], end = [0 mm, 0 mm])
+        base = line(start = [0 mm, 0 mm], end = [50 mm, 0 mm])
+    }
+    feature base = sheet_metal.base_flange(
+        profile = sketch.s_chain,
+        depth = 40 mm,
+        rules = { thickness = 2 mm, bend_radius = 3 mm, rule = k_factor(k = 0.44) }
+    )
+    feature jog = sheet_metal.fold()
+}

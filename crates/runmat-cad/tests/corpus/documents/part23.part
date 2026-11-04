@@ -1,0 +1,17 @@
+runmat 0.7
+std 1
+
+part skin {
+    sketch s on origin.xy {
+        a = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])
+        b = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])
+        c = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])
+        e = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])
+        h1 = line(start = [10 mm, 5 mm], end = [20 mm, 5 mm])
+        h2 = line(start = [20 mm, 5 mm], end = [20 mm, 15 mm])
+        h3 = line(start = [20 mm, 15 mm], end = [10 mm, 15 mm])
+        h4 = line(start = [10 mm, 15 mm], end = [10 mm, 5 mm])
+    }
+    feature patch = surface.planar(profile = sketch.s)
+    feature fence = surface.ruled(edges = [feature.patch.edge.boundary(s.b)], distance = 10 mm)
+}

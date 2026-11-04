@@ -1,0 +1,64 @@
+runmat 0.7
+std 1
+
+drawing rig {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [
+            { label = "Part number", source = { source = property, name = part_number } },
+            { label = Rev, source = { source = revision } },
+            { label = Sheet, source = { source = sheet_number } },
+            { label = Drawn, source = { source = property, name = drawn_by } }
+        ]
+    }
+
+    sheet "1" = { format = a3, scale = [1, 2], projection = third_angle }
+
+    view front = standard(
+        orientation = front,
+        sheet = "1",
+        model = { file = "rig.assembly" },
+        at = [100, 100],
+        display = hidden_lines
+    )
+    view top = projected(
+        from = front,
+        direction = up,
+        sheet = "1",
+        model = { file = "rig.assembly" },
+        at = [100, 100],
+        display = hidden_lines
+    )
+    view a_a = section(
+        from = front,
+        plane = feature.body.face.start,
+        label = A,
+        sheet = "1",
+        model = { file = "rig.assembly" },
+        at = [100, 100],
+        display = hidden_lines
+    )
+    view b = detail(
+        from = a_a,
+        center = feature.body.face.end,
+        radius = 20 mm,
+        label = B,
+        sheet = "1",
+        model = { file = "rig.assembly" },
+        at = [100, 100],
+        scale = [2, 1],
+        display = hidden_lines
+    )
+
+    annotation d1 = dimension(
+        style = linear,
+        references = [feature.body.face.start, feature.body.face.end],
+        pmi = thickness,
+        view = front
+    )
+    annotation g1 = gdt(tolerance = top_parallel, view = front)
+    annotation b1 = balloon(occurrence = [{ name = bolts }, { name = b1 }], table = bom, view = front)
+    annotation n1 = note(text = "PART {part_number} REV {revision}", view = top)
+
+    table bom = bom(view = front, include_fasteners, sheet = "1", at = [0, 0])
+}

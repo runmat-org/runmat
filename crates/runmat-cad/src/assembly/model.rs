@@ -356,6 +356,12 @@ pub enum OverrideKind {
     Flexible {
         flexible: bool,
     },
+    /// Use another definition (or another revision) for the target in this context: the
+    /// target keeps its name, placement and mates; its geometry, configurations and
+    /// published items come from `source`.
+    Replace {
+        source: OccurrenceSource,
+    },
 }
 
 impl OverrideKind {
@@ -369,6 +375,7 @@ impl OverrideKind {
             OverrideKind::Material { .. } => "material".into(),
             OverrideKind::Property { property } => format!("property.{}", property.name),
             OverrideKind::Flexible { .. } => "flexible".into(),
+            OverrideKind::Replace { .. } => "replace".into(),
         }
     }
 }

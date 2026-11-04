@@ -398,6 +398,12 @@ fn a_check_reads_in_its_block_form() {
         &PlainData,
     )
     .unwrap();
+    // Checks print in the block form, one field per line.
+    assert!(
+        printed.contains("    check mass {\n        rule = below\n        limit = 2.5\n    }\n"),
+        "{printed}"
+    );
+    assert!(printed.contains("    check span {\n"), "{printed}");
     let back = parse_document(&CHECKED, "p.part", &printed, &PlainData);
     assert_eq!(back.json.decode::<Checked>().unwrap(), doc);
     let bad = "part p {\n    check mass {\n        rule below\n    }\n}\n";

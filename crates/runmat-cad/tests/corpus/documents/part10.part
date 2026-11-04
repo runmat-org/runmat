@@ -1,0 +1,25 @@
+runmat 0.7
+std 1
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness)
+    feature pull = direct.move_faces(
+        faces = [feature.body.face.end],
+        motion = offset(distance = 5 mm),
+        keep = [{ keep = parallel, a = feature.body.face.end, b = feature.body.face.start }]
+    )
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+
+    region top : face = { select = [feature.body.face.end], expect = exactly_one }
+}

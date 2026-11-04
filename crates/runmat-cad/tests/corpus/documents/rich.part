@@ -1,0 +1,81 @@
+runmat 0.7
+std 1
+
+use material aluminum from "./materials"
+use part skeleton from "//wing/skeleton" @ "R3" as sk
+use "./fasteners" as lib
+
+part bracket {
+    input width : length = 80 mm
+    input depth : length = 50 mm
+    input thickness : length = 10 mm
+    input plate : length = { default = 3 mm, minimum = 1 mm, maximum = input.thickness }
+
+    let v0 = 8 mm
+    let v1 = 2.5
+    let v2 = input.width
+    let v3 = let.half
+    let v4 = -input.width
+    let v5 = input.width / 2
+    let v6 = 10 kohm ± 1 %
+    let v7 = airDensity(altitude = 10 km)
+    let v8 = rho(2) as kg/m^3
+    let v9 = feature.boss.depth
+    let v10 = part.bracket.mass
+    let half : length = (-2.5 mm) * -(3)
+
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])
+        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])
+        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])
+        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = input.thickness, suppressed)
+    sketch s_cut on origin.xy {
+        c1 = line(start = [20 mm, 20 mm], end = [40 mm, 20 mm])
+        c2 = line(start = [40 mm, 20 mm], end = [40 mm, 30 mm])
+        c3 = line(start = [40 mm, 30 mm], end = [20 mm, 30 mm])
+        c4 = line(start = [20 mm, 30 mm], end = [20 mm, 20 mm])
+    }
+    feature cut = extrude(profile = sketch.s_cut, through_all, mode = cut)
+    feature h = hole(
+        face = feature.body.face.end,
+        at = { a = point(60 mm, 10 mm, 10 mm) },
+        diameter = 4 mm,
+        through_all
+    )
+    feature round = fillet(
+        edges = [edges_between(feature.body.face.side(s1.l1), feature.body.face.end)],
+        radius = 1.5 mm
+    )
+    feature round_missing = fillet(
+        edges = [edges_between(feature.body.face.side(s1.l9), feature.body.face.end)],
+        radius = 1 mm
+    )
+    feature row = pattern(
+        features = [h],
+        layout = grid(
+            first = origin.x,
+            first_spacing = 6 mm,
+            first_count = 3,
+            second = origin.y,
+            second_spacing = 8 mm,
+            second_count = 2
+        )
+    )
+
+    output bracket = { body = feature.body.body, part_number = "BR-100", material = "material.aluminum" }
+
+    region top : face = { select = [feature.body.face.end], expect = at_least_one }
+    region cut_wall : face = { select = [feature.cut.face.side(s_cut.c1)], expect = exactly_one }
+
+    publish top = region(region = top)
+
+    material = { body = feature.body.body, material = "material.steel" }
+
+    configuration long = { overrides = { width = 120 mm }, suppress = [round_missing] }
+
+    link verifies feature.body to "checks/mass.fea#check.mass_budget"
+
+    closed = true
+}

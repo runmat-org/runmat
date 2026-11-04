@@ -1,0 +1,77 @@
+runmat 0.7
+std 1
+
+assembly aircraft {
+    use assembly section from "fuselage/section.assembly" as section1 {
+        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 0 mm] } }
+        required = true
+    }
+    use assembly section from "fuselage/section.assembly" as section2 {
+        placement = { placement = offset, offset = { translation = [3000 mm, 0 mm, 0 mm] } }
+        required = true
+    }
+    use part wing from "wing/wing.part" as wing_left {
+        placement = {
+            placement = attach,
+            own = { anchor = published, name = root },
+            to = {
+                frame = interface,
+                file = "interfaces/fuselage-wing.part",
+                name = wing_ref,
+                context = { context = pinned, revision = A }
+            }
+        }
+    }
+    use part engine_a from "propulsion/engine-a.part" as engine_left {
+        when = { when = is, axis = engine, value = a }
+        placement = { placement = offset, offset = { translation = [1050 mm, 6000 mm, -1500 mm] } }
+        required = true
+    }
+    use part engine_b from "propulsion/engine-b.part" as engine_left {
+        when = { when = is, axis = engine, value = b }
+        placement = { placement = offset, offset = { translation = [1050 mm, 6000 mm, -1500 mm] } }
+        required = true
+    }
+    use part cargo_door from "fuselage/cargo-door.part" as cargo_door {
+        when = { when = is, axis = freighter, value = true }
+        placement = { placement = offset, offset = { translation = [600 mm, 0 mm, 0 mm] } }
+    }
+
+    mirror wing_mirror = {
+        seeds = [wing_left],
+        plane = { plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] },
+        hand = symmetric(point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0])
+    }
+
+    part_number = "AX-000000"
+    options = {
+            axes = [
+                { name = msn, domain = { domain = unit, min = 1, max = 200 }, default = 1 },
+                { name = engine, domain = { domain = enum, values = [a, b] }, default = a },
+                { name = freighter, domain = { domain = bool }, default = false }
+            ],
+            rules = [
+                {
+                    name = freighter_needs_engine_b,
+                    condition = {
+                        when = any,
+                        of = [
+                            { when = not, of = { when = is, axis = freighter, value = true } },
+                            { when = is, axis = engine, value = b }
+                        ]
+                    }
+                }
+            ],
+            groups = [
+                {
+                    name = ECO_0041,
+                    effectivity = { when = range, axis = msn, min = 41 },
+                    description = "heavy frames from MSN 41"
+                }
+            ],
+            configurations = [
+                { name = launch, values = { msn = 7 } },
+                { name = freighter, values = { engine = b, freighter = true, msn = 120 } }
+            ]
+        }
+}
