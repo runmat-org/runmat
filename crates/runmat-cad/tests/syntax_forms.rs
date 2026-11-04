@@ -807,3 +807,54 @@ fn a_version_header_below_leading_comments_is_edited_in_place() {
         commented.replace("radius = 2 mm", "radius = 3 mm")
     );
 }
+
+const TWO_PLATES: &str = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate from \"plate.part\" as a\n    use part plate from \"plate.part\" as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
+
+#[test]
+fn removing_or_suppressing_an_occurrence_with_a_body_changes_only_that_occurrence() {
+    let parsed = parse_assembly("rig.assembly", TWO_PLATES);
+    let original: AssemblyDocument = parsed.document.clone().expect("reads");
+    // Remove `b`: its statement and block go, nothing else changes.
+    let mut d = original.clone();
+    d.occurrences.retain(|o| o.name.as_str() != "b");
+    let change = syntax::edit::diff_source(
+        &syntax::ASSEMBLY,
+        "rig.assembly",
+        TWO_PLATES,
+        &d,
+        &parsed.uses,
+        &[],
+    )
+    .expect("an edit");
+    assert!(!change.reprinted, "{}", change.source);
+    assert_eq!(
+        change.source,
+        "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate from \"plate.part\" as a\n}\n"
+    );
+    // Suppress `b`: only its block changes.
+    let mut d = original.clone();
+    let b = d
+        .occurrences
+        .iter_mut()
+        .find(|o| o.name.as_str() == "b")
+        .expect("b");
+    b.suppressed = true;
+    let change = syntax::edit::diff_source(
+        &syntax::ASSEMBLY,
+        "rig.assembly",
+        TWO_PLATES,
+        &d,
+        &parsed.uses,
+        &[],
+    )
+    .expect("an edit");
+    assert!(!change.reprinted, "{}", change.source);
+    assert!(change.source.starts_with(
+        "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate from \"plate.part\" as a\n    use part plate from \"plate.part\" as b {\n"
+    ));
+    assert!(
+        change.source.contains("suppressed = true"),
+        "{}",
+        change.source
+    );
+}

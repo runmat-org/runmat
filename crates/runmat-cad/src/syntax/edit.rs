@@ -113,9 +113,13 @@ fn reindent(text: &str, from: &str, to: &str) -> String {
 }
 
 fn statement_node(root: &SyntaxNode, span: Span) -> Option<SyntaxNode> {
-    root.descendants()
-        .into_iter()
-        .find(|node| node.kind().is_statement() && node.trimmed_span() == span)
+    root.descendants().into_iter().find(|node| {
+        // An occurrence (`use part … as b { … }`) is a use declaration inside the
+        // assembly's block: an entry like any statement.
+        (node.kind().is_statement()
+            || node.kind() == runmat_design_syntax::tree::NodeKind::UseDeclaration)
+            && node.trimmed_span() == span
+    })
 }
 
 fn declaration_block(root: &SyntaxNode, span: Span) -> Option<SyntaxNode> {
