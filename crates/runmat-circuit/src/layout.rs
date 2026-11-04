@@ -769,6 +769,8 @@ pub struct Board {
     pub dimensions: BTreeMap<ItemId, Dimension>,
     pub limits: FabLimits,
     pub next_id: u64,
+    /// What the board last took from the schematic: the ECO's base for three-way compares.
+    pub sync: crate::eco::BoardSync,
 }
 
 impl Board {
@@ -791,6 +793,7 @@ impl Board {
             dimensions: BTreeMap::new(),
             limits: FabLimits::default(),
             next_id: 1,
+            sync: Default::default(),
         }
     }
     pub fn alloc(&mut self) -> ItemId {

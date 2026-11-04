@@ -20,6 +20,8 @@
 //! - [`zone`]: copper pour fill (clearances, thermal spokes, minimum width, islands).
 //! - [`spatial`]: grid index; [`connectivity`]: physical copper islands.
 //! - [`drc`]: the incremental DRC kernel.
+//! - [`eco`]: engineering change orders: schematic ↔ board sync as a typed, validated, undoable
+//!   change list with cause and board impact, back-annotation and agent change sets.
 //! - [`route`]: ratsnest, any-angle walkaround, checked insertion, tuning lengths.
 //! - [`router`]: interactive-routing primitives: 45°/90° shaping, mitred and arc corners,
 //!   clearance hulls, shortest and hugging walkaround.
@@ -42,6 +44,7 @@ pub mod board_rules;
 pub mod commands;
 pub mod connectivity;
 pub mod drc;
+pub mod eco;
 pub mod elab;
 pub mod erc;
 pub mod fab;

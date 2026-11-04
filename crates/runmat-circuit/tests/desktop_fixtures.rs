@@ -1,6 +1,7 @@
 //! Desktop fixture: the real circuit JSON projection of a small mixed-signal board (two analog
-//! channels, a third added since the board was last synced, pours, seeded DRC violations), for
-//! the Desktop's circuit Outline provider and its tests.
+//! channels, a third added since the board was last synced, edits of every ECO type, board-side
+//! swaps and renumbering, pours, seeded DRC violations), for the Desktop's circuit Outline
+//! provider, its ECO review and their tests.
 //!
 //! The Desktop checks it in at `desktop/src/app/components/circuit/fixtures/io.circuit.json`.
 //! Set `RUNMAT_DESKTOP_FIXTURES` to that folder to write it; with it unset, the test compares
@@ -8,12 +9,11 @@
 
 use runmat_circuit::board_rules::{props, BoardGraph, BoardRules, RuleSpec, RuleValue};
 use runmat_circuit::drc::Drc;
-use runmat_circuit::elab::{elaborate, ElabOptions};
+use runmat_circuit::eco;
 use runmat_circuit::erc::{self, ErcOptions};
-use runmat_circuit::fixture::{self, LargeParams};
+use runmat_circuit::fixture;
 use runmat_circuit::geom::mm;
-use runmat_circuit::ids::{DerivedUuids, LockSection};
-use runmat_circuit::index::{add_board, build_index, to_json};
+use runmat_circuit::index::{add_board, add_eco, build_index, to_json};
 use runmat_circuit::review::{self, ReviewOptions};
 use runmat_circuit::zone::fill_zones;
 use runmat_rules::{SourceKey, SourceOrder};
@@ -52,19 +52,12 @@ fn specs() -> Vec<RuleSpec> {
 
 #[test]
 fn circuit_fixture() {
-    let synced = LargeParams {
-        channels: 2,
-        copper_layers: 4,
-        route_every: 2,
-        pours: true,
-    };
-    let params = LargeParams {
-        channels: 3,
-        ..synced.clone()
-    };
-    let pool = fixture::standard_pool();
-    let design = fixture::large_design(&params);
-    let mut nl = elaborate(&design, &pool, &ElabOptions::default(), None);
+    // A board synced with two channels and edited on the board side; the schematic since gained a
+    // third channel and edits of every ECO type (`fixture::eco_scenario`).
+    let sc = fixture::eco_scenario();
+    let pool = &sc.pool;
+    let design = &sc.design;
+    let mut nl = sc.netlist.clone();
     // The FPGA's unused IO carry no-ERC markers, as a designer places them; two are still unmarked.
     if let Some(ci) = nl.components.iter().position(|c| c.designator == "U9000") {
         let unused: Vec<usize> = nl.components[ci]
@@ -78,21 +71,12 @@ fn circuit_fixture() {
             nl.no_erc.insert((ci, pi));
         }
     }
-    // The lock as of the last board sync (two channels); the third channel is pending ECO.
-    let mut lock = LockSection::default();
-    let old = elaborate(
-        &fixture::large_design(&synced),
-        &pool,
-        &ElabOptions::default(),
-        None,
-    );
-    lock.reconcile(&old.lock_items(), &mut DerivedUuids { namespace: 7 });
-    let eco = lock.reconcile(&nl.lock_items(), &mut DerivedUuids { namespace: 7 });
-    // +5 V and ground come in on J100 (power flags); the -5 V rail has no source yet.
+    // +5 V and ground come in on J1 (power flags); the negative rail has no source yet.
     let erc = erc::run(
         &nl,
         &ErcOptions {
             power_flags: ["+5V", "GND"].iter().map(|n| (*n).to_owned()).collect(),
+            allow_single: ["SHIELD"].iter().map(|n| (*n).to_owned()).collect(),
             ..ErcOptions::default()
         },
     );
@@ -101,10 +85,10 @@ fn circuit_fixture() {
         "a realistic ERC list, not noise: {} entries",
         erc.len()
     );
-    let findings = review::run_all(&nl, &pool, &ReviewOptions::default());
-    let mut index = build_index(&design, &nl, &pool, &erc, &findings, &eco);
+    let findings = review::run_all(&nl, pool, &ReviewOptions::default());
+    let mut index = build_index(design, &nl, pool, &erc, &findings);
 
-    let (mut board, _) = fixture::large_board_report(&pool, &old, &synced);
+    let mut board = sc.board.clone();
     fixture::seed_violations(&mut board, 2);
     let (mut rules, errs) = BoardRules::new(&board.limits, &specs());
     assert!(errs.is_empty(), "{errs:?}");
@@ -112,10 +96,20 @@ fn circuit_fixture() {
     let fills = fill_zones(&mut board, &rules, &[]);
     let drc = Drc::run(&board, &rules, &[], &fills);
     add_board(&mut index, &board, &rules, &drc);
+    let s = eco::Schematic {
+        design,
+        netlist: &nl,
+        pool,
+        lock: &sc.lock,
+    };
+    let forward = eco::compare(&s, &board, &eco::ComparatorOptions::default());
+    let back = eco::back_annotate(&s, &board, &eco::ComparatorOptions::default());
+    add_eco(&mut index, &forward, &back, &board);
 
+    assert!(index.eco.total > 0, "the third channel waits for the board");
     assert!(
-        !index.eco.is_empty(),
-        "the third channel waits for the board"
+        index.back_annotation.total > 0,
+        "board edits wait for the schematic"
     );
     let board_index = index.board.as_ref().unwrap();
     assert!(board_index.layers.iter().any(|l| l.kind == "copper"));
