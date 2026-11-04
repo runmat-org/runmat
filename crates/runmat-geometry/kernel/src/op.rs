@@ -107,6 +107,74 @@ pub enum SegmentKind {
         center: [f64; 2],
         radius: f64,
     },
+    /// An elliptical arc about `center`, counter-clockwise from `start` to `end` unless
+    /// `clockwise`; `start == end` is the whole ellipse. `major` is the semi-major axis vector,
+    /// `ratio` the minor axis over the major (at most 1); the minor axis is a quarter turn
+    /// counter-clockwise from the major.
+    Ellipse {
+        center: [f64; 2],
+        major: [f64; 2],
+        ratio: f64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        clockwise: bool,
+    },
+    /// A clamped B-spline (rational when `weights` are given, one per pole) from its first
+    /// pole (`start`) to its last (`end`). `knots` are the distinct knot values with their
+    /// `multiplicities`; the end knots have multiplicity `degree + 1`. A closed spline repeats
+    /// its first pole last.
+    Spline {
+        degree: u32,
+        poles: Vec<[f64; 2]>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        weights: Vec<f64>,
+        knots: Vec<f64>,
+        multiplicities: Vec<u32>,
+    },
+}
+
+impl SegmentKind {
+    /// The same curve with every defining point moved by a rigid map of the plane.
+    pub fn mapped(&self, map: &dyn Fn([f64; 2]) -> [f64; 2]) -> SegmentKind {
+        match self {
+            SegmentKind::Line => SegmentKind::Line,
+            SegmentKind::Arc { center, clockwise } => SegmentKind::Arc {
+                center: map(*center),
+                clockwise: *clockwise,
+            },
+            SegmentKind::Circle { center, radius } => SegmentKind::Circle {
+                center: map(*center),
+                radius: *radius,
+            },
+            SegmentKind::Ellipse {
+                center,
+                major,
+                ratio,
+                clockwise,
+            } => {
+                let c = map(*center);
+                let m = map([center[0] + major[0], center[1] + major[1]]);
+                SegmentKind::Ellipse {
+                    center: c,
+                    major: [m[0] - c[0], m[1] - c[1]],
+                    ratio: *ratio,
+                    clockwise: *clockwise,
+                }
+            }
+            SegmentKind::Spline {
+                degree,
+                poles,
+                weights,
+                knots,
+                multiplicities,
+            } => SegmentKind::Spline {
+                degree: *degree,
+                poles: poles.iter().map(|p| map(*p)).collect(),
+                weights: weights.clone(),
+                knots: knots.clone(),
+                multiplicities: multiplicities.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -116,6 +184,168 @@ pub struct ProfileSegment {
     pub kind: SegmentKind,
     pub start: [f64; 2],
     pub end: [f64; 2],
+}
+
+impl ProfileSegment {
+    /// The point at fraction `t` (0 at `start`, 1 at `end`) of the curve's parameter range:
+    /// the angle for arcs, circles and ellipses, the knot range for splines.
+    pub fn point_at(&self, t: f64) -> [f64; 2] {
+        let tau = std::f64::consts::TAU;
+        match &self.kind {
+            SegmentKind::Line => [
+                self.start[0] + t * (self.end[0] - self.start[0]),
+                self.start[1] + t * (self.end[1] - self.start[1]),
+            ],
+            SegmentKind::Arc { center, clockwise } => {
+                let r = ((self.start[0] - center[0]).powi(2) + (self.start[1] - center[1]).powi(2))
+                    .sqrt();
+                let (a0, sweep) = sweep_between(*center, self.start, self.end, *clockwise);
+                let a = a0 + t * sweep;
+                [center[0] + r * a.cos(), center[1] + r * a.sin()]
+            }
+            SegmentKind::Circle { center, radius } => {
+                let a = t * tau;
+                [center[0] + radius * a.cos(), center[1] + radius * a.sin()]
+            }
+            SegmentKind::Ellipse {
+                center,
+                major,
+                ratio,
+                clockwise,
+            } => {
+                // Parametric angle about the major axis.
+                let ra = (major[0] * major[0] + major[1] * major[1])
+                    .sqrt()
+                    .max(1e-300);
+                let ux = [major[0] / ra, major[1] / ra];
+                let uy = [-ux[1], ux[0]];
+                let rb = ra * ratio;
+                let param = |p: [f64; 2]| {
+                    let d = [p[0] - center[0], p[1] - center[1]];
+                    let x = d[0] * ux[0] + d[1] * ux[1];
+                    let y = d[0] * uy[0] + d[1] * uy[1];
+                    (y / rb.max(1e-300)).atan2(x / ra)
+                };
+                let u0 = param(self.start);
+                let mut u1 = param(self.end);
+                let whole = ((self.start[0] - self.end[0]).powi(2)
+                    + (self.start[1] - self.end[1]).powi(2))
+                .sqrt()
+                    <= 1e-12 * ra.max(1.0);
+                if *clockwise {
+                    while u1 >= u0 - if whole { tau - 1e-12 } else { 0.0 } {
+                        u1 -= tau;
+                    }
+                } else {
+                    while u1 <= u0 + if whole { tau - 1e-12 } else { 0.0 } {
+                        u1 += tau;
+                    }
+                }
+                let u = u0 + t * (u1 - u0);
+                [
+                    center[0] + ra * u.cos() * ux[0] + rb * u.sin() * uy[0],
+                    center[1] + ra * u.cos() * ux[1] + rb * u.sin() * uy[1],
+                ]
+            }
+            SegmentKind::Spline {
+                degree,
+                poles,
+                weights,
+                knots,
+                multiplicities,
+            } => spline_point(*degree, poles, weights, knots, multiplicities, t),
+        }
+    }
+
+    /// `n + 1` points from `start` to `end`, evenly spaced in the curve's parameter.
+    pub fn polyline(&self, n: usize) -> Vec<[f64; 2]> {
+        let n = n.max(1);
+        (0..=n)
+            .map(|i| self.point_at(i as f64 / n as f64))
+            .collect()
+    }
+
+    /// Whether the segment is a whole closed curve on its own (a circle, a whole ellipse, a
+    /// closed spline).
+    pub fn is_closed_curve(&self) -> bool {
+        match self.kind {
+            SegmentKind::Circle { .. } => true,
+            SegmentKind::Ellipse { .. } | SegmentKind::Spline { .. } => {
+                (self.start[0] - self.end[0]).abs() <= 1e-12
+                    && (self.start[1] - self.end[1]).abs() <= 1e-12
+            }
+            _ => false,
+        }
+    }
+}
+
+/// An arc's start angle and signed sweep about `c` from `a` to `b`.
+fn sweep_between(c: [f64; 2], a: [f64; 2], b: [f64; 2], clockwise: bool) -> (f64, f64) {
+    let tau = std::f64::consts::TAU;
+    let a0 = (a[1] - c[1]).atan2(a[0] - c[0]);
+    let a1 = (b[1] - c[1]).atan2(b[0] - c[0]);
+    let mut sweep = a1 - a0;
+    if clockwise {
+        while sweep >= -1e-12 {
+            sweep -= tau;
+        }
+    } else {
+        while sweep <= 1e-12 {
+            sweep += tau;
+        }
+    }
+    (a0, sweep)
+}
+
+/// A clamped (rational) B-spline at fraction `t` of its knot range (de Boor).
+fn spline_point(
+    degree: u32,
+    poles: &[[f64; 2]],
+    weights: &[f64],
+    knots: &[f64],
+    mults: &[u32],
+    t: f64,
+) -> [f64; 2] {
+    let p = degree as usize;
+    let mut flat = Vec::new();
+    for (k, m) in knots.iter().zip(mults) {
+        for _ in 0..*m {
+            flat.push(*k);
+        }
+    }
+    let n = poles.len();
+    if n == 0 || flat.len() < n + p + 1 || p == 0 {
+        return poles.first().copied().unwrap_or([0.0, 0.0]);
+    }
+    let (lo, hi) = (flat[p], flat[n]);
+    let u = lo + t.clamp(0.0, 1.0) * (hi - lo);
+    // The span holding u.
+    let mut k = p;
+    while k + 1 < n && flat[k + 1] <= u {
+        k += 1;
+    }
+    let w = |i: usize| weights.get(i).copied().unwrap_or(1.0);
+    let mut d: Vec<[f64; 3]> = (0..=p)
+        .map(|j| {
+            let i = j + k - p;
+            [poles[i][0] * w(i), poles[i][1] * w(i), w(i)]
+        })
+        .collect();
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = j + k - p;
+            let den = flat[i + p + 1 - r] - flat[i];
+            let a = if den.abs() < 1e-300 {
+                0.0
+            } else {
+                (u - flat[i]) / den
+            };
+            for c in 0..3 {
+                d[j][c] = (1.0 - a) * d[j - 1][c] + a * d[j][c];
+            }
+        }
+    }
+    [d[p][0] / d[p][2], d[p][1] / d[p][2]]
 }
 
 /// Closed loops in a sketch frame. The first loop is outer; the rest are holes.

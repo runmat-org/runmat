@@ -700,6 +700,60 @@ impl<'a> Lower<'a> {
                         reals.extend_from_slice(&[center[0], center[1], *radius]);
                         3
                     }
+                    SegmentKind::Ellipse {
+                        center,
+                        major,
+                        ratio,
+                        clockwise,
+                    } => {
+                        if seg.is_closed_curve() {
+                            reals.extend_from_slice(&[
+                                center[0], center[1], major[0], major[1], *ratio,
+                            ]);
+                            5
+                        } else {
+                            reals.extend_from_slice(&[
+                                seg.start[0],
+                                seg.start[1],
+                                seg.end[0],
+                                seg.end[1],
+                                center[0],
+                                center[1],
+                                major[0],
+                                major[1],
+                                *ratio,
+                                *clockwise as i64 as f64,
+                            ]);
+                            4
+                        }
+                    }
+                    SegmentKind::Spline {
+                        degree,
+                        poles,
+                        weights,
+                        knots,
+                        multiplicities,
+                    } => {
+                        if !weights.is_empty() && weights.len() != poles.len() {
+                            return Err(failed("a profile spline needs one weight per pole"));
+                        }
+                        if knots.len() != multiplicities.len() {
+                            return Err(failed("a profile spline needs one multiplicity per knot"));
+                        }
+                        reals.push(*degree as f64);
+                        reals.push(poles.len() as f64);
+                        for p in poles {
+                            reals.extend_from_slice(p);
+                        }
+                        for i in 0..poles.len() {
+                            reals.push(weights.get(i).copied().unwrap_or(1.0));
+                        }
+                        reals.push(knots.len() as f64);
+                        reals.extend_from_slice(knots);
+                        reals.extend(multiplicities.iter().map(|m| *m as f64));
+                        reals.push(0.0);
+                        6
+                    }
                 };
                 ints.push(kind);
                 ints.push(match sides(seg) {
@@ -1104,6 +1158,14 @@ impl<'a> Lower<'a> {
         (de, ds): (f64, f64),
         labels: &ToolLabels<'_>,
     ) -> Result<i64, KernelError> {
+        if let Some(chain) = open_chain(profile) {
+            if t.cap.is_some() {
+                return Err(failed(
+                    "a thin wall along an open profile has no ends to cap",
+                ));
+            }
+            return self.open_thin(profile, chain, a, b, a_label, b_label, t, (de, ds), labels);
+        }
         let base = self.profile(profile, true, &|_| None, None, None)?;
         let segs: Vec<&ProfileSegment> = profile.loops.iter().flatten().collect();
         let mut outer = vec![base, segs.len() as i64];
@@ -1151,6 +1213,82 @@ impl<'a> Lower<'a> {
         };
         let hole = self.push(3, vec![pi, ial, ibl], vec![ia, ib, de, ds]);
         Ok(self.push(7, vec![1, 1, wall, 1, hole], vec![]))
+    }
+
+    /// A thin wall along an open chain: the chain offset `outside` to its right and `inside`
+    /// to its left (as a counter-clockwise closed profile's outside and inside), closed by
+    /// straight ends, extruded. Outer walls are [`Role::Side`], inner walls [`Role::ThinWall`]
+    /// tagged by curve; the end faces are [`Role::ThinWall`] tagged by the first curve
+    /// (ordinal 2) and the last (ordinal 3).
+    #[allow(clippy::too_many_arguments)]
+    fn open_thin(
+        &mut self,
+        profile: &CanonicalProfile,
+        chain: &[ProfileSegment],
+        a: f64,
+        b: f64,
+        a_label: i64,
+        b_label: i64,
+        t: &runmat_geometry_kernel::op::ThinWallSpec,
+        (de, ds): (f64, f64),
+        labels: &ToolLabels<'_>,
+    ) -> Result<i64, KernelError> {
+        if t.inside + t.outside <= 0.0 {
+            return Err(failed("a thin wall needs a thickness"));
+        }
+        let right = offset_chain(chain, -t.outside)?;
+        let left = offset_chain(chain, t.inside)?;
+        let pi = labels.profile_index;
+        let curve_tag = |c: &SketchEntityId| KernelTag::Curve {
+            profile: pi,
+            curve: c.clone(),
+        };
+        let first = &chain[0].curve;
+        let last = &chain[chain.len() - 1].curve;
+        let mut segs: Vec<ProfileSegment> = Vec::new();
+        let mut sides: Vec<HistorySource> = Vec::new();
+        for s in &right {
+            segs.push(s.clone());
+            sides.push(labels.mark(labels.side(&s.curve, None)));
+        }
+        let end_a = right.last().expect("chain").end;
+        let end_b = left.last().expect("chain").end;
+        segs.push(ProfileSegment {
+            curve: last.clone(),
+            kind: SegmentKind::Line,
+            start: end_a,
+            end: end_b,
+        });
+        sides.push(labels.mark(gen(Role::ThinWall, curve_tag(last), Some(3))));
+        for s in left.iter().rev() {
+            let mut r = s.clone();
+            std::mem::swap(&mut r.start, &mut r.end);
+            if let SegmentKind::Arc { clockwise, .. } = &mut r.kind {
+                *clockwise = !*clockwise;
+            }
+            segs.push(r);
+            sides.push(labels.mark(gen(Role::ThinWall, curve_tag(&s.curve), None)));
+        }
+        segs.push(ProfileSegment {
+            curve: first.clone(),
+            kind: SegmentKind::Line,
+            start: left[0].start,
+            end: right[0].start,
+        });
+        sides.push(labels.mark(gen(Role::ThinWall, curve_tag(first), Some(2))));
+        let section = CanonicalProfile {
+            frame: profile.frame,
+            loops: vec![segs],
+            merge_collinear: false,
+        };
+        let at = std::cell::Cell::new(0usize);
+        let side = |_: &ProfileSegment| {
+            let i = at.get();
+            at.set(i + 1);
+            sides.get(i).cloned()
+        };
+        let p = self.profile(&section, true, &side, None, None)?;
+        Ok(self.push(3, vec![p, a_label, b_label], vec![a, b, de, ds]))
     }
 
     fn sweep(
@@ -1255,16 +1393,14 @@ impl<'a> Lower<'a> {
                 fine.loops[li].iter().map(|s| s.curve.clone()).collect()
             })
             .collect();
-        let refined: Vec<CanonicalProfile> = profiles
-            .iter()
-            .map(|p| {
-                let mut q = p.clone();
-                for (li, l) in q.loops.iter_mut().enumerate() {
-                    *l = refine_loop(l, counts[li]);
-                }
-                q
-            })
-            .collect();
+        let mut refined: Vec<CanonicalProfile> = Vec::new();
+        for p in profiles {
+            let mut q = p.clone();
+            for (li, l) in q.loops.iter_mut().enumerate() {
+                *l = refine_loop(l, counts[li])?;
+            }
+            refined.push(q);
+        }
         let mut slots = Vec::new();
         for (k, p) in refined.iter().enumerate() {
             let ord = several.then_some(k as u32);
@@ -1726,6 +1862,29 @@ impl<'a> Lower<'a> {
         self.keep_others(operand)
     }
 
+    /// Conic and curvature-continuous blends of straight edges between planar faces (op 43).
+    fn section_blend(
+        &mut self,
+        edges: &[OperandEntity],
+        radius: f64,
+        profile: BlendProfile,
+    ) -> Result<(), KernelError> {
+        let operand = single_operand(edges)?;
+        let slot = self.operand(operand)?;
+        let eb = self.edge_labels(operand, Role::Blend)?;
+        let (kind, rho) = match profile {
+            BlendProfile::Conic { rho } => (0, rho),
+            BlendProfile::Curvature => (1, 0.0),
+            BlendProfile::Circular => unreachable!("circular blends are fillets"),
+        };
+        let mut ints = vec![slot, operand as i64, eb, edges.len() as i64];
+        ints.extend(edges.iter().map(|e| e.entity as i64));
+        ints.push(kind);
+        let r = self.push(43, ints, vec![radius, rho]);
+        self.output(r, false, OutputSpec::default());
+        self.keep_others(operand)
+    }
+
     fn keep_others(&mut self, used: u32) -> Result<(), KernelError> {
         for i in 0..self.operands.len() as u32 {
             if i != used {
@@ -1769,7 +1928,143 @@ fn mid(seg: &ProfileSegment) -> [f64; 2] {
             [center[0] + r * a.cos(), center[1] + r * a.sin()]
         }
         SegmentKind::Circle { center, radius } => [center[0] + radius, center[1]],
+        SegmentKind::Ellipse { .. } | SegmentKind::Spline { .. } => seg.point_at(0.5),
     }
+}
+
+/// The profile's one loop when it is an open chain (its last curve ends away from where its
+/// first starts).
+fn open_chain(p: &CanonicalProfile) -> Option<&[ProfileSegment]> {
+    let [l] = &p.loops[..] else {
+        return None;
+    };
+    let (f, z) = (l.first()?, l.last()?);
+    let gap = ((z.end[0] - f.start[0]).powi(2) + (z.end[1] - f.start[1]).powi(2)).sqrt();
+    (gap > 1e-9 && !f.is_closed_curve()).then_some(&l[..])
+}
+
+/// A chain offset by `d` to its left (negative: to its right), each curve trimmed or extended
+/// to meet its neighbours. Lines and arcs only.
+fn offset_chain(chain: &[ProfileSegment], d: f64) -> Result<Vec<ProfileSegment>, KernelError> {
+    // Each curve offset on its own.
+    let mut out: Vec<ProfileSegment> = Vec::new();
+    for s in chain {
+        let mut o = s.clone();
+        match &s.kind {
+            SegmentKind::Line => {
+                let u = [s.end[0] - s.start[0], s.end[1] - s.start[1]];
+                let l = (u[0] * u[0] + u[1] * u[1]).sqrt();
+                if l <= 0.0 {
+                    return Err(failed("a profile line has no length"));
+                }
+                let n = [-u[1] / l * d, u[0] / l * d];
+                o.start = [s.start[0] + n[0], s.start[1] + n[1]];
+                o.end = [s.end[0] + n[0], s.end[1] + n[1]];
+            }
+            SegmentKind::Arc { center, clockwise } => {
+                // The left of a counter-clockwise arc is towards its centre.
+                let r =
+                    ((s.start[0] - center[0]).powi(2) + (s.start[1] - center[1]).powi(2)).sqrt();
+                let r2 = if *clockwise { r + d } else { r - d };
+                if r2 <= 1e-12 {
+                    return Err(failed("the thin wall is thicker than an arc's radius"));
+                }
+                let at = |p: [f64; 2]| {
+                    [
+                        center[0] + (p[0] - center[0]) * r2 / r,
+                        center[1] + (p[1] - center[1]) * r2 / r,
+                    ]
+                };
+                o.start = at(s.start);
+                o.end = at(s.end);
+            }
+            _ => {
+                return Err(not_supported(
+                    "thin walls along ellipses or splines of open profiles",
+                ))
+            }
+        }
+        out.push(o);
+    }
+    if d == 0.0 {
+        return Ok(out);
+    }
+    // Corners: neighbours meet where their offset curves cross, nearest the naive joint.
+    for i in 0..out.len().saturating_sub(1) {
+        let (a, b) = (&out[i], &out[i + 1]);
+        let gap = ((a.end[0] - b.start[0]).powi(2) + (a.end[1] - b.start[1]).powi(2)).sqrt();
+        if gap <= 1e-12 {
+            continue;
+        }
+        let guess = [(a.end[0] + b.start[0]) / 2.0, (a.end[1] + b.start[1]) / 2.0];
+        let p = meet(a, b, guess).ok_or_else(|| {
+            failed("the thin wall's offset curves do not meet at a corner of the profile")
+        })?;
+        out[i].end = p;
+        out[i + 1].start = p;
+    }
+    Ok(out)
+}
+
+/// The crossing of two offset curves (as whole lines and circles) nearest `guess`.
+fn meet(a: &ProfileSegment, b: &ProfileSegment, guess: [f64; 2]) -> Option<[f64; 2]> {
+    enum G {
+        L([f64; 2], [f64; 2]),
+        C([f64; 2], f64),
+    }
+    let g = |s: &ProfileSegment| match &s.kind {
+        SegmentKind::Arc { center, .. } => G::C(
+            *center,
+            ((s.start[0] - center[0]).powi(2) + (s.start[1] - center[1]).powi(2)).sqrt(),
+        ),
+        _ => G::L(s.start, [s.end[0] - s.start[0], s.end[1] - s.start[1]]),
+    };
+    let line_circle = |p: [f64; 2], u: [f64; 2], c: [f64; 2], r: f64| -> Vec<[f64; 2]> {
+        let f = [p[0] - c[0], p[1] - c[1]];
+        let aa = u[0] * u[0] + u[1] * u[1];
+        let bb = 2.0 * (f[0] * u[0] + f[1] * u[1]);
+        let cc = f[0] * f[0] + f[1] * f[1] - r * r;
+        let disc = bb * bb - 4.0 * aa * cc;
+        if disc < 0.0 || aa == 0.0 {
+            return Vec::new();
+        }
+        let q = disc.sqrt();
+        [(-bb - q) / (2.0 * aa), (-bb + q) / (2.0 * aa)]
+            .iter()
+            .map(|t| [p[0] + t * u[0], p[1] + t * u[1]])
+            .collect()
+    };
+    let cands: Vec<[f64; 2]> = match (g(a), g(b)) {
+        (G::L(p, u), G::L(q, v)) => {
+            let den = u[0] * v[1] - u[1] * v[0];
+            if den.abs() < 1e-15 {
+                return None;
+            }
+            let w = [q[0] - p[0], q[1] - p[1]];
+            let s = (w[0] * v[1] - w[1] * v[0]) / den;
+            vec![[p[0] + s * u[0], p[1] + s * u[1]]]
+        }
+        (G::L(p, u), G::C(c, r)) | (G::C(c, r), G::L(p, u)) => line_circle(p, u, c, r),
+        (G::C(c1, r1), G::C(c2, r2)) => {
+            let dx = [c2[0] - c1[0], c2[1] - c1[1]];
+            let dd = (dx[0] * dx[0] + dx[1] * dx[1]).sqrt();
+            if dd < 1e-15 || dd > r1 + r2 || dd < (r1 - r2).abs() {
+                return None;
+            }
+            let aa = (r1 * r1 - r2 * r2 + dd * dd) / (2.0 * dd);
+            let h = (r1 * r1 - aa * aa).max(0.0).sqrt();
+            let m = [c1[0] + aa * dx[0] / dd, c1[1] + aa * dx[1] / dd];
+            vec![
+                [m[0] - h * dx[1] / dd, m[1] + h * dx[0] / dd],
+                [m[0] + h * dx[1] / dd, m[1] - h * dx[0] / dd],
+            ]
+        }
+    };
+    cands.into_iter().min_by(|x, y| {
+        let dx = (x[0] - guess[0]).powi(2) + (x[1] - guess[1]).powi(2);
+        let dy = (y[0] - guess[0]).powi(2) + (y[1] - guess[1]).powi(2);
+        dx.partial_cmp(&dy).unwrap_or(std::cmp::Ordering::Equal)
+    })
 }
 
 /// How the faces of a direct edit move: each by an offset along its normal, or each turned
@@ -1845,10 +2140,15 @@ fn segment_length(seg: &ProfileSegment) -> f64 {
             let (a0, a1, r) = arc_angles(seg, *center, *clockwise);
             r * (a1 - a0).abs()
         }
-        _ => {
+        SegmentKind::Line => {
             let d = [seg.end[0] - seg.start[0], seg.end[1] - seg.start[1]];
             (d[0] * d[0] + d[1] * d[1]).sqrt()
         }
+        SegmentKind::Ellipse { .. } | SegmentKind::Spline { .. } => seg
+            .polyline(256)
+            .windows(2)
+            .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt())
+            .sum(),
     }
 }
 
@@ -1872,7 +2172,7 @@ fn arc_angles(seg: &ProfileSegment, c: [f64; 2], clockwise: bool) -> (f64, f64, 
 }
 
 /// A segment split at its middle into two of the same curve.
-fn split_segment(seg: &ProfileSegment) -> [ProfileSegment; 2] {
+fn split_segment(seg: &ProfileSegment) -> Result<[ProfileSegment; 2], KernelError> {
     let half = |kind: SegmentKind, a: [f64; 2], b: [f64; 2]| ProfileSegment {
         curve: seg.curve.clone(),
         kind,
@@ -1896,29 +2196,32 @@ fn split_segment(seg: &ProfileSegment) -> [ProfileSegment; 2] {
                 center: c,
                 clockwise: false,
             };
-            [half(arc.clone(), p, q), half(arc, q, p)]
+            Ok([half(arc.clone(), p, q), half(arc, q, p)])
         }
         SegmentKind::Arc { center, clockwise } => {
             let (a0, a1, r) = arc_angles(seg, *center, *clockwise);
             let am = 0.5 * (a0 + a1);
             let m = [center[0] + r * am.cos(), center[1] + r * am.sin()];
-            [
+            Ok([
                 half(seg.kind.clone(), seg.start, m),
                 half(seg.kind.clone(), m, seg.end),
-            ]
+            ])
         }
-        _ => {
+        SegmentKind::Line | SegmentKind::Ellipse { .. } => {
             let m = mid(seg);
-            [
+            Ok([
                 half(seg.kind.clone(), seg.start, m),
                 half(seg.kind.clone(), m, seg.end),
-            ]
+            ])
         }
+        SegmentKind::Spline { .. } => Err(not_supported(
+            "refining a loft section by splitting a spline",
+        )),
     }
 }
 
 /// A loop refined to `count` segments by splitting the longest one, repeatedly.
-fn refine_loop(l: &[ProfileSegment], count: usize) -> Vec<ProfileSegment> {
+fn refine_loop(l: &[ProfileSegment], count: usize) -> Result<Vec<ProfileSegment>, KernelError> {
     let mut out = l.to_vec();
     while out.len() < count {
         let mut best = 0;
@@ -1927,10 +2230,10 @@ fn refine_loop(l: &[ProfileSegment], count: usize) -> Vec<ProfileSegment> {
                 best = i;
             }
         }
-        let [a, b] = split_segment(&out[best]);
+        let [a, b] = split_segment(&out[best])?;
         out.splice(best..best + 1, [a, b]);
     }
-    out
+    Ok(out)
 }
 
 fn single_operand(es: &[OperandEntity]) -> Result<u32, KernelError> {
@@ -1996,9 +2299,12 @@ impl OcctKernel {
                     return Err(not_supported("fillet setbacks"));
                 }
                 if *profile != BlendProfile::Circular {
-                    return Err(not_supported(
-                        "conic and curvature-continuous blend profiles",
-                    ));
+                    if !variable.is_empty() {
+                        return Err(not_supported(
+                            "variable conic and curvature-continuous blends",
+                        ));
+                    }
+                    return l.section_blend(edges, *radius, *profile);
                 }
                 l.fillet(edges, *radius, variable)
             }
@@ -2008,11 +2314,6 @@ impl OcctKernel {
                 radius,
                 profile,
             } => {
-                if *profile != BlendProfile::Circular {
-                    return Err(not_supported(
-                        "conic and curvature-continuous blend profiles",
-                    ));
-                }
                 let operand = single_operand(&[first.clone(), second.clone()].concat())?;
                 let t = &l.body(operand)?.topology;
                 let a: BTreeSet<u32> = first.iter().map(|e| e.entity).collect();
@@ -2032,6 +2333,9 @@ impl OcctKernel {
                     .collect();
                 if edges.is_empty() {
                     return Err(not_supported("face blends between faces that do not meet"));
+                }
+                if *profile != BlendProfile::Circular {
+                    return l.section_blend(&edges, *radius, *profile);
                 }
                 l.fillet(&edges, *radius, &[])
             }
@@ -2122,10 +2426,38 @@ impl OcctKernel {
                 parting,
                 step,
             } => {
-                if *step {
-                    return Err(not_supported("step drafts"));
-                }
                 let operand = single_operand(faces)?;
+                if *step {
+                    // A step face is needed only where two drafted neighbours hinge at different
+                    // heights; where they all hinge at one height the step draft is the
+                    // parting-line draft.
+                    let t = &l.body(operand)?.topology;
+                    let pull = norm(neutral.z);
+                    let height = |f: u32| -> Option<f64> {
+                        let hs: Vec<f64> = parting
+                            .iter()
+                            .filter_map(|p| t.edges.get(p.entity as usize))
+                            .filter(|e| e.faces.contains(&f))
+                            .flat_map(|e| [e.geom.start, e.geom.end])
+                            .map(|q| dot(sub(q, neutral.origin), pull))
+                            .collect();
+                        (!hs.is_empty()).then(|| hs.iter().sum::<f64>() / hs.len() as f64)
+                    };
+                    let drafted: BTreeSet<u32> = faces.iter().map(|f| f.entity).collect();
+                    for e in &t.edges {
+                        let [f, g] = e.faces;
+                        if f == g || !drafted.contains(&f) || !drafted.contains(&g) {
+                            continue;
+                        }
+                        if let (Some(a), Some(b)) = (height(f), height(g)) {
+                            if (a - b).abs() > 1e-9 {
+                                return Err(not_supported(
+                                    "step faces between drafted faces hinged at different heights",
+                                ));
+                            }
+                        }
+                    }
+                }
                 let slot = l.operand(operand)?;
                 let mut ints = vec![slot, operand as i64, faces.len() as i64];
                 ints.extend(faces.iter().map(|f| f.entity as i64));
@@ -2668,8 +3000,8 @@ impl OcctKernel {
         // body per instance and leaves the operands as they are.
         let mut current: Option<i64> = None;
         let mut touched = false;
-        for si in 0..seeds.len() {
-            let mode = seeds[si].combine;
+        for (si, seed) in seeds.iter().enumerate() {
+            let mode = seed.combine;
             if (0..instances.len()).any(|ii| seed_at(ii, si).combine != mode) {
                 return Err(failed(
                     "a variable pattern's instances must combine as their seed",
@@ -2702,10 +3034,8 @@ impl OcctKernel {
                     );
                     continue;
                 }
-                if n == 0 && current.is_none() {
-                    if mode != Combine::Add {
-                        return Err(failed("there is no body to combine the tool with"));
-                    }
+                if n == 0 && current.is_none() && mode != Combine::Add {
+                    return Err(failed("there is no body to combine the tool with"));
                 }
                 let op = match mode {
                     Combine::Add => 0,

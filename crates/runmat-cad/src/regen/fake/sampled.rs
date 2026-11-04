@@ -44,7 +44,14 @@ pub(super) enum Curve2 {
         c: [f64; 2],
         r: f64,
     },
+    /// A free-form curve (ellipse, spline) as a fine polyline from start to end.
+    Poly {
+        pts: Vec<[f64; 2]>,
+    },
 }
+
+/// Polyline points per free-form profile curve.
+const POLY_SAMPLES: usize = 64;
 
 fn d2(a: [f64; 2], b: [f64; 2]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
@@ -92,6 +99,9 @@ impl Curve2 {
                     sweep,
                 }
             }
+            SegmentKind::Ellipse { .. } | SegmentKind::Spline { .. } => Curve2::Poly {
+                pts: s.polyline(POLY_SAMPLES),
+            },
         }
     }
 
@@ -100,12 +110,26 @@ impl Curve2 {
             Curve2::Line { .. } => 1,
             Curve2::Arc { sweep, .. } => ((sweep.abs() / (PI / 24.0)).ceil() as usize).max(2),
             Curve2::Circle { .. } => 48,
+            Curve2::Poly { pts } => pts.len() - 1,
         }
     }
 
     /// `n + 1` points from start to end (`n` from [`Curve2::samples`] or more).
     pub(super) fn polyline(&self, n: usize) -> Vec<[f64; 2]> {
         let n = n.max(1);
+        if let Curve2::Poly { pts } = self {
+            // Even steps along the polyline's own points.
+            let m = pts.len() - 1;
+            return (0..=n)
+                .map(|i| {
+                    let x = i as f64 * m as f64 / n as f64;
+                    let k = (x.floor() as usize).min(m.saturating_sub(1));
+                    let f = x - k as f64;
+                    let (a, b) = (pts[k], pts[(k + 1).min(m)]);
+                    [a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1])]
+                })
+                .collect();
+        }
         (0..=n)
             .map(|i| {
                 let t = i as f64 / n as f64;
@@ -119,6 +143,7 @@ impl Curve2 {
                         let a = t * TAU;
                         [c[0] + r * a.cos(), c[1] + r * a.sin()]
                     }
+                    Curve2::Poly { .. } => unreachable!("handled above"),
                 }
             })
             .collect()
@@ -128,6 +153,10 @@ impl Curve2 {
         match self {
             Curve2::Line { a, b } => seg_dist(p, *a, *b),
             Curve2::Circle { c, r } => (d2(p, *c) - r).abs(),
+            Curve2::Poly { pts } => pts
+                .windows(2)
+                .map(|w| seg_dist(p, w[0], w[1]))
+                .fold(f64::INFINITY, f64::min),
             Curve2::Arc { c, r, a0, sweep } => {
                 // As the counter-clockwise arc over the same points.
                 let (a0, sweep) = if *sweep < 0.0 {
@@ -1074,6 +1103,7 @@ fn side_hint(c: &Curve2, to_world: &Transform) -> SurfaceKind {
             axis_direction: to_world.apply_vector([0.0, 0.0, 1.0]),
             radius: *r,
         },
+        Curve2::Poly { .. } => SurfaceKind::Other,
     }
 }
 

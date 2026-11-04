@@ -54,6 +54,9 @@
 #include <GeomLib_IsPlanarSurface.hxx>
 #include <Geom2d_Curve.hxx>
 #include <Geom_Plane.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <Geom_BezierCurve.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Failure.hxx>
@@ -85,6 +88,9 @@
 
 namespace runmat_geometry_io {
 namespace occt_kernel {
+
+// A label a later step removes (the Rust side's INTERNAL).
+constexpr std::uint32_t kInternalLabel = 0xfffffffeu;
 
 // ------------------------------------------------------------------------- errors
 
@@ -2345,6 +2351,153 @@ Tracked trim_to_next(const Exec& x, const KInstr& in) {
   return out;
 }
 
+// ---- conic and curvature-continuous blends
+
+// op 43: ints [slot, operand, edge label base, n, edges (n), profile (0 conic, 1 curvature)],
+// reals [radius, rho]. Each straight edge between two planar faces is blended by a section
+// swept along it: tangent to both faces at the setback a circular blend of `radius` has
+// (radius / tan(α/2) from the edge, α the angle between the faces). The section is a conic of
+// `rho` (a rational quadratic through the corner point) or a quartic whose ends have zero
+// curvature (curvature-continuous with the planes). The region between the section and the
+// edge is cut away (a convex edge) or filled (a concave edge). The edge's ends must be planar
+// faces square to it.
+Tracked do_section_blend(const Exec& x, const KInstr& in) {
+  const auto& I = in.ints;
+  const Tracked& src = x.slot(I[0]);
+  const std::int64_t operand = I[1];
+  const std::int64_t base = I[2];
+  const std::int64_t n = I[3];
+  const int kind = static_cast<int>(I[4 + n]);
+  const double radius = in.reals[0];
+  const double rho = in.reals[1];
+  if (radius <= 0) fail("a blend needs a positive radius");
+  if (kind == 0 && (rho <= 0.0 || rho >= 1.0)) fail("a conic blend's rho must lie between 0 and 1");
+  const Body& b = x.operand(operand);
+  TopTools_IndexedDataMapOfShapeListOfShape ef, vf;
+  TopExp::MapShapesAndUniqueAncestors(b.shape, TopAbs_EDGE, TopAbs_FACE, ef);
+  TopExp::MapShapesAndUniqueAncestors(b.shape, TopAbs_VERTEX, TopAbs_FACE, vf);
+  std::vector<Tracked> cut_tools, fill_tools;
+  for (std::int64_t i = 0; i < n; ++i) {
+    const std::int64_t ei = I[4 + i];
+    const TopoDS_Edge e = x.edge(operand, ei);
+    BRepAdaptor_Curve c(e);
+    if (c.GetType() != GeomAbs_Line) unsupported("conic and curvature-continuous blends of curved edges");
+    const TopTools_ListOfShape& fs = ef.FindFromKey(e);
+    if (fs.Extent() != 2) fail("a blended edge needs two faces");
+    const TopoDS_Face f1 = TopoDS::Face(fs.First()), f2 = TopoDS::Face(fs.Last());
+    gp_Pnt p0 = c.Value(c.FirstParameter()), p1 = c.Value(c.LastParameter());
+    const gp_Vec along(p0, p1);
+    const double len = along.Magnitude();
+    if (len < 1e-12) fail("a blended edge has no length");
+    const gp_Dir t(along);
+    // Per face: its outward normal and the direction into it across the edge.
+    auto side = [&](const TopoDS_Face& f, gp_Dir& normal, gp_Dir& into) {
+      BRepAdaptor_Surface s(f, Standard_True);
+      if (s.GetType() != GeomAbs_Plane) unsupported("conic and curvature-continuous blends next to curved faces");
+      normal = s.Plane().Axis().Direction();
+      if (!s.Plane().Direct()) normal.Reverse();
+      if (f.Orientation() == TopAbs_REVERSED) normal.Reverse();
+      into = gp_Dir(gp_Vec(t).Crossed(gp_Vec(normal)));
+      const gp_Pnt m = c.Value(0.5 * (c.FirstParameter() + c.LastParameter()));
+      const double probe = std::min(radius, len) * 1e-3;
+      gp_Pnt q = m.Translated(gp_Vec(into) * probe);
+      BRepClass_FaceClassifier fc(f, q, 1e-9);
+      if (fc.State() != TopAbs_IN) into.Reverse();
+    };
+    gp_Dir n1, n2, d1, d2;
+    side(f1, n1, d1);
+    side(f2, n2, d2);
+    const double cosa = gp_Vec(d1).Dot(gp_Vec(d2));
+    const double alpha = std::acos(std::max(-1.0, std::min(1.0, cosa)));
+    if (alpha < 1e-6 || alpha > M_PI - 1e-6) unsupported("blends of an edge where its two faces meet tangentially");
+    const bool convex = gp_Vec(n1).Dot(gp_Vec(d2)) < 0;
+    const double s = radius / std::tan(alpha / 2.0);
+    // The edge's ends: planar faces square to it. The swept section's caps continue them.
+    TopoDS_Shape ends[2];
+    {
+      const TopoDS_Vertex vs[2] = {TopExp::FirstVertex(e, Standard_True), TopExp::LastVertex(e, Standard_True)};
+      for (int k = 0; k < 2; ++k) {
+        for (const TopoDS_Shape& g : vf.FindFromKey(vs[k])) {
+          if (g.IsSame(f1) || g.IsSame(f2)) continue;
+          BRepAdaptor_Surface gs(TopoDS::Face(g), Standard_True);
+          if (gs.GetType() != GeomAbs_Plane || !gs.Plane().Axis().Direction().IsParallel(t, 1e-9))
+            unsupported("conic and curvature-continuous blends of edges whose ends are not square faces");
+          if (ends[k].IsNull()) ends[k] = g;
+        }
+      }
+      // The first vertex is where the section starts.
+      if (BRep_Tool::Pnt(vs[0]).Distance(p0) > 1e-9) std::swap(ends[0], ends[1]);
+    }
+    // The section in the plane square to the edge at its start.
+    const gp_Pnt V = p0;
+    const gp_Pnt T1 = V.Translated(gp_Vec(d1) * s), T2 = V.Translated(gp_Vec(d2) * s);
+    Handle(Geom_Curve) arc;
+    if (kind == 0) {
+      TColgp_Array1OfPnt poles(1, 3);
+      poles(1) = T1; poles(2) = V; poles(3) = T2;
+      TColStd_Array1OfReal w(1, 3);
+      w(1) = 1.0; w(2) = rho / (1.0 - rho); w(3) = 1.0;
+      arc = new Geom_BezierCurve(poles, w);
+    } else {
+      TColgp_Array1OfPnt poles(1, 5);
+      poles(1) = T1;
+      poles(2) = gp_Pnt(0.5 * (T1.XYZ() + V.XYZ()));
+      poles(3) = V;
+      poles(4) = gp_Pnt(0.5 * (T2.XYZ() + V.XYZ()));
+      poles(5) = T2;
+      arc = new Geom_BezierCurve(poles);
+    }
+    BRepBuilderAPI_MakeWire mw;
+    const TopoDS_Edge ce = BRepBuilderAPI_MakeEdge(arc).Edge();
+    mw.Add(ce);
+    mw.Add(BRepBuilderAPI_MakeEdge(T2, V).Edge());
+    mw.Add(BRepBuilderAPI_MakeEdge(V, T1).Edge());
+    if (!mw.IsDone()) fail("the blend section could not be closed");
+    BRepBuilderAPI_MakeFace mf(mw.Wire(), Standard_True);
+    if (!mf.IsDone()) fail("the blend section is not planar");
+    BRepPrimAPI_MakePrism mk(mf.Face(), along, Standard_True);
+    if (!mk.IsDone()) fail("the blend could not be swept along its edge");
+    Tracked tool;
+    tool.shape = mk.Shape();
+    const TopoDS_Shape blend = mk.Generated(ce).First();
+    for (TopExp_Explorer ex(tool.shape, TopAbs_FACE); ex.More(); ex.Next()) {
+      const TopoDS_Shape& g = ex.Current();
+      if (g.IsSame(blend)) {
+        add_origins(tool.faces, g, label(lab(base + ei)));
+      } else if (g.IsSame(mk.FirstShape()) && !ends[0].IsNull()) {
+        add_origins(tool.faces, g, origins_of(src.faces, ends[0]));
+      } else if (g.IsSame(mk.LastShape()) && !ends[1].IsNull()) {
+        add_origins(tool.faces, g, origins_of(src.faces, ends[1]));
+      } else {
+        add_origins(tool.faces, g, label(kInternalLabel));
+      }
+    }
+    (convex ? cut_tools : fill_tools).push_back(std::move(tool));
+  }
+  Tracked cur = src;
+  for (int pass = 0; pass < 2; ++pass) {
+    std::vector<Tracked>& tools = pass == 0 ? cut_tools : fill_tools;
+    if (tools.empty()) continue;
+    std::vector<const Tracked*> tp;
+    for (const Tracked& t : tools) tp.push_back(&t);
+    cur = boolean_op(pass == 0 ? 1 : 0, {&cur}, tp);
+  }
+  // Only the swept sections' blend faces may be new: any other tool face on the result means
+  // the section ran past its edge.
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(cur.shape, TopAbs_FACE, faces);
+  for (int i = 1; i <= faces.Extent(); ++i) {
+    const Origins& o = origins_of(cur.faces, faces(i));
+    Origins kept;
+    for (const Origin& g : o)
+      if (!(g.kind == kLabel && g.a == kInternalLabel)) kept.push_back(g);
+    if (kept.empty()) fail("a conic or curvature-continuous blend ran past its edge");
+    if (Origins* m = cur.faces.ChangeSeek(faces(i))) *m = kept;
+  }
+  require_labels(cur, "the blend");
+  return cur;
+}
+
 // ---- mid-surfaces
 
 // op 40: ints [operand, neighbour label base, none label, n pairs, then per pair: face a,
@@ -2548,6 +2701,7 @@ KResult kernel_execute(rust::Slice<const KInstr> program,
         case 39: t = do_offset_sheet(x, in); break;
         case 40: t = do_mid_surface(x, in); break;
         case 41: t = trim_to_next(x, in); break;
+        case 43: t = do_section_blend(x, in); break;
         case 35: t = do_delete_hole(x, in); break;
         case 36: t = do_fill(x, in); break;
         case 34: t = do_ruled(x, in); t.sheet = true; break;

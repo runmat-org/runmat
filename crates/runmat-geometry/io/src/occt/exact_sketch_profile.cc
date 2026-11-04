@@ -200,7 +200,9 @@ TopoDS_Edge make_segment(const gp_Ax3& f, std::int64_t kind, Reader& rd, TopoDS_
         return BRepBuilderAPI_MakeEdge(bs).Edge();
       }
       const gp_Pnt a = bs->StartPoint(), b = bs->EndPoint();
-      TopoDS_Vertex va = vertex_at(a, last), vb = end_vertex(b);
+      TopoDS_Vertex va = vertex_at(a, last);
+      // A closed spline that is a loop on its own starts and ends on one vertex.
+      TopoDS_Vertex vb = (first.IsNull() && last.IsNull() && a.Distance(b) < 1e-9) ? va : end_vertex(b);
       TopoDS_Edge e = BRepBuilderAPI_MakeEdge(bs, va, vb).Edge();
       last = vb;
       return e;

@@ -2596,21 +2596,7 @@ impl FakeKernel {
                                     let mut m = seg.clone();
                                     m.start = map(seg.start);
                                     m.end = map(seg.end);
-                                    m.kind = match &seg.kind {
-                                        SegmentKind::Line => SegmentKind::Line,
-                                        SegmentKind::Arc { center, clockwise } => {
-                                            SegmentKind::Arc {
-                                                center: map(*center),
-                                                clockwise: *clockwise,
-                                            }
-                                        }
-                                        SegmentKind::Circle { center, radius } => {
-                                            SegmentKind::Circle {
-                                                center: map(*center),
-                                                radius: *radius,
-                                            }
-                                        }
-                                    };
+                                    m.kind = seg.kind.mapped(&map);
                                     sampled::Curve2::from_segment(&m)
                                 })
                                 .collect()

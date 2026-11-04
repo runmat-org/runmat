@@ -967,3 +967,499 @@ fn k1_loft_between_sections_with_different_curve_counts() {
     }
     assert_eq!(body.topology.faces.len(), 6);
 }
+
+// ------------------------------------------------------------------- drafts
+
+#[test]
+fn k1_step_draft_with_one_hinge_height_is_the_parting_line_draft() {
+    let k = KernelUnderTest::new();
+    let b = block(&k);
+    let bottom = face_of_block(&k, &start_cap());
+    let sides: Vec<u32> = ["c1", "c2", "c3", "c4"]
+        .iter()
+        .map(|c| face_of_block(&k, &side(c)))
+        .collect();
+    let parting: Vec<OperandEntity> = b
+        .topology
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.faces.contains(&bottom) && sides.iter().any(|s| e.faces.contains(s)))
+        .map(|(i, _)| entity(0, i as u32))
+        .collect();
+    assert_eq!(parting.len(), 4);
+    let op = |step: bool| KernelOp::Draft {
+        faces: sides.iter().map(|f| entity(0, *f)).collect(),
+        neutral: Frame::WORLD,
+        angle: 4f64.to_radians(),
+        parting: parting.clone(),
+        step,
+    };
+    let stepped = k.execute(&op(true), &[&b.handle]).expect("step draft");
+    let plain = k.execute(&op(false), &[&b.handle]).expect("parting draft");
+    // The reference kernel drafts one side of the block (its grid cannot rebuild four).
+    let one = KernelOp::Draft {
+        faces: vec![entity(0, sides[0])],
+        neutral: Frame::WORLD,
+        angle: 4f64.to_radians(),
+        parting: parting
+            .iter()
+            .filter(|e| {
+                b.topology.edges[e.entity as usize]
+                    .faces
+                    .contains(&sides[0])
+            })
+            .copied()
+            .collect(),
+        step: true,
+    };
+    same_history_as_reference(&|k| vec![block(k)], &one);
+    let (vs, _) = volume(&k, &stepped.bodies[0]);
+    let (vp, _) = volume(&k, &plain.bodies[0]);
+    assert!(close(vs, vp, 1e-12), "{vs} vs {vp}");
+    let t = 4f64.to_radians().tan();
+    let narrowing = L * W * H - (L + W) * t * H * H + 4.0 * t * t * H * H * H / 3.0;
+    assert!(close(vs, narrowing, 1e-7), "{vs} vs {narrowing}");
+}
+
+// ------------------------------------------------------------------- free-form profile curves
+
+fn prism_of(segs: Vec<ProfileSegment>, h: f64) -> KernelOp {
+    new_tool(ToolShape::prism(
+        CanonicalProfile {
+            frame: Frame::WORLD,
+            loops: vec![segs],
+            merge_collinear: false,
+        },
+        0.0,
+        h,
+    ))
+}
+
+#[test]
+fn k1_ellipse_and_spline_profiles() {
+    let k = KernelUnderTest::new();
+    let (a, b) = (0.03, 0.012);
+    // A whole ellipse, tilted 30°.
+    let t = 30f64.to_radians();
+    let start = [a * t.cos(), a * t.sin()];
+    let whole = ProfileSegment {
+        curve: SketchEntityId::new("e"),
+        kind: SegmentKind::Ellipse {
+            center: [0.0, 0.0],
+            major: start,
+            ratio: b / a,
+            clockwise: false,
+        },
+        start,
+        end: start,
+    };
+    let out = k.execute(&prism_of(vec![whole], H), &[]).expect("ellipse");
+    let (v, c) = volume(&k, &out.bodies[0]);
+    assert!(close(v, std::f64::consts::PI * a * b * H, 1e-9), "{v}");
+    assert!(c[0].abs() < 1e-12 && c[1].abs() < 1e-12);
+    face_of(&out, 0, &side("e"));
+    // Half an ellipse closed by its major axis, clockwise from (-a, 0) over the top... drawn
+    // as the counter-clockwise arc from (a, 0) to (-a, 0) and the line back.
+    let half = vec![
+        ProfileSegment {
+            curve: SketchEntityId::new("arc"),
+            kind: SegmentKind::Ellipse {
+                center: [0.0, 0.0],
+                major: [a, 0.0],
+                ratio: b / a,
+                clockwise: false,
+            },
+            start: [a, 0.0],
+            end: [-a, 0.0],
+        },
+        line("base", [-a, 0.0], [a, 0.0]),
+    ];
+    let out = k.execute(&prism_of(half, H), &[]).expect("half ellipse");
+    let (v, c) = volume(&k, &out.bodies[0]);
+    assert!(
+        close(v, std::f64::consts::PI * a * b * H / 2.0, 1e-9),
+        "{v}"
+    );
+    // The half-ellipse centroid: 4b / 3π above the axis.
+    assert!(
+        (c[1] - 4.0 * b / (3.0 * std::f64::consts::PI)).abs() < 1e-9,
+        "{c:?}"
+    );
+    // A cubic spline edge closing a region with two lines; and a rational one.
+    for weights in [Vec::new(), vec![1.0, 0.6, 0.6, 1.0]] {
+        let spline = ProfileSegment {
+            curve: SketchEntityId::new("s"),
+            kind: SegmentKind::Spline {
+                degree: 3,
+                poles: vec![[L, 0.0], [L, W], [L / 2.0, W], [0.0, W]],
+                weights: weights.clone(),
+                knots: vec![0.0, 1.0],
+                multiplicities: vec![4, 4],
+            },
+            start: [L, 0.0],
+            end: [0.0, W],
+        };
+        let pts = spline.polyline(20000);
+        let segs = vec![
+            line("l1", [0.0, 0.0], [L, 0.0]),
+            spline,
+            line("l2", [0.0, W], [0.0, 0.0]),
+        ];
+        let mut poly = vec![[0.0, 0.0]];
+        poly.extend(pts);
+        let area = shoelace(&poly);
+        let out = k.execute(&prism_of(segs, H), &[]).expect("spline");
+        let (v, _) = volume(&k, &out.bodies[0]);
+        // OCCT integrates the free-form side face to about 1e-7 relative.
+        assert!(close(v, area * H, 1e-6), "{v} vs {}", area * H);
+        assert_eq!(out.bodies[0].topology.faces.len(), 5);
+        face_of(&out, 0, &side("s"));
+    }
+}
+
+#[test]
+fn k1_thin_walls_along_open_profiles() {
+    let k = KernelUnderTest::new();
+    // An L: along x then up y, 2 mm inside (left of travel), 1 mm outside.
+    let chain = vec![
+        line("a", [0.0, 0.0], [0.04, 0.0]),
+        line("b", [0.04, 0.0], [0.04, 0.03]),
+    ];
+    let thin = ThinWallSpec {
+        inside: 0.002,
+        outside: 0.001,
+        cap: None,
+    };
+    let op = |chain: Vec<ProfileSegment>| {
+        new_tool(ToolShape::Prism {
+            profile: CanonicalProfile {
+                frame: Frame::WORLD,
+                loops: vec![chain],
+                merge_collinear: false,
+            },
+            start: 0.0,
+            end: H,
+            start_bound: PrismBound::Blind,
+            end_bound: PrismBound::Blind,
+            draft: None,
+            thin: Some(thin),
+        })
+    };
+    let out = k.execute(&op(chain), &[]).expect("open thin");
+    let body = &out.bodies[0];
+    // Outer corner at (0.041, -0.001), inner at (0.038, 0.002): the L's area.
+    let outer = [
+        [0.0, -0.001],
+        [0.041, -0.001],
+        [0.041, 0.03],
+        [0.038, 0.03],
+        [0.038, 0.002],
+        [0.0, 0.002],
+    ];
+    let (v, _) = volume(&k, body);
+    assert!(close(v, shoelace(&outer) * H, 1e-9), "{v}");
+    assert_eq!(body.topology.faces.len(), 8);
+    for c in ["a", "b"] {
+        face_of(&out, 0, &side(c));
+        face_of(
+            &out,
+            0,
+            &generated(
+                Role::ThinWall,
+                KernelTag::Curve {
+                    profile: 0,
+                    curve: SketchEntityId::new(c),
+                },
+            ),
+        );
+    }
+    let end = |c: &str, o: u32| HistorySource::Generated {
+        role: Role::ThinWall,
+        tag: KernelTag::Curve {
+            profile: 0,
+            curve: SketchEntityId::new(c),
+        },
+        ordinal: Some(o),
+        seed: None,
+        instance: None,
+    };
+    face_of(&out, 0, &end("a", 2));
+    face_of(&out, 0, &end("b", 3));
+    // A line into a quarter arc (tangent): the wall follows the arc at radius 10 ± mm.
+    let r = 0.01;
+    let chain = vec![
+        line("l", [0.0, 0.0], [0.02, 0.0]),
+        ProfileSegment {
+            curve: SketchEntityId::new("q"),
+            kind: SegmentKind::Arc {
+                center: [0.02, r],
+                clockwise: false,
+            },
+            start: [0.02, 0.0],
+            end: [0.02 + r, r],
+        },
+    ];
+    let out = k.execute(&op(chain), &[]).expect("open thin with an arc");
+    let (v, _) = volume(&k, &out.bodies[0]);
+    let band = 0.003;
+    let ring = std::f64::consts::PI / 4.0 * ((r + 0.001).powi(2) - (r - 0.002).powi(2));
+    assert!(close(v, (0.02 * band + ring) * H, 1e-9), "{v}");
+}
+
+// ------------------------------------------------------------------- conic and G2 blends
+
+/// The region between a blend section and its corner, for a 90° edge with setback `s`, the
+/// section given as a polyline from one tangent point to the other in edge-local coordinates
+/// (the corner at the origin, the faces along the axes).
+fn corner_area(section: &[[f64; 2]]) -> f64 {
+    let mut p = section.to_vec();
+    p.push([0.0, 0.0]);
+    shoelace(&p)
+}
+
+fn bezier(poles: &[[f64; 2]], t: f64) -> [f64; 2] {
+    let mut q = poles.to_vec();
+    while q.len() > 1 {
+        q = q
+            .windows(2)
+            .map(|w| {
+                [
+                    w[0][0] + t * (w[1][0] - w[0][0]),
+                    w[0][1] + t * (w[1][1] - w[0][1]),
+                ]
+            })
+            .collect();
+    }
+    q[0]
+}
+
+#[test]
+fn k1_conic_and_curvature_blends_of_straight_edges() {
+    let k = KernelUnderTest::new();
+    let b = block(&k);
+    let top = face_of_block(&k, &end_cap());
+    let front = face_of_block(&k, &side("c1"));
+    let edge = b
+        .topology
+        .edges
+        .iter()
+        .position(|e| e.faces.contains(&top) && e.faces.contains(&front))
+        .expect("top front edge") as u32;
+    let r = 0.003;
+    let blend = generated(
+        Role::Blend,
+        KernelTag::InputEdge {
+            edge: entity(0, edge),
+        },
+    );
+    // A conic of rho 0.5 is a parabola: the corner region is a sixth of the setback squared.
+    let out = k
+        .execute(
+            &KernelOp::Fillet {
+                edges: vec![entity(0, edge)],
+                radius: r,
+                variable: Vec::new(),
+                profile: BlendProfile::Conic { rho: 0.5 },
+                setbacks: Vec::new(),
+            },
+            &[&b.handle],
+        )
+        .expect("conic");
+    let (v, _) = volume(&k, &out.bodies[0]);
+    assert!(close(v, L * W * H - L * r * r / 6.0, 1e-9), "{v}");
+    face_of(&out, 0, &blend);
+    assert_eq!(out.bodies[0].topology.faces.len(), 7);
+    // Curvature-continuous: the quartic through the corner.
+    let poles = [
+        [r, 0.0],
+        [r / 2.0, 0.0],
+        [0.0, 0.0],
+        [0.0, r / 2.0],
+        [0.0, r],
+    ];
+    let section: Vec<[f64; 2]> = (0..=4000)
+        .map(|i| bezier(&poles, i as f64 / 4000.0))
+        .collect();
+    let out = k
+        .execute(
+            &KernelOp::FaceBlend {
+                first: vec![entity(0, top)],
+                second: vec![entity(0, front)],
+                radius: r,
+                profile: BlendProfile::Curvature,
+            },
+            &[&b.handle],
+        )
+        .expect("curvature");
+    let (v, _) = volume(&k, &out.bodies[0]);
+    let want = L * W * H - L * corner_area(&section);
+    assert!(close(v, want, 1e-7), "{v} vs {want}");
+    face_of(&out, 0, &blend);
+    // A concave edge (the step's foot) is filled.
+    let s = stepped(&k);
+    let foot = s
+        .topology
+        .edges
+        .iter()
+        .position(|e| {
+            [e.geom.start, e.geom.end]
+                .iter()
+                .all(|p| (p[0] - L / 2.0).abs() < 1e-9 && (p[2] - H).abs() < 1e-9)
+        })
+        .expect("the step's foot") as u32;
+    let out = k
+        .execute(
+            &KernelOp::Fillet {
+                edges: vec![entity(0, foot)],
+                radius: r,
+                variable: Vec::new(),
+                profile: BlendProfile::Conic { rho: 0.5 },
+                setbacks: Vec::new(),
+            },
+            &[&s.handle],
+        )
+        .expect("concave conic");
+    let (v0, _) = volume(&k, &s);
+    let (v, _) = volume(&k, &out.bodies[0]);
+    assert!(close(v, v0 + W * r * r / 6.0, 1e-9), "{v} vs {v0}");
+    face_of(
+        &out,
+        0,
+        &generated(
+            Role::Blend,
+            KernelTag::InputEdge {
+                edge: entity(0, foot),
+            },
+        ),
+    );
+}
+
+// ------------------------------------------------------------------- sheet metal hems
+
+#[test]
+fn k1_closed_and_open_hems_name_their_faces_as_the_reference_kernel_does() {
+    use crate::common::{mm, sketch, Env};
+    use runmat_cad::ids::FeatureId;
+    use runmat_cad::model::sheet_metal::*;
+    use runmat_cad::model::*;
+    use runmat_cad::refs::*;
+    use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest};
+    let mut s = Sketch {
+        plane: PlaneRef::Datum {
+            datum: DatumRef::OriginPlane {
+                plane: OriginPlane::Zx,
+            },
+        },
+        entities: Vec::new(),
+        constraints: Vec::new(),
+        solved: Default::default(),
+    };
+    let pts = [(0.0, 30.0), (0.0, 0.0), (50.0, 0.0)];
+    for (k, name) in ["up", "base"].iter().enumerate() {
+        s.entities.push(SketchEntity {
+            id: SketchEntityId::new(*name),
+            geometry: SketchGeometry::Line {
+                start: PointExpr::mm(pts[k].0, pts[k].1),
+                end: PointExpr::mm(pts[k + 1].0, pts[k + 1].1),
+            },
+            construction: false,
+        });
+    }
+    let named = |role: Role, key: &str, o: u32| {
+        Reference::face(EntityName::Generated(GenerationName {
+            feature: FeatureId::new("base"),
+            role,
+            tag: SourceTag::Key { key: key.into() },
+            ordinal: Some(o),
+        }))
+    };
+    for kind in [HemKind::Closed, HemKind::Open { gap: mm(1.0) }] {
+        let mut d = PartDocument::new("hem.part");
+        d.features.push(sketch("s_chain", s.clone()));
+        d.features.push(Feature::new(
+            "base",
+            FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange {
+                profile: ProfileRef::sketch("s_chain"),
+                depth: Some(mm(40.0)),
+                side: MaterialSide::Left,
+                rules: SheetMetalRules {
+                    thickness: mm(2.0),
+                    bend_radius: mm(3.0),
+                    rule: BendRule::KFactor {
+                        k: runmat_cad::value::ValueExpr::number(0.44),
+                    },
+                    gauge: None,
+                    relief: ReliefKind::Tear,
+                },
+            }),
+        ));
+        d.features.push(Feature::new(
+            "hem",
+            FeatureKind::SheetMetal(SheetMetalFeature::Hem {
+                edges: vec![Reference::edges_between(
+                    named(Role::SheetFace, "base", 0),
+                    named(Role::SheetEdge, "base", 1),
+                )],
+                kind: kind.clone(),
+                length: mm(8.0),
+            }),
+        ));
+        let env = Env::new();
+        let r = env.regen(&d);
+        assert!(r.status("hem").unwrap().ran(), "{:?}", r.diagnostics);
+        let fake = FakeKernel::new();
+        let ctx = RegenContext {
+            kernel: &fake,
+            ..env.ctx()
+        };
+        let reference = regenerate(
+            &d,
+            &ctx,
+            &RegenRequest::default(),
+            &mut RegenCache::default(),
+        );
+        let hem_names = |r: &runmat_cad::regen::RegenResult| {
+            let mut v: Vec<String> = r
+                .state
+                .bodies
+                .iter()
+                .flat_map(|b| b.names.faces.iter())
+                .flatten()
+                .filter(|n| matches!(n, EntityName::Generated(g) if g.feature.0 == "hem"))
+                .map(|n| format!("{n:?}"))
+                .collect();
+            v.sort();
+            v
+        };
+        let names = hem_names(&r);
+        assert!(!names.is_empty());
+        if reference.status("hem").map(|s| s.ran()).unwrap_or(false) {
+            assert_eq!(names, hem_names(&reference), "{kind:?}");
+        }
+        // The hem adds its half-turn fold and its flat: depth × t × (length + π (r + t/2)),
+        // r the fold's inner radius (half the gap; a hundredth of t when closed).
+        let k = KernelUnderTest::new();
+        let vol = |r: &runmat_cad::regen::RegenResult| {
+            volume(
+                &k,
+                &KernelBody {
+                    handle: r.state.bodies[0].handle.clone(),
+                    topology: r.state.bodies[0].topology.clone(),
+                },
+            )
+            .0
+        };
+        let mut plain = d.clone();
+        plain.features.pop();
+        let before = vol(&env.regen(&plain));
+        let t = 0.002;
+        let inner = match kind {
+            HemKind::Closed => t * 0.01,
+            _ => 0.0005,
+        };
+        let want = 0.04 * t * (0.008 + std::f64::consts::PI * (inner + t / 2.0));
+        let added = vol(&r) - before;
+        assert!(close(added, want, 1e-6), "{kind:?}: {added} vs {want}");
+    }
+}

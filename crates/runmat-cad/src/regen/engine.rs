@@ -2372,8 +2372,13 @@ fn build_loops(
     }
     let area = |l: &Vec<ProfileSegment>| -> f64 {
         l.iter()
-            .map(|s| match s.kind {
+            .map(|s| match &s.kind {
                 SegmentKind::Circle { radius, .. } => std::f64::consts::PI * radius * radius,
+                SegmentKind::Ellipse { .. } | SegmentKind::Spline { .. } => s
+                    .polyline(64)
+                    .windows(2)
+                    .map(|w| (w[0][0] * w[1][1] - w[1][0] * w[0][1]) / 2.0)
+                    .sum::<f64>(),
                 _ => (s.start[0] * s.end[1] - s.end[0] * s.start[1]) / 2.0,
             })
             .sum::<f64>()
@@ -2394,14 +2399,37 @@ fn build_loops(
 
 fn reverse_segment(s: &mut ProfileSegment) {
     std::mem::swap(&mut s.start, &mut s.end);
-    if let SegmentKind::Arc { clockwise, .. } = &mut s.kind {
-        *clockwise = !*clockwise;
+    match &mut s.kind {
+        SegmentKind::Arc { clockwise, .. } | SegmentKind::Ellipse { clockwise, .. } => {
+            *clockwise = !*clockwise;
+        }
+        SegmentKind::Spline {
+            poles,
+            weights,
+            knots,
+            multiplicities,
+            ..
+        } => {
+            poles.reverse();
+            weights.reverse();
+            let (lo, hi) = (
+                knots.first().copied().unwrap_or(0.0),
+                knots.last().copied().unwrap_or(1.0),
+            );
+            for k in knots.iter_mut() {
+                *k = lo + hi - *k;
+            }
+            knots.reverse();
+            multiplicities.reverse();
+        }
+        SegmentKind::Line | SegmentKind::Circle { .. } => {}
     }
 }
 
 /// Points along a segment from start to end: the ends for a line, samples for an arc.
 fn segment_samples(s: &ProfileSegment) -> Vec<[f64; 2]> {
     match s.kind {
+        SegmentKind::Ellipse { .. } | SegmentKind::Spline { .. } => s.polyline(24),
         SegmentKind::Line => vec![s.start, s.end],
         SegmentKind::Arc { center, clockwise } => {
             let r = ((s.start[0] - center[0]).powi(2) + (s.start[1] - center[1]).powi(2)).sqrt();

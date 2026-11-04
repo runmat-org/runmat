@@ -195,11 +195,11 @@ fn holes_of(m: &RegeneratedModel<'_>) -> Vec<HoleInstance> {
 }
 
 /// The hole whose axis is the line through `point` along `direction`.
-fn hole_on_axis<'h>(
-    holes: &'h [HoleInstance],
+fn hole_on_axis(
+    holes: &[HoleInstance],
     point: [f64; 3],
     direction: [f64; 3],
-) -> Option<&'h HoleInstance> {
+) -> Option<&HoleInstance> {
     let d = unit3(direction);
     holes.iter().find(|h| {
         let a = unit3(h.axis);
