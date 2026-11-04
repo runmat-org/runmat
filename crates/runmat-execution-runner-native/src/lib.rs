@@ -137,7 +137,7 @@ pub use analysis_modal::{
     CompletedStructuralModalStudy,
 };
 pub use analysis_modal_frequency::{
-    execute_structural_modal_frequency_study_locally,
+    execute_structural_modal_frequency_study_locally_with_source,
     execute_structural_modal_frequency_study_remotely, CompletedStructuralModalFrequencyStudy,
 };
 pub use analysis_modal_transient::{

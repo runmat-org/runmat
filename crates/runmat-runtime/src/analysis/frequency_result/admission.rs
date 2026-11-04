@@ -64,6 +64,23 @@ pub(in crate::analysis) fn admit_prestressed_structural_frequency_result(
     )
 }
 
+pub(in crate::analysis) fn admit_modal_structural_frequency_result(
+    numerical: &StructuralStudyFrequencyNumericalResult,
+    solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
+    options: &AnalysisStructuralFrequencyRunOptions,
+    assigned_run_id: String,
+    modal_state: &runmat_analysis_fea::execution::CanonicalSemanticState,
+) -> Result<CompletedStructuralFrequencyStep, String> {
+    admit_structural_frequency_result_with_state(
+        numerical,
+        solver_mesh,
+        options,
+        assigned_run_id,
+        None,
+        Some(modal_state),
+    )
+}
+
 pub(in crate::analysis) fn admit_prestressed_modal_structural_frequency_result(
     numerical: &StructuralStudyFrequencyNumericalResult,
     solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
@@ -112,8 +129,12 @@ fn admit_structural_frequency_result_with_state(
             &numerical.result,
             &numerical.publication,
         ),
-        (None, Some(_)) => return Err(
-            "structural modal-frequency admission requires its prestress state".into(),
+        (None, Some(modal)) => runmat_analysis_fea::pipeline::structural_frequency::admit_modal_structural_frequency_publication(
+            &numerical.workload,
+            solver_mesh,
+            modal,
+            &numerical.result,
+            &numerical.publication,
         ),
     }
     .map_err(|error| error.to_string())?;

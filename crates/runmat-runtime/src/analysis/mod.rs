@@ -273,7 +273,7 @@ pub use study_numerical_result::StructuralStudyNumericalResult;
 pub use frequency_result::{
     StructuralFrequencyArtifactRootIndex, StructuralFrequencyFinalizedHistoryArtifactRoots,
     StructuralFrequencyHistoryArtifactRoot, StructuralStudyFrequencyNumericalResult,
-    StructuralStudyPrestressedFrequencyNumericalResult,
+    StructuralStudyModalFrequencyNumericalResult, StructuralStudyPrestressedFrequencyNumericalResult,
     StructuralStudyPrestressedFrequencyReductionResult,
     StructuralStudyPrestressedModalFrequencyReductionResult,
 };

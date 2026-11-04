@@ -358,6 +358,7 @@ fn numerical_kind(
         StructuralStudyNumericalResult::LinearSequence(_) => "structural_linear_sequence",
         StructuralStudyNumericalResult::StructuralModal(_) => "structural_modal",
         StructuralStudyNumericalResult::StructuralModalTransient(_) => "structural_modal_transient",
+        StructuralStudyNumericalResult::StructuralModalFrequency(_) => "structural_modal_frequency",
         StructuralStudyNumericalResult::StructuralModalResponseSpectrum(_) => {
             "structural_modal_response_spectrum"
         }
