@@ -215,6 +215,38 @@ pub struct NamingContext {
     pub profiles: Vec<Vec<FeatureId>>,
     /// For patterns and mirrors of features: the seed feature per seed index.
     pub seeds: Vec<FeatureId>,
+    /// The step of a compound feature this operation is ([`GenerationName::step`]).
+    pub step: Option<String>,
+    /// Features whose faces this step rebuilds ([`Restore`]).
+    pub restore: Vec<Restore>,
+}
+
+/// A compound feature's step that rebuilds faces another feature made (a fold re-making the
+/// bends an unfold flattened): every face the step generates also answers to the name the
+/// other feature gave the same face (`feature`, the same role, tag and ordinal, no step). The
+/// step still owns its own names; the restored name stays the other feature's, the one name
+/// it always had. `keys`, when set, limits the restore to faces tagged by those keys.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Restore {
+    pub feature: FeatureId,
+    pub keys: Option<BTreeSet<String>>,
+}
+
+impl Restore {
+    pub fn all(feature: &FeatureId) -> Self {
+        Restore {
+            feature: feature.clone(),
+            keys: None,
+        }
+    }
+
+    fn applies(&self, tag: &SourceTag) -> bool {
+        match (&self.keys, tag) {
+            (None, _) => true,
+            (Some(keys), SourceTag::Key { key }) => keys.contains(key),
+            _ => false,
+        }
+    }
 }
 
 impl NamingContext {
@@ -223,7 +255,53 @@ impl NamingContext {
             feature: feature.clone(),
             profiles: vec![profiles],
             seeds: Vec::new(),
+            step: None,
+            restore: Vec::new(),
         }
+    }
+
+    /// The context of step `step` of this feature.
+    pub fn at_step(&self, step: Option<String>, restore: Vec<Restore>) -> Self {
+        Self {
+            step,
+            restore,
+            ..self.clone()
+        }
+    }
+
+    /// The name this feature gives a generated entity: its own (with the step) and, for a
+    /// step that rebuilds another feature's faces, the restored ones.
+    fn generated(
+        &self,
+        maker: FeatureId,
+        role: Role,
+        tag: SourceTag,
+        ordinal: Option<u32>,
+    ) -> Vec<EntityName> {
+        let own = maker == self.feature;
+        let mut out = Vec::new();
+        if own {
+            for r in self.restore.iter().filter(|r| r.applies(&tag)) {
+                out.push(EntityName::Generated(GenerationName {
+                    feature: r.feature.clone(),
+                    role,
+                    tag: tag.clone(),
+                    ordinal,
+                    step: None,
+                }));
+            }
+        }
+        out.insert(
+            0,
+            EntityName::Generated(GenerationName {
+                feature: maker,
+                role,
+                tag,
+                ordinal,
+                step: if own { self.step.clone() } else { None },
+            }),
+        );
+        out
     }
 }
 
@@ -338,17 +416,16 @@ pub fn name_outputs(
                             ),
                         };
                         let tag = translate_tag(tag, &profiles, operands)?;
-                        let base = EntityName::Generated(GenerationName {
-                            feature: maker,
-                            role: *role,
-                            tag,
-                            ordinal: *ordinal,
-                        });
-                        let name = match instance {
-                            Some(k) => EntityName::copy(&base, &ctx.feature, k.clone()),
-                            None => base,
+                        let made = ctx.generated(maker, *role, tag, *ordinal);
+                        match instance {
+                            Some(k) => {
+                                names.insert(EntityName::copy(&made[0], &ctx.feature, k.clone()))
+                            }
+                            None => {
+                                names.extend(made);
+                                true
+                            }
                         };
-                        names.insert(name);
                     }
                     HistorySource::Copy { from, instance } => {
                         for n in operand_face(from)? {
@@ -386,12 +463,7 @@ pub fn name_outputs(
                     } => {
                         let profiles = ctx.profiles.first().cloned().unwrap_or_default();
                         let tag = translate_tag(tag, &profiles, operands)?;
-                        names.insert(EntityName::Generated(GenerationName {
-                            feature: ctx.feature.clone(),
-                            role: *role,
-                            tag,
-                            ordinal: *ordinal,
-                        }));
+                        names.extend(ctx.generated(ctx.feature.clone(), *role, tag, *ordinal));
                     }
                     HistorySource::Copy { from, instance } => {
                         if let Some(o) = operands.get(from.operand as usize) {
@@ -456,11 +528,13 @@ pub fn name_outputs(
                     };
                     let profiles = ctx.profiles.first().cloned().unwrap_or_default();
                     let tag = translate_tag(tag, &profiles, operands)?;
+                    let own = maker == ctx.feature;
                     let base = EntityName::Generated(GenerationName {
                         feature: maker,
                         role: *role,
                         tag,
                         ordinal: *ordinal,
+                        step: if own { ctx.step.clone() } else { None },
                     });
                     let name = match instance {
                         Some(k) => EntityName::copy(&base, &ctx.feature, k.clone()),

@@ -7,6 +7,7 @@
 //! | `feature.body.face.side(s1.l1)` | a face from the curve `l1` of sketch `s1` |
 //! | `feature.h.face.wall(a)`, `feature.cut.face.split_face(side = positive)` | a face by key or side |
 //! | `feature.body.face.side(s1.l1, ordinal = 2)` | one piece of a split face |
+//! | `feature.fold.face.bend(l1, ordinal = 0, step = b1)` | a face one step of a compound feature made |
 //! | `feature.step.face("Top")` | a face named in an imported CAD file |
 //! | `edges_between(a, b)`, `vertex_of(a, b, c)`, `piece(a, bounded_by = [b])` | relational references |
 //! | `origin.xy`, `origin.yz`, `origin.zx`, `plane.mid` | a plane |
@@ -200,12 +201,14 @@ fn print_name(kind: TopoKind, name: &EntityName) -> Option<String> {
             role,
             tag,
             ordinal,
+            step,
         }) => {
             let feature = word(&feature.0)?;
             if kind == TopoKind::Body
                 && *role == Role::Body
                 && *tag == SourceTag::None
                 && ordinal.is_none()
+                && step.is_none()
             {
                 return Some(format!("feature.{feature}.body"));
             }
@@ -231,6 +234,15 @@ fn print_name(kind: TopoKind, name: &EntityName) -> Option<String> {
             }
             if let Some(ordinal) = ordinal {
                 arguments.push(format!("ordinal = {ordinal}"));
+            }
+            if let Some(step) = step {
+                arguments.push(format!(
+                    "step = {}",
+                    match word(step) {
+                        Some(step) => step,
+                        None => quote(step),
+                    }
+                ));
             }
             let head = format!("feature.{feature}.{kind}.{}", role.as_str());
             Some(if arguments.is_empty() {
@@ -483,6 +495,7 @@ fn generated(
     let role = role_named(role).ok_or_else(|| error(expr, format!("`{role}` is not a role")))?;
     let mut tag = SourceTag::None;
     let mut ordinal = None;
+    let mut step = None;
     for argument in arguments {
         match argument {
             Argument::Positional(value) if tag == SourceTag::None => {
@@ -505,6 +518,11 @@ fn generated(
                     .value()
                     .ok_or_else(|| error(expr, format!("`{name}` needs a value")))?;
                 match (name.as_str(), &value) {
+                    ("step", Expr::String(text)) => step = Some(text.value()),
+                    ("step", Expr::Reference(key)) => match key.segments().as_slice() {
+                        [key] => step = Some(key.clone()),
+                        _ => return Err(error(&value, "a step is a key")),
+                    },
                     ("ordinal", Expr::Number(number)) => {
                         ordinal = Some(
                             number
@@ -539,6 +557,7 @@ fn generated(
             role,
             tag,
             ordinal,
+            step,
         }),
     })
 }

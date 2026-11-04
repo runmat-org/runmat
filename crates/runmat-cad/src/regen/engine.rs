@@ -17,7 +17,8 @@ use crate::pmi::{resolve_pmi_with, ResolvedPmi};
 use crate::refs::history::{OperandEntity, SurfaceKind, Topology};
 use crate::refs::lock::{ItemPath, LockSection};
 use crate::refs::naming::{
-    cad_names_for_import, edge_name, name_outputs, BodyNames, NamingContext, OperandView, SlotTie,
+    cad_names_for_import, edge_name, name_outputs, BodyNames, NamingContext, NamingOutput,
+    OperandView, SlotTie,
 };
 use crate::refs::publish::{
     ForeignEntity, ForeignTarget, PublishTable, PublishedCatalog, XrefProblem,
@@ -92,6 +93,9 @@ pub struct PartState {
     /// Typed records of geometry-free features and derived data (reference curves, threads,
     /// sheet metal rules and developments, mold analyses), by feature.
     pub records: BTreeMap<FeatureId, crate::regen::records::FeatureRecord>,
+    /// The kernel operation of each sketched bend and jog, which a fold of the plate replays
+    /// as one of its steps.
+    pub replays: BTreeMap<FeatureId, KernelOp>,
 }
 
 impl PartState {
@@ -235,6 +239,24 @@ enum Compiled {
         tools: Option<Vec<ToolOp>>,
     },
     Delete(Vec<usize>),
+    /// A compound feature: kernel operations run in order, each on the bodies the earlier
+    /// steps left. The feature owns every name its steps make (each step names its outputs
+    /// with the feature and its own [`NamingContext::step`]), and names carry from step to
+    /// step through each step's history exactly as from feature to feature, so the feature's
+    /// history is the composition of its steps' histories. Only the last step's bodies are
+    /// committed; names an intermediate step made and a later step removed are never seen.
+    Steps(Vec<Step>),
+}
+
+/// One kernel operation of a compound feature.
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct Step {
+    pub op: KernelOp,
+    /// The bodies the step reads, by position in the body list as the earlier steps left it.
+    /// The step's outputs take the place of its first operand.
+    pub operands: Vec<usize>,
+    #[serde(skip)]
+    pub naming: NamingContext,
 }
 
 struct Run<'a, 'b> {
@@ -426,6 +448,9 @@ fn regenerate_unexpanded(
                             }
                             Compiled::Op { op, .. } => {
                                 serde_json::to_value(op).expect("op serializes")
+                            }
+                            Compiled::Steps(steps) => {
+                                serde_json::to_value(steps).expect("steps serialize")
                             }
                             Compiled::Delete(_) => serde_json::Value::String("delete".into()),
                             Compiled::Record(r) => {
@@ -1757,6 +1782,8 @@ impl<'a, 'b> Run<'a, 'b> {
                     feature: id.clone(),
                     profiles,
                     seeds: seed_ids,
+                    step: None,
+                    restore: Vec::new(),
                 };
                 let operands = self.implicit_bodies(i, id)?;
                 Ok(Compiled::Op {
@@ -1835,146 +1862,22 @@ impl<'a, 'b> Run<'a, 'b> {
                 tools,
             } => {
                 let record = self.pending_record.take();
-                let mut status = FeatureStatus::Regenerated;
-                let mut output = None;
-                if let Some(frozen) = &f.frozen {
-                    match cache.entries.get(frozen) {
-                        Some(o) => {
-                            if frozen != key {
-                                self.diags.push(
-                                    DiagCode::RegenFrozenStale,
-                                    Severity::Info,
-                                    Site::feature(id, None),
-                                    format!("`{}` is frozen; upstream changes since the freeze are not applied to it", id),
-                                    Cause::Root,
-                                    Vec::new(),
-                                );
-                            }
-                            output = Some(o.clone());
-                            status = FeatureStatus::Frozen;
-                        }
-                        None => {
-                            self.diags.push(
-                                DiagCode::RegenFrozenMissing,
-                                Severity::Warning,
-                                Site::feature(id, None),
-                                format!("`{}` is frozen but its cached result is gone; regenerated instead", id),
-                                Cause::Root,
-                                Vec::new(),
-                            );
-                        }
-                    }
-                }
-                if output.is_none() {
-                    if let Some(o) = cache.entries.get(key) {
-                        cache.hits += 1;
-                        status = FeatureStatus::CacheHit;
-                        output = Some(o.clone());
-                    }
-                }
-                let output = match output {
-                    Some(o) => o,
-                    None => {
-                        let handles: Vec<&BodyHandle> = operands
-                            .iter()
-                            .map(|b| &self.st.bodies[*b].handle)
-                            .collect();
-                        match self.ctx.kernel.execute(&op, &handles) {
-                            Ok(o) => {
-                                cache.misses += 1;
-                                cache.entries.insert(key.clone(), o.clone());
-                                o
-                            }
-                            Err(e) => {
-                                let code = match &e {
-                                    KernelError::NotSupported { .. } => {
-                                        DiagCode::KernelNotSupported
-                                    }
-                                    KernelError::HistoryIncomplete { .. } => {
-                                        DiagCode::KernelHistoryIncomplete
-                                    }
-                                    _ => DiagCode::KernelFailed,
-                                };
-                                return Err(self.error(id, None, code, e.to_string(), Vec::new()));
-                            }
-                        }
-                    }
-                };
-                let named = {
-                    let views: Vec<OperandView<'_>> = operands
-                        .iter()
-                        .map(|b| OperandView {
-                            names: &self.st.bodies[*b].names,
-                            topology: &self.st.bodies[*b].topology,
-                        })
-                        .collect();
-                    let outs: Vec<&Topology> = output.bodies.iter().map(|b| &b.topology).collect();
-                    name_outputs(&naming, &views, &outs, &output.history)
-                };
-                let mut named = match named {
-                    Ok(n) => n,
-                    Err(e) => {
-                        return Err(self.error(
-                            id,
-                            None,
-                            DiagCode::KernelHistoryIncomplete,
-                            e.to_string(),
-                            Vec::new(),
-                        ))
-                    }
-                };
-                if import {
-                    cad_names_for_import(id, &mut named);
-                }
-                if let Err(c) = named.intern_into(&mut self.st.names) {
-                    return Err(self.error(
-                        id,
-                        None,
-                        DiagCode::RefTokenCollision,
-                        c.to_string(),
-                        Vec::new(),
-                    ));
-                }
-                for tie in &named.slot_ties {
-                    let Some(first) = tie.names.first() else {
-                        continue;
-                    };
-                    let body_ref = Reference::body(first.clone());
-                    let candidates = slot_tie_candidates(&body_ref, tie, &named.bodies);
-                    self.diags.push(
-                        DiagCode::RefBodySlotTie,
-                        Severity::Warning,
-                        Site::feature(id, None),
-                        format!(
-                            "`{}` split `{}` into {} pieces equally similar to it by lineage; \
-                             references to it now select all of them",
-                            id,
-                            Shown(&body_ref, Some(&self.st.names)),
-                            tie.bodies.len()
-                        ),
-                        Cause::Root,
-                        vec![Repair::Disambiguate {
-                            site: Site::feature(id, None),
-                            candidates,
-                        }],
-                    );
-                }
-                let insert_at = operands.first().copied().unwrap_or(self.st.bodies.len());
-                for &b in operands.iter().rev() {
-                    self.st.bodies.remove(b);
-                }
-                let insert_at = insert_at.min(self.st.bodies.len());
-                for (k, (kb, names)) in output.bodies.into_iter().zip(named.bodies).enumerate() {
-                    self.st.bodies.insert(
-                        insert_at + k,
-                        LiveBody {
-                            handle: kb.handle,
-                            topology: kb.topology,
-                            names,
-                        },
-                    );
-                }
-                for (kind, n) in named.buried {
+                let bodies = std::mem::take(&mut self.st.bodies);
+                let ran = self.execute(
+                    id,
+                    f.frozen.as_ref(),
+                    &op,
+                    &operands,
+                    &naming,
+                    import,
+                    key,
+                    cache,
+                    &bodies,
+                );
+                self.st.bodies = bodies;
+                let (status, output, named) = ran?;
+                let buried = Self::commit(&mut self.st.bodies, &operands, output, named);
+                for (kind, n) in buried {
                     self.st
                         .burials
                         .entry((kind, n))
@@ -1991,7 +1894,240 @@ impl<'a, 'b> Run<'a, 'b> {
                 }
                 Ok(status)
             }
+            Compiled::Steps(steps) => {
+                let record = self.pending_record.take();
+                let mut working = self.st.bodies.clone();
+                let mut buried: Vec<(TopoKind, EntityName)> = Vec::new();
+                let mut statuses = Vec::new();
+                for (k, step) in steps.iter().enumerate() {
+                    let ran = self.execute(
+                        id,
+                        f.frozen.as_ref().map(|fk| fk.step(k)).as_ref(),
+                        &step.op,
+                        &step.operands,
+                        &step.naming,
+                        false,
+                        &key.step(k),
+                        cache,
+                        &working,
+                    );
+                    let (status, output, named) = ran?;
+                    statuses.push(status);
+                    buried.extend(Self::commit(&mut working, &step.operands, output, named));
+                }
+                // Names alive after the last step were not removed, whatever an earlier step
+                // did; names only an intermediate step made were never seen.
+                let alive: BTreeSet<&EntityName> = working
+                    .iter()
+                    .flat_map(|b| b.names.body.iter().chain(b.names.faces.iter().flatten()))
+                    .collect();
+                let mut dead: Vec<(TopoKind, EntityName)> = Vec::new();
+                for (kind, n) in buried {
+                    if !alive.contains(&n) && n.maker() != id && !dead.contains(&(kind, n.clone()))
+                    {
+                        dead.push((kind, n));
+                    }
+                }
+                // A name a step restored is alive again: it is no longer buried.
+                let restored: Vec<(TopoKind, EntityName)> = self
+                    .st
+                    .burials
+                    .keys()
+                    .filter(|(_, n)| alive.contains(n))
+                    .cloned()
+                    .collect();
+                for k in restored {
+                    self.st.burials.remove(&k);
+                }
+                for (kind, n) in dead {
+                    self.st
+                        .burials
+                        .entry((kind, n))
+                        .or_insert_with(|| id.clone());
+                }
+                self.st.bodies = working;
+                if let Some(r) = record {
+                    self.st.records.insert(id.clone(), r);
+                }
+                Ok(if statuses.contains(&FeatureStatus::Regenerated) {
+                    FeatureStatus::Regenerated
+                } else if statuses.contains(&FeatureStatus::Frozen) {
+                    FeatureStatus::Frozen
+                } else {
+                    FeatureStatus::CacheHit
+                })
+            }
         }
+    }
+
+    /// Runs one kernel operation on `bodies` (from the cache when it holds the key, or the
+    /// frozen result) and names its outputs.
+    #[allow(clippy::too_many_arguments)]
+    fn execute(
+        &mut self,
+        id: &FeatureId,
+        frozen: Option<&CacheKey>,
+        op: &KernelOp,
+        operands: &[usize],
+        naming: &NamingContext,
+        import: bool,
+        key: &CacheKey,
+        cache: &mut RegenCache,
+        bodies: &[LiveBody],
+    ) -> Result<(FeatureStatus, KernelOutput, NamingOutput), Halt> {
+        let mut status = FeatureStatus::Regenerated;
+        let mut output = None;
+        if let Some(frozen) = frozen {
+            match cache.entries.get(frozen) {
+                Some(o) => {
+                    if frozen != key {
+                        self.diags.push(
+                            DiagCode::RegenFrozenStale,
+                            Severity::Info,
+                            Site::feature(id, None),
+                            format!("`{}` is frozen; upstream changes since the freeze are not applied to it", id),
+                            Cause::Root,
+                            Vec::new(),
+                        );
+                    }
+                    output = Some(o.clone());
+                    status = FeatureStatus::Frozen;
+                }
+                None => {
+                    self.diags.push(
+                        DiagCode::RegenFrozenMissing,
+                        Severity::Warning,
+                        Site::feature(id, None),
+                        format!(
+                            "`{}` is frozen but its cached result is gone; regenerated instead",
+                            id
+                        ),
+                        Cause::Root,
+                        Vec::new(),
+                    );
+                }
+            }
+        }
+        if output.is_none() {
+            if let Some(o) = cache.entries.get(key) {
+                cache.hits += 1;
+                status = FeatureStatus::CacheHit;
+                output = Some(o.clone());
+            }
+        }
+        let output = match output {
+            Some(o) => o,
+            None => {
+                let handles: Vec<&BodyHandle> =
+                    operands.iter().map(|b| &bodies[*b].handle).collect();
+                match self.ctx.kernel.execute(op, &handles) {
+                    Ok(o) => {
+                        cache.misses += 1;
+                        cache.entries.insert(key.clone(), o.clone());
+                        o
+                    }
+                    Err(e) => {
+                        let code = match &e {
+                            KernelError::NotSupported { .. } => DiagCode::KernelNotSupported,
+                            KernelError::HistoryIncomplete { .. } => {
+                                DiagCode::KernelHistoryIncomplete
+                            }
+                            _ => DiagCode::KernelFailed,
+                        };
+                        return Err(self.error(id, None, code, e.to_string(), Vec::new()));
+                    }
+                }
+            }
+        };
+        let named = {
+            let views: Vec<OperandView<'_>> = operands
+                .iter()
+                .map(|b| OperandView {
+                    names: &bodies[*b].names,
+                    topology: &bodies[*b].topology,
+                })
+                .collect();
+            let outs: Vec<&Topology> = output.bodies.iter().map(|b| &b.topology).collect();
+            name_outputs(naming, &views, &outs, &output.history)
+        };
+        let mut named = match named {
+            Ok(n) => n,
+            Err(e) => {
+                return Err(self.error(
+                    id,
+                    None,
+                    DiagCode::KernelHistoryIncomplete,
+                    e.to_string(),
+                    Vec::new(),
+                ))
+            }
+        };
+        if import {
+            cad_names_for_import(id, &mut named);
+        }
+        if let Err(c) = named.intern_into(&mut self.st.names) {
+            return Err(self.error(
+                id,
+                None,
+                DiagCode::RefTokenCollision,
+                c.to_string(),
+                Vec::new(),
+            ));
+        }
+        for tie in &named.slot_ties {
+            let Some(first) = tie.names.first() else {
+                continue;
+            };
+            let body_ref = Reference::body(first.clone());
+            let candidates = slot_tie_candidates(&body_ref, tie, &named.bodies);
+            self.diags.push(
+                DiagCode::RefBodySlotTie,
+                Severity::Warning,
+                Site::feature(id, None),
+                format!(
+                    "`{}` split `{}` into {} pieces equally similar to it by lineage; \
+                     references to it now select all of them",
+                    id,
+                    Shown(&body_ref, Some(&self.st.names)),
+                    tie.bodies.len()
+                ),
+                Cause::Root,
+                vec![Repair::Disambiguate {
+                    site: Site::feature(id, None),
+                    candidates,
+                }],
+            );
+        }
+        Ok((status, output, named))
+    }
+
+    /// Replaces the operands in `bodies` by the outputs (at the first operand's place) and
+    /// returns the names the operation buried.
+    fn commit(
+        bodies: &mut Vec<LiveBody>,
+        operands: &[usize],
+        output: KernelOutput,
+        named: NamingOutput,
+    ) -> Vec<(TopoKind, EntityName)> {
+        let insert_at = operands.first().copied().unwrap_or(bodies.len());
+        let mut gone: Vec<usize> = operands.to_vec();
+        gone.sort_unstable();
+        gone.dedup();
+        for &b in gone.iter().rev() {
+            bodies.remove(b);
+        }
+        let insert_at = insert_at.min(bodies.len());
+        for (k, (kb, names)) in output.bodies.into_iter().zip(named.bodies).enumerate() {
+            bodies.insert(
+                insert_at + k,
+                LiveBody {
+                    handle: kb.handle,
+                    topology: kb.topology,
+                    names,
+                },
+            );
+        }
+        named.buried
     }
 
     #[allow(clippy::type_complexity)]

@@ -854,6 +854,7 @@ fn sweep_side(ordinal: Option<u32>) -> Reference {
             entity: runmat_cad::ids::SketchEntityId::new("l2"),
         },
         ordinal,
+        step: None,
     }))
 }
 
@@ -957,6 +958,7 @@ fn loft_side(ordinal: Option<u32>) -> Reference {
             entity: runmat_cad::ids::SketchEntityId::new("l1"),
         },
         ordinal,
+        step: None,
     }))
 }
 

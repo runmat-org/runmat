@@ -202,6 +202,13 @@ pub struct GenerationName {
     /// In a reference, `None` matches every ordinal: the whole logical entity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ordinal: Option<u32>,
+    /// The step of a compound feature that made the entity: a key from the feature's own
+    /// definition (the feature a step replays, or the step's role in the feature), never a
+    /// position in the step list. `None` for single-operation features and for the step whose
+    /// names stand for the feature as a whole. Steps keep the names two kernel operations of
+    /// one feature make apart, so the feature stays the only owner of all of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
 }
 
 /// A face or body name, one level deep. Edges and vertices are named relationally (by the
@@ -235,6 +242,7 @@ impl EntityName {
             role,
             tag,
             ordinal: None,
+            step: None,
         })
     }
 
@@ -333,7 +341,7 @@ impl EntityName {
     }
 
     /// Whether `self`, used as a query, matches the stored name `candidate`. A query without an
-    /// ordinal matches every ordinal of the same feature, role and tag; a pattern image whose
+    /// ordinal matches every ordinal of the same feature, role, tag and step; a pattern image whose
     /// base is written without an ordinal matches the images of every piece.
     pub fn matches(&self, candidate: &EntityName) -> bool {
         match (self, candidate) {
@@ -341,6 +349,7 @@ impl EntityName {
                 q.feature == c.feature
                     && q.role == c.role
                     && q.tag == c.tag
+                    && q.step == c.step
                     && (q.ordinal.is_none() || q.ordinal == c.ordinal)
             }
             (
@@ -376,6 +385,7 @@ impl EntityName {
                 role: g.role,
                 tag: g.tag.mapped(from, to, map),
                 ordinal: g.ordinal,
+                step: g.step.clone(),
             }),
             EntityName::Copy {
                 base,
@@ -452,6 +462,9 @@ impl EntityName {
                         write!(f, "#{}", o)?;
                     }
                     f.write_str(")")?;
+                }
+                if let Some(step) = &g.step {
+                    write!(f, "@{}", step)?;
                 }
                 Ok(())
             }

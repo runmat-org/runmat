@@ -29,6 +29,16 @@ impl CacheKey {
         part(&mut h, configuration.unwrap_or("").as_bytes());
         CacheKey(hex::encode::<[u8; 32]>(h.finalize().into()))
     }
+
+    /// The key of step `index` of the compound feature keyed `self`: the step's kernel result
+    /// is cached under it, so a frozen compound feature finds every step again.
+    pub fn step(&self, index: usize) -> CacheKey {
+        let mut h = Sha256::new();
+        part(&mut h, b"runmat-cad/regen/v1/step");
+        part(&mut h, self.0.as_bytes());
+        part(&mut h, &(index as u64).to_be_bytes());
+        CacheKey(hex::encode::<[u8; 32]>(h.finalize().into()))
+    }
 }
 
 fn part(h: &mut Sha256, bytes: &[u8]) {

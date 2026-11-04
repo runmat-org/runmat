@@ -310,6 +310,7 @@ fn c08_slot_inserted_after_fillet_splits_blend_into_pieces() {
         role: Role::Blend,
         tag: SourceTag::edge_between(&name_of(&front()), &name_of(&top())),
         ordinal: None,
+        step: None,
     }));
     d.regions.push(region(
         "blend",
@@ -1029,6 +1030,7 @@ fn wall(instance: u32, ordinal: Option<u32>) -> Reference {
         role: Role::HoleWall,
         tag: SourceTag::Key { key: "a".into() },
         ordinal,
+        step: None,
     });
     Reference::face(EntityName::copy(
         &base,
@@ -1164,6 +1166,7 @@ fn c31_mirror_image_named_by_instance() {
         role: Role::HoleWall,
         tag: SourceTag::Key { key: "a".into() },
         ordinal: None,
+        step: None,
     });
     let img = Reference::face(EntityName::copy(
         &base_wall,

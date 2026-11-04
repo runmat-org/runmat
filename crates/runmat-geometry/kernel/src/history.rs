@@ -32,6 +32,17 @@
 //!    [`KernelError::HistoryIncomplete`](crate::op::KernelError). It never returns a
 //!    body with guessed history.
 //!
+//! # Compound features
+//!
+//! A design feature may lower to several operations run in order, each on the bodies the
+//! earlier ones left (a fold that rebuilds a plate and then replays its bends). Each operation
+//! keeps this contract on its own; the design layer composes them. A face of the last output
+//! continues an input face of the first when every step's record chains back to it, and a
+//! face any step generated is named by the feature, that step's key from the definition and
+//! the role, tag and ordinal the step's operation reported. The kernel never sees the
+//! composition: it needs no record of earlier steps, and a step that cannot report history
+//! fails the whole feature.
+//!
 //! Geometry summaries ([`FaceGeom`], [`EdgeGeom`]) are informative: they feed sketch-on-face
 //! frames, the explicit geometric fallback and the index. They never decide identity on their own.
 
