@@ -2214,10 +2214,125 @@ fn split_segment(seg: &ProfileSegment) -> Result<[ProfileSegment; 2], KernelErro
                 half(seg.kind.clone(), m, seg.end),
             ])
         }
-        SegmentKind::Spline { .. } => Err(not_supported(
-            "refining a loft section by splitting a spline",
-        )),
+        SegmentKind::Spline {
+            degree,
+            poles,
+            weights,
+            knots,
+            multiplicities,
+        } => {
+            let [(pa, wa, ka, ma), (pb, wb, kb, mb)] =
+                split_spline(*degree, poles, weights, knots, multiplicities)?;
+            let spline =
+                |poles: Vec<[f64; 2]>, weights, knots, multiplicities| SegmentKind::Spline {
+                    degree: *degree,
+                    poles,
+                    weights,
+                    knots,
+                    multiplicities,
+                };
+            let m = *pa.last().expect("poles");
+            Ok([
+                half(spline(pa, wa, ka, ma), seg.start, m),
+                half(spline(pb, wb, kb, mb), m, seg.end),
+            ])
+        }
     }
+}
+
+/// One piece of a split spline: poles, weights, distinct knots and their multiplicities.
+type SplinePiece = (Vec<[f64; 2]>, Vec<f64>, Vec<f64>, Vec<u32>);
+
+/// A clamped (rational) B-spline split exactly at the middle of its knot range: the knot is
+/// inserted (Boehm) until its multiplicity is the degree, so the pole there is on the curve
+/// and the two halves are the same curve.
+fn split_spline(
+    degree: u32,
+    poles: &[[f64; 2]],
+    weights: &[f64],
+    knots: &[f64],
+    multiplicities: &[u32],
+) -> Result<[SplinePiece; 2], KernelError> {
+    let p = degree as usize;
+    let rational = !weights.is_empty();
+    if p == 0 || knots.len() != multiplicities.len() || knots.len() < 2 {
+        return Err(failed("a profile spline needs one multiplicity per knot"));
+    }
+    if rational && weights.len() != poles.len() {
+        return Err(failed("a rational spline needs one weight per pole"));
+    }
+    let mut u_all: Vec<f64> = knots
+        .iter()
+        .zip(multiplicities)
+        .flat_map(|(k, m)| std::iter::repeat_n(*k, *m as usize))
+        .collect();
+    if u_all.len() != poles.len() + p + 1 {
+        return Err(failed("a spline's knots do not match its poles and degree"));
+    }
+    // Homogeneous poles.
+    let w = |i: usize| if rational { weights[i] } else { 1.0 };
+    let mut pw: Vec<[f64; 3]> = (0..poles.len())
+        .map(|i| [poles[i][0] * w(i), poles[i][1] * w(i), w(i)])
+        .collect();
+    let (lo, hi) = (u_all[p], u_all[u_all.len() - p - 1]);
+    let u = 0.5 * (lo + hi);
+    let tol = 1e-12 * (hi - lo).abs().max(1.0);
+    let mult = |u_all: &[f64]| u_all.iter().filter(|k| (**k - u).abs() <= tol).count();
+    while mult(&u_all) < p {
+        // The span holding u: u_all[k] <= u < u_all[k + 1].
+        let k = (p..u_all.len() - p - 1)
+            .rev()
+            .find(|&k| u_all[k] <= u + tol)
+            .unwrap_or(p);
+        let mut q = Vec::with_capacity(pw.len() + 1);
+        for i in 0..=pw.len() {
+            if i + p <= k {
+                q.push(pw[i]);
+            } else if i > k {
+                q.push(pw[i - 1]);
+            } else {
+                let a = (u - u_all[i]) / (u_all[i + p] - u_all[i]);
+                let (x, y) = (pw[i - 1], pw[i]);
+                q.push([
+                    (1.0 - a) * x[0] + a * y[0],
+                    (1.0 - a) * x[1] + a * y[1],
+                    (1.0 - a) * x[2] + a * y[2],
+                ]);
+            }
+        }
+        pw = q;
+        u_all.insert(k + 1, u);
+    }
+    let j = u_all
+        .iter()
+        .position(|k| (*k - u).abs() <= tol)
+        .expect("inserted");
+    let piece = |range: std::ops::Range<usize>, knots: Vec<f64>| -> SplinePiece {
+        let pts = &pw[range];
+        let poles = pts.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect();
+        let weights = if rational {
+            pts.iter().map(|h| h[2]).collect()
+        } else {
+            Vec::new()
+        };
+        let mut distinct: Vec<f64> = Vec::new();
+        let mut counts: Vec<u32> = Vec::new();
+        for k in knots {
+            match distinct.last() {
+                Some(last) if (k - last).abs() <= tol => *counts.last_mut().expect("count") += 1,
+                _ => {
+                    distinct.push(k);
+                    counts.push(1);
+                }
+            }
+        }
+        (poles, weights, distinct, counts)
+    };
+    let mut left: Vec<f64> = u_all[..j].to_vec();
+    left.extend(std::iter::repeat_n(u, p + 1));
+    let mut right: Vec<f64> = std::iter::repeat_n(u, p + 1).collect();
+    right.extend_from_slice(&u_all[j + p..]);
+    Ok([piece(0..j, left), piece(j - 1..pw.len(), right)])
 }
 
 /// A loop refined to `count` segments by splitting the longest one, repeatedly.

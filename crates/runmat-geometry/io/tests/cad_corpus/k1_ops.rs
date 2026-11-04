@@ -1583,3 +1583,172 @@ fn k1_sketched_bends_and_jogs_keep_the_developed_plate() {
     let v = regen_volume(&out);
     assert!(close(v, want, 1e-7), "jog: {v} vs {want}");
 }
+
+#[test]
+fn k1_miter_flanges_add_their_section_along_the_edges_and_mitre_exactly() {
+    use crate::common::Env;
+    use crate::families::{miter_doc, plate_doc};
+    let env = Env::new();
+    let (t, r, h) = (2.0f64, 3.0f64, 15.0f64);
+    let plate = 80.0 * 40.0 * t;
+    assert!(close(
+        regen_volume(&env.regen(&plate_doc())),
+        plate * 1e-9,
+        1e-9
+    ));
+    // The section (mm): the 90° bend's annular quarter and the wall above it.
+    let (ro, ri) = (r + t, r);
+    let area = std::f64::consts::FRAC_PI_4 * (ro * ro - ri * ri) + t * (h - r);
+    // Its first moment about the plate edge: (R³ − ρ³)/3 for the bend, the wall at r + t/2.
+    let moment = (ro.powi(3) - ri.powi(3)) / 3.0 + t * (h - r) * (r + t / 2.0);
+    // Each side carries the section over its length; a 45° mitre adds, per mitred end, the
+    // section's moment less the area times the half gap's shift along the edge (g/√2).
+    for (edges, length, ends, gap) in [
+        (&["e1", "e2"][..], 120.0, 2.0, 0.0),
+        (&["e1", "e2", "e3", "e4"][..], 240.0, 8.0, 0.5),
+    ] {
+        let out = env.regen(&miter_doc(edges, h, gap));
+        assert!(
+            out.status("miter").unwrap().ran(),
+            "{edges:?}: {:?}",
+            out.diagnostics
+        );
+        let want =
+            (plate + area * length + ends * (moment - area * gap / std::f64::consts::SQRT_2))
+                * 1e-9;
+        let v = regen_volume(&out);
+        // OCCT integrates the clipped cylinders to about 1e-7 of the volume.
+        assert!(close(v, want, 1e-6), "{edges:?}: {v} vs {want}");
+        // On exact geometry every face the flange made has a name of its own.
+        let (roles, repeated) = crate::families::made_by(&out, "miter");
+        assert!(!repeated, "{edges:?}: {roles:?}");
+    }
+}
+
+#[test]
+fn k1_a_bent_plate_flattens_and_unfolds_to_its_plate_exactly() {
+    use crate::common::Env;
+    use crate::families::bent_plate_doc;
+    use runmat_cad::model::sheet_metal::*;
+    use runmat_cad::model::*;
+    let env = Env::new();
+    let plate = 0.08 * 0.04 * 0.002;
+    // The flat pattern is a second body: the plate's outline, t thick.
+    let mut d = bent_plate_doc();
+    d.features.push(Feature::new(
+        "flat",
+        FeatureKind::SheetMetal(SheetMetalFeature::FlatPattern {
+            fixed_face: crate::families::plate_top(),
+            grain: None,
+        }),
+    ));
+    let out = env.regen(&d);
+    assert!(out.status("flat").unwrap().ran(), "{:?}", out.diagnostics);
+    let k = KernelUnderTest::new();
+    let flat = out
+        .state
+        .bodies
+        .iter()
+        .find(|b| {
+            b.names
+                .body
+                .iter()
+                .any(|n| n.maker() == &runmat_cad::ids::FeatureId::new("flat"))
+        })
+        .expect("the flat body");
+    let v = volume(
+        &k,
+        &KernelBody {
+            handle: flat.handle.clone(),
+            topology: flat.topology.clone(),
+        },
+    )
+    .0;
+    assert!(close(v, plate, 1e-9), "{v} vs {plate}");
+    // Unfolded in place: the one body is the plate again.
+    let mut d = bent_plate_doc();
+    d.features.push(Feature::new(
+        "unfold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Unfold {
+            fixed_face: crate::families::plate_top(),
+            bends: Vec::new(),
+        }),
+    ));
+    let out = env.regen(&d);
+    assert!(out.status("unfold").unwrap().ran(), "{:?}", out.diagnostics);
+    let v = regen_volume(&out);
+    assert!(close(v, plate, 1e-9), "{v} vs {plate}");
+}
+
+#[test]
+fn k1_loft_refines_a_section_by_splitting_its_spline_exactly() {
+    let k = KernelUnderTest::new();
+    let bez = |poles: [[f64; 2]; 4], t: f64| {
+        let s = 1.0 - t;
+        let w = [s * s * s, 3.0 * s * s * t, 3.0 * s * t * t, t * t * t];
+        let mut p = [0.0; 2];
+        for (i, q) in poles.iter().enumerate() {
+            p[0] += w[i] * q[0];
+            p[1] += w[i] * q[1];
+        }
+        p
+    };
+    let spline = |name: &str, poles: [[f64; 2]; 4]| ProfileSegment {
+        curve: SketchEntityId::new(name),
+        kind: SegmentKind::Spline {
+            degree: 3,
+            poles: poles.to_vec(),
+            weights: Vec::new(),
+            knots: vec![0.0, 1.0],
+            multiplicities: vec![4, 4],
+        },
+        start: poles[0],
+        end: poles[3],
+    };
+    let c = [[0.04, 0.0], [0.045, 0.03], [0.01, 0.045], [0.0, 0.04]];
+    // The same curve as two halves (de Casteljau at t = 1/2).
+    let mid = |a: [f64; 2], b: [f64; 2]| [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+    let (p01, p12, p23) = (mid(c[0], c[1]), mid(c[1], c[2]), mid(c[2], c[3]));
+    let (p012, p123) = (mid(p01, p12), mid(p12, p23));
+    let m = mid(p012, p123);
+    let a = CanonicalProfile {
+        frame: Frame::WORLD,
+        loops: vec![vec![
+            line("l1", [0.0, 0.0], c[0]),
+            spline("s", c),
+            line("l2", c[3], [0.0, 0.0]),
+        ]],
+        merge_collinear: false,
+    };
+    let b = CanonicalProfile {
+        frame: lifted(H),
+        loops: vec![vec![
+            line("l1", [0.0, 0.0], c[0]),
+            spline("s1", [c[0], p01, p012, m]),
+            spline("s2", [m, p123, p23, c[3]]),
+            line("l2", c[3], [0.0, 0.0]),
+        ]],
+        merge_collinear: false,
+    };
+    let out = k
+        .execute(
+            &new_tool(ToolShape::Loft {
+                profiles: vec![a, b],
+            }),
+            &[],
+        )
+        .expect("loft");
+    // Corresponding pieces are the same curve, so the loft is the prism of the section.
+    let n = 4000;
+    let mut area = 0.0;
+    for i in 0..n {
+        let (t0, t1) = (i as f64 / n as f64, (i + 1) as f64 / n as f64);
+        let (p, q, r) = (bez(c, t0), bez(c, (t0 + t1) / 2.0), bez(c, t1));
+        // The curve as 8000 chords (the lines through the origin add nothing).
+        let d = |u: [f64; 2], v: [f64; 2]| u[0] * v[1] - u[1] * v[0];
+        area += (d(p, q) + d(q, r)) / 2.0;
+    }
+    let want = area * H;
+    let (v, _) = volume(&k, &out.bodies[0]);
+    assert!(close(v, want, 1e-6), "{v} vs {want}");
+}
