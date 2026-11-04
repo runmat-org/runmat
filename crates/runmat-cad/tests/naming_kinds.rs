@@ -1789,6 +1789,212 @@ fn boolean_family() -> Family {
     }
 }
 
+fn outward_shell() -> Family {
+    Family {
+        name: "outward shell",
+        feature: "osh",
+        inputs: vec![("wall", "length", 2.0)],
+        build: |d| {
+            let mut s = Shell::new(
+                Reference::feature_body("body"),
+                vec![Reference::end_cap("body")],
+                input("wall"),
+            );
+            s.outward = true;
+            d.features.push(Feature::new("osh", FeatureKind::Shell(s)));
+        },
+        probes: |p| {
+            let front = side("body", "s1", "l1");
+            let top = Reference::end_cap("body");
+            let outer = |f: &Reference| {
+                Reference::gen_face("osh", Role::ShellOuter, SourceTag::face_of(&name_of(f)))
+            };
+            vec![
+                face1(
+                    "osh_front_out",
+                    outer(&front),
+                    "osh",
+                    plane_at([0.0, 1.0, 0.0], 1, -p["wall"]),
+                ),
+                face1(
+                    "osh_bottom_out",
+                    outer(&Reference::start_cap("body")),
+                    "osh",
+                    plane_at([0.0, 0.0, 1.0], 2, -p["wall"]),
+                ),
+                face1(
+                    "osh_rim",
+                    Reference::gen_face("osh", Role::ShellRim, SourceTag::face_of(&name_of(&top))),
+                    "osh",
+                    plane_at([0.0, 0.0, 1.0], 2, p["thickness"]),
+                ),
+                // The body's own faces line the cavity.
+                face1(
+                    "osh_front_in",
+                    front,
+                    "body",
+                    plane_at([0.0, 1.0, 0.0], 1, 0.0),
+                ),
+                probe(
+                    "osh_opened",
+                    TopoKind::Face,
+                    top,
+                    Cardinality::ExactlyOne,
+                    "body",
+                    Expect::Problem("consumed"),
+                )
+                .suppressed(ok1(plane_at([0.0, 0.0, 1.0], 2, p["thickness"]))),
+            ]
+        },
+        edits: vec![
+            pv(&[("wall", 3.0)]),
+            pv(&[("width", 60.0)]),
+            pv(&[("thickness", 14.0)]),
+        ],
+    }
+}
+
+fn vertex_chamfer() -> Family {
+    Family {
+        name: "vertex chamfer",
+        feature: "vc",
+        inputs: vec![("vd", "length", 6.0)],
+        build: |d| {
+            d.features.push(Feature::new(
+                "vc",
+                FeatureKind::Chamfer(Chamfer {
+                    edges: vec![Reference::vertex_of(vec![
+                        Reference::end_cap("body"),
+                        side("body", "s1", "l1"),
+                        side("body", "s1", "l2"),
+                    ])],
+                    form: ChamferForm::Vertex {
+                        distances: [input("vd"), input("vd"), input("vd")],
+                    },
+                    flip: false,
+                }),
+            ));
+        },
+        probes: |p| {
+            let faces = [
+                name_of(&Reference::end_cap("body")),
+                name_of(&side("body", "s1", "l1")),
+                name_of(&side("body", "s1", "l2")),
+            ];
+            let v = p["vd"];
+            vec![
+                // The triangle's centroid, a third of the way in along each edge (the fake
+                // kernel's staircase lands within a tenth of the size).
+                face1(
+                    "vc_face",
+                    Reference::gen_face("vc", Role::Chamfer, SourceTag::vertex_of(&faces)),
+                    "vc",
+                    centroid_near(
+                        [
+                            Some(p["width"] - v / 3.0),
+                            Some(v / 3.0),
+                            Some(p["thickness"] - v / 3.0),
+                        ],
+                        v / 10.0,
+                    ),
+                ),
+                face1(
+                    "vc_front",
+                    side("body", "s1", "l1"),
+                    "body",
+                    plane_at([0.0, 1.0, 0.0], 1, 0.0),
+                ),
+                face1(
+                    "vc_top",
+                    Reference::end_cap("body"),
+                    "body",
+                    plane_at([0.0, 0.0, 1.0], 2, p["thickness"]),
+                ),
+            ]
+        },
+        edits: vec![
+            pv(&[("vd", 4.0)]),
+            pv(&[("width", 60.0)]),
+            pv(&[("thickness", 14.0)]),
+        ],
+    }
+}
+
+fn cut_with_surface() -> Family {
+    Family {
+        name: "cut with surface",
+        feature: "trim",
+        inputs: vec![("level", "length", 4.0)],
+        build: |d| {
+            d.features
+                .push(offset_plane("lvl", origin(OriginPlane::Xy), input("level")));
+            d.features.push(sketch(
+                "s_sheet",
+                rect_names(
+                    PlaneRef::datum("lvl"),
+                    -10.0,
+                    -10.0,
+                    100.0,
+                    70.0,
+                    ["sa", "sb", "sc", "sd"],
+                ),
+            ));
+            d.features.push(Feature::new(
+                "sheet",
+                FeatureKind::Surface(SurfaceFeature::Planar {
+                    profile: ProfileRef::sketch("s_sheet"),
+                }),
+            ));
+            d.features.push(Feature::new(
+                "trim",
+                FeatureKind::Surface(SurfaceFeature::CutWithSurface {
+                    body: Reference::feature_body("body"),
+                    surface: Reference::feature_body("sheet"),
+                    keep: PlaneSide::Negative,
+                }),
+            ));
+        },
+        probes: |p| {
+            vec![
+                face1(
+                    "trim_cut",
+                    Reference::gen_face(
+                        "trim",
+                        Role::SplitFace,
+                        SourceTag::Side {
+                            side: PlaneSide::Negative,
+                        },
+                    ),
+                    "trim",
+                    plane_at([0.0, 0.0, 1.0], 2, p["level"]),
+                ),
+                face1(
+                    "trim_front",
+                    side("body", "s1", "l1"),
+                    "body",
+                    plane_at([0.0, 1.0, 0.0], 1, 0.0),
+                ),
+                face1(
+                    "trim_floor",
+                    Reference::start_cap("body"),
+                    "body",
+                    plane_at([0.0, 0.0, 1.0], 2, 0.0),
+                ),
+                probe(
+                    "trim_top",
+                    TopoKind::Face,
+                    Reference::end_cap("body"),
+                    Cardinality::ExactlyOne,
+                    "body",
+                    Expect::Problem("consumed"),
+                )
+                .suppressed(ok1(plane_at([0.0, 0.0, 1.0], 2, p["thickness"]))),
+            ]
+        },
+        edits: vec![pv(&[("level", 6.0)]), pv(&[("width", 60.0)])],
+    }
+}
+
 fn families() -> Vec<Family> {
     vec![
         arc_boss(),
@@ -1811,6 +2017,9 @@ fn families() -> Vec<Family> {
         chamfer_family(),
         split_family(),
         boolean_family(),
+        outward_shell(),
+        vertex_chamfer(),
+        cut_with_surface(),
     ]
 }
 

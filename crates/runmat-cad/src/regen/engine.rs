@@ -1325,11 +1325,16 @@ impl<'a, 'b> Run<'a, 'b> {
         Ok((combine, Self::bodies_of(&set)))
     }
 
-    /// Every body, for a feature with implicit targets. With none present, the feature waits on
-    /// (or cascades from) the earlier body feature that did not run; with none at all it fails.
+    /// Every solid body, for a feature with implicit targets (surface bodies, with boundary
+    /// edges, are never implicit targets of solid tools). With none present, the feature waits
+    /// on (or cascades from) the earlier body feature that did not run; with none at all it
+    /// fails.
     fn implicit_bodies(&mut self, i: usize, f: &FeatureId) -> Result<Vec<usize>, Halt> {
-        if !self.st.bodies.is_empty() {
-            return Ok((0..self.st.bodies.len()).collect());
+        let solids: Vec<usize> = (0..self.st.bodies.len())
+            .filter(|b| !self.st.bodies[*b].topology.edges.iter().any(|e| e.laminar))
+            .collect();
+        if !solids.is_empty() {
+            return Ok(solids);
         }
         let earlier: Vec<FeatureId> = self.doc.features[..i]
             .iter()
