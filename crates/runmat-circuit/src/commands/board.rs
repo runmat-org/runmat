@@ -118,6 +118,17 @@ pub(super) fn add(c: &mut Catalog) {
         brd("board.dimension", "Dimension", "dimension", "Add a board dimension annotation.")
             .inputs(vec![picks("items", "Between", &[K::Pad, K::Track, K::Via, K::Component]), text("layer", "Layer", Some("Mech1"))])
             .edit(add_to("dimension", Section::Outline)),
+        brd(
+            "board.update-schematic",
+            "Update schematic (back-annotate)",
+            "sync",
+            "Send board changes (renumbering, pin and gate swaps, footprints) back to the schematic; review each line.",
+        )
+        .kw(&["eco", "back annotate", "back-annotation", "swap", "renumber"])
+        .inputs(vec![checklist("changes", "Changes to apply", &[K::EcoChange])])
+        .when(has(Facet::PendingBackAnnotation))
+        .on(&[K::EcoChange])
+        .edit(edit(EditOp::Sync, Section::Components).item("back_annotation")),
         brd("board.drc", "DRC", "drc", "Run the design rule check (also runs live while editing).")
             .kw(&["design rule check", "clearance"])
             .inputs(vec![radio("scope", "Check", &[("all", "Whole board"), ("selection", "Selection")]), flag("live", "Live checking", true)])
@@ -259,6 +270,11 @@ pub(super) fn tab() -> DomainTab {
                 ],
             ),
             group("annotate", "Annotate", vec![c("board.dimension")]),
+            group(
+                "sync",
+                "Sync",
+                vec![c("schematic.update-board"), c("board.update-schematic")],
+            ),
             group(
                 "rules",
                 "Rules",

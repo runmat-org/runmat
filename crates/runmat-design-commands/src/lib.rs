@@ -397,6 +397,8 @@ pub enum Facet {
     BoardOutline,
     /// There are schematic changes the board hasn't taken yet.
     PendingEco,
+    /// There are board changes the schematic hasn't taken yet (back-annotation).
+    PendingBackAnnotation,
     /// The file compiled without errors.
     Compiled,
     /// The runtime that rebuilds and previews is ready.
@@ -418,6 +420,7 @@ impl Facet {
             Facet::Board => "This circuit has no board yet",
             Facet::BoardOutline => "Draw the board outline first",
             Facet::PendingEco => "The board is up to date with the schematic",
+            Facet::PendingBackAnnotation => "The schematic is up to date with the board",
             Facet::Compiled => "Fix the errors in this file first",
             Facet::Runtime => "Waiting for the runtime",
         }

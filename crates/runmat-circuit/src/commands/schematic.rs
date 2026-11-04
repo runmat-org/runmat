@@ -264,11 +264,10 @@ pub(super) fn add(c: &mut Catalog) {
             "Send schematic changes to the board; review each line.",
         )
         .kw(&["eco", "engineering change", "sync", "update pcb"])
-        .inputs(vec![checklist(
-            "changes",
-            "Changes to apply",
-            &[K::EcoChange],
-        )])
+        .inputs(vec![
+            checklist("changes", "Changes to apply", &[K::EcoChange]),
+            flag("remove_orphaned_copper", "Remove orphaned copper", false),
+        ])
         .when(has(Facet::PendingEco))
         .on(&[K::EcoChange])
         .edit(edit(EditOp::Sync, Section::Placement).item("eco")),
