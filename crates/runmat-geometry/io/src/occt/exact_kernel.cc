@@ -13,21 +13,29 @@
 #include <BRepAlgoAPI_Defeaturing.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
+#include <BRepClass_FaceClassifier.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepCheck_ListOfStatus.hxx>
+#include <BRepCheck_Result.hxx>
+#include <TopAbs.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
+#include <BRepGProp_Face.hxx>
 #include <BRepLib.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepOffset_MakeOffset.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakeHalfSpace.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_ReShape.hxx>
@@ -38,6 +46,7 @@
 #include <GProp_GProps.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <GeomLib_IsPlanarSurface.hxx>
+#include <Geom2d_Curve.hxx>
 #include <Geom_Plane.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
@@ -51,6 +60,7 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Solid.hxx>
+#include <gp.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
@@ -58,7 +68,9 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <functional>
 #include <cmath>
+#include <cstdlib>
 #include <map>
 #include <mutex>
 #include <set>
@@ -138,6 +150,11 @@ std::uint64_t registry_put(std::shared_ptr<Body> body) {
 void kernel_release(std::uint64_t id) {
   std::lock_guard<std::mutex> lock(registry_mutex());
   registry().erase(id);
+}
+
+std::unique_lock<std::recursive_mutex> kernel_lock() {
+  static std::recursive_mutex m;
+  return std::unique_lock<std::recursive_mutex>(m);
 }
 
 std::uint64_t kernel_live_bodies() {
@@ -284,6 +301,33 @@ void propagate_history(const Tracked& in, const Handle(BRepTools_History) & h, T
   }
 }
 
+void propagate_draft(const Tracked& src, BRepOffsetAPI_DraftAngle& mk, Tracked& out) {
+  // DraftAngle reports a drafted face only through Generated and an edge or vertex only
+  // through ModifiedShape, so carry every tracked entity through ModifiedShape (the image the
+  // modifier built for it, the shape itself when unchanged).
+  TopTools_IndexedMapOfShape present[3];
+  const TopAbs_ShapeEnum kinds[3] = {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX};
+  const ShapeOrigins* from[3] = {&src.faces, &src.edges, &src.vertices};
+  ShapeOrigins* to[3] = {&out.faces, &out.edges, &out.vertices};
+  for (int k = 0; k < 3; ++k) {
+    TopExp::MapShapes(out.shape, kinds[k], present[k]);
+    for (int i = 1; i <= from[k]->Extent(); ++i) {
+      const TopoDS_Shape& s0 = from[k]->FindKey(i);
+      TopoDS_Shape m;
+      try {
+        m = mk.ModifiedShape(s0);
+      } catch (const Standard_Failure&) {
+        continue;
+      }
+      if (m.IsNull()) continue;
+      for (TopExp_Explorer ex(m, kinds[k]); ex.More(); ex.Next())
+        if (present[k].Contains(ex.Current())) add_origins(*to[k], ex.Current(), (*from[k])(i));
+    }
+  }
+  for (int i = 1; i <= src.kept.Extent(); ++i)
+    if (present[0].Contains(src.kept.FindKey(i))) out.kept.Add(src.kept.FindKey(i), 1);
+}
+
 // ------------------------------------------------------------------------- frames
 
 gp_Ax3 frame_from(const double* r) {
@@ -305,6 +349,26 @@ Tracked boolean_op(int op, const std::vector<const Tracked*>& args,
   if (tools.empty()) {
     Tracked t = *args.front();
     return t;
+  }
+  if (op != 0 && args.size() > 1) {
+    // A cut or common applies to each target on its own: one general fuse over several
+    // targets would also split the targets against each other where they overlap.
+    BRep_Builder bb;
+    TopoDS_Compound c;
+    bb.MakeCompound(c);
+    Tracked out;
+    out.sheet = args.front()->sheet;
+    for (const Tracked* t : args) {
+      Tracked one = boolean_op(op, {t}, tools);
+      bb.Add(c, one.shape);
+      for (int i = 1; i <= one.faces.Extent(); ++i) add_origins(out.faces, one.faces.FindKey(i), one.faces(i));
+      for (int i = 1; i <= one.edges.Extent(); ++i) add_origins(out.edges, one.edges.FindKey(i), one.edges(i));
+      for (int i = 1; i <= one.vertices.Extent(); ++i)
+        add_origins(out.vertices, one.vertices.FindKey(i), one.vertices(i));
+      for (int i = 1; i <= one.kept.Extent(); ++i) out.kept.Add(one.kept.FindKey(i), 1);
+    }
+    out.shape = c;
+    return out;
   }
   TopTools_ListOfShape a, b;
   for (const Tracked* t : args) a.Append(t->shape);
@@ -514,6 +578,15 @@ KBody body_payload(const Tracked& t, const TopoDS_Shape& piece, bool sheet) {
     TopExp::Vertices(e, v0, v1, Standard_True);
     gp_Pnt p0 = v0.IsNull() ? gp_Pnt() : BRep_Tool::Pnt(v0);
     gp_Pnt p1 = v1.IsNull() ? p0 : BRep_Tool::Pnt(v1);
+    // The contract's canonical order: start precedes end lexicographically.
+    {
+      const double d[3] = {p1.X() - p0.X(), p1.Y() - p0.Y(), p1.Z() - p0.Z()};
+      for (double c : d) {
+        if (std::abs(c) <= 1e-9) continue;
+        if (c < 0) std::swap(p0, p1);
+        break;
+      }
+    }
     push3(ke.geom, p0.XYZ());
     push3(ke.geom, p1.XYZ());
     BRepAdaptor_Curve c(e);
@@ -538,8 +611,9 @@ KBody body_payload(const Tracked& t, const TopoDS_Shape& piece, bool sheet) {
   return k;
 }
 
-// Output bodies of a shape, in a deterministic order: solids, then free shells, then free
-// faces gathered into one sheet.
+// Output bodies of a shape, in a deterministic order: solids, then the faces outside solids
+// as sheets, one per set of faces connected through shared edges (in first-face order). Faces
+// are grouped as they are, never sewn: sewing would rebuild them and lose their origins.
 std::vector<std::pair<TopoDS_Shape, bool>> pieces_of(const TopoDS_Shape& s) {
   std::vector<std::pair<TopoDS_Shape, bool>> out;
   TopTools_IndexedMapOfShape in_solid;
@@ -547,39 +621,50 @@ std::vector<std::pair<TopoDS_Shape, bool>> pieces_of(const TopoDS_Shape& s) {
     out.emplace_back(ex.Current(), false);
     TopExp::MapShapes(ex.Current(), TopAbs_FACE, in_solid);
   }
-  for (TopExp_Explorer ex(s, TopAbs_SHELL, TopAbs_SOLID); ex.More(); ex.Next()) {
-    out.emplace_back(ex.Current(), true);
-    TopExp::MapShapes(ex.Current(), TopAbs_FACE, in_solid);
+  std::vector<TopoDS_Shape> loose;
+  TopTools_IndexedMapOfShape seen;
+  for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
+    if (in_solid.Contains(ex.Current()) || seen.Contains(ex.Current())) continue;
+    seen.Add(ex.Current());
+    loose.push_back(ex.Current());
   }
-  TopoDS_Compound loose;
-  BRep_Builder b;
-  b.MakeCompound(loose);
-  bool any = false;
-  for (TopExp_Explorer ex(s, TopAbs_FACE, TopAbs_SHELL); ex.More(); ex.Next()) {
-    if (in_solid.Contains(ex.Current())) continue;
-    b.Add(loose, ex.Current());
-    any = true;
+  if (loose.empty()) return out;
+  // Union-find over faces sharing an edge.
+  std::vector<int> parent(loose.size());
+  for (std::size_t i = 0; i < loose.size(); ++i) parent[i] = static_cast<int>(i);
+  std::function<int(int)> find = [&](int i) { return parent[i] == i ? i : parent[i] = find(parent[i]); };
+  TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
+  TopTools_IndexedMapOfShape face_index;
+  for (const TopoDS_Shape& f : loose) {
+    face_index.Add(f);
+    TopExp::MapShapesAndUniqueAncestors(f, TopAbs_EDGE, TopAbs_FACE, edge_faces);
   }
-  if (any) {
-    BRepBuilderAPI_Sewing sew(1e-7);
-    sew.Add(loose);
-    sew.Perform();
-    // Free faces that do not share edges stay separate sheets.
-    TopoDS_Shape sewn = sew.SewedShape();
-    if (sewn.ShapeType() == TopAbs_FACE) {
-      TopoDS_Shell sh;
-      b.MakeShell(sh);
-      b.Add(sh, sewn);
-      out.emplace_back(sh, true);
-    } else {
-      for (TopExp_Explorer ex(loose, TopAbs_FACE); ex.More(); ex.Next()) {
-        TopoDS_Shell sh;
-        b.MakeShell(sh);
-        b.Add(sh, ex.Current());
-        out.emplace_back(sh, true);
+  for (int i = 1; i <= edge_faces.Extent(); ++i) {
+    int first = -1;
+    for (const TopoDS_Shape& f : edge_faces(i)) {
+      const int k = face_index.FindIndex(f) - 1;
+      if (k < 0) continue;
+      if (first < 0) {
+        first = k;
+      } else {
+        parent[find(k)] = find(first);
       }
     }
   }
+  BRep_Builder b;
+  std::map<int, std::size_t> sheet_of;
+  std::vector<TopoDS_Shell> sheets;
+  for (std::size_t i = 0; i < loose.size(); ++i) {
+    const int root = find(static_cast<int>(i));
+    auto it = sheet_of.find(root);
+    if (it == sheet_of.end()) {
+      it = sheet_of.emplace(root, sheets.size()).first;
+      sheets.emplace_back();
+      b.MakeShell(sheets.back());
+    }
+    b.Add(sheets[it->second], loose[i]);
+  }
+  for (const TopoDS_Shell& sh : sheets) out.emplace_back(sh, true);
   return out;
 }
 }  // namespace
@@ -634,17 +719,127 @@ void require_labels(const Tracked& t, const char* what) {
   TopTools_IndexedMapOfShape faces;
   TopExp::MapShapes(t.shape, TopAbs_FACE, faces);
   for (int i = 1; i <= faces.Extent(); ++i) {
-    if (origins_of(t.faces, faces(i)).empty()) incomplete(std::string(what) + " made a face OCCT reports no history for");
+    if (!origins_of(t.faces, faces(i)).empty()) continue;
+    GProp_GProps props;
+    BRepGProp::SurfaceProperties(faces(i), props);
+    const gp_Pnt c = props.CentreOfMass();
+    BRepAdaptor_Surface s(TopoDS::Face(faces(i)), Standard_False);
+    std::ostringstream m;
+    m << what << " made a face OCCT reports no history for (surface type " << int(s.GetType())
+      << ", centroid " << c.X() << ", " << c.Y() << ", " << c.Z() << ")";
+    incomplete(m.str());
   }
 }
 
 void check_valid(const TopoDS_Shape& s, const char* what) {
   if (s.IsNull()) fail(std::string(what) + " produced nothing");
   BRepCheck_Analyzer check(s, Standard_True);
-  if (!check.IsValid()) fail(std::string(what) + " produced an invalid shape");
+  if (check.IsValid()) return;
+  std::ostringstream m;
+  m << what << " produced an invalid shape";
+  // Name the first invalid entity and its BRepCheck status.
+  bool named = false;
+  for (TopAbs_ShapeEnum k : {TopAbs_VERTEX, TopAbs_EDGE, TopAbs_WIRE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID}) {
+    for (TopExp_Explorer ex(s, k); ex.More() && !named; ex.Next()) {
+      if (check.IsValid(ex.Current())) continue;
+      const Handle(BRepCheck_Result)& r = check.Result(ex.Current());
+      m << " (" << TopAbs::ShapeTypeToString(k);
+      if (!r.IsNull()) {
+        for (const BRepCheck_Status st : r->Status()) {
+          if (st != BRepCheck_NoError) {
+            m << ": BRepCheck status " << int(st);
+            break;
+          }
+        }
+      }
+      m << ")";
+      named = true;
+    }
+    if (named) break;
+  }
+  if (const char* dir = std::getenv("RUNMAT_K1_DUMP")) {
+    static std::atomic<int> n{0};
+    const std::string path = std::string(dir) + "/invalid-" + std::to_string(n++) + ".brep";
+    BRepTools::Write(s, path.c_str());
+    m << " [written to " << path << "]";
+  }
+  fail(m.str());
+}
+
+// ---- blends
+
+// Whether the two faces of an edge meet tangentially along it (sampled at a few points): such an
+// edge has no corner to round or bevel.
+bool smooth_edge(const TopoDS_Edge& e, const TopoDS_Shape& shape) {
+  TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
+  TopExp::MapShapesAndUniqueAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+  const TopTools_ListOfShape* fs = edge_faces.Seek(e);
+  if (fs == nullptr || fs->Extent() != 2) return false;
+  const TopoDS_Face f1 = TopoDS::Face(fs->First());
+  const TopoDS_Face f2 = TopoDS::Face(fs->Last());
+  double a = 0, b = 0;
+  Handle(Geom2d_Curve) c1 = BRep_Tool::CurveOnSurface(e, f1, a, b);
+  double a2 = 0, b2 = 0;
+  Handle(Geom2d_Curve) c2 = BRep_Tool::CurveOnSurface(e, f2, a2, b2);
+  if (c1.IsNull() || c2.IsNull()) return false;
+  BRepGProp_Face g1(f1), g2(f2);
+  for (double t : {0.25, 0.5, 0.75}) {
+    const gp_Pnt2d p1 = c1->Value(a + t * (b - a));
+    const gp_Pnt2d p2 = c2->Value(a2 + t * (b2 - a2));
+    gp_Pnt q;
+    gp_Vec n1, n2;
+    g1.Normal(p1.X(), p1.Y(), q, n1);
+    g2.Normal(p2.X(), p2.Y(), q, n2);
+    if (n1.Magnitude() < 1e-12 || n2.Magnitude() < 1e-12) return false;
+    if (n1.Normalized().Dot(n2.Normalized()) < 1.0 - 1e-9) return false;
+  }
+  return true;
+}
+
+void require_corner_edge(const TopoDS_Edge& e, const TopoDS_Shape& shape, const char* what) {
+  if (smooth_edge(e, shape))
+    unsupported(std::string(what) + " blends of an edge where its two faces meet tangentially");
 }
 
 // ---- fillet
+
+// OCCT's blend approximations use absolute tolerances tuned for millimetre models (a variable
+// radius fillet on a metre-scale box fails where the same box in millimetres blends): such an
+// operation works on a copy scaled up by 1000 and scales the result back, carrying origins and
+// kept faces through both transforms.
+struct MmFrame {
+  bool on = false;
+  std::unique_ptr<BRepBuilderAPI_Transform> up;
+  Tracked work;
+
+  MmFrame(const Tracked& src, bool scale) : on(scale) {
+    if (!on) {
+      work = src;
+      return;
+    }
+    gp_Trsf t;
+    t.SetScale(gp::Origin(), 1000.0);
+    up = std::make_unique<BRepBuilderAPI_Transform>(src.shape, t, Standard_True);
+    work.shape = up->Shape();
+    work.sheet = src.sheet;
+    propagate(src, *up, work);
+    for (int i = 1; i <= src.kept.Extent(); ++i) work.kept.Add(up->ModifiedShape(src.kept.FindKey(i)), 1);
+  }
+  TopoDS_Shape image(const TopoDS_Shape& s) const { return on ? up->ModifiedShape(s) : s; }
+  double len(double v) const { return on ? v * 1000.0 : v; }
+  Tracked back(const Tracked& res) const {
+    if (!on) return res;
+    gp_Trsf t;
+    t.SetScale(gp::Origin(), 1e-3);
+    BRepBuilderAPI_Transform down(res.shape, t, Standard_True);
+    Tracked out;
+    out.shape = down.Shape();
+    out.sheet = res.sheet;
+    propagate(res, down, out);
+    for (int i = 1; i <= res.kept.Extent(); ++i) out.kept.Add(down.ModifiedShape(res.kept.FindKey(i)), 1);
+    return out;
+  }
+};
 
 Tracked do_fillet(const Exec& x, const KInstr& in) {
   const Tracked& src = x.slot(in.ints[0]);
@@ -654,23 +849,57 @@ Tracked do_fillet(const Exec& x, const KInstr& in) {
   const std::int64_t n = in.ints[4];
   const double radius = in.reals[0];
   const std::size_t nvar = static_cast<std::size_t>(in.reals[1]);
-  BRepFilletAPI_MakeFillet mk(src.shape, ChFi3d_Rational);
+  // Rational sections are exact circles; a radius law needs the polynomial approximation.
+  const MmFrame mm(src, nvar > 0);
+  BRepFilletAPI_MakeFillet mk(mm.work.shape, nvar > 0 ? ChFi3d_Polynomial : ChFi3d_Rational);
   for (std::int64_t i = 0; i < n; ++i) {
-    TopoDS_Edge e = x.edge(operand, in.ints[5 + i]);
+    require_corner_edge(x.edge(operand, in.ints[5 + i]), src.shape, "fillet");
+    const TopoDS_Edge e = TopoDS::Edge(mm.image(x.edge(operand, in.ints[5 + i])));
+    mk.Add(mm.len(radius), e);
     if (nvar > 0) {
-      TColgp_Array1OfPnt2d ur(1, static_cast<int>(nvar));
-      for (std::size_t k = 0; k < nvar; ++k)
-        ur.SetValue(static_cast<int>(k + 1), gp_Pnt2d(in.reals[2 + 2 * k], in.reals[3 + 2 * k]));
-      mk.Add(ur, e);
-    } else {
-      mk.Add(radius, e);
+      // Positions are fractions of the edge from its canonical start (the lexicographically
+      // first end point, as in the summary); OCCT takes relative parameters on the spine, which
+      // may run the other way.
+      const int ic = mk.Contour(e);
+      BRepAdaptor_Curve curve(e);
+      gp_Pnt q0 = curve.Value(curve.FirstParameter()), q1 = curve.Value(curve.LastParameter());
+      for (double c : {q1.X() - q0.X(), q1.Y() - q0.Y(), q1.Z() - q0.Z()}) {
+        if (std::abs(c) <= 1e-9) continue;
+        if (c < 0) std::swap(q0, q1);
+        break;
+      }
+      const gp_Pnt first = BRep_Tool::Pnt(mk.FirstVertex(ic));
+      const bool flip = first.Distance(q1) < first.Distance(q0);
+      std::vector<gp_Pnt2d> pts;
+      bool at0 = false, at1 = false;
+      for (std::size_t k = 0; k < nvar; ++k) {
+        const double t = in.reals[2 + 2 * k];
+        at0 |= std::abs(t) < 1e-12;
+        at1 |= std::abs(t - 1.0) < 1e-12;
+        pts.emplace_back(flip ? 1.0 - t : t, mm.len(in.reals[3 + 2 * k]));
+      }
+      // The constant radius holds at an end the definition leaves open.
+      if (!at0) pts.emplace_back(flip ? 1.0 : 0.0, mm.len(radius));
+      if (!at1) pts.emplace_back(flip ? 0.0 : 1.0, mm.len(radius));
+      std::sort(pts.begin(), pts.end(), [](const gp_Pnt2d& p, const gp_Pnt2d& q) { return p.X() < q.X(); });
+      TColgp_Array1OfPnt2d ur(1, static_cast<int>(pts.size()));
+      for (std::size_t k = 0; k < pts.size(); ++k) ur.SetValue(static_cast<int>(k + 1), pts[k]);
+      int iinc = 1;
+      for (int k = 1; k <= mk.NbEdges(ic); ++k)
+        if (mk.Edge(ic, k).IsSame(e)) iinc = k;
+      mk.SetRadius(ur, ic, iinc);
     }
   }
   mk.Build();
-  if (!mk.IsDone()) fail("the fillet could not be built (radius too large, or the edges do not allow it)");
-  Tracked out;
-  out.shape = mk.Shape();
-  propagate(src, mk, out);
+  if (!mk.IsDone()) {
+    std::ostringstream m;
+    m << "the fillet could not be built (radius too large, or the edges do not allow it; "
+      << mk.NbFaultyContours() << " of " << mk.NbContours() << " contours failed)";
+    fail(m.str());
+  }
+  Tracked res;
+  res.shape = mk.Shape();
+  propagate(mm.work, mk, res);
   const Body& b = x.operand(operand);
   // Per-edge label overrides (a full round tags both blends by the centre face).
   std::map<std::int64_t, std::uint32_t> overrides;
@@ -682,23 +911,51 @@ Tracked do_fillet(const Exec& x, const KInstr& in) {
   }
   // Blend faces take the edge they replace; corner patches the vertex they round.
   TopTools_IndexedMapOfShape faces;
-  TopExp::MapShapes(out.shape, TopAbs_FACE, faces);
+  TopExp::MapShapes(res.shape, TopAbs_FACE, faces);
   for (std::size_t i = 0; i < b.edges.size(); ++i) {
     auto it = overrides.find(static_cast<std::int64_t>(i));
     const std::uint32_t l = it != overrides.end()
                                 ? it->second
                                 : static_cast<std::uint32_t>(edge_base + static_cast<std::int64_t>(i));
-    for (const TopoDS_Shape& g : mk.Generated(b.edges[i])) {
-      if (g.ShapeType() == TopAbs_FACE && faces.Contains(g)) add_origins(out.faces, g, label(l));
+    for (const TopoDS_Shape& g : mk.Generated(mm.image(b.edges[i]))) {
+      if (g.ShapeType() == TopAbs_FACE && faces.Contains(g)) add_origins(res.faces, g, label(l));
     }
   }
   for (std::size_t i = 0; i < b.vertices.size(); ++i) {
-    for (const TopoDS_Shape& g : mk.Generated(b.vertices[i])) {
+    for (const TopoDS_Shape& g : mk.Generated(mm.image(b.vertices[i]))) {
       if (g.ShapeType() == TopAbs_FACE && faces.Contains(g))
-        add_origins(out.faces, g, label(static_cast<std::uint32_t>(vertex_base + static_cast<std::int64_t>(i))));
+        add_origins(res.faces, g, label(static_cast<std::uint32_t>(vertex_base + static_cast<std::int64_t>(i))));
     }
   }
+  Tracked out = mm.back(res);
   require_labels(out, "the fillet");
+  return out;
+}
+
+// ---- full round
+
+// The half cylinder that replaces a rib's centre face: the slab above the axis between the
+// side planes is cut away and the half cylinder fused in; its curved face is the round.
+Tracked do_full_round(const Tracked& src, std::uint32_t round_label, const double* r) {
+  const gp_Pnt a0(r[0], r[1], r[2]);
+  const gp_Dir d(r[3], r[4], r[5]), ydir(r[6], r[7], r[8]), nc(r[9], r[10], r[11]);
+  const double len = r[12], rad = r[13];
+  if (len <= 0 || rad <= 0) fail("the full round has no extent");
+  const gp_Pnt corner(a0.XYZ() - ydir.XYZ() * rad);
+  BRepPrimAPI_MakeBox box(gp_Ax2(corner, nc, d), len, 2 * rad, 3 * rad);
+  Tracked slab;
+  slab.shape = box.Solid();
+  Tracked cut = boolean_op(1, {&src}, {&slab});
+  BRepPrimAPI_MakeCylinder cyl(gp_Ax2(a0, d, ydir), rad, len, M_PI);
+  Tracked half;
+  half.shape = cyl.Solid();
+  for (TopExp_Explorer ex(half.shape, TopAbs_FACE); ex.More(); ex.Next()) {
+    BRepAdaptor_Surface s(TopoDS::Face(ex.Current()));
+    if (s.GetType() == GeomAbs_Cylinder) add_origins(half.faces, ex.Current(), label(round_label));
+  }
+  Tracked out = boolean_op(0, {&cut}, {&half});
+  // Same-domain pieces of the rib's ends and the half cylinder's flat ends become one face
+  // each when the bodies are output; nothing else of the tools may remain.
   return out;
 }
 
@@ -718,6 +975,7 @@ Tracked do_chamfer(const Exec& x, const KInstr& in) {
     const std::int64_t mode = in.ints[5 + 3 * i];
     const bool second = in.ints[6 + 3 * i] != 0;
     TopoDS_Edge e = x.edge(operand, ei);
+    require_corner_edge(e, src.shape, "chamfer");
     const double a = in.reals[2 * i];
     const double c = in.reals[2 * i + 1];
     const TopTools_ListOfShape& fs = edge_faces.FindFromKey(e);
@@ -814,6 +1072,73 @@ Tracked do_vertex_chamfer(const Exec& x, const KInstr& in) {
 
 // ---- shell
 
+// A closed shell: the operand's own faces stay as they are and an offset skin, reversed, bounds
+// the sealed void (inward) or encloses the body (outward). Building the solid from the two
+// shells keeps every original face, so the body continues its operand.
+Tracked closed_shell(const Exec& x, const KInstr& in, const Tracked& src, const Body& b,
+                     std::int64_t wall_base, bool outward, double t, std::int64_t nper) {
+  BRepOffset_MakeOffset mo;
+  mo.Initialize(src.shape, outward ? t : -t, 1e-6, BRepOffset_Skin, Standard_False,
+                Standard_False, GeomAbs_Intersection, Standard_False, Standard_False);
+  for (std::int64_t i = 0; i < nper; ++i) {
+    TopoDS_Face f = x.face(in.ints[1], in.ints[7 + i]);
+    const double ti = in.reals[1 + i];
+    mo.SetOffsetOnFace(f, outward ? ti : -ti);
+  }
+  mo.MakeOffsetShape();
+  if (!mo.IsDone() || mo.Shape().IsNull()) fail("the shell could not be built (a wall is thicker than the part allows)");
+  auto one_shell = [](const TopoDS_Shape& s) {
+    TopExp_Explorer ex(s, TopAbs_SHELL);
+    if (!ex.More()) fail("the shell's offset skin is not closed");
+    TopoDS_Shell sh = TopoDS::Shell(ex.Current());
+    ex.Next();
+    if (ex.More()) fail("the shell's offset skin splits into several pieces");
+    return sh;
+  };
+  const TopoDS_Shell original = one_shell(src.shape);
+  const TopoDS_Shell skin = one_shell(mo.Shape());
+  // Orient each shell outward on its own, then reverse the inner one.
+  auto oriented = [](const TopoDS_Shell& sh) {
+    BRep_Builder bb;
+    TopoDS_Solid so;
+    bb.MakeSolid(so);
+    bb.Add(so, sh);
+    BRepLib::OrientClosedSolid(so);
+    TopExp_Explorer ex(so, TopAbs_SHELL);
+    return TopoDS::Shell(ex.Current());
+  };
+  TopoDS_Shell outer = oriented(outward ? skin : original);
+  TopoDS_Shell inner = oriented(outward ? original : skin);
+  inner.Reverse();
+  BRep_Builder bb;
+  TopoDS_Solid solid;
+  bb.MakeSolid(solid);
+  bb.Add(solid, outer);
+  bb.Add(solid, inner);
+  check_valid(solid, "the shell");
+  Tracked out;
+  out.shape = solid;
+  for (int i = 1; i <= src.faces.Extent(); ++i) add_origins(out.faces, src.faces.FindKey(i), src.faces(i));
+  for (int i = 1; i <= src.edges.Extent(); ++i) add_origins(out.edges, src.edges.FindKey(i), src.edges(i));
+  for (int i = 1; i <= src.vertices.Extent(); ++i)
+    add_origins(out.vertices, src.vertices.FindKey(i), src.vertices(i));
+  for (int i = 1; i <= src.kept.Extent(); ++i) out.kept.Add(src.kept.FindKey(i), 1);
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(skin, TopAbs_FACE, faces);
+  const BRepAlgo_Image& image = mo.OffsetFacesFromShapes();
+  for (std::size_t i = 0; i < b.faces.size(); ++i) {
+    const std::uint32_t wall = static_cast<std::uint32_t>(wall_base + static_cast<std::int64_t>(i));
+    if (!image.HasImage(b.faces[i])) continue;
+    TopTools_ListOfShape imgs;
+    image.LastImage(b.faces[i], imgs);
+    for (const TopoDS_Shape& g : imgs)
+      for (TopExp_Explorer ex(g, TopAbs_FACE); ex.More(); ex.Next())
+        if (faces.Contains(ex.Current())) add_origins(out.faces, ex.Current(), label(wall));
+  }
+  require_labels(out, "the shell");
+  return out;
+}
+
 Tracked do_shell(const Exec& x, const KInstr& in) {
   const Tracked& src = x.slot(in.ints[0]);
   const std::int64_t operand = in.ints[1];
@@ -824,6 +1149,7 @@ Tracked do_shell(const Exec& x, const KInstr& in) {
   const std::int64_t nper = in.ints[6 + nopen];
   const double t = in.reals[0];
   const Body& b = x.operand(operand);
+  if (nopen == 0) return closed_shell(x, in, src, b, inner_base, outward, t, nper);
   BRepOffset_MakeOffset mk;
   mk.Initialize(src.shape, outward ? t : -t, 1e-6, BRepOffset_Skin, Standard_True, Standard_False,
                 GeomAbs_Intersection, Standard_False, Standard_False);
@@ -849,6 +1175,16 @@ Tracked do_shell(const Exec& x, const KInstr& in) {
   for (std::size_t i = 0; i < b.faces.size(); ++i) {
     const TopoDS_Face& f = b.faces[i];
     const std::uint32_t wall = static_cast<std::uint32_t>(inner_base + static_cast<std::int64_t>(i));
+    if (open.Contains(f)) {
+      // An opened face is consumed: what OCCT keeps of it in its plane (its image, or the face
+      // itself trimmed to the wall ring) is the rim.
+      const std::uint32_t rim = static_cast<std::uint32_t>(rim_base + static_cast<std::int64_t>(i));
+      if (faces.Contains(f)) add_origins(out.faces, f, label(rim));
+      for (const TopoDS_Shape& m : mk.Modified(f))
+        for (TopExp_Explorer ex(m, TopAbs_FACE); ex.More(); ex.Next())
+          if (faces.Contains(ex.Current())) add_origins(out.faces, ex.Current(), label(rim));
+      continue;
+    }
     if (faces.Contains(f)) {
       add_origins(out.faces, f, origins_of(src.faces, f));
       out.kept.Add(f, 1);
@@ -856,7 +1192,6 @@ Tracked do_shell(const Exec& x, const KInstr& in) {
     for (const TopoDS_Shape& m : mk.Modified(f)) {
       if (faces.Contains(m)) add_origins(out.faces, m, origins_of(src.faces, f));
     }
-    if (open.Contains(f)) continue;
     if (image.HasImage(f)) {
       TopTools_ListOfShape imgs;
       image.LastImage(f, imgs);
@@ -943,7 +1278,7 @@ Tracked do_draft(const Exec& x, const KInstr& in) {
   if (!mk.IsDone()) fail("the draft could not be built");
   Tracked out;
   out.shape = mk.Shape();
-  propagate(src, mk, out);
+  propagate_draft(src, mk, out);
   require_labels(out, "the draft");
   return out;
 }
@@ -1006,6 +1341,58 @@ Tracked do_scale(const Tracked& src, const double* r) {
 
 // ---- split by a plane
 
+namespace {
+// Each solid of `in` as an independent copy, so a face two solids share (the splitter's cut
+// face, bounding both sides in opposite orientations) becomes one face per solid. Origins and
+// kept marks follow the copy's history; shapes outside solids are carried as they are.
+Tracked separate_solids(const Tracked& in) {
+  BRep_Builder b;
+  TopoDS_Compound c;
+  b.MakeCompound(c);
+  Tracked out;
+  out.sheet = in.sheet;
+  auto carry_copy = [](const ShapeOrigins& from, ShapeOrigins& to, BRepBuilderAPI_Copy& cp,
+                       const TopoDS_Shape& solid, TopAbs_ShapeEnum kind) {
+    TopTools_IndexedMapOfShape sub;
+    TopExp::MapShapes(solid, kind, sub);
+    for (int i = 1; i <= sub.Extent(); ++i) {
+      const Origins& o = origins_of(from, sub(i));
+      if (o.empty()) continue;
+      for (const TopoDS_Shape& m : cp.Modified(sub(i))) add_origins(to, m, o);
+    }
+  };
+  TopTools_IndexedMapOfShape in_solid;
+  for (TopExp_Explorer ex(in.shape, TopAbs_SOLID); ex.More(); ex.Next()) {
+    const TopoDS_Shape& solid = ex.Current();
+    TopExp::MapShapes(solid, TopAbs_FACE, in_solid);
+    BRepBuilderAPI_Copy cp(solid, Standard_False, Standard_False);
+    b.Add(c, cp.Shape());
+    carry_copy(in.faces, out.faces, cp, solid, TopAbs_FACE);
+    carry_copy(in.edges, out.edges, cp, solid, TopAbs_EDGE);
+    carry_copy(in.vertices, out.vertices, cp, solid, TopAbs_VERTEX);
+    TopTools_IndexedMapOfShape faces;
+    TopExp::MapShapes(solid, TopAbs_FACE, faces);
+    for (int i = 1; i <= faces.Extent(); ++i)
+      if (in.kept.Contains(faces(i)))
+        for (const TopoDS_Shape& m : cp.Modified(faces(i))) out.kept.Add(m, 1);
+  }
+  for (TopExp_Explorer ex(in.shape, TopAbs_FACE); ex.More(); ex.Next()) {
+    if (in_solid.Contains(ex.Current())) continue;
+    b.Add(c, ex.Current());
+    add_origins(out.faces, ex.Current(), origins_of(in.faces, ex.Current()));
+    if (in.kept.Contains(ex.Current())) out.kept.Add(ex.Current(), 1);
+    TopTools_IndexedMapOfShape sub;
+    TopExp::MapShapes(ex.Current(), TopAbs_EDGE, sub);
+    for (int i = 1; i <= sub.Extent(); ++i) add_origins(out.edges, sub(i), origins_of(in.edges, sub(i)));
+    sub.Clear();
+    TopExp::MapShapes(ex.Current(), TopAbs_VERTEX, sub);
+    for (int i = 1; i <= sub.Extent(); ++i) add_origins(out.vertices, sub(i), origins_of(in.vertices, sub(i)));
+  }
+  out.shape = c;
+  return out;
+}
+}  // namespace
+
 Tracked do_split(const Tracked& src, const gp_Ax3& frame, std::uint32_t pos_label,
                  std::uint32_t neg_label) {
   Bnd_Box box;
@@ -1022,17 +1409,19 @@ Tracked do_split(const Tracked& src, const gp_Ax3& frame, std::uint32_t pos_labe
   sp.SetRunParallel(Standard_False);
   sp.Build();
   if (!sp.IsDone() || sp.HasErrors()) fail("the split failed");
-  Tracked out;
-  out.shape = sp.Shape();
-  out.sheet = src.sheet;
-  propagate(src, sp, out);
-  // Split faces: tagged by the side of the body they bound (opposite their outward normal).
-  TopTools_IndexedMapOfShape faces;
-  TopExp::MapShapes(out.shape, TopAbs_FACE, faces);
-  for (const TopoDS_Shape& g : sp.Modified(mf.Face())) {
-    for (TopExp_Explorer ex(out.shape, TopAbs_FACE); ex.More(); ex.Next()) {
-      if (!ex.Current().IsSame(g)) continue;
+  Tracked split;
+  split.shape = sp.Shape();
+  split.sheet = src.sheet;
+  propagate(src, sp, split);
+  // The cut face is shared by the two sides; give each side its own copy before naming it.
+  Tracked out = separate_solids(split);
+  // Split faces (images of the cutting plane, so without an origin): tagged by the side of the
+  // body they bound, which is opposite their outward normal.
+  for (TopExp_Explorer sx(out.shape, TopAbs_SOLID); sx.More(); sx.Next()) {
+    for (TopExp_Explorer ex(sx.Current(), TopAbs_FACE); ex.More(); ex.Next()) {
+      if (!origins_of(out.faces, ex.Current()).empty()) continue;
       BRepAdaptor_Surface s(TopoDS::Face(ex.Current()));
+      if (s.GetType() != GeomAbs_Plane) continue;
       gp_Dir n = s.Plane().Axis().Direction();
       if (!s.Plane().Direct()) n.Reverse();
       if (ex.Current().Orientation() == TopAbs_REVERSED) n.Reverse();
@@ -1041,6 +1430,112 @@ Tracked do_split(const Tracked& src, const gp_Ax3& frame, std::uint32_t pos_labe
     }
   }
   require_labels(out, "the split");
+  return out;
+}
+
+// ---- cut a solid with a sheet
+
+namespace {
+// A point inside a face (a UV grid sample the face classifier puts IN) and the face's outward
+// normal there, as the face is oriented in its shape.
+bool face_sample(const TopoDS_Face& f, gp_Pnt& p, gp_Vec& n) {
+  double u0, u1, v0, v1;
+  BRepTools::UVBounds(f, u0, u1, v0, v1);
+  BRepGProp_Face g(f);
+  const double tol = BRep_Tool::Tolerance(f);
+  for (int i = 1; i < 8; ++i) {
+    for (int j = 1; j < 8; ++j) {
+      const gp_Pnt2d uv(u0 + (u1 - u0) * ((i * 37) % 8) / 8.0, v0 + (v1 - v0) * ((j * 53) % 8) / 8.0);
+      BRepClass_FaceClassifier c(f, uv, tol);
+      if (c.State() != TopAbs_IN) continue;
+      g.Normal(uv.X(), uv.Y(), p, n);
+      if (n.Magnitude() < 1e-12) continue;
+      n.Normalize();
+      return true;
+    }
+  }
+  return false;
+}
+
+// The sheet's normal at a point on it (as its faces are oriented in the sheet).
+bool sheet_normal(const TopoDS_Shape& sheet, const gp_Pnt& p, gp_Vec& n) {
+  for (TopExp_Explorer ex(sheet, TopAbs_FACE); ex.More(); ex.Next()) {
+    const TopoDS_Face f = TopoDS::Face(ex.Current());
+    GeomAPI_ProjectPointOnSurf proj(p, BRep_Tool::Surface(f));
+    if (proj.NbPoints() == 0 || proj.LowerDistance() > 1e-6) continue;
+    double u, v;
+    proj.LowerDistanceParameters(u, v);
+    BRepClass_FaceClassifier c(f, gp_Pnt2d(u, v), BRep_Tool::Tolerance(f));
+    if (c.State() == TopAbs_OUT) continue;
+    gp_Pnt q;
+    BRepGProp_Face(f).Normal(u, v, q, n);
+    if (n.Magnitude() < 1e-12) continue;
+    n.Normalize();
+    return true;
+  }
+  return false;
+}
+}  // namespace
+
+// Split the solid by the sheet and keep the pieces on the `keep_positive` side of the sheet's
+// normal; the faces the sheet cut take `cut_label`.
+Tracked do_cut_with_sheet(const Tracked& solid, const Tracked& sheet, bool keep_positive,
+                          std::uint32_t cut_label) {
+  BRepAlgoAPI_Splitter sp;
+  TopTools_ListOfShape args, tools;
+  args.Append(solid.shape);
+  tools.Append(sheet.shape);
+  sp.SetArguments(args);
+  sp.SetTools(tools);
+  sp.SetRunParallel(Standard_False);
+  sp.SetNonDestructive(Standard_True);
+  sp.Build();
+  if (!sp.IsDone() || sp.HasErrors()) fail("the cut with the surface failed");
+  Tracked split;
+  split.shape = sp.Shape();
+  propagate(solid, sp, split);
+  Tracked pieces = separate_solids(split);
+  BRep_Builder b;
+  TopoDS_Compound kept;
+  b.MakeCompound(kept);
+  int npieces = 0, nkept = 0;
+  std::vector<TopoDS_Face> cut_faces;
+  for (TopExp_Explorer sx(pieces.shape, TopAbs_SOLID); sx.More(); sx.Next()) {
+    ++npieces;
+    int side = 0;  // +1 positive, -1 negative
+    std::vector<TopoDS_Face> mine;
+    for (TopExp_Explorer ex(sx.Current(), TopAbs_FACE); ex.More(); ex.Next()) {
+      if (!origins_of(pieces.faces, ex.Current()).empty()) continue;
+      const TopoDS_Face f = TopoDS::Face(ex.Current());
+      mine.push_back(f);
+      gp_Pnt p;
+      gp_Vec out_n, sheet_n;
+      if (side == 0 && face_sample(f, p, out_n) && sheet_normal(sheet.shape, p, sheet_n))
+        side = out_n.Dot(sheet_n) < 0 ? +1 : -1;  // the piece lies against its cut face's normal
+    }
+    if (side == 0) fail("a piece of the cut does not meet the surface");
+    if ((side > 0) != keep_positive) continue;
+    ++nkept;
+    b.Add(kept, sx.Current());
+    cut_faces.insert(cut_faces.end(), mine.begin(), mine.end());
+  }
+  if (npieces < 2) fail("the surface does not cut through the body");
+  if (nkept == 0) fail("nothing of the body lies on the kept side of the surface");
+  Tracked out;
+  out.shape = kept;
+  TopTools_IndexedMapOfShape present[3];
+  const TopAbs_ShapeEnum kinds[3] = {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX};
+  const ShapeOrigins* from[3] = {&pieces.faces, &pieces.edges, &pieces.vertices};
+  ShapeOrigins* to[3] = {&out.faces, &out.edges, &out.vertices};
+  for (int k = 0; k < 3; ++k) {
+    TopExp::MapShapes(kept, kinds[k], present[k]);
+    for (int i = 1; i <= from[k]->Extent(); ++i)
+      if (present[k].Contains(from[k]->FindKey(i))) add_origins(*to[k], from[k]->FindKey(i), (*from[k])(i));
+  }
+  for (int i = 1; i <= pieces.kept.Extent(); ++i)
+    if (present[0].Contains(pieces.kept.FindKey(i))) out.kept.Add(pieces.kept.FindKey(i), 1);
+  for (const TopoDS_Face& f : cut_faces) add_origins(out.faces, f, label(cut_label));
+  require_labels(out, "the cut with the surface");
   return out;
 }
 
@@ -1211,6 +1706,25 @@ Tracked do_thicken(const Exec& x, const KInstr& in) {
         if (faces.Contains(ex.Current()) && origins_of(out.faces, ex.Current()).empty())
           add_origins(out.faces, ex.Current(), label(static_cast<std::uint32_t>(rim_base + ei)));
   }
+  // A rim OCCT does not report as generated still holds the sheet's boundary edge it stands on.
+  for (int i = 1; i <= faces.Extent(); ++i) {
+    if (!origins_of(out.faces, faces(i)).empty()) continue;
+    for (TopExp_Explorer ex(faces(i), TopAbs_EDGE); ex.More(); ex.Next()) {
+      std::uint32_t ei = kNoLabel;
+      for (const Origin& o : origins_of(base.edges, ex.Current()))
+        if (o.kind == kInput) ei = o.b;
+      if (ei == kNoLabel) {
+        for (int k = 1; k <= base.edges.Extent() && ei == kNoLabel; ++k)
+          for (const TopoDS_Shape& m : mk.Modified(base.edges.FindKey(k)))
+            if (m.IsSame(ex.Current()))
+              for (const Origin& o : base.edges(k))
+                if (o.kind == kInput) ei = o.b;
+      }
+      if (ei == kNoLabel) continue;
+      add_origins(out.faces, faces(i), label(static_cast<std::uint32_t>(rim_base + ei)));
+      break;
+    }
+  }
   require_labels(out, "the thicken");
   return out;
 }
@@ -1278,6 +1792,7 @@ Tracked import_step(const KInstr& in, KResult& result);
 
 KResult kernel_execute(rust::Slice<const KInstr> program,
                        rust::Slice<const std::uint64_t> operands) {
+  const auto guard = kernel_lock();
   Exec x{program, {}, {}, {}, {}, {}};
   // Bodies registered by earlier outputs are released when a later instruction fails.
   auto release_partial = [&x]() {
@@ -1380,6 +1895,8 @@ KResult kernel_execute(rust::Slice<const KInstr> program,
         }
         case 28: p = offset_profile(x.profile(I[0]), in); prof = true; t = p.tracked; break;
         case 30: t = split_keep(x.slot(I[0]), in, x.operand(I[1])); break;
+        case 33: t = do_full_round(x.slot(I[0]), lab(I[1]), R.data()); break;
+        case 32: t = do_cut_with_sheet(x.slot(I[0]), x.slot(I[1]), I[2] != 0, lab(I[3])); break;
         case 31: t = prism_to_body(x.profile(I[0]), in, x.operand(I[3])); break;
         default: unsupported("unknown kernel instruction");
       }
@@ -1402,6 +1919,7 @@ KResult kernel_execute(rust::Slice<const KInstr> program,
 rust::Vec<double> kernel_ray_hits(rust::Slice<const std::uint64_t> bodies,
                                   rust::Slice<const std::int64_t> face_filter,
                                   rust::Slice<const double> ray) {
+  const auto guard = kernel_lock();
   // Returns (t, body, face, entering) quadruples sorted by t along the ray (both ways).
   try {
     rust::Vec<double> out;
@@ -1439,6 +1957,7 @@ rust::Vec<double> kernel_ray_hits(rust::Slice<const std::uint64_t> bodies,
 
 rust::Vec<double> kernel_extent(rust::Slice<const std::uint64_t> bodies,
                                 rust::Slice<const double> axis) {
+  const auto guard = kernel_lock();
   // The range of (p - o)·d over the bodies, exact on their geometry.
   try {
     const gp_Pnt o(axis[0], axis[1], axis[2]);

@@ -106,6 +106,7 @@ TopoDS_Shape placed(const Body& b, const double* t) {
 
 rust::Vec<double> kernel_analyze(std::uint32_t kind, rust::Slice<const double> r,
                                  rust::Slice<const std::uint64_t> ids) {
+  const auto guard = kernel_lock();
   try {
     std::vector<std::shared_ptr<const Body>> bodies;
     for (auto id : ids) bodies.push_back(registry_get(id));
@@ -308,6 +309,7 @@ rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> ids,
                                      rust::Slice<const double> transforms,
                                      rust::Slice<const double> frame_r, std::uint32_t flags,
                                      double tolerance) {
+  const auto guard = kernel_lock();
   try {
     const bool hidden = flags & 1;
     const bool smooth = flags & 2;
@@ -456,6 +458,7 @@ rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> ids,
 
 rust::Vec<double> kernel_proximity(std::uint64_t a, rust::Slice<const double> ta, std::uint64_t b,
                                    rust::Slice<const double> tb) {
+  const auto guard = kernel_lock();
   try {
     auto ba = registry_get(a);
     auto bb = registry_get(b);

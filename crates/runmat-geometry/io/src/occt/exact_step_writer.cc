@@ -60,6 +60,7 @@ struct StaticGuard {
 
 rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
                                            rust::Slice<const std::uint64_t> ids) {
+  const auto guard = kernel_lock();
   try {
     static std::mutex step_mutex;  // the writer's settings are process-global
     std::lock_guard<std::mutex> lock(step_mutex);

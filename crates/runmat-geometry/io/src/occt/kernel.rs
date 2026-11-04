@@ -432,6 +432,13 @@ fn scale(a: [f64; 3], s: f64) -> [f64; 3] {
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
 fn norm(a: [f64; 3]) -> [f64; 3] {
     let l = dot(a, a).sqrt();
     if l > 0.0 {
@@ -508,6 +515,9 @@ struct OutputSpec {
     split: Option<Frame>,
     /// Operands passed back untouched.
     kept: bool,
+    /// The operands whose material a body can hold, when not every operand's can (a cut's
+    /// tools leave faces on the result but no material, so the result does not continue them).
+    material: Option<Vec<u32>>,
 }
 
 struct Lower<'a> {
@@ -806,7 +816,7 @@ impl<'a> Lower<'a> {
                 labels,
                 true,
             )?]),
-            ToolShape::Loft { profiles } => Ok(vec![self.loft(profiles, labels)?]),
+            ToolShape::Loft { profiles } => Ok(vec![self.loft(profiles, labels, true)?]),
             ToolShape::Holes { .. } => self.holes(shape, labels),
         }
     }
@@ -1104,6 +1114,7 @@ impl<'a> Lower<'a> {
         &mut self,
         profiles: &[CanonicalProfile],
         labels: &ToolLabels<'_>,
+        solid: bool,
     ) -> Result<i64, KernelError> {
         let first = profiles
             .first()
@@ -1135,7 +1146,11 @@ impl<'a> Lower<'a> {
                     s.curve = names[li][si].clone();
                 }
             }
-            slots.push(self.solid_profile(&q, labels, ord)?);
+            slots.push(if solid {
+                self.solid_profile(&q, labels, ord)?
+            } else {
+                self.sheet_profile(&q, labels, ord)?
+            });
         }
         let sl = self.label(labels.mark(labels.start.clone()));
         let el = self.label(labels.mark(labels.end.clone()));
@@ -1894,7 +1909,14 @@ impl OcctKernel {
                 let mut ints = vec![op, 1, target, tools.len() as i64];
                 ints.extend(&tools);
                 let r = l.push(7, ints, vec![]);
-                l.output(r, false, OutputSpec::default());
+                l.output(
+                    r,
+                    false,
+                    OutputSpec {
+                        material: (op == 1).then(|| vec![0]),
+                        ..OutputSpec::default()
+                    },
+                );
                 if *keep_tools {
                     l.keep_operands(1..n)?;
                 }
@@ -2177,44 +2199,62 @@ impl OcctKernel {
             ));
         }
         let width = dot(sub(cb, ca), na).abs();
-        let c: BTreeSet<u32> = center.iter().map(|e| e.entity).collect();
-        let sides: BTreeSet<u32> = first.iter().chain(second).map(|e| e.entity).collect();
-        let slot = l.operand(operand)?;
-        let eb = l.edge_labels(operand, Role::Blend)?;
-        let vb = l.vertex_labels(operand, Role::Blend)?;
-        let mut edges = Vec::new();
-        for (i, e) in t.edges.iter().enumerate() {
-            let [f, g] = e.faces;
-            if (c.contains(&f) && sides.contains(&g)) || (c.contains(&g) && sides.contains(&f)) {
-                edges.push(i as i64);
-            }
-        }
-        if edges.is_empty() {
-            return Err(failed("the centre faces do not meet the side faces"));
-        }
-        // Both blends replace the centre faces and are tagged by them; tangent and of one
-        // radius about one axis, they merge into one face per centre face.
-        let mut ints = vec![slot, operand as i64, eb, vb, edges.len() as i64];
-        ints.extend(&edges);
-        ints.push(edges.len() as i64);
-        for e in &edges {
-            let [f, g] = t.edges[*e as usize].faces;
-            let cf = if c.contains(&f) { f } else { g };
-            let lb = l.label(gen(
-                Role::Blend,
-                KernelTag::InputFace {
-                    face: OperandEntity {
-                        operand,
-                        entity: cf,
-                    },
-                },
-                None,
+        // One planar centre face square to the sides: the round is the half cylinder of radius
+        // width / 2 whose axis runs along the centre face, width / 2 below it, midway between
+        // the sides. (Two edge fillets of exactly half the width meet and consume the centre
+        // face, which OCCT's fillet does not build.)
+        let [cf] = center else {
+            return Err(not_supported("full rounds over several centre faces"));
+        };
+        let cg = t.faces[cf.entity as usize].geom;
+        let SurfaceKind::Plane { normal } = cg.surface else {
+            return Err(not_supported("full rounds over a curved centre face"));
+        };
+        let nc = norm(normal);
+        if dot(nc, na).abs() > 1e-9 {
+            return Err(not_supported(
+                "full rounds whose centre face is not square to the sides",
             ));
-            ints.push(*e);
-            ints.push(lb);
         }
-        let r = l.push(8, ints, vec![width / 2.0, 0.0]);
-        l.output(r, false, OutputSpec::default());
+        let r = width / 2.0;
+        // The rib lies behind the first side (its outward normal `na`); the mid-plane is r in.
+        let mid = dot(ca, na) - r;
+        let on_mid = add(cg.centroid, scale(na, mid - dot(cg.centroid, na)));
+        let axis = add(on_mid, scale(nc, -r));
+        let d = norm(cross(nc, na));
+        let ydir = cross(nc, d);
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for k in 0..8 {
+            let corner = |a: usize| {
+                if k & (1 << a) == 0 {
+                    cg.bbox_min[a]
+                } else {
+                    cg.bbox_max[a]
+                }
+            };
+            let s = dot(sub([corner(0), corner(1), corner(2)], axis), d);
+            lo = lo.min(s);
+            hi = hi.max(s);
+        }
+        let slot = l.operand(operand)?;
+        let lb = l.label(gen(
+            Role::Blend,
+            KernelTag::InputFace {
+                face: OperandEntity {
+                    operand,
+                    entity: cf.entity,
+                },
+            },
+            None,
+        ));
+        let mut reals = add(axis, scale(d, lo)).to_vec();
+        reals.extend_from_slice(&d);
+        reals.extend_from_slice(&ydir);
+        reals.extend_from_slice(&nc);
+        reals.push(hi - lo);
+        reals.push(r);
+        let out = l.push(33, vec![slot, lb], reals);
+        l.output(out, false, OutputSpec::default());
         l.keep_others(operand)
     }
 
@@ -2411,7 +2451,8 @@ impl OcctKernel {
                         path,
                         path_curves,
                     } => l.sweep(profile, path, path_curves, &labels, false)?,
-                    _ => return Err(not_supported("swept sheets of lofts and holes")),
+                    ToolShape::Loft { profiles } => l.loft(profiles, &labels, false)?,
+                    ToolShape::Holes { .. } => return Err(not_supported("swept sheets of holes")),
                 };
                 l.output(
                     slot,
@@ -2469,7 +2510,21 @@ impl OcctKernel {
             SurfaceOp::DeleteHole { .. } => Err(not_supported("delete hole")),
             SurfaceOp::Fill { .. } => Err(not_supported("fill surface")),
             SurfaceOp::Ruled { .. } => Err(not_supported("ruled surface")),
-            SurfaceOp::CutWithSurface { .. } => Err(not_supported("cut with surface")),
+            SurfaceOp::CutWithSurface { keep } => {
+                if n != 2 {
+                    return Err(failed("cut with surface needs a solid and a sheet"));
+                }
+                let solid = l.operand(0)?;
+                let sheet = l.operand(1)?;
+                let fl = l.label(gen(Role::SplitFace, KernelTag::Side { side: *keep }, None));
+                let r = l.push(
+                    32,
+                    vec![solid, sheet, (*keep == PlaneSide::Positive) as i64, fl],
+                    vec![],
+                );
+                l.output(r, false, OutputSpec::default());
+                l.keep_operands(1..2)
+            }
         }
     }
 
@@ -2576,7 +2631,12 @@ impl OcctKernel {
                 sources.dedup();
                 for s in &sources {
                     match s {
-                        HistorySource::Input { from } => {
+                        HistorySource::Input { from }
+                            if spec
+                                .material
+                                .as_ref()
+                                .is_none_or(|m| m.contains(&from.operand)) =>
+                        {
                             operand_bodies.insert(from.operand);
                         }
                         HistorySource::Copy { from, instance } => {

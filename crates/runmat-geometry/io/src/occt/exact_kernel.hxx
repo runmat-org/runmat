@@ -14,6 +14,7 @@
 #include "rust/cxx.h"
 
 #include <BRepBuilderAPI_MakeShape.hxx>
+#include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepTools_History.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <TopTools_ListOfShape.hxx>
@@ -27,6 +28,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -106,6 +108,9 @@ void add_origins(ShapeOrigins& map, const TopoDS_Shape& s, const Origins& o);
 // Modified images inherit; unmodified, undeleted entities still present keep theirs.
 void propagate(const Tracked& in, BRepBuilderAPI_MakeShape& h, Tracked& out);
 void propagate_history(const Tracked& in, const Handle(BRepTools_History) & h, Tracked& out);
+// A draft's history: drafted faces are reported only as Generated and edges and vertices only
+// through ModifiedShape, so every tracked entity is carried through ModifiedShape.
+void propagate_draft(const Tracked& in, BRepOffsetAPI_DraftAngle& mk, Tracked& out);
 
 // A tracked operand: every face, edge and vertex carries its Input origin.
 Tracked track_operand(const Body& body, std::uint32_t operand);
@@ -148,6 +153,10 @@ Tracked boolean_op(int op, const std::vector<const Tracked*>& args,
                    const std::vector<const Tracked*>& tools);
 
 constexpr std::uint32_t kNoLabel = 0xffffffffu;
+
+// Every K1 entry point holds this lock: OCCT's blend builder keeps shared state, so two fillets
+// built at once on different threads can produce invalid solids. Kernel calls run one at a time.
+std::unique_lock<std::recursive_mutex> kernel_lock();
 
 // Exact queries used by the Rust lowering before it builds a program.
 rust::Vec<double> kernel_ray_hits(rust::Slice<const std::uint64_t> bodies,

@@ -167,7 +167,7 @@ Tracked drafted(const Tracked& prism, const Profile& base, double angle, const g
   if (!mk.IsDone()) fail("the drafted prism could not be built");
   Tracked out;
   out.shape = mk.Shape();
-  propagate(prism, mk, out);
+  propagate_draft(prism, mk, out);
   return out;
 }
 }  // namespace
@@ -415,9 +415,91 @@ Tracked build_sweep(const Profile& p, const std::vector<gp_Pnt>& path, std::uint
 
 // Ruled spans between consecutive sections, fused. Section k's edge labels name span k's
 // sides (the lowering numbers them by span); caps are the first and last sections.
+namespace {
+bool same_ends(const TopoDS_Edge& e, const TopoDS_Edge& f) {
+  TopoDS_Vertex e0, e1, f0, f1;
+  TopExp::Vertices(e, e0, e1);
+  TopExp::Vertices(f, f0, f1);
+  if (e0.IsNull() || e1.IsNull() || f0.IsNull() || f1.IsNull()) return false;
+  const gp_Pnt a0 = BRep_Tool::Pnt(e0), a1 = BRep_Tool::Pnt(e1);
+  const gp_Pnt b0 = BRep_Tool::Pnt(f0), b1 = BRep_Tool::Pnt(f1);
+  const double tol = 1e-7;
+  return (a0.Distance(b0) < tol && a1.Distance(b1) < tol) ||
+         (a0.Distance(b1) < tol && a1.Distance(b0) < tol);
+}
+
+// A sheet loft (open chains): one ruled face per chain curve per span, tagged by the curve.
+// Boundary edges: the first section's curves are start caps, the last section's end caps, and
+// the edges from chain ends carry their vertices' labels.
+Tracked build_sheet_loft(const std::vector<const Profile*>& sections) {
+  std::vector<Tracked> spans;
+  for (std::size_t k = 0; k + 1 < sections.size(); ++k) {
+    const Profile& a = *sections[k];
+    const Profile& b = *sections[k + 1];
+    if (a.caps.size() != b.caps.size()) fail("loft sections have different numbers of curves");
+    std::vector<TopoDS_Wire> wa, wb;
+    for (TopExp_Explorer ex(a.tracked.shape, TopAbs_WIRE); ex.More(); ex.Next()) wa.push_back(TopoDS::Wire(ex.Current()));
+    for (TopExp_Explorer ex(b.tracked.shape, TopAbs_WIRE); ex.More(); ex.Next()) wb.push_back(TopoDS::Wire(ex.Current()));
+    if (wa.size() != wb.size()) fail("loft sections have different numbers of chains");
+    for (std::size_t li = 0; li < wa.size(); ++li) {
+      BRepOffsetAPI_ThruSections mk(Standard_False, Standard_True, 1e-6);
+      mk.CheckCompatibility(Standard_False);
+      mk.AddWire(wa[li]);
+      mk.AddWire(wb[li]);
+      mk.Build();
+      if (!mk.IsDone()) fail("the surface loft could not be built through its sections");
+      Tracked t;
+      t.shape = mk.Shape();
+      t.sheet = true;
+      TopTools_IndexedMapOfShape chain;
+      TopExp::MapShapes(wa[li], TopAbs_EDGE, chain);
+      for (std::size_t ci = 0; ci < a.caps.size(); ++ci) {
+        const ProfileCap& c = a.caps[ci];
+        if (!chain.Contains(c.edge)) continue;
+        const TopoDS_Shape f = mk.GeneratedFace(c.edge);
+        if (f.IsNull()) continue;
+        add_origins(t.faces, f, origins_of(a.tracked.edges, c.edge));
+        for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) {
+          const TopoDS_Edge e = TopoDS::Edge(ex.Current());
+          if (k == 0 && same_ends(e, c.edge)) label_edge(t, e, c.start_cap);
+          if (k + 2 == sections.size() && same_ends(e, b.caps[ci].edge)) label_edge(t, e, c.end_cap);
+        }
+      }
+      // Edges running from a chain-end vertex of this section to the next.
+      for (TopExp_Explorer ex(t.shape, TopAbs_EDGE); ex.More(); ex.Next()) {
+        TopoDS_Vertex v0, v1;
+        TopExp::Vertices(TopoDS::Edge(ex.Current()), v0, v1);
+        if (v0.IsNull() || v1.IsNull()) continue;
+        for (int i = 1; i <= a.tracked.vertices.Extent(); ++i) {
+          const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(a.tracked.vertices.FindKey(i)));
+          const gp_Pnt q0 = BRep_Tool::Pnt(v0), q1 = BRep_Tool::Pnt(v1);
+          const bool at0 = p.Distance(q0) < 1e-7, at1 = p.Distance(q1) < 1e-7;
+          if (at0 == at1) continue;  // not from this vertex, or degenerate
+          const gp_Pnt other = at0 ? q1 : q0;
+          auto on = [&](const TopoDS_Wire& w) {
+            for (TopExp_Explorer vx(w, TopAbs_VERTEX); vx.More(); vx.Next())
+              if (BRep_Tool::Pnt(TopoDS::Vertex(vx.Current())).Distance(other) < 1e-7) return true;
+            return false;
+          };
+          if (on(wa[li]) || !on(wb[li])) continue;  // a section edge, not one along the loft
+          add_origins(t.edges, ex.Current(), a.tracked.vertices(i));
+        }
+      }
+      spans.push_back(std::move(t));
+    }
+  }
+  if (spans.size() == 1) return spans.front();
+  Tracked out;
+  fuse_all(spans, out);
+  out.sheet = true;
+  return out;
+}
+}  // namespace
+
 Tracked build_loft(const std::vector<const Profile*>& sections, std::uint32_t start_label,
                    std::uint32_t end_label) {
   if (sections.size() < 2) fail("a loft needs two sections");
+  if (!sections.front()->closed) return build_sheet_loft(sections);
   std::vector<Tracked> spans;
   for (std::size_t k = 0; k + 1 < sections.size(); ++k) {
     const Profile& a = *sections[k];
@@ -548,6 +630,7 @@ std::string label_name(const TDF_Label& l) {
 }  // namespace
 
 rust::Vec<rust::String> kernel_step_products(rust::Str path) {
+  const auto guard = kernel_lock();
   try {
     Handle(TDocStd_Document) doc = read_step(std::string(path));
     Handle(XCAFDoc_ShapeTool) st = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
