@@ -42,6 +42,7 @@ pub(in crate::cdt) use mutable::{
     apply_prepared_delaunay_volume_node_insertion, insert_delaunay_volume_node_into_mutation,
     insert_delaunay_volume_node_into_mutation_with_barriers,
     insert_delaunay_volume_node_into_mutation_with_prepared_barriers_from_hint,
+    legalize_inserted_node_and_check_star,
 };
 use topology_access::TetrahedralTopology;
 #[cfg(test)]
@@ -159,6 +160,34 @@ pub(super) fn legalize_delaunay_volume_topology_with_barriers(
     let protected_faces = protected_faces.iter().copied().collect::<BTreeSet<_>>();
     let mut work = InsertionWork::new(options, cancellation);
     legalize_delaunay_volume_topology(topology, &protected_faces, true, None, &mut work)
+}
+
+/// Lawson flips around each focus node's link only. After nodes are inserted into a
+/// constrained-Delaunay complex, only faces of their stars can be illegal; callers validate the
+/// result and fall back to the complete repair when local flips stall.
+pub(super) fn legalize_delaunay_volume_topology_around_nodes_with_barriers(
+    mut topology: DelaunayVolumeTopology,
+    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
+    focus: &[runmat_meshing_core::StableDigest],
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunayVolumeTopology, DelaunayInsertionError> {
+    validate_options(options)?;
+    if protected_faces.len() as u64 > options.maximum_protected_faces {
+        return Err(resource("protected-face inventory limit exceeded"));
+    }
+    let protected_faces = protected_faces.iter().copied().collect::<BTreeSet<_>>();
+    let mut work = InsertionWork::new(options, cancellation);
+    for identity in focus {
+        topology = legalize_delaunay_volume_topology(
+            topology,
+            &protected_faces,
+            true,
+            Some(*identity),
+            &mut work,
+        )?;
+    }
+    Ok(topology)
 }
 
 pub(super) fn legalize_delaunay_volume_topology_completely_with_barriers(

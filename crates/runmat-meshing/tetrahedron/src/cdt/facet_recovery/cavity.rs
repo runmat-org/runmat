@@ -311,7 +311,7 @@ fn edge_star_diagnostic(
     topology: &DelaunayVolumeTopology,
     edge: [u32; 2],
     removed: &BTreeSet<u32>,
-    signs: &[PredicateSign],
+    signs: &PlaneSigns<'_>,
 ) -> String {
     let mut total = 0usize;
     let mut selected = 0usize;
@@ -505,48 +505,139 @@ fn facet_indices(
         .map(|indices| [indices[0], indices[1], indices[2]])
 }
 
-fn plane_signs(
-    topology: &DelaunayVolumeTopology,
+/// Facet-plane orientation of each node, evaluated on first use: a cavity attempt touches the
+/// nodes near its facet, while an eager pass over every node made facet recovery quadratic in
+/// the model size (and exhausted the search budget on large assemblies).
+pub(super) struct PlaneSigns<'a> {
+    topology: &'a DelaunayVolumeTopology,
+    facet: [[f64; 3]; 3],
+    cache: Vec<std::cell::Cell<u8>>,
+}
+
+impl std::ops::Index<usize> for PlaneSigns<'_> {
+    type Output = PredicateSign;
+
+    fn index(&self, node: usize) -> &PredicateSign {
+        const NEGATIVE: PredicateSign = PredicateSign::Negative;
+        const ZERO: PredicateSign = PredicateSign::Zero;
+        const POSITIVE: PredicateSign = PredicateSign::Positive;
+        let code = match self.cache[node].get() {
+            0 => {
+                let [a, b, c] = self.facet;
+                // Coordinates are validated finite on admission, so the exact predicate
+                // cannot fail here.
+                let sign = orient3d([
+                    a,
+                    b,
+                    c,
+                    self.topology.nodes[node].coordinates_m.canonical_value(),
+                ])
+                .unwrap_or(PredicateSign::Zero);
+                let code = match sign {
+                    PredicateSign::Negative => 1,
+                    PredicateSign::Zero => 2,
+                    PredicateSign::Positive => 3,
+                };
+                self.cache[node].set(code);
+                code
+            }
+            code => code,
+        };
+        match code {
+            1 => &NEGATIVE,
+            2 => &ZERO,
+            _ => &POSITIVE,
+        }
+    }
+}
+
+fn plane_signs<'t>(
+    topology: &'t DelaunayVolumeTopology,
     facet: [u32; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
-) -> Result<Vec<PredicateSign>, DelaunayFacetRecoveryError> {
-    let mut signs = Vec::with_capacity(topology.nodes.len());
-    for node in &topology.nodes {
-        work.search_step(constraint_index)?;
-        signs.push(
-            orient3d([
-                topology.nodes[facet[0] as usize]
-                    .coordinates_m
-                    .canonical_value(),
-                topology.nodes[facet[1] as usize]
-                    .coordinates_m
-                    .canonical_value(),
-                topology.nodes[facet[2] as usize]
-                    .coordinates_m
-                    .canonical_value(),
-                node.coordinates_m.canonical_value(),
-            ])
-            .map_err(|failure| {
-                invalid_topology(
-                    constraint_index,
-                    format!("facet cavity predicate failed: {failure:?}"),
-                )
-            })?,
-        );
+) -> Result<PlaneSigns<'t>, DelaunayFacetRecoveryError> {
+    work.search_step(constraint_index)?;
+    let facet = facet.map(|node| topology.nodes[node as usize].coordinates_m.canonical_value());
+    if facet.iter().flatten().any(|value| !value.is_finite()) {
+        return Err(invalid_topology(
+            constraint_index,
+            "facet cavity predicate failed: non-finite facet node",
+        ));
     }
-    Ok(signs)
+    Ok(PlaneSigns {
+        topology,
+        facet,
+        cache: (0..topology.nodes.len())
+            .map(|_| std::cell::Cell::new(0))
+            .collect(),
+    })
 }
 
+/// Tetrahedra with a face that crosses the facet footprint. Every such tetrahedron meets the
+/// footprint triangle, so its interior meets the open box `B` strictly containing the triangle.
+/// Interiors meeting an open connected set are connected through faces (an open set stays
+/// connected after removing the codimension-two edge skeleton), and the stars of the facet's
+/// vertices lie in that set. The walk therefore reaches every crossing tetrahedron while only
+/// visiting cells whose bounding box meets `B`: the result equals a scan of the whole
+/// topology, at a cost proportional to the facet's neighborhood.
 fn facet_intersection_seed(
     topology: &DelaunayVolumeTopology,
     facet: [u32; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<BTreeSet<u32>, DelaunayFacetRecoveryError> {
+    use crate::cdt::insertion::topology_access::TetrahedralTopology;
+    let point = |node: u32| topology.nodes[node as usize].coordinates_m.canonical_value();
+    let corners = facet.map(point);
+    let mut lower = corners[0];
+    let mut upper = corners[0];
+    for corner in &corners[1..] {
+        for axis in 0..3 {
+            lower[axis] = lower[axis].min(corner[axis]);
+            upper[axis] = upper[axis].max(corner[axis]);
+        }
+    }
+    let span = (0..3)
+        .map(|axis| (upper[axis] - lower[axis]).abs().max(lower[axis].abs()).max(upper[axis].abs()))
+        .fold(0.0_f64, f64::max);
+    let margin = span * 1.0e-6 + f64::MIN_POSITIVE;
+    for axis in 0..3 {
+        lower[axis] -= margin;
+        upper[axis] += margin;
+    }
+    let meets_box = |tetrahedron: u32| {
+        let vertices = topology.tetrahedra[tetrahedron as usize]
+            .vertex_indices
+            .map(point);
+        (0..3).all(|axis| {
+            let low = vertices.iter().map(|vertex| vertex[axis]).fold(f64::INFINITY, f64::min);
+            let high = vertices
+                .iter()
+                .map(|vertex| vertex[axis])
+                .fold(f64::NEG_INFINITY, f64::max);
+            high > lower[axis] && low < upper[axis]
+        })
+    };
+    let mut visited = BTreeSet::new();
+    let mut queue = std::collections::VecDeque::new();
+    for vertex in facet {
+        for tetrahedron in topology.vertex_star(vertex) {
+            if visited.insert(tetrahedron) {
+                queue.push_back(tetrahedron);
+            }
+        }
+    }
     let mut removed = BTreeSet::new();
-    for (index, tetrahedron) in topology.tetrahedra.iter().enumerate() {
+    while let Some(index) = queue.pop_front() {
         work.cavity_step(constraint_index)?;
+        let tetrahedron = &topology.tetrahedra[index as usize];
+        for neighbor in tetrahedron.neighbors.into_iter().flatten() {
+            if !visited.contains(&neighbor) && meets_box(neighbor) {
+                visited.insert(neighbor);
+                queue.push_back(neighbor);
+            }
+        }
         let mut intersects = false;
         for opposite in 0..4 {
             let mut face = [0; 3];
@@ -563,7 +654,7 @@ fn facet_intersection_seed(
             }
         }
         if intersects {
-            removed.insert(index as u32);
+            removed.insert(index);
             if removed.len() as u64 > work.options.maximum_cavity_tetrahedra {
                 return Err(resource_or_cancelled(
                     DelaunayFacetRecoveryErrorKind::ResourceLimit,
@@ -579,7 +670,7 @@ fn facet_intersection_seed(
 fn expand_crossing_boundary(
     topology: &DelaunayVolumeTopology,
     facet: [u32; 3],
-    signs: &[PredicateSign],
+    signs: &PlaneSigns<'_>,
     removed: &mut BTreeSet<u32>,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
@@ -666,7 +757,7 @@ fn regularize_nonmanifold_edge_stars(
     removed: &mut BTreeSet<u32>,
     mandatory: &BTreeSet<u32>,
     protected_edges: &BTreeSet<[u32; 2]>,
-    plane_signs: &[PredicateSign],
+    plane_signs: &PlaneSigns<'_>,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {

@@ -140,6 +140,7 @@ pub(super) fn ensure_support_triangle_edges(
     )
     .map_err(segment_error)?;
     if let Some(conflict) = temporary.conflicting_protected_edges.first().copied() {
+        work.clear_rejection();
         let Some(refined) = try_split_recovered_segment_edge(
             recovery,
             conflict,
@@ -148,7 +149,20 @@ pub(super) fn ensure_support_triangle_edges(
             work,
         )?
         else {
-            work.reject("temporary support segment reported an unknown recovered segment conflict");
+            let coordinates = conflict.map(|identity| {
+                node_index(&recovery.topology, identity)
+                    .map(|index| recovery.topology.nodes[index].coordinates_m.canonical_value())
+            });
+            let detail = work
+                .last_rejection()
+                .unwrap_or("the edge is not an interval of a recovered segment")
+                .to_owned();
+            work.reject(format!(
+                "temporary support segment for edge {:?} conflicts with recovered segment edge \
+                 {coordinates:?}, which could not be split: {detail}",
+                edge.map(|identity| node_index(&recovery.topology, identity)
+                    .map(|index| recovery.topology.nodes[index].coordinates_m.canonical_value())),
+            ));
             return Ok(SupportTriangleEdgeState::Unavailable);
         };
         *recovery = refined.recovery;

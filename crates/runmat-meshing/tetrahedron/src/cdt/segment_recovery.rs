@@ -18,6 +18,7 @@ use crate::cdt::{
     insertion::{
         insert_delaunay_volume_node_into_mutation,
         insert_delaunay_volume_node_into_mutation_with_barriers,
+        legalize_delaunay_volume_topology_around_nodes_with_barriers,
         legalize_delaunay_volume_topology_completely_with_barriers,
         topology_access::TetrahedralTopology, validate_constrained_delaunay_volume_topology,
     },
@@ -466,13 +467,37 @@ pub(in crate::cdt) fn recover_temporary_delaunay_segment(
         let candidate = mutation
             .freeze(options.insertion.topology, cancellation)
             .map_err(mutation_error)?;
-        let candidate = legalize_delaunay_volume_topology_completely_with_barriers(
-            candidate,
+        // Only the stars of the chain's nodes can hold illegal faces: Lawson flips there
+        // restore the complex in time proportional to the change. The complete repair, whose
+        // every step scans the whole complex, is the fallback when local flips stall.
+        let focus = chain.iter().map(|node| node.identity).collect::<Vec<_>>();
+        let local = legalize_delaunay_volume_topology_around_nodes_with_barriers(
+            candidate.clone(),
             protected_faces,
+            &focus,
             options.insertion,
             cancellation,
         )
-        .map_err(|failure| insertion_error(failure, constraint_index))?;
+        .ok()
+        .filter(|local| {
+            validate_constrained_delaunay_volume_topology(
+                local,
+                protected_faces,
+                options.insertion,
+                cancellation,
+            )
+            .is_ok()
+        });
+        let candidate = match local {
+            Some(local) => local,
+            None => legalize_delaunay_volume_topology_completely_with_barriers(
+                candidate,
+                protected_faces,
+                options.insertion,
+                cancellation,
+            )
+            .map_err(|failure| insertion_error(failure, constraint_index))?,
+        };
         let conflicting_protected_edges = protected_edges
             .iter()
             .copied()

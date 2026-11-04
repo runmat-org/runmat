@@ -76,3 +76,75 @@ Commits on q-mesh-fix-6 (base f9b884d862 = t1-transplant):
    constraint-8461 triangle; the replay qmf-ih.json reproduces in 40 s.
 5. D5: profile OrderElevation on blade4 (1633 s for 146k Tet10) with `sample`; bracket-t10 shows the same 10x.
 6. Corpus + muffler + blade with one fea-release CLI once the code is final.
+
+## q-mesh-fix-7 hand-back (2026-11-03, early: asked to hand back)
+Uncommitted working-tree changes (not yet compiled green; h3 chain verifies them):
+- size point_field.rs: integrated_edge_length orders endpoint lengths (bit-identical both directions) -> size lib 56/0 (~/logs/qmf6/h1.out).
+- D3 (curve): SharedCurveEvaluationContext + discretize_shared_curves / _partition / validate_shared_curve_geometry take
+  `surfaces: &dyn ExactSurfaceEvaluator`; vertex_uv.rs admits incident pcurve ends by model-space separation <= max(vertex
+  tolerance_m, geometry error) when UV differs > 1e-10; closed-edge endpoint check same rule; validation re-derives face
+  uses with face_uses_for_parameters. New test vertex_uv::tests::incident_pcurves_agree_within_the_source_vertex_tolerance_in_model_space.
+- D4 (tetrahedron order_elevation/geometry/evaluation.rs): curve midpoints no longer trim-classify their pcurve images
+  (3D agreement kept); surface midpoints outside the trim fall back to the closest surface point to the chord point
+  (closest_trimmed_chord_point). No regression test yet: needs pin-v1 evidence first.
+- Induction diagnostic (facet_recovery/support_refinement.rs): segment-conflict rejection names node, edge, split
+  rejection and on-facet rejection.
+Debug harness (uncommitted, applied by sync.sh): work/q-mesh-fix-6/qmf_mesh.rs -> crates/runmat-cli/examples/qmf-mesh.rs
+(calls mesh_exact_geometry below CLI admission) + qmesh.sh runner, cases-h1.txt (cabin, pin-v1, cantc).
+Running: build-Mac PID 65960 chain h3 (build example, curve lib, induction replay -> ~/logs/qmf6/h3.out; then harness
+cases -> ~/runs/qmf6/h3/summary.txt).
+
+## q-mesh-fix-8 (2026-11-03, in progress)
+Commits: aab5264ec5 D3 (vertex pcurve ends agree in model space; size symmetric fix), abde500c6b D4 (curve midpoints skip
+own-pcurve trim classification; closest trimmed chord point), 11a1e9a09d induction diagnostic, f1f20f9f69 merge t1-transplant.
+Lib tests h4 (aab5264ec5 tree): curve 43/0, size 56/0, surface 103/0/1 ign, execution 131/0, tetrahedron 586/0/7 ign.
+Release CLI ~/fea-cli/runmat-qmf8-f1f20f9f69 (signed in): cantc ok 2012 el 10 s (was fail 43 s); pin-v1 still OrderElevation
+trim (surface edge on planar face, chord midpoint outside trim); cabin passes curve stage, lost to server outage at 340 s.
+Uncommitted (testing h6/h7): completion.rs boundary pcurve images agreement-only; surface midpoints outside trim within the
+chordal deviation of the chord point are admitted; conforming split falls back to complete legalization; new test
+tet10_curve_midpoints_do_not_trim_classify_their_own_pcurve_images (BOUNDARY_OUTSIDE_EVALUATOR fixture).
+Induction: topology before the failed insertion WAS constrained-Delaunay (h5) -> insertion procedures leave non-CD faces.
+Harness note: qmf-mesh debug build is too slow for site CAD; use release CLI runs (meshq.sh) now that sign-in works.
+- b562a3f8e8 D4 follow-up committed (completion agreement-only; near-chord surface midpoints; regression test). tet lib 587/0.
+- 723318a06a merged integration/0.7.1 (f81788a4a8).
+- Induction (uncommitted, h11): conforming segment split now uses a constrained Bowyer-Watson cavity with correction
+  (barrier faces, split-child edges, cone visibility incl. near-flat cones), falling back to the edge star.
+  Complete legalization as fallback was tried: same failure, 10x slower -> reverted.
+- D5 (uncommitted, h11): profile of bracket-t10 worker (release CLI, ~/runs/qmf6/prof/w1.txt): single core, ~85% of busy
+  samples in meshing_core tet10_element::integrate (shared rule stiffness quadrature 8^3+12^3(+16^3) points x 900
+  moments). Shared rule now runs via runmat_cpu_execution::ordered_map over elements (bit-identical; first error in order).
+- Muffler with qmf8-f1f20f9f69 CLI: reaches OrderElevation at 1585 s (was TimeBudget in Tetrahedralize at 3665 s), then
+  "curve and surface evaluations disagree" -> uncommitted: curve/pcurve agreement uses max(request tolerance, ExactEdge
+  tolerance_m), error names the edge, points, distance.
+- Run retry wrapper ~/runs/qmf6/meshq-retry.sh (server flaps; re-runs only ServerUnreachable cases).
+- P0 hero (m01-module, 22 boxes shared, Tet4 8 mm): 830c112746 hull-edge on-hull detection fix + lattice regression test
+  (fails before, passes after). Sent to q-hero-pack (aa13b1c95980ad3ee). 9b3647d5cd D5 parallel shared rule;
+  9d9ed859b1 edge tolerance for curve/pcurve agreement (muffler); f68e28c024 diagnostics. tet lib 588/0 (p2).
+- Induction cavity work parked: work/q-mesh-fix-6/induction-cavity.patch (blocked by a near-flat sliver lying in the
+  facet plane at the split segment; complete-legalization fallback did not help).
+- bracket-t10 with qmf8-f1f20f9f69: 475,767 elements / 2066 s vs c13 126,089 / 1148 s -> check sizing change (53f4c8b336).
+
+## q-mesh-fix-9 (2026-11-04, handed back early on request)
+- Merged integration/0.7.1 (7507f51f46) -> afdc02c877.
+- Hero P0 "neighbor strictly inside its circumsphere" = point-set hull bug, already fixed by 830c112746 (hero CLI
+  0a97eae0da carries it as ec4a5a07fa). With it, the m01 replay (dumps/hero/volume-input-14618-0.json) passes point set
+  and segment recovery, then fails in facet recovery.
+- Fixed: facet_recovery/cavity.rs facet_intersection_seed scanned EVERY tetrahedron with exact predicates per cavity
+  attempt (charging search steps) -> "facet topology-search limit exceeded" at constraint 8566 (p6, 888 s). Now a
+  face-adjacency walk from the facet vertices bounded by an open box around the facet (same result set, proof in doc
+  comment). Lazy PlaneSigns (q-mesh-fix-8 WIP) fixed for lifetimes. p7: budget error gone.
+- Real failure now (p8, 847 s): constraint 8566, facet on z=0.026 (TIM bottom / lid top, 3 mm TIM layer): temp support
+  segment breaks a recovered segment edge; splitting that edge leaves an unflippable illegal link face in the TIM;
+  complete legalization leaves it too. Same class as the 4-cell study (constraint 711, z=0.026) and the induction case.
+- Uncommitted->committed in this round: local conforming split (legalize_inserted_node_and_check_star: link flips +
+  exact star check in a cavity_trial, fallback to complete path); better conflict diagnostic; parked
+  induction-cavity.patch applied as a FIRST strategy (SplitStrategy::ConstrainedCavity) with edge-star fallback.
+  The cavity strategy is NOT yet verified (p9 tet lib + p10 hero replay were running at hand-back).
+- Single-threaded: shared interfaces join all 22 solids into one constraint component; one CDT per component is serial.
+  Time split (p6-p8 samples, debug replay): point set ~6 min, segment recovery ~4 min (full CD validation after each
+  temporary segment), facet recovery O(N) per conforming split (from_canonical/freeze/snapshot per canonical_call).
+- Repro subsets (from q-hero-pack-2): ~/runs/qmf6/in/m01-sub-a.step (TIM+lid), m01-sub-b.step (8 solids),
+  m01-module-lid.step (lid10, memory runaway 8.7 GB), m01-4cell.step (c4). Harness cases ~/runs/qmf6/cases-p9.txt.
+- Detached on build Mac: chain-p9.sh (build qmf-mesh example, tet lib -> ~/logs/qmf6/p9.out; harness subsets ->
+  ~/runs/qmf6/p9/summary.txt, volume dumps ~/runs/qmf6/dumps/p9), then chain-p10.sh (hero replay -> ~/logs/qmf6/p10.out,
+  samples prof/p10-*.txt).

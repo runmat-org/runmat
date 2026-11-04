@@ -223,6 +223,73 @@ pub(super) fn require_mutation_capacity(
     Ok(())
 }
 
+/// Restores the constrained Delaunay property after `inserted` was placed by a local split of a
+/// constrained-Delaunay complex whose created cells all contain it. Link flips run on the
+/// working topology; afterwards every face of the inserted node's star is checked with the
+/// validator's exact strict empty-sphere test. Every cell the split or a link flip created
+/// contains `inserted`, so faces outside that star are unchanged and stay legal. Returns
+/// `false` when an illegal face remains (the caller falls back to complete legalization).
+pub(in crate::cdt) fn legalize_inserted_node_and_check_star(
+    topology: &mut TopologyMutation,
+    inserted: u32,
+    protected_faces: &BTreeSet<[StableDigest; 3]>,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<bool, DelaunayInsertionError> {
+    use super::topology_access::TetrahedralTopology;
+    validate_options(options)?;
+    let mut work = InsertionWork::new(options, cancellation);
+    legalize_inserted_node(topology, inserted, protected_faces, true, &mut work)?;
+    for left_index in topology.vertex_stars[inserted as usize].iter().copied() {
+        let left = topology
+            .tetrahedron(left_index)
+            .expect("inserted-node star references an active tetrahedron");
+        for (opposite, neighbor) in left.neighbors.iter().enumerate() {
+            let Some(right_index) = *neighbor else {
+                continue;
+            };
+            work.checkpoint()?;
+            let right = topology.tetrahedron(right_index).ok_or_else(|| {
+                error(
+                    DelaunayInsertionErrorKind::InvalidTopology,
+                    "star check neighbor is inactive",
+                )
+            })?;
+            if left.region_id != right.region_id
+                || protected_faces.contains(&stable_face(topology, left.vertex_indices, opposite))
+            {
+                continue;
+            }
+            let Some(apex) = right
+                .vertex_indices
+                .iter()
+                .copied()
+                .find(|vertex| !left.vertex_indices.contains(vertex))
+            else {
+                return Ok(false);
+            };
+            work.predicate()?;
+            let points = left
+                .vertex_indices
+                .map(|vertex| topology.nodes[vertex as usize]);
+            if topology
+                .insphere_nodes([
+                    points[0],
+                    points[1],
+                    points[2],
+                    points[3],
+                    topology.nodes[apex as usize],
+                ])
+                .map_err(super::predicate_error)?
+                == PredicateSign::Positive
+            {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 fn legalize_inserted_node(
     topology: &mut TopologyMutation,
     inserted: u32,
