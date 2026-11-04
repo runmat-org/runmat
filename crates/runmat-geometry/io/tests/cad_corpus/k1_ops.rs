@@ -1372,6 +1372,7 @@ fn k1_closed_and_open_hems_name_their_faces_as_the_reference_kernel_does() {
             role,
             tag: SourceTag::Key { key: key.into() },
             ordinal: Some(o),
+            step: None,
         }))
     };
     for kind in [HemKind::Closed, HemKind::Open { gap: mm(1.0) }] {
@@ -1751,4 +1752,213 @@ fn k1_loft_refines_a_section_by_splitting_its_spline_exactly() {
     let want = area * H;
     let (v, _) = volume(&k, &out.bodies[0]);
     assert!(close(v, want, 1e-6), "{v} vs {want}");
+}
+
+/// Every face name of every body is carried by one face only.
+fn assert_unique_face_names(out: &runmat_cad::regen::RegenResult) {
+    let mut seen = std::collections::BTreeSet::new();
+    for n in out
+        .state
+        .bodies
+        .iter()
+        .flat_map(|b| b.names.faces.iter().flatten())
+    {
+        assert!(seen.insert(n.clone()), "{n} on two faces");
+    }
+}
+
+#[test]
+fn k1_compound_folds_and_partial_unfolds_of_a_bent_plate_are_exact() {
+    use crate::common::Env;
+    use crate::families::{
+        bend_face, bend_only_doc, bent_plate_doc, count_faces, generated_face, nested_bend_doc,
+        plate_top, unfold_of,
+    };
+    use runmat_cad::model::sheet_metal::*;
+    use runmat_cad::model::*;
+    let env = Env::new();
+    let (t, k, w) = (0.002, 0.44, 0.04);
+    let plate = 0.08 * 0.04 * t;
+    let per_bend = |deg: f64| w * t * t * deg.to_radians() * (0.5 - k);
+    let bent = plate + per_bend(90.0) + 2.0 * per_bend(60.0);
+    let fold = |bends: Vec<runmat_cad::refs::Reference>, id: &str| {
+        Feature::new(
+            id,
+            FeatureKind::SheetMetal(SheetMetalFeature::Fold { bends }),
+        )
+    };
+    let names = [
+        bend_face("bend", "bl"),
+        bend_face("jog", "bl2"),
+        bend_face("jog", "bl2.2"),
+        generated_face(
+            "bend",
+            runmat_cad::refs::name::Role::SheetFace,
+            "bl.flat",
+            1,
+        ),
+    ];
+    // Unfold all, fold all: the bent plate, every bend face named as its bend named it.
+    let mut d = bent_plate_doc();
+    d.features.push(unfold_of(plate_top(), Vec::new()));
+    d.features.push(fold(Vec::new(), "fold"));
+    let out = env.regen(&d);
+    assert!(out.status("fold").unwrap().ran(), "{:?}", out.diagnostics);
+    assert!(
+        close(regen_volume(&out), bent, 1e-7),
+        "{}",
+        regen_volume(&out)
+    );
+    assert_eq!(count_faces(&out, &d, &names), vec![1, 1, 1, 1]);
+    assert_unique_face_names(&out);
+    // Unfold the jog only: the plate with its bend.
+    let mut d = bent_plate_doc();
+    d.features
+        .push(unfold_of(plate_top(), vec![bend_face("jog", "bl2")]));
+    let out = env.regen(&d);
+    assert!(out.status("unfold").unwrap().ran(), "{:?}", out.diagnostics);
+    let one = plate + per_bend(90.0);
+    assert!(
+        close(regen_volume(&out), one, 1e-7),
+        "{}",
+        regen_volume(&out)
+    );
+    assert_eq!(count_faces(&out, &d, &names), vec![1, 0, 0, 1]);
+    assert_unique_face_names(&out);
+    // Unfold all, fold the bend only: the same.
+    let mut d = bent_plate_doc();
+    d.features.push(unfold_of(plate_top(), Vec::new()));
+    d.features.push(fold(vec![bend_face("bend", "bl")], "fold"));
+    let out = env.regen(&d);
+    assert!(out.status("fold").unwrap().ran(), "{:?}", out.diagnostics);
+    assert!(
+        close(regen_volume(&out), one, 1e-7),
+        "{}",
+        regen_volume(&out)
+    );
+    // The equal check on the bend-only plate itself.
+    assert!(close(regen_volume(&env.regen(&bend_only_doc())), one, 1e-7));
+    // A bend of the flat the first bend moved: two 90° bends' worth.
+    let d = nested_bend_doc();
+    let out = env.regen(&d);
+    assert!(out.status("nested").unwrap().ran(), "{:?}", out.diagnostics);
+    let two = plate + 2.0 * per_bend(90.0);
+    assert!(
+        close(regen_volume(&out), two, 1e-7),
+        "{}",
+        regen_volume(&out)
+    );
+    assert_unique_face_names(&out);
+    // Its unfold (all) and fold (all) round trip.
+    let mut d = nested_bend_doc();
+    d.features.push(unfold_of(plate_top(), Vec::new()));
+    let out = env.regen(&d);
+    assert!(
+        close(regen_volume(&out), plate, 1e-9),
+        "{}",
+        regen_volume(&out)
+    );
+    d.features.push(fold(Vec::new(), "fold"));
+    let out = env.regen(&d);
+    assert!(out.status("fold").unwrap().ran(), "{:?}", out.diagnostics);
+    assert!(
+        close(regen_volume(&out), two, 1e-7),
+        "{}",
+        regen_volume(&out)
+    );
+    assert_eq!(
+        count_faces(&out, &d, &[bend_face("nested", "bl3")]),
+        vec![1]
+    );
+    // A flat pattern fixed on the moved flat: the plate's volume, a second body.
+    let mut d = bend_only_doc();
+    d.features.push(Feature::new(
+        "flat",
+        FeatureKind::SheetMetal(SheetMetalFeature::FlatPattern {
+            fixed_face: generated_face(
+                "bend",
+                runmat_cad::refs::name::Role::SheetFace,
+                "bl.flat",
+                0,
+            ),
+            grain: None,
+        }),
+    ));
+    let out = env.regen(&d);
+    assert!(out.status("flat").unwrap().ran(), "{:?}", out.diagnostics);
+    assert_eq!(out.state.bodies.len(), 2);
+    let k = KernelUnderTest::new();
+    let vols: Vec<f64> = out
+        .state
+        .bodies
+        .iter()
+        .map(|b| {
+            volume(
+                &k,
+                &KernelBody {
+                    handle: b.handle.clone(),
+                    topology: b.topology.clone(),
+                },
+            )
+            .0
+        })
+        .collect();
+    assert!(
+        close(vols[0], one, 1e-7) && close(vols[1], plate, 1e-9),
+        "{vols:?}"
+    );
+}
+
+#[test]
+fn k1_partial_unfolds_and_folds_of_a_bent_strip_are_exact() {
+    use crate::common::Env;
+    use crate::families::{bend_face, count_faces, sheet_doc, sheet_face, unfold_of};
+    use runmat_cad::model::sheet_metal::*;
+    use runmat_cad::model::*;
+    let env = Env::new();
+    let chain = [(0.0, 30.0), (0.0, 0.0), (50.0, 0.0), (50.0, 20.0)];
+    let d = sheet_doc(&chain, &["up", "base", "down"]);
+    let bent = regen_volume(&env.regen(&d));
+    let mut full = d.clone();
+    full.features
+        .push(unfold_of(sheet_face("base", 0), Vec::new()));
+    let flat = regen_volume(&env.regen(&full));
+    // The two bends are alike (90°, R, t): flattening one moves the volume half way.
+    let mut one = d.clone();
+    one.features.push(unfold_of(
+        sheet_face("base", 0),
+        vec![bend_face("base", "base+down")],
+    ));
+    let out = env.regen(&one);
+    assert!(out.status("unfold").unwrap().ran(), "{:?}", out.diagnostics);
+    let v = regen_volume(&out);
+    assert!(close(v, (bent + flat) / 2.0, 1e-9), "{flat} {v} {bent}");
+    let refs = [
+        bend_face("base", "up+base"),
+        bend_face("base", "base+down"),
+        bend_face("unfold", "base+down"),
+        sheet_face("down", 1),
+        sheet_face("up", 0),
+    ];
+    assert_eq!(count_faces(&out, &one, &refs), vec![1, 0, 1, 1, 1]);
+    assert_unique_face_names(&out);
+    // Folded back: the channel.
+    let mut back = one.clone();
+    back.features.push(Feature::new(
+        "fold",
+        FeatureKind::SheetMetal(SheetMetalFeature::Fold {
+            bends: vec![bend_face("unfold", "base+down")],
+        }),
+    ));
+    let out = env.regen(&back);
+    assert!(out.status("fold").unwrap().ran(), "{:?}", out.diagnostics);
+    assert!(
+        close(regen_volume(&out), bent, 1e-9),
+        "{}",
+        regen_volume(&out)
+    );
+    assert_eq!(
+        count_faces(&out, &back, &[bend_face("base", "base+down")]),
+        vec![1]
+    );
 }
