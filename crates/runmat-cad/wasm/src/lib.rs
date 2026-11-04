@@ -10,6 +10,9 @@
 //!   `projection` is `{ kind: "part", data: { document, index } }` or
 //!   `{ kind: "assembly", data: <assembly index> }` and `display` is `{ kind, data }` with the
 //!   part display (`part_display` with `sketch_display`) or the assembly display.
+//! - `edit(path, text, files, request)` → `{ ok: true, files, summary }` or
+//!   `{ ok: false, message, diagnostics }`: a catalog command run from the canvas, written as
+//!   the smallest text change ([`edit`]).
 //!
 //! Geometry comes from the reference kernel ([`runmat_cad::regen::fake::FakeKernel`]): exact
 //! for prismatic parts, sampled for curved tools. The OCCT kernel slots in behind the same
@@ -17,6 +20,7 @@
 //! through the Tauri host; the JSON shapes stay the same. Malformed input is reported as a
 //! diagnostic, never a panic.
 
+pub mod edit;
 pub mod runtime;
 
 use wasm_bindgen::prelude::*;
@@ -36,4 +40,15 @@ pub fn compile(path: &str, text: &str, files: &str, options: &str) -> String {
     };
     let _ = options;
     runtime::compile_json(path, text, &files)
+}
+
+/// Runs a catalog command on the part or assembly `path`.
+#[wasm_bindgen]
+pub fn edit(path: &str, text: &str, files: &str, request: &str) -> String {
+    match runtime::parse_files(files) {
+        Ok(files) => edit::edit_json(path, text, &files, request),
+        Err(message) => {
+            serde_json::json!({ "ok": false, "message": message, "diagnostics": [] }).to_string()
+        }
+    }
 }
