@@ -32,6 +32,7 @@ pub mod drawing;
 pub mod evaluate;
 pub mod ids;
 pub mod index;
+pub mod kernel_seams;
 pub mod metering;
 pub mod model;
 pub mod pmi;

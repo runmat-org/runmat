@@ -27,3 +27,8 @@ runmat-rules = { path = "../runmat-rules" }
 runmat-geometry-kernel = { workspace = true }
 # The design-command descriptor schema shared with runmat-circuit.
 runmat-design-commands = { path = "../runmat-design-commands", version = "=0.6.2" }
+
+# `runmat-geometry-io`'s `cad_kernel_corpus` test builds these integration tests on the OCCT
+# kernel by setting this cfg (see tests/common/mod.rs).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(runmat_cad_kernel_under_test)'] }

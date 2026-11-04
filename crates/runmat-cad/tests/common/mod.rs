@@ -180,8 +180,15 @@ pub fn set_input(d: &mut PartDocument, name: &str, v: ValueExpr) {
         .default = v;
 }
 
+/// The kernel the integration tests run on: the grid test kernel, or (when these files are
+/// built into `runmat-geometry-io`'s `cad_kernel_corpus` test) the OCCT kernel under test.
+#[cfg(not(runmat_cad_kernel_under_test))]
+pub type TestKernel = FakeKernel;
+#[cfg(runmat_cad_kernel_under_test)]
+pub type TestKernel = crate::kernel_under_test::KernelUnderTest;
+
 pub struct Env {
-    pub kernel: FakeKernel,
+    pub kernel: TestKernel,
     pub solver: ExplicitSketchSolver,
     pub units: StubUnits,
     pub dynamic: NoDynamicValues,
@@ -193,7 +200,7 @@ pub struct Env {
 impl Env {
     pub fn new() -> Self {
         Env {
-            kernel: FakeKernel::new(),
+            kernel: TestKernel::new(),
             solver: ExplicitSketchSolver,
             units: StubUnits,
             dynamic: NoDynamicValues,

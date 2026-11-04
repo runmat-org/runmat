@@ -111,6 +111,14 @@ mod ffi;
     feature = "occt-native"
 ))]
 mod import_validation;
+/// K1: the geometry engine (`runmat-geometry-kernel` contract) on OCCT. Without the native
+/// backend every operation reports `NotSupported`.
+pub mod kernel;
+#[cfg(all(
+    any(not(target_arch = "wasm32"), target_os = "emscripten"),
+    feature = "occt-kernel"
+))]
+mod kernel_ffi;
 #[cfg(all(
     any(not(target_arch = "wasm32"), target_os = "emscripten"),
     feature = "occt-native"
