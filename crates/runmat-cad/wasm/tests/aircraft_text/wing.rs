@@ -80,8 +80,9 @@ fn piece_curves(piece: Piece, y: f64) -> Vec<Curve> {
     }
 }
 
-/// A piece lofted between stations `y0` and `y1` (starboard positive; `side` -1 mirrors it).
-fn lofted(name: &str, number: &str, material: &str, comment: &str, piece: Piece, y0: f64, y1: f64, side: f64) -> String {
+/// A piece lofted between stations `span = (y0, y1)` (starboard positive; `side` -1 mirrors it).
+fn lofted(name: &str, number: &str, material: &str, comment: &str, piece: Piece, span: (f64, f64), side: f64) -> String {
+    let (y0, y1) = span;
     let mut body = String::new();
     for (k, y) in [y0, y1].into_iter().enumerate() {
         body += &format!("    feature st{k} = plane.offset(base = origin.zx, distance = {})\n", mm(side * y));
@@ -183,7 +184,7 @@ pub fn parts() -> Vec<(String, String)> {
     for side in [1.0, -1.0] {
         for (name, number, material, comment, piece, y0, y1) in pieces() {
             let n = stem(name, side);
-            out.push((format!("{n}.part"), lofted(&n, number, material, comment, piece, y0, y1, side)));
+            out.push((format!("{n}.part"), lofted(&n, number, material, comment, piece, (y0, y1), side)));
         }
         let (f, r) = (stem("front_spar", side), stem("rear_spar", side));
         out.push((format!("{f}.part"), spar(&f, "WNG-SP-500", FRONT, side)));

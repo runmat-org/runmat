@@ -296,6 +296,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 line,
                 motion,
                 parent: (region.key != "plate").then(|| region.key.clone()),
+                frame: fr,
             });
         }
         self.st.records.insert(
@@ -309,10 +310,12 @@ impl<'a, 'b> Run<'a, 'b> {
     }
 
     /// The developed outline of plate `plate` with the strips of `flanges` spliced in along
-    /// their edges, in feature order (a flange on another flange's tip extends that tip).
+    /// their edges, in feature order (a flange on another flange's tip extends that tip), then the
+    /// corner features' edits.
     pub(super) fn developed_plate(
         &mut self,
         id: &FeatureId,
+        maker: &FeatureId,
         plate: &CanonicalProfile,
         flanges: &[FeatureId],
     ) -> Result<CanonicalProfile, Halt> {
@@ -369,6 +372,16 @@ impl<'a, 'b> Run<'a, 'b> {
                 pieces.push(line_seg(&format!("{c}.{}", e.key), q, s.end));
             }
             lp.splice(k..=k, pieces);
+        }
+        // Corner reliefs and closed corners, in feature order.
+        for edit in self.plate_corner_edits(maker) {
+            let lp = out.loops.first_mut().expect("an outer loop");
+            if !super::corners::apply_edit(lp, &edit, tol) {
+                return Err(self.not_lowered(
+                    id,
+                    "flat patterns of a corner feature whose corner a later feature moved",
+                ));
+            }
         }
         Ok(out)
     }

@@ -78,6 +78,12 @@ pub enum FeatureRecord {
         base: crate::ids::FeatureId,
         edges: Vec<PlateFlangeEdge>,
     },
+    /// What a corner relief or closed corner changed at flange corners of a flat plate (the
+    /// base flange `base`): each edit replaces a stretch of the developed outline.
+    PlateCorner {
+        base: crate::ids::FeatureId,
+        edits: Vec<OutlineEdit>,
+    },
     /// Structural members and their cut list.
     Weldment {
         cuts: Vec<MemberCut>,
@@ -118,6 +124,19 @@ pub struct PlateFlangeEdge {
     /// `key`, or none for the plate's unmoved part.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// The flange's section frame in the part (world coordinates): `x` out of the thickness
+    /// face, `y` out of the sheet face the flange turns towards, `z` along the bend axis, the
+    /// origin on the bend's plate-side tangent line.
+    pub frame: runmat_geometry_kernel::frame::Frame,
+}
+
+/// A stretch of a plate's developed outline replaced: the outline runs from `from` to `to`
+/// along `path` instead (in the base flange's profile frame, metres).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutlineEdit {
+    pub from: [f64; 2],
+    pub to: [f64; 2],
+    pub path: Vec<runmat_geometry_kernel::op::ProfileSegment>,
 }
 
 impl FeatureRecord {

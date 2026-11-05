@@ -215,7 +215,7 @@ pub(super) fn sheet_metal_commands() -> Vec<CommandDescriptor> {
                     "Relief",
                     &[
                         ("rectangular", "Rectangular"),
-                        ("circular", "Circular"),
+                        ("round", "Round"),
                         ("tear", "Tear"),
                     ],
                 ),

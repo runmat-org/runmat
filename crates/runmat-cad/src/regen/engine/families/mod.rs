@@ -12,6 +12,7 @@ mod curves;
 mod direct;
 mod surface;
 mod sheet_metal;
+mod unfold;
 mod flanges;
 mod bend_chain;
 mod weldment;

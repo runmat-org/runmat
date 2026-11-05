@@ -673,6 +673,33 @@ pub fn feature_kind(
                 "length": value(values, "length", "mm")?,
             }),
         ),
+        "sheet-metal.relief" => {
+            let kind = match text(values, "relief", "rectangular") {
+                "tear" => json!({ "relief": "tear" }),
+                k => {
+                    json!({ "relief": if k == "round" { "round" } else { "rectangular" }, "size": value(values, "size", "mm")? })
+                }
+            };
+            (
+                "relief",
+                json!({
+                    "feature": "sheet_metal",
+                    "sheet_metal": "corner_relief",
+                    "corners": picks.references(&some(values, "corners", "the corners to relieve")?)?,
+                    "kind": kind,
+                }),
+            )
+        }
+        "sheet-metal.closed-corner" => (
+            "corner",
+            json!({
+                "feature": "sheet_metal",
+                "sheet_metal": "closed_corner",
+                "faces": picks.references(&some(values, "faces", "the flange faces to extend")?)?,
+                "gap": value(values, "gap", "mm")?,
+                "overlap": match text(values, "type", "overlap") { "underlap" => "underlap", "butt" => "butt", _ => "overlap" },
+            }),
+        ),
         "sheet-metal.sketched-bend" | "sheet-metal.jog" => {
             let (sketch, entity) = picks.sketch_entity(&one(values, "line", "the bend line")?)?;
             let face = match picks_of(values, "fixed").first() {

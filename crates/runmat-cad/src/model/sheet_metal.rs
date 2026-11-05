@@ -196,12 +196,35 @@ pub enum HemKind {
     },
 }
 
+/// How a closed corner's two flats meet. The picked flange `A` and the flange `B` it meets
+/// both stand at 90°; each flat extends along its bend line towards the other:
+///
+/// - `overlap`: `A` runs to `B`'s outer face, covering `B`'s end; `B` stops `gap` short of
+///   `A`'s inner face;
+/// - `underlap`: `A` stops `gap` short of `B`'s inner face; `B` runs to `A`'s outer face;
+/// - `butt`: each stops `gap` short of the other's inner face.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CornerOverlap {
     Overlap,
     Underlap,
     Butt,
+}
+
+/// A corner relief, placed at the corner `P` where the plate-side tangent lines of two bends
+/// meet on the flat pattern. Along each bend the relief removes the bend zone's last `size`
+/// next to the corner; on the plate it removes:
+///
+/// - `rectangular`: the `size` × `size` square at `P`;
+/// - `round`: the quarter disc of radius `size` about `P`, so the relief's inner end is a
+///   rounded and tangent to both bend zones' cuts;
+/// - `tear`: nothing. The bends are ripped along their tangent lines up to `P`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "relief")]
+pub enum CornerReliefKind {
+    Rectangular { size: ValueExpr },
+    Round { size: ValueExpr },
+    Tear,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -287,6 +310,8 @@ pub enum SheetMetalFeature {
         rip_edges: Vec<Reference>,
         rules: SheetMetalRules,
     },
+    /// Extends the flats of the flanges whose faces are picked, and of the flange each one
+    /// meets at a corner, to close that corner (see [`CornerOverlap`]).
     ClosedCorner {
         faces: Vec<Reference>,
         gap: ValueExpr,
@@ -296,9 +321,11 @@ pub enum SheetMetalFeature {
         edges: Vec<Reference>,
         kind: BreakKind,
     },
+    /// Reliefs at corners where two flanges' bends meet: each reference picks the corner
+    /// nearest it (a vertex or edge there).
     CornerRelief {
         corners: Vec<Reference>,
-        kind: ReliefKind,
+        kind: CornerReliefKind,
     },
     /// Tabs on one sheet's edge and matching slots in another's face.
     TabAndSlot {
@@ -471,7 +498,11 @@ impl Params for SheetMetalFeature {
             }
             S::CornerRelief { corners, kind } => {
                 v.references("corners", corners);
-                relief_values(kind, v);
+                if let CornerReliefKind::Rectangular { size } | CornerReliefKind::Round { size } =
+                    kind
+                {
+                    v.value(size);
+                }
             }
             S::TabAndSlot {
                 edge,

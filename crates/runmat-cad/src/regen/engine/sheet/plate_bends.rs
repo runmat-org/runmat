@@ -41,7 +41,11 @@ impl<'a, 'b> Run<'a, 'b> {
         &self,
         body: usize,
         maker: &FeatureId,
-    ) -> (Vec<(FeatureId, Vec<FlatBendLine>)>, Vec<FeatureId>, Vec<usize>) {
+    ) -> (
+        Vec<(FeatureId, Vec<FlatBendLine>)>,
+        Vec<FeatureId>,
+        Vec<usize>,
+    ) {
         let is_bend = |f: &FeatureId| {
             matches!(
                 self.st.records.get(f),
@@ -51,7 +55,8 @@ impl<'a, 'b> Run<'a, 'b> {
         let is_flange = |f: &FeatureId| {
             matches!(
                 self.st.records.get(f),
-                Some(FeatureRecord::PlateFlange { base, .. }) if base == maker
+                Some(FeatureRecord::PlateFlange { base, .. }
+                    | FeatureRecord::PlateCorner { base, .. }) if base == maker
             )
         };
         // Each face answers to the plate or one of its bends (a fold's faces answer to the
@@ -509,26 +514,25 @@ impl<'a, 'b> Run<'a, 'b> {
         let names = self.st.entity_names(fixed);
         // Fixed on the plate's unmoved part, the flat lies in place; fixed on a flat a bend
         // moved, the developed plate moves with that bend so the fixed face stays put.
-        let motion =
-            if !follow_fixed || names.iter().any(|n| n.maker() == maker) {
-                None
-            } else {
-                let moved_by = names
-                    .iter()
-                    .find_map(|n| match self.st.records.get(n.maker()) {
-                        Some(FeatureRecord::PlateBend { base, motion, .. }) if base == maker => {
-                            Some(*motion)
-                        }
-                        _ => None,
-                    });
-                match moved_by {
+        let motion = if !follow_fixed || names.iter().any(|n| n.maker() == maker) {
+            None
+        } else {
+            let moved_by = names
+                .iter()
+                .find_map(|n| match self.st.records.get(n.maker()) {
+                    Some(FeatureRecord::PlateBend { base, motion, .. }) if base == maker => {
+                        Some(*motion)
+                    }
+                    _ => None,
+                });
+            match moved_by {
                     Some(m) => Some(m),
                     None => return Err(self.not_lowered(
                         id,
                         "flat patterns fixed on a bend face or a flange (fix the flat on the plate or on a flat a sketched bend moved)",
                     )),
                 }
-            };
+        };
         // Cuts and holes other features made in the flats develop onto the flat pattern.
         let (bends, flanges, others) = self.plate_bends_and_others(body, maker);
         let profile_ref = match self.doc.feature(maker).map(|f| &f.kind) {
@@ -539,7 +543,7 @@ impl<'a, 'b> Run<'a, 'b> {
         };
         let sketched = self.profile(i, id, "fixed_face", &profile_ref)?;
         // Edge flanges develop as strips spliced into the outline along their edges.
-        let plate = self.developed_plate(id, &sketched, &flanges)?;
+        let plate = self.developed_plate(id, maker, &sketched, &flanges)?;
         let t = rules.thickness;
         let mut tool = LabeledTool::new(ToolShape::prism(plate.clone(), 0.0, t));
         for seg in plate.loops.iter().flatten() {
