@@ -106,6 +106,31 @@ fn block_faces_match_topology_and_names() {
     );
 }
 
+/// A face a file region holds carries that region's name, the name the Outline's Regions
+/// folder and a simulation's named regions show; the other faces carry none.
+#[test]
+fn faces_carry_the_regions_that_hold_them() {
+    let mut d = block();
+    d.regions.push(region(
+        "mount",
+        TopoKind::Face,
+        vec![side("body", "s1", "l1")],
+        Cardinality::ExactlyOne,
+    ));
+    let (r, shown) = display(&d);
+    assert_clean(&r);
+    let faces = &shown.bodies[0].faces;
+    let held: Vec<(&str, &[String])> = faces
+        .iter()
+        .filter(|f| !f.regions.is_empty())
+        .map(|f| (f.reference.as_deref().unwrap_or(""), f.regions.as_slice()))
+        .collect();
+    assert_eq!(
+        held,
+        vec![("feature.body.face.side(s1.l1)", &["mount".to_string()][..])]
+    );
+}
+
 /// A fillet on a convex edge draws as a rounded strip between its tangent lines, and the faces
 /// it meets are trimmed back to them: the shown area stays close to the filleted solid's.
 #[test]

@@ -41,6 +41,10 @@ pub struct FaceDisplay {
     /// Every name the face carries (a merged face has several), as reference text.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub names: Vec<String>,
+    /// The file's face regions that hold it (`region mount : face = …`), by name: what the
+    /// Outline's Regions folder and a simulation's named regions call it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<String>,
     /// The features that made it.
     pub features: Vec<String>,
     pub positions: Vec<f32>,
@@ -186,6 +190,7 @@ fn body_display(
     body_names: &BTreeSet<EntityName>,
     face_names: &[BTreeSet<EntityName>],
     topology: &crate::refs::history::Topology,
+    regions: &BTreeMap<&EntityName, Vec<String>>,
 ) -> BodyDisplay {
     let face_ref: Vec<Option<String>> = (0..mesh.faces.len())
         .map(|i| {
@@ -203,6 +208,15 @@ fn body_display(
             FaceDisplay {
                 index: i as u32,
                 reference: face_ref[i].clone(),
+                regions: names
+                    .map(|set| {
+                        set.iter()
+                            .flat_map(|n| regions.get(n).into_iter().flatten().cloned())
+                            .collect::<BTreeSet<_>>()
+                            .into_iter()
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 names: names
                     .map(|set| {
                         set.iter()
@@ -302,6 +316,14 @@ pub fn part_display(
     options: &TessellationOptions,
 ) -> PartDisplay {
     let mut out = PartDisplay::default();
+    // Each name the file's regions resolved to, with those regions' names (a face matches
+    // through its own face names only).
+    let mut regions: BTreeMap<&EntityName, Vec<String>> = BTreeMap::new();
+    for (region, outcome) in &result.regions {
+        for name in outcome.entities.iter().flatten() {
+            regions.entry(name).or_default().push(region.as_str().to_string());
+        }
+    }
     for (i, body) in result.state.bodies.iter().enumerate() {
         match kernel.tessellate(&body.handle, options) {
             Ok(mesh) => {
@@ -314,6 +336,7 @@ pub fn part_display(
                     &body.names.body,
                     &body.names.faces,
                     &body.topology,
+                    &regions,
                 ));
             }
             Err(error) => out.problems.push(DisplayProblem {
