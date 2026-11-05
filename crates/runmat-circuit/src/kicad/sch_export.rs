@@ -21,7 +21,9 @@ use super::sexpr::{self, SExpr};
 use crate::elab::Netlist;
 use crate::geom::Coord;
 use crate::library::Pool;
-use crate::schematic::{layout, unit_pins, units, NetLabel, SchematicSheet, UnitLayout, PIN_LEN};
+use crate::schematic::{
+    layout, unit_pins, units, NetLabel, SchematicSheet, UnitLayout, NAME_OFFSET,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -58,7 +60,10 @@ fn effects(justify: Option<&str>) -> SExpr {
         "font",
         vec![SExpr::list(
             "size",
-            vec![SExpr::num(1.27), SExpr::num(1.27)],
+            vec![
+                mm(crate::schematic::PIN_TEXT),
+                mm(crate::schematic::PIN_TEXT),
+            ],
         )],
     )];
     if let Some(j) = justify {
@@ -78,7 +83,10 @@ fn hidden_effects() -> SExpr {
                 "font",
                 vec![SExpr::list(
                     "size",
-                    vec![SExpr::num(1.27), SExpr::num(1.27)],
+                    vec![
+                        mm(crate::schematic::PIN_TEXT),
+                        mm(crate::schematic::PIN_TEXT),
+                    ],
                 )],
             ),
             SExpr::sym("hide"),
@@ -546,6 +554,11 @@ fn lib_symbol(lib: &str, units: &[(UnitLayout, Option<String>)]) -> SExpr {
     let short = lib.split_once(':').map(|x| x.1).unwrap_or(lib);
     let mut v = vec![
         SExpr::str(lib),
+        // Names inside the body at the canvas's name offset; numbers above the pin lines.
+        SExpr::list(
+            "pin_names",
+            vec![SExpr::list("offset", vec![mm(NAME_OFFSET)])],
+        ),
         SExpr::list("in_bom", vec![SExpr::sym("yes")]),
         SExpr::list("on_board", vec![SExpr::sym("yes")]),
         SExpr::list(
@@ -612,7 +625,7 @@ fn lib_symbol(lib: &str, units: &[(UnitLayout, Option<String>)]) -> SExpr {
                                 SExpr::num(if *left { 0.0 } else { 180.0 }),
                             ],
                         ),
-                        SExpr::list("length", vec![mm(PIN_LEN)]),
+                        SExpr::list("length", vec![mm(lay.pin_len)]),
                         SExpr::list("name", vec![SExpr::str(name), effects(None)]),
                         SExpr::list("number", vec![SExpr::str(pad), effects(None)]),
                     ],

@@ -255,3 +255,122 @@ fn the_large_board_projection_reaches_the_scale_scene_size() {
     );
     assert!(primitives > 10_000, "{primitives}");
 }
+
+/// Every symbol and unit of io.circuit (the FPGA's bank and power units included) draws its pin
+/// names, pin numbers, designator and value without any two texts overlapping: pins sit on the
+/// 2.54 mm pitch with 1.27 mm text, names inside the body, numbers above the pin lines outside
+/// it, and the body as wide as the longest names on both sides.
+#[test]
+fn schematic_texts_never_overlap() {
+    use runmat_circuit::schematic::{text_box, PIN_TEXT};
+    let (index, _) = scenario_index();
+    let nm = |v: f64| (v * 1.0e6).round() as i64;
+    let meets =
+        |a: &[i64; 4], b: &[i64; 4]| a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    let mut symbols = 0;
+    let mut fpga_units = 0;
+    for page in &index.schematic.sheets {
+        for symbol in &page.symbols {
+            symbols += 1;
+            if symbol.designator == "U9000" {
+                fpga_units += 1;
+            }
+            assert_eq!(nm(symbol.pin_text_mm), PIN_TEXT);
+            let xs: Vec<f64> = symbol.body[0].iter().map(|p| p[0]).collect();
+            let (left, right) = (
+                nm(xs.iter().cloned().fold(f64::MAX, f64::min)),
+                nm(xs.iter().cloned().fold(f64::MIN, f64::max)),
+            );
+            let mut boxes: Vec<(String, [i64; 4])> = Vec::new();
+            for pin in &symbol.pins {
+                let on_left = pin.side == "left";
+                let name = text_box(
+                    &pin.name,
+                    PIN_TEXT,
+                    nm(pin.name_at[0]),
+                    nm(pin.name_at[1]),
+                    if on_left { "start" } else { "end" },
+                );
+                assert!(
+                    name[0] >= left && name[2] <= right,
+                    "{} {} name leaves the body",
+                    symbol.designator,
+                    pin.name
+                );
+                boxes.push((format!("name {}", pin.name), name));
+                if pin.number != pin.name {
+                    let number = text_box(
+                        &pin.number_text,
+                        PIN_TEXT,
+                        nm(pin.number_at[0]),
+                        nm(pin.number_at[1]),
+                        "middle",
+                    );
+                    // Above the pin line, between the body and the tip.
+                    assert!(
+                        number[1] > nm(pin.y_mm),
+                        "{} {} number on its line",
+                        symbol.designator,
+                        pin.number
+                    );
+                    let (lo, hi) = if on_left {
+                        (nm(pin.x_mm), left)
+                    } else {
+                        (right, nm(pin.x_mm))
+                    };
+                    assert!(
+                        number[0] >= lo && number[2] <= hi,
+                        "{} {} number leaves its pin",
+                        symbol.designator,
+                        pin.number_text
+                    );
+                    boxes.push((format!("number {}", pin.number_text), number));
+                }
+            }
+            let name = match &symbol.unit {
+                Some(u) => format!("{}{u}", symbol.designator),
+                None => symbol.designator.clone(),
+            };
+            let designator = match &symbol.unit_label {
+                Some(l) => format!("{name} · {l}"),
+                None => name,
+            };
+            boxes.push((
+                "designator".into(),
+                text_box(
+                    &designator,
+                    nm(symbol.designator_text_mm),
+                    nm(symbol.designator_at[0]),
+                    nm(symbol.designator_at[1]),
+                    "middle",
+                ),
+            ));
+            if let Some(value) = &symbol.value {
+                boxes.push((
+                    "value".into(),
+                    text_box(
+                        value,
+                        nm(symbol.value_text_mm),
+                        nm(symbol.value_at[0]),
+                        nm(symbol.value_at[1]),
+                        "middle",
+                    ),
+                ));
+            }
+            for (i, (a, ba)) in boxes.iter().enumerate() {
+                for (b, bb) in &boxes[i + 1..] {
+                    assert!(
+                        !meets(ba, bb),
+                        "{}{}: {a} overlaps {b}",
+                        symbol.designator,
+                        symbol.unit.as_deref().unwrap_or("")
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        symbols > 10 && fpga_units >= 5,
+        "{symbols} symbols, {fpga_units} FPGA units"
+    );
+}

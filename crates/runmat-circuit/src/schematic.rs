@@ -41,6 +41,59 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub(crate) const GRID: Coord = 1_270_000;
 pub(crate) const PIN_PITCH: Coord = 2_540_000;
 pub(crate) const PIN_LEN: Coord = 2_540_000;
+/// Pin name and number text height: 50 mil, half the pin pitch, as KiCad and Altium draw it.
+pub const PIN_TEXT: Coord = 1_270_000;
+/// The designator's and the value's text heights.
+pub const DESIGNATOR_TEXT: Coord = 1_524_000;
+pub const VALUE_TEXT: Coord = 1_270_000;
+/// The gap between the body edge and a pin name inside it (KiCad's default name offset).
+pub const NAME_OFFSET: Coord = 508_000;
+/// The gap between a pin line and the number above it.
+const NUMBER_LIFT: Coord = 254_000;
+/// The least gap between the left and right names across the body.
+const NAME_GAP: Coord = 1_270_000;
+
+/// How wide a line of text of height `size` is: an upper bound on the advance of the fonts the
+/// canvas (Inter) and KiCad (its stroke font) draw, 0.72 of the height per character.
+pub fn text_width(text: &str, size: Coord) -> Coord {
+    ceil_div(text.chars().count() as Coord * size * 72, 100)
+}
+
+/// The box a line of text covers, `[x0, y0, x1, y1]` in nm: the baseline at `y`, descenders
+/// 0.2 of the height below it and capitals and ascenders 0.8 above, aligned `start`, `middle`
+/// or `end` at `x`.
+pub fn text_box(text: &str, size: Coord, x: Coord, y: Coord, anchor: &str) -> [Coord; 4] {
+    let w = text_width(text, size);
+    let x0 = match anchor {
+        "middle" => x - w / 2,
+        "end" => x - w,
+        _ => x,
+    };
+    [x0, y - size / 5, x0 + w, y + size * 4 / 5]
+}
+
+/// The baseline that centres capitals of height `size` on `y`.
+fn centred_baseline(y: Coord, size: Coord) -> Coord {
+    y - size * 3 / 10
+}
+
+/// A pin's number as drawn: its pad, or its first pad and how many more (`A1 +7`).
+pub fn number_text(pads: &[String]) -> String {
+    match pads {
+        [] => String::new(),
+        [one] => one.clone(),
+        [a, b] => format!("{a},{b}"),
+        [first, rest @ ..] => format!("{first} +{}", rest.len()),
+    }
+}
+
+fn ceil_div(a: Coord, b: Coord) -> Coord {
+    (a + b - 1).div_euclid(b)
+}
+
+fn up_to_grid(v: Coord) -> Coord {
+    ceil_div(v, GRID) * GRID
+}
 const STUB: Coord = 2_540_000;
 const MARGIN: Coord = 20 * GRID;
 /// Sheet sizes tried in order, landscape (mm).
@@ -58,6 +111,8 @@ pub(crate) struct UnitLayout {
     pub(crate) pins: Vec<(String, Vec<String>, PinType, bool, Coord)>,
     pub(crate) half_w: Coord,
     pub(crate) half_h: Coord,
+    /// Every pin's length: long enough for the widest number above its line.
+    pub(crate) pin_len: Coord,
 }
 
 impl UnitLayout {
@@ -94,9 +149,22 @@ impl UnitLayout {
         }
         let rows = left.len().max(right.len()).max(1) as Coord;
         let half_h = (rows * PIN_PITCH) / 2 + GRID;
-        let name_len = pins.iter().map(|p| p.0.chars().count()).max().unwrap_or(1) as Coord;
-        let half_w =
-            ((((name_len * GRID + 5 * GRID) / 2) + GRID - 1) / GRID * GRID).max(2 * PIN_PITCH);
+        // The body holds the longest name on each side, inset by the name offset, with a gap
+        // between them; the pins hold the widest number. Nothing can overlap.
+        let widest = |list: &[usize]| {
+            list.iter()
+                .map(|&i| text_width(&pins[i].0, PIN_TEXT))
+                .max()
+                .unwrap_or(0)
+        };
+        let names = widest(&left) + widest(&right) + 2 * NAME_OFFSET + NAME_GAP;
+        let half_w = up_to_grid(ceil_div(names, 2)).max(2 * PIN_PITCH);
+        let number = pins
+            .iter()
+            .map(|p| text_width(&number_text(&p.1), PIN_TEXT))
+            .max()
+            .unwrap_or(0);
+        let pin_len = up_to_grid(number + 2 * NAME_OFFSET).max(PIN_LEN);
         let mut out = Vec::new();
         for (side, list) in [(true, &left), (false, &right)] {
             let top = (list.len() as Coord - 1) * PIN_PITCH / 2;
@@ -110,12 +178,28 @@ impl UnitLayout {
             pins: out,
             half_w,
             half_h,
+            pin_len,
         }
     }
     /// Pin tip in library coordinates.
     pub(crate) fn tip(&self, left: bool, y: Coord) -> Point {
-        let x = self.half_w + PIN_LEN;
+        let x = self.half_w + self.pin_len;
         Point::new(if left { -x } else { x }, y)
+    }
+    /// Where a pin's name sits (inside the body, centred on the pin line) and its anchor.
+    pub(crate) fn name_at(&self, left: bool, y: Coord) -> (Point, &'static str) {
+        let x = self.half_w - NAME_OFFSET;
+        let base = centred_baseline(y, PIN_TEXT);
+        if left {
+            (Point::new(-x, base), "start")
+        } else {
+            (Point::new(x, base), "end")
+        }
+    }
+    /// Where a pin's number sits: above the pin line, centred along it, outside the body.
+    pub(crate) fn number_at(&self, left: bool, y: Coord) -> Point {
+        let x = self.half_w + self.pin_len / 2;
+        Point::new(if left { -x } else { x }, y + NUMBER_LIFT + PIN_TEXT / 5)
     }
 }
 
@@ -171,6 +255,10 @@ pub struct SchematicSymbol {
     /// Where the designator and value texts sit.
     pub designator_at: Xy,
     pub value_at: Xy,
+    /// Text heights (mm): pin names and numbers, the designator and the value.
+    pub pin_text_mm: f64,
+    pub designator_text_mm: f64,
+    pub value_text_mm: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -183,6 +271,12 @@ pub struct SchematicPin {
     pub y_mm: f64,
     /// `left` or `right` of the body.
     pub side: String,
+    /// The name's baseline point, inside the body: text starts there on a left pin and ends
+    /// there on a right pin.
+    pub name_at: Xy,
+    /// The number as drawn (`A1`, `A1 +7`) and its baseline centre, above the pin line.
+    pub number_text: String,
+    pub number_at: Xy,
     /// `input`, `output`, `passive`, `power_in`…
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -508,7 +602,10 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
                     let (_, lay, idx) = &gates[*comp][*gate];
                     let room =
                         label_room(&mut idx.iter().map(|i| nl.components[*comp].pins[*i].net));
-                    (2 * (lay.half_w + PIN_LEN + room), 2 * lay.half_h + 8 * GRID)
+                    (
+                        2 * (lay.half_w + lay.pin_len + room),
+                        2 * lay.half_h + 8 * GRID,
+                    )
                 }
                 Cell::Sheet { child } => {
                     let pins = &sheet_pins[child];
@@ -596,12 +693,17 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
                         let edge = Point::new(o.x + if *left { -hw } else { hw }, tip.y);
                         body.push(vec![xy(edge), xy(tip)]);
                         let net = c.pins[*pin_index].net;
+                        let (name_at, _) = lay.name_at(*left, *ly);
+                        let number_at = lay.number_at(*left, *ly);
                         pins.push(SchematicPin {
                             name: name.clone(),
                             number: pads.join(","),
                             x_mm: mm(tip.x),
                             y_mm: mm(tip.y),
                             side: side(*left),
+                            name_at: xy(Point::new(o.x + name_at.x, o.y + name_at.y)),
+                            number_text: number_text(pads),
+                            number_at: xy(Point::new(o.x + number_at.x, o.y + number_at.y)),
                             kind: pin_kind(*kind).to_owned(),
                             net: net.map(|n| nl.nets[n].name.clone()),
                         });
@@ -625,6 +727,9 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
                         value: crate::index::component_value(c),
                         designator_at: xy(Point::new(o.x, o.y + hh + GRID)),
                         value_at: xy(Point::new(o.x, o.y - hh - 2 * GRID)),
+                        pin_text_mm: mm(PIN_TEXT),
+                        designator_text_mm: mm(DESIGNATOR_TEXT),
+                        value_text_mm: mm(VALUE_TEXT),
                     });
                 }
                 Cell::Sheet { child } => {

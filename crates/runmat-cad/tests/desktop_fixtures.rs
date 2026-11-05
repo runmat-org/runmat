@@ -54,8 +54,8 @@ fn emit(name: &str, json: &str) {
     );
 }
 
-/// A bracket: block, cut, hole pattern, fillet, a fillet that fails on a missing edge, a
-/// suppressed chamfer, regions, a publish and a second configuration.
+/// The showcase bracket: block, cut, hole, fillet, regions, a publish and a second
+/// configuration. It regenerates cleanly; [`bracket_error`] carries the failing feature.
 fn bracket() -> PartDocument {
     let mut d = block();
     d.path = "bracket.part".into();
@@ -111,14 +111,6 @@ fn bracket() -> PartDocument {
         )],
         1.5,
     ));
-    d.features.push(fillet(
-        "round_missing",
-        vec![Reference::edges_between(
-            side("body", "s1", "l9"),
-            Reference::end_cap("body"),
-        )],
-        1.0,
-    ));
     d.regions.push(region(
         "top",
         TopoKind::Face,
@@ -145,24 +137,54 @@ fn bracket() -> PartDocument {
     d
 }
 
+/// The error case: the bracket with a fillet on an edge its sketch doesn't have (`s1.l9`), so
+/// the tree shows a failed feature, its diagnostic and what it blocks.
+fn bracket_error() -> PartDocument {
+    let mut d = bracket();
+    d.path = "bracket-error.part".into();
+    d.features.push(fillet(
+        "round_missing",
+        vec![Reference::edges_between(
+            side("body", "s1", "l9"),
+            Reference::end_cap("body"),
+        )],
+        1.0,
+    ));
+    d
+}
+
+fn part_json(d: &PartDocument, index: &runmat_cad::index::PartIndex) -> String {
+    let mut json = String::from("{\n\"document\": ");
+    json.push_str(&serde_json::to_string_pretty(d).unwrap());
+    json.push_str(",\n\"index\": ");
+    json.push_str(to_json(index).trim_end());
+    json.push_str("\n}\n");
+    serde_json::from_str::<serde_json::Value>(&json).unwrap();
+    json
+}
+
+#[test]
+fn part_error_fixture() {
+    let env = Env::new();
+    let d = bracket_error();
+    let r = env.regen(&d);
+    let index = build_index(&d, &r, None);
+    assert!(
+        !index.diagnostics.is_empty(),
+        "the error case carries a failing fillet"
+    );
+    emit("bracket-error.part.json", &part_json(&d, &index));
+}
+
 #[test]
 fn part_fixture() {
     let env = Env::new();
     let d = bracket();
     let r = env.regen(&d);
     let index = build_index(&d, &r, None);
-    // The fixture shows every node state the tree draws.
-    assert!(
-        !index.diagnostics.is_empty(),
-        "the bracket carries a failing fillet"
-    );
-    let mut json = String::from("{\n\"document\": ");
-    json.push_str(&serde_json::to_string_pretty(&d).unwrap());
-    json.push_str(",\n\"index\": ");
-    json.push_str(to_json(&index).trim_end());
-    json.push_str("\n}\n");
-    serde_json::from_str::<serde_json::Value>(&json).unwrap();
-    emit("bracket.part.json", &json);
+    // The showcase regenerates cleanly: no red in the pictures that show it.
+    assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
+    emit("bracket.part.json", &part_json(&d, &index));
     // What the part viewport draws: the test kernel's tessellation, joined with the names.
     let mut display = part_display(&r, &env.kernel, &TessellationOptions::default());
     display.sketches = sketch_display(&d, &r);
