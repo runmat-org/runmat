@@ -44,6 +44,7 @@ impl TimeLimit {
     }
     /// A unit-preserving elapsed fraction. Unbounded limits have no fraction.
     /// Zero is already reached; callers decide whether to clamp display values.
+    #[cfg(any(feature = "plot-core", test))]
     pub(crate) fn fraction(self, elapsed: Duration) -> Option<f64> {
         match self {
             Self::Unbounded => None,
