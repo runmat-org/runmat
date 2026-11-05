@@ -188,6 +188,14 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 
 /// The test kernel's display mesh of one solid.
 pub(crate) fn tessellate_solid(s: &FakeSolid, options: &TessellationOptions) -> BodyMesh {
+    if let Some(mesh) = super::mesh::tessellate(s, options) {
+        return mesh;
+    }
+    facet_mesh(s, options)
+}
+
+/// The solid drawn on its grid facets, blends as strips over trimmed faces.
+fn facet_mesh(s: &FakeSolid, options: &TessellationOptions) -> BodyMesh {
     let blends = convex_blends(s);
     let segments = ((FRAC_PI_2 / options.angle_tolerance.max(1e-3)).ceil() as usize).clamp(2, 64);
     let mut faces = vec![FaceMesh::default(); s.faces.len()];

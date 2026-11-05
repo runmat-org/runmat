@@ -998,7 +998,7 @@ impl PolyTool {
         cen: P3,
         a: P3,
         b: P3,
-    ) -> Option<(HistorySource, FacetKind)> {
+    ) -> Option<(HistorySource, FacetKind, super::FacetExact)> {
         // Exact: a polygon on the facet's plane holding its centre.
         for (f, l) in &self.facets {
             if let Some((ax, s)) = super::axis_of(f.normal) {
@@ -1006,7 +1006,7 @@ impl PolyTool {
                     && (f.offset_of() * s - plane.offset).abs() < 1e-9
                     && f.contains(cen)
                 {
-                    return Some((l.clone(), FacetKind::Planar));
+                    return Some((l.clone(), FacetKind::Planar, super::FacetExact::None));
                 }
             }
         }
@@ -1031,9 +1031,17 @@ impl PolyTool {
             }
         }
         best.map(|(_, f, l)| {
+            let o = f.loops.first().and_then(|lp| lp.first()).copied();
+            let ex = match o {
+                Some(o) => {
+                    super::FacetExact::Ready(std::sync::Arc::new(super::exact_plane(o, f.normal)))
+                }
+                None => super::FacetExact::None,
+            };
             (
                 l.clone(),
                 FacetKind::Faceted(SurfaceKind::Plane { normal: f.normal }),
+                ex,
             )
         })
     }

@@ -17,6 +17,7 @@
 //! curve per span); holes (simple, counterbore, countersink) as revolves of their section; and
 //! images of whole bodies under any rigid motion or reflection.
 
+use super::exact::Exact;
 use super::{FakeSolid, Rect};
 use crate::refs::history::{HistorySource, OperandEntity, SurfaceKind};
 use crate::refs::name::InstanceKey;
@@ -894,6 +895,149 @@ impl Sampled {
             s.plane = None;
         }
         self.exact = exact;
+    }
+
+    /// The exact surface of surface `i`, in world coordinates, where the shape has a chart
+    /// for it (see [`super::exact`]). Lofts and drafted or thin extrusion walls have none.
+    pub(super) fn exact_of(&self, i: usize) -> Option<Exact> {
+        let world = self.to_local.inverse();
+        let plane_at = |o: [f64; 3], e1: [f64; 3], e2: [f64; 3]| {
+            Some(Exact::plane(
+                world.apply(o),
+                world.apply_vector(e1),
+                world.apply_vector(e2),
+            ))
+        };
+        let (x, y) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        match &self.shape {
+            Shape::Prism {
+                loops,
+                z0,
+                z1,
+                caps,
+                ..
+            } => {
+                if i == caps[0] {
+                    return plane_at([0.0, 0.0, *z0], x, y);
+                }
+                if i == caps[1] {
+                    return plane_at([0.0, 0.0, *z1], x, y);
+                }
+                let (c, _) = loops.iter().flatten().find(|(_, si)| *si == i)?;
+                Exact::extruded(world, c.clone(), [0.0; 3], [0.0, 0.0, 1.0])
+            }
+            Shape::Revolve {
+                loops,
+                ap,
+                ad,
+                e1,
+                sense,
+                angle,
+                caps,
+                ..
+            } => {
+                if let Some([s, e]) = caps {
+                    if i == *s || i == *e {
+                        let th = if i == *s { 0.0 } else { *angle };
+                        let ad3 = [ad[0], ad[1], 0.0];
+                        let e13 = [e1[0], e1[1], 0.0];
+                        let e23 = {
+                            let c = [
+                                ad3[1] * e13[2] - ad3[2] * e13[1],
+                                ad3[2] * e13[0] - ad3[0] * e13[2],
+                                ad3[0] * e13[1] - ad3[1] * e13[0],
+                            ];
+                            [c[0] * sense, c[1] * sense, c[2] * sense]
+                        };
+                        let radial = [
+                            e13[0] * th.cos() + e23[0] * th.sin(),
+                            e13[1] * th.cos() + e23[1] * th.sin(),
+                            e13[2] * th.cos() + e23[2] * th.sin(),
+                        ];
+                        return plane_at([ap[0], ap[1], 0.0], ad3, radial);
+                    }
+                }
+                let (c, _) = loops
+                    .iter()
+                    .flatten()
+                    .find(|(c, si)| *si == i && !self.on_axis(c))?;
+                Exact::revolved(world, c.clone(), *ap, *ad, *e1, *sense)
+            }
+            Shape::Sweep {
+                loops,
+                offsets,
+                sides,
+                caps,
+                ..
+            } => {
+                if i == caps[0] {
+                    return plane_at([0.0; 3], x, y);
+                }
+                if i == caps[1] {
+                    return plane_at(offsets[offsets.len() - 1], x, y);
+                }
+                for (li, l) in loops.iter().enumerate() {
+                    for (ci, c) in l.iter().enumerate() {
+                        if let Some(j) = sides[li][ci].iter().position(|s| *s == i) {
+                            // One side surface per path segment; a curve reused across
+                            // segments of one direction is still one extrusion.
+                            let segs: Vec<usize> = sides[li][ci]
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, s)| **s == i)
+                                .map(|(k, _)| k)
+                                .collect();
+                            let d = sub3(offsets[j + 1], offsets[j]);
+                            let same = segs.iter().all(|&k| {
+                                let e = sub3(offsets[k + 1], offsets[k]);
+                                let (a, b) = (norm3(d), norm3(e));
+                                a > 1e-300
+                                    && b > 1e-300
+                                    && (dot3(d, e) / (a * b) - 1.0).abs() < 1e-9
+                            });
+                            if !same {
+                                return None;
+                            }
+                            return Exact::extruded(world, c.clone(), offsets[j], d);
+                        }
+                    }
+                }
+                None
+            }
+            Shape::Loft { .. } => None,
+            Shape::Image { solid } => {
+                let f = solid.faces.get(i)?;
+                let local = match (&f.exact, f.plane) {
+                    (Some(e), _) => (**e).clone(),
+                    (None, Some(p)) => super::mesh::grid_plane(&p),
+                    _ => return None,
+                };
+                Some(local.transformed(&world))
+            }
+            Shape::Extrusion(x) => {
+                if x.draft.is_some() {
+                    return None;
+                }
+                if i == x.caps[0] {
+                    return x
+                        .start
+                        .fixed()
+                        .and_then(|z| plane_at([0.0, 0.0, z], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]));
+                }
+                if i == x.caps[1] {
+                    return x
+                        .end
+                        .fixed()
+                        .and_then(|z| plane_at([0.0, 0.0, z], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]));
+                }
+                let outside = x.thin.map(|t| t.1).unwrap_or(0.0);
+                let (c, _, _) = x.loops.iter().flatten().find(|(_, o, _)| *o == i)?;
+                if outside.abs() > 1e-12 {
+                    return None;
+                }
+                Exact::extruded(world, c.clone(), [0.0; 3], [0.0, 0.0, 1.0])
+            }
+        }
     }
 
     /// A local point on each planar surface (where the shape knows one).

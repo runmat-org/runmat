@@ -30,9 +30,12 @@
 #![allow(clippy::needless_range_loop)]
 
 mod analysis;
+mod cdt;
 mod display;
+mod exact;
 mod extra;
 mod features;
+mod mesh;
 mod sampled;
 mod sheet;
 
@@ -43,6 +46,7 @@ use crate::refs::history::*;
 use crate::refs::name::{InstanceKey, PlaneSide, Role};
 use crate::regen::kernel::*;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 const EPS: f64 = 1e-9;
 
@@ -103,6 +107,39 @@ struct FFace {
     facet_planes: Vec<PlaneKey>,
     /// Informative surface of a faceted face.
     surface: Option<SurfaceKind>,
+    /// The true surface of a faceted face, when its tool knows one (for display).
+    exact: Option<Arc<exact::Exact>>,
+}
+
+/// Where a facet's exact surface comes from.
+#[derive(Clone, Debug)]
+enum FacetExact {
+    None,
+    Ready(Arc<exact::Exact>),
+    /// Surface `.1` of tool `.0` (in `tools` then `carve` order).
+    Tool(usize, usize),
+    /// Surface of the tool that labelled the facet, before the tool index is known.
+    Surface(usize),
+}
+
+/// A plane through `o` with normal `n`, as an exact surface.
+fn exact_plane(o: [f64; 3], n: [f64; 3]) -> exact::Exact {
+    let a = (0..3)
+        .min_by(|i, j| n[*i].abs().total_cmp(&n[*j].abs()))
+        .unwrap_or(0);
+    let mut t = [0.0; 3];
+    t[a] = 1.0;
+    let e1 = [
+        n[1] * t[2] - n[2] * t[1],
+        n[2] * t[0] - n[0] * t[2],
+        n[0] * t[1] - n[1] * t[0],
+    ];
+    let e2 = [
+        n[1] * e1[2] - n[2] * e1[1],
+        n[2] * e1[0] - n[0] * e1[2],
+        n[0] * e1[1] - n[1] * e1[0],
+    ];
+    exact::Exact::plane(o, e1, e2)
 }
 
 /// Whether a facet lies on a planar grid face or on a faceted surface.
@@ -119,6 +156,7 @@ impl FFace {
             rects: Vec::new(),
             facet_planes: Vec::new(),
             surface: None,
+            exact: None,
         }
     }
 
@@ -506,11 +544,11 @@ impl Tool {
         cen: [f64; 3],
         a: [f64; 3],
         b: [f64; 3],
-    ) -> Option<(HistorySource, FacetKind)> {
+    ) -> Option<(HistorySource, FacetKind, FacetExact)> {
         match self {
             Tool::Exact(t) => t
                 .label(plane.axis, plane.offset, cen)
-                .map(|l| (l, FacetKind::Planar)),
+                .map(|l| (l, FacetKind::Planar, FacetExact::None)),
             Tool::Sampled(t) => t.crossing(a, b).map(|i| {
                 let s = &t.surfaces[i];
                 let kind = match s.plane {
@@ -519,7 +557,7 @@ impl Tool {
                     }
                     _ => FacetKind::Faceted(s.hint),
                 };
-                (s.label.clone(), kind)
+                (s.label.clone(), kind, FacetExact::Surface(i))
             }),
             Tool::Polys(t) => t.label(plane, cen, a, b),
             Tool::Clipped(t, planes) => {
@@ -538,12 +576,22 @@ impl Tool {
                                 Some((ax, _)) if ax == plane.axis => FacetKind::Planar,
                                 _ => FacetKind::Faceted(SurfaceKind::Plane { normal: *n }),
                             };
-                            return Some((l.clone(), kind));
+                            let ex = FacetExact::Ready(Arc::new(exact_plane(*o, *n)));
+                            return Some((l.clone(), kind, ex));
                         }
                     }
                 }
                 t.label(plane, cen, a, b)
             }
+        }
+    }
+
+    /// The exact surface of the sampled surface `i` this tool labelled a facet with.
+    fn exact_surface(&self, i: usize) -> Option<exact::Exact> {
+        match self {
+            Tool::Sampled(t) => t.exact_of(i),
+            Tool::Clipped(t, _) => t.exact_surface(i),
+            _ => None,
         }
     }
 
@@ -1353,6 +1401,7 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
     let draft_reach = drafts.iter().map(|d| d.reach).fold(0.0, f64::max);
     let mut labels: Vec<Vec<HistorySource>> = Vec::with_capacity(facets.len());
     let mut kinds: Vec<FacetKind> = Vec::with_capacity(facets.len());
+    let mut exacts: Vec<FacetExact> = Vec::with_capacity(facets.len());
     for f in &facets {
         let plane = facet_plane(f);
         let r = facet_rect(f);
@@ -1383,6 +1432,7 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
         };
         let mut ls: Vec<HistorySource> = Vec::new();
         let mut kind = FacetKind::Planar;
+        let mut ex = FacetExact::None;
         // A drafted face's tilted surface: the draft deciding either side of the facet whose
         // material changes across it. On the face's flank (see [`DraftSpec::flank`]) the
         // draft's half-space decides; elsewhere it leaves the facet to the operand's faces.
@@ -1426,6 +1476,9 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                         });
                         if let FacetKind::Faceted(h) = face.kind() {
                             kind = FacetKind::Faceted(h);
+                            if let Some(e) = &face.exact {
+                                ex = FacetExact::Ready(e.clone());
+                            }
                         }
                     }
                 }
@@ -1448,6 +1501,9 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                         });
                         if let FacetKind::Faceted(h) = face.kind() {
                             kind = FacetKind::Faceted(h);
+                            if let Some(e) = &face.exact {
+                                ex = FacetExact::Ready(e.clone());
+                            }
                         }
                     }
                 }
@@ -1589,10 +1645,14 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
             }
         }
         if ls.is_empty() {
-            for t in job.tools.iter().chain(&job.carve) {
-                if let Some((l, k)) = t.label(&plane, cen, cin, cout) {
+            for (ti, t) in job.tools.iter().chain(&job.carve).enumerate() {
+                if let Some((l, k, e)) = t.label(&plane, cen, cin, cout) {
                     ls.push(l);
                     kind = k;
+                    ex = match e {
+                        FacetExact::Surface(i) => FacetExact::Tool(ti, i),
+                        other => other,
+                    };
                     break;
                 }
             }
@@ -1620,6 +1680,11 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
         ls.dedup();
         labels.push(ls);
         kinds.push(kind);
+        exacts.push(if kind == FacetKind::Planar {
+            FacetExact::None
+        } else {
+            ex
+        });
     }
 
     // Faces: planar facets join coplanar neighbours (so flush faces merge, see
@@ -1724,6 +1789,19 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
                 if faces[l].surface.is_none() {
                     faces[l].surface = Some(h);
                 }
+                if faces[l].exact.is_none() {
+                    faces[l].exact = match &exacts[fi] {
+                        FacetExact::Ready(e) => Some(e.clone()),
+                        FacetExact::Tool(ti, i) => job
+                            .tools
+                            .iter()
+                            .chain(&job.carve)
+                            .nth(*ti)
+                            .and_then(|t| t.exact_surface(*i))
+                            .map(Arc::new),
+                        _ => None,
+                    };
+                }
             }
             if let Some(p0) = faces[l]
                 .plane
@@ -1744,6 +1822,7 @@ fn run_grid(job: GridJob<'_>) -> Result<GridResult, KernelError> {
             if planar[l] {
                 face.facet_planes.clear();
                 face.surface = None;
+                face.exact = None;
             } else {
                 face.plane = None;
             }
@@ -3319,6 +3398,9 @@ fn shift(s: &mut FakeSolid, t: [f64; 3]) {
         }
         if let Some(h) = &mut f.surface {
             *h = sampled::move_hint(h, &Transform::translation(t));
+        }
+        if let Some(e) = &mut f.exact {
+            *e = Arc::new(e.transformed(&Transform::translation(t)));
         }
         for r in &mut f.rects {
             for a in 0..3 {

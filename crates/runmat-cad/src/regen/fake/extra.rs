@@ -1455,6 +1455,10 @@ fn scale_solid(s: &mut FakeSolid, c: [f64; 3], k: [f64; 3]) {
                 _ => SurfaceKind::Other,
             };
         }
+        // A scaled chart is not rigid; the face draws on its facets.
+        if (0..3).any(|a| (k[a] - 1.0).abs() > 1e-12) {
+            f.exact = None;
+        }
         for r in &mut f.rects {
             for a in 0..3 {
                 r.lo[a] = m(a, r.lo[a]);

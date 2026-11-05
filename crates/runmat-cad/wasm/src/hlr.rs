@@ -35,7 +35,11 @@ pub fn axes(orientation: &str) -> Axes {
         "right" => a([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]),
         "left" => a([0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]),
         "isometric" => a(
-            [std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2, 0.0],
+            [
+                std::f64::consts::FRAC_1_SQRT_2,
+                std::f64::consts::FRAC_1_SQRT_2,
+                0.0,
+            ],
             [-0.4082, 0.4082, 0.8165],
             [0.5774, -0.5774, 0.5774],
         ),
@@ -391,7 +395,7 @@ pub fn view_lines(display: &Value, axes: &Axes) -> ViewLines {
     let sil = silhouettes(&model, axes.depth);
     edges.extend(sil.iter());
     // A segment seen end-on draws as a point; leave it out.
-    let mut seen: BTreeMap<[i64; 4], ()> = BTreeMap::new();
+    let mut seen: BTreeMap<[i64; 4], bool> = BTreeMap::new();
     for edge in edges {
         for w in edge.points.windows(2) {
             let (a, b) = (w[0], w[1]);
@@ -428,11 +432,16 @@ pub fn view_lines(display: &Value, axes: &Axes) -> ViewLines {
                 }
             }
             if let Some((state, pts)) = run.take() {
-                // One projected segment drawn twice (a through-cut's top and bottom edges) draws
-                // once; a hidden copy of a visible one adds nothing.
-                if seen.insert(k, ()).is_some() && (state || steps == 1) {
-                    continue;
+                // One projected segment drawn twice (a through-cut's top and bottom edges, a
+                // hole's two rims) draws once: a copy adds nothing unless it is the first
+                // visible one (a hidden line under it is dropped by `merge_overlaps`).
+                let visible = !state;
+                match seen.get(&k) {
+                    Some(true) => continue,
+                    Some(false) if !visible => continue,
+                    _ => {}
                 }
+                seen.insert(k, visible);
                 push(&mut out, state, pts);
             }
         }
