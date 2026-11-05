@@ -109,7 +109,8 @@ pub(crate) async fn execute_with_capacity(
     let field_definitions = structural_static_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if let Some(capacity) = capacity {
-        let work = runmat_analysis_fea::results::observation::structural_observation_derivation_work_upper_bound(mesh.as_ref())?;
+        let work =
+            runmat_analysis_fea::structural_linear_preparation_work_upper_bound(mesh.as_ref())?;
         capacity.ensure_capacity(work).await.map_err(|cause| {
             AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(cause))
         })?;

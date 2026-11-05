@@ -356,15 +356,18 @@ impl StructuralSequenceCoordinator {
     pub fn next_solve_wave_work_upper_bound(
         &self,
     ) -> AnalysisBridgeResult<runmat_simulation_usage::OperationCount> {
-        use runmat_analysis_fea::results::observation::{
-            structural_observation_derivation_work_upper_bound, ObservationError,
-        };
         let count = u64::try_from(self.next_solve_level()?.len()).map_err(|_| {
-            ObservationError::Accounting(runmat_simulation_usage::LedgerError::CountOverflow)
+            AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(
+                runmat_simulation_usage::LedgerError::CountOverflow,
+            ))
         })?;
-        structural_observation_derivation_work_upper_bound(self.preparation.mesh.as_ref())?
-            .checked_mul(count)
-            .map_err(|cause| AnalysisBridgeError::from(ObservationError::Accounting(cause.into())))
+        runmat_analysis_fea::structural_linear_preparation_work_upper_bound(
+            self.preparation.mesh.as_ref(),
+        )?
+        .checked_mul(count)
+        .map_err(|cause| {
+            AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(cause.into()))
+        })
     }
 
     pub fn prepare_next_solve_wave(&mut self) -> AnalysisBridgeResult<PreparedStructuralSolveWave> {

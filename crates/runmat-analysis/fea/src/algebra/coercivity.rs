@@ -20,10 +20,12 @@ mod symbolic;
 
 pub(crate) use symbolic::CoercivityWorkEnvelope;
 
-/// Capacity is acquired before this exact symbolic phase runs. The direct solver's
-/// own reservation remains the only completed-work owner.
+/// Capacity is acquired before the named numerical phase runs. The numerical
+/// kernel reserves and completes its work; the capacity callback records none.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NumericalCapacityPhase {
+    StaticPreassembly,
+    StaticStorageVerification,
     SolidAssemblyBlock { elements: std::ops::Range<usize> },
     Tet4AssemblyElement { element: usize },
     Tet10AssemblyElement { element: usize },

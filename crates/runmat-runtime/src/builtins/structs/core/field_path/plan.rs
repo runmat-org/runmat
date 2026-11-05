@@ -166,14 +166,15 @@ fn numeric_linear_output_shape<'a>(
     selector_shape: &'a [usize],
     selected_len: usize,
 ) -> SelectionShape<'a> {
-    if is_non_scalar_vector(target_shape) && is_vector(selector_shape) {
-        return resize_vector(target_shape, selected_len);
+    if !is_vector(selector_shape) {
+        return SelectionShape::Borrowed(selector_shape);
     }
-    if is_vector(selector_shape) {
-        resize_vector(selector_shape, selected_len)
+    let orientation = if is_vector(target_shape) && target_shape.iter().any(|extent| *extent != 1) {
+        target_shape
     } else {
-        SelectionShape::Borrowed(selector_shape)
-    }
+        selector_shape
+    };
+    resize_vector(orientation, selected_len)
 }
 fn resize_vector(shape: &[usize], selected_len: usize) -> SelectionShape<'static> {
     SelectionShape::Vector(if shape.first().copied().unwrap_or(1) == 1 {
@@ -181,9 +182,6 @@ fn resize_vector(shape: &[usize], selected_len: usize) -> SelectionShape<'static
     } else {
         [selected_len, 1]
     })
-}
-fn is_non_scalar_vector(shape: &[usize]) -> bool {
-    is_vector(shape) && shape.iter().any(|extent| *extent != 1)
 }
 fn is_vector(shape: &[usize]) -> bool {
     let rows = shape.first().copied().unwrap_or(1);

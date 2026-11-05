@@ -8,6 +8,8 @@ pub enum ResourcePlanningError {
     CanonicalWireCapacity { required: u64, maximum: u64 },
     #[error("invalid FEA resource fact: {0}")]
     Invalid(String),
+    #[error("FEA resource numerical accounting failed: {0}")]
+    Accounting(#[from] runmat_simulation_usage::LedgerError),
     #[error("FEA resource arithmetic overflow: {0}")]
     Overflow(&'static str),
     #[error(
@@ -69,6 +71,14 @@ impl ResourcePlanningError {
     pub(crate) fn from_preparation_error(error: crate::FeaRunError) -> Self {
         match error {
             crate::FeaRunError::Resource(error) => error,
+            crate::FeaRunError::Usage(cause) => Self::Accounting(cause),
+            other => Self::Invalid(other.to_string()),
+        }
+    }
+
+    pub(crate) fn from_projection_error(error: crate::topology::AnalysisProjectionError) -> Self {
+        match error {
+            crate::topology::AnalysisProjectionError::Accounting(cause) => Self::Accounting(cause),
             other => Self::Invalid(other.to_string()),
         }
     }

@@ -15,7 +15,9 @@ pub struct Replies {
     reader_ready: std::sync::atomic::AtomicBool,
 }
 impl Replies {
-    pub(crate) fn activate_reader(&self) {
+    /// Mark the bounded private reply observer ready after its reader starts.
+    /// Bootstrap cleanup before this point must not wait for a reply.
+    pub fn activate_reader(&self) {
         self.reader_ready
             .store(true, std::sync::atomic::Ordering::Release);
     }

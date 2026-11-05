@@ -196,13 +196,14 @@ pub fn execute_meshing(
 
     // Native standalone meshing reserves this worker budget. Under a study (or a browser
     // host's scope), the provider must honor the already admitted parent allocation.
-    let allocation = FeaRunScope::current_allocation().unwrap_or_else(|| {
-        std::thread::available_parallelism()
-            .map(usize::from)
-            .unwrap_or(1)
-            .min(runmat_cpu_execution::MAX_THREADS) as u64
-            * 1000
-    });
+    let allocation = crate::analysis::fea_run_admission::current_fea_cpu_capacity_millicores()
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+                .min(runmat_cpu_execution::MAX_THREADS) as u64
+                * 1000
+        });
     let mut admission = FeaRunRequest::local(
         FeaRunKind::Meshing,
         allocation,

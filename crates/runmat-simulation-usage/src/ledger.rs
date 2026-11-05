@@ -142,12 +142,37 @@ impl UsageLedger {
         self.with_renewal(|| self.try_reserve_capacity(additional, false))
     }
 
+    /// Acquire cumulative grant for a phase in addition to completed and
+    /// currently reserved work, without reserving or completing that phase.
+    /// Primitive batches still own admission and completed-work accounting;
+    /// concurrent work can consume capacity before those batches reserve it.
+    pub fn ensure_capacity(&self, maximum: OperationCount) -> Result<(), LedgerError> {
+        self.with_renewal(|| {
+            let state = self.lock()?;
+            Self::checked_capacity(&state, maximum).map(|_| ())
+        })
+    }
+
     fn try_reserve_capacity(
         &self,
         maximum: OperationCount,
         new_owner: bool,
     ) -> Result<(), LedgerError> {
         let mut state = self.lock()?;
+        let reserved = Self::checked_capacity(&state, maximum)?;
+        let active = state
+            .active
+            .checked_add(usize::from(new_owner))
+            .ok_or(LedgerError::CountOverflow)?;
+        state.reserved = reserved;
+        state.active = active;
+        Ok(())
+    }
+
+    fn checked_capacity(
+        state: &State,
+        maximum: OperationCount,
+    ) -> Result<OperationCount, LedgerError> {
         if state.closed {
             return Err(LedgerError::Closed);
         }
@@ -165,13 +190,7 @@ impl UsageLedger {
                 granted: state.grant,
             });
         }
-        let active = state
-            .active
-            .checked_add(usize::from(new_owner))
-            .ok_or(LedgerError::CountOverflow)?;
-        state.reserved = reserved;
-        state.active = active;
-        Ok(())
+        Ok(reserved)
     }
 
     pub fn snapshot(&self) -> Result<LedgerSnapshot, LedgerError> {

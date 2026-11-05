@@ -70,7 +70,11 @@ pub(super) fn map_fea_run_error(
             model_details(),
         ),
         FeaRunError::Resource(error) => {
-            let error_type = match &error {
+            let error_type = match error {
+                ResourcePlanningError::Accounting(cause) => {
+                    return super::fea_run_admission::FeaRunDenied::Accounting(cause)
+                        .into_operation_error(operation.name(), operation.version(), context);
+                }
                 ResourcePlanningError::CanonicalCollectionCapacity { .. }
                 | ResourcePlanningError::CanonicalWireCapacity { .. }
                 | ResourcePlanningError::AccuracyCeiling { .. }

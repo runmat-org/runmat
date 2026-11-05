@@ -50,6 +50,12 @@ impl AnalysisProjection {
                 }
             })?;
         check_cancelled()?;
+        if let Some(usage) = runmat_simulation_usage::UsageContext::capture() {
+            usage
+                .ledger()
+                .ensure_capacity(Self::derivation_work_upper_bound(mesh)?)?;
+            check_cancelled()?;
+        }
         let mut nodes = reserve(mesh.topology.nodes.len())?;
         for node in &mesh.topology.nodes {
             check_cancelled()?;

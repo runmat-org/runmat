@@ -5,7 +5,10 @@ use crate::context::RuntimeContext;
 use crate::execution::RootedValue;
 use crate::{BuiltinResult, RuntimeError};
 use runmat_builtins::BuiltinPreparationOperation;
-use runmat_types::{NumericClass, OperatorKind, RealFloatingRecipe};
+use runmat_types::{NumericClass, OperatorKind};
+
+mod output;
+use output::generate;
 use runmat_value::{NumericDType, Value};
 
 pub(in crate::builtins::math::elementwise::binary_arithmetic) fn require_unbounded_host_output(
@@ -215,46 +218,4 @@ pub(crate) fn execute_value(
         return Err(invalid());
     };
     Ok(crate::builtins::common::tensor::tensor_into_value(tensor))
-}
-
-fn generate(
-    runtime: &RuntimeContext,
-    mut output: PreparedHostNumericalOutput,
-    operator: OperatorKind,
-    left_class: NumericClass,
-    right_class: NumericClass,
-    left: impl Fn(usize) -> Option<f64>,
-    right: impl Fn(usize) -> Option<f64>,
-) -> BuiltinResult<Value> {
-    let recipe =
-        RealFloatingRecipe::for_classes(operator, left_class, right_class).ok_or_else(invalid)?;
-    let expected = match recipe.result_class() {
-        NumericClass::Single => NumericDType::F32,
-        NumericClass::Double => NumericDType::F64,
-        _ => return Err(invalid()),
-    };
-    if output.dtype() != expected {
-        return Err(invalid());
-    }
-    let mut plan = output.take_broadcast_plan().ok_or_else(invalid)?;
-    if plan.output_shape() != output.shape() {
-        return Err(invalid());
-    }
-    let mut indices = plan.iter();
-    let mut next = |index| {
-        let (actual, a, b) = indices.next().ok_or_else(invalid)?;
-        if actual != index {
-            return Err(invalid());
-        }
-        recipe
-            .evaluate(left(a).ok_or_else(invalid)?, right(b).ok_or_else(invalid)?)
-            .ok_or_else(invalid)
-    };
-    match expected {
-        NumericDType::F32 => {
-            output.generate_real_f32(runtime, |index| next(index).map(|value| value as f32))
-        }
-        NumericDType::F64 => output.generate_real_f64(runtime, next),
-        _ => Err(invalid()),
-    }
 }

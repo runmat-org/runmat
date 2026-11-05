@@ -26,6 +26,16 @@ pub(super) fn execute(
     request: NativeSiteRequest,
     exit: &mut NativeExit,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
+    if request.function != state.function.portable_id.0 {
+        return Err(NativeExecutorError::Host(
+            "native site function identity mismatch".into(),
+        ));
+    }
+    // A resumed generated block re-enters from its first site. Skip verified
+    // prefix sites before matching the completed site's retirement payload.
+    if state.skip_before_resume(request)? {
+        return Ok(NativeSiteOutcome::continue_execution());
+    }
     // A completed retirement resumes the already-executed site's exact POD
     // control-flow decision. Never replay its mutation or edge binding.
     if let Some(outcome) = super::call_suspension::take_completed_retirement(state, request)? {
@@ -175,14 +185,6 @@ fn execute_inner(
     request: NativeSiteRequest,
     exit: &mut NativeExit,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
-    if request.function != state.function.portable_id.0 {
-        return Err(NativeExecutorError::Host(
-            "native site function identity mismatch".into(),
-        ));
-    }
-    if state.skip_before_resume(request)? {
-        return Ok(NativeSiteOutcome::continue_execution());
-    }
     if let Some(cancelled) = super::control::poll(&state.runtime.cancellation()) {
         *exit = cancelled;
         return Ok(NativeSiteOutcome::exit());

@@ -13,6 +13,8 @@ mod argument_stage_tests;
 mod arguments;
 #[cfg(test)]
 mod catch_scope_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod retirement_prefix_tests;
 pub(super) mod numeric_region;
 pub(super) mod payload;
 mod prepared;

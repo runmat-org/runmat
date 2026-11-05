@@ -62,6 +62,12 @@ impl AnalysisBridgeError {
                 runmat_analysis_fea::results::observation::ObservationError::Accounting(cause),
             ) => Some(cause),
             Self::FeaRun(FeaRunError::Usage(cause))
+            | Self::FeaRun(FeaRunError::Resource(
+                runmat_analysis_fea::planning::resource::ResourcePlanningError::Accounting(cause),
+            ))
+            | Self::Resource(
+                runmat_analysis_fea::planning::resource::ResourcePlanningError::Accounting(cause),
+            )
             | Self::Analysis(runmat_analysis_fea::execution::AnalysisExecutionError::Usage(
                 cause,
             ))

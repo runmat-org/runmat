@@ -128,6 +128,61 @@ mod tests {
         ));
     }
     #[test]
+    fn phase_grant_coalesces_renewal_without_reserving_or_charging_primitive_work() {
+        for partial in [false, true] {
+            let (ledger, host) = fixture(partial);
+            let before = ledger.snapshot().unwrap();
+            let admission = ledger.ensure_capacity(count(30));
+            assert_eq!(host.calls.load(Ordering::SeqCst), 1);
+            if partial {
+                assert_eq!(
+                    admission,
+                    Err(LedgerError::MoreGrantRequired {
+                        required: count(30),
+                        granted: count(2),
+                    })
+                );
+                assert_eq!(ledger.snapshot().unwrap(), before);
+            } else {
+                admission.unwrap();
+                let admitted = ledger.snapshot().unwrap();
+                assert_eq!(admitted.budget, before.budget);
+                assert_eq!(admitted.granted, count(30));
+                assert_eq!(admitted.completed, before.completed);
+                assert_eq!(admitted.reserved, before.reserved);
+                for amount in [4, 6, 8] {
+                    let mut batch = ledger
+                        .reserve(UsageCategory::Assembly, count(amount))
+                        .unwrap();
+                    batch.complete(count(amount)).unwrap();
+                }
+                assert_eq!(host.calls.load(Ordering::SeqCst), 1);
+                assert_eq!(ledger.snapshot().unwrap().completed.assembly, count(18));
+                assert_eq!(ledger.snapshot().unwrap().reserved, count(0));
+            }
+            let stable = ledger.snapshot().unwrap();
+            let required = stable
+                .completed
+                .total()
+                .unwrap()
+                .checked_add(count(51))
+                .unwrap();
+            assert_eq!(
+                ledger.ensure_capacity(count(51)),
+                Err(LedgerError::BudgetExceeded {
+                    required,
+                    budget: count(50),
+                })
+            );
+            assert_eq!(host.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(ledger.snapshot().unwrap(), stable);
+            let completed = ledger.finish().unwrap();
+            assert_eq!(completed.assembly, count(if partial { 0 } else { 18 }));
+            assert_eq!(ledger.ensure_capacity(count(0)), Err(LedgerError::Closed));
+        }
+    }
+
+    #[test]
     fn partial_or_lost_host_does_not_admit_work_or_retry_unchanged_grants() {
         let (ledger, host) = fixture(true);
         let before = ledger.snapshot().unwrap();

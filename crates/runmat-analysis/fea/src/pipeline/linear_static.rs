@@ -64,6 +64,14 @@ pub use thermal_state::{
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 
+/// Shared quote for the two metered topology derivations in static preassembly:
+/// observation resolution and structural resource planning.
+pub fn structural_linear_preparation_work_upper_bound(
+    mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
+) -> Result<runmat_simulation_usage::OperationCount, FeaRunError> {
+    preflight::structural_linear_preparation_work_upper_bound(mesh)
+}
+
 impl From<LinearAssemblyError> for FeaRunError {
     fn from(error: LinearAssemblyError) -> Self {
         match error {
@@ -261,6 +269,16 @@ where
             crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference;
     }
     let phase_clock = crate::progress::phase_timer("structural_static.preflight");
+    if awaited_solid {
+        let work = structural_linear_preparation_work_upper_bound(options.solver_mesh.as_ref())?;
+        if work > runmat_simulation_usage::OperationCount::ZERO {
+            before_block(
+                crate::algebra::NumericalCapacityPhase::StaticPreassembly,
+                work,
+            )
+            .await?;
+        }
+    }
     let preassembly = preflight::prepare_static_preassembly(
         model,
         execution_step,
@@ -374,6 +392,16 @@ where
     // Element recovery now owns the temperatures it needs. Release the aligned global
     // field before solving; only the canonical transition must survive into the result.
     let thermal_transition = thermal_transfer.map(|transfer| transfer.transition);
+    if awaited_solid && assembly_constraint_plan.is_some() {
+        let work = preflight::resource_projection_work_upper_bound(options.solver_mesh.as_ref())?;
+        if work > runmat_simulation_usage::OperationCount::ZERO {
+            before_block(
+                crate::algebra::NumericalCapacityPhase::StaticStorageVerification,
+                work,
+            )
+            .await?;
+        }
+    }
     let planned_reduced_support = preflight::verify_executed_preassembly(
         model,
         &options,
