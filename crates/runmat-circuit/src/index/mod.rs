@@ -499,10 +499,15 @@ mod tests {
     }
 }
 
-/// An ERC item's schematic region: `R1.2` (pin) is its component, a net name its net.
+/// An ERC item's schematic region: a pin (`U1.VCCINT (F7)`, `R1.2`) is that pin, as the
+/// schematic scene names it (`pin:U1.VCCINT`), so selecting a finding lights the pin and not
+/// every unit of a large part; a net name is its net.
 fn erc_region(item: &str) -> String {
+    let item = item.split(" (").next().unwrap_or(item);
     match item.split_once('.') {
-        Some((component, _)) if !component.is_empty() => format!("component:{component}"),
+        Some((component, pin)) if !component.is_empty() && !pin.is_empty() => {
+            format!("pin:{component}.{pin}")
+        }
         _ => format!("net:{item}"),
     }
 }
