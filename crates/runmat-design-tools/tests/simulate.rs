@@ -5,6 +5,17 @@ use serde_json::json;
 
 const DAQ: &str = include_str!("../../runmat-circuit/tests/projects/daq/daq.circuit");
 
+/// The daq showcase without its own `simulation` sections, so a test adds the section it checks.
+fn bare(base: &str) -> String {
+    let mut s = base.to_string();
+    while let Some(i) = s.find("\n    simulation ") {
+        let close = "\n    }\n";
+        let j = i + 1 + s[i + 1..].find(close).expect("a closed section") + close.len();
+        s.replace_range(i + 1..j, "");
+    }
+    s
+}
+
 const SECTION: &str = r#"
     simulation front_end {
         sheet = channel
@@ -25,8 +36,9 @@ const SECTION: &str = r#"
 "#;
 
 fn files() -> Files {
-    let end = DAQ.rfind('}').unwrap();
-    [("/p/daq.circuit".to_owned(), format!("{}{SECTION}{}", &DAQ[..end], &DAQ[end..]))].into()
+    let daq = bare(DAQ);
+    let end = daq.rfind('}').unwrap();
+    [("/p/daq.circuit".to_owned(), format!("{}{SECTION}{}", &daq[..end], &daq[end..]))].into()
 }
 
 #[test]
@@ -60,7 +72,7 @@ fn simulate_returns_waveforms_measures_and_operations() {
 
 #[test]
 fn a_circuit_without_a_section_says_how_to_add_one() {
-    let files: Files = [("/p/daq.circuit".to_owned(), DAQ.to_owned())].into();
+    let files: Files = [("/p/daq.circuit".to_owned(), bare(DAQ))].into();
     let e = call("design.simulate", json!({ "path": "/p/daq.circuit" }), &files).unwrap_err();
     assert_eq!(e.code, "no_simulation");
 }

@@ -27,8 +27,19 @@ pub const SECTION: &str = r#"
     }
 "#;
 
+/// The daq showcase without its own `simulation` sections, so a test adds the section it checks.
+fn bare(base: &str) -> String {
+    let mut s = base.to_string();
+    while let Some(i) = s.find("\n    simulation ") {
+        let close = "\n    }\n";
+        let j = i + 1 + s[i + 1..].find(close).expect("a closed section") + close.len();
+        s.replace_range(i + 1..j, "");
+    }
+    s
+}
+
 pub fn daq_with_section() -> String {
-    let base = include_str!("../../runmat-circuit/tests/projects/daq/daq.circuit");
+    let base = bare(include_str!("../../runmat-circuit/tests/projects/daq/daq.circuit"));
     let end = base.rfind('}').unwrap();
     format!("{}{SECTION}{}", &base[..end], &base[end..])
 }
@@ -187,4 +198,28 @@ fn a_pin_probe_reads_the_current_into_the_pin() {
     let step = json["analyses"].as_array().unwrap().iter().find(|a| a["name"] == "step").unwrap();
     assert_eq!(step["signals"][2]["probe"], "RS.1");
     assert_eq!(step["signals"][2]["quantity"], "current");
+}
+
+#[test]
+fn a_pin_probe_matches_the_pin_by_name_or_pad_number() {
+    // The op-amp's output is pin OUT, pad 1 on its SOT-23-5. Both name the same sense source,
+    // and KCL holds at AMP: the current out of U.OUT enters RF.2 and RO.1.
+    let text = daq_with_section().replace("probe = [net.IN, net.INF, net.AMP, net.AIN]", "probe = [\"U.OUT\", \"U.1\", \"RF.2\", \"RO.1\", \"U.IN+\"]");
+    let design = parse_circuit("/p/daq.circuit", &text).design.unwrap();
+    let s = study::run(&design, &standard_pool(), "front_end", &|_| None, None).unwrap();
+    assert!(!s.warnings.iter().any(|w| w.starts_with("probe ")), "{:?}", s.warnings);
+    let labels: Vec<String> = s.probes.iter().map(|(p, _)| p.label()).collect();
+    assert_eq!(labels, ["I(U.OUT)", "I(U.1)", "I(RF.2)", "I(RO.1)", "I(U.IN+)"]);
+    assert_eq!(s.probes[0].1, s.probes[1].1, "name and pad number share one sense source");
+    let tran = s.results["step"].real().unwrap();
+    let (out, rf, ro, inp) = (tran.get(&s.probes[0].1).unwrap(), tran.get(&s.probes[2].1).unwrap(), tran.get(&s.probes[3].1).unwrap(), tran.get(&s.probes[4].1).unwrap());
+    let mut peak = 0f64;
+    for k in 0..tran.x.len() {
+        let sum = out[k] + rf[k] + ro[k];
+        assert!(sum.abs() < 1e-9 + 1e-6 * out[k].abs(), "t = {}: KCL at AMP {sum}", tran.x[k]);
+        peak = peak.max(out[k].abs());
+        // The macromodel's input draws only its bias current.
+        assert!(inp[k].abs() < 1e-6, "I(U.IN+) = {}", inp[k]);
+    }
+    assert!(peak > 1e-5, "the output drives RF and RO: peak {peak}");
 }

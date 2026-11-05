@@ -17,6 +17,17 @@ use runmat_plot::styling::{PlotThemeConfig, ThemeVariant};
 const DAQ: &str = include_str!("../../runmat-circuit/tests/projects/daq/daq.circuit");
 const SECTION: &str = include_str!("../tests/fixtures/daq_front_end.simulation");
 
+/// The daq showcase without its own `simulation` sections, so a test adds the section it checks.
+fn bare(base: &str) -> String {
+    let mut s = base.to_string();
+    while let Some(i) = s.find("\n    simulation ") {
+        let close = "\n    }\n";
+        let j = i + 1 + s[i + 1..].find(close).expect("a closed section") + close.len();
+        s.replace_range(i + 1..j, "");
+    }
+    s
+}
+
 const W: u32 = 2400;
 const H: u32 = 1400;
 
@@ -50,8 +61,9 @@ fn save(fig: &mut Figure, dark: bool, path: &str) {
 
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| ".".into());
-    let end = DAQ.rfind('}').unwrap();
-    let text = format!("{}{SECTION}{}", &DAQ[..end], &DAQ[end..]);
+    let daq = bare(DAQ);
+    let end = daq.rfind('}').unwrap();
+    let text = format!("{}{SECTION}{}", &daq[..end], &daq[end..]);
     let parsed = parse_circuit("/p/daq.circuit", &text);
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
     let design = parsed.design.unwrap();

@@ -7,7 +7,10 @@
 //! analysis runs once; a `monte_carlo` analysis reruns the analysis it names with each
 //! component's own tolerance band (`value = 1 kohm ± 1 %` on the component or its part), where a
 //! section `tolerance` statement that matches the element replaces it. Measurements read their
-//! analysis, or every Monte Carlo run of it.
+//! analysis, or every Monte Carlo run of it. A `noise` analysis solves the output noise density
+//! and the input-referred density; a `temperature` analysis rebuilds the circuit at each
+//! temperature and reruns the analysis it names, and its measurements hold one value per
+//! temperature. A measurement reads a net's voltage or the current into a pin.
 //!
 //! With an operation limit (the host's granted operations), each analysis gets what is left;
 //! one that reaches it keeps the points it solved, and the analyses after it don't run.
@@ -18,6 +21,7 @@ use runmat_circuit::ir::Design;
 use runmat_circuit::library::{Pool, SpiceModel};
 use runmat_circuit::simulation::{MeasureKind, SimAnalysis, SimMeasure, SimModel, SimProbe, SimWave, SimulationDef, SourceKind};
 use runmat_circuit_sim as sim;
+use sim::analysis::noise::{NoiseSpec, NoiseWave};
 use sim::measure::{evaluate, Measure};
 use sim::montecarlo::{glob, Distribution, McOutcome, MonteCarlo, Stats, Target, Tolerance};
 use std::collections::BTreeMap;
@@ -30,7 +34,17 @@ pub struct MeasureValue {
     /// Per-run values and their statistics, for a measurement of a Monte Carlo analysis.
     pub runs: Vec<f64>,
     pub stats: Option<Stats>,
+    /// A temperature sweep's temperatures (°C); `runs` then holds the value at each.
+    pub temperatures: Vec<f64>,
     pub error: Option<String>,
+}
+
+/// One temperature of a temperature sweep: the rerun analysis's result (or its noise).
+#[derive(Clone, Debug)]
+pub struct TempPoint {
+    pub temp_c: f64,
+    pub result: Option<sim::SimResult>,
+    pub noise: Option<NoiseWave>,
 }
 
 #[derive(Clone, Debug)]
@@ -40,6 +54,10 @@ pub struct Study {
     /// Results by analysis name (Monte Carlo analyses keep their first run here).
     pub results: BTreeMap<String, sim::SimResult>,
     pub monte_carlo: BTreeMap<String, McOutcome>,
+    /// Noise analyses by name.
+    pub noise: BTreeMap<String, NoiseWave>,
+    /// Temperature sweeps by name, one point per temperature in the section's order.
+    pub temperatures: BTreeMap<String, Vec<TempPoint>>,
     pub measures: BTreeMap<String, MeasureValue>,
     /// Each probe and its signal in the results: `v(<node>)` for a net, `i(<sense source>)`
     /// (the current into the pin) for a pin.
@@ -120,13 +138,23 @@ fn deck_text(deck: &Deck, sim_def: &SimulationDef) -> String {
     lines.join("\n") + "\n"
 }
 
-fn measure(m: &SimMeasure, node: &str) -> Measure {
-    let v = format!("v({node})");
+/// The result signal a probe reads: `v(<node>)` for a net, `i(<sense source>)` for a pin.
+pub fn signal_of(deck: &Deck, p: &SimProbe) -> Option<String> {
+    match p {
+        SimProbe::Net(n) => Some(format!("v({})", deck.node(n).to_ascii_lowercase())),
+        SimProbe::Pin { component, pin } => deck.senses.iter().find(|s| s.designator == *component && s.matches(pin)).map(|s| format!("i({})", s.source.to_ascii_lowercase())),
+    }
+}
+
+/// `m` on `signal` (`v(n)` or `i(vs)`); dB and phase read `vdb(n)` / `idb(vs)` and so on.
+fn measure(m: &SimMeasure, signal: &str) -> Measure {
+    let v = signal.to_string();
+    let (letter, inner) = signal.split_at(1);
     let a = |k: &str| m.args.get(k).copied();
     match m.kind {
         MeasureKind::At => Measure::At { signal: v, x: a("at").unwrap_or(0.0) },
-        MeasureKind::GainAt => Measure::At { signal: format!("vdb({node})"), x: a("at").unwrap_or(0.0) },
-        MeasureKind::PhaseAt => Measure::At { signal: format!("vp({node})"), x: a("at").unwrap_or(0.0) },
+        MeasureKind::GainAt => Measure::At { signal: format!("{letter}db{inner}"), x: a("at").unwrap_or(0.0) },
+        MeasureKind::PhaseAt => Measure::At { signal: format!("{letter}p{inner}"), x: a("at").unwrap_or(0.0) },
         MeasureKind::Max => Measure::Max { signal: v, from: a("from"), to: a("to") },
         MeasureKind::Min => Measure::Min { signal: v, from: a("from"), to: a("to") },
         MeasureKind::PeakToPeak => Measure::PeakToPeak { signal: v, from: a("from"), to: a("to") },
@@ -141,7 +169,43 @@ fn measure(m: &SimMeasure, node: &str) -> Measure {
         MeasureKind::Q => Measure::Q { signal: v },
         MeasureKind::UnityGain => Measure::UnityGain { signal: v },
         MeasureKind::PhaseMargin => Measure::PhaseMargin { signal: v },
+        // Read from the noise wave by [`noise_measure`].
+        MeasureKind::OutputNoise | MeasureKind::InputNoise | MeasureKind::NoiseDensity => Measure::Final { signal: v },
     }
+}
+
+/// A noise measurement: the output or input-referred noise integrated over the analysis band
+/// (or `from`–`to`), or the output density at `at`.
+fn noise_measure(m: &SimMeasure, w: &NoiseWave) -> Result<f64, String> {
+    let (lo, hi) = (m.args.get("from").copied().unwrap_or(f64::NEG_INFINITY), m.args.get("to").copied().unwrap_or(f64::INFINITY));
+    let band = |d: &[f64]| -> Result<f64, String> {
+        let pts: Vec<(f64, f64)> = w.freq.iter().zip(d).filter(|(f, _)| **f >= lo && **f <= hi).map(|(f, v)| (*f, *v)).collect();
+        if pts.len() < 2 {
+            return Err("the band holds fewer than two noise frequencies".into());
+        }
+        Ok(pts.windows(2).map(|p| 0.5 * (p[0].1 * p[0].1 + p[1].1 * p[1].1) * (p[1].0 - p[0].0)).sum::<f64>().sqrt())
+    };
+    match m.kind {
+        MeasureKind::OutputNoise => band(&w.onoise),
+        MeasureKind::InputNoise => band(&w.inoise),
+        MeasureKind::NoiseDensity => {
+            let at = m.args.get("at").copied().ok_or("a noise density needs `at = <frequency>`")?;
+            sim::results::interp(&w.freq, &w.onoise, at).ok_or_else(|| "the noise analysis solved no frequencies".into())
+        }
+        k => Err(format!("`{}` reads a waveform; a noise analysis gives output_noise, input_noise and noise_density", k.word())),
+    }
+}
+
+/// `m` on one result: a noise wave for noise measurements, else the result's signal.
+fn evaluate_one(m: &SimMeasure, signal: Option<&str>, result: Option<&sim::SimResult>, noise: Option<&NoiseWave>) -> Result<f64, String> {
+    if m.kind.is_noise() {
+        return noise.ok_or_else(|| format!("`{}` reads a noise analysis; `{}` is not one", m.kind.word(), m.of)).and_then(|w| noise_measure(m, w));
+    }
+    if noise.is_some() {
+        return Err(format!("a noise analysis gives output_noise, input_noise and noise_density, not `{}`", m.kind.word()));
+    }
+    let signal = signal.ok_or_else(|| format!("{} is not on a simulated part", m.probe.label()))?;
+    evaluate(&measure(m, signal), result.ok_or_else(|| format!("analysis `{}` did not run", m.of))?)
 }
 
 fn analysis(a: &SimAnalysis, sources: &SimulationDef) -> Result<sim::Analysis, String> {
@@ -154,8 +218,21 @@ fn analysis(a: &SimAnalysis, sources: &SimulationDef) -> Result<sim::Analysis, S
         }
         SimAnalysis::Ac { from, to, points } => sim::Analysis::Ac { sweep: sim::AcSweep::Dec, points: *points as usize, fstart: *from, fstop: *to },
         SimAnalysis::Tran { stop, step, max_step } => sim::Analysis::Tran(sim::TranSpec { tstep: *step, tstop: *stop, tstart: 0.0, tmax: *max_step, uic: false }),
-        SimAnalysis::MonteCarlo { .. } => return Err("a Monte Carlo analysis names another analysis".into()),
+        SimAnalysis::MonteCarlo { .. } | SimAnalysis::Temperature { .. } => return Err("a Monte Carlo or temperature analysis reruns another analysis; it does not rerun one that reruns".into()),
+        SimAnalysis::Noise { .. } => return Err("a noise analysis is not one a Monte Carlo reruns".into()),
     })
+}
+
+/// The engine's noise request for `a` on `deck`: nodes by net, the input as its source element.
+fn noise_spec(a: &SimAnalysis, def: &SimulationDef, deck: &Deck) -> Result<NoiseSpec, String> {
+    let SimAnalysis::Noise { output, reference, input, from, to, points } = a else { unreachable!() };
+    let s = def.sources.get(input).ok_or_else(|| format!("the noise analysis refers to `{input}`, which is not a source of this simulation"))?;
+    if s.kind != SourceKind::Voltage {
+        return Err(format!("the noise analysis refers to `{input}`, a current source; name a voltage source"));
+    }
+    let node = |n: &str| deck.node(n).to_ascii_lowercase();
+    let freqs = sim::analysis::ac::frequencies(sim::AcSweep::Dec, *points as usize, *from, *to).map_err(|e| e.to_string())?;
+    Ok(NoiseSpec { output: (node(output), reference.as_deref().map(node).unwrap_or_else(|| "0".into())), input: format!("v{}", input.to_ascii_lowercase()), freqs })
 }
 
 /// Runs simulation `name` of `design` with no operation limit. `resolve` reads model libraries;
@@ -186,7 +263,12 @@ impl Runner {
     let mut warnings: Vec<String> = nl.diagnostics.iter().map(|x| format!("{}: {}", x.code, x.message)).collect();
     let mut opts = EmitOptions { title: format!("{} / {name}", design.name), sense: SensePins::None, skip_unmodelled: true, ..Default::default() };
     // Only probed pins get a sense source, so an unprobed design solves the matrix it always did.
-    let pins: Vec<(String, String)> = def.probes.iter().filter_map(|p| if let SimProbe::Pin { component, pin } = p { Some((component.clone(), pin.clone())) } else { None }).collect();
+    let pins: Vec<(String, String)> = def
+        .probes
+        .iter()
+        .chain(def.measures.values().map(|m| &m.probe))
+        .filter_map(|p| if let SimProbe::Pin { component, pin } = p { Some((component.clone(), pin.clone())) } else { None })
+        .collect();
     if !pins.is_empty() {
         opts.sense = SensePins::Only(pins);
     }
@@ -228,6 +310,8 @@ impl Runner {
         deck,
         results: BTreeMap::new(),
         monte_carlo: BTreeMap::new(),
+        noise: BTreeMap::new(),
+        temperatures: BTreeMap::new(),
         measures: BTreeMap::new(),
         probes: vec![],
         tolerances: applied,
@@ -237,23 +321,21 @@ impl Runner {
     };
     let mut probes = vec![];
     for p in &def.probes {
-        let signal = match p {
-            SimProbe::Net(n) => format!("v({})", study.deck.node(n).to_ascii_lowercase()),
-            SimProbe::Pin { component, pin } => match study.deck.senses.iter().find(|s| s.designator == *component && s.pin.eq_ignore_ascii_case(pin)) {
-                Some(s) => format!("i({})", s.source.to_ascii_lowercase()),
-                None => {
-                    study.warnings.push(format!("probe {}: no such pin on a simulated part", p.label()));
-                    continue;
-                }
-            },
-        };
-        probes.push((p.clone(), signal));
+        match signal_of(&study.deck, p) {
+            Some(signal) => probes.push((p.clone(), signal)),
+            None => study.warnings.push(format!("probe {}: no such pin on a simulated part", p.label())),
+        }
     }
     study.probes = probes;
     let mut units = vec![];
     for (k, a) in &def.analyses {
-        if !matches!(a, SimAnalysis::MonteCarlo { .. }) {
+        if a.reruns().is_none() {
             units.push(Unit::Analysis(k.clone()));
+        }
+    }
+    for (k, a) in &def.analyses {
+        if let SimAnalysis::Temperature { values, .. } = a {
+            units.extend((0..values.len()).map(|index| Unit::Temp { name: k.clone(), index }));
         }
     }
     for (k, a) in &def.analyses {
@@ -278,6 +360,16 @@ impl Runner {
 enum Unit {
     Analysis(String),
     Batch { name: String, first: usize, runs: usize, total: usize },
+    /// One temperature of a temperature sweep.
+    Temp { name: String, index: usize },
+}
+
+impl Unit {
+    fn name(&self) -> &str {
+        match self {
+            Unit::Analysis(k) | Unit::Batch { name: k, .. } | Unit::Temp { name: k, .. } => k,
+        }
+    }
 }
 
 /// Monte Carlo runs per unit: the host reports usage and can cancel between units.
@@ -310,6 +402,10 @@ impl Runner {
         let next = match self.units.get(self.next) {
             Some(Unit::Analysis(k)) => format!("analysis {k}"),
             Some(Unit::Batch { name, first, runs, total }) => format!("{name}: runs {}–{} of {total}", first + 1, first + runs),
+            Some(Unit::Temp { name, index }) => match &self.def.analyses[name] {
+                SimAnalysis::Temperature { values, .. } => format!("{name}: {} °C ({} of {})", values[*index], index + 1, values.len()),
+                _ => name.clone(),
+            },
             None => String::new(),
         };
         Progress { done: self.next, total: self.units.len(), next }
@@ -338,13 +434,20 @@ impl Runner {
         let Some(unit) = self.units.get(self.next).cloned() else { return Ok(true) };
         self.next += 1;
         if self.study.stopped.is_some() {
-            let (Unit::Analysis(k) | Unit::Batch { name: k, .. }) = &unit;
-            if !self.not_run.contains(k) && !self.study.monte_carlo.contains_key(k) {
-                self.not_run.push(k.clone());
+            let k = unit.name().to_string();
+            if !self.not_run.contains(&k) && !self.study.monte_carlo.contains_key(&k) && !self.study.temperatures.contains_key(&k) {
+                self.not_run.push(k);
             }
             return Ok(self.finished());
         }
         match unit {
+            Unit::Analysis(k) if matches!(self.def.analyses[&k], SimAnalysis::Noise { .. }) => {
+                let spec = noise_spec(&self.def.analyses[&k], &self.def, &self.study.deck)?;
+                if let Some(w) = self.noise(&k, None, &spec)? {
+                    self.study.noise.insert(k, w);
+                }
+            }
+            Unit::Temp { name, index } => self.temperature(name, index)?,
             Unit::Analysis(k) => {
                 let a = analysis(&self.def.analyses[&k], &self.def)?;
                 let (o, spent) = sim::simulate_spent(&self.circuit, &a, self.left());
@@ -376,8 +479,8 @@ impl Runner {
                     .measures
                     .iter()
                     .filter(|(_, m)| m.of == name)
-                    .map(|(n, m)| (n.clone(), measure(m, &self.study.deck.node(&m.net).to_ascii_lowercase())))
-                    .collect();
+                    .map(|(n, m)| signal_of(&self.study.deck, &m.probe).map(|sig| (n.clone(), measure(m, &sig))).ok_or_else(|| format!("measure `{n}`: {} is not on a simulated part", m.probe.label())))
+                    .collect::<Result<_, _>>()?;
                 let threads = if cfg!(target_arch = "wasm32") { None } else { self.options.threads };
                 let mc = MonteCarlo { runs, first, seed: *seed, tolerances, analysis: analysis(base, &self.def)?, measures, keep_results: 20, limit: self.left() };
                 let out = sim::montecarlo::run(&self.sim_design, &mc, threads).map_err(|e| format!("analysis `{name}`: {e}"))?;
@@ -401,6 +504,64 @@ impl Runner {
         Ok(self.finished())
     }
 
+    /// Runs one noise analysis on `c` (the study's circuit when `None`) under the operation
+    /// limit; `None` when it stopped first.
+    fn noise(&mut self, what: &str, c: Option<&sim::Circuit>, spec: &NoiseSpec) -> Result<Option<NoiseWave>, String> {
+        let left = self.left();
+        let out = sim::simulate_noise(c.unwrap_or(&self.circuit), spec, left);
+        match out {
+            Ok((w, usage)) => {
+                self.add(&usage)?;
+                if w.freq.len() < spec.freqs.len() {
+                    self.study.stopped = Some(format!("noise analysis `{what}` stopped at the granted operations; it holds the frequencies solved before then"));
+                }
+                Ok(Some(w))
+            }
+            Err(sim::SimError::Stopped) => {
+                self.study.stopped = Some(format!("noise analysis `{what}` reached the granted operations before its operating point converged"));
+                Ok(None)
+            }
+            Err(e) => Err(format!("analysis `{what}`: {e}")),
+        }
+    }
+
+    /// Temperature `index` of sweep `name`: the circuit rebuilt at that temperature (junction
+    /// saturation currents, thermal voltages and kT noise follow it) and the named analysis rerun.
+    fn temperature(&mut self, name: String, index: usize) -> Result<(), String> {
+        let SimAnalysis::Temperature { of, values } = &self.def.analyses[&name] else { unreachable!() };
+        let t = values[index];
+        let base = self.def.analyses.get(of).ok_or_else(|| format!("temperature sweep `{name}` names analysis `{of}`, which is not declared"))?.clone();
+        let mut d = self.sim_design.clone();
+        d.options.temp_c = t;
+        let c = d.circuit().map_err(|e| format!("analysis `{name}` at {t} °C: {e}"))?;
+        let mut point = TempPoint { temp_c: t, result: None, noise: None };
+        if matches!(base, SimAnalysis::Noise { .. }) {
+            let spec = noise_spec(&base, &self.def, &self.study.deck)?;
+            point.noise = self.noise(&format!("{name} at {t} °C"), Some(&c), &spec)?;
+        } else {
+            let a = analysis(&base, &self.def).map_err(|e| format!("temperature sweep `{name}`: {e}"))?;
+            let (o, spent) = sim::simulate_spent(&c, &a, self.left());
+            self.add(&spent)?;
+            match o {
+                Err(sim::SimError::Stopped) => self.study.stopped = Some(format!("temperature sweep `{name}` reached the granted operations at {t} °C")),
+                r => {
+                    let o = r.map_err(|e| format!("analysis `{name}` at {t} °C: {e}"))?;
+                    if o.stopped {
+                        self.study.stopped = Some(format!("temperature sweep `{name}` stopped at the granted operations at {t} °C"));
+                    }
+                    point.result = Some(o.result);
+                }
+            }
+        }
+        if index == 0 {
+            if let Some(r) = &point.result {
+                self.study.results.insert(name.clone(), r.clone());
+            }
+        }
+        self.study.temperatures.entry(name).or_default().push(point);
+        Ok(())
+    }
+
     /// Stops here: the units not yet run are listed as cancelled.
     pub fn cancel(&mut self) {
         if self.finished() {
@@ -409,9 +570,9 @@ impl Runner {
         let p = self.progress();
         let mut left: Vec<String> = vec![];
         for u in &self.units[self.next..] {
-            let (Unit::Analysis(k) | Unit::Batch { name: k, .. }) = u;
-            if !left.contains(k) {
-                left.push(k.clone());
+            let k = u.name().to_string();
+            if !left.contains(&k) {
+                left.push(k);
             }
         }
         self.study.stopped = Some(format!("cancelled before {} ({} of {} steps done); not finished: {}", p.next, p.done, p.total, left.join(", ")));
@@ -428,15 +589,30 @@ impl Runner {
             mc.stats = mc.values.iter().map(|(k, v)| (k.clone(), Stats::of(v))).collect();
         }
         for (n, m) in &self.def.measures {
-            let node = study.deck.node(&m.net).to_ascii_lowercase();
+            let signal = signal_of(&study.deck, &m.probe);
+            let signal = signal.as_deref();
+            let blank = MeasureValue { of: m.of.clone(), value: None, runs: vec![], stats: None, temperatures: vec![], error: None };
             let v = if let Some(mc) = study.monte_carlo.get(&m.of) {
                 let runs = mc.values.get(n).cloned().unwrap_or_default();
-                MeasureValue { of: m.of.clone(), value: None, stats: Some(Stats::of(&runs)), runs, error: None }
+                MeasureValue { stats: Some(Stats::of(&runs)), runs, ..blank }
+            } else if let Some(points) = study.temperatures.get(&m.of) {
+                let mut error = None;
+                let runs = points
+                    .iter()
+                    .map(|p| {
+                        evaluate_one(m, signal, p.result.as_ref(), p.noise.as_ref()).unwrap_or_else(|e| {
+                            error.get_or_insert(format!("at {} °C: {e}", p.temp_c));
+                            f64::NAN
+                        })
+                    })
+                    .collect();
+                MeasureValue { runs, temperatures: points.iter().map(|p| p.temp_c).collect(), error, ..blank }
+            } else if !study.results.contains_key(&m.of) && !study.noise.contains_key(&m.of) {
+                MeasureValue { error: Some(format!("analysis `{}` did not run", m.of)), ..blank }
             } else {
-                match study.results.get(&m.of).map(|r| evaluate(&measure(m, &node), r)) {
-                    Some(Ok(x)) => MeasureValue { of: m.of.clone(), value: Some(x), runs: vec![], stats: None, error: None },
-                    Some(Err(e)) => MeasureValue { of: m.of.clone(), value: None, runs: vec![], stats: None, error: Some(e) },
-                    None => MeasureValue { of: m.of.clone(), value: None, runs: vec![], stats: None, error: Some(format!("analysis `{}` did not run", m.of)) },
+                match evaluate_one(m, signal, study.results.get(&m.of), study.noise.get(&m.of)) {
+                    Ok(x) => MeasureValue { value: Some(x), ..blank },
+                    Err(e) => MeasureValue { error: Some(e), ..blank },
                 }
             };
             study.measures.insert(n.clone(), v);

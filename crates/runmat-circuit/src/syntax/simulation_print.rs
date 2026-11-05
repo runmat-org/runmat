@@ -169,31 +169,45 @@ pub fn analysis_line(sim: &SimulationDef, k: &str, a: &SimAnalysis) -> String {
             }
             format!("monte_carlo {}", record(&e))
         }
+        SimAnalysis::Noise { output, reference, input, from, to, points } => {
+            let mut e = vec![("output".to_string(), net_ref(output))];
+            if let Some(r) = reference {
+                e.push(("reference".into(), net_ref(r)));
+            }
+            e.extend([("input".into(), name(input)), ("from".into(), qty(*from, "Hz")), ("to".into(), qty(*to, "Hz")), ("points".into(), points.to_string())]);
+            format!("noise {}", record(&e))
+        }
+        SimAnalysis::Temperature { of, values } => {
+            let items: Vec<String> = values.iter().map(|t| format!("{} degC", format_f64(*t))).collect();
+            format!("temperature {}", record(&[("of".into(), name(of)), ("values".into(), format!("[{}]", items.join(", ")))]))
+        }
     };
     format!("analysis {} = {body}", name(k))
 }
 
+/// A probe as a section writes it: `net.X`, or a pin quoted as the `connect` lists write them
+/// (`"RS.1"`, `"U.IN+"`).
+pub fn probe_ref(p: &SimProbe) -> String {
+    match p {
+        SimProbe::Net(n) => net_ref(n),
+        SimProbe::Pin { .. } => quote(&p.name()),
+    }
+}
+
 pub fn probe_line(probes: &[SimProbe]) -> String {
-    let items: Vec<String> = probes
-        .iter()
-        .map(|p| match p {
-            SimProbe::Net(n) => net_ref(n),
-            // Pins quote as the `connect` lists write them (`"RS.1"`, `"U.IN+"`).
-            SimProbe::Pin { .. } => quote(&p.name()),
-        })
-        .collect();
+    let items: Vec<String> = probes.iter().map(probe_ref).collect();
     format!("probe = [{}]", items.join(", "))
 }
 
 /// The x unit of the analysis a measure reads (a Monte Carlo reads its nominal analysis).
 fn x_unit(sim: &SimulationDef, of: &str) -> &'static str {
     match sim.analyses.get(of) {
-        Some(SimAnalysis::MonteCarlo { of: inner, .. }) => match sim.analyses.get(inner) {
-            Some(SimAnalysis::Ac { .. }) => "Hz",
+        Some(a @ (SimAnalysis::MonteCarlo { .. } | SimAnalysis::Temperature { .. })) => match a.reruns().and_then(|inner| sim.analyses.get(inner)) {
+            Some(SimAnalysis::Ac { .. } | SimAnalysis::Noise { .. }) => "Hz",
             Some(SimAnalysis::Dc { source, .. }) => sweep_unit(sim, source),
             _ => "s",
         },
-        Some(SimAnalysis::Ac { .. }) => "Hz",
+        Some(SimAnalysis::Ac { .. } | SimAnalysis::Noise { .. }) => "Hz",
         Some(SimAnalysis::Dc { source, .. }) => sweep_unit(sim, source),
         _ => "s",
     }
@@ -201,7 +215,7 @@ fn x_unit(sim: &SimulationDef, of: &str) -> &'static str {
 
 pub fn measure_line(sim: &SimulationDef, k: &str, m: &SimMeasure) -> String {
     let xu = x_unit(sim, &m.of);
-    let mut e = vec![("of".to_string(), name(&m.of)), (m.kind.word().to_string(), net_ref(&m.net))];
+    let mut e = vec![("of".to_string(), name(&m.of)), (m.kind.word().to_string(), probe_ref(&m.probe))];
     e.extend(m.args.iter().map(|(a, b)| {
         let unit = match a.as_str() {
             "band" => "%",
@@ -210,9 +224,10 @@ pub fn measure_line(sim: &SimulationDef, k: &str, m: &SimMeasure) -> String {
         };
         (a.clone(), qty(*b, unit))
     }));
-    let limit = |v: f64| match m.kind.unit() {
+    let limit = |v: f64| match m.unit() {
         "%" => format!("{} %", format_f64(v)),
         "°" => format!("{} deg", format_f64(v)),
+        "V/√Hz" => qty(v, "V"),
         u => qty(v, u),
     };
     let mut spec = vec![];

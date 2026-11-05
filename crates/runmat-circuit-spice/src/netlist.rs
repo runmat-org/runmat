@@ -15,7 +15,7 @@
 //! the pins it lists) is fed through a zero-volt source `VS_<designator>_<k>` so the engine
 //! reports each pin current.
 
-use runmat_circuit::elab::{FitState, Netlist};
+use runmat_circuit::elab::{CompInst, FitState, Netlist};
 use runmat_circuit::ir::{ParamValue, Tolerance};
 use runmat_circuit::library::{Pool, SpiceModel};
 use std::collections::{BTreeMap, BTreeSet};
@@ -62,13 +62,32 @@ pub enum SensePins {
 }
 
 impl SensePins {
-    fn wants(&self, designator: &str, pin: &str) -> bool {
+    fn wants(&self, designator: &str, aliases: &[String]) -> bool {
         match self {
             SensePins::None => false,
             SensePins::All => true,
-            SensePins::Only(list) => list.iter().any(|(d, p)| d == designator && p.eq_ignore_ascii_case(pin)),
+            SensePins::Only(list) => list.iter().any(|(d, p)| d == designator && aliases.iter().any(|a| a.eq_ignore_ascii_case(p))),
         }
     }
+}
+
+/// The names a pin answers to: its element label, its name (`IN+`), `<unit>.<name>` on a
+/// multi-unit part, and its pad numbers (`3`).
+fn pin_aliases(c: &CompInst, label: &str) -> Vec<String> {
+    let inst = match label.split_once('.') {
+        Some((g, p)) => c.pins.iter().find(|x| x.pin == p && (g.is_empty() || x.gate == g)),
+        None => c.pins.iter().find(|x| x.pin == label),
+    };
+    let mut out = vec![label.to_string(), label.trim_start_matches('.').to_string()];
+    if let Some(x) = inst {
+        out.push(x.pin.clone());
+        if !x.gate.is_empty() {
+            out.push(format!("{}.{}", x.gate, x.pin));
+        }
+        out.extend(x.pads.iter().cloned());
+    }
+    out.dedup();
+    out
 }
 
 /// A source time function.
@@ -178,8 +197,17 @@ pub struct Element {
 pub struct Sense {
     pub designator: String,
     pub pin: String,
+    /// What else the pin answers to: its name, `<unit>.<name>` and its pad numbers.
+    pub aliases: Vec<String>,
     pub net: String,
     pub source: String,
+}
+
+impl Sense {
+    /// Whether `pin` names this pin: its label, name, `<unit>.<name>` or a pad number.
+    pub fn matches(&self, pin: &str) -> bool {
+        self.pin.eq_ignore_ascii_case(pin) || self.aliases.iter().any(|a| a.eq_ignore_ascii_case(pin))
+    }
 }
 
 /// A SPICE deck.
@@ -392,7 +420,8 @@ pub fn emit(nl: &Netlist, pool: &Pool, opts: &EmitOptions) -> Result<Deck, Vec<E
                     format!("nc_{nc}")
                 }
             };
-            if net.is_some() && opts.sense.wants(&c.designator, label) {
+            let aliases = pin_aliases(c, label);
+            if net.is_some() && opts.sense.wants(&c.designator, &aliases) {
                 let pin_node = format!("p_{}_{k}", node_name(&c.designator));
                 let source = format!("VS_{}_{k}", node_name(&c.designator));
                 deck.elements.push(Element {
@@ -405,6 +434,7 @@ pub fn emit(nl: &Netlist, pool: &Pool, opts: &EmitOptions) -> Result<Deck, Vec<E
                 deck.senses.push(Sense {
                     designator: c.designator.clone(),
                     pin: label.clone(),
+                    aliases,
                     net: net.clone().unwrap(),
                     source,
                 });

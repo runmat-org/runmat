@@ -10,8 +10,12 @@
 //!     analysis step = tran { stop = 50 us, step = 50 ns }
 //!     analysis response = ac { from = 10 Hz, to = 100 MHz, points = 50 }
 //!     analysis spread = monte_carlo { of = response, runs = 1000, seed = 1 }
+//!     analysis hiss = noise { output = net.AIN, input = VIN, from = 10 Hz, to = 10 MHz, points = 20 }
+//!     analysis hot = temperature { of = response, values = [-40 degC, 25 degC, 85 degC] }
 //!     probe = [net.IN, net.AMP, net.AIN, RO.2]
 //!     measure f3db = { of = response, bandwidth = net.AIN }
+//!     measure peak_current = { of = step, max = "RO.2" }
+//!     measure en = { of = hiss, output_noise = net.AIN }
 //! }
 //! ```
 //!
@@ -116,6 +120,11 @@ pub enum SimAnalysis {
     Ac { from: f64, to: f64, points: u32 },
     Tran { stop: f64, step: f64, max_step: Option<f64> },
     MonteCarlo { of: String, runs: u32, seed: u64, uniform: bool },
+    /// Small-signal noise at net `output` (against `reference`, ground when `None`), referred to
+    /// the section source `input`, on a logarithmic sweep with `points` per decade.
+    Noise { output: String, reference: Option<String>, input: String, from: f64, to: f64, points: u32 },
+    /// Reruns analysis `of` at each temperature (°C).
+    Temperature { of: String, values: Vec<f64> },
 }
 
 impl SimAnalysis {
@@ -126,6 +135,16 @@ impl SimAnalysis {
             SimAnalysis::Ac { .. } => "ac",
             SimAnalysis::Tran { .. } => "tran",
             SimAnalysis::MonteCarlo { .. } => "monte_carlo",
+            SimAnalysis::Noise { .. } => "noise",
+            SimAnalysis::Temperature { .. } => "temperature",
+        }
+    }
+
+    /// The analysis a Monte Carlo or temperature sweep reruns.
+    pub fn reruns(&self) -> Option<&str> {
+        match self {
+            SimAnalysis::MonteCarlo { of, .. } | SimAnalysis::Temperature { of, .. } => Some(of),
+            _ => None,
         }
     }
 }
@@ -150,6 +169,12 @@ pub enum MeasureKind {
     PhaseMargin,
     GainAt,
     PhaseAt,
+    /// A noise analysis: the output noise integrated over its band (or `from`–`to`), in V rms.
+    OutputNoise,
+    /// The input-referred noise integrated the same way, in V rms.
+    InputNoise,
+    /// The output noise density at `at`, in V/√Hz.
+    NoiseDensity,
 }
 
 impl MeasureKind {
@@ -171,16 +196,31 @@ impl MeasureKind {
         ("phase_margin", MeasureKind::PhaseMargin),
         ("gain", MeasureKind::GainAt),
         ("phase", MeasureKind::PhaseAt),
+        ("output_noise", MeasureKind::OutputNoise),
+        ("input_noise", MeasureKind::InputNoise),
+        ("noise_density", MeasureKind::NoiseDensity),
     ];
     pub fn word(self) -> &'static str {
         Self::ALL.iter().find(|(_, k)| *k == self).map(|(w, _)| *w).unwrap_or("value")
     }
 
-    /// The unit the measured value is in: `V`, `s`, `Hz`, `dB`, `°`, `%` (overshoot, in
-    /// percent), or empty (Q).
+    /// Whether it reads the signal's level (volts on a net, amperes into a pin).
+    pub fn is_level(self) -> bool {
+        matches!(self, MeasureKind::At | MeasureKind::Max | MeasureKind::Min | MeasureKind::PeakToPeak | MeasureKind::Average | MeasureKind::Rms | MeasureKind::Final)
+    }
+
+    /// Whether it reads a noise analysis.
+    pub fn is_noise(self) -> bool {
+        matches!(self, MeasureKind::OutputNoise | MeasureKind::InputNoise | MeasureKind::NoiseDensity)
+    }
+
+    /// The unit the measured value is in on a net: `V`, `s`, `Hz`, `dB`, `°`, `%` (overshoot,
+    /// in percent), `V/√Hz`, or empty (Q). [`SimMeasure::unit`] gives amperes for a pin.
     pub fn unit(self) -> &'static str {
         match self {
             MeasureKind::At | MeasureKind::Max | MeasureKind::Min | MeasureKind::PeakToPeak | MeasureKind::Average | MeasureKind::Rms | MeasureKind::Final => "V",
+            MeasureKind::OutputNoise | MeasureKind::InputNoise => "V",
+            MeasureKind::NoiseDensity => "V/√Hz",
             MeasureKind::RiseTime | MeasureKind::Settling => "s",
             MeasureKind::Bandwidth | MeasureKind::PeakFrequency | MeasureKind::UnityGain => "Hz",
             MeasureKind::GainAt => "dB",
@@ -196,13 +236,23 @@ pub struct SimMeasure {
     /// The analysis it reads.
     pub of: String,
     pub kind: MeasureKind,
-    /// The net it measures.
-    pub net: String,
+    /// The net (its voltage) or pin (the current into it) it measures.
+    pub probe: SimProbe,
     /// `at`, `from`, `to`, `band`, `drop`, in SI (fractions for `band`, dB for `drop`).
     pub args: BTreeMap<String, f64>,
     /// The specification limits (`spec = { min = …, max = … }`), in the measured value's unit
-    /// ([`MeasureKind::unit`]): a value passes inside them, and a Monte Carlo's yield is the
+    /// ([`SimMeasure::unit`]): a value passes inside them, and a Monte Carlo's yield is the
     /// fraction of runs that do.
     pub spec_min: Option<f64>,
     pub spec_max: Option<f64>,
+}
+
+impl SimMeasure {
+    /// The measured value's unit: [`MeasureKind::unit`], in amperes for a level on a pin.
+    pub fn unit(&self) -> &'static str {
+        match (&self.probe, self.kind.is_level()) {
+            (SimProbe::Pin { .. }, true) => "A",
+            _ => self.kind.unit(),
+        }
+    }
 }

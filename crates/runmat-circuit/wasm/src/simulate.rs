@@ -172,8 +172,19 @@ mod tests {
     }
 "#;
 
+    /// The daq showcase without its own `simulation` sections, so a test adds the section it checks.
+    fn bare(base: &str) -> String {
+        let mut s = base.to_string();
+        while let Some(i) = s.find("\n    simulation ") {
+            let close = "\n    }\n";
+            let j = i + 1 + s[i + 1..].find(close).expect("a closed section") + close.len();
+            s.replace_range(i + 1..j, "");
+        }
+        s
+    }
+
     fn daq() -> String {
-        let base = include_str!("../../tests/projects/daq/daq.circuit");
+        let base = bare(include_str!("../../tests/projects/daq/daq.circuit"));
         let end = base.rfind('}').unwrap();
         format!("{}{SECTION}{}", &base[..end], &base[end..])
     }

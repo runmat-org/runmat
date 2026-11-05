@@ -408,6 +408,35 @@ pub(super) fn add(c: &mut Catalog) {
         ])
         .edit(edit(EditOp::Add, Section::Studies).item("analysis")),
         sch(
+            "simulate.noise",
+            "Noise",
+            "simulate",
+            "Add a noise sweep: the output noise density at a net and the noise referred to an input source.",
+        )
+        .kw(&["noise", "spectral density", "input referred", "snr"])
+        .inputs(vec![
+            text("name", "Name", Some("hiss")).optional(),
+            text("output", "Output net", Some("OUT")),
+            text("input", "Input source", Some("VIN")),
+            qty("start", "Start", "frequency", Some(10.0)),
+            qty("stop", "Stop", "frequency", Some(1.0e6)),
+            count("points", "Points per decade", 20, 1),
+        ])
+        .edit(edit(EditOp::Add, Section::Studies).item("analysis")),
+        sch(
+            "simulate.temperature",
+            "Temperature sweep",
+            "simulate",
+            "Add a temperature sweep that reruns another analysis of the section at each temperature.",
+        )
+        .kw(&["temperature", "corners", "hot", "cold", "thermal"])
+        .inputs(vec![
+            text("name", "Name", Some("corners")).optional(),
+            text("of", "Repeats", Some("response")),
+            text("values", "Temperatures (°C)", Some("-40, 25, 85")),
+        ])
+        .edit(edit(EditOp::Add, Section::Studies).item("analysis")),
+        sch(
             "simulate.monte-carlo",
             "Monte Carlo",
             "simulate",
@@ -599,6 +628,8 @@ pub(super) fn tab() -> DomainTab {
                     e("simulate.dc-sweep"),
                     e("simulate.transient"),
                     e("simulate.ac"),
+                    e("simulate.noise"),
+                    e("simulate.temperature"),
                     e("simulate.monte-carlo"),
                     e("simulate.set-tolerance"),
                     e("simulate.probe"),

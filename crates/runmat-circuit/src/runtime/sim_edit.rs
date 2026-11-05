@@ -4,7 +4,7 @@
 //!   net or pin selected on the schematic, from its context menu): adds `net.X` (its voltage) or
 //!   `R1.2` (the current into the pin) to `probe = [ … ]` (or writes that statement);
 //! - `simulate.monte-carlo`, and `simulate.op-point`, `simulate.dc-sweep`,
-//!   `simulate.transient`, `simulate.ac` with their kind fixed: writes `analysis <name> = …`,
+//!   `simulate.transient`, `simulate.ac`, `simulate.noise`, `simulate.temperature` with their kind fixed: writes `analysis <name> = …`,
 //!   replacing the analysis of that name when there is one;
 //! - `simulate.set-tolerance`: writes `tolerance <name> = { match, value }`, replacing the one of
 //!   that name or pattern.
@@ -79,6 +79,8 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                 "simulate.dc-sweep" => "dc".into(),
                 "simulate.transient" => "tran".into(),
                 "simulate.ac" => "ac".into(),
+                "simulate.noise" => "noise".into(),
+                "simulate.temperature" => "temperature".into(),
                 "simulate.monte-carlo" => string(v, "kind").ok_or_else(|| EditError::new("pick the analysis (op, dc, ac, tran, monte_carlo)"))?,
                 other => return Err(EditError::new(format!("`{other}` is not a simulation edit"))),
             };
@@ -160,6 +162,7 @@ fn analysis(kind: &str, v: &Map<String, Value>, def: &SimulationDef) -> Result<S
             SimAnalysis::Dc { source, from: w(from, u), to: w(to, u), step: w(step, u) }
         }
         SimAnalysis::Ac { from, to, points } => SimAnalysis::Ac { from: w(from, "Hz"), to: w(to, "Hz"), points },
+        SimAnalysis::Noise { output, reference, input, from, to, points } => SimAnalysis::Noise { output, reference, input, from: w(from, "Hz"), to: w(to, "Hz"), points },
         SimAnalysis::Tran { stop, step, max_step } => SimAnalysis::Tran { stop: w(stop, "s"), step: w(step, "s"), max_step: max_step.map(|m| w(m, "s")) },
         other => other,
     })
@@ -203,7 +206,39 @@ fn analysis_raw(kind: &str, v: &Map<String, Value>, def: &SimulationDef) -> Resu
             }
             SimAnalysis::MonteCarlo { of, runs: runs as u32, seed: number(v, "seed").unwrap_or(1.0) as u64, uniform: string(v, "distribution").is_some_and(|d| d == "uniform") }
         }
-        other => return Err(EditError::new(format!("`{other}` is not an analysis (op, dc, ac, tran, monte_carlo)"))),
+        "noise" => {
+            let output = string(v, "output").ok_or_else(|| EditError::new("name the output net"))?;
+            let output = output.strip_prefix("net.").unwrap_or(&output).to_string();
+            let input = string(v, "input").ok_or_else(|| EditError::new("name the input source the noise is referred to"))?;
+            if !def.sources.contains_key(&input) {
+                return Err(EditError::new(format!("the simulation has no source `{input}` to refer the noise to")));
+            }
+            let from = number(v, "start").or_else(|| number(v, "from")).ok_or_else(|| EditError::new("give the start frequency"))?;
+            let to = number(v, "stop").or_else(|| number(v, "to")).ok_or_else(|| EditError::new("give the stop frequency"))?;
+            let points = number(v, "points").unwrap_or(20.0);
+            if !(from > 0.0 && to > from && points >= 1.0) {
+                return Err(EditError::new("a noise sweep goes up from a start frequency above zero, with at least one point per decade"));
+            }
+            SimAnalysis::Noise { output, reference: None, input, from, to, points: points as u32 }
+        }
+        "temperature" => {
+            let of = string(v, "of").ok_or_else(|| EditError::new("name the analysis the sweep repeats"))?;
+            match def.analyses.get(&of) {
+                None => return Err(EditError::new(format!("the simulation has no analysis `{of}` to repeat"))),
+                Some(a) if a.reruns().is_some() => return Err(EditError::new(format!("`{of}` already reruns another analysis; name that one"))),
+                _ => {}
+            }
+            let values: Vec<f64> = match v.get("values") {
+                Some(Value::Array(items)) => items.iter().filter_map(Value::as_f64).collect(),
+                Some(Value::String(t)) => t.split([',', ' ']).filter(|x| !x.is_empty()).map(|x| x.trim_end_matches("degC").parse::<f64>()).collect::<Result<_, _>>().map_err(|_| EditError::new("temperatures are numbers in °C (`-40, 25, 85`)"))?,
+                _ => vec![],
+            };
+            if values.is_empty() || values.iter().any(|t| !t.is_finite() || *t < -273.15) {
+                return Err(EditError::new("give the temperatures in °C (`-40, 25, 85`)"));
+            }
+            SimAnalysis::Temperature { of, values }
+        }
+        other => return Err(EditError::new(format!("`{other}` is not an analysis (op, dc, ac, tran, monte_carlo, noise, temperature)"))),
     })
 }
 
@@ -214,6 +249,8 @@ fn default_name(kind: &str, def: &SimulationDef) -> String {
         "ac" => "response",
         "dc" => "sweep",
         "op" => "bias",
+        "noise" => "hiss",
+        "temperature" => "corners",
         _ => "spread",
     };
     std::iter::once(base.to_string()).chain((2..).map(|k| format!("{base}{k}"))).find(|n| !def.analyses.contains_key(n)).expect("a free name")

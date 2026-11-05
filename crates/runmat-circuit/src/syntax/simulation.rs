@@ -2,8 +2,9 @@
 //!
 //! Statements: `sheet = <sheet>`, `source <name> = { … }`, `model <part> = { … }`,
 //! `tolerance <name> = { match = "R*", value = 1 % }`, `analysis <name> = op | dc { … } |
-//! ac { … } | tran { … } | monte_carlo { … }`, `probe = [net.A, …]`,
-//! `measure <name> = { of = <analysis>, <kind> = net.X, … }` and `option <name> = <value>`.
+//! ac { … } | tran { … } | monte_carlo { … } | noise { … } | temperature { … }`,
+//! `probe = [net.A, "R1.2", …]`, `measure <name> = { of = <analysis>, <kind> = net.X | "R1.2", … }`
+//! and `option <name> = <value>`.
 //! Printing is in [`super::simulation_print`].
 
 use super::values::{diagnostic, val, Val, V};
@@ -225,8 +226,17 @@ fn read_model(v: &Val, span: Span) -> Read<SimModel> {
     Ok(SimModel::Subckt { library: word(req(&f, "library", span, "a model")?)?, name: word(req(&f, "subckt", span, "a model")?)?, pins })
 }
 
+/// A temperature in °C: `85 degC`, or a plain number of degrees Celsius.
+fn celsius(v: &Val) -> Read<f64> {
+    match &v.v {
+        V::Num(t) => t.parse().map_err(|_| diagnostic(v.span, "expected a temperature")),
+        V::Qty(t, u) if u == "degC" || u == "°C" => t.parse().map_err(|_| diagnostic(v.span, "expected a temperature")),
+        _ => Err(diagnostic(v.span, "a temperature is in degC (`85 degC`)")),
+    }
+}
+
 fn read_analysis((callee, arg): (Option<String>, Option<Val>), span: Span) -> Read<SimAnalysis> {
-    let w = callee.ok_or_else(|| diagnostic(span, "an analysis is op, dc { … }, ac { … }, tran { … } or monte_carlo { … }"))?;
+    let w = callee.ok_or_else(|| diagnostic(span, "an analysis is op, dc { … }, ac { … }, tran { … }, monte_carlo { … }, noise { … } or temperature { … }"))?;
     let empty = Val { v: V::Rec(vec![]), span };
     let a = arg.unwrap_or(empty);
     let what = format!("a `{w}` analysis");
@@ -257,7 +267,27 @@ fn read_analysis((callee, arg): (Option<String>, Option<Val>), span: Span) -> Re
             };
             SimAnalysis::MonteCarlo { of: word(req(&f, "of", span, &what)?)?, runs: si(req(&f, "runs", span, &what)?)? as u32, seed: f.get("seed").map(|x| si(x)).transpose()?.unwrap_or(1.0) as u64, uniform }
         }
-        o => return Err(diagnostic(span, format!("`{o}` is not an analysis (op, dc, ac, tran, monte_carlo)"))),
+        "noise" => {
+            let f = fields(&a, &["output", "reference", "input", "from", "to", "points"], &what)?;
+            SimAnalysis::Noise {
+                output: net(req(&f, "output", span, &what)?)?,
+                reference: f.get("reference").map(|x| net(x)).transpose()?,
+                input: word(req(&f, "input", span, &what)?)?,
+                from: si(req(&f, "from", span, &what)?)?,
+                to: si(req(&f, "to", span, &what)?)?,
+                points: f.get("points").map(|x| si(x)).transpose()?.unwrap_or(20.0) as u32,
+            }
+        }
+        "temperature" => {
+            let f = fields(&a, &["of", "values"], &what)?;
+            let v = req(&f, "values", span, &what)?;
+            let values = match &v.v {
+                V::List(items) if !items.is_empty() => items.iter().map(celsius).collect::<Read<Vec<_>>>()?,
+                _ => return Err(diagnostic(v.span, "values is a list of temperatures (`[-40 degC, 25 degC, 85 degC]`)")),
+            };
+            SimAnalysis::Temperature { of: word(req(&f, "of", span, &what)?)?, values }
+        }
+        o => return Err(diagnostic(span, format!("`{o}` is not an analysis (op, dc, ac, tran, monte_carlo, noise, temperature)"))),
     })
 }
 
@@ -275,21 +305,26 @@ fn read_measure(v: &Val, span: Span) -> Read<SimMeasure> {
             if kind.is_some() {
                 return Err(diagnostic(x.span, "a measure computes one quantity"));
             }
-            kind = Some((*mk, net(x)?));
+            let p = probe(x)?;
+            if mk.is_noise() && !matches!(p, SimProbe::Net(_)) {
+                return Err(diagnostic(x.span, format!("`{k}` reads the noise analysis's output net (`net.X`)")));
+            }
+            kind = Some((*mk, p));
         } else if ["at", "from", "to", "band", "drop"].contains(&k.as_str()) {
             args.insert(k.clone(), si(x)?);
         } else {
             return Err(diagnostic(x.span, format!("a measure has no `{k}`")));
         }
     }
-    let (kind, net) = kind.ok_or_else(|| {
+    let (kind, probe) = kind.ok_or_else(|| {
         let all: Vec<&str> = MeasureKind::ALL.iter().map(|(w, _)| *w).collect();
         diagnostic(span, format!("a measure names what it computes: {}", all.join(", ")))
     })?;
+    let unit = SimMeasure { of: String::new(), kind, probe: probe.clone(), args: BTreeMap::new(), spec_min: None, spec_max: None }.unit();
     let (mut spec_min, mut spec_max) = (None, None);
     if let Some(x) = spec {
         for (k, l) in rec(x)? {
-            let v = spec_value(l, kind.unit())?;
+            let v = spec_value(l, unit)?;
             match k.as_str() {
                 "min" => spec_min = Some(v),
                 "max" => spec_max = Some(v),
@@ -305,12 +340,14 @@ fn read_measure(v: &Val, span: Span) -> Read<SimMeasure> {
             }
         }
     }
-    Ok(SimMeasure { of: of.ok_or_else(|| diagnostic(span, "a measure needs `of = <analysis>`"))?, kind, net, args, spec_min, spec_max })
+    Ok(SimMeasure { of: of.ok_or_else(|| diagnostic(span, "a measure needs `of = <analysis>`"))?, kind, probe, args, spec_min, spec_max })
 }
 
 /// A spec limit in the measured value's unit. Percent (overshoot) and degrees (phase) take the
-/// written number as it is; SI units must match the measure's dimension.
+/// written number as it is; SI units must match the measure's dimension. A noise density
+/// (V/√Hz) is written in volts (`max = 20 nV`), per root hertz.
 fn spec_value(v: &Val, unit: &str) -> Read<f64> {
+    let unit = if unit == "V/√Hz" { "V" } else { unit };
     let num = |t: &str| t.parse::<f64>().map_err(|_| diagnostic(v.span, "expected a number"));
     match (&v.v, unit) {
         (V::Num(t), "") => num(t),
