@@ -29,6 +29,8 @@ pub use runmat_types::physical::VACUUM_ELECTRIC_PERMITTIVITY as VACUUM_PERMITTIV
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ElectricalStaticError {
+    #[error("electrical assembly numerical accounting failed: {0}")]
+    Accounting(runmat_simulation_usage::LedgerError),
     #[error("invalid canonical electrical input: {0}")]
     InvalidInput(String),
     #[error("canonical electrical envelope does not support {0}")]
@@ -119,8 +121,13 @@ pub(crate) fn solve_canonical_static_with_admission(
     let Some(ElectromagneticDomain::Static { equation }) = &model.electromagnetic else {
         unreachable!("validated static electrical domain")
     };
-    let projection = crate::topology::AnalysisProjection::derive(mesh)
-        .map_err(|error| ElectricalStaticError::Topology(error.to_string()))?;
+    let projection =
+        crate::topology::AnalysisProjection::derive(mesh).map_err(|error| match error {
+            crate::topology::AnalysisProjectionError::Accounting(error) => {
+                ElectricalStaticError::Accounting(error)
+            }
+            other => ElectricalStaticError::Topology(other.to_string()),
+        })?;
     let properties = crate::properties::compile_solid_property_map(model, mesh)
         .map_err(|error| ElectricalStaticError::Material(error.to_string()))?;
     let assembled = assembly::ElectricalAssembly::assemble(
@@ -168,8 +175,13 @@ pub(crate) fn solve_conduction_with_conductivity(
             "coupled conduction requires a steady-conduction model".into(),
         ));
     }
-    let projection = crate::topology::AnalysisProjection::derive(mesh)
-        .map_err(|error| ElectricalStaticError::Topology(error.to_string()))?;
+    let projection =
+        crate::topology::AnalysisProjection::derive(mesh).map_err(|error| match error {
+            crate::topology::AnalysisProjectionError::Accounting(error) => {
+                ElectricalStaticError::Accounting(error)
+            }
+            other => ElectricalStaticError::Topology(other.to_string()),
+        })?;
     let properties = crate::properties::compile_solid_property_map(model, mesh)
         .map_err(|error| ElectricalStaticError::Material(error.to_string()))?;
     let equation = runmat_analysis_core::StaticElectricalEquation::SteadyConduction;

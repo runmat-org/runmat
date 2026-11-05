@@ -18,7 +18,7 @@ pub(in super::super) fn local_cap_apex_candidates(
     surface_point: [f64; 3],
     cavity_centroid: [f64; 3],
     node_coordinates: &BTreeMap<u32, [f64; 3]>,
-) -> Vec<LocalCapApexCandidate> {
+) -> Result<Vec<LocalCapApexCandidate>, runmat_simulation_usage::LedgerError> {
     let mut candidates = Vec::<LocalCapApexCandidate>::new();
     for fraction in [0.03, 0.06, 0.1, 0.16, 0.25, 0.38, 0.55, 0.75] {
         candidates.push(LocalCapApexCandidate {
@@ -35,13 +35,13 @@ pub(in super::super) fn local_cap_apex_candidates(
     }
 
     let Some(first) = node_coordinates.get(&face[0]).copied() else {
-        return candidates;
+        return Ok(candidates);
     };
     let Some(second) = node_coordinates.get(&face[1]).copied() else {
-        return candidates;
+        return Ok(candidates);
     };
     let Some(third) = node_coordinates.get(&face[2]).copied() else {
-        return candidates;
+        return Ok(candidates);
     };
     let first_edge = [
         second[0] - first[0],
@@ -55,13 +55,13 @@ pub(in super::super) fn local_cap_apex_candidates(
     ];
     let normal = cross(first_edge, second_edge);
     let Some(unit_normal) = normalize(normal) else {
-        return candidates;
+        return Ok(candidates);
     };
     let max_edge_length = distance(first, second)
         .max(distance(second, third))
         .max(distance(third, first));
     if !max_edge_length.is_finite() || max_edge_length <= 0.0 {
-        return candidates;
+        return Ok(candidates);
     }
     let inward = [
         cavity_centroid[0] - surface_point[0],
@@ -101,7 +101,7 @@ pub(in super::super) fn local_cap_apex_candidates(
             } else {
                 "normal_optimized_negative"
             },
-        ));
+        )?);
     }
     if let Some(inward_direction) = normalize(inward) {
         let in_plane_targets = [
@@ -176,7 +176,7 @@ pub(in super::super) fn local_cap_apex_candidates(
                 inward_direction,
                 in_plane_direction,
                 max_edge_length,
-            ));
+            )?);
             candidates.push(optimized_inplane_inward_cap_apex_candidate(
                 [first, second, third],
                 surface_point,
@@ -187,8 +187,8 @@ pub(in super::super) fn local_cap_apex_candidates(
                     -in_plane_direction[2],
                 ],
                 max_edge_length,
-            ));
+            )?);
         }
     }
-    candidates
+    Ok(candidates)
 }

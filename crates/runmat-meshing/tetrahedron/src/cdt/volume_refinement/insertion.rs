@@ -228,6 +228,9 @@ pub(super) fn candidate_error(
     failure: DelaunayVolumeRefinementCandidateError,
 ) -> DelaunayVolumeRefinementStepError {
     let kind = match failure.kind {
+        DelaunayVolumeRefinementCandidateErrorKind::Accounting(cause) => {
+            DelaunayVolumeRefinementStepErrorKind::Accounting(cause)
+        }
         DelaunayVolumeRefinementCandidateErrorKind::InvalidOptions => {
             DelaunayVolumeRefinementStepErrorKind::InvalidOptions
         }
@@ -275,6 +278,9 @@ pub(super) fn insertion_error(
 
 fn provenance_error(failure: DelaunayVolumeProvenanceError) -> DelaunayVolumeRefinementStepError {
     let kind = match failure.kind {
+        DelaunayVolumeProvenanceErrorKind::Accounting(cause) => {
+            DelaunayVolumeRefinementStepErrorKind::Accounting(cause)
+        }
         DelaunayVolumeProvenanceErrorKind::InvalidOptions => {
             DelaunayVolumeRefinementStepErrorKind::InvalidOptions
         }
@@ -298,6 +304,9 @@ pub(super) fn quality_error(
     failure: DelaunayVolumeQualityError,
 ) -> DelaunayVolumeRefinementStepError {
     let kind = match failure.kind {
+        DelaunayVolumeQualityErrorKind::Accounting(cause) => {
+            DelaunayVolumeRefinementStepErrorKind::Accounting(cause)
+        }
         DelaunayVolumeQualityErrorKind::InvalidOptions => {
             DelaunayVolumeRefinementStepErrorKind::InvalidOptions
         }

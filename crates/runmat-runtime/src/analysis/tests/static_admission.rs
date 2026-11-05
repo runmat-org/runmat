@@ -110,7 +110,8 @@ fn sparse_provider_operator_contract_solves_spd_and_releases_resources() {
         LinearAlgebraBackendKind::Accelerator,
         &runmat_analysis_fea::solve::backend::cpu_reference::CpuReferenceBackend,
         None,
-    );
+    )
+    .expect("valid static admission fixture must solve");
     assert!(result.converged);
     assert!(result
         .solution

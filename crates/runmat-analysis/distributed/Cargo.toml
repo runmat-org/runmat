@@ -1,6 +1,6 @@
 [package]
 name = "runmat-analysis-distributed"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
@@ -11,5 +11,6 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 faer = { version = "=0.24.4", default-features = false, features = ["std", "linalg", "sparse-linalg"] }
 thiserror = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 
 [dev-dependencies]

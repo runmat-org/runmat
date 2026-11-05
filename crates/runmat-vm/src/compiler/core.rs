@@ -84,9 +84,18 @@ pub struct Compiler {
     current_span: Option<runmat_hir::Span>,
     current_catch_scope: Option<runmat_mir::CatchScopeId>,
     pending_place_mutation: Option<MirPlaceMutation>,
-    prepared_index_component: Option<usize>,
-    contextual_index_component: Option<usize>,
-    subscript_end_component: Option<(usize, usize)>,
+    index_end_context: Option<IndexEndContext>,
+}
+
+/// The innermost selector owns `end`, regardless of how its receiver is prepared.
+#[derive(Clone, Copy)]
+enum IndexEndContext {
+    Prepared(usize),
+    Contextual(usize),
+    Subscript {
+        component: usize,
+        component_count: usize,
+    },
 }
 
 struct SpanGuard {
@@ -408,9 +417,7 @@ impl Compiler {
             current_span: None,
             current_catch_scope: None,
             pending_place_mutation: None,
-            prepared_index_component: None,
-            contextual_index_component: None,
-            subscript_end_component: None,
+            index_end_context: None,
         })
     }
 
@@ -457,9 +464,7 @@ impl Compiler {
             current_span: None,
             current_catch_scope: None,
             pending_place_mutation: None,
-            prepared_index_component: None,
-            contextual_index_component: None,
-            subscript_end_component: None,
+            index_end_context: None,
         })
     }
 
@@ -1588,9 +1593,12 @@ impl Compiler {
                     selectors.push(crate::bytecode::BytecodeSubscriptSelector::Value);
                 }
                 MirIndexComponent::ContextualExpr(region) => {
-                    let previous = self.prepared_index_component.replace(component_index);
-                    self.compile_mir_expression_region(region)?;
-                    self.prepared_index_component = previous;
+                    let previous = self
+                        .index_end_context
+                        .replace(IndexEndContext::Prepared(component_index));
+                    let result = self.compile_mir_expression_region(region);
+                    self.index_end_context = previous;
+                    result?;
                     selectors.push(crate::bytecode::BytecodeSubscriptSelector::Value);
                 }
                 MirIndexComponent::Expansion(region) => {
@@ -1686,9 +1694,12 @@ impl Compiler {
                     numeric_count += 1;
                 }
                 MirIndexComponent::ContextualExpr(region) => {
-                    let previous = self.contextual_index_component.replace(component_index);
-                    self.compile_mir_expression_region(region)?;
-                    self.contextual_index_component = previous;
+                    let previous = self
+                        .index_end_context
+                        .replace(IndexEndContext::Contextual(component_index));
+                    let result = self.compile_mir_expression_region(region);
+                    self.index_end_context = previous;
+                    result?;
                     numeric_count += 1;
                 }
                 MirIndexComponent::Expansion(_) => {
@@ -1723,9 +1734,12 @@ impl Compiler {
                     self.compile_mir_prepared_expression_region(region)?;
                 }
                 MirIndexComponent::ContextualExpr(region) => {
-                    let previous = self.contextual_index_component.replace(component_index);
-                    self.compile_mir_expression_region(region)?;
-                    self.contextual_index_component = previous;
+                    let previous = self
+                        .index_end_context
+                        .replace(IndexEndContext::Contextual(component_index));
+                    let result = self.compile_mir_expression_region(region);
+                    self.index_end_context = previous;
+                    result?;
                 }
                 MirIndexComponent::Expansion(_) => {
                     return Err(self.compile_error(
@@ -2360,8 +2374,8 @@ impl Compiler {
                 destination,
                 ..
             } => {
-                let previous = self.prepared_index_component;
-                self.prepared_index_component = *component;
+                let previous = self.index_end_context;
+                self.index_end_context = component.map(IndexEndContext::Prepared);
                 let result = (|| -> Result<(), CompileError> {
                     self.compile_mir_expression_steps(&region.steps)?;
                     match (destination, &region.argument) {
@@ -2390,7 +2404,7 @@ impl Compiler {
                     }
                     Ok(())
                 })();
-                self.prepared_index_component = previous;
+                self.index_end_context = previous;
                 result?;
             }
             Phase::FinishStep { path_step } => {
@@ -3023,19 +3037,27 @@ impl Compiler {
                 Ok(())
             }
             MirRvalue::End => {
-                if let Some((component, component_count)) = self.subscript_end_component {
-                    self.emit(Instr::LoadSubscriptEnd {
+                match self.index_end_context {
+                    Some(IndexEndContext::Subscript {
                         component,
                         component_count,
-                    });
-                } else if let Some(component) = self.prepared_index_component {
-                    self.emit(Instr::LoadPreparedIndexEnd { component });
-                } else if let Some(component) = self.contextual_index_component {
-                    self.emit(Instr::LoadContextualIndexEnd { component });
-                } else {
-                    return Err(self.compile_error(
-                        "MIR end expression is not enclosed by a contextual index component",
-                    ));
+                    }) => {
+                        self.emit(Instr::LoadSubscriptEnd {
+                            component,
+                            component_count,
+                        });
+                    }
+                    Some(IndexEndContext::Prepared(component)) => {
+                        self.emit(Instr::LoadPreparedIndexEnd { component });
+                    }
+                    Some(IndexEndContext::Contextual(component)) => {
+                        self.emit(Instr::LoadContextualIndexEnd { component });
+                    }
+                    None => {
+                        return Err(self.compile_error(
+                            "MIR end expression is not enclosed by a contextual index component",
+                        ))
+                    }
                 }
                 Ok(())
             }
@@ -3879,6 +3901,11 @@ impl Compiler {
         if matches!(fallback_policy, CallableFallbackPolicy::None) {
             return match identity {
                 CallableIdentity::Builtin(runmat_hir::BuiltinId(name)) if !name.trim().is_empty() => {
+                    Ok(())
+                }
+                // Workspace lookup still runs first. If it misses, the typed
+                // function identity is sufficient to dispatch without a name fallback.
+                CallableIdentity::BoundFunction(_) | CallableIdentity::ExternalFunction { .. } => {
                     Ok(())
                 }
                 _ => Err(self
@@ -4937,9 +4964,7 @@ mod tests {
             current_span: None,
             current_catch_scope: None,
             pending_place_mutation: None,
-            prepared_index_component: None,
-            contextual_index_component: None,
-            subscript_end_component: None,
+            index_end_context: None,
         }
     }
 

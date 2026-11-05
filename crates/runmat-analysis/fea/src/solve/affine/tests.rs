@@ -88,14 +88,16 @@ fn repeated_affine_solves_rebind_lifting_and_invalidate_changed_congruence() {
             &CpuReferenceBackend,
             None,
             &mut reuse,
-        );
+        )
+        .unwrap();
         let cold = solve_affine_constraint_system(
             &view,
             &reduction,
             LinearAlgebraBackendKind::CpuReference,
             &CpuReferenceBackend,
             None,
-        );
+        )
+        .unwrap();
         assert_eq!(warm, cold);
         assert!(warm.converged);
         let t = (3.0 * ratio + 3.0 - 2.0 * ratio * offset) / (5.0 * ratio * ratio + 5.0);
@@ -113,6 +115,7 @@ fn repeated_affine_solves_rebind_lifting_and_invalidate_changed_congruence() {
                 None,
                 &mut reuse
             )
+            .unwrap()
             .converged
         );
     }

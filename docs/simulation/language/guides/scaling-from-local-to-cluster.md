@@ -1,4 +1,4 @@
-# Scale a study from local execution to a cluster
+# Scale from local to cluster
 
 First run the study locally and preserve its study-definition identity, mesh digest, and numerical
 requirements. Placement should be the variable in this comparison, not the model.

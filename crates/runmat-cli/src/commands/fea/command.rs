@@ -47,6 +47,7 @@ pub async fn snapshot(
     case: Option<String>,
     views: Vec<String>,
     out: PathBuf,
+    presentation: crate::cli::SnapshotPresentationArgs,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
@@ -61,12 +62,18 @@ pub async fn snapshot(
         case.as_deref(),
         &views,
         &out,
+        &presentation,
     )
     .await
 }
 
-pub async fn render_snapshot(snapshot: PathBuf, out: PathBuf) -> Result<()> {
-    super::snapshot::render::render_saved(&snapshot, &out).await
+pub async fn render_snapshot(
+    snapshot: PathBuf,
+    out: PathBuf,
+    views: Vec<String>,
+    presentation: crate::cli::SnapshotPresentationArgs,
+) -> Result<()> {
+    super::snapshot::render::render_saved(&snapshot, &out, &views, &presentation).await
 }
 
 pub fn verify_snapshot(snapshot: PathBuf, out: PathBuf) -> Result<()> {
@@ -96,7 +103,7 @@ pub async fn reassess(
         &result_manifest,
         &study.study,
         runmat_runtime::analysis::assessment::AssessmentEvaluationLimits::default(),
-        64 * 1024 * 1024,
+        super::SAVED_PUBLICATION_MANIFEST_MAX_BYTES,
     )
     .await
     .map_err(anyhow::Error::msg)?;

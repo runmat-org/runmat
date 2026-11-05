@@ -158,6 +158,8 @@ impl TransientIntegrationInterval {
 
 #[derive(Debug, Error)]
 pub enum TransientSolveError<E> {
+    #[error("transient numerical usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
     #[error("transient solve options are invalid: {0}")]
     InvalidOptions(&'static str),
     #[error("transient solve was cancelled before a complete result was available")]

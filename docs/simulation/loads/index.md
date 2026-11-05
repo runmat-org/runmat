@@ -1,4 +1,4 @@
-# Loads, excitations, and natural boundaries
+# Loads
 
 A load applies a known constant quantity directly. An excitation applies a named signal and keeps
 the signal's domain, interpolation, callable identity, and data provenance separate from its target,

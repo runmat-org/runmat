@@ -1,6 +1,6 @@
 [package]
 name = "runmat-package"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 description = "Portable package identities, resolution graph, and lockfile domain for RunMat"
 license-file = "../../LICENSE.md"

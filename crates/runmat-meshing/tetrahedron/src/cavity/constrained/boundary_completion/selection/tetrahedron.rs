@@ -20,7 +20,8 @@ pub(in super::super::super) fn best_boundary_face_completion_tetrahedron_for_fac
             refill_tetrahedra,
             boundary_triangles,
             options,
-        ) else {
+        )?
+        else {
             continue;
         };
         let mut candidate_tetrahedra = refill_tetrahedra.to_vec();

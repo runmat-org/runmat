@@ -74,6 +74,7 @@ impl AnalysisSolverOptions {
                     truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
                         *requested_count,
                     ),
+                    residual_vector_directions: step.modal_residual_vector_directions().to_vec(),
                     ..AnalysisModalRunOptions::default()
                 };
                 Ok(Self::StructuralModes(options))

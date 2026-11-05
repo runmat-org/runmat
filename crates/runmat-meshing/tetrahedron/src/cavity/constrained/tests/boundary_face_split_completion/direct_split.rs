@@ -125,6 +125,7 @@ fn boundary_face_split_completion_prefers_higher_quality_split_point() {
         &boundary_nodes,
         options,
     )
+    .expect("centroid split accounting should be admitted")
     .expect("centroid split should generate child cap tetrahedra");
     let centroid_min_quality = centroid_tetrahedra
         .iter()

@@ -114,8 +114,20 @@ impl HomogeneousStaticSolver {
             FeaRunError::Solve(format!("homogeneous static correction failed: {error}"))
         })?;
         let equilibrium_residual = subtract(&apply_k(&self.system, &vector), &reduced_load)?;
-        let equilibrium_residual_ratio =
-            norm(&equilibrium_residual) / norm(&reduced_load).max(f64::MIN_POSITIVE);
+        // Normwise backward error ||K x - f|| / (||K||_F ||x|| + ||f||). A direct factor meets it
+        // near machine precision on any conditioning; ||K x - f|| / ||f|| alone scales with
+        // eps * cond(K) and rejects correct solves of stiff models.
+        let stiffness_norm = self
+            .system
+            .operators()
+            .stiffness()
+            .values()
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
+        let equilibrium_residual_ratio = norm(&equilibrium_residual)
+            / (stiffness_norm * norm(&vector) + norm(&reduced_load)).max(f64::MIN_POSITIVE);
         if !equilibrium_residual_ratio.is_finite() || equilibrium_residual_ratio > STATIC_TOLERANCE
         {
             return Err(FeaRunError::Solve(

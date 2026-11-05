@@ -44,7 +44,7 @@ fn optimize(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Option<[f64; 3]>, DelaunayVolumeSliverError> {
     let mut point = start;
-    let initial_score = kernel.score(point);
+    let initial_score = kernel.score(point)?;
     let mut best_score = initial_score;
     let mut radius = local_scale * 0.25;
     let minimum_radius = local_scale * 2_f64.powi(-24);

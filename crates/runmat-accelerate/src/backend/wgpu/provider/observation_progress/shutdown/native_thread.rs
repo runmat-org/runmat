@@ -4,7 +4,7 @@
 use std::thread::JoinHandle;
 
 #[cfg(unix)]
-pub(super) fn is_current(thread: &JoinHandle<()>) -> bool {
+pub(super) fn is_current<T>(thread: &JoinHandle<T>) -> bool {
     use std::os::unix::thread::JoinHandleExt;
 
     // SAFETY: the borrowed join handle owns a live, joinable pthread identity.
@@ -13,7 +13,7 @@ pub(super) fn is_current(thread: &JoinHandle<()>) -> bool {
 }
 
 #[cfg(windows)]
-pub(super) fn is_current(thread: &JoinHandle<()>) -> bool {
+pub(super) fn is_current<T>(thread: &JoinHandle<T>) -> bool {
     use std::{ffi::c_void, os::windows::io::AsRawHandle};
 
     #[link(name = "kernel32")]

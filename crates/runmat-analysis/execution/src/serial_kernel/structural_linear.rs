@@ -7,6 +7,13 @@ use runmat_analysis_fea::results::observation::ObservationLimits;
 pub(crate) fn execute(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    crate::serial::finish_inline(execute_with_capacity(invocation, None))
+}
+
+pub(crate) async fn execute_with_capacity(
+    invocation: AnalysisKernelInvocation<'_>,
+    capacity: Option<&dyn AsyncCapacityOwner>,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
     let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.decode_inputs");
     let solve_invocation =
         unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
@@ -293,7 +300,24 @@ pub(crate) fn execute(
         }
         (execution.run, Some(execution.linearization))
     } else if publishes_linearization {
-        let execution =
+        let execution = if let Some(capacity) = capacity {
+            runmat_analysis_fea::run_linear_static_with_prepared_constraint_plan_and_linearization_tet4_owned(
+                &solver_model,
+                solve.backend,
+                solve_options,
+                runmat_analysis_fea::StaticLinearizationInput {
+                    constraint_plan: &constraint_plan,
+                    topology_digest,
+                },
+                static_admission,
+                usize::MAX,
+                |_phase, work| async move {
+                    capacity.ensure_capacity(work).await.map_err(|cause| {
+                        AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(cause))
+                    })
+                },
+            ).await?
+        } else {
             runmat_analysis_fea::run_linear_static_with_prepared_constraint_plan_and_linearization(
                 &solver_model,
                 solve.backend,
@@ -301,19 +325,37 @@ pub(crate) fn execute(
                 &constraint_plan,
                 topology_digest,
                 static_admission,
-            )
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+            )?
+        };
         (execution.run, Some(execution.linearization))
     } else {
         (
-            run_linear_static_with_prepared_constraint_plan(
-                &solver_model,
-                solve.backend,
-                solve_options,
-                &constraint_plan,
-                static_admission,
-            )
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            if let Some(capacity) = capacity {
+                runmat_analysis_fea::run_linear_static_with_prepared_constraint_plan_tet4_owned(
+                    &solver_model,
+                    solve.backend,
+                    solve_options,
+                    &constraint_plan,
+                    static_admission,
+                    usize::MAX,
+                    |_phase, work| async move {
+                        capacity.ensure_capacity(work).await.map_err(|cause| {
+                            AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(
+                                cause,
+                            ))
+                        })
+                    },
+                )
+                .await?
+            } else {
+                run_linear_static_with_prepared_constraint_plan(
+                    &solver_model,
+                    solve.backend,
+                    solve_options,
+                    &constraint_plan,
+                    static_admission,
+                )?
+            },
             None,
         )
     };

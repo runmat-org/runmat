@@ -2,7 +2,10 @@
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{endpoint::ServerEndpoint, ids::OrgId};
+use crate::{
+    ids::OrgId,
+    lease_http::{LeaseHttp, ServerLeaseTransportError},
+};
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,55 +117,20 @@ fn api_error(status: u16, body: &[u8]) -> FeaLeaseError {
 
 #[derive(Clone)]
 pub struct FeaLeaseClient {
-    endpoint: ServerEndpoint,
-    http: reqwest::Client,
+    transport: LeaseHttp,
 }
 impl FeaLeaseClient {
     pub fn new(server: &str, token: &str) -> Result<Self, FeaLeaseError> {
-        use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
-        let endpoint = ServerEndpoint::parse(server).map_err(|_| FeaLeaseError::LicenseInvalid)?;
-        let mut headers = HeaderMap::new();
-        let mut bearer = HeaderValue::from_str(&format!("Bearer {token}"))
-            .map_err(|_| FeaLeaseError::LicenseInvalid)?;
-        bearer.set_sensitive(true);
-        headers.insert(AUTHORIZATION, bearer);
-        let http = reqwest::Client::builder()
-            .default_headers(headers)
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(|_| FeaLeaseError::ServerUnreachable)?;
-        Ok(Self { endpoint, http })
+        Ok(Self {
+            transport: LeaseHttp::new(server, token)?,
+        })
     }
 
     async fn response<T: DeserializeOwned>(
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<T, FeaLeaseError> {
-        let mut response = request
-            .send()
-            .await
-            .map_err(|_| FeaLeaseError::ServerUnreachable)?;
-        let status = response.status();
-        if status.is_server_error() {
-            return Err(FeaLeaseError::ServerUnreachable);
-        }
-        // Lease metadata is small; bound both success and error bodies before decoding.
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| FeaLeaseError::ServerUnreachable)?
-        {
-            if bytes.len().saturating_add(chunk.len()) > 64 * 1024 {
-                return Err(FeaLeaseError::LicenseInvalid);
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        if !status.is_success() {
-            return Err(api_error(status.as_u16(), &bytes));
-        }
-        serde_json::from_slice(&bytes).map_err(|_| FeaLeaseError::LicenseInvalid)
+        self.transport.response(request, api_error).await
     }
 
     pub async fn start(
@@ -171,10 +139,11 @@ impl FeaLeaseClient {
         request: &StartFeaLease,
     ) -> Result<FeaLease, FeaLeaseError> {
         self.response(
-            self.http
+            self.transport
+                .http
                 .post(format!(
                     "{}/v1/orgs/{}/fea/leases",
-                    self.endpoint.as_str(),
+                    self.transport.endpoint.as_str(),
                     org.as_str()
                 ))
                 .json(request),
@@ -189,7 +158,7 @@ impl FeaLeaseClient {
         uuid::Uuid::parse_str(suffix).map_err(|_| FeaLeaseError::LicenseInvalid)?;
         Ok(format!(
             "{}/v1/fea/leases/{lease}/{operation}",
-            self.endpoint.as_str()
+            self.transport.endpoint.as_str()
         ))
     }
     pub async fn usage(
@@ -197,8 +166,13 @@ impl FeaLeaseClient {
         lease: &str,
         usage: FeaLeaseUsage,
     ) -> Result<FeaLeaseHold, FeaLeaseError> {
-        self.response(self.http.post(self.lease_url(lease, "usage")?).json(&usage))
-            .await
+        self.response(
+            self.transport
+                .http
+                .post(self.lease_url(lease, "usage")?)
+                .json(&usage),
+        )
+        .await
     }
     pub async fn settle(
         &self,
@@ -213,7 +187,8 @@ impl FeaLeaseClient {
             usage: FeaLeaseUsage,
         }
         self.response(
-            self.http
+            self.transport
+                .http
                 .post(self.lease_url(lease, "settle")?)
                 .json(&Settlement { outcome, usage }),
         )
@@ -234,8 +209,9 @@ impl FeaLeaseClient {
         }
         let page: Page = self
             .response(
-                self.http
-                    .get(format!("{}/v1/orgs", self.endpoint.as_str()))
+                self.transport
+                    .http
+                    .get(format!("{}/v1/orgs", self.transport.endpoint.as_str()))
                     .query(&[("limit", "2")]),
             )
             .await?;
@@ -243,6 +219,20 @@ impl FeaLeaseClient {
             return Err(FeaLeaseError::LicenseInvalid);
         }
         Ok(page.items.into_iter().next().expect("one organization").id)
+    }
+}
+
+impl From<ServerLeaseTransportError> for FeaLeaseError {
+    fn from(error: ServerLeaseTransportError) -> Self {
+        match error {
+            ServerLeaseTransportError::Http(_) | ServerLeaseTransportError::ServerStatus(_) => {
+                Self::ServerUnreachable
+            }
+            ServerLeaseTransportError::Endpoint(_)
+            | ServerLeaseTransportError::Credential(_)
+            | ServerLeaseTransportError::BodyTooLarge
+            | ServerLeaseTransportError::Decode(_) => Self::LicenseInvalid,
+        }
     }
 }
 

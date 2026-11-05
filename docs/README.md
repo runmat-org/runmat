@@ -121,7 +121,7 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Geometry](./simulation/geometry.md)
 - [Meshing](./simulation/meshing.md)
 - [Models](./simulation/models.md)
-- [Procedure Sequences, Observations, and Accuracy](./simulation/study-contracts.md)
+- [Study contracts](./simulation/study-contracts.md)
 - [Physics guides](./simulation/physics/)
 - [Constraint guides](./simulation/constraints/)
 - [Load and excitation guides](./simulation/loads/)

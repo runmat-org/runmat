@@ -1,6 +1,6 @@
 [package]
 name = "runmat-sparse-solvers"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -13,6 +13,7 @@ num-complex = { version = "0.4.6", default-features = false, features = ["std"] 
 libm = "0.2"
 rayon = "1.11"
 runmat-cpu-execution = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 thiserror = { workspace = true }
 
 # Threaded factorizations run on the caller's admitted Rayon pool natively; the browser build

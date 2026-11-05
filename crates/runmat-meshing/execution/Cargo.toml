@@ -1,6 +1,6 @@
 [package]
 name = "runmat-meshing-execution"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
@@ -33,6 +33,7 @@ libc = "0.2"
 
 [dev-dependencies]
 runmat-geometry-fixtures = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 
 [build-dependencies]
 runmat-build-identity = { workspace = true }

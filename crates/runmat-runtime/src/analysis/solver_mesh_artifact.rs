@@ -6,20 +6,28 @@ thread_local! {
     static SCOPED_INPUT: std::cell::RefCell<Option<(std::path::PathBuf, SolverMeshArtifact)>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Own one original input for a numerical worker without persisting worker output.
-pub(super) fn with_scoped_solver_mesh<T>(
+/// Install the owned input only while polling numerical work. An admission
+/// wait restores the caller's input instead of leaving thread-local state live.
+pub(super) async fn with_scoped_solver_mesh_future<T>(
     path: std::path::PathBuf,
     mesh: SolverMeshArtifact,
-    work: impl FnOnce() -> T,
+    work: impl std::future::Future<Output = T>,
 ) -> T {
-    struct Restore(Option<(std::path::PathBuf, SolverMeshArtifact)>);
-    impl Drop for Restore {
+    type Input = Option<(std::path::PathBuf, SolverMeshArtifact)>;
+    struct Restore<'a>(&'a mut Input);
+    impl Drop for Restore<'_> {
         fn drop(&mut self) {
-            SCOPED_INPUT.with(|slot| *slot.borrow_mut() = self.0.take());
+            SCOPED_INPUT.with(|slot| std::mem::swap(&mut *slot.borrow_mut(), self.0));
         }
     }
-    let _restore = Restore(SCOPED_INPUT.with(|slot| slot.replace(Some((path, mesh)))));
-    work()
+    let mut input = Some((path, mesh));
+    let mut work = std::pin::pin!(work);
+    std::future::poll_fn(|cx| {
+        SCOPED_INPUT.with(|slot| std::mem::swap(&mut *slot.borrow_mut(), &mut input));
+        let _restore = Restore(&mut input);
+        std::future::Future::poll(work.as_mut(), cx)
+    })
+    .await
 }
 
 #[derive(Debug)]

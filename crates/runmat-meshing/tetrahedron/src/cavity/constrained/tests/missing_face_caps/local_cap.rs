@@ -30,7 +30,8 @@ fn local_cap_apex_candidates_include_optimized_normal_offsets() {
         (2, [0.18, 0.72, 0.0]),
     ]);
     let surface_point = face_centroid(face, &nodes).expect("face should have a centroid");
-    let candidates = local_cap_apex_candidates(face, surface_point, [0.3, 0.2, 0.8], &nodes);
+    let candidates =
+        local_cap_apex_candidates(face, surface_point, [0.3, 0.2, 0.8], &nodes).unwrap();
 
     let quality_for = |candidate: &LocalCapApexCandidate| {
         tetrahedron_scaled_jacobian([
@@ -39,6 +40,7 @@ fn local_cap_apex_candidates_include_optimized_normal_offsets() {
             nodes[&face[2]],
             candidate.coordinates_m.canonical_value(),
         ])
+        .expect("scaled-Jacobian accounting should be admitted")
     };
     let best_discrete_positive = candidates
         .iter()
@@ -74,7 +76,8 @@ fn local_cap_apex_candidates_include_inplane_inward_offsets() {
         (2, [0.2, 0.8, 0.0]),
     ]);
     let surface_point = face_centroid(face, &nodes).expect("face should have a centroid");
-    let candidates = local_cap_apex_candidates(face, surface_point, [0.3, 0.2, 0.8], &nodes);
+    let candidates =
+        local_cap_apex_candidates(face, surface_point, [0.3, 0.2, 0.8], &nodes).unwrap();
     let inplane_candidates = candidates
         .iter()
         .filter(|candidate| candidate.source == "inplane_inward")

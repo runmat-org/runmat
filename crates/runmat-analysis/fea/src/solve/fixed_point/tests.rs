@@ -1,4 +1,64 @@
 use super::*;
+use runmat_simulation_usage::{UsageContext, UsageLedger};
+use std::sync::Arc;
+
+#[test]
+fn anderson_reference_batches_conserve_selected_prefix_and_refusal() {
+    let policy = AndersonOnePolicy::default();
+    let accepted = OperationCount::from_operations(15); // n=2: 2 + 6 + 1 + 6.
+    let ledger = Arc::new(UsageLedger::new(accepted, accepted).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    let proposal = context.run_sync(|| {
+        propose(
+            &[1.0, 4.0],
+            &[3.0, 2.0],
+            &[2.0, 6.0],
+            &[1.0, 1.0],
+            policy,
+            false,
+        )
+    });
+    assert!(matches!(proposal, Ok(Some(_))));
+    let usage = ledger.snapshot().unwrap();
+    assert_eq!(usage.completed.solve, accepted);
+    assert_eq!(usage.reserved, OperationCount::ZERO);
+
+    let degenerate = OperationCount::from_operations(8); // n=2: difference and both dots.
+    let ledger = Arc::new(UsageLedger::new(degenerate, degenerate).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    assert_eq!(
+        context.run_sync(|| propose(
+            &[1.0, 2.0],
+            &[0.0, 0.0],
+            &[3.0, 4.0],
+            &[0.0, 0.0],
+            policy,
+            false
+        )),
+        Ok(None)
+    );
+    assert_eq!(ledger.snapshot().unwrap().completed.solve, degenerate);
+
+    let first_batch = OperationCount::from_operations(2);
+    let ledger = Arc::new(UsageLedger::new(first_batch, first_batch).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    assert!(matches!(
+        context.run_sync(|| propose(
+            &[1.0, 4.0],
+            &[3.0, 2.0],
+            &[2.0, 6.0],
+            &[1.0, 1.0],
+            policy,
+            false
+        )),
+        Err(FixedPointError::Accounting(
+            LedgerError::BudgetExceeded { .. }
+        ))
+    ));
+    let usage = ledger.snapshot().unwrap();
+    assert_eq!(usage.completed.solve, first_batch);
+    assert_eq!(usage.reserved, OperationCount::ZERO);
+}
 
 #[test]
 fn affine_scalar_fixed_points_are_independently_recovered() {

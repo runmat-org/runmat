@@ -5100,7 +5100,8 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
     let parallel = solve_linear_system_with_execution(
         &summary,
@@ -5172,7 +5173,8 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     let multiplier_parallel = solve_linear_system_with_execution(
         &summary,
         SpdPreconditionerKind::Jacobi,

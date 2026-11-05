@@ -90,6 +90,7 @@ pub struct DelaunayVolumeRefinementStep {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeRefinementStepErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidInput,
     InvalidCandidate,
@@ -153,6 +154,7 @@ impl Default for DelaunayVolumeRefinementCandidateOptions {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeRefinementCandidateErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidTopology,
     InvalidQuality,
@@ -335,6 +337,9 @@ fn validate_options(
 
 fn quality_error(failure: DelaunayVolumeQualityError) -> DelaunayVolumeRefinementCandidateError {
     let kind = match failure.kind {
+        DelaunayVolumeQualityErrorKind::Accounting(cause) => {
+            DelaunayVolumeRefinementCandidateErrorKind::Accounting(cause)
+        }
         DelaunayVolumeQualityErrorKind::InvalidOptions => {
             DelaunayVolumeRefinementCandidateErrorKind::InvalidOptions
         }

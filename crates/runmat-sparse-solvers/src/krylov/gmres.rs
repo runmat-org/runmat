@@ -9,16 +9,25 @@
 //! Arnoldi estimate passes or a cycle ends, and still certifies convergence on
 //! that true residual before returning flag 0.
 
+use super::usage::{BatchCompletion, GivensBranch, ScalarWork, VectorWork};
 use num_complex::Complex64;
 
 use super::{ApplyStatus as PreconditionerStatus, KrylovFailure};
 mod scalar;
-use scalar::{axpy, copy, dot, fill, norm, Norm};
+use scalar::{axpy, copy, divide, dot, fill, norm, residual, Norm};
 mod geometry;
 pub use geometry::GmresGeometry;
 
 pub trait GmresOperations<T> {
     type Error;
+
+    /// Admit a typed arithmetic batch before its synchronous numerical work.
+    /// `completed` is false when an optional native kernel declined the work.
+    fn measured<R>(
+        &mut self,
+        work: super::usage::VectorWork,
+        run: impl FnOnce(&mut Self) -> (R, super::usage::BatchCompletion),
+    ) -> impl std::future::Future<Output = Result<R, Self::Error>>;
 
     fn coefficient(
         &mut self,
@@ -165,6 +174,7 @@ pub struct GmresParameters {
 /// returns `None` whenever its native result is not finite, so extreme-range
 /// vectors still take the portable path.
 pub trait Arithmetic<T> {
+    const DOMAIN: super::usage::ArithmeticDomain;
     fn zero() -> T;
     fn to_complex(value: T) -> Complex64;
     fn from_complex(value: Complex64) -> Option<T>;
@@ -319,41 +329,17 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             chunk.fill(Complex64::new(0.0, 0.0));
         }
         operations.coefficient(work.x, work.product).await?;
-        match operations.native_residual(rhs, work.product, work.residual) {
-            Some(true) => operations.cooperate(n as u64).await?,
-            Some(false) => {
-                return Ok(GmresOutcome {
-                    flag: 4,
-                    relres: best_residual.relative(denominator),
-                    outer: best_iteration.0,
-                    inner: best_iteration.1,
-                    residual_count,
-                    steps,
-                })
-            }
-            None => {
-                for (index, (destination, (&b, &ax))) in work
-                    .residual
-                    .iter_mut()
-                    .zip(rhs.iter().zip(&*work.product))
-                    .enumerate()
-                {
-                    if index % 1024 == 0 {
-                        operations.cooperate((n - index).min(1024) as u64).await?;
-                    }
-                    let Some(value) = A::from_complex(A::to_complex(b) - A::to_complex(ax)) else {
-                        return Ok(GmresOutcome {
-                            flag: 4,
-                            relres: best_residual.relative(denominator),
-                            outer: best_iteration.0,
-                            inner: best_iteration.1,
-                            residual_count,
-                            steps,
-                        });
-                    };
-                    *destination = value;
-                }
-            }
+        if !residual::<T, A, O>(rhs, work.product, work.residual, operations).await? {
+            return Ok(GmresOutcome {
+                flag: 4,
+                relres: best_residual
+                    .measured_relative(denominator, operations)
+                    .await?,
+                outer: best_iteration.0,
+                inner: best_iteration.1,
+                residual_count,
+                steps,
+            });
         }
         if side == PreconditionerSide::Left {
             if operations
@@ -364,7 +350,9 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 let (outer, inner) = best_iteration;
                 return Ok(GmresOutcome {
                     flag: 2,
-                    relres: best_residual.relative(denominator),
+                    relres: best_residual
+                        .measured_relative(denominator, operations)
+                        .await?,
                     outer,
                     inner,
                     residual_count,
@@ -377,14 +365,16 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
         let Some(beta) = norm::<T, A, O>(work.preconditioned, operations).await? else {
             return Ok(GmresOutcome {
                 flag: 4,
-                relres: best_residual.relative(denominator),
+                relres: best_residual
+                    .measured_relative(denominator, operations)
+                    .await?,
                 outer: best_iteration.0,
                 inner: best_iteration.1,
                 residual_count,
                 steps,
             });
         };
-        if beta.less_than(best_residual) {
+        if beta.measured_less_than(best_residual, operations).await? {
             best_residual = beta;
             if outer > 0 {
                 best_iteration = x_position;
@@ -392,14 +382,14 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             copy(work.x, work.best, operations).await?;
         }
         if residual_count == 0 {
-            work.history[0] = beta.magnitude();
+            work.history[0] = beta.measured_magnitude(operations).await?;
             residual_count = 1;
         }
-        if beta.relative(denominator) <= tolerance {
+        if beta.measured_relative(denominator, operations).await? <= tolerance {
             let (outer, inner) = if on_estimate { x_position } else { (outer, 0) };
             return Ok(GmresOutcome {
                 flag: 0,
-                relres: beta.relative(denominator),
+                relres: beta.measured_relative(denominator, operations).await?,
                 outer,
                 inner,
                 residual_count,
@@ -410,31 +400,17 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             // OnEstimate verification pass after the last permitted cycle or step.
             break;
         }
-        if beta.native_magnitude().is_some()
-            && operations.native_divide(&mut work.basis[..n], work.preconditioned, beta.magnitude())
-        {
-            operations.cooperate(n as u64).await?;
-        } else {
-            for (index, (target, &value)) in work.basis[..n]
-                .iter_mut()
-                .zip(&*work.preconditioned)
-                .enumerate()
-            {
-                if index % 1024 == 0 {
-                    operations.cooperate((n - index).min(1024) as u64).await?;
-                }
-                let Some(value) = A::from_complex(beta.normalize(A::to_complex(value))) else {
-                    return Ok(GmresOutcome {
-                        flag: 4,
-                        relres: best_residual.relative(denominator),
-                        outer: best_iteration.0,
-                        inner: best_iteration.1,
-                        residual_count,
-                        steps,
-                    });
-                };
-                *target = value;
-            }
+        if !divide::<T, A, O>(work.preconditioned, &mut work.basis[..n], beta, operations).await? {
+            return Ok(GmresOutcome {
+                flag: 4,
+                relres: best_residual
+                    .measured_relative(denominator, operations)
+                    .await?,
+                outer: best_iteration.0,
+                inner: best_iteration.1,
+                residual_count,
+                steps,
+            });
         }
         for chunk in work.rotated_rhs[..restart + 1].chunks_mut(1024) {
             operations.cooperate(chunk.len() as u64).await?;
@@ -444,7 +420,7 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
         // H can have representable beta/H even though 1/H would overflow.
         // Only an unrepresentable absolute beta uses unit g with the residual
         // scale carried through the subsequent native candidate correction.
-        let absolute_beta = beta.magnitude();
+        let absolute_beta = beta.measured_magnitude(operations).await?;
         let (projected_rhs, correction_scale) = if absolute_beta.is_finite() {
             (absolute_beta, Norm::one())
         } else {
@@ -489,7 +465,9 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             if status == PreconditionerStatus::NumericalFailure {
                 return Ok(GmresOutcome {
                     flag: 2,
-                    relres: best_residual.relative(denominator),
+                    relres: best_residual
+                        .measured_relative(denominator, operations)
+                        .await?,
                     outer: best_iteration.0,
                     inner: best_iteration.1,
                     residual_count,
@@ -499,7 +477,9 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             let Some(before) = norm::<T, A, O>(work.preconditioned, operations).await? else {
                 return Ok(GmresOutcome {
                     flag: 4,
-                    relres: best_residual.relative(denominator),
+                    relres: best_residual
+                        .measured_relative(denominator, operations)
+                        .await?,
                     outer: best_iteration.0,
                     inner: best_iteration.1,
                     residual_count,
@@ -508,15 +488,41 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             };
             for pass in 0..2 {
                 let rows = inner + 1;
-                if operations.native_project(
-                    &work.basis[..rows * n],
-                    rows,
-                    work.preconditioned,
-                    &mut work.coefficients[..rows],
-                ) {
+                let native_projected = operations
+                    .measured(
+                        VectorWork::Projection {
+                            rows,
+                            elements: n,
+                            domain: A::DOMAIN,
+                        },
+                        |operations| {
+                            let applied = operations.native_project(
+                                &work.basis[..rows * n],
+                                rows,
+                                work.preconditioned,
+                                &mut work.coefficients[..rows],
+                            );
+                            (
+                                applied,
+                                if applied {
+                                    BatchCompletion::Complete
+                                } else {
+                                    BatchCompletion::Skipped
+                                },
+                            )
+                        },
+                    )
+                    .await?;
+                if native_projected {
                     operations.cooperate((2 * rows * n) as u64).await?;
                     for row in 0..rows {
-                        work.hessenberg[h_index(row, inner, restart)] += work.coefficients[row];
+                        operations
+                            .measured(VectorWork::HessenbergAdd { domain: A::DOMAIN }, |_| {
+                                work.hessenberg[h_index(row, inner, restart)] +=
+                                    work.coefficients[row];
+                                ((), BatchCompletion::Complete)
+                            })
+                            .await?;
                     }
                 } else {
                     for row in 0..=inner {
@@ -526,20 +532,29 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                         else {
                             return Ok(GmresOutcome {
                                 flag: 4,
-                                relres: best_residual.relative(denominator),
+                                relres: best_residual
+                                    .measured_relative(denominator, operations)
+                                    .await?,
                                 outer: best_iteration.0,
                                 inner: best_iteration.1,
                                 residual_count,
                                 steps,
                             });
                         };
-                        work.hessenberg[h_index(row, inner, restart)] += coefficient;
+                        operations
+                            .measured(VectorWork::HessenbergAdd { domain: A::DOMAIN }, |_| {
+                                work.hessenberg[h_index(row, inner, restart)] += coefficient;
+                                ((), BatchCompletion::Complete)
+                            })
+                            .await?;
                         if !axpy::<T, A, O>(work.preconditioned, -coefficient, basis, operations)
                             .await?
                         {
                             return Ok(GmresOutcome {
                                 flag: 4,
-                                relres: best_residual.relative(denominator),
+                                relres: best_residual
+                                    .measured_relative(denominator, operations)
+                                    .await?,
                                 outer: best_iteration.0,
                                 inner: best_iteration.1,
                                 residual_count,
@@ -548,18 +563,24 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                         }
                     }
                 }
-                if pass == 0
-                    && norm::<T, A, O>(work.preconditioned, operations)
-                        .await?
-                        .is_some_and(|after| after.relative(before) >= 0.717)
-                {
+                let reorthogonalized = if pass == 0 {
+                    match norm::<T, A, O>(work.preconditioned, operations).await? {
+                        Some(after) => after.measured_relative(before, operations).await? >= 0.717,
+                        None => false,
+                    }
+                } else {
+                    false
+                };
+                if reorthogonalized {
                     break;
                 }
             }
             let Some(next_norm) = norm::<T, A, O>(work.preconditioned, operations).await? else {
                 return Ok(GmresOutcome {
                     flag: 4,
-                    relres: best_residual.relative(denominator),
+                    relres: best_residual
+                        .measured_relative(denominator, operations)
+                        .await?,
                     outer: best_iteration.0,
                     inner: best_iteration.1,
                     residual_count,
@@ -567,46 +588,63 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 });
             };
             work.hessenberg[h_index(inner + 1, inner, restart)] =
-                Complex64::new(next_norm.magnitude(), 0.0);
+                Complex64::new(next_norm.measured_magnitude(operations).await?, 0.0);
             if !next_norm.is_zero()
-                && next_norm.native_magnitude().is_some()
-                && operations.native_divide(
-                    &mut work.basis[(inner + 1) * n..(inner + 2) * n],
+                && !divide::<T, A, O>(
                     work.preconditioned,
-                    next_norm.magnitude(),
+                    &mut work.basis[(inner + 1) * n..(inner + 2) * n],
+                    next_norm,
+                    operations,
                 )
+                .await?
             {
-                operations.cooperate(n as u64).await?;
-            } else if !next_norm.is_zero() {
-                for (index, (target, &value)) in work.basis[(inner + 1) * n..(inner + 2) * n]
-                    .iter_mut()
-                    .zip(&*work.preconditioned)
-                    .enumerate()
-                {
-                    if index % 1024 == 0 {
-                        operations.cooperate((n - index).min(1024) as u64).await?;
-                    }
-                    let Some(value) = A::from_complex(next_norm.normalize(A::to_complex(value)))
-                    else {
-                        return Ok(GmresOutcome {
-                            flag: 4,
-                            relres: best_residual.relative(denominator),
-                            outer: best_iteration.0,
-                            inner: best_iteration.1,
-                            residual_count,
-                            steps,
-                        });
-                    };
-                    *target = value;
-                }
+                return Ok(GmresOutcome {
+                    flag: 4,
+                    relres: best_residual
+                        .measured_relative(denominator, operations)
+                        .await?,
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
             }
             apply_previous_rotations(work, inner, restart, operations).await?;
             let first = h_index(inner, inner, restart);
             let second = first + 1;
-            let Some((c, s)) = rotation(work.hessenberg[first], work.hessenberg[second]) else {
+            let a = work.hessenberg[first];
+            let b = work.hessenberg[second];
+            let a_zero = a.re == 0.0 && a.im == 0.0;
+            let b_zero = b.re == 0.0 && b.im == 0.0;
+            let givens = VectorWork::Givens {
+                magnitude_evaluations: u8::from(a.im != 0.0) + u8::from(b.im != 0.0),
+                branch: if a_zero && b_zero {
+                    GivensBranch::Zero
+                } else if a_zero {
+                    GivensBranch::ZeroFirst
+                } else {
+                    GivensBranch::General
+                },
+            };
+            let rotated = operations
+                .measured(givens, |_| {
+                    let result = rotation(a, b);
+                    (
+                        result,
+                        if result.is_some() {
+                            BatchCompletion::Complete
+                        } else {
+                            BatchCompletion::Skipped
+                        },
+                    )
+                })
+                .await?;
+            let Some((c, s)) = rotated else {
                 return Ok(GmresOutcome {
                     flag: 4,
-                    relres: best_residual.relative(denominator),
+                    relres: best_residual
+                        .measured_relative(denominator, operations)
+                        .await?,
                     outer: best_iteration.0,
                     inner: best_iteration.1,
                     residual_count,
@@ -615,18 +653,69 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             };
             work.cosines[inner] = c;
             work.sines[inner] = s;
-            let a = work.hessenberg[first];
-            let b = work.hessenberg[second];
-            work.hessenberg[first] = c * a + s * b;
-            work.hessenberg[second] = Complex64::new(0.0, 0.0);
-            let g = work.rotated_rhs[inner];
-            work.rotated_rhs[inner] = c * g;
-            work.rotated_rhs[inner + 1] = -s.conj() * g;
+            operations
+                .measured(
+                    VectorWork::Scalar(ScalarWork::ComplexRotationFinalize),
+                    |_| {
+                        work.hessenberg[first] = c * a + s * b;
+                        work.hessenberg[second] = Complex64::new(0.0, 0.0);
+                        let g = work.rotated_rhs[inner];
+                        work.rotated_rhs[inner] = c * g;
+                        work.rotated_rhs[inner + 1] = -s.conj() * g;
+                        ((), BatchCompletion::Complete)
+                    },
+                )
+                .await?;
             if on_estimate {
-                let estimate = correction_scale.times(work.rotated_rhs[inner + 1].norm());
-                work.history[residual_count] = estimate.magnitude();
+                let rotated = work.rotated_rhs[inner + 1];
+                let rotated_magnitude = operations
+                    .measured(
+                        VectorWork::Scalar(if rotated.im == 0.0 {
+                            ScalarWork::Zero
+                        } else {
+                            ScalarWork::Hypot
+                        }),
+                        |_| {
+                            (
+                                if rotated.im == 0.0 {
+                                    rotated.re.abs()
+                                } else {
+                                    rotated.norm()
+                                },
+                                BatchCompletion::Complete,
+                            )
+                        },
+                    )
+                    .await?;
+                let estimate = operations
+                    .measured(
+                        VectorWork::Scalar(
+                            if rotated_magnitude == 0.0 || correction_scale.is_zero() {
+                                ScalarWork::Zero
+                            } else {
+                                ScalarWork::NormScale
+                            },
+                        ),
+                        |_| {
+                            (
+                                correction_scale.times(rotated_magnitude),
+                                BatchCompletion::Complete,
+                            )
+                        },
+                    )
+                    .await?;
+                work.history[residual_count] = operations
+                    .measured(VectorWork::Scalar(ScalarWork::NormScale), |_| {
+                        (estimate.magnitude(), BatchCompletion::Complete)
+                    })
+                    .await?;
                 residual_count += 1;
-                if estimate.relative(denominator) > tolerance
+                let relative_estimate = operations
+                    .measured(VectorWork::Scalar(estimate.relative_work()), |_| {
+                        (estimate.relative(denominator), BatchCompletion::Complete)
+                    })
+                    .await?;
+                if relative_estimate > tolerance
                     && !next_norm.is_zero()
                     && inner + 1 < restart
                     && steps < step_limit
@@ -652,7 +741,9 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 Candidate::Breakdown => {
                     return Ok(GmresOutcome {
                         flag: 4,
-                        relres: best_residual.relative(denominator),
+                        relres: best_residual
+                            .measured_relative(denominator, operations)
+                            .await?,
                         outer: best_iteration.0,
                         inner: best_iteration.1,
                         residual_count,
@@ -662,7 +753,9 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 Candidate::PreconditionerFailure => {
                     return Ok(GmresOutcome {
                         flag: 2,
-                        relres: best_residual.relative(denominator),
+                        relres: best_residual
+                            .measured_relative(denominator, operations)
+                            .await?,
                         outer: best_iteration.0,
                         inner: best_iteration.1,
                         residual_count,
@@ -690,7 +783,9 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                     copy(work.best, work.x, operations).await?;
                     return Ok(GmresOutcome {
                         flag: 3,
-                        relres: best_residual.relative(denominator),
+                        relres: best_residual
+                            .measured_relative(denominator, operations)
+                            .await?,
                         outer: best_iteration.0,
                         inner: best_iteration.1,
                         residual_count,
@@ -702,42 +797,17 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 break;
             }
             operations.coefficient(work.candidate, work.product).await?;
-            match operations.native_residual(rhs, work.product, work.residual) {
-                Some(true) => operations.cooperate(n as u64).await?,
-                Some(false) => {
-                    return Ok(GmresOutcome {
-                        flag: 4,
-                        relres: best_residual.relative(denominator),
-                        outer: best_iteration.0,
-                        inner: best_iteration.1,
-                        residual_count,
-                        steps,
-                    })
-                }
-                None => {
-                    for (index, (destination, (&b, &ax))) in work
-                        .residual
-                        .iter_mut()
-                        .zip(rhs.iter().zip(&*work.product))
-                        .enumerate()
-                    {
-                        if index % 1024 == 0 {
-                            operations.cooperate((n - index).min(1024) as u64).await?;
-                        }
-                        let Some(value) = A::from_complex(A::to_complex(b) - A::to_complex(ax))
-                        else {
-                            return Ok(GmresOutcome {
-                                flag: 4,
-                                relres: best_residual.relative(denominator),
-                                outer: best_iteration.0,
-                                inner: best_iteration.1,
-                                residual_count,
-                                steps,
-                            });
-                        };
-                        *destination = value;
-                    }
-                }
+            if !residual::<T, A, O>(rhs, work.product, work.residual, operations).await? {
+                return Ok(GmresOutcome {
+                    flag: 4,
+                    relres: best_residual
+                        .measured_relative(denominator, operations)
+                        .await?,
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
             }
             let checked: &[T] = if side == PreconditionerSide::Left {
                 if operations
@@ -747,7 +817,9 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 {
                     return Ok(GmresOutcome {
                         flag: 2,
-                        relres: best_residual.relative(denominator),
+                        relres: best_residual
+                            .measured_relative(denominator, operations)
+                            .await?,
                         outer: best_iteration.0,
                         inner: best_iteration.1,
                         residual_count,
@@ -761,26 +833,28 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             let Some(actual) = norm::<T, A, O>(checked, operations).await? else {
                 return Ok(GmresOutcome {
                     flag: 4,
-                    relres: best_residual.relative(denominator),
+                    relres: best_residual
+                        .measured_relative(denominator, operations)
+                        .await?,
                     outer: best_iteration.0,
                     inner: best_iteration.1,
                     residual_count,
                     steps,
                 });
             };
-            work.history[residual_count] = actual.magnitude();
+            work.history[residual_count] = actual.measured_magnitude(operations).await?;
             residual_count += 1;
             let last = (outer + 1, inner + 1);
-            if actual.less_than(best_residual) {
+            if actual.measured_less_than(best_residual, operations).await? {
                 best_residual = actual;
                 best_iteration = last;
                 copy(work.candidate, work.best, operations).await?;
             }
-            if actual.relative(denominator) <= tolerance {
+            if actual.measured_relative(denominator, operations).await? <= tolerance {
                 copy(work.candidate, work.x, operations).await?;
                 return Ok(GmresOutcome {
                     flag: 0,
-                    relres: actual.relative(denominator),
+                    relres: actual.measured_relative(denominator, operations).await?,
                     outer: outer + 1,
                     inner: inner + 1,
                     residual_count,
@@ -803,7 +877,9 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
             if same {
                 return Ok(GmresOutcome {
                     flag: 3,
-                    relres: best_residual.relative(denominator),
+                    relres: best_residual
+                        .measured_relative(denominator, operations)
+                        .await?,
                     outer: best_iteration.0,
                     inner: best_iteration.1,
                     residual_count,
@@ -820,7 +896,9 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
                 copy(work.best, work.x, operations).await?;
                 return Ok(GmresOutcome {
                     flag: 4,
-                    relres: best_residual.relative(denominator),
+                    relres: best_residual
+                        .measured_relative(denominator, operations)
+                        .await?,
                     outer: best_iteration.0,
                     inner: best_iteration.1,
                     residual_count,
@@ -836,7 +914,9 @@ async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperatio
     copy(work.best, work.x, operations).await?;
     Ok(GmresOutcome {
         flag: 1,
-        relres: best_residual.relative(denominator),
+        relres: best_residual
+            .measured_relative(denominator, operations)
+            .await?,
         outer: best_iteration.0,
         inner: best_iteration.1,
         residual_count,

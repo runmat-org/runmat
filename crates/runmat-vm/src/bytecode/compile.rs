@@ -7550,7 +7550,7 @@ y = x^[1 2; 3 4];\n",
     }
 
     #[test]
-    fn compile_rejects_workspace_first_bound_function_fallback() {
+    fn compile_preserves_workspace_first_bound_function_identity() {
         let ast = runmat_parser::parse("run(\"setup.m\"); y = remote_inc(2);").expect("parse");
         let mut bound_functions = HashMap::new();
         bound_functions.insert("remote_inc".to_string(), FunctionId(9001));
@@ -7559,12 +7559,48 @@ y = x^[1 2; 3 4];\n",
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
 
-        let err = compile(&hir.assembly, &mir, entrypoint)
-            .expect_err("workspace-first bound function fallback should be rejected");
-        assert_eq!(
-            err.identifier.as_deref(),
-            Some("RunMat:MirCallFallbackPolicyUnsupported")
-        );
+        let bytecode = compile(&hir.assembly, &mir, entrypoint)
+            .expect("workspace-first semantic function should compile");
+        assert!(bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            Instr::CallWorkspaceFirstMulti {
+                identity: CallableIdentity::ExternalFunction {
+                    function: FunctionId(9001),
+                    display_name,
+                },
+                fallback_policy: CallableFallbackPolicy::None,
+                ..
+            } if display_name.as_str() == "remote_inc"
+        )));
+    }
+
+    #[test]
+    fn load_then_local_function_keeps_workspace_first_semantic_identity() {
+        let source = "a = 7; save('fixture.mat', 'a'); clear a; load('fixture.mat'); \
+                      y = local_value(a); function out = local_value(x); out = x + 1; end";
+        let ast = runmat_parser::parse(source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let local_function = bytecode
+            .function_registry
+            .functions
+            .values()
+            .find(|function| function.display_name == "local_value")
+            .expect("local function has a semantic identity")
+            .function;
+        assert!(bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            Instr::CallWorkspaceFirstMulti {
+                name,
+                identity: CallableIdentity::BoundFunction(function),
+                fallback_policy: CallableFallbackPolicy::None,
+                arg_count: 1,
+                out_count: 1,
+                ..
+            } if name == "local_value" && *function == local_function
+        )));
     }
 
     #[test]

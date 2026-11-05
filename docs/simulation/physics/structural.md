@@ -1,4 +1,4 @@
-# Structural FEA in RunMat: static, modal, transient, harmonic, buckling, and nonlinear analysis
+# Structural
 
 Use structural FEA to answer questions about deformation, stress, reactions, natural frequencies,
 forced vibration, shock response, buckling, and nonlinear load paths. RunMat keeps the physical
@@ -249,6 +249,9 @@ analysis response after analysis.modes {
 Use direct response when modal truncation is unacceptable; use modal response when the retained basis
 captures the excited band and participation. Check damping, frequency spacing around resonances,
 complex equilibrium residual, and modal truncation. A frequency list is part of study identity.
+A modal-reduced sweep is accepted on its reduced-space residual and publishes its full-order
+imbalance as the modal truncation measure; `static_correction = applied_loads` and modal
+`residual_vectors` reduce it (see [modal truncation and residual vectors](../language/reference/procedures.md#modal-truncation-and-residual-vectors)).
 
 The [solid harmonic qualification case](../qualification/solid-harmonic) checks physical
 Tet4/Tet10 direct and modal response against independent element integrals and oscillator

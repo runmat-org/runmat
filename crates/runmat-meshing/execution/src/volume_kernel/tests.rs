@@ -130,3 +130,21 @@ fn general_volume_errors_keep_typed_stage_categories() {
         assert_eq!(failure.category, expected);
     }
 }
+
+#[test]
+fn volume_accounting_failure_retains_original_cause() {
+    let cause = runmat_simulation_usage::LedgerError::CountOverflow;
+    let failure = map_volume_error(DelaunayVolumeMeshError {
+        stage: DelaunayVolumeMeshStage::Quality,
+        kind: DelaunayVolumeMeshErrorKind::Accounting(cause),
+        reason: "operation count overflow".into(),
+    });
+    assert_eq!(
+        failure.category,
+        MeshingFailureCategory::NumericalAccounting
+    );
+    assert_eq!(failure.accounting_error, Some(cause));
+    failure
+        .validate()
+        .expect("typed accounting failure contract");
+}

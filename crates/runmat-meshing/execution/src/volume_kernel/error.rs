@@ -8,7 +8,12 @@ use runmat_meshing_tetrahedron::cdt::{
 };
 
 pub(super) fn map_volume_error(error: DelaunayVolumeMeshError) -> Box<MeshingFailure> {
+    let accounting_error = match error.kind {
+        DelaunayVolumeMeshErrorKind::Accounting(cause) => Some(cause),
+        _ => None,
+    };
     let category = match error.kind {
+        DelaunayVolumeMeshErrorKind::Accounting(_) => MeshingFailureCategory::NumericalAccounting,
         DelaunayVolumeMeshErrorKind::InvalidOptions => {
             MeshingFailureCategory::InternalInvariantViolation
         }
@@ -24,11 +29,14 @@ pub(super) fn map_volume_error(error: DelaunayVolumeMeshError) -> Box<MeshingFai
         DelaunayVolumeMeshErrorKind::Cancelled => MeshingFailureCategory::Cancelled,
         DelaunayVolumeMeshErrorKind::ResourceLimit => resource_category(error.stage),
     };
-    volume_failure(
-        category,
-        "repair the exact boundary, increase its resource budget, or relax volume quality targets",
-        &error.to_string(),
-    )
+    let remediation = if accounting_error.is_some() {
+        "resolve numerical operation admission and retry the volume mesh"
+    } else {
+        "repair the exact boundary, increase its resource budget, or relax volume quality targets"
+    };
+    let mut failure = volume_failure(category, remediation, &error.to_string());
+    failure.accounting_error = accounting_error;
+    failure
 }
 
 pub(super) fn map_diagnostic_error(error: crate::MeshingSubtaskCacheError) -> Box<MeshingFailure> {
@@ -108,6 +116,7 @@ pub(super) fn volume_failure(
             value: MeshingDiagnosticValue::Text(detail),
             unit: None,
         }],
+        accounting_error: None,
         remediation: remediation.into(),
     })
 }

@@ -129,6 +129,11 @@ pub enum RemoteWorkerCommand {
         sequence: runmat_execution::CollectiveSequence,
         result: crate::protocol::CollectiveProcessResult,
     },
+    CompleteFeaAdmission {
+        attempt_id: AttemptId,
+        sequence: u64,
+        reply: crate::fea_proxy::Reply,
+    },
     Cancel {
         attempt_id: AttemptId,
         reason: runmat_execution::CancellationReason,
@@ -204,6 +209,10 @@ pub enum RemoteWorkerOutcome {
     CollectiveRequest {
         attempt_id: AttemptId,
         request: runmat_execution::CollectiveRequest,
+    },
+    FeaAdmissionCall {
+        attempt_id: AttemptId,
+        call: crate::fea_proxy::Call,
     },
     Attempt {
         #[serde(deserialize_with = "runmat_execution::console::deserialize_source_identity")]

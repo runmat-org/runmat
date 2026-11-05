@@ -555,7 +555,7 @@ impl AffineConstraintReduction {
         ))
     }
 
-    fn reduce_rhs(
+    pub(crate) fn reduce_rhs(
         &self,
         operator: &RealSparseMatrix,
         right_hand_side: &[f64],

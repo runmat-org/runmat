@@ -13,8 +13,8 @@ use crate::{
         backend::kind::LinearAlgebraBackendKind,
         dynamics::{
             advance_modal_transient_state, initialize_modal_transient_state,
-            refresh_modal_transient_state, ModalReducedSystem, ModalTransientInitialState,
-            ModalTransientStep,
+            refresh_modal_transient_state, ModalProjectionError, ModalReducedSystem,
+            ModalTransientInitialState, ModalTransientStep,
         },
     },
 };
@@ -22,7 +22,7 @@ use crate::{
 use super::{
     advance::{
         TransientInitialVectors, TransientNumericalStepOutcome, TransientSolverAccounting,
-        TransientStepStrategy,
+        TransientStepFailure, TransientStepStrategy,
     },
     block_execution::{
         solve_structural_transient_block_with_strategy, StructuralTransientBlockSolveInput,
@@ -35,6 +35,33 @@ use super::{
 
 const INITIAL_RECONSTRUCTION_TOLERANCE: f64 = 1.0e-10;
 
+pub(super) fn projection_error<E>(error: ModalProjectionError) -> TransientSolveError<E> {
+    match error {
+        ModalProjectionError::Usage(error) => TransientSolveError::Usage(error),
+        other => TransientSolveError::ExecutionContract {
+            detail: other.to_string(),
+        },
+    }
+}
+
+fn physical_projection_error<E>(error: ModalProjectionError) -> TransientSolveError<E> {
+    match error {
+        ModalProjectionError::Usage(error) => TransientSolveError::Usage(error),
+        other => TransientSolveError::PhysicalMapping {
+            detail: other.to_string(),
+        },
+    }
+}
+
+fn continuation_projection_error<E>(error: ModalProjectionError) -> TransientSolveError<E> {
+    match error {
+        ModalProjectionError::Usage(error) => TransientSolveError::Usage(error),
+        other => TransientSolveError::InvalidContinuationState {
+            detail: other.to_string(),
+        },
+    }
+}
+
 pub struct StructuralModalTransientBlockSolveInput<'a> {
     pub block: StructuralTransientBlockSolveInput<'a>,
     pub basis_state: StateIdentity,
@@ -45,12 +72,8 @@ pub fn solve_structural_modal_transient_block_with_assembly<E>(
     input: StructuralModalTransientBlockSolveInput<'_>,
     mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
 ) -> Result<StructuralTransientSegment, TransientSolveError<E>> {
-    let reduced =
-        ModalReducedSystem::project(input.block.initial_summary, input.basis).map_err(|error| {
-            TransientSolveError::ExecutionContract {
-                detail: error.to_string(),
-            }
-        })?;
+    let reduced = ModalReducedSystem::project(input.block.initial_summary, input.basis)
+        .map_err(projection_error)?;
     let expansion = reduced.clone();
     let mut map_physical_state =
         |_: f64, _: SignalSampleApproach, summary: &AssemblySummary, state: &SecondOrderState| {
@@ -60,24 +83,26 @@ pub fn solve_structural_modal_transient_block_with_assembly<E>(
                     _,
                 >::new(state.displacement()))
                 .map(|field| field.into_canonical_storage())
-                .map_err(|error| error.to_string())?;
+                .map_err(physical_projection_error)?;
             let velocity = (expansion)
                 .expand_state(&runmat_types::physical::Quantity::<
                     runmat_types::physical::kind::Velocity,
                     _,
                 >::new(state.velocity()))
                 .map(|field| field.into_canonical_storage())
-                .map_err(|error| error.to_string())?;
+                .map_err(physical_projection_error)?;
             let acceleration = (expansion)
                 .expand_state(&runmat_types::physical::Quantity::<
                     runmat_types::physical::kind::Acceleration,
                     _,
                 >::new(state.acceleration()))
                 .map(|field| field.into_canonical_storage())
-                .map_err(|error| error.to_string())?;
+                .map_err(physical_projection_error)?;
             let physical = SecondOrderState::try_new(displacement, velocity, acceleration)
-                .map_err(|error| error.to_string())?;
-            Ok::<_, String>((summary.clone(), physical))
+                .map_err(|error| TransientSolveError::PhysicalMapping {
+                    detail: error.to_string(),
+                })?;
+            Ok::<_, TransientSolveError<E>>((summary.clone(), physical))
         };
     let physical_dof_count = input.block.initial_summary.dof_count;
     solve_structural_modal_transient_block_with_mapping(
@@ -89,7 +114,7 @@ pub fn solve_structural_modal_transient_block_with_assembly<E>(
     )
 }
 
-pub(crate) fn solve_structural_modal_transient_block_with_mapping<E, M: std::fmt::Display>(
+pub(crate) fn solve_structural_modal_transient_block_with_mapping<E>(
     input: StructuralModalTransientBlockSolveInput<'_>,
     reduced: ModalReducedSystem,
     physical_dof_count: usize,
@@ -99,7 +124,10 @@ pub(crate) fn solve_structural_modal_transient_block_with_mapping<E, M: std::fmt
         SignalSampleApproach,
         &AssemblySummary,
         &SecondOrderState,
-    ) -> Result<(AssemblySummary, SecondOrderState), M>,
+    ) -> Result<
+        (AssemblySummary, SecondOrderState),
+        TransientSolveError<E>,
+    >,
 ) -> Result<StructuralTransientSegment, TransientSolveError<E>> {
     validate_scope(&input, &reduced)?;
     let initial_conditions = input
@@ -198,15 +226,11 @@ fn project_representable_state<E, K: crate::solve::dynamics::ModalCoordinateQuan
     let coordinates = reduced
         .state_field::<K>(physical)
         .and_then(|field| reduced.project_state::<K, _>(&field))
-        .map_err(|error| TransientSolveError::InvalidContinuationState {
-            detail: error.to_string(),
-        })?;
+        .map_err(continuation_projection_error)?;
     let reconstructed = reduced
         .expand_state(&coordinates)
         .map(|field| field.into_canonical_storage())
-        .map_err(|error| TransientSolveError::InvalidContinuationState {
-            detail: error.to_string(),
-        })?;
+        .map_err(continuation_projection_error)?;
     let error = reconstructed
         .iter()
         .zip(physical)
@@ -255,11 +279,11 @@ impl TransientStepStrategy for ModalTransientStepStrategy {
         &mut self,
         summary: &AssemblySummary,
         initial: TransientInitialVectors,
-    ) -> Result<TransientNumericalStepOutcome, String> {
+    ) -> Result<TransientNumericalStepOutcome, TransientStepFailure> {
         let load = (self.reduced)
             .load_field(&physical_load(summary))
             .and_then(|field| (self.reduced).project_load(&field))
-            .map_err(|error| error.to_string())?;
+            .map_err(TransientStepFailure::projection)?;
         initialize_modal_transient_state(
             &self.reduced,
             load.canonical_values(),
@@ -274,7 +298,7 @@ impl TransientStepStrategy for ModalTransientStepStrategy {
                 >::new(initial.velocity),
             },
         )
-        .map_err(|error| error.to_string())
+        .map_err(TransientStepFailure::modal)
         .and_then(modal_outcome)
     }
 
@@ -283,18 +307,18 @@ impl TransientStepStrategy for ModalTransientStepStrategy {
         summary: &AssemblySummary,
         previous: &SecondOrderState,
         time_step_s: f64,
-    ) -> Result<TransientNumericalStepOutcome, String> {
+    ) -> Result<TransientNumericalStepOutcome, TransientStepFailure> {
         let load = (self.reduced)
             .load_field(&physical_load(summary))
             .and_then(|field| (self.reduced).project_load(&field))
-            .map_err(|error| error.to_string())?;
+            .map_err(TransientStepFailure::projection)?;
         advance_modal_transient_state(
             &self.reduced,
             time_step_s,
             load.canonical_values(),
             modal_coordinates(previous),
         )
-        .map_err(|error| error.to_string())
+        .map_err(TransientStepFailure::modal)
         .and_then(modal_outcome)
     }
 
@@ -302,25 +326,27 @@ impl TransientStepStrategy for ModalTransientStepStrategy {
         &mut self,
         summary: &AssemblySummary,
         previous: &SecondOrderState,
-    ) -> Result<TransientNumericalStepOutcome, String> {
+    ) -> Result<TransientNumericalStepOutcome, TransientStepFailure> {
         let load = (self.reduced)
             .load_field(&physical_load(summary))
             .and_then(|field| (self.reduced).project_load(&field))
-            .map_err(|error| error.to_string())?;
+            .map_err(TransientStepFailure::projection)?;
         refresh_modal_transient_state(
             &self.reduced,
             load.canonical_values(),
             previous.displacement().to_vec(),
             previous.velocity().to_vec(),
         )
-        .map_err(|error| error.to_string())
+        .map_err(TransientStepFailure::modal)
         .and_then(modal_outcome)
     }
 }
 
-fn modal_outcome(step: ModalTransientStep) -> Result<TransientNumericalStepOutcome, String> {
+fn modal_outcome(
+    step: ModalTransientStep,
+) -> Result<TransientNumericalStepOutcome, TransientStepFailure> {
     Ok(TransientNumericalStepOutcome {
-        state: coordinate_state(step.coordinates)?,
+        state: coordinate_state(step.coordinates).map_err(TransientStepFailure::Detail)?,
         projected_relative_residual: step.relative_residual,
         accounting: TransientSolverAccounting::modal_dense(),
     })

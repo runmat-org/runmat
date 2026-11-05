@@ -47,8 +47,9 @@ fn outward_tetrahedron_bound_contains_the_independent_corner_quality() {
     ] {
         for height in [1e-6, 0.1, 1.] {
             let points = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0.2, 0.3, height]];
-            let actual =
-                crate::cdt::volume_quality::evaluate_tetrahedron_jacobian(points, metric).unwrap();
+            let actual = crate::cdt::volume_quality::evaluate_tetrahedron_jacobian(points, metric)
+                .unwrap()
+                .unwrap();
             let upper = tetrahedron_jacobian_upper_bound(points, metric).unwrap();
             assert!(upper >= actual * (1. - 1e-12));
             assert!(upper <= actual * (1. + 1e-6));

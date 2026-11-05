@@ -404,10 +404,16 @@ fn char_to_mx(value: &CharArray) -> Result<MxArray, MxConversionError> {
         .iter_column_major()
         .map(runmat_value::Utf16CodeUnit::raw)
         .collect::<Vec<_>>();
-    record_host_copy(
-        HostCopyReason::MemoryLayoutConversion,
-        encoded.len().saturating_mul(std::mem::size_of::<u16>()),
-    );
+    if !encoded.is_empty() {
+        record_host_copy(
+            if character_changes_layout(value.shape()) {
+                HostCopyReason::MemoryLayoutConversion
+            } else {
+                HostCopyReason::ForeignStorageConversion
+            },
+            encoded.len().saturating_mul(std::mem::size_of::<u16>()),
+        );
+    }
     MxArray::character(encoded, value.shape().to_vec()).map_err(MxConversionError::new)
 }
 
@@ -670,10 +676,15 @@ fn complex_from_components(
 }
 
 fn char_from_mx(values: &[u16], shape: &[usize]) -> Result<Value, MxConversionError> {
-    record_host_copy(
-        HostCopyReason::MemoryLayoutConversion,
-        values.len().saturating_mul(std::mem::size_of::<u16>()),
-    );
+    if !values.is_empty() {
+        let bytes = values.len().saturating_mul(std::mem::size_of::<u16>());
+        // The borrowed MEX payload needs an owned UTF-16 backing. Reordering a
+        // matrix page is a separate copy; row/column pages keep that backing.
+        record_host_copy(HostCopyReason::ForeignStorageConversion, bytes);
+        if character_changes_layout(shape) {
+            record_host_copy(HostCopyReason::MemoryLayoutConversion, bytes);
+        }
+    }
     let code_units = values
         .iter()
         .copied()
@@ -682,6 +693,10 @@ fn char_from_mx(values: &[u16], shape: &[usize]) -> Result<Value, MxConversionEr
     CharArray::from_column_major(code_units, shape.to_vec())
         .map(Value::CharArray)
         .map_err(MxConversionError::new)
+}
+
+fn character_changes_layout(shape: &[usize]) -> bool {
+    shape.first().copied().unwrap_or(0) > 1 && shape.get(1).copied().unwrap_or(1) > 1
 }
 
 fn cell_from_mx(

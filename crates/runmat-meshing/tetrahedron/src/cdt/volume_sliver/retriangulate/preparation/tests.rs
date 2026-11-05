@@ -78,13 +78,13 @@ fn vertex_star_inventory_preserves_complete_cavity_and_outside_owners() {
                     .collect(),
                 volume_m3: tetrahedron_volume(points),
                 aspect_ratio: tetrahedron_edge_aspect_ratio(points),
-                exact_scaled_jacobian: tetrahedron_scaled_jacobian(points),
+                exact_scaled_jacobian: tetrahedron_scaled_jacobian(points).unwrap(),
             }
         })
         .collect::<Vec<_>>();
     let expected =
         constrained_cavity_from_selected_tetrahedra(&all, &selected, Vec::new()).unwrap();
-    let (local, local_selected) = local_cavity_inventory(&topology, &selected);
+    let (local, local_selected) = local_cavity_inventory(&topology, &selected).unwrap();
     let actual =
         constrained_cavity_from_selected_tetrahedra(&local, &local_selected, Vec::new()).unwrap();
     assert_eq!(actual, expected);

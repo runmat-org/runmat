@@ -4,7 +4,7 @@ keywords: [.fea declarations, geometry declaration, mesh settings, material prop
 doc_type: language-reference
 examples: [cantilever-static]
 ---
-# Declaration reference
+# Declarations
 
 A `.fea` module is a list of imports followed by top-level declarations. This page lists every declaration, every member it accepts, the member's type and unit, whether it is required, and its default. Blocks marked `fragment` show the shape of one declaration, not a whole file. A complete study is on the [language overview](../index.md#a-complete-study).
 

@@ -47,7 +47,8 @@ fn cpu_reference_solve_converges_with_small_canonical_residual() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(result.converged);
     assert!(result.residual_norm <= 1.0e-8);
 }
@@ -210,7 +211,8 @@ fn static_pcg_preserves_a_manufactured_solution_under_operator_and_load_scaling(
             LinearAlgebraBackendKind::CpuReference,
             &CpuReferenceBackend,
             None,
-        );
+        )
+        .unwrap();
         let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap();
         let scoped = solve_operator_system_scoped(
             &operator,
@@ -261,7 +263,8 @@ fn zero_load_warm_start_returns_the_exact_zero_solution() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         Some(&[1.0, -1.0]),
-    );
+    )
+    .unwrap();
     assert!(solved.converged, "{:?}", solved.diagnostics);
     // A homogeneous nonsingular system has the exact solution zero, whatever the warm start.
     assert_eq!(solved.iterations, 0);
@@ -286,7 +289,8 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap();
     let parallel = solve_operator_system_scoped(
         &operator,
@@ -346,7 +350,8 @@ fn cpu_reference_warm_start_does_not_use_an_absolute_breakdown_threshold() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         Some(&initial_guess),
-    );
+    )
+    .unwrap();
 
     assert!(result.converged, "diagnostics={:?}", result.diagnostics);
     assert!(result.residual_norm <= 1.0e-8);
@@ -364,7 +369,8 @@ fn noncoercive_operator_is_rejected_before_preconditioner_setup() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(!result.converged);
     assert_eq!(result.iterations, 0);
     assert_eq!(result.diagnostics[0].code, "FEA_INVALID_REAL_SYSTEM");
@@ -407,7 +413,8 @@ fn cpu_and_accelerator_reject_unproved_semidefinite_system_before_iteration() {
             backend,
             &CpuReferenceBackend,
             None,
-        );
+        )
+        .unwrap();
         assert!(!result.converged);
         assert_eq!(result.iterations, 0);
         assert_eq!(result.device_apply_k_attempt_count, 0);
@@ -428,7 +435,8 @@ fn warmed_preparation_keeps_exact_work_admission_and_original_pcg_result() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     let mut settings =
         ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None);
     settings.preparation = Some(&mut reuse);

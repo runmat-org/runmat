@@ -8,7 +8,7 @@ use crate::{
     execution::{StateIdentity, StructuralTransientSegment},
     pipeline::modal_basis::ModalBasisArtifact,
     solve::{
-        dynamics::ModalReducedSystem,
+        dynamics::{ModalProjectionError, ModalReducedSystem},
         transient::{
             solve_structural_modal_transient_block_with_mapping, SecondOrderState,
             StructuralModalTransientBlockSolveInput, StructuralTransientBlockSolveInput,
@@ -37,11 +37,7 @@ pub(super) fn solve_prescribed_modal_motion_block(
         SignalSampleApproach::At,
     )
     .map_err(assembly_error)?;
-    let reduced = ModalReducedSystem::project(input.summary, basis).map_err(|error| {
-        TransientSolveError::ExecutionContract {
-            detail: error.to_string(),
-        }
-    })?;
+    let reduced = ModalReducedSystem::project(input.summary, basis).map_err(projection_error)?;
     let relative_initial_conditions = input
         .initial_conditions
         .as_ref()
@@ -78,10 +74,10 @@ pub(super) fn solve_prescribed_modal_motion_block(
                 .borrow()
                 .get(&snapshot_key(time_s, approach))
                 .cloned()
-                .ok_or_else(|| {
-                    FeaRunError::Assembly(format!(
+                .ok_or_else(|| TransientSolveError::PhysicalMapping {
+                    detail: format!(
                     "modal support-motion snapshot at {time_s} s ({approach:?}) was not retained"
-                ))
+                ),
                 })?;
             let displacement = (expansion)
                 .expand_state(&runmat_types::physical::Quantity::<
@@ -89,31 +85,35 @@ pub(super) fn solve_prescribed_modal_motion_block(
                     _,
                 >::new(state.displacement()))
                 .map(|field| field.into_canonical_storage())
-                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+                .map_err(physical_projection_error)?;
             let velocity = (expansion)
                 .expand_state(&runmat_types::physical::Quantity::<
                     runmat_types::physical::kind::Velocity,
                     _,
                 >::new(state.velocity()))
                 .map(|field| field.into_canonical_storage())
-                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+                .map_err(physical_projection_error)?;
             let acceleration = (expansion)
                 .expand_state(&runmat_types::physical::Quantity::<
                     runmat_types::physical::kind::Acceleration,
                     _,
                 >::new(state.acceleration()))
                 .map(|field| field.into_canonical_storage())
-                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+                .map_err(physical_projection_error)?;
             let expanded = snapshot
                 .lift_homogeneous_state(&displacement, &velocity, &acceleration)
-                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+                .map_err(|error| TransientSolveError::PhysicalMapping {
+                    detail: error.to_string(),
+                })?;
             let state = SecondOrderState::try_new(
                 expanded.displacement,
                 expanded.velocity,
                 expanded.acceleration,
             )
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-            Ok::<_, FeaRunError>((snapshot.full_summary, state))
+            .map_err(|error| TransientSolveError::PhysicalMapping {
+                detail: error.to_string(),
+            })?;
+            Ok::<_, TransientSolveError<FeaRunError>>((snapshot.full_summary, state))
         };
     let block = StructuralTransientBlockSolveInput {
         request: input.request,
@@ -135,4 +135,22 @@ pub(super) fn solve_prescribed_modal_motion_block(
         &mut modal_assembly_at,
         &mut map_physical_state,
     )
+}
+
+fn projection_error(error: ModalProjectionError) -> TransientSolveError<FeaRunError> {
+    match error {
+        ModalProjectionError::Usage(error) => TransientSolveError::Usage(error),
+        other => TransientSolveError::ExecutionContract {
+            detail: other.to_string(),
+        },
+    }
+}
+
+fn physical_projection_error(error: ModalProjectionError) -> TransientSolveError<FeaRunError> {
+    match error {
+        ModalProjectionError::Usage(error) => TransientSolveError::Usage(error),
+        other => TransientSolveError::PhysicalMapping {
+            detail: other.to_string(),
+        },
+    }
 }

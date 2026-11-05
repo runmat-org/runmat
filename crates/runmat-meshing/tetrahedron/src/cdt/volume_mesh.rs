@@ -125,6 +125,7 @@ pub enum DelaunayVolumeMeshStage {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeMeshErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidGeometry,
     InvalidTopology,

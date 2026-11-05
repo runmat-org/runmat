@@ -1,4 +1,6 @@
-# Constraints, loads, and interfaces
+# Constraints, loads and interfaces
+
+This page is the syntax reference for constraints, loads and interfaces. To set up a study, see [Loads](../../loads) and [Constraints](../../constraints).
 
 These declarations belong to a `model`. Each has a stable id and a closed typed kind. Geometry
 targets resolve to exact regions before projection onto a mesh.

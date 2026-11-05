@@ -40,10 +40,12 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
         {
             continue;
         }
-        if let Ok(tetrahedron) =
-            raw_refill_tetrahedron_with_rejection_reason(node_ids, tetrahedron_points, options)
-        {
-            boundary_refill_tetrahedra.push(tetrahedron);
+        match raw_refill_tetrahedron_with_rejection_reason(node_ids, tetrahedron_points, options) {
+            Ok(tetrahedron) => boundary_refill_tetrahedra.push(tetrahedron),
+            Err(RefillTetrahedronError::Rejected(_)) => {}
+            Err(RefillTetrahedronError::Accounting(cause)) => {
+                return Err(ConstrainedCavityRefillError::Accounting(cause))
+            }
         }
     }
     let missing_faces = missing_refill_boundary_faces(cavity, &boundary_refill_tetrahedra)
@@ -76,6 +78,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
         let mut best_failed_face_source = None::<&'static str>;
         for apex in
             local_cap_apex_candidates(face, surface_point, cavity_centroid, &boundary_node_map)
+                .map_err(ConstrainedCavityRefillError::Accounting)?
         {
             let tetrahedron_points = [
                 boundary_node_map[&face[0]],
@@ -103,7 +106,8 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                 .candidate_source_bins
                 .entry(apex.source)
                 .or_default() += 1;
-            let exact_scaled_jacobian = tetrahedron_scaled_jacobian(tetrahedron_points);
+            let exact_scaled_jacobian = tetrahedron_scaled_jacobian(tetrahedron_points)
+                .map_err(ConstrainedCavityRefillError::Accounting)?;
             match raw_refill_tetrahedron_with_rejection_reason(
                 [face[0], face[1], face[2], next_node_id],
                 tetrahedron_points,
@@ -115,7 +119,7 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                         .max(tetrahedron.exact_scaled_jacobian);
                     face_passed = true;
                 }
-                Err(reason) => {
+                Err(RefillTetrahedronError::Rejected(reason)) => {
                     if exact_scaled_jacobian.is_finite()
                         && exact_scaled_jacobian > best_failed_face_quality
                     {
@@ -123,6 +127,9 @@ pub(crate) fn diagnostic_missing_face_local_cap_quality(
                         best_failed_face_source = Some(apex.source);
                     }
                     *diagnostic.rejected_by_reason.entry(reason).or_default() += 1;
+                }
+                Err(RefillTetrahedronError::Accounting(cause)) => {
+                    return Err(ConstrainedCavityRefillError::Accounting(cause))
                 }
             }
             next_node_id = next_node_id.saturating_add(1);

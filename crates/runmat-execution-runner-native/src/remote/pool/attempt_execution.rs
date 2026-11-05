@@ -110,6 +110,7 @@ impl RemotePoolDriver {
                                 progress.as_deref(),
                                 collective_context,
                                 console_budget,
+                                &this.fea_provider,
                             )
                             .await;
                             let execution = execution.and_then(|mut observed| {

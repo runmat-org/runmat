@@ -58,6 +58,24 @@ fn linear_index_and_end_keyword() {
 }
 
 #[test]
+fn member_selectors_bind_end_and_preserve_argument_expansion() {
+    for source in [
+        "S=struct('x',reshape(1:12,3,4)); a=2; actual=S.x(:,a:end); assert(isequal(actual,reshape(4:12,3,3)));",
+        "S=struct('x',reshape(1:12,3,4)); actual=S.x(end-1,end); assert(actual==11);",
+        "S=struct('x',reshape(1:12,3,4)); c={2,4}; actual=S.x(c{1:end}); assert(actual==11);",
+        "S=struct('x',reshape(1:12,3,4)); c={2}; actual=S.x(end-c{end}); assert(actual==10);",
+    ] {
+        execute_source(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+    // This form needs runtime-expanded selector cardinality. Match ordinary
+    // indexing's explicit refusal instead of resolving `end` against the wrong rank.
+    let error =
+        compile_source("S=struct('x',reshape(1:24,3,4,2)); c={2,3}; actual=S.x(c{1:end},1:end);")
+            .expect_err("outer end with variable-width selectors requires dynamic cardinality");
+    assert_eq!(error.identifier(), Some("RunMat:MirIndexContextInvalid"));
+}
+
+#[test]
 fn logical_mask_indexing() {
     // A(logical([1 0 1 0])) over linearized A
     let vars = execute_source("A=[1,2;3,4]; idx=logical([1,0,1,0]); v=A(idx);").unwrap();

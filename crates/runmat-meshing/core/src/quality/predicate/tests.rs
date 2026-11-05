@@ -39,8 +39,35 @@ fn tetrahedron_scaled_jacobian_reports_shape_quality() {
         [1.0e-4, 1.0e-4, 1.0e-5],
     ];
 
-    assert!(tetrahedron_scaled_jacobian(orthogonal) > 0.5);
-    assert!(tetrahedron_scaled_jacobian(sliver) < 0.01);
+    assert!(tetrahedron_scaled_jacobian(orthogonal).unwrap() > 0.5);
+    assert!(tetrahedron_scaled_jacobian(sliver).unwrap() < 0.01);
+}
+
+#[test]
+fn scaled_jacobian_reserves_reference_work_and_settles_invalid_prefix() {
+    use runmat_simulation_usage::{OperationCount, UsageContext, UsageLedger};
+    use std::sync::Arc;
+
+    let valid = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ];
+    // Each call reserves its full batch before settling the work it completes.
+    let budget = OperationCount::from_operations(280 + 280);
+    let ledger = Arc::new(UsageLedger::new(budget, budget).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    context.run_sync(|| {
+        tetrahedron_scaled_jacobian(valid).unwrap();
+        assert_eq!(tetrahedron_scaled_jacobian([[0.0; 3]; 4]).unwrap(), 0.0);
+    });
+    let snapshot = ledger.snapshot().unwrap();
+    assert_eq!(
+        snapshot.completed.meshing,
+        OperationCount::from_operations(280 + 12)
+    );
+    assert_eq!(snapshot.reserved, OperationCount::ZERO);
 }
 
 #[test]
@@ -53,8 +80,8 @@ fn tetrahedron_scaled_jacobian_is_invariant_under_small_uniform_scales() {
     ];
     let small = tetrahedron.map(|point| point.map(|coordinate| coordinate * 1.0e-9));
 
-    let reference = tetrahedron_scaled_jacobian(tetrahedron);
-    let scaled = tetrahedron_scaled_jacobian(small);
+    let reference = tetrahedron_scaled_jacobian(tetrahedron).unwrap();
+    let scaled = tetrahedron_scaled_jacobian(small).unwrap();
 
     assert!(reference > 0.0);
     assert!((scaled - reference).abs() <= 32.0 * f64::EPSILON);
@@ -69,7 +96,7 @@ fn tetrahedron_scaled_jacobian_retains_an_extreme_positive_sliver() {
         [0.5, 0.5, 1.0e-200],
     ];
 
-    let quality = tetrahedron_scaled_jacobian(sliver);
+    let quality = tetrahedron_scaled_jacobian(sliver).unwrap();
     assert!(quality > 0.0);
     assert!(quality < 1.0e-190);
 }

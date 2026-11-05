@@ -2,6 +2,7 @@ use super::DelaunayVolumeMeshErrorKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunaySolverTopologyErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidGeometry,
     InvalidMesh,
@@ -46,6 +47,9 @@ pub(super) fn volume(
     reason: impl Into<String>,
 ) -> DelaunaySolverTopologyError {
     let mapped = match kind {
+        DelaunayVolumeMeshErrorKind::Accounting(cause) => {
+            DelaunaySolverTopologyErrorKind::Accounting(cause)
+        }
         DelaunayVolumeMeshErrorKind::InvalidOptions => {
             DelaunaySolverTopologyErrorKind::InvalidOptions
         }

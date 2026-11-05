@@ -31,6 +31,7 @@ pub(super) fn stage_failure(
                 value: MeshingDiagnosticValue::Text(error.to_string()),
                 unit: None,
             }],
+            accounting_error: None,
             remediation: "inspect the original task time envelope and stage performance".into(),
         }));
     }

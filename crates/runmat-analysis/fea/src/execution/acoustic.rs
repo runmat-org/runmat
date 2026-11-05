@@ -4,7 +4,8 @@ use crate::{
     admission::AnalysisRunIdentity,
     contracts::{validate_solver_formulation_compatibility, SolverMethod},
     physics::acoustic::{
-        solve_canonical_harmonic, validate_canonical_input, AcousticHarmonicPolicy,
+        solve_canonical_harmonic, validate_canonical_input, AcousticHarmonicError,
+        AcousticHarmonicPolicy,
     },
 };
 use runmat_analysis_core::{
@@ -149,8 +150,14 @@ impl AcousticHarmonicWorkload {
             self.solver,
             self.power_balance_relative_tolerance,
         )
-        .map_err(invalid)?;
+        .map_err(acoustic_failure)?;
         AcousticHarmonicSolverResult::new(self, mesh, formulation, response)
+    }
+}
+fn acoustic_failure(error: AcousticHarmonicError) -> AnalysisExecutionError {
+    match error {
+        AcousticHarmonicError::Accounting(cause) => AnalysisExecutionError::Usage(cause),
+        other => invalid(other),
     }
 }
 fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {

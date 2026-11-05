@@ -46,6 +46,7 @@ pub struct DelaunayAdaptiveCoarseningResult {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayAdaptiveCoarseningErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidInput,
     InvalidRemovals,
@@ -369,6 +370,9 @@ fn topology_error(failure: DelaunayTopologyError) -> DelaunayAdaptiveCoarseningE
 
 fn refinement_error(failure: DelaunayAdaptiveRefinementError) -> DelaunayAdaptiveCoarseningError {
     let kind = match failure.kind {
+        DelaunayAdaptiveRefinementErrorKind::Accounting(cause) => {
+            DelaunayAdaptiveCoarseningErrorKind::Accounting(cause)
+        }
         DelaunayAdaptiveRefinementErrorKind::InvalidOptions => {
             DelaunayAdaptiveCoarseningErrorKind::InvalidOptions
         }
@@ -399,6 +403,9 @@ fn insertion_error(failure: DelaunayInsertionError) -> DelaunayAdaptiveCoarsenin
 
 fn quality_error(failure: DelaunayVolumeQualityError) -> DelaunayAdaptiveCoarseningError {
     let kind = match failure.kind {
+        DelaunayVolumeQualityErrorKind::Accounting(cause) => {
+            DelaunayAdaptiveCoarseningErrorKind::Accounting(cause)
+        }
         DelaunayVolumeQualityErrorKind::InvalidOptions => {
             DelaunayAdaptiveCoarseningErrorKind::InvalidOptions
         }

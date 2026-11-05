@@ -197,6 +197,7 @@ pub struct DelaunayVolumeQuality {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeQualityErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidTopology,
     InvalidMetric,
@@ -447,6 +448,9 @@ fn validate_inputs<'a>(
 
 fn provenance_error(failure: DelaunayVolumeProvenanceError) -> DelaunayVolumeQualityError {
     let kind = match failure.kind {
+        DelaunayVolumeProvenanceErrorKind::Accounting(cause) => {
+            DelaunayVolumeQualityErrorKind::Accounting(cause)
+        }
         DelaunayVolumeProvenanceErrorKind::InvalidOptions => {
             DelaunayVolumeQualityErrorKind::InvalidOptions
         }

@@ -1,4 +1,7 @@
 use runmat_execution::resource::ResourceUsage;
+use runmat_simulation_usage::{
+    CompletedUsage, DelegatedReservation, LedgerError, MeasurementVersion, OperationCount,
+};
 use serde::{Deserialize, Serialize};
 pub const FEA_DEADLINE_MONITOR_STACK_BYTES: usize = 64 * 1024;
 pub const FEA_HEARTBEAT_STACK_BYTES: usize = 2 * 1024 * 1024;
@@ -35,6 +38,7 @@ pub struct FeaRunRequest {
     pub allocated_cpu_millicores: u64,
     pub estimated_wall_seconds: Option<u64>,
     pub study_identity: String,
+    pub measurement_version: MeasurementVersion,
 }
 
 impl FeaRunRequest {
@@ -58,6 +62,7 @@ impl FeaRunRequest {
             allocated_cpu_millicores,
             estimated_wall_seconds: None,
             study_identity: study_identity.to_string(),
+            measurement_version: MeasurementVersion::reference_v1(),
         };
         request.validate()?;
         Ok(request)
@@ -78,6 +83,7 @@ impl FeaRunRequest {
             || !valid_estimate
             || self.study_identity.is_empty()
             || self.study_identity.len() > 256
+            || self.measurement_version != MeasurementVersion::reference_v1()
         {
             return Err(FeaRunDenied::LicenseInvalid);
         }
@@ -94,15 +100,33 @@ pub enum FeaRunDenied {
     LeaseExpired,
     LicenseInvalid,
     ServerUnreachable,
+    AllowanceUnpublished,
+    BudgetUnavailable {
+        available_ops: Option<OperationCount>,
+    },
+    Accounting(LedgerError),
 }
 
 impl FeaRunDenied {
+    /// Preserve admission identity and its typed cause at a language builtin.
+    pub(crate) fn into_runtime_error(self, builtin: &'static str) -> crate::RuntimeError {
+        crate::build_runtime_error(self.to_string())
+            .with_identifier(self.error_code())
+            .with_builtin(builtin)
+            .with_source(self)
+            .build()
+    }
     pub const fn error_code(&self) -> &'static str {
         match self {
             Self::SignInRequired => "RM.FEA.SignInRequired",
             Self::AllowanceUsed { .. } => "RM.FEA.AllowanceUsed",
             Self::LeaseExpired | Self::LicenseInvalid => "RM.FEA.LeaseInvalid",
             Self::ServerUnreachable => "RM.FEA.ServerUnreachable",
+            Self::AllowanceUnpublished => "RM.FEA.AllowanceUnpublished",
+            Self::BudgetUnavailable { .. } => "RM.FEA.BudgetUnavailable",
+            Self::Accounting(LedgerError::BudgetExceeded { .. }) => "RM.FEA.BudgetReached",
+            Self::Accounting(LedgerError::MoreGrantRequired { .. }) => "RM.FEA.GrantRequired",
+            Self::Accounting(_) => "RM.FEA.AccountingInvalid",
         }
     }
 
@@ -113,6 +137,14 @@ impl FeaRunDenied {
         context: &crate::operations::OperationContext,
     ) -> crate::operations::OperationErrorEnvelope {
         use crate::operations::*;
+        // The generic operation wire carries string-valued diagnostic context.
+        // Keep the complete typed denial there; callers must not reconstruct
+        // accounting causes or exact counts from presentation messages.
+        let details = std::collections::BTreeMap::from([(
+            "fea_admission_denial".to_owned(),
+            serde_json::to_string(&self)
+                .expect("FEA denials contain only serializable enum and integer/count fields"),
+        )]);
         operation_error(
             operation,
             version,
@@ -124,7 +156,7 @@ impl FeaRunDenied {
                 severity: OperationErrorSeverity::Error,
             },
             self.to_string(),
-            Default::default(),
+            details,
         )
     }
 }
@@ -138,11 +170,11 @@ impl std::fmt::Display for FeaRunDenied {
             } => {
                 let date =
                     refills_at_unix_seconds.and_then(|v| chrono::DateTime::from_timestamp(v, 0));
-                f.write_str("You've used this week's core-hours. ")?;
+                f.write_str("You've used your simulation allowance. ")?;
                 if let Some(date) = date {
-                    write!(f, "They refill on {}. ", date.format("%Y-%m-%d %H:%M UTC"))?;
+                    write!(f, "It refills on {}. ", date.format("%Y-%m-%d %H:%M UTC"))?;
                 }
-                f.write_str("Add a core-hour pack or move to Scale: https://runmat.com/pricing")
+                f.write_str("See your simulation allowance and plans at https://runmat.com/pricing")
             }
             Self::LeaseExpired | Self::LicenseInvalid => f.write_str(
                 "Your FEA authorization needs refreshing. Run `runmat login`, then try again.",
@@ -150,11 +182,36 @@ impl std::fmt::Display for FeaRunDenied {
             Self::ServerUnreachable => {
                 f.write_str("Meshing and solving need a connection to RunMat.")
             }
+            Self::Accounting(cause) => std::fmt::Display::fmt(cause, f),
+            Self::AllowanceUnpublished => {
+                f.write_str("The simulation allowance for this RunMat version is not published.")
+            }
+            Self::BudgetUnavailable { available_ops } => {
+                f.write_str(
+                    "The requested simulation spending cap exceeds the available allowance",
+                )?;
+                if let Some(available) = available_ops {
+                    write!(f, " ({available} operations)")?;
+                }
+                f.write_str(".")
+            }
         }
     }
 }
 
-impl std::error::Error for FeaRunDenied {}
+impl std::error::Error for FeaRunDenied {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Accounting(cause) => Some(cause),
+            _ => None,
+        }
+    }
+}
+impl From<LedgerError> for FeaRunDenied {
+    fn from(cause: LedgerError) -> Self {
+        Self::Accounting(cause)
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FeaRunExecutionError {
@@ -202,21 +259,27 @@ impl std::fmt::Display for FeaRunExecutionError {
 }
 impl std::error::Error for FeaRunExecutionError {}
 
-/// Cumulative allocated CPU allowance and expiry from the original lease.
+/// Fixed simulation spending cap, cumulative grant and lease liveness.
+/// CPU allocation and elapsed wall time are physical-resource telemetry, not
+/// conversion factors for these operation counts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FeaRunBudget {
-    pub held_core_millis: u64,
+    pub budget_ops: OperationCount,
+    pub granted_ops: OperationCount,
     pub expires_at_unix_millis: u64,
     pub heartbeat_millis: u64,
 }
 
 impl FeaRunBudget {
     pub fn validate(&self) -> Result<(), FeaRunDenied> {
-        if self.held_core_millis == 0 {
+        if self.budget_ops == OperationCount::ZERO {
             return Err(FeaRunDenied::AllowanceUsed {
                 refills_at_unix_seconds: None,
             });
+        }
+        if self.granted_ops > self.budget_ops {
+            return Err(LedgerError::InvalidGrant.into());
         }
         if self.expires_at_unix_millis
             <= runmat_time::unix_timestamp_ms().min(u128::from(u64::MAX)) as u64
@@ -230,15 +293,47 @@ impl FeaRunBudget {
     }
 }
 
-/// Host calls must have bounded transport timeouts. A separate runtime monitor
-/// enforces the current hold while a heartbeat is in flight.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FeaRunUsage {
+    pub completed_ops: CompletedUsage,
+    pub resources: ResourceUsage,
+}
+
+/// Host calls have bounded transport timeouts. Numerical reservations enforce
+/// the operation grant before effects; the monitor enforces lease expiry.
 pub trait FeaRunPermit: Send {
     fn budget(&self) -> FeaRunBudget;
-    fn heartbeat(&self, usage: &ResourceUsage) -> Result<FeaRunBudget, FeaRunDenied>;
+    fn heartbeat(&self, usage: &FeaRunUsage) -> Result<FeaRunBudget, FeaRunDenied>;
+    /// Request an absolute cumulative operation grant before numerical effects.
+    /// Fixed-grant hosts can renew liveness but cannot manufacture capacity.
+    fn request_grant(
+        &self,
+        usage: &FeaRunUsage,
+        required: OperationCount,
+    ) -> Result<FeaRunBudget, FeaRunDenied> {
+        let budget = self.heartbeat(usage)?;
+        budget.validate()?;
+        if required > budget.budget_ops {
+            return Err(LedgerError::BudgetExceeded {
+                required,
+                budget: budget.budget_ops,
+            }
+            .into());
+        }
+        if required > budget.granted_ops {
+            return Err(LedgerError::MoreGrantRequired {
+                required,
+                granted: budget.granted_ops,
+            }
+            .into());
+        }
+        Ok(budget)
+    }
     fn settle(
         self: Box<Self>,
         outcome: FeaRunOutcome,
-        usage: &ResourceUsage,
+        usage: &FeaRunUsage,
     ) -> Result<(), FeaRunDenied>;
 }
 
@@ -351,14 +446,6 @@ impl FeaRunDelegation {
         {
             return Err(FeaRunDenied::LicenseInvalid);
         }
-        let used = (u128::from(self.elapsed_wall_millis)
-            * u128::from(self.request.allocated_cpu_millicores))
-        .div_ceil(1000);
-        if used >= u128::from(self.budget.held_core_millis) {
-            return Err(FeaRunDenied::AllowanceUsed {
-                refills_at_unix_seconds: None,
-            });
-        }
         if self.allocation_ceiling_millicores == 0
             || self.allocation_ceiling_millicores > self.request.allocated_cpu_millicores
         {
@@ -367,7 +454,16 @@ impl FeaRunDelegation {
         Ok(())
     }
 }
+/// The trusted parent retains the reservation alongside the child's exact
+/// authenticated assignment. Only `delegation` crosses the worker transport.
+pub struct FeaRunDelegatedGrant {
+    pub delegation: FeaRunDelegation,
+    pub reservation: DelegatedReservation,
+}
 pub trait FeaRunDelegationSource: Send + Sync {
-    fn snapshot(&self) -> Result<FeaRunDelegation, FeaRunDenied>;
+    /// Liveness and root limits only; reading these fields reserves no child
+    /// capacity. A child still needs its own retained delegated reservation.
+    fn current_budget(&self) -> Result<FeaRunBudget, FeaRunDenied>;
+    fn delegate(&self, maximum: OperationCount) -> Result<FeaRunDelegatedGrant, FeaRunDenied>;
     fn cancellation_token(&self) -> runmat_execution::cancellation::CancellationToken;
 }

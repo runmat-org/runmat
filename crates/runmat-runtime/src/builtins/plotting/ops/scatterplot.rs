@@ -266,7 +266,7 @@ async fn gpu_real_imag_handles(
     let provider = match resolve_resident_compute_owner(handle) {
         Ok(provider) => provider,
         Err(ResidentComputeDecline::PolicyDenied) => return Ok(None),
-        Err(decline @ ResidentComputeDecline::InvalidOwner) => {
+        Err(decline) => {
             return Err(decline.with_domain_error(scatterplot_error(
                 "scatterplot: no exact provider owns the sample input",
                 &SCATTERPLOT_ERROR_PLOT_FAILED,

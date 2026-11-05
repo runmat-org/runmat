@@ -107,6 +107,7 @@ impl AnalysisProjection {
                     }
                 },
             )
+            .map_err(AnalysisProjectionError::Accounting)?
             .ok_or(AnalysisProjectionError::InvalidElementGeometry {
                 element_id: element.element_id,
             })?;

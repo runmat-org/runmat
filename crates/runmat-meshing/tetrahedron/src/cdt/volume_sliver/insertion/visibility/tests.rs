@@ -116,6 +116,7 @@ fn reference_smooth_visibility_cavity_point(
                     points,
                     metrics(*face).unwrap(),
                 )
+                .unwrap()
                 .map(|quality| quality.metric_scaled_jacobian)
             })
             .min_by(f64::total_cmp)

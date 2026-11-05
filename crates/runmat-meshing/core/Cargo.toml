@@ -1,6 +1,6 @@
 [package]
 name = "runmat-meshing-core"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
@@ -19,6 +19,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 runmat-geometry-core = { workspace = true }
 runmat-meshing-size = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 robust = "1.2"
 
 [dev-dependencies]

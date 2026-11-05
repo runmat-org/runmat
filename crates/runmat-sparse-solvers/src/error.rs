@@ -22,6 +22,8 @@ pub enum SolverError {
     OverBudget { required: u64, budget: u64 },
     #[error("cancelled")]
     Cancelled,
+    #[error(transparent)]
+    Usage(#[from] runmat_simulation_usage::LedgerError),
     #[error("index overflow")]
     IndexOverflow,
     #[error("operator application failed: {0}")]

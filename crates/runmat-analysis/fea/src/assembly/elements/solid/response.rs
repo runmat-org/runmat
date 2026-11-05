@@ -3,7 +3,7 @@
 //! Quadrature selection and global DOF gathering belong to callers. Thermal response at an
 //! arbitrary point uses the retained local nodal solution, never a fit to recovery samples.
 
-use super::SolidMaterial;
+use super::{material::SolidMaterialError, SolidMaterial};
 use crate::assembly::SolidRecoveryElementSummary;
 use crate::topology::VolumeQuadraturePoint;
 
@@ -17,6 +17,8 @@ pub(crate) struct SolidResponsePoint {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SolidResponseError {
+    #[error("solid response numerical accounting failed: {0}")]
+    Accounting(runmat_simulation_usage::LedgerError),
     #[error("solid response material is invalid")]
     InvalidMaterial,
     #[error("solid response input is inconsistent or non-finite")]
@@ -28,12 +30,8 @@ pub(crate) fn response_from_strain(
     total_strain: [f64; 6],
     eigenstrain: f64,
 ) -> Result<SolidResponsePoint, SolidResponseError> {
-    let lambda = material
-        .lame_lambda_pa()
-        .map_err(|_| SolidResponseError::InvalidMaterial)?;
-    let mu = material
-        .shear_modulus_pa()
-        .map_err(|_| SolidResponseError::InvalidMaterial)?;
+    let lambda = material.lame_lambda_pa().map_err(material_error)?;
+    let mu = material.shear_modulus_pa().map_err(material_error)?;
     if !eigenstrain.is_finite() || total_strain.iter().any(|value| !value.is_finite()) {
         return Err(SolidResponseError::InvalidInput);
     }
@@ -60,6 +58,13 @@ pub(crate) fn response_from_strain(
         elastic_strain,
         stress,
     })
+}
+
+fn material_error(error: SolidMaterialError) -> SolidResponseError {
+    match error {
+        SolidMaterialError::Accounting(error) => SolidResponseError::Accounting(error),
+        _ => SolidResponseError::InvalidMaterial,
+    }
 }
 
 pub(crate) fn response_at_volume_point(

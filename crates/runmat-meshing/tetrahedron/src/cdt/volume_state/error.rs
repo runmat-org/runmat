@@ -5,6 +5,7 @@ use crate::cdt::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::cdt) enum VolumeStateErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidInput,
     InvalidTopology,
@@ -32,6 +33,9 @@ pub(super) fn error(kind: VolumeStateErrorKind, reason: impl Into<String>) -> Vo
 }
 pub(super) fn quality_error(failure: DelaunayVolumeQualityError) -> VolumeStateError {
     let kind = match failure.kind {
+        DelaunayVolumeQualityErrorKind::Accounting(cause) => {
+            VolumeStateErrorKind::Accounting(cause)
+        }
         DelaunayVolumeQualityErrorKind::ResourceLimit => VolumeStateErrorKind::ResourceLimit,
         DelaunayVolumeQualityErrorKind::Cancelled => VolumeStateErrorKind::Cancelled,
         DelaunayVolumeQualityErrorKind::InvalidOptions => VolumeStateErrorKind::InvalidOptions,

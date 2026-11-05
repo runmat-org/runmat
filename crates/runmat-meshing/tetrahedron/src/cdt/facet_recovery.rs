@@ -130,6 +130,7 @@ pub struct DelaunayFacetRecovery {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayFacetRecoveryErrorKind {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidConstraints,
     InvalidTopology,

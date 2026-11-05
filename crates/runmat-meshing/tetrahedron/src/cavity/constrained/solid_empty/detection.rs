@@ -7,7 +7,7 @@ pub(in super::super) fn solid_empty_boundary_faces(
     boundary_nodes: &BTreeMap<u32, Point3>,
     boundary_triangles: &[Triangle3],
     options: ConstrainedCavityRefillOptions,
-) -> Vec<[u32; 3]> {
+) -> Result<Vec<[u32; 3]>, ConstrainedCavityRefillError> {
     let boundary_node_ids = cavity_boundary_node_ids(cavity)
         .into_iter()
         .collect::<Vec<_>>();
@@ -43,25 +43,29 @@ pub(in super::super) fn solid_empty_boundary_faces(
                     {
                         continue;
                     }
-                    if raw_refill_tetrahedron_with_rejection_reason(
+                    match raw_refill_tetrahedron_with_rejection_reason(
                         tetrahedron_node_ids,
                         points,
                         options,
-                    )
-                    .is_ok()
-                    {
-                        for face in candidate_faces {
-                            if boundary_faces.contains(&face) {
-                                solid_faces.insert(face);
+                    ) {
+                        Ok(_) => {
+                            for face in candidate_faces {
+                                if boundary_faces.contains(&face) {
+                                    solid_faces.insert(face);
+                                }
                             }
+                        }
+                        Err(RefillTetrahedronError::Rejected(_)) => {}
+                        Err(RefillTetrahedronError::Accounting(cause)) => {
+                            return Err(ConstrainedCavityRefillError::Accounting(cause));
                         }
                     }
                 }
             }
         }
     }
-    boundary_faces
+    Ok(boundary_faces
         .into_iter()
         .filter(|face| !solid_faces.contains(face))
-        .collect()
+        .collect())
 }

@@ -63,7 +63,7 @@ impl MagnetostaticWorkload {
             self.relative_residual_target,
             system,
         )
-        .map_err(invalid)?;
+        .map_err(super::magnetic_failure)?;
         drop(input);
         MagnetostaticSolverResult::new(self, mesh, formulation, sampling, response)
     }

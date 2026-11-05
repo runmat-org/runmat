@@ -1330,6 +1330,19 @@ fn scalar_slice_with_nonnumeric_selector_errors() {
 }
 
 #[test]
+fn primitive_scalar_slices_use_shared_index_plan() {
+    let source = "x = 7; column = x(:); one = x(:,1,1); repeated = x([1 1],1); empty = x([],1); \
+                  assert(column == 7); assert(one == 7); \
+                  assert(isequal(repeated, [7;7])); assert(isempty(empty));";
+    let bytecode = compile_source(source).expect("compile scalar slice plans");
+    interpret(&bytecode).expect("singleton, repeated, and empty selections execute");
+
+    let out_of_bounds = compile_source("x = 7; y = x(:,2);").expect("compile scalar bounds check");
+    let error = interpret(&out_of_bounds).expect_err("second scalar column is out of bounds");
+    assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
+}
+
+#[test]
 fn string_slice_assignment_on_scalar_string_reports_slice_non_tensor() {
     let input = r#"
         x = "abc";

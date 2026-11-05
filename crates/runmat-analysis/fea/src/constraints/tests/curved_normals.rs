@@ -177,7 +177,8 @@ fn curved_tri6_normal_support_solves_tangential_traction_and_recovers_normal_rea
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(solve.converged, "{:?}", solve.diagnostics);
     let (tangent_stiffness, normal_tangent_stiffness) =
         curved_midside_stiffness_reference(warp_m, youngs_pa, poisson);
@@ -331,7 +332,8 @@ fn curved_tri6_foundation_adds_independent_normal_stiffness_and_recovered_energy
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-    );
+    )
+    .unwrap();
     assert!(solve.converged, "{:?}", solve.diagnostics);
     let (solid_stiffness, _) = curved_midside_stiffness_reference(warp_m, youngs_pa, poisson);
     let (_, midside_shape_area_m2) = curved_face_traction_reference(warp_m);

@@ -422,5 +422,6 @@ fn structural_modal_snapshot_shows_only_mode_shapes_and_verifies() {
         .output()
         .unwrap();
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("no view 'stress'"));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("no view 'stress'"), "stderr: {stderr}");
 }

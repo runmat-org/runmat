@@ -42,7 +42,7 @@ pub fn visit_tetrahedron_volume_quadrature(
     order: runmat_meshing_core::ElementOrder,
     coordinates: &[[f64; 3]],
     visit: impl FnMut(VolumeQuadraturePoint),
-) -> Option<()> {
+) -> Result<Option<()>, runmat_simulation_usage::LedgerError> {
     quadrature::visit_volume_quadrature(order, coordinates, visit)
 }
 #[cfg(test)]

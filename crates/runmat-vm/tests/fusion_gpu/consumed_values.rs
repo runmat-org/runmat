@@ -197,7 +197,9 @@ fn borrowed_initial_workspace_survives_error_and_retires_only_after_replacement(
                 admission,
                 source: source_lease,
             } = canonical_input(&bytecode, runtime, &input);
-            let mut publication = projection.terminal_publication(&runtime).unwrap();
+            let mut publication =
+                block_on(runtime.scope(async { projection.terminal_publication(&runtime) }))
+                    .unwrap();
             let result = block_on(runmat_vm::interpret_workspace(
                 &bytecode,
                 vars,
@@ -217,7 +219,7 @@ fn borrowed_initial_workspace_survives_error_and_retires_only_after_replacement(
                 Some(Value::Num(3.0)),
                 "staged prefix survives terminalization"
             );
-            publication.publish_pending().unwrap();
+            block_on(runtime.scope(async { publication.publish_pending() })).unwrap();
             assert_eq!(
                 owner.lookup("x").unwrap(),
                 Some(Value::Num(3.0)),

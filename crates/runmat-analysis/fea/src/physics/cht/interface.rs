@@ -38,7 +38,7 @@ pub(super) fn solve_conjugate_interface(
     interface_conductance_w_per_m2k: f64,
     advection_shift_k: f64,
     reference_temperature_k: f64,
-) -> Result<ConjugateInterfaceSolution, String> {
+) -> Result<ConjugateInterfaceSolution, dense::DenseCouplingError> {
     let temperature_count = base_temperature.len().max(1);
     let interface_count = heat_flux.len().max(1);
     let interface_denom = interface_count.saturating_sub(1).max(1) as f64;

@@ -17,7 +17,7 @@ pub(super) fn diagnostic_boundary_face_completion(
     boundary_triangles: &[Triangle3],
     options: ConstrainedCavityRefillOptions,
     missing_face_count: usize,
-) -> BoundaryNodeCompletionDiagnostic {
+) -> Result<BoundaryNodeCompletionDiagnostic, ConstrainedCavityRefillError> {
     let mut cap_candidate_count = 0_usize;
     let mut outside_candidate_count = 0_usize;
     let mut duplicate_candidate_count = 0_usize;
@@ -76,9 +76,10 @@ pub(super) fn diagnostic_boundary_face_completion(
                     saw_non_duplicate = true;
                 }
             }
-            Err(reason) => {
+            Err(RefillTetrahedronError::Rejected(reason)) => {
                 *rejected_cap_node_ids.entry(node_id).or_default() += 1;
-                let exact_scaled_jacobian = tetrahedron_scaled_jacobian(points);
+                let exact_scaled_jacobian = tetrahedron_scaled_jacobian(points)
+                    .map_err(ConstrainedCavityRefillError::Accounting)?;
                 if exact_scaled_jacobian.is_finite() {
                     max_rejected_scaled_jacobian =
                         max_rejected_scaled_jacobian.max(exact_scaled_jacobian);
@@ -173,6 +174,9 @@ pub(super) fn diagnostic_boundary_face_completion(
                     .entry(boundary_node_refill_rejection_reason(reason))
                     .or_default() += 1;
             }
+            Err(RefillTetrahedronError::Accounting(cause)) => {
+                return Err(ConstrainedCavityRefillError::Accounting(cause));
+            }
         }
     }
     let reason = if saw_non_duplicate {
@@ -182,7 +186,7 @@ pub(super) fn diagnostic_boundary_face_completion(
     } else {
         "boundary_node_completion_no_candidate"
     };
-    BoundaryNodeCompletionDiagnostic {
+    Ok(BoundaryNodeCompletionDiagnostic {
         reason,
         missing_face_count,
         cap_candidate_count,
@@ -213,5 +217,5 @@ pub(super) fn diagnostic_boundary_face_completion(
         three_edge_split_cap_scaled_jacobian_worst_corner_bins,
         three_edge_split_cap_apex_limited_node_ids,
         rejected_by_reason,
-    }
+    })
 }

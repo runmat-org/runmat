@@ -362,6 +362,21 @@
       ]
     },
     {
+      "id": "structural.modal-reduced.residual-vectors",
+      "title": "Modal residual vectors and applied-load static correction for modal-reduced structural steps",
+      "kind": "language",
+      "area": "structural",
+      "status": "release",
+      "requirements": [
+        "FEA-DYNAMICS-RESPONSE-001"
+      ],
+      "verification": [],
+      "docs": [
+        "language/reference/procedures.md",
+        "physics/structural.md"
+      ]
+    },
+    {
       "id": "thermal.static",
       "title": "Thermal static",
       "kind": "procedure",

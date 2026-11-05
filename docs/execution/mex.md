@@ -223,6 +223,8 @@ Storage supplied through `mxSetData`, typed setters, `mxSetIr`, or `mxSetJc` is 
 
 Separate/interleaved complex changes, 32-bit sparse indices, character encoding, row-major layout, and host/device movement are explicit conversion boundaries. Pointers must not outlive the array, persistent allocation, or Data API control that owns them.
 
+Character interchange preserves UTF-16 code units, including unpaired surrogates. Borrowed MEX character data requires owned runtime storage; row and column vectors retain its linear order, while matrix pages require reordering. Copy diagnostics distinguish storage materialization from layout conversion.
+
 ## Modern C++ Data And Engine APIs
 
 Modern gateways include `mex.hpp` and `mexAdapter.hpp`, derive `MexFunction` from `matlab::mex::Function`, and receive `matlab::mex::ArgumentList` objects. The bundled Data API supports:

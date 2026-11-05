@@ -128,7 +128,12 @@ fn meshing_trailing_bound_admits_renewals_and_denials_without_consuming_a_slot()
     let observer = LeaseObserver::default();
     observer.install(&grant, &scope).unwrap();
     let mut budget = grant.parent.budget;
-    budget.held_core_millis += 1000;
+    budget.granted_ops = budget
+        .granted_ops
+        .checked_add(runmat_simulation_usage::OperationCount::from_operations(
+            1000,
+        ))
+        .unwrap();
     budget.expires_at_unix_millis += 1000;
     let update = |update| {
         serde_json::to_vec(&WorkerDriverMessage::FeaLeaseUpdate {

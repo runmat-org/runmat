@@ -35,7 +35,7 @@ use crate::{
 };
 
 const YOUNGS: f64 = 100.0;
-const WAVE_SPEED: f64 = 10.0;
+pub(crate) const WAVE_SPEED: f64 = 10.0;
 const PHASOR: [f64; 2] = [1.0, 0.4];
 
 mod curved;
@@ -43,7 +43,7 @@ mod damped;
 mod damped_modal;
 mod execution;
 
-fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {
+pub(crate) fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.material_assignments[0].target =
         PropertyRegionTarget::solid(runmat_meshing_core::fixtures::fixture_solid("slab"));
@@ -130,7 +130,7 @@ fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {
     model
 }
 
-fn assemble(
+pub(crate) fn assemble(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     k: f64,
@@ -300,7 +300,7 @@ fn harmonic_continuum(quadratic: bool) {
     }
 }
 
-fn modal_model(model: &AnalysisModel) -> AnalysisModel {
+pub(crate) fn modal_model(model: &AnalysisModel) -> AnalysisModel {
     let mut modal = model.clone();
     modal.sequence.steps = vec![ProcedureStep::structural_modal("rod_basis")];
     replace_fixture_excitations(&mut modal, Vec::new());
@@ -331,7 +331,7 @@ fn solid_rod_tet10_modal_frequency_and_retained_response_have_independent_eviden
     modal_continuum(true);
 }
 
-fn rod_mesh(cells: usize, quadratic: bool) -> SolverMeshArtifact {
+pub(crate) fn rod_mesh(cells: usize, quadratic: bool) -> SolverMeshArtifact {
     if quadratic {
         quadratic_slab_mesh(cells)
     } else {

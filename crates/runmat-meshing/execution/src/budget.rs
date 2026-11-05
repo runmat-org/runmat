@@ -415,6 +415,7 @@ pub(super) fn failure(
         witnesses: Vec::new(),
         request_values,
         achieved_values,
+        accounting_error: None,
         remediation: remediation.into(),
     })
 }

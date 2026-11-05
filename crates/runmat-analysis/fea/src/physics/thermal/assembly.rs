@@ -171,8 +171,12 @@ pub(crate) fn assemble(
     excitations: &RealizedExcitations,
     sample: ExcitationSamplePoint<'_>,
 ) -> Result<ThermalOperatorAssembly, ThermalAssemblyError> {
-    let projection = AnalysisProjection::derive(mesh)
-        .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+    let projection = AnalysisProjection::derive(mesh).map_err(|error| match error {
+        crate::topology::AnalysisProjectionError::Accounting(error) => {
+            ThermalAssemblyError::Accounting(error)
+        }
+        other => ThermalAssemblyError::InvalidProjection(other.to_string()),
+    })?;
     // A finite-conductance interface splits its nodes: the second side's elements and faces use
     // their own side-owned nodes, joined to the first side by the interface conductance.
     let (interfaces, dofs) = thermal_interface::solid_conduction(&projection, &model.interfaces)
@@ -231,11 +235,41 @@ pub(crate) fn assemble(
         |index, _, out: &mut ElementOutputs<'_, f64>| {
             let element = &projection.elements[index];
             let n = element.node_indices.len();
+            // Fifteen points; each node pair forms a three-term gradient dot
+            // (3 products, 2 sums), scales and accumulates conduction (3),
+            // then forms and accumulates heat capacity (4): 12 operations.
+            let pairs = u64::try_from(n)
+                .ok()
+                .and_then(|width| width.checked_mul(width))
+                .ok_or(ThermalAssemblyError::Accounting(
+                    runmat_simulation_usage::LedgerError::CountOverflow,
+                ))?;
+            let per_point = pairs
+                .checked_mul(12)
+                .ok_or(ThermalAssemblyError::Accounting(
+                    runmat_simulation_usage::LedgerError::CountOverflow,
+                ))?;
+            let maximum = per_point
+                .checked_mul(15)
+                .ok_or(ThermalAssemblyError::Accounting(
+                    runmat_simulation_usage::LedgerError::CountOverflow,
+                ))?;
+            let usage = runmat_simulation_usage::UsageContext::capture();
+            let mut batch = usage
+                .as_ref()
+                .map(|usage| {
+                    usage.ledger().reserve(
+                        runmat_simulation_usage::UsageCategory::Assembly,
+                        runmat_simulation_usage::OperationCount::from_operations(maximum),
+                    )
+                })
+                .transpose()?;
+            let mut visited = 0_u64;
             let conductivity = element_conductivity_w_per_mk[index];
             let capacity = element_volumetric_capacity_j_per_m3k[index];
             let mut local_conductivity = vec![0.0; n * n];
             let mut local_capacity = vec![0.0; n * n];
-            projection
+            let quadrature = projection
                 .visit_element_quadrature(element, |point| {
                     let gradients = point.physical_shape_gradients();
                     let shapes = point.shape_values();
@@ -252,8 +286,20 @@ pub(crate) fn assemble(
                                 capacity * shapes[row] * shapes[column] * point.volume_weight_m3;
                         }
                     }
+                    visited += 1;
                 })
-                .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+                .map_err(|error| match error {
+                    crate::topology::AnalysisProjectionError::Accounting(error) => {
+                        ThermalAssemblyError::Accounting(error)
+                    }
+                    other => ThermalAssemblyError::InvalidProjection(other.to_string()),
+                });
+            if let Some(batch) = &mut batch {
+                batch.complete(runmat_simulation_usage::OperationCount::from_operations(
+                    visited * per_point,
+                ))?;
+            }
+            quadrature?;
             out.matrix(0).copy_from_slice(&local_conductivity);
             out.matrix(1).copy_from_slice(&local_capacity);
             Ok(())
@@ -262,6 +308,8 @@ pub(crate) fn assemble(
     )
     .map_err(|error| match error {
         ElementAssemblyError::Element { error, .. } => error,
+        ElementAssemblyError::Admission(error) => error,
+        ElementAssemblyError::Accounting(error) => ThermalAssemblyError::Accounting(error),
         other => ThermalAssemblyError::SparseOperator(other.to_string()),
     })?;
     drop(element_map);

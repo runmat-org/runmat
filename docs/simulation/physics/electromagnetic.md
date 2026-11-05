@@ -1,4 +1,4 @@
-# Electromagnetic FEA in RunMat: potentials, harmonic fields, currents, and losses
+# Electromagnetic
 
 Electromagnetic analysis predicts electric potential, current flow, magnetic vector potential,
 flux density, field intensity, and frequency-dependent loss. RunMat uses typed quantities for volts,

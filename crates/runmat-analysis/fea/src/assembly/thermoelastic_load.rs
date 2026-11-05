@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 use runmat_meshing_core::SolverMeshArtifact;
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 use thiserror::Error;
 
 use crate::{
@@ -13,6 +14,10 @@ use crate::{
 
 #[derive(Debug, Error)]
 pub(crate) enum ThermoelasticLoadError {
+    #[error("thermoelastic numerical accounting failed: {0}")]
+    Accounting(#[from] LedgerError),
+    #[error("thermoelastic projection cancelled")]
+    Cancelled,
     #[error("thermoelastic element projection is invalid: {0}")]
     Projection(String),
     #[error("thermoelastic solid element {0} has no compiled material owner")]
@@ -27,6 +32,62 @@ pub(crate) enum ThermoelasticLoadError {
     UnknownRegion(String),
     #[error("solved thermoelastic temperature field is incomplete or inconsistent with the mesh")]
     InvalidNodalField,
+}
+
+fn projection_error(error: crate::topology::AnalysisProjectionError) -> ThermoelasticLoadError {
+    match error {
+        crate::topology::AnalysisProjectionError::Accounting(cause) => {
+            ThermoelasticLoadError::Accounting(cause)
+        }
+        crate::topology::AnalysisProjectionError::Cancelled => ThermoelasticLoadError::Cancelled,
+        other => ThermoelasticLoadError::Projection(other.to_string()),
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum ThermoelasticLoadCapacityError<A> {
+    Numerical(ThermoelasticLoadError),
+    Admission(A),
+}
+
+impl<A> From<ThermoelasticLoadError> for ThermoelasticLoadCapacityError<A> {
+    fn from(error: ThermoelasticLoadError) -> Self {
+        Self::Numerical(error)
+    }
+}
+
+impl<A> From<LedgerError> for ThermoelasticLoadCapacityError<A> {
+    fn from(error: LedgerError) -> Self {
+        Self::Numerical(ThermoelasticLoadError::Accounting(error))
+    }
+}
+
+fn quadrature_work(order: runmat_meshing_core::ElementOrder, prescribed: bool) -> OperationCount {
+    let per_point = match order {
+        runmat_meshing_core::ElementOrder::Tet4 => 39 * 4 + 105,
+        runmat_meshing_core::ElementOrder::Tet10 => 116 + 39 * 10 + 105,
+    };
+    OperationCount::from_operations(
+        crate::topology::quadrature::KEAST_FIFTEEN.len() as u64 * per_point
+            + if prescribed { 1 + 2 + 4 } else { 0 },
+    )
+}
+
+#[cfg(test)]
+fn immediate<R>(
+    future: impl std::future::Future<
+        Output = Result<R, ThermoelasticLoadCapacityError<std::convert::Infallible>>,
+    >,
+) -> Result<R, ThermoelasticLoadError> {
+    let mut future = std::pin::pin!(future);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    match std::future::Future::poll(future.as_mut(), &mut context) {
+        std::task::Poll::Ready(result) => result.map_err(|error| match error {
+            ThermoelasticLoadCapacityError::Numerical(error) => error,
+            ThermoelasticLoadCapacityError::Admission(never) => match never {},
+        }),
+        std::task::Poll::Pending => unreachable!("immediate thermal load cannot suspend"),
+    }
 }
 
 pub(super) fn validate_temperature_regions(
@@ -89,7 +150,19 @@ pub(super) fn element_temperature_k(
             context.applied_temperature_delta_k.canonical_value(),
             |target| target.temperature_delta_k,
         );
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(UsageCategory::Assembly, OperationCount::from_operations(1))
+        })
+        .transpose()?;
     let temperature = context.reference_temperature_k.canonical_value() + delta;
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(1))?;
+    }
     if temperature.is_finite() && temperature > 0.0 {
         Ok(temperature)
     } else {
@@ -110,8 +183,20 @@ pub(super) fn element_thermal_eigenstrain(
         .require_thermal()
         .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(owner.element_id))?;
     let temperature_k = element_temperature_k(region, provenance, context)?;
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage
+                .ledger()
+                .reserve(UsageCategory::Assembly, OperationCount::from_operations(2))
+        })
+        .transpose()?;
     let strain = thermal.expansion_coefficient_per_k.canonical_value()
         * (temperature_k - thermal.reference_temperature_k.canonical_value());
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(2))?;
+    }
     if strain.is_finite() {
         Ok(strain)
     } else {
@@ -125,16 +210,35 @@ pub(super) fn element_thermal_eigenstrain(
 /// The isotropic hydrostatic stress is E α(T − Tref)/(1−2ν), so each nodal force component is
 /// its volume integral against the corresponding physical shape gradient. No material average or
 /// ordinal DOF distribution enters this load.
+#[cfg(test)]
 pub(super) fn assemble_prescribed_temperature_load(
     mesh: &SolverMeshArtifact,
     properties: &CompiledPropertyMap,
     context: &FeaThermoMechanicalContext,
 ) -> Result<Vec<f64>, ThermoelasticLoadError> {
+    let mut owner = |_, _| std::future::ready(Ok::<(), std::convert::Infallible>(()));
+    immediate(assemble_prescribed_temperature_load_with_owner(
+        mesh, properties, context, &mut owner,
+    ))
+}
+
+pub(super) async fn assemble_prescribed_temperature_load_with_owner<O, F, A>(
+    mesh: &SolverMeshArtifact,
+    properties: &CompiledPropertyMap,
+    context: &FeaThermoMechanicalContext,
+    before: &mut O,
+) -> Result<Vec<f64>, ThermoelasticLoadCapacityError<A>>
+where
+    O: FnMut(usize, OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+{
     validate_temperature_regions(mesh, context)?;
-    let projection = AnalysisProjection::derive(mesh)
-        .map_err(|error| ThermoelasticLoadError::Projection(error.to_string()))?;
+    let projection = AnalysisProjection::derive(mesh).map_err(projection_error)?;
     let mut load = vec![0.0; projection.nodes.len() * 3];
-    for element in &projection.elements {
+    for (element_index, element) in projection.elements.iter().enumerate() {
+        before(element_index, quadrature_work(element.order, true))
+            .await
+            .map_err(ThermoelasticLoadCapacityError::Admission)?;
         let owner = properties
             .solid_material(element.stable_identity)
             .ok_or(ThermoelasticLoadError::MissingOwner(element.element_id))?;
@@ -142,13 +246,24 @@ pub(super) fn assemble_prescribed_temperature_load(
             .material
             .require_mechanical()
             .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(element.element_id))?;
-        let hydrostatic_stress_pa = mechanical.youngs_modulus_pa.canonical_value()
-            * element_thermal_eigenstrain(owner, &element.region_id, &element.provenance, context)?
+        let eigenstrain =
+            element_thermal_eigenstrain(owner, &element.region_id, &element.provenance, context)?;
+        let usage = UsageContext::capture();
+        let mut batch = usage
+            .as_ref()
+            .map(|usage| {
+                usage
+                    .ledger()
+                    .reserve(UsageCategory::Assembly, OperationCount::from_operations(4))
+            })
+            .transpose()?;
+        let hydrostatic_stress_pa = mechanical.youngs_modulus_pa.canonical_value() * eigenstrain
             / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value());
+        if let Some(batch) = &mut batch {
+            batch.complete(OperationCount::from_operations(4))?;
+        }
         if !hydrostatic_stress_pa.is_finite() {
-            return Err(ThermoelasticLoadError::InvalidConstitutive(
-                element.element_id,
-            ));
+            return Err(ThermoelasticLoadError::InvalidConstitutive(element.element_id).into());
         }
         projection
             .visit_element_quadrature(element, |point| {
@@ -163,20 +278,39 @@ pub(super) fn assemble_prescribed_temperature_load(
                     }
                 }
             })
-            .map_err(|error| ThermoelasticLoadError::Projection(error.to_string()))?;
+            .map_err(projection_error)?;
     }
     Ok(load)
 }
 
 /// Integrate the transferred nodal solution as a physical temperature field at each solid
 /// quadrature point. No element-average or ordinal region proxy replaces the field interpolation.
+#[cfg(test)]
 pub(crate) fn assemble_solved_temperature_load(
     mesh: &SolverMeshArtifact,
     properties: &CompiledPropertyMap,
     temperature: &crate::execution::SolvedTemperatureField,
 ) -> Result<Vec<f64>, ThermoelasticLoadError> {
-    let projection = AnalysisProjection::derive(mesh)
-        .map_err(|error| ThermoelasticLoadError::Projection(error.to_string()))?;
+    let mut owner = |_, _| std::future::ready(Ok::<(), std::convert::Infallible>(()));
+    immediate(assemble_solved_temperature_load_with_owner(
+        mesh,
+        properties,
+        temperature,
+        &mut owner,
+    ))
+}
+
+pub(crate) async fn assemble_solved_temperature_load_with_owner<O, F, A>(
+    mesh: &SolverMeshArtifact,
+    properties: &CompiledPropertyMap,
+    temperature: &crate::execution::SolvedTemperatureField,
+    before: &mut O,
+) -> Result<Vec<f64>, ThermoelasticLoadCapacityError<A>>
+where
+    O: FnMut(usize, OperationCount) -> F,
+    F: std::future::Future<Output = Result<(), A>>,
+{
+    let projection = AnalysisProjection::derive(mesh).map_err(projection_error)?;
     if projection.nodes.len() != temperature.node_count()
         || projection.nodes.len() != mesh.topology.nodes.len()
         || projection
@@ -186,10 +320,13 @@ pub(crate) fn assemble_solved_temperature_load(
             .any(|(projected, canonical)| projected.node_id != canonical.node_id)
         || !temperature.all_positive_finite()
     {
-        return Err(ThermoelasticLoadError::InvalidNodalField);
+        return Err(ThermoelasticLoadError::InvalidNodalField.into());
     }
     let mut load = vec![0.0; projection.nodes.len() * 3];
     for (element_index, element) in projection.elements.iter().enumerate() {
+        before(element_index, quadrature_work(element.order, false))
+            .await
+            .map_err(ThermoelasticLoadCapacityError::Admission)?;
         let owner = properties
             .solid_material(element.stable_identity)
             .ok_or(ThermoelasticLoadError::MissingOwner(element.element_id))?;
@@ -205,9 +342,7 @@ pub(crate) fn assemble_solved_temperature_load(
             * thermal.expansion_coefficient_per_k.canonical_value()
             / (1.0 - 2.0 * mechanical.poisson_ratio.canonical_value());
         if !coefficient.is_finite() {
-            return Err(ThermoelasticLoadError::InvalidConstitutive(
-                element.element_id,
-            ));
+            return Err(ThermoelasticLoadError::InvalidConstitutive(element.element_id).into());
         }
         projection
             .visit_element_quadrature(element, |point| {
@@ -230,10 +365,10 @@ pub(crate) fn assemble_solved_temperature_load(
                     }
                 }
             })
-            .map_err(|error| ThermoelasticLoadError::Projection(error.to_string()))?;
+            .map_err(projection_error)?;
     }
     if load.iter().any(|value| !value.is_finite()) {
-        return Err(ThermoelasticLoadError::InvalidNodalField);
+        return Err(ThermoelasticLoadError::InvalidNodalField.into());
     }
     Ok(load)
 }
@@ -261,6 +396,54 @@ mod tests {
             applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(10.0),
             thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(0.0),
             region_temperature_deltas: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn awaited_fixed_thermoelastic_rules_match_native_and_keep_denial_typed() {
+        for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+            let mesh = canonical_tetrahedron_solver_mesh(order);
+            let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+            model.materials[0]
+                .thermal
+                .as_mut()
+                .unwrap()
+                .expansion_coefficient_per_k =
+                runmat_types::physical::ThermalExpansion::new(1.0e-5);
+            let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
+            let native =
+                assemble_prescribed_temperature_load(&mesh, &properties, &context()).unwrap();
+            let quotes = std::cell::RefCell::new(Vec::new());
+            let mut grant = |element, count| {
+                quotes.borrow_mut().push((element, count));
+                std::future::ready(Ok::<(), &'static str>(()))
+            };
+            let awaited =
+                futures::executor::block_on(assemble_prescribed_temperature_load_with_owner(
+                    &mesh,
+                    &properties,
+                    &context(),
+                    &mut grant,
+                ))
+                .unwrap();
+            assert_eq!(awaited, native);
+            assert_eq!(quotes.borrow().len(), mesh.topology.volume_elements.len());
+            assert!(quotes
+                .borrow()
+                .iter()
+                .all(|(_, count)| *count == quadrature_work(order, true)));
+            let mut deny = |_, _| std::future::ready(Err::<(), _>("denied"));
+            let denied =
+                futures::executor::block_on(assemble_prescribed_temperature_load_with_owner(
+                    &mesh,
+                    &properties,
+                    &context(),
+                    &mut deny,
+                ));
+            assert!(matches!(
+                denied,
+                Err(ThermoelasticLoadCapacityError::Admission("denied"))
+            ));
         }
     }
 

@@ -190,8 +190,11 @@ pub(super) async fn execute(
     progress: Option<&RemoteProgressBuffer>,
     collectives: Option<RemoteCollectiveAssignment>,
     console_budget: Option<runmat_execution::console::ConsoleBudget>,
+    fea_provider: &crate::fea_proxy::Provider,
 ) -> NativeExecutionResult<runmat_execution_runner::port::BackendReport> {
     let attempt_id = attempt.scheduling.id;
+    let scheduling = attempt.scheduling.clone();
+    let mut fea_parent = None;
     let execution = channel.execute_observed(attempt, console_budget);
     tokio::pin!(execution);
     loop {
@@ -201,6 +204,14 @@ pub(super) async fn execute(
                     progress.append(channel, attempt_id)?;
                 }
                 forward_collectives(channel, attempt_id, collectives.as_ref()).await?;
+                forward_fea(channel, &scheduling, fea_provider, &mut fea_parent).await?;
+                if matches!(&result, Ok(report) if matches!(&report.report, runmat_execution_runner::AttemptReport::Succeeded { .. })) {
+                    if let Some(parent) = &fea_parent {
+                        parent.terminal_check().map_err(|error| {
+                            NativeExecutionError::Protocol(format!("remote FEA parent did not settle before successful attempt: {error}"))
+                        })?;
+                    }
+                }
                 return result;
             }
             _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {
@@ -208,9 +219,63 @@ pub(super) async fn execute(
                     progress.append(channel, attempt_id)?;
                 }
                 forward_collectives(channel, attempt_id, collectives.as_ref()).await?;
+                forward_fea(channel, &scheduling, fea_provider, &mut fea_parent).await?;
             }
         }
     }
+}
+
+async fn forward_fea(
+    channel: &dyn RemoteWorkerChannel,
+    scheduling: &runmat_execution_runner::AttemptRequest,
+    provider: &crate::fea_proxy::Provider,
+    parent: &mut Option<std::sync::Arc<crate::fea_proxy::Parent>>,
+) -> NativeExecutionResult<()> {
+    for call in channel.drain_fea_calls(scheduling.id) {
+        let sequence = call.sequence;
+        if parent.is_none() {
+            let assignment = runmat_execution::ProgramExecutionAssignment {
+                scope_id: scheduling.scope_id,
+                pool_id: scheduling.task.pool_id,
+                task_id: scheduling.task_id,
+                attempt_id: scheduling.id,
+                worker_id: scheduling.worker_id,
+                backend: runmat_execution::PoolBackend::Remote,
+                resources: scheduling.resource_assignment.clone(),
+            };
+            match crate::fea_proxy::Parent::new(
+                provider.clone(),
+                assignment,
+                scheduling.task.resources.clone(),
+                scheduling.task.deadline_unix_millis,
+                0,
+            ) {
+                Ok(created) => *parent = Some(created),
+                Err(_) => {
+                    channel.complete_fea_call(
+                        scheduling.id,
+                        sequence,
+                        crate::fea_proxy::Reply::Denied {
+                            denied: runmat_runtime::analysis::fea_run_admission::FeaRunDenied::LicenseInvalid,
+                        },
+                    ).await?;
+                    continue;
+                }
+            }
+        }
+        let owner = std::sync::Arc::clone(parent.as_ref().ok_or_else(|| {
+            NativeExecutionError::Protocol("remote FEA parent was not installed".into())
+        })?);
+        let reply = tokio::task::spawn_blocking(move || owner.call(call))
+            .await
+            .map_err(|error| {
+                NativeExecutionError::Protocol(format!("remote FEA parent stopped: {error}"))
+            })?;
+        channel
+            .complete_fea_call(scheduling.id, sequence, reply)
+            .await?;
+    }
+    Ok(())
 }
 
 async fn forward_collectives(

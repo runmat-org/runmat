@@ -29,6 +29,7 @@ fn anisotropic_boundary_offcenter_meets_the_original_target_before_the_old_apex(
             [face[0], face[1], face[2], point],
             metric,
         )
+        .unwrap()
         .unwrap();
         assert!(quality.metric_scaled_jacobian >= 0.01);
     }

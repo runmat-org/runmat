@@ -82,7 +82,7 @@ pub use refill_evaluation::{
 use refill_faces::*;
 use refill_tetrahedra::{
     boundary_faces_from_refill_tetrahedra, raw_refill_tetrahedron_with_rejection_reason,
-    refill_from_tetrahedra,
+    refill_from_tetrahedra, RefillTetrahedronError,
 };
 pub use refill_tetrahedra::{
     flip_refill_tetrahedra_across_shared_face, flip_refill_tetrahedra_around_shared_edge,

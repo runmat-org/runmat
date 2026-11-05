@@ -154,6 +154,7 @@ impl StructuralRecoveryEstimate {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StructuralRecoveryEstimatorError {
+    Accounting(runmat_simulation_usage::LedgerError),
     InvalidOptions,
     InvalidArtifact(String),
     MissingElementTopology,

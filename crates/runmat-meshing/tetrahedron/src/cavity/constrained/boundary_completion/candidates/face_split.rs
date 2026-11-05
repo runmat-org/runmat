@@ -49,7 +49,8 @@ pub(in super::super::super) fn best_boundary_face_split_completion(
                 split_node,
                 boundary_nodes,
                 options,
-            ) else {
+            )?
+            else {
                 continue;
             };
             if child_tetrahedra.iter().any(|tetrahedron| {

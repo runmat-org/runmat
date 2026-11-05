@@ -2,6 +2,7 @@ use super::super::{
     cavity_boundary_node_ids, exact_cover_refill_from_candidate_tetrahedra,
     refill_tetrahedra::{
         raw_refill_tetrahedron_with_rejection_reason, refill_from_tetrahedra, refill_is_better,
+        RefillTetrahedronError,
     },
     tetrahedralize_points, ConnectivityPoint, ConstrainedCavityNode,
     ConstrainedCavityRefillTetrahedron,
@@ -63,10 +64,13 @@ pub(in super::super) fn two_interior_node_refill_candidate(
                     options,
                 ) {
                     Ok(tetrahedron) => refill_tetrahedra.push(tetrahedron),
-                    Err(reason) => {
+                    Err(RefillTetrahedronError::Rejected(reason)) => {
                         if first_rejection.is_none() {
                             first_rejection = Some(boundary_node_refill_rejection_reason(reason));
                         }
+                    }
+                    Err(RefillTetrahedronError::Accounting(error)) => {
+                        return Err(ConstrainedCavityValidationError::Accounting(error));
                     }
                 }
             }
@@ -106,7 +110,10 @@ pub(in super::super) fn two_interior_node_refill_candidate(
                         continue;
                     }
                     if first_rejection.is_none() {
-                        first_rejection = Some(boundary_node_refill_validation_reason(&err));
+                        first_rejection = Some(
+                            boundary_node_refill_validation_reason(&err)
+                                .map_err(ConstrainedCavityValidationError::Accounting)?,
+                        );
                     }
                 }
             }

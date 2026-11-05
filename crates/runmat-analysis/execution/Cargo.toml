@@ -1,6 +1,6 @@
 [package]
 name = "runmat-analysis-execution"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
@@ -25,6 +25,7 @@ runmat-geometry-ops = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-execution = { workspace = true }
 runmat-mir = { workspace = true, features = ["compiler"] }
+runmat-simulation-usage = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

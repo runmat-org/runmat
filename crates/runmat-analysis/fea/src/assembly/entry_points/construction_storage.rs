@@ -27,6 +27,7 @@ impl From<ConstraintPlanError> for StructuralAssemblyError {
     fn from(error: ConstraintPlanError) -> Self {
         match error {
             ConstraintPlanError::Cancelled => Self::Cancelled,
+            ConstraintPlanError::Accounting(error) => Self::Accounting(error),
             other => Self::InvalidConstraintPlan(other.to_string()),
         }
     }

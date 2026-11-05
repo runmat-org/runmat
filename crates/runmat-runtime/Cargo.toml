@@ -1,6 +1,6 @@
 [package]
 name = "runmat-runtime"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -69,6 +69,7 @@ libm = "0.2"
 complex-bessel = { version = "=0.3.0", default-features = false }
 num-complex = "0.4"
 runmat-sparse-solvers = { workspace = true }
+runmat-simulation-usage = { workspace = true }
 num-bigint = "0.4"
 num-rational = "=0.4.2"
 num-traits = "0.2"

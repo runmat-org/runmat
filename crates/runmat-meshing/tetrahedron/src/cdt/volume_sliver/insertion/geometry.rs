@@ -111,7 +111,7 @@ pub(super) fn smooth_edge_star_point(
     let boundary_faces = edge_star_boundary_faces(topology, star, edge);
 
     let mut point = midpoint;
-    let mut score = prepared.score(point);
+    let mut score = prepared.score(point)?;
     let mut improved = false;
     for iteration in 0..MAXIMUM_CAVITY_SMOOTHING_ITERATIONS {
         if iteration.is_multiple_of(16) && cancellation.is_cancelled() {
@@ -137,7 +137,7 @@ pub(super) fn smooth_edge_star_point(
             )? {
                 continue;
             }
-            let candidate_score = prepared.score(candidate);
+            let candidate_score = prepared.score(candidate)?;
             if candidate_score <= score {
                 continue;
             }
@@ -190,7 +190,7 @@ pub(super) fn pattern_search_edge_star(
         return Ok(None);
     }
     let mut point = start;
-    let initial_score = prepared.score(point);
+    let initial_score = prepared.score(point)?;
     let mut score = initial_score;
     let mut radius = local_scale * 0.25;
     let minimum_radius = local_scale * 2_f64.powi(-24);
@@ -221,7 +221,7 @@ pub(super) fn pattern_search_edge_star(
                     )? {
                         continue;
                     }
-                    let candidate_score = prepared.score(candidate);
+                    let candidate_score = prepared.score(candidate)?;
                     if candidate_score <= score {
                         continue;
                     }

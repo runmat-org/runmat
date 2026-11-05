@@ -1,6 +1,6 @@
 [package]
 name = "runmat-package-cache"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 description = "Portable transactional package cache policy and state machine for RunMat"
 license-file = "../../LICENSE.md"

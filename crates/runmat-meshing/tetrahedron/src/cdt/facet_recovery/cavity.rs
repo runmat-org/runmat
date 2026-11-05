@@ -20,7 +20,7 @@ use crate::{
     cavity::constrained::{
         retriangulate_constrained_cavity_from_nodes_with_diagnostics, ConstrainedCavity,
         ConstrainedCavityNode, ConstrainedCavityRefillBudget, ConstrainedCavityRefillError,
-        ConstrainedCavityRefillOptions,
+        ConstrainedCavityRefillOptions, ConstrainedCavityValidationError,
     },
     cdt::{
         insertion::validate_constrained_delaunay_volume_topology,
@@ -544,6 +544,14 @@ pub(in crate::cdt::facet_recovery) fn refill_side_exact_with_options(
                     .collect()
             }))
         }
+        Err(ConstrainedCavityRefillError::Accounting(cause))
+        | Err(ConstrainedCavityRefillError::Validation(
+            ConstrainedCavityValidationError::Accounting(cause),
+        )) => Err(resource_or_cancelled(
+            DelaunayFacetRecoveryErrorKind::Accounting(cause),
+            constraint_index,
+            "numerical accounting denied cavity refill".to_owned(),
+        )),
         Err(ConstrainedCavityRefillError::ResourceLimit { reason }) => Err(resource_or_cancelled(
             DelaunayFacetRecoveryErrorKind::ResourceLimit,
             constraint_index,

@@ -1,12 +1,12 @@
-//! Apply float controls to compiler-emitted SPIR-V without changing executable
-//! instructions, identifiers, bindings, control flow or bounds-check code.
+//! Apply binary64 float controls and exact unsigned-conversion legalization.
+//! Bindings, existing result IDs, control flow and bounds checks are preserved.
 use crate::wgsl::host_buffers::{self, ClaimedVec};
 use runmat_execution::resource::ProviderHostMetadataAdmission;
 use spirv::{Capability, Decoration, ExecutionMode, GLOp, Op};
 
-struct Instruction<'a> {
-    op: Op,
-    words: &'a [u32],
+pub(super) struct Instruction<'a> {
+    pub op: Op,
+    pub words: &'a [u32],
 }
 
 fn instructions<'a>(
@@ -117,7 +117,7 @@ fn is_type_or_constant(op: Op) -> bool {
     )
 }
 
-fn append_instruction(
+pub(super) fn append_instruction(
     metadata: Option<&dyn ProviderHostMetadataAdmission>,
     output: &mut ClaimedVec<u32>,
     op: Op,
@@ -138,6 +138,8 @@ pub(super) fn apply(
     metadata: Option<&dyn ProviderHostMetadataAdmission>,
 ) -> anyhow::Result<ClaimedVec<u32>> {
     let instructions = instructions(words, metadata)?;
+    let conversions =
+        super::unsigned_conversion::Plan::new(instructions.as_slice(), words[3], metadata)?;
     let mut wide_types = ClaimedVec::with_capacity(0, metadata)?;
     let mut imports = ClaimedVec::with_capacity(0, metadata)?;
     let mut entries = ClaimedVec::with_capacity(0, metadata)?;
@@ -248,6 +250,15 @@ pub(super) fn apply(
     .iter()
     .filter(|cap| !existing_caps.as_slice().contains(&(**cap as u32)))
     .count();
+    let integer_capability = !conversions.conversions.is_empty()
+        && !existing_caps
+            .as_slice()
+            .contains(&(Capability::Int64 as u32));
+    let declarations_at = instructions
+        .as_slice()
+        .iter()
+        .position(|instruction| instruction.op == Op::Function)
+        .ok_or_else(|| anyhow::anyhow!("SPIR-V compute function is missing"))?;
     let modes = entries
         .as_slice()
         .iter()
@@ -282,11 +293,30 @@ pub(super) fn apply(
         .and_then(|n| modes.checked_mul(4).and_then(|m| n.checked_add(m)))
         .and_then(|n| annotations.checked_mul(3).and_then(|a| n.checked_add(a)))
         .and_then(|n| words.len().checked_add(n))
+        .and_then(|n| n.checked_add(conversions.declarations.len()))
+        .and_then(|n| {
+            conversions
+                .conversions
+                .len()
+                .checked_mul(4)
+                .and_then(|extra| n.checked_add(extra))
+        })
+        .and_then(|n| n.checked_add(if integer_capability { 2 } else { 0 }))
         .ok_or(host_buffers::Error::Overflow)?;
     let mut output = ClaimedVec::with_capacity(output_words, metadata)?;
     output.extend_from_slice(&words[..5], metadata)?;
+    output.as_mut_slice()[3] = conversions.bound;
+    let mut conversion = conversions.conversions.as_slice().iter().peekable();
     for index in 0..=instructions.len() {
         if index == capability_at {
+            if integer_capability {
+                append_instruction(
+                    metadata,
+                    &mut output,
+                    Op::Capability,
+                    &[Capability::Int64 as u32],
+                )?;
+            }
             for capability in [
                 Capability::SignedZeroInfNanPreserve,
                 Capability::RoundingModeRTE,
@@ -337,8 +367,22 @@ pub(super) fn apply(
                 }
             }
         }
+        if index == declarations_at {
+            output.extend_from_slice(conversions.declarations.as_slice(), metadata)?;
+        }
         if let Some(instruction) = instructions.as_slice().get(index) {
-            output.extend_from_slice(instruction.words, metadata)?;
+            if conversion
+                .peek()
+                .is_some_and(|conversion| conversion.index == index)
+            {
+                conversion.next().expect("checked conversion").append(
+                    instruction,
+                    &mut output,
+                    metadata,
+                )?;
+            } else {
+                output.extend_from_slice(instruction.words, metadata)?;
+            }
         }
     }
     anyhow::ensure!(

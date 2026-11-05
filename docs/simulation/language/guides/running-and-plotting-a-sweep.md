@@ -1,4 +1,4 @@
-# Run and plot a parameter sweep
+# Run and plot a sweep
 
 Start with bounded study inputs, then create a named sweep over that study:
 

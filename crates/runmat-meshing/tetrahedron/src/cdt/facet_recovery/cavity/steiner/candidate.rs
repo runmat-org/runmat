@@ -15,7 +15,7 @@ use crate::{
         generate_constrained_cavity_interior_steiner_candidates_with_diagnostics,
         retriangulate_constrained_cavity_from_nodes, ConstrainedCavity, ConstrainedCavityNode,
         ConstrainedCavityRefillBudget, ConstrainedCavityRefillError,
-        ConstrainedCavitySteinerCandidateBudget,
+        ConstrainedCavitySteinerCandidateBudget, ConstrainedCavityValidationError,
     },
     cdt::{
         insertion::{
@@ -483,6 +483,14 @@ fn map_candidate_error(
     constraint_index: u32,
 ) -> DelaunayFacetRecoveryError {
     match failure {
+        ConstrainedCavityRefillError::Accounting(cause)
+        | ConstrainedCavityRefillError::Validation(ConstrainedCavityValidationError::Accounting(
+            cause,
+        )) => resource_or_cancelled(
+            DelaunayFacetRecoveryErrorKind::Accounting(cause),
+            constraint_index,
+            "numerical accounting denied cavity candidate".to_owned(),
+        ),
         ConstrainedCavityRefillError::ResourceLimit { reason } => resource_or_cancelled(
             DelaunayFacetRecoveryErrorKind::ResourceLimit,
             constraint_index,

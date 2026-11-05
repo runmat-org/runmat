@@ -22,6 +22,7 @@ async fn synchronous_export_inside_session_reactor_writes_png() {
 
 #[test]
 fn test_complete_2d_plotting_pipeline() {
+    assert!(!Figure::new().legend_enabled, "legends are opt-in");
     // Test data
     let x_data = (0..100).map(|i| i as f64 * 0.1).collect::<Vec<_>>();
     let y_data = x_data.iter().map(|&x| x.sin()).collect::<Vec<_>>();
@@ -59,8 +60,10 @@ fn test_complete_2d_plotting_pipeline() {
     assert_eq!(figure.len(), 2);
     assert!(figure.title.is_some());
     assert!(figure.grid_enabled);
-    // No legend until one is asked for, as in MATLAB.
-    assert!(!figure.legend_enabled);
+    assert!(
+        figure.legend_enabled,
+        "with_legend(true) enables the legend"
+    );
 
     // Test statistics
     let stats = figure.statistics();

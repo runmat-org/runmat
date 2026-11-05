@@ -1,4 +1,4 @@
-# Fluid-flow analysis in RunMat: velocity, pressure, walls, and mass balance
+# Fluid flow
 
 RunMat's fluid family describes incompressible velocity–pressure problems with typed inlet velocity,
 mass flow, moving/no-slip/slip walls, pressure reference, outlet pressure, symmetry, periodicity, and

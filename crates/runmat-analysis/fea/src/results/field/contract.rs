@@ -854,6 +854,8 @@ fn sample_identity(
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum RecoveredFieldError {
+    #[error("recovered field numerical accounting failed: {0}")]
+    Accounting(runmat_simulation_usage::LedgerError),
     #[error("recovered field requires a physics/procedure-specific physical quantity descriptor")]
     MissingQuantityDescriptor,
     #[error("recovered field physical storage contains an invalid quantity or nonfinite value")]

@@ -81,6 +81,9 @@ fn validate_sources(
     )
     .map_err(|failure| {
         let kind = match failure.kind {
+            DelaunayCarvingErrorKind::Accounting(cause) => {
+                DelaunayVolumeProvenanceErrorKind::Accounting(cause)
+            }
             DelaunayCarvingErrorKind::InvalidOptions => {
                 DelaunayVolumeProvenanceErrorKind::InvalidOptions
             }

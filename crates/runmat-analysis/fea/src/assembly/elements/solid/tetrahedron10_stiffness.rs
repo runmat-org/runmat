@@ -6,11 +6,13 @@
 //! because this element's elasticity tensor is constant over it; consumers with per-point
 //! material state integrate on the shared rule's converged points instead.
 
+use runmat_simulation_usage::{OperationCount, UsageCategory, UsageContext};
+
 use super::{
     material::elasticity_matrix,
     tetrahedron10::{
-        validate_nodes, Tetrahedron10ElementError, Tetrahedron10ElementGeometry,
-        Tetrahedron10Matrix30, TETRAHEDRON10_ELEMENT_DOF_COUNT,
+        validate_nodes, Tetrahedron10CapacityError, Tetrahedron10ElementError,
+        Tetrahedron10ElementGeometry, Tetrahedron10Matrix30, TETRAHEDRON10_ELEMENT_DOF_COUNT,
     },
     SolidMaterial,
 };
@@ -21,21 +23,84 @@ pub fn global_stiffness_matrix(
 ) -> Result<Tetrahedron10Matrix30, Tetrahedron10ElementError> {
     validate_nodes(geometry.nodes_m)?;
     let elasticity = elasticity_matrix(material)?;
-    let moments = runmat_meshing_core::tetrahedron10_stiffness_moments(&geometry.nodes_m).map_err(
-        |invalidity| match invalidity {
-            runmat_meshing_core::Tet10ElementInvalidity::InvertedOrDegenerate => {
-                Tetrahedron10ElementError::DegenerateOrInverted
-            }
-            runmat_meshing_core::Tet10ElementInvalidity::InsufficientJacobianMargin => {
-                Tetrahedron10ElementError::UncertifiedJacobian
-            }
-            runmat_meshing_core::Tet10ElementInvalidity::UnconvergedStiffnessQuadrature => {
-                Tetrahedron10ElementError::UnconvergedStiffnessQuadrature
-            }
-        },
-    )?;
+    let moments = runmat_meshing_core::tetrahedron10_stiffness_moments_for_category(
+        &geometry.nodes_m,
+        UsageCategory::Assembly,
+    )
+    .map_err(map_moments_error)?;
+    finish_stiffness(elasticity, &moments)
+}
+
+fn map_moments_error(
+    invalidity: runmat_meshing_core::Tet10ElementInvalidity,
+) -> Tetrahedron10ElementError {
+    match invalidity {
+        runmat_meshing_core::Tet10ElementInvalidity::InvertedOrDegenerate => {
+            Tetrahedron10ElementError::DegenerateOrInverted
+        }
+        runmat_meshing_core::Tet10ElementInvalidity::InsufficientJacobianMargin => {
+            Tetrahedron10ElementError::UncertifiedJacobian
+        }
+        runmat_meshing_core::Tet10ElementInvalidity::UnconvergedStiffnessQuadrature => {
+            Tetrahedron10ElementError::UnconvergedStiffnessQuadrature
+        }
+        runmat_meshing_core::Tet10ElementInvalidity::Accounting(error) => {
+            Tetrahedron10ElementError::Accounting(error)
+        }
+    }
+}
+
+pub async fn global_stiffness_matrix_with_capacity<E>(
+    material: SolidMaterial,
+    geometry: Tetrahedron10ElementGeometry,
+    owner: &dyn runmat_simulation_usage::AsyncCapacityOwner<E>,
+) -> Result<Tetrahedron10Matrix30, Tetrahedron10CapacityError<E>> {
+    super::tetrahedron10_geometry::validate_nodes_with_capacity(geometry.nodes_m, owner).await?;
+    owner
+        .ensure_capacity(OperationCount::from_operations(15))
+        .await
+        .map_err(Tetrahedron10CapacityError::Admission)?;
+    let elasticity = elasticity_matrix(material)?;
+    let moments = runmat_meshing_core::tetrahedron10_stiffness_moments_with_capacity(
+        &geometry.nodes_m,
+        UsageCategory::Assembly,
+        Some(owner),
+    )
+    .await
+    .map_err(|error| match error {
+        runmat_meshing_core::Tet10CapacityError::Invalidity(error) => {
+            Tetrahedron10CapacityError::Numerical(map_moments_error(error))
+        }
+        runmat_meshing_core::Tet10CapacityError::Admission(error) => {
+            Tetrahedron10CapacityError::Admission(error)
+        }
+    })?;
+    owner
+        .ensure_capacity(OperationCount::from_operations(4_200))
+        .await
+        .map_err(Tetrahedron10CapacityError::Admission)?;
+    finish_stiffness(elasticity, &moments).map_err(Tetrahedron10CapacityError::Numerical)
+}
+
+fn finish_stiffness(
+    elasticity: super::material::ElasticityMatrix,
+    moments: &runmat_meshing_core::Tet10StiffnessMoments,
+) -> Result<Tetrahedron10Matrix30, Tetrahedron10ElementError> {
     let lambda = elasticity[0][1];
     let mu = elasticity[3][3];
+    // Final 30x30 contraction only. Each cell has two products and two
+    // additions; 300 diagonal-component cells additionally sum three moments
+    // with two additions. Shared moment integration is a separate obligation.
+    let usage = UsageContext::capture();
+    let mut batch = usage
+        .as_ref()
+        .map(|usage| {
+            usage.ledger().reserve(
+                UsageCategory::Assembly,
+                OperationCount::from_operations(4_200),
+            )
+        })
+        .transpose()?;
     // The isotropic BᵀDB block is λ∂ₐNᵢ∂ᵦNⱼ + μ(δₐᵦ∇Nᵢ·∇Nⱼ + ∂ᵦNᵢ∂ₐNⱼ), integrated term by term.
     let stiffness: Tetrahedron10Matrix30 = std::array::from_fn(|row| {
         let (i, a) = (row / 3, row % 3);
@@ -50,6 +115,9 @@ pub fn global_stiffness_matrix(
         })
     });
     debug_assert_eq!(stiffness.len(), TETRAHEDRON10_ELEMENT_DOF_COUNT);
+    if let Some(batch) = &mut batch {
+        batch.complete(OperationCount::from_operations(4_200))?;
+    }
     if stiffness.iter().flatten().all(|value| value.is_finite()) {
         Ok(stiffness)
     } else {
@@ -161,9 +229,7 @@ mod tests {
             poisson_ratio: runmat_types::physical::PoissonRatio::new(0.25),
             density_kg_per_m3: runmat_types::physical::MassDensity::new(1.0),
         };
-        assert!(!runmat_meshing_core::is_valid_tetrahedron10_element(
-            &nodes_m
-        ));
+        assert!(!runmat_meshing_core::is_valid_tetrahedron10_element(&nodes_m).unwrap());
         assert!(matches!(
             global_stiffness_matrix(material, geometry),
             Err(Tetrahedron10ElementError::UnconvergedStiffnessQuadrature

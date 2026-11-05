@@ -1,4 +1,4 @@
-# Thermal loads and boundaries
+# Thermal loads
 
 Thermal loads enter the heat equation as volume and boundary integrals. Convection adds both a
 boundary operator and source:

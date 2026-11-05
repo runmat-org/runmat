@@ -118,7 +118,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     loop {
         if (attempt_index >= params.attempts) { break; }
         let attempt = add64(vec2<u32>(params.attempt0, params.attempt1), vec2<u32>(attempt_index, 0u));
-        let words = threefry(counter_for_item_attempt(global_idx, attempt));
+        let words = threefry(counter_for_item_attempt(global_idx, attempt)).lanes;
         let word = words[0];
         if (!ge64(word.x, word.y, params.accept_limit0, params.accept_limit1)) {
             var remainder = vec2<u32>(word.x, word.y);

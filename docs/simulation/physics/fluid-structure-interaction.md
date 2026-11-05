@@ -1,4 +1,4 @@
-# Fluid–structure interaction in RunMat: pressure, wall motion, and partitioned coupling
+# Fluid–structure
 
 Fluid–structure interaction (FSI) transfers fluid traction to a structure and structural wall
 motion back to the fluid. The paired interface is explicit; matching-looking CAD faces do not

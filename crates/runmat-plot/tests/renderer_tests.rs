@@ -327,11 +327,23 @@ fn test_uniform_buffer_layout() {
     let bytes: &[u8] = bytemuck::bytes_of(&uniforms);
     assert_eq!(bytes.len(), std::mem::size_of::<Uniforms>());
 
-    // Verify expected size - 2 Mat4 (64 bytes each) + 4x3 normal matrix (48 bytes)
-    // Should be aligned to 16 bytes for GPU usage
-    let expected_size = std::mem::size_of::<[[f32; 4]; 4]>() * 2 + // view_proj + model matrices
-                       std::mem::size_of::<[[f32; 4]; 3]>(); // normal matrix (4x3 for alignment)
+    // Match the WGSL Uniforms fields: two mat4x4, two mat3x4 and a vec4<u32>.
+    let matrix = std::mem::size_of::<[[f32; 4]; 4]>();
+    let rotation = std::mem::size_of::<[[f32; 4]; 3]>();
+    assert_eq!(std::mem::offset_of!(Uniforms, view_proj), 0);
+    assert_eq!(std::mem::offset_of!(Uniforms, model), matrix);
+    assert_eq!(std::mem::offset_of!(Uniforms, normal_matrix), 2 * matrix);
+    assert_eq!(
+        std::mem::offset_of!(Uniforms, cad_view_rotation),
+        2 * matrix + rotation
+    );
+    assert_eq!(
+        std::mem::offset_of!(Uniforms, cad_lighting),
+        2 * matrix + 2 * rotation
+    );
+    let expected_size = 2 * matrix + 2 * rotation + std::mem::size_of::<[u32; 4]>();
     assert_eq!(std::mem::size_of::<Uniforms>(), expected_size);
+    assert_eq!(expected_size % 16, 0);
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Retain native worker joins until they finish, and drain them before driver
 //! process finalizers. Ordinary provider/cancellation Drop remains nonblocking.
 
-use super::Control;
+use super::{Control, State};
 #[path = "shutdown/native_thread.rs"]
 mod native_thread;
 use std::{
@@ -12,8 +12,15 @@ use std::{
 
 struct Worker {
     control: Weak<Control>,
-    thread: JoinHandle<()>,
+    thread: JoinHandle<RetiredWorker>,
 }
+
+// Transfer the final device owner to the joining thread. A device dropped by
+// its worker during atexit can unload DXC, whose DLL finalizer waits for the
+// C-runtime exit lock already held by the thread joining that worker.
+// The thread result retains the same state allocation; it does not clone GPU
+// storage or introduce another progress thread.
+type RetiredWorker = (Arc<State>, std::thread::Result<()>);
 
 #[derive(Default)]
 struct Registry {
@@ -87,9 +94,7 @@ pub(super) fn spawn(control: &Arc<Control>, run: impl FnOnce() + Send + 'static)
         .workers
         .try_reserve(1)
         .map_err(|error| io::Error::other(format!("GPU worker registry capacity: {error}")))?;
-    let thread = std::thread::Builder::new()
-        .name("runmat-gpu-observation".into())
-        .spawn(run)?;
+    let thread = spawn_retained(Arc::clone(&control.state), run)?;
     registry.workers.push(Worker {
         control: Arc::downgrade(control),
         thread,
@@ -97,7 +102,21 @@ pub(super) fn spawn(control: &Arc<Control>, run: impl FnOnce() + Send + 'static)
     Ok(())
 }
 
-fn join_unless_current(thread: JoinHandle<()>) {
+fn spawn_retained(
+    retirement_owner: Arc<State>,
+    run: impl FnOnce() + Send + 'static,
+) -> io::Result<JoinHandle<RetiredWorker>> {
+    std::thread::Builder::new()
+        .name("runmat-gpu-observation".into())
+        .spawn(move || {
+            // Preserve the owner on both normal return and unwind. The panic
+            // hook still reports a worker panic; joining never resumes it.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
+            (retirement_owner, result)
+        })
+}
+
+fn join_unless_current(thread: JoinHandle<RetiredWorker>) {
     // Internal completion callbacks do not exit the process. Nevertheless an
     // embedding host can do so: never deadlock by joining the calling worker.
     if !native_thread::is_current(&thread) {

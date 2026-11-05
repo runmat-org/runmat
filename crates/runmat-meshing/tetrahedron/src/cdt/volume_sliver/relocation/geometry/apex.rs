@@ -41,14 +41,30 @@ pub(in crate::cdt::volume_sliver) fn target(
     };
     let expected = side(points[slot]);
     let metric = crate::cdt::volume_quality::PreparedJacobian::new(source.resolved_metric)
+        .map_err(|cause| {
+            error(
+                DelaunayVolumeSliverErrorKind::Accounting(cause),
+                "relocation metric numerical accounting failed",
+            )
+        })?
         .expect("admitted metric");
     let score = |point| {
         let mut trial = points;
         trial[slot] = point;
-        metric.score(trial).unwrap_or(0.)
+        Ok::<f64, DelaunayVolumeSliverError>(
+            metric
+                .score(trial)
+                .map_err(|cause| {
+                    error(
+                        DelaunayVolumeSliverErrorKind::Accounting(cause),
+                        "relocation score numerical accounting failed",
+                    )
+                })?
+                .unwrap_or(0.),
+        )
     };
     let mut point = points[slot];
-    let initial = score(point);
+    let initial = score(point)?;
     let mut best = initial;
     let scale = face
         .iter()
@@ -79,7 +95,7 @@ pub(in crate::cdt::volume_sliver) fn target(
                     if side(trial) * expected <= 0. {
                         continue;
                     }
-                    let value = score(trial);
+                    let value = score(trial)?;
                     if value > best
                         && next
                             .as_ref()

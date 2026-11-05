@@ -4,6 +4,7 @@ use crate::runtime::{config::SessionConfig, gpu};
 use crate::wire::errors::js_error;
 use runmat_runtime::analysis::{self, fea_run_admission::FeaRunOutcome};
 use serde::{Deserialize, Serialize};
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
 #[derive(Serialize, Deserialize)]
@@ -25,13 +26,16 @@ pub async fn execute_owned_fea_study_step(
     super::fea_execution::validate_numerical_input(json.len(), memory_bytes)?;
     let payload: OwnedFeaStudyStepPayload =
         serde_json::from_str(&json).map_err(|error| js_error(&error.to_string()))?;
-    let context = LocalFeaRunContext::for_worker(
-        worker_context,
-        worker_admission,
-        &json,
-        payload.study_identity,
-    )
-    .await?;
+    let context = Rc::new(
+        LocalFeaRunContext::for_worker(
+            worker_context,
+            worker_admission,
+            &json,
+            payload.study_identity,
+        )
+        .await?,
+    );
+    let mut execution_cancelled = false;
     let result = async {
         let config = SessionConfig::from_closed_runtime(payload.runtime)
             .map_err(|error| js_error(&error))?;
@@ -56,6 +60,11 @@ pub async fn execute_owned_fea_study_step(
         let mut session =
             runmat_core::RunMatSession::with_options(config.enable_jit, config.verbose)
                 .map_err(|error| js_error(&error.to_string()))?;
+        session.install_fea_run_admission_service(Rc::new(
+            super::fea_async_host::BrowserWorkerFeaAdmission {
+                context: Rc::downgrade(&context),
+            },
+        ));
         session
             .apply_runtime_config(&config.runtime)
             .map_err(|error| js_error(&error.to_string()))?;
@@ -67,28 +76,62 @@ pub async fn execute_owned_fea_study_step(
         .map_err(|error| js_error(&error.to_string()))?;
         let runtime = session.execution_runtime_context(payload.program_revision);
         let _entered = runtime.enter();
-        let result = context
+        let capacity = super::fea_async_host::BrowserNumericalCapacity::new(&context);
+        let operation_context = payload.request.context.clone();
+        let checked = context
             .scope()
-            .run_checked_sync(|| {
-                analysis::analysis_execute_study_step(payload.request).and_then(|result| {
+            .run_checked_result_future(async {
+                analysis::analysis_execute_study_step_with_capacity(
+                    payload.request,
+                    Some(&capacity),
+                )
+                .await
+                .and_then(|result| {
                     analysis::analysis_validate_study_step_transfer(&result)?;
                     Ok(result)
                 })
             })
-            .map_err(super::fea_lease::denied_to_js)?;
+            .await;
+        execution_cancelled = matches!(
+            &checked,
+            Err(analysis::fea_run_admission::FeaRunExecutionError::Cancelled)
+        ) || matches!(
+            &checked,
+            Ok(Err(error)) if error.error_type == runmat_runtime::operations::OperationErrorType::Cancelled
+        );
+        let result = checked.map_err(|error| match error {
+                analysis::fea_run_admission::FeaRunExecutionError::Denied(denied) => {
+                    super::fea_lease::denied_to_js(denied)
+                }
+                analysis::fea_run_admission::FeaRunExecutionError::Cancelled => {
+                    js_error("Simulation cancelled.")
+                }
+            })?;
+        let result = analysis::fea_run_admission::merge_lease_error(
+            result,
+            context.scope().check().err().map(|denied| {
+                denied.into_operation_error(
+                    analysis::ANALYSIS_RUN_STUDY_OPERATION,
+                    analysis::ANALYSIS_RUN_STUDY_OP_VERSION,
+                    &operation_context,
+                )
+            }),
+        );
         let successful = result.is_ok();
         let json = serde_json::to_string(&result).map_err(|error| js_error(&error.to_string()))?;
         super::fea_execution::validate_numerical_input(json.len(), memory_bytes)?;
         Ok((json, successful))
     }
     .await;
-    let outcome = if runmat_runtime::interrupt::is_cancelled() {
+    let outcome = if execution_cancelled || runmat_runtime::interrupt::is_cancelled() {
         FeaRunOutcome::Cancelled
     } else if result.as_ref().is_ok_and(|(_, successful)| *successful) {
         FeaRunOutcome::Completed
     } else {
         FeaRunOutcome::Failed
     };
+    let context = Rc::try_unwrap(context)
+        .map_err(|_| js_error("Owned worker admission remained active after execution."))?;
     let settled = context.settle(outcome).await;
     super::fea_lease::merge_js_lease_error(result.map(|(json, _)| json), settled.err())
 }

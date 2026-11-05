@@ -66,6 +66,9 @@ struct Display {
     /// The statistic the drawn field is (`None`: a state of the solution). A statistic is
     /// drawn on the undeformed body: an RMS or envelope vector is not a displacement state.
     statistic: Option<FieldStatistic>,
+    /// Drawn only from time-domain runs: in a run that publishes a phasor of the quantity, a
+    /// real field is the phasor's real part, never an instantaneous value.
+    time_domain: bool,
 }
 
 /// Real-valued quantities.
@@ -83,6 +86,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "displacement",
@@ -91,6 +95,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE_OR_REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
     // Random response: the root-mean-square of each displacement component; the magnitude of
     // that vector is the RMS of the displacement magnitude.
@@ -101,6 +106,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: false,
         statistic: Some(FieldStatistic::RootMeanSquare),
+        time_domain: false,
     },
     // Response spectrum: the combined modal peak of each displacement component.
     Display {
@@ -110,6 +116,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: false,
         statistic: Some(FieldStatistic::ComponentMagnitudeEnvelope),
+        time_domain: false,
     },
     Display {
         id: "stress",
@@ -118,6 +125,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "sound-pressure-level",
@@ -126,6 +134,7 @@ const DISPLAYS: &[Display] = &[
         representations: &[R::SoundPressureLevel],
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "acoustic-pressure",
@@ -134,6 +143,17 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE,
         deformed: false,
         statistic: None,
+        time_domain: false,
+    },
+    // Acoustic transient: the real pressure of one instant.
+    Display {
+        id: "sound-pressure",
+        legend: "Acoustic pressure",
+        quantities: &[Q::AcousticPressure],
+        representations: REAL,
+        deformed: false,
+        statistic: None,
+        time_domain: true,
     },
     Display {
         id: "velocity",
@@ -142,6 +162,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "pressure",
@@ -150,6 +171,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "electric-potential",
@@ -158,6 +180,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE_OR_REAL,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "current-density",
@@ -166,6 +189,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE_OR_REAL,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "magnetic-flux-density",
@@ -174,6 +198,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE_OR_REAL,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "joule-loss",
@@ -182,6 +207,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "electric-field",
@@ -190,6 +216,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE_OR_REAL,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "heat-flux",
@@ -198,6 +225,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
 ];
 
@@ -504,15 +532,17 @@ pub(super) struct StoredValues;
 
 impl PublishedValues for StoredValues {
     fn peak(&self, run_id: &str, descriptor: &AnalysisFieldDescriptor) -> Result<f64> {
-        Ok(runmat_runtime::analysis::field_scene::extrema::field_extrema(
-            run_id,
-            &selection(descriptor),
-            None,
-            None,
+        Ok(
+            runmat_runtime::analysis::field_scene::extrema::field_extrema(
+                run_id,
+                &selection(descriptor),
+                None,
+                None,
+            )
+            .map_err(anyhow::Error::msg)?
+            .maximum
+            .value,
         )
-        .map_err(anyhow::Error::msg)?
-        .maximum
-        .value)
     }
 
     fn small(&self, run_id: &str, descriptor: &AnalysisFieldDescriptor) -> Result<Vec<f64>> {
@@ -623,9 +653,9 @@ struct RunFields<'a> {
     published: &'a [AnalysisFieldDescriptor],
     descriptors: Vec<&'a AnalysisFieldDescriptor>,
     deformation: Option<AnalysisFieldSelection>,
-    /// A time-sampled structural run (a transient) is shown at one instant: the time of its
-    /// peak nodal displacement magnitude. Every time-sampled quantity of the run is drawn at
-    /// that instant, on the displacement of that instant.
+    /// A time-sampled run (a transient of any family) is shown at one instant, chosen from its
+    /// primary response (see [`PRIMARY_RESPONSES`]). Every time-sampled quantity of the run is
+    /// drawn at that instant, on the displacement of that instant when the run publishes one.
     instant: Option<StateKey>,
     /// The instant's title: its time, or its step when the run publishes no time.
     instant_label: Option<String>,
@@ -676,6 +706,27 @@ impl<'a> RunFields<'a> {
             run.final_load = Some((*index, format!("load factor {factor:.3}")));
         }
         run.modal = !run.modes().is_empty();
+        if run.final_load.is_none() {
+            if let Some((response, stepped)) = run.primary_response() {
+                let at = match response.instant {
+                    InstantRule::Peak => peak_of(run_id, stepped, values)?,
+                    InstantRule::Final => latest(&stepped),
+                };
+                if let Some(at) = at {
+                    run.instant = state_key(at);
+                    run.instant_label = match run.instant {
+                        Some(StateKey::Time(time)) => Some(time_label(time)),
+                        Some(StateKey::Step(index)) => Some(
+                            match values.state_time(run_id, at, index)? {
+                                Some(time) => time_label(time),
+                                None => format!("step {index}"),
+                            },
+                        ),
+                        None => None,
+                    };
+                }
+            }
+        }
         let nodal: Vec<_> = run
             .of_quantity(Q::Displacement, REAL, None)
             .into_iter()
@@ -684,32 +735,46 @@ impl<'a> RunFields<'a> {
                     && descriptor.layout.value_shape == ObservationValueShape::Vector3
             })
             .collect();
-        let stepped: Vec<_> = nodal
-            .iter()
-            .copied()
-            .filter(|descriptor| state_key(descriptor).is_some())
-            .collect();
-        let deformation = if stepped.len() > 1 && run.final_load.is_none() {
-            let peak = peak_of(run_id, stepped, values)?;
-            if let Some(peak) = peak {
-                run.instant = state_key(peak);
-                run.instant_label = match run.instant {
-                    Some(StateKey::Time(time)) => Some(time_label(time)),
-                    Some(StateKey::Step(index)) => Some(
-                        match values.state_time(run_id, peak, index)? {
-                            Some(time) => time_label(time),
-                            None => format!("step {index}"),
-                        },
-                    ),
-                    None => None,
-                };
-            }
-            peak
-        } else {
-            latest(&nodal)
+        let deformation = match run.instant {
+            Some(instant) => nodal
+                .iter()
+                .copied()
+                .find(|descriptor| state_key(descriptor) == Some(instant))
+                .or_else(|| latest(&nodal)),
+            None => latest(&nodal),
         };
         run.deformation = deformation.map(selection);
         Ok(run)
+    }
+
+    /// Whether the run publishes `quantity` as a phasor (complex, magnitude, phase or level).
+    fn publishes_phasor(&self, quantity: Q) -> bool {
+        self.published.iter().any(|descriptor| {
+            descriptor.layout.quantity == quantity
+                && matches!(
+                    descriptor.layout.representation,
+                    R::Complex | R::Imaginary | R::Magnitude | R::PhaseRadians | R::SoundPressureLevel
+                )
+        })
+    }
+
+    /// The run's primary response when it is time-stepped (more than one retained state): the
+    /// first of [`PRIMARY_RESPONSES`] it publishes as stepped nodal fields.
+    fn primary_response(
+        &self,
+    ) -> Option<(&'static PrimaryResponse, Vec<&'a AnalysisFieldDescriptor>)> {
+        PRIMARY_RESPONSES.iter().find_map(|response| {
+            let stepped: Vec<_> = self
+                .of_quantity(response.quantity, REAL, None)
+                .into_iter()
+                .filter(|descriptor| {
+                    descriptor.layout.location == FieldLocation::Node
+                        && descriptor.layout.value_shape == response.shape
+                        && state_key(descriptor).is_some()
+                })
+                .collect();
+            (stepped.len() > 1).then_some((response, stepped))
+        })
     }
 
     fn of_quantity(
@@ -816,6 +881,48 @@ impl<'a> RunFields<'a> {
     }
 }
 
+/// How a time-stepped run's instant is chosen from its primary response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstantRule {
+    /// The retained state with the largest peak magnitude (a dynamic response's worst instant).
+    Peak,
+    /// The last retained state (a heating or cooling transient's end state).
+    Final,
+}
+
+/// A family's primary time response: the nodal quantity that picks the instant a transient is
+/// shown at.
+struct PrimaryResponse {
+    quantity: Q,
+    shape: ObservationValueShape,
+    instant: InstantRule,
+}
+
+/// Primary responses in priority order: structural displacement, acoustic pressure and fluid
+/// velocity at their peak; temperature at the end of the transient.
+const PRIMARY_RESPONSES: &[PrimaryResponse] = &[
+    PrimaryResponse {
+        quantity: Q::Displacement,
+        shape: ObservationValueShape::Vector3,
+        instant: InstantRule::Peak,
+    },
+    PrimaryResponse {
+        quantity: Q::AcousticPressure,
+        shape: ObservationValueShape::Scalar,
+        instant: InstantRule::Peak,
+    },
+    PrimaryResponse {
+        quantity: Q::FluidVelocity,
+        shape: ObservationValueShape::Vector3,
+        instant: InstantRule::Peak,
+    },
+    PrimaryResponse {
+        quantity: Q::Temperature,
+        shape: ObservationValueShape::Scalar,
+        instant: InstantRule::Final,
+    },
+];
+
 /// The fields that are a mode's shape, in order of preference.
 const MODE_SHAPE_QUANTITIES: &[(Q, ObservationValueShape)] = &[
     (Q::Displacement, ObservationValueShape::Vector3),
@@ -884,8 +991,11 @@ impl CaptureProfile {
             let mut chosen = None;
             'runs: for run in runs.iter().filter(|run| !run.modal) {
                 for quantity in display.quantities {
-                    let candidates =
+                    let mut candidates =
                         run.of_quantity(*quantity, display.representations, display.statistic);
+                    if display.time_domain && run.publishes_phasor(*quantity) {
+                        candidates.clear();
+                    }
                     if let Some(found) = run.chosen(&candidates, values)? {
                         chosen = Some((run, found));
                         break 'runs;
@@ -1136,7 +1246,8 @@ mod tests {
                 vec![4, 3],
             ),
         ];
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(
             ids(&profile),
             [
@@ -1191,7 +1302,8 @@ mod tests {
                 )
             })
             .collect();
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(ids(&profile), ["geometry", "mode-1", "mode-2", "mode-3"]);
         for (view, mode) in profile.views[1..].iter().zip(0..) {
             assert_eq!(
@@ -1225,7 +1337,8 @@ mod tests {
             published("modal.mode_shape.1", node_vector(0), vec![4, 3]),
             published("modal.mode_shape.2", node_vector(1), vec![4, 3]),
         ];
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(ids(&profile), ["geometry", "mode-1", "mode-2"]);
         let shapes: Vec<_> = profile.views[1..]
             .iter()
@@ -1250,7 +1363,8 @@ mod tests {
                 )
             })
             .collect();
-        let profile = || CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            || CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         let names = |names: &[&str]| {
             names
                 .iter()
@@ -1278,7 +1392,8 @@ mod tests {
             AnalysisFieldLayout::vector3(Q::FluidVelocity, FieldLocation::Element),
             vec![4, 3],
         )];
-        let profile = CaptureProfile::from_published(&[("run", &velocity)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &velocity)], &Values::default()).unwrap();
         let kinds: Vec<_> = profile
             .views
             .iter()
@@ -1307,7 +1422,8 @@ mod tests {
                 vec![4],
             ),
         ];
-        let profile = CaptureProfile::from_published(&[("run", &pressure)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &pressure)], &Values::default()).unwrap();
         let sections: Vec<_> = profile
             .views
             .iter()
@@ -1350,7 +1466,8 @@ mod tests {
                 )
             })
             .collect();
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(
             profile.views[1].field.as_ref().unwrap().field_id,
             "thermal.temperature.2"
@@ -1373,7 +1490,8 @@ mod tests {
                 vec![4],
             ),
         ];
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(
             ids(&profile),
             ["geometry", "sound-pressure-level", "acoustic-pressure"]
@@ -1396,12 +1514,11 @@ mod tests {
             AnalysisFieldLayout::scalar(Q::Temperature, FieldLocation::Node).step(0),
             vec![4],
         )];
-        let profile =
-            CaptureProfile::from_published(
-                &[("conduction", &conduction), ("heat", &heat)],
-                &Values::default(),
-            )
-                .unwrap();
+        let profile = CaptureProfile::from_published(
+            &[("conduction", &conduction), ("heat", &heat)],
+            &Values::default(),
+        )
+        .unwrap();
         let by_id = |id: &str| profile.views.iter().find(|view| view.id == id).unwrap();
         assert_eq!(by_id("temperature").run_id, "heat");
         assert_eq!(by_id("electric-potential").run_id, "conduction");
@@ -1419,8 +1536,7 @@ mod tests {
         let mut values = Values::default();
         let mut fields = Vec::new();
         for (step, time) in times.into_iter().enumerate() {
-            for (name, quantity) in [("displacement", Q::Displacement), ("velocity", Q::Velocity)]
-            {
+            for (name, quantity) in [("displacement", Q::Displacement), ("velocity", Q::Velocity)] {
                 let id = format!("structural.transient.{name}.{step}");
                 fields.push(sampled(
                     &id,
@@ -1429,15 +1545,16 @@ mod tests {
                     RecoveredFieldSample::TimeSeconds(time),
                 ));
                 // Displacement peaks at 4 ms; the final state is smaller.
-                values
-                    .peaks
-                    .insert(id, [0.0, 1.0, 3.0, 2.0][step]);
+                values.peaks.insert(id, [0.0, 1.0, 3.0, 2.0][step]);
             }
         }
         let profile = CaptureProfile::from_published(&[("run", &fields)], &values).unwrap();
         assert_eq!(ids(&profile), ["geometry", "displacement", "velocity"]);
         let displacement = view(&profile, "displacement");
-        assert_eq!(field_of(displacement), "structural.transient.displacement.2");
+        assert_eq!(
+            field_of(displacement),
+            "structural.transient.displacement.2"
+        );
         assert_eq!(displacement.label, "Displacement magnitude · t = 4 ms");
         assert_eq!(
             displacement.deformation.as_ref().unwrap().field_id,
@@ -1467,7 +1584,11 @@ mod tests {
         for step in 0..3 {
             let id = format!("transient.displacement.{step}");
             values.peaks.insert(id.clone(), [0.0, 2.0, 1.0][step]);
-            fields.push(published(&id, node_vector(Q::Displacement).step(step), vec![4, 3]));
+            fields.push(published(
+                &id,
+                node_vector(Q::Displacement).step(step),
+                vec![4, 3],
+            ));
             fields.push(published(
                 &format!("transient.von_mises.{step}"),
                 AnalysisFieldLayout::scalar(Q::VonMisesStress, FieldLocation::Element).step(step),
@@ -1543,10 +1664,7 @@ mod tests {
             CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(ids(&profile), ["geometry", "rms-displacement"]);
         let rms = view(&profile, "rms-displacement");
-        assert_eq!(
-            field_of(rms),
-            "structural.random_response.rms.displacement"
-        );
+        assert_eq!(field_of(rms), "structural.random_response.rms.displacement");
         assert_eq!(rms.label, "RMS displacement magnitude");
         assert!(rms.deformation.is_none());
         assert_eq!(rms.shape, "undeformed");
@@ -1591,7 +1709,10 @@ mod tests {
             CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(ids(&profile), ["geometry", "displacement", "stress"]);
         let displacement = view(&profile, "displacement");
-        assert_eq!(field_of(displacement), "structural.nonlinear.displacement.2");
+        assert_eq!(
+            field_of(displacement),
+            "structural.nonlinear.displacement.2"
+        );
         assert_eq!(
             displacement.label,
             "Displacement magnitude · load factor 1.000"
@@ -1666,5 +1787,171 @@ mod tests {
         let displacement = view(&profile, "displacement");
         assert_eq!(field_of(displacement), "structural.harmonic.displacement.1");
         assert_eq!(displacement.label, "Displacement magnitude · 80.00 Hz");
+    }
+
+    /// Thermal steady: temperature and heat flux on the undeformed body (no displacement).
+    #[test]
+    fn thermal_steady_shows_temperature_and_heat_flux_undeformed() {
+        let fields = [
+            published(
+                "thermal.temperature",
+                AnalysisFieldLayout::scalar(Q::Temperature, FieldLocation::Node),
+                vec![4],
+            ),
+            published(
+                "thermal.heat_flux",
+                AnalysisFieldLayout::vector3(Q::HeatFlux, FieldLocation::Element),
+                vec![2, 3],
+            ),
+        ];
+        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        for (id, field) in [("temperature", "thermal.temperature"), ("heat-flux", "thermal.heat_flux")] {
+            let shown = view(&profile, id);
+            assert_eq!(field_of(shown), field);
+            assert!(shown.deformation.is_none());
+            assert_eq!(shown.shape, "undeformed");
+        }
+        assert_eq!(view(&profile, "temperature").label, "Temperature");
+    }
+
+    /// Thermal transient: the end of the transient, titled with its retained time; heat flux
+    /// is drawn at the same instant.
+    #[test]
+    fn thermal_transient_shows_the_final_temperature_at_its_time() {
+        let mut fields = Vec::new();
+        for (step, time) in [0.0, 30.0, 60.0].into_iter().enumerate() {
+            fields.push(sampled(
+                &format!("thermal.transient.temperature.{step}"),
+                AnalysisFieldLayout::scalar(Q::Temperature, FieldLocation::Node).step(step),
+                vec![4],
+                RecoveredFieldSample::TimeSeconds(time),
+            ));
+            fields.push(sampled(
+                &format!("thermal.transient.heat_flux.{step}"),
+                AnalysisFieldLayout::vector3(Q::HeatFlux, FieldLocation::Element).step(step),
+                vec![2, 3],
+                RecoveredFieldSample::TimeSeconds(time),
+            ));
+        }
+        // The final-state rule reads no peaks.
+        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let temperature = view(&profile, "temperature");
+        assert_eq!(field_of(temperature), "thermal.transient.temperature.2");
+        assert_eq!(temperature.label, "Temperature · t = 60 s");
+        let flux = view(&profile, "heat-flux");
+        assert_eq!(field_of(flux), "thermal.transient.heat_flux.2");
+        assert_eq!(flux.label, "Heat-flux magnitude · t = 60 s");
+    }
+
+    /// Electromagnetic harmonic: each quantity at the frequency of its largest response.
+    #[test]
+    fn electromagnetic_harmonic_shows_each_quantity_at_its_peak_frequency() {
+        let mut values = Values::default();
+        let mut fields = Vec::new();
+        for (index, hertz) in [50.0, 1000.0, 10000.0].into_iter().enumerate() {
+            for (name, quantity, peak) in [
+                ("current_density", Q::ElectricCurrentDensity, [1.0, 4.0, 2.0][index]),
+                ("magnetic_flux_density", Q::MagneticFluxDensity, [3.0, 2.0, 1.0][index]),
+            ] {
+                let id = format!("electromagnetic.{name}.{index}");
+                values.peaks.insert(id.clone(), peak);
+                fields.push(sampled(
+                    &id,
+                    AnalysisFieldLayout::vector3(quantity, FieldLocation::Element)
+                        .representation(R::Complex),
+                    vec![2, 3, 2],
+                    RecoveredFieldSample::FrequencyHertz(hertz),
+                ));
+            }
+        }
+        let profile = CaptureProfile::from_published(&[("run", &fields)], &values).unwrap();
+        let current = view(&profile, "current-density");
+        assert_eq!(field_of(current), "electromagnetic.current_density.1");
+        assert_eq!(current.label, "Current density |J| · 1000.00 Hz");
+        assert!(current.deformation.is_none());
+        let flux = view(&profile, "magnetic-flux-density");
+        assert_eq!(field_of(flux), "electromagnetic.magnetic_flux_density.0");
+        assert_eq!(flux.label, "Magnetic flux density |B| · 50.00 Hz");
+    }
+
+    /// Acoustic harmonic: the pressure amplitude at the resonant frequency, undeformed.
+    #[test]
+    fn acoustic_harmonic_shows_the_pressure_amplitude_at_the_peak_frequency() {
+        let mut values = Values::default();
+        let fields: Vec<_> = [(100.0, 0.5), (343.0, 7.0), (800.0, 1.0)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (hertz, peak))| {
+                let id = format!("acoustic.pressure.{index}");
+                values.peaks.insert(id.clone(), peak);
+                sampled(
+                    &id,
+                    AnalysisFieldLayout::scalar(Q::AcousticPressure, FieldLocation::Node)
+                        .representation(R::Complex),
+                    vec![4, 2],
+                    RecoveredFieldSample::FrequencyHertz(hertz),
+                )
+            })
+            .collect();
+        let profile = CaptureProfile::from_published(&[("run", &fields)], &values).unwrap();
+        let pressure = view(&profile, "acoustic-pressure");
+        assert_eq!(field_of(pressure), "acoustic.pressure.1");
+        assert_eq!(pressure.label, "Acoustic pressure amplitude |p| · 343.00 Hz");
+        assert_eq!(pressure.shape, "undeformed");
+    }
+
+    /// Acoustic transient: the instant of peak pressure, titled with its time.
+    #[test]
+    fn acoustic_transient_shows_the_peak_pressure_instant() {
+        let mut values = Values::default();
+        let fields: Vec<_> = [(0.0, 0.0), (0.001, 5.0), (0.002, 2.0)]
+            .into_iter()
+            .enumerate()
+            .map(|(step, (time, peak))| {
+                let id = format!("acoustic.transient.pressure.{step}");
+                values.peaks.insert(id.clone(), peak);
+                sampled(
+                    &id,
+                    AnalysisFieldLayout::scalar(Q::AcousticPressure, FieldLocation::Node).step(step),
+                    vec![4],
+                    RecoveredFieldSample::TimeSeconds(time),
+                )
+            })
+            .collect();
+        let profile = CaptureProfile::from_published(&[("run", &fields)], &values).unwrap();
+        let pressure = view(&profile, "sound-pressure");
+        assert_eq!(field_of(pressure), "acoustic.transient.pressure.1");
+        assert_eq!(pressure.label, "Acoustic pressure · t = 1 ms");
+    }
+
+    /// Fluid transient: velocity and pressure at the instant of peak velocity.
+    #[test]
+    fn fluid_transient_shows_the_peak_velocity_instant() {
+        let mut values = Values::default();
+        let mut fields = Vec::new();
+        for (step, (time, peak)) in [(0.0, 0.1), (0.5, 2.0), (1.0, 1.5)].into_iter().enumerate() {
+            let id = format!("fluid.velocity.{step}");
+            values.peaks.insert(id.clone(), peak);
+            fields.push(sampled(
+                &id,
+                node_vector(Q::FluidVelocity).step(step),
+                vec![4, 3],
+                RecoveredFieldSample::TimeSeconds(time),
+            ));
+            fields.push(sampled(
+                &format!("fluid.pressure.{step}"),
+                AnalysisFieldLayout::scalar(Q::FluidPressure, FieldLocation::Node).step(step),
+                vec![4],
+                RecoveredFieldSample::TimeSeconds(time),
+            ));
+        }
+        let profile = CaptureProfile::from_published(&[("run", &fields)], &values).unwrap();
+        let velocity = view(&profile, "velocity");
+        assert_eq!(field_of(velocity), "fluid.velocity.1");
+        assert_eq!(velocity.label, "Velocity magnitude · t = 500 ms");
+        assert!(velocity.deformation.is_none());
+        let pressure = view(&profile, "pressure");
+        assert_eq!(field_of(pressure), "fluid.pressure.1");
+        assert_eq!(pressure.label, "Pressure · t = 500 ms");
     }
 }

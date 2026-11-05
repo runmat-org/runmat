@@ -2469,6 +2469,9 @@ export type ModalCombination = "srss"
   | "ten_percent"
   | "absolute_sum";
 
+export type ModalStaticCorrection = "none"
+  | "applied_loads";
+
 export type ModalTruncationCorrection = "none"
   | "residual_mode"
   | { missing_mass: {
@@ -2843,7 +2846,9 @@ export interface Pressure {
 
 export type ProcedureSettings = "none"
   | { structural_random_response: StructuralRandomResponseSettings }
-  | { structural_nonlinear: StructuralNonlinearSettings };
+  | { structural_nonlinear: StructuralNonlinearSettings }
+  | { structural_modal_basis: StructuralModalBasisSettings }
+  | { structural_modal_frequency: StructuralModalFrequencySettings };
 
 export interface ProcedureStep {
   step_id: ProcedureStepId;
@@ -3623,6 +3628,14 @@ export type StructuralKinematicHistory = { acceleration_driven: {
 
 export type StructuralKinematics = "small_strain"
   | "large_deformation";
+
+export interface StructuralModalBasisSettings {
+  residual_vector_directions: SpectrumDirection[];
+}
+
+export interface StructuralModalFrequencySettings {
+  static_correction: ModalStaticCorrection;
+}
 
 export type StructuralMotionReconstruction = "piecewise_linear_acceleration_exact";
 

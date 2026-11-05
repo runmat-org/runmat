@@ -22,19 +22,21 @@ use crate::operator::{LinearOperator, Preconditioner};
 use crate::scalar::Scalar;
 
 mod bicgstab;
+mod legacy_usage;
 pub mod lanczos;
 pub mod gmres;
 mod minres;
 pub mod pcg;
 mod sync;
+pub mod usage;
 
 pub use bicgstab::{bicgstab_async, bicgstab_workspace_len};
 pub use gmres::{PreconditionerSide, ResidualCheck};
 pub use minres::{minres_async, minres_workspace_len};
 pub use sync::{
     gmres_distributed, gmres_solve as gmres, gmres_with_workspace, gmres_workspace_len,
-    pcg_distributed, pcg_solve as pcg, pcg_workspace_len, GmresOptions, GmresWorkspace,
-    HostKernels, ScalarArithmetic,
+    pcg_distributed, pcg_solve as pcg, pcg_solve_with_capacity, pcg_workspace_len, GmresOptions, GmresWorkspace,
+    HostKernels, PcgCapacityError, ScalarArithmetic,
 };
 
 /// Outcome of a callback application.
@@ -84,6 +86,12 @@ pub trait Control {
 /// Operator, preconditioner and checkpoint hooks awaited by MINRES and BiCGStab.
 #[allow(async_fn_in_trait)]
 pub trait KrylovOps<T: Scalar> {
+    /// Admit one typed completed numerical batch before its synchronous kernel.
+    async fn measured<R>(
+        &mut self,
+        work: usage::VectorWork,
+        run: impl FnOnce() -> R,
+    ) -> SolverResult<R>;
     /// `y = A x`.
     async fn apply_operator(&mut self, x: &[T], y: &mut [T]) -> SolverResult<ApplyStatus>;
     /// `z = M⁻¹ r`. Only called when [`KrylovOps::has_preconditioner`] is true.
@@ -199,6 +207,21 @@ pub struct SyncOps<'a, T: Scalar> {
 }
 
 impl<T: Scalar> KrylovOps<T> for SyncOps<'_, T> {
+    async fn measured<R>(
+        &mut self,
+        work: usage::VectorWork,
+        run: impl FnOnce() -> R,
+    ) -> SolverResult<R> {
+        use runmat_simulation_usage::{LedgerError, UsageCategory, UsageContext};
+        let count = work.operations().map_err(LedgerError::from)?;
+        let Some(context) = UsageContext::capture() else {
+            return Ok(run());
+        };
+        let mut reservation = context.ledger().reserve(UsageCategory::Solve, count)?;
+        let result = run();
+        reservation.complete(count)?;
+        Ok(result)
+    }
     async fn apply_operator(&mut self, x: &[T], y: &mut [T]) -> SolverResult<ApplyStatus> {
         self.operator.apply(x, y)?;
         Ok(ApplyStatus::Applied)

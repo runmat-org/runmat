@@ -18,6 +18,7 @@ use super::{
     validation::{validate_constrained_cavity, validate_refill_options},
     ConstrainedCavity, ConstrainedCavityNode, ConstrainedCavityRefillError,
     ConstrainedCavityRefillOptions, ConstrainedCavitySteinerCandidateBudget,
+    RefillTetrahedronError,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -127,12 +128,10 @@ pub(crate) fn generate_constrained_cavity_interior_steiner_candidates_with_diagn
                 >::new(cavity_centroid),
                 source: "cavity_centroid",
             }))
-            .chain(local_cap_apex_candidates(
-                face,
-                surface_point,
-                cavity_centroid,
-                &boundary_nodes,
-            ));
+            .chain(
+                local_cap_apex_candidates(face, surface_point, cavity_centroid, &boundary_nodes)
+                    .map_err(ConstrainedCavityRefillError::Accounting)?,
+            );
         for candidate in candidates {
             evaluated = evaluated.checked_add(1).ok_or_else(|| {
                 resource("constrained cavity Steiner candidate counter overflowed")
@@ -208,19 +207,24 @@ pub(crate) fn generate_constrained_cavity_interior_steiner_candidates_with_diagn
                 options,
             ) {
                 Ok(tetrahedron) => tetrahedron,
-                Err("star_tetrahedron_min_volume") => {
+                Err(RefillTetrahedronError::Rejected("star_tetrahedron_min_volume")) => {
                     diagnostics.tetrahedron_below_minimum_volume += 1;
                     continue;
                 }
-                Err("star_tetrahedron_aspect_ratio") => {
+                Err(RefillTetrahedronError::Rejected("star_tetrahedron_aspect_ratio")) => {
                     diagnostics.tetrahedron_above_maximum_aspect_ratio += 1;
                     continue;
                 }
-                Err("star_tetrahedron_scaled_jacobian") => {
+                Err(RefillTetrahedronError::Rejected("star_tetrahedron_scaled_jacobian")) => {
                     diagnostics.tetrahedron_below_minimum_scaled_jacobian += 1;
                     continue;
                 }
-                Err(_) => unreachable!("raw tetrahedron rejection reasons are closed"),
+                Err(RefillTetrahedronError::Rejected(_)) => {
+                    unreachable!("raw tetrahedron rejection reasons are closed")
+                }
+                Err(RefillTetrahedronError::Accounting(error)) => {
+                    return Err(ConstrainedCavityRefillError::Accounting(error));
+                }
             };
             diagnostics.accepted_before_deduplication += 1;
             scored.push((

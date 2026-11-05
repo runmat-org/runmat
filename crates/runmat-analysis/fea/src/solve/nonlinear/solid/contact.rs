@@ -237,6 +237,7 @@ impl SolidNewtonProblem<'_> {
 fn body_error(error: NonlinearSolidError) -> SolidNewtonError {
     match error {
         NonlinearSolidError::Cancelled => SolidNewtonError::Cancelled,
+        NonlinearSolidError::Accounting(error) => SolidNewtonError::Usage(error),
         other => SolidNewtonError::Evaluation(other.to_string()),
     }
 }

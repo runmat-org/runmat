@@ -110,7 +110,7 @@ fn plan_heterogeneous(
     policy: StructuralStudyPlanningPolicy,
     fields: &[crate::execution::InitialFieldBinding],
 ) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
-    let residual_directions = response_spectrum_residual_directions(study)?;
+    let residual_directions = modal_residual_directions(study)?;
     let mut workloads = BTreeMap::new();
     for step in &study.model.sequence.steps {
         if step.family == runmat_analysis_core::PhysicsFamily::Thermal {
@@ -417,10 +417,19 @@ fn random_response_template(
     Ok(template)
 }
 
-fn response_spectrum_residual_directions(
+/// Residual-vector directions of the study's modal basis: the authored modal-step directions,
+/// then any response-spectrum direction that requests a residual-mode correction.
+fn modal_residual_directions(
     study: &CompiledAnalysisStudy,
 ) -> Result<Vec<runmat_analysis_core::SpectrumDirection>, StructuralStudyPlanningError> {
     let mut directions = Vec::new();
+    for step in &study.model.sequence.steps {
+        for direction in step.modal_residual_vector_directions() {
+            if !directions.contains(direction) {
+                directions.push(direction.clone());
+            }
+        }
+    }
     for step in &study.model.sequence.steps {
         let IndependentDomain::ResponseSpectra { spectrum_ids } = &step.independent_domain else {
             continue;
