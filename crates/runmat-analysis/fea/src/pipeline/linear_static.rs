@@ -5,6 +5,7 @@ use runmat_analysis_core::{
 };
 mod preflight;
 mod prepared;
+mod observations;
 mod reference_diagnostics;
 mod solve;
 mod static_diagnostics;
@@ -36,18 +37,10 @@ use crate::{
         RealizedExcitations,
     },
     pipeline::electro_thermal::recover_electro_thermal_fields,
-    post::{
-        fields::{
-            recover_result_fields_with_capacity, structural_field_recovery_metrics_from_fields,
-            take_structural_observable_fields,
-        },
-        recover_connector_observable_fields, recover_constraint_group_observable_fields,
+    post::fields::{
+        recover_result_fields_with_capacity, structural_field_recovery_metrics_from_fields,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
-    results::{
-        field::{RecoveredFieldCatalog, StructuralRecoveredFieldTopology},
-        observation::{evaluate_structural_observations, ObservationLimits},
-    },
 };
 pub use prepared::{
     run_linear_static_with_prepared_constraint_plan,
@@ -632,56 +625,19 @@ where
     fields.extend(electro_thermal_fields.thermal_residual_snapshots);
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.observations");
-    let observations = if execution_step.observations.is_empty() {
-        Vec::new()
-    } else {
-        let mesh = options.solver_mesh.as_ref();
-        let mut recovered = take_structural_observable_fields(&mut fields)
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        recovered.extend(
-            recover_constraint_group_observable_fields(&structural_constraint_result)
-                .map_err(|error| FeaRunError::Observation(error.to_string()))?,
-        );
-        recovered.extend(
-            recover_connector_observable_fields(&structural_connector_result)
-                .map_err(|error| FeaRunError::Observation(error.to_string()))?,
-        );
-        let mut topology = StructuralRecoveredFieldTopology::derive(model, mesh)
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        topology.entity_counts.constraint_groups = structural_constraint_result.groups.len();
-        topology.entity_counts.connectors = structural_connector_result.responses.len();
-        let catalog = RecoveredFieldCatalog::new_for_topology(
-            topology.identity.discretization_digest(),
-            topology.entity_counts,
-            recovered,
-        )
-        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        let definitions = catalog
-            .fields()
-            .iter()
-            .map(|field| field.definition().clone())
-            .collect::<Vec<_>>();
-        let plan =
-            crate::results::observation::resolve_structural_observation_plan_with_connectors(
-                execution_step,
-                model,
-                mesh,
-                executed_constraint_plan,
-                &structural_connector_result.plan,
-                &definitions,
-                ObservationLimits::default(),
-            )
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        let observations = evaluate_structural_observations(&plan, model, mesh, &catalog)
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        fields.extend(
-            catalog
-                .into_fields()
-                .into_iter()
-                .map(|field| field.into_storage()),
-        );
-        observations
-    };
+    let observations = observations::evaluate(
+        observations::StaticObservationInputs {
+            model,
+            step: execution_step,
+            mesh: options.solver_mesh.as_ref(),
+            constraints: executed_constraint_plan,
+            constraint_result: &structural_constraint_result,
+            connector_result: &structural_connector_result,
+        },
+        &mut fields,
+        awaited_solid.then_some(&mut before_block),
+    )
+    .await?;
     drop(phase_clock);
     emit_phase(
         "fea.run_linear_static",

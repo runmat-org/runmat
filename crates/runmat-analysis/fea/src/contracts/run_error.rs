@@ -90,3 +90,12 @@ impl From<crate::constraints::ConstraintResultError> for FeaRunError {
         }
     }
 }
+
+impl From<crate::results::observation::ObservationError> for FeaRunError {
+    fn from(error: crate::results::observation::ObservationError) -> Self {
+        match error {
+            crate::results::observation::ObservationError::Accounting(cause) => Self::Usage(cause),
+            other => Self::Observation(other.to_string()),
+        }
+    }
+}

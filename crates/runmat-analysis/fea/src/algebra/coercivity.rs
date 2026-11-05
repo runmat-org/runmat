@@ -42,6 +42,7 @@ pub enum NumericalCapacityPhase {
     StaticBalance,
     ConstraintRecovery,
     FieldRecovery,
+    StaticObservations,
     SolidRecoveryElement { element: usize },
     SolvePrimitive,
     DirectSolve(runmat_sparse_solvers::direct::DirectSolvePhase),
