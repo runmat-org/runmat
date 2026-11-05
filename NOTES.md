@@ -242,7 +242,7 @@ c. Explain the 15.5 -> 20 GB RSS rise (p12 samples).
 
 ## q-mesh-fix-12 (2026-11-04, handed back; WIP, sub-a 1869 and hero 8566 still fail)
 Commit 6f6abddf59 on q-mesh-fix-6 (base 2312ef4919). Sub-a replay: `~/runs/qmf6/suba-new.sh <tag>`.
-Debug prints used for the traces below: scratchpad patch with-debug.patch (QMF_DEBUG env), not committed.
+Debug prints used for the traces below: $J/tmp/work/q-mesh-fix-6/qmf12-debug-r15.patch (full diff vs 2312ef4919 at r15 incl. QMF_DEBUG eprintlns; not committed).
 
 ### What 1869 really was (sub-a, z=.029 = TIM top, on the convex hull)
 - Each surface triangle is its own constraint, and every surface triangle edge is a segment.
