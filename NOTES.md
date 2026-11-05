@@ -158,3 +158,8 @@ two newest hashes per workspace crate: 109 GB -> 47 GB), runs ~/runs/q-snapshot-
 3. Snapshot profiles: PRIMARY_RESPONSES picks a transient's instant per family (displacement,
    acoustic pressure, fluid velocity at peak; temperature at the final state); new real
    "sound-pressure" display for acoustic transients; 6 family tests.
+Hand-back state: see the final report (also posted as sister-comms/fea-pinned-build-6d2debb569.txt).
+Commits b9eaf10ce0 686bbd966d 980558bbd0 06b7649e73 6d2debb569 ec9a2a37c4.
+Open: ec9a2a37c4 untested and not in a release; acoustic frequency render tiles; fluid transient
+publishes only the final state (element-located), so its primary-response instant rule never fires;
+thermal transient example (initial-vs-prescribed conflict); EM examples blocked by mesher and resources.
