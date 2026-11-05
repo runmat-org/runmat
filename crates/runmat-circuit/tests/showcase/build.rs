@@ -18,7 +18,13 @@ impl Build {
         self.run_on(LAYOUT, command, values, selection)
     }
 
-    pub fn run_on(&mut self, path: &str, command: &str, values: Value, selection: &[&str]) -> String {
+    pub fn run_on(
+        &mut self,
+        path: &str,
+        command: &str,
+        values: Value,
+        selection: &[&str],
+    ) -> String {
         let request = EditRequest {
             command: command.into(),
             values: values.as_object().cloned().unwrap_or_default(),
@@ -35,19 +41,33 @@ impl Build {
     }
 
     pub fn board(&self) -> runmat_circuit::layout::Board {
-        parse_board(LAYOUT, &self.files[LAYOUT]).board.expect("the layout reads")
+        parse_board(LAYOUT, &self.files[LAYOUT])
+            .board
+            .expect("the layout reads")
     }
 }
 
 pub fn build(dir: &Path) {
     let start = include_str!("start.circuit.layout");
     let mut files = Files::new();
-    files.insert(CIRCUIT.into(), std::fs::read_to_string(dir.join("daq.circuit")).unwrap());
+    files.insert(
+        CIRCUIT.into(),
+        std::fs::read_to_string(dir.join("daq.circuit")).unwrap(),
+    );
     files.insert(LAYOUT.into(), start.to_owned());
     let mut b = Build { files };
     b.run_on(CIRCUIT, "schematic.annotate", json!({}), &[]);
-    b.run("board.layer-stack", json!({ "layers": 6, "thickness": 1.6 }), &[]);
-    let index = runtime::compile(LAYOUT, &b.files[LAYOUT], &b.files, &CompileOptions::default());
+    b.run(
+        "board.layer-stack",
+        json!({ "layers": 6, "thickness": 1.6 }),
+        &[],
+    );
+    let index = runtime::compile(
+        LAYOUT,
+        &b.files[LAYOUT],
+        &b.files,
+        &CompileOptions::default(),
+    );
     for d in &index.diagnostics {
         eprintln!("diag {:?}", d);
     }
@@ -191,7 +211,11 @@ fn pours(b: &mut Build) {
     ] {
         // Outer-layer pours meet SMD pads solid (reflow needs no relief there); the planes
         // keep thermal reliefs on the through-hole pads.
-        let connect = if layer.starts_with("In") { "relief" } else { "relief-tht" };
+        let connect = if layer.starts_with("In") {
+            "relief"
+        } else {
+            "relief-tht"
+        };
         b.run(
             "board.pour",
             json!({ "net": format!("net:{net}"), "layer": layer, "points": all, "connect": connect }),
@@ -234,12 +258,21 @@ fn route(b: &mut Build) {
         .map(|n| format!("net:/ch[0]/{n}"))
         .collect();
     b.run("board.autoroute", json!({ "nets": local }), &[]);
-    b.run("board.copy-room-formats", json!({ "source": ["room:ch[0]"] }), &[]);
+    b.run(
+        "board.copy-room-formats",
+        json!({ "source": ["room:ch[0]"] }),
+        &[],
+    );
     let board = b.board();
     let smd: Vec<String> = board
         .footprints
         .values()
-        .filter(|f| f.package.pads.iter().any(|p| p.kind == runmat_circuit::library::PadKind::Smd))
+        .filter(|f| {
+            f.package
+                .pads
+                .iter()
+                .any(|p| p.kind == runmat_circuit::library::PadKind::Smd)
+        })
         .map(|f| format!("component:{}", f.reference))
         .collect();
     b.run("board.fanout", json!({ "component": smd }), &[]);
@@ -248,7 +281,12 @@ fn route(b: &mut Build) {
 
 /// What the built board's compile says: findings by code and the airwires left.
 pub fn report(b: &Build) {
-    let out = runtime::compile(LAYOUT, &b.files[LAYOUT], &b.files, &CompileOptions::default());
+    let out = runtime::compile(
+        LAYOUT,
+        &b.files[LAYOUT],
+        &b.files,
+        &CompileOptions::default(),
+    );
     for d in &out.diagnostics {
         eprintln!("diagnostic: {} {}", d.path, d.message);
     }
@@ -265,14 +303,19 @@ pub fn report(b: &Build) {
     let parsed = b.board();
     for r in &board.drc {
         for it in &r.items {
-            let Some(n) = it.strip_prefix("track ").and_then(|n| n.parse::<u64>().ok()) else {
+            let Some(n) = it
+                .strip_prefix("track ")
+                .and_then(|n| n.parse::<u64>().ok())
+            else {
                 continue;
             };
             if let Some(t) = parsed.tracks.get(&runmat_circuit::layout::ItemId(n)) {
                 let (a, c) = t.endpoints();
                 eprintln!(
                     "    track {n}: {} L{} w{} {a} -> {c}",
-                    t.net.map(|x| parsed.net_name(x).to_owned()).unwrap_or_default(),
+                    t.net
+                        .map(|x| parsed.net_name(x).to_owned())
+                        .unwrap_or_default(),
                     t.layer,
                     to_mm(t.width)
                 );
@@ -296,7 +339,11 @@ pub fn report(b: &Build) {
 }
 
 fn write(b: &Build, dir: &Path) {
-    for (path, name) in [(CIRCUIT, "daq.circuit"), (LAYOUT, "daq.circuit.layout"), (LOCK, "daq.circuit.lock")] {
+    for (path, name) in [
+        (CIRCUIT, "daq.circuit"),
+        (LAYOUT, "daq.circuit.layout"),
+        (LOCK, "daq.circuit.lock"),
+    ] {
         if let Some(text) = b.files.get(path) {
             std::fs::write(dir.join(name), text).unwrap();
         }

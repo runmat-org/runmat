@@ -16,6 +16,7 @@
 mod fanout;
 mod search;
 mod space;
+mod star;
 
 pub use fanout::{fanout, FanoutOptions, FanoutReport};
 pub use space::Space;
@@ -117,16 +118,10 @@ pub fn autoroute_in(
 ) -> RouteReport {
     let mut report = RouteReport::default();
     let wanted: std::collections::BTreeSet<NetId> = opts.nets.iter().copied().collect();
-    let mut wires: Vec<crate::route::Airwire> = wires
+    let wires: Vec<crate::route::Airwire> = wires
         .into_iter()
         .filter(|a| wanted.contains(&a.net))
         .collect();
-    wires.sort_by(|a, b| {
-        a.length
-            .partial_cmp(&b.length)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| (a.net, a.a, a.b).cmp(&(b.net, b.a, b.b)))
-    });
     let n = board.copper_count();
     let pads = board.all_pads();
     let layer_cost: Vec<f64> = opts
@@ -136,6 +131,13 @@ pub fn autoroute_in(
         .map(|(i, _)| 1.0 + 0.25 * i as f64)
         .collect();
     let rooms: Vec<crate::geom::Rect> = board.rooms.iter().map(|r| r.outline.bbox()).collect();
+    let mut wires = star::star_between_rooms(wires, &rooms);
+    wires.sort_by(|a, b| {
+        a.length
+            .partial_cmp(&b.length)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| (a.net, a.a, a.b).cmp(&(b.net, b.a, b.b)))
+    });
     for w in wires {
         let avoid: Vec<(crate::geom::Rect, Option<Point>)> = rooms
             .iter()
