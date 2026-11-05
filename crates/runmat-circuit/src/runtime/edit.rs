@@ -1,0 +1,432 @@
+//! Catalog commands on a circuit: board edits, ECO in both directions, room formats; each a
+//! minimal text change per file.
+
+use super::*;
+
+/* ------------------------------------------------------------------------------------------------
+ * Edits
+ * --------------------------------------------------------------------------------------------- */
+
+/// A catalog command's run, as the Desktop sends it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct EditRequest {
+    pub command: String,
+    #[serde(default)]
+    pub values: serde_json::Map<String, Value>,
+    /// Outline node ids (`component:R1`, `track:17`, `room:ch[0]`).
+    #[serde(default)]
+    pub selection: Vec<String>,
+    #[serde(default)]
+    pub options: CompileOptions,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct EditOutput {
+    pub files: Vec<FileChange>,
+    /// One line on what the edit did.
+    pub summary: String,
+}
+
+/// Why an edit did nothing: the files don't compile, or the edit can't be made.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct EditError {
+    pub message: String,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+impl EditError {
+    pub(super) fn new(message: impl Into<String>) -> Self {
+        EditError {
+            message: message.into(),
+            diagnostics: Vec::new(),
+        }
+    }
+}
+
+impl From<String> for EditError {
+    fn from(m: String) -> Self {
+        EditError::new(m)
+    }
+}
+
+pub(super) fn failure(f: EditFailure) -> EditError {
+    EditError::new(f.to_string())
+}
+
+/// Runs a catalog command on the circuit `path` belongs to, as one change per file.
+pub fn edit(
+    path: &str,
+    text: &str,
+    files: &Files,
+    request: &EditRequest,
+) -> Result<EditOutput, EditError> {
+    let project = load(path, text, files, &request.options).map_err(|diagnostics| EditError {
+        message: format!(
+            "the circuit has {} error(s), so the edit wasn't made",
+            diagnostics.len()
+        ),
+        diagnostics,
+    })?;
+    match request.command.as_str() {
+        "schematic.update-board" => update_board(&project, request),
+        "board.update-schematic" => update_schematic(&project, request),
+        "board.copy-room-formats" => room_formats(&project, request),
+        command => {
+            let layout = project.layout_or_err()?;
+            let board = layout.parsed.board.as_ref().expect("read");
+            let edit = board_edit(board, &layout.parsed.sites, command, request)?;
+            let change =
+                board_edit::board_command(&layout.path, &layout.text, &edit).map_err(failure)?;
+            Ok(EditOutput {
+                summary: format!("{} on {}", edit.command(), layout.path),
+                files: vec![file_change(&layout.path, &layout.text, change)],
+            })
+        }
+    }
+}
+
+/// The ECO lines a run selected: its `changes` value holds Outline node ids
+/// (`eco:<line>`, `eco-back:<line>`).
+fn selected_lines(values: &serde_json::Map<String, Value>, prefix: &str) -> BTreeSet<String> {
+    strings(values.get("changes"))
+        .into_iter()
+        .filter_map(|id| id.strip_prefix(prefix).map(str::to_owned))
+        .collect()
+}
+
+fn strings(v: Option<&Value>) -> Vec<String> {
+    match v {
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn flag(values: &serde_json::Map<String, Value>, id: &str, default: bool) -> bool {
+    values.get(id).and_then(Value::as_bool).unwrap_or(default)
+}
+
+fn number(values: &serde_json::Map<String, Value>, id: &str) -> Option<f64> {
+    values.get(id).and_then(Value::as_f64)
+}
+
+/// All or nothing: the selected lines that fail validation, named.
+fn refuse(plan: &EcoPlan, board: &Board, selected: &BTreeSet<String>) -> Result<(), EditError> {
+    if selected.is_empty() {
+        return Err(EditError::new("select at least one change to apply"));
+    }
+    let unknown: Vec<&String> = selected
+        .iter()
+        .filter(|id| !plan.changes.iter().any(|c| &c.id == *id))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(EditError::new(format!(
+            "{} selected change(s) are no longer pending: {}",
+            unknown.len(),
+            unknown
+                .iter()
+                .take(3)
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    let checks = eco::validate(plan, board, selected);
+    let failures: Vec<String> = plan
+        .changes
+        .iter()
+        .filter(|c| checks.get(&c.id).is_some_and(|k| k.status == Status::Error))
+        .map(|c| {
+            format!(
+                "{} ({})",
+                c.item,
+                checks[&c.id].reason().unwrap_or_default()
+            )
+        })
+        .collect();
+    if failures.is_empty() {
+        return Ok(());
+    }
+    Err(EditError::new(format!(
+        "{} {} validation, so nothing was applied: {}{}",
+        failures.len(),
+        if failures.len() == 1 {
+            "change fails"
+        } else {
+            "changes fail"
+        },
+        failures
+            .iter()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; "),
+        if failures.len() > 3 { "…" } else { "" }
+    )))
+}
+
+fn update_board(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
+    let layout = project.layout_or_err()?;
+    let board = project.board().expect("read");
+    let run = EcoSettings::from_values(&request.values);
+    let (plan, _) = plans(project, board, Some(&run));
+    let selected = selected_lines(&request.values, "eco:");
+    refuse(&plan, board, &selected)?;
+    let options = ApplyOptions {
+        remove_orphaned_copper: flag(&request.values, "remove_orphaned_copper", false),
+    };
+    let (change, report) = board_edit::apply_eco(
+        &layout.path,
+        &layout.text,
+        &plan,
+        &selected,
+        &project.pool,
+        &options,
+    )
+    .map_err(failure)?;
+    Ok(EditOutput {
+        summary: format!(
+            "applied {} change(s); removed {} track(s) and {} via(s); {} left without a net",
+            report.applied.len(),
+            report.removed_tracks.len(),
+            report.removed_vias.len(),
+            report.unnetted.len()
+        ),
+        files: vec![file_change(&layout.path, &layout.text, change)],
+    })
+}
+
+fn update_schematic(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
+    let layout = project.layout_or_err()?;
+    let board = project.board().expect("read");
+    let plan = eco::back_annotate(&project.schematic(), board, &board.sync.options);
+    let selected = selected_lines(&request.values, "eco-back:");
+    refuse(&plan, board, &selected)?;
+    let mut design = project.design.clone();
+    let mut lock = project.lock.clone();
+    let (board_change, applied) = board_edit::edit_board(&layout.path, &layout.text, |b| {
+        eco::apply_back(&mut design, &mut lock, b, &plan, &selected).map_err(|e| format!("{e:?}"))
+    })
+    .map_err(failure)?;
+    // The file's own sheets take the change; a change in a used file is not written here.
+    let mut own_new = project.own.clone();
+    for (name, sheet) in own_new.sheets.iter_mut() {
+        if let Some(changed) = design.sheets.get(name) {
+            *sheet = changed.clone();
+        }
+    }
+    for (name, sheet) in &design.sheets {
+        if !project.own.sheets.contains_key(name) && project.design.sheets.get(name) != Some(sheet)
+        {
+            return Err(EditError::new(format!(
+                "sheet `{name}` comes from a used file; back-annotate there"
+            )));
+        }
+    }
+    let mut files = vec![file_change(&layout.path, &layout.text, board_change)];
+    if own_new != project.own {
+        let change = diff_circuit(
+            &project.circuit_path,
+            &project.circuit_text,
+            &project.own,
+            &own_new,
+        )?;
+        files.push(file_change(
+            &project.circuit_path,
+            &project.circuit_text,
+            change,
+        ));
+    }
+    let lock_text = lock.to_text();
+    if project.lock_text.as_deref() != Some(lock_text.as_str()) && lock != project.lock {
+        let path = lock_path_for(&project.circuit_path);
+        let old = project.lock_text.clone().unwrap_or_default();
+        files.push(FileChange {
+            edits: vec![Utf16Edit {
+                start: 0,
+                end: utf16_offset(&old, old.len()),
+                text: lock_text.clone(),
+            }],
+            path,
+            text: lock_text,
+            reprinted: true,
+        });
+    }
+    Ok(EditOutput {
+        summary: format!("back-annotated {} change(s)", applied.len()),
+        files,
+    })
+}
+
+/// `room:ch[0]` → `ch[0]`; a bare room name stays.
+fn room_name(id: &str) -> String {
+    id.strip_prefix("room:").unwrap_or(id).to_owned()
+}
+
+fn room_formats(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
+    let layout = project.layout_or_err()?;
+    let source = strings(request.values.get("source"))
+        .into_iter()
+        .chain(
+            request
+                .selection
+                .iter()
+                .filter(|s| s.starts_with("room:"))
+                .cloned(),
+        )
+        .next()
+        .map(|s| room_name(&s))
+        .ok_or_else(|| EditError::new("pick the room to copy from"))?;
+    let targets: Vec<String> = strings(request.values.get("targets"))
+        .iter()
+        .map(|s| room_name(s))
+        .filter(|t| t != &source)
+        .collect();
+    let options = RoomFormatOptions {
+        placement: flag(&request.values, "placement", true),
+        routing: flag(&request.values, "routing", true),
+        room_shape: flag(&request.values, "room_shape", true),
+        pours: flag(&request.values, "pours", true),
+    };
+    let (change, report) =
+        board_edit::copy_room_formats(&layout.path, &layout.text, &source, &targets, &options)
+            .map_err(failure)?;
+    let placed: usize = report.copies.iter().map(|c| c.placed.len()).sum();
+    let tracks: usize = report.copies.iter().map(|c| c.tracks_added.len()).sum();
+    let pours: usize = report.copies.iter().map(|c| c.pours_added.len()).sum();
+    Ok(EditOutput {
+        summary: format!(
+            "copied {source} into {} room(s): {placed} part(s) placed, {tracks} track(s) and {pours} pour(s) copied",
+            report.copies.len()
+        ),
+        files: vec![file_change(&layout.path, &layout.text, change)],
+    })
+}
+
+/// An Outline node id or designator → the site or designator `apply_board_edit` resolves.
+fn site_of(board: &Board, sites: &BTreeMap<ItemId, String>, id: &str) -> Result<String, EditError> {
+    let (kind, rest) = id.split_once(':').unwrap_or(("", id));
+    match kind {
+        "component" | "footprint" | "" => {
+            if board.footprint_by_ref(rest).is_some() {
+                Ok(rest.to_owned())
+            } else {
+                Err(EditError::new(format!("{rest} is not on the board")))
+            }
+        }
+        "track" | "via" | "pour" | "zone" | "fiducial" | "text" | "keepout" | "dimension" => {
+            let n: u64 = rest
+                .parse()
+                .map_err(|_| EditError::new(format!("`{id}` is not a board item")))?;
+            sites
+                .get(&ItemId(n))
+                .cloned()
+                .ok_or_else(|| EditError::new(format!("`{id}` is not on the board")))
+        }
+        _ => Err(EditError::new(format!("`{id}` is not a board item"))),
+    }
+}
+
+const MM: f64 = 1_000_000.0;
+
+fn mm_value(values: &serde_json::Map<String, Value>, id: &str) -> Option<crate::geom::Coord> {
+    number(values, id).map(|v| (v * MM).round() as crate::geom::Coord)
+}
+
+/// The model edit a board catalog command makes, from its values and the selection.
+pub(super) fn board_edit(
+    board: &Board,
+    sites: &BTreeMap<ItemId, String>,
+    command: &str,
+    request: &EditRequest,
+) -> Result<BoardEdit, EditError> {
+    let values = &request.values;
+    let items = |field: &str| -> Result<Vec<String>, EditError> {
+        let picked = strings(values.get(field));
+        let ids = if picked.is_empty() {
+            request.selection.clone()
+        } else {
+            picked
+        };
+        if ids.is_empty() {
+            return Err(EditError::new("select the items first"));
+        }
+        ids.iter().map(|id| site_of(board, sites, id)).collect()
+    };
+    match command {
+        "board.move" => Ok(BoardEdit::Move {
+            items: items("items")?,
+            dx: mm_value(values, "dx").unwrap_or(0),
+            dy: mm_value(values, "dy").unwrap_or(0),
+            rotation: number(values, "rotation").unwrap_or(0.0),
+        }),
+        "board.lock" => {
+            let items = items("items")?;
+            // Lock toggles: all locked unlocks, otherwise everything locks.
+            let all_locked = items.iter().all(|s| {
+                board.footprint_by_ref(s).is_some_and(|f| f.locked)
+                    || sites.iter().find(|(_, x)| *x == s).is_some_and(|(id, _)| {
+                        board.tracks.get(id).is_some_and(|t| t.locked)
+                            || board.vias.get(id).is_some_and(|v| v.locked)
+                            || board.zones.get(id).is_some_and(|z| z.locked)
+                    })
+            });
+            Ok(BoardEdit::Lock {
+                items,
+                locked: !all_locked,
+            })
+        }
+        "board.delete" | "edit.delete" => Ok(BoardEdit::Delete {
+            items: items("items")?,
+        }),
+        "board.layer-stack" => Ok(BoardEdit::LayerStack {
+            layers: number(values, "layers").map_or(board.copper_count(), |n| n as u8),
+            thickness: mm_value(values, "thickness").unwrap_or_else(|| board.stackup.thickness()),
+        }),
+        "board.test-points" => {
+            let nets = strings(values.get("nets"));
+            let net = nets
+                .first()
+                .map(|n| n.strip_prefix("net:").unwrap_or(n).to_owned())
+                .ok_or_else(|| EditError::new("pick the net for the test point"))?;
+            if nets.len() > 1 {
+                return Err(EditError::new("test points are placed one net at a time"));
+            }
+            let at = board
+                .outline
+                .outer
+                .iter()
+                .fold(None::<crate::geom::Point>, |acc, p| {
+                    Some(acc.map_or(*p, |a| crate::geom::Point::new(a.x.min(p.x), a.y.min(p.y))))
+                })
+                .ok_or_else(|| {
+                    EditError::new("the board has no outline to place a test point in")
+                })?;
+            Ok(BoardEdit::TestPoint {
+                net,
+                at: crate::geom::Point::new(
+                    at.x + crate::geom::mm(2.0),
+                    at.y + crate::geom::mm(2.0),
+                ),
+                side: if values.get("side").and_then(Value::as_str) == Some("top") {
+                    Side::Top
+                } else {
+                    Side::Bottom
+                },
+                diameter: mm_value(values, "diameter").unwrap_or(crate::geom::mm(1.0)),
+            })
+        }
+        "board.route" | "board.place-via" | "board.pour" | "board.keepout" | "board.room"
+        | "board.dimension" | "board.outline" | "board.fill" => {
+            crate::drawn::drawn_edit(board, command, values, &request.selection)
+                .map_err(EditError::new)
+        }
+        other => Err(EditError::new(format!(
+            "{other} isn't a model edit the circuit runtime runs"
+        ))),
+    }
+}
