@@ -500,6 +500,11 @@ fn move_snapshot_field(
     {
         let mut field = fields.remove(position);
         field.field_id = snapshot_id;
+        // The snapshot is the retained state at this position of the accepted schedule, as
+        // its velocity and energy snapshots declare.
+        field.layout = field
+            .layout
+            .with_ordinal(runmat_analysis_core::FieldOrdinal::Step(index));
         history.push(field);
     }
 }

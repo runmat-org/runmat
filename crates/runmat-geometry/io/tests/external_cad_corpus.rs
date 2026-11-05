@@ -493,3 +493,38 @@ fn sandbox_bracket_samples_stay_inside_original_edge_domains() {
     }
     assert!(checked > 0);
 }
+
+/// One solid ("Pack negative perimeter cable") carried out of an exported EV battery pack. The
+/// writer stamps a 0.9 nm tolerance on every edge, while its swept B-spline pcurves sit up to
+/// 23 nm from their 3D curves. Import admits those gaps (up to 1 um) by raising each affected
+/// edge's tolerance to the measured gap, more than ten times the written value, and the file
+/// passes incidence validation.
+#[test]
+fn exported_pack_cable_with_nanometre_pcurve_gaps_imports() {
+    const CABLE: &[u8] = include_bytes!("fixtures/battery_pack_perimeter_cable.step");
+    let imported = import_exact_cad(
+        "battery_pack_perimeter_cable.step",
+        CABLE,
+        GeometryFormat::Step,
+        &ExactCadImportOptions {
+            source_units: Some(LengthUnit::Millimeter),
+            ..ExactCadImportOptions::default()
+        },
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let tolerances: Vec<f64> = imported
+        .topology
+        .edges
+        .iter()
+        .map(|edge| edge.tolerance_m.canonical_value())
+        .collect();
+    let written = tolerances.iter().copied().fold(f64::INFINITY, f64::min);
+    let raised = tolerances.iter().copied().fold(0.0_f64, f64::max);
+    assert!(written < 1.0e-9, "written edge tolerance {written:e} m");
+    assert!(
+        raised > 10.0 * written && raised < 1.0e-6,
+        "raised edge tolerance {raised:e} m against written {written:e} m"
+    );
+    assert_eq!(imported.topology.solids.len(), 1);
+}

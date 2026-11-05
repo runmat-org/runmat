@@ -287,6 +287,19 @@ fn validate_numerical_evidence(numerical: &StructuralStudyNumericalResult) -> Re
                     .map_err(|error| error.to_string())?;
             }
         }
+        StructuralStudyNumericalResult::StructuralModalFrequency(result) => {
+            result
+                .modal_numerical_receipt
+                .validate_against(
+                    result.modal_numerical_receipt.source_result(),
+                    &result.modal_result,
+                )
+                .map_err(|error| error.to_string())?;
+            result
+                .basis_state
+                .validate()
+                .map_err(|error| error.to_string())?;
+        }
         StructuralStudyNumericalResult::StructuralTransient(result) => result
             .numerical_receipt
             .validate_for_result(&result.result)
@@ -341,6 +354,12 @@ fn validate_numerical_kind_and_steps(
             vec![
                 result.modal_step_id.clone(),
                 result.transient_step_id.clone(),
+            ]
+        }
+        StructuralStudyNumericalResult::StructuralModalFrequency(result) => {
+            vec![
+                result.modal_step_id.clone(),
+                result.frequency_step_id.clone(),
             ]
         }
         StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result) => {
@@ -400,6 +419,7 @@ fn validate_numerical_kind_and_steps(
         ) | (
             StructuralStudyWorkloads::HeterogeneousSequence { .. },
             StructuralStudyNumericalResult::StructuralModalTransient(_)
+                | StructuralStudyNumericalResult::StructuralModalFrequency(_)
                 | StructuralStudyNumericalResult::StructuralModalResponseSpectrum(_)
                 | StructuralStudyNumericalResult::StructuralRandomResponse(_)
                 | StructuralStudyNumericalResult::StructuralBuckling(_)

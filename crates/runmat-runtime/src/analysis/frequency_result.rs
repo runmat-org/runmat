@@ -12,7 +12,7 @@ use runmat_execution::Digest;
 mod admission;
 
 pub(in crate::analysis) use admission::{
-    admit_prestressed_modal_structural_frequency_result,
+    admit_modal_structural_frequency_result, admit_prestressed_modal_structural_frequency_result,
     admit_prestressed_structural_frequency_result, admit_structural_frequency_result,
     CompletedStructuralFrequencyStep, StructuralFrequencyPersistence,
 };
@@ -86,6 +86,19 @@ pub struct StructuralStudyPrestressedFrequencyNumericalResult {
         runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
     pub prestress_state: runmat_analysis_fea::execution::CanonicalSemanticState,
     pub reduction: StructuralStudyPrestressedFrequencyReductionResult,
+    pub frequency: StructuralStudyFrequencyNumericalResult,
+}
+
+/// A modal-extraction step and the modal-reduced frequency sweep (`modal_harmonic`) that
+/// consumes its published basis.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StructuralStudyModalFrequencyNumericalResult {
+    pub frozen_project_digest: Option<runmat_execution::Digest>,
+    pub modal_step_id: ProcedureStepId,
+    pub frequency_step_id: ProcedureStepId,
+    pub modal_result: runmat_analysis_fea::execution::StructuralModalSolverResult,
+    pub modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
+    pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
     pub frequency: StructuralStudyFrequencyNumericalResult,
 }
 

@@ -180,6 +180,21 @@ impl RegionTarget {
             self.resolved_entities.binary_search(entity).is_ok()
         }
     }
+
+    /// Whether this target selects a volume element with mesh region `region_id` and CAD
+    /// ownership `provenance`. A volume target resolves to canonical mesh regions or to the
+    /// exact CAD solids the elements were meshed from (a region selected by solid name), so
+    /// either identity selects the element.
+    pub fn selects_volume_element(
+        &self,
+        region_id: &PersistentEntityId,
+        provenance: &[PersistentEntityId],
+    ) -> bool {
+        self.matches_persistent_entity(region_id)
+            || provenance
+                .iter()
+                .any(|entity| self.matches_persistent_entity(entity))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

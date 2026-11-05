@@ -79,10 +79,9 @@ impl OcctExactEvaluator {
         valid_range(value.range_start, value.range_end)?;
         let surface = self
             .bindings
-            .surfaces
-            .iter()
-            .find(|(_, shape)| **shape == key.face)
-            .map(|(surface, _)| format!("occt:{}:{}", self.session_id, surface.as_str()))
+            .surface_by_face
+            .get(&key.face)
+            .map(|surface| format!("occt:{}:{}", self.session_id, surface.as_str()))
             .unwrap_or_else(|| format!("occt:{}:face:{}", self.session_id, key.face));
         let u = super::evaluator::parameter_frame(
             value.u_parameter_unit,
