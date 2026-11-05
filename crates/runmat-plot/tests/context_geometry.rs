@@ -88,7 +88,7 @@ fn context_chunks_are_blended_and_survive_the_saved_scene() {
         .collect();
     assert_eq!(surfaces.len(), 2);
     let blended =
-        |chunk: &&GeometrySceneChunk| chunk.render_data.material.alpha_mode == AlphaMode::Blend;
+        |chunk: &&&GeometrySceneChunk| chunk.render_data.material.alpha_mode == AlphaMode::Blend;
     assert_eq!(
         surfaces.iter().filter(blended).count(),
         1,
