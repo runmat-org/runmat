@@ -276,3 +276,17 @@ fn workspace_symbols_name_declarations_by_kind() {
                 .all(|s| s.name.to_ascii_lowercase().contains("width"))
     );
 }
+
+#[test]
+fn circuit_simulation_words_and_units_color_and_complete() {
+    let v = highlight::dialect_vocabulary(Dialect::Circuit);
+    // Analysis and measure kinds read as functions; a measure's `spec` as a clause.
+    for word in ["noise", "temperature", "monte_carlo", "tran", "output_noise", "noise_density", "rise_time"] {
+        assert_eq!(v.words.get(word).map(|c| c.token_type), Some(FUNCTION), "{word}");
+    }
+    assert_eq!(v.words.get("spec").map(|c| c.token_type), Some(KEYWORD));
+    // Every SI symbol under every prefix the circuit reader takes, and its named units.
+    for unit in ["uA", "nV", "nF", "pF", "kohm", "MHz", "degC", "dB", "ppm", "mil"] {
+        assert!(v.units.contains(unit), "{unit}");
+    }
+}

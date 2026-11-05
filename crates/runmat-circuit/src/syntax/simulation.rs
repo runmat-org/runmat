@@ -18,6 +18,10 @@ use std::collections::BTreeMap;
 
 pub const WORD: &str = super::words::SIMULATION;
 pub const STATEMENTS: &[&str] = &["sheet", "source", "model", "tolerance", "analysis", "probe", "measure", "option"];
+/// The analysis kinds `analysis <name> = <kind> { … }` takes, for the reader, completion and the highlighter.
+pub const ANALYSES: &[&str] = &["op", "dc", "ac", "tran", "monte_carlo", "noise", "temperature"];
+/// A measure's fields besides the quantity it computes (`MeasureKind::ALL`): its analysis, its spec and their arguments.
+pub const MEASURE_FIELDS: &[&str] = &["of", "spec", "at", "from", "to", "band", "drop"];
 
 fn si(v: &Val) -> Read<f64> {
     match &v.v {
@@ -287,7 +291,7 @@ fn read_analysis((callee, arg): (Option<String>, Option<Val>), span: Span) -> Re
             };
             SimAnalysis::Temperature { of: word(req(&f, "of", span, &what)?)?, values }
         }
-        o => return Err(diagnostic(span, format!("`{o}` is not an analysis (op, dc, ac, tran, monte_carlo, noise, temperature)"))),
+        o => return Err(diagnostic(span, format!("`{o}` is not an analysis ({})", ANALYSES.join(", ")))),
     })
 }
 
@@ -310,7 +314,7 @@ fn read_measure(v: &Val, span: Span) -> Read<SimMeasure> {
                 return Err(diagnostic(x.span, format!("`{k}` reads the noise analysis's output net (`net.X`)")));
             }
             kind = Some((*mk, p));
-        } else if ["at", "from", "to", "band", "drop"].contains(&k.as_str()) {
+        } else if MEASURE_FIELDS[2..].contains(&k.as_str()) {
             args.insert(k.clone(), si(x)?);
         } else {
             return Err(diagnostic(x.span, format!("a measure has no `{k}`")));

@@ -183,13 +183,41 @@ const CAD_FORMS = "crates/runmat-cad/src/syntax/forms.rs";
 const CAD_FORM_STATEMENTS = { source: CAD_FORMS, from: /pub const STATEMENTS/, to: /;/, pattern: /"([a-z_]+)"/g };
 const CAD_FORM_OPERATIONS = { source: CAD_FORMS, from: /pub const OPERATIONS/, to: /;/, pattern: /"([a-z_]+)"/g };
 
+// Circuit simulation sections: analysis kinds and measure kinds read as operations, a measure's
+// own fields (`spec`, `of`, `at`, …) as clauses (runmat-circuit src/syntax/simulation.rs and
+// src/simulation.rs `MeasureKind::ALL`).
+const CIRCUIT_SIMULATION = "crates/runmat-circuit/src/syntax/simulation.rs";
+const CIRCUIT_SIMULATION_OPERATIONS = [
+    { source: CIRCUIT_SIMULATION, from: /^pub const ANALYSES/m, to: /;/, pattern: /"([a-z_]+)"/g },
+    { source: "crates/runmat-circuit/src/simulation.rs", from: /pub const ALL: &'static \[\(&'static str, MeasureKind\)\]/, to: /\];/, pattern: /\("([a-z_]+)", MeasureKind/g },
+];
+const CIRCUIT_MEASURE_FIELDS = { source: CIRCUIT_SIMULATION, from: /^pub const MEASURE_FIELDS/m, to: /;/, pattern: /"([a-z_]+)"/g };
+// Circuit quantities read through runmat-rules' `BuiltinUnits`: every SI base symbol under
+// every prefix, plus the named units its resolver takes (`mil`, `degC`, `ppm`, …).
+const RULES_VALUE = "crates/runmat-rules/src/value.rs";
+const CIRCUIT_UNITS = source => {
+    const text = readFileSync(join(source, RULES_VALUE), "utf8");
+    const block = (from, to) => { const start = text.search(from); const rest = text.slice(start); return rest.slice(0, rest.search(to)); };
+    const quoted = body => [...body.matchAll(/\("([^"]+)", /g)].map(match => match[1]);
+    const prefixes = quoted(block(/^const PREFIXES/m, /^\];/m));
+    const base = quoted(block(/^const BASE/m, /^\];/m));
+    // Quotes pair in order (the resolver's first arm is `""`), and the empty symbol is no unit.
+    const named = [...block(/match symbol \{/, /_ => \{\}/).matchAll(/"([^"]*)"/g)].map(match => match[1]).filter(Boolean);
+    return [...new Set([...base, ...prefixes.flatMap(p => base.map(b => p + b)), ...named, "dB"])];
+};
+// Quoted endpoints in a circuit: a pin (`"C1.1"`, `"U1.V-"`) and a net written as a string (`"net.+5V"`).
+const CIRCUIT_QUOTED = [
+    { scope: "variable.other.net", match: "\"net\\.[^\"]+\"" },
+    { scope: "variable.other.pin", match: "\"[A-Z][A-Za-z0-9_]*(?:\\[\\d+\\])?\\.[A-Za-z0-9_+\\-~#]+\"" },
+];
+
 /** One entry per design dialect: its registry name, file extension and front-end word tables. */
 export const DESIGN_DIALECTS = [
     { dialect: "Part", name: "part", extension: "part", statements: [{ source: CAD_SYNTAX, from: /^pub const PART: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g }, CAD_FORM_STATEMENTS], operations: [{ source: "crates/runmat-cad/src/model/feature.rs", from: /^pub enum FeatureKind \{/m, to: /^\}/m, pattern: /^\s+([A-Z][A-Za-z]*)\(/gm, snake: true }, CAD_FORM_OPERATIONS] },
     { dialect: "Assembly", name: "assembly", extension: "assembly", statements: [{ source: CAD_SYNTAX, from: /^pub const ASSEMBLY: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g }, CAD_FORM_STATEMENTS] },
     { dialect: "Drawing", name: "drawing", extension: "drawing", statements: { source: CAD_SYNTAX, from: /^pub const DRAWING: DocumentGrammar/m, to: /^};/m, pattern: /named\("([a-z_]+)"/g } },
-    { dialect: "Circuit", name: "circuit", extension: "circuit", statements: { source: "crates/runmat-circuit/src/syntax/mod.rs", from: /^pub mod words \{/m, to: /pub const ALL/, pattern: /: &str = "([a-z_]+)"/g } },
-    { dialect: "CircuitLayout", name: "circuit-layout", extension: "circuit.layout", statements: { source: "crates/runmat-circuit/src/syntax/layout.rs", from: /^pub mod words \{/m, to: /pub const ALL/, pattern: /: &str = "([a-z_]+)"/g } },
+    { dialect: "Circuit", name: "circuit", extension: "circuit", statements: { source: "crates/runmat-circuit/src/syntax/mod.rs", from: /^pub mod words \{/m, to: /pub const ALL/, pattern: /: &str = "([a-z_]+)"/g }, operations: CIRCUIT_SIMULATION_OPERATIONS, clauses: CIRCUIT_MEASURE_FIELDS, units: CIRCUIT_UNITS, quoted: CIRCUIT_QUOTED },
+    { dialect: "CircuitLayout", name: "circuit-layout", extension: "circuit.layout", statements: { source: "crates/runmat-circuit/src/syntax/layout.rs", from: /^pub mod words \{/m, to: /pub const ALL/, pattern: /: &str = "([a-z_]+)"/g }, units: CIRCUIT_UNITS },
 ];
 
 const snakeCase = name => name.replace(/[A-Z]/g, (letter, index) => (index ? "_" : "") + letter.toLowerCase());
@@ -230,7 +258,7 @@ export function designVocabulary(source, entry) {
     const groups = [
         { id: "declarations", scope: `keyword.control.${suffix}`, names: words.declarations },
         { id: "generic forms", scope: `keyword.control.${suffix}`, names: [...words.forms, ...words.header, ...words.values] },
-        { id: "clauses", scope: `keyword.other.${suffix}`, names: words.clauses },
+        { id: "clauses", scope: `keyword.other.${suffix}`, names: [...words.clauses, ...wordsIn(source, entry.clauses)] },
         { id: "literals", scope: `constant.language.${suffix}`, names: words.literals },
         { id: "statements", scope: `storage.type.${suffix}`, names: wordsIn(source, entry.statements) },
         { id: "operations", scope: `support.function.${suffix}`, names: wordsIn(source, entry.operations) },
@@ -241,7 +269,7 @@ export function designVocabulary(source, entry) {
 export function designGrammar(source, entry) {
     const suffix = entry.name;
     const groups = designVocabulary(source, entry).filter(group => group.names.length);
-    const units = [...registryNames(source, UNITS), "%"];
+    const units = [...new Set([...registryNames(source, UNITS), ...(entry.units ? entry.units(source) : []), "%"])];
     const order = ["support.function", "keyword.control", "storage.type", "keyword.other", "constant.language"].map(scope => `${scope}.${suffix}`);
     const byScope = new Map();
     for (const group of groups) {
@@ -259,6 +287,7 @@ export function designGrammar(source, entry) {
         generated: "scripts/docs/fea-grammar.mjs from the RunMat dialect registry and front-end registries; do not edit by hand",
         patterns: [
             { name: `comment.line.double-slash.${suffix}`, match: "//.*$" },
+            ...(entry.quoted ?? []).map(q => ({ name: `${q.scope}.${suffix}`, match: q.match })),
             { name: `string.quoted.double.${suffix}`, begin: "\"", end: "\"" },
             { match: `(${number}|\\])(\\s*)(${unit})(?![\\w%])`, captures: { 1: { patterns: [{ name: `constant.numeric.${suffix}`, match: "-?\\d.*" }] }, 3: { name: `support.type.unit.${suffix}` } } },
             ...order.filter(scope => byScope.has(scope)).map(scope => ({ name: scope, match: words(byScope.get(scope)) })),
