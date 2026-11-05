@@ -68,7 +68,12 @@ impl GeometryLines {
                 .iter()
                 .map(|region| SerializedSegmentRegion {
                     region_id: region.region_id.clone(),
-                    segment_ranges: region.triangle_ranges.iter().copied().map(Into::into).collect(),
+                    segment_ranges: region
+                        .triangle_ranges
+                        .iter()
+                        .copied()
+                        .map(Into::into)
+                        .collect(),
                 })
                 .collect(),
             instances: chunk.instances.clone(),
@@ -142,12 +147,14 @@ impl GeometryLines {
             {
                 return Err("geometry line region runs past its segments".into());
             }
-            chunk.segment_regions.push(crate::geometry_scene::GeometrySceneRegion::new(
-                region.region_id,
-                None,
-                None,
-                region.segment_ranges.into_iter().map(Into::into).collect(),
-            ));
+            chunk
+                .segment_regions
+                .push(crate::geometry_scene::GeometrySceneRegion::new(
+                    region.region_id,
+                    None,
+                    None,
+                    region.segment_ranges.into_iter().map(Into::into).collect(),
+                ));
         }
         Ok(chunk.with_instances(self.instances, self.lod_pixels))
     }
