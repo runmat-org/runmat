@@ -146,7 +146,7 @@ impl LocalFeaRunContext {
         })
     }
 
-    pub(crate) async fn worker_context(&self, prepared_json: &str, work_class: WorkerWorkClass) -> Result<JsValue, JsValue> {
+    pub(super) async fn worker_context(&self, prepared_json: &str, work_class: WorkerWorkClass) -> Result<JsValue, JsValue> {
         let host = self
             .host
             .as_ref()
