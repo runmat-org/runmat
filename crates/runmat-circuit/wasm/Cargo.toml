@@ -14,6 +14,10 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 runmat-circuit = { path = "..", version = "=0.6.2" }
+# Circuit simulation: the native engine (ours), its reports and its operation counts.
+runmat-circuit-spice = { path = "../../runmat-circuit-spice", version = "=0.6.2" }
+runmat-circuit-sim = { path = "../../runmat-circuit-sim", version = "=0.6.2" }
+runmat-simulation-usage = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 wasm-bindgen = "0.2"

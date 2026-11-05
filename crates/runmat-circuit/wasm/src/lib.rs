@@ -14,6 +14,9 @@
 //!
 //! Malformed JSON input is reported the same way as a failed edit, never as a panic.
 
+mod simulate;
+pub use simulate::{simulate_begin, simulate_end, simulate_step, simulation_setup};
+
 use runmat_circuit::runtime::{self, CompileOptions, EditRequest, Files, Session};
 use serde::Serialize;
 use std::cell::RefCell;
