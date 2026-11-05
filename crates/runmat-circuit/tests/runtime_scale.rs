@@ -159,8 +159,8 @@ fn small_edits_on_a_large_board_stay_within_budget() {
         assert_eq!(x.polygons, y.polygons, "fills after a delete");
     }
 
-    // A package statement changes (as an ECO's footprint swap does): the layout is read
-    // whole, and the fills keep every tile that package's footprints don't reach.
+    // A package statement changes (as an ECO's footprint swap does): only the footprints
+    // that use it re-read, and rules, fills, DRC and the index patch from them.
     let parsed = runmat_circuit::syntax::board::parse_board(LAYOUT, &files[LAYOUT]);
     let b = parsed.board.as_ref().expect("reads");
     let mut users: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
@@ -185,15 +185,21 @@ fn small_edits_on_a_large_board_stay_within_budget() {
     files.insert(LAYOUT.into(), edited);
     let t = Instant::now();
     let compiled = session.compile(LAYOUT, &files[LAYOUT], &files, &CompileOptions::default());
-    let whole = t.elapsed();
+    let recompile = t.elapsed();
     assert!(compiled.diagnostics.is_empty(), "{:?}", compiled.diagnostics);
-    assert!(session.timings.whole, "a package change reads the layout whole");
-    eprintln!("package {name} ({n} footprints) edited: recompile {whole:?}: {:?}", session.timings);
+    assert!(!session.timings.whole, "a package change patches the board");
+    eprintln!("package {name} ({n} footprints) edited: recompile {recompile:?}: {:?}", session.timings);
+    assert!(recompile < budget(), "package edit took {recompile:?}");
     let fresh = runtime::compile(LAYOUT, &files[LAYOUT], &files, &CompileOptions::default());
-    assert!(
-        session.index() == fresh.index.as_ref(),
-        "the session's projection after a whole re-read differs from a fresh compile"
+    let (a, b) = (
+        session.index().unwrap().board.as_ref().unwrap(),
+        fresh.index.as_ref().unwrap().board.as_ref().unwrap(),
     );
+    assert_eq!(a.footprints.len(), b.footprints.len());
+    assert_eq!(a.drc.len(), b.drc.len());
+    for (x, y) in a.zones.iter().zip(&b.zones) {
+        assert_eq!(x.polygons, y.polygons, "fills after a package edit");
+    }
     // The fills reuse their tiles: well under a fresh fill.
     assert!(
         session.timings.fill * 4 < first_fill,

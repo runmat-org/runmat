@@ -6,9 +6,11 @@
 //! (rules, fills, DRC) updates from the [`BoardDelta`] alone.
 //!
 //! The patch covers item statements (footprints, fiducials, copper, vias, pours, keepouts,
-//! texts, graphics, dimensions). A change that touches anything else (stackups, nets, rules,
-//! packages, the sync section, the file head), renames or duplicates a footprint, or doesn't
-//! read cleanly falls back to a whole read, and [`BoardDelta::whole`] says so.
+//! texts, graphics, dimensions) and package blocks: a changed package re-reads only the
+//! footprints that use it ([`super::repackage`]). A change that touches anything else
+//! (stackups, nets, rules, the sync section, the file head), renames or duplicates a footprint
+//! or package, or doesn't read cleanly falls back to a whole read, and [`BoardDelta::whole`]
+//! says so.
 //!
 //! Ids: a re-read statement keeps the id of the statement it replaces when the window holds
 //! the same kinds of statement in the same order; otherwise its old items are removed and the
@@ -33,15 +35,15 @@ pub struct BoardDelta {
 /// A window's items, read against the board it belongs to.
 pub(crate) struct Window {
     /// Old statement indices `first..last` the window replaces.
-    first: usize,
-    last: usize,
+    pub(super) first: usize,
+    pub(super) last: usize,
     /// Old byte range of the window, and its text's shift.
-    old_start: usize,
-    old_end: usize,
-    delta: isize,
+    pub(super) old_start: usize,
+    pub(super) old_end: usize,
+    pub(super) delta: isize,
     /// The re-read statements, at new-source offsets, with their items.
-    statements: Vec<BoardStatement>,
-    items: Vec<BoardItem>,
+    pub(super) statements: Vec<BoardStatement>,
+    pub(super) items: Vec<BoardItem>,
 }
 
 /// One item read from a window.
@@ -102,7 +104,7 @@ const ITEM_GROUPS: [Group; 9] = [
 ];
 
 /// Removes item `id` from whichever map holds it.
-fn take_item(board: &mut Board, id: ItemId) -> Option<BoardItem> {
+pub(super) fn take_item(board: &mut Board, id: ItemId) -> Option<BoardItem> {
     if let Some(x) = board.footprints.remove(&id) {
         return Some(BoardItem::Footprint(x));
     }
@@ -130,7 +132,7 @@ fn take_item(board: &mut Board, id: ItemId) -> Option<BoardItem> {
     board.dimensions.remove(&id).map(BoardItem::Dimension)
 }
 
-fn put_item(board: &mut Board, item: BoardItem) {
+pub(super) fn put_item(board: &mut Board, item: BoardItem) {
     let id = item.id();
     match item {
         BoardItem::Footprint(x) => {
@@ -197,7 +199,7 @@ fn floor_boundary(s: &str, mut at: usize) -> usize {
 }
 
 /// The changed byte ranges of `old` and `new`: `(start, old_end, new_end)`.
-fn changed_range(old: &str, new: &str) -> (usize, usize, usize) {
+pub(super) fn changed_range(old: &str, new: &str) -> (usize, usize, usize) {
     let (a, b) = (old.as_bytes(), new.as_bytes());
     let max = a.len().min(b.len());
     let mut p = a.iter().zip(b).take_while(|(x, y)| x == y).count();
@@ -223,6 +225,32 @@ fn line_end(s: &str, at: usize) -> usize {
     s[at..].find('\n').map_or(s.len(), |i| at + i)
 }
 
+/// The statements a change at `p..old_end` of `old_src` overlaps, on whole lines, grown until no
+/// statement crosses the window's edges: `(start, end, first, last)`, the byte range and the
+/// statement indices `first..last`.
+pub(super) fn statement_window(
+    old_src: &str,
+    statements: &[BoardStatement],
+    p: usize,
+    old_end: usize,
+) -> (usize, usize, usize, usize) {
+    let mut start = line_start(old_src, p);
+    let mut end = line_end(old_src, old_end.max(p));
+    loop {
+        let first = statements.partition_point(|s| s.span.end <= start);
+        let last = statements.partition_point(|s| s.span.start < end);
+        let (mut s2, mut e2) = (start, end);
+        if first < last {
+            s2 = s2.min(line_start(old_src, statements[first].span.start));
+            e2 = e2.max(line_end(old_src, statements[last - 1].span.end));
+        }
+        if (s2, e2) == (start, end) {
+            return (start, end, first, last);
+        }
+        (start, end) = (s2, e2);
+    }
+}
+
 /// Reads the window of `new` that replaces the statements `old_src` → `new` changed, or
 /// `None` when the change needs a whole read.
 pub(crate) fn read_window(
@@ -234,24 +262,8 @@ pub(crate) fn read_window(
     let board = old.board.as_ref()?;
     let block = old.block?;
     let (p, old_end, new_end) = changed_range(old_src, new);
-    // The statements the change overlaps, on whole lines, until no statement crosses the
-    // window's edges.
     let statements = &old.statements;
-    let mut start = line_start(old_src, p);
-    let mut end = line_end(old_src, old_end.max(p));
-    let (first, last) = loop {
-        let first = statements.partition_point(|s| s.span.end <= start);
-        let last = statements.partition_point(|s| s.span.start < end);
-        let (mut s2, mut e2) = (start, end);
-        if first < last {
-            s2 = s2.min(line_start(old_src, statements[first].span.start));
-            e2 = e2.max(line_end(old_src, statements[last - 1].span.end));
-        }
-        if (s2, e2) == (start, end) {
-            break (first, last);
-        }
-        (start, end) = (s2, e2);
-    };
+    let (start, end, first, last) = statement_window(old_src, statements, p, old_end);
     if start <= block.start || end >= block.end.saturating_sub(1) {
         return None;
     }
@@ -441,7 +453,7 @@ fn indexed_word(site: &str) -> Option<&str> {
 
 /// Patches `parsed` (the reading of the old source) with a window: the board, statements,
 /// sites and spans of the new source.
-fn apply_window(parsed: &mut ParsedBoard, w: Window) -> BoardDelta {
+pub(super) fn apply_window(parsed: &mut ParsedBoard, w: Window) -> BoardDelta {
     let board = parsed
         .board
         .as_mut()
@@ -586,6 +598,10 @@ pub fn reparse_board_keeping(
     if old.diagnostics.is_empty() {
         if let Some(w) = read_window(path, old_src, &old, new) {
             let delta = apply_window(&mut old, w);
+            return (old, delta, None);
+        }
+        if let Some(change) = super::repackage::read_packages(path, old_src, &old, new) {
+            let delta = super::repackage::apply_packages(&mut old, change);
             return (old, delta, None);
         }
     }

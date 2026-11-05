@@ -98,6 +98,7 @@ pub use print::*;
 pub use super::layout::words;
 
 mod reparse;
+mod repackage;
 pub(crate) use reparse::{item_of, read_window, window_items, window_replaced};
 pub use reparse::{reparse_board, reparse_board_keeping, BoardDelta, BoardItem};
 

@@ -154,3 +154,42 @@ fn other_changes_read_whole() {
     let new = format!("{}{}{}", &old[..s], broken, &old[e..]);
     check(&old, &new, true);
 }
+
+#[test]
+fn package_changes_re_read_their_footprints() {
+    let old = source();
+    // Widen the 0402 capacitor's pads: every C_0402 footprint re-reads, nothing else does.
+    let head = "package C_0402_1005Metric_IPCN {";
+    let at = old.find(head).expect("the 0402 package");
+    let end = at + old[at..].find("\n    }").unwrap();
+    let block = old[at..end].replace("size = [0.515, 0.57]", "size = [0.6, 0.57]");
+    let new = format!("{}{}{}", &old[..at], block, &old[end..]);
+    check(&old, &new, false);
+    let parsed = parse_board(PATH, &old);
+    let users: Vec<ItemId> = {
+        let b = parsed.board.as_ref().unwrap();
+        b.footprints.values().filter(|f| f.package.name == "C_0402_1005Metric_IPCN").map(|f| f.id).collect()
+    };
+    assert!(!users.is_empty());
+    let (re, delta) = reparse_board(PATH, &old, parsed, &new);
+    assert_eq!(delta.changed, users, "only the package's footprints re-read");
+    assert_eq!(delta.replaced.len(), users.len());
+    assert!(delta.removed.is_empty());
+    let b = re.board.as_ref().unwrap();
+    for id in &users {
+        let f = &b.footprints[id];
+        assert!(f.component.is_some(), "{} keeps its schematic link", f.reference);
+        assert_eq!(&f.package, &re.packages["C_0402_1005Metric_IPCN"], "{} has the new package", f.reference);
+        assert!(f.package.pads.iter().all(|p| p.shape.size().0 == runmat_circuit::geom::mm(0.6)));
+    }
+    // A text that grows moves every statement after it: a longer description.
+    let new = old.replacen(
+        "description = \"C chip 0402 (1005 metric), IPC-7351B density B\"",
+        "description = \"C chip 0402 (1005 metric), IPC-7351B density B, edited\"",
+        1,
+    );
+    check(&old, &new, false);
+    // Renaming a package changes which footprints it serves: a whole read.
+    let renamed = old.replacen(head, "package C_0402_Renamed {", 1);
+    check(&old, &renamed, true);
+}
