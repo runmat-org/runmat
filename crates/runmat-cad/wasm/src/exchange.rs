@@ -22,6 +22,7 @@ use runmat_cad::regen::kernel::{
 use runmat_cad::regen::RegenResult;
 use std::collections::BTreeMap;
 
+pub mod flat;
 pub mod meshes;
 pub mod pmi;
 

@@ -290,10 +290,9 @@ fn annotations(out: &mut Sheet, view: &str, box_: ([f64; 2], [f64; 2]), mark: Op
 pub(super) fn flat_pattern(path: &str, text: &str) -> Result<Sheet, ToolError> {
     let part = runmat_cad_wasm::runtime::regenerate_part(path, text)
         .map_err(|_| ToolError::new("not_compiled", format!("{path} has syntax errors")))?;
-    for record in part.result.state.records.values() {
-        if let runmat_cad::regen::records::FeatureRecord::FlatPattern { layout, .. } = record {
-            return Ok(flat_pattern_sheet(&runmat_cad::drawing::flat_pattern::flat_pattern_sheet(layout)));
-        }
+    // The outline as cut: from the flat body (holes and cuts in the flats included).
+    if let Some((_, layout)) = runmat_cad_wasm::exchange::flat::flat_layout(&part) {
+        return Ok(flat_pattern_sheet(&runmat_cad::drawing::flat_pattern::flat_pattern_sheet(&layout)));
     }
     Err(ToolError::new(
         "unsupported",

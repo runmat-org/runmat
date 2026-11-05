@@ -19,16 +19,35 @@ impl<'a, 'b> Run<'a, 'b> {
         body: usize,
         maker: &FeatureId,
     ) -> Result<Vec<(FeatureId, Vec<FlatBendLine>)>, FeatureId> {
+        let (bends, others) = self.plate_bends_and_others(body, maker);
+        match others.first() {
+            None => Ok(bends),
+            Some(&f) => Err(self.st.bodies[body].names.faces[f]
+                .iter()
+                .next()
+                .map(|n| n.maker().clone())
+                .unwrap_or_else(|| maker.clone())),
+        }
+    }
+
+    /// The bend features that made faces on `body`, besides the base flange `maker`, with
+    /// their plate-bend records, and the faces of `body` other features made.
+    pub(super) fn plate_bends_and_others(
+        &self,
+        body: usize,
+        maker: &FeatureId,
+    ) -> (Vec<(FeatureId, Vec<FlatBendLine>)>, Vec<usize>) {
         let is_bend = |f: &FeatureId| {
             matches!(
                 self.st.records.get(f),
                 Some(FeatureRecord::PlateBend { base, .. }) if base == maker
             )
         };
-        // Each face must answer to the plate or one of its bends (a fold's faces answer to
-        // the names it restored as well as its own).
+        // Each face answers to the plate or one of its bends (a fold's faces answer to the
+        // names it restored as well as its own), or another feature made it.
         let mut bends: Vec<&FeatureId> = Vec::new();
-        for names in &self.st.bodies[body].names.faces {
+        let mut others = Vec::new();
+        for (index, names) in self.st.bodies[body].names.faces.iter().enumerate() {
             let mut accounted = false;
             for n in names {
                 if n.maker() == maker {
@@ -40,10 +59,8 @@ impl<'a, 'b> Run<'a, 'b> {
                     }
                 }
             }
-            if !accounted {
-                if let Some(n) = names.iter().next() {
-                    return Err(n.maker().clone());
-                }
+            if !accounted && !names.is_empty() {
+                others.push(index);
             }
         }
         let mut out = Vec::new();
@@ -54,7 +71,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 }
             }
         }
-        Ok(out)
+        (out, others)
     }
 
     /// The sketched bends and jogs of plate `maker` made before feature `i`, in order.
@@ -501,17 +518,8 @@ impl<'a, 'b> Run<'a, 'b> {
                     )),
                 }
             };
-        let bends = match self.plate_bends(body, maker) {
-            Ok(b) => b,
-            Err(other) => {
-                return Err(self.not_lowered(
-                    id,
-                    &format!(
-                        "flat patterns of a plate that `{other}` changed (only sketched bends and jogs develop back to the plate)"
-                    ),
-                ))
-            }
-        };
+        // Cuts and holes other features made in the flats develop onto the flat pattern.
+        let (bends, others) = self.plate_bends_and_others(body, maker);
         let profile_ref = match self.doc.feature(maker).map(|f| &f.kind) {
             Some(FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. })) => {
                 profile.clone()
@@ -533,7 +541,7 @@ impl<'a, 'b> Run<'a, 'b> {
             frame: plate.frame,
             depth: t,
             loops: plate.loops.clone(),
-            bend_lines: bends.into_iter().flat_map(|(_, l)| l).collect(),
+            bend_lines: bends.iter().flat_map(|(_, l)| l.clone()).collect(),
         };
         self.st.records.insert(
             id.clone(),
@@ -542,18 +550,25 @@ impl<'a, 'b> Run<'a, 'b> {
                 development: None,
             },
         );
-        let flat = op(
-            labeled(vec![tool], Vec::new(), Combine::New, false),
-            Vec::new(),
-            naming.clone(),
-        );
+        let develop = labeled(vec![tool], Vec::new(), Combine::New, false);
+        let (cuts, at) = if others.is_empty() {
+            (Vec::new(), self.st.bodies.len())
+        } else {
+            self.plate_cut_steps(id, body, &bends, &plate, t, &others, naming)?
+        };
+        if motion.is_none() && cuts.is_empty() {
+            return Ok(op(develop, Vec::new(), naming.clone()));
+        }
+        let mut steps = vec![Step {
+            op: develop,
+            operands: Vec::new(),
+            naming: naming.clone(),
+        }];
+        steps.extend(cuts);
         let Some(motion) = motion else {
-            return Ok(flat);
+            return Ok(Compiled::Steps(steps));
         };
-        // Two steps: the developed plate, then the move that keeps the fixed flat in place.
-        let Compiled::Op { op: develop, .. } = flat else {
-            return Ok(flat);
-        };
+        // Then the move that keeps the fixed flat in place.
         if let Some(FeatureRecord::FlatPattern { layout, .. }) = self.st.records.get_mut(id) {
             layout.frame = Frame {
                 origin: motion.apply(layout.frame.origin),
@@ -562,18 +577,11 @@ impl<'a, 'b> Run<'a, 'b> {
                 z: rotate_by(&motion, layout.frame.z),
             };
         }
-        let new_body = self.st.bodies.len();
-        Ok(Compiled::Steps(vec![
-            Step {
-                op: develop,
-                operands: Vec::new(),
-                naming: naming.clone(),
-            },
-            Step {
-                op: KernelOp::Transform { transform: motion },
-                operands: vec![new_body],
-                naming: naming.at_step(Some("place".into()), Vec::new()),
-            },
-        ]))
+        steps.push(Step {
+            op: KernelOp::Transform { transform: motion },
+            operands: vec![at],
+            naming: naming.at_step(Some("place".into()), Vec::new()),
+        });
+        Ok(Compiled::Steps(steps))
     }
 }

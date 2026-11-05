@@ -48,7 +48,11 @@ fn display_bodies(display: &runmat_cad::display::PartDisplay) -> Vec<BodyMesh> {
                         .chunks_exact(3)
                         .map(|p| [p[0] as f64, p[1] as f64, p[2] as f64])
                         .collect(),
-                    triangles: f.triangles.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect(),
+                    triangles: f
+                        .triangles
+                        .chunks_exact(3)
+                        .map(|t| [t[0], t[1], t[2]])
+                        .collect(),
                     normals: Vec::new(),
                 })
                 .collect(),
@@ -66,7 +70,10 @@ pub fn assembly_meshes(
 ) -> Result<AssemblyMeshes, Vec<Diagnostic>> {
     let resolution = resolve_assembly_in(path, text, files, configuration)?;
     let resolved = &resolution.resolved;
-    let mut out = AssemblyMeshes { prototypes: Vec::new(), occurrences: Vec::new() };
+    let mut out = AssemblyMeshes {
+        prototypes: Vec::new(),
+        occurrences: Vec::new(),
+    };
     let mut prototype_of: BTreeMap<(String, String), usize> = BTreeMap::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
         if node.failed || node.represented_by_ancestor {
@@ -93,7 +100,9 @@ pub fn assembly_meshes(
                         let output = document.parts.first();
                         (
                             bodies,
-                            output.and_then(|o| o.material.as_ref()).map(|m| m.0.clone()),
+                            output
+                                .and_then(|o| o.material.as_ref())
+                                .map(|m| m.0.clone()),
                             output.and_then(|o| o.part_number.clone()),
                         )
                     }
@@ -109,7 +118,11 @@ pub fn assembly_meshes(
                         .then(|| node.configuration.name.as_ref().map(|c| c.to_string()))
                         .flatten(),
                     // The occurrence's material (an override), else the part's own.
-                    material: node.material.as_ref().map(|m| m.0.clone()).or(document_material),
+                    material: node
+                        .material
+                        .as_ref()
+                        .map(|m| m.0.clone())
+                        .or(document_material),
                     part_number: node.part_number.clone().or(part_number),
                     bodies,
                 });
@@ -126,7 +139,11 @@ pub fn assembly_meshes(
             }
             world[9 + r] = w.translation[r];
         }
-        out.occurrences.push(MeshOccurrence { path: resolved.path(id as u32), prototype, world });
+        out.occurrences.push(MeshOccurrence {
+            path: resolved.path(id as u32),
+            prototype,
+            world,
+        });
     }
     Ok(out)
 }

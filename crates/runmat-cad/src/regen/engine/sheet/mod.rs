@@ -28,6 +28,7 @@
 
 mod miter;
 mod plate_bends;
+mod plate_cuts;
 mod strips;
 
 use super::families::{bend_tool, frame_of, labeled, op, plane_normal, polygon};
