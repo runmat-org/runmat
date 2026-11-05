@@ -514,12 +514,7 @@ impl Scene {
             let overlay = node
                 .render_data
                 .as_ref()
-                .map(|data| {
-                    matches!(
-                        data.pipeline_type,
-                        super::PipelineType::LinesNoDepth | super::PipelineType::AnnotationStroke
-                    )
-                })
+                .map(|data| data.pipeline_type.is_depth_free_overlay())
                 .unwrap_or(false);
             (overlay, node.id)
         });

@@ -287,6 +287,7 @@ impl NativeSurfaceRenderContext {
 
     pub fn set_pixels_per_point(&mut self, pixels_per_point: f32) {
         self.pixels_per_point = pixels_per_point.clamp(0.5, 4.0);
+        self.renderer.wgpu_renderer.pixels_per_point = self.pixels_per_point;
     }
 
     /// Query only modes valid for both the actual output and depth attachment,

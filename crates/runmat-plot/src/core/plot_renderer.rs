@@ -1964,9 +1964,7 @@ impl PlotRenderer {
                             self.wgpu_renderer.get_marker_screen_bind_group(),
                             &[],
                         );
-                    } else if render_data.pipeline_type
-                        == crate::core::PipelineType::AnnotationStroke
-                    {
+                    } else if render_data.pipeline_type.binds_screen_uniforms() {
                         render_pass.set_bind_group(
                             1,
                             self.wgpu_renderer.get_marker_screen_bind_group(),
@@ -2955,6 +2953,10 @@ impl PlotRenderer {
             self.wgpu_renderer
                 .ensure_pipeline(emission, crate::core::PipelineType::LinesNoDepth);
             self.wgpu_renderer
+                .ensure_pipeline(emission, crate::core::PipelineType::EdgeStroke);
+            self.wgpu_renderer
+                .ensure_pipeline(emission, crate::core::PipelineType::EdgeStrokeNoDepth);
+            self.wgpu_renderer
                 .ensure_pipeline(emission, crate::core::PipelineType::Points);
         }
         self.wgpu_renderer.update_marker_screen_uniforms_for_axes(
@@ -3194,9 +3196,7 @@ impl PlotRenderer {
                                 .get_marker_screen_bind_group_for_axes(axes_index),
                             &[],
                         );
-                    } else if render_data.pipeline_type
-                        == crate::core::PipelineType::AnnotationStroke
-                    {
+                    } else if render_data.pipeline_type.binds_screen_uniforms() {
                         render_pass.set_bind_group(
                             1,
                             self.wgpu_renderer
@@ -4652,7 +4652,10 @@ fn darken_pale_lines_for_light_background(render_data: &mut crate::core::RenderD
     if render_data.gpu_vertices.is_some()
         || !matches!(
             render_data.pipeline_type,
-            crate::core::PipelineType::Lines | crate::core::PipelineType::LinesNoDepth
+            crate::core::PipelineType::Lines
+                | crate::core::PipelineType::LinesNoDepth
+                | crate::core::PipelineType::EdgeStroke
+                | crate::core::PipelineType::EdgeStrokeNoDepth
         )
     {
         return;

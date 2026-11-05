@@ -1,0 +1,69 @@
+//! Screen-space wide lines for geometry edges.
+//!
+//! Each segment arrives as two triangles (six vertices). A vertex carries its own endpoint in
+//! `position`, the segment's other endpoint in `normal`, and `(side, width_css_px)` in
+//! `tex_coords`. The vertex shader offsets the endpoint perpendicular to the projected segment by
+//! half the width and extends it past the endpoint by half the width (a square cap), so chained
+//! segments of a polyline meet without gaps. Width is in CSS pixels and is scaled by the screen
+//! uniform's pixels-per-point, so a 1.25 px edge has the same weight at 1× and 2×.
+pub const SHADER: &str = r#"
+struct Uniforms {
+    view_proj: mat4x4<f32>,
+    model: mat4x4<f32>,
+    normal_matrix: mat3x4<f32>,
+}
+
+struct ScreenUniforms {
+    viewport_px: vec2<f32>,
+    pixels_per_point: f32,
+    _pad: f32,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(1) @binding(0) var<uniform> screen: ScreenUniforms;
+
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) color: vec4<f32>,
+    @location(2) other_endpoint: vec3<f32>,
+    @location(3) stroke: vec2<f32>,
+}
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+}
+
+@vertex
+fn vs_main(input: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    let mvp = uniforms.view_proj * uniforms.model;
+    let near_clip = mvp * vec4<f32>(input.position, 1.0);
+    let far_clip = mvp * vec4<f32>(input.other_endpoint, 1.0);
+    let viewport = max(screen.viewport_px, vec2<f32>(1.0, 1.0));
+    let near_px = near_clip.xy / max(abs(near_clip.w), 0.0001) * viewport;
+    let far_px = far_clip.xy / max(abs(far_clip.w), 0.0001) * viewport;
+    let delta = far_px - near_px;
+    let length_px = length(delta);
+    var tangent = vec2<f32>(1.0, 0.0);
+    if length_px > 0.0001 {
+        tangent = delta / length_px;
+    }
+    let perpendicular = vec2<f32>(-tangent.y, tangent.x);
+    let width_px = max(input.stroke.y, 0.0) * max(screen.pixels_per_point, 0.5);
+    // NDC spans two units across the viewport, so a half-width offset of h px is 2h/viewport.
+    let offset_px = perpendicular * input.stroke.x * width_px - tangent * width_px;
+    let offset_ndc = offset_px / viewport;
+    out.clip_position = vec4<f32>(near_clip.xy + offset_ndc * near_clip.w, near_clip.zw);
+    out.color = input.color;
+    return out;
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    if input.color.a <= 0.0 {
+        discard;
+    }
+    return input.color;
+}
+"#;

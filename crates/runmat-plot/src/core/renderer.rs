@@ -9,6 +9,8 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use crate::core::DepthMode;
+
+mod edge_stroke_pipeline;
 use crate::{
     core::scene::{GpuIndirectDraw, GpuVertexBuffer},
     gpu::shaders,
@@ -164,7 +166,9 @@ pub struct PointStyleUniforms {
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct MarkerScreenUniforms {
     pub viewport_px: [f32; 2],
-    pub _pad: [f32; 2],
+    /// Device pixels per CSS pixel, so screen-space widths given in CSS px keep their weight.
+    pub pixels_per_point: f32,
+    pub _pad: f32,
 }
 
 impl Default for Uniforms {
@@ -264,9 +268,36 @@ pub enum PipelineType {
     Lines,
     LinesNoDepth,
     AnnotationStroke,
+    /// Depth-tested screen-space strokes for geometry edges (see `geometry_scene::edge_stroke`).
+    EdgeStroke,
+    /// Edge strokes drawn over everything, for edge display modes that show hidden lines.
+    EdgeStrokeNoDepth,
     Triangles,
     Scatter3,
     Textured,
+}
+
+impl PipelineType {
+    /// Pipelines whose shaders read the screen uniforms (viewport size, pixels per point) at
+    /// bind group 1.
+    pub fn binds_screen_uniforms(self) -> bool {
+        matches!(
+            self,
+            PipelineType::AnnotationStroke
+                | PipelineType::EdgeStroke
+                | PipelineType::EdgeStrokeNoDepth
+        )
+    }
+
+    /// Pipelines composited after surfaces because they ignore depth.
+    pub fn is_depth_free_overlay(self) -> bool {
+        matches!(
+            self,
+            PipelineType::LinesNoDepth
+                | PipelineType::AnnotationStroke
+                | PipelineType::EdgeStrokeNoDepth
+        )
+    }
 }
 
 /// High-performance WGPU renderer for interactive plotting
@@ -282,6 +313,10 @@ pub struct WgpuRenderer {
     line_pipeline: Option<wgpu::RenderPipeline>,
     line_no_depth_pipeline: Option<wgpu::RenderPipeline>,
     annotation_stroke_pipeline: Option<wgpu::RenderPipeline>,
+    edge_stroke_pipeline: Option<wgpu::RenderPipeline>,
+    edge_stroke_no_depth_pipeline: Option<wgpu::RenderPipeline>,
+    /// Device pixels per CSS pixel for screen-space stroke widths.
+    pub pixels_per_point: f32,
     triangle_pipeline: Option<wgpu::RenderPipeline>,
 
     // Direct rendering pipelines (optimized coordinate transformation)
@@ -482,7 +517,8 @@ impl WgpuRenderer {
                     label: Some(&format!("Axes Marker Screen Uniform Buffer {idx}")),
                     contents: bytemuck::cast_slice(&[MarkerScreenUniforms {
                         viewport_px: [1.0, 1.0],
-                        _pad: [0.0, 0.0],
+                        pixels_per_point: 1.0,
+                        _pad: 0.0,
                     }]),
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
@@ -648,7 +684,8 @@ impl WgpuRenderer {
                 label: Some("Marker Screen Uniform Buffer"),
                 contents: bytemuck::cast_slice(&[MarkerScreenUniforms {
                     viewport_px: [1.0, 1.0],
-                    _pad: [0.0, 0.0],
+                    pixels_per_point: 1.0,
+                    _pad: 0.0,
                 }]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
@@ -699,6 +736,9 @@ impl WgpuRenderer {
             line_pipeline: None,
             line_no_depth_pipeline: None,
             annotation_stroke_pipeline: None,
+            edge_stroke_pipeline: None,
+            edge_stroke_no_depth_pipeline: None,
+            pixels_per_point: 1.0,
             triangle_pipeline: None,
             direct_line_pipeline: None,
             direct_triangle_pipeline: None,
@@ -786,6 +826,8 @@ impl WgpuRenderer {
             self.line_pipeline = None;
             self.line_no_depth_pipeline = None;
             self.annotation_stroke_pipeline = None;
+            self.edge_stroke_pipeline = None;
+            self.edge_stroke_no_depth_pipeline = None;
             self.triangle_pipeline = None;
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
@@ -813,6 +855,8 @@ impl WgpuRenderer {
             self.line_pipeline = None;
             self.line_no_depth_pipeline = None;
             self.annotation_stroke_pipeline = None;
+            self.edge_stroke_pipeline = None;
+            self.edge_stroke_no_depth_pipeline = None;
             self.triangle_pipeline = None;
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
@@ -1106,7 +1150,8 @@ impl WgpuRenderer {
     ) {
         let uniforms = MarkerScreenUniforms {
             viewport_px: [viewport_px[0].max(1.0), viewport_px[1].max(1.0)],
-            _pad: [0.0, 0.0],
+            pixels_per_point: self.pixels_per_point,
+            _pad: 0.0,
         };
         emission.queue().write_buffer(
             &self.marker_screen_uniform_buffer,
@@ -1130,7 +1175,8 @@ impl WgpuRenderer {
         self.ensure_axes_uniform_capacity(emission, axes_index + 1);
         let uniforms = MarkerScreenUniforms {
             viewport_px: [viewport_px[0].max(1.0), viewport_px[1].max(1.0)],
-            _pad: [0.0, 0.0],
+            pixels_per_point: self.pixels_per_point,
+            _pad: 0.0,
         };
         emission.queue().write_buffer(
             &self.axes_marker_screen_uniform_buffers[axes_index],
@@ -1189,6 +1235,17 @@ impl WgpuRenderer {
                         Some(self.create_annotation_stroke_pipeline(emission));
                 }
             }
+            PipelineType::EdgeStroke => {
+                if self.edge_stroke_pipeline.is_none() {
+                    self.edge_stroke_pipeline = Some(self.create_edge_stroke_pipeline(emission, true));
+                }
+            }
+            PipelineType::EdgeStrokeNoDepth => {
+                if self.edge_stroke_no_depth_pipeline.is_none() {
+                    self.edge_stroke_no_depth_pipeline =
+                        Some(self.create_edge_stroke_pipeline(emission, false));
+                }
+            }
             PipelineType::Triangles => {
                 if self.triangle_pipeline.is_none() {
                     self.triangle_pipeline = Some(self.create_triangle_pipeline(emission));
@@ -1213,6 +1270,8 @@ impl WgpuRenderer {
             PipelineType::Lines => self.line_pipeline.as_ref().unwrap(),
             PipelineType::LinesNoDepth => self.line_no_depth_pipeline.as_ref().unwrap(),
             PipelineType::AnnotationStroke => self.annotation_stroke_pipeline.as_ref().unwrap(),
+            PipelineType::EdgeStroke => self.edge_stroke_pipeline.as_ref().unwrap(),
+            PipelineType::EdgeStrokeNoDepth => self.edge_stroke_no_depth_pipeline.as_ref().unwrap(),
             PipelineType::Triangles => self.triangle_pipeline.as_ref().unwrap(),
             PipelineType::Scatter3 => self.get_pipeline(PipelineType::Points),
             PipelineType::Textured => self.image_pipeline.as_ref().unwrap(),

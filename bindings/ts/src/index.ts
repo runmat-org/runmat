@@ -1536,6 +1536,8 @@ export interface GeometryScenePresentationState {
   isolatedOwnerNodeIds?: string[] | null;
   section?: GeometrySceneImageSectionState | null;
   viewPreset?: GeometrySceneViewPreset | null;
+  /** Edge and wireframe line width in CSS px; above 1 px edges draw as screen-space strokes. */
+  edgeWidthPx?: number | null;
 }
 
 export type GeometrySceneTopologySelectionState =

@@ -2002,6 +2002,22 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
                 canvas.draw_line(a, b, 2.8, style_code, false);
             }
         }
+        PipelineType::EdgeStroke | PipelineType::EdgeStrokeNoDepth => {
+            // Six vertices per segment; the first and third are its two endpoints, and
+            // tex_coords.y carries the stroke width in CSS px.
+            let depth_test =
+                axes.has_3d_content && render_data.pipeline_type == PipelineType::EdgeStroke;
+            for stroke in render_data.vertices.chunks_exact(6) {
+                let Some(a) = project_vertex(&stroke[0], axes) else {
+                    continue;
+                };
+                let Some(b) = project_vertex(&stroke[2], axes) else {
+                    continue;
+                };
+                let width = stroke[0].tex_coords[1].max(1.0);
+                canvas.draw_line(a, b, width, style_code, depth_test);
+            }
+        }
         PipelineType::Lines | PipelineType::LinesNoDepth => {
             let depth_test =
                 axes.has_3d_content && render_data.pipeline_type != PipelineType::LinesNoDepth;

@@ -12,6 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 mod annotations;
+mod edge_stroke;
 
 const SECTION_DISTANCE_EPSILON: f32 = 1.0e-6;
 const GEOMETRY_SELECTED_REGION_COLOR: [f32; 4] = [0.98, 0.45, 0.12, 1.0];
@@ -161,7 +162,10 @@ impl GeometryScene {
                 axes_index: 0,
                 parent: None,
                 children: Vec::new(),
-                render_data: Some(chunk.render_data_with_presentation(presentation)),
+                render_data: Some(edge_stroke::widen(
+                    chunk.render_data_with_presentation(presentation),
+                    presentation.edge_width_px,
+                )),
                 bounds: chunk.bounds,
                 lod_levels: Vec::new(),
                 current_lod: 0,
@@ -230,6 +234,10 @@ pub struct GeometryScenePresentation {
     pub section: Option<Option<GeometrySceneSection>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view_preset: Option<GeometrySceneViewPreset>,
+    /// Width of line chunks (edges, wireframes) in CSS px. Above 1 px they draw as screen-space
+    /// strokes of that width; unset or 1 px or less draws GPU hairlines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_width_px: Option<f32>,
 }
 
 impl Default for GeometryScenePresentation {
@@ -248,6 +256,7 @@ impl Default for GeometryScenePresentation {
             isolated_owner_node_ids: None,
             section: None,
             view_preset: None,
+            edge_width_px: None,
         }
     }
 }
