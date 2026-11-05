@@ -42,3 +42,7 @@ occt = ["dep:runmat-geometry-io"]
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[[example]]
+name = "circuit_sim_pictures"
+required-features = ["render"]
