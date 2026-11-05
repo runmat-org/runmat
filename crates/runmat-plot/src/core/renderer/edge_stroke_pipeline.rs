@@ -47,7 +47,10 @@ impl WgpuRenderer {
                 },
             )
         } else {
-            (wgpu::CompareFunction::Always, wgpu::DepthBiasState::default())
+            (
+                wgpu::CompareFunction::Always,
+                wgpu::DepthBiasState::default(),
+            )
         };
         emission.device().create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
             label: Some(label),

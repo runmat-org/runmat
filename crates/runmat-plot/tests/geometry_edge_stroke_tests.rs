@@ -1,9 +1,9 @@
 //! Geometry edges keep a set CSS-pixel weight on the real renderer.
 use glam::{Vec3, Vec4};
 use runmat_plot::{
+    core::{Camera, ProjectionType},
     core::{Material, PipelineType, Vertex},
     export::native_surface::{create_headless_context, is_headless_gpu_unavailable_error},
-    core::{Camera, ProjectionType},
     geometry_scene::GeometryScenePresentation,
     styling::{PlotThemeConfig, ThemeVariant},
     GeometryScene, GeometrySceneChunk,
@@ -92,12 +92,19 @@ async fn render(edge_width_px: Option<f32>, pixels_per_point: f32) -> Option<Vec
     };
     camera.mark_dirty();
     let rgba = context
-        .render_geometry_scene_to_rgba_with_presentation(&scene(), Some(&camera), Some(&presentation))
+        .render_geometry_scene_to_rgba_with_presentation(
+            &scene(),
+            Some(&camera),
+            Some(&presentation),
+        )
         .await
         .unwrap();
     if let Ok(directory) = std::env::var("RUNMAT_EDGE_STROKE_IMAGES") {
         let png = runmat_plot::export::cpu_surface::encode_png_bytes(WIDTH, HEIGHT, &rgba).unwrap();
-        let name = format!("{directory}/edges-{:?}-{pixels_per_point}x.png", edge_width_px);
+        let name = format!(
+            "{directory}/edges-{:?}-{pixels_per_point}x.png",
+            edge_width_px
+        );
         std::fs::write(name, png).unwrap();
     }
     Some(rgba)

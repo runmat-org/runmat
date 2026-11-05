@@ -864,7 +864,13 @@ pub fn write_with_designator(
         )
     };
     let prop = |k: &str, v: &str, layer: &str, y: f64| {
-        prop_at(k, v, layer, SExpr::list("at", vec![SExpr::num(0.0), SExpr::num(y)]), 1.0)
+        prop_at(
+            k,
+            v,
+            layer,
+            SExpr::list("at", vec![SExpr::num(0.0), SExpr::num(y)]),
+            1.0,
+        )
     };
     items.push(match designator {
         Some((p, size)) => prop_at(

@@ -1237,7 +1237,8 @@ impl WgpuRenderer {
             }
             PipelineType::EdgeStroke => {
                 if self.edge_stroke_pipeline.is_none() {
-                    self.edge_stroke_pipeline = Some(self.create_edge_stroke_pipeline(emission, true));
+                    self.edge_stroke_pipeline =
+                        Some(self.create_edge_stroke_pipeline(emission, true));
                 }
             }
             PipelineType::EdgeStrokeNoDepth => {

@@ -75,8 +75,14 @@ struct Occupancy {
 impl Occupancy {
     const CELL: f64 = 2.0;
     fn keys(b: &MmBox) -> impl Iterator<Item = (i64, i64)> {
-        let (x0, x1) = ((b.x0 / Self::CELL).floor() as i64, (b.x1 / Self::CELL).floor() as i64);
-        let (y0, y1) = ((b.y0 / Self::CELL).floor() as i64, (b.y1 / Self::CELL).floor() as i64);
+        let (x0, x1) = (
+            (b.x0 / Self::CELL).floor() as i64,
+            (b.x1 / Self::CELL).floor() as i64,
+        );
+        let (y0, y1) = (
+            (b.y0 / Self::CELL).floor() as i64,
+            (b.y1 / Self::CELL).floor() as i64,
+        );
         (x0..=x1).flat_map(move |x| (y0..=y1).map(move |y| (x, y)))
     }
     fn add(&mut self, b: MmBox) {
@@ -182,6 +188,10 @@ pub fn to_local(f: &Footprint, p: Point) -> Point {
     let (dx, dy) = ((p.x - f.at.x) as f64, (p.y - f.at.y) as f64);
     let r = (-f.rotation).to_radians();
     let (x, y) = (dx * r.cos() - dy * r.sin(), dx * r.sin() + dy * r.cos());
-    let x = if f.side == crate::layout::Side::Bottom { -x } else { x };
+    let x = if f.side == crate::layout::Side::Bottom {
+        -x
+    } else {
+        x
+    };
     Point::new(x.round() as Coord, y.round() as Coord)
 }

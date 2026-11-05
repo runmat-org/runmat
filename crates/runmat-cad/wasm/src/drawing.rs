@@ -619,11 +619,14 @@ mod tests {
     #[test]
     fn an_empty_file_is_an_empty_drawing() {
         let out: Value =
-            serde_json::from_str(&compile_json("/p/new.drawing", "\n  \n", &Files::new()))
-                .unwrap();
+            serde_json::from_str(&compile_json("/p/new.drawing", "\n  \n", &Files::new())).unwrap();
         assert_eq!(out["projection"]["kind"], "drawing", "{out}");
         let document = &out["projection"]["data"]["document"];
-        assert_eq!(document["sheets"].as_array().map(Vec::len), Some(0), "{out}");
+        assert_eq!(
+            document["sheets"].as_array().map(Vec::len),
+            Some(0),
+            "{out}"
+        );
         assert!(out["diagnostics"]
             .as_array()
             .is_some_and(|d| d.iter().all(|d| d["severity"] != "error")));

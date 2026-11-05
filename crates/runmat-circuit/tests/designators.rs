@@ -18,7 +18,12 @@ fn every_unnamed_part_gets_a_designator_clear_of_pads_and_of_the_others() {
     let board = board();
     let placed = designators(&board);
     for f in board.footprints.values() {
-        assert_eq!(placed.contains_key(&f.id), !names_itself(f), "{}", f.reference);
+        assert_eq!(
+            placed.contains_key(&f.id),
+            !names_itself(f),
+            "{}",
+            f.reference
+        );
     }
     assert!(!placed.is_empty());
     let pads: Vec<_> = board
@@ -35,14 +40,26 @@ fn every_unnamed_part_gets_a_designator_clear_of_pads_and_of_the_others() {
             assert!((0.6..=1.0).contains(&size), "{} at {size} mm", f.reference);
             let (w, h) = (0.62 * size * f.reference.len() as f64, 0.78 * size);
             let (x, y) = (to_mm(d.at.x), to_mm(d.at.y));
-            (f.reference.clone(), [x - w / 2.0, y - h / 2.0, x + w / 2.0, y + h / 2.0])
+            (
+                f.reference.clone(),
+                [x - w / 2.0, y - h / 2.0, x + w / 2.0, y + h / 2.0],
+            )
         })
         .collect();
-    let overlaps = |a: &[f64; 4], b: &[f64; 4]| a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    let overlaps =
+        |a: &[f64; 4], b: &[f64; 4]| a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
     let mut on_pads = 0;
     for (name, b) in &boxes {
         if pads.iter().any(|p| {
-            overlaps(b, &[to_mm(p.min.x), to_mm(p.min.y), to_mm(p.max.x), to_mm(p.max.y)])
+            overlaps(
+                b,
+                &[
+                    to_mm(p.min.x),
+                    to_mm(p.min.y),
+                    to_mm(p.max.x),
+                    to_mm(p.max.y),
+                ],
+            )
         }) {
             on_pads += 1;
             eprintln!("{name} touches a pad");

@@ -166,7 +166,11 @@ mod tests {
     fn depth_free_lines_become_depth_free_strokes() {
         let out = widen(lines(PipelineType::LinesNoDepth, false), Some(2.0));
         assert_eq!(out.pipeline_type, PipelineType::EdgeStrokeNoDepth);
-        assert_eq!(out.vertices.len(), 6, "one pair in three unindexed vertices");
+        assert_eq!(
+            out.vertices.len(),
+            6,
+            "one pair in three unindexed vertices"
+        );
     }
 
     #[test]
