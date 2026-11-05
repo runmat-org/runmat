@@ -1406,8 +1406,25 @@ pub async fn render_geometry_scene_rgba_bytes_interactive_with_camera_and_theme(
     camera: &Camera,
     theme: PlotThemeConfig,
 ) -> Result<Vec<u8>, String> {
+    render_geometry_scene_rgba_bytes_with_camera_theme_and_scale(
+        scene, width, height, camera, theme, 1.0,
+    )
+    .await
+}
+
+/// As [`render_geometry_scene_rgba_bytes_interactive_with_camera_and_theme`], with text and
+/// overlays drawn at `pixels_per_point` device pixels per layout point.
+pub async fn render_geometry_scene_rgba_bytes_with_camera_theme_and_scale(
+    scene: GeometryScene,
+    width: u32,
+    height: u32,
+    camera: &Camera,
+    theme: PlotThemeConfig,
+    pixels_per_point: f32,
+) -> Result<Vec<u8>, String> {
     let mut context = create_headless_context(width.max(1), height.max(1)).await?;
     context.set_theme_config(theme);
+    context.set_pixels_per_point(pixels_per_point);
     context
         .render_geometry_scene_to_rgba(&scene, Some(camera))
         .await

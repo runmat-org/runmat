@@ -40,7 +40,7 @@ fn authenticate(saved: &super::CapturedRun) -> Result<()> {
         runmat_runtime::analysis::study_result_manifest::read_saved_study_publication(
             definition,
             Path::new(manifest),
-            16 * 1024 * 1024,
+            super::super::SAVED_PUBLICATION_MANIFEST_MAX_BYTES,
         )
         .map_err(anyhow::Error::msg)?;
     ensure!(
@@ -64,7 +64,13 @@ fn authenticate(saved: &super::CapturedRun) -> Result<()> {
     Ok(())
 }
 
-pub(in crate::commands::fea) async fn render_saved(input: &Path, output: &Path) -> Result<()> {
+/// Redraw the saved views (the selected ones, or every saved view) with `presentation`.
+pub(in crate::commands::fea) async fn render_saved(
+    input: &Path,
+    output: &Path,
+    selected: &[String],
+    presentation: &crate::cli::SnapshotPresentationArgs,
+) -> Result<()> {
     let mut bytes = Vec::new();
     std::fs::File::open(input)?
         .take(16 * 1024 * 1024 + 1)
@@ -80,6 +86,19 @@ pub(in crate::commands::fea) async fn render_saved(input: &Path, output: &Path) 
     for run in &runs {
         authenticate(run)?;
     }
-    let views: Vec<String> = saved.views.into_iter().map(|view| view.id).collect();
-    super::write_snapshot(&runs, &views, output).await
+    let saved_views: Vec<String> = saved.views.into_iter().map(|view| view.id).collect();
+    for view in selected {
+        ensure!(
+            saved_views.contains(view),
+            "snapshot has no saved view '{view}'; views: {}",
+            saved_views.join(", ")
+        );
+    }
+    let views = if selected.is_empty() {
+        saved_views
+    } else {
+        selected.to_vec()
+    };
+    let presentation = super::views::Presentation::from_args(presentation)?;
+    super::write_snapshot(&runs, &views, output, &presentation).await
 }

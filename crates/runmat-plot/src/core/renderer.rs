@@ -285,6 +285,9 @@ pub struct WgpuRenderer {
     line_no_depth_pipeline: Option<wgpu::RenderPipeline>,
     annotation_stroke_pipeline: Option<wgpu::RenderPipeline>,
     triangle_pipeline: Option<wgpu::RenderPipeline>,
+    /// Blended surfaces drawn after opaque ones: depth-tested, without depth writes, so a
+    /// translucent surface never hides what lies behind it.
+    translucent_triangle_pipeline: Option<wgpu::RenderPipeline>,
 
     // Direct rendering pipelines (optimized coordinate transformation)
     pub direct_line_pipeline: Option<wgpu::RenderPipeline>,
@@ -702,6 +705,7 @@ impl WgpuRenderer {
             line_no_depth_pipeline: None,
             annotation_stroke_pipeline: None,
             triangle_pipeline: None,
+            translucent_triangle_pipeline: None,
             direct_line_pipeline: None,
             direct_triangle_pipeline: None,
             direct_point_pipeline: None,
@@ -789,6 +793,7 @@ impl WgpuRenderer {
             self.line_no_depth_pipeline = None;
             self.annotation_stroke_pipeline = None;
             self.triangle_pipeline = None;
+            self.translucent_triangle_pipeline = None;
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
             self.direct_point_pipeline = None;
@@ -816,6 +821,7 @@ impl WgpuRenderer {
             self.line_no_depth_pipeline = None;
             self.annotation_stroke_pipeline = None;
             self.triangle_pipeline = None;
+            self.translucent_triangle_pipeline = None;
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
             self.direct_point_pipeline = None;
@@ -1193,7 +1199,11 @@ impl WgpuRenderer {
             }
             PipelineType::Triangles => {
                 if self.triangle_pipeline.is_none() {
-                    self.triangle_pipeline = Some(self.create_triangle_pipeline(emission));
+                    self.triangle_pipeline = Some(self.create_triangle_pipeline(emission, true));
+                }
+                if self.translucent_triangle_pipeline.is_none() {
+                    self.translucent_triangle_pipeline =
+                        Some(self.create_triangle_pipeline(emission, false));
                 }
             }
             PipelineType::Scatter3 => {
@@ -1218,6 +1228,20 @@ impl WgpuRenderer {
             PipelineType::Triangles => self.triangle_pipeline.as_ref().unwrap(),
             PipelineType::Scatter3 => self.get_pipeline(PipelineType::Points),
             PipelineType::Textured => self.image_pipeline.as_ref().unwrap(),
+        }
+    }
+
+    /// The pipeline that draws `render_data`. With `translucent_last` (the scene draws blended
+    /// surfaces after opaque ones), a blended surface draws without depth writes.
+    pub fn pipeline_for(
+        &self,
+        render_data: &crate::core::RenderData,
+        translucent_last: bool,
+    ) -> &wgpu::RenderPipeline {
+        if translucent_last && crate::core::scene::is_translucent_surface(render_data) {
+            self.translucent_triangle_pipeline.as_ref().unwrap()
+        } else {
+            self.get_pipeline(render_data.pipeline_type)
         }
     }
 
@@ -1689,6 +1713,7 @@ impl WgpuRenderer {
     fn create_triangle_pipeline(
         &self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        depth_write_enabled: bool,
     ) -> wgpu::RenderPipeline {
         let shader = emission
             .device()
@@ -1727,10 +1752,25 @@ impl WgpuRenderer {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: Self::depth_format(),
-                    depth_write_enabled: true,
+                    depth_write_enabled,
                     depth_compare: self.depth_compare(),
                     stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
+                    // Translucent surfaces sit a hair behind coincident opaque ones: where context
+                    // geometry touches a result face, the result shows untinted instead of
+                    // z-fighting with it.
+                    bias: if depth_write_enabled {
+                        wgpu::DepthBiasState::default()
+                    } else {
+                        let away = match self.depth_mode {
+                            DepthMode::Standard => 1,
+                            DepthMode::ReversedZ => -1,
+                        };
+                        wgpu::DepthBiasState {
+                            constant: 8 * away,
+                            slope_scale: 2.0 * away as f32,
+                            clamp: 0.0,
+                        }
+                    },
                 }),
                 multisample: wgpu::MultisampleState {
                     count: self.msaa_sample_count,

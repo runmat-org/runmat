@@ -1,0 +1,308 @@
+//! How a snapshot draws its scenes and posters: translucent context geometry around the
+//! result, a caption, the poster size and the camera direction.
+use anyhow::{bail, ensure, Context, Result};
+use runmat_geometry_core::LengthUnit;
+use runmat_plot::{GeometryScene, GeometrySceneChunk};
+use serde::Serialize;
+use std::path::Path;
+
+/// Default surface opacity of context geometry.
+const CONTEXT_OPACITY: f32 = 0.12;
+/// Context surfaces: a light neutral slate, unlike any colormap colour of a result.
+const CONTEXT_FACE_RGB: [f32; 3] = [0.74, 0.79, 0.86];
+const CONTEXT_EDGE_RGB: [f32; 3] = [0.64, 0.75, 0.90];
+/// Posters are drawn with text at this many device pixels per point for each 1200 px of
+/// width, so a wide poster's labels keep their size relative to the picture.
+const POSTER_REFERENCE_WIDTH: f32 = 1200.0;
+
+/// One context file drawn in every view, as the view records it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(in crate::commands::fea) struct ContextRecord {
+    pub file: String,
+    pub sha256: String,
+    /// Surface opacity (0 to 1).
+    pub opacity: f32,
+    /// Always "geometry": context carries no result.
+    pub shows: &'static str,
+}
+
+struct ContextGeometry {
+    record: ContextRecord,
+    chunks: Vec<GeometrySceneChunk>,
+}
+
+pub(in crate::commands::fea) struct Presentation {
+    context: Vec<ContextGeometry>,
+    pub caption: Option<String>,
+    pub poster_width: u32,
+    pub poster_height: u32,
+    /// MATLAB `view(az, el)` in degrees, when not the standard poster view.
+    pub view_angle: Option<(f32, f32)>,
+}
+
+impl Default for Presentation {
+    fn default() -> Self {
+        Self {
+            context: Vec::new(),
+            caption: None,
+            poster_width: 1200,
+            poster_height: 750,
+            view_angle: None,
+        }
+    }
+}
+
+impl Presentation {
+    /// Parse the arguments and load every context file once.
+    pub fn from_args(args: &crate::cli::SnapshotPresentationArgs) -> Result<Self> {
+        let (poster_width, poster_height) = parse_size(&args.poster_size)?;
+        let units = parse_units(&args.context_units)?;
+        let context = args
+            .context
+            .iter()
+            .enumerate()
+            .map(|(index, spec)| {
+                let (file, opacity) = parse_context(spec)?;
+                load_context(index, Path::new(file), opacity, units)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            context,
+            caption: args.caption.clone(),
+            poster_width,
+            poster_height,
+            view_angle: args.view_angle.as_deref().map(parse_angle).transpose()?,
+        })
+    }
+
+    /// Add the context geometry and caption to one view's scene.
+    pub fn dress(&self, scene: &mut GeometryScene) {
+        let chunks: Vec<_> = self
+            .context
+            .iter()
+            .flat_map(|context| context.chunks.iter().cloned())
+            .collect();
+        if !chunks.is_empty() {
+            scene.append_chunks(chunks);
+        }
+        if let Some(caption) = &self.caption {
+            scene.title = Some(caption.clone());
+        }
+    }
+
+    pub fn records(&self) -> Vec<ContextRecord> {
+        self.context
+            .iter()
+            .map(|context| context.record.clone())
+            .collect()
+    }
+
+    pub fn pixels_per_point(&self) -> f32 {
+        (self.poster_width as f32 / POSTER_REFERENCE_WIDTH).max(1.0)
+    }
+
+    pub fn aspect_ratio(&self) -> f32 {
+        self.poster_width as f32 / self.poster_height as f32
+    }
+}
+
+fn load_context(
+    index: usize,
+    path: &Path,
+    opacity: f32,
+    units: LengthUnit,
+) -> Result<ContextGeometry> {
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("cannot read context geometry {}", path.display()))?;
+    let name = path.display().to_string();
+    let options = runmat_geometry_io::GeometryImportOptions {
+        units,
+        source_units: Some(units),
+        ..Default::default()
+    };
+    let asset = runmat_runtime::geometry::geometry_load_with_options_op(
+        &name,
+        &bytes,
+        options,
+        runmat_runtime::operations::OperationContext::new(None, None),
+    )
+    .map_err(|error| anyhow::anyhow!("context geometry {name}: {}", error.message))?
+    .data;
+    let scene = runmat_runtime::geometry::geometry_preview_scene(
+        &asset,
+        name.clone(),
+        runmat_runtime::geometry::GeometryPreviewSceneOptions::default(),
+    )
+    .map_err(|error| anyhow::anyhow!("context geometry {name}: {error}"))?;
+    let edge_opacity = (0.15 + 1.5 * opacity).min(0.9);
+    let [r, g, b] = CONTEXT_FACE_RGB;
+    let [er, eg, eb] = CONTEXT_EDGE_RGB;
+    let chunks = scene
+        .chunks
+        .into_iter()
+        .map(|mut chunk| {
+            // Unique beside the result's chunks and the other context files' chunks.
+            chunk.chunk_id = format!("context{index}:{}", chunk.chunk_id);
+            chunk.into_context([r, g, b, opacity], [er, eg, eb, edge_opacity])
+        })
+        .collect();
+    log::info!(
+        "context geometry {name}: {} triangles; peak resident {} MiB",
+        asset
+            .surface_meshes
+            .iter()
+            .map(|mesh| mesh.triangles.len())
+            .sum::<usize>(),
+        super::peak_resident_mib()
+    );
+    Ok(ContextGeometry {
+        record: ContextRecord {
+            file: name,
+            sha256: asset.source.sha256.clone(),
+            opacity,
+            shows: "geometry",
+        },
+        chunks,
+    })
+}
+
+/// `FILE` or `FILE@OPACITY`.
+fn parse_context(spec: &str) -> Result<(&str, f32)> {
+    if let Some((file, opacity)) = spec.rsplit_once('@') {
+        if let Ok(opacity) = opacity.parse::<f32>() {
+            ensure!(
+                opacity > 0.0 && opacity <= 1.0,
+                "context opacity must be in (0, 1], got {opacity} in '{spec}'"
+            );
+            ensure!(!file.is_empty(), "context file missing in '{spec}'");
+            return Ok((file, opacity));
+        }
+    }
+    Ok((spec, CONTEXT_OPACITY))
+}
+
+fn parse_size(text: &str) -> Result<(u32, u32)> {
+    let (width, height) = text
+        .split_once(['x', 'X'])
+        .with_context(|| format!("poster size must be WIDTHxHEIGHT, got '{text}'"))?;
+    let (width, height): (u32, u32) = (width.trim().parse()?, height.trim().parse()?);
+    ensure!(
+        (64..=8192).contains(&width) && (64..=8192).contains(&height),
+        "poster size must be 64 to 8192 px on each side, got '{text}'"
+    );
+    Ok((width, height))
+}
+
+fn parse_angle(text: &str) -> Result<(f32, f32)> {
+    let (azimuth, elevation) = text
+        .split_once(',')
+        .with_context(|| format!("view angle must be AZ,EL in degrees, got '{text}'"))?;
+    let (azimuth, elevation): (f32, f32) = (azimuth.trim().parse()?, elevation.trim().parse()?);
+    ensure!(
+        azimuth.is_finite() && (-90.0..=90.0).contains(&elevation),
+        "view elevation must be -90 to 90 degrees, got '{text}'"
+    );
+    Ok((azimuth, elevation))
+}
+
+fn parse_units(text: &str) -> Result<LengthUnit> {
+    Ok(match text.to_ascii_lowercase().as_str() {
+        "m" | "meter" | "meters" | "metre" | "metres" => LengthUnit::Meter,
+        "mm" | "millimeter" | "millimeters" | "millimetre" | "millimetres" => {
+            LengthUnit::Millimeter
+        }
+        "in" | "inch" | "inches" => LengthUnit::Inch,
+        other => bail!("unsupported context unit '{other}'"),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_specs_take_an_optional_opacity() {
+        assert_eq!(
+            parse_context("pack.step").unwrap(),
+            ("pack.step", CONTEXT_OPACITY)
+        );
+        assert_eq!(parse_context("lid.step@0.3").unwrap(), ("lid.step", 0.3));
+        // An '@' in the path without a number is part of the path.
+        assert_eq!(
+            parse_context("runs/a@b/pack.step").unwrap(),
+            ("runs/a@b/pack.step", CONTEXT_OPACITY)
+        );
+        assert!(parse_context("lid.step@0").is_err());
+        assert!(parse_context("lid.step@1.5").is_err());
+    }
+
+    #[test]
+    fn poster_size_angle_and_units_parse() {
+        assert_eq!(parse_size("2400x1500").unwrap(), (2400, 1500));
+        assert!(parse_size("2400").is_err());
+        assert!(parse_size("10x10").is_err());
+        assert_eq!(parse_angle("-37.5,30").unwrap(), (-37.5, 30.0));
+        assert!(parse_angle("0,120").is_err());
+        assert_eq!(parse_units("mm").unwrap(), LengthUnit::Millimeter);
+        assert!(parse_units("furlong").is_err());
+    }
+
+    #[test]
+    fn text_scales_with_poster_width() {
+        let wide = Presentation {
+            poster_width: 2400,
+            poster_height: 1500,
+            ..Default::default()
+        };
+        assert_eq!(wide.pixels_per_point(), 2.0);
+        assert_eq!(Presentation::default().pixels_per_point(), 1.0);
+        assert_eq!(wide.aspect_ratio(), 1.6);
+    }
+
+    #[test]
+    fn dressing_adds_context_and_caption() {
+        let triangle = |id: &str| {
+            GeometrySceneChunk::indexed_triangles(
+                id,
+                (0..3)
+                    .map(|i| {
+                        runmat_plot::geometry_scene_vertex(
+                            [i as f32, (i * i) as f32, 0.0],
+                            [0.9, 0.1, 0.1, 1.0],
+                            [0.0, 0.0, 1.0],
+                        )
+                    })
+                    .collect(),
+                vec![0, 1, 2],
+                runmat_plot::cad_default_material(),
+            )
+        };
+        let presentation = Presentation {
+            context: vec![ContextGeometry {
+                record: ContextRecord {
+                    file: "pack.step".into(),
+                    sha256: "00".into(),
+                    opacity: 0.12,
+                    shows: "geometry",
+                },
+                chunks: vec![triangle("context0:a")
+                    .into_context([0.7, 0.8, 0.9, 0.12], [0.6, 0.7, 0.9, 0.33])],
+            }],
+            caption: Some("Steady thermal on the cells".into()),
+            ..Default::default()
+        };
+        let mut scene = GeometryScene::new("result", 1, vec![triangle("result")]);
+        presentation.dress(&mut scene);
+        assert_eq!(scene.chunks.len(), 2);
+        assert_eq!(scene.title.as_deref(), Some("Steady thermal on the cells"));
+        assert_eq!(
+            scene.chunks[0].render_data.material.alpha_mode,
+            runmat_plot::core::AlphaMode::Opaque
+        );
+        assert_eq!(
+            scene.chunks[1].render_data.material.alpha_mode,
+            runmat_plot::core::AlphaMode::Blend
+        );
+        assert_eq!(presentation.records()[0].shows, "geometry");
+    }
+}

@@ -1121,6 +1121,32 @@ impl GeometrySceneChunk {
         self
     }
 
+    /// Restyle this chunk as translucent context geometry: surfaces take `face` (its alpha
+    /// below 1 makes them blended), edge lines take `edge`. A scene that also holds opaque
+    /// surfaces draws these after them without depth writes, so context never hides a result.
+    pub fn into_context(mut self, face: [f32; 4], edge: [f32; 4]) -> Self {
+        let color = if self.is_edge_chunk() { edge } else { face };
+        let blended = color[3] < 1.0;
+        for vertex in self
+            .vertices
+            .iter_mut()
+            .chain(self.render_data.vertices.iter_mut())
+        {
+            vertex.color = color;
+        }
+        for material in [&mut self.material, &mut self.render_data.material] {
+            material.albedo = Vec4::from_array(color);
+            if blended {
+                material.alpha_mode = AlphaMode::Blend;
+            }
+        }
+        // The colour lives in the vertices now; a stale GPU copy would keep the old one.
+        self.render_data.gpu_vertices = None;
+        // Context edges are part of its look in every display mode.
+        self.wireframe_only = false;
+        self
+    }
+
     pub fn with_regions(mut self, regions: Vec<GeometrySceneRegion>) -> Self {
         self.regions = regions;
         self

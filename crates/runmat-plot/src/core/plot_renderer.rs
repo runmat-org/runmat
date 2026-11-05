@@ -586,6 +586,7 @@ impl PlotRenderer {
         self.geometry_hidden_owner_node_ids.clear();
         // Clear existing scene
         self.scene.clear();
+        self.scene.set_translucent_last(false);
         self.scene_buffer_cache.borrow_mut().clear();
 
         // Convert figure to scene nodes
@@ -706,11 +707,19 @@ impl PlotRenderer {
             .flatten();
         let preserved_xray_enabled = same_scene_identity.then_some(self.geometry_xray_enabled);
         self.geometry_overlay = geometry_scene.overlay.clone();
-        let geometry_xray_enabled = geometry_scene.chunks.iter().any(|chunk| {
-            chunk.render_data.pipeline_type == crate::core::PipelineType::Triangles
-                && (chunk.material.albedo.w < 0.95
-                    || matches!(chunk.material.alpha_mode, crate::core::AlphaMode::Blend))
-        });
+        // An X-ray scene is one whose every surface is translucent. A scene that mixes opaque
+        // and translucent surfaces (a result inside translucent context geometry) keeps each
+        // surface's own opacity.
+        let mut surfaces = geometry_scene
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.render_data.pipeline_type == crate::core::PipelineType::Triangles)
+            .peekable();
+        let geometry_xray_enabled = surfaces.peek().is_some()
+            && surfaces.all(|chunk| {
+                chunk.material.albedo.w < 0.95
+                    || matches!(chunk.material.alpha_mode, crate::core::AlphaMode::Blend)
+            });
         if self.last_geometry_scene_key.as_ref() == Some(&cache_key) {
             self.last_geometry_scene = Some(geometry_scene.clone());
             let show_grid = presentation.show_grid.unwrap_or(geometry_scene.show_grid);
@@ -730,6 +739,7 @@ impl PlotRenderer {
         }
 
         self.scene.clear();
+        self.scene.set_translucent_last(true);
         self.scene_buffer_cache.borrow_mut().clear();
         self.geometry_node_owner_ids.clear();
         if !same_scene_identity {
@@ -2016,7 +2026,9 @@ impl PlotRenderer {
                         render_pass.set_bind_group(1, img_bg, &[]);
                     }
                 } else {
-                    let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
+                    let pipeline = self
+                        .wgpu_renderer
+                        .pipeline_for(render_data, self.scene.translucent_last());
                     render_pass.set_pipeline(pipeline);
                     // Set the uniform bind group (required by shaders)
                     render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
@@ -3271,7 +3283,9 @@ impl PlotRenderer {
                         );
                     }
                 } else {
-                    let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
+                    let pipeline = self
+                        .wgpu_renderer
+                        .pipeline_for(render_data, self.scene.translucent_last());
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(
                         0,

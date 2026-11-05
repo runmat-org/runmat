@@ -2,7 +2,9 @@ use anyhow::Result;
 use serde::Serialize;
 use std::path::Path;
 mod camera;
+mod presentation;
 mod profiles;
+pub(super) use presentation::Presentation;
 pub(super) use profiles::CaptureProfile;
 
 #[derive(Serialize)]
@@ -41,6 +43,13 @@ pub(super) struct View {
     /// One camera shared by every view, framed on the union of their bounds; serialized as
     /// the state itself (always set before the views are returned).
     pub initial_camera: Option<runmat_runtime::builtins::plotting::PlotSurfaceCameraState>,
+    /// The scene's title: what the view's result is of.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+    /// CAD files drawn around the result as translucent context geometry. They show shape
+    /// only; the result covers only the solved mesh.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub context: Vec<presentation::ContextRecord>,
 }
 
 /// A view whose scene is already written: what its poster pass still needs.
@@ -84,6 +93,7 @@ pub(super) async fn capture(
     output: &Path,
     profile: CaptureProfile,
     solver_mesh: impl Fn(&str) -> Option<String>,
+    presentation: &Presentation,
 ) -> Result<Vec<View>> {
     use runmat_runtime::analysis::field_scene::extrema;
     use runmat_runtime::builtins::plotting;
@@ -171,6 +181,7 @@ pub(super) async fn capture(
                     (scene, deformation_scale, Some(surface), None)
                 }
             };
+            presentation.dress(&mut scene);
             let mut scalar_scale = 1.0;
             if let Some(legend) = scene
                 .overlay
@@ -280,11 +291,19 @@ pub(super) async fn capture(
                 }),
                 // Set once every view's bounds are known.
                 initial_camera: None,
+                caption: presentation.caption.clone(),
+                context: presentation.records(),
             },
         });
     }
     drop(mesh);
-    let camera = camera::shared_camera(written.iter().map(|view| view.bounds));
+    let camera = camera::shared_camera(
+        written.iter().map(|view| view.bounds),
+        presentation
+            .view_angle
+            .map(|(azimuth, elevation)| camera::view_direction(azimuth, elevation)),
+        presentation.aspect_ratio(),
+    );
     let mut result = Vec::with_capacity(written.len());
     for Written { mut view, .. } in written {
         // Render the persisted representation: the poster and live view must share
@@ -293,11 +312,12 @@ pub(super) async fn capture(
         let handle = plotting::import_geometry_scene_payload(&bytes)?
             .ok_or_else(|| anyhow::anyhow!("snapshot scene did not contain geometry"))?;
         drop(bytes);
-        let poster = plotting::render_geometry_scene_snapshot_with_camera_state(
+        let poster = plotting::render_geometry_scene_snapshot_with_camera_state_scaled(
             handle,
-            1200,
-            750,
+            presentation.poster_width,
+            presentation.poster_height,
             camera.clone(),
+            presentation.pixels_per_point(),
         )
         .await;
         plotting::close_geometry_scene(handle);
