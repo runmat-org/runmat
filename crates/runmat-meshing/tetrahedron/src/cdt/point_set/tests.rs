@@ -347,3 +347,52 @@ fn a_point_on_a_flat_hull_cap_replaces_the_cells_whose_circumcircle_holds_it() {
     )
     .unwrap();
 }
+
+// witness: FEA-MESH-DISCRETIZATION-001/volume_conformity @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Regression (EV battery module, 22 shared-interface boxes): boundary nodes of
+//   axis-aligned boxes land on hull edges between collinear nodes; whatever cell the walk
+//   returns, the point set stays Delaunay. Facet recovery and carving are separate tests.
+#[test]
+fn box_surface_lattice_stays_delaunay_in_any_insertion_order() {
+    let mut nodes = Vec::new();
+    for x in 0..5 {
+        for y in 0..4 {
+            for z in 0..3 {
+                if x == 0 || x == 4 || y == 0 || y == 3 || z == 0 || z == 2 {
+                    let identity = nodes.len() as u8 + 1;
+                    nodes.push(node(identity, [f64::from(x), f64::from(y), f64::from(z)]));
+                }
+            }
+        }
+    }
+    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    for _ in 0..64 {
+        let mut order = (0..nodes.len()).collect::<Vec<_>>();
+        for slot in (1..order.len()).rev() {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            order.swap(slot, (state >> 33) as usize % (slot + 1));
+        }
+        let rank = order
+            .iter()
+            .enumerate()
+            .map(|(position, index)| (nodes[*index].identity, position))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let topology = build_delaunay_volume_point_set_with_order(
+            nodes.clone(),
+            DelaunayPointSetOptions::default(),
+            &NeverCancelled,
+            |left, right| rank[&left.identity].cmp(&rank[&right.identity]),
+        )
+        .unwrap_or_else(|failure| panic!("order {order:?}: {failure}"));
+        assert_eq!(topology.nodes.len(), nodes.len());
+        validate_delaunay_volume_topology(
+            &topology,
+            crate::cdt::DelaunayInsertionOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap_or_else(|failure| panic!("order {order:?}: {failure}"));
+    }
+}

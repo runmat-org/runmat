@@ -1282,8 +1282,13 @@ static void strip_free_wireframe(CadDocument& document) {
 // pcurves only at the writer's control points (OCCT checks 23), and exports often understate it.
 // RunMat's curve, surface and validation stages rely on the edge tolerance continuously, so each
 // understated tolerance is raised to the gap measured at dense control points plus a 5% margin,
-// as OCCT's own shape healing does. Gaps above ten times the written tolerance are real defects
-// and are left for validation to report.
+// as OCCT's own shape healing does. A gap is admitted when it is at most ten times the written
+// tolerance or at most kAdmissibleEdgeGapM (1 um), whichever is larger. The absolute bound keeps
+// the rule meaningful for writers that stamp a nominal tolerance near the kernel's confusion
+// distance: an exported EV battery pack writes 0.9 nm on every edge while its B-spline pcurves
+// sit 8-13 nm off their 3D curves, ordinary for real CAD. Larger gaps are real defects and are
+// left for validation to report.
+
 static void admit_measured_edge_tolerances(const TopoDS_Shape& shape, const OcctImportOptions& options) {
   TopTools_IndexedMapOfShape edges;
   TopExp::MapShapes(shape, TopAbs_EDGE, edges);
@@ -1301,7 +1306,9 @@ static void admit_measured_edge_tolerances(const TopoDS_Shape& shape, const Occt
     analysis.CheckSameParameter(edge, deviation, 101);
     const double written = BRep_Tool::Tolerance(edge);
     const double required = deviation * 1.05;
-    if (!std::isfinite(required) || required <= written || deviation > 10.0 * written) {
+    const double admissible =
+        std::max(10.0 * written, kAdmissibleEdgeGapM / options.step_coordinate_unit_m);
+    if (!std::isfinite(required) || required <= written || deviation > admissible) {
       continue;
     }
     builder.UpdateEdge(edge, required);
