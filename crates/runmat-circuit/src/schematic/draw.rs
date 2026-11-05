@@ -6,7 +6,7 @@ use super::symbol::{Art, Place, PinSide};
 use super::*;
 
 /// Gap between a body and the designator or value beside it.
-const TEXT_GAP: Coord = 500_000;
+pub(super) const TEXT_GAP: Coord = 500_000;
 
 fn xy(p: Point) -> Xy {
     [mm(p.x), mm(p.y)]

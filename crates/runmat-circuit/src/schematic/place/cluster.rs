@@ -56,6 +56,23 @@ impl Ctx<'_> {
         }
     }
 
+    /// The pitch of a decoupling row: the upright pitch, or wider when a cap's designator or
+    /// value (`100 nF ±10%`) would reach the next cap's body, so the row's texts never touch.
+    fn decap_pitch(&self, ds: &[usize], places: &[Place]) -> Coord {
+        let reach = ds.iter().fold((0, 0), |(left, right), &d| {
+            let e = self.extent(d, &places[d]);
+            // An upright cap's extent keeps 9 grids for the texts beside its body; the texts as
+            // drawn start two text gaps right of the body.
+            let texts = if places[d].upright() {
+                e[2] - 9 * GRID + 2 * crate::schematic::draw::TEXT_GAP + self.cells[d].text_w
+            } else {
+                e[2]
+            };
+            (left.max(-e[0]), right.max(texts.max(e[2])))
+        });
+        UPRIGHT_PITCH.max(crate::schematic::up_to_grid(reach.0 + reach.1 + GRID))
+    }
+
     /// Lays out one cluster: columns by rank, gaps holding shunts, feedback above its box and
     /// decoupling under its IC. Returns each member's origin and the cluster's box.
     pub(super) fn cluster(&self, members: &[usize], places: &mut [Place]) -> (Vec<(usize, Point)>, [Coord; 4]) {
@@ -144,7 +161,7 @@ impl Ctx<'_> {
                 let de = up_ext(ds[0], places);
                 let per = ds.len().min(DECAP_ROW) as Coord;
                 let rows = ds.len().div_ceil(DECAP_ROW) as Coord;
-                let w = per * UPRIGHT_PITCH;
+                let w = per * self.decap_pitch(ds, places);
                 e[0] = e[0].min(-w / 2);
                 e[2] = e[2].max(w / 2 + (de[2] - de[0]) / 2);
                 e[1] = base[1] + decap_lift(&places[i]) - rows * (GRID + de[3] - de[1]);
@@ -223,11 +240,12 @@ impl Ctx<'_> {
             let bottom = up_ext(h, places)[1] + decap_lift(&places[h]);
             let de = up_ext(ds[0], places);
             let per = ds.len().min(DECAP_ROW) as Coord;
-            let x0 = o.x - (per - 1) * UPRIGHT_PITCH / 2;
+            let pitch = self.decap_pitch(ds, places);
+            let x0 = o.x - (per - 1) * pitch / 2;
             for (k, &d) in ds.iter().enumerate() {
                 let (row, col) = ((k / DECAP_ROW) as Coord, (k % DECAP_ROW) as Coord);
                 places[d].origin = Point::new(
-                    snap(x0 + col * UPRIGHT_PITCH),
+                    snap(x0 + col * pitch),
                     snap(o.y + bottom - GRID - de[3] - row * (GRID + de[3] - de[1])),
                 );
             }

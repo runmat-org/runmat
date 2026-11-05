@@ -365,6 +365,9 @@ pub(super) struct Cell {
     /// Each layout pin's netlist pin (units only).
     pub pins: Vec<usize>,
     pub designator: String,
+    /// The widest of the designator and the value as drawn (0 for a sheet symbol, whose name
+    /// sits in its box): an upright part's texts reach this far right of its body.
+    pub text_w: Coord,
     pub connector: bool,
     /// Sheets: whether the child drives each pin's net.
     pub sheet_out: Vec<bool>,
@@ -532,6 +535,8 @@ fn page(
                 pins,
                 lay,
                 designator: c.designator.clone(),
+                text_w: text_width(&c.designator, DESIGNATOR_TEXT)
+                    .max(crate::index::component_value(c).map_or(0, |v| text_width(&v, VALUE_TEXT))),
                 connector: connector(&c.designator),
                 sheet_out: Vec::new(),
             });
@@ -591,6 +596,7 @@ fn page(
             pins: Vec::new(),
             lay,
             designator: name,
+            text_w: 0,
             connector: false,
             sheet_out,
         });
