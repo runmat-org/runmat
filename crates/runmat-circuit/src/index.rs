@@ -476,6 +476,13 @@ pub struct CopperRow {
     pub polygons: Vec<crate::display::PourLayer>,
 }
 
+/// A point in millimetres, `[x, y]`.
+pub type Xy = [f64; 2];
+
+fn xy(p: crate::geom::Point) -> Xy {
+    [mm(p.x), mm(p.y)]
+}
+
 fn mm(nm: i64) -> f64 {
     (nm as f64 / 1.0e6 * 1.0e6).round() / 1.0e6
 }

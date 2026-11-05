@@ -771,6 +771,7 @@ fn catalog_edits_run_through_the_minimal_diff() {
             },
             clearance: Some(mm(0.3)),
             connect: PadConnect::Solid,
+            priority: 0,
         },
         BoardEdit::Keepout {
             name: "mount".into(),
