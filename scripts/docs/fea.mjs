@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readJson, copyInput } from "./documents.mjs";
 import { loadLedger, pendingView } from "./ledger.mjs";
-import { COMMITTED_GRAMMAR } from "./fea-grammar.mjs";
+import { COMMITTED_GRAMMAR, DESIGN_DIALECTS, committedDesignGrammar } from "./fea-grammar.mjs";
 export function collectFea(source, output, register, examples, evidence, validate) {
     if (register.schema_version !== 1 || register.posture !== "discovery_only" || !Array.isArray(register.requirements))
         throw new Error("Unsupported requirement export");
@@ -47,4 +47,12 @@ export function collectFea(source, output, register, examples, evidence, validat
     // The one `.fea` grammar (committed in runmat-design-syntax and kept current by fea-grammar.test.mjs),
     // so the site colors code exactly as the language server does. Fixture trees carry no compiler.
     if (existsSync(join(source, COMMITTED_GRAMMAR))) copyFileSync(join(source, COMMITTED_GRAMMAR), join(output, "fea/fea.tmLanguage.json"));
+    // The design formats' grammars beside it (`design/part.tmLanguage.json`, …), the same copies
+    // the language server and the Desktop color with.
+    for (const entry of DESIGN_DIALECTS) {
+        const committed = join(source, committedDesignGrammar(entry));
+        if (!existsSync(committed)) continue;
+        mkdirSync(join(output, "design"), { recursive: true });
+        copyFileSync(committed, join(output, `design/${entry.extension}.tmLanguage.json`));
+    }
 }

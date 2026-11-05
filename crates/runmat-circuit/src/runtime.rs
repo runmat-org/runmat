@@ -598,6 +598,63 @@ pub fn compile(path: &str, text: &str, files: &Files, options: &CompileOptions) 
     }
 }
 
+/// What a language server shows as a file is typed: syntax and read errors, elaboration and
+/// ERC findings at their source ranges, and the schematic's projection (design review
+/// findings are in it, under `review`). Zone fill and DRC
+/// stay with [`compile`] and the board view; a layout's board rules are still checked.
+/// Every diagnostic is in `path`'s own file (findings elsewhere are left to that file).
+pub fn check(path: &str, text: &str, files: &Files, options: &CompileOptions) -> CompileOutput {
+    let project = match load(path, text, files, options) {
+        Ok(p) => p,
+        Err(diagnostics) => {
+            return CompileOutput {
+                index: None,
+                diagnostics,
+            }
+        }
+    };
+    let mut erc = project.netlist.diagnostics.clone();
+    erc.extend(erc::run(&project.netlist, &ErcOptions::default()));
+    let findings = review::run_all(&project.netlist, &project.pool, &ReviewOptions::default());
+    let index = build_index(
+        &project.design,
+        &project.netlist,
+        &project.pool,
+        &erc,
+        &findings,
+    );
+    let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    for finding in &erc {
+        if finding.source.file != path {
+            continue;
+        }
+        let severity = match finding.severity {
+            crate::elab::Severity::Error => "error",
+            crate::elab::Severity::Warning => "warning",
+            crate::elab::Severity::Info => "info",
+        };
+        diagnostics.push(Diagnostic {
+            path: path.to_owned(),
+            start: utf16_offset(text, finding.source.start as usize),
+            end: utf16_offset(text, finding.source.end as usize),
+            severity: severity.into(),
+            message: format!("{} ({})", finding.message, finding.code),
+        });
+    }
+    if let Some(layout) = project.layout.as_ref().filter(|l| l.path == path) {
+        if let Some(board) = &layout.parsed.board {
+            let (_, errors) = BoardRules::new(&board.limits, &board.rules);
+            for e in errors {
+                diagnostics.push(Diagnostic::error(path, Some(text), 0, 0, format!("{e:?}")));
+            }
+        }
+    }
+    CompileOutput {
+        index: Some(index),
+        diagnostics,
+    }
+}
+
 fn plans(project: &Project, board: &Board, run: Option<&EcoSettings>) -> (EcoPlan, EcoPlan) {
     let s = project.schematic();
     let forward_options = run.map_or_else(

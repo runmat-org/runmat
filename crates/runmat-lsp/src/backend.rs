@@ -9,6 +9,7 @@ use crate::core::analysis::{
     rename_subject_at, rename_subject_has_collision, semantic_document_facts, semantic_tokens_full,
     semantic_tokens_legend, signature_help_at, CompatMode, DocumentAnalysis,
 };
+use crate::core::design::DesignDocumentAnalysis;
 use crate::core::fea::FeaDocumentAnalysis;
 use crate::core::position::position_to_offset;
 use crate::core::project::ProjectContext;
@@ -36,6 +37,7 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
 
+mod design;
 mod fea;
 mod rename;
 // Cargo substitutes this at compile time so we can surface the precise build version in logs.
@@ -54,6 +56,7 @@ struct DocumentState {
     version: Option<i32>,
     analysis: Option<DocumentAnalysis>,
     fea_analysis: Option<FeaDocumentAnalysis>,
+    design_analysis: Option<DesignDocumentAnalysis>,
 }
 
 struct AnalyzerState {
@@ -160,6 +163,9 @@ impl RunMatLanguageServer {
     }
 
     async fn reanalyze(&self, uri: &Url) {
+        if design::reanalyze(self, uri).await {
+            return;
+        }
         if fea::reanalyze(self, uri).await {
             return;
         }
@@ -182,6 +188,16 @@ impl RunMatLanguageServer {
             }
         }
         fea::reanalyze_open_documents(self).await;
+    }
+
+    /// The compiled design document at `uri`, when it is one.
+    async fn design_of(&self, uri: &Url) -> Option<DesignDocumentAnalysis> {
+        self.state
+            .read()
+            .await
+            .documents
+            .get(uri)
+            .and_then(|document| document.design_analysis.clone())
     }
 
     async fn analyze_and_store(
@@ -622,6 +638,9 @@ impl LanguageServer for RunMatLanguageServer {
     async fn hover(&self, params: HoverParams) -> RpcResult<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
+        if let Some(design) = self.design_of(&uri).await {
+            return Ok(design.hover(&position));
+        }
 
         let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
@@ -649,6 +668,9 @@ impl LanguageServer for RunMatLanguageServer {
     async fn completion(&self, params: CompletionParams) -> RpcResult<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
+        if let Some(design) = self.design_of(&uri).await {
+            return Ok(Some(CompletionResponse::Array(design.completion_items(&position))));
+        }
 
         let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
@@ -681,6 +703,11 @@ impl LanguageServer for RunMatLanguageServer {
     ) -> RpcResult<Option<GotoDefinitionResponse>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
+        if let Some(design) = self.design_of(&uri).await {
+            return Ok(design
+                .definition(&position)
+                .map(|location| GotoDefinitionResponse::Array(vec![location])));
+        }
 
         let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
@@ -729,6 +756,11 @@ impl LanguageServer for RunMatLanguageServer {
     async fn references(&self, params: ReferenceParams) -> RpcResult<Option<Vec<Location>>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
+        if let Some(design) = self.design_of(&uri).await {
+            let locations =
+                design.references(&position, params.context.include_declaration);
+            return Ok((!locations.is_empty()).then_some(locations));
+        }
 
         let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
@@ -819,6 +851,9 @@ impl LanguageServer for RunMatLanguageServer {
         params: SemanticTokensParams,
     ) -> RpcResult<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
+        if let Some(design) = self.design_of(&uri).await {
+            return Ok(Some(SemanticTokensResult::Tokens(design.semantic_tokens())));
+        }
 
         let (analysis, fea_analysis, text) = {
             let state = self.state.read().await;
@@ -849,6 +884,9 @@ impl LanguageServer for RunMatLanguageServer {
         params: DocumentFormattingParams,
     ) -> RpcResult<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
+        if let Some(design) = self.design_of(&uri).await {
+            return Ok(Some(design.formatting_edits()));
+        }
         let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
             match state.documents.get(&uri) {
@@ -878,6 +916,9 @@ impl LanguageServer for RunMatLanguageServer {
         params: DocumentSymbolParams,
     ) -> RpcResult<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
+        if let Some(design) = self.design_of(&uri).await {
+            return Ok(Some(DocumentSymbolResponse::Nested(design.document_symbols())));
+        }
 
         let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;

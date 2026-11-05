@@ -35,7 +35,8 @@ pub const REFERENCE_FUNCTIONS: &[&str] = &["edges_between", "vertex_of", "piece"
 /// Path heads the datum, sketch and reference forms take.
 pub const RESERVED_HEADS: &[&str] = &["origin", "plane", "axis", "point", "sketch"];
 
-const TOPOLOGY: &[&str] = &["body", "face", "edge", "vertex"];
+/// The topology words after `feature.<name>.` (`feature.body.face.end`).
+pub const TOPOLOGY: &[&str] = &["body", "face", "edge", "vertex"];
 
 /// Whether a dotted path reads as one of the forms here (so a value reference with this path
 /// must be written another way).
@@ -47,9 +48,9 @@ pub fn is_reserved_path(path: &[String]) -> bool {
     }
 }
 
-// Every role, for reading role words back. The match below fails to compile when the kernel
-// adds a role, so the list stays complete.
-const ROLES: &[Role] = &[
+/// Every role, for reading role words back (`feature.body.face.<role>`). The match below fails
+/// to compile when the kernel adds a role, so the list stays complete.
+pub const ROLES: &[Role] = &[
     Role::Side,
     Role::StartCap,
     Role::EndCap,

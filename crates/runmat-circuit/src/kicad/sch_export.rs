@@ -10,8 +10,11 @@
 //! - **Symbols.** One library symbol per entity and unit layout, one KiCad unit per schematic
 //!   unit ([`crate::schematic::units`]: a large part's banks and power units included, with
 //!   their names); pins numbered by pad (a pin on several pads becomes stacked pins).
-//! - **Labels.** Local labels, global labels (global nets and power rails) and hierarchical
-//!   labels, where and as the layout draws them; label and sheet pin text is the net's name.
+//! - **Labels.** Local labels, global labels (global nets) and hierarchical labels, where and
+//!   as the layout draws them; label and sheet pin text is the net's name.
+//! - **Power rails.** A power port is a KiCad power symbol (`power:GND`, `power:+5V`): a ground
+//!   bar under a ground or negative rail, an arrow over a positive one, its value the net's
+//!   name, its reference `#PWR…` (hidden, not in the BOM), one library symbol per rail.
 //! - **Coordinates.** The layout's page millimetres (y up, origin bottom left) flip to KiCad's
 //!   (y down, origin top left).
 //!
@@ -188,6 +191,149 @@ fn stroke() -> SExpr {
     )
 }
 
+/// Whether a rail is drawn as a ground bar (grounds and negative rails) or an arrow.
+fn is_ground_rail(net: &str) -> bool {
+    let upper = net.to_ascii_uppercase();
+    upper.contains("GND")
+        || upper.starts_with("VSS")
+        || upper.starts_with("VEE")
+        || upper.starts_with("VNEG")
+        || upper.starts_with('-')
+}
+
+/// The library name of a rail's power symbol (`power:+5V`).
+fn power_lib(net: &str) -> String {
+    format!("power:{}", sanitize(net))
+}
+
+/// The power symbol a rail's ports place: a pin at the origin (the connection point), hidden,
+/// named after the rail, and the bar or arrow drawn away from it.
+fn power_lib_symbol(net: &str) -> SExpr {
+    let lib = power_lib(net);
+    let short = lib.split_once(':').map(|x| x.1).unwrap_or(&lib).to_string();
+    let ground = is_ground_rail(net);
+    let pt = |x: f64, y: f64| SExpr::list("xy", vec![len(x), len(y)]);
+    let shape = if ground {
+        vec![pt(0.0, 0.0), pt(0.0, -1.27), pt(1.27, -1.27), pt(0.0, -2.54), pt(-1.27, -1.27), pt(0.0, -1.27)]
+    } else {
+        vec![pt(0.0, 0.0), pt(0.0, 2.54), pt(-0.762, 1.27), pt(0.0, 2.54), pt(0.762, 1.27)]
+    };
+    let value_y = if ground { -3.81 } else { 3.556 };
+    SExpr::list(
+        "symbol",
+        vec![
+            SExpr::str(&lib),
+            SExpr::list("power", vec![]),
+            SExpr::list("pin_names", vec![SExpr::list("offset", vec![SExpr::num(0.0)])]),
+            SExpr::list("in_bom", vec![SExpr::sym("no")]),
+            SExpr::list("on_board", vec![SExpr::sym("yes")]),
+            SExpr::list(
+                "property",
+                vec![
+                    SExpr::str("Reference"),
+                    SExpr::str("#PWR"),
+                    SExpr::list("at", vec![len(0.0), len(if ground { -6.35 } else { 6.35 }), SExpr::num(0.0)]),
+                    hidden_effects(),
+                ],
+            ),
+            SExpr::list(
+                "property",
+                vec![
+                    SExpr::str("Value"),
+                    SExpr::str(net),
+                    SExpr::list("at", vec![len(0.0), len(value_y), SExpr::num(0.0)]),
+                    effects(None),
+                ],
+            ),
+            SExpr::list(
+                "symbol",
+                vec![
+                    SExpr::str(&format!("{short}_0_1")),
+                    SExpr::list(
+                        "polyline",
+                        vec![
+                            SExpr::list("pts", shape),
+                            stroke(),
+                            SExpr::list("fill", vec![SExpr::list("type", vec![SExpr::sym("none")])]),
+                        ],
+                    ),
+                ],
+            ),
+            SExpr::list(
+                "symbol",
+                vec![
+                    SExpr::str(&format!("{short}_1_1")),
+                    SExpr::list(
+                        "pin",
+                        vec![
+                            SExpr::sym("power_in"),
+                            SExpr::sym("line"),
+                            SExpr::list("at", vec![len(0.0), len(0.0), SExpr::num(if ground { 270.0 } else { 90.0 })]),
+                            SExpr::list("length", vec![SExpr::num(0.0)]),
+                            SExpr::sym("hide"),
+                            SExpr::list("name", vec![SExpr::str(net), effects(None)]),
+                            SExpr::list("number", vec![SExpr::str("1"), effects(None)]),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )
+}
+
+/// A power port placed as its rail's power symbol, value text on the far side of the shape.
+fn power_symbol_node(page: &Page, label: &NetLabel, reference: &str, here: &str, project: &str, seed: &str) -> SExpr {
+    let ground = is_ground_rail(&label.net);
+    let value_y = if ground { label.y_mm - 3.81 } else { label.y_mm + 3.556 };
+    SExpr::list(
+        "symbol",
+        vec![
+            SExpr::list("lib_id", vec![SExpr::str(&power_lib(&label.net))]),
+            page.at(label.x_mm, label.y_mm, 0.0),
+            SExpr::list("unit", vec![SExpr::num(1.0)]),
+            SExpr::list("in_bom", vec![SExpr::sym("no")]),
+            SExpr::list("on_board", vec![SExpr::sym("yes")]),
+            uuid_node(seed),
+            SExpr::list(
+                "property",
+                vec![
+                    SExpr::str("Reference"),
+                    SExpr::str(reference),
+                    page.at(label.x_mm, label.y_mm, 0.0),
+                    hidden_effects(),
+                ],
+            ),
+            SExpr::list(
+                "property",
+                vec![
+                    SExpr::str("Value"),
+                    SExpr::str(&label.net),
+                    page.at(label.x_mm, value_y, 0.0),
+                    effects(None),
+                ],
+            ),
+            SExpr::list("pin", vec![SExpr::str("1"), uuid_node(&format!("{seed}|pin"))]),
+            SExpr::list(
+                "instances",
+                vec![SExpr::list(
+                    "project",
+                    vec![
+                        SExpr::str(project),
+                        SExpr::list(
+                            "path",
+                            vec![
+                                SExpr::str(here),
+                                SExpr::list("reference", vec![SExpr::str(reference)]),
+                                SExpr::list("unit", vec![SExpr::num(1.0)]),
+                            ],
+                        ),
+                    ],
+                )],
+            ),
+        ],
+    )
+}
+
 fn label_node(page: &Page, label: &NetLabel, seed: &str) -> SExpr {
     let left = label.side == "left";
     let (head, shaped) = match label.kind.as_str() {
@@ -265,6 +411,8 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
         .map(|(k, s)| (s.path.as_str(), k + 1))
         .collect();
     let mut files = BTreeMap::new();
+    // `#PWR` references number across the whole project, page by page.
+    let mut power_refs = 0usize;
     for sheet in &drawn.sheets {
         let page = Page {
             height: sheet.height_mm,
@@ -510,13 +658,28 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
                 ],
             ));
         }
+        let mut rails: BTreeSet<&str> = BTreeSet::new();
         for (k, label) in sheet.labels.iter().enumerate() {
-            items.push(label_node(&page, label, &seed(&format!("l{k}"))));
+            if label.kind == "power" {
+                power_refs += 1;
+                rails.insert(&label.net);
+                items.push(power_symbol_node(
+                    &page,
+                    label,
+                    &format!("#PWR{power_refs:02}"),
+                    &here,
+                    &project,
+                    &seed(&format!("p{k}")),
+                ));
+            } else {
+                items.push(label_node(&page, label, &seed(&format!("l{k}"))));
+            }
         }
-        let lib_nodes = used
+        let mut lib_nodes: Vec<SExpr> = used
             .iter()
             .map(|lib| lib_symbol(lib, &libs[*lib]))
             .collect();
+        lib_nodes.extend(rails.iter().map(|net| power_lib_symbol(net)));
         let root = sheet.path == "/";
         let mut page_items = vec![
             SExpr::list("version", vec![SExpr::sym("20231120")]),

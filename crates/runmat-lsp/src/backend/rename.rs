@@ -30,6 +30,14 @@ pub(super) async fn prepare(
     server: &RunMatLanguageServer,
     params: TextDocumentPositionParams,
 ) -> RpcResult<Option<PrepareRenameResponse>> {
+    if let Some(design) = server.design_of(&params.text_document.uri).await {
+        return Ok(design
+            .prepare_rename(&params.position)
+            .map(|(range, placeholder)| PrepareRenameResponse::RangeWithPlaceholder {
+                range,
+                placeholder,
+            }));
+    }
     let Some(target) = target_at(server, &params).await else {
         return Ok(None);
     };
@@ -48,6 +56,11 @@ pub(super) async fn rename(
     params: RenameParams,
 ) -> RpcResult<Option<WorkspaceEdit>> {
     let request = params.text_document_position;
+    if let Some(design) = server.design_of(&request.text_document.uri).await {
+        return design
+            .rename(&request.position, &params.new_name)
+            .map_err(RpcError::invalid_params);
+    }
     let Some(target) = target_at(server, &request).await else {
         return Ok(None);
     };

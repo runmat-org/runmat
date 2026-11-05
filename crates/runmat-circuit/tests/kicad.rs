@@ -443,6 +443,13 @@ fn fresh_schematic_export_reimports_with_the_same_connectivity() {
         .map(|c| c.designator.clone())
         .collect();
     assert_eq!(designators, back_d);
+    assert!(
+        drawn
+            .sheets
+            .iter()
+            .any(|s| s.labels.iter().any(|l| l.kind == "power")),
+        "the large design draws power ports"
+    );
     // The export draws the canvas's schematic: each page's wire segments and labels are the
     // layout's, flipped to KiCad's y-down page.
     for sheet in &drawn.sheets {
@@ -483,15 +490,39 @@ fn fresh_schematic_export_reimports_with_the_same_connectivity() {
             .iter()
             .map(|h| tree.children(h).count())
             .sum::<usize>();
-        assert_eq!(labels, sheet.labels.len(), "{file}");
+        let power: Vec<_> = sheet.labels.iter().filter(|l| l.kind == "power").collect();
+        assert_eq!(labels, sheet.labels.len() - power.len(), "{file}");
         assert_eq!(
             tree.children("sheet").count(),
             sheet.sheet_symbols.len(),
             "{file}"
         );
+        // Power ports are power symbols, never global labels: one `power:<rail>` symbol each,
+        // valued with the rail, and one library symbol per rail.
+        let power_symbols: Vec<_> = tree
+            .children("symbol")
+            .filter(|s| s.child_arg("lib_id").is_some_and(|l| l.starts_with("power:")))
+            .collect();
+        assert_eq!(power_symbols.len(), power.len(), "{file}");
+        for (symbol, label) in power_symbols.iter().zip(&power) {
+            let value = symbol
+                .children("property")
+                .find(|p| p.arg(0) == Some("Value"))
+                .and_then(|p| p.arg(1));
+            assert_eq!(value, Some(label.net.as_str()), "{file}");
+        }
+        assert!(tree
+            .children("global_label")
+            .all(|l| !power.iter().any(|p| Some(p.net.as_str()) == l.arg(0))));
+        let rails: BTreeSet<&str> = power.iter().map(|l| l.net.as_str()).collect();
+        let power_libs = tree
+            .child("lib_symbols")
+            .map(|ls| ls.children("symbol").filter(|s| s.child("power").is_some()).count())
+            .unwrap_or(0);
+        assert_eq!(power_libs, rails.len(), "{file}");
         assert_eq!(
             tree.children("symbol").count(),
-            sheet.symbols.len(),
+            sheet.symbols.len() + power.len(),
             "{file}"
         );
     }

@@ -7954,6 +7954,7 @@ version = "0.6.2"
 dependencies = [
  "runmat-cad",
  "runmat-design-syntax",
+ "runmat-types",
  "serde",
  "serde_json",
  "wasm-bindgen",
@@ -8592,6 +8593,8 @@ dependencies = [
  "once_cell",
  "runmat-analysis-language",
  "runmat-builtins",
+ "runmat-cad",
+ "runmat-circuit",
  "runmat-config",
  "runmat-design-syntax",
  "runmat-filesystem",
