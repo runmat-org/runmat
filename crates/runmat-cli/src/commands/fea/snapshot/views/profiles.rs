@@ -66,6 +66,9 @@ struct Display {
     /// The statistic the drawn field is (`None`: a state of the solution). A statistic is
     /// drawn on the undeformed body: an RMS or envelope vector is not a displacement state.
     statistic: Option<FieldStatistic>,
+    /// Drawn only from time-domain runs: in a run that publishes a phasor of the quantity, a
+    /// real field is the phasor's real part, never an instantaneous value.
+    time_domain: bool,
 }
 
 /// Real-valued quantities.
@@ -83,6 +86,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "displacement",
@@ -91,6 +95,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE_OR_REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
     // Random response: the root-mean-square of each displacement component; the magnitude of
     // that vector is the RMS of the displacement magnitude.
@@ -101,6 +106,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: false,
         statistic: Some(FieldStatistic::RootMeanSquare),
+        time_domain: false,
     },
     // Response spectrum: the combined modal peak of each displacement component.
     Display {
@@ -110,6 +116,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: false,
         statistic: Some(FieldStatistic::ComponentMagnitudeEnvelope),
+        time_domain: false,
     },
     Display {
         id: "stress",
@@ -118,6 +125,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "sound-pressure-level",
@@ -126,6 +134,7 @@ const DISPLAYS: &[Display] = &[
         representations: &[R::SoundPressureLevel],
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "acoustic-pressure",
@@ -134,6 +143,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     // Acoustic transient: the real pressure of one instant.
     Display {
@@ -143,6 +153,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: false,
         statistic: None,
+        time_domain: true,
     },
     Display {
         id: "velocity",
@@ -151,6 +162,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "pressure",
@@ -159,6 +171,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "electric-potential",
@@ -167,6 +180,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE_OR_REAL,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "current-density",
@@ -175,6 +189,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE_OR_REAL,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "magnetic-flux-density",
@@ -183,6 +198,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE_OR_REAL,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "joule-loss",
@@ -191,6 +207,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "electric-field",
@@ -199,6 +216,7 @@ const DISPLAYS: &[Display] = &[
         representations: AMPLITUDE_OR_REAL,
         deformed: false,
         statistic: None,
+        time_domain: false,
     },
     Display {
         id: "heat-flux",
@@ -207,6 +225,7 @@ const DISPLAYS: &[Display] = &[
         representations: REAL,
         deformed: true,
         statistic: None,
+        time_domain: false,
     },
 ];
 
@@ -726,6 +745,17 @@ impl<'a> RunFields<'a> {
         Ok(run)
     }
 
+    /// Whether the run publishes `quantity` as a phasor (complex, magnitude, phase or level).
+    fn publishes_phasor(&self, quantity: Q) -> bool {
+        self.published.iter().any(|descriptor| {
+            descriptor.layout.quantity == quantity
+                && matches!(
+                    descriptor.layout.representation,
+                    R::Complex | R::Imaginary | R::Magnitude | R::PhaseRadians | R::SoundPressureLevel
+                )
+        })
+    }
+
     /// The run's primary response when it is time-stepped (more than one retained state): the
     /// first of [`PRIMARY_RESPONSES`] it publishes as stepped nodal fields.
     fn primary_response(
@@ -959,8 +989,11 @@ impl CaptureProfile {
             let mut chosen = None;
             'runs: for run in runs.iter().filter(|run| !run.modal) {
                 for quantity in display.quantities {
-                    let candidates =
+                    let mut candidates =
                         run.of_quantity(*quantity, display.representations, display.statistic);
+                    if display.time_domain && run.publishes_phasor(*quantity) {
+                        candidates.clear();
+                    }
                     if let Some(found) = run.chosen(&candidates, values)? {
                         chosen = Some((run, found));
                         break 'runs;

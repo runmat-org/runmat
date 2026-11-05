@@ -572,14 +572,18 @@ mod tests {
         }
     }
     /// Full-space relative balance of a modal-reduced harmonic solve at `omega` (rad/s).
-    fn reduced_balance(summary: &AssemblySummary, reduced: &ModalReducedSystem, omega: f64) -> f64 {
-        let zeros = vec![0.0; summary.dof_count];
+    fn reduced_balance(
+        summary: &AssemblySummary,
+        imaginary_load: &[f64],
+        reduced: &ModalReducedSystem,
+        omega: f64,
+    ) -> f64 {
         let load = super::super::ModalHarmonicLoad {
             real: reduced
                 .project_load(&reduced.load_field(summary.operator.load()).unwrap())
                 .unwrap(),
             imaginary: reduced
-                .project_load(&reduced.load_field(&zeros).unwrap())
+                .project_load(&reduced.load_field(imaginary_load).unwrap())
                 .unwrap(),
         };
         let response = super::super::solve_modal_harmonic(reduced, omega, &load).unwrap();
@@ -592,13 +596,13 @@ mod tests {
             .expand_state(&response.displacement_imaginary)
             .unwrap()
             .into_canonical_storage();
-        let physical = super::super::harmonic_balance::evaluate_harmonic_physical_state(
+        let physical = super::super::evaluate_harmonic_physical_state(
             summary,
             omega,
             &real,
             &imaginary,
             summary.operator.load(),
-            &zeros,
+            imaginary_load,
         )
         .unwrap();
         physical
@@ -608,37 +612,28 @@ mod tests {
             .1
     }
 
-    // witness: FEA-DYNAMICS-RESPONSE-001/direct_modal_procedures @ linear_structural_dynamics/tet4/numerical_kernel; coverage: partial; boundary: applied-load static correction cuts the full-space truncation balance of a modal-reduced harmonic solve below the first mode
+    // witness: FEA-DYNAMICS-RESPONSE-001/direct_modal_procedures @ linear_structural_dynamics/tet4/numerical_kernel; coverage: partial; boundary: applied-load static correction cuts the full-space truncation balance of a one-mode modal-reduced harmonic solve of the physical Tet4 slab rod below its first mode
     #[test]
     fn applied_load_static_correction_collapses_the_modal_truncation_balance() {
-        let mut model =
-            crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
-        model.sequence.steps = vec![ProcedureStep::structural_modal("projection")];
+        use crate::pipeline::modal::rod_qualification as rod;
+        let mesh = rod::rod_mesh(2, false);
+        let model = rod::rod_model(&mesh, &[1.0]);
+        // k = 1 drives the rod at 10 rad/s, below its first axial mode (2.5 Hz).
+        let assembly = rod::assemble(&model, &mesh, 1.0);
+        let omega = rod::WAVE_SPEED;
         let modal = crate::run_modal_with_options(
-            &model,
+            &rod::modal_model(&model),
             crate::ComputeBackend::Cpu,
-            crate::ModalSolveOptions::default(),
+            crate::ModalSolveOptions {
+                solver_mesh: Some(mesh.clone()),
+                truncation: crate::pipeline::modal_governance::ModalTruncationPolicy::requested(1),
+                ..crate::ModalSolveOptions::default()
+            },
         )
         .unwrap();
-        let excitations = crate::excitation::realize_step_excitations(
-            &model,
-            &model.sequence.steps[0],
-            crate::excitation::ExcitationSamplePoint::Static,
-        )
-        .unwrap();
-        let summary = crate::assembly::assemble_structural_system(
-            &model,
-            &excitations,
-            None,
-            crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
-        )
-        .unwrap();
-        assert!(summary.operator.load().iter().any(|value| *value != 0.0));
-        let omega =
-            0.25 * 2.0 * std::f64::consts::PI * modal.basis.modes()[0].frequency_hz();
-
-        let modes_only = ModalReducedSystem::project(&summary, &modal.basis).unwrap();
-        let truncated = reduced_balance(&summary, &modes_only, omega);
+        let summary = &assembly.real;
+        let modes_only = ModalReducedSystem::project(summary, &modal.basis).unwrap();
+        let truncated = reduced_balance(summary, &assembly.imaginary_load, &modes_only, omega);
 
         let retained = modal
             .basis
@@ -647,21 +642,24 @@ mod tests {
             .map(|mode| mode.dof_shape())
             .collect::<Vec<_>>();
         let corrections = crate::pipeline::modal_residual::applied_load_static_corrections(
-            &summary,
+            summary,
             &retained,
-            &[summary.operator.load()],
+            &[summary.operator.load(), &assembly.imaginary_load],
         )
         .unwrap();
+        // The real and imaginary traction share one spatial pattern: one correction vector.
         assert_eq!(corrections.len(), 1);
-        let corrected = ModalReducedSystem::project_enriched(&summary, &modal.basis, corrections)
-            .unwrap();
+        let corrected =
+            ModalReducedSystem::project_enriched(summary, &modal.basis, corrections).unwrap();
         assert_eq!(corrected.mode_count(), modes_only.mode_count() + 1);
-        let enriched = reduced_balance(&summary, &corrected, omega);
-
-        assert!(truncated > 1.0e-4, "modes-only truncation balance={truncated}");
+        let enriched = reduced_balance(summary, &assembly.imaginary_load, &corrected, omega);
+        eprintln!("rod one-mode truncation balance {truncated} -> static-corrected {enriched}");
+        assert!(truncated > 1.0e-3, "modes-only truncation balance={truncated}");
+        // At omega / omega_1 = 0.64 the correction leaves only the dynamic part of the missing
+        // response: measured 0.396 -> 0.00545 (73x).
         assert!(
-            enriched <= 1.0e-2 * truncated,
-            "static correction must cut the truncation balance by 100x: {truncated} -> {enriched}"
+            enriched <= 2.0e-2 * truncated,
+            "static correction must cut the truncation balance by 50x: {truncated} -> {enriched}"
         );
     }
 }

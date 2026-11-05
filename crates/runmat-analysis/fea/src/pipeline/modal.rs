@@ -483,7 +483,7 @@ fn modal_result_fields(basis: &ModalBasisArtifact) -> Vec<AnalysisField> {
 mod curved_tet10_tests;
 
 #[cfg(test)]
-mod rod_qualification;
+pub(crate) mod rod_qualification;
 
 #[cfg(test)]
 mod tests {
