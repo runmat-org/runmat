@@ -11,6 +11,7 @@ use super::{
 mod cavity;
 mod conforming_split;
 mod execution;
+mod facet_delaunay;
 mod flip;
 mod protection;
 mod support;
@@ -31,10 +32,10 @@ use cavity::{
 use flip::try_recover_facet_with_local_edge_flip;
 use support::facet_support_on;
 use support_refinement::{
-    ensure_support_triangle_edges, ensure_support_triangle_edges_in_place, recovered_segment_edges, refine_support_triangle_interior,
-    refine_support_triangle_interior_in_place,
-    triangle_has_positive_area_on, PendingSupportTriangle, SupportRefinementContext,
-    SupportTriangleEdgeState,
+    ensure_support_triangle_edges, ensure_support_triangle_edges_in_place, interior_support_node,
+    recovered_segment_edges, refine_support_triangle_interior,
+    refine_support_triangle_interior_in_place, triangle_has_positive_area_on,
+    PendingSupportTriangle, SupportRefinementContext, SupportTriangleEdgeState,
 };
 pub use validation::validate_delaunay_facet_recovery;
 use validation::{face_exists, validate_inputs};

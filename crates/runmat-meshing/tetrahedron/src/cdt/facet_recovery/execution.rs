@@ -86,10 +86,21 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
             }
             work.clear_rejection();
             let mut refinement_rejection = None;
+            let mut suspended = Vec::new();
             let edge_state =
                 if working.support_edges_exist(pending_triangle.triangle.node_identities) {
                     SupportTriangleEdgeState::Ready
                 } else {
+                    let missing_edges = triangle_edges(pending_triangle.triangle.node_identities)
+                        .into_iter()
+                        .filter(|edge| !support_edge_exists(working.topology(), *edge))
+                        .collect::<Vec<_>>();
+                    suspended = facet_delaunay::encroached_by_edges(
+                        working.topology(),
+                        &support,
+                        &missing_edges,
+                    );
+                    suspend(&mut protection, &suspended);
                     let protected_faces = protection.ordered_faces();
                     let context = || SupportRefinementContext {
                         protected_triangles: &protection.triangles,
@@ -132,9 +143,11 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                         }
                     }
                 };
+            let vanished = settle_suspended(&working, &mut protection, &mut support, suspended);
             match edge_state {
-                SupportTriangleEdgeState::Ready => {}
+                SupportTriangleEdgeState::Ready => push_vanished(&mut pending, &vanished),
                 SupportTriangleEdgeState::Unavailable => {
+                    push_vanished(&mut pending, &vanished);
                     refinement_rejection = work.last_rejection().map(str::to_owned);
                 }
                 SupportTriangleEdgeState::Split {
@@ -158,19 +171,22 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                         protected_splits,
                     );
                     refinement_rank += 1;
-                    steiner_insertions.extend(insertions);
-                    ensure_pending_capacity(
-                        &pending,
-                        triangles.len(),
+                    push_split(
+                        &working,
+                        &mut pending,
+                        pending_triangle,
+                        triangles,
+                        vanished,
+                        &insertions,
+                        &protected_edges,
                         options.maximum_pending_support_triangles,
                         constraint_index as u32,
                     )?;
-                    for triangle in triangles.into_iter().rev() {
-                        pending.push_front(triangle);
-                    }
+                    steiner_insertions.extend(insertions);
                     continue;
                 }
                 SupportTriangleEdgeState::RefinedSegment { protected_splits } => {
+                    push_vanished(&mut pending, &vanished);
                     let split_span = tracing::info_span!(
                         "meshing.tetrahedron.facet_recovery.segment_split",
                         constraint_index,
@@ -281,6 +297,23 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                     steiner_insertions.extend(insertions);
                 } else {
                     let recovery_rejection = work.last_rejection().map(str::to_owned);
+                    let interior_suspended = match interior_support_node(
+                        working.topology(),
+                        &pending_triangle,
+                        &protected_edges,
+                        constraint_index as u32,
+                        refinement_rank,
+                        &mut work,
+                    )? {
+                        Some((node, _, _)) => facet_delaunay::encroached_by_point(
+                            working.topology(),
+                            &support,
+                            node.coordinates_m.canonical_value(),
+                        ),
+                        None => Vec::new(),
+                    };
+                    work.clear_rejection();
+                    suspend(&mut protection, &interior_suspended);
                     let protected_faces = protection.ordered_faces();
                     let interior_context = || SupportRefinementContext {
                         protected_triangles: &protection.triangles,
@@ -334,6 +367,15 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                             state
                         }
                     };
+                    let vanished = settle_suspended(
+                        &working,
+                        &mut protection,
+                        &mut support,
+                        interior_suspended,
+                    );
+                    if !matches!(interior, SupportTriangleEdgeState::Split { .. }) {
+                        push_vanished(&mut pending, &vanished);
+                    }
                     match interior {
                         SupportTriangleEdgeState::Split {
                             triangles,
@@ -349,23 +391,25 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                                 "facet interior split"
                             );
                             apply_splits_with_current(
-                        &mut protection,
-                        &mut facets,
-                        &mut support,
-                        constraint_index as u32,
-                        protected_splits,
-                    );
+                                &mut protection,
+                                &mut facets,
+                                &mut support,
+                                constraint_index as u32,
+                                protected_splits,
+                            );
                             refinement_rank += 1;
-                            steiner_insertions.extend(insertions);
-                            ensure_pending_capacity(
-                                &pending,
-                                triangles.len(),
+                            push_split(
+                                &working,
+                                &mut pending,
+                                pending_triangle,
+                                triangles,
+                                vanished,
+                                &insertions,
+                                &protected_edges,
                                 options.maximum_pending_support_triangles,
                                 constraint_index as u32,
                             )?;
-                            for triangle in triangles.into_iter().rev() {
-                                pending.push_front(triangle);
-                            }
+                            steiner_insertions.extend(insertions);
                             continue;
                         }
                         SupportTriangleEdgeState::RefinedSegment { protected_splits } => {
@@ -377,12 +421,12 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                                 "facet recovery split a protected segment"
                             );
                             apply_splits_with_current(
-                        &mut protection,
-                        &mut facets,
-                        &mut support,
-                        constraint_index as u32,
-                        protected_splits,
-                    );
+                                &mut protection,
+                                &mut facets,
+                                &mut support,
+                                constraint_index as u32,
+                                protected_splits,
+                            );
                             pending.push_front(pending_triangle);
                             protected_edges = working
                                 .segments
@@ -484,4 +528,113 @@ pub(super) fn support_edge_exists(
         return false;
     };
     topology.has_edge([first, second])
+}
+
+/// Lifts the protection of the current facet's recovered triangles that the next refinement
+/// step can encroach (see [`facet_delaunay`]).
+fn suspend(protection: &mut FacetProtection, triangles: &[DelaunayRecoveredFacetTriangle]) {
+    for triangle in triangles {
+        protection.remove(*triangle);
+    }
+}
+
+/// Protects again each suspended triangle whose face survived the step. The others leave the
+/// current facet's recovered support and are returned.
+fn settle_suspended(
+    working: &FacetRecoveryWorking,
+    protection: &mut FacetProtection,
+    support: &mut Vec<DelaunayRecoveredFacetTriangle>,
+    suspended: Vec<DelaunayRecoveredFacetTriangle>,
+) -> Vec<DelaunayRecoveredFacetTriangle> {
+    let mut vanished = Vec::new();
+    for triangle in suspended {
+        let [Some(a), Some(b), Some(c)] = triangle
+            .node_identities
+            .map(|identity| working.topology().node_index(identity))
+        else {
+            vanished.push(triangle);
+            continue;
+        };
+        if working.topology().face_incidence([a, b, c]).is_empty() {
+            vanished.push(triangle);
+        } else {
+            protection.insert(triangle);
+        }
+    }
+    support.retain(|triangle| !vanished.contains(triangle));
+    vanished
+}
+
+/// Returns triangles that a step removed without a node in their circumcircle to the pending
+/// support as they are.
+fn push_vanished(
+    pending: &mut VecDeque<PendingSupportTriangle>,
+    vanished: &[DelaunayRecoveredFacetTriangle],
+) {
+    for triangle in vanished.iter().rev() {
+        pending.push_front(PendingSupportTriangle {
+            triangle: *triangle,
+            lineage_support: triangle.node_identities,
+        });
+    }
+}
+
+/// Queues the support that replaces a split support triangle. The split's new nodes are inserted
+/// into the facet's unrecovered triangles (the split triangle, the recovered triangles the step
+/// removed and the pending ones) by 2D Bowyer-Watson steps, so the pending support matches the
+/// facet triangulation that the 3D Delaunay insertion produced and fan splits leave no slivers.
+/// A split without new nodes, or a cavity that is not star-shaped from its node, keeps the
+/// split's own children.
+#[allow(clippy::too_many_arguments)]
+fn push_split(
+    working: &FacetRecoveryWorking,
+    pending: &mut VecDeque<PendingSupportTriangle>,
+    split: PendingSupportTriangle,
+    children: Vec<PendingSupportTriangle>,
+    vanished: Vec<DelaunayRecoveredFacetTriangle>,
+    insertions: &[DelaunayFacetSteinerInsertion],
+    protected_edges: &[[StableDigest; 2]],
+    maximum_pending: u64,
+    constraint_index: u32,
+) -> Result<(), DelaunayFacetRecoveryError> {
+    if !insertions.is_empty() {
+        let mut region = Vec::with_capacity(pending.len() + vanished.len() + 1);
+        region.push(PendingSupportTriangle {
+            triangle: split.triangle,
+            lineage_support: split.lineage_support,
+        });
+        region.extend(vanished.iter().map(|triangle| PendingSupportTriangle {
+            triangle: *triangle,
+            lineage_support: triangle.node_identities,
+        }));
+        region.extend(pending.iter().map(|entry| PendingSupportTriangle {
+            triangle: entry.triangle,
+            lineage_support: entry.lineage_support,
+        }));
+        let nodes = insertions
+            .iter()
+            .map(|insertion| insertion.node_identity)
+            .collect::<Vec<_>>();
+        let segment_edges = protected_edges.iter().copied().collect();
+        if let Some(triangles) =
+            facet_delaunay::insert_nodes(working.topology(), region, &nodes, &segment_edges)
+        {
+            if triangles.len() as u64 > maximum_pending {
+                return Err(resource(
+                    constraint_index,
+                    "facet support queue exceeded its configured triangle limit",
+                ));
+            }
+            pending.clear();
+            pending.extend(triangles);
+            return Ok(());
+        }
+        // The cavity is not star-shaped from a node: keep the split's own children.
+        push_vanished(pending, &vanished);
+    }
+    ensure_pending_capacity(pending, children.len(), maximum_pending, constraint_index)?;
+    for triangle in children.into_iter().rev() {
+        pending.push_front(triangle);
+    }
+    Ok(())
 }

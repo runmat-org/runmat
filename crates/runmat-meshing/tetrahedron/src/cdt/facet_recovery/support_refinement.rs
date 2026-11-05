@@ -375,7 +375,7 @@ pub(super) fn ensure_support_triangle_edges(
 /// inside every nondegenerate triangle and remains exactly coplanar in constructed predicates.
 /// The facet-interior split node of `pending`, with its insertion round and candidate rank, or
 /// `None` (with a rejection) when the triangle cannot take one.
-fn interior_support_node(
+pub(super) fn interior_support_node(
     topology: &impl crate::cdt::insertion::topology_access::TetrahedralTopology,
     pending: &PendingSupportTriangle,
     protected_edges: &[[StableDigest; 2]],

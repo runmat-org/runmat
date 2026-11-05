@@ -164,6 +164,7 @@ pub(super) fn split_recovered_segment_edge_in_place(
         protected,
         protected_edges,
         0,
+        None,
         constraint_index,
         work,
         &mut trial_splits,
@@ -186,6 +187,7 @@ fn split_with_encroachment_cascade(
     mut protected: Vec<DelaunayRecoveredFacetTriangle>,
     mut protected_edges: Vec<[StableDigest; 2]>,
     depth: u8,
+    parent: Option<[StableDigest; 2]>,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
     splits: &mut Vec<ProtectedFacetSplit>,
@@ -198,6 +200,7 @@ fn split_with_encroachment_cascade(
     // with one of them is a half the last split made: the midpoint keeps swallowing the
     // shrinking halves at that vertex, so the cascade stops and the edge star is tried.
     let mut cascaded = Vec::<[StableDigest; 2]>::new();
+    let mut blocked_done = Vec::<[StableDigest; 2]>::new();
     'retry: loop {
         work.support_step(constraint_index)?;
         attempts += 1;
@@ -208,6 +211,10 @@ fn split_with_encroachment_cascade(
         }
         let Some((segment_index, interval_index)) = segment_edge_location(&working.segments, edge)
         else {
+            if attempts > 1 {
+                // A nested pair split of this edge and the edge it encroached split it.
+                return Ok(true);
+            }
             work.reject("the edge is not an interval of a recovered segment");
             return Ok(false);
         };
@@ -254,6 +261,36 @@ fn split_with_encroachment_cascade(
                     return Ok(true);
                 }
                 LocalSplit::Encroached(encroached)
+                    if parent.is_some_and(|parent| {
+                        let mut parent = parent;
+                        let mut encroached = encroached;
+                        parent.sort_unstable();
+                        encroached.sort_unstable();
+                        parent == encroached
+                    }) =>
+                {
+                    // Two disjoint edges encroach each other (each midpoint swallows the
+                    // other's star, as on the two faces of a layer thinner than the edges):
+                    // split both in one edit. The caller sees its edge split.
+                    match split_pair_at_shared_vertex(
+                        working,
+                        edge,
+                        encroached,
+                        &protected,
+                        &protected_edges,
+                        constraint_index,
+                        work,
+                    )? {
+                        Ok(accepted) => {
+                            splits.extend(accepted);
+                            return Ok(true);
+                        }
+                        Err(reason) => reasons.push(format!(
+                            "pair split with the mutually encroaching edge declined: {reason}"
+                        )),
+                    }
+                }
+                LocalSplit::Encroached(encroached)
                     if encroached.iter().any(|node| edge.contains(node)) =>
                 {
                     // Midpoint splits of two segments meeting at an acute vertex encroach each
@@ -292,6 +329,7 @@ fn split_with_encroachment_cascade(
                         protected.clone(),
                         protected_edges.clone(),
                         depth + 1,
+                        Some(edge),
                         constraint_index,
                         work,
                         splits,
@@ -303,31 +341,12 @@ fn split_with_encroachment_cascade(
                         ));
                         continue;
                     }
-                    // Refresh the caller-side constraint views with the encroached split.
-                    let applied = &splits[first..];
-                    apply_protected_facet_splits(
-                        &mut [],
+                    refresh_constraint_views(
+                        working,
+                        &splits[first..],
                         &mut protected,
-                        applied
-                            .iter()
-                            .map(|split| ProtectedFacetSplit {
-                                source: split.source,
-                                children: split.children.clone(),
-                            })
-                            .collect(),
+                        &mut protected_edges,
                     );
-                    protected_edges = working
-                        .segments
-                        .iter()
-                        .flat_map(|segment| segment.nodes.windows(2))
-                        .map(|pair| {
-                            let mut key = [pair[0].identity, pair[1].identity];
-                            key.sort_unstable();
-                            key
-                        })
-                        .collect::<BTreeSet<_>>()
-                        .into_iter()
-                        .collect();
                     continue 'retry;
                 }
                 LocalSplit::Encroached(encroached) => reasons.push(format!(
@@ -344,9 +363,82 @@ fn split_with_encroachment_cascade(
                 }
             }
         }
+        // Both splits declined. A segment edge at an endpoint of `edge` whose coplanar opposite
+        // vertex lies in the circumcircle of a child triangle of the split blocks it: no
+        // constrained-Delaunay complex holds the midpoint while that edge stays. Split the
+        // blocking edge, then retry.
+        if depth < MAXIMUM_ENCROACHMENT_DEPTH {
+            if let Ok(blocking) =
+                encroached_corner_segments(working, &[(edge, node)], constraint_index)?
+            {
+                if let Some((blocked, _, _)) = blocking
+                    .into_iter()
+                    .find(|(blocked, _, _)| !blocked_done.contains(blocked))
+                {
+                    blocked_done.push(blocked);
+                    let first = splits.len();
+                    if split_with_encroachment_cascade(
+                        working,
+                        blocked,
+                        protected.clone(),
+                        protected_edges.clone(),
+                        depth + 1,
+                        Some(edge),
+                        constraint_index,
+                        work,
+                        splits,
+                    )? {
+                        refresh_constraint_views(
+                            working,
+                            &splits[first..],
+                            &mut protected,
+                            &mut protected_edges,
+                        );
+                        continue 'retry;
+                    }
+                    reasons.push(format!(
+                        "split of blocking segment edge at depth {} declined: {}",
+                        depth + 1,
+                        work.last_rejection().unwrap_or("no reason recorded")
+                    ));
+                }
+            }
+        }
         work.reject(reasons.join("; "));
         return Ok(false);
     }
+}
+
+/// Refreshes the caller-side constraint views with splits made by a nested cascade.
+fn refresh_constraint_views(
+    working: &super::working::FacetRecoveryWorking,
+    applied: &[ProtectedFacetSplit],
+    protected: &mut Vec<DelaunayRecoveredFacetTriangle>,
+    protected_edges: &mut Vec<[StableDigest; 2]>,
+) {
+    apply_protected_facet_splits(
+        &mut [],
+        protected,
+        applied
+            .iter()
+            .map(|split| ProtectedFacetSplit {
+                source: split.source,
+                children: split.children.clone(),
+            })
+            .collect(),
+    );
+    *protected_edges = working
+        .segments
+        .iter()
+        .flat_map(|segment| segment.nodes.windows(2))
+        .map(|pair| {
+            let mut key = [pair[0].identity, pair[1].identity];
+            key.sort_unstable();
+            key
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
 }
 
 /// Splits `edge` and `other`, which share one endpoint, at dyadic points the same distance from
@@ -366,9 +458,6 @@ fn split_pair_at_shared_vertex(
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Result<Vec<ProtectedFacetSplit>, String>, DelaunayFacetRecoveryError> {
-    let Some(shared) = other.iter().copied().find(|node| edge.contains(node)) else {
-        return Ok(Err("the edges share no endpoint".to_owned()));
-    };
     let (Some(edge_location), Some(other_location)) = (
         segment_edge_location(&working.segments, edge),
         segment_edge_location(&working.segments, other),
@@ -376,16 +465,34 @@ fn split_pair_at_shared_vertex(
         return Ok(Err("an edge is not a recovered segment interval".to_owned()));
     };
     let [(edge_node, edge_recovered), (other_node, other_recovered)] =
-        match shared_vertex_split_points(
-            working.topology(),
-            &working.segments,
-            [edge, other],
-            shared,
-            [edge_location, other_location],
-            constraint_index,
-        )? {
-            Ok(points) => points,
-            Err(reason) => return Ok(Err(reason)),
+        match other.iter().copied().find(|node| edge.contains(node)) {
+            Some(shared) => match shared_vertex_split_points(
+                working.topology(),
+                &working.segments,
+                [edge, other],
+                shared,
+                [edge_location, other_location],
+                constraint_index,
+            )? {
+                Ok(points) => points,
+                Err(reason) => return Ok(Err(reason)),
+            },
+            // Disjoint edges that encroach each other (the midpoint split of either swallows
+            // the other's star) are split at both midpoints in one edit.
+            None => [edge_location, other_location]
+                .map(|(segment, interval)| {
+                    recovered_segment_midpoint_on(
+                        working.topology(),
+                        &working.segments,
+                        segment,
+                        interval,
+                    )
+                })
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(super::segment_error)?
+                .try_into()
+                .expect("two split points"),
         };
     if [edge_node, other_node].iter().any(|candidate| {
         working.topology().nodes.iter().any(|existing| {
@@ -401,7 +508,7 @@ fn split_pair_at_shared_vertex(
     }
     let encroached = match encroached_corner_segments(
         working,
-        [(edge, edge_node), (other, other_node)],
+        &[(edge, edge_node), (other, other_node)],
         constraint_index,
     )? {
         Ok(encroached) => encroached,
@@ -632,7 +739,7 @@ type EncroachedCornerSegment = (
 /// floating-point trigger; the exact admission of the whole edit decides.
 fn encroached_corner_segments(
     working: &super::working::FacetRecoveryWorking,
-    splits: [([StableDigest; 2], DelaunayVolumeNode); 2],
+    splits: &[([StableDigest; 2], DelaunayVolumeNode)],
     constraint_index: u32,
 ) -> Result<Result<Vec<EncroachedCornerSegment>, String>, DelaunayFacetRecoveryError> {
     let topology = working.topology();
@@ -664,15 +771,19 @@ fn encroached_corner_segments(
             key
         })
         .collect::<BTreeSet<_>>();
-    let mut split_keys = splits.map(|(split, _)| {
-        let mut key = split;
-        key.sort_unstable();
-        key
-    });
+    let mut split_keys = splits
+        .iter()
+        .map(|(split, _)| {
+            let mut key = *split;
+            key.sort_unstable();
+            key
+        })
+        .collect::<Vec<_>>();
     split_keys.sort_unstable();
     let mut found = Vec::<EncroachedCornerSegment>::new();
     let mut queue = splits
-        .into_iter()
+        .iter()
+        .copied()
         .collect::<std::collections::VecDeque<_>>();
     while let Some((split, node)) = queue.pop_front() {
         let [u, v] = [index_of(split[0])?, index_of(split[1])?];

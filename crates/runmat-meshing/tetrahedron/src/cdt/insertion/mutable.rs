@@ -806,7 +806,40 @@ fn first_illegal_inserted_face(
                 }
             }
             face.sort_unstable();
-            // Only planar flips: a facet flip, or a 2-2 flip of two unprotected hull triangles.
+            // A non-cavity split (an edge-star split or a pair split) can leave an illegal face
+            // through the inserted node whose 2-3 flip is admissible, for example a face in a
+            // facet plane not yet recovered with apexes on both sides of it.
+            if two_to_three_topology_is_admissible(
+                topology,
+                left_index,
+                right_index,
+                left_apex,
+                right_apex,
+            ) && two_to_three_geometry_is_admissible(
+                left.vertex_indices,
+                right.vertex_indices,
+                |node| {
+                    let node = topology.nodes[node as usize];
+                    DelaunayVolumeNode::explicit(
+                        node.identity,
+                        node.coordinates_m.canonical_value(),
+                    )
+                    .predicate_point()
+                },
+            )
+            .map_err(super::predicate_error)?
+                && created_tetrahedra_are_exactly_nondegenerate(
+                    topology, left_apex, right_apex, face,
+                )?
+            {
+                return Ok(Some(LinkFlip::TwoToThree(TwoToThreeFlip {
+                    left: left_index,
+                    right: right_index,
+                    face,
+                })));
+            }
+            // Otherwise only planar flips: a facet flip, or a 2-2 flip of two unprotected hull
+            // triangles.
             if let Some(flip @ LinkFlip::Edge { .. }) = edge_link_flip(
                 topology,
                 [left_index, right_index],

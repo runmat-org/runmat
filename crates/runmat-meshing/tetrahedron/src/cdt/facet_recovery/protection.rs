@@ -25,6 +25,38 @@ impl FacetProtection {
         self.faces.insert(face);
         true
     }
+    /// Removes a protected triangle (the inverse of [`Self::insert`]). Returns whether it was
+    /// protected. The current facet's triangles are the newest, so the search runs from the end.
+    pub(super) fn remove(&mut self, triangle: DelaunayRecoveredFacetTriangle) -> bool {
+        let oriented = triangle.node_identities;
+        let Some(count) = self.oriented.get_mut(&oriented) else {
+            return false;
+        };
+        *count -= 1;
+        if *count == 0 {
+            self.oriented.remove(&oriented);
+        }
+        let mut face = oriented;
+        face.sort_unstable();
+        let [a, b, c] = face;
+        if ![
+            [a, b, c],
+            [a, c, b],
+            [b, a, c],
+            [b, c, a],
+            [c, a, b],
+            [c, b, a],
+        ]
+        .iter()
+        .any(|order| self.oriented.contains_key(order))
+        {
+            self.faces.remove(&face);
+        }
+        if let Some(index) = self.triangles.iter().rposition(|entry| *entry == triangle) {
+            self.triangles.remove(index);
+        }
+        true
+    }
     pub(super) fn ordered_faces(&self) -> Vec<[StableDigest; 3]> {
         self.faces.iter().copied().collect()
     }
