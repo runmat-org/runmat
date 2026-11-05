@@ -50,6 +50,8 @@ pub const VALUE_TEXT: Coord = 1_270_000;
 pub const NAME_OFFSET: Coord = 508_000;
 /// The gap between a pin line and the number above it.
 const NUMBER_LIFT: Coord = 254_000;
+/// Half the size of a no-connect cross drawn at a pin's tip.
+pub const NO_CONNECT_HALF: Coord = 800_000;
 /// The least gap between the left and right names across the body.
 const NAME_GAP: Coord = 1_270_000;
 
@@ -164,7 +166,8 @@ impl UnitLayout {
             .map(|p| text_width(&number_text(&p.1), PIN_TEXT))
             .max()
             .unwrap_or(0);
-        let pin_len = up_to_grid(number + 2 * NAME_OFFSET).max(PIN_LEN);
+        // The number sits centred on the pin, clear of the body and of a no-connect cross at the tip.
+        let pin_len = up_to_grid(number + 2 * NO_CONNECT_HALF + NAME_OFFSET).max(PIN_LEN);
         let mut out = Vec::new();
         for (side, list) in [(true, &left), (false, &right)] {
             let top = (list.len() as Coord - 1) * PIN_PITCH / 2;

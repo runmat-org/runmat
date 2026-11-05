@@ -324,6 +324,15 @@ fn schematic_texts_never_overlap() {
                         symbol.designator,
                         pin.number_text
                     );
+                    // Clear of a no-connect cross at the tip.
+                    let tip = nm(pin.x_mm);
+                    let half = runmat_circuit::schematic::NO_CONNECT_HALF;
+                    assert!(
+                        number[2] <= tip - half || number[0] >= tip + half,
+                        "{} {} number under the tip's cross",
+                        symbol.designator,
+                        pin.number_text
+                    );
                     boxes.push((format!("number {}", pin.number_text), number));
                 }
             }
