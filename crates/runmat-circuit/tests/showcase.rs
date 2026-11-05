@@ -165,3 +165,44 @@ fn the_drc_variant_compiles_to_a_board_with_findings() {
     let board = index.board.as_ref().expect("a board");
     assert!(!board.drc.is_empty(), "the seeded violations are found");
 }
+
+/// A room's interior carries only its own circuits: a track more than 1 mm inside a room is on a
+/// net with a pad in that room, so a chain between channels runs in the streets between rooms
+/// and around a channel it doesn't serve.
+#[test]
+fn tracks_inside_a_room_belong_to_its_pads() {
+    use runmat_circuit::geom::{Point, Rect};
+    let files = files();
+    let layout = "/p/daq.circuit.layout";
+    let board = runmat_circuit::syntax::board::parse_board(layout, &files[layout])
+        .board
+        .expect("reads");
+    let pads = board.all_pads();
+    let inset = 1_000_000;
+    let mut through = Vec::new();
+    for room in &board.rooms {
+        let b = room.outline.bbox();
+        let inner = Rect::new(
+            Point::new(b.min.x + inset, b.min.y + inset),
+            Point::new(b.max.x - inset, b.max.y - inset),
+        );
+        for t in board.tracks.values() {
+            let Some(net) = t.net else { continue };
+            if pads.iter().any(|p| p.net == Some(net) && b.contains(p.center)) {
+                continue;
+            }
+            let (a, z) = t.endpoints();
+            let steps = (a.dist(z) / 250_000.0).ceil().max(1.0) as i64;
+            let inside = (0..=steps).any(|k| {
+                let p = Point::new(a.x + (z.x - a.x) * k / steps, a.y + (z.y - a.y) * k / steps);
+                inner.contains(p)
+            });
+            if inside {
+                through.push(format!("{} through {}", board.net_name(net), room.name));
+            }
+        }
+    }
+    through.sort();
+    through.dedup();
+    assert!(through.is_empty(), "{through:#?}");
+}

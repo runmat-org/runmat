@@ -38,17 +38,23 @@ pub(super) struct Query<'a> {
     pub anchors: [Point; 2],
     pub neck_reach: Coord,
     /// Rooms that don't hold both ends of the connection, each with the end it holds (if
-    /// any): a step inside one, farther than [`ROOM_EXIT`] from that end, costs [`ROOM_COST`]
-    /// times as much, so a route between channels leaves its room near its pin and runs
-    /// around the other channels' rooms.
+    /// any): a step inside the room of an end, farther than [`ROOM_EXIT`] from that end, costs
+    /// [`ROOM_COST`] times as much, and a step in a room that holds neither end
+    /// [`THROUGH_ROOM_COST`] times, so a route between channels leaves its room near its pin
+    /// and runs around the other channels' rooms.
     pub avoid: &'a [(crate::geom::Rect, Option<Point>)],
 }
 
 /// How far from its pin a route between rooms may run inside the pin's room at no extra cost.
 pub(super) const ROOM_EXIT: Coord = 5_000_000;
 
-/// Cost multiplier for a step through a room the connection doesn't belong to.
+/// Cost multiplier for a step inside the room of one end, past [`ROOM_EXIT`] from that end.
 pub(super) const ROOM_COST: f64 = 2.5;
+
+/// Cost multiplier for a step through a room that holds neither end: a chain between channels
+/// runs in the street between rooms and around a channel it doesn't serve, as a layout engineer
+/// keeps a room for its own circuit.
+pub(super) const THROUGH_ROOM_COST: f64 = 8.0;
 
 impl Query<'_> {
     /// The track width at `p`.
@@ -248,13 +254,18 @@ impl<'a> Search<'a> {
                         }
                     }
                 };
-                let foreign = !self.q.avoid.is_empty() && {
+                let room = if self.q.avoid.is_empty() {
+                    1.0
+                } else {
                     let at = point(&self.q, next);
-                    self.q.avoid.iter().any(|(r, end)| {
-                        r.contains(at) && end.is_none_or(|e| e.dist(at) > ROOM_EXIT as f64)
+                    self.q.avoid.iter().fold(1.0_f64, |c, (r, end)| match end {
+                        _ if !r.contains(at) => c,
+                        None => c.max(THROUGH_ROOM_COST),
+                        Some(e) if e.dist(at) > ROOM_EXIT as f64 => c.max(ROOM_COST),
+                        Some(_) => c,
                     })
                 };
-                let ng = g + step * cost * if foreign { ROOM_COST } else { 1.0 } + turn;
+                let ng = g + step * cost * room + turn;
                 let key = (next, d as u8);
                 if best.get(&key).is_none_or(|b| ng < *b) {
                     best.insert(key, ng);
