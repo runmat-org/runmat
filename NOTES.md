@@ -303,3 +303,22 @@ Debug prints used for the traces below: $J/tmp/work/q-mesh-fix-6/qmf12-debug-r15
   TopologyMutation (face_uses/tetrahedron_indices/vertex_stars B-trees) is several times a canonical
   topology. Item 5 removes one mutation and one canonical copy from that peak; ConstrainedCavity then
   EdgeStar run the whole sequence twice (sequential, not additive).
+
+## q-mesh-fix-13 (2026-11-04, handed back on request; WIP)
+Commit 2d79f1744d. Debug variant: $J/tmp/work/q-mesh-fix-6/qmf13-debug.patch (QMF_DEBUG_C=<constraint> prints;
+harness writes full error to QMF_ERROR_FILE). Scripts: ~/runs/qmf6/suba-dbg2.sh <tag> (QMFC=<constraint>).
+- 1869 root cause: the support refinement of facet X=[D,F,R] placed temporary-segment chain node S inside the
+  circumcircle of an already recovered (protected) sliver support triangle PQR of the same facet (fan splits make
+  slivers). With PQR a barrier, no CDT holds S; the canonical tseg legalization then fails validation. Input to the
+  tseg was valid, so admission and validator agree; the producer was the support bookkeeping.
+- Fix: suspend encroachable current-facet recovered triangles during a refining step, re-protect survivors, and
+  rebuild pending support by 2D Bowyer-Watson insertion of the new nodes (facet_delaunay.rs, 3 unit tests).
+  Sub-a now passes 1869 in 16 steps (~40 s to the next failure).
+- Next sub-a failure: constraint 11867 (z=.026 facet, TIM layer). Split of bottom segment C-E ping-pongs with its
+  twin top edge C_top-E_top (3 mm apart, 6 mm long: each midpoint swallows the other's star). Added: twin pair
+  split (both midpoints in one edit) and blocking-segment split; the twin pair split still declines: cell
+  [C, M_top, M, A] has apex X(z=.024) in its sphere across face C-M-A (z=.026 plane, pending). The added 2-3 flip
+  on faces through the inserted node did not repair it; next: diagnose why (2-3 geometry vs 3-2/4-4 on edge M-A,
+  kept halves) — likely the same family as the hero 8566 pattern (cells spanning the TIM).
+- Tet lib + hero chain on this commit started (~/runs/qmf6/chain-q13.sh; ~/logs/qmf6/q13.out, q13h.out, q13h.err,
+  q13-rss.txt, q13-chain.done).
