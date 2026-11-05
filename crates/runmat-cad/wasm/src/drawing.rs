@@ -478,13 +478,13 @@ mod tests {
             "../../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures/bracket.part"
         );
         const STANDARD: &str = include_str!(
-            "../../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures/bracket-standard.drawing"
+            "../../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures/standard.drawing"
         );
         let files: Files = [("/p/bracket.part".to_owned(), PART.to_owned())]
             .into_iter()
             .collect();
         let out: Value =
-            serde_json::from_str(&compile_json("/p/bracket.drawing", STANDARD, &files)).unwrap();
+            serde_json::from_str(&compile_json("/p/standard.drawing", STANDARD, &files)).unwrap();
         let data = &out["projection"]["data"];
         assert_eq!(
             out["diagnostics"].as_array().map(Vec::len),
