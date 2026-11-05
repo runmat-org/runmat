@@ -25,6 +25,7 @@
 
 pub mod drawing;
 pub mod edit;
+pub mod hlr;
 pub mod runtime;
 
 use wasm_bindgen::prelude::*;

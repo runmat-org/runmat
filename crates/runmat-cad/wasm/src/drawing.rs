@@ -221,8 +221,29 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
         }
     }
     let index = build_drawing_index(&document, &models, &NoAnnotationValues);
+    let mut data = serde_json::to_value(&index).unwrap_or(Value::Null);
+    // Each view's edges, visible and hidden, from the drawn model's display.
+    let views = serde_json::to_value(&document.views).unwrap_or(Value::Null);
+    let mut hlr = serde_json::Map::new();
+    for view in views.as_array().into_iter().flatten() {
+        let (Some(name), Some(file)) = (view["name"].as_str(), view["model"]["file"].as_str())
+        else {
+            continue;
+        };
+        if let Some(display) = displays.get(file) {
+            let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
+            let lines = crate::hlr::view_lines(display, &axes);
+            hlr.insert(
+                name.to_owned(),
+                serde_json::to_value(&lines).unwrap_or(Value::Null),
+            );
+        }
+    }
+    if let Value::Object(o) = &mut data {
+        o.insert("hlr".into(), Value::Object(hlr));
+    }
     json!({
-        "projection": { "kind": "drawing", "data": index },
+        "projection": { "kind": "drawing", "data": data },
         "models": displays,
         "diagnostics": problems,
     })
