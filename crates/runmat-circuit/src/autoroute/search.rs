@@ -37,7 +37,18 @@ pub(super) struct Query<'a> {
     pub neck: Coord,
     pub anchors: [Point; 2],
     pub neck_reach: Coord,
+    /// Rooms that don't hold both ends of the connection, each with the end it holds (if
+    /// any): a step inside one, farther than [`ROOM_EXIT`] from that end, costs [`ROOM_COST`]
+    /// times as much, so a route between channels leaves its room near its pin and runs
+    /// around the other channels' rooms.
+    pub avoid: &'a [(crate::geom::Rect, Option<Point>)],
 }
+
+/// How far from its pin a route between rooms may run inside the pin's room at no extra cost.
+pub(super) const ROOM_EXIT: Coord = 5_000_000;
+
+/// Cost multiplier for a step through a room the connection doesn't belong to.
+pub(super) const ROOM_COST: f64 = 2.5;
 
 impl Query<'_> {
     /// The track width at `p`.
@@ -237,7 +248,13 @@ impl<'a> Search<'a> {
                         }
                     }
                 };
-                let ng = g + step * cost + turn;
+                let foreign = !self.q.avoid.is_empty() && {
+                    let at = point(&self.q, next);
+                    self.q.avoid.iter().any(|(r, end)| {
+                        r.contains(at) && end.is_none_or(|e| e.dist(at) > ROOM_EXIT as f64)
+                    })
+                };
+                let ng = g + step * cost * if foreign { ROOM_COST } else { 1.0 } + turn;
                 let key = (next, d as u8);
                 if best.get(&key).is_none_or(|b| ng < *b) {
                     best.insert(key, ng);

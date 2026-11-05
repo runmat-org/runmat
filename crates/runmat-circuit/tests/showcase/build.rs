@@ -329,8 +329,9 @@ fn variants(b: &Build, dir: &Path) {
         json!({ "dx": 0.0, "dy": -0.75, "rotation": 0.0 }),
         &["component:C2"],
     );
-    let layout = v.files[LAYOUT].clone();
-    std::fs::write(dir.join("daq-drc.circuit.layout"), layout).unwrap();
+    // A layout is named after its file: the variant is `daq_drc`, laying out `daq.circuit`.
+    let layout = v.files[LAYOUT].replacen("layout daq {", "layout daq_drc {", 1);
+    std::fs::write(dir.join("daq_drc.circuit.layout"), layout).unwrap();
     let circuit = b.files[CIRCUIT]
         .replace(
             "net \"+1V2\" = { class = power, power_flag = true }",

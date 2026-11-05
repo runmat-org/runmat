@@ -228,3 +228,63 @@ fp /ch[2]/RG 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[2]/FB,GND
 fp /ch[2]/RO 2d897a1e-a763-8dec-9885-934db4b4fbd9|/ch[2]/AIN,/ch[2]/AMP
 fp /ch[2]/RS 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[2]/INF,AIN2
 fp /ch[2]/U 6322f084-76b3-8b73-99b9-88e3333a560f|+5V,/ch[2]/AMP,/ch[2]/FB,/ch[2]/INF,GND
+place channel/ADC 218.44 100.33 0
+place channel/CDA 124.46 127 270
+place channel/CDD 218.44 137.16 270
+place channel/CDV 205.74 137.16 270
+place channel/CF 87.63 102.87 270
+place channel/CO 177.8 104.14 270
+place channel/CREF 231.14 137.16 270
+place channel/RF 124.46 69.85 0
+place channel/RG 100.33 105.41 270
+place channel/RO 154.94 95.25 0
+place channel/RS 63.5 93.98 0
+place channel/U 124.46 95.25 0
+place main/C101 213.36 182.88 270
+place main/C102 335.28 185.42 270
+place main/C103 347.98 185.42 270
+place main/C104 317.5 161.29 270
+place main/C105 360.68 185.42 270
+place main/C106 124.46 287.02 270
+place main/C107 100.33 262.89 270
+place main/C108 137.16 287.02 270
+place main/C109 219.71 284.48 270
+place main/C110 193.04 257.81 270
+place main/C111 457.2 180.34 270
+place main/C112 469.9 180.34 270
+place main/C113 482.6 180.34 270
+place main/C114 495.3 180.34 270
+place main/C115 508 180.34 270
+place main/C116 457.2 201.93 270
+place main/C117 469.9 201.93 270
+place main/C118 482.6 201.93 270
+place main/C119 495.3 201.93 270
+place main/C120 508 201.93 270
+place main/D1 407.67 149.86 180
+place main/H1 414.02 229.87 0
+place main/H2 422.91 229.87 0
+place main/H3 431.8 229.87 0
+place main/H4 440.69 229.87 0
+place main/J1 213.36 139.7 0
+place main/J2 91.44 138.43 0 mirror
+place main/L1 391.16 138.43 90
+place main/L2 167.64 240.03 90
+place main/R101 431.8 140.97 270
+place main/R102 254 140.97 270
+place main/R103 266.7 143.51 270
+place main/R104 304.8 138.43 270
+place main/R105 292.1 156.21 270
+place main/R106 87.63 240.03 270
+place main/R107 74.93 257.81 270
+place main/U1:A 166.37 154.94 0 mirror
+place main/U1:B 264.16 255.27 0
+place main/U1:C 302.26 255.27 0
+place main/U1:D 342.9 255.27 0
+place main/U1:E 383.54 255.27 0
+place main/U1:F 482.6 146.05 0
+place main/U2 347.98 148.59 0
+place main/U3 130.81 250.19 0
+place main/U4 219.71 248.92 0
+place main/ch[0] 120.65 127 0
+place main/ch[1] 120.65 154.94 0
+place main/ch[2] 120.65 182.88 0

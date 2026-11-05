@@ -135,7 +135,17 @@ pub fn autoroute_in(
         .enumerate()
         .map(|(i, _)| 1.0 + 0.25 * i as f64)
         .collect();
+    let rooms: Vec<crate::geom::Rect> = board.rooms.iter().map(|r| r.outline.bbox()).collect();
     for w in wires {
+        let avoid: Vec<(crate::geom::Rect, Option<Point>)> = rooms
+            .iter()
+            .filter_map(|r| match (r.contains(w.a), r.contains(w.b)) {
+                (true, true) => None,
+                (true, false) => Some((*r, Some(w.a))),
+                (false, true) => Some((*r, Some(w.b))),
+                (false, false) => Some((*r, None)),
+            })
+            .collect();
         let width = opts
             .widths
             .get(&w.net)
@@ -160,6 +170,7 @@ pub fn autoroute_in(
             neck,
             anchors: [w.a, w.b],
             neck_reach: mm(0.8),
+            avoid: &avoid,
         };
         match route_one(space, q, w.a, w.b) {
             Ok(route) => {

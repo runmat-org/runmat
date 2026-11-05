@@ -3,7 +3,7 @@
 //! FPGA, USB-C power with two buck regulators) on six layers, placed, fanned out, routed and
 //! poured with the product's own board commands.
 //!
-//! The project is checked in at `tests/projects/daq/` (with `daq-drc.circuit.layout` and
+//! The project is checked in at `tests/projects/daq/` (with `daq_drc.circuit.layout` and
 //! `daq-erc.circuit`, the DRC and ERC views' seeded variants). Set `RUNMAT_SHOWCASE_BUILD=1` to
 //! rebuild it from `tests/showcase/start.circuit.layout` with the command script in
 //! `showcase/build.rs`; run it in release (`cargo test --release`), where it takes seconds.
@@ -146,4 +146,22 @@ fn annotate_records_designators_and_reset_renumbers_the_numbered_parts() {
     a.sort();
     b.sort();
     assert_eq!(a, b, "the same designators, reassigned");
+}
+
+/// The DRC variant opens on its own: its layout names `daq.circuit`, compiles to a board, and
+/// reports the seeded violations (the Desktop's DRC picture opens this file).
+#[test]
+fn the_drc_variant_compiles_to_a_board_with_findings() {
+    use runmat_circuit::runtime::{compile, CompileOptions};
+    let mut files = files();
+    let path = "/p/daq_drc.circuit.layout";
+    files.insert(
+        path.into(),
+        std::fs::read_to_string(here().join("daq_drc.circuit.layout")).expect("checked in"),
+    );
+    let out = compile(path, &files[path], &files, &CompileOptions::default());
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let index = out.index.expect("compiles");
+    let board = index.board.as_ref().expect("a board");
+    assert!(!board.drc.is_empty(), "the seeded violations are found");
 }
