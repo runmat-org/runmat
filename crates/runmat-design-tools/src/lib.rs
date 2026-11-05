@@ -366,7 +366,7 @@ mod tests {
         names.sort();
         names.dedup();
         assert_eq!(names.len(), tools.len());
-        assert_eq!(names.len(), 8);
+        assert_eq!(names.len(), 9);
         for t in &tools {
             assert!(t.name.starts_with("design."));
             assert!(t.description.starts_with("Use this"));

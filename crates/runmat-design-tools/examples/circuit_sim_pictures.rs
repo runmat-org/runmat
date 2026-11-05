@@ -1,6 +1,6 @@
 //! Circuit simulation pictures for the site: the daq channel's step response, its AC magnitude
-//! and phase, and a Monte Carlo histogram of its −3 dB frequency, drawn through runmat-plot at 2×
-//! in the light and dark themes.
+//! and phase, and a Monte Carlo histogram of its −3 dB frequency against the section's spec limits
+//! (with the yield), drawn through runmat-plot at 2× in the light and dark themes.
 //!
 //! `cargo run --release -p runmat-design-tools --features render --example circuit_sim_pictures -- <out dir>`
 
@@ -11,7 +11,7 @@ use runmat_circuit_sim::montecarlo::histogram;
 use runmat_circuit_spice::study;
 use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
 use runmat_plot::plots::line::LineStyle;
-use runmat_plot::plots::{BarChart, Figure, LinePlot};
+use runmat_plot::plots::{AreaPlot, Figure, LinePlot, ReferenceLine, ReferenceLineOrientation};
 use runmat_plot::styling::{PlotThemeConfig, ThemeVariant};
 
 const DAQ: &str = include_str!("../../runmat-circuit/tests/projects/daq/daq.circuit");
@@ -76,9 +76,10 @@ fn main() {
         fig.set_grid(true);
         fig.set_legend(true);
         let t: Vec<f64> = w.x.iter().map(|x| x * 1e6).collect();
-        for (k, (net, sig)) in s.probes.iter().enumerate() {
+        for (k, (probe, sig)) in s.probes.iter().enumerate() {
+            let net = probe.name();
             let y = w.get(sig).unwrap().to_vec();
-            let p = LinePlot::new(t.clone(), y).unwrap().with_style(color(k, dark), 2.5, LineStyle::Solid).with_label(label(net));
+            let p = LinePlot::new(t.clone(), y).unwrap().with_style(color(k, dark), 2.5, LineStyle::Solid).with_label(label(&net));
             fig.add_line_plot(p);
         }
         save(&mut fig, dark, &format!("{out}/{th}-circuit-sim-transient.png"));
@@ -93,33 +94,61 @@ fn main() {
         fig.set_axes_log_modes(1, true, false);
         fig.set_grid(true);
         fig.set_legend(true);
-        for (k, (net, sig)) in s.probes.iter().enumerate().filter(|(_, (n, _))| n != "IN") {
+        for (k, (probe, sig)) in s.probes.iter().enumerate().filter(|(_, (p, _))| p.name() != "IN") {
+            let net = probe.name();
             let db = a.db(sig).unwrap();
             let ph = a.phase_deg(sig).unwrap();
-            fig.add_line_plot_on_axes(LinePlot::new(a.freq.clone(), db).unwrap().with_style(color(k, dark), 2.5, LineStyle::Solid).with_label(label(net)), 0);
-            fig.add_line_plot_on_axes(LinePlot::new(a.freq.clone(), ph).unwrap().with_style(color(k, dark), 2.5, LineStyle::Solid).with_label(label(net)), 1);
+            fig.add_line_plot_on_axes(LinePlot::new(a.freq.clone(), db).unwrap().with_style(color(k, dark), 2.5, LineStyle::Solid).with_label(label(&net)), 0);
+            fig.add_line_plot_on_axes(LinePlot::new(a.freq.clone(), ph).unwrap().with_style(color(k, dark), 2.5, LineStyle::Solid).with_label(label(&net)), 1);
         }
         let g0 = a.db(&s.probes[3].1).unwrap()[0];
         let mark = LinePlot::new(vec![a.freq[0], a.freq[a.freq.len() - 1]], vec![g0 - 3.0103; 2]).unwrap().with_style(color(1, dark) * Vec4::new(1.0, 1.0, 1.0, 0.6), 1.5, LineStyle::Dashed).with_label("−3 dB");
         fig.add_line_plot_on_axes(mark, 0);
         save(&mut fig, dark, &format!("{out}/{th}-circuit-sim-ac.png"));
-        // Monte Carlo histogram.
+        // Monte Carlo histogram on a kHz axis: in-spec bins in the trace color, out-of-spec bins
+        // in red, the spec limits, the mean and ±3σ as reference lines, the yield in the title.
         let m = &s.measures["f3db_spread"];
+        let def = &design.simulations["front_end"].measures["f3db_spread"];
+        let (lo, hi) = (def.spec_min.unwrap(), def.spec_max.unwrap());
         let st = m.stats.clone().unwrap();
+        let within = m.runs.iter().filter(|v| **v >= lo && **v <= hi).count();
         let khz: Vec<f64> = m.runs.iter().map(|v| v / 1e3).collect();
-        let (edges, counts) = histogram(&khz, 24);
-        let labels: Vec<String> = edges.windows(2).map(|e| format!("{:.0}", 0.5 * (e[0] + e[1]))).collect();
+        let (edges, counts) = histogram(&khz, 32);
+        let (mut x, mut y_in, mut y_out) = (vec![], vec![], vec![]);
+        for (k, c) in counts.iter().enumerate() {
+            let out_of_spec = edges[k + 1] <= lo / 1e3 || edges[k] >= hi / 1e3;
+            for e in [edges[k], edges[k + 1]] {
+                x.push(e);
+                y_in.push(if out_of_spec { 0.0 } else { *c as f64 });
+                y_out.push(if out_of_spec { *c as f64 } else { 0.0 });
+            }
+        }
+        let red = if dark { Vec4::new(1.0, 0.42, 0.42, 1.0) } else { Vec4::new(0.8, 0.12, 0.12, 1.0) };
         let mut fig = Figure::new();
         fig.set_title(format!(
-            "−3 dB frequency over {} Monte Carlo runs (R ±1 %, C ±5 %, 3σ): mean {:.1} kHz, σ {:.1} kHz",
+            "−3 dB frequency over {} Monte Carlo runs (R ±1 %, C ±5 %): yield {:.1} % in {:.0}–{:.0} kHz",
             st.n,
-            st.mean / 1e3,
-            st.std / 1e3
+            100.0 * within as f64 / st.n as f64,
+            lo / 1e3,
+            hi / 1e3
         ));
-        fig.set_axis_labels("−3 dB frequency (kHz)", "Runs");
+        fig.set_axis_labels("−3 dB frequency at AIN (kHz)", "Runs");
         fig.set_grid(true);
-        let bars = BarChart::new(labels, counts.iter().map(|c| *c as f64).collect()).unwrap().with_style(color(0, dark), 0.85).with_label("runs");
-        fig.add_bar_chart(bars);
+        fig.set_legend(true);
+        fig.add_area_plot(AreaPlot::new(x.clone(), y_in).unwrap().with_style(color(0, dark) * Vec4::new(1.0, 1.0, 1.0, 0.8), 0.0).with_label("runs in spec"));
+        fig.add_area_plot(AreaPlot::new(x, y_out).unwrap().with_style(red * Vec4::new(1.0, 1.0, 1.0, 0.8), 0.0).with_label("runs out of spec"));
+        let line = |v: f64, c: Vec4, w: f32, style: LineStyle, name: Option<String>| {
+            let mut l = ReferenceLine::new(ReferenceLineOrientation::Vertical, v).unwrap().with_style(c, w, style);
+            l.display_name = name;
+            l.color_auto = false;
+            l
+        };
+        let fg = if dark { Vec4::new(0.9, 0.9, 0.92, 1.0) } else { Vec4::new(0.15, 0.15, 0.18, 1.0) };
+        fig.add_reference_line_on_axes(line(lo / 1e3, red, 3.0, LineStyle::Solid, Some(format!("spec min {:.0} kHz", lo / 1e3))), 0);
+        fig.add_reference_line_on_axes(line(hi / 1e3, red, 3.0, LineStyle::Solid, Some(format!("spec max {:.0} kHz", hi / 1e3))), 0);
+        fig.add_reference_line_on_axes(line(st.mean / 1e3, fg, 2.0, LineStyle::Dashed, Some(format!("mean {:.1} kHz", st.mean / 1e3))), 0);
+        fig.add_reference_line_on_axes(line((st.mean - 3.0 * st.std) / 1e3, fg, 1.5, LineStyle::Dotted, Some(format!("±3σ ({:.1} kHz σ)", st.std / 1e3))), 0);
+        fig.add_reference_line_on_axes(line((st.mean + 3.0 * st.std) / 1e3, fg, 1.5, LineStyle::Dotted, None), 0);
         save(&mut fig, dark, &format!("{out}/{th}-circuit-sim-montecarlo.png"));
     }
 }

@@ -14,5 +14,5 @@
         probe = [net.IN, net.INF, net.AMP, net.AIN]
         measure f3db = { of = response, bandwidth = net.AIN }
         measure rise = { of = step, rise_time = net.AIN }
-        measure f3db_spread = { of = spread, bandwidth = net.AIN }
+        measure f3db_spread = { of = spread, bandwidth = net.AIN, spec = { min = 152 kHz, max = 166 kHz } }
     }

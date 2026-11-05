@@ -42,7 +42,7 @@ fn simulate_returns_waveforms_measures_and_operations() {
     let step = analyses.iter().find(|a| a["name"] == "step").unwrap();
     assert_eq!(step["kind"], "tran");
     assert_eq!(step["x"].as_array().unwrap().len(), 50);
-    let ain = step["signals"].as_array().unwrap().iter().find(|s| s["net"] == "AIN").unwrap();
+    let ain = step["signals"].as_array().unwrap().iter().find(|s| s["probe"] == "AIN" && s["quantity"] == "voltage").unwrap();
     let last = ain["values"].as_array().unwrap().last().unwrap().as_f64().unwrap();
     assert!((last - 3.5).abs() < 0.01, "{last}");
     let response = analyses.iter().find(|a| a["name"] == "response").unwrap();
@@ -63,4 +63,38 @@ fn a_circuit_without_a_section_says_how_to_add_one() {
     let files: Files = [("/p/daq.circuit".to_owned(), DAQ.to_owned())].into();
     let e = call("design.simulate", json!({ "path": "/p/daq.circuit" }), &files).unwrap_err();
     assert_eq!(e.code, "no_simulation");
+}
+
+#[test]
+fn the_report_names_units_overlays_and_tolerances() {
+    let out = call("design.simulate", json!({ "path": "/p/daq.circuit", "maxPoints": 40 }), &files()).unwrap();
+    assert_eq!(out["probes"], json!(["IN", "AIN"]));
+    let analyses = out["analyses"].as_array().unwrap();
+    let step = analyses.iter().find(|a| a["name"] == "step").unwrap();
+    assert_eq!((step["xName"].as_str(), step["xUnit"].as_str()), (Some("time"), Some("s")));
+    let spread = analyses.iter().find(|a| a["name"] == "spread").unwrap();
+    assert_eq!((spread["kind"].as_str(), spread["of"].as_str(), spread["ofKind"].as_str()), (Some("monte_carlo"), Some("response"), Some("ac")));
+    let runs = spread["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 20);
+    assert!(runs[0]["signals"][1]["magnitudeDb"].as_array().unwrap().len() == runs[0]["x"].as_array().unwrap().len());
+    let m = out["measures"].as_array().unwrap();
+    let f3 = m.iter().find(|x| x["name"] == "f3db").unwrap();
+    assert_eq!((f3["unit"].as_str(), f3["kind"].as_str(), f3["probe"].as_str()), (Some("Hz"), Some("bandwidth"), Some("AIN")));
+    let tol = out["tolerances"].as_array().unwrap();
+    assert!(tol.iter().any(|t| t["from"] == "tolerance resistors" && t["plusPercent"] == 1.0));
+    assert!(out.get("stopped").is_none());
+}
+
+#[test]
+fn a_limited_run_stops_under_the_grant_with_what_it_solved() {
+    let full = call("design.simulate", json!({ "path": "/p/daq.circuit" }), &files()).unwrap();
+    let total: u64 = full["usage"]["total"].as_str().unwrap().parse().unwrap();
+    let limit = total / 2;
+    let out = call("design.simulate", json!({ "path": "/p/daq.circuit", "limitOps": limit.to_string() }), &files()).unwrap();
+    let used: u64 = out["usage"]["total"].as_str().unwrap().parse().unwrap();
+    assert!(used <= limit, "{used} > {limit}");
+    let stopped = out["stopped"].as_str().unwrap();
+    assert!(stopped.contains("granted operations"), "{stopped}");
+    let e = call("design.simulate", json!({ "path": "/p/daq.circuit", "limitOps": "lots" }), &files()).unwrap_err();
+    assert_eq!(e.code, "invalid_arguments");
 }
