@@ -169,3 +169,25 @@ fn errors_name_what_is_wrong() {
     assert!(bad("values = [0 degC, 50 degC]", "values = []").contains("list of temperatures"));
     assert!(bad("spec = { min = 900 uA, max = 1.1 mA }", "spec = { max = 1 V }").contains("write the limit in A"));
 }
+
+#[test]
+fn a_noise_run_stopped_at_its_grant_reports_what_it_spent() {
+    // Only the noise analysis, with a grant too small for its operating point: the study
+    // stops, and the operations the stopped run spent still count.
+    let text = RC
+        .replace("        analysis step = tran { stop = 8 us, step = 10 ns }\n", "")
+        .replace("        analysis hot = temperature { of = hiss, values = [-40 degC, 27 degC, 85 degC] }\n", "")
+        .replace("        analysis warm = temperature { of = step, values = [0 degC, 50 degC] }\n", "")
+        .replace("        measure en_hot = { of = hot, output_noise = net.OUT }\n", "")
+        .replace("        measure ipk = { of = step, max = \"C1.1\", spec = { min = 900 uA, max = 1.1 mA } }\n", "")
+        .replace("        measure ipk_warm = { of = warm, max = \"C1.1\" }\n", "");
+    let parsed = parse_circuit("/p/rc.circuit", &text);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let d = parsed.design.unwrap();
+    let limit = 20;
+    let s = study::run_with(&d, &standard_pool(), "lowpass", &|_| None, study::RunOptions { threads: None, limit: Some(limit) }).unwrap();
+    let stopped = s.stopped.as_deref().expect("the grant stops the run");
+    assert!(stopped.contains("noise analysis `hiss`"), "{stopped}");
+    let spent = s.usage.total().unwrap().operations();
+    assert!(spent > 0 && spent <= limit, "spent {spent} of {limit}");
+}

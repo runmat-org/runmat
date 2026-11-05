@@ -246,15 +246,19 @@ pub fn simulate(design: &Design, analysis: &Analysis) -> Result<Outcome, SimErro
 }
 
 /// Runs a noise analysis (see [`analysis::noise`]) on a built circuit, spending at most `limit`
-/// operations; a run that reaches it keeps the frequencies solved so far.
-pub fn simulate_noise(c: &Circuit, spec: &analysis::noise::NoiseSpec, limit: Option<u64>) -> Result<(analysis::noise::NoiseWave, Usage), SimError> {
+/// operations; a run that reaches it keeps the frequencies solved so far. The operations spent
+/// come back whether or not the analysis succeeded: a run stopped before its operating point
+/// converged ([`SimError::Stopped`]) still did its work, and its count still bills.
+pub fn simulate_noise(c: &Circuit, spec: &analysis::noise::NoiseSpec, limit: Option<u64>) -> (Result<analysis::noise::NoiseWave, SimError>, Usage) {
     let _ = num::dual::take_ops();
     let mut e = Engine::new(c);
     e.limit = limit;
     let out = analysis::noise::run(&mut e, spec);
     e.meter.assembly += num::dual::take_ops();
-    let usage = e.meter.usage().map_err(|_| SimError::CountOverflow)?;
-    out.map(|w| (w, usage))
+    match e.meter.usage() {
+        Ok(usage) => (out, usage),
+        Err(_) => (Err(SimError::CountOverflow), Usage::default()),
+    }
 }
 
 /// Runs one analysis on a built circuit.

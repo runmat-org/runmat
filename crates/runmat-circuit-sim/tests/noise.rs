@@ -9,7 +9,7 @@ const T: f64 = 300.15;
 fn noise(deck: &str, out: &str, input: &str, freqs: Vec<f64>) -> NoiseWave {
     let d = Design::from_netlist(deck, &|_| None).unwrap_or_else(|e| panic!("{e}"));
     let c = d.circuit().unwrap();
-    simulate_noise(&c, &NoiseSpec { output: (out.into(), "0".into()), input: input.into(), freqs }, None).unwrap_or_else(|e| panic!("{e}")).0
+    simulate_noise(&c, &NoiseSpec { output: (out.into(), "0".into()), input: input.into(), freqs }, None).0.unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn decades(from: f64, to: f64, per: usize) -> Vec<f64> {

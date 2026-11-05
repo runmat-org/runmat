@@ -508,10 +508,10 @@ impl Runner {
     /// limit; `None` when it stopped first.
     fn noise(&mut self, what: &str, c: Option<&sim::Circuit>, spec: &NoiseSpec) -> Result<Option<NoiseWave>, String> {
         let left = self.left();
-        let out = sim::simulate_noise(c.unwrap_or(&self.circuit), spec, left);
+        let (out, usage) = sim::simulate_noise(c.unwrap_or(&self.circuit), spec, left);
+        self.add(&usage)?;
         match out {
-            Ok((w, usage)) => {
-                self.add(&usage)?;
+            Ok(w) => {
                 if w.freq.len() < spec.freqs.len() {
                     self.study.stopped = Some(format!("noise analysis `{what}` stopped at the granted operations; it holds the frequencies solved before then"));
                 }
