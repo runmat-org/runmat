@@ -520,6 +520,25 @@ fn split_pair_at_shared_vertex(
         // Split first: the blocking edges are kept by every other split of the edit.
         encroached.extend(forced.iter().cloned());
         let mut blocking = Vec::<[StableDigest; 2]>::new();
+        let mut swallowed = Vec::<[StableDigest; 2]>::new();
+        let unsplit_intervals = {
+            let mut splitting = [edge, other]
+                .into_iter()
+                .chain(encroached.iter().map(|(split, _, _)| *split))
+                .collect::<Vec<_>>();
+            for key in &mut splitting {
+                key.sort_unstable();
+            }
+            protected_edges
+                .iter()
+                .copied()
+                .filter(|candidate| {
+                    let mut key = *candidate;
+                    key.sort_unstable();
+                    !splitting.contains(&key)
+                })
+                .collect::<Vec<_>>()
+        };
         let insertion = work.options.segment_recovery.insertion;
         let cancellation = work.cancellation;
         let outcome = working.edit(|topology| {
@@ -588,6 +607,19 @@ fn split_pair_at_shared_vertex(
                 let kept_list = kept_edges.iter().copied().collect::<Vec<_>>();
                 let swallows_kept_edge = !removed.is_empty()
                     && encroached_segment_edge(&observed, &removed, &kept_list, split_key).is_some();
+                // A swallowed recovered segment interval that this edit does not split cannot
+                // coexist with the node in any constrained-Delaunay complex; the edge-star split
+                // below keeps it, and if the edit is then declined it is split on the next try.
+                if swallows_kept_edge {
+                    if let Some(interval) = encroached_segment_edge(
+                        &observed,
+                        &removed,
+                        &unsplit_intervals,
+                        split_key,
+                    ) {
+                        swallowed.push(interval);
+                    }
+                }
                 let (removed, created, splits) = if removed.is_empty() || swallows_kept_edge {
                     split_edge(
                         &observed,
@@ -734,6 +766,7 @@ fn split_pair_at_shared_vertex(
         }
         Ok::<_, DelaunayFacetRecoveryError>((outcome, changed))
     })?;
+        blocking.extend(swallowed);
         if outcome.is_err() && encroached.len() < MAXIMUM_ENCROACHED_CORNER_SPLITS {
             if let Some(location) = blocking
                 .first()

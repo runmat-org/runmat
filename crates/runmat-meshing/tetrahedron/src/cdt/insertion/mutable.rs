@@ -644,12 +644,14 @@ fn legalize_inserted_node(
     work: &mut InsertionWork<'_>,
 ) -> Result<(), DelaunayInsertionError> {
     let mut flip_count = 0_u64;
+    let mut star_edge_flips = MAXIMUM_STAR_EDGE_FLIPS;
     while let Some(flip) = first_illegal_inserted_face(
         topology,
         inserted,
         &*protected_faces,
         protect_region_boundaries,
         flips,
+        &mut star_edge_flips,
         work,
     )? {
         flip_count = flip_count.checked_add(1).ok_or_else(|| {
@@ -707,12 +709,19 @@ enum LinkFlip {
     },
 }
 
+/// Edge flips (3-2 and 4-4) on illegal faces through an inserted node, beyond its link, per
+/// legalization of that node. These faces sit outside the link that Joe's termination argument
+/// covers, so the budget bounds a flip cycle; once spent, the remaining illegal face declines
+/// the edit.
+const MAXIMUM_STAR_EDGE_FLIPS: u32 = 256;
+
 fn first_illegal_inserted_face(
     topology: &TopologyMutation,
     inserted: u32,
     protected_faces: &Protection<'_>,
     protect_region_boundaries: bool,
     flips: LinkFlips<'_>,
+    star_edge_flips: &mut u32,
     work: &mut InsertionWork<'_>,
 ) -> Result<Option<LinkFlip>, DelaunayInsertionError> {
     let mut edge_flip = None;
@@ -921,8 +930,10 @@ fn first_illegal_inserted_face(
                     face,
                 })));
             }
-            // Otherwise only planar flips: a facet flip, or a 2-2 flip of two unprotected hull
-            // triangles.
+            // Otherwise an edge flip: a facet flip or a 2-2 flip of two unprotected hull
+            // triangles, or (within the budget) a 3-2 or 4-4 flip that removes the unkept edge
+            // of the face beyond which the two apexes' segment passes, for example an edge from
+            // the inserted node to a coplanar vertex of a facet plane not yet recovered.
             if let Some(flip @ LinkFlip::Edge { .. }) = edge_link_flip(
                 topology,
                 [left_index, right_index],
@@ -935,6 +946,10 @@ fn first_illegal_inserted_face(
             )? {
                 if let LinkFlip::Edge { removed, facet, .. } = &flip {
                     if facet.is_some() || removed.len() == 2 {
+                        return Ok(Some(flip));
+                    }
+                    if *star_edge_flips > 0 {
+                        *star_edge_flips -= 1;
                         return Ok(Some(flip));
                     }
                 }
