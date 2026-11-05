@@ -66,6 +66,48 @@ impl DelegatedReservation {
         Ok(())
     }
 
+    /// Raise the child's capacity to at least `required`, plus headroom, so a
+    /// child that reserves small counts per element does not wait on its parent
+    /// for every element.
+    ///
+    /// Headroom comes only from operations the parent already holds as grant
+    /// and has not reserved, and it never asks the host for more grant. It is
+    /// at most the child's current capacity, so capacity doubles and the number
+    /// of renewals grows with the logarithm of the work. It is also at most half
+    /// of the free grant, so sibling children keep the rest. Headroom is not
+    /// charged: `finish` returns unused capacity to the parent.
+    pub fn grow_capacity(&mut self, required: OperationCount) -> Result<(), LedgerError> {
+        if self.closed {
+            return Err(LedgerError::Closed);
+        }
+        if required <= self.maximum {
+            return Ok(());
+        }
+        let exact = required.operations() - self.maximum.operations();
+        let headroom = {
+            let state = self.ledger.lock()?;
+            let committed = state.completed.total()?.checked_add(state.reserved)?;
+            let free = state.grant.operations().saturating_sub(committed.operations());
+            let spare = free.saturating_sub(exact) / 2;
+            self.maximum.operations().max(exact).min(spare)
+        };
+        if headroom > 0 {
+            let additional = exact
+                .checked_add(headroom)
+                .map(OperationCount::from_operations)
+                .ok_or(LedgerError::CountOverflow)?;
+            // Reserve against the grant already held, without renewal. If a
+            // sibling took the free grant since it was read, fall back to the
+            // exact increase, which may renew upstream as before.
+            let grown = self.maximum.checked_add(additional)?;
+            if self.ledger.try_reserve_capacity(additional, false).is_ok() {
+                self.maximum = grown;
+                return Ok(());
+            }
+        }
+        self.increase_capacity(required)
+    }
+
     /// Merge authenticated cumulative completed work into the parent. Validate
     /// every category and all arithmetic before changing either owner's state.
     pub fn report(&mut self, completed: CompletedUsage) -> Result<(), LedgerError> {
@@ -273,6 +315,66 @@ mod tests {
         child.finish(usage).unwrap();
         drop(local);
         assert_eq!(ledger.finish().unwrap(), usage);
+    }
+
+    #[test]
+    fn growing_child_capacity_doubles_from_free_grant_and_returns_headroom_at_finish() {
+        let ledger = Arc::new(UsageLedger::new(count(10_000), count(1_000)).unwrap());
+        let mut child = ledger.delegate(count(0)).unwrap();
+        // Per-element reserves of 10 ops: one renewal per element without headroom.
+        let mut renewals = 0;
+        for element in 1..=60u64 {
+            let required = count(element * 10);
+            if required > child.capacity() {
+                child.grow_capacity(required).unwrap();
+                renewals += 1;
+            }
+            assert!(child.capacity() >= required);
+            // Never more than half of the free grant beyond the exact need.
+            assert!(ledger.snapshot().unwrap().reserved <= count(1_000));
+        }
+        assert!(renewals <= 8, "{renewals} renewals for 60 elements");
+        let before = ledger.snapshot().unwrap();
+        // Requests at or below the current capacity change nothing.
+        child.grow_capacity(count(1)).unwrap();
+        assert_eq!(ledger.snapshot().unwrap(), before);
+        let usage = CompletedUsage {
+            assembly: count(600),
+            ..Default::default()
+        };
+        child.finish(usage).unwrap();
+        let after = ledger.snapshot().unwrap();
+        assert_eq!(after.reserved, count(0));
+        assert_eq!(after.completed, usage);
+        assert_eq!(ledger.finish().unwrap(), usage);
+    }
+
+    #[test]
+    fn growing_child_capacity_leaves_siblings_half_and_never_renews_for_headroom() {
+        let ledger = Arc::new(UsageLedger::new(count(1_000), count(100)).unwrap());
+        let mut first = ledger.delegate(count(0)).unwrap();
+        let mut second = ledger.delegate(count(0)).unwrap();
+        first.grow_capacity(count(10)).unwrap();
+        // 90 free after the exact 10; headroom is min(max(0, 10), 45) = 10.
+        assert_eq!(first.capacity(), count(20));
+        first.grow_capacity(count(60)).unwrap();
+        // 80 free, exact 40, spare 20; headroom min(max(20, 40), 20) = 20.
+        assert_eq!(first.capacity(), count(80));
+        // The sibling still gets its exact need from the remaining 20.
+        second.grow_capacity(count(20)).unwrap();
+        assert_eq!(second.capacity(), count(20));
+        // With no free grant, growth is exact and asks upstream as before.
+        assert_eq!(
+            second.grow_capacity(count(21)),
+            Err(LedgerError::MoreGrantRequired {
+                required: count(101),
+                granted: count(100),
+            })
+        );
+        assert_eq!(second.capacity(), count(20));
+        first.finish(CompletedUsage::default()).unwrap();
+        second.finish(CompletedUsage::default()).unwrap();
+        assert_eq!(ledger.snapshot().unwrap().reserved, count(0));
     }
 
     #[test]

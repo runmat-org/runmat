@@ -534,11 +534,13 @@ impl ActiveFeaLease {
                     && worker.work_class == WorkerWorkClass::Numerical
                     && context.work_class == WorkerWorkClass::Numerical && worker.started && !worker.final_reported)
                     .ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
-                worker.reservation.increase_capacity(maximum)
+                // Grow with headroom so per-element reserves in the worker do
+                // not each wait on a host call.
+                worker.reservation.grow_capacity(maximum).map(|()| worker.reservation.capacity())
             };
             match acquisition {
-                Ok(()) => {
-                    lease.granted_ops = maximum;
+                Ok(capacity) => {
+                    lease.granted_ops = capacity;
                     return crate::wire::json_contract_to_js(&LeaseState {
                         lease,
                         root_started_at_unix_millis: self.root_started_at_unix_millis,
