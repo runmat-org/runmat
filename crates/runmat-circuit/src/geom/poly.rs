@@ -642,12 +642,14 @@ fn simplify_ring(r: &mut Ring) {
     r.rotate_left(start);
 }
 
-fn build_rings(mut edges: Vec<(Point, Point)>) -> PolySet {
+pub(crate) fn build_rings(mut edges: Vec<(Point, Point)>) -> PolySet {
     edges.sort();
-    let mut by_start: BTreeMap<Point, Vec<usize>> = BTreeMap::new();
-    for (i, (a, _)) in edges.iter().enumerate() {
-        by_start.entry(*a).or_default().push(i);
-    }
+    // Edges sorted by start: the edges leaving a point are one run.
+    let starting = |edges: &[(Point, Point)], p: Point| {
+        let lo = edges.partition_point(|e| e.0 < p);
+        let hi = lo + edges[lo..].partition_point(|e| e.0 == p);
+        lo..hi
+    };
     let mut used = vec![false; edges.len()];
     let mut rings: Vec<Ring> = Vec::new();
     for s in 0..edges.len() {
@@ -668,8 +670,8 @@ fn build_rings(mut edges: Vec<(Point, Point)>) -> PolySet {
             ring.push(b);
             let din = b - a;
             let mut best: Option<usize> = None;
-            if let Some(cands) = by_start.get(&b) {
-                for &c in cands {
+            {
+                for c in starting(&edges, b) {
                     if used[c] {
                         continue;
                     }
@@ -710,9 +712,11 @@ fn assemble(rings: Vec<Ring>) -> PolySet {
             holes: Vec::new(),
         })
         .collect();
+    // Large outers answer containment from an edge index over their doubled ring, built once.
+    let mut doubled: Vec<Option<(Ring, Option<crate::spatial::EdgeIndex>)>> = vec![None; 0];
+    doubled.resize_with(outers.len(), || None);
     for h in holes {
         let hb = ring_bbox(&h);
-        let mut placed = false;
         'outer: for (oi, o) in outers.iter().enumerate() {
             let ob = boxes[oi];
             if hb.min.x < ob.min.x
@@ -722,16 +726,27 @@ fn assemble(rings: Vec<Ring>) -> PolySet {
             {
                 continue;
             }
+            let (o2, index) = doubled[oi].get_or_insert_with(|| {
+                let o2: Ring = o.iter().map(|p| Point::new(p.x * 2, p.y * 2)).collect();
+                let index = (o2.len() > 256).then(|| {
+                    let b = ring_bbox(&o2);
+                    let cell = ((b.width().max(b.height()) as f64) / (o2.len() as f64).sqrt())
+                        .max(1.0) as Coord;
+                    crate::spatial::EdgeIndex::new([&o2], cell)
+                });
+                (o2, index)
+            });
             // Probe edge midpoints (doubled grid) until one is strictly in or out.
             let n = h.len();
             for i in 0..n {
-                let a = h[i];
-                let b = h[(i + 1) % n];
-                let o2: Vec<Point> = o.iter().map(|p| Point::new(p.x * 2, p.y * 2)).collect();
-                match ring_contains(&o2, a + b) {
+                let m = h[i] + h[(i + 1) % n];
+                let inside = match index {
+                    Some(ix) => ix.contains(m),
+                    None => ring_contains(o2, m),
+                };
+                match inside {
                     Some(true) => {
                         polys[oi].holes.push(h.clone());
-                        placed = true;
                         break 'outer;
                     }
                     Some(false) => continue 'outer,
@@ -740,10 +755,8 @@ fn assemble(rings: Vec<Ring>) -> PolySet {
             }
             // Every probe on the boundary: the hole coincides with this outer's boundary.
             polys[oi].holes.push(h.clone());
-            placed = true;
             break;
         }
-        let _ = placed;
     }
     for p in &mut polys {
         p.holes.sort();

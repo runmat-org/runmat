@@ -9,12 +9,12 @@ use crate::drc::Drc;
 use crate::eco::{Direction, EcoPlan, Origin};
 use crate::elab::{FitState, Netlist, Severity};
 use crate::ir::{Design, Param, ParamValue, Tolerance};
-use crate::layout::{Board, NetId, PadConnect, Side, StackKind};
+use crate::layout::{Board, ItemId, NetId, PadConnect, Side, StackKind};
 use crate::library::PadShape;
 use crate::library::Pool;
 use crate::review::ReviewFinding;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// The projection's format version. This release's shape is version 1; a later release that
 /// changes the shape bumps it.
@@ -831,6 +831,65 @@ pub fn fix_label(edit: &crate::review::ModelEdit) -> String {
 
 /// Adds the board: layers, footprints, copper with rule explanations, and DRC findings.
 pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, drc: &Drc) {
+    add_board_reusing(index, board, rules, drc, None);
+}
+
+/// What a board projection may take from the previous one: its rows for every item not in
+/// `items` and its airwires for every net not in `nets`.
+pub struct Reuse<'a> {
+    pub old: BoardIndex,
+    pub items: &'a BTreeSet<ItemId>,
+    pub nets: &'a BTreeSet<NetId>,
+}
+
+/// [`add_board`], taking unchanged rows from a previous projection of the same board.
+pub fn add_board_reusing(
+    index: &mut CircuitIndex,
+    board: &Board,
+    rules: &BoardRules,
+    drc: &Drc,
+    reuse: Option<Reuse>,
+) {
+    let (
+        mut old_tracks,
+        mut old_vias,
+        mut old_zones,
+        mut old_fps,
+        mut old_pads,
+        mut old_air,
+        changed,
+        dirty_nets,
+    ) = match reuse {
+        Some(r) => {
+            let by_id = |rows: Vec<CopperRow>| -> HashMap<u64, CopperRow> {
+                rows.into_iter().map(|row| (row.id, row)).collect()
+            };
+            let mut pads: HashMap<String, Vec<PadRow>> = HashMap::new();
+            for p in r.old.pads {
+                pads.entry(p.component.clone()).or_default().push(p);
+            }
+            let mut air: BTreeMap<String, Vec<crate::display::AirwireRow>> = BTreeMap::new();
+            for a in r.old.unrouted {
+                air.entry(a.net.clone()).or_default().push(a);
+            }
+            (
+                by_id(r.old.tracks),
+                by_id(r.old.vias),
+                by_id(r.old.zones),
+                r.old
+                    .footprints
+                    .into_iter()
+                    .map(|f| (f.reference.clone(), f))
+                    .collect::<HashMap<_, _>>(),
+                pads,
+                Some(air),
+                Some(r.items),
+                Some(r.nets),
+            )
+        }
+        None => Default::default(),
+    };
+    let keep = |id: ItemId| changed.is_some_and(|c| !c.contains(&id));
     let graph = BoardGraph::new(board, &[]);
     let copper = board.stackup.copper_count();
     let net_name = |n: Option<NetId>| n.map(|id| board.nets[id.0 as usize].name.clone());
@@ -848,6 +907,9 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
         .tracks
         .values()
         .map(|t| {
+            if let Some(row) = keep(t.id).then(|| old_tracks.remove(&t.id.0)).flatten() {
+                return row;
+            }
             let it = BItem::Track(t.id);
             let required = rules.len(&graph, it, props::TRACK_WIDTH).map(mm);
             let mut values = BTreeMap::new();
@@ -880,6 +942,9 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
         .vias
         .values()
         .map(|v| {
+            if let Some(row) = keep(v.id).then(|| old_vias.remove(&v.id.0)).flatten() {
+                return row;
+            }
             let it = BItem::Via(v.id);
             let mut values = BTreeMap::new();
             values.insert("diameter".to_owned(), mm(v.diameter));
@@ -908,6 +973,9 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
         .zones
         .values()
         .map(|z| {
+            if let Some(row) = keep(z.id).then(|| old_zones.remove(&z.id.0)).flatten() {
+                return row;
+            }
             let mut values = BTreeMap::new();
             let required = rules.pair_len(BItem::Zone(z.id), BItem::Edge, props::CLEARANCE);
             values.insert(
@@ -965,57 +1033,65 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
         .footprints
         .values()
         .flat_map(|f| {
-            f.pads(copper).into_iter().map(move |p| {
-                let it = BItem::Pad(f.id, p.index as u32);
-                let mut values = BTreeMap::new();
-                values.insert(
-                    "clearance".to_owned(),
-                    mm(rules.pair_len(it, BItem::Edge, props::CLEARANCE)),
-                );
-                let (rule, source) = rules.pair_origin(it, BItem::Edge, props::CLEARANCE);
-                let mut explain_map = BTreeMap::new();
-                explain_map.insert(
-                    "clearance".to_owned(),
-                    if rule == "default" {
-                        "clearance from the board defaults".to_owned()
-                    } else {
-                        format!("clearance from rule {rule} at {source}")
-                    },
-                );
-                let shape = match f.package.pads.get(p.index).map(|d| &d.shape) {
-                    Some(PadShape::Circle { .. }) => "circle",
-                    Some(PadShape::Rect { .. }) => "rect",
-                    Some(PadShape::RoundRect { .. }) => "round_rect",
-                    Some(PadShape::Oval { .. }) => "oval",
-                    Some(PadShape::Trapezoid { .. }) => "trapezoid",
-                    Some(PadShape::Chamfered { .. }) => "chamfered",
-                    _ => "custom",
-                };
-                let g = crate::display::pad(f, p.index, copper).unwrap_or_default();
-                PadRow {
-                    x_mm: g.x_mm,
-                    y_mm: g.y_mm,
-                    rotation: g.rotation,
-                    size_x_mm: g.size_x_mm,
-                    size_y_mm: g.size_y_mm,
-                    drill_mm: g.drill_mm,
-                    slot_mm: g.slot_mm,
-                    corner_radius_mm: g.corner_radius_mm,
-                    outline: g.outline,
-                    id: format!("{}.{}", f.reference, p.name),
-                    component: f.reference.clone(),
-                    net: net_name(p.net),
-                    layer: p
-                        .layers
-                        .iter()
-                        .map(|l| layer_name(*l))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    shape: shape.to_owned(),
-                    values,
-                    explain: explain_map,
+            if keep(f.id) {
+                if let Some(rows) = old_pads.remove(&f.reference) {
+                    return rows;
                 }
-            })
+            }
+            f.pads(copper)
+                .into_iter()
+                .map(|p| {
+                    let it = BItem::Pad(f.id, p.index as u32);
+                    let mut values = BTreeMap::new();
+                    values.insert(
+                        "clearance".to_owned(),
+                        mm(rules.pair_len(it, BItem::Edge, props::CLEARANCE)),
+                    );
+                    let (rule, source) = rules.pair_origin(it, BItem::Edge, props::CLEARANCE);
+                    let mut explain_map = BTreeMap::new();
+                    explain_map.insert(
+                        "clearance".to_owned(),
+                        if rule == "default" {
+                            "clearance from the board defaults".to_owned()
+                        } else {
+                            format!("clearance from rule {rule} at {source}")
+                        },
+                    );
+                    let shape = match f.package.pads.get(p.index).map(|d| &d.shape) {
+                        Some(PadShape::Circle { .. }) => "circle",
+                        Some(PadShape::Rect { .. }) => "rect",
+                        Some(PadShape::RoundRect { .. }) => "round_rect",
+                        Some(PadShape::Oval { .. }) => "oval",
+                        Some(PadShape::Trapezoid { .. }) => "trapezoid",
+                        Some(PadShape::Chamfered { .. }) => "chamfered",
+                        _ => "custom",
+                    };
+                    let g = crate::display::pad(f, p.index, copper).unwrap_or_default();
+                    PadRow {
+                        x_mm: g.x_mm,
+                        y_mm: g.y_mm,
+                        rotation: g.rotation,
+                        size_x_mm: g.size_x_mm,
+                        size_y_mm: g.size_y_mm,
+                        drill_mm: g.drill_mm,
+                        slot_mm: g.slot_mm,
+                        corner_radius_mm: g.corner_radius_mm,
+                        outline: g.outline,
+                        id: format!("{}.{}", f.reference, p.name),
+                        component: f.reference.clone(),
+                        net: net_name(p.net),
+                        layer: p
+                            .layers
+                            .iter()
+                            .map(|l| layer_name(*l))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        shape: shape.to_owned(),
+                        values,
+                        explain: explain_map,
+                    }
+                })
+                .collect::<Vec<_>>()
         })
         .collect();
     let rule_rows = rules
@@ -1034,11 +1110,9 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
             source: r.source.to_string(),
         })
         .collect();
-    let footprints = board
-        .footprints
-        .values()
-        .map(|f| (f, crate::display::footprint(f)))
-        .map(|(f, g)| FootprintRow {
+    let footprint_row = |f: &crate::layout::Footprint| -> FootprintRow {
+        let g = crate::display::footprint(f);
+        FootprintRow {
             courtyard: g.courtyard,
             silkscreen: g.silkscreen,
             fab: g.fab,
@@ -1054,6 +1128,18 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
             }
             .to_owned(),
             locked: f.locked,
+        }
+    };
+    let footprints = board
+        .footprints
+        .values()
+        .map(|f| {
+            if keep(f.id) {
+                if let Some(row) = old_fps.remove(&f.reference) {
+                    return row;
+                }
+            }
+            footprint_row(f)
         })
         .collect();
     let item_label = |it: &BItem| match it {
@@ -1154,7 +1240,21 @@ pub fn add_board(index: &mut CircuitIndex, board: &Board, rules: &BoardRules, dr
         graphics: crate::display::board_graphics(board),
         dimensions: crate::display::dimensions(board),
         fiducials: crate::display::fiducials(board),
-        unrouted: crate::display::unrouted(board),
+        unrouted: match (old_air.as_mut(), dirty_nets) {
+            (Some(old), Some(nets)) => {
+                let fresh = crate::display::unrouted_nets(board, nets);
+                let names: BTreeSet<&str> = nets.iter().map(|n| board.net_name(*n)).collect();
+                let mut rows: Vec<crate::display::AirwireRow> = old
+                    .iter_mut()
+                    .filter(|(net, _)| !names.contains(net.as_str()))
+                    .flat_map(|(_, rows)| std::mem::take(rows))
+                    .chain(fresh)
+                    .collect();
+                crate::display::sort_airwires(&mut rows);
+                rows
+            }
+            _ => crate::display::unrouted(board),
+        },
     });
 }
 

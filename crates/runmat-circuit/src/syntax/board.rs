@@ -86,6 +86,24 @@ use std::collections::{BTreeMap, HashMap};
 /// The `.circuit.layout` statement words: one registry for the board and its sync section.
 pub use super::layout::words;
 
+mod reparse;
+pub(crate) use reparse::{item_of, read_window, window_items, window_replaced};
+pub use reparse::{reparse_board, BoardDelta, BoardItem};
+
+/// The words of item statements: each reads into one board item with its own id.
+const ITEM_WORDS: [&str; 10] = [
+    words::FOOTPRINT,
+    words::FIDUCIAL,
+    words::TRACK,
+    words::ARC,
+    words::VIA,
+    words::POUR,
+    words::KEEPOUT,
+    words::TEXT,
+    words::GRAPHIC,
+    words::DIMENSION,
+];
+
 /// The section a statement belongs to: statements print grouped, in this order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Group {
@@ -147,6 +165,8 @@ pub struct ParsedBoard {
     /// The layout declaration's block, `{` to `}`.
     pub block: Option<Span>,
     pub diagnostics: Vec<FeaSyntaxDiagnostic>,
+    /// The packages the file defines, by the name footprints give them.
+    pub packages: HashMap<String, Package>,
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -485,6 +505,7 @@ pub fn parse_board(path: &str, source: &str) -> ParsedBoard {
             sites: BTreeMap::new(),
             block: None,
             diagnostics: syntax.diagnostics.clone(),
+            packages: HashMap::new(),
         },
         sites: Sites::default(),
     };
@@ -664,6 +685,7 @@ impl Reader<'_> {
                 }
             }
         }
+        self.out.packages = packages.clone();
         let mut stackups = stackups.into_iter();
         let main = stackups
             .next()
@@ -844,142 +866,8 @@ impl Reader<'_> {
                         board.rooms.push(r);
                     }
                 }
-                words::FOOTPRINT => {
-                    let name = h.name.clone().unwrap_or_default().0;
-                    let site = self.sites.named(words::FOOTPRINT, &name);
-                    let id = board.alloc();
-                    self.record(Group::Footprint, site, at, Some(id));
-                    let r = need_name(&h).and_then(|r| ctx.footprint(id, r, need_value(&h)?));
-                    if let Some(f) = self.note(r) {
-                        board.footprints.insert(id, f);
-                    }
-                }
-                words::FIDUCIAL => {
-                    let name = h.name.clone().unwrap_or_default().0;
-                    let site = self.sites.named(words::FIDUCIAL, &name);
-                    let id = board.alloc();
-                    self.record(Group::Fiducial, site, at, Some(id));
-                    let r = need_name(&h).and_then(|name| {
-                        let mut f = Fields::of(need_value(&h)?, "fiducial")?;
-                        let fid = Fiducial {
-                            id,
-                            name,
-                            at: point(f.need("at")?)?,
-                            side: f.or("side", Side::Top, side_of)?,
-                            diameter: len(f.need("diameter")?)?,
-                            opening: len(f.need("opening")?)?,
-                            locked: f.or("locked", false, boolean)?,
-                        };
-                        f.finish()?;
-                        Ok(fid)
-                    });
-                    if let Some(f) = self.note(r) {
-                        board.fiducials.insert(id, f);
-                    }
-                }
-                words::TRACK | words::ARC => {
-                    let word = if h.word == words::TRACK {
-                        words::TRACK
-                    } else {
-                        words::ARC
-                    };
-                    let site = self.sites.indexed(word);
-                    let id = board.alloc();
-                    self.record(Group::Copper, site, at, Some(id));
-                    let r = ctx.track(id, word, &h);
-                    if let Some(t) = self.note(r) {
-                        board.tracks.insert(id, t);
-                    }
-                }
-                words::VIA => {
-                    let site = self.sites.indexed(words::VIA);
-                    let id = board.alloc();
-                    self.record(Group::Via, site, at, Some(id));
-                    let n = board.copper_count();
-                    let r = ctx.via(id, &h, n);
-                    if let Some(v) = self.note(r) {
-                        board.vias.insert(id, v);
-                    }
-                }
-                words::POUR => {
-                    let site = self.sites.indexed(words::POUR);
-                    let id = board.alloc();
-                    self.record(Group::Pour, site, at, Some(id));
-                    let r = ctx.pour(id, &h);
-                    if let Some(z) = self.note(r) {
-                        board.zones.insert(id, z);
-                    }
-                }
-                words::KEEPOUT => {
-                    let site = self.sites.indexed(words::KEEPOUT);
-                    let id = board.alloc();
-                    self.record(Group::Keepout, site, at, Some(id));
-                    let r = ctx.keepout(id, &h);
-                    if let Some(k) = self.note(r) {
-                        board.keepouts.insert(id, k);
-                    }
-                }
-                words::TEXT => {
-                    let site = self.sites.indexed(words::TEXT);
-                    let id = board.alloc();
-                    self.record(Group::Text, site, at, Some(id));
-                    let r = need_name(&h).and_then(|text| {
-                        let mut f = Fields::of(need_value(&h)?, "text")?;
-                        let t = BoardText {
-                            id,
-                            layer: layers.layer(f.need("layer")?)?,
-                            at: point(f.need("at")?)?,
-                            text,
-                            size: len(f.need("size")?)?,
-                            thickness: len(f.need("thickness")?)?,
-                            angle: f.or("angle", 0.0, angle)?,
-                            mirrored: f.or("mirrored", false, boolean)?,
-                        };
-                        f.finish()?;
-                        Ok(t)
-                    });
-                    if let Some(t) = self.note(r) {
-                        board.texts.insert(id, t);
-                    }
-                }
-                words::GRAPHIC => {
-                    let site = self.sites.indexed(words::GRAPHIC);
-                    let id = board.alloc();
-                    self.record(Group::Graphic, site, at, Some(id));
-                    let r = need_name(&h).and_then(|kind| {
-                        let mut f = Fields::of(need_value(&h)?, "graphic")?;
-                        let layer = layers.layer(f.need("layer")?)?;
-                        let graphic = read_graphic(&kind, &mut f, h.span)?;
-                        f.finish()?;
-                        Ok(BoardGraphic { id, layer, graphic })
-                    });
-                    if let Some(g) = self.note(r) {
-                        board.graphics.insert(id, g);
-                    }
-                }
-                words::DIMENSION => {
-                    let site = self.sites.indexed(words::DIMENSION);
-                    let id = board.alloc();
-                    self.record(Group::Dimension, site, at, Some(id));
-                    let r = need_value(&h).and_then(|v| {
-                        let mut f = Fields::of(v, "dimension")?;
-                        let d = Dimension {
-                            id,
-                            layer: layers.layer(f.need("layer")?)?,
-                            a: point(f.need("from")?)?,
-                            b: point(f.need("to")?)?,
-                            offset: f.or("offset", 0, len)?,
-                            precision: f.or("precision", 2, |v| {
-                                u8::try_from(whole(v)?)
-                                    .map_err(|_| diagnostic(v.span, "precision is 0 to 255"))
-                            })?,
-                        };
-                        f.finish()?;
-                        Ok(d)
-                    });
-                    if let Some(d) = self.note(r) {
-                        board.dimensions.insert(id, d);
-                    }
+                w if ITEM_WORDS.contains(&w) => {
+                    self.read_item(&mut board, &ctx, &h, at, None);
                 }
                 other => self.out.diagnostics.push(diagnostic(
                     at,
@@ -1017,6 +905,169 @@ impl Reader<'_> {
             }
         }
         board
+    }
+
+    /// Reads one item statement (footprint, fiducial, copper, via, pour, keepout, text,
+    /// graphic or dimension) into `board`, under `reuse` or a new id. The item's id, whether
+    /// or not it read.
+    fn read_item(
+        &mut self,
+        board: &mut Board,
+        ctx: &Ctx,
+        h: &Head,
+        at: Span,
+        reuse: Option<ItemId>,
+    ) -> Option<ItemId> {
+        let layers = ctx.layers;
+        match h.word.as_str() {
+            words::FOOTPRINT => {
+                let name = h.name.clone().unwrap_or_default().0;
+                let site = self.sites.named(words::FOOTPRINT, &name);
+                let id = reuse.unwrap_or_else(|| board.alloc());
+                self.record(Group::Footprint, site, at, Some(id));
+                let r = need_name(h).and_then(|r| ctx.footprint(id, r, need_value(h)?));
+                if let Some(f) = self.note(r) {
+                    board.footprints.insert(id, f);
+                }
+                Some(id)
+            }
+            words::FIDUCIAL => {
+                let name = h.name.clone().unwrap_or_default().0;
+                let site = self.sites.named(words::FIDUCIAL, &name);
+                let id = reuse.unwrap_or_else(|| board.alloc());
+                self.record(Group::Fiducial, site, at, Some(id));
+                let r = need_name(h).and_then(|name| {
+                    let mut f = Fields::of(need_value(h)?, "fiducial")?;
+                    let fid = Fiducial {
+                        id,
+                        name,
+                        at: point(f.need("at")?)?,
+                        side: f.or("side", Side::Top, side_of)?,
+                        diameter: len(f.need("diameter")?)?,
+                        opening: len(f.need("opening")?)?,
+                        locked: f.or("locked", false, boolean)?,
+                    };
+                    f.finish()?;
+                    Ok(fid)
+                });
+                if let Some(f) = self.note(r) {
+                    board.fiducials.insert(id, f);
+                }
+                Some(id)
+            }
+            words::TRACK | words::ARC => {
+                let word = if h.word == words::TRACK {
+                    words::TRACK
+                } else {
+                    words::ARC
+                };
+                let site = self.sites.indexed(word);
+                let id = reuse.unwrap_or_else(|| board.alloc());
+                self.record(Group::Copper, site, at, Some(id));
+                let r = ctx.track(id, word, h);
+                if let Some(t) = self.note(r) {
+                    board.tracks.insert(id, t);
+                }
+                Some(id)
+            }
+            words::VIA => {
+                let site = self.sites.indexed(words::VIA);
+                let id = reuse.unwrap_or_else(|| board.alloc());
+                self.record(Group::Via, site, at, Some(id));
+                let n = board.copper_count();
+                let r = ctx.via(id, h, n);
+                if let Some(v) = self.note(r) {
+                    board.vias.insert(id, v);
+                }
+                Some(id)
+            }
+            words::POUR => {
+                let site = self.sites.indexed(words::POUR);
+                let id = reuse.unwrap_or_else(|| board.alloc());
+                self.record(Group::Pour, site, at, Some(id));
+                let r = ctx.pour(id, h);
+                if let Some(z) = self.note(r) {
+                    board.zones.insert(id, z);
+                }
+                Some(id)
+            }
+            words::KEEPOUT => {
+                let site = self.sites.indexed(words::KEEPOUT);
+                let id = reuse.unwrap_or_else(|| board.alloc());
+                self.record(Group::Keepout, site, at, Some(id));
+                let r = ctx.keepout(id, h);
+                if let Some(k) = self.note(r) {
+                    board.keepouts.insert(id, k);
+                }
+                Some(id)
+            }
+            words::TEXT => {
+                let site = self.sites.indexed(words::TEXT);
+                let id = reuse.unwrap_or_else(|| board.alloc());
+                self.record(Group::Text, site, at, Some(id));
+                let r = need_name(h).and_then(|text| {
+                    let mut f = Fields::of(need_value(h)?, "text")?;
+                    let t = BoardText {
+                        id,
+                        layer: layers.layer(f.need("layer")?)?,
+                        at: point(f.need("at")?)?,
+                        text,
+                        size: len(f.need("size")?)?,
+                        thickness: len(f.need("thickness")?)?,
+                        angle: f.or("angle", 0.0, angle)?,
+                        mirrored: f.or("mirrored", false, boolean)?,
+                    };
+                    f.finish()?;
+                    Ok(t)
+                });
+                if let Some(t) = self.note(r) {
+                    board.texts.insert(id, t);
+                }
+                Some(id)
+            }
+            words::GRAPHIC => {
+                let site = self.sites.indexed(words::GRAPHIC);
+                let id = reuse.unwrap_or_else(|| board.alloc());
+                self.record(Group::Graphic, site, at, Some(id));
+                let r = need_name(h).and_then(|kind| {
+                    let mut f = Fields::of(need_value(h)?, "graphic")?;
+                    let layer = layers.layer(f.need("layer")?)?;
+                    let graphic = read_graphic(&kind, &mut f, h.span)?;
+                    f.finish()?;
+                    Ok(BoardGraphic { id, layer, graphic })
+                });
+                if let Some(g) = self.note(r) {
+                    board.graphics.insert(id, g);
+                }
+                Some(id)
+            }
+            words::DIMENSION => {
+                let site = self.sites.indexed(words::DIMENSION);
+                let id = reuse.unwrap_or_else(|| board.alloc());
+                self.record(Group::Dimension, site, at, Some(id));
+                let r = need_value(h).and_then(|v| {
+                    let mut f = Fields::of(v, "dimension")?;
+                    let d = Dimension {
+                        id,
+                        layer: layers.layer(f.need("layer")?)?,
+                        a: point(f.need("from")?)?,
+                        b: point(f.need("to")?)?,
+                        offset: f.or("offset", 0, len)?,
+                        precision: f.or("precision", 2, |v| {
+                            u8::try_from(whole(v)?)
+                                .map_err(|_| diagnostic(v.span, "precision is 0 to 255"))
+                        })?,
+                    };
+                    f.finish()?;
+                    Ok(d)
+                });
+                if let Some(d) = self.note(r) {
+                    board.dimensions.insert(id, d);
+                }
+                Some(id)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -1949,7 +2000,7 @@ fn package_keys(board: &Board) -> (BTreeMap<ItemId, String>, Vec<(String, Packag
     let mut defined: Vec<(String, Package)> = Vec::new();
     for f in board.footprints.values() {
         let p = &f.package;
-        let key = match defined.iter().find(|(_, x)| x == p) {
+        let key = match defined.iter().find(|(_, x)| x.name == p.name && x == p) {
             Some((k, _)) => k.clone(),
             None => {
                 let taken = |k: &str| defined.iter().any(|(x, _)| x == k);
@@ -2084,6 +2135,12 @@ fn package_text(key: &str, p: &Package) -> String {
 
 /// Every statement of a board, in print order, with its site.
 pub fn statements(board: &Board) -> Vec<Printed> {
+    statements_where(board, &|_| true)
+}
+
+/// [`statements`], with the text of only the items `want` names: the others carry their
+/// group, site and item with empty text.
+pub fn statements_where(board: &Board, want: &dyn Fn(ItemId) -> bool) -> Vec<Printed> {
     let mut out: Vec<Printed> = Vec::new();
     let mut sites = Sites::default();
     let layers = Layers::of(&board.stackup);
@@ -2218,6 +2275,11 @@ pub fn statements(board: &Board) -> Vec<Printed> {
     }
     let (keys, packages) = package_keys(board);
     for f in board.footprints.values() {
+        if !want(f.id) {
+            let site = sites.named(words::FOOTPRINT, &f.reference);
+            push(Group::Footprint, site, String::new(), Some(f.id));
+            continue;
+        }
         let mut r = Rec::new();
         r.put(words::PACKAGE, name_text(&keys[&f.id]))
             .pt("at", f.at);
@@ -2261,6 +2323,11 @@ pub fn statements(board: &Board) -> Vec<Printed> {
         );
     }
     for fid in board.fiducials.values() {
+        if !want(fid.id) {
+            let site = sites.named(words::FIDUCIAL, &fid.name);
+            push(Group::Fiducial, site, String::new(), Some(fid.id));
+            continue;
+        }
         let mut r = Rec::new();
         r.pt("at", fid.at);
         if fid.side != Side::Top {
@@ -2282,6 +2349,19 @@ pub fn statements(board: &Board) -> Vec<Printed> {
         );
     }
     for t in board.tracks.values() {
+        if !want(t.id) {
+            let word = match t.geom {
+                TrackGeom::Segment { .. } => words::TRACK,
+                TrackGeom::Arc { .. } => words::ARC,
+            };
+            push(
+                Group::Copper,
+                sites.indexed(word),
+                String::new(),
+                Some(t.id),
+            );
+            continue;
+        }
         let mut r = Rec::new();
         r.put("layer", layers.copper_text(t.layer))
             .len("width", t.width);
@@ -2305,6 +2385,15 @@ pub fn statements(board: &Board) -> Vec<Printed> {
     }
     let n = board.copper_count();
     for v in board.vias.values() {
+        if !want(v.id) {
+            push(
+                Group::Via,
+                sites.indexed(words::VIA),
+                String::new(),
+                Some(v.id),
+            );
+            continue;
+        }
         let mut r = Rec::new();
         r.pt("at", v.at)
             .len("size", v.diameter)
@@ -2332,6 +2421,15 @@ pub fn statements(board: &Board) -> Vec<Printed> {
         );
     }
     for z in board.zones.values() {
+        if !want(z.id) {
+            push(
+                Group::Pour,
+                sites.indexed(words::POUR),
+                String::new(),
+                Some(z.id),
+            );
+            continue;
+        }
         let d = Zone::new(z.id, "", None, Vec::new(), Polygon::default());
         let mut r = Rec::new();
         if !z.name.is_empty() {
@@ -2370,6 +2468,15 @@ pub fn statements(board: &Board) -> Vec<Printed> {
         );
     }
     for k in board.keepouts.values() {
+        if !want(k.id) {
+            push(
+                Group::Keepout,
+                sites.indexed(words::KEEPOUT),
+                String::new(),
+                Some(k.id),
+            );
+            continue;
+        }
         let mut r = Rec::new();
         polygon_fields(&mut r, &k.outline);
         if !k.layers.is_empty() {
@@ -2397,6 +2504,15 @@ pub fn statements(board: &Board) -> Vec<Printed> {
         );
     }
     for t in board.texts.values() {
+        if !want(t.id) {
+            push(
+                Group::Text,
+                sites.indexed(words::TEXT),
+                String::new(),
+                Some(t.id),
+            );
+            continue;
+        }
         let mut r = Rec::new();
         r.put("layer", layers.layer_text(t.layer))
             .pt("at", t.at)
@@ -2419,6 +2535,15 @@ pub fn statements(board: &Board) -> Vec<Printed> {
         );
     }
     for g in board.graphics.values() {
+        if !want(g.id) {
+            push(
+                Group::Graphic,
+                sites.indexed(words::GRAPHIC),
+                String::new(),
+                Some(g.id),
+            );
+            continue;
+        }
         let mut r = Rec::new();
         r.put("layer", layers.layer_text(g.layer));
         let (kind, text) = graphic_text(&g.graphic, r);
@@ -2430,6 +2555,15 @@ pub fn statements(board: &Board) -> Vec<Printed> {
         );
     }
     for d in board.dimensions.values() {
+        if !want(d.id) {
+            push(
+                Group::Dimension,
+                sites.indexed(words::DIMENSION),
+                String::new(),
+                Some(d.id),
+            );
+            continue;
+        }
         let mut r = Rec::new();
         r.put("layer", layers.layer_text(d.layer))
             .pt("from", d.a)

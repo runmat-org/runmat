@@ -498,12 +498,35 @@ pub fn unrouted(board: &Board) -> Vec<AirwireRow> {
             to: xy(a.b),
         })
         .collect();
+    sort_airwires(&mut rows);
+    rows
+}
+
+/// The airwires of `nets` only.
+pub fn unrouted_nets(
+    board: &Board,
+    nets: &std::collections::BTreeSet<crate::layout::NetId>,
+) -> Vec<AirwireRow> {
+    let mut nodes = crate::connectivity::net_nodes(board);
+    nodes.retain(|n, _| nets.contains(n));
+    nodes
+        .into_iter()
+        .flat_map(|(n, nodes)| crate::route::net_ratsnest(&crate::connectivity::islands(n, nodes)))
+        .map(|a| AirwireRow {
+            net: board.net_name(a.net).to_owned(),
+            from: xy(a.a),
+            to: xy(a.b),
+        })
+        .collect()
+}
+
+/// Airwires in net and position order.
+pub fn sort_airwires(rows: &mut [AirwireRow]) {
     rows.sort_by(|a, b| {
         (&a.net, a.from[0], a.from[1], a.to[0], a.to[1])
             .partial_cmp(&(&b.net, b.from[0], b.from[1], b.to[0], b.to[1]))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    rows
 }
 
 /// A fiducial: a bare copper dot and its mask opening.

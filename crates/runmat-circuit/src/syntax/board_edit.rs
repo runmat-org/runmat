@@ -21,7 +21,8 @@
 //! [`apply_board_edit`]) are built on it.
 
 use super::board::{
-    canonical, parse_board, print_board, same_board, statements, Group, ParsedBoard, Printed,
+    canonical, parse_board, print_board, same_board, statements, statements_where, Group,
+    ParsedBoard, Printed,
 };
 use crate::eco::{ApplyError, ApplyOptions, ApplyReport, EcoPlan};
 use crate::geom::poly::Polygon;
@@ -345,6 +346,252 @@ pub fn edit_board<T>(
             .is_some_and(|b| same_board(&b, &board)));
     }
     Ok((change, out))
+}
+
+/// Whether two boards agree on everything but their items (footprints, fiducials, copper,
+/// vias, pours, keepouts, texts, graphics, dimensions) and the next id.
+fn same_but_items(a: &Board, b: &Board) -> bool {
+    a.name == b.name
+        && a.outline == b.outline
+        && a.stackup == b.stackup
+        && a.stackups == b.stackups
+        && a.regions == b.regions
+        && a.nets == b.nets
+        && a.rooms == b.rooms
+        && a.limits == b.limits
+        && a.rules == b.rules
+        && a.net_class_rules == b.net_class_rules
+        && a.sync == b.sync
+}
+
+/// Item ids that differ between two id-keyed maps: `(changed, added, removed)`.
+fn map_diff<T: PartialEq>(
+    a: &BTreeMap<ItemId, T>,
+    b: &BTreeMap<ItemId, T>,
+    eq: impl Fn(&T, &T) -> bool,
+    out: &mut (Vec<ItemId>, Vec<ItemId>, Vec<ItemId>),
+) {
+    for (id, x) in a {
+        match b.get(id) {
+            Some(y) if eq(x, y) => {}
+            Some(_) => out.0.push(*id),
+            None => out.2.push(*id),
+        }
+    }
+    for id in b.keys() {
+        if !a.contains_key(id) {
+            out.1.push(*id);
+        }
+    }
+}
+
+/// The items an edit changed, added and removed, or `None` when it changed anything else.
+fn item_changes(old: &Board, new: &Board) -> Option<(Vec<ItemId>, Vec<ItemId>, Vec<ItemId>)> {
+    if !same_but_items(old, new) {
+        return None;
+    }
+    let mut d = (Vec::new(), Vec::new(), Vec::new());
+    map_diff(&old.footprints, &new.footprints, |a, b| a == b, &mut d);
+    // A footprint's schematic link and package are written outside its statement.
+    let fp_ok = d.0.iter().all(|id| {
+        let (a, b) = (&old.footprints[id], &new.footprints[id]);
+        a.component == b.component && a.package == b.package
+    }) && d.1.iter().all(|id| {
+        let f = &new.footprints[id];
+        f.component.is_none() && old.footprints.values().any(|o| o.package == f.package)
+    }) && d.2.iter().all(|id| {
+        let f = &old.footprints[id];
+        f.component.is_none() && new.footprints.values().any(|o| o.package == f.package)
+    });
+    if !fp_ok {
+        return None;
+    }
+    let zone_eq = |a: &Zone, b: &Zone| {
+        a.id == b.id
+            && a.name == b.name
+            && a.net == b.net
+            && a.layers == b.layers
+            && a.outline == b.outline
+            && a.priority == b.priority
+            && a.clearance == b.clearance
+            && a.min_width == b.min_width
+            && a.connect == b.connect
+            && a.thermal_gap == b.thermal_gap
+            && a.spoke_width == b.spoke_width
+            && a.islands == b.islands
+            && a.locked == b.locked
+    };
+    map_diff(&old.fiducials, &new.fiducials, |a, b| a == b, &mut d);
+    map_diff(&old.tracks, &new.tracks, |a, b| a == b, &mut d);
+    map_diff(&old.vias, &new.vias, |a, b| a == b, &mut d);
+    map_diff(&old.zones, &new.zones, zone_eq, &mut d);
+    map_diff(&old.keepouts, &new.keepouts, |a, b| a == b, &mut d);
+    map_diff(&old.texts, &new.texts, |a, b| a == b, &mut d);
+    map_diff(&old.graphics, &new.graphics, |a, b| a == b, &mut d);
+    map_diff(&old.dimensions, &new.dimensions, |a, b| a == b, &mut d);
+    Some(d)
+}
+
+/// The minimal edits for an edit that only changed, added or removed items: each changed
+/// statement is replaced, each removed one deleted, each added one goes after the last
+/// statement of its kind. `None` when the general diff is needed.
+fn diff_items(
+    source: &str,
+    parsed: &ParsedBoard,
+    new: &Board,
+    (changed, added, removed): &(Vec<ItemId>, Vec<ItemId>, Vec<ItemId>),
+) -> Option<Vec<TextEdit>> {
+    let printed_ids: BTreeSet<ItemId> = changed.iter().chain(added).copied().collect();
+    let printed = statements_where(new, &|id| printed_ids.contains(&id));
+    let text_of: HashMap<ItemId, (&str, Group)> = printed
+        .iter()
+        .filter_map(|p| {
+            p.item
+                .filter(|i| printed_ids.contains(i))
+                .map(|i| (i, (p.text.as_str(), p.group)))
+        })
+        .collect();
+    let mut at_of: HashMap<ItemId, Span> = HashMap::new();
+    let mut last_of: HashMap<Group, Span> = HashMap::new();
+    for s in &parsed.statements {
+        if let Some(i) = s.item {
+            at_of.insert(i, s.span);
+        }
+        last_of.insert(s.group, s.span);
+    }
+    let mut edits = Vec::new();
+    for id in removed {
+        edits.push(TextEdit::delete(own_range(source, *at_of.get(id)?)));
+    }
+    for id in changed {
+        edits.push(TextEdit::replace(
+            *at_of.get(id)?,
+            text_of.get(id)?.0.to_owned(),
+        ));
+    }
+    let mut inserts: BTreeMap<usize, String> = BTreeMap::new();
+    for id in added {
+        let (text, group) = text_of.get(id)?;
+        let at = after_line(source, *last_of.get(group)?)?;
+        let s = inserts.entry(at).or_default();
+        s.push_str(INDENT);
+        s.push_str(text);
+        s.push('\n');
+    }
+    for (at, text) in inserts {
+        edits.push(TextEdit::insert(at, text));
+    }
+    Some(edits)
+}
+
+/// [`edit_board`] from a reading of `source` the caller keeps: an edit that only changes items
+/// prints and re-reads just their statements.
+pub fn edit_parsed<T>(
+    path: &str,
+    source: &str,
+    parsed: &ParsedBoard,
+    edit: impl FnOnce(&mut Board) -> Result<T, String>,
+) -> Result<(SourceChange, T), EditFailure> {
+    let Some(old) = parsed.board.as_ref() else {
+        return Err(EditFailure::Invalid(parsed.diagnostics.clone()));
+    };
+    let mut board = old.clone();
+    let out = edit(&mut board).map_err(EditFailure::Model)?;
+    if let Some(change) = item_changes(old, &board) {
+        if let Some(edits) = diff_items(source, parsed, &board, &change) {
+            if let Ok(edited) = apply_edits(source, &edits) {
+                if fits_items(path, source, parsed, &edited, &board, &change) {
+                    return Ok((
+                        SourceChange {
+                            edits,
+                            source: edited,
+                            reprinted: false,
+                        },
+                        out,
+                    ));
+                }
+            }
+        }
+    }
+    let mut change = diff_board(source, parsed, &board)?;
+    let reread = parse_board(path, &change.source);
+    let fits = reread
+        .board
+        .as_ref()
+        .is_some_and(|b| canonical(b) == canonical(&board));
+    if !fits {
+        let text = print_board(&board, &parsed.uses);
+        change = SourceChange {
+            edits: vec![TextEdit::replace(
+                Span {
+                    start: 0,
+                    end: source.len(),
+                },
+                text.clone(),
+            )],
+            source: text,
+            reprinted: true,
+        };
+    }
+    Ok((change, out))
+}
+
+/// Whether `edited` re-reads (window only) as the items the edit made.
+fn fits_items(
+    path: &str,
+    source: &str,
+    parsed: &ParsedBoard,
+    edited: &str,
+    new: &Board,
+    (changed, added, removed): &(Vec<ItemId>, Vec<ItemId>, Vec<ItemId>),
+) -> bool {
+    let Some(w) = super::board::read_window(path, source, parsed, edited) else {
+        return false;
+    };
+    let items = super::board::window_items(&w);
+    let replaced: BTreeSet<ItemId> = super::board::window_replaced(parsed, &w)
+        .into_iter()
+        .collect();
+    let old = parsed.board.as_ref().expect("read");
+    // Every changed item reads back under its id; removed ones are gone.
+    for id in changed {
+        if items.get(id).copied() != super::board::item_of(new, *id).as_ref() {
+            return false;
+        }
+    }
+    if removed
+        .iter()
+        .any(|id| !replaced.contains(id) || items.contains_key(id))
+    {
+        return false;
+    }
+    // Added items read back in order, under new ids; window items that replaced old ones
+    // unchanged are the window's context.
+    let fresh: Vec<_> = items
+        .iter()
+        .filter(|(id, _)| !old_has(old, **id))
+        .map(|(_, i)| *i)
+        .collect();
+    if fresh.len() != added.len() {
+        return false;
+    }
+    let mut with_ids: Vec<super::board::BoardItem> = fresh.into_iter().cloned().collect();
+    for (item, id) in with_ids.iter_mut().zip(added) {
+        item.set_id(*id);
+    }
+    added
+        .iter()
+        .zip(&with_ids)
+        .all(|(id, item)| super::board::item_of(new, *id).as_ref() == Some(item))
+        && items.iter().all(|(id, item)| {
+            !old_has(old, *id)
+                || changed.contains(id)
+                || super::board::item_of(old, *id).as_ref() == Some(*item)
+        })
+}
+
+fn old_has(old: &Board, id: ItemId) -> bool {
+    id.0 < old.next_id && super::board::item_of(old, id).is_some()
 }
 
 /// Applies an ECO plan to the layout `source` as one minimal text change: the board and its
@@ -823,6 +1070,18 @@ pub fn board_command(
     edit: &BoardEdit,
 ) -> Result<SourceChange, EditFailure> {
     let parsed = parse_board(path, source);
-    let sites = parsed.sites.clone();
-    edit_board(path, source, |board| apply_board_edit(board, &sites, edit)).map(|(c, ())| c)
+    board_command_parsed(path, source, &parsed, edit)
+}
+
+/// [`board_command`] from a reading of `source` the caller keeps.
+pub fn board_command_parsed(
+    path: &str,
+    source: &str,
+    parsed: &ParsedBoard,
+    edit: &BoardEdit,
+) -> Result<SourceChange, EditFailure> {
+    edit_parsed(path, source, parsed, |board| {
+        apply_board_edit(board, &parsed.sites, edit)
+    })
+    .map(|(c, ())| c)
 }

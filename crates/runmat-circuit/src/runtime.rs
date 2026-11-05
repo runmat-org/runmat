@@ -39,6 +39,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod session;
+pub use session::{Session, SessionTimings};
+
 pub const CIRCUIT_SUFFIX: &str = ".circuit";
 pub const LAYOUT_SUFFIX: &str = ".circuit.layout";
 pub const LOCK_SUFFIX: &str = ".circuit.lock";
@@ -384,6 +387,17 @@ fn load(
     files: &Files,
     options: &CompileOptions,
 ) -> Result<Project, Vec<Diagnostic>> {
+    load_with(path, text, files, options, true)
+}
+
+/// [`load`]; a circuit's sibling layout is read only when `read_layout` is set.
+fn load_with(
+    path: &str,
+    text: &str,
+    files: &Files,
+    options: &CompileOptions,
+    read_layout: bool,
+) -> Result<Project, Vec<Diagnostic>> {
     let (circuit_path, layout) = if is_layout(path) {
         let parsed = parse_board(path, text);
         if !parsed.diagnostics.is_empty() {
@@ -413,7 +427,7 @@ fn load(
         )
     } else {
         let layout_path = layout_path_for(path);
-        let layout = match files.get(&layout_path) {
+        let layout = match files.get(&layout_path).filter(|_| read_layout) {
             Some(t) => {
                 let parsed = parse_board(&layout_path, t);
                 if !parsed.diagnostics.is_empty() {

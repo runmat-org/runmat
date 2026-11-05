@@ -5,16 +5,24 @@
 //! files [`dependencies`] listed, as the caller read them.
 //!
 //! - `dependencies(path, text)` → `["/p/io.circuit", …]`
-//! - `compile(path, text, files, options)` → `{ index?, diagnostics }`
+//! - `compile(path, text, files, options)` → `{ index?, diagnostics }`; the module keeps the
+//!   last circuit's state, so recompiling after a small edit patches it
 //! - `review(path, text, files, options)` → `{ eco?, back_annotation?, diagnostics }`
 //! - `edit(path, text, files, request)` → `{ ok: true, files, summary }` or
 //!   `{ ok: false, message, diagnostics }`
 //!
 //! Malformed JSON input is reported the same way as a failed edit, never as a panic.
 
-use runmat_circuit::runtime::{self, CompileOptions, EditRequest, Files};
+use runmat_circuit::runtime::{self, CompileOptions, EditRequest, Files, Session};
 use serde::Serialize;
+use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
+
+thread_local! {
+    /// The module's runtime session: the last circuit's compiled state, so a small edit
+    /// recompiles only what it changed (`runmat_circuit::runtime::Session`).
+    static SESSION: RefCell<Session> = RefCell::new(Session::new());
+}
 
 fn json<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value)
@@ -48,7 +56,7 @@ pub fn compile(path: &str, text: &str, files: &str, options: &str) -> String {
         (Ok(f), Ok(o)) => (f, o),
         (Err(m), _) | (_, Err(m)) => return error_json(&m),
     };
-    json(&runtime::compile(path, text, &files, &options))
+    SESSION.with(|s| s.borrow_mut().compile_json(path, text, &files, &options))
 }
 
 /// Both ECO directions under a run's comparator settings.
@@ -74,7 +82,7 @@ pub fn edit(path: &str, text: &str, files: &str, request: &str) -> String {
         (Ok(f), Ok(r)) => (f, r),
         (Err(m), _) | (_, Err(m)) => return error_json(&m),
     };
-    match runtime::edit(path, text, &files, &request) {
+    match SESSION.with(|s| s.borrow_mut().edit(path, text, &files, &request)) {
         Ok(out) => {
             let mut v = serde_json::to_value(&out).unwrap_or_default();
             v["ok"] = serde_json::Value::Bool(true);
