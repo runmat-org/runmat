@@ -6,6 +6,8 @@ use runmat_plot::{GeometryScene, GeometrySceneChunk};
 use serde::Serialize;
 use std::path::Path;
 
+/// Chord tolerance of context tessellation, in meters.
+const CONTEXT_CHORD_M: f64 = 0.5e-3;
 /// Largest merged context chunk.
 const CONTEXT_CHUNK_VERTICES: usize = 1 << 20;
 /// Default surface opacity of context geometry.
@@ -117,9 +119,17 @@ fn load_context(
     let bytes = std::fs::read(path)
         .with_context(|| format!("cannot read context geometry {}", path.display()))?;
     let name = path.display().to_string();
+    // Context is drawn translucent at poster scale: a 0.5 mm chord keeps curved parts smooth
+    // and the scene a few megabytes (the import default, 0.01 source units, made the battery
+    // pack a 68.6 MB scene).
     let options = runmat_geometry_io::GeometryImportOptions {
         units,
         source_units: Some(units),
+        tessellation_profile: runmat_geometry_core::TessellationProfile {
+            profile_id: "snapshot-context-v1".into(),
+            chord_tolerance: Some(CONTEXT_CHORD_M / units.meters_per_unit()),
+            ..Default::default()
+        },
         ..Default::default()
     };
     let asset = runmat_runtime::geometry::geometry_load_with_options_op(
