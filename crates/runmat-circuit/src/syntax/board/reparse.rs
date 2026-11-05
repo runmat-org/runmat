@@ -565,16 +565,28 @@ fn apply_window(parsed: &mut ParsedBoard, w: Window) -> BoardDelta {
 pub fn reparse_board(
     path: &str,
     old_src: &str,
-    mut old: ParsedBoard,
+    old: ParsedBoard,
     new: &str,
 ) -> (ParsedBoard, BoardDelta) {
+    let (parsed, delta, _) = reparse_board_keeping(path, old_src, old, new);
+    (parsed, delta)
+}
+
+/// [`reparse_board`], also handing back the old reading when the file was read whole, so a
+/// caller can compare the two (the session keeps the fill tiles a whole re-read didn't reach).
+pub fn reparse_board_keeping(
+    path: &str,
+    old_src: &str,
+    mut old: ParsedBoard,
+    new: &str,
+) -> (ParsedBoard, BoardDelta, Option<ParsedBoard>) {
     if old_src == new && old.diagnostics.is_empty() {
-        return (old, BoardDelta::default());
+        return (old, BoardDelta::default(), None);
     }
     if old.diagnostics.is_empty() {
         if let Some(w) = read_window(path, old_src, &old, new) {
             let delta = apply_window(&mut old, w);
-            return (old, delta);
+            return (old, delta, None);
         }
     }
     (
@@ -583,6 +595,7 @@ pub fn reparse_board(
             whole: true,
             ..Default::default()
         },
+        Some(old),
     )
 }
 

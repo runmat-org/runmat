@@ -108,6 +108,7 @@ fn small_edits_on_a_large_board_stay_within_budget() {
     let t = Instant::now();
     let first = session.compile(LAYOUT, &files[LAYOUT], &files, &CompileOptions::default());
     eprintln!("first compile {:?}: {:?}", t.elapsed(), session.timings);
+    let first_fill = session.timings.fill;
     assert!(first.diagnostics.is_empty(), "{:?}", first.diagnostics);
     let index = first.index.expect("compiles");
     let board = index.board.as_ref().expect("has a board");
@@ -157,4 +158,46 @@ fn small_edits_on_a_large_board_stay_within_budget() {
     for (x, y) in a.zones.iter().zip(&b.zones) {
         assert_eq!(x.polygons, y.polygons, "fills after a delete");
     }
+
+    // A package statement changes (as an ECO's footprint swap does): the layout is read
+    // whole, and the fills keep every tile that package's footprints don't reach.
+    let parsed = runmat_circuit::syntax::board::parse_board(LAYOUT, &files[LAYOUT]);
+    let b = parsed.board.as_ref().expect("reads");
+    let mut users: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for f in b.footprints.values() {
+        *users.entry(f.package.name.as_str()).or_default() += 1;
+    }
+    let (name, n) = users.iter().min_by_key(|(_, n)| **n).map(|(k, n)| (k.to_string(), *n)).unwrap();
+    let text = &files[LAYOUT];
+    // The printer quotes a name that isn't a plain word.
+    let at = [format!("package {name} {{"), format!("package \"{name}\" {{")]
+        .iter()
+        .find_map(|head| text.find(head.as_str()).map(|at| at + head.len()))
+        .expect("the package block");
+    let edited = format!("{}\n        description = \"edited\"{}", &text[..at], &text[at..]);
+    let edited = if runmat_circuit::syntax::board::parse_board(LAYOUT, &edited).diagnostics.is_empty() {
+        edited
+    } else {
+        // The block already has a description: change its text instead.
+        let d = at + text[at..].find("description = \"").expect("a description") + "description = \"".len();
+        format!("{}edited {}", &text[..d], &text[d..])
+    };
+    files.insert(LAYOUT.into(), edited);
+    let t = Instant::now();
+    let compiled = session.compile(LAYOUT, &files[LAYOUT], &files, &CompileOptions::default());
+    let whole = t.elapsed();
+    assert!(compiled.diagnostics.is_empty(), "{:?}", compiled.diagnostics);
+    assert!(session.timings.whole, "a package change reads the layout whole");
+    eprintln!("package {name} ({n} footprints) edited: recompile {whole:?}: {:?}", session.timings);
+    let fresh = runtime::compile(LAYOUT, &files[LAYOUT], &files, &CompileOptions::default());
+    assert!(
+        session.index() == fresh.index.as_ref(),
+        "the session's projection after a whole re-read differs from a fresh compile"
+    );
+    // The fills reuse their tiles: well under a fresh fill.
+    assert!(
+        session.timings.fill * 4 < first_fill,
+        "fill {:?} after a package edit, {first_fill:?} fresh",
+        session.timings.fill
+    );
 }

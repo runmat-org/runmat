@@ -99,7 +99,7 @@ pub use super::layout::words;
 
 mod reparse;
 pub(crate) use reparse::{item_of, read_window, window_items, window_replaced};
-pub use reparse::{reparse_board, BoardDelta, BoardItem};
+pub use reparse::{reparse_board, reparse_board_keeping, BoardDelta, BoardItem};
 
 /// The words of item statements: each reads into one board item with its own id.
 const ITEM_WORDS: [&str; 10] = [

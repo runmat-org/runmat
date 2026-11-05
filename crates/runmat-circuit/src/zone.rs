@@ -27,6 +27,8 @@ use crate::library::PadKind;
 use crate::spatial::EdgeIndex;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod rekey;
+
 /// Tolerance for arcs in fills: 5 µm.
 pub const FILL_TOL: Coord = 5_000;
 
@@ -153,6 +155,8 @@ struct LayerCache {
     tiles: BTreeMap<(i64, i64), PolySet>,
     merged: PolySet,
     report: FillReport,
+    /// The report names old ids (after [`FillCache::rekey`]): merge again on the next fill.
+    remerge: bool,
 }
 
 impl FillCache {
@@ -333,6 +337,7 @@ pub fn fill_zones_cached(
                             tiles: BTreeMap::new(),
                             merged: PolySet::default(),
                             report: FillReport::default(),
+                            remerge: false,
                         },
                     );
                 }
@@ -401,7 +406,8 @@ pub fn fill_zones_cached(
                     r.extend(done.iter().map(|t| tile_rect(*t)));
                     change.tiles.insert(ck, done.clone());
                 }
-                if stale || dropped || !done.is_empty() {
+                let remerge = cache.layers[&ck].remerge;
+                if stale || dropped || remerge || !done.is_empty() {
                     let (merged, report) =
                         merge_layer(rules, &g, board, z, layer, li, &cache.layers[&ck].tiles);
                     let c = cache.layers.get_mut(&ck).unwrap();
@@ -410,6 +416,7 @@ pub fn fill_zones_cached(
                     }
                     c.merged = merged;
                     c.report = report;
+                    c.remerge = false;
                 }
                 let c = &cache.layers[&ck];
                 reports.push(c.report.clone());

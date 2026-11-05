@@ -13,7 +13,9 @@
 
 use super::*;
 use crate::board_rules::BItem;
-use crate::syntax::board::{reparse_board, BoardDelta, BoardItem};
+use crate::syntax::board::{reparse_board_keeping, BoardDelta, BoardItem};
+
+mod reuse;
 use crate::syntax::board_edit::board_command_parsed;
 use crate::zone::{fill_zones_cached, FillCache, FillDirty, FillReport};
 use std::time::Duration;
@@ -229,6 +231,7 @@ impl Session {
         // Read the layout: re-read the change when the session holds this layout.
         let t = now();
         let held = self.board.take().filter(|b| b.path == layout_path);
+        let mut kept: Option<(String, ParsedBoard)> = None;
         let (state, delta) = match held {
             Some(mut b) if b.text == layout_text && !rebuilt && b.eco == options.eco => {
                 self.timings.read = t.elapsed();
@@ -250,7 +253,10 @@ impl Session {
                     index,
                     ..
                 } = b;
-                let (parsed, delta) = reparse_board(&layout_path, &old_text, parsed, layout_text);
+                let (parsed, delta, old_parsed) =
+                    reparse_board_keeping(&layout_path, &old_text, parsed, layout_text);
+                // A whole re-read keeps the old reading, to keep the fill tiles it didn't reach.
+                kept = old_parsed.map(|p| (old_text, p));
                 (
                     Some((
                         parsed,
@@ -282,10 +288,12 @@ impl Session {
                 return Err(diags);
             }
             (Some(s), Some(_)) => {
-                // A whole re-read: it is the parse a fresh compile does.
-                self.whole(layout_path, layout_text, Some(s.0), options)?;
+                // A whole re-read: it is the parse a fresh compile does, and the fills keep
+                // the tiles the change didn't reach.
+                let reuse = kept.map(|(text, old)| (text, old, s.3));
+                self.whole(layout_path, layout_text, Some(s.0), reuse, options)?;
             }
-            _ => self.whole(layout_path, layout_text, None, options)?,
+            _ => self.whole(layout_path, layout_text, None, None, options)?,
         }
         Ok(())
     }
@@ -295,6 +303,7 @@ impl Session {
         path: String,
         text: &str,
         parsed: Option<ParsedBoard>,
+        reuse: Option<(String, ParsedBoard, FillCache)>,
         options: &CompileOptions,
     ) -> Result<(), Vec<Diagnostic>> {
         self.timings.whole = true;
@@ -308,22 +317,35 @@ impl Session {
                 .collect());
         }
         self.timings.read += t.elapsed();
+        let t = now();
+        let (rules, rule_errors) = {
+            let board = parsed.board.as_ref().expect("a layout without errors has a board");
+            let (mut rules, errors) = BoardRules::new(&board.limits, &board.rules);
+            let rule_errors: Vec<Diagnostic> = errors
+                .into_iter()
+                .map(|e| Diagnostic::error(&path, Some(text), 0, 0, format!("{e:?}")))
+                .collect();
+            rules.rebuild(&BoardGraph::new(board, &[]));
+            (rules, rule_errors)
+        };
+        self.timings.rules = t.elapsed();
+        let t = now();
+        let (mut fills, dirty) = match reuse {
+            Some((old_text, old, fills)) => {
+                let reach = rules.max_clearance() + crate::geom::mm(1.0);
+                (fills, reuse::whole_dirty(&old_text, &old, text, &parsed, reach))
+            }
+            None => (FillCache::default(), FillDirty::everywhere()),
+        };
         let board = parsed
             .board
             .as_mut()
             .expect("a layout without errors has a board");
-        let t = now();
-        let (mut rules, errors) = BoardRules::new(&board.limits, &board.rules);
-        let rule_errors = errors
-            .into_iter()
-            .map(|e| Diagnostic::error(&path, Some(text), 0, 0, format!("{e:?}")))
-            .collect();
-        rules.rebuild(&BoardGraph::new(board, &[]));
-        self.timings.rules = t.elapsed();
-        let t = now();
-        let mut fills = FillCache::default();
-        let (reports, _) =
-            fill_zones_cached(board, &rules, &[], &mut fills, &FillDirty::everywhere());
+        if !dirty.everywhere {
+            // The re-read numbered the zones afresh: find each cached fill's zone by content.
+            fills.rekey(&board.zones);
+        }
+        let (reports, _) = fill_zones_cached(board, &rules, &[], &mut fills, &dirty);
         self.timings.fill = t.elapsed();
         let t = now();
         let drc = Drc::run(board, &rules, &[], &reports);
