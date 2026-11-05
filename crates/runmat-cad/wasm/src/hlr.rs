@@ -20,7 +20,8 @@
 
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+// Ordered maps, so a view lists its lines in the same order on every run.
+use std::collections::BTreeMap;
 
 /// A view's projection: screen right `u`, screen up `v`, and `depth` into the screen.
 #[derive(Clone, Copy, Debug)]
@@ -176,8 +177,8 @@ fn key(p: P3) -> [i64; 3] {
 }
 
 /// The segments of a face's mesh boundary (edges used by one triangle), by their end keys.
-fn boundary(face: &Face) -> HashMap<EdgeKey, (P3, P3)> {
-    let mut count: HashMap<EdgeKey, (usize, P3, P3)> = HashMap::new();
+fn boundary(face: &Face) -> BTreeMap<EdgeKey, (P3, P3)> {
+    let mut count: BTreeMap<EdgeKey, (usize, P3, P3)> = BTreeMap::new();
     for t in &face.tris {
         for k in 0..3 {
             let (a, b) = (t[k], t[(k + 1) % 3]);
@@ -452,7 +453,7 @@ fn model_of(display: &Value) -> Model {
 fn silhouettes(model: &Model, depth: P3) -> Vec<Edge> {
     let mut out = Vec::new();
     for (fi, face) in model.faces.iter().enumerate() {
-        let mut by_edge: HashMap<EdgeKey, Vec<(f64, P3, P3)>> = HashMap::new();
+        let mut by_edge: BTreeMap<EdgeKey, Vec<(f64, P3, P3)>> = BTreeMap::new();
         for t in &face.tris {
             let n = cross(sub(t[1], t[0]), sub(t[2], t[0]));
             let facing = dot(n, depth);
@@ -678,7 +679,7 @@ pub fn section_lines(display: &Value, axes: &Axes, point: P3) -> ViewLines {
 /// Cut segments chained into closed loops, projected.
 fn loops(cut: &[(P3, P3)], project: &dyn Fn(P3) -> [f64; 2]) -> Vec<Vec<f64>> {
     let k = |p: P3| p.map(|x| (x * 1.0e3).round() as i64);
-    let mut next: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
+    let mut next: BTreeMap<[i64; 3], Vec<usize>> = BTreeMap::new();
     for (i, (a, b)) in cut.iter().enumerate() {
         next.entry(k(*a)).or_default().push(i);
         next.entry(k(*b)).or_default().push(i);
