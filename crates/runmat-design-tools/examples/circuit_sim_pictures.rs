@@ -1,6 +1,7 @@
 //! Circuit simulation pictures for the site: the daq channel's step response, its AC magnitude
 //! and phase, and a Monte Carlo histogram of its −3 dB frequency against the section's spec limits
-//! (with the yield), drawn through runmat-plot at 2× in the light and dark themes.
+//! (with the yield), drawn through runmat-plot at 2× (two pixels per point) in the light and dark
+//! themes.
 //!
 //! `cargo run --release -p runmat-design-tools --features render --example circuit_sim_pictures -- <out dir>`
 
@@ -32,15 +33,7 @@ const W: u32 = 2400;
 const H: u32 = 1400;
 
 fn theme(dark: bool) -> PlotThemeConfig {
-    let mut t = PlotThemeConfig { variant: if dark { ThemeVariant::ModernDark } else { ThemeVariant::ClassicLight }, ..PlotThemeConfig::default() };
-    let ty = &mut t.typography;
-    for s in [&mut ty.title_font_size, &mut ty.subtitle_font_size, &mut ty.axis_label_font_size, &mut ty.tick_label_font_size, &mut ty.legend_font_size] {
-        *s *= 2.0;
-    }
-    t.layout.data_line_width *= 2.0;
-    t.layout.axis_line_width *= 2.0;
-    t.layout.grid_line_width *= 2.0;
-    t
+    PlotThemeConfig { variant: if dark { ThemeVariant::ModernDark } else { ThemeVariant::ClassicLight }, ..PlotThemeConfig::default() }
 }
 
 /// Series colors that hold contrast on both backgrounds.
@@ -52,7 +45,7 @@ fn color(k: usize, dark: bool) -> Vec4 {
 }
 
 fn save(fig: &mut Figure, dark: bool, path: &str) {
-    let mut ex = pollster::block_on(ImageExporter::with_settings(ImageExportSettings { width: W, height: H, ..Default::default() })).unwrap();
+    let mut ex = pollster::block_on(ImageExporter::with_settings(ImageExportSettings { width: W, height: H, pixels_per_point: 2.0, ..Default::default() })).unwrap();
     ex.set_theme_config(theme(dark));
     let png = pollster::block_on(ex.render_png_bytes(fig)).unwrap();
     std::fs::write(path, png).unwrap();

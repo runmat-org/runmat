@@ -34,8 +34,9 @@ runmat-geometry-io = { workspace = true, optional = true, features = ["occt-nati
 
 [features]
 default = []
-# `design.render` through the Desktop's renderer (runmat-plot on wgpu, headless).
-render = ["dep:runmat-plot", "dep:pollster", "dep:glam"]
+# `design.render` through the Desktop's renderer (runmat-plot on wgpu, headless), with its
+# overlay: without `egui-overlay` a 2D figure exports with no axes, ticks, labels, title or legend.
+render = ["dep:runmat-plot", "runmat-plot/egui-overlay", "dep:pollster", "dep:glam"]
 # Regenerate on OCCT (the kernel Desktop and the browser use), so check, inspect, render and
 # export answer as the Desktop does; STEP export writes exact AP242.
 occt = ["dep:runmat-geometry-io"]

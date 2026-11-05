@@ -1220,6 +1220,13 @@ impl NativeSurfaceRenderContext {
 
         #[cfg(not(feature = "egui-overlay"))]
         {
+            // The axes, tick labels, titles and legend are drawn by the overlay; a figure
+            // exported without it is only its data, edge to edge.
+            if self.renderer.geometry_overlay().is_none() {
+                log::warn!(
+                    "runmat-plot: built without the `egui-overlay` feature, so this figure exports with no axes, tick labels, titles or legend"
+                );
+            }
             self.renderer.fit_pending_figure_cameras_for_surface(
                 self.config.width.max(1),
                 self.config.height.max(1),
@@ -1386,6 +1393,25 @@ pub async fn render_figure_rgba_bytes_interactive(
     height: u32,
 ) -> Result<Vec<u8>, String> {
     let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    context.render_to_rgba(&figure, None, None).await
+}
+
+/// A figure at `pixels_per_point` device pixels per point (2 for a 2x picture), with the theme
+/// and textmark when given.
+pub async fn render_figure_rgba_bytes_scaled(
+    figure: Figure,
+    width: u32,
+    height: u32,
+    theme: Option<PlotThemeConfig>,
+    textmark: Option<&str>,
+    pixels_per_point: f32,
+) -> Result<Vec<u8>, String> {
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    context.set_pixels_per_point(pixels_per_point);
+    if let Some(theme) = theme {
+        context.set_theme_config(theme);
+    }
+    context.set_textmark(textmark);
     context.render_to_rgba(&figure, None, None).await
 }
 

@@ -60,7 +60,9 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @l
         // a standard view) read at nearly its full colour; a key up and left of the eye
         // separates the faces of a box seen in an iso view; a dim fill and a floor keep
         // away-facing faces and recesses legible.
-        // Face on: 0.20 + 0.40 * 0.74 + 0.32 + ... ~ 0.93 of the colour; a side face at 70 degrees ~ 0.5.
+        // High key, as CATIA and SolidWorks show a light part: face on reads at the full colour; an
+        // iso box reads ~ 0.88 / 0.77 / 0.71 on its three faces, and a side face at 70 degrees
+        // ~ 0.54 to 0.74, so a white fuselage's flank still reads white rather than grey.
         let world_normal = select(-normal, normal, front_facing);
         let n = normalize((uniforms.cad_view_rotation * world_normal).xyz);
         let key = normalize(vec3<f32>(-0.42, 0.52, 0.74));
@@ -74,7 +76,7 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @l
         // A bounce from opposite the key lifts faces turned away from it (a housing's inner
         // walls, the far side of a part) so they still read; faces the key lights don't change.
         let bounce = 0.10 * max(dot(n, normalize(vec3<f32>(0.42, -0.52, 0.30))), 0.0);
-        let lighting = clamp(0.20 + 0.40 * diffuse + 0.32 * head + 0.08 * fill_diffuse + 0.04 * hemisphere + bounce, 0.20, 1.0);
+        let lighting = clamp(0.32 + 0.37 * diffuse + 0.30 * head + 0.08 * fill_diffuse + 0.04 * hemisphere + bounce, 0.32, 1.0);
         return vec4<f32>(clamp(input.color.rgb * lighting + vec3<f32>(highlight), vec3<f32>(0.0), vec3<f32>(1.0)), input.color.a);
     }
 

@@ -511,16 +511,23 @@ impl Scene {
                 node.visible && node.render_data.is_some() && self.is_node_in_frustum(node)
             })
             .collect();
-        // HashMap iteration is not a draw order. In particular, depth-free
-        // annotations must be composited after surfaces, never underneath them.
-        // Node IDs preserve insertion order within each layer.
+        // HashMap iteration is not a draw order. See-through surfaces (glass, a clear lid)
+        // blend over what is behind them, so they draw after every opaque node; depth-free
+        // annotations must be composited after surfaces, never underneath them. Node IDs
+        // preserve insertion order within each layer.
         nodes.sort_by_key(|node| {
-            let overlay = node
-                .render_data
-                .as_ref()
+            let data = node.render_data.as_ref();
+            let overlay = data
                 .map(|data| data.pipeline_type.is_depth_free_overlay())
                 .unwrap_or(false);
-            (overlay, node.id)
+            let see_through = data
+                .map(|data| {
+                    data.pipeline_type == crate::core::PipelineType::Triangles
+                        && (data.material.albedo.w < 0.95
+                            || matches!(data.material.alpha_mode, crate::core::AlphaMode::Blend))
+                })
+                .unwrap_or(false);
+            (overlay, see_through, node.id)
         });
         nodes
     }
