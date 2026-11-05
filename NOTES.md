@@ -322,3 +322,41 @@ harness writes full error to QMF_ERROR_FILE). Scripts: ~/runs/qmf6/suba-dbg2.sh 
   kept halves) — likely the same family as the hero 8566 pattern (cells spanning the TIM).
 - Tet lib + hero chain on this commit started (~/runs/qmf6/chain-q13.sh; ~/logs/qmf6/q13.out, q13h.out, q13h.err,
   q13-rss.txt, q13-chain.done).
+
+## q-mesh-fix-14 (2026-11-05, handed back; WIP, sub-a 15374 and hero 8566 still fail)
+Commits 90d372c41c, 7f83d96370 on q-mesh-fix-6. Build Mac sources: ~/src/qmf14 (= 7f83d96370 + q13 debug prints),
+~/src/qmf14d (same + reflex-edge prints in the pair split). Scripts: ~/runs/qmf6/suba14.sh / suba14d.sh <tag>
+(QMFC=<constraint>), batch14.sh / batch14d.sh, chain-e3.sh / chain-e10.sh (hero + rssmax + sampler).
+- 11867 root cause: the TIM twin pair split of E-F and E_top-F_top was admitted against a still-kept
+  ancestor segment C-E. Cell [E, E_top, A, C] (A = mid E-F) had apex X (z=.024) in its sphere; the
+  E_top-X segment crosses the face plane beyond edge C-E, so only removing C-E repairs it.
+- Fix (90d372c41c): `observed_change_reflex_edges` (mutable.rs) lists, per illegal face of an edit, the
+  face edges beyond which the apex-apex segment passes. The pair split retries with each reflex edge that
+  is a recovered segment interval split in the same edit (bounded by MAXIMUM_ENCROACHED_CORNER_SPLITS).
+  The in-place temporary support segment reports such an edge as a conflict, so the caller splits it
+  first. That was the next failure on 11867: the chain node lay inside the circumcircle of a coplanar
+  protected triangle of another facet, across segment P-E.
+  Sub-a then passes 11867 and fails at 15374 after 54 s (~/logs/qmf6/e2.*).
+- 7f83d96370: the star scan may take 3-2/4-4 flips on illegal faces through the inserted node (budget 256
+  per node), and swallowed segment intervals join the pair split's retry. Neutral on sub-a (e5, e6:
+  15374 unchanged).
+- Tried and reverted: general edge removal (k-to-2k-4 for ring 5..7), saved as
+  $J/tmp/work/q-mesh-fix-6/qmf14-edge-removal.patch. It regressed sub-a to 1869 (e7) and broke
+  complete_link_flips_restore_delaunay_after_edge_star_splits (e9). The hero was unchanged (e8, 8566).
+- Remaining family (sub-a 15374 and hero 8566, same shape): a shared-vertex pair split on the TIM side or
+  top edge leaves a cell spanning the 3 mm layer, with two corners at .029 and two at .026. A neighbor
+  apex coplanar with two of those corners lies inside its sphere. The reflex edge is an unkept diagonal
+  that crosses the layer (hero: (-1.005125,.29188,.029)-(-1.0059688,.2909439,.026); sub-a 15374:
+  (-1.073,.4796875,.029)-(-1.0785234,.4776047,.026)). Its star has more than 4 cells, so no Lawson flip
+  removes it, and the complete canonical legalization stalls the same way. The other reflex edges are
+  this edit's own kept halves. Receipts: ~/logs/qmf6/e10-hero.log (reflex prints at 8566), e4-e7.log
+  (sub-a 15374).
+- Diagnosis: the TIM surface edges (5-6 mm) are about twice the layer thickness (3 mm). Every top/bottom
+  pair of edges encroaches each other and cells spanning the layer keep appearing. Producer options:
+  (a) size the TIM faces so their edges stay at or below the layer thickness (surface-side proximity
+  sizing across a solid layer, not only void gaps; check with q-mesh-proximity-1); or (b) before facet
+  recovery, split every recovered segment that is not strongly Gabriel (Ruppert-style), so a CDT exists
+  before Steiner points are added. Local flip repairs keep moving the failure around.
+- Tet lib on 7f83d96370 sources: 595/0/7 ign (~/logs/qmf6/e11.out). Tet lib on 2d79f1744d: 595/0 (q13.out).
+- Hero receipts: q13 on 2d79f1744d fails 8566 after 771 s, RSS 19.97 GB. e3 on 90d372c41c fails 8566 after 781 s,
+  20.7 GB. e10 on 7f83d96370 (+prints) fails 8566 after 807 s, 18.57 GB. All above the 18 GB target.
