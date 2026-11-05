@@ -43,8 +43,12 @@ fn authenticate(saved: &super::CapturedRun) -> Result<()> {
             super::super::SAVED_PUBLICATION_MANIFEST_MAX_BYTES,
         )
         .map_err(anyhow::Error::msg)?;
+    // The manifest records the publication before the manifest itself is written, so its copy
+    // never names the manifest's own path; every other field must match.
+    let mut located = saved.publication.clone();
+    located.result_manifest_artifact_path = None;
     ensure!(
-        publication == saved.publication && publication.numerically_acceptable,
+        publication == located && publication.numerically_acceptable,
         "saved snapshot differs from original accepted study publication"
     );
     let step = publication
