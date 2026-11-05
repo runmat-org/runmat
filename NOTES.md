@@ -418,3 +418,16 @@ qmf15-est.py (surface growth estimate), qmf15-dbgpatch.py (FACEGAP prints to $QM
 3. Hero study: author `cells_across_gap = 1` in the tetrahedra block of m01-module-thermal.fea (thermal
    only; one linear layer is exact for 1-D conduction across the layer). With the default, the surface
    exceeds the 512 MB contract.
+
+## q-mesh-fix-16 (2026-11-05, hero stage 2: M01 heat-path module)
+- Merged integration/0.7.1 774de546c3 (ecc2a887cd; NOTES.md and the parallel Tet10 element rule in
+  order_elevation/jacobian.rs kept ours). Release CLI: build Mac ~/fea-cli/runmat-qmf16-ecc2a887cd (46 min).
+- Study: build Mac ~/runs/q-hero-pack/study/m01-module-thermal.fea (old one kept as .bak-qmf16), geometry
+  geometry/m01-heatpath.step = make_subset.py of m01-module.step: cells 1-8, dielectric thermal interface,
+  coldplate base, coldplate bonded lid (no barriers, endplates, shoes). Convection h_eff = 2421 W/m^2/K on the
+  39 base channel faces (38,208 mm^2) = 92.5 W/K, the cells-only conductance; the lid ceiling has no CAD face.
+- Run guard: ../run_guarded_term.py (SIGTERM, GUARD_GB default 24, 2h50m) via study/snap4.sh (timeout 3h).
+- mod1 (12 mm, grading 1.3, cells_across_gap 1): surface and volume meshing pass (no 32323: the endplate void
+  is gone), then OrderElevation fails: solver projection needs > 536,870,912 bytes (ARTIFACT 512 MiB limit),
+  3030 s, peak RSS 20.1 GB. The thin plates sized to one layer (lid 2 mm, pad 3 mm) dominate.
+- mod2: target 20 mm, maximum_grading_ratio 2.0 (cell interiors only).
