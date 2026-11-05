@@ -1,4 +1,4 @@
-//! `runmat-circuit`: the core library of RunMat PCB.
+//! `runmat-circuit`: the core library of RunMat ECAD.
 //!
 //! Logical design:
 //! - [`ids`]: name paths, UUIDs and the lock section (stable identity; a rename is an ECO

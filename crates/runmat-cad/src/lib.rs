@@ -1,4 +1,4 @@
-//! RunMat CAD: the kernel-free design layer.
+//! RunMat MCAD: the kernel-free mechanical design layer.
 //!
 //! - [`assembly`]: product structure, variants and effectivity, mates, patterns, fastener
 //!   rules, representations and load levels, BOM, interference, the assembly index.
