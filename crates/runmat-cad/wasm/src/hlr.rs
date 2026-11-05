@@ -46,7 +46,8 @@ pub fn axes(orientation: &str) -> Axes {
                 0.0,
             ],
             [-0.4082, 0.4082, 0.8165],
-            [0.5774, -0.5774, 0.5774],
+            // Into the screen, seen from front-right-top (1, -1, 1): -(u × v).
+            [-0.5774, 0.5774, -0.5774],
         ),
         _ => a([1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
     }
@@ -776,6 +777,8 @@ fn lines_of(model: &Model, axes: &Axes) -> ViewLines {
 
 mod merge;
 use merge::{merge_overlaps, push};
+
+pub mod exact;
 
 #[cfg(test)]
 mod tests;

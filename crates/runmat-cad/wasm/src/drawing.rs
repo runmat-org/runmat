@@ -9,6 +9,9 @@
 //!   against the assembly's resolved tree; properties read the part's output (`part_number`,
 //!   `material`, its declared properties). References built from other references
 //!   (`edges_between`, pieces) resolve when every name inside them does.
+//! - **Lines.** A part's views are projected by the kernel's exact hidden-line removal
+//!   ([`crate::hlr::exact`], OCCT); assemblies, and kernels without it, project their display
+//!   meshes ([`crate::hlr`]).
 //! - **Output.** `{ projection: { kind: "drawing", data }, models: { <file as written>:
 //!   <display> }, diagnostics }`; a view whose model is missing or doesn't compile is reported
 //!   as a warning and the sheet draws its frame without geometry.
@@ -16,7 +19,7 @@
 pub mod auto;
 mod values;
 
-use crate::runtime::{compile_assembly, compile_part, resolve_path, Diagnostic, Files};
+use crate::runtime::{compile_assembly, regenerate_part, resolve_path, Diagnostic, Files, RegeneratedPart};
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::build_drawing_index;
@@ -157,6 +160,8 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
     let mut models = CompiledModels::default();
     let mut displays = serde_json::Map::new();
     let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
+    // Each drawn part as regenerated, its bodies on the kernel that made them.
+    let mut exact: BTreeMap<String, RegeneratedPart> = BTreeMap::new();
     let mut problems: Vec<Diagnostic> = Vec::new();
     let warn = |message: String| Diagnostic {
         path: path.to_owned(),
@@ -197,7 +202,7 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
             }
             continue;
         }
-        match compile_part(&at, source) {
+        match regenerate_part(&at, source) {
             Ok(part) => {
                 let mut names = BTreeSet::new();
                 for body in &part.index.bodies {
@@ -256,6 +261,7 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
                     file.clone(),
                     json!({ "kind": "part", "data": part.display }),
                 );
+                exact.insert(file.clone(), part);
             }
             Err(_) => problems.push(warn(format!(
                 "{file} doesn't compile, so its views are empty"
@@ -274,6 +280,22 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
     // Each view's edges, visible and hidden, from the drawn model's display.
     let views = serde_json::to_value(&document.views).unwrap_or(Value::Null);
     let mut hlr = serde_json::Map::new();
+    // A view's lines: exact on the part's kernel when it projects, else from the display.
+    let lines_of = |file: &str, display: &Value, axes: &crate::hlr::Axes| -> crate::hlr::ViewLines {
+        exact
+            .get(file)
+            .and_then(|part| {
+                let bodies: Vec<_> = part
+                    .result
+                    .state
+                    .bodies
+                    .iter()
+                    .map(|b| (&b.handle, runmat_cad::regen::kernel::Transform::IDENTITY))
+                    .collect();
+                crate::hlr::exact::view_lines(part.kernel.as_ref(), &bodies, display, axes)
+            })
+            .unwrap_or_else(|| crate::hlr::view_lines(display, axes))
+    };
     for view in views.as_array().into_iter().flatten() {
         let (Some(name), Some(file)) = (view["name"].as_str(), view["model"]["file"].as_str())
         else {
@@ -293,8 +315,8 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
                 // centre the view names.
                 Some("detail") => {
                     let axes = parent_axes;
-                    let mut lines = serde_json::to_value(crate::hlr::view_lines(display, &axes))
-                        .unwrap_or(Value::Null);
+                    let mut lines =
+                        serde_json::to_value(lines_of(file, display, &axes)).unwrap_or(Value::Null);
                     let center = document
                         .views
                         .iter()
@@ -318,8 +340,7 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
                 }
                 _ => {
                     let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
-                    serde_json::to_value(crate::hlr::view_lines(display, &axes))
-                        .unwrap_or(Value::Null)
+                    serde_json::to_value(lines_of(file, display, &axes)).unwrap_or(Value::Null)
                 }
             };
             hlr.insert(name.to_owned(), entry);

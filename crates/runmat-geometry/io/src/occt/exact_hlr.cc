@@ -379,27 +379,50 @@ rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> ids,
           run = KProjected();
           have = false;
         };
-        for (int k = 1; k <= pts.NbPoints(); ++k) {
-          const gp_Pnt p = pts.Value(k);
-          const bool v = visible_at(p);
-          if (have && v != vis) {
-            // Close the run at this point, then start the next run from it.
-            const auto q = to2d(p);
-            run.points.push_back(q.first);
-            run.points.push_back(q.second);
-            flush();
-          }
-          if (!have) {
-            run.body = static_cast<std::uint32_t>(bi);
-            run.kind = 0;
-            run.entity = static_cast<std::uint32_t>(ei);
-            run.visible = v;
-            vis = v;
-            have = true;
-          }
+        auto add = [&](const gp_Pnt& p) {
           const auto q = to2d(p);
           run.points.push_back(q.first);
           run.points.push_back(q.second);
+        };
+        auto start = [&](const gp_Pnt& p, bool v) {
+          run.body = static_cast<std::uint32_t>(bi);
+          run.kind = 0;
+          run.entity = static_cast<std::uint32_t>(ei);
+          run.visible = v;
+          vis = v;
+          have = true;
+          add(p);
+        };
+        // Visibility is tested along the curve at most `step` apart (the chord points of a
+        // straight edge are only its ends); where it changes, the change is found by bisection
+        // to the tolerance, and the run ends and the next starts there.
+        const double step = std::max(scale_of(scene) / 256.0, std::max(tolerance, 1e-9));
+        double prev_u = pts.Parameter(1);
+        gp_Pnt prev = c.Value(prev_u);
+        start(prev, visible_at(prev));
+        for (int k = 2; k <= pts.NbPoints(); ++k) {
+          const double next_u = pts.Parameter(k);
+          const gp_Pnt next = c.Value(next_u);
+          const int pieces = std::max(1, std::min(512, static_cast<int>(std::ceil(prev.Distance(next) / step))));
+          for (int j = 1; j <= pieces; ++j) {
+            const double ua = prev_u + (next_u - prev_u) * (static_cast<double>(j - 1) / pieces);
+            const double ub = prev_u + (next_u - prev_u) * (static_cast<double>(j) / pieces);
+            const bool v = visible_at(c.Value(ub));
+            if (v != vis) {
+              double lo = ua, hi = ub;
+              for (int it = 0; it < 40 && c.Value(lo).Distance(c.Value(hi)) > std::max(tolerance * 0.1, eps); ++it) {
+                const double mid = 0.5 * (lo + hi);
+                if (visible_at(c.Value(mid)) == vis) lo = mid; else hi = mid;
+              }
+              const gp_Pnt at = c.Value(0.5 * (lo + hi));
+              add(at);
+              flush();
+              start(at, v);
+            }
+          }
+          add(next);
+          prev = next;
+          prev_u = next_u;
         }
         flush();
       }
