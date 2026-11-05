@@ -581,7 +581,13 @@ pub fn catalog() -> GuideCatalog {
             "Outline, stack-up, rules from net classes and placement",
             "circuit_layout",
             ".circuit.layout",
-            vec![new_file(".circuit.layout"), command("schematic.update-board"), command("board.room"), EntryPoint::Agent],
+            vec![
+                open_file(&[".circuit"]),
+                new_file(".circuit.layout"),
+                command("schematic.update-board"),
+                command("board.room"),
+                EntryPoint::Agent,
+            ],
             vec![
                 decision("outline", "What is the board outline?", &[Value, File], &[], true, Ask,
                     "A rectangle with corner radii, or the enclosure's outline from its part"),
