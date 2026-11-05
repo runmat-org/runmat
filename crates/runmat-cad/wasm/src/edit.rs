@@ -11,8 +11,8 @@
 //! cut, intersect or a new body, sketch-plane or offset start, draft and thin walls),
 //! `part.delete`, `part.suppress`, `part.unsuppress`, `part.move-up` and `part.move-down`.
 //! Assemblies: `assembly.delete`, `assembly.suppress` and `assembly.fix` on the file's own
-//! occurrences. Ends and starts that name geometry (up to a face, from a surface) and every
-//! other command answer with a message saying so; the source editor edits those.
+//! occurrences. Every other part command that adds a feature is built by [`crate::features`] from
+//! its values and picks ([`crate::picks`]); a command or option the model lacks says so.
 
 use crate::runtime::{compile_assembly, Files};
 use runmat_cad::assembly::model::AssemblyDocument;
@@ -88,115 +88,10 @@ fn model(message: impl Into<String>) -> EditFailure {
     EditFailure::Model(message.into())
 }
 
-/// A length or angle field as a value expression: a number in the field's unit, a value edit
-/// (`{ kind: "value", value }`) or an expression itself.
-fn value_expr(v: Option<&Value>, unit: &str, field: &str) -> Result<Value, EditFailure> {
-    match v {
-        Some(Value::Number(n)) => Ok(json!({ "form": "quantity", "value": n, "unit": unit })),
-        Some(Value::Object(o)) if o.get("kind").and_then(Value::as_str) == Some("value") => o
-            .get("value")
-            .cloned()
-            .ok_or_else(|| model(format!("`{field}` has no value"))),
-        Some(Value::Object(o)) if o.contains_key("form") => Ok(Value::Object(o.clone())),
-        Some(Value::String(s)) => s
-            .trim()
-            .parse::<f64>()
-            .map(|n| json!({ "form": "quantity", "value": n, "unit": unit }))
-            .map_err(|_| model(format!("`{field}` isn't a number: {s}"))),
-        _ => Err(model(format!("`{field}` needs a value"))),
-    }
-}
-
-fn text<'a>(values: &'a Map<String, Value>, id: &str, default: &'a str) -> &'a str {
-    values.get(id).and_then(Value::as_str).unwrap_or(default)
-}
-
-fn flag(values: &Map<String, Value>, id: &str) -> bool {
-    values.get(id).and_then(Value::as_bool).unwrap_or(false)
-}
-
-fn ids(v: Option<&Value>) -> Vec<String> {
-    match v {
-        Some(Value::String(s)) => vec![s.clone()],
-        Some(Value::Array(items)) => items
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
 /// The feature an Outline ID names (`feature:body`, `sketch:s1`).
 fn feature_of(id: &str) -> Option<&str> {
     id.strip_prefix("feature:")
         .or_else(|| id.strip_prefix("sketch:"))
-}
-
-/// One direction's end condition.
-fn extent(
-    values: &Map<String, Value>,
-    end_id: &str,
-    distance_id: &str,
-) -> Result<Value, EditFailure> {
-    match text(values, end_id, "blind") {
-        "blind" => Ok(
-            json!({ "extent": "blind", "distance": value_expr(values.get(distance_id), "mm", distance_id)? }),
-        ),
-        "mid_plane" => Ok(
-            json!({ "extent": "symmetric", "distance": value_expr(values.get(distance_id), "mm", distance_id)? }),
-        ),
-        "through_all" => Ok(json!({ "extent": "through_all" })),
-        "up_to_next" => Ok(json!({ "extent": "up_to_next" })),
-        other => Err(model(format!(
-            "an extrude that ends {} names geometry; pick it in the source editor for now",
-            other.replace('_', " ")
-        ))),
-    }
-}
-
-/// `part.extrude`'s values as the extrude feature's model.
-pub fn extrude_feature(id: &str, values: &Map<String, Value>) -> Result<Feature, EditFailure> {
-    let profile = ids(values.get("profile"));
-    let sketch = profile
-        .iter()
-        .find_map(|p| feature_of(p))
-        .ok_or_else(|| model("pick the sketch to extrude"))?;
-    let mode = match text(values, "op", "add") {
-        "add" => json!({ "mode": "add" }),
-        "remove" => json!({ "mode": "cut" }),
-        "intersect" => json!({ "mode": "intersect" }),
-        _ => json!({ "mode": "new" }),
-    };
-    let mut kind = json!({
-        "feature": "extrude",
-        "profile": { "sketch": sketch },
-        "extent": extent(values, "end", "distance")?,
-        "reverse": flag(values, "flip"),
-        "mode": mode,
-    });
-    match text(values, "from", "sketch_plane") {
-        "sketch_plane" => {}
-        "offset" => {
-            kind["from"] = json!({ "from": "offset", "distance": value_expr(values.get("from_offset").or(values.get("offset")), "mm", "offset")? })
-        }
-        other => {
-            return Err(model(format!(
-                "an extrude from a {other} names geometry; pick it in the source editor for now"
-            )))
-        }
-    }
-    if flag(values, "second_direction") {
-        kind["second"] = extent(values, "second_end", "second_distance")?;
-    }
-    if flag(values, "draft") {
-        kind["draft"] = json!({ "angle": value_expr(values.get("draft_angle"), "deg", "draft_angle")?, "outward": flag(values, "draft_outward") });
-    }
-    if flag(values, "thin") {
-        kind["thin"] = json!({ "thickness": value_expr(values.get("thin_thickness"), "mm", "thin_thickness")?, "side": text(values, "thin_side", "one") });
-    }
-    let kind = serde_json::from_value(kind).map_err(|e| model(format!("the extrude: {e}")))?;
-    Ok(Feature::new(id, kind))
 }
 
 /// The first free `{stem}{n}` among the part's features.
@@ -229,16 +124,6 @@ fn part_edit(
         }
     };
     match request.command.as_str() {
-        "part.extrude" => {
-            let mut added = String::new();
-            let change = edit_part(text, path, |document| {
-                added = fresh_id(document, "extrude");
-                let feature = extrude_feature(&added, &request.values)?;
-                document.features.push(feature);
-                Ok(())
-            })?;
-            Ok((change, format!("Added {added}")))
-        }
         "part.delete" => {
             need_one()?;
             let change = edit_part(text, path, |document| {
@@ -298,9 +183,30 @@ fn part_edit(
             let change = reorder_feature(text, path, id, after)?;
             Ok((change, format!("Moved {id}")))
         }
-        other => Err(model(format!(
-            "`{other}` edits parts through the source editor in this build"
-        ))),
+        command => {
+            // A command that adds a feature: its values and picks as the feature's model.
+            let parsed = parse_part(path, text);
+            let document = parsed
+                .document
+                .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
+            let picks = crate::picks::Picks::new(&document, path, text);
+            let Some((stem, kind)) =
+                crate::features::feature_kind(command, &request.values, &picks)?
+            else {
+                return Err(model(format!(
+                    "`{command}` edits parts through the source editor in this build"
+                )));
+            };
+            let kind: runmat_cad::model::FeatureKind =
+                serde_json::from_value(kind).map_err(|e| model(format!("the {stem}: {e}")))?;
+            let mut added = String::new();
+            let change = edit_part(text, path, |document| {
+                added = fresh_id(document, stem);
+                document.features.push(Feature::new(&added, kind.clone()));
+                Ok(())
+            })?;
+            Ok((change, format!("Added {added}")))
+        }
     }
 }
 
@@ -548,7 +454,14 @@ mod tests {
             json!({ "command": "part.extrude", "values": { "profile": ["feature:s1"], "end": "up_to_face" } }),
         );
         assert_eq!(face["ok"], false);
-        assert!(face["message"].as_str().unwrap().contains("source editor"));
+        // An end that names geometry asks for the pick.
+        assert!(
+            face["message"]
+                .as_str()
+                .unwrap()
+                .contains("pick what the extrude goes up to"),
+            "{face}"
+        );
         let bad = run(
             "/p/plate.part",
             "part {",

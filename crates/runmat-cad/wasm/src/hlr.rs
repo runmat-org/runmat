@@ -35,7 +35,7 @@ pub fn axes(orientation: &str) -> Axes {
         "right" => a([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]),
         "left" => a([0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]),
         "isometric" => a(
-            [0.7071, 0.7071, 0.0],
+            [std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2, 0.0],
             [-0.4082, 0.4082, 0.8165],
             [0.5774, -0.5774, 0.5774],
         ),
@@ -77,6 +77,8 @@ pub struct ViewLines {
 }
 
 type P3 = [f64; 3];
+/// A mesh edge by its two end keys (smaller first).
+type EdgeKey = ([i64; 3], [i64; 3]);
 
 fn dot(a: P3, b: P3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -130,8 +132,8 @@ fn key(p: P3) -> [i64; 3] {
 }
 
 /// The segments of a face's mesh boundary (edges used by one triangle), by their end keys.
-fn boundary(face: &Face) -> HashMap<([i64; 3], [i64; 3]), (P3, P3)> {
-    let mut count: HashMap<([i64; 3], [i64; 3]), (usize, P3, P3)> = HashMap::new();
+fn boundary(face: &Face) -> HashMap<EdgeKey, (P3, P3)> {
+    let mut count: HashMap<EdgeKey, (usize, P3, P3)> = HashMap::new();
     for t in &face.tris {
         for k in 0..3 {
             let (a, b) = (t[k], t[(k + 1) % 3]);
@@ -265,7 +267,7 @@ fn model_of(display: &Value) -> Model {
 fn silhouettes(model: &Model, depth: P3) -> Vec<Edge> {
     let mut out = Vec::new();
     for (fi, face) in model.faces.iter().enumerate() {
-        let mut by_edge: HashMap<([i64; 3], [i64; 3]), Vec<(f64, P3, P3)>> = HashMap::new();
+        let mut by_edge: HashMap<EdgeKey, Vec<(f64, P3, P3)>> = HashMap::new();
         for t in &face.tris {
             let n = cross(sub(t[1], t[0]), sub(t[2], t[0]));
             let facing = dot(n, depth);
