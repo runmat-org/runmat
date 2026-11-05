@@ -197,6 +197,9 @@ pub struct MeshPlot {
     feature_edge_groups: Option<Vec<u64>>,
     vertex_colors: Option<Vec<Vec4>>,
     triangle_colors: Option<Vec<Vec4>>,
+    /// Surface normals per vertex from the source (a CAD kernel's exact surface normals);
+    /// `None` shades with area-weighted triangle normals.
+    vertex_normals: Option<Vec<Vec3>>,
     label: Option<String>,
     regions: Vec<MeshRegion>,
     highlighted_region_id: Option<String>,
@@ -229,6 +232,7 @@ impl MeshPlot {
             feature_edge_groups: None,
             vertex_colors: None,
             triangle_colors: None,
+            vertex_normals: None,
             label: None,
             regions: Vec::new(),
             highlighted_region_id: None,
@@ -406,6 +410,37 @@ impl MeshPlot {
         self.vertex_colors = colors.map(|colors| colors.into_iter().map(sanitize_color).collect());
         self.mark_dirty();
         Ok(())
+    }
+
+    /// Exact per-vertex normals (one per vertex, unit length after normalisation). A rim of a
+    /// hole or fillet then shades smoothly where averaged triangle normals would band.
+    pub fn set_vertex_normals(&mut self, normals: Option<Vec<Vec3>>) -> Result<(), String> {
+        if let Some(normals) = normals.as_ref() {
+            if normals.len() != self.vertices.len() {
+                return Err(format!(
+                    "mesh vertex normals: normal count must match vertex count ({})",
+                    self.vertices.len()
+                ));
+            }
+        }
+        self.vertex_normals = normals.map(|normals| {
+            normals
+                .into_iter()
+                .map(|n| {
+                    if n.is_finite() && n.length_squared() > 1e-20 {
+                        n.normalize()
+                    } else {
+                        Vec3::ZERO
+                    }
+                })
+                .collect()
+        });
+        self.mark_dirty();
+        Ok(())
+    }
+
+    pub fn vertex_normals_source(&self) -> Option<&[Vec3]> {
+        self.vertex_normals.as_deref()
     }
 
     pub fn set_triangle_colors(&mut self, colors: Option<Vec<Vec4>>) -> Result<(), String> {
@@ -826,7 +861,18 @@ impl MeshPlot {
         if self.dirty || self.face_vertices.is_none() || self.face_indices.is_none() {
             let color = self.effective_face_color();
             let vertices_source = self.effective_vertices();
-            let normals = vertex_normals(&vertices_source, &self.triangles);
+            // Source normals hold for the undeformed shape; a deformed one recomputes them.
+            let normals = match (&self.vertex_normals, &self.deformation) {
+                (Some(source), None) => {
+                    let computed = vertex_normals(&vertices_source, &self.triangles);
+                    source
+                        .iter()
+                        .zip(computed)
+                        .map(|(&n, fallback)| if n == Vec3::ZERO { fallback } else { n })
+                        .collect()
+                }
+                _ => vertex_normals(&vertices_source, &self.triangles),
+            };
             let scalar_limits = self.scalar_field.as_ref().and_then(scalar_limits);
             let (vertices, indices) = if self.highlighted_region_id.is_some()
                 || self

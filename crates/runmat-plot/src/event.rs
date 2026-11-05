@@ -579,6 +579,10 @@ pub enum ScenePlot {
         vertex_colors_rgba: Vec<[f32; 4]>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         triangle_colors_rgba: Vec<[f32; 4]>,
+        /// Per-vertex surface normals from the source (CAD kernels' exact normals); empty
+        /// shades with area-weighted triangle normals.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        vertex_normals: Vec<[f32; 3]>,
         axes_index: u32,
         label: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -988,6 +992,7 @@ fn append_geometry_scene_chunks(
         feature_edge_groups,
         vertex_colors_rgba,
         triangle_colors_rgba,
+        vertex_normals,
         axes_index: _,
         label,
         regions,
@@ -1028,6 +1033,11 @@ fn append_geometry_scene_chunks(
     if !vertex_colors_rgba.is_empty() {
         mesh.set_vertex_colors(Some(
             vertex_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+        ))?;
+    }
+    if !vertex_normals.is_empty() {
+        mesh.set_vertex_normals(Some(
+            vertex_normals.into_iter().map(Vec3::from_array).collect(),
         ))?;
     }
     if !triangle_colors_rgba.is_empty() {
@@ -1123,6 +1133,7 @@ fn scene_chunk_to_mesh_plot(
         feature_edge_groups: Vec::new(),
         vertex_colors_rgba: vertex_colors,
         triangle_colors_rgba: triangle_colors,
+        vertex_normals: Vec::new(),
         axes_index: 0,
         label: chunk.label.clone(),
         regions: chunk.regions.iter().map(Into::into).collect(),
@@ -3021,6 +3032,10 @@ impl ScenePlot {
                     .feature_edge_groups()
                     .map(|groups| groups.to_vec())
                     .unwrap_or_default(),
+                vertex_normals: mesh
+                    .vertex_normals_source()
+                    .map(|normals| normals.iter().map(|n| n.to_array()).collect())
+                    .unwrap_or_default(),
                 vertex_colors_rgba: mesh
                     .vertex_colors()
                     .map(|colors| colors.iter().copied().map(vec4_to_rgba).collect())
@@ -3601,6 +3616,7 @@ impl ScenePlot {
                 feature_edge_groups,
                 vertex_colors_rgba,
                 triangle_colors_rgba,
+                vertex_normals,
                 axes_index,
                 label,
                 regions,
@@ -3626,6 +3642,11 @@ impl ScenePlot {
                 if !vertex_colors_rgba.is_empty() {
                     mesh.set_vertex_colors(Some(
                         vertex_colors_rgba.into_iter().map(rgba_to_vec4).collect(),
+                    ))?;
+                }
+                if !vertex_normals.is_empty() {
+                    mesh.set_vertex_normals(Some(
+                        vertex_normals.into_iter().map(Vec3::from_array).collect(),
                     ))?;
                 }
                 if !triangle_colors_rgba.is_empty() {

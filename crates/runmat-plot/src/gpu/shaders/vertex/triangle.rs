@@ -57,10 +57,12 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @l
     if uniforms.cad_lighting.x != 0u {
         // Camera-relative studio key/fill keeps recesses legible while orbiting.
         // The low ambient floor preserves orientation contrast; fill prevents
-        // away-facing surfaces from disappearing into the background.
+        // away-facing surfaces from disappearing into the background. The key sits
+        // up and to the left of the eye, so a face seen straight on (a sketch plane
+        // in Normal to, a standard view) reads light, as in SolidWorks and CATIA.
         let world_normal = select(-normal, normal, front_facing);
         let n = normalize((uniforms.cad_view_rotation * world_normal).xyz);
-        let key = normalize(vec3<f32>(-0.78, 0.58, 0.24));
+        let key = normalize(vec3<f32>(-0.42, 0.52, 0.74));
         let fill = normalize(vec3<f32>(0.55, -0.15, 0.55));
         let diffuse = max(dot(n, key), 0.0);
         let fill_diffuse = max(dot(n, fill), 0.0);
