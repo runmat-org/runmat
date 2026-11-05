@@ -167,6 +167,7 @@ pub fn block() -> PartDocument {
         body: Reference::feature_body("body"),
         part_number: Some("BR-100".into()),
         material: Some("material.aluminum".into()),
+        color: None,
         properties: Vec::new(),
     });
     d

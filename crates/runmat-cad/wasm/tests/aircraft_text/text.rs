@@ -98,9 +98,34 @@ pub fn rect(name: &str, plane: &str, u0: f64, v0: f64, u1: f64, v1: f64) -> Stri
 }
 
 pub fn part(name: &str, number: &str, material: &str, comment: &str, body: &str, last: &str) -> String {
+    let color = paint(name).map(|c| format!(", color = \"{c}\"")).unwrap_or_default();
     format!(
-        "{HEADER}// {comment}\npart {name} {{\n{body}\n    output {name} = {{ body = feature.{last}.body, part_number = \"{number}\", material = \"{material}\" }}\n}}\n"
+        "{HEADER}// {comment}\npart {name} {{\n{body}\n    output {name} = {{ body = feature.{last}.body, part_number = \"{number}\", material = \"{material}\"{color} }}\n}}\n"
     )
+}
+
+/// A generic airliner's finish by part, apart from its material: a light-grey fuselage, slightly
+/// darker wing and tail greys, dark tinted glazing, dark intakes, bare-metal exhaust and gear,
+/// primer-green inner structure. No airline's livery.
+fn paint(name: &str) -> Option<&'static str> {
+    let stem = name.strip_prefix("wing_").unwrap_or(name);
+    let stem = stem.strip_suffix("_port").unwrap_or(stem);
+    Some(match stem {
+        "nose" | "skin_panel" | "tail_cone" => "#E6E9ED",
+        "fairing" | "pylon" => "#C7CCD3",
+        n if n.starts_with("cockpit_window") => "#1A222B",
+        "cabin_window" => "#252E38",
+        "frame" | "stringer" | "rib" | "front_spar" | "rear_spar" => "#A7B596",
+        "rivet" => "#BFC4CB",
+        "leading_edge" | "slat" | "box_skin_upper" | "box_skin_lower" | "trailing_edge_tip" => "#B6BCC4",
+        "flap_inboard" | "flap_outboard" | "aileron" => "#BDC2C9",
+        "winglet" | "fin" | "rudder" | "stabilizer" | "elevator" => "#CED2D8",
+        "cowl" => "#DCDFE3",
+        "fan" | "spinner" => "#363C44",
+        "core_nozzle" | "plug" => "#8A9097",
+        "gear_strut" | "axle" | "hub" => "#A2A8AF",
+        _ => return None,
+    })
 }
 
 pub fn offset(x: f64, y: f64, z: f64) -> String {

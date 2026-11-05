@@ -334,6 +334,7 @@ fn sheet_references_survive_a_segment_added_to_the_chain() {
         body: Reference::feature_body("base"),
         part_number: None,
         material: None,
+        color: None,
         properties: Vec::new(),
     });
     let before = env.regen(&d);

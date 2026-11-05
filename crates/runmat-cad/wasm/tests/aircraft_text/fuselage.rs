@@ -43,9 +43,10 @@ fn nose() -> String {
     )
 }
 
-/// A cockpit window pane: a band 4 mm proud of the nose between `x0` and `x1`, `angle` round.
+/// A cockpit window pane: a band flush with the nose (0.5 mm proud, so it shades over the skin)
+/// between `x0` and `x1`, `angle` round.
 fn cockpit_window(name: &str, x0: f64, x1: f64, angle: f64) -> String {
-    let outer = nose_profile(x0, x1, 4.0, 6);
+    let outer = nose_profile(x0, x1, 0.5, 6);
     let mut inner = nose_profile(x0, x1, -6.0, 6);
     inner.reverse();
     part(

@@ -291,6 +291,7 @@ fn g06_dependency_analysis_by_input_and_configuration() {
         body: Reference::feature_body("lug"),
         part_number: None,
         material: None,
+        color: None,
         properties: Vec::new(),
     });
     d.regions.push(region(

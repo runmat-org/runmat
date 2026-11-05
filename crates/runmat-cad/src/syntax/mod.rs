@@ -183,6 +183,8 @@ pub const ASSEMBLY: DocumentGrammar = DocumentGrammar {
         named("configuration", "configurations", "configuration"),
         named("property", "properties", "property"),
         named("exploded", "exploded", "exploded"),
+        // `view hero = { from = [-0.62, 0.7, -0.36], up = [0, 0, 1], default = true }`
+        named("view", "views", "view"),
     ],
     links: Some(LINKS),
 };

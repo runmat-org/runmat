@@ -221,6 +221,17 @@ pub fn wing(name: &str, side: f64) -> String {
         let station = format!("(input.root_station + 100 mm + {k} * input.rib_pitch)");
         let frac = format!("{station} / input.semispan");
         let rib_y = if side > 0.0 { y } else { -y - 20.0 };
+        // The skins are lofted straight between the root-station and tip sections, so at a
+        // station between them the depth (chord times thickness ratio) runs linearly, not the
+        // product of the linear chord and the linear ratio: the rib takes that depth over its
+        // chord as its ratio, or its caps would stand up to 24 mm through the skin at midspan.
+        let chord_at = |f: &str| format!("(input.root_chord - {f} * (input.root_chord - input.tip_chord))");
+        let ratio_at = |f: &str| format!("(input.root_thickness - {f} * (input.root_thickness - input.tip_thickness))");
+        let root_frac = "(input.root_station / input.semispan)";
+        let root_depth = format!("{} * {}", chord_at(root_frac), ratio_at(root_frac));
+        let tip_depth = "input.tip_chord * input.tip_thickness".to_string();
+        let along = format!("(({station} - input.root_station) / (input.semispan - input.root_station))");
+        let depth = format!("({root_depth} + {along} * ({tip_depth} - {root_depth}))");
         s += &use_(
             "part",
             "rib",
@@ -228,7 +239,7 @@ pub fn wing(name: &str, side: f64) -> String {
             &[
                 inputs(&[
                     ("chord", format!("input.root_chord - {frac} * (input.root_chord - input.tip_chord)")),
-                    ("thickness", format!("input.root_thickness - {frac} * (input.root_thickness - input.tip_thickness)")),
+                    ("thickness", format!("{depth} / {}", chord_at(&frac))),
                 ]),
                 offset(x_le(y), rib_y, z_le(y)),
             ],

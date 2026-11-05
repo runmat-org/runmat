@@ -131,6 +131,9 @@ pub struct AssemblyIndex {
     pub bom: Bom,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: ResolveStats,
+    /// The top assembly's saved model views ([`crate::assembly::views`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<crate::assembly::views::ModelView>,
 }
 
 /// The child of `from` reached by walking `path` segment by segment.
@@ -289,6 +292,10 @@ pub fn build_assembly_index(
         bom: flat_bom(tree, source, &BomOptions::default()),
         diagnostics: tree.diagnostics.diagnostics.clone(),
         stats: tree.stats.clone(),
+        views: source
+            .and_then(|s| s.assembly(&tree.top, None).ok())
+            .map(|doc| doc.views.clone())
+            .unwrap_or_default(),
     }
 }
 

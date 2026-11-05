@@ -29,6 +29,7 @@ pub mod resolve;
 pub mod source;
 pub mod synth;
 pub mod validate;
+pub mod views;
 
 pub use model::*;
 pub use options::{

@@ -51,6 +51,28 @@ pub fn material_appearance(material: Option<&str>) -> (&'static str, [f32; 4]) {
     ("default", CAD_FACE_RGBA)
 }
 
+/// A display color from sRGB hex: `#RRGGBB` (opaque) or `#RRGGBBAA`, the `#` optional.
+pub fn parse_srgb_hex(text: &str) -> Option<[f32; 4]> {
+    let hex = text.trim().strip_prefix('#').unwrap_or(text.trim());
+    if !(hex.len() == 6 || hex.len() == 8) || !hex.is_ascii() {
+        return None;
+    }
+    let byte = |k: usize| {
+        u8::from_str_radix(&hex[k..k + 2], 16)
+            .ok()
+            .map(|b| b as f32 / 255.0)
+    };
+    Some([byte(0)?, byte(2)?, byte(4)?, if hex.len() == 8 { byte(6)? } else { 1.0 }])
+}
+
+/// The color a part draws in: its own `color` when it is valid hex, else its material's
+/// appearance.
+pub fn part_appearance(material: Option<&str>, color: Option<&str>) -> [f32; 4] {
+    color
+        .and_then(parse_srgb_hex)
+        .unwrap_or_else(|| material_appearance(material).1)
+}
+
 /// `#RRGGBBAA` of a display color, as 3MF's `displaycolor` takes it.
 pub fn srgb_hex(c: [f32; 4]) -> String {
     let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -71,5 +93,22 @@ mod tests {
         assert_eq!(material_appearance(Some("material.epoxy")).0, "epoxy");
         assert!(material_appearance(Some("glass")).1[3] < 0.5, "glass is see-through");
         assert_eq!(srgb_hex([1.0, 0.0, 0.0, 1.0]), "#FF0000FF");
+    }
+
+    #[test]
+    fn a_part_color_overrides_its_material() {
+        assert_eq!(parse_srgb_hex("#FF000080"), Some([1.0, 0.0, 0.0, 128.0 / 255.0]));
+        assert_eq!(parse_srgb_hex("00ff00"), Some([0.0, 1.0, 0.0, 1.0]));
+        assert_eq!(parse_srgb_hex("#12345"), None);
+        assert_eq!(parse_srgb_hex("#GG0000"), None);
+        assert_eq!(
+            part_appearance(Some("glass"), Some("#1B232C")),
+            [27.0 / 255.0, 35.0 / 255.0, 44.0 / 255.0, 1.0]
+        );
+        // An invalid color falls back to the material.
+        assert_eq!(
+            part_appearance(Some("glass"), Some("navy")),
+            material_appearance(Some("glass")).1
+        );
     }
 }

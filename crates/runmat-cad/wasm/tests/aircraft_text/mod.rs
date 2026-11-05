@@ -92,6 +92,9 @@ fn airliner() -> String {
     s += &use_("assembly", "main_gear", "main_gear_starboard", &[attach("main_gear_starboard")]);
     s += &use_("assembly", "main_gear", "main_gear_port", &[attach("main_gear_port")]);
     s += &use_("assembly", "nose_gear", "nose_gear", &[attach("nose_gear")]);
+    // The view it opens on: three-quarters from ahead, a little below, so both engines, both
+    // wings and the gear read.
+    s += "\n    view hero = { from = [-0.68, -0.62, -0.26], up = [0, 0, 1], default = true }\n";
     s += "}\n";
     s
 }

@@ -731,6 +731,9 @@ pub struct AssemblyDocument {
     /// Named exploded states ([`crate::assembly::explode`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<ExplodedView>,
+    /// Saved model views ([`crate::assembly::views`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<crate::assembly::views::ModelView>,
     #[serde(default)]
     pub closed: bool,
 }
@@ -757,6 +760,7 @@ impl AssemblyDocument {
             properties: Vec::new(),
             links: Vec::new(),
             exploded: Vec::new(),
+            views: Vec::new(),
             closed: false,
         }
     }

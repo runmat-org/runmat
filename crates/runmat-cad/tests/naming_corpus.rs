@@ -1292,6 +1292,7 @@ fn c34_imported_cad_names_survive_source_edit() {
         }),
         part_number: None,
         material: None,
+        color: None,
         properties: Vec::new(),
     });
     let r1 = env.regen(&d);

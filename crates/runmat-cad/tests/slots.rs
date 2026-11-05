@@ -66,6 +66,7 @@ fn two_bodies() -> PartDocument {
         body: Reference::feature_body("tab"),
         part_number: None,
         material: None,
+        color: None,
         properties: Vec::new(),
     });
     d

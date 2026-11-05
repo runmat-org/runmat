@@ -135,6 +135,11 @@ pub struct PartOutput {
     pub part_number: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<MaterialRef>,
+    /// The part's display color, sRGB `#RRGGBB` (opaque) or `#RRGGBBAA`: its appearance, set
+    /// apart from its material (a painted skin, tinted glazing). Absent: the material's
+    /// appearance ([`crate::appearance`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     #[serde(default)]
     pub properties: Vec<Property>,
 }

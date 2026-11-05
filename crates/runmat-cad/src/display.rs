@@ -528,14 +528,28 @@ pub fn assembly_display_configured(
                         None => PrototypeShape::Empty,
                     },
                 };
+                // The part's own appearance (its color, else its material's) unless the
+                // occurrence overrides the material.
+                let own = match &shape {
+                    PrototypeShape::Mesh { part } => part.appearance,
+                    _ => None,
+                };
+                let part_material = source
+                    .definition(&node.definition, node.revision.as_ref())
+                    .ok()
+                    .and_then(|s| s.material.clone());
+                let appearance = match own {
+                    Some(c) if node.material == part_material => c,
+                    _ => crate::appearance::material_appearance(
+                        node.material.as_ref().map(|m| m.0.as_str()),
+                    )
+                    .1,
+                };
                 out.prototypes.push(Prototype {
                     file,
                     configuration,
                     material: node.material.as_ref().map(|m| m.0.clone()),
-                    appearance: crate::appearance::material_appearance(
-                        node.material.as_ref().map(|m| m.0.as_str()),
-                    )
-                    .1,
+                    appearance,
                     shape,
                 });
                 let p = (out.prototypes.len() - 1) as u32;
