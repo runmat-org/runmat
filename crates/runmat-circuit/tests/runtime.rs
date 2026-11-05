@@ -238,6 +238,9 @@ fn update_board_applies_as_minimal_edits_and_the_board_takes_the_lines() {
     )
     .unwrap_or_else(|e| panic!("{}", e.message));
     assert_eq!(out.files.len(), 1);
+    // The summary is a sentence a reviewer reads: counts agree with their nouns.
+    assert!(out.summary.starts_with("Applied "), "{}", out.summary);
+    assert!(!out.summary.contains("(s)"), "{}", out.summary);
     let layout = changed(&out, LAYOUT);
     assert!(!layout.reprinted, "minimal edits");
     let statements = files[LAYOUT].lines().count();

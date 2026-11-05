@@ -216,15 +216,37 @@ fn update_board(project: &Project, request: &EditRequest) -> Result<EditOutput, 
     )
     .map_err(failure)?;
     Ok(EditOutput {
-        summary: format!(
-            "applied {} change(s); removed {} track(s) and {} via(s); {} left without a net",
-            report.applied.len(),
-            report.removed_tracks.len(),
-            report.removed_vias.len(),
-            report.unnetted.len()
-        ),
+        summary: eco_summary(&plan, &report),
         files: vec![file_change(&layout.path, &layout.text, change)],
     })
+}
+
+/// What an applied ECO did, in a sentence a reviewer reads: the one change named
+/// (`C900: C_0402_1005Metric_IPCN → C_0805_2012Metric_IPCN`), or the count, then the copper it
+/// removed and any copper left on no net.
+fn eco_summary(plan: &eco::EcoPlan, report: &eco::ApplyReport) -> String {
+    let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let mut out = match report.applied.as_slice() {
+        [id] => match plan.get(id) {
+            Some(c) => match (&c.from, &c.to) {
+                (Some(from), Some(to)) => format!("Applied {}: {from} → {to}.", c.item),
+                _ => format!("Applied the change to {}.", c.item),
+            },
+            None => "Applied 1 change.".to_string(),
+        },
+        all => format!("Applied {}.", count(all.len(), "change", "changes")),
+    };
+    let (tracks, vias) = (report.removed_tracks.len(), report.removed_vias.len());
+    out.push_str(&match (tracks, vias) {
+        (0, 0) => " No tracks or vias were removed.".to_string(),
+        (t, 0) => format!(" Removed {}.", count(t, "track", "tracks")),
+        (0, v) => format!(" Removed {}.", count(v, "via", "vias")),
+        (t, v) => format!(" Removed {} and {}.", count(t, "track", "tracks"), count(v, "via", "vias")),
+    });
+    if !report.unnetted.is_empty() {
+        out.push_str(&format!(" {} left on no net.", count(report.unnetted.len(), "copper item is", "copper items are")));
+    }
+    out
 }
 
 fn update_schematic(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
