@@ -147,9 +147,9 @@ pub(in crate::regen::fake) fn sweep(
     Ok(s)
 }
 
-/// A ruled loft through sections at local heights `z` (strictly increasing after sorting),
-/// each with the same loops and curve counts. Side faces are tagged by the first section's
-/// curves and numbered by span when there are more than two sections.
+/// A loft through sections at local heights `z` (strictly increasing after sorting), each with
+/// the same loops and curve counts, sampled as ruled strips between sections. Each first-section
+/// curve makes one side face through every section, as OCCT's smooth loft does.
 pub(in crate::regen::fake) fn loft(
     to_world: Transform,
     sections: Vec<(f64, Vec<Vec<Curve2>>)>,
@@ -212,23 +212,12 @@ pub(in crate::regen::fake) fn loft(
     for (li, l) in labels.iter().enumerate() {
         let mut sl = Vec::new();
         for lab in l.iter().take(shape0[li]) {
-            let mut per = Vec::new();
-            for k in 0..spans {
-                let span = if increasing { k } else { spans - 1 - k };
-                let mut label = lab.clone();
-                if spans > 1 {
-                    if let HistorySource::Generated { ordinal, .. } = &mut label {
-                        *ordinal = Some(span as u32);
-                    }
-                }
-                per.push(surfaces.len());
-                surfaces.push(Surf {
-                    label,
-                    hint: SurfaceKind::Other,
-                    plane: None,
-                });
-            }
-            sl.push(per);
+            sl.push(vec![surfaces.len(); spans]);
+            surfaces.push(Surf {
+                label: lab.clone(),
+                hint: SurfaceKind::Other,
+                plane: None,
+            });
         }
         sides.push(sl);
     }

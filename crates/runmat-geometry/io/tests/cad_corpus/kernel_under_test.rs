@@ -4,7 +4,8 @@
 use runmat_cad::evaluate::{AnalysisRequest, AnalysisResult, GeometryAnalyzer};
 use runmat_cad::regen::fake::FakeImportBox;
 use runmat_cad::regen::kernel::{
-    BodyHandle, CadKernel, KernelError, KernelId, KernelOp, KernelOutput, ToolShape,
+    BodyHandle, BodyMesh, CadKernel, KernelError, KernelId, KernelOp, KernelOutput,
+    TessellationOptions, Tessellator, ToolShape,
 };
 use runmat_geometry_io::{ImportSource, NamedBox, OcctKernel};
 use std::collections::BTreeMap;
@@ -120,6 +121,17 @@ impl CadKernel for KernelUnderTest {
         };
         record(&op_case(op), &outcome);
         r
+    }
+}
+
+/// Display meshes come from OCCT, as the Desktop host tessellates.
+impl Tessellator for KernelUnderTest {
+    fn tessellate(
+        &self,
+        body: &BodyHandle,
+        options: &TessellationOptions,
+    ) -> Result<BodyMesh, KernelError> {
+        self.occt().tessellate(body, options)
     }
 }
 

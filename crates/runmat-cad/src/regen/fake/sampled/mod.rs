@@ -13,8 +13,8 @@
 //!
 //! Shapes: prisms of line, arc and circle profiles on any frame; revolves (any angle, caps
 //! when not full); translational sweeps along polyline paths (one side face per curve per path
-//! segment, ordinals from the path); ruled lofts through parallel sections (one side face per
-//! curve per span); holes (simple, counterbore, countersink) as revolves of their section; and
+//! segment, ordinals from the path); lofts through parallel sections (one side face per curve
+//! through every section, sampled as ruled strips); holes (simple, counterbore, countersink) as revolves of their section; and
 //! images of whole bodies under any rigid motion or reflection.
 
 mod occupancy;

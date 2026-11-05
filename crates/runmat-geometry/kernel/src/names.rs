@@ -11,8 +11,9 @@ use std::fmt;
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     /// A face swept from a profile curve (extrude, revolve, sweep, loft). A sweep along a path
-    /// with corners numbers the pieces by path segment; a loft through more than two sections
-    /// numbers them by span; both ordinals come from the definition.
+    /// with corners numbers the pieces by path segment, an ordinal from the definition. A solid
+    /// loft makes one smooth face per curve through all its sections; a surface loft through
+    /// more than two sections numbers its ruled pieces by span.
     Side,
     /// The cap at the profile plane (extrude, sweep start, revolve start).
     StartCap,

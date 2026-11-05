@@ -1,5 +1,5 @@
 // Tool shapes for K1: prisms (with draft and bounded ends), revolves, translational sweeps,
-// ruled lofts, offset profiles, planar sheets and STEP import with CAD-file names.
+// lofts (ruled between two sections, smooth through more), offset profiles, planar sheets and STEP import with CAD-file names.
 //
 // Every face a builder makes takes the label of the profile edge (side) or cap that made it,
 // read from OCCT's Generated/FirstShape/LastShape records; sheet boundary edges take the
@@ -415,8 +415,10 @@ Tracked build_sweep(const Profile& p, const std::vector<gp_Pnt>& path, std::uint
 
 // ------------------------------------------------------------------------- loft
 
-// Ruled spans between consecutive sections, fused. Section k's edge labels name span k's
-// sides (the lowering numbers them by span); caps are the first and last sections.
+// A solid loft between two sections is ruled; through more it is one smooth surface per loop
+// (BRepOffsetAPI_ThruSections, not ruled), its sides named by the first section's edges. A
+// sheet loft is ruled per span, section k's edge labels naming span k's sides (the lowering
+// numbers them by span). Caps are the first and last sections.
 namespace {
 bool same_ends(const TopoDS_Edge& e, const TopoDS_Edge& f) {
   TopoDS_Vertex e0, e1, f0, f1;
@@ -502,6 +504,37 @@ Tracked build_loft(const std::vector<const Profile*>& sections, std::uint32_t st
                    std::uint32_t end_label) {
   if (sections.size() < 2) fail("a loft needs two sections");
   if (!sections.front()->closed) return build_sheet_loft(sections);
+  // Three or more sections: one smooth surface through them all (as SolidWorks and CATIA loft),
+  // so the loft has no crease or edge at its inner sections.
+  if (sections.size() > 2) {
+    std::vector<std::vector<TopoDS_Wire>> wires(sections.size());
+    for (std::size_t k = 0; k < sections.size(); ++k) {
+      for (TopExp_Explorer ex(sections[k]->tracked.shape, TopAbs_WIRE); ex.More(); ex.Next()) wires[k].push_back(TopoDS::Wire(ex.Current()));
+      if (wires[k].size() != wires[0].size()) fail("loft sections have different numbers of loops");
+    }
+    const Profile& a = *sections.front();
+    std::vector<Tracked> loops;
+    for (std::size_t li = 0; li < wires[0].size(); ++li) {
+      BRepOffsetAPI_ThruSections mk(Standard_True, Standard_False, 1e-6);
+      mk.CheckCompatibility(Standard_False);
+      for (const auto& w : wires) mk.AddWire(w[li]);
+      mk.Build();
+      if (!mk.IsDone()) fail("the loft could not be built through its sections");
+      Tracked t;
+      t.shape = mk.Shape();
+      for (TopExp_Explorer ex(wires[0][li], TopAbs_EDGE); ex.More(); ex.Next()) {
+        const TopoDS_Shape f = mk.GeneratedFace(ex.Current());
+        if (!f.IsNull()) add_origins(t.faces, f, origins_of(a.tracked.edges, ex.Current()));
+      }
+      label_face(t, mk.FirstShape(), start_label);
+      label_face(t, mk.LastShape(), end_label);
+      loops.push_back(std::move(t));
+    }
+    if (loops.size() == 1) return loops.front();
+    std::vector<const Tracked*> holes;
+    for (std::size_t i = 1; i < loops.size(); ++i) holes.push_back(&loops[i]);
+    return boolean_op(1, {&loops[0]}, holes);
+  }
   std::vector<Tracked> spans;
   for (std::size_t k = 0; k + 1 < sections.size(); ++k) {
     const Profile& a = *sections[k];

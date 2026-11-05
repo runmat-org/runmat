@@ -14,6 +14,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
 #include <IMeshTools_Parameters.hxx>
@@ -22,6 +23,7 @@
 #include <Poly_Triangulation.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopoDS.hxx>
@@ -103,6 +105,18 @@ KPolyline edge_polyline(const TopoDS_Edge& edge, const TopTools_ListOfShape& fac
   return out;
 }
 
+// Whether a face of the body already holds a triangulation finer than `chord`. BRepMesh keeps a
+// finer mesh, so a coarse display level asked for after the full display would get the full
+// one; such a body is cleaned and meshed again at the coarser chord.
+bool finer_mesh_than(const TopoDS_Shape& shape, double chord) {
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
+    TopLoc_Location loc;
+    const Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), loc);
+    if (!tri.IsNull() && tri->Deflection() < chord * 0.999) return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 KDisplay kernel_tessellate(std::uint64_t id, double chord, double angle) {
@@ -118,6 +132,7 @@ KDisplay kernel_tessellate(std::uint64_t id, double chord, double angle) {
     parameters.InParallel = Standard_False;
     parameters.MinSize = chord * 0.1;
     parameters.ControlSurfaceDeflection = Standard_True;
+    if (finer_mesh_than(body->shape, chord)) BRepTools::Clean(body->shape);
     BRepMesh_IncrementalMesh mesh(body->shape, parameters);
     if (!mesh.IsDone()) fail("OCCT display tessellation did not complete");
 

@@ -2444,7 +2444,8 @@ fn specials() -> Vec<Outcome> {
         ));
     }
 
-    // Loft: a third section makes two spans; the ordinal-free side is now two pieces.
+    // Loft: a third section keeps one smooth side face per profile curve through all three
+    // sections (as CATIA and SolidWorks loft); a span-numbered reference is not generated.
     {
         let f = loft();
         let p = f.defaults();
@@ -2455,13 +2456,11 @@ fn specials() -> Vec<Outcome> {
         loft_doc(&mut d, true);
         apply(&mut d, &p);
         let probes = vec![
-            probe(
+            face1(
                 "lf_side_one",
-                TopoKind::Face,
                 loft_side(None),
-                Cardinality::ExactlyOne,
                 "lf",
-                Expect::Problem("ambiguous"),
+                centroid_near([None, None, Some(30.0 + p["lz"] / 2.0)], 2.5),
             ),
             probe(
                 "lf_side_all",
@@ -2469,19 +2468,23 @@ fn specials() -> Vec<Outcome> {
                 loft_side(None),
                 Cardinality::AtLeastOne,
                 "lf",
-                Expect::Ok(2, any()),
+                Expect::Ok(1, any()),
             ),
-            face1(
+            probe(
                 "lf_span0",
+                TopoKind::Face,
                 loft_side(Some(0)),
+                Cardinality::ExactlyOne,
                 "lf",
-                centroid_near([None, None, Some(20.0 + p["lz"] / 2.0)], 2.5),
+                Expect::Problem("not_generated"),
             ),
-            face1(
+            probe(
                 "lf_span1",
+                TopoKind::Face,
                 loft_side(Some(1)),
+                Cardinality::ExactlyOne,
                 "lf",
-                centroid_near([None, None, Some(30.0 + p["lz"])], 2.5),
+                Expect::Problem("not_generated"),
             ),
         ];
         for pr in &probes {

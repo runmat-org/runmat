@@ -1397,14 +1397,16 @@ impl<'a> Lower<'a> {
         if profiles.len() < 2 {
             return Err(failed("a loft needs two sections"));
         }
-        let several = profiles.len() > 2;
+        // A solid loft is one smooth face per curve through every section; a surface loft's
+        // ruled pieces are numbered by span.
+        let several = profiles.len() > 2 && !solid;
         if profiles.iter().any(|p| p.loops.len() != first.loops.len()) {
             return Err(failed("loft sections need the same number of loops"));
         }
         // Sections with fewer curves in a loop are refined to the most curves any section has
         // there: their longest segments split at the middle, longest first (the earliest of
         // equal ones). Sides are tagged by the curves of the first section with the most curves
-        // in each loop (the first section when every count agrees), by span.
+        // in each loop (the first section when every count agrees).
         let counts: Vec<usize> = (0..first.loops.len())
             .map(|li| {
                 profiles
