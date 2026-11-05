@@ -16,8 +16,11 @@ use crate::board_rules::BItem;
 use crate::syntax::board::{reparse_board_keeping, BoardDelta, BoardItem};
 
 mod reuse;
+mod since;
+pub use since::Since;
 use crate::syntax::board_edit::board_command_parsed;
 use crate::zone::{fill_zones_cached, FillCache, FillDirty, FillReport};
+use std::collections::HashSet;
 use std::time::Duration;
 
 /// Where the last call spent its time.
@@ -63,6 +66,14 @@ pub struct Session {
     schematic: Option<SchematicState>,
     board: Option<BoardState>,
     pub timings: SessionTimings,
+    /// The projection's number: it goes up by one each time the projection may have changed.
+    generation: u64,
+    /// The change from projection `generation - 1` to `generation`, when the session made one.
+    last_delta: Option<serde_json::Value>,
+    /// Set while a sync runs: `Some` when the projection may have changed, with its delta when known.
+    change: Option<Option<serde_json::Value>>,
+    /// The projection a whole recompile replaces, for its delta.
+    prev: Option<CircuitIndex>,
 }
 
 /// A stopwatch for [`SessionTimings`]; wasm32 has no clock in `std`, so it reads zero there.
@@ -132,7 +143,8 @@ impl Session {
         Session::default()
     }
 
-    /// The schematic for `circuit_path`, reused when its inputs are the ones it was built from.
+    /// The schematic for `circuit_path`, reused when its inputs are the ones it was built from;
+    /// `true` when it was built anew.
     fn schematic(
         &mut self,
         path: &str,
@@ -141,7 +153,7 @@ impl Session {
         layout_path: &str,
         files: &Files,
         options: &CompileOptions,
-    ) -> Result<(), Vec<Diagnostic>> {
+    ) -> Result<bool, Vec<Diagnostic>> {
         let mut inputs: Files = files
             .iter()
             .filter(|(p, _)| p.as_str() != layout_path)
@@ -153,7 +165,7 @@ impl Session {
         if let Some(s) = &self.schematic {
             if s.circuit_path == circuit_path && s.inputs == inputs && s.variant == options.variant
             {
-                return Ok(());
+                return Ok(false);
             }
         }
         self.schematic = None;
@@ -187,11 +199,32 @@ impl Session {
             project,
             index,
         });
-        Ok(())
+        Ok(true)
     }
 
     /// Brings the session to `path`/`text` and `files`; `None` diagnostics when it compiles.
+    /// Numbers the projection: a sync that may have changed it takes the next generation.
     fn sync(
+        &mut self,
+        path: &str,
+        text: &str,
+        files: &Files,
+        options: &CompileOptions,
+    ) -> Result<(), Vec<Diagnostic>> {
+        self.change = None;
+        let out = self.sync_inner(path, text, files, options);
+        self.prev = None;
+        if out.is_err() {
+            self.change = Some(None);
+        }
+        if let Some(delta) = self.change.take() {
+            self.generation += 1;
+            self.last_delta = delta;
+        }
+        out
+    }
+
+    fn sync_inner(
         &mut self,
         path: &str,
         text: &str,
@@ -215,16 +248,12 @@ impl Session {
         } else {
             files.get(&layout_path).map(String::as_str)
         };
-        let schematic_changed = self
-            .schematic
-            .as_ref()
-            .is_none_or(|s| s.circuit_path != circuit_path);
-        let before = self.schematic.as_ref().map(|s| s as *const SchematicState);
-        self.schematic(path, text, &circuit_path, &layout_path, files, options)?;
-        let rebuilt = schematic_changed
-            || before != self.schematic.as_ref().map(|s| s as *const SchematicState);
+        let rebuilt = self.schematic(path, text, &circuit_path, &layout_path, files, options)?;
         self.timings.schematic = t.elapsed();
         let Some(layout_text) = layout_text else {
+            if rebuilt || self.board.is_some() {
+                self.change = Some(None);
+            }
             self.board = None;
             return Ok(());
         };
@@ -272,7 +301,11 @@ impl Session {
                     Some(delta),
                 )
             }
-            _ => (None, None),
+            other => {
+                // A whole recompile: the delta is taken against the projection it replaces.
+                self.prev = other.map(|b| b.index);
+                (None, None)
+            }
         };
         self.timings.read = t.elapsed();
         match (state, delta) {
@@ -291,6 +324,7 @@ impl Session {
                 // A whole re-read: it is the parse a fresh compile does, and the fills keep
                 // the tiles the change didn't reach.
                 let reuse = kept.map(|(text, old)| (text, old, s.3));
+                self.prev = Some(s.8);
                 self.whole(layout_path, layout_text, Some(s.0), reuse, options)?;
             }
             _ => self.whole(layout_path, layout_text, None, None, options)?,
@@ -359,6 +393,7 @@ impl Session {
         add_board(&mut index, board, &rules, &drc);
         add_eco(&mut index, &plans.0, &plans.1, board);
         self.timings.index = t.elapsed();
+        self.change = Some(self.prev.take().map(|prev| super::delta::index_delta(&prev, &index)));
         self.board = Some(BoardState {
             path,
             text: text.to_owned(),
@@ -509,6 +544,11 @@ impl Session {
             items.insert(*z);
             nets.extend(board.zones.get(z).and_then(|z| z.net));
         }
+        // What the delta compares: the old rows of the items rebuilt below, and the fields
+        // rebuilt whole. Every other row moves over unchanged.
+        let refs: HashSet<&str> = items.iter().filter_map(|id| board.footprints.get(id)).map(|f| f.reference.as_str()).collect();
+        let base = super::delta::PatchBase::take(&mut index, |id| items.contains(&ItemId(id)), |r| refs.contains(r));
+        drop(refs);
         let reuse = index.board.take().map(|old| crate::index::Reuse {
             old,
             items: &items,
@@ -516,6 +556,7 @@ impl Session {
         });
         crate::index::add_board_reusing(&mut index, board, &rules, &drc, reuse);
         add_eco(&mut index, &plans.0, &plans.1, board);
+        self.change = Some(base.map(|b| super::delta::patched_delta(&b, &index)));
         self.timings.index = t.elapsed();
         self.board = Some(BoardState {
             path,

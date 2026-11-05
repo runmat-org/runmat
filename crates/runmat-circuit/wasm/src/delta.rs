@@ -1,45 +1,26 @@
 //! Recompiles that send what changed: `compile_delta(path, text, files, options, base)`.
 //!
-//! The module keeps the last projection it sent, numbered. A caller that holds projection
-//! `base` gets `{ seq, delta, diagnostics }` ([`runmat_circuit::runtime::delta`]): the rows and
-//! fields that changed since. Any other caller (the first call, or one whose `base` isn't the
-//! last sent) gets `{ seq, index, diagnostics }`, the whole projection. After a small edit on a
+//! The module's session numbers each projection. A caller that holds the one before gets
+//! `{ seq, delta, diagnostics }` ([`runmat_circuit::runtime::delta`]): the rows and fields that
+//! changed since. Any other caller (the first call, or one whose `base` is older) gets
+//! `{ seq, index, diagnostics }`, the whole projection. After a small edit on a
 //! 50k-primitive board the delta is kilobytes where the projection is megabytes.
 
-use crate::{error_json, parse, SESSION};
-use runmat_circuit::index::CircuitIndex;
-use runmat_circuit::runtime::{delta, CompileOptions, Files};
-use std::cell::RefCell;
+use crate::{error_json, files, parse, SESSION};
+use runmat_circuit::runtime::CompileOptions;
 use wasm_bindgen::prelude::*;
 
-thread_local! {
-    /// The last projection sent, and its number.
-    static SENT: RefCell<(u64, Option<CircuitIndex>)> = const { RefCell::new((0, None)) };
-}
-
 /// The projection of the circuit `path` belongs to, as a delta from projection `base` (a `seq`
-/// an earlier call returned) when the module still holds it, else whole.
+/// an earlier call returned) when the module can give it, else whole
+/// ([`runmat_circuit::runtime::Session::compile_since`]).
 #[wasm_bindgen]
-pub fn compile_delta(path: &str, text: &str, files: &str, options: &str, base: &str) -> String {
-    let (files, options) = match (parse::<Files>(files, "files"), parse::<CompileOptions>(options, "options")) {
+pub fn compile_delta(path: &str, text: &str, files_json: &str, options: &str, base: &str) -> String {
+    let (files, options) = match (files(files_json), parse::<CompileOptions>(options, "options")) {
         (Ok(f), Ok(o)) => (f, o),
         (Err(m), _) | (_, Err(m)) => return error_json(&m),
     };
-    let out = SESSION.with(|s| s.borrow_mut().compile(path, text, &files, &options));
     let base: Option<u64> = base.trim().parse().ok();
-    SENT.with(|sent| {
-        let mut sent = sent.borrow_mut();
-        let seq = sent.0 + 1;
-        let diagnostics = serde_json::to_string(&out.diagnostics).unwrap_or_else(|_| "[]".into());
-        // Written straight to text: the whole projection is the large case.
-        let body = match (&out.index, &sent.1) {
-            (Some(new), Some(old)) if base == Some(sent.0) => format!(",\"delta\":{}", delta::index_delta(old, new)),
-            (Some(new), _) => format!(",\"index\":{}", serde_json::to_string(new).unwrap_or_else(|_| "null".into())),
-            (None, _) => String::new(),
-        };
-        *sent = (seq, out.index);
-        format!("{{\"seq\":{seq},\"diagnostics\":{diagnostics}{body}}}")
-    })
+    SESSION.with(|s| s.borrow_mut().compile_since(path, text, &files, &options, base))
 }
 
 /// The 50k-primitive scale fixture's source files (`runmat_circuit::fixture::large_files`), as a

@@ -92,6 +92,6 @@ fn time_drives_a_b_source_in_a_transient() {
 
 #[test]
 fn bad_expressions_name_the_element() {
-    let err = Design::from_netlist("bad\nV1 a 0 1\nB1 o 0 V={nope(V(a))}\nR1 o 0 1\n", &|_| None).err().expect("rejected").to_string();
+    let err = Design::from_netlist("bad\nV1 a 0 1\nB1 o 0 V={nope(V(a))}\nR1 o 0 1\n", &|_| None).expect_err("rejected").to_string();
     assert!(err.contains("b1") && err.contains("unknown function `nope`"), "{err}");
 }

@@ -27,7 +27,9 @@ use crate::library::PadKind;
 use crate::spatial::EdgeIndex;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod items;
 mod rekey;
+use items::{layer_items, pad_extent, LayerItem, LayerItems};
 
 /// Tolerance for arcs in fills: 5 µm.
 pub const FILL_TOL: Coord = 5_000;
@@ -46,71 +48,7 @@ pub struct FillReport {
     pub area: f64,
 }
 
-struct LayerItem {
-    key: BItem,
-    net: Option<NetId>,
-    prim: Prim,
-    pad: Option<PlacedPad>,
-    _hole: Option<(Point, Coord)>,
-}
 
-fn layer_items(board: &Board, pads: &[PlacedPad], layer: u8) -> LayerItems {
-    let mut out = Vec::new();
-    for p in pads.iter().cloned() {
-        if p.layers.contains(&layer) || p.kind == PadKind::Npth {
-            let hole = p.drill.map(|d| (p.center, d / 2));
-            if p.kind == PadKind::Npth {
-                // NPTH: only the hole matters.
-                if let Some((c, r)) = hole {
-                    out.push(LayerItem {
-                        key: BItem::Pad(p.footprint, p.index as u32),
-                        net: None,
-                        prim: Prim::circle(c, r),
-                        pad: None,
-                        _hole: hole,
-                    });
-                }
-                continue;
-            }
-            out.push(LayerItem {
-                key: BItem::Pad(p.footprint, p.index as u32),
-                net: p.net,
-                prim: p.prim.clone(),
-                _hole: hole,
-                pad: Some(p),
-            });
-        }
-    }
-    for t in board.tracks.values() {
-        if t.layer == layer {
-            for prim in t.prims() {
-                out.push(LayerItem {
-                    key: BItem::Track(t.id),
-                    net: t.net,
-                    prim,
-                    pad: None,
-                    _hole: None,
-                });
-            }
-        }
-    }
-    for v in board.vias.values() {
-        if v.layers().any(|l| l == layer) {
-            out.push(LayerItem {
-                key: BItem::Via(v.id),
-                net: v.net,
-                prim: Prim::circle(v.at, v.diameter / 2),
-                pad: None,
-                _hole: Some((v.at, v.drill / 2)),
-            });
-        }
-    }
-    let mut grid = crate::spatial::Grid::new(crate::geom::mm(2.0));
-    for (k, it) in out.iter().enumerate() {
-        grid.insert(k as u32, it.prim.bbox());
-    }
-    LayerItems { items: out, grid }
-}
 
 fn spokes_for(p: &PlacedPad, fp_rotation: f64, gap: Coord, width: Coord) -> Vec<Ring> {
     let b = p.prim.bbox();
@@ -216,20 +154,6 @@ fn tiles_of(r: &Rect) -> impl Iterator<Item = (i64, i64)> {
     (y0..=y1).flat_map(move |j| (x0..=x1).map(move |i| (i, j)))
 }
 
-/// A layer's items with a grid over their boxes.
-struct LayerItems {
-    items: Vec<LayerItem>,
-    grid: crate::spatial::Grid<u32>,
-}
-
-impl LayerItems {
-    fn near(&self, r: &Rect) -> Vec<&LayerItem> {
-        let mut keys = self.grid.query(r);
-        keys.sort_unstable();
-        keys.dedup();
-        keys.into_iter().map(|k| &self.items[k as usize]).collect()
-    }
-}
 
 /// The relief a same-net pad gets from zone `z`: `None` when it joins solid.
 fn relief(
@@ -309,6 +233,9 @@ pub fn fill_zones_cached(
             boolean(&rings, &[], BoolOp::Union)
         };
         let pads = board.all_pads();
+        let extent = pad_extent(&pads);
+        // Each layer's items, made when a merge needs the whole layer; a tile refill takes the
+        // items of the region it refills.
         let mut per_layer: BTreeMap<u8, LayerItems> = BTreeMap::new();
         // Tiles refilled so far per layer: lower-priority zones there refill too.
         let mut refilled: BTreeMap<u8, Vec<Rect>> = BTreeMap::new();
@@ -320,9 +247,7 @@ pub fn fill_zones_cached(
             let mut bare = z.clone();
             bare.fill.clear();
             for &layer in &z.layers {
-                let li = per_layer
-                    .entry(layer)
-                    .or_insert_with(|| layer_items(board, &pads, layer));
+                let spoke = spoke_reach(z, extent.get(&layer).copied().unwrap_or(0));
                 let ck = (zid, layer);
                 let stale = cache.layers.get(&ck).is_none_or(|c| c.zone != bare);
                 if stale {
@@ -343,7 +268,7 @@ pub fn fill_zones_cached(
                 }
                 let zclr = z.clearance.unwrap_or(0);
                 let margin = z.min_width + 8 * FILL_TOL + 4 * FILL_MARGIN;
-                let reach = max_clr.max(zclr) + FILL_MARGIN + margin + spoke_reach(z, li);
+                let reach = max_clr.max(zclr) + FILL_MARGIN + margin + spoke;
                 let area_box = cache.layers[&ck].area.bbox();
                 let wanted: Vec<(i64, i64)> = if area_box.is_empty() {
                     Vec::new()
@@ -377,6 +302,10 @@ pub fn fill_zones_cached(
                 } else {
                     fills_cut(cache, rules, board, z, layer, &fills)
                 };
+                // What the refilled tiles' cutters can come from (fill_tile's `near`).
+                let near = |t: (i64, i64)| tile_rect(t).inflate(margin + max_clr.max(zclr) + FILL_MARGIN + spoke);
+                let region = redo.iter().map(|t| near(*t)).reduce(|a, b| a.union(b));
+                let local = region.map(|r| layer_items(board, &pads, layer, Some(&r)));
                 for t in redo {
                     let piece = fill_tile(
                         board,
@@ -384,7 +313,8 @@ pub fn fill_zones_cached(
                         &g,
                         z,
                         layer,
-                        li,
+                        local.as_ref().expect("a region for the tiles"),
+                        spoke,
                         &cache.layers[&ck].area,
                         &higher,
                         t,
@@ -408,6 +338,7 @@ pub fn fill_zones_cached(
                 }
                 let remerge = cache.layers[&ck].remerge;
                 if stale || dropped || remerge || !done.is_empty() {
+                    let li = per_layer.entry(layer).or_insert_with(|| layer_items(board, &pads, layer, None));
                     let (merged, report) =
                         merge_layer(rules, &g, board, z, layer, li, &cache.layers[&ck].tiles);
                     let c = cache.layers.get_mut(&ck).unwrap();
@@ -434,17 +365,8 @@ pub fn fill_zones_cached(
 }
 
 /// How far a thermal spoke of a same-net pad on the layer reaches past the pad's box.
-fn spoke_reach(z: &crate::layout::Zone, li: &LayerItems) -> Coord {
-    let pad = li
-        .items
-        .iter()
-        .filter(|it| it.pad.is_some())
-        .map(|it| {
-            let b = it.prim.bbox();
-            b.width().max(b.height())
-        })
-        .max()
-        .unwrap_or(0);
+/// `pad` is the largest side of a plated pad's box on the layer ([`pad_extent`]).
+fn spoke_reach(z: &crate::layout::Zone, pad: Coord) -> Coord {
     pad + z.thermal_gap.max(0) + z.spoke_width.max(0) + crate::geom::mm(1.0)
 }
 
@@ -494,6 +416,7 @@ fn fill_tile(
     z: &crate::layout::Zone,
     layer: u8,
     li: &LayerItems,
+    spoke: Coord,
     area: &PolySet,
     higher: &HigherFills,
     t: (i64, i64),
@@ -513,7 +436,7 @@ fn fill_tile(
     }
     let zkey = BItem::Zone(z.id);
     let zclr = z.clearance.unwrap_or(0);
-    let near = window.inflate(rules.max_clearance().max(zclr) + FILL_MARGIN + spoke_reach(z, li));
+    let near = window.inflate(rules.max_clearance().max(zclr) + FILL_MARGIN + spoke);
     let mut cutters: Vec<Ring> = Vec::new();
     let mut hard: Vec<Ring> = Vec::new();
     let mut thermal: Vec<(&PlacedPad, Coord, Coord)> = Vec::new();

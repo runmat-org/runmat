@@ -217,9 +217,9 @@ impl<T: Scalar> Lu<T> {
                 x[self.l_idx[t]] = T::zero();
             }
             x[self.prow[j]] = T::zero();
-            for k in p.col_ptr[col]..p.col_ptr[col + 1] {
-                let r = p.row_idx[k];
-                x[r] = vals[k];
+            let span = p.col_ptr[col]..p.col_ptr[col + 1];
+            for (&r, &v) in p.row_idx[span.clone()].iter().zip(&vals[span]) {
+                x[r] = v;
             }
             for t in self.u_ptr[j]..self.u_ptr[j + 1] {
                 let k = self.u_idx[t];
@@ -306,14 +306,14 @@ mod tests {
         let mut lu = Lu::factor(&m.pattern, &m.vals, &q, u64::MAX, &mut spent).unwrap();
         let mut x = b.clone();
         assert_eq!(lu.solve(&mut x), lu.solve_ops());
-        for r in 0..n {
+        for (r, &want) in b.iter().enumerate().take(n) {
             let mut s = T::zero();
             for &(rr, c, v) in a {
                 if rr == r {
                     s += v * x[c];
                 }
             }
-            assert!((s - b[r]).magnitude() < 1e-9, "row {r}: {s:?} vs {:?}", b[r]);
+            assert!((s - want).magnitude() < 1e-9, "row {r}: {s:?} vs {want:?}");
         }
         let mut again = 0;
         assert!(lu.refactor(&m.pattern, &m.vals, u64::MAX, &mut again).unwrap().is_ok());

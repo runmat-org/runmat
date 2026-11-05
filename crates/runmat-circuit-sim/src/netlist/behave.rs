@@ -205,7 +205,7 @@ fn table(text: &str, env: &Env, ctl: &mut Vec<Ctl>) -> Result<Ex, String> {
         .filter(|s| !s.is_empty())
         .map(|s| parse_number(s).ok_or_else(|| format!("TABLE: `{s}` is not a number")))
         .collect::<Result<_, _>>()?;
-    if nums.len() < 2 || nums.len() % 2 != 0 {
+    if nums.len() < 2 || !nums.len().is_multiple_of(2) {
         return Err("TABLE needs (x, y) pairs".into());
     }
     let points: Vec<(f64, f64)> = nums.chunks(2).map(|p| (p[0], p[1])).collect();

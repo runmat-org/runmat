@@ -11,8 +11,12 @@
 //!   what changed since projection `base` ([`delta`])
 //! - `review(path, text, files, options)` → `{ eco?, back_annotation?, diagnostics }`
 //! - `edit(path, text, files, request)` → `{ ok: true, files, summary }` or
-//!   `{ ok: false, message, diagnostics }`
+//!   `{ ok: false, message, diagnostics }`; the open file's change has `text: null` when its
+//!   edits give the new text (applied from the last to the first to `text`)
 //! - `board_model()` → the last compiled board in 3D as a part display, or `null`
+//!
+//! A file whose text is `null` in `files` is the text the module last received for that path:
+//! the caller sends a large file's text once, not on every call ([`files`]).
 //!
 //! Malformed JSON input is reported the same way as a failed edit, never as a panic.
 
@@ -37,6 +41,31 @@ fn json<T: Serialize>(value: &T) -> String {
         .unwrap_or_else(|e| error_json(&format!("the result can't be written: {e}")))
 }
 
+thread_local! {
+    /// The text of every file the module has received, by path.
+    static HELD: RefCell<Files> = RefCell::new(Files::new());
+}
+
+/// The files of a call: each path's text as sent, or the text last sent for it when `null`.
+pub(crate) fn files(text: &str) -> Result<Files, String> {
+    let sent: std::collections::BTreeMap<String, Option<String>> = parse(text, "files")?;
+    HELD.with(|held| {
+        let mut held = held.borrow_mut();
+        sent.into_iter()
+            .map(|(path, text)| match text {
+                Some(text) => {
+                    held.insert(path.clone(), text.clone());
+                    Ok((path, text))
+                }
+                None => match held.get(&path) {
+                    Some(text) => Ok((path, text.clone())),
+                    None => Err(format!("the files aren't valid: {path} was sent as unchanged, but the module never received it")),
+                },
+            })
+            .collect()
+    })
+}
+
 pub(crate) fn error_json(message: &str) -> String {
     serde_json::json!({ "ok": false, "message": message, "diagnostics": [] }).to_string()
 }
@@ -58,7 +87,7 @@ pub fn dependencies(path: &str, text: &str) -> String {
 #[wasm_bindgen]
 pub fn compile(path: &str, text: &str, files: &str, options: &str) -> String {
     let (files, options) = match (
-        parse::<Files>(files, "files"),
+        crate::files(files),
         parse::<CompileOptions>(options, "options"),
     ) {
         (Ok(f), Ok(o)) => (f, o),
@@ -71,7 +100,7 @@ pub fn compile(path: &str, text: &str, files: &str, options: &str) -> String {
 #[wasm_bindgen]
 pub fn review(path: &str, text: &str, files: &str, options: &str) -> String {
     let (files, options) = match (
-        parse::<Files>(files, "files"),
+        crate::files(files),
         parse::<CompileOptions>(options, "options"),
     ) {
         (Ok(f), Ok(o)) => (f, o),
@@ -84,7 +113,7 @@ pub fn review(path: &str, text: &str, files: &str, options: &str) -> String {
 #[wasm_bindgen]
 pub fn edit(path: &str, text: &str, files: &str, request: &str) -> String {
     let (files, request) = match (
-        parse::<Files>(files, "files"),
+        crate::files(files),
         parse::<EditRequest>(request, "request"),
     ) {
         (Ok(f), Ok(r)) => (f, r),
@@ -93,6 +122,12 @@ pub fn edit(path: &str, text: &str, files: &str, request: &str) -> String {
     match SESSION.with(|s| s.borrow_mut().edit(path, text, &files, &request)) {
         Ok(out) => {
             let mut v = serde_json::to_value(&out).unwrap_or_default();
+            // A large board's text goes back once, as the caller's own edits.
+            for f in v["files"].as_array_mut().into_iter().flatten() {
+                if f["path"] == path && f["reprinted"] == false {
+                    f["text"] = serde_json::Value::Null;
+                }
+            }
             v["ok"] = serde_json::Value::Bool(true);
             v.to_string()
         }

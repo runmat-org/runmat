@@ -66,6 +66,17 @@ fn edit_and_compile(
     (edit, compile)
 }
 
+/// The session's delta from projection `since` (which was `before`) is the one comparing the
+/// whole projections gives, and applying it to `before` gives the current projection.
+fn check_delta(session: &Session, before: &runmat_circuit::index::CircuitIndex, since: u64) {
+    let runtime::Since::Delta(delta) = session.since(since) else {
+        panic!("a patched recompile has its delta: {:?}", session.since(since));
+    };
+    let after = session.index().expect("compiled");
+    assert_eq!(*delta, runtime::delta::index_delta(before, after), "the patch's delta is the one a whole compare gives");
+    assert!(runtime::delta::apply_index_delta(before, delta).unwrap() == *after, "the delta applied to the old projection differs from the new one");
+}
+
 #[test]
 fn small_edits_on_a_large_board_stay_within_budget() {
     let t = Instant::now();
@@ -95,21 +106,24 @@ fn small_edits_on_a_large_board_stay_within_budget() {
         &[format!("component:{fp}")],
     );
     let before = session.index().cloned().expect("compiled");
+    let since = session.generation();
     let (edit, compile) = edit_and_compile(&mut session, &mut files, &mv);
     eprintln!("move {fp}: edit {edit:?}, recompile {compile:?}");
-    // The worker sends the change, not the projection: a few rows, and applying them gives
-    // the new projection exactly.
+    // The worker sends the change, not the projection: the patch's own delta, a few rows, and
+    // applying them gives the new projection exactly.
     let after = session.index().expect("compiled");
     let t = Instant::now();
-    let snapshot = after.clone();
-    eprintln!("projection clone (the module keeps one per recompile): {:?}", t.elapsed());
-    drop(snapshot);
-    let t = Instant::now();
-    let delta = runtime::delta::index_delta(&before, after);
+    let runtime::Since::Delta(delta) = session.since(since) else {
+        panic!("a patched move has its delta: {:?}", session.since(since));
+    };
     let delta_text = delta.to_string();
     let delta_time = t.elapsed();
     let whole_text = serde_json::to_string(after).unwrap();
-    eprintln!("move delta: {} bytes in {delta_time:?}; whole projection {} bytes", delta_text.len(), whole_text.len());
+    eprintln!("move delta: {} bytes, written in {delta_time:?}; whole projection {} bytes", delta_text.len(), whole_text.len());
+    let t = Instant::now();
+    let compared = runtime::delta::index_delta(&before, after);
+    eprintln!("  (comparing whole projections instead: {:?})", t.elapsed());
+    assert_eq!(*delta, compared, "the patch's delta is the one a whole compare gives");
     for part in ["fields", "board"] {
         for (k, v) in delta[part].as_object().into_iter().flatten() {
             for (k2, v2) in v.as_object().into_iter().flatten() {
@@ -121,7 +135,7 @@ fn small_edits_on_a_large_board_stay_within_budget() {
         }
     }
     assert!(delta_text.len() < 64 * 1024, "delta {} bytes, projection {}", delta_text.len(), whole_text.len());
-    assert!(runtime::delta::apply_index_delta(&before, &delta).unwrap() == *after, "the delta applied to the old projection differs from the new one");
+    assert!(runtime::delta::apply_index_delta(&before, delta).unwrap() == *after, "the delta applied to the old projection differs from the new one");
     assert!(edit + compile < budget(), "move took {:?}", edit + compile);
     // The patched projection is the one a fresh compile gives.
     let fresh = runtime::compile(LAYOUT, &files[LAYOUT], &files, &CompileOptions::default());
@@ -137,7 +151,9 @@ fn small_edits_on_a_large_board_stay_within_budget() {
         serde_json::json!({}),
         &[format!("track:{track}")],
     );
+    let (before, since) = (session.index().cloned().unwrap(), session.generation());
     let (edit, compile) = edit_and_compile(&mut session, &mut files, &del);
+    check_delta(&session, &before, since);
     eprintln!("delete track {track}: edit {edit:?}, recompile {compile:?}");
     assert!(
         edit + compile < budget(),
@@ -181,12 +197,14 @@ fn small_edits_on_a_large_board_stay_within_budget() {
         format!("{}edited {}", &text[..d], &text[d..])
     };
     files.insert(LAYOUT.into(), edited);
+    let (before, since) = (session.index().cloned().unwrap(), session.generation());
     let t = Instant::now();
     let compiled = session.compile(LAYOUT, &files[LAYOUT], &files, &CompileOptions::default());
     let recompile = t.elapsed();
     assert!(compiled.diagnostics.is_empty(), "{:?}", compiled.diagnostics);
     assert!(!session.timings.whole, "a package change patches the board");
     eprintln!("package {name} ({n} footprints) edited: recompile {recompile:?}: {:?}", session.timings);
+    check_delta(&session, &before, since);
     assert!(recompile < budget(), "package edit took {recompile:?}");
     let fresh = runtime::compile(LAYOUT, &files[LAYOUT], &files, &CompileOptions::default());
     let (a, b) = (

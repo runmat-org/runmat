@@ -51,7 +51,7 @@ pub use edit::*;
 use edit::{board_edit, failure};
 pub use kicad::*;
 pub use rules::*;
-pub use session::{Session, SessionTimings};
+pub use session::{Since, Session, SessionTimings};
 
 pub const CIRCUIT_SUFFIX: &str = ".circuit";
 pub const LAYOUT_SUFFIX: &str = ".circuit.layout";

@@ -59,7 +59,7 @@ fn usage(u: &runmat_circuit_sim::Usage) -> Value {
 }
 
 fn load(path: &str, text: &str, files: &str) -> Result<(runmat_circuit::ir::Design, runmat_circuit::library::Pool, Files), String> {
-    let files: Files = if files.trim().is_empty() { Files::default() } else { serde_json::from_str(files).map_err(|e| format!("the files aren't valid: {e}"))? };
+    let files: Files = crate::files(files)?;
     let (design, pool) = design_and_pool(path, text, &files, &CompileOptions::default())
         .map_err(|d| d.iter().map(|x| x.message.clone()).collect::<Vec<_>>().join("; "))?;
     Ok((design, pool, files))
