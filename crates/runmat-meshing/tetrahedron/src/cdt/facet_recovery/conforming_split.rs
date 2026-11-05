@@ -194,6 +194,10 @@ fn split_with_encroachment_cascade(
     let cancellation = work.cancellation;
     let mut attempts = 0_u32;
     let mut reasons = Vec::new();
+    // Encroached edges this call has split. A newly swallowed edge that shares an endpoint
+    // with one of them is a half the last split made: the midpoint keeps swallowing the
+    // shrinking halves at that vertex, so the cascade stops and the edge star is tried.
+    let mut cascaded = Vec::<[StableDigest; 2]>::new();
     'retry: loop {
         work.support_step(constraint_index)?;
         attempts += 1;
@@ -274,7 +278,13 @@ fn split_with_encroachment_cascade(
                         )),
                     }
                 }
-                LocalSplit::Encroached(encroached) if depth < MAXIMUM_ENCROACHMENT_DEPTH => {
+                LocalSplit::Encroached(encroached)
+                    if depth < MAXIMUM_ENCROACHMENT_DEPTH
+                        && !cascaded
+                            .iter()
+                            .any(|done| done.iter().any(|node| encroached.contains(node))) =>
+                {
+                    cascaded.push(encroached);
                     let first = splits.len();
                     if !split_with_encroachment_cascade(
                         working,
@@ -324,7 +334,9 @@ fn split_with_encroachment_cascade(
                     "in-place {strategy:?} split: the midpoint encroaches recovered segment edge \
                      {:?} beyond the cascade depth or its split was declined",
                     encroached.map(|identity| working.topology().node_index(identity).map(
-                        |index| working.topology().nodes[index as usize].coordinates_m.canonical_value()
+                        |index| working.topology().nodes[index as usize]
+                            .coordinates_m
+                            .canonical_value()
                     ))
                 )),
                 LocalSplit::Declined(reason) => {
@@ -337,10 +349,13 @@ fn split_with_encroachment_cascade(
     }
 }
 
-/// Splits `edge` at its midpoint and `other`, which shares one endpoint with it, at the dyadic
-/// point nearest the same distance from that endpoint, in one cavity trial. `other` is split
-/// through its edge star first, so `edge` survives for its constrained Bowyer-Watson split; link
-/// flips around both nodes and the exact admission of every changed cell decide the edit.
+/// Splits `edge` and `other`, which share one endpoint, at dyadic points the same distance from
+/// that endpoint, in one cavity trial. The distance is half the shorter edge: `edge` is split at
+/// its midpoint unless `other` is shorter, in which case `edge` is split at half the length of
+/// `other`. A larger distance would place the point on `other` near its far end, which leaves a
+/// sliver facet triangle there and encroaches the segments at that end. `other` is split through
+/// its edge star first, so `edge` survives for its constrained Bowyer-Watson split; link flips
+/// around both nodes and the exact admission of every changed cell decide the edit.
 #[allow(clippy::too_many_arguments)]
 fn split_pair_at_shared_vertex(
     working: &mut super::working::FacetRecoveryWorking,
@@ -360,35 +375,18 @@ fn split_pair_at_shared_vertex(
     ) else {
         return Ok(Err("an edge is not a recovered segment interval".to_owned()));
     };
-    let (edge_node, edge_recovered) = recovered_segment_midpoint_on(
-        working.topology(),
-        &working.segments,
-        edge_location.0,
-        edge_location.1,
-    )
-    .map_err(super::segment_error)?;
-    let shared_point = working
-        .topology()
-        .node_index(shared)
-        .map(|index| working.topology().nodes[index as usize].coordinates_m.canonical_value())
-        .ok_or_else(|| invalid(constraint_index, "shared segment vertex is missing"))?;
-    let distance_m = (0..3)
-        .map(|axis| (edge_node.coordinates_m.canonical_value()[axis] - shared_point[axis]).powi(2))
-        .sum::<f64>()
-        .sqrt();
-    let Some((other_node, other_recovered)) = crate::cdt::segment_recovery::recovered_segment_point_on(
-        working.topology(),
-        &working.segments,
-        other_location.0,
-        other_location.1,
-        Some((shared, distance_m)),
-    )
-    .map_err(super::segment_error)?
-    else {
-        return Ok(Err(format!(
-            "no dyadic point lies {distance_m} m from the shared vertex inside the encroached edge"
-        )));
-    };
+    let [(edge_node, edge_recovered), (other_node, other_recovered)] =
+        match shared_vertex_split_points(
+            working.topology(),
+            &working.segments,
+            [edge, other],
+            shared,
+            [edge_location, other_location],
+            constraint_index,
+        )? {
+            Ok(points) => points,
+            Err(reason) => return Ok(Err(reason)),
+        };
     if [edge_node, other_node].iter().any(|candidate| {
         working.topology().nodes.iter().any(|existing| {
             crate::cdt::segment_recovery::coordinates_share_representable_location(
@@ -397,8 +395,18 @@ fn split_pair_at_shared_vertex(
             )
         })
     }) {
-        return Ok(Err("a split point duplicates an existing node position".to_owned()));
+        return Ok(Err(
+            "a split point duplicates an existing node position".to_owned()
+        ));
     }
+    let encroached = match encroached_corner_segments(
+        working,
+        [(edge, edge_node), (other, other_node)],
+        constraint_index,
+    )? {
+        Ok(encroached) => encroached,
+        Err(reason) => return Ok(Err(reason)),
+    };
     let insertion = work.options.segment_recovery.insertion;
     let cancellation = work.cancellation;
     let outcome = working.edit(|topology| {
@@ -407,12 +415,15 @@ fn split_pair_at_shared_vertex(
             let mut observed = trial.observe_edge_changes();
             let mut protected = protected.to_vec();
             let mut all_splits = Vec::new();
-            let halves = [
+            let mut halves = vec![
                 [edge[0], edge_node.identity],
                 [edge[1], edge_node.identity],
                 [other[0], other_node.identity],
                 [other[1], other_node.identity],
             ];
+            for (split, node, _) in &encroached {
+                halves.extend(split.map(|endpoint| [endpoint, node.identity]));
+            }
             // Link flips keep every recovered segment edge, both split edges until they are
             // split, and the four halves.
             let kept_edges = crate::cdt::segment_recovery::sorted_edge_keys(
@@ -420,7 +431,8 @@ fn split_pair_at_shared_vertex(
                     .iter()
                     .copied()
                     .chain([edge, other])
-                    .chain(halves),
+                    .chain(encroached.iter().map(|(split, _, _)| *split))
+                    .chain(halves.iter().copied()),
             );
             let protected_face_set = |protected: &[DelaunayRecoveredFacetTriangle]| {
                 protected
@@ -435,10 +447,20 @@ fn split_pair_at_shared_vertex(
             // Each node is legalized before the next is placed, so the second split starts from
             // a constrained-Delaunay complex: its constrained cavity is then exact, and link
             // flips only repair what visibility or barriers left out of that cavity.
-            for (node, split, strategy) in [
-                (other_node, other, SplitStrategy::EdgeStar),
-                (edge_node, edge, SplitStrategy::ConstrainedCavity),
-            ] {
+            // Segments that the pair nodes block are split first, the last of the cascade first,
+            // each by its constrained cavity (the edge star when that cavity would delete a kept
+            // edge). Split later, their still-kept edges would push the pair nodes' cavities onto
+            // edge stars, whose link flips can stall.
+            let order = encroached
+                .iter()
+                .rev()
+                .map(|(split, node, _)| (*node, *split, SplitStrategy::ConstrainedCavity))
+                .chain([
+                    (other_node, other, SplitStrategy::EdgeStar),
+                    (edge_node, edge, SplitStrategy::ConstrainedCavity),
+                ])
+                .collect::<Vec<_>>();
+            for (node, split, strategy) in order {
                 let Ok(index) = observed.append_node(node) else {
                     return Ok(Err("a split node was rejected".to_owned()));
                 };
@@ -519,7 +541,10 @@ fn split_pair_at_shared_vertex(
                 }
             }
             let protected_faces = protected_face_set(&protected);
-            let mut replaced = [edge, other];
+            let mut replaced = [edge, other]
+                .into_iter()
+                .chain(encroached.iter().map(|(split, _, _)| *split))
+                .collect::<Vec<_>>();
             for key in &mut replaced {
                 key.sort_unstable();
             }
@@ -576,8 +601,276 @@ fn split_pair_at_shared_vertex(
         let edge_location = segment_edge_location(&working.segments, edge)
             .ok_or_else(|| invalid(constraint_index, "split edge left its recovered segment"))?;
         working.record_segment_split(edge_location.0, edge_location.1, edge_recovered)?;
+        for (split, _, recovered) in encroached {
+            let location = segment_edge_location(&working.segments, split).ok_or_else(|| {
+                invalid(
+                    constraint_index,
+                    "encroached edge left its recovered segment",
+                )
+            })?;
+            working.record_segment_split(location.0, location.1, recovered)?;
+        }
     }
     Ok(outcome)
+}
+
+type EncroachedCornerSegment = (
+    [StableDigest; 2],
+    DelaunayVolumeNode,
+    crate::cdt::DelaunayRecoveredSegmentNode,
+);
+
+/// Recovered segment edges that a pair-split node blocks, with their midpoints. A split node
+/// `n` on edge `uv` of a facet triangle `uvw` creates the child triangle `unw` (and `nvw`).
+/// When a vertex `x` of the coplanar triangle across the segment edge `uw` lies strictly
+/// inside the circumcircle of `unw`, every cell on `unw` has `x` inside its circumsphere, and
+/// no flip may remove the segment edge `uw`, so no constrained-Delaunay complex holds `n`.
+/// Splitting `uw` at its midpoint removes the conflict. The triangles come from the current
+/// tetrahedralization (vertices adjacent to both ends and coplanar), so facets not yet
+/// recovered count too. Each midpoint is checked the same way in turn (a bounded cascade),
+/// which declines past [`MAXIMUM_ENCROACHED_CORNER_SPLITS`] splits. The circle test is a
+/// floating-point trigger; the exact admission of the whole edit decides.
+fn encroached_corner_segments(
+    working: &super::working::FacetRecoveryWorking,
+    splits: [([StableDigest; 2], DelaunayVolumeNode); 2],
+    constraint_index: u32,
+) -> Result<Result<Vec<EncroachedCornerSegment>, String>, DelaunayFacetRecoveryError> {
+    let topology = working.topology();
+    let index_of = |identity: StableDigest| {
+        topology
+            .node_index(identity)
+            .ok_or_else(|| invalid(constraint_index, "facet vertex is missing"))
+    };
+    let coordinates = |index: u32| {
+        topology.nodes[index as usize]
+            .coordinates_m
+            .canonical_value()
+    };
+    let neighbors = |index: u32| {
+        topology.vertex_stars[index as usize]
+            .iter()
+            .filter_map(|cell| topology.tetrahedron(*cell))
+            .flat_map(|cell| cell.vertex_indices)
+            .filter(|vertex| *vertex != index)
+            .collect::<BTreeSet<_>>()
+    };
+    let intervals = working
+        .segments
+        .iter()
+        .flat_map(|segment| segment.nodes.windows(2))
+        .map(|pair| {
+            let mut key = [pair[0].identity, pair[1].identity];
+            key.sort_unstable();
+            key
+        })
+        .collect::<BTreeSet<_>>();
+    let mut split_keys = splits.map(|(split, _)| {
+        let mut key = split;
+        key.sort_unstable();
+        key
+    });
+    split_keys.sort_unstable();
+    let mut found = Vec::<EncroachedCornerSegment>::new();
+    let mut queue = splits
+        .into_iter()
+        .collect::<std::collections::VecDeque<_>>();
+    while let Some((split, node)) = queue.pop_front() {
+        let [u, v] = [index_of(split[0])?, index_of(split[1])?];
+        let shared = neighbors(u)
+            .intersection(&neighbors(v))
+            .copied()
+            .collect::<Vec<_>>();
+        for w in shared {
+            for (end, opposite) in [(u, v), (v, u)] {
+                let mut key = [
+                    topology.nodes[end as usize].identity,
+                    topology.nodes[w as usize].identity,
+                ];
+                key.sort_unstable();
+                if !intervals.contains(&key)
+                    || split_keys.contains(&key)
+                    || found.iter().any(|(edge, _, _)| *edge == key)
+                {
+                    continue;
+                }
+                let plane = [end, w, opposite].map(|vertex| topology.nodes[vertex as usize]);
+                let child = [
+                    coordinates(end),
+                    node.coordinates_m.canonical_value(),
+                    coordinates(w),
+                ];
+                let blocked = neighbors(end).intersection(&neighbors(w)).any(|x| {
+                    *x != opposite
+                        && orient_volume_nodes([
+                            plane[0],
+                            plane[1],
+                            plane[2],
+                            topology.nodes[*x as usize],
+                        ])
+                        .is_ok_and(|sign| sign == PredicateSign::Zero)
+                        && opposite_sides(
+                            coordinates(end),
+                            coordinates(w),
+                            coordinates(opposite),
+                            coordinates(*x),
+                        )
+                        && strictly_inside_circumcircle(child, coordinates(*x))
+                });
+                if !blocked {
+                    continue;
+                }
+                let Some(location) = segment_edge_location(&working.segments, key) else {
+                    continue;
+                };
+                let (midpoint, recovered) = recovered_segment_midpoint_on(
+                    topology,
+                    &working.segments,
+                    location.0,
+                    location.1,
+                )
+                .map_err(super::segment_error)?;
+                if topology.nodes.iter().any(|existing| {
+                    crate::cdt::segment_recovery::coordinates_share_representable_location(
+                        existing.coordinates_m.canonical_value(),
+                        midpoint.coordinates_m.canonical_value(),
+                    )
+                }) {
+                    return Ok(Err(
+                        "an encroached segment midpoint duplicates an existing node position"
+                            .to_owned(),
+                    ));
+                }
+                if found.len() == MAXIMUM_ENCROACHED_CORNER_SPLITS {
+                    return Ok(Err(format!(
+                        "the encroached-segment cascade exceeds {MAXIMUM_ENCROACHED_CORNER_SPLITS} splits"
+                    )));
+                }
+                found.push((key, midpoint, recovered));
+                queue.push_back((key, midpoint));
+            }
+        }
+    }
+    Ok(Ok(found))
+}
+
+/// Whether `first` and `second` lie strictly on opposite sides of line `ab` in their common
+/// plane (floating point).
+fn opposite_sides(a: [f64; 3], b: [f64; 3], first: [f64; 3], second: [f64; 3]) -> bool {
+    let sub = |p: [f64; 3], q: [f64; 3]| [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+    let cross = |p: [f64; 3], q: [f64; 3]| {
+        [
+            p[1] * q[2] - p[2] * q[1],
+            p[2] * q[0] - p[0] * q[2],
+            p[0] * q[1] - p[1] * q[0],
+        ]
+    };
+    let line = sub(b, a);
+    let one = cross(line, sub(first, a));
+    let two = cross(line, sub(second, a));
+    (0..3).map(|axis| one[axis] * two[axis]).sum::<f64>() < 0.0
+}
+
+/// Whether `point`, coplanar with `triangle`, lies strictly inside its circumcircle, with a
+/// relative margin for rounding (floating point).
+fn strictly_inside_circumcircle(triangle: [[f64; 3]; 3], point: [f64; 3]) -> bool {
+    let sub = |p: [f64; 3], q: [f64; 3]| [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+    let dot = |p: [f64; 3], q: [f64; 3]| (0..3).map(|axis| p[axis] * q[axis]).sum::<f64>();
+    let cross = |p: [f64; 3], q: [f64; 3]| {
+        [
+            p[1] * q[2] - p[2] * q[1],
+            p[2] * q[0] - p[0] * q[2],
+            p[0] * q[1] - p[1] * q[0],
+        ]
+    };
+    let [a, b, c] = triangle;
+    let (ab, ac) = (sub(b, a), sub(c, a));
+    let normal = cross(ab, ac);
+    let denominator = 2.0 * dot(normal, normal);
+    if denominator == 0.0 {
+        return false;
+    }
+    let term = |scale: f64, vector: [f64; 3]| vector.map(|value| value * scale);
+    let first = term(dot(ac, ac), cross(normal, ab));
+    let second = term(dot(ab, ab), cross(ac, normal));
+    let offset = [0, 1, 2].map(|axis| (first[axis] + second[axis]) / denominator);
+    let center = [0, 1, 2].map(|axis| a[axis] + offset[axis]);
+    let radius_squared = dot(offset, offset);
+    let distance_squared = dot(sub(point, center), sub(point, center));
+    distance_squared < radius_squared * (1.0 - 1e-9)
+}
+
+const MAXIMUM_ENCROACHED_CORNER_SPLITS: usize = 64;
+
+/// The pair-split points of `edges = [edge, other]`, which share the vertex `shared`: dyadic
+/// points the same distance from `shared`, that distance being half the shorter edge (see
+/// [`split_pair_at_shared_vertex`]). `locations` are the edges' segment intervals.
+pub(super) fn shared_vertex_split_points(
+    topology: &impl crate::cdt::insertion::topology_access::TetrahedralTopology,
+    segments: &[crate::cdt::DelaunayRecoveredSegment],
+    edges: [[StableDigest; 2]; 2],
+    shared: StableDigest,
+    locations: [(usize, usize); 2],
+    constraint_index: u32,
+) -> Result<
+    Result<[(DelaunayVolumeNode, crate::cdt::DelaunayRecoveredSegmentNode); 2], String>,
+    DelaunayFacetRecoveryError,
+> {
+    let [edge, other] = edges;
+    let [edge_location, other_location] = locations;
+    let point = |identity: StableDigest| {
+        topology
+            .node_index(identity)
+            .map(|index| {
+                topology.nodes()[index as usize]
+                    .coordinates_m
+                    .canonical_value()
+            })
+            .ok_or_else(|| invalid(constraint_index, "split segment vertex is missing"))
+    };
+    let distance = |first: [f64; 3], second: [f64; 3]| {
+        (0..3)
+            .map(|axis| (first[axis] - second[axis]).powi(2))
+            .sum::<f64>()
+            .sqrt()
+    };
+    let shared_point = point(shared)?;
+    let other_length_m = distance(point(other[0])?, point(other[1])?);
+    let edge_length_m = distance(point(edge[0])?, point(edge[1])?);
+    let (edge_node, edge_recovered) = if other_length_m < edge_length_m {
+        let Some(split) = crate::cdt::segment_recovery::recovered_segment_point_on(
+            topology,
+            segments,
+            edge_location.0,
+            edge_location.1,
+            Some((shared, 0.5 * other_length_m)),
+        )
+        .map_err(super::segment_error)?
+        else {
+            return Ok(Err(format!(
+                "no dyadic point lies {} m from the shared vertex inside the split edge",
+                0.5 * other_length_m
+            )));
+        };
+        split
+    } else {
+        recovered_segment_midpoint_on(topology, segments, edge_location.0, edge_location.1)
+            .map_err(super::segment_error)?
+    };
+    let distance_m = distance(edge_node.coordinates_m.canonical_value(), shared_point);
+    let Some(other_split) = crate::cdt::segment_recovery::recovered_segment_point_on(
+        topology,
+        segments,
+        other_location.0,
+        other_location.1,
+        Some((shared, distance_m)),
+    )
+    .map_err(super::segment_error)?
+    else {
+        return Ok(Err(format!(
+            "no dyadic point lies {distance_m} m from the shared vertex inside the encroached edge"
+        )));
+    };
+    Ok(Ok([(edge_node, edge_recovered), other_split]))
 }
 
 enum LocalSplit {
@@ -605,8 +898,14 @@ fn split_and_admit_locally(
     };
     let mut split_edge_key = edge;
     split_edge_key.sort_unstable();
-    let (removed, created, mut splits) =
-        split_edge(&observed, inserted, edge, protected, strategy, constraint_index)?;
+    let (removed, created, mut splits) = split_edge(
+        &observed,
+        inserted,
+        edge,
+        protected,
+        strategy,
+        constraint_index,
+    )?;
     if removed.is_empty() {
         return Ok(LocalSplit::Declined("empty replacement".to_owned()));
     }
@@ -620,7 +919,9 @@ fn split_and_admit_locally(
             .is_ok_and(|sign| sign == PredicateSign::Zero)
     }) || observed.replace_cavity(&removed, created).is_err()
     {
-        return Ok(LocalSplit::Declined("zero-volume or rejected cavity replacement".to_owned()));
+        return Ok(LocalSplit::Declined(
+            "zero-volume or rejected cavity replacement".to_owned(),
+        ));
     }
     let protected_faces = updated_protected_faces(protected, &splits)
         .into_iter()
@@ -641,7 +942,11 @@ fn split_and_admit_locally(
         cancellation,
     ) {
         Ok((true, flips)) => flips,
-        Ok((false, _)) => return Ok(LocalSplit::Declined("an illegal face remains in the new node's star after link flips".to_owned())),
+        Ok((false, _)) => {
+            return Ok(LocalSplit::Declined(
+                "an illegal face remains in the new node's star after link flips".to_owned(),
+            ))
+        }
         Err(failure)
             if matches!(
                 failure.kind,
@@ -654,7 +959,11 @@ fn split_and_admit_locally(
                 constraint_index,
             ))
         }
-        Err(failure) => return Ok(LocalSplit::Declined(format!("link flips failed: {failure}"))),
+        Err(failure) => {
+            return Ok(LocalSplit::Declined(format!(
+                "link flips failed: {failure}"
+            )))
+        }
     };
     // Facet-plane flips retriangulate protected triangles; they join the split records, and the
     // admission below checks the flipped protection.
@@ -693,7 +1002,9 @@ fn split_and_admit_locally(
                 && !observed.has_edge(key)
         });
     if segment_edge_lost {
-        return Ok(LocalSplit::Declined("a recovered segment edge was lost".to_owned()));
+        return Ok(LocalSplit::Declined(
+            "a recovered segment edge was lost".to_owned(),
+        ));
     }
     let violation = crate::cdt::insertion::observed_change_violation(
         &observed,
@@ -719,7 +1030,9 @@ fn copy_splits(splits: &[ProtectedFacetSplit]) -> Vec<ProtectedFacetSplit> {
         .collect()
 }
 
-fn protected_face_keys(protected: &[DelaunayRecoveredFacetTriangle]) -> BTreeSet<[StableDigest; 3]> {
+fn protected_face_keys(
+    protected: &[DelaunayRecoveredFacetTriangle],
+) -> BTreeSet<[StableDigest; 3]> {
     protected
         .iter()
         .map(|triangle| {
@@ -820,7 +1133,10 @@ fn encroached_segment_edge(
             }
         }
     }
-    let keys = candidates.iter().map(|(key, _)| *key).collect::<BTreeSet<_>>();
+    let keys = candidates
+        .iter()
+        .map(|(key, _)| *key)
+        .collect::<BTreeSet<_>>();
     let segment_edges = protected_edges
         .iter()
         .filter(|edge| keys.contains(*edge))
@@ -838,7 +1154,7 @@ fn encroached_segment_edge(
         .map(|(key, _)| key)
 }
 
-fn segment_edge_location(
+pub(super) fn segment_edge_location(
     segments: &[crate::cdt::DelaunayRecoveredSegment],
     mut edge: [StableDigest; 2],
 ) -> Option<(usize, usize)> {
@@ -935,7 +1251,14 @@ fn insert_conformingly_with(
         )
     })?;
     let (removed, created, splits) = if let Some(edge) = selected_edge {
-        split_edge(&mutation, inserted, edge, protected, strategy, constraint_index)?
+        split_edge(
+            &mutation,
+            inserted,
+            edge,
+            protected,
+            strategy,
+            constraint_index,
+        )?
     } else {
         split_faces(&mutation, inserted, hits, constraint_index)?
     };
@@ -992,7 +1315,8 @@ fn insert_conformingly_with(
             Err(failure)
                 if matches!(
                     failure.kind,
-                    DelaunayInsertionErrorKind::ResourceLimit | DelaunayInsertionErrorKind::Cancelled
+                    DelaunayInsertionErrorKind::ResourceLimit
+                        | DelaunayInsertionErrorKind::Cancelled
                 ) =>
             {
                 return Err(insertion_error(
@@ -1092,8 +1416,13 @@ fn finish_conforming_insertion(
     splits: Vec<ProtectedFacetSplit>,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Option<ConformingInsertion>, DelaunayFacetRecoveryError> {
-    let mut recovery = current.clone();
-    recovery.topology = topology;
+    // Built field by field: cloning `current` would copy its whole topology only to drop it.
+    let mut recovery = DelaunaySegmentRecovery {
+        topology,
+        segments: current.segments.clone(),
+        steiner_node_identities: current.steiner_node_identities.clone(),
+        recovery_passes: current.recovery_passes,
+    };
     if let Some(edge) = selected_edge {
         if let Some((segment_index, interval_index)) =
             recovered_segment_edge_location(current, edge)
@@ -1226,7 +1555,10 @@ fn split_edge(
     // edge endpoint must stay on the cavity boundary to carry the split children.
     let split_apexes = protected
         .iter()
-        .filter(|triangle| edge.iter().all(|node| triangle.node_identities.contains(node)))
+        .filter(|triangle| {
+            edge.iter()
+                .all(|node| triangle.node_identities.contains(node))
+        })
         .filter_map(|triangle| {
             triangle
                 .node_identities
@@ -1240,13 +1572,20 @@ fn split_edge(
     for _ in 0..64 {
         let mut dropped = BTreeSet::new();
         for index in &cavity {
-            let tet = topology.tetrahedron(*index).expect("cavity tetrahedra remain active");
+            let tet = topology
+                .tetrahedron(*index)
+                .expect("cavity tetrahedra remain active");
             for (slot, neighbor) in tet.neighbors.iter().enumerate() {
                 let inside = neighbor.is_some_and(|neighbor| cavity.contains(&neighbor));
                 if inside {
                     let neighbor = neighbor.expect("inside neighbor");
-                    if barriers.contains(&canonical_mutation_face(topology, tet.vertex_indices, slot)) {
-                        dropped.extend([*index, neighbor].into_iter().filter(|t| !star.contains(t)));
+                    if barriers.contains(&canonical_mutation_face(
+                        topology,
+                        tet.vertex_indices,
+                        slot,
+                    )) {
+                        dropped
+                            .extend([*index, neighbor].into_iter().filter(|t| !star.contains(t)));
                     }
                     continue;
                 }
@@ -1315,11 +1654,12 @@ fn split_edge(
     };
     // A cavity that is still not star-shaped from the node falls back to the edge star,
     // whose split is always valid; flips then legalize it.
-    let star_shaped = |created: &Vec<([u32; 4], Option<runmat_geometry_core::PersistentEntityId>)>| {
-        created
-            .iter()
-            .all(|(tetrahedron, _)| cone_is_visible(topology, *tetrahedron))
-    };
+    let star_shaped =
+        |created: &Vec<([u32; 4], Option<runmat_geometry_core::PersistentEntityId>)>| {
+            created
+                .iter()
+                .all(|(tetrahedron, _)| cone_is_visible(topology, *tetrahedron))
+        };
     let created = fill(&cavity);
     let (removed, created) = if strategy == SplitStrategy::ConstrainedCavity
         && cavity.len() > star.len()
@@ -1402,7 +1742,9 @@ fn constrained_cavity(
             if barriers.contains(&canonical_mutation_face(topology, tet.vertex_indices, slot)) {
                 continue;
             }
-            let points = other.vertex_indices.map(|vertex| topology.nodes[vertex as usize]);
+            let points = other
+                .vertex_indices
+                .map(|vertex| topology.nodes[vertex as usize]);
             let inside = crate::cdt::topology::insphere_materialized_volume_nodes([
                 points[0], points[1], points[2], points[3], node,
             ])
@@ -1447,7 +1789,13 @@ fn cone_is_visible(topology: &TopologyMutation, vertices: [u32; 4]) -> bool {
         .abs();
     let longest = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
         .into_iter()
-        .map(|(a, b)| edge(a, b).iter().map(|value| value * value).sum::<f64>().sqrt())
+        .map(|(a, b)| {
+            edge(a, b)
+                .iter()
+                .map(|value| value * value)
+                .sum::<f64>()
+                .sqrt()
+        })
         .fold(0.0, f64::max);
     volume >= MINIMUM_RELATIVE_VOLUME * longest.powi(3)
 }
@@ -1458,7 +1806,11 @@ fn barrier_faces(
 ) -> BTreeSet<[StableDigest; 3]> {
     protected
         .iter()
-        .filter(|triangle| !edge.iter().all(|node| triangle.node_identities.contains(node)))
+        .filter(|triangle| {
+            !edge
+                .iter()
+                .all(|node| triangle.node_identities.contains(node))
+        })
         .map(|triangle| {
             let mut face = triangle.node_identities;
             face.sort_unstable();
@@ -1490,7 +1842,9 @@ fn connected_from_star(
     let mut connected = star.clone();
     let mut frontier = star.iter().copied().collect::<Vec<_>>();
     while let Some(index) = frontier.pop() {
-        let tet = topology.tetrahedron(index).expect("cavity tetrahedra remain active");
+        let tet = topology
+            .tetrahedron(index)
+            .expect("cavity tetrahedra remain active");
         for (slot, neighbor) in tet.neighbors.iter().enumerate() {
             let Some(neighbor) = *neighbor else { continue };
             if !cavity.contains(&neighbor)

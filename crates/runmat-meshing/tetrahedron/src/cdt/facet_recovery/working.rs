@@ -56,6 +56,10 @@ impl FacetRecoveryWorking {
             steiner_node_identities: self.steiner_node_identities.clone(),
             recovery_passes: self.recovery_passes,
         };
+        // The working mutation is rebuilt from the provider's result below, and every caller
+        // ends facet recovery on a provider error. Release it while the provider runs, since the
+        // provider builds mutations and canonical copies of its own.
+        drop(std::mem::replace(&mut self.topology, released_mutation()));
         let result = provider(&mut source, work)?;
         // Providers replace the canonical topology wholesale and never edit it in place, so the
         // returned value is the canonical form of the rebuilt working topology.
@@ -158,6 +162,20 @@ impl FacetRecoveryWorking {
             .map_err(|failure| mutation_error(0, failure))?;
         Ok((topology, self.segments))
     }
+}
+
+/// An empty mutation that holds the working slot while a canonical provider runs.
+fn released_mutation() -> TopologyMutation {
+    TopologyMutation::from_canonical(DelaunayVolumeTopology {
+        nodes: Vec::new(),
+        tetrahedra: Vec::new(),
+        incidence: crate::cdt::DelaunayVolumeIncidence {
+            vertex_stars: Vec::new(),
+            boundary_facets: Vec::new(),
+            regions: Vec::new(),
+            unassigned_tetrahedron_indices: Vec::new(),
+        },
+    })
 }
 
 pub(super) fn mutation_error(

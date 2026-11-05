@@ -542,3 +542,57 @@ fn facet_recovery_enforces_search_limits_and_cancellation() {
         DelaunayFacetRecoveryErrorKind::Cancelled
     );
 }
+
+/// Two segments meet at a 27 degree corner, a 4.9 m edge and a 2.5 m edge (the shape of the
+/// battery-pack TIM corner, scaled). The shell split puts both points half the shorter edge
+/// from the corner. At the long edge's midpoint distance, the short edge's point would sit 4% of
+/// its length from its far end and leave a sliver facet triangle there.
+#[test]
+fn shared_vertex_pair_split_stays_inside_the_shorter_edge() {
+    let angle = 27.0_f64.to_radians();
+    let constraints = constraints_with_coordinates(
+        [
+            [0.0, 0.0, 0.0],
+            [4.9, 0.0, 0.0],
+            [2.5 * angle.cos(), 2.5 * angle.sin(), 0.0],
+            [1.0, 0.5, 5.0],
+            [1.0, 0.5, -5.0],
+        ],
+        false,
+    );
+    let recovery = segment_recovery(false, &constraints);
+    let id = |index: usize| constraints.nodes[index].identity;
+    let long = [id(0), id(1)];
+    let short = [id(0), id(2)];
+    let locations = [long, short].map(|edge| {
+        conforming_split::segment_edge_location(&recovery.segments, edge)
+            .expect("both edges are recovered segment intervals")
+    });
+    let [(long_point, _), (short_point, _)] = conforming_split::shared_vertex_split_points(
+        &recovery.topology,
+        &recovery.segments,
+        [long, short],
+        id(0),
+        locations,
+        0,
+    )
+    .unwrap()
+    .unwrap();
+    let radius = |node: DelaunayVolumeNode| {
+        node.coordinates_m
+            .canonical_value()
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt()
+    };
+    let (long_radius, short_radius) = (radius(long_point), radius(short_point));
+    assert!(
+        (short_radius - 1.25).abs() < 0.05,
+        "short-edge point at {short_radius} m from the corner"
+    );
+    assert!(
+        (long_radius - short_radius).abs() < 0.05,
+        "the two points lie {long_radius} m and {short_radius} m from the corner"
+    );
+}

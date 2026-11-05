@@ -32,7 +32,9 @@ fn delaunay_violation(topology: &TopologyMutation) -> Option<u32> {
         let Some(cell) = topology.tetrahedron(index) else {
             continue;
         };
-        let mut points = cell.vertex_indices.map(|vertex| topology.nodes[vertex as usize]);
+        let mut points = cell
+            .vertex_indices
+            .map(|vertex| topology.nodes[vertex as usize]);
         if orient_volume_nodes(points).unwrap() == PredicateSign::Negative {
             points.swap(0, 1);
         }
@@ -147,7 +149,11 @@ fn complete_link_flips_restore_delaunay_after_edge_star_splits() {
     let kept = BTreeSet::new();
     let mut two_to_three_stalls = 0;
     let edges = interior_edges(&base, 40);
-    assert!(edges.len() >= 20, "fixture has {} interior edges", edges.len());
+    assert!(
+        edges.len() >= 20,
+        "fixture has {} interior edges",
+        edges.len()
+    );
     for (rank, edge) in edges.into_iter().enumerate() {
         let identity = StableDigest::from_bytes([0xa0 + (rank % 32) as u8; 32]);
         let mut complete = base.clone();
@@ -222,7 +228,96 @@ fn complete_link_flips_keep_listed_edges() {
         };
         for key in all_edges.iter().filter(|key| **key != split) {
             let indices = key.map(|identity| topology.node_index(identity).unwrap());
-            assert!(topology.has_edge(indices), "a 3-2 or 4-4 flip removed kept edge {key:?}");
+            assert!(
+                topology.has_edge(indices),
+                "a 3-2 or 4-4 flip removed kept edge {key:?}"
+            );
         }
     }
+}
+
+/// A pyramid over the planar quadrilateral A-B-C-E (a protected boundary facet), apex Z the
+/// inserted node, with the base triangulated through A-C. E lies inside the circumcircle of the
+/// sliver A-B-C, so the face A-C-Z between the two cells is illegal. That face runs through Z,
+/// so no link flip reaches it; the boundary facet flip A-C -> B-E repairs it.
+#[test]
+fn boundary_facet_flip_repairs_an_illegal_face_through_the_inserted_node() {
+    let node = |tag: u8, coordinates: [f64; 3]| {
+        DelaunayVolumeNode::explicit(StableDigest::from_bytes([tag; 32]), coordinates)
+    };
+    let nodes = vec![
+        node(1, [0.0, 1.0, 0.0]),
+        node(2, [-0.05, 0.0, 0.0]),
+        node(3, [0.0, -1.0, 0.0]),
+        node(4, [0.9, 0.0, 0.0]),
+        node(5, [0.2, 0.05, -0.6]),
+    ];
+    let identities = nodes.iter().map(|node| node.identity).collect::<Vec<_>>();
+    let canonical =
+        build_delaunay_volume_point_set(nodes, DelaunayPointSetOptions::default(), &NeverCancelled)
+            .unwrap();
+    let mut topology = TopologyMutation::from_canonical(canonical);
+    let index = |slot: usize| topology.node_index(identities[slot]).unwrap();
+    let [a, b, c, e, z] = [0, 1, 2, 3, 4].map(index);
+    let cells = (0..topology.tetrahedron_slot_count() as u32)
+        .filter(|cell| topology.tetrahedron(*cell).is_some())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(cells.len(), 2, "the pyramid has two cells");
+    let region = topology
+        .tetrahedron(*cells.first().unwrap())
+        .unwrap()
+        .region_id
+        .clone();
+    topology
+        .replace_cavity(
+            &cells,
+            vec![([a, b, c, z], region.clone()), ([a, c, e, z], region)],
+        )
+        .unwrap();
+    assert!(delaunay_violation(&topology).is_some());
+    let face = |vertices: [usize; 3]| {
+        let mut key = vertices.map(|slot| identities[slot]);
+        key.sort_unstable();
+        key
+    };
+    let protected = BTreeSet::from([face([0, 1, 2]), face([0, 2, 3])]);
+    let kept = BTreeSet::new();
+    let options = DelaunayInsertionOptions::default();
+
+    let mut without = topology.clone();
+    let (legal, flips) = legalize_inserted_node_and_check_star_with_facet_flips(
+        &mut without,
+        z,
+        &protected,
+        &kept,
+        false,
+        options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert!(!legal && flips.is_empty());
+
+    let (legal, flips) = legalize_inserted_node_and_check_star_with_facet_flips(
+        &mut topology,
+        z,
+        &protected,
+        &kept,
+        true,
+        options,
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert!(legal);
+    assert_eq!(flips.len(), 1);
+    let [flip] = flips[..] else { unreachable!() };
+    assert_eq!(
+        BTreeSet::from(flip.removed),
+        BTreeSet::from([face([0, 1, 2]), face([0, 2, 3])])
+    );
+    assert_eq!(
+        BTreeSet::from(flip.created),
+        BTreeSet::from([face([1, 3, 0]), face([1, 3, 2])])
+    );
+    assert_eq!(flip.off_plane, identities[4]);
+    assert_eq!(delaunay_violation(&topology), None);
 }
