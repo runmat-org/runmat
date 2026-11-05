@@ -22,7 +22,7 @@ pub(crate) fn initial_target_nodes(
             let mut selected = vec![false; projection.nodes.len()];
             let mut matched = false;
             for element in &projection.elements {
-                if target.matches_persistent_entity(&element.region_id) {
+                if target.selects_volume_element(&element.region_id, &element.provenance) {
                     matched = true;
                     for &node in &element.node_indices {
                         *selected
