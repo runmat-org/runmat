@@ -263,6 +263,11 @@ pub fn derive_curve_geometry_metric(
                 }
             }
         }
+        for (face_id, witness) in &mut face_witnesses {
+            if let Some(solids) = face_solids.get(face_id) {
+                witness.solid_ids = solids.clone();
+            }
+        }
         contributions.extend(derive_face_proximity_contributions(
             face_witnesses.into_values().collect(),
             &contact_pairs,
