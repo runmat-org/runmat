@@ -23,7 +23,7 @@ pub enum Distribution {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
-    /// Elements whose flattened name matches a glob (`r*`, `xu1.r?`, `c5`).
+    /// Elements whose flattened name matches a glob (`r*`, `xu1.r?`, `c5`, `?[sf]`).
     Elements(String),
     ModelParam { model: String, param: String },
 }
@@ -179,12 +179,37 @@ impl Rng {
     }
 }
 
+/// Case-insensitive glob over a lowercase name: `*`, `?` and `[…]` sets (`[sf]`, `[1-4]`,
+/// `[!r]`).
 pub fn glob(pattern: &str, name: &str) -> bool {
     fn go(p: &[u8], n: &[u8]) -> bool {
         match (p.first(), n.first()) {
             (None, None) => true,
             (Some(b'*'), _) => go(&p[1..], n) || (!n.is_empty() && go(p, &n[1..])),
             (Some(b'?'), Some(_)) => go(&p[1..], &n[1..]),
+            (Some(b'['), Some(&c)) => match p.iter().skip(1).position(|&x| x == b']') {
+                // `[…]` matches one character of the set (`a-z` ranges; `!` or `^` first negates).
+                Some(k) if k > 0 => {
+                    let set = &p[1..1 + k];
+                    let (neg, set) = match set.first() {
+                        Some(b'!' | b'^') => (true, &set[1..]),
+                        _ => (false, set),
+                    };
+                    let mut hit = false;
+                    let mut i = 0;
+                    while i < set.len() {
+                        if i + 2 < set.len() && set[i + 1] == b'-' {
+                            hit |= (set[i]..=set[i + 2]).contains(&c);
+                            i += 3;
+                        } else {
+                            hit |= set[i] == c;
+                            i += 1;
+                        }
+                    }
+                    hit != neg && go(&p[2 + k..], &n[1..])
+                }
+                _ => c == b'[' && go(&p[1..], &n[1..]),
+            },
             (Some(a), Some(b)) if a == b => go(&p[1..], &n[1..]),
             _ => false,
         }

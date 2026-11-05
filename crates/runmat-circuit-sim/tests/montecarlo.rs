@@ -89,3 +89,12 @@ fn a_monte_carlo_split_into_ranges_gives_the_same_runs() {
     assert_eq!(head.usage, all.usage);
     assert_eq!(head.completed, 100);
 }
+
+#[test]
+fn tolerance_globs_take_sets_and_ranges() {
+    use runmat_circuit_sim::montecarlo::glob;
+    assert!(glob("?[SF]", "rs") && glob("?[SF]", "cf") && !glob("?[SF]", "rg"));
+    assert!(glob("r[1-3]", "r2") && !glob("r[1-3]", "r4"));
+    assert!(glob("[!r]*", "c5") && !glob("[!r]*", "r5"));
+    assert!(glob("xu1.r?", "xu1.r7") && glob("R*", "r10"));
+}
