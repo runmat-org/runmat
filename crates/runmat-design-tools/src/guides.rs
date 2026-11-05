@@ -112,14 +112,19 @@ pub enum EntryPoint {
     Agent,
 }
 
-/// A count from `design.check` the finished file must reach, and the decision that fills it.
+/// A count from `design.check` (or `design.inspect`'s totals) the finished file must reach, or
+/// stay under, and the decision that settles it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Requirement {
     /// A key of `design.check`'s `counts` (features, bodies, published, occurrences, mates,
-    /// views, annotations, components, nets, footprints, tracks).
+    /// views, annotations, components, nets, footprints, tracks) or of `design.inspect`'s totals
+    /// (`erc power errors`, `eco differences`, `unplaced components`).
     pub count: String,
     pub at_least: usize,
-    /// The decision that is still open while the count is short.
+    /// The most the finished file may have (`Some(0)`: none left).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_most: Option<usize>,
+    /// The decision that is still open while the count is short, or over.
     pub decision: String,
 }
 
@@ -308,7 +313,8 @@ pub fn status(guide: &Guide, path: &str, files: &Files) -> Result<GuideStatus, T
     let mut open: Vec<String> = Vec::new();
     for r in &guide.completion.requires {
         let have = totals.get(&r.count).copied().unwrap_or(0);
-        if have < r.at_least && !open.contains(&r.decision) {
+        let over = r.at_most.is_some_and(|most| have > most);
+        if (have < r.at_least || over) && !open.contains(&r.decision) {
             open.push(r.decision.clone());
         }
     }
@@ -358,6 +364,17 @@ fn needs(count: &str, at_least: usize, decision: &str) -> Requirement {
     Requirement {
         count: count.into(),
         at_least,
+        at_most: None,
+        decision: decision.into(),
+    }
+}
+
+/// None of `count` may remain: `decision` stays open while any does.
+fn needs_none(count: &str, decision: &str) -> Requirement {
+    Requirement {
+        count: count.into(),
+        at_least: 0,
+        at_most: Some(0),
         decision: decision.into(),
     }
 }
@@ -471,7 +488,7 @@ pub fn catalog() -> GuideCatalog {
                     "Mount, bracket, enclosure, shaft or plate, with the features each usually needs"),
                 decision("envelope", "What space must it fit in?", &[Quantity], &[], true, Ask,
                     "Width, depth and height limits, from a mating part or a drawing"),
-                decision("interfaces", "Which faces mount to the wall?", &[EditorPick, ProjectFile], &[Face, Edge, SketchEntity], true, Ask,
+                decision("interfaces", "Which faces mount to the mating part?", &[EditorPick, ProjectFile], &[Face, Edge, SketchEntity], true, Ask,
                     "Faces of a mating part, a hole pattern, or a sketch on the base plane"),
                 decision("material", "What material?", &[SingleChoice], &[], true, Propose,
                     "Aluminum 6061, steel 1018, stainless 304 or ABS, by strength, weight and cost"),
@@ -499,7 +516,7 @@ pub fn catalog() -> GuideCatalog {
                     "The process minimum for this material, with where the part is thinner"),
                 decision("draft", "Which walls need draft, and how much?", &[EditorPick, Quantity], &[Face], false, Propose,
                     "1 to 3 degrees on walls parallel to the pull direction"),
-                decision("radii", "Minimum inside radius for 2 mm 5052 sheet?", &[Quantity], &[], true, Propose,
+                decision("radii", "Minimum inside bend radius?", &[Quantity], &[], true, Propose,
                     "1 × thickness for 5052-H32, 1.5 × for 6061-T6, with the cracking risk below it"),
                 decision("tolerances", "Which features carry tight tolerances?", &[EditorPick, Quantity], &[Face, Edge], false, Ask,
                     "Bores, mating faces and hole positions; everything else at the general tolerance"),
@@ -521,7 +538,7 @@ pub fn catalog() -> GuideCatalog {
                     "Parts in this project, with the ones other assemblies already use"),
                 decision("fixed", "Which part stays fixed?", &[EditorPick, SingleChoice], &[Occurrence], true, Propose,
                     "The base or frame, usually the largest part"),
-                decision("mates", "How does the hook attach?", &[SingleChoice, EditorPick], &[Face, Edge], true, Ask,
+                decision("mates", "How do the parts attach?", &[SingleChoice, EditorPick], &[Face, Edge], true, Ask,
                     "Bolted, welded or snap fit, with the mates each one adds"),
                 decision("motion", "Should anything move?", &[SingleChoice], &[], false, Ask,
                     "Nothing, a hinge, a slider, or a mate controller over a range"),
@@ -567,13 +584,13 @@ pub fn catalog() -> GuideCatalog {
                     "Power, MCU, radio, sensors and connectors, with a part for each"),
                 decision("interfaces", "How do the blocks connect?", &[SingleChoice, EditorPick], &[Net, Pin], true, Ask,
                     "I2C, SPI, UART or GPIO, with pull-ups and level shifting where needed"),
-                decision("rails", "Which rail powers the radio?", &[SingleChoice, EditorPick], &[Net], true, Ask,
+                decision("rails", "Which rail powers each block?", &[SingleChoice, EditorPick], &[Net], true, Ask,
                     "The rails on the sheet, with each one's voltage and the radio's supply range"),
                 decision("parts", "Which parts, and which alternates?", &[SingleChoice, ProjectFile, EditorPick], &[Component], true, Propose,
                     "Parts in the library with stock and a second source each"),
             ],
             "design.check",
-            vec![needs("components", 1, "blocks"), needs("nets", 1, "interfaces")],
+            vec![needs("components", 1, "blocks"), needs("nets", 1, "interfaces"), needs_none("erc power errors", "rails")],
             "general",
             "Capture a schematic from a block diagram",
         ),
@@ -597,11 +614,11 @@ pub fn catalog() -> GuideCatalog {
                     "2 layers for simple boards, 4 with solid ground for RF and fast edges"),
                 decision("rules", "Which rules come from the net classes?", &[Quantity, SingleChoice], &[], true, Propose,
                     "Track width and clearance per class, from current and voltage"),
-                decision("placement", "Place the two channels as matching rooms?", &[ChangeReview, EditorPick], &[Room, Component], true, Propose,
+                decision("placement", "How are repeated channels placed?", &[ChangeReview, EditorPick], &[Room, Component], true, Propose,
                     "Copy Room Formats from channel A to B, or place each by hand"),
             ],
             "design.check",
-            vec![needs("footprints", 1, "placement")],
+            vec![needs("footprints", 1, "placement"), needs_none("unplaced components", "placement")],
             "general",
             "Bring up a board from this schematic",
         ),
@@ -613,7 +630,7 @@ pub fn catalog() -> GuideCatalog {
             ".circuit.layout",
             vec![command("board.update-schematic"), command("schematic.update-board"), EntryPoint::Agent],
             vec![
-                decision("differences", "Three footprints changed. Apply all?", &[ChangeReview, MultipleChoice, EditorPick], &[Component], true, Propose,
+                decision("differences", "Apply the schematic's changes to the board?", &[ChangeReview, MultipleChoice, EditorPick], &[Component], true, Propose,
                     "Apply all, apply the footprint changes only, or review each row"),
                 decision("relinks", "Re-link the parts whose designators changed?", &[SingleChoice], &[], false, Propose,
                     "Keep placement by unique id, or place them again"),
@@ -621,7 +638,7 @@ pub fn catalog() -> GuideCatalog {
                     "Move changed parts into their rooms, or leave them where they are"),
             ],
             "design.check",
-            vec![],
+            vec![needs_none("eco differences", "differences")],
             "general",
             "Update the board from the schematic",
         ),

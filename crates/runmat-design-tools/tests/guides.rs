@@ -117,8 +117,11 @@ fn a_part_that_does_not_compile_is_not_complete() {
     assert!(!s.complete);
 }
 
+/// The I/O schematic compiles with every block and net, but ERC finds power pins no source
+/// drives, so the rails stay open; its board leaves the third channel's parts unplaced until it
+/// takes the schematic's changes, so placement and the ECO stay open.
 #[test]
-fn the_io_schematic_completes_schematic_capture_and_its_board_completes_bring_up() {
+fn the_io_schematic_leaves_its_rails_open_and_its_board_its_placement_and_changes() {
     let all: Files = [
         ("/b/io.circuit".to_owned(), IO_CIRCUIT.to_owned()),
         ("/b/io.circuit.layout".to_owned(), IO_LAYOUT.to_owned()),
@@ -133,7 +136,8 @@ fn the_io_schematic_completes_schematic_capture_and_its_board_completes_bring_up
         &files,
     )
     .unwrap();
-    assert!(s.complete, "{s:?}");
+    assert!(s.check_ok && !s.complete, "{s:?}");
+    assert_eq!(s.open, ["rails"]);
     let files = dependency_closure(
         "/b/io.circuit.layout",
         IO_LAYOUT,
@@ -146,7 +150,15 @@ fn the_io_schematic_completes_schematic_capture_and_its_board_completes_bring_up
         &files,
     )
     .unwrap();
-    assert!(s.complete, "{s:?}");
+    assert!(s.check_ok && !s.complete, "{s:?}");
+    assert_eq!(s.open, ["placement"]);
+    let s = status(
+        c.guide("engineering_change").unwrap(),
+        "/b/io.circuit.layout",
+        &files,
+    )
+    .unwrap();
+    assert_eq!(s.open, ["differences"], "{s:?}");
 }
 
 #[test]

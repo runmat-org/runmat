@@ -11,8 +11,9 @@ use std::collections::BTreeMap;
 
 /// What to read. Parts: `faces`, `regions`, `published`, `inputs`, `features`, `bodies`,
 /// `mass`. Assemblies: `occurrences`, `mates`, `bom`, `mass`. Circuits: `components`, `nets`,
-/// `net_classes`, `bom`, `sheets`, `rooms`, `footprints`, `layers`. Drawings: `sheets`, `views`,
-/// `annotations`.
+/// `net_classes`, `bom`, `sheets`, `erc_power`, and with a board `rooms`, `footprints`, `layers`,
+/// `unplaced` and `eco`. Drawings: `sheets`, `views`, `annotations`, `models` (the inputs of
+/// the parts the views show).
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InspectInput {
@@ -434,6 +435,30 @@ fn drawing(s: &mut Sections, path: &str, text: &str, files: &Files) {
     s.add("sheets", rows(&doc["sheets"]), &["name"]);
     s.add("views", rows(&doc["views"]), &["name"]);
     s.add("annotations", rows(&doc["annotations"]), &["id", "view"]);
+    // The inputs of each part the views show, so a drawing's dimensions can be named by value.
+    if s.wants("models") {
+        let dir = path.rsplit_once('/').map_or("", |(d, _)| d);
+        let mut models = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for view in rows(&doc["views"]) {
+            let Some(file) = view["model"]["file"].as_str() else { continue };
+            let model = if file.starts_with('/') { file.to_owned() } else { format!("{dir}/{file}") };
+            if !model.ends_with(".part") || !seen.insert(model.clone()) {
+                continue;
+            }
+            let input = InspectInput {
+                path: model.clone(),
+                sections: Some(vec!["inputs".into()]),
+                filter: None,
+                density: None,
+                limit: None,
+            };
+            if let Ok(out) = inspect(&input, files) {
+                models.push(json!({ "path": model, "inputs": out.sections.get("inputs").cloned().unwrap_or(Value::Null) }));
+            }
+        }
+        s.value("models", Value::Array(models));
+    }
 }
 
 fn circuit(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(), ToolError> {
@@ -460,7 +485,51 @@ fn circuit(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<()
     s.add("net_classes", rows(&index.net_classes), &["name"]);
     s.add("bom", rows(&index.bom), &["part", "designators"]);
     s.add("sheets", rows(&index.hierarchy), &["path", "sheet"]);
+    // The open work a guide reads: ERC errors that no power source drives, and the changes
+    // the board hasn't taken from the schematic.
+    let power_errors: Vec<Value> = index
+        .erc
+        .iter()
+        .filter(|c| c.code == "power-not-driven" && c.severity == "error")
+        .filter_map(|c| serde_json::to_value(c).ok())
+        .collect();
+    s.out.totals.insert("erc power errors".into(), power_errors.len());
+    s.value("erc_power", Value::Array(power_errors));
     if let Some(board) = &index.board {
+        s.out
+            .totals
+            .insert("eco differences".into(), index.eco.total as usize);
+        // One row per change, by its id (`eco:<id>` selects it for `schematic.update-board`).
+        let eco = serde_json::to_value(&index.eco).unwrap_or(Value::Null);
+        let eco_rows: Vec<Value> = eco["groups"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|g| g["rows"].as_array().cloned().unwrap_or_default())
+            .map(|r| {
+                let mut row = json!({ "id": r["id"], "kind": r["kind"], "item": r["item"], "status": r["status"] });
+                for key in ["from", "to", "reason", "requires"] {
+                    if !r[key].is_null() {
+                        row[key] = r[key].clone();
+                    }
+                }
+                row
+            })
+            .collect();
+        s.value(
+            "eco",
+            json!({ "total": eco["total"], "errors": eco["errors"], "warnings": eco["warnings"], "rows": eco_rows }),
+        );
+        let placed: std::collections::BTreeSet<&str> =
+            board.footprints.iter().map(|f| f.reference.as_str()).collect();
+        let unplaced: Vec<Value> = index
+            .components
+            .iter()
+            .filter(|c| c.fitting == "fitted" && !placed.contains(c.designator.as_str()))
+            .map(|c| json!({ "designator": c.designator, "path": c.path, "part": c.part }))
+            .collect();
+        s.out.totals.insert("unplaced components".into(), unplaced.len());
+        s.value("unplaced", Value::Array(unplaced));
         s.add("rooms", rows(&board.rooms), &["name", "members"]);
         s.add(
             "footprints",
