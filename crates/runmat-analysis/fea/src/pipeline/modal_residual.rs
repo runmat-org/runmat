@@ -99,6 +99,7 @@ pub(super) fn build_directional_residual_vectors(
         let solution = static_solver.solve(&load)?;
         let equilibrium_ratio = solution.equilibrium_residual_ratio;
         let mut shape = solution.displacement;
+        let initial_mass = dot(&shape, &apply_m(&summary.operator, &shape));
         for mode in modes {
             let coefficient = dot(mode.dof_shape(), &load) / mode.modal_stiffness();
             subtract_scaled(&mut shape, mode.dof_shape(), coefficient)?;
@@ -108,7 +109,12 @@ pub(super) fn build_directional_residual_vectors(
         }
         let mass_applied = apply_m(&summary.operator, &shape);
         let modal_mass = dot(&shape, &mass_applied);
-        if !modal_mass.is_finite() || modal_mass <= f64::EPSILON {
+        // Dependence is relative to the static response itself: an absolute bound on a modal
+        // mass in kg m^2 rejects every physically small (stiff, SI-unit) residual vector.
+        if !modal_mass.is_finite()
+            || !initial_mass.is_finite()
+            || modal_mass.sqrt() <= STATIC_CORRECTION_DEPENDENCE_RATIO * initial_mass.sqrt()
+        {
             return Err(FeaRunError::Solve(
                 "residual vector is linearly dependent on the retained modal basis".into(),
             ));
