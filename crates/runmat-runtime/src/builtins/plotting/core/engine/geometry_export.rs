@@ -60,7 +60,30 @@ pub async fn render_geometry_scene_snapshot_with_camera_state(
     height: u32,
     camera: web::PlotSurfaceCameraState,
 ) -> BuiltinResult<Vec<u8>> {
-    render_geometry_scene_snapshot_inner(handle, width, height, None, Some(camera)).await
+    render_geometry_scene_snapshot_with_camera_state_scaled(handle, width, height, camera, 1.0)
+        .await
+}
+
+/// As [`render_geometry_scene_snapshot_with_camera_state`], with titles, legends and other text
+/// drawn at `pixels_per_point` device pixels per layout point, so a poster shown scaled down
+/// keeps readable labels.
+#[cfg(feature = "plot-core")]
+pub async fn render_geometry_scene_snapshot_with_camera_state_scaled(
+    handle: u32,
+    width: u32,
+    height: u32,
+    camera: web::PlotSurfaceCameraState,
+    pixels_per_point: f32,
+) -> BuiltinResult<Vec<u8>> {
+    const SNAPSHOT_CONTEXT: &str = "renderGeometrySceneImage";
+    let scene = clone_geometry_scene(handle).ok_or_else(|| {
+        map_control_flow_with_builtin(
+            engine_error(format!("geometry scene handle {handle} does not exist")),
+            SNAPSHOT_CONTEXT,
+        )
+    })?;
+    render_geometry_observation_scaled(scene, width, height, None, Some(camera), pixels_per_point)
+        .await
 }
 
 #[cfg(feature = "plot-core")]
@@ -108,9 +131,24 @@ async fn render_geometry_observation_inner(
     view: Option<String>,
     camera_state: Option<web::PlotSurfaceCameraState>,
 ) -> BuiltinResult<Vec<u8>> {
+    render_geometry_observation_scaled(scene, width, height, view, camera_state, 1.0).await
+}
+
+#[cfg(feature = "plot-core")]
+async fn render_geometry_observation_scaled(
+    scene: runmat_plot::GeometryScene,
+    width: u32,
+    height: u32,
+    view: Option<String>,
+    camera_state: Option<web::PlotSurfaceCameraState>,
+    pixels_per_point: f32,
+) -> BuiltinResult<Vec<u8>> {
     const SNAPSHOT_CONTEXT: &str = "renderGeometrySceneImage";
     use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
-    let mut settings = ImageExportSettings::default();
+    let mut settings = ImageExportSettings {
+        pixels_per_point,
+        ..ImageExportSettings::default()
+    };
     if width > 0 {
         settings.width = width;
     }

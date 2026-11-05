@@ -84,7 +84,12 @@ fn selects_case(case_id: &str, selected: Option<&str>) -> bool {
 
 /// Views of the captured runs (the named ones, or every view the runs offer), written beside
 /// `output`, then the snapshot metadata.
-async fn write_snapshot(runs: &[CapturedRun], selected: &[String], output: &Path) -> Result<()> {
+async fn write_snapshot(
+    runs: &[CapturedRun],
+    selected: &[String],
+    output: &Path,
+    presentation: &views::Presentation,
+) -> Result<()> {
     let (primary, others) = runs
         .split_first()
         .ok_or_else(|| anyhow!("snapshot captured no run"))?;
@@ -99,11 +104,16 @@ async fn write_snapshot(runs: &[CapturedRun], selected: &[String], output: &Path
             .collect::<Vec<_>>(),
     )?
     .select(selected)?;
-    let views = views::capture(parent, profile, |run_id| {
-        runs.iter()
-            .find(|run| run.run_id == run_id)
-            .and_then(|run| run.publication.solver_mesh_artifact_path.clone())
-    })
+    let views = views::capture(
+        parent,
+        profile,
+        |run_id| {
+            runs.iter()
+                .find(|run| run.run_id == run_id)
+                .and_then(|run| run.publication.solver_mesh_artifact_path.clone())
+        },
+        presentation,
+    )
     .await?;
     std::fs::write(
         output,
@@ -125,7 +135,10 @@ pub(super) async fn capture(
     case: Option<&str>,
     selected_views: &[String],
     output: &Path,
+    presentation: &crate::cli::SnapshotPresentationArgs,
 ) -> Result<()> {
+    // Load context geometry and check the options before solving anything.
+    let presentation = views::Presentation::from_args(presentation)?;
     let ResolvedFeaRoot::Study(study) = root else {
         bail!("snapshot requires one study");
     };
@@ -226,7 +239,7 @@ pub(super) async fn capture(
             runs: others,
         })?,
     )?;
-    write_snapshot(&runs, selected_views, output).await?;
+    write_snapshot(&runs, selected_views, output, &presentation).await?;
     std::fs::remove_file(accepted_checkpoint)?;
     Ok(())
 }

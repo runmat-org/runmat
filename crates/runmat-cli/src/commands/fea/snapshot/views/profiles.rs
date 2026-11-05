@@ -532,15 +532,17 @@ pub(super) struct StoredValues;
 
 impl PublishedValues for StoredValues {
     fn peak(&self, run_id: &str, descriptor: &AnalysisFieldDescriptor) -> Result<f64> {
-        Ok(runmat_runtime::analysis::field_scene::extrema::field_extrema(
-            run_id,
-            &selection(descriptor),
-            None,
-            None,
+        Ok(
+            runmat_runtime::analysis::field_scene::extrema::field_extrema(
+                run_id,
+                &selection(descriptor),
+                None,
+                None,
+            )
+            .map_err(anyhow::Error::msg)?
+            .maximum
+            .value,
         )
-        .map_err(anyhow::Error::msg)?
-        .maximum
-        .value)
     }
 
     fn small(&self, run_id: &str, descriptor: &AnalysisFieldDescriptor) -> Result<Vec<f64>> {
@@ -1244,7 +1246,8 @@ mod tests {
                 vec![4, 3],
             ),
         ];
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(
             ids(&profile),
             [
@@ -1299,7 +1302,8 @@ mod tests {
                 )
             })
             .collect();
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(ids(&profile), ["geometry", "mode-1", "mode-2", "mode-3"]);
         for (view, mode) in profile.views[1..].iter().zip(0..) {
             assert_eq!(
@@ -1333,7 +1337,8 @@ mod tests {
             published("modal.mode_shape.1", node_vector(0), vec![4, 3]),
             published("modal.mode_shape.2", node_vector(1), vec![4, 3]),
         ];
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(ids(&profile), ["geometry", "mode-1", "mode-2"]);
         let shapes: Vec<_> = profile.views[1..]
             .iter()
@@ -1358,7 +1363,8 @@ mod tests {
                 )
             })
             .collect();
-        let profile = || CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            || CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         let names = |names: &[&str]| {
             names
                 .iter()
@@ -1386,7 +1392,8 @@ mod tests {
             AnalysisFieldLayout::vector3(Q::FluidVelocity, FieldLocation::Element),
             vec![4, 3],
         )];
-        let profile = CaptureProfile::from_published(&[("run", &velocity)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &velocity)], &Values::default()).unwrap();
         let kinds: Vec<_> = profile
             .views
             .iter()
@@ -1415,7 +1422,8 @@ mod tests {
                 vec![4],
             ),
         ];
-        let profile = CaptureProfile::from_published(&[("run", &pressure)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &pressure)], &Values::default()).unwrap();
         let sections: Vec<_> = profile
             .views
             .iter()
@@ -1458,7 +1466,8 @@ mod tests {
                 )
             })
             .collect();
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(
             profile.views[1].field.as_ref().unwrap().field_id,
             "thermal.temperature.2"
@@ -1481,7 +1490,8 @@ mod tests {
                 vec![4],
             ),
         ];
-        let profile = CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let profile =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(
             ids(&profile),
             ["geometry", "sound-pressure-level", "acoustic-pressure"]
@@ -1504,12 +1514,11 @@ mod tests {
             AnalysisFieldLayout::scalar(Q::Temperature, FieldLocation::Node).step(0),
             vec![4],
         )];
-        let profile =
-            CaptureProfile::from_published(
-                &[("conduction", &conduction), ("heat", &heat)],
-                &Values::default(),
-            )
-                .unwrap();
+        let profile = CaptureProfile::from_published(
+            &[("conduction", &conduction), ("heat", &heat)],
+            &Values::default(),
+        )
+        .unwrap();
         let by_id = |id: &str| profile.views.iter().find(|view| view.id == id).unwrap();
         assert_eq!(by_id("temperature").run_id, "heat");
         assert_eq!(by_id("electric-potential").run_id, "conduction");
@@ -1527,8 +1536,7 @@ mod tests {
         let mut values = Values::default();
         let mut fields = Vec::new();
         for (step, time) in times.into_iter().enumerate() {
-            for (name, quantity) in [("displacement", Q::Displacement), ("velocity", Q::Velocity)]
-            {
+            for (name, quantity) in [("displacement", Q::Displacement), ("velocity", Q::Velocity)] {
                 let id = format!("structural.transient.{name}.{step}");
                 fields.push(sampled(
                     &id,
@@ -1537,15 +1545,16 @@ mod tests {
                     RecoveredFieldSample::TimeSeconds(time),
                 ));
                 // Displacement peaks at 4 ms; the final state is smaller.
-                values
-                    .peaks
-                    .insert(id, [0.0, 1.0, 3.0, 2.0][step]);
+                values.peaks.insert(id, [0.0, 1.0, 3.0, 2.0][step]);
             }
         }
         let profile = CaptureProfile::from_published(&[("run", &fields)], &values).unwrap();
         assert_eq!(ids(&profile), ["geometry", "displacement", "velocity"]);
         let displacement = view(&profile, "displacement");
-        assert_eq!(field_of(displacement), "structural.transient.displacement.2");
+        assert_eq!(
+            field_of(displacement),
+            "structural.transient.displacement.2"
+        );
         assert_eq!(displacement.label, "Displacement magnitude · t = 4 ms");
         assert_eq!(
             displacement.deformation.as_ref().unwrap().field_id,
@@ -1575,7 +1584,11 @@ mod tests {
         for step in 0..3 {
             let id = format!("transient.displacement.{step}");
             values.peaks.insert(id.clone(), [0.0, 2.0, 1.0][step]);
-            fields.push(published(&id, node_vector(Q::Displacement).step(step), vec![4, 3]));
+            fields.push(published(
+                &id,
+                node_vector(Q::Displacement).step(step),
+                vec![4, 3],
+            ));
             fields.push(published(
                 &format!("transient.von_mises.{step}"),
                 AnalysisFieldLayout::scalar(Q::VonMisesStress, FieldLocation::Element).step(step),
@@ -1651,10 +1664,7 @@ mod tests {
             CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(ids(&profile), ["geometry", "rms-displacement"]);
         let rms = view(&profile, "rms-displacement");
-        assert_eq!(
-            field_of(rms),
-            "structural.random_response.rms.displacement"
-        );
+        assert_eq!(field_of(rms), "structural.random_response.rms.displacement");
         assert_eq!(rms.label, "RMS displacement magnitude");
         assert!(rms.deformation.is_none());
         assert_eq!(rms.shape, "undeformed");
@@ -1699,7 +1709,10 @@ mod tests {
             CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
         assert_eq!(ids(&profile), ["geometry", "displacement", "stress"]);
         let displacement = view(&profile, "displacement");
-        assert_eq!(field_of(displacement), "structural.nonlinear.displacement.2");
+        assert_eq!(
+            field_of(displacement),
+            "structural.nonlinear.displacement.2"
+        );
         assert_eq!(
             displacement.label,
             "Displacement magnitude · load factor 1.000"

@@ -2615,6 +2615,9 @@ impl PlotOverlay {
         axes_index: usize,
         font_scale: f32,
     ) {
+        if !plot_renderer.shows_orientation_triad() {
+            return;
+        }
         let cam_ref = plot_renderer
             .axes_camera(axes_index)
             .unwrap_or_else(|| plot_renderer.camera());
@@ -2735,6 +2738,9 @@ impl PlotOverlay {
         axes_index: usize,
         font_scale: f32,
     ) {
+        if !plot_renderer.shows_world_triad(axes_index) {
+            return;
+        }
         let cam_ref = plot_renderer
             .axes_camera(axes_index)
             .unwrap_or_else(|| plot_renderer.camera());
@@ -3185,9 +3191,11 @@ impl PlotOverlay {
             (text.y.clamp(0.0, 1.0) * 255.0) as u8,
             (text.z.clamp(0.0, 1.0) * 255.0) as u8,
         );
-        let muted = text_color.gamma_multiply(0.68);
+        let muted = text_color.gamma_multiply(0.85);
         let label_font = FontId::proportional(11.0 * scale);
-        let detail_font = FontId::proportional(9.0 * scale);
+        // The range values are the data the legend exists for: as large as its label, so they
+        // stay readable when a poster is shown small.
+        let detail_font = FontId::proportional(11.0 * scale);
         ui.painter().text(
             rect.right_top(),
             Align2::RIGHT_TOP,
