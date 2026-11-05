@@ -8,10 +8,12 @@ use runmat_cad::display::{BodyDisplay, Bounds, EdgeDisplay, FaceDisplay, PartDis
 use std::collections::BTreeMap;
 
 /// The bodies a drawing and the 3D view outline: the substrate and its mask (the board
-/// outline and cutouts), drills (holes) and component bodies, terminals and leads. Copper,
-/// pads and silkscreen are surface art: outlining them would bury the drawing in strokes.
+/// outline and cutouts), drills (holes) and the component bodies. Copper, pads and silkscreen
+/// are surface art, and terminals, leads and pins sit inside their package's outline at
+/// drawing scale: outlining them would bury the drawing in strokes, as SolidWorks' simplified
+/// PCB representation leaves them out.
 fn outlined(body: &str) -> bool {
-    !matches!(body, "Copper" | "Pads" | "Silkscreen")
+    !matches!(body, "Copper" | "Pads" | "Silkscreen" | "Terminals" | "Leads" | "Pins")
 }
 
 /// A mesh's feature edges as polylines of segments (mm): where only one triangle meets a
@@ -212,6 +214,7 @@ mod tests {
         assert!(edges("Packages") >= 12, "a package body is at least a box: {}", edges("Packages"));
         assert_eq!(edges("Silkscreen"), 0);
         assert_eq!(edges("Copper"), 0);
+        assert_eq!(edges("Terminals"), 0);
     }
 
     #[test]
