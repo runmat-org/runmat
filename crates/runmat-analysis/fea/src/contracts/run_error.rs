@@ -34,6 +34,12 @@ pub enum FeaRunError {
     Cancelled,
 }
 
+impl From<runmat_simulation_usage::LedgerError> for FeaRunError {
+    fn from(error: runmat_simulation_usage::LedgerError) -> Self {
+        Self::Usage(error)
+    }
+}
+
 impl From<crate::post::StructuralFieldRecoveryError> for FeaRunError {
     fn from(error: crate::post::StructuralFieldRecoveryError) -> Self {
         use crate::{

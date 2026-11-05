@@ -118,6 +118,8 @@ pub enum CoercivityError {
     SymbolicOrdering,
     #[error("coercivity proof was cancelled")]
     Cancelled,
+    #[error("coercivity factorization usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
     #[error("coercivity evidence does not match its prepared operator or right-hand side")]
     BindingMismatch,
     #[error("coercivity evidence identity encoding failed: {0}")]
@@ -308,7 +310,8 @@ impl CoercivityCertificate {
                 return Err(CoercivityError::AdmissionDimension {
                     required: dimension as u64,
                     admitted: admission.dimension.0,
-                }.into());
+                }
+                .into());
             }
             let updates = symbolic::flop_count(&estimate);
             if estimate.factor_entries > admission.factor_nonzero_upper_bound.0
@@ -320,18 +323,21 @@ impl CoercivityCertificate {
                     factor_nonzero_limit: admission.factor_nonzero_upper_bound.0,
                     update_count: updates,
                     update_limit: admission.update_count_upper_bound.0,
-                }.into());
+                }
+                .into());
             }
             if estimate.peak_bytes() > admission.resident_bytes_upper_bound.0 {
                 return Err(CoercivityError::FactorAdmission {
                     required_bytes: estimate.peak_bytes(),
                     budget_bytes: admission.resident_bytes_upper_bound.0,
-                }.into());
+                }
+                .into());
             }
         }
         let factor_work = symbolic.reference_work().map_err(|error| match error {
-            runmat_sparse_solvers::direct::ReferenceWorkError::Overflow(_) =>
-                CoercivityError::WorkOverflow,
+            runmat_sparse_solvers::direct::ReferenceWorkError::Overflow(_) => {
+                CoercivityError::WorkOverflow
+            }
             _ => CoercivityError::SymbolicOrdering,
         })?;
         before_factor(
@@ -365,6 +371,7 @@ impl CoercivityCertificate {
                 }
             }
             runmat_sparse_solvers::SolverError::Cancelled => CoercivityError::Cancelled,
+            runmat_sparse_solvers::SolverError::Usage(error) => CoercivityError::Usage(error),
             _ => CoercivityError::SymbolicOrdering,
         })?;
         // Scaled pivots l_jj² / a_jj are the pivots of D^{-1/2} A D^{-1/2}; a tiny one is a

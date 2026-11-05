@@ -1,14 +1,21 @@
 //! Canonical homogeneous static solve shared by modal correction procedures.
 
+use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory};
+
 use crate::{
     algebra::{
-        apply_k, AssembledRealSystem, CanonicalRealOperators, MatrixProperties, OperatorRole,
-        RealSparseMatrix,
+        apply_k,
+        capacity::{measured_sync, real_spmv_work},
+        AssembledRealSystem, CanonicalRealOperators, CoercivityError, MatrixProperties,
+        OperatorRole, RealSparseMatrix, RealSystemError, ScopedSpmvError,
     },
     assembly::AssemblySummary,
     constraints::AffineConstraintReduction,
     contracts::FeaRunError,
-    solve::{preconditioner::SpdPreconditionerKind, shared_sparse},
+    solve::{
+        affine_expand_linear, affine_recovery_work, affine_scatter_work, affine_transpose_work,
+        preconditioner::SpdPreconditionerKind, shared_sparse,
+    },
 };
 
 const STATIC_TOLERANCE: f64 = 1.0e-10;
@@ -24,6 +31,8 @@ pub(crate) struct HomogeneousStaticSolver {
     reduction: AffineConstraintReduction,
     system: AssembledRealSystem,
     factor: std::sync::Arc<runmat_sparse_solvers::direct::DirectSolver<f64>>,
+    /// `||K||_F` of the reduced stiffness, computed once per factor.
+    stiffness_norm: f64,
 }
 
 pub(crate) struct HomogeneousStaticSolution {
@@ -36,11 +45,20 @@ impl HomogeneousStaticSolver {
         SpdPreconditionerKind::Direct
     }
 
+    /// Reduces and factors the stiffness. Under an admitted usage context the reduction scatter
+    /// is charged as solve work and the Cholesky factorization charges its own reference
+    /// operations; a ledger refusal returns [`FeaRunError::Usage`].
     pub(crate) fn new(summary: &AssemblySummary) -> Result<Self, FeaRunError> {
         let reduction = homogeneous_reduction(summary)?;
-        let stiffness = reduction
-            .reduce_sparse_operator(summary.operator.operators().stiffness())
-            .map_err(|error| FeaRunError::Solve(error.to_string()))?;
+        let full_stiffness = summary.operator.operators().stiffness();
+        let stiffness = metered(
+            affine_scatter_work(&reduction, full_stiffness).map_err(scoped_error)?,
+            || {
+                reduction
+                    .reduce_sparse_operator(full_stiffness)
+                    .map_err(|error| FeaRunError::Solve(error.to_string()))
+            },
+        )?;
         let dimension = stiffness.rows();
         let system = AssembledRealSystem::try_new(
             CanonicalRealOperators::try_new(
@@ -67,7 +85,10 @@ impl HomogeneousStaticSolver {
             crate::planning::resource::LocalExecutionPlan::serial(),
             || system.prepare_linear(),
         )
-        .map_err(|error| FeaRunError::Solve(error.to_string()))?;
+        .map_err(|error| match error {
+            RealSystemError::Coercivity(CoercivityError::Usage(cause)) => FeaRunError::Usage(cause),
+            other => FeaRunError::Solve(other.to_string()),
+        })?;
         let factor = prepared
             .admissibility()
             .and_then(|evidence| evidence.factor())
@@ -75,28 +96,35 @@ impl HomogeneousStaticSolver {
             .ok_or_else(|| {
                 FeaRunError::Solve("homogeneous static stiffness has no Cholesky proof".into())
             })?;
+        let values = system.operators().stiffness().values();
+        let stiffness_norm = metered(norm_work(values.len())?, || Ok(norm(values)))?;
         Ok(Self {
             reduction,
             system,
             factor,
+            stiffness_norm,
         })
     }
 
+    /// One correction load. The direct substitutions, refinement residuals and norms charge
+    /// themselves inside the shared direct solver; this owner charges the constraint transpose
+    /// and expansion, the equilibrium product `K x - f` and its backward-error norms.
     pub(crate) fn solve(
         &self,
         full_load: &[f64],
     ) -> Result<HomogeneousStaticSolution, FeaRunError> {
-        let reduced_load = self
-            .reduction
-            .transpose_apply(full_load)
-            .map_err(|error| FeaRunError::Solve(error.to_string()))?;
+        let reduced_load = metered(
+            affine_transpose_work(&self.reduction).map_err(scoped_error)?,
+            || {
+                self.reduction
+                    .transpose_apply(full_load)
+                    .map_err(|error| FeaRunError::Solve(error.to_string()))
+            },
+        )?;
         if reduced_load.iter().all(|value| *value == 0.0) {
             let zero = vec![0.0; self.system.dof_count()];
             return Ok(HomogeneousStaticSolution {
-                displacement: self
-                    .reduction
-                    .expand_linear(&zero)
-                    .map_err(|error| FeaRunError::Solve(error.to_string()))?,
+                displacement: self.expand(&zero)?,
                 equilibrium_residual_ratio: 0.0,
             });
         }
@@ -110,38 +138,91 @@ impl HomogeneousStaticSolver {
                     .map(|_| ())
             },
         )
-        .map_err(|error| {
-            FeaRunError::Solve(format!("homogeneous static correction failed: {error}"))
+        .map_err(|error| match error {
+            runmat_sparse_solvers::SolverError::Usage(cause) => FeaRunError::Usage(cause),
+            error => FeaRunError::Solve(format!("homogeneous static correction failed: {error}")),
         })?;
-        let equilibrium_residual = subtract(&apply_k(&self.system, &vector), &reduced_load)?;
+        let length = vector.len();
+        let applied = metered(real_spmv_work(self.system.operators().stiffness())?, || {
+            Ok(apply_k(&self.system, &vector))
+        })?;
+        let equilibrium_residual = metered(vector_work(length, 1)?, || {
+            subtract(&applied, &reduced_load)
+        })?;
         // Normwise backward error ||K x - f|| / (||K||_F ||x|| + ||f||). A direct factor meets it
         // near machine precision on any conditioning; ||K x - f|| / ||f|| alone scales with
         // eps * cond(K) and rejects correct solves of stiff models.
-        let stiffness_norm = self
-            .system
-            .operators()
-            .stiffness()
-            .values()
-            .iter()
-            .map(|value| value * value)
-            .sum::<f64>()
-            .sqrt();
-        let equilibrium_residual_ratio = norm(&equilibrium_residual)
-            / (stiffness_norm * norm(&vector) + norm(&reduced_load)).max(f64::MIN_POSITIVE);
+        let residual_norm = metered(norm_work(length)?, || Ok(norm(&equilibrium_residual)))?;
+        let solution_norm = metered(norm_work(length)?, || Ok(norm(&vector)))?;
+        let load_norm = metered(norm_work(length)?, || Ok(norm(&reduced_load)))?;
+        // One product, one sum and one quotient.
+        let equilibrium_residual_ratio = metered(OperationCount::from_operations(3), || {
+            Ok(residual_norm
+                / (self.stiffness_norm * solution_norm + load_norm).max(f64::MIN_POSITIVE))
+        })?;
         if !equilibrium_residual_ratio.is_finite() || equilibrium_residual_ratio > STATIC_TOLERANCE
         {
             return Err(FeaRunError::Solve(
                 "homogeneous static correction failed its equilibrium tolerance".into(),
             ));
         }
-        let displacement = self
-            .reduction
-            .expand_linear(&vector)
-            .map_err(|error| FeaRunError::Solve(error.to_string()))?;
         Ok(HomogeneousStaticSolution {
-            displacement,
+            displacement: self.expand(&vector)?,
             equilibrium_residual_ratio,
         })
+    }
+
+    /// `T u` for the homogeneous (offset-free) reduction.
+    fn expand(&self, reduced: &[f64]) -> Result<Vec<f64>, FeaRunError> {
+        if reduced.len() != self.reduction.reduced_dof_count {
+            return Err(FeaRunError::Solve(
+                "homogeneous static correction dimensions are inconsistent".into(),
+            ));
+        }
+        metered(
+            affine_recovery_work(&self.reduction).map_err(scoped_error)?,
+            || affine_expand_linear(&self.reduction, reduced, None).map_err(scoped_error),
+        )
+    }
+}
+
+/// Reserves `work` as solve operations on the active usage ledger (if any), runs `run`, and
+/// completes the reservation only when `run` succeeds.
+pub(crate) fn metered<R>(
+    work: OperationCount,
+    run: impl FnOnce() -> Result<R, FeaRunError>,
+) -> Result<R, FeaRunError> {
+    measured_sync(UsageCategory::Solve, work, run)
+}
+
+/// `per_entry` reference operations for each of `length` vector entries.
+pub(crate) fn vector_work(length: usize, per_entry: u64) -> Result<OperationCount, FeaRunError> {
+    Ok(OperationCount::from_operations(
+        u64::try_from(length).map_err(|_| LedgerError::CountOverflow)?,
+    )
+    .checked_mul(per_entry)
+    .map_err(LedgerError::from)?)
+}
+
+/// A real dot product of `length` entries.
+pub(crate) fn dot_work(length: usize) -> Result<OperationCount, FeaRunError> {
+    Ok(OperationCount::direct_real_dot(
+        u64::try_from(length).map_err(|_| LedgerError::CountOverflow)?,
+    )
+    .map_err(LedgerError::from)?)
+}
+
+/// A Euclidean norm: the self dot product plus one square root.
+pub(crate) fn norm_work(length: usize) -> Result<OperationCount, FeaRunError> {
+    Ok(dot_work(length)?
+        .checked_add(OperationCount::from_operations(1))
+        .map_err(LedgerError::from)?)
+}
+
+fn scoped_error(error: ScopedSpmvError) -> FeaRunError {
+    match error {
+        ScopedSpmvError::Usage(cause) => FeaRunError::Usage(cause),
+        other => FeaRunError::Solve(other.to_string()),
     }
 }
 
