@@ -74,6 +74,7 @@ pub fn edit(
         "board.fanout" | "board.autoroute" => super::autoroute::run(&project, request),
         "schematic.annotate" => super::annotate::run(&project, request),
         "schematic.move" => super::annotate::move_items(&project, request),
+        "simulate.probe" | "simulate.probe-net" | "simulate.monte-carlo" | "simulate.op-point" | "simulate.dc-sweep" | "simulate.transient" | "simulate.ac" | "simulate.set-tolerance" => super::sim_edit::run(&project, request),
         command => {
             let layout = project.layout_or_err()?;
             let board = layout.parsed.board.as_ref().expect("read");
@@ -90,7 +91,11 @@ pub fn edit(
 
 /// The lock file rewritten to `lock`, when it differs from the one on disk (or, with
 /// `write_missing`, when there is none on disk yet).
-pub(super) fn lock_change(project: &Project, lock: &LockSection, write_missing: bool) -> Option<FileChange> {
+pub(super) fn lock_change(
+    project: &Project,
+    lock: &LockSection,
+    write_missing: bool,
+) -> Option<FileChange> {
     let lock_text = lock.to_text();
     let changed = match &project.lock_text {
         Some(old) => *old != lock_text && *lock != project.lock,
@@ -113,11 +118,13 @@ pub(super) fn lock_change(project: &Project, lock: &LockSection, write_missing: 
 }
 
 /// The ECO lines a run selected: its `changes` value holds Outline node ids
-/// (`eco:<line>`, `eco-back:<line>`).
+/// (`eco:<line>`, `eco-back:<line>`), as a list or as one text with the ids separated by
+/// commas (an agent's proposal gives each field one text). Line ids hold no commas.
 fn selected_lines(values: &serde_json::Map<String, Value>, prefix: &str) -> BTreeSet<String> {
     strings(values.get("changes"))
-        .into_iter()
-        .filter_map(|id| id.strip_prefix(prefix).map(str::to_owned))
+        .iter()
+        .flat_map(|text| text.split(','))
+        .filter_map(|id| id.trim().strip_prefix(prefix).map(str::to_owned))
         .collect()
 }
 
@@ -225,7 +232,8 @@ fn update_board(project: &Project, request: &EditRequest) -> Result<EditOutput, 
 /// (`C900: C_0402_1005Metric_IPCN → C_0805_2012Metric_IPCN`), or the count, then the copper it
 /// removed and any copper left on no net.
 fn eco_summary(plan: &eco::EcoPlan, report: &eco::ApplyReport) -> String {
-    let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let count =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     let mut out = match report.applied.as_slice() {
         [id] => match plan.get(id) {
             Some(c) => match (&c.from, &c.to) {
@@ -234,17 +242,58 @@ fn eco_summary(plan: &eco::EcoPlan, report: &eco::ApplyReport) -> String {
             },
             None => "Applied 1 change.".to_string(),
         },
-        all => format!("Applied {}.", count(all.len(), "change", "changes")),
+        all => {
+            // One edit made to several parts (a sheet's part in every channel): the parts, then
+            // each kind of change, when every part had the same changes.
+            let changes: Vec<_> = all.iter().filter_map(|id| plan.get(id)).collect();
+            // Each edit (from → to) and the parts it reached, by designator (a parameter row
+            // names `C4 capacitance`).
+            let mut kinds: Vec<(String, String, BTreeSet<&str>)> = Vec::new();
+            let mut parts: Vec<&str> = Vec::new();
+            for c in &changes {
+                let part = c.item.split(' ').next().unwrap_or_default();
+                if !parts.contains(&part) {
+                    parts.push(part);
+                }
+                let (Some(from), Some(to)) = (&c.from, &c.to) else {
+                    continue;
+                };
+                match kinds.iter_mut().find(|(f, t, _)| f == from && t == to) {
+                    Some((_, _, at)) => {
+                        at.insert(part);
+                    }
+                    None => kinds.push((from.clone(), to.clone(), [part].into())),
+                }
+            }
+            let items = parts;
+            let alike = changes.len() == all.len()
+                && !kinds.is_empty()
+                && kinds.iter().all(|k| k.2.len() == items.len());
+            if alike && !items.is_empty() && items.len() <= 6 {
+                let edits: Vec<String> =
+                    kinds.iter().map(|(f, t, _)| format!("{f} → {t}")).collect();
+                format!("Applied {}: {}.", items.join(", "), edits.join(", "))
+            } else {
+                format!("Applied {}.", count(all.len(), "change", "changes"))
+            }
+        }
     };
     let (tracks, vias) = (report.removed_tracks.len(), report.removed_vias.len());
     out.push_str(&match (tracks, vias) {
         (0, 0) => " No tracks or vias were removed.".to_string(),
         (t, 0) => format!(" Removed {}.", count(t, "track", "tracks")),
         (0, v) => format!(" Removed {}.", count(v, "via", "vias")),
-        (t, v) => format!(" Removed {} and {}.", count(t, "track", "tracks"), count(v, "via", "vias")),
+        (t, v) => format!(
+            " Removed {} and {}.",
+            count(t, "track", "tracks"),
+            count(v, "via", "vias")
+        ),
     });
     if !report.unnetted.is_empty() {
-        out.push_str(&format!(" {} left on no net.", count(report.unnetted.len(), "copper item is", "copper items are")));
+        out.push_str(&format!(
+            " {} left on no net.",
+            count(report.unnetted.len(), "copper item is", "copper items are")
+        ));
     }
     out
 }

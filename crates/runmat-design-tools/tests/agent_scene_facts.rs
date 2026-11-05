@@ -20,6 +20,11 @@ use std::path::Path;
 const IO_CIRCUIT: &str = include_str!("../../runmat-circuit/tests/projects/io/io.circuit");
 const IO_LAYOUT: &str = include_str!("../../runmat-circuit/tests/projects/io/io.circuit.layout");
 const IO_LOCK: &str = include_str!("../../runmat-circuit/tests/projects/io/io.circuit.lock");
+// The ECO scene's project: the daq showcase board with a schematic change waiting for it
+// (each channel's anti-alias capacitor CF goes from 1 nF to 2.2 nF).
+const DAQ_ECO_CIRCUIT: &str = include_str!("../../runmat-circuit/tests/projects/daq/daq-eco.circuit");
+const DAQ_LAYOUT: &str = include_str!("../../runmat-circuit/tests/projects/daq/daq.circuit.layout");
+const DAQ_LOCK: &str = include_str!("../../runmat-circuit/tests/projects/daq/daq.circuit.lock");
 
 /// The sections a circuit guide turn reads when the whole inspection doesn't fit.
 const CIRCUIT_GUIDE_SECTIONS: &[&str] = &["erc_power", "unplaced", "eco", "rooms", "nets", "bom"];
@@ -30,12 +35,15 @@ fn scenes_dir() -> std::path::PathBuf {
 }
 
 /// The scene workspace: every scene file at the root, as the capture creates them, plus the I/O
-/// project.
+/// project and the ECO scene's daq project (its edited schematic under the name `daq.circuit`).
 fn workspace(dir: &Path) -> Files {
     let mut files: Files = [
         ("/io.circuit".to_owned(), IO_CIRCUIT.to_owned()),
         ("/io.circuit.layout".to_owned(), IO_LAYOUT.to_owned()),
         ("/io.circuit.lock".to_owned(), IO_LOCK.to_owned()),
+        ("/daq.circuit".to_owned(), DAQ_ECO_CIRCUIT.to_owned()),
+        ("/daq.circuit.layout".to_owned(), DAQ_LAYOUT.to_owned()),
+        ("/daq.circuit.lock".to_owned(), DAQ_LOCK.to_owned()),
     ]
     .into();
     let mut names: Vec<_> = std::fs::read_dir(dir.join("files"))

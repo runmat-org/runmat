@@ -4,7 +4,8 @@
 //! poured with the product's own board commands.
 //!
 //! The project is checked in at `tests/projects/daq/` (with `daq_drc.circuit.layout` and
-//! `daq-erc.circuit`, the DRC and ERC views' seeded variants). Set `RUNMAT_SHOWCASE_BUILD=1` to
+//! `daq-erc.circuit`, the DRC and ERC views' seeded variants, and `daq-eco.circuit`, the ECO scene's
+//! edited schematic). Set `RUNMAT_SHOWCASE_BUILD=1` to
 //! rebuild it from `tests/showcase/start.circuit.layout` with the command script in
 //! `showcase/build.rs`; run it in release (`cargo test --release`), where it takes seconds.
 
@@ -49,8 +50,11 @@ fn the_showcase_board_is_placed_routed_and_clean() {
     assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     let index = out.index.expect("compiles");
     let board = index.board.as_ref().expect("a board");
-    let placed: std::collections::BTreeSet<&str> =
-        board.footprints.iter().map(|f| f.reference.as_str()).collect();
+    let placed: std::collections::BTreeSet<&str> = board
+        .footprints
+        .iter()
+        .map(|f| f.reference.as_str())
+        .collect();
     let missing: Vec<&str> = index
         .components
         .iter()
@@ -58,7 +62,11 @@ fn the_showcase_board_is_placed_routed_and_clean() {
         .filter(|d| !placed.contains(d))
         .collect();
     assert!(missing.is_empty(), "not on the board: {missing:?}");
-    assert!(index.components.len() >= 70, "{} components", index.components.len());
+    assert!(
+        index.components.len() >= 70,
+        "{} components",
+        index.components.len()
+    );
     let outline = runmat_circuit::syntax::board::parse_board(layout, &files[layout])
         .board
         .expect("reads")
@@ -66,7 +74,11 @@ fn the_showcase_board_is_placed_routed_and_clean() {
         .bbox();
     for f in &board.footprints {
         let at = runmat_circuit::geom::Point::mm(f.x_mm, f.y_mm);
-        assert!(outline.contains(at), "{} at {at} is off the board", f.reference);
+        assert!(
+            outline.contains(at),
+            "{} at {at} is off the board",
+            f.reference
+        );
     }
     let drc: Vec<String> = board
         .drc
@@ -74,16 +86,26 @@ fn the_showcase_board_is_placed_routed_and_clean() {
         .map(|r| format!("{} {} {:?}", r.code, r.message, r.items))
         .collect();
     assert!(drc.is_empty(), "DRC: {drc:#?}");
-    assert!(board.unrouted.is_empty(), "unrouted: {:?}", board.unrouted.len());
+    assert!(
+        board.unrouted.is_empty(),
+        "unrouted: {:?}",
+        board.unrouted.len()
+    );
     let erc: Vec<String> = index
         .erc
         .iter()
         .map(|r| format!("{} {} {:?}", r.code, r.message, r.items))
         .collect();
     assert!(erc.is_empty(), "ERC: {erc:#?}");
-    assert_eq!(index.eco.total, 0, "the board is in sync with the schematic");
+    assert_eq!(
+        index.eco.total, 0,
+        "the board is in sync with the schematic"
+    );
     // Six copper layers, 1.6 mm, routed on both outer layers, BGA fanned out, poured planes.
-    assert_eq!(board.layers.iter().filter(|l| l.kind == "copper").count(), 6);
+    assert_eq!(
+        board.layers.iter().filter(|l| l.kind == "copper").count(),
+        6
+    );
     assert!(board.tracks.len() > 150 && board.vias.len() > 100);
     assert!(board.zones.len() >= 7);
 }
@@ -118,7 +140,11 @@ fn annotate_records_designators_and_reset_renumbers_the_numbered_parts() {
         options: CompileOptions::default(),
     };
     let out = edit(circuit, &files[circuit], &files, &request(false)).expect("annotates");
-    let written = out.files.iter().find(|f| f.path == lock).expect("a lock is written");
+    let written = out
+        .files
+        .iter()
+        .find(|f| f.path == lock)
+        .expect("a lock is written");
     assert!(written.text.contains("designator="), "{}", written.text);
     files.insert(lock.into(), written.text.clone());
     assert_eq!(designators(&files), before, "the lock keeps the numbering");
@@ -188,7 +214,10 @@ fn tracks_inside_a_room_belong_to_its_pads() {
         );
         for t in board.tracks.values() {
             let Some(net) = t.net else { continue };
-            if pads.iter().any(|p| p.net == Some(net) && b.contains(p.center)) {
+            if pads
+                .iter()
+                .any(|p| p.net == Some(net) && b.contains(p.center))
+            {
                 continue;
             }
             let (a, z) = t.endpoints();
@@ -205,4 +234,66 @@ fn tracks_inside_a_room_belong_to_its_pads() {
     through.sort();
     through.dedup();
     assert!(through.is_empty(), "{through:#?}");
+}
+
+/// The ECO scene's schematic gives each channel's anti-alias capacitor CF a 2.2 nF part. Update
+/// board stages exactly those changes (the part and its capacitance, in each channel), and
+/// applying them leaves the board clean: DRC finds nothing, nothing is unrouted, and the board
+/// is in sync again.
+#[test]
+fn the_eco_variant_stages_value_changes_that_keep_the_board_clean() {
+    use runmat_circuit::runtime::{compile, edit, CompileOptions, EditRequest};
+    let mut files = files();
+    let circuit = "/p/daq.circuit";
+    files.insert(
+        circuit.into(),
+        std::fs::read_to_string(here().join("daq-eco.circuit")).expect("checked in"),
+    );
+    let layout = "/p/daq.circuit.layout";
+    let out = compile(layout, &files[layout], &files, &CompileOptions::default());
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let index = out.index.expect("compiles");
+    let rows: Vec<(String, String)> = index
+        .eco
+        .groups
+        .iter()
+        .flat_map(|g| g.rows.iter())
+        .map(|r| (r.id.clone(), r.status.clone()))
+        .collect();
+    let want: Vec<String> = (0..3)
+        .map(|k| format!("change_value:/ch[{k}]/CF"))
+        .chain((0..3).map(|k| format!("change_parameter:/ch[{k}]/CF#capacitance")))
+        .collect();
+    assert_eq!(
+        rows.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+        want,
+        "{rows:?}"
+    );
+    let values = serde_json::json!({
+        "changes": want.iter().map(|id| format!("eco:{id}")).collect::<Vec<_>>().join(",")
+    });
+    let request = EditRequest {
+        command: "schematic.update-board".into(),
+        values: values.as_object().cloned().unwrap(),
+        selection: vec![],
+        options: CompileOptions::default(),
+    };
+    let applied = edit(circuit, &files[circuit], &files, &request).expect("applies");
+    assert_eq!(
+        applied.summary,
+        "Applied C4, C10, C16: 1 nF ±5% → 2.2 nF ±5%. No tracks or vias were removed."
+    );
+    for f in applied.files {
+        files.insert(f.path, f.text);
+    }
+    let out = compile(layout, &files[layout], &files, &CompileOptions::default());
+    let index = out.index.expect("compiles");
+    let board = index.board.as_ref().expect("a board");
+    assert!(board.drc.is_empty(), "DRC: {:?}", board.drc.len());
+    assert!(
+        board.unrouted.is_empty(),
+        "unrouted: {}",
+        board.unrouted.len()
+    );
+    assert_eq!(index.eco.total, 0, "the board is in sync after the update");
 }

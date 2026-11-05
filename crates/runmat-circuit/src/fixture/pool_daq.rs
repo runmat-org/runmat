@@ -45,6 +45,7 @@ pub(super) fn add(p: &mut Pool) {
     }
     for (mpn, farads, tol, volts) in [
         ("C0402-1N", 1e-9, 5.0, 50.0),
+        ("C0402-2N2", 2.2e-9, 5.0, 50.0),
         ("C0402-3N3", 3.3e-9, 10.0, 50.0),
     ] {
         let part = make::part_by_name(p, mpn, "Generic", c, c0402);

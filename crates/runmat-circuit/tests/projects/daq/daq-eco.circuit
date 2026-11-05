@@ -1,0 +1,138 @@
+runmat 0.7
+std 1
+
+circuit daq {
+    net_class power = { track_width = "0.40 mm" }
+    net_class analog = { clearance = "0.20 mm" }
+
+    sheet channel {
+        port IN : in
+        port CONVST : in
+        port SCLK : in
+        port SDO : out
+        component U = { part = OPA171 }
+        component ADC = { part = ADS8860 }
+        component RS = { part = "R0402-1K" }
+        component CF = { part = "C0402-2N2" }
+        component RG = { part = "R0402-1K" }
+        component RF = { part = "R0402-1K" }
+        component RO = { part = "R0402-49R9" }
+        component CO = { part = "C0402-1N" }
+        component CDA = { part = "C0402-100N" }
+        component CDV = { part = "C0402-100N" }
+        component CDD = { part = "C0402-100N" }
+        component CREF = { part = "C0805-10U" }
+        net GND = { class = power, global = true }
+        net "+5V" = { class = power, global = true }
+        net "+3V3" = { class = power, global = true }
+        net VREF = { class = power, global = true }
+        net INF = { class = analog }
+        net FB = { class = analog }
+        net AMP = { class = analog }
+        net AIN = { class = analog }
+        connect = [port.IN, net.IN, "RS.1"]
+        connect = [net.INF, "RS.2", "CF.1", "U.IN+"]
+        connect = [net.FB, "U.IN-", "RG.1", "RF.1"]
+        connect = [net.AMP, U.OUT, "RF.2", "RO.1"]
+        connect = [net.AIN, "RO.2", "CO.1", ADC.AINP]
+        connect = [net.GND, "CF.2", "RG.2", "CO.2", "U.V-", ADC.AINN, ADC.GND, "CDA.2", "CDV.2", "CDD.2", "CREF.2"]
+        connect = ["net.+5V", "U.V+", "CDA.1", ADC.AVDD, "CDV.1"]
+        connect = ["net.+3V3", ADC.DVDD, ADC.DIN, "CDD.1"]
+        connect = [net.VREF, ADC.REF, "CREF.1"]
+        connect = [port.CONVST, ADC.CONVST]
+        connect = [port.SCLK, ADC.SCLK]
+        connect = [port.SDO, ADC.DOUT]
+    }
+
+    sheet main {
+        component U1 = { part = "FPGA-BGA256-C" }
+        component U2 = { part = TPS62130 }
+        component U3 = { part = TPS62130 }
+        component U4 = { part = REF5040 }
+        component J1 = { part = USB4105 }
+        component J2 = { part = "HDR-2x05" }
+        component D1 = { part = "LED0603-G" }
+        component L1 = { part = "L1210-4U7" }
+        component L2 = { part = "L1210-4U7" }
+        component R101 = { part = "R0402-1K" }
+        component R102 = { part = "R0402-5K1" }
+        component R103 = { part = "R0402-5K1" }
+        component R104 = { part = "R0402-100K" }
+        component R105 = { part = "R0402-32K4" }
+        component R106 = { part = "R0402-49K9" }
+        component R107 = { part = "R0402-100K" }
+        component C101 = { part = "C0805-10U" }
+        component C102 = { part = "C0805-10U" }
+        component C103 = { part = "C0805-10U" }
+        component C104 = { part = "C0402-3N3" }
+        component C105 = { part = "C0805-10U" }
+        component C106 = { part = "C0805-10U" }
+        component C107 = { part = "C0402-3N3" }
+        component C108 = { part = "C0805-1U" }
+        component C109 = { part = "C0805-10U" }
+        component C110 = { part = "C0805-1U" }
+        component C111 = { part = "C0402-100N" }
+        component C112 = { part = "C0402-100N" }
+        component C113 = { part = "C0402-100N" }
+        component C114 = { part = "C0402-100N" }
+        component C115 = { part = "C0805-10U" }
+        component C116 = { part = "C0402-100N" }
+        component C117 = { part = "C0402-100N" }
+        component C118 = { part = "C0402-100N" }
+        component C119 = { part = "C0402-100N" }
+        component C120 = { part = "C0805-10U" }
+        component H1 = { part = "MH-M3" }
+        component H2 = { part = "MH-M3" }
+        component H3 = { part = "MH-M3" }
+        component H4 = { part = "MH-M3" }
+        net GND = { class = power, global = true, power_flag = true }
+        net "+5V" = { class = power, global = true, power_flag = true }
+        net "+3V3" = { class = power, global = true, power_flag = true }
+        net "+1V2" = { class = power, power_flag = true }
+        net VREF = { class = power, global = true }
+        bus AIN = [AIN0, AIN1, AIN2]
+        bus SDO = [SDO0, SDO1, SDO2]
+        instance ch = {
+            sheet = channel,
+            repeat = 3,
+            bind = { IN = { bus = AIN, offset = 0 }, SDO = { bus = SDO, offset = 0 }, CONVST = net.CONVST, SCLK = net.SCLK }
+        }
+        connect = [net.CONVST, U1.IO0]
+        connect = [net.SCLK, U1.IO1]
+        connect = [net.SDO0, U1.IO2]
+        connect = [net.SDO1, U1.IO3]
+        connect = [net.SDO2, U1.IO4]
+        connect = ["net.+1V2", U1.VCCINT, "C111.1", "C112.1", "C113.1", "C114.1", "C115.1"]
+        connect = ["net.+3V3", U1.VCCIO, "C116.1", "C117.1", "C118.1", "C119.1", "C120.1"]
+        connect = [net.GND, U1.GND, "C111.2", "C112.2", "C113.2", "C114.2", "C115.2", "C116.2", "C117.2", "C118.2", "C119.2", "C120.2"]
+        connect = ["net.+5V", J1.VBUS]
+        connect = [net.GND, J1.GND, J1.SHIELD, "R102.2", "R103.2"]
+        connect = [net.CC1, J1.CC1, "R102.1"]
+        connect = [net.CC2, J1.CC2, "R103.1"]
+        connect = ["net.+5V", U2.VIN, U2.EN, "C101.1"]
+        connect = [net.SW1, U2.SW, "L1.1"]
+        connect = ["net.+3V3", "L1.2", U2.VOS, "C102.1", "C103.1", "R104.1", "R101.1"]
+        connect = [net.FB1, U2.FB, "R104.2", "R105.1"]
+        connect = [net.SS1, U2.SS, "C104.1"]
+        connect = [net.LED, "R101.2", D1.A]
+        connect = [net.PG1, U2.PG, D1.K]
+        connect = [net.GND, U2.GND, "C101.2", "C102.2", "C103.2", "R105.2", "C104.2"]
+        connect = ["net.+5V", U3.VIN, U3.EN, "C105.1"]
+        connect = [net.SW2, U3.SW, "L2.1"]
+        connect = ["net.+1V2", "L2.2", U3.VOS, "C106.1", "R106.1"]
+        connect = [net.FB2, U3.FB, "R106.2", "R107.1"]
+        connect = [net.SS2, U3.SS, "C107.1"]
+        connect = [net.GND, U3.GND, "C105.2", "C106.2", "R107.2", "C107.2"]
+        connect = ["net.+5V", U4.VIN, "C108.1"]
+        connect = [net.VREF, U4.VOUT, "C109.1"]
+        connect = [net.NR, U4.NR, "C110.1"]
+        connect = [net.GND, U4.GND, "C108.2", "C109.2", "C110.2"]
+        connect = [net.AIN0, "J2.1"]
+        connect = [net.AIN1, "J2.3"]
+        connect = [net.AIN2, "J2.5"]
+        connect = [net.GND, "J2.2", "J2.4", "J2.6", "J2.8", "J2.10"]
+        connect = [net.GND, "H1.1", "H2.1", "H3.1", "H4.1"]
+        no_erc = [J1.DP, J1.DN, J1.SBU1, J1.SBU2, U3.PG, U4.TEMP, "J2.7", "J2.9"]
+        no_erc = [U1.IO5, U1.IO6, U1.IO7, U1.IO8, U1.IO9, U1.IO10, U1.IO11, U1.IO12, U1.IO13, U1.IO14, U1.IO15, U1.IO16, U1.IO17, U1.IO18, U1.IO19, U1.IO20, U1.IO21, U1.IO22, U1.IO23, U1.IO24, U1.IO25, U1.IO26, U1.IO27, U1.IO28, U1.IO29, U1.IO30, U1.IO31, U1.IO32, U1.IO33, U1.IO34, U1.IO35, U1.IO36, U1.IO37, U1.IO38, U1.IO39, U1.IO40, U1.IO41, U1.IO42, U1.IO43, U1.IO44, U1.IO45, U1.IO46, U1.IO47, U1.IO48, U1.IO49, U1.IO50, U1.IO51, U1.IO52, U1.IO53, U1.IO54, U1.IO55, U1.IO56, U1.IO57, U1.IO58, U1.IO59, U1.IO60, U1.IO61, U1.IO62, U1.IO63, U1.IO64, U1.IO65, U1.IO66, U1.IO67, U1.IO68, U1.IO69, U1.IO70, U1.IO71, U1.IO72, U1.IO73, U1.IO74, U1.IO75, U1.IO76, U1.IO77, U1.IO78, U1.IO79, U1.IO80, U1.IO81, U1.IO82, U1.IO83, U1.IO84, U1.IO85, U1.IO86, U1.IO87, U1.IO88, U1.IO89, U1.IO90, U1.IO91, U1.IO92, U1.IO93, U1.IO94, U1.IO95, U1.IO96, U1.IO97, U1.IO98, U1.IO99, U1.IO100, U1.IO101, U1.IO102, U1.IO103, U1.IO104, U1.IO105, U1.IO106, U1.IO107, U1.IO108, U1.IO109, U1.IO110, U1.IO111, U1.IO112, U1.IO113, U1.IO114, U1.IO115, U1.IO116, U1.IO117, U1.IO118, U1.IO119, U1.IO120, U1.IO121, U1.IO122, U1.IO123, U1.IO124, U1.IO125, U1.IO126, U1.IO127, U1.IO128, U1.IO129, U1.IO130, U1.IO131, U1.IO132, U1.IO133, U1.IO134, U1.IO135, U1.IO136, U1.IO137, U1.IO138, U1.IO139, U1.IO140, U1.IO141, U1.IO142, U1.IO143, U1.IO144, U1.IO145, U1.IO146, U1.IO147, U1.IO148, U1.IO149, U1.IO150, U1.IO151, U1.IO152, U1.IO153, U1.IO154, U1.IO155, U1.IO156, U1.IO157, U1.IO158, U1.IO159, U1.IO160, U1.IO161, U1.IO162, U1.IO163, U1.IO164, U1.IO165, U1.IO166, U1.IO167, U1.IO168, U1.IO169, U1.IO170, U1.IO171, U1.IO172, U1.IO173, U1.IO174, U1.IO175, U1.IO176, U1.IO177, U1.IO178, U1.IO179, U1.IO180, U1.IO181, U1.IO182, U1.IO183, U1.IO184, U1.IO185, U1.IO186, U1.IO187, U1.IO188, U1.IO189, U1.IO190, U1.IO191, U1.IO192, U1.IO193, U1.IO194, U1.IO195, U1.IO196, U1.IO197, U1.IO198, U1.IO199]
+    }
+}
