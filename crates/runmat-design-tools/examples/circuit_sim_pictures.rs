@@ -107,7 +107,7 @@ fn main() {
             fig.add_line_plot_on_axes(LinePlot::new(a.freq.clone(), ph).unwrap().with_style(color(k, dark), 2.5, LineStyle::Solid).with_label(label(&net)), 1);
         }
         let g0 = a.db(&s.probes[3].1).unwrap()[0];
-        let mark = LinePlot::new(vec![a.freq[0], a.freq[a.freq.len() - 1]], vec![g0 - 3.0103; 2]).unwrap().with_style(color(1, dark) * Vec4::new(1.0, 1.0, 1.0, 0.6), 1.5, LineStyle::Dashed).with_label("−3 dB");
+        let mark = LinePlot::new(vec![a.freq[0], a.freq[a.freq.len() - 1]], vec![g0 - 3.0103; 2]).unwrap().with_style(if dark { Vec4::new(0.75, 0.78, 0.82, 1.0) } else { Vec4::new(0.35, 0.38, 0.42, 1.0) }, 1.5, LineStyle::Dashed).with_label("−3 dB");
         fig.add_line_plot_on_axes(mark, 0);
         save(&mut fig, dark, &format!("{out}/{th}-circuit-sim-ac.png"));
         // Monte Carlo histogram on a kHz axis: in-spec bins in the trace color, out-of-spec bins
@@ -154,6 +154,10 @@ fn main() {
         fig.add_reference_line_on_axes(line(st.mean / 1e3, fg, 2.0, LineStyle::Dashed, Some(format!("mean {:.1} kHz", st.mean / 1e3))), 0);
         fig.add_reference_line_on_axes(line((st.mean - 3.0 * st.std) / 1e3, fg, 1.5, LineStyle::Dotted, Some(format!("±3σ ({:.1} kHz σ)", st.std / 1e3))), 0);
         fig.add_reference_line_on_axes(line((st.mean + 3.0 * st.std) / 1e3, fg, 1.5, LineStyle::Dotted, None), 0);
+        // Frame the runs, both spec limits and ±3σ with a margin, so no marker sits on the frame.
+        let (x0, x1) = (lo.min(st.mean - 3.0 * st.std), hi.max(st.mean + 3.0 * st.std));
+        let pad = 0.05 * (x1 - x0);
+        fig.set_axes_limits(0, Some(((x0 - pad) / 1e3, (x1 + pad) / 1e3)), None);
         save(&mut fig, dark, &format!("{out}/{th}-circuit-sim-montecarlo.png"));
     }
 }
