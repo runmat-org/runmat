@@ -20,6 +20,11 @@ pub struct TessellationOptions {
     /// diagonal (within `chord_tolerance` scaled up for large bodies): finer for small parts.
     #[serde(default = "default_size_fraction")]
     pub size_fraction: f64,
+    /// The ceiling a size-scaled chord stops at; `None` takes the kernel's own (OCCT's keeps
+    /// large thin walls under the structure they cover). A viewer's coarse level of detail sets
+    /// it higher.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chord_max: Option<f64>,
 }
 
 fn default_size_fraction() -> f64 {
@@ -32,6 +37,7 @@ impl Default for TessellationOptions {
             chord_tolerance: 1.0e-4,
             angle_tolerance: 8.0_f64.to_radians(),
             size_fraction: default_size_fraction(),
+            chord_max: None,
         }
     }
 }

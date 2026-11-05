@@ -50,7 +50,7 @@ const CHORD_MAX: f64 = 1.5e-3;
 pub(crate) fn chord_for(size: f64, options: &TessellationOptions) -> f64 {
     (size * options.size_fraction)
         .min((options.chord_tolerance * 10.0).max(size * CHORD_OF_SIZE_LARGE))
-        .min(CHORD_MAX)
+        .min(options.chord_max.unwrap_or(CHORD_MAX))
         .max(CHORD_MIN)
 }
 
