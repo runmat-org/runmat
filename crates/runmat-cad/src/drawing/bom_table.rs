@@ -175,15 +175,44 @@ pub trait BomProperties {
 }
 
 /// A material as a parts list names it: `material.aluminum_6061` → `Aluminum 6061` (the
-/// library scope and the identifier's underscores dropped).
+/// library scope and the identifier's underscores dropped). Materials known by a trade or
+/// standard designation print as written in industry: `fr4` → `FR-4`, `abs` → `ABS`.
 pub fn material_name(id: &str) -> String {
-    let name = id.strip_prefix("material.").unwrap_or(id).replace('_', " ");
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => String::new(),
-    }
+    let id = id.strip_prefix("material.").unwrap_or(id);
+    let words: Vec<String> = id
+        .split('_')
+        .filter(|w| !w.is_empty())
+        .enumerate()
+        .map(|(k, word)| match DESIGNATIONS.iter().find(|(key, _)| key.eq_ignore_ascii_case(word)) {
+            Some((_, shown)) => (*shown).to_owned(),
+            None if k == 0 => {
+                let mut chars = word.chars();
+                chars
+                    .next()
+                    .map(|first| first.to_uppercase().chain(chars).collect())
+                    .unwrap_or_default()
+            }
+            None => word.to_owned(),
+        })
+        .collect();
+    words.join(" ")
 }
+
+/// Material words a parts list prints as their designation.
+const DESIGNATIONS: &[(&str, &str)] = &[
+    ("fr4", "FR-4"),
+    ("abs", "ABS"),
+    ("pla", "PLA"),
+    ("petg", "PETG"),
+    ("pc", "PC"),
+    ("pom", "POM"),
+    ("ptfe", "PTFE"),
+    ("peek", "PEEK"),
+    ("pvc", "PVC"),
+    ("hdpe", "HDPE"),
+    ("cfrp", "CFRP"),
+    ("gfrp", "GFRP"),
+];
 
 /// No properties: property columns are empty (and reported).
 pub struct NoBomProperties;
@@ -615,4 +644,18 @@ pub fn render_bom_table(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod material_name_tests {
+    use super::material_name;
+
+    #[test]
+    fn materials_print_by_name_and_designation() {
+        assert_eq!(material_name("material.aluminum_6061"), "Aluminum 6061");
+        assert_eq!(material_name("material.fr4"), "FR-4");
+        assert_eq!(material_name("steel_1018"), "Steel 1018");
+        assert_eq!(material_name("abs"), "ABS");
+        assert_eq!(material_name("glass_filled_peek"), "Glass filled PEEK");
+    }
 }

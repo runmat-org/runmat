@@ -85,6 +85,10 @@ pub struct BodyDisplay {
     pub edges: Vec<EdgeDisplay>,
     pub vertices: Vec<VertexDisplay>,
     pub triangle_count: u32,
+    /// The body's own color (a circuit board's mask, copper, silkscreen and component bodies);
+    /// absent: the part's appearance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[f32; 4]>,
 }
 
 /// A body the kernel could not draw, with why.
@@ -108,6 +112,67 @@ pub struct PartDisplay {
     /// and opacity. Absent: the CAD face color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub appearance: Option<[f32; 4]>,
+    /// Coarser tessellations of the same bodies, finest first, for a viewer's level of detail:
+    /// an assembly's prototypes carry them ([`DISPLAY_LEVELS`]) so a part small on screen
+    /// draws with fewer triangles. Faces only; edges and names stay on `bodies`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub levels: Vec<DisplayLevel>,
+}
+
+/// One level of detail: every face of every body as one mesh (part coordinates, metres).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DisplayLevel {
+    pub positions: Vec<f32>,
+    pub triangles: Vec<u32>,
+    /// The surface normal at each position, when the kernel knows it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub normals: Vec<f32>,
+}
+
+/// How much coarser each level of an assembly prototype tessellates than its full display:
+/// chords and the size fraction grow by these factors, the angle per segment to 20° and 32°.
+pub const DISPLAY_LEVELS: [(f64, f64); 2] = [(4.0, 20.0), (16.0, 32.0)];
+
+/// The chord ceiling the coarse levels scale from (metres): the full display's ceiling on OCCT.
+const DISPLAY_CHORD_CEILING: f64 = 1.5e-3;
+
+/// The part's coarser levels ([`DISPLAY_LEVELS`]) under `options` (the full display's).
+pub fn display_levels(
+    result: &RegenResult,
+    kernel: &dyn Tessellator,
+    options: &TessellationOptions,
+) -> Vec<DisplayLevel> {
+    DISPLAY_LEVELS
+        .iter()
+        .map(|&(scale, degrees)| {
+            let coarse = TessellationOptions {
+                chord_tolerance: options.chord_tolerance * scale,
+                angle_tolerance: degrees.to_radians().max(options.angle_tolerance),
+                size_fraction: options.size_fraction * scale,
+                // Past the full display's 1.5 mm ceiling, by the same factor: a level drawn
+                // small on screen sags well under a pixel.
+                chord_max: Some(DISPLAY_CHORD_CEILING * scale),
+            };
+            let mut level = DisplayLevel::default();
+            for body in &result.state.bodies {
+                let Ok(mesh) = kernel.tessellate(&body.handle, &coarse) else {
+                    continue;
+                };
+                for face in &mesh.faces {
+                    let base = (level.positions.len() / 3) as u32;
+                    level.positions.extend(face.positions.iter().flat_map(|p| p.map(|v| v as f32)));
+                    level.triangles.extend(face.triangles.iter().flat_map(|t| t.map(|i| i + base)));
+                    if face.normals.len() == face.positions.len() {
+                        level.normals.extend(face.normals.iter().flat_map(|n| n.map(|v| v as f32)));
+                    }
+                }
+            }
+            if level.normals.len() != level.positions.len() {
+                level.normals.clear();
+            }
+            level
+        })
+        .collect()
 }
 
 /// A sketch plane in part coordinates.
@@ -305,6 +370,7 @@ fn body_display(
         edges,
         vertices,
         triangle_count: mesh.triangle_count() as u32,
+        color: None,
     }
 }
 
