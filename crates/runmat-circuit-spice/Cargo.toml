@@ -8,7 +8,9 @@ description = "RunMat PCB circuit simulation: SPICE netlists from the circuit IR
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
-# ngspice (BSD) is loaded at run time through libloading (MIT/Apache); nothing links to it.
+# The native engine is runmat-circuit-sim; ngspice (BSD) remains an optional engine, loaded at run time through libloading (MIT/Apache); nothing links to it.
 [dependencies]
 runmat-circuit = { path = "../runmat-circuit", version = "=0.6.2" }
+# The native engine (clean-room, ours).
+runmat-circuit-sim = { path = "../runmat-circuit-sim", version = "=0.6.2" }
 libloading = "0.8"

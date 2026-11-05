@@ -73,6 +73,11 @@ pub fn sweep(e: &mut Engine, freqs: &[f64]) -> Result<AcWave, SimError> {
             for d in &c.devices {
                 d.load(&mut ld);
             }
+            if let Some(r) = c.options.rshunt {
+                for k in 0..c.n_nodes {
+                    ld.mat(k, k, 1.0 / r);
+                }
+            }
             let ops = ld.ops;
             e.meter.assembly += dual::take_ops() + ops + mat.ops;
             if mat.needs_rebuild() {

@@ -399,6 +399,17 @@ fn load(
     load_with(path, text, files, options, true)
 }
 
+/// The resolved design (with its `use` lines brought in) and part pool of a `.circuit` or
+/// `.circuit.layout`, for consumers such as circuit simulation.
+pub fn design_and_pool(
+    path: &str,
+    text: &str,
+    files: &Files,
+    options: &CompileOptions,
+) -> Result<(Design, Pool), Vec<Diagnostic>> {
+    load(path, text, files, options).map(|p| (p.design, p.pool))
+}
+
 /// [`load`]; a circuit's sibling layout is read only when `read_layout` is set.
 fn load_with(
     path: &str,

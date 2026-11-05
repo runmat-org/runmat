@@ -37,7 +37,7 @@
     },
     {
       "name": "storage.type.circuit",
-      "match": "(?<![\\w])(?:component|diff_pair|interface|net_class|instance|circuit|connect|harness|variant|no_erc|param|sheet|port|root|bus|net)(?![\\w])"
+      "match": "(?<![\\w])(?:simulation|component|diff_pair|interface|net_class|tolerance|analysis|instance|circuit|connect|harness|measure|variant|no_erc|option|source|model|param|probe|sheet|port|root|bus|net)(?![\\w])"
     },
     {
       "name": "keyword.other.circuit",
@@ -85,6 +85,7 @@
       {
         "scope": "storage.type.circuit",
         "words": [
+          "analysis",
           "bus",
           "circuit",
           "component",
@@ -93,13 +94,20 @@
           "harness",
           "instance",
           "interface",
+          "measure",
+          "model",
           "net",
           "net_class",
           "no_erc",
+          "option",
           "param",
           "port",
+          "probe",
           "root",
           "sheet",
+          "simulation",
+          "source",
+          "tolerance",
           "variant"
         ]
       },

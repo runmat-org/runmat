@@ -1,0 +1,66 @@
+//! `design.simulate` on the daq showcase with a `simulation` section for its analog channel.
+
+use runmat_design_tools::{call, catalog, Files};
+use serde_json::json;
+
+const DAQ: &str = include_str!("../../runmat-circuit/tests/projects/daq/daq.circuit");
+
+const SECTION: &str = r#"
+    simulation front_end {
+        sheet = channel
+        source VIN = { p = net.IN, ac = 1 V, pulse = { from = 0.25 V, to = 1.75 V, delay = 2 us, rise = 10 ns } }
+        source V5 = { p = "net.+5V", dc = 5 V }
+        source V3 = { p = "net.+3V3", dc = 3.3 V }
+        source VR = { p = net.VREF, dc = 4.096 V }
+        model OPA171 = { opamp = { a0 = 1000000, gbw = 3 MHz, sr = 1500000, rout = 10 ohm, vdrop = 0.02 V }, pins = ["IN+", "IN-", OUT, "V+", "V-"] }
+        tolerance resistors = { match = "R*", value = 1 % }
+        tolerance capacitors = { match = "C*", value = 5 % }
+        analysis step = tran { stop = 20 us, step = 10 ns }
+        analysis response = ac { from = 100 Hz, to = 100 MHz, points = 50 }
+        analysis spread = monte_carlo { of = response, runs = 100, seed = 7 }
+        probe = [net.IN, net.AIN]
+        measure f3db = { of = response, bandwidth = net.AIN }
+        measure f3db_spread = { of = spread, bandwidth = net.AIN }
+    }
+"#;
+
+fn files() -> Files {
+    let end = DAQ.rfind('}').unwrap();
+    [("/p/daq.circuit".to_owned(), format!("{}{SECTION}{}", &DAQ[..end], &DAQ[end..]))].into()
+}
+
+#[test]
+fn the_catalog_lists_design_simulate() {
+    assert!(catalog().iter().any(|t| t.name == "design.simulate"));
+}
+
+#[test]
+fn simulate_returns_waveforms_measures_and_operations() {
+    let out = call("design.simulate", json!({ "path": "/p/daq.circuit", "maxPoints": 50 }), &files()).unwrap();
+    assert_eq!(out["simulation"], "front_end");
+    let analyses = out["analyses"].as_array().unwrap();
+    let step = analyses.iter().find(|a| a["name"] == "step").unwrap();
+    assert_eq!(step["kind"], "tran");
+    assert_eq!(step["x"].as_array().unwrap().len(), 50);
+    let ain = step["signals"].as_array().unwrap().iter().find(|s| s["net"] == "AIN").unwrap();
+    let last = ain["values"].as_array().unwrap().last().unwrap().as_f64().unwrap();
+    assert!((last - 3.5).abs() < 0.01, "{last}");
+    let response = analyses.iter().find(|a| a["name"] == "response").unwrap();
+    assert!(response["signals"][1]["magnitudeDb"].is_array());
+    let m = out["measures"].as_array().unwrap();
+    let f3 = m.iter().find(|x| x["name"] == "f3db").unwrap()["value"].as_f64().unwrap();
+    assert!(f3 > 140e3 && f3 < 160e3, "{f3}");
+    let spread = m.iter().find(|x| x["name"] == "f3db_spread").unwrap();
+    assert_eq!(spread["runs"], 100);
+    assert_eq!(spread["histogramCounts"].as_array().unwrap().iter().map(|c| c.as_u64().unwrap()).sum::<u64>(), 100);
+    assert_eq!(out["usage"]["measurementVersion"], "rsua-1");
+    assert!(out["usage"]["total"].as_str().unwrap().parse::<u64>().unwrap() > 0);
+    assert!(out["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("ADC")));
+}
+
+#[test]
+fn a_circuit_without_a_section_says_how_to_add_one() {
+    let files: Files = [("/p/daq.circuit".to_owned(), DAQ.to_owned())].into();
+    let e = call("design.simulate", json!({ "path": "/p/daq.circuit" }), &files).unwrap_err();
+    assert_eq!(e.code, "no_simulation");
+}

@@ -26,7 +26,7 @@ impl SourceSpec {
         let mut i = 0;
         let num = |i: usize| words.get(i).and_then(|w| parse_number(w));
         let nums_from = |i: usize| -> Vec<f64> {
-            words[i..].iter().map_while(|w| parse_number(w)).collect()
+            words[i..].iter().map_while(|w| if *w == "inf" { Some(f64::INFINITY) } else { parse_number(w) }).collect()
         };
         while i < words.len() {
             match words[i] {

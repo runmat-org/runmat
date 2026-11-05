@@ -7953,6 +7953,7 @@ name = "runmat-cad-wasm"
 version = "0.6.2"
 dependencies = [
  "runmat-cad",
+ "runmat-circuit",
  "runmat-design-syntax",
  "runmat-types",
  "serde",
@@ -7996,6 +7997,7 @@ version = "0.6.2"
 dependencies = [
  "libloading 0.8.9",
  "runmat-circuit",
+ "runmat-circuit-sim",
 ]
 
 [[package]]
@@ -8174,6 +8176,8 @@ dependencies = [
  "runmat-cad",
  "runmat-cad-wasm",
  "runmat-circuit",
+ "runmat-circuit-sim",
+ "runmat-circuit-spice",
  "runmat-design-commands",
  "runmat-design-syntax",
  "runmat-geometry-io",

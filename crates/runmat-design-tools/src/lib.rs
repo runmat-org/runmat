@@ -35,6 +35,7 @@ mod locate;
 pub mod render;
 pub mod rules;
 pub mod scene;
+pub mod simulate;
 
 pub use locate::{Locator, Range};
 
@@ -225,6 +226,11 @@ pub fn catalog() -> Vec<ToolDefinition> {
             "Import into design",
             "Use this to bring a KiCad project (.kicad_sch, .kicad_pcb) or a STEP file into the project as RunMat sources. Returns a staged change: the new files, their diagnostics, and the project calls that keep it.",
         ),
+        definition::<simulate::SimulateInput, simulate::SimulateOutput>(
+            "design.simulate",
+            "Simulate circuit",
+            "Use this to simulate a .circuit: runs its `simulation` section (operating point, DC sweep, AC, transient and Monte Carlo over component tolerances) on RunMat's circuit engine and returns the probed nets' waveforms (transient and DC in volts, AC as dB and degrees), each measurement (Monte Carlo ones with mean, standard deviation and a histogram), the parts left out for want of a model, and the measured operations.",
+        ),
         definition::<edit::ProposeEditInput, edit::StagedChange>(
             "design.propose_edit",
             "Propose design edit",
@@ -257,6 +263,7 @@ pub fn call(name: &str, input: Value, files: &Files) -> ToolResult {
         "design.export" => out(exchange::export(&parse(input)?, files)?),
         "design.import" => out(exchange::import(&parse(input)?, files)?),
         "design.propose_edit" => out(edit::propose(&parse(input)?, files)?),
+        "design.simulate" => out(simulate::simulate(&parse(input)?, files)?),
         "design.render" => render_call(input, files),
         other => Err(ToolError::new(
             "unknown_tool",

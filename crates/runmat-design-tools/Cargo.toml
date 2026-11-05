@@ -13,6 +13,8 @@ publish = false
 runmat-cad = { path = "../runmat-cad", version = "=0.6.2" }
 runmat-cad-wasm = { path = "../runmat-cad/wasm", version = "=0.6.2", default-features = false }
 runmat-circuit = { path = "../runmat-circuit", version = "=0.6.2" }
+runmat-circuit-sim = { path = "../runmat-circuit-sim", version = "=0.6.2" }
+runmat-circuit-spice = { path = "../runmat-circuit-spice", version = "=0.6.2" }
 runmat-design-commands = { path = "../runmat-design-commands", version = "=0.6.2" }
 runmat-design-syntax = { workspace = true }
 runmat-rules = { path = "../runmat-rules", version = "=0.6.2" }

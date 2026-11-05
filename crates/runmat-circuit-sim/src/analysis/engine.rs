@@ -84,9 +84,10 @@ impl<'c> Engine<'c> {
             for d in &self.c.devices {
                 d.load(&mut ld);
             }
-            if p.gdiag > 0.0 {
+            let gdiag = p.gdiag + self.c.options.rshunt.map(|r| 1.0 / r).unwrap_or(0.0);
+            if gdiag > 0.0 {
                 for k in 0..self.c.n_nodes {
-                    ld.mat(k, k, p.gdiag);
+                    ld.mat(k, k, gdiag);
                 }
             }
             let force = |list: &[(usize, f64)], ld: &mut Load| {

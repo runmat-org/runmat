@@ -17,8 +17,10 @@
 //!   (`runmat-simulation-usage`). This crate meters nothing itself.
 
 pub mod fake;
+pub mod native;
 pub mod netlist;
 pub mod ngspice;
+pub mod study;
 
 use std::collections::BTreeMap;
 use std::fmt;

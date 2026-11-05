@@ -33,6 +33,8 @@ pub struct EmitOptions {
     pub stimuli: Vec<Stimulus>,
     /// Extra lines (models, options) placed before `.end`.
     pub extra: Vec<String>,
+    /// Models for parts that carry none, by part number or designator (designator wins).
+    pub part_models: BTreeMap<String, SpiceModel>,
 }
 
 impl Default for EmitOptions {
@@ -44,6 +46,7 @@ impl Default for EmitOptions {
             skip_unmodelled: false,
             stimuli: vec![],
             extra: vec![],
+            part_models: BTreeMap::new(),
         }
     }
 }
@@ -304,7 +307,12 @@ pub fn emit(nl: &Netlist, pool: &Pool, opts: &EmitOptions) -> Result<Deck, Vec<E
         };
         // (pin label, net) in element order, plus the element's model text.
         let (letter, pins, value): (char, Vec<(String, Option<String>)>, String) =
-            match part.as_ref().and_then(|p| p.spice.clone()) {
+            match part.as_ref().and_then(|p| p.spice.clone()).or_else(|| {
+                opts.part_models
+                    .get(&c.designator)
+                    .or_else(|| part.as_ref().and_then(|p| opts.part_models.get(&p.mpn)))
+                    .cloned()
+            }) {
                 Some(SpiceModel {
                     model,
                     library,

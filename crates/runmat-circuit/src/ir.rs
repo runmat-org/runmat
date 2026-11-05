@@ -376,6 +376,8 @@ pub struct Design {
     pub interfaces: BTreeMap<String, InterfaceDef>,
     pub variants: BTreeMap<String, VariantDef>,
     pub params: BTreeMap<String, Param>,
+    /// `simulation` sections, by name.
+    pub simulations: BTreeMap<String, crate::simulation::SimulationDef>,
 }
 
 impl Design {

@@ -41,6 +41,7 @@ pub mod board;
 pub mod board_edit;
 pub mod circuit_edit;
 pub mod layout;
+pub mod simulation;
 pub(crate) mod values;
 
 use crate::ir::{
@@ -73,10 +74,20 @@ pub mod words {
     pub const CONNECT: &str = "connect";
     pub const NO_ERC: &str = "no_erc";
     pub const DIFF_PAIR: &str = "diff_pair";
+    pub const SIMULATION: &str = "simulation";
+    /// Statements inside a `simulation` section.
+    pub const SOURCE: &str = "source";
+    pub const MODEL: &str = "model";
+    pub const TOLERANCE: &str = "tolerance";
+    pub const ANALYSIS: &str = "analysis";
+    pub const PROBE: &str = "probe";
+    pub const MEASURE: &str = "measure";
+    pub const OPTION: &str = "option";
     /// Every statement word, for completion and the highlighter.
     pub const ALL: &[&str] = &[
         CIRCUIT, SHEET, ROOT, PARAM, NET_CLASS, INTERFACE, VARIANT, PORT, COMPONENT, NET, BUS,
-        HARNESS, INSTANCE, CONNECT, NO_ERC, DIFF_PAIR,
+        HARNESS, INSTANCE, CONNECT, NO_ERC, DIFF_PAIR, SIMULATION, SOURCE, MODEL, TOLERANCE,
+        ANALYSIS, PROBE, MEASURE, OPTION,
     ];
 }
 
@@ -357,6 +368,15 @@ fn read_circuit(reader: &mut Reader<'_>, declaration: &ast::Declaration) -> Desi
             Statement::Block(sheet) if sheet.keyword() == words::SHEET => {
                 read_sheet(reader, &mut design, sheet)
             }
+            Statement::Block(sim) if sim.keyword() == words::SIMULATION => {
+                if let Some(s) = simulation::read(reader, sim) {
+                    if design.simulations.contains_key(&s.name) {
+                        reader.diagnostics.push(diagnostic(span, format!("simulation `{}` is declared twice", s.name)));
+                    } else {
+                        design.simulations.insert(s.name.clone(), s);
+                    }
+                }
+            }
             Statement::Assignment(assignment) if assignment.target() == [words::ROOT] => {
                 if let Some(root) = reader.note(word_of(assignment.value(), span)) {
                     design.root = root;
@@ -406,7 +426,7 @@ fn read_circuit(reader: &mut Reader<'_>, declaration: &ast::Declaration) -> Desi
             }
             _ => reader.diagnostics.push(diagnostic(
                 span,
-                "expected a sheet, `root`, `param`, `net_class`, `interface` or `variant`",
+                "expected a sheet, a simulation, `root`, `param`, `net_class`, `interface` or `variant`",
             )),
         }
     }
@@ -1416,6 +1436,12 @@ pub fn print_circuit(design: &Design) -> Print {
             body.push(String::new());
         }
         body.push(print_sheet(sheet)?);
+    }
+    for sim in design.simulations.values() {
+        if !body.is_empty() {
+            body.push(String::new());
+        }
+        body.push(simulation::print(sim));
     }
     let mut out = String::from("runmat 0.7\nstd 1\n\n");
     for u in &design.uses {

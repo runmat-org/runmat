@@ -78,6 +78,7 @@ pub mod review;
 pub mod room_formats;
 pub mod runtime;
 pub mod schematic;
+pub mod simulation;
 pub mod route;
 pub mod router;
 pub mod spatial;

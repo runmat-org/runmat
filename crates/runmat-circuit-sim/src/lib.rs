@@ -50,6 +50,8 @@ pub struct Options {
     pub itl4: usize,
     pub method: Method,
     pub temp_c: f64,
+    /// A resistor from every node to ground (`rshunt`), so nodes left without a DC path solve.
+    pub rshunt: Option<f64>,
 }
 
 impl Default for Options {
@@ -66,6 +68,7 @@ impl Default for Options {
             itl4: 20,
             method: Method::Trapezoidal,
             temp_c: 27.0,
+            rshunt: None,
         }
     }
 }
@@ -84,6 +87,7 @@ impl Options {
             "itl2" => self.itl2 = num()? as usize,
             "itl4" => self.itl4 = num()? as usize,
             "temp" => self.temp_c = num()?,
+            "rshunt" => self.rshunt = Some(num()?).filter(|r| *r > 0.0),
             "method" => {
                 self.method = match value {
                     "trap" | "trapezoidal" => Method::Trapezoidal,
@@ -94,7 +98,7 @@ impl Options {
             }
             // Accepted for compatibility; no effect on this engine.
             "tnom" | "itl3" | "itl5" | "itl6" | "maxord" | "noacct" | "nopage" | "nomod" | "acct" | "list" | "node" | "opts"
-            | "gminsteps" | "srcsteps" | "numdgt" | "pivtol" | "pivrel" | "cshunt" | "rshunt" | "post" | "probe" | "ingold" => {}
+            | "gminsteps" | "srcsteps" | "numdgt" | "pivtol" | "pivrel" | "cshunt" | "post" | "probe" | "ingold" => {}
             k => return Err(format!("unknown option `{k}`")),
         }
         Ok(())
