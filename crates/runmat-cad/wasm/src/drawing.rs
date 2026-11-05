@@ -17,6 +17,7 @@
 //!   as a warning and the sheet draws its frame without geometry.
 
 pub mod auto;
+mod props;
 mod values;
 
 use crate::runtime::{compile_assembly, regenerate_part_in, resolve_path, Diagnostic, Files, RegeneratedPart};
@@ -48,6 +49,8 @@ pub struct CompiledModels {
     pmi: BTreeMap<String, PmiNames>,
     /// File → the assembly's flat BOM (its index's), for BOM tables and balloons.
     boms: BTreeMap<String, Bom>,
+    /// Assembly file → BOM item definition file → its properties (parts lists' description).
+    item_properties: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
 }
 
 fn names_in(reference: &Value, out: &mut Vec<Value>) {
@@ -112,6 +115,18 @@ impl ModelReferences for CompiledModels {
     }
     fn bom(&self, model: &ModelRef) -> Option<Bom> {
         self.boms.get(model.file.as_str()).cloned()
+    }
+    fn item_property(
+        &self,
+        model: &ModelRef,
+        item: &runmat_cad::assembly::bom::BomItem,
+        name: &PropertyName,
+    ) -> Option<String> {
+        self.item_properties
+            .get(model.file.as_str())?
+            .get(item.definition.file.as_str())?
+            .get(name.as_str())
+            .cloned()
     }
 }
 
@@ -197,6 +212,9 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                         .unwrap_or_default();
                     models.occurrences.insert(file.clone(), occ);
                     if let Ok(bom) = serde_json::from_value::<Bom>(index["bom"].clone()) {
+                        models
+                            .item_properties
+                            .insert(file.clone(), props::item_properties(&at, &bom, files));
                         models.boms.insert(file.clone(), bom);
                     }
                     models.names.insert(file.clone(), BTreeSet::new());
@@ -221,37 +239,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                     }
                 }
                 models.names.insert(file.clone(), names);
-                let mut props = BTreeMap::new();
-                if let Some(output) = part.document.parts.first() {
-                    if let Some(pn) = &output.part_number {
-                        props.insert("part_number".to_owned(), pn.clone());
-                    }
-                    if let Some(material) = &output.material {
-                        // `material.aluminum` names the material the part uses: its name shows.
-                        let text = serde_json::to_value(material).ok().and_then(|v| match v {
-                            Value::String(s) => {
-                                Some(s.strip_prefix("material.").map(capitalized).unwrap_or(s))
-                            }
-                            other => other.get("name").and_then(Value::as_str).map(str::to_owned),
-                        });
-                        if let Some(text) = text {
-                            props.insert("material".to_owned(), text);
-                        }
-                    }
-                    for p in &output.properties {
-                        let value = serde_json::to_value(&p.value).unwrap_or(Value::Null);
-                        let text = value
-                            .as_str()
-                            .map(str::to_owned)
-                            .or_else(|| {
-                                value
-                                    .get("value")
-                                    .map(|v| v.to_string().trim_matches('"').to_owned())
-                            })
-                            .unwrap_or_else(|| value.to_string());
-                        props.insert(p.name.as_str().to_owned(), text);
-                    }
-                }
+                let props = props::output_properties(&part.document);
                 models.properties.insert(file.clone(), props);
                 let pmi = &part.document.pmi;
                 models.pmi.insert(
@@ -389,13 +377,6 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
     .to_string()
 }
 
-fn capitalized(s: &str) -> String {
-    let mut c = s.chars();
-    c.next()
-        .map(|f| f.to_uppercase().chain(c).collect())
-        .unwrap_or_default()
-}
-
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
@@ -511,23 +492,27 @@ mod tests {
     pub(crate) const DRAWING: &str = "runmat 0.7\nstd 1\n\ndrawing bracket {\n    format a3 = {\n        size = { size = iso, name = A3 },\n        title_block = [\n            { label = \"Part number\", source = { source = property, name = part_number } }\n        ]\n    }\n\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n\n    view front = standard(\n        orientation = front,\n        sheet = \"1\",\n        model = { file = \"bracket.part\" },\n        at = [100, 100],\n        display = hidden_lines\n    )\n    view top = projected(\n        from = front,\n        direction = up,\n        sheet = \"1\",\n        model = { file = \"bracket.part\" },\n        at = [100, 200],\n        display = hidden_lines\n    )\n}\n";
 
     /// The Desktop's sheet tests read what the worker gets for its fixtures. Set
-    /// `RUNMAT_DESKTOP_FIXTURES=1` to write it; otherwise the checked-in copy must be current.
+    /// `RUNMAT_DESKTOP_FIXTURES` to the Desktop's fixtures folder to write it, as runmat-cad's
+    /// `desktop_fixtures` test reads it; otherwise the sibling checkout's copy must be current.
     fn desktop_fixture(name: &str, json: &str) {
+        if let Ok(dir) = std::env::var("RUNMAT_DESKTOP_FIXTURES") {
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(name), json).unwrap();
+            return;
+        }
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures");
         if !dir.exists() {
             return;
         }
         let path = dir.join(name);
-        if std::env::var("RUNMAT_DESKTOP_FIXTURES").is_ok() {
-            std::fs::write(&path, json).unwrap();
-            return;
-        }
         let checked_in = std::fs::read_to_string(&path).unwrap_or_default();
         assert!(
             checked_in == json,
-            "{} is stale; rerun with RUNMAT_DESKTOP_FIXTURES=1",
-            path.display()
+            "{} is stale; regenerate with RUNMAT_DESKTOP_FIXTURES={} cargo test -p runmat-cad-wasm --lib",
+            path.display(),
+            dir.display()
         );
     }
 

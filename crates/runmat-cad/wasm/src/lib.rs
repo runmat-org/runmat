@@ -23,6 +23,7 @@
 //! double. Every compile result names its kernel (`kernel`). Malformed input is reported as a
 //! diagnostic, never a panic.
 
+pub mod board;
 mod configured;
 pub mod drawing;
 pub mod edit;

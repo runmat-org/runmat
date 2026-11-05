@@ -495,7 +495,9 @@ pub fn assembly_display_configured(
     let mut out = AssemblyDisplay::default();
     let mut prototype_of: BTreeMap<(String, String), u32> = BTreeMap::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
-        if node.definition.kind != DefinitionKind::Part || node.represented_by_ancestor {
+        // Parts and circuit boards are leaves that draw; a board draws its 3D model.
+        let drawn = matches!(node.definition.kind, DefinitionKind::Part | DefinitionKind::Circuit);
+        if !drawn || node.represented_by_ancestor {
             continue;
         }
         let file = node.definition.file.as_str().to_string();

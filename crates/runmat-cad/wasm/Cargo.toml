@@ -17,6 +17,8 @@ crate-type = ["rlib"]
 
 [dependencies]
 runmat-cad = { path = "..", version = "=0.6.2" }
+# Circuit boards placed in assemblies draw their 3D board model (`board_display`).
+runmat-circuit = { path = "../../runmat-circuit", version = "=0.6.2" }
 runmat-design-syntax = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }

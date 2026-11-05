@@ -128,6 +128,10 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
     if path.ends_with(".drawing") {
         return crate::drawing::dependencies(path, text);
     }
+    if path.ends_with(".circuit") || path.ends_with(".circuit.layout") {
+        // A circuit placed in an assembly draws its board: the layout, the circuit and its lock.
+        return runmat_circuit::runtime::dependencies(path, text);
+    }
     if !is_assembly(path) {
         // A part needs the files its imports read (STEP text the kernel is handed).
         let Some(doc) = parse_part(path, text).document else {
@@ -187,6 +191,7 @@ pub const ASSEMBLY_TESSELLATION: TessellationOptions = TessellationOptions {
     chord_tolerance: 5.0e-4,
     angle_tolerance: 12.0 * std::f64::consts::PI / 180.0,
     size_fraction: 2.0e-3,
+    chord_max: None,
 };
 
 /// [`regenerate_part`] with the display tessellated under `tessellation`.
@@ -366,6 +371,26 @@ pub fn resolve_assembly(path: &str, text: &str, files: &Files) -> Result<Assembl
                 continue;
             };
             match def.kind {
+                DefinitionKind::Circuit => match crate::board::board_display(&file, files) {
+                    Ok(display) => {
+                        let configured = ConfiguredSummary {
+                            bbox: bbox(&display),
+                            artifact: format!("text:{key}"),
+                            ..Default::default()
+                        };
+                        let mut summary = DefinitionSummary::new(def.clone());
+                        summary.digest = format!("text:{}", text.len());
+                        source.add_part(summary, configured);
+                        displays.insert(key.clone(), display);
+                    }
+                    Err(message) => problems.push(Diagnostic {
+                        path: path.to_owned(),
+                        start: 0,
+                        end: 0,
+                        severity: "warning".into(),
+                        message: format!("{key}: {message}, so it draws as its box"),
+                    }),
+                },
                 DefinitionKind::Assembly => match parse_assembly(&key, text).document {
                     Some(sub) => {
                         queue.push((file.clone(), sub.clone()));
@@ -421,7 +446,10 @@ pub fn resolve_assembly(path: &str, text: &str, files: &Files) -> Result<Assembl
                             ..Default::default()
                         };
                         source.add_part(summary, configured);
-                        displays.insert(key.clone(), part.display);
+                        // Coarser tessellations for the canvas's level of detail.
+                        let mut display = part.display;
+                        display.levels = runmat_cad::display::display_levels(&part.result, part.kernel.as_ref(), &ASSEMBLY_TESSELLATION);
+                        displays.insert(key.clone(), display);
                         documents.insert(key.clone(), part.document);
                     }
                     Err(mut d) => problems.append(&mut d),

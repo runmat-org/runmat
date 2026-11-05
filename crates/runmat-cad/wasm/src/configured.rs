@@ -78,7 +78,8 @@ pub fn configured_displays(
             continue;
         };
         let (result, kernel) = regenerate_configured(document, &node.configuration);
-        let display = part_display(&result, kernel.as_ref(), &crate::runtime::ASSEMBLY_TESSELLATION);
+        let mut display = part_display(&result, kernel.as_ref(), &crate::runtime::ASSEMBLY_TESSELLATION);
+        display.levels = runmat_cad::display::display_levels(&result, kernel.as_ref(), &crate::runtime::ASSEMBLY_TESSELLATION);
         out.insert(key, display);
     }
     out
