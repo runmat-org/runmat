@@ -16,6 +16,17 @@ pub struct GeometryLines {
     pub label: Option<String>,
     pub visible: bool,
     pub wireframe_only: bool,
+    /// Named groups of segments (ranges count index pairs): a CAD face's boundary edges under the
+    /// face's region id, so the presentation's selection and hover color them with the face.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub segment_regions: Vec<SerializedSegmentRegion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedSegmentRegion {
+    pub region_id: String,
+    pub segment_ranges: Vec<super::SerializedMeshTriangleRange>,
 }
 impl GeometryLines {
     pub(super) fn capture(
@@ -35,9 +46,17 @@ impl GeometryLines {
             label: chunk.label.clone(),
             visible: chunk.visible,
             wireframe_only: chunk.wireframe_only,
+            segment_regions: chunk
+                .segment_regions
+                .iter()
+                .map(|region| SerializedSegmentRegion {
+                    region_id: region.region_id.clone(),
+                    segment_ranges: region.triangle_ranges.iter().copied().map(Into::into).collect(),
+                })
+                .collect(),
         })
     }
-    pub(super) fn restore(self, id: String) -> Result<GeometrySceneChunk, String> {
+    pub(crate) fn restore(self, id: String) -> Result<GeometrySceneChunk, String> {
         let count = self.indices.as_ref().map_or(self.positions.len(), Vec::len);
         if self.positions.len() != self.colors.len()
             || !count.is_multiple_of(2)
@@ -85,6 +104,22 @@ impl GeometryLines {
         chunk.label = self.label;
         chunk.visible = self.visible;
         chunk.wireframe_only = self.wireframe_only;
+        let segments = (count / 2) as u64;
+        for region in self.segment_regions {
+            if region
+                .segment_ranges
+                .iter()
+                .any(|range| u64::from(range.start) + u64::from(range.count) > segments)
+            {
+                return Err("geometry line region runs past its segments".into());
+            }
+            chunk.segment_regions.push(crate::geometry_scene::GeometrySceneRegion::new(
+                region.region_id,
+                None,
+                None,
+                region.segment_ranges.into_iter().map(Into::into).collect(),
+            ));
+        }
         Ok(chunk)
     }
 }

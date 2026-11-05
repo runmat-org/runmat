@@ -55,21 +55,23 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @l
 
     let normal = normalize(input.normal);
     if uniforms.cad_lighting.x != 0u {
-        // Camera-relative studio key/fill keeps recesses legible while orbiting.
-        // The low ambient floor preserves orientation contrast; fill prevents
-        // away-facing surfaces from disappearing into the background. The key sits
-        // up and to the left of the eye, so a face seen straight on (a sketch plane
-        // in Normal to, a standard view) reads light, as in SolidWorks and CATIA.
+        // Camera-relative studio lighting, as SolidWorks and CATIA light a part: a headlight
+        // along the view makes a face seen straight on (a sketch plane in Normal to, a face in
+        // a standard view) read at nearly its full colour; a key up and left of the eye
+        // separates the faces of a box seen in an iso view; a dim fill and a floor keep
+        // away-facing faces and recesses legible.
+        // Face on: 0.20 + 0.40 * 0.74 + 0.32 + ... ~ 0.93 of the colour; a side face at 70 degrees ~ 0.5.
         let world_normal = select(-normal, normal, front_facing);
         let n = normalize((uniforms.cad_view_rotation * world_normal).xyz);
         let key = normalize(vec3<f32>(-0.42, 0.52, 0.74));
         let fill = normalize(vec3<f32>(0.55, -0.15, 0.55));
         let diffuse = max(dot(n, key), 0.0);
+        let head = max(n.z, 0.0);
         let fill_diffuse = max(dot(n, fill), 0.0);
         let hemisphere = 0.5 + 0.5 * n.y;
         let half_direction = normalize(key + vec3<f32>(0.0, 0.0, 1.0));
-        let highlight = 0.025 * pow(max(dot(n, half_direction), 0.0), 16.0);
-        let lighting = clamp(0.18 + 0.65 * diffuse + 0.10 * fill_diffuse + 0.05 * hemisphere, 0.18, 0.98);
+        let highlight = 0.03 * pow(max(dot(n, half_direction), 0.0), 24.0);
+        let lighting = clamp(0.20 + 0.40 * diffuse + 0.32 * head + 0.08 * fill_diffuse + 0.04 * hemisphere, 0.20, 1.0);
         return vec4<f32>(clamp(input.color.rgb * lighting + vec3<f32>(highlight), vec3<f32>(0.0), vec3<f32>(1.0)), input.color.a);
     }
 

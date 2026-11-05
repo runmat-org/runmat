@@ -58,7 +58,7 @@ pub use geometry_scene::{
     GeometrySceneAnnotationKind, GeometrySceneAssemblyNode, GeometrySceneCacheKey,
     GeometrySceneChunk, GeometrySceneCompleteness, GeometrySceneDisplayMode, GeometrySceneOverlay,
     GeometryScenePickIndex, GeometryScenePickMode, GeometryScenePickRequest,
-    GeometryScenePickResult, GeometryScenePresentation, GeometrySceneRegion,
+    GeometryScenePickResult, GeometryScenePresentation, GeometrySceneProjection, GeometrySceneRegion,
     GeometrySceneRegionAnnotation, GeometrySceneRegionSummary, GeometrySceneTopologySelection,
     GeometrySceneTriangleRange,
 };

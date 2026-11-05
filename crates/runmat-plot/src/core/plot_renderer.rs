@@ -3914,8 +3914,31 @@ impl PlotRenderer {
             })
             .collect()
     }
+    /// Draws the 3-D views with perspective or as a parallel projection. Framing is kept: the
+    /// parallel view's height is the perspective view's height at the target.
+    pub fn set_geometry_projection(
+        &mut self,
+        projection: crate::geometry_scene::GeometrySceneProjection,
+    ) {
+        let parallel = projection == crate::geometry_scene::GeometrySceneProjection::Orthographic;
+        for camera in &mut self.axes_cameras {
+            if matches!(
+                camera.projection,
+                crate::core::camera::ProjectionType::Perspective { .. }
+            ) && camera.parallel != parallel
+            {
+                camera.parallel = parallel;
+                camera.mark_dirty();
+                self.needs_update = true;
+            }
+        }
+    }
+
     pub fn set_geometry_scene_presentation(&mut self, mut presentation: GeometryScenePresentation) {
         let requested_view_preset = presentation.view_preset.take();
+        if let Some(projection) = presentation.projection.take() {
+            self.set_geometry_projection(projection);
+        }
         self.preserve_geometry_scene_state_when_unspecified(&mut presentation);
         if let Some(view_preset) = requested_view_preset {
             self.set_camera_view_preset(geometry_scene_view_preset_to_camera(view_preset));

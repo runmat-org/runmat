@@ -1538,6 +1538,8 @@ export interface GeometryScenePresentationState {
   viewPreset?: GeometrySceneViewPreset | null;
   /** Edge and wireframe line width in CSS px; above 1 px edges draw as screen-space strokes. */
   edgeWidthPx?: number | null;
+  /** The 3D view's projection: with perspective, or parallel (orthographic). Unset keeps it. */
+  projection?: "perspective" | "orthographic" | null;
 }
 
 export type GeometrySceneTopologySelectionState =

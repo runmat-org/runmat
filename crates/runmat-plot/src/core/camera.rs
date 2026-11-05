@@ -74,6 +74,13 @@ pub struct Camera {
     /// axis to fill a cube, as MATLAB's default plot box does; `ONE` keeps data units.
     pub axis_scale: Vec3,
 
+    /// A 3-D view drawn as a parallel (orthographic) projection: the perspective camera's
+    /// position, target and field of view still define the view, and the visible height is the
+    /// perspective view's height at the target (`2 · distance · tan(fov / 2)`), so orbit, zoom
+    /// (dolly), fit and standard views keep working and switching modes keeps the framing.
+    /// The 2-D plot camera (`ProjectionType::Orthographic`) is separate.
+    pub parallel: bool,
+
     // Cached matrices
     view_matrix: Mat4,
     projection_matrix: Mat4,
@@ -103,6 +110,7 @@ impl Camera {
             zoom_sensitivity: 0.1,
             rotate_sensitivity: 0.005,
             axis_scale: Vec3::ONE,
+            parallel: false,
             view_matrix: Mat4::IDENTITY,
             projection_matrix: Mat4::IDENTITY,
             view_proj_dirty: true,
@@ -140,6 +148,7 @@ impl Camera {
             zoom_sensitivity: 0.1,
             rotate_sensitivity: 0.0, // Disable rotation for 2D
             axis_scale: Vec3::ONE,
+            parallel: false,
             view_matrix: Mat4::IDENTITY,
             projection_matrix: Mat4::IDENTITY,
             view_proj_dirty: true,
@@ -368,8 +377,13 @@ impl Camera {
                         if i & 2 == 0 { -half.y } else { half.y },
                         if i & 4 == 0 { -half.z } else { half.z },
                     );
-                    // Depth toward the camera, and offsets across the view.
-                    let toward = corner.dot(direction);
+                    // Depth toward the camera, and offsets across the view. A parallel view's
+                    // image doesn't grow with depth, so only the offsets count.
+                    let toward = if self.parallel {
+                        0.0
+                    } else {
+                        corner.dot(direction)
+                    };
                     let u = corner.dot(right).abs();
                     let v = corner.dot(true_up).abs();
                     distance = distance.max(toward + u / tan_x).max(toward + v / tan_y);
@@ -609,6 +623,20 @@ impl Camera {
 
         // Update projection matrix
         self.projection_matrix = match self.projection {
+            ProjectionType::Perspective { fov, far, .. } if self.parallel => {
+                let distance = (self.position - self.target).length().max(1.0e-6);
+                let half_height = distance * (0.5 * fov).tan();
+                let half_width = half_height * self.aspect_ratio.max(1e-6);
+                // Geometry behind the eye still draws (a view zoomed into a part), so the box
+                // runs from `far` behind the eye to `far` in front of it.
+                let far = far.max(distance * 2.0);
+                let (near, far) = match self.depth_mode {
+                    DepthMode::Standard => (-far, far),
+                    // Reversed-Z: near->1, far->0.
+                    DepthMode::ReversedZ => (far, -far),
+                };
+                Mat4::orthographic_rh(-half_width, half_width, -half_height, half_height, near, far)
+            }
             ProjectionType::Perspective { fov, near, far } => {
                 match self.depth_mode {
                     DepthMode::Standard => Mat4::perspective_rh(fov, self.aspect_ratio, near, far),
@@ -1099,6 +1127,65 @@ pub enum MouseButton {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn parallel_view_keeps_size_with_depth_and_frames_like_perspective_at_the_target() {
+        for depth_mode in [DepthMode::Standard, DepthMode::ReversedZ] {
+            let mut camera = Camera::new();
+            camera.depth_mode = depth_mode;
+            camera.aspect_ratio = 1.6;
+            camera.position = Vec3::new(0.0, 0.0, 100.0);
+            camera.target = Vec3::ZERO;
+            camera.up = Vec3::Y;
+            camera.projection = ProjectionType::Perspective {
+                fov: 30.0_f32.to_radians(),
+                near: 1.0,
+                far: 500.0,
+            };
+            let ndc = |camera: &mut Camera, p: Vec3| {
+                let clip = camera.view_proj_matrix() * p.extend(1.0);
+                clip.truncate() / clip.w
+            };
+            // At the target the two projections agree.
+            let edge = Vec3::new(0.0, 100.0 * 15.0_f32.to_radians().tan(), 0.0);
+            camera.mark_dirty();
+            let perspective = ndc(&mut camera, edge);
+            camera.parallel = true;
+            camera.mark_dirty();
+            let parallel = ndc(&mut camera, edge);
+            assert!((perspective.y - 1.0).abs() < 1e-4 && (parallel.y - 1.0).abs() < 1e-4);
+            // Off the target only the parallel view keeps the size, and depth still orders.
+            let near_point = ndc(&mut camera, Vec3::new(0.0, 10.0, 40.0));
+            let far_point = ndc(&mut camera, Vec3::new(0.0, 10.0, -40.0));
+            assert!((near_point.y - far_point.y).abs() < 1e-5);
+            let nearer = match depth_mode {
+                DepthMode::Standard => near_point.z < far_point.z,
+                DepthMode::ReversedZ => near_point.z > far_point.z,
+            };
+            assert!(nearer, "{depth_mode:?}: the nearer point wins the depth test");
+            assert!((0.0..=1.0).contains(&near_point.z) && (0.0..=1.0).contains(&far_point.z));
+            // A point behind the eye (a view zoomed into a part) still draws.
+            let behind = ndc(&mut camera, Vec3::new(0.0, 0.0, 150.0));
+            assert!((0.0..=1.0).contains(&behind.z));
+        }
+    }
+
+    #[test]
+    fn parallel_fit_frames_the_box_by_its_extent_across_the_view() {
+        let mut camera = Camera::new();
+        camera.aspect_ratio = 1.0;
+        camera.parallel = true;
+        camera.up = Vec3::Y;
+        camera.position = Vec3::new(0.0, 0.0, 10.0);
+        camera.target = Vec3::ZERO;
+        // A deep box: 20 across, 200 along the view.
+        camera.fit_bounds(Vec3::new(-10.0, -10.0, -100.0), Vec3::new(10.0, 10.0, 100.0));
+        let corner = Vec3::new(10.0, 10.0, 100.0);
+        let clip = camera.view_proj_matrix() * corner.extend(1.0);
+        let y = clip.y / clip.w;
+        // Fills the view to the fit margin (0.92) whatever the depth.
+        assert!((y - 0.92).abs() < 0.01, "corner at {y}");
+    }
     use super::*;
 
     #[test]

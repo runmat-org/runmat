@@ -195,15 +195,15 @@ fn presentation_selection_colors_indexed_triangle_region() {
     );
     assert_eq!(
         render_data.vertices[4].color,
-        GEOMETRY_SELECTED_REGION_COLOR
+        SELECTED_PAINT.face([0.5, 0.5, 0.5, 1.0])
     );
     assert_eq!(
         render_data.vertices[5].color,
-        GEOMETRY_SELECTED_REGION_COLOR
+        SELECTED_PAINT.face([0.5, 0.5, 0.5, 1.0])
     );
     assert_eq!(
         render_data.vertices[6].color,
-        GEOMETRY_SELECTED_REGION_COLOR
+        SELECTED_PAINT.face([0.5, 0.5, 0.5, 1.0])
     );
 }
 
@@ -395,15 +395,15 @@ fn presentation_selection_colors_direct_triangle_region() {
     assert_eq!(render_data.vertices[2].color, base_color);
     assert_eq!(
         render_data.vertices[3].color,
-        GEOMETRY_SELECTED_REGION_COLOR
+        SELECTED_PAINT.face(base_color)
     );
     assert_eq!(
         render_data.vertices[4].color,
-        GEOMETRY_SELECTED_REGION_COLOR
+        SELECTED_PAINT.face(base_color)
     );
     assert_eq!(
         render_data.vertices[5].color,
-        GEOMETRY_SELECTED_REGION_COLOR
+        SELECTED_PAINT.face(base_color)
     );
 }
 
@@ -742,7 +742,10 @@ fn topology_selection_colors_face_and_draws_edge_and_point() {
     });
     let face = nodes[0].render_data.as_ref().unwrap();
     assert_eq!(face.indices.as_ref().unwrap()[0], 3);
-    assert_eq!(face.vertices[3].color, GEOMETRY_SELECTED_REGION_COLOR);
+    assert_eq!(
+        face.vertices[3].color,
+        SELECTED_PAINT.face(face.vertices[0].color)
+    );
     let topology = nodes
         .iter()
         .find(|node| node.name == "Selected geometry topology")
@@ -780,4 +783,100 @@ fn scale_independent_picking_still_rejects_parallel_and_behind_faces() {
         };
         assert!(ray_intersects_triangle(&ray, Vec3::ZERO, Vec3::X, Vec3::Y).is_none());
     }
+}
+
+#[test]
+fn selection_tints_the_face_and_draws_its_boundary_edges_in_the_selection_color() {
+    let grey = [0.66, 0.72, 0.8, 1.0];
+    let face = GeometrySceneChunk::indexed_triangles(
+        "faces",
+        vec![
+            vertex([0.0, 0.0, 0.0], grey, [0.0, 0.0, 1.0]),
+            vertex([1.0, 0.0, 0.0], grey, [0.0, 0.0, 1.0]),
+            vertex([0.0, 1.0, 0.0], grey, [0.0, 0.0, 1.0]),
+        ],
+        vec![0, 1, 2],
+        cad_default_material(),
+    )
+    .with_regions(vec![GeometrySceneRegion::new(
+        "face:0:0",
+        None,
+        None,
+        vec![GeometrySceneTriangleRange::new(0, 1)],
+    )]);
+    let black = [0.07, 0.08, 0.1, 1.0];
+    // Three segments sharing vertices; the first two bound the selected face.
+    let mut edges = GeometrySceneChunk::from_render_data(
+        "lines",
+        RenderData {
+            pipeline_type: PipelineType::Lines,
+            vertices: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [2.0, 2.0, 0.0]]
+                .map(|p| vertex(p, black, [0.0, 0.0, 1.0]))
+                .to_vec(),
+            indices: Some(vec![0, 1, 1, 2, 2, 3]),
+            gpu_vertices: None,
+            bounds: None,
+            material: Material::default(),
+            draw_calls: vec![DrawCall {
+                vertex_offset: 0,
+                vertex_count: 4,
+                index_offset: Some(0),
+                index_count: Some(6),
+                instance_count: 1,
+            }],
+            image: None,
+        },
+    );
+    edges.segment_regions = vec![GeometrySceneRegion::new(
+        "face:0:0",
+        None,
+        None,
+        vec![GeometrySceneTriangleRange::new(0, 2)],
+    )];
+    let selected = GeometryScenePresentation {
+        selected_region_ids: vec!["face:0:0".to_string()],
+        ..Default::default()
+    };
+
+    let shaded = face.render_data_with_presentation(&selected);
+    let tinted = shaded.vertices[shaded.indices.as_ref().unwrap()[0] as usize].color;
+    // Part way to the selection tint: lighter than the selection color, at the face's alpha.
+    assert_eq!(tinted, SELECTED_PAINT.face(grey));
+    assert!(tinted[0] > grey[0] && tinted[0] < GEOMETRY_SELECTED_REGION_COLOR[0]);
+    assert_eq!(tinted[3], 1.0);
+
+    let lines = edges.render_data_with_presentation(&selected);
+    let indices = lines.indices.clone().unwrap();
+    let color = |at: usize| lines.vertices[indices[at] as usize].color;
+    for at in 0..4 {
+        assert_eq!(color(at), GEOMETRY_SELECTED_REGION_COLOR, "boundary corner {at}");
+    }
+    // The third segment keeps its colour although it shares vertex 2 with the second.
+    assert_eq!(color(4), black);
+    assert_eq!(color(5), black);
+
+    let hovered = edges.render_data_with_presentation(&GeometryScenePresentation {
+        hovered_region_id: Some("face:0:0".to_string()),
+        ..Default::default()
+    });
+    let hi = hovered.indices.clone().unwrap();
+    assert_eq!(hovered.vertices[hi[0] as usize].color, GEOMETRY_HOVER_EDGE_COLOR);
+}
+
+#[test]
+fn saved_line_segment_regions_round_trip_and_reject_overruns() {
+    let lines: crate::event::GeometryLines = serde_json::from_value(serde_json::json!({
+        "positions": [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+        "colors": [[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+        "indices": [0, 1, 1, 2],
+        "meshId": null, "label": "Edges", "visible": true, "wireframeOnly": true,
+        "segmentRegions": [{ "regionId": "face:0:1", "segmentRanges": [{ "start": 1, "count": 1 }] }]
+    }))
+    .unwrap();
+    let chunk = lines.clone().restore("lines".into()).unwrap();
+    assert_eq!(chunk.segment_regions.len(), 1);
+    assert_eq!(chunk.segment_regions[0].triangle_ranges, vec![GeometrySceneTriangleRange::new(1, 1)]);
+    let mut bad = lines;
+    bad.segment_regions[0].segment_ranges[0].count = 2;
+    assert!(bad.restore("lines".into()).is_err());
 }

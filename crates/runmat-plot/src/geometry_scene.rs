@@ -13,6 +13,11 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 mod annotations;
 mod edge_stroke;
+mod paint;
+
+use paint::{RegionPaint, HOVER_PAINT, SELECTED_PAINT};
+#[cfg(test)]
+use paint::GEOMETRY_HOVER_EDGE_COLOR;
 
 const SECTION_DISTANCE_EPSILON: f32 = 1.0e-6;
 const GEOMETRY_SELECTED_REGION_COLOR: [f32; 4] = [0.98, 0.45, 0.12, 1.0];
@@ -20,7 +25,6 @@ const GEOMETRY_HOVER_REGION_COLOR: [f32; 4] = [0.43, 0.78, 1.0, 1.0];
 const GEOMETRY_MATERIAL_REGION_COLOR: [f32; 4] = [0.38, 0.58, 0.96, 0.92];
 const GEOMETRY_BOUNDARY_REGION_COLOR: [f32; 4] = [0.22, 0.82, 0.52, 0.96];
 const GEOMETRY_DRIVING_REGION_COLOR: [f32; 4] = [0.98, 0.38, 0.28, 0.96];
-
 #[derive(Debug, Clone)]
 pub struct GeometryScene {
     pub scene_id: String,
@@ -234,10 +238,22 @@ pub struct GeometryScenePresentation {
     pub section: Option<Option<GeometrySceneSection>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view_preset: Option<GeometrySceneViewPreset>,
+    /// Perspective or orthographic (parallel) projection for the 3-D view. Unset keeps the
+    /// current one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection: Option<GeometrySceneProjection>,
     /// Width of line chunks (edges, wireframes) in CSS px. Above 1 px they draw as screen-space
     /// strokes of that width; unset or 1 px or less draws GPU hairlines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edge_width_px: Option<f32>,
+}
+
+/// How the 3-D view projects: with perspective, or parallel as CAD drafting views do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GeometrySceneProjection {
+    Perspective,
+    Orthographic,
 }
 
 impl Default for GeometryScenePresentation {
@@ -256,6 +272,7 @@ impl Default for GeometryScenePresentation {
             isolated_owner_node_ids: None,
             section: None,
             view_preset: None,
+            projection: None,
             edge_width_px: None,
         }
     }
@@ -1049,6 +1066,9 @@ pub struct GeometrySceneChunk {
     pub bounds: BoundingBox,
     pub material: Material,
     pub regions: Vec<GeometrySceneRegion>,
+    /// Regions of a line chunk, with ranges counted in segments (index pairs). A CAD face's or
+    /// occurrence's boundary edges carry its region id, so selection and hover color them too.
+    pub segment_regions: Vec<GeometrySceneRegion>,
     pub owner_node_ids: Vec<String>,
     pub visible: bool,
     /// Topology lines generated for CAD display modes; shaded CAD stays smooth.
@@ -1091,6 +1111,7 @@ impl GeometrySceneChunk {
             bounds,
             material,
             regions: Vec::new(),
+            segment_regions: Vec::new(),
             owner_node_ids: Vec::new(),
             visible: true,
             wireframe_only: false,
@@ -1114,6 +1135,7 @@ impl GeometrySceneChunk {
             bounds,
             material,
             regions: Vec::new(),
+            segment_regions: Vec::new(),
             owner_node_ids: Vec::new(),
             visible: true,
             wireframe_only: false,
@@ -1132,6 +1154,11 @@ impl GeometrySceneChunk {
 
     pub fn with_regions(mut self, regions: Vec<GeometrySceneRegion>) -> Self {
         self.regions = regions;
+        self
+    }
+
+    pub fn with_segment_regions(mut self, segment_regions: Vec<GeometrySceneRegion>) -> Self {
+        self.segment_regions = segment_regions;
         self
     }
 
@@ -1342,20 +1369,18 @@ impl GeometrySceneChunk {
             self.apply_region_color(
                 &mut render_data,
                 &highlight.region_id,
-                highlight
-                    .color
-                    .unwrap_or_else(|| geometry_region_role_color(highlight.role.as_deref())),
+                RegionPaint::Fill(
+                    highlight
+                        .color
+                        .unwrap_or_else(|| geometry_region_role_color(highlight.role.as_deref())),
+                ),
             );
         }
         if let Some(region_id) = presentation.hovered_region_id.as_deref() {
-            self.apply_region_color(&mut render_data, region_id, GEOMETRY_HOVER_REGION_COLOR);
+            self.apply_region_color(&mut render_data, region_id, HOVER_PAINT);
         }
         for region_id in &presentation.selected_region_ids {
-            let colored = self.apply_region_color(
-                &mut render_data,
-                region_id,
-                GEOMETRY_SELECTED_REGION_COLOR,
-            );
+            let colored = self.apply_region_color(&mut render_data, region_id, SELECTED_PAINT);
             log::debug!(
                 target: "runmat_plot",
                 "geometry_scene.selection_color chunk_id={} region_id={} colored_triangles={}",
@@ -1371,20 +1396,12 @@ impl GeometrySceneChunk {
             } = selection
             {
                 if chunk_id == &self.chunk_id {
-                    self.apply_triangle_color(
-                        &mut render_data,
-                        *triangle_index,
-                        GEOMETRY_SELECTED_REGION_COLOR,
-                    );
+                    self.apply_triangle_color(&mut render_data, *triangle_index, SELECTED_PAINT);
                 }
             }
         }
         if let Some(region_id) = presentation.selected_region_id.as_deref() {
-            let colored = self.apply_region_color(
-                &mut render_data,
-                region_id,
-                GEOMETRY_SELECTED_REGION_COLOR,
-            );
+            let colored = self.apply_region_color(&mut render_data, region_id, SELECTED_PAINT);
             log::debug!(
                 target: "runmat_plot",
                 "geometry_scene.selection_color chunk_id={} region_id={} colored_triangles={}",
@@ -1435,135 +1452,6 @@ impl GeometrySceneChunk {
         })
     }
 
-    fn apply_region_color(
-        &self,
-        render_data: &mut RenderData,
-        region_id: &str,
-        color: [f32; 4],
-    ) -> usize {
-        if self.render_data.pipeline_type != PipelineType::Triangles {
-            return 0;
-        }
-        let Some(region) = self.regions.iter().find(|item| item.region_id == region_id) else {
-            log::debug!(
-                target: "runmat_plot",
-                "geometry_scene.selection_color_missing chunk_id={} region_id={} available_regions={}",
-                self.chunk_id,
-                region_id,
-                self.regions.len()
-            );
-            return 0;
-        };
-        let (Some(indices), Some(render_indices)) =
-            (self.indices.as_ref(), render_data.indices.as_mut())
-        else {
-            return self.apply_direct_region_color(render_data, region, color);
-        };
-
-        let mut colored = 0usize;
-        for range in &region.triangle_ranges {
-            let start = range.start as usize;
-            let end = start.saturating_add(range.count as usize);
-            for triangle_index in start..end {
-                let base = triangle_index.saturating_mul(3);
-                let Some(triangle) = indices.get(base..base + 3) else {
-                    continue;
-                };
-                if render_indices.get(base..base + 3).is_none() {
-                    continue;
-                }
-                let mut isolated_indices = [0_u32; 3];
-                let mut isolated = true;
-                for (slot, vertex_index) in triangle.iter().copied().enumerate() {
-                    let Some(vertex) = render_data.vertices.get(vertex_index as usize).copied()
-                    else {
-                        isolated = false;
-                        break;
-                    };
-                    let mut vertex = vertex;
-                    vertex.color = color;
-                    let next_index = render_data.vertices.len();
-                    if next_index > u32::MAX as usize {
-                        isolated = false;
-                        break;
-                    }
-                    render_data.vertices.push(vertex);
-                    isolated_indices[slot] = next_index as u32;
-                }
-                if isolated {
-                    render_indices[base..base + 3].copy_from_slice(&isolated_indices);
-                    colored += 1;
-                }
-            }
-        }
-        colored
-    }
-
-    fn apply_triangle_color(
-        &self,
-        render_data: &mut RenderData,
-        triangle_index: usize,
-        color: [f32; 4],
-    ) {
-        if self.render_data.pipeline_type != PipelineType::Triangles {
-            return;
-        }
-        let base = triangle_index.saturating_mul(3);
-        if let (Some(source_indices), Some(render_indices)) =
-            (self.indices.as_ref(), render_data.indices.as_mut())
-        {
-            let (Some(source), Some(target)) = (
-                source_indices.get(base..base + 3),
-                render_indices.get_mut(base..base + 3),
-            ) else {
-                return;
-            };
-            let mut isolated = [0_u32; 3];
-            for (slot, index) in source.iter().copied().enumerate() {
-                let Some(mut vertex) = render_data.vertices.get(index as usize).copied() else {
-                    return;
-                };
-                vertex.color = color;
-                let Ok(next_index) = u32::try_from(render_data.vertices.len()) else {
-                    return;
-                };
-                render_data.vertices.push(vertex);
-                isolated[slot] = next_index;
-            }
-            target.copy_from_slice(&isolated);
-        } else if let Some(triangle) = render_data.vertices.get_mut(base..base + 3) {
-            for vertex in triangle {
-                vertex.color = color;
-            }
-        }
-    }
-
-    fn apply_direct_region_color(
-        &self,
-        render_data: &mut RenderData,
-        region: &GeometrySceneRegion,
-        color: [f32; 4],
-    ) -> usize {
-        if render_data.indices.is_some() {
-            return 0;
-        }
-        let mut colored = 0usize;
-        for range in &region.triangle_ranges {
-            let start = range.start as usize;
-            let end = start.saturating_add(range.count as usize);
-            for triangle_index in start..end {
-                let base = triangle_index.saturating_mul(3);
-                let Some(triangle) = render_data.vertices.get_mut(base..base + 3) else {
-                    continue;
-                };
-                for vertex in triangle {
-                    vertex.color = color;
-                }
-                colored += 1;
-            }
-        }
-        colored
-    }
 }
 
 fn section_plane(plane: &GeometrySceneSectionPlane) -> Option<(Vec3, Vec3)> {
