@@ -74,9 +74,6 @@ pub fn derive_curve_geometry_metric(
         }
     }
     let mut edge_witnesses = Vec::new();
-    // Gaps between facing surfaces are measured only when the request authors
-    // `cells_across_gap`, so default requests keep their meshes.
-    let measure_face_gaps = request.cells_across_gap.is_some();
     let mut face_witnesses =
         BTreeMap::<runmat_geometry_core::PersistentEntityId, FaceWitness>::new();
     for edge in &topology.edges {
@@ -99,6 +96,10 @@ pub fn derive_curve_geometry_metric(
         let mut has_curvature = false;
         let mut witness_points = Vec::with_capacity(CURVATURE_SAMPLES_PER_EDGE as usize);
         let mut is_feature = relations.edge_coedges(&edge.id).len() != 2;
+        // This edge's samples on each face it bounds, in parameter order: one boundary
+        // polyline of that face's gap witness.
+        let mut face_boundaries =
+            BTreeMap::<runmat_geometry_core::PersistentEntityId, Vec<_>>::new();
         for sample in 0..CURVATURE_SAMPLES_PER_EDGE {
             control
                 .consume_iterations(1)
@@ -163,15 +164,19 @@ pub fn derive_curve_geometry_metric(
                         > surface_quality.maximum_normal_deviation_degrees
                 })
             });
-            if measure_face_gaps {
-                for sample in normals {
-                    face_witnesses
-                        .entry(sample.face_id.clone())
-                        .or_insert_with(|| FaceWitness::new(sample.face_id))
-                        .samples
-                        .push((sample.point_m, sample.normal));
-                }
+            for sample in normals {
+                face_boundaries
+                    .entry(sample.face_id)
+                    .or_default()
+                    .push((sample.point_m, sample.normal));
             }
+        }
+        for (face_id, boundary) in face_boundaries {
+            face_witnesses
+                .entry(face_id.clone())
+                .or_insert_with(|| FaceWitness::new(face_id))
+                .boundaries
+                .push(boundary);
         }
         if has_curvature {
             contributions.push(MetricContribution {
@@ -248,34 +253,32 @@ pub fn derive_curve_geometry_metric(
             points_m: witness.points_m.clone(),
         })
         .collect::<Vec<_>>();
-    if measure_face_gaps {
-        for edge in &topology.edges {
-            for coedge in relations.edge_coedges(&edge.id) {
-                if let Some(witness) = face_witnesses.get_mut(&coedge.face_id) {
-                    witness.tolerance_m =
-                        witness.tolerance_m.max(edge.tolerance_m.canonical_value());
-                    witness.vertex_ids.extend(
-                        edge.start_vertex_id
-                            .iter()
-                            .chain(&edge.end_vertex_id)
-                            .cloned(),
-                    );
-                }
+    for edge in &topology.edges {
+        for coedge in relations.edge_coedges(&edge.id) {
+            if let Some(witness) = face_witnesses.get_mut(&coedge.face_id) {
+                witness.tolerance_m =
+                    witness.tolerance_m.max(edge.tolerance_m.canonical_value());
+                witness.vertex_ids.extend(
+                    edge.start_vertex_id
+                        .iter()
+                        .chain(&edge.end_vertex_id)
+                        .cloned(),
+                );
             }
         }
-        for (face_id, witness) in &mut face_witnesses {
-            if let Some(solids) = face_solids.get(face_id) {
-                witness.solid_ids = solids.clone();
-            }
-        }
-        contributions.extend(derive_face_proximity_contributions(
-            face_witnesses.into_values().collect(),
-            &contact_pairs,
-            search_radius_m,
-            request.resolved_cells_across_gap(),
-            control,
-        )?);
     }
+    for (face_id, witness) in &mut face_witnesses {
+        if let Some(solids) = face_solids.get(face_id) {
+            witness.solid_ids = solids.clone();
+        }
+    }
+    contributions.extend(derive_face_proximity_contributions(
+        face_witnesses.into_values().collect(),
+        &contact_pairs,
+        search_radius_m,
+        request.resolved_cells_across_face_gap(),
+        control,
+    )?);
     contributions.extend(derive_proximity_contributions(
         edge_witnesses,
         &contact_pairs,
