@@ -690,6 +690,34 @@ pub fn feature_kind(
                 }),
             )
         }
+        "sheet-metal.form-tool" => {
+            let q = |v: f64| json!({ "form": "quantity", "value": v, "unit": "mm" });
+            let tool = match text(values, "tool", "louver") {
+                "dimple" => json!({ "form": "dimple", "diameter": q(10.0), "height": q(3.0) }),
+                "bead" => {
+                    json!({ "form": "bead", "length": q(30.0), "width": q(8.0), "height": q(3.0) })
+                }
+                "louver" => {
+                    json!({ "form": "louver", "length": q(20.0), "width": q(5.0), "height": q(3.0) })
+                }
+                other => {
+                    return Err(model(format!(
+                        "there is no `{other}` form tool (louver, dimple or bead)"
+                    )))
+                }
+            };
+            (
+                "form",
+                json!({
+                    "feature": "sheet_metal",
+                    "sheet_metal": "form_tool",
+                    "tool": tool,
+                    "face": picks.reference(&one(values, "face", "the face to stamp")?)?,
+                    "at": picks.point(&one(values, "position", "where to stamp")?)?,
+                    "rotation": value(values, "rotation", "deg")?,
+                }),
+            )
+        }
         "sheet-metal.closed-corner" => (
             "corner",
             json!({

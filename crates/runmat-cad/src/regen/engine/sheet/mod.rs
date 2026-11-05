@@ -27,6 +27,7 @@
 //! its ends). A mitre cut adds 6 (at the chain's earlier corner) or 7 (at the later one).
 
 mod corners;
+mod forms;
 mod miter;
 mod plate_bends;
 mod plate_cuts;

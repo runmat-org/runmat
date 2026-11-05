@@ -23,6 +23,9 @@ mod k1_sheet_flanges;
 #[path = "cad_corpus/k1_sheet_corners.rs"]
 mod k1_sheet_corners;
 
+#[path = "cad_corpus/k1_sheet_forms.rs"]
+mod k1_sheet_forms;
+
 #[path = "../../../runmat-cad/tests/common/mod.rs"]
 mod common;
 

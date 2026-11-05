@@ -542,7 +542,12 @@ impl<'a, 'b> Run<'a, 'b> {
                 self.corner_relief(i, id, corners, kind, &simple)
             }
             SheetMetalFeature::TabAndSlot { .. } => Err(self.not_lowered(id, "tabs and slots")),
-            SheetMetalFeature::FormTool { .. } => Err(self.not_lowered(id, "form tools")),
+            SheetMetalFeature::FormTool {
+                tool,
+                face,
+                at,
+                rotation,
+            } => self.form_tool(i, id, tool, face, at, rotation, &simple),
             SheetMetalFeature::Unfold { fixed_face, bends } => {
                 self.unfold(i, id, fixed_face, bends, &simple)
             }

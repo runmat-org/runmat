@@ -84,6 +84,10 @@ pub enum FeatureRecord {
         base: crate::ids::FeatureId,
         edits: Vec<OutlineEdit>,
     },
+    /// A form tool stamped into a flat of a flat plate (the base flange `base`).
+    PlateForm {
+        base: crate::ids::FeatureId,
+    },
     /// Structural members and their cut list.
     Weldment {
         cuts: Vec<MemberCut>,

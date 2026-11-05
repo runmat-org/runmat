@@ -56,7 +56,8 @@ impl<'a, 'b> Run<'a, 'b> {
             matches!(
                 self.st.records.get(f),
                 Some(FeatureRecord::PlateFlange { base, .. }
-                    | FeatureRecord::PlateCorner { base, .. }) if base == maker
+                    | FeatureRecord::PlateCorner { base, .. }
+                    | FeatureRecord::PlateForm { base }) if base == maker
             )
         };
         // Each face answers to the plate or one of its bends (a fold's faces answer to the

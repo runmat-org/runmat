@@ -211,6 +211,34 @@ pub enum CornerOverlap {
     Butt,
 }
 
+/// A form tool's shape, in the frame of the face it is stamped on: `x` along the tool
+/// (the face frame's `x` turned by the feature's rotation), `z` out of the face, the origin
+/// at the stamp point. Each form keeps the sheet's thickness `t`:
+///
+/// - `louver`: a lance `length` × `width` (`0 ≤ y ≤ width`) whose material rises as a hood
+///   hinged at `y = 0` to `height` at `y = width`, open at the lance and at both ends;
+/// - `dimple`: a round cup of outer `diameter` rising `height` out of the face;
+/// - `bead`: a rectangular rib `length` × `width` rising `height` out of the face, closed at
+///   its ends.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "form")]
+pub enum FormToolShape {
+    Louver {
+        length: ValueExpr,
+        width: ValueExpr,
+        height: ValueExpr,
+    },
+    Dimple {
+        diameter: ValueExpr,
+        height: ValueExpr,
+    },
+    Bead {
+        length: ValueExpr,
+        width: ValueExpr,
+        height: ValueExpr,
+    },
+}
+
 /// A corner relief, placed at the corner `P` where the plate-side tangent lines of two bends
 /// meet on the flat pattern. Along each bend the relief removes the bend zone's last `size`
 /// next to the corner; on the plate it removes:
@@ -336,9 +364,9 @@ pub enum SheetMetalFeature {
         #[serde(default = "zero")]
         clearance: ValueExpr,
     },
-    /// A library form tool (louvre, lance, dimple) stamped at a point of a face.
+    /// A form tool stamped at a point of a flat of a plate, rising out of that face.
     FormTool {
-        tool: String,
+        tool: FormToolShape,
         face: Reference,
         at: PointRef,
         #[serde(default = "zero")]
@@ -518,8 +546,31 @@ impl Params for SheetMetalFeature {
                 v.value(clearance);
             }
             S::FormTool {
-                face, at, rotation, ..
+                tool,
+                face,
+                at,
+                rotation,
             } => {
+                match tool {
+                    FormToolShape::Louver {
+                        length,
+                        width,
+                        height,
+                    }
+                    | FormToolShape::Bead {
+                        length,
+                        width,
+                        height,
+                    } => {
+                        v.value(length);
+                        v.value(width);
+                        v.value(height);
+                    }
+                    FormToolShape::Dimple { diameter, height } => {
+                        v.value(diameter);
+                        v.value(height);
+                    }
+                }
                 v.reference("face", face);
                 v.point("at", at);
                 v.value(rotation);

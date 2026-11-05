@@ -241,9 +241,13 @@ pub(super) fn sheet_metal_commands() -> Vec<CommandDescriptor> {
             "Form tool",
             "form-tool",
             "form_tool",
-            "Stamp a form (louver, dimple, lance) into a face.",
+            "Stamp a form (louver, dimple, bead) into a face.",
             vec![
-                text("tool", "Form tool", Some("louver")),
+                choice(
+                    "tool",
+                    "Form tool",
+                    &[("louver", "Louver"), ("dimple", "Dimple"), ("bead", "Bead")],
+                ),
                 pick("face", "Face", &[K::Face]),
                 pick(
                     "position",
