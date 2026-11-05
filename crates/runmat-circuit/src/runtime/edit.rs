@@ -74,7 +74,7 @@ pub fn edit(
         "board.fanout" | "board.autoroute" => super::autoroute::run(&project, request),
         "schematic.annotate" => super::annotate::run(&project, request),
         "schematic.move" => super::annotate::move_items(&project, request),
-        "simulate.probe" | "simulate.probe-net" | "simulate.monte-carlo" | "simulate.op-point" | "simulate.dc-sweep" | "simulate.transient" | "simulate.ac" | "simulate.set-tolerance" => super::sim_edit::run(&project, request),
+        "simulate.probe" | "simulate.probe-net" | "simulate.probe-pin" | "simulate.monte-carlo" | "simulate.op-point" | "simulate.dc-sweep" | "simulate.transient" | "simulate.ac" | "simulate.set-tolerance" => super::sim_edit::run(&project, request),
         command => {
             let layout = project.layout_or_err()?;
             let board = layout.parsed.board.as_ref().expect("read");

@@ -45,6 +45,7 @@ mod edit;
 mod kicad;
 mod rules;
 mod session;
+mod sim_edit;
 pub use edit::*;
 use edit::{board_edit, failure};
 pub use kicad::*;
@@ -264,6 +265,10 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         }
         out.push(lock_path_for(path));
         out.push(layout_path_for(path));
+        // The SPICE model libraries its simulation sections name, so a run has them.
+        for lib in crate::syntax::simulation_spans::model_libraries(text) {
+            out.push(resolve_path(path, &lib));
+        }
     }
     out.sort();
     out.dedup();

@@ -42,6 +42,8 @@ pub mod board_edit;
 pub mod circuit_edit;
 pub mod layout;
 pub mod simulation;
+pub mod simulation_print;
+pub mod simulation_spans;
 pub(crate) mod values;
 
 use crate::ir::{
@@ -1441,7 +1443,7 @@ pub fn print_circuit(design: &Design) -> Print {
         if !body.is_empty() {
             body.push(String::new());
         }
-        body.push(simulation::print(sim));
+        body.push(simulation_print::print(sim));
     }
     let mut out = String::from("runmat 0.7\nstd 1\n\n");
     for u in &design.uses {

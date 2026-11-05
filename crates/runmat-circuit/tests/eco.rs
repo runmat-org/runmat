@@ -753,6 +753,7 @@ fn deterministic_and_grouped_projection() {
         erc: vec![],
         review: vec![],
         schematic: Default::default(),
+        simulations: Default::default(),
         board: None,
     };
     assert_eq!(to_json(&wrap(ia.clone())), to_json(&wrap(ib)));

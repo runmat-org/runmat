@@ -50,6 +50,24 @@ pub struct CircuitIndex {
     pub schematic: crate::schematic::SchematicIndex,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board: Option<BoardIndex>,
+    /// The design's `simulation` sections and the nets each probes, for the schematic's probe
+    /// markers and the simulation pane.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub simulations: Vec<SimulationRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SimulationRow {
+    pub name: String,
+    /// The sheet it simulates alone, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet: Option<String>,
+    /// Probed nets and pins (`OUT`, `RO.2`), in the section's order (their trace colors follow
+    /// it).
+    pub probes: Vec<String>,
+    /// The probes that are pin currents.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub currents: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -438,6 +456,16 @@ pub fn build_index(
         review: review_rows,
         schematic: crate::schematic::layout(netlist),
         board: None,
+        simulations: design
+            .simulations
+            .values()
+            .map(|s| SimulationRow {
+                name: s.name.clone(),
+                sheet: s.sheet.clone(),
+                probes: s.probes.iter().map(|p| p.name()).collect(),
+                currents: s.probes.iter().filter(|p| matches!(p, crate::simulation::SimProbe::Pin { .. })).map(|p| p.name()).collect(),
+            })
+            .collect(),
     }
 }
 

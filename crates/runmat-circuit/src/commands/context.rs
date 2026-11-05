@@ -65,6 +65,14 @@ pub(super) fn add(catalog: &mut Catalog) {
             .desc("Report the net's routed and unrouted length.")
             .when(selected(&[K::Net]))
             .edit(analyze("net_length")),
+        cmd("simulate.probe-net", "Probe in simulation", "probe", CIRCUIT)
+            .desc("Plot the net's voltage when the simulation section runs.")
+            .when(selected_one(&[K::Net]))
+            .edit(edit(EditOp::Add, Section::Studies).item("probe")),
+        cmd("simulate.probe-pin", "Probe current in simulation", "probe", CIRCUIT)
+            .desc("Plot the current into the pin when the simulation section runs.")
+            .when(selected_one(&[K::Pin]))
+            .edit(edit(EditOp::Add, Section::Studies).item("probe")),
         cmd("board.route-net", "Route net", "route", CIRCUIT)
             .desc("Route the net's open connections with the interactive router.")
             .when(selected(&[K::Net]))
@@ -134,6 +142,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                 vec![c("board.highlight-net"), c("circuit.cross-probe")],
                 vec![class, c("circuit.rename-net")],
                 vec![c("circuit.net-length"), c("board.route-net")],
+                vec![c("simulate.probe-net")],
                 vec![c("design.copy-reference")],
             ],
         ),

@@ -10,7 +10,7 @@
 //!     analysis step = tran { stop = 50 us, step = 50 ns }
 //!     analysis response = ac { from = 10 Hz, to = 100 MHz, points = 50 }
 //!     analysis spread = monte_carlo { of = response, runs = 1000, seed = 1 }
-//!     probe = [net.IN, net.AMP, net.AIN]
+//!     probe = [net.IN, net.AMP, net.AIN, RO.2]
 //!     measure f3db = { of = response, bandwidth = net.AIN }
 //! }
 //! ```
@@ -32,12 +32,41 @@ pub struct SimulationDef {
     /// Relative tolerances (fractions) by designator pattern, by statement name.
     pub tolerances: BTreeMap<String, SimTolerance>,
     pub analyses: BTreeMap<String, SimAnalysis>,
-    /// Net names whose voltages are recorded and plotted.
-    pub probes: Vec<String>,
+    /// What is recorded and plotted: net voltages and pin currents.
+    pub probes: Vec<SimProbe>,
     pub measures: BTreeMap<String, SimMeasure>,
     /// `.options`-style settings (`reltol`, `method`, `temp`).
     pub options: BTreeMap<String, String>,
     pub source: SourceKey,
+}
+
+/// A probe: a net's voltage (`net.OUT`), or the current into a component pin (`RO.2`), which
+/// the run measures through a zero-volt sense source in series with that pin.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SimProbe {
+    Net(String),
+    Pin { component: String, pin: String },
+}
+
+impl SimProbe {
+    /// The net (`OUT`) or the pin (`RO.2`).
+    pub fn name(&self) -> String {
+        match self {
+            SimProbe::Net(n) => n.clone(),
+            SimProbe::Pin { component, pin } => format!("{component}.{pin}"),
+        }
+    }
+    /// `voltage` or `current`.
+    pub fn quantity(&self) -> &'static str {
+        match self {
+            SimProbe::Net(_) => "voltage",
+            SimProbe::Pin { .. } => "current",
+        }
+    }
+    /// `V(OUT)`, `I(RO.2)`.
+    pub fn label(&self) -> String {
+        format!("{}({})", if matches!(self, SimProbe::Net(_)) { "V" } else { "I" }, self.name())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -146,6 +175,20 @@ impl MeasureKind {
     pub fn word(self) -> &'static str {
         Self::ALL.iter().find(|(_, k)| *k == self).map(|(w, _)| *w).unwrap_or("value")
     }
+
+    /// The unit the measured value is in: `V`, `s`, `Hz`, `dB`, `°`, `%` (overshoot, in
+    /// percent), or empty (Q).
+    pub fn unit(self) -> &'static str {
+        match self {
+            MeasureKind::At | MeasureKind::Max | MeasureKind::Min | MeasureKind::PeakToPeak | MeasureKind::Average | MeasureKind::Rms | MeasureKind::Final => "V",
+            MeasureKind::RiseTime | MeasureKind::Settling => "s",
+            MeasureKind::Bandwidth | MeasureKind::PeakFrequency | MeasureKind::UnityGain => "Hz",
+            MeasureKind::GainAt => "dB",
+            MeasureKind::PhaseAt | MeasureKind::PhaseMargin => "°",
+            MeasureKind::Overshoot => "%",
+            MeasureKind::Q => "",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -157,4 +200,9 @@ pub struct SimMeasure {
     pub net: String,
     /// `at`, `from`, `to`, `band`, `drop`, in SI (fractions for `band`, dB for `drop`).
     pub args: BTreeMap<String, f64>,
+    /// The specification limits (`spec = { min = …, max = … }`), in the measured value's unit
+    /// ([`MeasureKind::unit`]): a value passes inside them, and a Monte Carlo's yield is the
+    /// fraction of runs that do.
+    pub spec_min: Option<f64>,
+    pub spec_max: Option<f64>,
 }

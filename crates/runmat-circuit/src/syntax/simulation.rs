@@ -4,10 +4,11 @@
 //! `tolerance <name> = { match = "R*", value = 1 % }`, `analysis <name> = op | dc { … } |
 //! ac { … } | tran { … } | monte_carlo { … }`, `probe = [net.A, …]`,
 //! `measure <name> = { of = <analysis>, <kind> = net.X, … }` and `option <name> = <value>`.
+//! Printing is in [`super::simulation_print`].
 
 use super::values::{diagnostic, val, Val, V};
-use super::{name, quote, record, Read, Reader};
-use crate::simulation::{MeasureKind, SimAnalysis, SimMeasure, SimModel, SimSource, SimTolerance, SimWave, SimulationDef, SourceKind};
+use super::{Read, Reader};
+use crate::simulation::{MeasureKind, SimAnalysis, SimMeasure, SimModel, SimProbe, SimSource, SimTolerance, SimWave, SimulationDef, SourceKind};
 use runmat_design_syntax::ast::{self, Expr, Headed, Statement};
 use runmat_design_syntax::json::format_f64;
 use runmat_rules::{parse_quantity, BuiltinUnits};
@@ -39,6 +40,20 @@ fn word(v: &Val) -> Read<String> {
 fn net(v: &Val) -> Read<String> {
     let w = word(v)?;
     w.strip_prefix("net.").map(str::to_string).ok_or_else(|| diagnostic(v.span, format!("expected a net (`net.{w}`)")))
+}
+
+/// `net.X` (its voltage) or `<component>.<pin>` (the current into the pin).
+fn probe(v: &Val) -> Read<SimProbe> {
+    let w = word(v)?;
+    if let Some(n) = w.strip_prefix("net.") {
+        return Ok(SimProbe::Net(n.to_string()));
+    }
+    match w.split_once('.') {
+        Some((component, pin)) if !component.is_empty() && !pin.is_empty() && !["port", "bus", "harness", "instance"].contains(&component) => {
+            Ok(SimProbe::Pin { component: component.to_string(), pin: pin.to_string() })
+        }
+        _ => Err(diagnostic(v.span, format!("a probe is a net (`net.{w}`) or a pin (`R1.2`)"))),
+    }
 }
 
 fn rec(v: &Val) -> Read<&[(String, Val)]> {
@@ -96,10 +111,10 @@ pub(super) fn read(reader: &mut Reader<'_>, block: &ast::BlockStatement) -> Opti
                     sim.sheet = Some(word(&val(&a.value().ok_or_else(|| diagnostic(span, "`sheet` needs a sheet name"))?)?)?);
                 }
                 Statement::Assignment(a) if a.target() == ["probe"] => {
-                    let v = val(&a.value().ok_or_else(|| diagnostic(span, "`probe` needs a list of nets"))?)?;
+                    let v = val(&a.value().ok_or_else(|| diagnostic(span, "`probe` needs a list of nets and pins"))?)?;
                     sim.probes = match &v.v {
-                        V::List(items) => items.iter().map(net).collect::<Read<_>>()?,
-                        _ => vec![net(&v)?],
+                        V::List(items) => items.iter().map(probe).collect::<Read<_>>()?,
+                        _ => vec![probe(&v)?],
                     };
                 }
                 Statement::Value(value) => {
@@ -250,9 +265,12 @@ fn read_measure(v: &Val, span: Span) -> Read<SimMeasure> {
     let mut of = None;
     let mut kind = None;
     let mut args = BTreeMap::new();
+    let mut spec = None;
     for (k, x) in rec(v)? {
         if k == "of" {
             of = Some(word(x)?);
+        } else if k == "spec" {
+            spec = Some(x);
         } else if let Some((_, mk)) = MeasureKind::ALL.iter().find(|(w, _)| w == k) {
             if kind.is_some() {
                 return Err(diagnostic(x.span, "a measure computes one quantity"));
@@ -268,123 +286,53 @@ fn read_measure(v: &Val, span: Span) -> Read<SimMeasure> {
         let all: Vec<&str> = MeasureKind::ALL.iter().map(|(w, _)| *w).collect();
         diagnostic(span, format!("a measure names what it computes: {}", all.join(", ")))
     })?;
-    Ok(SimMeasure { of: of.ok_or_else(|| diagnostic(span, "a measure needs `of = <analysis>`"))?, kind, net, args })
+    let (mut spec_min, mut spec_max) = (None, None);
+    if let Some(x) = spec {
+        for (k, l) in rec(x)? {
+            let v = spec_value(l, kind.unit())?;
+            match k.as_str() {
+                "min" => spec_min = Some(v),
+                "max" => spec_max = Some(v),
+                _ => return Err(diagnostic(l.span, format!("a spec has `min` and `max`, not `{k}`"))),
+            }
+        }
+        if spec_min.is_none() && spec_max.is_none() {
+            return Err(diagnostic(x.span, "a spec names `min`, `max` or both"));
+        }
+        if let (Some(lo), Some(hi)) = (spec_min, spec_max) {
+            if lo > hi {
+                return Err(diagnostic(x.span, "the spec's `min` is above its `max`"));
+            }
+        }
+    }
+    Ok(SimMeasure { of: of.ok_or_else(|| diagnostic(span, "a measure needs `of = <analysis>`"))?, kind, net, args, spec_min, spec_max })
 }
 
-fn q(v: f64) -> String {
-    format_f64(v)
-}
-
-fn net_ref(n: &str) -> String {
-    let t = format!("net.{n}");
-    if n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && n.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
-        t
-    } else {
-        quote(&t)
-    }
-}
-
-fn pins(p: &[String]) -> String {
-    let items: Vec<String> = p.iter().map(|s| name(s)).collect();
-    format!("[{}]", items.join(", "))
-}
-
-/// The section's text (one statement per line, SI values).
-pub(super) fn print(sim: &SimulationDef) -> String {
-    let mut lines = vec![];
-    if let Some(s) = &sim.sheet {
-        lines.push(format!("sheet = {}", name(s)));
-    }
-    for (k, s) in &sim.sources {
-        let mut e: Vec<(String, String)> = vec![("p".into(), net_ref(&s.p))];
-        if s.n != "GND" {
-            e.push(("n".into(), net_ref(&s.n)));
+/// A spec limit in the measured value's unit. Percent (overshoot) and degrees (phase) take the
+/// written number as it is; SI units must match the measure's dimension.
+fn spec_value(v: &Val, unit: &str) -> Read<f64> {
+    let num = |t: &str| t.parse::<f64>().map_err(|_| diagnostic(v.span, "expected a number"));
+    match (&v.v, unit) {
+        (V::Num(t), "") => num(t),
+        (V::Qty(t, u), "%") if u == "%" => num(t),
+        (V::Qty(t, u), "°") if u == "deg" || u == "°" => num(t),
+        (V::Qty(t, u), "dB") if u == "dB" => num(t),
+        (V::Num(t), "dB") => num(t),
+        (V::Qty(t, u), _) if !matches!(unit, "" | "%" | "°" | "dB") => {
+            let q = parse_quantity(&format!("{t} {u}"), &BuiltinUnits).map_err(|e| diagnostic(v.span, e))?;
+            let want = parse_quantity(&format!("1 {unit}"), &BuiltinUnits).map_err(|e| diagnostic(v.span, e))?;
+            if q.dim != want.dim {
+                return Err(diagnostic(v.span, format!("this measure is in {unit}; write the limit in {unit}")));
+            }
+            Ok(q.value)
         }
-        if s.kind == SourceKind::Current {
-            e.push(("current".into(), "true".into()));
+        _ => {
+            let shown = match unit {
+                "" => "a plain number".to_string(),
+                "°" => "deg".to_string(),
+                u => u.to_string(),
+            };
+            Err(diagnostic(v.span, format!("write the limit in {shown}")))
         }
-        if s.dc != 0.0 {
-            e.push(("dc".into(), q(s.dc)));
-        }
-        if s.ac != 0.0 {
-            e.push(("ac".into(), q(s.ac)));
-        }
-        match &s.wave {
-            Some(SimWave::Pulse { from, to, delay, rise, fall, width, period }) => {
-                let mut p = vec![("from".to_string(), q(*from)), ("to".into(), q(*to)), ("delay".into(), q(*delay)), ("rise".into(), q(*rise)), ("fall".into(), q(*fall))];
-                if width.is_finite() {
-                    p.push(("width".into(), q(*width)));
-                }
-                if period.is_finite() {
-                    p.push(("period".into(), q(*period)));
-                }
-                e.push(("pulse".into(), record(&p)));
-            }
-            Some(SimWave::Sin { offset, amplitude, freq, delay }) => {
-                e.push(("sin".into(), record(&[("offset".into(), q(*offset)), ("amplitude".into(), q(*amplitude)), ("freq".into(), q(*freq)), ("delay".into(), q(*delay))])));
-            }
-            Some(SimWave::Pwl(pts)) => {
-                let items: Vec<String> = pts.iter().map(|(t, v)| format!("[{}, {}]", q(*t), q(*v))).collect();
-                e.push(("pwl".into(), format!("[{}]", items.join(", "))));
-            }
-            None => {}
-        }
-        lines.push(format!("source {} = {}", name(k), record(&e)));
     }
-    for (k, m) in &sim.models {
-        let e = match m {
-            SimModel::OpAmp { params, pins: p } => {
-                let ps: Vec<(String, String)> = params.iter().map(|(a, b)| (a.clone(), q(*b))).collect();
-                vec![("opamp".into(), record(&ps)), ("pins".into(), pins(p))]
-            }
-            SimModel::Subckt { library, name: n, pins: p } => vec![("library".into(), quote(library)), ("subckt".into(), name(n)), ("pins".into(), pins(p))],
-        };
-        lines.push(format!("model {} = {}", name(k), record(&e)));
-    }
-    for (k, t) in &sim.tolerances {
-        lines.push(format!("tolerance {} = {}", name(k), record(&[("match".into(), quote(&t.pattern)), ("value".into(), q(t.value))])));
-    }
-    for (k, a) in &sim.analyses {
-        let body = match a {
-            SimAnalysis::Op => "op".to_string(),
-            SimAnalysis::Dc { source, from, to, step } => format!("dc {}", record(&[("source".into(), name(source)), ("from".into(), q(*from)), ("to".into(), q(*to)), ("step".into(), q(*step))])),
-            SimAnalysis::Ac { from, to, points } => format!("ac {}", record(&[("from".into(), q(*from)), ("to".into(), q(*to)), ("points".into(), points.to_string())])),
-            SimAnalysis::Tran { stop, step, max_step } => {
-                let mut e = vec![("stop".to_string(), q(*stop)), ("step".into(), q(*step))];
-                if let Some(m) = max_step {
-                    e.push(("max_step".into(), q(*m)));
-                }
-                format!("tran {}", record(&e))
-            }
-            SimAnalysis::MonteCarlo { of, runs, seed, uniform } => {
-                let mut e = vec![("of".to_string(), name(of)), ("runs".into(), runs.to_string()), ("seed".into(), seed.to_string())];
-                if *uniform {
-                    e.push(("distribution".into(), "uniform".into()));
-                }
-                format!("monte_carlo {}", record(&e))
-            }
-        };
-        lines.push(format!("analysis {} = {body}", name(k)));
-    }
-    if !sim.probes.is_empty() {
-        let items: Vec<String> = sim.probes.iter().map(|p| net_ref(p)).collect();
-        lines.push(format!("probe = [{}]", items.join(", ")));
-    }
-    for (k, m) in &sim.measures {
-        let mut e = vec![("of".to_string(), name(&m.of)), (m.kind.word().to_string(), net_ref(&m.net))];
-        e.extend(m.args.iter().map(|(a, b)| (a.clone(), q(*b))));
-        lines.push(format!("measure {} = {}", name(k), record(&e)));
-    }
-    for (k, v) in &sim.options {
-        let text = if v.parse::<f64>().is_ok() || v.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { v.clone() } else { quote(v) };
-        lines.push(format!("option {} = {text}", name(k)));
-    }
-    let mut out = format!("{WORD} {} {{\n", name(&sim.name));
-    for l in lines {
-        out.push_str(runmat_design_syntax::json::INDENT);
-        out.push_str(&l);
-        out.push('\n');
-    }
-    out.push('}');
-    out
 }

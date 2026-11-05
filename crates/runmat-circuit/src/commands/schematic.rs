@@ -352,64 +352,97 @@ pub(super) fn add(c: &mut Catalog) {
         ])
         .edit(analyze("manufacturer_search")),
         sch(
+            "simulate.run",
+            "Run simulation",
+            "simulate",
+            "Run the design's simulation section: plot its probes and list its measurements.",
+        )
+        .kw(&["spice", "simulate", "transient", "ac", "monte carlo", "waveform"])
+        .edit(check("simulate")),
+        sch(
             "simulate.op-point",
             "Operating point",
             "simulate",
-            "Solve the DC operating point and show voltages and power.",
+            "Add a DC operating point to the simulation section.",
         )
-        .kw(&["spice", "ngspice", "dc"])
-        .edit(analyze("op")),
+        .kw(&["spice", "bias", "dc"])
+        .inputs(vec![text("name", "Name", Some("bias")).optional()])
+        .edit(edit(EditOp::Add, Section::Studies).item("analysis")),
         sch(
             "simulate.dc-sweep",
             "DC sweep",
             "simulate",
-            "Sweep a source and plot the response.",
+            "Add a DC sweep of a source to the simulation section.",
         )
         .inputs(vec![
+            text("name", "Name", Some("sweep")).optional(),
             text("source", "Source", Some("V1")),
             qty("start", "Start", "voltage", Some(0.0)),
             qty("stop", "Stop", "voltage", Some(5.0)),
             qty("step", "Step", "voltage", Some(0.1)),
         ])
-        .edit(analyze("dc")),
+        .edit(edit(EditOp::Add, Section::Studies).item("analysis")),
         sch(
             "simulate.transient",
             "Transient",
             "simulate",
-            "Simulate over time.",
+            "Add a transient (over time) to the simulation section.",
         )
         .inputs(vec![
+            text("name", "Name", Some("step")).optional(),
             qty("stop", "Stop time", "time", Some(0.001)),
             qty("step", "Step", "time", Some(0.000001)),
         ])
-        .edit(analyze("tran")),
+        .edit(edit(EditOp::Add, Section::Studies).item("analysis")),
         sch(
             "simulate.ac",
             "AC",
             "simulate",
-            "Sweep frequency for gain and phase.",
+            "Add an AC sweep (gain and phase over frequency) to the simulation section.",
         )
         .inputs(vec![
+            text("name", "Name", Some("response")).optional(),
             qty("start", "Start", "frequency", Some(10.0)),
             qty("stop", "Stop", "frequency", Some(1.0e6)),
             count("points", "Points per decade", 20, 1),
         ])
-        .edit(analyze("ac")),
+        .edit(edit(EditOp::Add, Section::Studies).item("analysis")),
+        sch(
+            "simulate.monte-carlo",
+            "Monte Carlo",
+            "simulate",
+            "Add a Monte Carlo over the section's tolerances that reruns another analysis of the section.",
+        )
+        .kw(&["monte carlo", "tolerance", "yield", "statistics"])
+        .inputs(vec![
+            choice("kind", "Analysis", &[("monte_carlo", "Monte Carlo")]),
+            text("name", "Name", Some("spread")).optional(),
+            text("of", "Repeats", Some("response")),
+            count("runs", "Runs", 1000, 1),
+            count("seed", "Seed", 1, 0),
+        ])
+        .edit(edit(EditOp::Add, Section::Studies).item("analysis")),
+        sch(
+            "simulate.set-tolerance",
+            "Tolerance",
+            "simulate",
+            "Set the tolerance a Monte Carlo varies parts by (it replaces the parts' own bands).",
+        )
+        .kw(&["tolerance", "monte carlo", "spread"])
+        .inputs(vec![
+            text("match", "Parts", Some("R*")),
+            qty("percent", "Tolerance (%)", "ratio", Some(1.0)).min(0.0).max(100.0),
+            text("name", "Name", Some("resistors")).optional(),
+        ])
+        .edit(edit(EditOp::Set, Section::Studies).item("tolerance")),
         sch(
             "simulate.probe",
             "Probe",
             "probe",
-            "Add a voltage or current probe.",
+            "Probe a net's voltage or the current into a pin: click it on the schematic, or pick it.",
         )
-        .inputs(vec![
-            radio(
-                "kind",
-                "Probe",
-                &[("voltage", "Voltage"), ("current", "Current")],
-            ),
-            pick("at", "At", &[K::Net, K::Pin, K::Component]),
-        ])
-        .edit(place("probe", Section::Directives)),
+        .inputs(vec![pick("at", "Net or pin", &[K::Net, K::Pin])])
+        .edit(place("probe", Section::Studies)),
         // View cluster.
         cmd("circuit.variant", "Variant", "variant", CIRCUIT)
             .desc("Pick the assembly variant (fitted and not-fitted parts).")
@@ -561,10 +594,13 @@ pub(super) fn tab() -> DomainTab {
                 "Simulate",
                 "simulate",
                 vec![
+                    e("simulate.run"),
                     e("simulate.op-point"),
                     e("simulate.dc-sweep"),
                     e("simulate.transient"),
                     e("simulate.ac"),
+                    e("simulate.monte-carlo"),
+                    e("simulate.set-tolerance"),
                     e("simulate.probe"),
                 ],
             )],
