@@ -72,6 +72,7 @@ pub fn edit(
         "board.update-schematic" => update_schematic(&project, request),
         "board.copy-room-formats" => room_formats(&project, request),
         "board.fanout" | "board.autoroute" => super::autoroute::run(&project, request),
+        "schematic.annotate" => super::annotate::run(&project, request),
         command => {
             let layout = project.layout_or_err()?;
             let board = layout.parsed.board.as_ref().expect("read");
@@ -84,6 +85,30 @@ pub fn edit(
             })
         }
     }
+}
+
+/// The lock file rewritten to `lock`, when it differs from the one on disk (or, with
+/// `write_missing`, when there is none on disk yet).
+pub(super) fn lock_change(project: &Project, lock: &LockSection, write_missing: bool) -> Option<FileChange> {
+    let lock_text = lock.to_text();
+    let changed = match &project.lock_text {
+        Some(old) => *old != lock_text && *lock != project.lock,
+        None => write_missing || *lock != project.lock,
+    };
+    if !changed {
+        return None;
+    }
+    let old = project.lock_text.clone().unwrap_or_default();
+    Some(FileChange {
+        edits: vec![Utf16Edit {
+            start: 0,
+            end: utf16_offset(&old, old.len()),
+            text: lock_text.clone(),
+        }],
+        path: lock_path_for(&project.circuit_path),
+        text: lock_text,
+        reprinted: true,
+    })
 }
 
 /// The ECO lines a run selected: its `changes` value holds Outline node ids
@@ -242,21 +267,7 @@ fn update_schematic(project: &Project, request: &EditRequest) -> Result<EditOutp
             change,
         ));
     }
-    let lock_text = lock.to_text();
-    if project.lock_text.as_deref() != Some(lock_text.as_str()) && lock != project.lock {
-        let path = lock_path_for(&project.circuit_path);
-        let old = project.lock_text.clone().unwrap_or_default();
-        files.push(FileChange {
-            edits: vec![Utf16Edit {
-                start: 0,
-                end: utf16_offset(&old, old.len()),
-                text: lock_text.clone(),
-            }],
-            path,
-            text: lock_text,
-            reprinted: true,
-        });
-    }
+    files.extend(lock_change(project, &lock, false));
     Ok(EditOutput {
         summary: format!("back-annotated {} change(s)", applied.len()),
         files,

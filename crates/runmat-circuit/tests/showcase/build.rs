@@ -15,13 +15,17 @@ pub struct Build {
 
 impl Build {
     pub fn run(&mut self, command: &str, values: Value, selection: &[&str]) -> String {
+        self.run_on(LAYOUT, command, values, selection)
+    }
+
+    pub fn run_on(&mut self, path: &str, command: &str, values: Value, selection: &[&str]) -> String {
         let request = EditRequest {
             command: command.into(),
             values: values.as_object().cloned().unwrap_or_default(),
             selection: selection.iter().map(|s| s.to_string()).collect(),
             options: CompileOptions::default(),
         };
-        let out = runtime::edit(LAYOUT, &self.files[LAYOUT], &self.files, &request)
+        let out = runtime::edit(path, &self.files[path], &self.files, &request)
             .unwrap_or_else(|e| panic!("{command}: {} {:?}", e.message, e.diagnostics));
         for f in out.files {
             self.files.insert(f.path.clone(), f.text.clone());
@@ -41,6 +45,7 @@ pub fn build(dir: &Path) {
     files.insert(CIRCUIT.into(), std::fs::read_to_string(dir.join("daq.circuit")).unwrap());
     files.insert(LAYOUT.into(), start.to_owned());
     let mut b = Build { files };
+    b.run_on(CIRCUIT, "schematic.annotate", json!({}), &[]);
     b.run("board.layer-stack", json!({ "layers": 6, "thickness": 1.6 }), &[]);
     let index = runtime::compile(LAYOUT, &b.files[LAYOUT], &b.files, &CompileOptions::default());
     for d in &index.diagnostics {
@@ -74,14 +79,14 @@ const CHANNEL: &[(&str, f64, f64, f64)] = &[
     ("C4", 6.2, 7.6, 270.0),
     ("U6", 9.0, 8.2, 270.0),
     ("R2", 6.6, 5.6, 180.0),
-    ("C1", 11.3, 7.3, 0.0),
+    ("C1", 11.9, 7.3, 0.0),
     ("R1", 12.2, 5.4, 0.0),
     ("R3", 13.4, 9.5, 0.0),
     ("C5", 15.4, 7.6, 270.0),
     ("C6", 17.4, 11.6, 90.0),
     ("U5", 20.0, 8.0, 0.0),
-    ("C3", 23.9, 9.4, 0.0),
-    ("C2", 23.9, 10.9, 0.0),
+    ("C3", 24.6, 9.4, 0.0),
+    ("C2", 24.6, 10.9, 0.0),
 ];
 
 /// Room corners: x from 9 to 37 mm, 14 mm tall.
@@ -96,9 +101,9 @@ const MAIN: &[(&str, f64, f64, f64)] = &[
     ("J2", 5.0, 30.0, 0.0),
     ("U1", 56.0, 30.0, 90.0),
     ("U4", 42.5, 48.0, 0.0),
-    ("C108", 39.4, 49.0, 90.0),
-    ("C109", 46.8, 47.4, 90.0),
-    ("C110", 46.8, 44.6, 90.0),
+    ("C108", 37.6, 48.0, 90.0),
+    ("C109", 47.8, 47.6, 90.0),
+    ("C110", 47.8, 44.0, 90.0),
     // 1.2 V core: regulator, inductor, output and soft-start, feedback divider.
     ("U3", 74.0, 46.0, 0.0),
     ("L2", 74.0, 41.6, 0.0),
@@ -184,9 +189,12 @@ fn pours(b: &mut Build) {
         ("GND", "F.Cu"),
         ("GND", "B.Cu"),
     ] {
+        // Outer-layer pours meet SMD pads solid (reflow needs no relief there); the planes
+        // keep thermal reliefs on the through-hole pads.
+        let connect = if layer.starts_with("In") { "relief" } else { "relief-tht" };
         b.run(
             "board.pour",
-            json!({ "net": format!("net:{net}"), "layer": layer, "points": all }),
+            json!({ "net": format!("net:{net}"), "layer": layer, "points": all, "connect": connect }),
             &[],
         );
     }
@@ -251,12 +259,35 @@ pub fn report(b: &Build) {
         *codes.entry(r.code.as_str()).or_default() += 1;
     }
     eprintln!("drc {:?}", codes);
-    for r in board.drc.iter().take(40) {
+    for r in board.drc.iter() {
         eprintln!("  {} {} {:?} {:?}", r.code, r.message, r.items, r.at);
     }
+    let parsed = b.board();
+    for r in &board.drc {
+        for it in &r.items {
+            let Some(n) = it.strip_prefix("track ").and_then(|n| n.parse::<u64>().ok()) else {
+                continue;
+            };
+            if let Some(t) = parsed.tracks.get(&runmat_circuit::layout::ItemId(n)) {
+                let (a, c) = t.endpoints();
+                eprintln!(
+                    "    track {n}: {} L{} w{} {a} -> {c}",
+                    t.net.map(|x| parsed.net_name(x).to_owned()).unwrap_or_default(),
+                    t.layer,
+                    to_mm(t.width)
+                );
+            }
+        }
+    }
     eprintln!("unrouted {}", board.unrouted.len());
-    for a in board.unrouted.iter().take(40) {
+    for a in board.unrouted.iter() {
         eprintln!("  {} {:?} {:?}", a.net, a.from, a.to);
+    }
+    eprintln!("eco {}", index.eco.total);
+    for g in &index.eco.groups {
+        for r in &g.rows {
+            eprintln!("  {} {} {:?}", g.group, r.id, r.status);
+        }
     }
     eprintln!("erc {}", index.erc.len());
     for r in index.erc.iter().take(20) {

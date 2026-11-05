@@ -123,7 +123,7 @@ pub(super) fn add(c: &mut Catalog) {
                 points("Outline", "Click the pour's corners.").shown("action", &["draw"]),
                 layer().shown("action", &["draw", "split_plane"]),
                 qty("clearance", "Clearance", "length", Some(0.25)).shown("action", &["draw"]),
-                choice("connect", "Pad connection", &[("relief", "Thermal relief"), ("solid", "Solid"), ("none", "None")]).shown("action", &["draw"]),
+                choice("connect", "Pad connection", &[("relief", "Thermal relief"), ("relief-tht", "Thermal relief on through-hole pads, SMD solid"), ("solid", "Solid"), ("none", "None")]).shown("action", &["draw"]),
                 count("priority", "Priority", 0, 0).shown("action", &["draw"]).help("Where pours overlap, the higher priority fills first."),
             ])
             .preview()

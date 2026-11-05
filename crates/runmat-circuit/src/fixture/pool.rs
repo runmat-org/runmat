@@ -166,7 +166,7 @@ pub fn standard_pool() -> Pool {
             ("SS", Passive),
         ],
     );
-    let qfn16 = p.add_package(footprint::qfn(16, 3.0, 0.5, Some(1.7), Density::B));
+    let qfn16 = p.add_package(footprint::qfn(16, 3.0, 0.5, Some(1.5), Density::B));
     let bp = make::part(
         &mut p,
         "TPS62130",

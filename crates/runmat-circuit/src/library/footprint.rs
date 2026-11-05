@@ -401,7 +401,7 @@ pub fn chip(kind: &str, code: &str, density: Density) -> Option<Package> {
         w,
         h,
         land.courtyard_excess,
-        polar.then(|| Point::mm(-c - pl / 2.0 - 0.25, 0.0)),
+        polar.then(|| Point::mm(-c - pl / 2.0 - 0.3, 0.0)),
         true,
     ))
 }

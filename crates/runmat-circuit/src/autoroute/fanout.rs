@@ -51,6 +51,7 @@ pub fn fanout_in(board: &mut Board, space: &mut Space, opts: &FanoutOptions) -> 
         let centre = fp.at;
         let reference = fp.reference.clone();
         let pitch = pitch(&fp.pads(n));
+        let ep = exposed_pad(&fp.pads(n), centre);
         let mut pads: Vec<PlacedPad> = fp
             .pads(n)
             .into_iter()
@@ -66,15 +67,45 @@ pub fn fanout_in(board: &mut Board, space: &mut Space, opts: &FanoutOptions) -> 
             }
             let width = opts.widths.get(&net).copied().unwrap_or(opts.default_width);
             let layer = *pad.layers.iter().next().expect("one layer");
+            let (d, drill) = opts.via;
+            // An exposed pad gets thermal vias in the pad; a pin on the exposed pad's net ties
+            // to it with a short track under the body, as QFN land patterns do.
+            if let Some(ep) = ep.as_ref().filter(|e| e.net == pad.net) {
+                if ep.center == pad.center {
+                    let placed = thermal_vias(board, space, &pad, net, opts.via, pitch);
+                    if placed > 0 {
+                        report.fanned += 1;
+                    } else {
+                        report.blocked.push(format!("{reference}.{}", pad.name));
+                    }
+                    continue;
+                }
+                let neck = narrow(&pad).min(width).max(board.limits.min_track);
+                let to = toward(&pad, ep);
+                if space.free(
+                    Some(net),
+                    1 << layer,
+                    &Prim::segment(pad.center, to, neck),
+                    0,
+                ) {
+                    board.add_track(Some(net), layer, neck, pad.center, to);
+                    space.add(Some(net), 1 << layer, Prim::segment(pad.center, to, neck));
+                    report.fanned += 1;
+                    continue;
+                }
+            }
             let sites = if bga {
                 bga_sites(&pad, centre, pitch)
             } else {
                 pad_sites(&pad, centre, opts.via.0)
             };
-            let (d, drill) = opts.via;
             let site = sites.into_iter().find(|v| {
-                space.free(Some(net), 1 << layer, &Prim::segment(pad.center, *v, width), 0)
-                    && space.free(Some(net), layer_mask(0..n), &Prim::circle(*v, d / 2), 0)
+                space.free(
+                    Some(net),
+                    1 << layer,
+                    &Prim::segment(pad.center, *v, width),
+                    0,
+                ) && space.free(Some(net), layer_mask(0..n), &Prim::circle(*v, d / 2), 0)
                     && space.hole_free(*v, drill / 2)
             });
             match site {
@@ -91,6 +122,79 @@ pub fn fanout_in(board: &mut Board, space: &mut Space, opts: &FanoutOptions) -> 
         }
     }
     report
+}
+
+/// The footprint's exposed pad: an SMD pad at its centre, larger than every other pad.
+fn exposed_pad(pads: &[PlacedPad], centre: Point) -> Option<PlacedPad> {
+    let area = |p: &PlacedPad| {
+        let bb = p.prim.bbox();
+        bb.width() as f64 * bb.height() as f64
+    };
+    let big = pads.iter().filter(|p| p.layers.len() == 1).max_by(|a, b| {
+        area(a)
+            .partial_cmp(&area(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })?;
+    let next = pads
+        .iter()
+        .filter(|p| p.name != big.name)
+        .map(area)
+        .fold(0.0, f64::max);
+    (big.center.dist(centre) < mm(0.05) as f64 && area(big) > 2.0 * next).then(|| big.clone())
+}
+
+/// The narrow side of a pad.
+fn narrow(p: &PlacedPad) -> Coord {
+    let bb = p.prim.bbox();
+    bb.width().min(bb.height())
+}
+
+/// The point just inside the exposed pad's edge, straight in from `pad` along its long axis.
+fn toward(pad: &PlacedPad, ep: &PlacedPad) -> Point {
+    let bb = ep.prim.bbox();
+    let inset = mm(0.1);
+    let c = pad.center;
+    Point::new(
+        c.x.clamp(bb.min.x + inset, bb.max.x - inset),
+        c.y.clamp(bb.min.y + inset, bb.max.y - inset),
+    )
+}
+
+/// Thermal vias in an exposed pad: one at the centre, then up to four more on the diagonals
+/// half a pitch out, where they fit inside the pad and keep the hole spacing.
+fn thermal_vias(
+    board: &mut Board,
+    space: &mut Space,
+    pad: &PlacedPad,
+    net: NetId,
+    (d, drill): (Coord, Coord),
+    pitch: Coord,
+) -> u32 {
+    let n = board.copper_count();
+    let bb = pad.prim.bbox();
+    let step = pitch.max(d + board.limits.min_hole_to_hole + drill);
+    let mut sites = vec![pad.center];
+    for (fx, fy) in [(1, 1), (-1, 1), (1, -1), (-1, -1)] {
+        sites.push(pad.center + Point::new(fx * step / 2, fy * step / 2));
+    }
+    let mut placed = 0;
+    for v in sites {
+        let inside = v.x - d / 2 >= bb.min.x
+            && v.x + d / 2 <= bb.max.x
+            && v.y - d / 2 >= bb.min.y
+            && v.y + d / 2 <= bb.max.y;
+        if !inside
+            || !space.free(Some(net), layer_mask(0..n), &Prim::circle(v, d / 2), 0)
+            || !space.hole_free(v, drill / 2)
+        {
+            continue;
+        }
+        board.add_via(Some(net), v, d, drill);
+        space.add(Some(net), layer_mask(0..n), Prim::circle(v, d / 2));
+        space.add_hole(v, drill / 2);
+        placed += 1;
+    }
+    placed
 }
 
 fn manhattan(a: Point, b: Point) -> Coord {

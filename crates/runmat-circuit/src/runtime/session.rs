@@ -606,6 +606,7 @@ impl Session {
                 | "board.copy-room-formats"
                 | "board.fanout"
                 | "board.autoroute"
+                | "schematic.annotate"
         ) {
             return super::edit(path, text, files, request);
         }

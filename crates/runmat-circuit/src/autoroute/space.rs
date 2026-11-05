@@ -79,7 +79,11 @@ impl Space {
             }
         }
         for v in board.vias.values() {
-            s.add(v.net, layer_mask(v.layers()), Prim::circle(v.at, v.diameter / 2));
+            s.add(
+                v.net,
+                layer_mask(v.layers()),
+                Prim::circle(v.at, v.diameter / 2),
+            );
             s.add_hole(v.at, v.drill / 2);
         }
         for k in board.keepouts.values() {
@@ -93,8 +97,7 @@ impl Space {
             };
             let mut rings = vec![k.outline.outer.clone()];
             rings.extend(k.outline.holes.iter().cloned());
-            s.keepouts
-                .push((layer_mask(layers), Prim::polygon(rings)));
+            s.keepouts.push((layer_mask(layers), Prim::polygon(rings)));
         }
         s
     }
@@ -122,22 +125,25 @@ impl Space {
         if self.edge.contains(anchor) != Some(true) {
             return false;
         }
-        if self.edge.boundary_gap(prim, self.edge_clearance + extra) < (self.edge_clearance + extra) as f64 {
+        if self.edge.boundary_gap(prim, self.edge_clearance + extra)
+            < (self.edge_clearance + extra) as f64
+        {
             return false;
         }
         let mut ok = true;
-        self.grid.visit(&bb.inflate(self.clearance + extra), |k, _| {
-            if !ok {
-                return;
-            }
-            let o = &self.items[k as usize];
-            if o.mask & mask == 0 || (net.is_some() && o.net == net) {
-                return;
-            }
-            if prim.gap(&o.prim) < need {
-                ok = false;
-            }
-        });
+        self.grid
+            .visit(&bb.inflate(self.clearance + extra), |k, _| {
+                if !ok {
+                    return;
+                }
+                let o = &self.items[k as usize];
+                if o.mask & mask == 0 || (net.is_some() && o.net == net) {
+                    return;
+                }
+                if prim.gap(&o.prim) < need {
+                    ok = false;
+                }
+            });
         ok && !self
             .keepouts
             .iter()
@@ -148,13 +154,12 @@ impl Space {
     pub fn hole_free(&self, at: Point, r: Coord) -> bool {
         let mut ok = true;
         let reach = r + self.hole_to_hole + crate::geom::mm(3.0);
-        self.holes
-            .visit(&Rect::new(at, at).inflate(reach), |k, _| {
-                let (c, cr) = self.hole_list[k as usize];
-                if at.dist(c) - ((r + cr) as f64) < self.hole_to_hole as f64 {
-                    ok = false;
-                }
-            });
+        self.holes.visit(&Rect::new(at, at).inflate(reach), |k, _| {
+            let (c, cr) = self.hole_list[k as usize];
+            if at.dist(c) - ((r + cr) as f64) < self.hole_to_hole as f64 {
+                ok = false;
+            }
+        });
         ok
     }
 

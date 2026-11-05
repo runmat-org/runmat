@@ -253,6 +253,7 @@ pub fn drawn_edit(
                 connect: match text(values, "connect") {
                     _ if fill => PadConnect::Solid,
                     Some("solid") => PadConnect::Solid,
+                    Some("relief-tht") => PadConnect::ThermalThtOnly,
                     Some("none") => PadConnect::None,
                     _ => PadConnect::Thermal,
                 },
@@ -301,6 +302,17 @@ pub fn drawn_edit(
                     }
                     v
                 });
+            // Redrawing an existing room with no components picked keeps its members.
+            let members = if members.is_empty() {
+                board
+                    .rooms
+                    .iter()
+                    .find(|r| r.name == name)
+                    .map(|r| r.members.clone())
+                    .unwrap_or_default()
+            } else {
+                members
+            };
             let outline = if pts.len() >= 3 {
                 polygon(&pts, "room")?
             } else {

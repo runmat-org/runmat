@@ -71,11 +71,10 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
             }
             _ => {
                 let mut nets = net_picks(board, values, "nets")?;
+                // Every net by default: the airwires come from the filled board, so a plane
+                // net only has the ones its pours leave (a pad off the plane, an island).
                 if nets.is_empty() {
-                    nets = (0..board.nets.len() as u32)
-                        .map(NetId)
-                        .filter(|n| !planes.contains(n))
-                        .collect();
+                    nets = (0..board.nets.len() as u32).map(NetId).collect();
                 }
                 let layers = match values.get("layers").and_then(Value::as_str) {
                     Some(text) if !text.trim().is_empty() => text
@@ -89,14 +88,26 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                 opts.default_width = default_width;
                 opts.via = via;
                 // Airwires as the board shows them: poured copper counts, so a pad already on a
-                // plane through its fanout via has none.
-                let mut filled = board.clone();
-                let (mut rules, _) = BoardRules::new(&filled.limits, &filled.rules);
-                rules.rebuild(&BoardGraph::new(&filled, &[]));
-                crate::zone::fill_zones(&mut filled, &rules, &[]);
-                let wires = crate::route::ratsnest(&filled);
-                let mut space = autoroute::Space::new(&filled, clearance);
-                let report = autoroute::autoroute_in(board, &mut space, &opts, wires);
+                // plane through its fanout via has none. New tracks can cut a pad's only spoke
+                // into a pour, so the pours refill after each pass and the airwires that opens
+                // are routed in the next (at most four passes, while a pass routes something).
+                let mut report = autoroute::RouteReport::default();
+                for _ in 0..4 {
+                    let mut filled = board.clone();
+                    let (mut rules, _) = BoardRules::new(&filled.limits, &filled.rules);
+                    rules.rebuild(&BoardGraph::new(&filled, &[]));
+                    crate::zone::fill_zones(&mut filled, &rules, &[]);
+                    let wires = crate::route::ratsnest(&filled);
+                    let mut space = autoroute::Space::new(&filled, clearance);
+                    let pass = autoroute::autoroute_in(board, &mut space, &opts, wires);
+                    report.routed += pass.routed;
+                    report.tracks += pass.tracks;
+                    report.vias += pass.vias;
+                    report.failed = pass.failed;
+                    if pass.routed == 0 {
+                        break;
+                    }
+                }
                 let total = report.routed as usize + report.failed.len();
                 summary = format!(
                     "Routed {} of {} connection(s) with {} track(s) and {} via(s){}",
@@ -107,12 +118,18 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                     if report.failed.is_empty() {
                         String::new()
                     } else {
-                        let names: BTreeSet<&str> =
-                            report.failed.iter().map(|f| f.0.as_str()).collect();
-                        format!(
-                            "; left unrouted: {}",
-                            names.into_iter().collect::<Vec<_>>().join(", ")
-                        )
+                        let mut why: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+                        for f in &report.failed {
+                            why.entry(f.net.as_str()).or_default().insert(f.why.text());
+                        }
+                        let parts: Vec<String> = why
+                            .into_iter()
+                            .map(|(net, w)| {
+                                let w: Vec<&str> = w.into_iter().collect();
+                                format!("{net} ({})", w.join(", "))
+                            })
+                            .collect();
+                        format!("; left unrouted: {}", parts.join(", "))
                     }
                 );
                 Ok(())

@@ -31,6 +31,28 @@ pub(super) struct Query<'a> {
     pub layer_cost: &'a [f64],
     /// Search bound: nodes expanded before giving up.
     pub budget: usize,
+    /// Neck-down: within `neck_reach` of an end that is a pad narrower than the track, the
+    /// track narrows to `neck` (the pad's width, at least the board's minimum track), as
+    /// Altium's neck-down rule does, so a wide power track can enter a fine-pitch pad.
+    pub neck: Coord,
+    pub anchors: [Point; 2],
+    pub neck_reach: Coord,
+}
+
+impl Query<'_> {
+    /// The track width at `p`.
+    pub fn width_at(&self, p: Point) -> Coord {
+        if self.neck < self.width
+            && self
+                .anchors
+                .iter()
+                .any(|a| a.dist(p) <= self.neck_reach as f64)
+        {
+            self.neck
+        } else {
+            self.width
+        }
+    }
 }
 
 #[derive(PartialEq)]
@@ -119,7 +141,7 @@ impl<'a> Search<'a> {
             return *v;
         }
         let p = point(&self.q, n);
-        let prim = Prim::circle(p, self.q.width / 2);
+        let prim = Prim::circle(p, self.q.width_at(p) / 2);
         let v = self
             .space
             .free(Some(self.q.net), self.mask(n.2), &prim, self.slack);
@@ -204,9 +226,9 @@ impl<'a> Search<'a> {
                 let turn = match dir {
                     START | VIA => 0.0,
                     prev => {
-                        let delta = (d as i32 - prev as i32).rem_euclid(8).min(
-                            (prev as i32 - d as i32).rem_euclid(8),
-                        );
+                        let delta = (d as i32 - prev as i32)
+                            .rem_euclid(8)
+                            .min((prev as i32 - d as i32).rem_euclid(8));
                         match delta {
                             0 => 0.0,
                             1 => 0.6,

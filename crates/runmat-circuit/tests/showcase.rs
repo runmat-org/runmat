@@ -3,10 +3,10 @@
 //! FPGA, USB-C power with two buck regulators) on six layers, placed, fanned out, routed and
 //! poured with the product's own board commands.
 //!
-//! The project is checked in at `tests/projects/daq/` and in the Desktop at
-//! `desktop/src/app/components/circuit/fixtures/daq/`. Set `RUNMAT_SHOWCASE_BUILD=1` to rebuild
-//! it from `tests/showcase/start.circuit.layout` with the command script in
-//! `showcase/build.rs` and rewrite both copies.
+//! The project is checked in at `tests/projects/daq/` (with `daq-drc.circuit.layout` and
+//! `daq-erc.circuit`, the DRC and ERC views' seeded variants). Set `RUNMAT_SHOWCASE_BUILD=1` to
+//! rebuild it from `tests/showcase/start.circuit.layout` with the command script in
+//! `showcase/build.rs`; run it in release (`cargo test --release`), where it takes seconds.
 
 mod showcase {
     pub mod build;
@@ -86,4 +86,64 @@ fn the_showcase_board_is_placed_routed_and_clean() {
     assert_eq!(board.layers.iter().filter(|l| l.kind == "copper").count(), 6);
     assert!(board.tracks.len() > 150 && board.vias.len() > 100);
     assert!(board.zones.len() >= 7);
+}
+
+/// `schematic.annotate` records every designator in the lock (a project without one gets it),
+/// and with `reset` renumbers only the compiler-numbered parts, keeping each prefix's set.
+#[test]
+fn annotate_records_designators_and_reset_renumbers_the_numbered_parts() {
+    use runmat_circuit::runtime::{compile, edit, CompileOptions, EditRequest};
+    use std::collections::BTreeMap;
+    let mut files = files();
+    let circuit = "/p/daq.circuit";
+    let lock = "/p/daq.circuit.lock";
+    let designators = |files: &runmat_circuit::runtime::Files| -> BTreeMap<String, String> {
+        let out = compile(circuit, &files[circuit], files, &CompileOptions::default());
+        out.index
+            .expect("compiles")
+            .components
+            .into_iter()
+            .map(|c| (c.path, c.designator))
+            .collect()
+    };
+    let before = designators(&files);
+    files.remove(lock);
+    let request = |reset: bool| EditRequest {
+        command: "schematic.annotate".into(),
+        values: serde_json::json!({ "reset": reset, "order": "down" })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        selection: Vec::new(),
+        options: CompileOptions::default(),
+    };
+    let out = edit(circuit, &files[circuit], &files, &request(false)).expect("annotates");
+    let written = out.files.iter().find(|f| f.path == lock).expect("a lock is written");
+    assert!(written.text.contains("designator="), "{}", written.text);
+    files.insert(lock.into(), written.text.clone());
+    assert_eq!(designators(&files), before, "the lock keeps the numbering");
+    // Again: nothing to change.
+    let again = edit(circuit, &files[circuit], &files, &request(false)).expect("annotates");
+    assert!(again.files.is_empty());
+
+    let out = edit(circuit, &files[circuit], &files, &request(true)).expect("renumbers");
+    assert!(out.summary.starts_with("Annotated"), "{}", out.summary);
+    if let Some(f) = out.files.iter().find(|f| f.path == lock) {
+        files.insert(lock.into(), f.text.clone());
+    }
+    let after = designators(&files);
+    let prefix = |d: &str| d.trim_end_matches(|c: char| c.is_ascii_digit()).to_owned();
+    for (path, d) in &before {
+        let numbered = path.contains(']');
+        if numbered {
+            assert_eq!(prefix(&after[path]), prefix(d), "{path}");
+        } else {
+            assert_eq!(&after[path], d, "{path} is named in the source");
+        }
+    }
+    let mut a: Vec<&String> = before.values().collect();
+    let mut b: Vec<&String> = after.values().collect();
+    a.sort();
+    b.sort();
+    assert_eq!(a, b, "the same designators, reassigned");
 }

@@ -64,10 +64,40 @@ impl RouteOptions {
 pub struct RouteReport {
     /// Airwires routed.
     pub routed: u32,
-    /// Airwires left unrouted: net name and the two ends.
-    pub failed: Vec<(String, Point, Point)>,
+    /// Airwires left unrouted.
+    pub failed: Vec<Unrouted>,
     pub tracks: u32,
     pub vias: u32,
+}
+
+/// An airwire the router left, and why.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unrouted {
+    pub net: String,
+    pub a: Point,
+    pub b: Point,
+    pub why: Why,
+}
+
+/// Why a connection stayed unrouted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Why {
+    /// No track of the net's width can leave the first end with the clearance.
+    StartBlocked,
+    /// No track can reach the second end.
+    EndBlocked,
+    /// The search ran out of room or budget between the ends.
+    NoPath,
+}
+
+impl Why {
+    pub fn text(self) -> &'static str {
+        match self {
+            Why::StartBlocked => "no room to leave the first pad",
+            Why::EndBlocked => "no room to reach the second pad",
+            Why::NoPath => "no path found",
+        }
+    }
 }
 
 /// Routes the airwires of `opts.nets`, shortest first.
@@ -98,6 +128,7 @@ pub fn autoroute_in(
             .then_with(|| (a.net, a.a, a.b).cmp(&(b.net, b.a, b.b)))
     });
     let n = board.copper_count();
+    let pads = board.all_pads();
     let layer_cost: Vec<f64> = opts
         .layers
         .iter()
@@ -105,7 +136,16 @@ pub fn autoroute_in(
         .map(|(i, _)| 1.0 + 0.25 * i as f64)
         .collect();
     for w in wires {
-        let width = opts.widths.get(&w.net).copied().unwrap_or(opts.default_width);
+        let width = opts
+            .widths
+            .get(&w.net)
+            .copied()
+            .unwrap_or(opts.default_width);
+        let neck = [w.a, w.b]
+            .iter()
+            .filter_map(|p| pad_width(&pads, w.net, *p))
+            .min()
+            .map_or(width, |pad| pad.min(width).max(board.limits.min_track));
         let q = Query {
             net: w.net,
             width,
@@ -116,12 +156,15 @@ pub fn autoroute_in(
             origin: w.a,
             via_cost: 25.0,
             layer_cost: &layer_cost,
-            budget: 400_000,
+            budget: 3_000_000,
+            neck,
+            anchors: [w.a, w.b],
+            neck_reach: mm(0.8),
         };
         match route_one(space, q, w.a, w.b) {
-            Some(route) => {
+            Ok(route) => {
                 report.routed += 1;
-                for (layer, a, b) in route.tracks {
+                for (layer, width, a, b) in route.tracks {
                     board.add_track(Some(w.net), layer, width, a, b);
                     space.add(Some(w.net), 1 << layer, Prim::segment(a, b, width));
                     report.tracks += 1;
@@ -129,21 +172,40 @@ pub fn autoroute_in(
                 for p in route.vias {
                     let id = board.add_via(Some(w.net), p, opts.via.0, opts.via.1);
                     let v = &board.vias[&id];
-                    space.add(Some(w.net), layer_mask(v.layers()), Prim::circle(p, v.diameter / 2));
+                    space.add(
+                        Some(w.net),
+                        layer_mask(v.layers()),
+                        Prim::circle(p, v.diameter / 2),
+                    );
                     space.add_hole(p, opts.via.1 / 2);
                     report.vias += 1;
                 }
             }
-            None => report
-                .failed
-                .push((board.net_name(w.net).to_owned(), w.a, w.b)),
+            Err(why) => report.failed.push(Unrouted {
+                net: board.net_name(w.net).to_owned(),
+                a: w.a,
+                b: w.b,
+                why,
+            }),
         }
     }
     report
 }
 
+/// The narrow side of the pad of `net` that covers `p`, if one does.
+fn pad_width(pads: &[crate::layout::PlacedPad], net: NetId, p: Point) -> Option<Coord> {
+    pads.iter()
+        .filter(|pad| pad.net == Some(net) && pad.prim.contains(p))
+        .map(|pad| {
+            let bb = pad.prim.bbox();
+            bb.width().min(bb.height())
+        })
+        .min()
+}
+
 struct Route {
-    tracks: Vec<(u8, Point, Point)>,
+    /// Layer, width, ends.
+    tracks: Vec<(u8, Coord, Point, Point)>,
     vias: Vec<Point>,
 }
 
@@ -206,14 +268,17 @@ fn copper_ends(s: &mut Search, p: Point) -> Vec<Node> {
     }
 }
 
-fn route_one(space: &Space, q: Query, a: Point, b: Point) -> Option<Route> {
+fn route_one(space: &Space, q: Query, a: Point, b: Point) -> Result<Route, Why> {
     let mut s = Search::new(q, space);
     let (sources, via_a) = ends(&mut s, space, a);
     let (targets, via_b) = ends(&mut s, space, b);
-    if sources.is_empty() || targets.is_empty() {
-        return None;
+    if sources.is_empty() {
+        return Err(Why::StartBlocked);
     }
-    let nodes = s.run(&sources, &targets, b)?;
+    if targets.is_empty() {
+        return Err(Why::EndBlocked);
+    }
+    let nodes = s.run(&sources, &targets, b).ok_or(Why::NoPath)?;
     let first = search::point(&s.q, nodes[0]);
     let last = search::point(&s.q, *nodes.last().expect("a path"));
     // A route that starts or ends on a pour does so with a via at its end node.
@@ -225,38 +290,49 @@ fn route_one(space: &Space, q: Query, a: Point, b: Point) -> Option<Route> {
     if via_b {
         route.vias.push(last);
     }
-    Some(route)
+    Ok(route)
 }
 
-/// The node path as tracks and vias: straight runs merged, corners cut where clear, and short
-/// stubs to the two anchors (inside the net's own copper).
+/// The node path as tracks and vias: split into runs by layer and by track width (the
+/// neck-down near pads), straight runs merged, corners cut where clear, and short stubs to the
+/// two anchors (inside the net's own copper).
 fn geometry(s: &Search, space: &Space, nodes: &[Node], a: Point, b: Point) -> Route {
     let q = &s.q;
-    // Split into per-layer runs.
-    let mut runs: Vec<(u8, Vec<Point>)> = Vec::new();
+    let mut runs: Vec<(u8, Coord, Vec<Point>)> = Vec::new();
     let mut vias = Vec::new();
     for n in nodes {
         let p = search::point(q, *n);
+        let w = q.width_at(p);
         match runs.last_mut() {
-            Some((l, pts)) if *l == n.2 => pts.push(p),
+            Some((l, rw, pts)) if *l == n.2 && *rw == w => pts.push(p),
+            Some((l, rw, pts)) if *l == n.2 => {
+                // The step between a neck node and a full-width node is drawn narrow.
+                let last = *pts.last().expect("a run has a point");
+                if *rw < w {
+                    pts.push(p);
+                    runs.push((n.2, w, vec![p]));
+                } else {
+                    runs.push((n.2, w, vec![last, p]));
+                }
+            }
             Some(_) => {
                 vias.push(p);
-                runs.push((n.2, vec![p]));
+                runs.push((n.2, w, vec![p]));
             }
-            None => runs.push((n.2, vec![p])),
+            None => runs.push((n.2, w, vec![p])),
         }
     }
     let last = runs.len() - 1;
-    runs[0].1.insert(0, a);
-    runs[last].1.push(b);
+    runs[0].2.insert(0, a);
+    runs[last].2.push(b);
     let mut tracks = Vec::new();
-    for (i, (l, pts)) in runs.into_iter().enumerate() {
+    for (i, (l, width, pts)) in runs.into_iter().enumerate() {
         let layer = q.layers[l as usize];
         let mut pts = merge(&pts);
-        pts = shortcut(space, q.net, layer, q.width, &pts, i == 0, i == last);
+        pts = shortcut(space, q.net, layer, width, &pts, i == 0, i == last);
         for w in pts.windows(2) {
             if w[0] != w[1] {
-                tracks.push((layer, w[0], w[1]));
+                tracks.push((layer, width, w[0], w[1]));
             }
         }
     }
