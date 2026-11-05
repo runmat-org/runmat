@@ -513,7 +513,7 @@ pub fn feature_kind(
                     "faces": picks.references(&some(values, "faces", "the faces to draft")?)?,
                     "neutral": neutral,
                     "angle": value(values, "angle", "deg")?,
-                    "kind": kind,
+                    "relief": kind,
                     "flip": flag(values, "flip"),
                 }),
             )
@@ -686,7 +686,7 @@ pub fn feature_kind(
                     "feature": "sheet_metal",
                     "sheet_metal": "corner_relief",
                     "corners": picks.references(&some(values, "corners", "the corners to relieve")?)?,
-                    "kind": kind,
+                    "relief": kind,
                 }),
             )
         }

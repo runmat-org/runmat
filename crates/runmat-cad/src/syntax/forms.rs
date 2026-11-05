@@ -35,6 +35,8 @@ const SCOPED_TAG_FIELDS: &[(&str, &str, &str)] = &[
     ("hole", "form", "hole"),
     ("chamfer", "form", "chamfer"),
     ("draft", "kind", "draft"),
+    ("form_tool", "tool", "form"),
+    ("sheet_metal", "tool", "form"),
 ];
 
 pub fn tag_field(scope: Option<&str>, key: &str) -> Option<&'static str> {

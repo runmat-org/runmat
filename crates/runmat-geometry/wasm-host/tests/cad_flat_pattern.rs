@@ -147,7 +147,10 @@ fn a_drawings_flat_pattern_view_carries_the_developed_sheet_and_its_bend_table()
     runmat_geometry_wasm_host::cad::install_occt();
     let files: runmat_cad_wasm::runtime::Files = [
         ("/p/plate_sm.part".to_string(), FLANGED_PLATE.to_string()),
-        ("/p/plate_flat.drawing".to_string(), FLAT_DRAWING.to_string()),
+        (
+            "/p/plate_flat.drawing".to_string(),
+            FLAT_DRAWING.to_string(),
+        ),
     ]
     .into_iter()
     .collect();
@@ -170,7 +173,10 @@ fn a_drawings_flat_pattern_view_carries_the_developed_sheet_and_its_bend_table()
     // The plate and the flange's strip, BA + 20 mm past x = 80 mm, in millimetres.
     let ba = std::f64::consts::FRAC_PI_2 * (3.0 + 0.44 * 2.0);
     let max = sheet["max"].as_array().expect("extents");
-    assert!((max[0].as_f64().unwrap() - (80.0 + ba + 20.0)).abs() < 1e-6, "{sheet}");
+    assert!(
+        (max[0].as_f64().unwrap() - (80.0 + ba + 20.0)).abs() < 1e-6,
+        "{sheet}"
+    );
     assert!((max[1].as_f64().unwrap() - 40.0).abs() < 1e-6, "{sheet}");
     // The hole is a circle of the outline; one bend line and one row of the bend table.
     let circles = sheet["outline"]
@@ -183,9 +189,103 @@ fn a_drawings_flat_pattern_view_carries_the_developed_sheet_and_its_bend_table()
     assert_eq!(circles, 1, "{sheet}");
     let lines = sheet["bend_lines"].as_array().expect("bend lines");
     assert_eq!(lines.len(), 1, "{sheet}");
-    assert!((lines[0]["start"][0].as_f64().unwrap() - (80.0 + ba / 2.0)).abs() < 1e-6, "{sheet}");
-    assert!(lines[0]["note"].as_str().unwrap_or("").contains("UP"), "{sheet}");
+    assert!(
+        (lines[0]["start"][0].as_f64().unwrap() - (80.0 + ba / 2.0)).abs() < 1e-6,
+        "{sheet}"
+    );
+    assert!(
+        lines[0]["note"].as_str().unwrap_or("").contains("UP"),
+        "{sheet}"
+    );
     let table = sheet["bend_table"].as_array().expect("bend table");
     assert_eq!(table.len(), 1, "{sheet}");
-    assert!((table[0]["angle"].as_f64().unwrap() - 90.0).abs() < 1e-9, "{sheet}");
+    assert!(
+        (table[0]["angle"].as_f64().unwrap() - 90.0).abs() < 1e-9,
+        "{sheet}"
+    );
+}
+
+/// The Desktop's sheet metal showcase: a vent cover with three edge flanges, rectangular
+/// corner reliefs at its four flange corners, three louvers and a dimple, and its flat
+/// pattern drawing with a bend table placed on the sheet.
+#[test]
+fn the_sheet_metal_showcase_compiles_and_draws_its_flat_pattern() {
+    runmat_geometry_wasm_host::cad::install_occt();
+    const FIXTURES: &str = "../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures";
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
+    let (Ok(part), Ok(drawing)) = (
+        std::fs::read_to_string(root.join("vent_cover.part")),
+        std::fs::read_to_string(root.join("vent_cover_flat.drawing")),
+    ) else {
+        panic!("the Desktop fixtures are missing at {}", root.display());
+    };
+    let files: runmat_cad_wasm::runtime::Files = [
+        ("/p/vent_cover.part".to_string(), part.clone()),
+        ("/p/vent_cover_flat.drawing".to_string(), drawing.clone()),
+    ]
+    .into_iter()
+    .collect();
+    let compiled: serde_json::Value = serde_json::from_str(
+        &runmat_cad_wasm::runtime::compile_json("/p/vent_cover.part", &part, &files),
+    )
+    .expect("json");
+    let problems: Vec<_> = compiled["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| d["severity"] == "error" || d["severity"] == "warning")
+        .collect();
+    assert!(problems.is_empty(), "{problems:?}");
+    let out: serde_json::Value = serde_json::from_str(&runmat_cad_wasm::drawing::compile_json(
+        "/p/vent_cover_flat.drawing",
+        &drawing,
+        &files,
+    ))
+    .expect("json");
+    let data = &out["projection"]["data"];
+    let errors: Vec<_> = data["diagnostics"]["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain(out["diagnostics"].as_array().into_iter().flatten())
+        .filter(|d| d["severity"] == "error")
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let sheet = &data["hlr"]["flat"]["flat"];
+    // Three flanges, three bend lines and table rows. The side flange meets the back and the
+    // front at two corners; each relief notch is a corner of the outline at (117, 3) mm
+    // and (117, 77) mm, 3 mm inside the plate's corner.
+    assert_eq!(
+        sheet["bend_lines"].as_array().map(Vec::len),
+        Some(3),
+        "{sheet}"
+    );
+    assert_eq!(
+        sheet["bend_table"].as_array().map(Vec::len),
+        Some(3),
+        "{sheet}"
+    );
+    let starts: Vec<(f64, f64)> = sheet["outline"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|l| l.as_array().cloned().unwrap_or_default())
+        .filter_map(|c| Some((c["start"][0].as_f64()?, c["start"][1].as_f64()?)))
+        .collect();
+    for corner in [(117.0, 3.0), (117.0, 77.0)] {
+        assert!(
+            starts
+                .iter()
+                .any(|p| (p.0 - corner.0).abs() < 1e-6 && (p.1 - corner.1).abs() < 1e-6),
+            "no relief corner at {corner:?}: {starts:?}"
+        );
+    }
+    // The bend table is placed where the drawing says.
+    let tables = data["document"]["tables"].as_array().expect("tables");
+    assert_eq!(tables.len(), 1, "{tables:?}");
+    assert_eq!(
+        tables[0]["at"],
+        serde_json::json!([20.0, 120.0]),
+        "{tables:?}"
+    );
 }

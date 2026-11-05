@@ -390,8 +390,10 @@ impl<'a, 'b> Run<'a, 'b> {
                         .iter()
                         .any(|m| e.key.rsplit_once('.').map(|k| k.0) == Some(m.0.as_str()))
                 };
+                // A face of the plate itself: every corner of the plate.
+                let whole = makers.contains(&view.maker);
                 let hits: Vec<usize> = (0..view.corners.len())
-                    .filter(|&k| of(&view.corners[k].a) || of(&view.corners[k].b))
+                    .filter(|&k| whole || of(&view.corners[k].a) || of(&view.corners[k].b))
                     .collect();
                 if !hits.is_empty() {
                     for k in hits {
@@ -454,7 +456,7 @@ impl<'a, 'b> Run<'a, 'b> {
     ) -> Result<Compiled, Halt> {
         let size = match kind {
             CornerReliefKind::Rectangular { size } | CornerReliefKind::Round { size } => {
-                Some(self.value(id, "kind.size", size, Dimension::LENGTH)?)
+                Some(self.value(id, "relief.size", size, Dimension::LENGTH)?)
             }
             CornerReliefKind::Tear => None,
         };
@@ -476,7 +478,7 @@ impl<'a, 'b> Run<'a, 'b> {
             if d <= 0.0 || d >= span(&c.a) || d >= span(&c.b) {
                 return Err(self.error(
                     id,
-                    Some("kind.size"),
+                    Some("relief.size"),
                     DiagCode::RegenInvalid,
                     "a corner relief's size is positive and shorter than both flanges".into(),
                     Vec::new(),
@@ -605,6 +607,20 @@ impl<'a, 'b> Run<'a, 'b> {
         };
         let mut extend: Vec<String> = Vec::new();
         for h in &set {
+            // A face of the plate itself: each corner's first flange (in feature order).
+            if self
+                .st
+                .entity_names(h)
+                .iter()
+                .any(|n| n.maker() == &view.maker)
+            {
+                for c in &view.corners {
+                    if !extend.contains(&c.a.key) && !extend.contains(&c.b.key) {
+                        extend.push(c.a.key.clone());
+                    }
+                }
+                continue;
+            }
             let p = self.entity_point(h);
             let found = view.corners.iter().flat_map(|c| [&c.a, &c.b]).find(|e| {
                 let q = local(inverse(&e.motion).apply(p));

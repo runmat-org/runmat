@@ -538,8 +538,8 @@ impl<'a, 'b> Run<'a, 'b> {
                 let gap = self.value(id, "gap", gap, Dimension::LENGTH)?;
                 self.closed_corner(i, id, faces, gap, *overlap, &simple)
             }
-            SheetMetalFeature::CornerRelief { corners, kind } => {
-                self.corner_relief(i, id, corners, kind, &simple)
+            SheetMetalFeature::CornerRelief { corners, relief } => {
+                self.corner_relief(i, id, corners, relief, &simple)
             }
             SheetMetalFeature::TabAndSlot { .. } => Err(self.not_lowered(id, "tabs and slots")),
             SheetMetalFeature::FormTool {

@@ -155,7 +155,7 @@ fn relief(kind: CornerReliefKind) -> impl Fn(&RegenResult) -> Feature {
             "relief",
             FeatureKind::SheetMetal(SheetMetalFeature::CornerRelief {
                 corners: vec![named(plain, "side", Role::BendFace, 0)],
-                kind: kind.clone(),
+                relief: kind.clone(),
             }),
         )
     }
@@ -243,4 +243,24 @@ fn k1_closed_corners_extend_both_flats_by_their_overlap() {
         assert!(close(part, want, 1e-9), "{kind:?}: part {part} vs {want}");
         assert!(close(flat, want, 1e-9), "{kind:?}: flat {flat} vs {want}");
     }
+}
+
+/// A face of the plate picks every corner of the plate: the plate's top relieves the one
+/// corner `side` and `back` share, as picking `side` does.
+#[test]
+fn k1_a_corner_relief_on_the_plate_face_relieves_every_corner() {
+    let d = 0.002;
+    let (part, flat, _) = change(flanged(FlangePosition::BendOutside), |_| {
+        Feature::new(
+            "relief",
+            FeatureKind::SheetMetal(SheetMetalFeature::CornerRelief {
+                corners: vec![plate_top()],
+                relief: CornerReliefKind::Rectangular { size: mm(2.0) },
+            }),
+        )
+    });
+    let flat_want = -T * (d * d + 2.0 * d * ba());
+    assert!(close(flat, flat_want, 1e-9), "flat {flat} vs {flat_want}");
+    let part_want = -(T * d * d + 2.0 * bend_piece(d));
+    assert!(close(part, part_want, 1e-9), "part {part} vs {part_want}");
 }
