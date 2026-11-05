@@ -135,4 +135,22 @@ circuit daq {
         no_erc = [J1.DP, J1.DN, J1.SBU1, J1.SBU2, U3.PG, "J2.7", "J2.9"]
         no_erc = [U1.IO5, U1.IO6, U1.IO7, U1.IO8, U1.IO9, U1.IO10, U1.IO11, U1.IO12, U1.IO13, U1.IO14, U1.IO15, U1.IO16, U1.IO17, U1.IO18, U1.IO19, U1.IO20, U1.IO21, U1.IO22, U1.IO23, U1.IO24, U1.IO25, U1.IO26, U1.IO27, U1.IO28, U1.IO29, U1.IO30, U1.IO31, U1.IO32, U1.IO33, U1.IO34, U1.IO35, U1.IO36, U1.IO37, U1.IO38, U1.IO39, U1.IO40, U1.IO41, U1.IO42, U1.IO43, U1.IO44, U1.IO45, U1.IO46, U1.IO47, U1.IO48, U1.IO49, U1.IO50, U1.IO51, U1.IO52, U1.IO53, U1.IO54, U1.IO55, U1.IO56, U1.IO57, U1.IO58, U1.IO59, U1.IO60, U1.IO61, U1.IO62, U1.IO63, U1.IO64, U1.IO65, U1.IO66, U1.IO67, U1.IO68, U1.IO69, U1.IO70, U1.IO71, U1.IO72, U1.IO73, U1.IO74, U1.IO75, U1.IO76, U1.IO77, U1.IO78, U1.IO79, U1.IO80, U1.IO81, U1.IO82, U1.IO83, U1.IO84, U1.IO85, U1.IO86, U1.IO87, U1.IO88, U1.IO89, U1.IO90, U1.IO91, U1.IO92, U1.IO93, U1.IO94, U1.IO95, U1.IO96, U1.IO97, U1.IO98, U1.IO99, U1.IO100, U1.IO101, U1.IO102, U1.IO103, U1.IO104, U1.IO105, U1.IO106, U1.IO107, U1.IO108, U1.IO109, U1.IO110, U1.IO111, U1.IO112, U1.IO113, U1.IO114, U1.IO115, U1.IO116, U1.IO117, U1.IO118, U1.IO119, U1.IO120, U1.IO121, U1.IO122, U1.IO123, U1.IO124, U1.IO125, U1.IO126, U1.IO127, U1.IO128, U1.IO129, U1.IO130, U1.IO131, U1.IO132, U1.IO133, U1.IO134, U1.IO135, U1.IO136, U1.IO137, U1.IO138, U1.IO139, U1.IO140, U1.IO141, U1.IO142, U1.IO143, U1.IO144, U1.IO145, U1.IO146, U1.IO147, U1.IO148, U1.IO149, U1.IO150, U1.IO151, U1.IO152, U1.IO153, U1.IO154, U1.IO155, U1.IO156, U1.IO157, U1.IO158, U1.IO159, U1.IO160, U1.IO161, U1.IO162, U1.IO163, U1.IO164, U1.IO165, U1.IO166, U1.IO167, U1.IO168, U1.IO169, U1.IO170, U1.IO171, U1.IO172, U1.IO173, U1.IO174, U1.IO175, U1.IO176, U1.IO177, U1.IO178, U1.IO179, U1.IO180, U1.IO181, U1.IO182, U1.IO183, U1.IO184, U1.IO185, U1.IO186, U1.IO187, U1.IO188, U1.IO189, U1.IO190, U1.IO191, U1.IO192, U1.IO193, U1.IO194, U1.IO195, U1.IO196, U1.IO197, U1.IO198, U1.IO199]
     }
+
+    simulation front_end {
+        sheet = channel
+        source VIN = { p = net.IN, ac = 1 V, pulse = { from = 0.25 V, to = 1.75 V, delay = 2 us, rise = 10 ns } }
+        source V5 = { p = "net.+5V", dc = 5 V }
+        source V3 = { p = "net.+3V3", dc = 3.3 V }
+        source VR = { p = net.VREF, dc = 4.096 V }
+        model OPA171 = { opamp = { a0 = 1000000, gbw = 3 MHz, sr = 1500000, rout = 10 ohm, vdrop = 0.02 V }, pins = ["IN+", "IN-", OUT, "V+", "V-"] }
+        tolerance resistors = { match = "R*", value = 1 % }
+        tolerance capacitors = { match = "C*", value = 5 % }
+        analysis step = tran { stop = 20 us, step = 10 ns }
+        analysis response = ac { from = 100 Hz, to = 100 MHz, points = 100 }
+        analysis spread = monte_carlo { of = response, runs = 1000, seed = 7 }
+        probe = [net.IN, net.INF, net.AMP, net.AIN]
+        measure f3db = { of = response, bandwidth = net.AIN }
+        measure rise = { of = step, rise_time = net.AIN }
+        measure f3db_spread = { of = spread, bandwidth = net.AIN, spec = { min = 152 kHz, max = 166 kHz } }
+    }
 }
