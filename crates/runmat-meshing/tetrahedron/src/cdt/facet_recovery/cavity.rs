@@ -30,6 +30,7 @@ use crate::{
 };
 
 mod footprint;
+mod in_place;
 mod sides;
 mod simultaneous;
 pub(super) mod star;
@@ -40,6 +41,9 @@ pub(super) use footprint::segment_hits_triangle_interior;
 use sides::{side_cavities, SideCavityConstruction};
 use simultaneous::{refill_cavity_sides, CavityRefillRequest};
 use star::star_refill;
+pub(super) use in_place::{
+    insert_candidate_in_place, try_recover_facet_with_cavity_in_place, InPlaceCandidate,
+};
 pub(super) use steiner::{
     candidate_node, steiner_identity, steiner_lineage, try_insert_candidate_with_conflicts,
     try_recover_facet_with_cavity, CandidateInsertion, CandidateInsertionResult,

@@ -407,7 +407,34 @@ fn split_pair_at_shared_vertex(
             let mut observed = trial.observe_edge_changes();
             let mut protected = protected.to_vec();
             let mut all_splits = Vec::new();
-            let mut inserted = Vec::new();
+            let halves = [
+                [edge[0], edge_node.identity],
+                [edge[1], edge_node.identity],
+                [other[0], other_node.identity],
+                [other[1], other_node.identity],
+            ];
+            // Link flips keep every recovered segment edge, both split edges until they are
+            // split, and the four halves.
+            let kept_edges = crate::cdt::segment_recovery::sorted_edge_keys(
+                protected_edges
+                    .iter()
+                    .copied()
+                    .chain([edge, other])
+                    .chain(halves),
+            );
+            let protected_face_set = |protected: &[DelaunayRecoveredFacetTriangle]| {
+                protected
+                    .iter()
+                    .map(|triangle| {
+                        let mut face = triangle.node_identities;
+                        face.sort_unstable();
+                        face
+                    })
+                    .collect::<BTreeSet<_>>()
+            };
+            // Each node is legalized before the next is placed, so the second split starts from
+            // a constrained-Delaunay complex: its constrained cavity is then exact, and link
+            // flips only repair what visibility or barriers left out of that cavity.
             for (node, split, strategy) in [
                 (other_node, other, SplitStrategy::EdgeStar),
                 (edge_node, edge, SplitStrategy::ConstrainedCavity),
@@ -417,7 +444,16 @@ fn split_pair_at_shared_vertex(
                 };
                 let (removed, created, splits) =
                     split_edge(&observed, index, split, &protected, strategy, constraint_index)?;
-                let (removed, created, splits) = if removed.is_empty() {
+                // A constrained cavity that holds the whole star of a kept edge (a recovered
+                // segment edge or a half of the first split) would delete that edge, and no link
+                // flip can bring it back. The edge-star split removes only cells around the split
+                // edge and keeps every other edge, so it takes over.
+                let mut split_key = split;
+                split_key.sort_unstable();
+                let kept_list = kept_edges.iter().copied().collect::<Vec<_>>();
+                let swallows_kept_edge = !removed.is_empty()
+                    && encroached_segment_edge(&observed, &removed, &kept_list, split_key).is_some();
+                let (removed, created, splits) = if removed.is_empty() || swallows_kept_edge {
                     split_edge(
                         &observed,
                         index,
@@ -447,35 +483,46 @@ fn split_pair_at_shared_vertex(
                         .collect(),
                 );
                 all_splits.extend(splits);
-                inserted.push(index);
+                match crate::cdt::insertion::legalize_inserted_nodes_with_facet_flips(
+                    &mut observed,
+                    &[index],
+                    &protected_face_set(&protected),
+                    &kept_edges,
+                    true,
+                    insertion,
+                    cancellation,
+                ) {
+                    Ok(flips) => {
+                        let Some(flip_splits) = facet_flip_splits(&observed, &mut protected, &flips)
+                        else {
+                            return Ok(Err(
+                                "a facet-plane flip names a protected triangle that is not recorded"
+                                    .to_owned(),
+                            ));
+                        };
+                        all_splits.extend(flip_splits);
+                    }
+                    Err(failure)
+                        if matches!(
+                            failure.kind,
+                            DelaunayInsertionErrorKind::ResourceLimit
+                                | DelaunayInsertionErrorKind::Cancelled
+                        ) =>
+                    {
+                        return Err(insertion_error(
+                            failure.kind,
+                            failure.to_string(),
+                            constraint_index,
+                        ))
+                    }
+                    Err(failure) => return Ok(Err(format!("link flips failed: {failure}"))),
+                }
             }
-            let protected_faces = protected
-                .iter()
-                .map(|triangle| {
-                    let mut face = triangle.node_identities;
-                    face.sort_unstable();
-                    face
-                })
-                .collect::<BTreeSet<_>>();
-            if let Err(failure) = crate::cdt::insertion::legalize_inserted_nodes(
-                &mut observed,
-                &inserted,
-                &protected_faces,
-                insertion,
-                cancellation,
-            ) {
-                return Ok(Err(format!("link flips failed: {failure}")));
-            }
+            let protected_faces = protected_face_set(&protected);
             let mut replaced = [edge, other];
             for key in &mut replaced {
                 key.sort_unstable();
             }
-            let halves = [
-                [edge[0], edge_node.identity],
-                [edge[1], edge_node.identity],
-                [other[0], other_node.identity],
-                [other[1], other_node.identity],
-            ];
             let mut checkpoint = || Ok::<(), DelaunayFacetRecoveryError>(());
             let removed_edges = observed.removed_edge_candidates(&mut checkpoint)?;
             let lost = protected_edges
@@ -558,7 +605,7 @@ fn split_and_admit_locally(
     };
     let mut split_edge_key = edge;
     split_edge_key.sort_unstable();
-    let (removed, created, splits) =
+    let (removed, created, mut splits) =
         split_edge(&observed, inserted, edge, protected, strategy, constraint_index)?;
     if removed.is_empty() {
         return Ok(LocalSplit::Declined("empty replacement".to_owned()));
@@ -578,15 +625,23 @@ fn split_and_admit_locally(
     let protected_faces = updated_protected_faces(protected, &splits)
         .into_iter()
         .collect::<BTreeSet<_>>();
-    match legalize_inserted_node_and_check_star(
+    let kept_edges = crate::cdt::segment_recovery::sorted_edge_keys(
+        protected_edges
+            .iter()
+            .copied()
+            .chain(edge.map(|endpoint| [endpoint, node.identity])),
+    );
+    let flips = match crate::cdt::insertion::legalize_inserted_node_and_check_star_with_facet_flips(
         &mut observed,
         inserted,
         &protected_faces,
+        &kept_edges,
+        true,
         options,
         cancellation,
     ) {
-        Ok(true) => {}
-        Ok(false) => return Ok(LocalSplit::Declined("an illegal face remains in the new node's star after link flips".to_owned())),
+        Ok((true, flips)) => flips,
+        Ok((false, _)) => return Ok(LocalSplit::Declined("an illegal face remains in the new node's star after link flips".to_owned())),
         Err(failure)
             if matches!(
                 failure.kind,
@@ -600,7 +655,22 @@ fn split_and_admit_locally(
             ))
         }
         Err(failure) => return Ok(LocalSplit::Declined(format!("link flips failed: {failure}"))),
-    }
+    };
+    // Facet-plane flips retriangulate protected triangles; they join the split records, and the
+    // admission below checks the flipped protection.
+    let protected_faces = if flips.is_empty() {
+        protected_faces
+    } else {
+        let mut current = protected.to_vec();
+        apply_protected_facet_splits(&mut [], &mut current, copy_splits(&splits));
+        let Some(flip_splits) = facet_flip_splits(&observed, &mut current, &flips) else {
+            return Ok(LocalSplit::Declined(
+                "a facet-plane flip names a protected triangle that is not recorded".to_owned(),
+            ));
+        };
+        splits.extend(flip_splits);
+        protected_face_keys(&current)
+    };
     // The split edge is replaced by its two halves; every other recovered segment edge that a
     // removed cell carried must survive.
     let halves = edge.map(|endpoint| [endpoint, node.identity]);
@@ -637,6 +707,90 @@ fn split_and_admit_locally(
         None => LocalSplit::Accepted(splits),
         Some(violation) => LocalSplit::Declined(violation),
     })
+}
+
+fn copy_splits(splits: &[ProtectedFacetSplit]) -> Vec<ProtectedFacetSplit> {
+    splits
+        .iter()
+        .map(|split| ProtectedFacetSplit {
+            source: split.source,
+            children: split.children.clone(),
+        })
+        .collect()
+}
+
+fn protected_face_keys(protected: &[DelaunayRecoveredFacetTriangle]) -> BTreeSet<[StableDigest; 3]> {
+    protected
+        .iter()
+        .map(|triangle| {
+            let mut face = triangle.node_identities;
+            face.sort_unstable();
+            face
+        })
+        .collect()
+}
+
+/// Records facet-plane flips as protected-facet changes and applies them to `protected`: the
+/// first removed triangle is replaced by both created triangles, oriented like it, and the
+/// second is dropped. Both lie in one facet (their shared edge is not a segment edge), so each
+/// facet's triangles still cover the same region. Returns `None` when a removed triangle is not
+/// in `protected`.
+fn facet_flip_splits(
+    topology: &TopologyMutation,
+    protected: &mut Vec<DelaunayRecoveredFacetTriangle>,
+    flips: &[crate::cdt::insertion::FacetFlip],
+) -> Option<Vec<ProtectedFacetSplit>> {
+    let point = |identity: StableDigest| {
+        node_index_mutation(topology, identity).map(|index| topology.nodes[index as usize])
+    };
+    let mut records = Vec::new();
+    for flip in flips {
+        let find = |face: [StableDigest; 3]| {
+            protected.iter().copied().find(|triangle| {
+                let mut key = triangle.node_identities;
+                key.sort_unstable();
+                key == face
+            })
+        };
+        let (first, second) = (find(flip.removed[0])?, find(flip.removed[1])?);
+        let off_plane = point(flip.off_plane)?;
+        let orientation = |triangle: [StableDigest; 3]| -> Option<PredicateSign> {
+            let [a, b, c] = triangle.map(point);
+            orient_materialized_volume_nodes([a?, b?, c?, off_plane]).ok()
+        };
+        let sense = orientation(first.node_identities)?;
+        if sense == PredicateSign::Zero {
+            return None;
+        }
+        let children = flip
+            .created
+            .iter()
+            .map(|face| {
+                let mut ordered = *face;
+                match orientation(ordered)? {
+                    PredicateSign::Zero => return None,
+                    current if current != sense => ordered.swap(0, 1),
+                    _ => {}
+                }
+                Some(DelaunayRecoveredFacetTriangle {
+                    node_identities: ordered,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let applied = vec![
+            ProtectedFacetSplit {
+                source: first,
+                children,
+            },
+            ProtectedFacetSplit {
+                source: second,
+                children: Vec::new(),
+            },
+        ];
+        apply_protected_facet_splits(&mut [], protected, copy_splits(&applied));
+        records.extend(applied);
+    }
+    Some(records)
 }
 
 /// A recovered segment edge, other than the split edge, whose every incident cell lies in the
@@ -814,11 +968,19 @@ fn insert_conformingly_with(
     // face remains, the trial rolls back and the complete repair below runs instead.
     let locally_legal = {
         let protected_set = protected_faces.iter().copied().collect::<BTreeSet<_>>();
+        let mut kept_edges =
+            crate::cdt::segment_recovery::recovered_segment_edge_keys(&current.segments);
+        if let Some(edge) = selected_edge {
+            kept_edges.extend(crate::cdt::segment_recovery::sorted_edge_keys(
+                edge.map(|endpoint| [endpoint, node.identity]),
+            ));
+        }
         let mut trial = mutation.cavity_trial();
         match legalize_inserted_node_and_check_star(
             &mut trial,
             inserted,
             &protected_set,
+            &kept_edges,
             work.options.segment_recovery.insertion,
             work.cancellation,
         ) {

@@ -182,8 +182,9 @@ pub(super) fn apply_prepared_delaunay_volume_node_insertion_with_work(
     legalize_inserted_node(
         topology,
         inserted,
-        protected_faces,
+        &mut Protection::new(protected_faces),
         protect_region_boundaries,
+        LinkFlips::TwoToThree,
         work,
     )?;
     // A construction-verified physical prefix must carry forward the changed
@@ -233,13 +234,59 @@ pub(in crate::cdt) fn legalize_inserted_node_and_check_star(
     topology: &mut TopologyMutation,
     inserted: u32,
     protected_faces: &BTreeSet<[StableDigest; 3]>,
+    kept_edges: &BTreeSet<[StableDigest; 2]>,
     options: DelaunayInsertionOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<bool, DelaunayInsertionError> {
-    use super::topology_access::TetrahedralTopology;
+    legalize_inserted_node_and_check_star_with_facet_flips(
+        topology,
+        inserted,
+        protected_faces,
+        kept_edges,
+        false,
+        options,
+        cancellation,
+    )
+    .map(|(legal, _)| legal)
+}
+
+/// [`legalize_inserted_node_and_check_star`]; with `facet_flips`, a 4-4 flip may also replace
+/// two coplanar protected triangles that share a non-kept edge (see [`FacetFlip`]). The star
+/// check then uses the flipped protection, and the flips are returned for the caller's records.
+pub(in crate::cdt) fn legalize_inserted_node_and_check_star_with_facet_flips(
+    topology: &mut TopologyMutation,
+    inserted: u32,
+    protected_faces: &BTreeSet<[StableDigest; 3]>,
+    kept_edges: &BTreeSet<[StableDigest; 2]>,
+    facet_flips: bool,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(bool, Vec<FacetFlip>), DelaunayInsertionError> {
     validate_options(options)?;
     let mut work = InsertionWork::new(options, cancellation);
-    legalize_inserted_node(topology, inserted, protected_faces, true, &mut work)?;
+    let mut protection = Protection::new(protected_faces);
+    legalize_inserted_node(
+        topology,
+        inserted,
+        &mut protection,
+        true,
+        LinkFlips::Complete {
+            kept_edges,
+            facet_flips,
+        },
+        &mut work,
+    )?;
+    let legal = star_is_legal(topology, inserted, &protection, &mut work)?;
+    Ok((legal, protection.flips))
+}
+
+fn star_is_legal(
+    topology: &TopologyMutation,
+    inserted: u32,
+    protection: &Protection<'_>,
+    work: &mut InsertionWork<'_>,
+) -> Result<bool, DelaunayInsertionError> {
+    use super::topology_access::TetrahedralTopology;
     for left_index in topology.vertex_stars[inserted as usize].iter().copied() {
         let left = topology
             .tetrahedron(left_index)
@@ -256,7 +303,7 @@ pub(in crate::cdt) fn legalize_inserted_node_and_check_star(
                 )
             })?;
             if left.region_id != right.region_id
-                || protected_faces.contains(&stable_face(topology, left.vertex_indices, opposite))
+                || protection.contains(&stable_face(topology, left.vertex_indices, opposite))
             {
                 continue;
             }
@@ -290,20 +337,103 @@ pub(in crate::cdt) fn legalize_inserted_node_and_check_star(
     Ok(true)
 }
 
-/// Lawson flips in the link of each listed node, on the working topology.
+/// Lawson flips (2-3, 3-2 and 4-4) in the link of each listed node, in order, on the working
+/// topology. No flip removes an edge in `kept_edges` (sorted node identities).
 pub(in crate::cdt) fn legalize_inserted_nodes(
     topology: &mut TopologyMutation,
     inserted: &[u32],
     protected_faces: &BTreeSet<[StableDigest; 3]>,
+    kept_edges: &BTreeSet<[StableDigest; 2]>,
     options: DelaunayInsertionOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayInsertionError> {
+    legalize_inserted_nodes_with_facet_flips(
+        topology,
+        inserted,
+        protected_faces,
+        kept_edges,
+        false,
+        options,
+        cancellation,
+    )
+    .map(|_| ())
+}
+
+/// [`legalize_inserted_nodes`]; with `facet_flips`, a 4-4 flip may also replace two coplanar
+/// protected triangles that share a non-kept edge. Returns those flips in order.
+pub(in crate::cdt) fn legalize_inserted_nodes_with_facet_flips(
+    topology: &mut TopologyMutation,
+    inserted: &[u32],
+    protected_faces: &BTreeSet<[StableDigest; 3]>,
+    kept_edges: &BTreeSet<[StableDigest; 2]>,
+    facet_flips: bool,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Vec<FacetFlip>, DelaunayInsertionError> {
     validate_options(options)?;
     let mut work = InsertionWork::new(options, cancellation);
+    let mut protection = Protection::new(protected_faces);
     for node in inserted {
-        legalize_inserted_node(topology, *node, protected_faces, true, &mut work)?;
+        legalize_inserted_node(
+            topology,
+            *node,
+            &mut protection,
+            true,
+            LinkFlips::Complete {
+                kept_edges,
+                facet_flips,
+            },
+            &mut work,
+        )?;
     }
-    Ok(())
+    Ok(protection.flips)
+}
+
+/// A 4-4 flip inside a facet plane: the coplanar protected triangles `removed` (sharing the
+/// flipped edge) became `created` (sharing the new edge), as sorted node identities.
+/// `off_plane` is a node of a removed cell off that plane, for orienting the new triangles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::cdt) struct FacetFlip {
+    pub(in crate::cdt) removed: [[StableDigest; 3]; 2],
+    pub(in crate::cdt) created: [[StableDigest; 3]; 2],
+    pub(in crate::cdt) off_plane: StableDigest,
+}
+
+/// Protected faces as the caller gave them, with the facet flips made so far applied.
+struct Protection<'a> {
+    base: &'a BTreeSet<[StableDigest; 3]>,
+    removed: BTreeSet<[StableDigest; 3]>,
+    added: BTreeSet<[StableDigest; 3]>,
+    flips: Vec<FacetFlip>,
+}
+
+impl<'a> Protection<'a> {
+    fn new(base: &'a BTreeSet<[StableDigest; 3]>) -> Self {
+        Self {
+            base,
+            removed: BTreeSet::new(),
+            added: BTreeSet::new(),
+            flips: Vec::new(),
+        }
+    }
+
+    fn contains(&self, face: &[StableDigest; 3]) -> bool {
+        self.added.contains(face) || self.base.contains(face) && !self.removed.contains(face)
+    }
+
+    fn apply(&mut self, flip: FacetFlip) {
+        for face in flip.removed {
+            if !self.added.remove(&face) {
+                self.removed.insert(face);
+            }
+        }
+        for face in flip.created {
+            if !self.removed.remove(&face) {
+                self.added.insert(face);
+            }
+        }
+        self.flips.push(flip);
+    }
 }
 
 /// Admits a local edit of a constrained-Delaunay complex with the validator's exact rules,
@@ -399,19 +529,39 @@ pub(in crate::cdt) fn observed_change_violation(
     Ok(None)
 }
 
+/// Which link flips restore the Delaunay property around an inserted node.
+#[derive(Clone, Copy)]
+pub(in crate::cdt) enum LinkFlips<'a> {
+    /// 2-3 flips only. A Bowyer-Watson cavity leaves its link faces legal except across
+    /// barriers, where no flip may cross, so this suffices after a cavity insertion.
+    TwoToThree,
+    /// 2-3, 3-2 and 4-4 flips (Joe's flip set), for a node placed by a local split whose link
+    /// can be non-convex at an illegal face. A 3-2 or 4-4 flip removes the edge of the link
+    /// face that the inserted node's segment to the opposite apex passes; it never removes a
+    /// listed edge (sorted node identities).
+    Complete {
+        kept_edges: &'a BTreeSet<[StableDigest; 2]>,
+        /// Allow the 4-4 flip whose only protected shared faces are the two coplanar triangles
+        /// on the flipped edge; the caller then owns the reported [`FacetFlip`]s.
+        facet_flips: bool,
+    },
+}
+
 fn legalize_inserted_node(
     topology: &mut TopologyMutation,
     inserted: u32,
-    protected_faces: &BTreeSet<[StableDigest; 3]>,
+    protected_faces: &mut Protection<'_>,
     protect_region_boundaries: bool,
+    flips: LinkFlips<'_>,
     work: &mut InsertionWork<'_>,
 ) -> Result<(), DelaunayInsertionError> {
     let mut flip_count = 0_u64;
     while let Some(flip) = first_illegal_inserted_face(
         topology,
         inserted,
-        protected_faces,
+        &*protected_faces,
         protect_region_boundaries,
+        flips,
         work,
     )? {
         flip_count = flip_count.checked_add(1).ok_or_else(|| {
@@ -431,7 +581,30 @@ fn legalize_inserted_node(
                 "mutable legalization tetrahedron inventory limit exceeded",
             ));
         }
-        apply_two_to_three_flip(topology, flip).map_err(mutation_topology_error)?;
+        match flip {
+            LinkFlip::TwoToThree(flip) => {
+                apply_two_to_three_flip(topology, flip).map_err(mutation_topology_error)?
+            }
+            LinkFlip::Edge {
+                removed,
+                created,
+                region,
+                facet,
+            } => {
+                topology
+                    .replace_cavity(
+                        &removed,
+                        created
+                            .into_iter()
+                            .map(|vertices| (vertices, region.clone()))
+                            .collect(),
+                    )
+                    .map_err(mutation_topology_error)?;
+                if let Some(facet) = facet {
+                    protected_faces.apply(facet);
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -442,13 +615,26 @@ struct TwoToThreeFlip {
     face: [u32; 3],
 }
 
+enum LinkFlip {
+    TwoToThree(TwoToThreeFlip),
+    /// A 3-2 or 4-4 flip that removes one edge of the illegal link face.
+    Edge {
+        removed: BTreeSet<u32>,
+        created: Vec<[u32; 4]>,
+        region: Option<runmat_geometry_core::PersistentEntityId>,
+        facet: Option<FacetFlip>,
+    },
+}
+
 fn first_illegal_inserted_face(
     topology: &TopologyMutation,
     inserted: u32,
-    protected_faces: &BTreeSet<[StableDigest; 3]>,
+    protected_faces: &Protection<'_>,
     protect_region_boundaries: bool,
+    flips: LinkFlips<'_>,
     work: &mut InsertionWork<'_>,
-) -> Result<Option<TwoToThreeFlip>, DelaunayInsertionError> {
+) -> Result<Option<LinkFlip>, DelaunayInsertionError> {
+    let mut edge_flip = None;
     for left_index in topology.vertex_stars[inserted as usize].iter().copied() {
         let left = topology
             .tetrahedron(left_index)
@@ -500,34 +686,232 @@ fn first_illegal_inserted_face(
             topology.nodes[right_apex as usize],
             work,
         )? != PredicateSign::Positive
-            || !two_to_three_topology_is_admissible(
-                topology,
-                left_index,
-                right_index,
-                inserted,
-                right_apex,
-            )
-            || !two_to_three_geometry_is_admissible(
-                left.vertex_indices,
-                right.vertex_indices,
-                |node| {
-                    let node = topology.nodes[node as usize];
-                    DelaunayVolumeNode::explicit(
-                        node.identity,
-                        node.coordinates_m.canonical_value(),
-                    )
-                    .predicate_point()
-                },
-            )
-            .map_err(super::predicate_error)?
-            || !created_tetrahedra_are_exactly_nondegenerate(topology, inserted, right_apex, face)?
         {
             continue;
         }
-        return Ok(Some(TwoToThreeFlip {
-            left: left_index,
-            right: right_index,
-            face,
+        if two_to_three_topology_is_admissible(
+            topology,
+            left_index,
+            right_index,
+            inserted,
+            right_apex,
+        ) && two_to_three_geometry_is_admissible(
+            left.vertex_indices,
+            right.vertex_indices,
+            |node| {
+                let node = topology.nodes[node as usize];
+                DelaunayVolumeNode::explicit(node.identity, node.coordinates_m.canonical_value())
+                    .predicate_point()
+            },
+        )
+        .map_err(super::predicate_error)?
+            && created_tetrahedra_are_exactly_nondegenerate(topology, inserted, right_apex, face)?
+        {
+            return Ok(Some(LinkFlip::TwoToThree(TwoToThreeFlip {
+                left: left_index,
+                right: right_index,
+                face,
+            })));
+        }
+        // Prefer a 2-3 flip anywhere in the link; remember the first edge flip.
+        if edge_flip.is_none() {
+            if let LinkFlips::Complete {
+                kept_edges,
+                facet_flips,
+            } = flips
+            {
+                edge_flip = edge_link_flip(
+                    topology,
+                    [left_index, right_index],
+                    [inserted, right_apex],
+                    face,
+                    protected_faces,
+                    kept_edges,
+                    facet_flips,
+                    work,
+                )?;
+            }
+        }
+    }
+    Ok(edge_flip)
+}
+
+/// The 3-2 or 4-4 flip that removes an edge `xy` of the illegal link face `xyz` between
+/// `cells = [(p,x,y,z), (x,y,z,d)]`, where `ends = [p, d]`:
+/// - 3-2: `xy` has exactly the three cells `pxyz`, `xyzd`, `xypd`, and `xy` crosses the
+///   interior of triangle `pzd`; the cells become `xpzd` and `ypzd`.
+/// - 4-4: `p`, `d`, `x`, `y` are coplanar, `pd` and `xy` cross at interior points of both, and
+///   `xy` has exactly the four cells `pxyz`, `xyzd`, `xyde`, `xyep`; the cells become
+///   `pdxz`, `pdzy`, `pdye`, `pdex`.
+///
+/// Either flip retriangulates the same polytope, so the change is local. Every predicate is
+/// exact. Edges in `kept_edges`, protected faces among the removed cells' shared faces, and
+/// region changes block the flip.
+#[allow(clippy::too_many_arguments)]
+fn edge_link_flip(
+    topology: &TopologyMutation,
+    cells: [u32; 2],
+    ends: [u32; 2],
+    face: [u32; 3],
+    protected_faces: &Protection<'_>,
+    kept_edges: &BTreeSet<[StableDigest; 2]>,
+    facet_flips: bool,
+    work: &mut InsertionWork<'_>,
+) -> Result<Option<LinkFlip>, DelaunayInsertionError> {
+    let [p, d] = ends;
+    let region = topology
+        .tetrahedron(cells[0])
+        .expect("link flip cell is active")
+        .region_id
+        .clone();
+    let orient = |vertices: [u32; 4]| {
+        orient_volume_nodes(vertices.map(|vertex| topology.nodes[vertex as usize]))
+            .map_err(super::predicate_error)
+    };
+    for (x, y, z) in [
+        (face[0], face[1], face[2]),
+        (face[1], face[2], face[0]),
+        (face[0], face[2], face[1]),
+    ] {
+        work.checkpoint()?;
+        let mut identities = [topology.nodes[x as usize].identity, topology.nodes[y as usize].identity];
+        identities.sort_unstable();
+        if kept_edges.contains(&identities) {
+            continue;
+        }
+        let star = topology.vertex_stars[x as usize]
+            .iter()
+            .copied()
+            .filter(|index| {
+                topology
+                    .tetrahedron(*index)
+                    .is_some_and(|tetrahedron| tetrahedron.vertex_indices.contains(&y))
+            })
+            .collect::<BTreeSet<_>>();
+        if !(star.len() == 3 || star.len() == 4) || !cells.iter().all(|cell| star.contains(cell)) {
+            continue;
+        }
+        // Every face shared by two cells of the edge star contains xy; none may be protected,
+        // and the star must lie in one region.
+        let mut ring = BTreeSet::new();
+        let mut blocked = false;
+        let mut protected_shared = BTreeSet::new();
+        for index in &star {
+            let tetrahedron = topology.tetrahedron(*index).expect("edge star cell is active");
+            if tetrahedron.region_id != region {
+                blocked = true;
+                break;
+            }
+            for vertex in tetrahedron.vertex_indices {
+                if vertex != x && vertex != y {
+                    ring.insert(vertex);
+                }
+            }
+            for (slot, neighbor) in tetrahedron.neighbors.iter().enumerate() {
+                let shared = stable_face(topology, tetrahedron.vertex_indices, slot);
+                if neighbor.is_some_and(|neighbor| star.contains(&neighbor))
+                    && protected_faces.contains(&shared)
+                {
+                    protected_shared.insert(shared);
+                }
+            }
+        }
+        if blocked || ring.len() != star.len() {
+            continue;
+        }
+        work.predicate()?;
+        if star.len() == 3 {
+            if !protected_shared.is_empty() {
+                continue;
+            }
+            if ring != BTreeSet::from([p, z, d]) {
+                continue;
+            }
+            let created = [[x, p, z, d], [y, p, z, d]];
+            if !two_to_three_geometry_is_admissible(created[0], created[1], |vertex| {
+                topology.nodes[vertex as usize].materialized_predicate_point()
+            })
+            .map_err(super::predicate_error)?
+            {
+                continue;
+            }
+            return Ok(Some(LinkFlip::Edge {
+                removed: star,
+                created: created.to_vec(),
+                region,
+                facet: None,
+            }));
+        }
+        // 4-4: the fourth ring vertex e closes the ring p, z, d, e around xy.
+        let Some(e) = ring
+            .iter()
+            .copied()
+            .find(|vertex| ![p, z, d].contains(vertex))
+        else {
+            continue;
+        };
+        if !ring.contains(&p) || !ring.contains(&d) || ring.len() != 4 {
+            continue;
+        }
+        let has_cell = |vertices: [u32; 4]| {
+            star.iter().any(|index| {
+                let corners = topology
+                    .tetrahedron(*index)
+                    .expect("edge star cell is active")
+                    .vertex_indices;
+                vertices.iter().all(|vertex| corners.contains(vertex))
+            })
+        };
+        if !has_cell([x, y, d, e]) || !has_cell([x, y, e, p]) {
+            continue;
+        }
+        if orient([p, d, x, y])? != PredicateSign::Zero {
+            continue;
+        }
+        let opposite = |first: PredicateSign, second: PredicateSign| {
+            first != PredicateSign::Zero && second != PredicateSign::Zero && first != second
+        };
+        if !opposite(orient([p, d, z, x])?, orient([p, d, z, y])?)
+            || !opposite(orient([x, y, z, p])?, orient([x, y, z, d])?)
+            || !opposite(orient([p, d, x, z])?, orient([p, d, x, e])?)
+        {
+            continue;
+        }
+        // The new edge pd must not exist outside the removed cells.
+        if topology.vertex_stars[p as usize].iter().any(|index| {
+            !star.contains(index)
+                && topology
+                    .tetrahedron(*index)
+                    .is_some_and(|tetrahedron| tetrahedron.vertex_indices.contains(&d))
+        }) {
+            continue;
+        }
+        // A 4-4 flip may replace the two coplanar protected triangles x-y-p and x-y-d of one
+        // facet by p-d-x and p-d-y: the same planar region, now triangulated through p-d. Any
+        // other protected shared face blocks it.
+        let stable = |vertices: [u32; 3]| {
+            let mut identities = vertices.map(|vertex| topology.nodes[vertex as usize].identity);
+            identities.sort_unstable();
+            identities
+        };
+        let facet = if protected_shared.is_empty() {
+            None
+        } else if facet_flips
+            && protected_shared == BTreeSet::from([stable([x, y, p]), stable([x, y, d])])
+        {
+            Some(FacetFlip {
+                removed: [stable([x, y, p]), stable([x, y, d])],
+                created: [stable([p, d, x]), stable([p, d, y])],
+                off_plane: topology.nodes[z as usize].identity,
+            })
+        } else {
+            continue;
+        };
+        return Ok(Some(LinkFlip::Edge {
+            removed: star,
+            created: vec![[p, d, x, z], [p, d, z, y], [p, d, y, e], [p, d, e, x]],
+            region,
+            facet,
         }));
     }
     Ok(None)
@@ -596,3 +980,6 @@ fn apply_two_to_three_flip(
     topology.replace_cavity(&removed, created)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

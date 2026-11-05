@@ -110,6 +110,31 @@ pub struct DelaunaySegmentRecovery {
     pub recovery_passes: u32,
 }
 
+/// Sorted node-identity keys of edges, for the edges link flips must keep.
+pub(in crate::cdt) fn sorted_edge_keys(
+    edges: impl IntoIterator<Item = [StableDigest; 2]>,
+) -> BTreeSet<[StableDigest; 2]> {
+    edges
+        .into_iter()
+        .map(|mut edge| {
+            edge.sort_unstable();
+            edge
+        })
+        .collect()
+}
+
+/// Every interval of every recovered segment, as sorted node-identity keys.
+pub(in crate::cdt) fn recovered_segment_edge_keys(
+    segments: &[DelaunayRecoveredSegment],
+) -> BTreeSet<[StableDigest; 2]> {
+    sorted_edge_keys(
+        segments
+            .iter()
+            .flat_map(|segment| segment.nodes.windows(2))
+            .map(|pair| [pair[0].identity, pair[1].identity]),
+    )
+}
+
 pub(in crate::cdt) fn recovered_segment_midpoint(
     recovery: &DelaunaySegmentRecovery,
     segment_index: usize,
@@ -750,10 +775,14 @@ pub(in crate::cdt) fn recover_temporary_delaunay_segment_in_place(
         let inserted = (original_node_count..observed.nodes.len())
             .map(|index| index as u32)
             .collect::<Vec<_>>();
+        let kept_edges = sorted_edge_keys(protected_edges.iter().copied().chain(
+            chain.windows(2).map(|pair| [pair[0].identity, pair[1].identity]),
+        ));
         match legalize_inserted_nodes(
             &mut observed,
             &inserted,
             &protected_face_set,
+            &kept_edges,
             options.insertion,
             cancellation,
         ) {

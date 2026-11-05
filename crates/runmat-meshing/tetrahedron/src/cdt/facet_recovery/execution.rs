@@ -150,7 +150,13 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                         inserted_node_count = insertions.len(),
                         "facet support split"
                     );
-                    protection.apply_splits(&mut facets, protected_splits);
+                    apply_splits_with_current(
+                        &mut protection,
+                        &mut facets,
+                        &mut support,
+                        constraint_index as u32,
+                        protected_splits,
+                    );
                     refinement_rank += 1;
                     steiner_insertions.extend(insertions);
                     ensure_pending_capacity(
@@ -179,7 +185,13 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                         protected_facet_split_count = protected_splits.len(),
                         "facet recovery split a protected segment"
                     );
-                    protection.apply_splits(&mut facets, protected_splits);
+                    apply_splits_with_current(
+                        &mut protection,
+                        &mut facets,
+                        &mut support,
+                        constraint_index as u32,
+                        protected_splits,
+                    );
                     pending.push_front(pending_triangle);
                     protected_edges = working
                         .segments
@@ -220,43 +232,109 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                 )
                 .map(|recovered| (recovered, recovered))
             })? {
-                // The provider's topology becomes the working topology inside canonical_call.
-                if let Some(insertions) =
-                    working.canonical_call(constraint_index as u32, &mut work, |source, work| {
-                        Ok(try_recover_facet_with_cavity(
-                            source,
-                            triangle.node_identities,
-                            &protection.triangles,
+                // The facet cavity runs on the working topology first; the canonical provider
+                // decides only when the in-place path declines, and its topology then becomes
+                // the working topology inside canonical_call.
+                let cavity_insertions = match working.atomic(|working| {
+                    let recovered = try_recover_facet_with_cavity_in_place(
+                        working,
+                        triangle.node_identities,
+                        &protection.triangles,
+                        &protected_edges,
+                        constraint_index as u32,
+                        &mut work,
+                    )?;
+                    let changed = recovered.is_some();
+                    Ok((recovered, changed))
+                })? {
+                    Some(insertions) => Some(insertions),
+                    None => {
+                        let in_place = work.last_rejection().map(str::to_owned);
+                        let canonical = working.canonical_call(
                             constraint_index as u32,
-                            work,
-                        )?
-                        .map(|updated| {
-                            source.topology = updated.topology;
-                            updated.steiner_insertions
-                        }))
-                    })?
-                {
+                            &mut work,
+                            |source, work| {
+                                Ok(try_recover_facet_with_cavity(
+                                    source,
+                                    triangle.node_identities,
+                                    &protection.triangles,
+                                    constraint_index as u32,
+                                    work,
+                                )?
+                                .map(|updated| {
+                                    source.topology = updated.topology;
+                                    updated.steiner_insertions
+                                }))
+                            },
+                        )?;
+                        if let (None, Some(in_place)) = (&canonical, in_place) {
+                            let reason = work
+                                .last_rejection()
+                                .unwrap_or("no reason recorded")
+                                .to_owned();
+                            work.reject(format!("{reason}; in-place cavity path: {in_place}"));
+                        }
+                        canonical
+                    }
+                };
+                if let Some(insertions) = cavity_insertions {
                     steiner_insertions.extend(insertions);
                 } else {
                     let recovery_rejection = work.last_rejection().map(str::to_owned);
-                    match working.canonical_call(
-                        constraint_index as u32,
-                        &mut work,
-                        |source, work| {
-                            refine_support_triangle_interior(
-                                source,
-                                &pending_triangle,
-                                SupportRefinementContext {
-                                    protected_triangles: &protection.triangles,
-                                    protected_faces: &protection.ordered_faces(),
-                                    protected_edges: &protected_edges,
-                                    constraint_index: constraint_index as u32,
-                                    refinement_rank,
-                                },
-                                work,
+                    let protected_faces = protection.ordered_faces();
+                    let interior_context = || SupportRefinementContext {
+                        protected_triangles: &protection.triangles,
+                        protected_faces: &protected_faces,
+                        protected_edges: &protected_edges,
+                        constraint_index: constraint_index as u32,
+                        refinement_rank,
+                    };
+                    let interior = match working.atomic(|working| {
+                        let state = refine_support_triangle_interior_in_place(
+                            working,
+                            &pending_triangle,
+                            interior_context(),
+                            &mut work,
+                        )?;
+                        let changed = matches!(
+                            state,
+                            Some(
+                                SupportTriangleEdgeState::Split { .. }
+                                    | SupportTriangleEdgeState::RefinedSegment { .. }
                             )
-                        },
-                    )? {
+                        );
+                        Ok((state, changed))
+                    })? {
+                        Some(state) => state,
+                        None => {
+                            let in_place = work.last_rejection().map(str::to_owned);
+                            let state = working.canonical_call(
+                                constraint_index as u32,
+                                &mut work,
+                                |source, work| {
+                                    refine_support_triangle_interior(
+                                        source,
+                                        &pending_triangle,
+                                        interior_context(),
+                                        work,
+                                    )
+                                },
+                            )?;
+                            if let (SupportTriangleEdgeState::Unavailable, Some(in_place)) =
+                                (&state, in_place)
+                            {
+                                let reason = work
+                                    .last_rejection()
+                                    .unwrap_or("no reason recorded")
+                                    .to_owned();
+                                work.reject(format!(
+                                    "{reason}; in-place interior path: {in_place}"
+                                ));
+                            }
+                            state
+                        }
+                    };
+                    match interior {
                         SupportTriangleEdgeState::Split {
                             triangles,
                             insertions,
@@ -270,7 +348,13 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                                 inserted_node_count = insertions.len(),
                                 "facet interior split"
                             );
-                            protection.apply_splits(&mut facets, protected_splits);
+                            apply_splits_with_current(
+                        &mut protection,
+                        &mut facets,
+                        &mut support,
+                        constraint_index as u32,
+                        protected_splits,
+                    );
                             refinement_rank += 1;
                             steiner_insertions.extend(insertions);
                             ensure_pending_capacity(
@@ -292,7 +376,13 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
                                 protected_facet_split_count = protected_splits.len(),
                                 "facet recovery split a protected segment"
                             );
-                            protection.apply_splits(&mut facets, protected_splits);
+                            apply_splits_with_current(
+                        &mut protection,
+                        &mut facets,
+                        &mut support,
+                        constraint_index as u32,
+                        protected_splits,
+                    );
                             pending.push_front(pending_triangle);
                             protected_edges = working
                                 .segments
@@ -367,6 +457,23 @@ pub(in crate::cdt) fn construct_delaunay_facet_recovery(
         steiner_insertions,
     };
     Ok(recovery)
+}
+
+/// Applies protected-facet changes to every recovered facet, including the triangles the current
+/// constraint has recovered so far.
+fn apply_splits_with_current(
+    protection: &mut FacetProtection,
+    facets: &mut Vec<DelaunayRecoveredFacet>,
+    support: &mut Vec<DelaunayRecoveredFacetTriangle>,
+    constraint_index: u32,
+    splits: Vec<super::conforming_split::ProtectedFacetSplit>,
+) {
+    facets.push(DelaunayRecoveredFacet {
+        constraint_index,
+        triangles: std::mem::take(support),
+    });
+    protection.apply_splits(facets, splits);
+    *support = facets.pop().expect("current facet").triangles;
 }
 
 pub(super) fn support_edge_exists(

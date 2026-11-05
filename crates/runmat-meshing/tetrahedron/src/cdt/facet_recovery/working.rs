@@ -84,6 +84,32 @@ impl FacetRecoveryWorking {
         Ok(result)
     }
 
+    /// Runs a multi-step local edit as one unit: when `body` reports no change or fails, every
+    /// topology edit, segment split and Steiner record it made is undone. `body` must not call
+    /// [`Self::canonical_call`], which replaces the topology wholesale.
+    pub(super) fn atomic<R>(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> Result<(R, bool), DelaunayFacetRecoveryError>,
+    ) -> Result<R, DelaunayFacetRecoveryError> {
+        // The body edits only the working topology, so the retained canonical form is not needed
+        // inside it and is valid again after a rollback.
+        let canonical = self.canonical.take();
+        let segments = self.segments.clone();
+        let steiner_node_identities = self.steiner_node_identities.clone();
+        let nodes_before = self.topology.nodes().len();
+        self.topology.begin_detached_trial();
+        let outcome = body(self);
+        let keep = matches!(outcome, Ok((_, true)));
+        self.topology.finish_detached_trial(keep);
+        if !keep {
+            debug_assert_eq!(self.topology.nodes().len(), nodes_before);
+            self.canonical = canonical;
+            self.segments = segments;
+            self.steiner_node_identities = steiner_node_identities;
+        }
+        outcome.map(|(result, _)| result)
+    }
+
     pub(super) fn record_segment_split(
         &mut self,
         segment_index: usize,

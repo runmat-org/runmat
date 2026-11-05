@@ -190,3 +190,52 @@ Commit: see `git log -1` on q-mesh-fix-6 ("Facet recovery: in-place support-edge
   c. Fix 8566, then add a regression test from a sub-a or sub-b dump (RUNMAT_DEBUG_VOLUME_DUMP_DIR with the qmf-mesh
      harness), run release CLIs on m01 at 8 mm and on lid10, and notify q-hero-pack-2 (a3654a9036a5ac106).
 - Harness: chain-p11.sh, p11.steps, rssmax.sh in ~/runs/qmf6 (hero replay with peak RSS; qmf-mesh example; subsets).
+
+## q-mesh-fix-11 (2026-11-04, handed back; WIP, constraint 8566 still fails)
+Base 0d5790e4ef. One commit on q-mesh-fix-6 (see git log -1). Changes:
+1. Link flips: `legalize_inserted_node` takes `LinkFlips::{TwoToThree, Complete { kept_edges, facet_flips }}`.
+   Complete adds exact 3-2 and 4-4 flips (Joe's set) on the edge of an illegal link face that segment p-d passes;
+   2-3 is preferred anywhere in the link. No flip removes a kept edge (recovered segment edges, split halves), a
+   protected face or a region boundary, with one exception: with `facet_flips`, a 4-4 flip may replace the two
+   coplanar protected triangles x-y-p, x-y-d by p-d-x, p-d-y (2D Delaunay flip inside one facet; x-y is not a
+   segment edge, so both triangles are in one facet). Reported as `FacetFlip`; callers turn it into
+   ProtectedFacetSplit records (first source -> both new triangles, oriented like it; second source -> none).
+   The Bowyer-Watson path keeps 2-3 only. Facet flips are on only in the pair split and split_and_admit_locally.
+2. Pair split at a shared vertex legalizes each node before the next; the second node uses the edge star when its
+   constrained cavity would swallow the whole star of a kept edge (that is what lost the half in p12).
+3. In-place facet cavity recovery (cavity/in_place.rs): plan on the working topology; direct, pair, progressive,
+   exact and batch Steiner refills as cavity trials with exact local admission. Wrapped in
+   `FacetRecoveryWorking::atomic` (detached nested trial: rolls back topology, segments and Steiner ids), so the
+   canonical fallback starts from the original state (no orphan Steiner nodes or identity collisions).
+4. In-place facet-interior refinement (refine_support_triangle_interior_in_place); canonical only on decline.
+5. canonical_node_inventory duplicate-position check was O(N^2) per Steiner refill; now one ordered set.
+6. execution.rs: protected-facet splits now also update the current constraint's recovered `support` triangles
+   (apply_splits_with_current); before, only earlier facets and protection were updated.
+7. Unit tests (insertion/mutable/tests.rs): Complete flips restore global Delaunay after 40 edge-star splits of a
+   48-point set where 2-3 alone stalls; Complete flips never remove kept edges.
+
+### Results
+- Tet lib: 590 passed, 0 failed, 7 ignored (588 + 2 new) on the final code (~/logs/qmf6/q4.out, q4-tet.log).
+- p12 (code = items 1,3,4,5 without facet flips / edge-star fallback):
+  - hero replay: still fails at 8566 after 755 s (was 985 s); peak RSS 20.0 GB (was 15.5 GB)
+    (~/logs/qmf6/p12h.out, p12-hero.log, p12-rss.txt; samples ~/runs/qmf6/prof/p12-*.txt). New reason: the pair
+    split lost the half V'-Q (P's constrained cavity swallowed its star) -> fixed by item 2, not yet rerun.
+    The RSS increase is unexplained (look at the p12 samples first).
+  - sub-a (qmf-mesh, 0.008/0.0002 tet4): FacetRecovery UnsatisfiableConstraint at constraint 1869 after 284 s
+    (~/runs/qmf6/p12/suba.out). Pre-existing: the sub-a volume dump (~/runs/qmf6/dumps/p12/volume-input-54192-0.json)
+    replays to the same failure on 0d5790e4ef (46 s) and on p12 (36 s) (~/logs/qmf6/suba-base.log, suba-new.log).
+    sub-a replay is the fast reproducer (~35 s debug).
+  - sub-b: killed by the 8 GB physical guard after 1315 s (~/runs/qmf6/p12/subb.json).
+- suba-r2 (item 2 added): still 1869. Cause: in the facet plane z=.029 a segment split leaves protected triangle ABC
+  as a sliver (B 3.9e-5 m off line AC) and the coplanar apex E of protected ACE lies in ABC's circumcircle; the facet
+  triangulation is not 2D Delaunay, so no CDT holds both. Item 1's facet flips target exactly this; the sub-a replay
+  with them (q4) never ran: the gate held it for over an hour at 87-98 GB free (floor 100 GB; others' targets).
+
+### Next
+a. Rerun `~/runs/qmf6/suba-new.sh <tag>` (sub-a replay, ~35 s) on this commit. If 1869 passes, run the hero replay
+   (`batch.sh p12h` with rssmax/sampler as in chain-p12.sh). If FacetFlip records break final facet validation,
+   check the coverage rule there (a flip child is not inside its single source triangle).
+b. If the hero passes 8566: regression test from the sub-a dump, release CLIs on m01 8 mm and lid10, notify
+   q-hero-pack-2 (a3654a9036a5ac106).
+c. Explain the 15.5 -> 20 GB RSS rise (p12 samples).
+- Disk: removed my stale builtins/runtime/fea artifacts (Nov 3) and ~/targets/q-mesh-fix-6-base; my target is ~27 GB.
