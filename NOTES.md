@@ -360,3 +360,33 @@ Commits 90d372c41c, 7f83d96370 on q-mesh-fix-6. Build Mac sources: ~/src/qmf14 (
 - Tet lib on 7f83d96370 sources: 595/0/7 ign (~/logs/qmf6/e11.out). Tet lib on 2d79f1744d: 595/0 (q13.out).
 - Hero receipts: q13 on 2d79f1744d fails 8566 after 771 s, RSS 19.97 GB. e3 on 90d372c41c fails 8566 after 781 s,
   20.7 GB. e10 on 7f83d96370 (+prints) fails 8566 after 807 s, 18.57 GB. All above the 18 GB target.
+
+## q-mesh-fix-15 (2026-11-05, in progress)
+Merged integration/0.7.1 b32655585d (4610b8500b; NOTES.md kept ours). Scripts: ~/runs/qmf6/chain-f.sh <tag>
+(HERO=1 adds the hero full pipeline), qmf15-edges-stream.py <dump> <zlo> <zhi> (per-face edge lengths),
+qmf15-est.py (surface growth estimate), qmf15-dbgpatch.py (FACEGAP prints to $QMF_DEBUG_FACEGAP file).
+### Why the TIM edges were 5-8 mm
+- Measured (old dumps): sub-a TIM top/bottom p50 3.8 mm, p90 6.35, max 8.0; hero TIM bottom b211 p90 4.7,
+  max 8.0; hero cell bottoms (TIM top) max 4.8; lid bottom max 7.7.
+- Edge proximity is directional: an edge pair 3 mm apart gets gap/2 only along the separation (z for the
+  TIM's top and bottom outline edges); the edge keeps the 8 mm target along itself. Face proximity
+  (isotropic gap/cells over both faces) ran only when the request authored `cells_across_gap`, so the
+  hero and sub-a never got it. 167efa2926 (void rule) was not involved.
+- Face samples were matched point to point (9 per edge, unaligned between faces), so even when on, a
+  short top edge over a long bottom edge often found no pair inside the 25 degree cone.
+### Fix (0fa0a55035)
+- Face gaps are always measured. Without an authored count, faces get one layer across
+  (`DEFAULT_CELLS_ACROSS_FACE_GAP = 1`: surface edges no longer than the layer thickness); authored
+  `cells_across_gap` divides it. Edge default stays 2.
+- Each face sample measures to the closest point of the other face's boundary polylines (per-edge sample
+  order), so unaligned outlines still find the point straight across. Void rule unchanged.
+- Tests: curve 48/0, size 56/0 (~/logs/qmf6/f1-curve.log). New: thin_layer_faces_with_unmatched_outline_
+  samples_face_each_other, unrequested_cells_across_a_face_gap_are_one_layer.
+### Results so far
+- sub-a full pipeline (f1): TIM top/bottom now max 3.0 mm, lid max 2.0 mm; surface 247k nodes (was 54k);
+  then the 8 GB guard killed volume meshing after 1927 s (~/runs/qmf6/f1/suba.json). Dump:
+  ~/runs/qmf6/dumps/f1-suba/volume-input-27759-0.json.
+- hero full pipeline (f1): surface fails after 4928 s, peak RSS 2.6 GB: "exact surface mesh ResourceLimit
+  ... projected encoded bytes exceed the contract limit" (~/runs/qmf6/f1/hero.out). Face gaps found
+  (~/logs/qmf6/f2-facegap.txt): 2 mm on 14 cell/barrier faces (500x95) and lid faces, 3 mm on TIM faces.
+  Estimate from the old dump: 1.46M -> 1.70M surface triangles.
