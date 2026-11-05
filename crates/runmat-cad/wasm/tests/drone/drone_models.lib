@@ -3,16 +3,25 @@
 * vendor netlist.
 
 * 36 V 2 A synchronous buck, 500 kHz, 0.8 V reference, 1 ms internal soft start, voltage mode
-* with input feedforward and an internal type-II compensator. Pins: VIN EN BST SW FB GND.
+* with input feedforward and an internal type-II compensator. Under-voltage lockout at 4.5 V:
+* until VIN and EN are up, the low-side switch holds SW at ground and COMP is held at 0 V (no
+* windup from a load on a dead output); COMP clamps at 2.4 V. Pins: VIN EN BST SW FB GND.
 .subckt BUCK36V vin en bst sw fb gnd
-Bref ref gnd V = {0.8*min(1, time/1m)*0.5*(1+tanh((V(en,gnd)-1.2)*20))}
-Gea gnd comp VALUE = {300u*(V(ref,gnd)-V(fb,gnd))}
+Bok ok gnd V = {0.5*(1+tanh((V(vin,gnd)-4.5)*10))*0.5*(1+tanh((V(en,gnd)-1.2)*20))}
+Bref ref gnd V = {0.8*min(1, time/1m)*V(ok,gnd)}
+Gea gnd comp VALUE = {300u*(V(ref,gnd)-V(fb,gnd))*V(ok,gnd)}
+Gdis comp gnd VALUE = {10m*V(comp,gnd)*(1-V(ok,gnd))}
 Rea comp gnd 5Meg
+Dclh comp clh DCLAMP
+Vclh clh gnd 2.4
+Dcll ncl comp DCLAMP
+Vcll ncl gnd -0.2
+.model DCLAMP D(is=1e-12 n=0.05)
 Rc comp cz 22k
 Cc cz gnd 4.7n
 Cp comp gnd 47p
 Vramp ramp gnd PULSE(0 1 0 1.96u 20n 20n 2u)
-Bpwm ctl gnd V = {0.5*(1+tanh((limit(V(comp,gnd)*10/max(V(vin,gnd),5), 0, 0.95) - V(ramp,gnd))*60))}
+Bpwm ctl gnd V = {V(ok,gnd)*0.5*(1+tanh((limit(V(comp,gnd)*10/max(V(vin,gnd),5), 0, 0.95) - V(ramp,gnd))*60))}
 Bctlb ctlb gnd V = {1 - V(ctl,gnd)}
 S1 vin sw ctl gnd SWHS
 S2 sw gnd ctlb gnd SWLS
