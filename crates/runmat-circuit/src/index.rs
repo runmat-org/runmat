@@ -1110,13 +1110,20 @@ pub fn add_board_reusing(
             source: r.source.to_string(),
         })
         .collect();
+    // Designators for parts whose package doesn't name them, placed once for the whole board
+    // (the KiCad export writes the same).
+    let designators = crate::designators::designators(board);
     let footprint_row = |f: &crate::layout::Footprint| -> FootprintRow {
         let g = crate::display::footprint(f);
+        let mut texts = g.texts;
+        if let Some(d) = designators.get(&f.id) {
+            texts.push(crate::display::designator_text(f, d));
+        }
         FootprintRow {
             courtyard: g.courtyard,
             silkscreen: g.silkscreen,
             fab: g.fab,
-            texts: g.texts,
+            texts,
             reference: f.reference.clone(),
             value: f.value.clone(),
             x_mm: mm(f.at.x),

@@ -225,6 +225,20 @@ pub fn footprint(f: &Footprint) -> FootprintGeometry {
     out
 }
 
+/// A placed designator as silkscreen text on the part's side, upright.
+pub fn designator_text(f: &Footprint, d: &crate::designators::Designator) -> TextGeometry {
+    TextGeometry {
+        id: None,
+        layer: layer_name(Layer::Silk(f.side), 2),
+        x_mm: mm(d.at.x),
+        y_mm: mm(d.at.y),
+        text: f.reference.clone(),
+        size_mm: mm(d.size),
+        rotation: 0.0,
+        mirrored: f.side == Side::Bottom,
+    }
+}
+
 /// A pad's placement: centre, absolute rotation, size, drill and, for shapes the canvas can't
 /// draw from parameters, its outline.
 #[derive(Clone, Debug, Default, PartialEq)]

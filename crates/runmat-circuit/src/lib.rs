@@ -53,6 +53,7 @@
 pub mod board_rules;
 pub mod commands;
 pub mod connectivity;
+pub mod designators;
 pub mod display;
 pub mod drawn;
 pub mod drc;

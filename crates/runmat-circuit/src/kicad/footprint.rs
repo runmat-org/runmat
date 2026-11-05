@@ -789,6 +789,17 @@ pub type Placement<'a> = (
 
 /// Writes a footprint node. For a library file pass `placement = None`.
 pub fn write(pkg: &Package, placement: Option<Placement<'_>>) -> SExpr {
+    write_with_designator(pkg, placement, None)
+}
+
+/// [`write`] with the board's designator for the part (see [`crate::designators`]): its centre
+/// in the package's own frame (nm) and its height. Without one the reference sits 1.5 mm above
+/// the origin at 1 mm, as library footprints have it.
+pub fn write_with_designator(
+    pkg: &Package,
+    placement: Option<Placement<'_>>,
+    designator: Option<(Point, Coord)>,
+) -> SExpr {
     let in_board = placement.is_some();
     let (side, rot_k, at, reference, value) = match &placement {
         Some((f, _)) => {
@@ -831,28 +842,40 @@ pub fn write(pkg: &Package, placement: Option<Placement<'_>>) -> SExpr {
     if !pkg.description.is_empty() {
         items.push(SExpr::list("descr", vec![SExpr::str(&pkg.description)]));
     }
-    let prop = |k: &str, v: &str, layer: &str, y: f64| {
+    let prop_at = |k: &str, v: &str, layer: &str, at: SExpr, size: f64| {
         SExpr::list(
             "property",
             vec![
                 SExpr::str(k),
                 SExpr::str(v),
-                SExpr::list("at", vec![SExpr::num(0.0), SExpr::num(y)]),
+                at,
                 SExpr::list("layer", vec![SExpr::str(layer)]),
                 SExpr::list(
                     "effects",
                     vec![SExpr::list(
                         "font",
                         vec![
-                            SExpr::list("size", vec![SExpr::num(1.0), SExpr::num(1.0)]),
-                            SExpr::list("thickness", vec![SExpr::num(0.15)]),
+                            SExpr::list("size", vec![SExpr::num(size), SExpr::num(size)]),
+                            SExpr::list("thickness", vec![SExpr::num((size * 0.15).max(0.1))]),
                         ],
                     )],
                 ),
             ],
         )
     };
-    items.push(prop("Reference", &reference, &flip_layer("F.SilkS"), -1.5));
+    let prop = |k: &str, v: &str, layer: &str, y: f64| {
+        prop_at(k, v, layer, SExpr::list("at", vec![SExpr::num(0.0), SExpr::num(y)]), 1.0)
+    };
+    items.push(match designator {
+        Some((p, size)) => prop_at(
+            "Reference",
+            &reference,
+            &flip_layer("F.SilkS"),
+            xy("at", local(p)),
+            crate::geom::to_mm(size),
+        ),
+        None => prop("Reference", &reference, &flip_layer("F.SilkS"), -1.5),
+    });
     items.push(prop("Value", &value, &flip_layer("F.Fab"), 1.5));
     if let Some((f, _)) = &placement {
         for (k, v) in &f.properties {

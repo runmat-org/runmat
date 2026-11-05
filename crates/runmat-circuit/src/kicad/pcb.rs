@@ -1056,7 +1056,15 @@ fn net_table(b: &Board) -> Vec<SExpr> {
     v
 }
 
-fn fp_node(f: &Footprint, b: &Board, codes: &Codes, orig: Option<&SExpr>) -> SExpr {
+/// A footprint node. A footprint read from the file keeps its own reference placement; a new
+/// one is written with `designator`.
+fn fp_node(
+    f: &Footprint,
+    b: &Board,
+    codes: &Codes,
+    orig: Option<&SExpr>,
+    designator: Option<&crate::designators::Designator>,
+) -> SExpr {
     let lookup = |pad: &str| {
         f.pad_nets.get(pad).and_then(|n| {
             codes
@@ -1064,7 +1072,11 @@ fn fp_node(f: &Footprint, b: &Board, codes: &Codes, orig: Option<&SExpr>) -> SEx
                 .map(|c| (c.parse::<i64>().unwrap_or(0), b.net_name(*n).to_string()))
         })
     };
-    let fresh = footprint::write(&f.package, Some((f, &lookup)));
+    let fresh = footprint::write_with_designator(
+        &f.package,
+        Some((f, &lookup)),
+        designator.map(|d| (crate::designators::to_local(f, d.at), d.size)),
+    );
     let Some(o) = orig else { return fresh };
     // Keep the original's unknown children; regenerate placement and pads.
     let mut out = merge(Some(o), fresh.clone(), &["at", "layer", "pad"]);
@@ -1249,7 +1261,7 @@ impl KicadPcb {
                 }
                 Some(Key::Footprint(id)) => match (b.footprints.get(id), s.footprints.get(id)) {
                     (Some(f), Some(o)) if f == o && !nets_changed => out.push(node.clone()),
-                    (Some(f), _) => out.push(fp_node(f, b, &codes, Some(node))),
+                    (Some(f), _) => out.push(fp_node(f, b, &codes, Some(node), None)),
                     (None, _) => {}
                 },
                 Some(Key::Track(id)) => match (b.tracks.get(id), s.tracks.get(id)) {
@@ -1413,8 +1425,19 @@ impl KicadPcb {
                 }
             })
             .collect();
-        for f in b.footprints.values().filter(|f| !known_fp.contains(&f.id)) {
-            out.push(fp_node(f, b, &codes, None));
+        // A footprint new to the file takes the board's designator placement (the display's).
+        let fresh: Vec<&Footprint> = b
+            .footprints
+            .values()
+            .filter(|f| !known_fp.contains(&f.id))
+            .collect();
+        let designators = if fresh.is_empty() {
+            BTreeMap::new()
+        } else {
+            crate::designators::designators(b)
+        };
+        for f in fresh {
+            out.push(fp_node(f, b, &codes, None, designators.get(&f.id)));
         }
         let has = |k: &dyn Fn(&Key) -> bool| -> Vec<ItemId> {
             self.origin
