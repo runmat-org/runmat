@@ -1116,7 +1116,9 @@ fn scene_chunk_to_mesh_plot(
         mesh_id: chunk.mesh_id.clone(),
         face_color_rgba: chunk.material.albedo.to_array(),
         edge_color_rgba: [0.08, 0.10, 0.13, 1.0],
-        face_alpha: chunk.material.albedo.w,
+        // The chunk's opacity is already in its face and vertex colours; a face alpha would
+        // apply it a second time when the mesh is decoded.
+        face_alpha: 1.0,
         edge_alpha: 0.0,
         edge_width: 0.0,
         edge_mode: "none".to_string(),
