@@ -282,3 +282,142 @@ fn cache_lifecycle_cancellation_and_missing_objects_preserve_committed_receipts(
         .is_err());
     assert!(receipt_path.exists());
 }
+fn staging_name(target: &str, pid: u32) -> String {
+    format!(".{target}.publish-{pid}-{}", uuid::Uuid::new_v4())
+}
+#[cfg(unix)]
+fn exited_pid() -> u32 {
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    pid
+}
+// A writer killed between staging and hard-linking leaves its temp behind.
+// The next owner reclaims it and publishes; the committed receipt survives.
+#[cfg(unix)]
+#[test]
+fn cache_lifecycle_reclaims_publication_staging_left_by_an_exited_writer() {
+    let cache = Cache::new();
+    let mut lifecycle = Lifecycle::default();
+    cache.publish(&mut lifecycle, 0, &[(b"committed", 8)]);
+    let committed = cache
+        .index
+        .join(filename(Digest::sha256(0usize.to_le_bytes())));
+    let pid = exited_pid();
+    let receipt_temp = cache.index.join(staging_name(
+        &filename(Digest::sha256(1usize.to_le_bytes())),
+        pid,
+    ));
+    let object_temp = cache
+        .objects
+        .join(staging_name(&filename(Digest::sha256(b"partial")), pid));
+    std::fs::write(&receipt_temp, b"{\"partial").unwrap();
+    std::fs::write(&object_temp, b"partial").unwrap();
+    let mut cold = Lifecycle::default();
+    cache.publish(&mut cold, 2, &[(b"committed", 8)]);
+    assert_eq!(cold.discoveries, 1);
+    assert!(!receipt_temp.exists());
+    assert!(!object_temp.exists());
+    assert!(committed.exists());
+    assert!(cache
+        .index
+        .join(filename(Digest::sha256(2usize.to_le_bytes())))
+        .exists());
+}
+// A temp whose writer still runs is neither removed nor allowed to block.
+#[test]
+fn cache_lifecycle_skips_publication_staging_of_a_running_writer() {
+    let cache = Cache::new();
+    let mut writers = vec![std::process::id()];
+    #[cfg(unix)]
+    let mut running = std::process::Command::new("sleep")
+        .arg("60")
+        .spawn()
+        .unwrap();
+    #[cfg(unix)]
+    writers.push(running.id());
+    let temps = writers
+        .iter()
+        .flat_map(|pid| {
+            [
+                cache.index.join(staging_name(
+                    &filename(Digest::sha256(pid.to_le_bytes())),
+                    *pid,
+                )),
+                cache
+                    .objects
+                    .join(staging_name(&filename(Digest::sha256(b"in-flight")), *pid)),
+            ]
+        })
+        .collect::<Vec<_>>();
+    for temp in &temps {
+        std::fs::write(temp, b"in-flight").unwrap();
+    }
+    let mut lifecycle = Lifecycle::default();
+    cache.publish(&mut lifecycle, 0, &[(b"fresh", 8)]);
+    #[cfg(unix)]
+    {
+        running.kill().unwrap();
+        running.wait().unwrap();
+    }
+    assert!(temps.iter().all(|temp| temp.exists()));
+    assert!(cache
+        .index
+        .join(filename(Digest::sha256(0usize.to_le_bytes())))
+        .exists());
+}
+// Names that only resemble the staging scheme, or staging names that are not
+// regular files, remain noncanonical and are preserved.
+#[test]
+fn cache_lifecycle_refuses_foreign_names_resembling_publication_staging() {
+    let target = filename(Digest::sha256(b"target"));
+    let nonce = uuid::Uuid::new_v4().to_string();
+    #[cfg(unix)]
+    let pid = exited_pid();
+    #[cfg(not(unix))]
+    let pid = 4_000_000_000u32;
+    let foreign = [
+        format!(".{target}.publish-{pid}-not-a-uuid"),
+        format!(".{target}.publish-0{pid}-{nonce}"),
+        format!(".{target}.publish--{nonce}"),
+        format!(".{target}.publish-{pid}-{}", nonce.to_uppercase()),
+        format!(".{target}.publish-{pid}-{}", nonce.replace('-', "")),
+        format!(".{target}.publish-{pid}-{nonce}.extra"),
+        format!(".{}.publish-{pid}-{nonce}", target.to_uppercase()),
+        format!(".{}.publish-{pid}-{nonce}", &target[1..]),
+        format!(
+            ".{target}.publish-{pid}-{}",
+            uuid::Uuid::from_bytes([7; 16]).hyphenated()
+        ),
+        format!("{target}.publish-{pid}-{nonce}"),
+        format!(".{target}.tmp-{pid}-{nonce}"),
+    ];
+    for name in foreign {
+        for directory in [false, true] {
+            let cache = Cache::new();
+            let path = cache.index.join(&name);
+            if directory {
+                std::fs::create_dir(&path).unwrap();
+            } else {
+                std::fs::write(&path, b"preserve").unwrap();
+            }
+            let refused = Lifecycle::default()
+                .reserve(&cache.index, &cache.objects, 1, 0, &|| Ok(()))
+                .err()
+                .unwrap_or_else(|| panic!("accepted foreign entry {name}"));
+            assert!(
+                refused.to_string().contains("noncanonical"),
+                "{name}: {refused}"
+            );
+            assert!(path.exists());
+        }
+    }
+    // A well-formed staging name that is a directory is not a publication.
+    let cache = Cache::new();
+    let path = cache.objects.join(staging_name(&target, pid));
+    std::fs::create_dir(&path).unwrap();
+    assert!(Lifecycle::default()
+        .reserve(&cache.index, &cache.objects, 1, 0, &|| Ok(()))
+        .is_err());
+    assert!(path.exists());
+}
