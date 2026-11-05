@@ -207,9 +207,14 @@ public:
             "original cleanup diagnostic must survive foreign-host retirement: {cleanup}"
         );
     });
+    let expected: &[u8] = if cfg!(windows) {
+        b"unloaded\r\n"
+    } else {
+        b"unloaded\n"
+    };
     assert_eq!(
-        fs::read_to_string(marker).expect("retained engine gateway unloaded"),
-        "unloaded\n",
+        fs::read(marker).expect("retained engine gateway unloaded"),
+        expected,
         "gateway destruction must happen exactly once"
     );
 }

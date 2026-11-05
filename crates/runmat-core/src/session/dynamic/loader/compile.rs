@@ -79,6 +79,11 @@ pub(super) async fn compile_dynamic_product(
             .into_iter()
             .collect::<HashSet<_>>();
     companion.apply_function_precedence(&primary_function_names);
+    #[cfg(windows)]
+    {
+        companion.canonical_search_root =
+            canonical_companion_search_root(path_origin, &companion).await?;
+    }
     let primary_statement_count = ast.body.len();
     let executable_source =
         super::super::super::compile::program_sources::ProgramSourceTable::dynamic_root(
@@ -350,4 +355,40 @@ pub(super) async fn compile_dynamic_product(
         selection,
         dependencies,
     })
+}
+
+#[cfg(windows)]
+async fn canonical_companion_search_root(
+    origin: &runmat_runtime::builtins::common::path_search::FileCandidateOrigin,
+    discovery: &super::super::super::compile::CompanionSourceDiscovery,
+) -> Result<Option<std::path::PathBuf>, RuntimeError> {
+    use runmat_runtime::builtins::common::path_search::FileCandidateOrigin;
+    let FileCandidateOrigin::SearchRoot { access_root, .. } = origin else {
+        return Ok(None);
+    };
+    let needs_canonical_root = discovery.statements.iter().any(|entry| {
+        entry
+            .source
+            .as_ref()
+            .and_then(|source| source.fullpath_name.as_deref())
+            .is_some_and(|full| Path::new(full).strip_prefix(access_root).is_err())
+    });
+    if !needs_canonical_root {
+        return Ok(None);
+    }
+    // Project discovery can issue verbatim Windows paths. Resolve the selected
+    // root through its filesystem owner before comparing those captured paths.
+    runmat_filesystem::canonicalize_async(access_root)
+        .await
+        .map(Some)
+        .map_err(|error| {
+            build_runtime_error(format!(
+                "Could not resolve selected source root '{}': {error}",
+                access_root.display()
+            ))
+            .with_identifier("RunMat:ExecutableSourceIdentity")
+            .with_source(error)
+            .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+            .build()
+        })
 }

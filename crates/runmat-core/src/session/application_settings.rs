@@ -57,9 +57,6 @@ mod tests {
     #[test]
     fn isolated_authority_serves_both_ports_across_real_sessions_and_hydration() {
         let _serial = runmat_filesystem::provider_override_lock();
-        #[cfg(windows)]
-        let root = "C:\\settings-example";
-        #[cfg(not(windows))]
         let root = "/settings-example";
         let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
             runmat_filesystem::MemoryFsProvider::with_current_dir(root),

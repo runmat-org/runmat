@@ -682,11 +682,14 @@ impl ActiveFeaLease {
                             && !worker.final_reported
                     })
                     .ok_or_else(|| denied_to_js(FeaRunDenied::LicenseInvalid))?;
-                worker.reservation.increase_capacity(maximum)
+                worker
+                    .reservation
+                    .grow_capacity(maximum)
+                    .map(|()| worker.reservation.capacity())
             };
             match acquisition {
-                Ok(()) => {
-                    lease.granted_ops = maximum;
+                Ok(capacity) => {
+                    lease.granted_ops = capacity;
                     return crate::wire::json_contract_to_js(&LeaseState {
                         lease,
                         root_started_at_unix_millis: self.root_started_at_unix_millis,
@@ -694,8 +697,10 @@ impl ActiveFeaLease {
                     })
                     .map_err(|error| js_error(&error.to_string()));
                 }
-                Err(LedgerError::MoreGrantRequired { required, .. }) => {
-                    let count = crate::wire::json_contract_to_js(&required)
+                Err(LedgerError::MoreGrantRequired { required, granted }) => {
+                    let target =
+                        runmat_simulation_usage::grant_target(required, granted, lease.budget_ops);
+                    let count = crate::wire::json_contract_to_js(&target)
                         .map_err(|error| js_error(&error.to_string()))?;
                     let state: LeaseState = serde_wasm_bindgen::from_value(
                         call_host(&host, "grant", &request, &count).await?,

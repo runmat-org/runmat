@@ -124,9 +124,9 @@ impl ChildGrant {
             let reservation = state.reservation.as_mut().ok_or(LedgerError::Closed)?;
             reservation.report(usage.completed_ops)?;
             if let Some(required) = required {
-                if required > reservation.capacity() {
-                    reservation.increase_capacity(required)?;
-                }
+                // Grow with headroom so per-element reserves in the child do
+                // not each wait on this channel.
+                reservation.grow_capacity(required)?;
             }
             self.capacity
                 .store(reservation.capacity().operations(), Ordering::Release);

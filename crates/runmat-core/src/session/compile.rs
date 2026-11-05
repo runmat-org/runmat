@@ -201,6 +201,8 @@ fn private_source_visible_to(primary_source_path: &Path, source_path: &Path) -> 
 
 #[derive(Default)]
 pub(super) struct CompanionSourceDiscovery {
+    #[cfg(windows)]
+    pub canonical_search_root: Option<PathBuf>,
     pub statements: Vec<DiscoveredSourceStatement>,
     pub source_catalog: Option<runmat_package::DiscoveredSourceSymbols>,
     pub project_symbol_aliases: HashMap<String, String>,

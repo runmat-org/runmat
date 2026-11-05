@@ -5,7 +5,7 @@ use std::sync::{Mutex, MutexGuard, Weak};
 mod delegated;
 mod renewal;
 pub use delegated::DelegatedReservation;
-pub use renewal::GrantRenewal;
+pub use renewal::{grant_target, GrantRenewal};
 
 /// One run's admitted operation budget. Storage is fixed-size; reserving a
 /// numerical batch allocates no heap memory and does not lock per operation.
