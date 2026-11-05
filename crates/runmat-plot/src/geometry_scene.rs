@@ -13,13 +13,16 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 mod annotations;
 mod edge_stroke;
+mod instances;
 mod paint;
 mod pick;
+mod pick_instances;
 
 pub use pick::{
     GeometryScenePickIndex, GeometryScenePickMode, GeometryScenePickRequest, GeometryScenePickResult,
 };
 
+pub use instances::GeometrySceneInstance;
 use paint::{RegionPaint, HOVER_PAINT, SELECTED_PAINT};
 #[cfg(test)]
 use paint::GEOMETRY_HOVER_EDGE_COLOR;
@@ -158,7 +161,18 @@ impl GeometryScene {
             .chunks
             .iter()
             .enumerate()
-            .map(|(index, chunk)| SceneNode {
+            .map(|(index, chunk)| {
+                // A section clips world triangles, so an instanced chunk draws flattened.
+                let flat;
+                let (chunk, instances) = if chunk.is_instanced() && presentation.active_section().is_some() {
+                    flat = chunk.flattened();
+                    (&flat, None)
+                } else if chunk.is_instanced() {
+                    (chunk, Some(chunk.node_instances(presentation)))
+                } else {
+                    (chunk, None)
+                };
+                SceneNode {
                 id: self.chunk_node_id(index, &chunk.chunk_id),
                 name: chunk
                     .label
@@ -178,7 +192,8 @@ impl GeometryScene {
                 bounds: chunk.bounds,
                 lod_levels: Vec::new(),
                 current_lod: 0,
-            })
+                instances,
+            }})
             .collect();
         nodes.extend(self.annotation_nodes(presentation));
         nodes.extend(self.topology_selection_nodes(presentation));
@@ -581,6 +596,11 @@ pub struct GeometrySceneChunk {
     pub visible: bool,
     /// Topology lines generated for CAD display modes; shaded CAD stays smooth.
     pub wireframe_only: bool,
+    /// Placements of an instanced chunk (see [`instances`]): its vertices are then the placed
+    /// mesh's own coordinates and each placement is one region.
+    pub instances: Vec<GeometrySceneInstance>,
+    /// The projected diameters, in device pixels, an instanced chunk draws its placements at.
+    pub lod_pixels: Option<[f32; 2]>,
 }
 
 impl GeometrySceneChunk {
@@ -623,6 +643,8 @@ impl GeometrySceneChunk {
             owner_node_ids: Vec::new(),
             visible: true,
             wireframe_only: false,
+            instances: Vec::new(),
+            lod_pixels: None,
         }
     }
 
@@ -647,6 +669,8 @@ impl GeometrySceneChunk {
             owner_node_ids: Vec::new(),
             visible: true,
             wireframe_only: false,
+            instances: Vec::new(),
+            lod_pixels: None,
         }
     }
 

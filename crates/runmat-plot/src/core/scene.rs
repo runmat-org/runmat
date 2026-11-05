@@ -37,6 +37,10 @@ pub struct SceneNode {
     // Level of detail settings
     pub lod_levels: Vec<LodLevel>,
     pub current_lod: usize,
+
+    /// Placements when the node is instanced: `render_data` is then in the placed mesh's own
+    /// coordinates and draws once per visible placement.
+    pub instances: Option<std::sync::Arc<crate::core::NodeInstances>>,
 }
 
 /// Rendering data for a scene node
@@ -732,6 +736,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         let parent_id = scene.add_node(parent_node);
@@ -750,6 +755,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         let child_id = scene.add_node(child_node);
@@ -781,6 +787,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         };
 
         let inserted_id = scene.add_node_preserving_id(node);
@@ -802,6 +809,7 @@ mod tests {
             bounds: BoundingBox::default(),
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         });
 
         assert_ne!(generated_id, explicit_id);

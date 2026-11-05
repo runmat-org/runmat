@@ -1,6 +1,7 @@
-//! The render pipeline for screen-space geometry edge strokes.
-use super::{shaders, Vertex, WgpuRenderer};
+//! The render pipelines for screen-space geometry edge strokes.
+use super::{shaders, InstanceRaw, Vertex, WgpuRenderer};
 use crate::core::DepthMode;
+use crate::gpu::shaders::vertex::edge_stroke::EdgeStrokeShader;
 
 impl WgpuRenderer {
     /// Edge strokes are alpha-blended triangles widened in the vertex shader. The depth-tested
@@ -14,6 +15,27 @@ impl WgpuRenderer {
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
         depth_tested: bool,
     ) -> wgpu::RenderPipeline {
+        self.create_edge_stroke_pipeline_variant(
+            emission,
+            EdgeStrokeShader {
+                depth_tested,
+                reversed_z: self.depth_mode == DepthMode::ReversedZ,
+                instanced: false,
+                depth_probe: None,
+            },
+            None,
+        )
+    }
+
+    /// Any edge stroke variant: instanced strokes read a second (instance) vertex buffer, and
+    /// depth-probed strokes bind the scene depth at group 2 (`probe_layout`).
+    pub(super) fn create_edge_stroke_pipeline_variant(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        variant: EdgeStrokeShader,
+        probe_layout: Option<&wgpu::BindGroupLayout>,
+    ) -> wgpu::RenderPipeline {
+        let depth_tested = variant.depth_tested;
         let label = if depth_tested {
             "Geometry Edge Stroke Pipeline"
         } else {
@@ -24,23 +46,28 @@ impl WgpuRenderer {
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(label),
                 source: wgpu::ShaderSource::Wgsl(
-                    shaders::vertex::edge_stroke::source(
-                        depth_tested,
-                        self.depth_mode == DepthMode::ReversedZ,
-                    )
-                    .into(),
+                    shaders::vertex::edge_stroke::source_for(variant).into(),
                 ),
             });
+        let mut layouts = vec![
+            &self.uniform_bind_group_layout,
+            &self.marker_screen_bind_group_layout,
+        ];
+        if let Some(probe) = probe_layout {
+            layouts.push(probe);
+        }
         let layout = emission
             .device()
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(label),
-                bind_group_layouts: &[
-                    &self.uniform_bind_group_layout,
-                    &self.marker_screen_bind_group_layout,
-                ],
+                bind_group_layouts: &layouts,
                 push_constant_ranges: &[],
             });
+        let buffers = if variant.instanced {
+            vec![Vertex::desc(), InstanceRaw::desc()]
+        } else {
+            vec![Vertex::desc()]
+        };
         let toward_camera = match self.depth_mode {
             DepthMode::Standard => -1,
             DepthMode::ReversedZ => 1,
@@ -63,7 +90,7 @@ impl WgpuRenderer {
         emission.device().create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
             label: Some(label),
             layout: Some(&layout),
-            vertex: crate::wgpu_compat::wgpu_vertex_state!(&shader, "vs_main", &[Vertex::desc()]),
+            vertex: crate::wgpu_compat::wgpu_vertex_state!(&shader, "vs_main", &buffers),
             fragment: Some(crate::wgpu_compat::wgpu_fragment_state!(&shader, "fs_main", &[Some(wgpu::ColorTargetState {
                 format: self.surface_config.format,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),

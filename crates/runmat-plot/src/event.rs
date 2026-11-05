@@ -1,5 +1,6 @@
 mod compact_mesh;
 mod geometry_lines;
+mod packed;
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
     AreaPlot, AxesKind, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar,
@@ -597,6 +598,16 @@ pub enum ScenePlot {
         vector_field: Option<Box<SerializedMeshVectorField>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         deformation: Option<Box<SerializedMeshDeformation>>,
+        /// Placements of the mesh (a CAD prototype drawn at each occurrence); the vertices are
+        /// then the prototype's own coordinates. See `geometry_scene::instances`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        instances: Vec<crate::geometry_scene::GeometrySceneInstance>,
+        /// The projected diameters (device px) placements draw at: one level of detail.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lod_pixels: Option<[f32; 2]>,
+        /// The mesh packed (base64), in place of `vertices`, `triangles` and `vertex_normals`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        packed: Option<packed::PackedMesh>,
         visible: bool,
     },
     Line3 {
@@ -1001,10 +1012,17 @@ fn append_geometry_scene_chunks(
         scalar_field,
         vector_field,
         deformation,
+        instances,
+        lod_pixels,
+        packed,
         visible,
     } = plot
     else {
         return Ok(());
+    };
+    let (vertices, triangles, vertex_normals) = match packed {
+        Some(packed) => packed.decode()?,
+        None => (vertices, triangles, vertex_normals),
     };
 
     if !visible {
@@ -1069,7 +1087,8 @@ fn append_geometry_scene_chunks(
         )
         .with_mesh_id(mesh_id_for_chunk.clone())
         .with_label(label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone()))
-        .with_regions(region_metadata),
+        .with_regions(region_metadata)
+        .with_instances(instances.clone(), lod_pixels),
     );
 
     if let Some(edge_render_data) = mesh.edge_render_data() {
@@ -1082,7 +1101,8 @@ fn append_geometry_scene_chunks(
             .with_label(format!(
                 "{} edges",
                 label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone())
-            )),
+            ))
+            .with_instances(instances.clone(), lod_pixels),
         );
     }
 
@@ -1142,6 +1162,9 @@ fn scene_chunk_to_mesh_plot(
         scalar_field: None,
         vector_field: None,
         deformation: None,
+        instances: chunk.instances.clone(),
+        lod_pixels: chunk.lod_pixels,
+        packed: None,
         visible: chunk.visible,
     })
 }
@@ -3052,6 +3075,9 @@ impl ScenePlot {
                 scalar_field: mesh.scalar_field().map(|field| Box::new(field.into())),
                 vector_field: mesh.vector_field().map(|field| Box::new(field.into())),
                 deformation: mesh.deformation().map(|field| Box::new(field.into())),
+                instances: Vec::new(),
+                lod_pixels: None,
+                packed: None,
                 visible: mesh.is_visible(),
             },
             PlotElement::Line3(line) => {
@@ -3625,8 +3651,15 @@ impl ScenePlot {
                 scalar_field,
                 vector_field,
                 deformation,
+                instances: _,
+                lod_pixels: _,
+                packed,
                 visible,
             } => {
+                let (vertices, triangles, vertex_normals) = match packed {
+                    Some(packed) => packed.decode()?,
+                    None => (vertices, triangles, vertex_normals),
+                };
                 let vertices: Vec<Vec3> = vertices.into_iter().map(xyz_to_vec3).collect();
                 let mut mesh = MeshPlot::new(vertices, triangles)?;
                 mesh.set_mesh_id(mesh_id);

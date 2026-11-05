@@ -49,13 +49,18 @@ pub struct GeometryScenePickIndex {
     feature_edges: HashMap<PickEdgeKey, FeatureEdgeInfo>,
     feature_edge_neighbors: HashMap<PickVertexKey, Vec<PickEdgeKey>>,
     scene_diagonal: f32,
+    /// Instanced chunks, picked per placement in the prototype's coordinates.
+    instanced: Vec<super::pick_instances::InstancedPick>,
 }
 
 impl GeometryScenePickIndex {
     pub fn build(scene: &GeometryScene) -> Self {
         let mut triangles = Vec::with_capacity(scene.triangle_count());
         for (chunk_index, chunk) in scene.chunks.iter().enumerate() {
-            if !chunk.visible || chunk.render_data.pipeline_type != PipelineType::Triangles {
+            if !chunk.visible
+                || chunk.render_data.pipeline_type != PipelineType::Triangles
+                || chunk.is_instanced()
+            {
                 continue;
             }
             let Some(indices) = chunk.indices.as_ref() else {
@@ -103,7 +108,13 @@ impl GeometryScenePickIndex {
             feature_edges,
             feature_edge_neighbors,
             scene_diagonal: scene.bounds.size().length().max(1.0e-6),
+            instanced: super::pick_instances::build(scene),
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn instanced_sets(&self) -> &[super::pick_instances::InstancedPick] {
+        &self.instanced
     }
 
     pub fn scene_key(&self) -> &GeometrySceneCacheKey {
@@ -127,9 +138,19 @@ impl GeometryScenePickIndex {
         let screen_size = Vec2::from_array(request.surface_size);
         match request.mode {
             GeometryScenePickMode::Face => {
-                let (hit, ray) = self.pick_at(&mut camera, screen_size, screen_pos)?;
-                let position = ray.origin + ray.direction * hit.distance;
-                self.result_for_triangle(hit.triangle_index, position, hit.distance, None)
+                let ray = pick_ray(&mut camera, screen_size, screen_pos)?;
+                let hit = self.hit_ray(&ray);
+                let placed = super::pick_instances::pick(
+                    &self.instanced,
+                    &ray,
+                    hit.map_or(f32::INFINITY, |(_, d)| d),
+                );
+                if placed.is_some() {
+                    return placed;
+                }
+                let (triangle_index, distance) = hit?;
+                let position = ray.origin + ray.direction * distance;
+                self.result_for_triangle(triangle_index, position, distance, None)
             }
             GeometryScenePickMode::Edge | GeometryScenePickMode::Point => {
                 self.pick_screen_topology(&mut camera, screen_size, screen_pos, request.mode)
@@ -137,7 +158,16 @@ impl GeometryScenePickIndex {
         }
     }
 
-    fn result_for_triangle(
+    /// The nearest triangle the ray hits: its index and distance.
+    pub(super) fn hit_ray(&self, ray: &PickRay) -> Option<(usize, f32)> {
+        let mut best = None;
+        if let Some(root) = self.root {
+            self.pick_node(root, ray, &mut best);
+        }
+        best.map(|hit: PickHit| (hit.triangle_index, hit.distance))
+    }
+
+    pub(super) fn result_for_triangle(
         &self,
         triangle_index: usize,
         position: Vec3,
@@ -168,13 +198,7 @@ impl GeometryScenePickIndex {
         size: Vec2,
         position: Vec2,
     ) -> Option<(PickHit, PickRay)> {
-        let origin = camera.screen_to_world(position, size, 0.0);
-        let far = camera.screen_to_world(position, size, 1.0);
-        let direction = (far - origin).normalize_or_zero();
-        if direction.length_squared() <= f32::EPSILON {
-            return None;
-        }
-        let ray = PickRay { origin, direction };
+        let ray = pick_ray(camera, size, position)?;
         let mut best = None;
         if let Some(root) = self.root {
             self.pick_node(root, &ray, &mut best);
@@ -502,6 +526,14 @@ impl GeometryScenePickIndex {
 }
 
 
+/// The ray under a screen position.
+fn pick_ray(camera: &mut Camera, size: Vec2, position: Vec2) -> Option<PickRay> {
+    let origin = camera.screen_to_world(position, size, 0.0);
+    let far = camera.screen_to_world(position, size, 1.0);
+    let direction = (far - origin).normalize_or_zero();
+    (direction.length_squared() > f32::EPSILON).then_some(PickRay { origin, direction })
+}
+
 #[derive(Debug, Clone)]
 struct IndexedTriangle {
     a: Vec3,
@@ -688,7 +720,7 @@ enum PickBvhNodeKind {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct PickRay {
+pub(crate) struct PickRay {
     pub(super) origin: Vec3,
     pub(super) direction: Vec3,
 }
@@ -767,7 +799,7 @@ fn combined_centroid_bounds(triangles: &[IndexedTriangle]) -> BoundingBox {
     bounds
 }
 
-fn ray_intersects_bounds(ray: &PickRay, bounds: BoundingBox) -> Option<f32> {
+pub(super) fn ray_intersects_bounds(ray: &PickRay, bounds: BoundingBox) -> Option<f32> {
     let mut t_min: f32 = 0.0;
     let mut t_max = f32::INFINITY;
     for axis in 0..3 {

@@ -312,6 +312,7 @@ impl GeometryScene {
             bounds,
             lod_levels: Vec::new(),
             current_lod: 0,
+            instances: None,
         }
     }
 }

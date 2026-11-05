@@ -854,6 +854,7 @@ impl PlotRenderer {
                 bounds: crate::core::BoundingBox::default(),
                 lod_levels: Vec::new(),
                 current_lod: 0,
+                instances: None,
             };
 
             let nid = self.scene.add_node(node);
@@ -1692,6 +1693,10 @@ impl PlotRenderer {
         let mut total_vertices = 0;
         let mut total_triangles = 0;
 
+        // Instanced nodes draw their placements in view at their level of detail.
+        let mut instance_buffers: Vec<Option<(wgpu::Buffer, u32)>> = Vec::new();
+        let viewport_px = glam::Vec2::new(config.width.max(1) as f32, config.height.max(1) as f32);
+        self.wgpu_renderer.ensure_extra_pipelines(emission);
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
                 if let Some((vertex_buffer, index_buffer)) =
@@ -1699,6 +1704,11 @@ impl PlotRenderer {
                 {
                     self.wgpu_renderer
                         .ensure_pipeline(emission, render_data.pipeline_type);
+                    instance_buffers.push(node.instances.as_ref().map(|set| {
+                        let shown = set.visible(view_proj_matrix * model_matrix, viewport_px);
+                        let count = shown.len() as u32;
+                        (self.wgpu_renderer.create_instance_buffer(emission, &shown), count)
+                    }));
                     render_items.push((render_data, vertex_buffer, index_buffer));
 
                     total_vertices += render_data.vertex_count();
@@ -1862,36 +1872,65 @@ impl PlotRenderer {
                 crate::core::DepthMode::Standard => 1.0,
                 crate::core::DepthMode::ReversedZ => 0.0,
             };
+            // Depth-tested edge strokes draw in a second pass that reads the scene's depth
+            // (see `edge_stroke::EdgeStrokeShader::depth_probe`).
+            let depth_probe = render_items
+                .iter()
+                .any(|(d, _, _)| d.pipeline_type == crate::core::PipelineType::EdgeStroke)
+                .then(|| self.wgpu_renderer.depth_probe_bind_group(emission, &depth_view))
+                .flatten();
+            let _keep_msaa_view_alive = &cached_msaa_view;
+            for stroke_pass in [false, true] {
+            if stroke_pass && depth_probe.is_none() {
+                break;
+            }
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Plot Render Pass"),
+                label: Some(if stroke_pass { "Plot Edge Stroke Pass" } else { "Plot Render Pass" }),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: color_view,
                     resolve_target,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: config.background_color.x as f64,
-                            g: config.background_color.y as f64,
-                            b: config.background_color.z as f64,
-                            a: config.background_color.w as f64,
-                        }),
+                        load: if stroke_pass {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(wgpu::Color {
+                                r: config.background_color.x as f64,
+                                g: config.background_color.y as f64,
+                                b: config.background_color.z as f64,
+                                a: config.background_color.w as f64,
+                            })
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth_view,
-                    depth_ops: Some(wgpu::Operations {
+                    // Read-only in the stroke pass, which samples it.
+                    depth_ops: (!stroke_pass).then_some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(depth_clear),
-                        store: wgpu::StoreOp::Discard,
+                        store: if depth_probe.is_some() {
+                            wgpu::StoreOp::Store
+                        } else {
+                            wgpu::StoreOp::Discard
+                        },
                     }),
                     stencil_ops: None,
                 }),
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            let _keep_msaa_view_alive = &cached_msaa_view;
 
             // Now render all items with proper bind group setup
             for (i, (render_data, vertex_buffer, index_buffer)) in render_items.iter().enumerate() {
+                let probed_stroke = depth_probe.is_some()
+                    && render_data.pipeline_type == crate::core::PipelineType::EdgeStroke;
+                if probed_stroke != stroke_pass {
+                    continue;
+                }
+                let instanced = instance_buffers[i].as_ref();
+                if instanced.is_some_and(|(_, count)| *count == 0) {
+                    continue;
+                }
                 #[cfg(target_arch = "wasm32")]
                 {
                     // On wasm, "blank but drawing" is often caused by bad vertex data (NaNs/alpha=0)
@@ -1944,10 +1983,24 @@ impl PlotRenderer {
                         render_pass.set_bind_group(1, img_bg, &[]);
                     }
                 } else {
-                    let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
+                    let variant = match render_data.pipeline_type {
+                        crate::core::PipelineType::Triangles if instanced.is_some() => {
+                            self.wgpu_renderer.instanced_triangle_pipeline()
+                        }
+                        crate::core::PipelineType::EdgeStroke if instanced.is_some() || probed_stroke => self
+                            .wgpu_renderer
+                            .edge_stroke_variant(instanced.is_some(), probed_stroke),
+                        _ => None,
+                    };
+                    let pipeline = variant.unwrap_or_else(|| self.wgpu_renderer.get_pipeline(render_data.pipeline_type));
                     render_pass.set_pipeline(pipeline);
                     // Set the uniform bind group (required by shaders)
                     render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
+                    if probed_stroke {
+                        if let Some(depth) = depth_probe.as_ref() {
+                            render_pass.set_bind_group(2, depth, &[]);
+                        }
+                    }
                     if matches!(
                         render_data.pipeline_type,
                         crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
@@ -1982,6 +2035,10 @@ impl PlotRenderer {
                 } else {
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 }
+                if let Some((buffer, _)) = instanced {
+                    render_pass.set_vertex_buffer(1, buffer.slice(..));
+                }
+                let placements = instanced.map(|(_, count)| 0..*count);
 
                 if let Some(index_buffer) = index_buffer {
                     render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -1990,7 +2047,7 @@ impl PlotRenderer {
                             indexed_draw_ranges(&render_data.draw_calls, indices.len())
                         {
                             log::trace!(target: "runmat_plot", "draw indexed count={}", index_range.len());
-                            render_pass.draw_indexed(index_range, 0, instance_range);
+                            render_pass.draw_indexed(index_range, 0, placements.clone().unwrap_or(instance_range));
                         }
                     }
                 } else {
@@ -2017,12 +2074,13 @@ impl PlotRenderer {
                         render_pass.draw(
                             draw_call.vertex_offset as u32
                                 ..(draw_call.vertex_offset + draw_call.vertex_count) as u32,
-                            0..draw_call.instance_count as u32,
+                            placements.clone().unwrap_or(0..draw_call.instance_count as u32),
                         );
                     }
                 }
             }
             // Drop render_pass at end of scope.
+            }
         }
 
         let render_time = start_time.elapsed().as_secs_f64() * 1000.0;
@@ -2302,6 +2360,8 @@ impl PlotRenderer {
         // Prepare render items outside the pass
         let mut owned_render_data: Vec<Box<crate::core::RenderData>> = Vec::new();
         let mut render_items = Vec::new();
+        let mut instances_by_item: std::collections::HashMap<*const crate::core::RenderData, std::sync::Arc<crate::core::NodeInstances>> = Default::default();
+        self.wgpu_renderer.ensure_extra_pipelines(emission);
         let mut grid_plane_buffers: Option<(wgpu::Buffer, wgpu::Buffer)> = None;
         let mut total_vertices = 0usize;
         let mut total_triangles = 0usize;
@@ -2333,6 +2393,9 @@ impl PlotRenderer {
                     total_vertices += render_data.vertex_count();
                     if let Some(indices) = &render_data.indices {
                         total_triangles += indices.len() / 3;
+                    }
+                    if let Some(set) = node.instances.as_ref() {
+                        instances_by_item.insert(render_data as *const crate::core::RenderData, set.clone());
                     }
                     render_items.push((render_data, vb, ib));
                 }
@@ -2672,6 +2735,20 @@ impl PlotRenderer {
             }
         }
 
+        // Instanced nodes draw their placements in view at their level of detail.
+        let instance_buffers: Vec<Option<(wgpu::Buffer, u32)>> = render_items
+            .iter()
+            .map(|(render_data, _, _)| {
+                instances_by_item.get(&(*render_data as *const crate::core::RenderData)).map(|set| {
+                    let shown = set.visible(
+                        view_proj_matrix * model_matrix,
+                        glam::Vec2::new(sw.max(1) as f32, sh.max(1) as f32),
+                    );
+                    let count = shown.len() as u32;
+                    (self.wgpu_renderer.create_instance_buffer(emission, &shown), count)
+                })
+            })
+            .collect();
         // Precompute expanded point buffers to keep them alive across the render pass
         let mut point_buffers: Vec<Option<(wgpu::Buffer, usize)>> =
             Vec::with_capacity(render_items.len());
@@ -3088,6 +3165,11 @@ impl PlotRenderer {
 
             for (idx, (render_data, vertex_buffer, index_buffer)) in render_items.iter().enumerate()
             {
+                let instanced = instance_buffers[idx].as_ref();
+                if instanced.is_some_and(|(_, count)| *count == 0) {
+                    continue;
+                }
+                let placements = instanced.map(|(_, count)| 0..*count);
                 let is_triangles = matches!(
                     render_data.pipeline_type,
                     crate::core::PipelineType::Triangles
@@ -3174,7 +3256,16 @@ impl PlotRenderer {
                         );
                     }
                 } else {
-                    let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
+                    let variant = match render_data.pipeline_type {
+                        crate::core::PipelineType::Triangles if instanced.is_some() => {
+                            self.wgpu_renderer.instanced_triangle_pipeline()
+                        }
+                        crate::core::PipelineType::EdgeStroke if instanced.is_some() => {
+                            self.wgpu_renderer.edge_stroke_variant(true, false)
+                        }
+                        _ => None,
+                    };
+                    let pipeline = variant.unwrap_or_else(|| self.wgpu_renderer.get_pipeline(render_data.pipeline_type));
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(
                         0,
@@ -3232,6 +3323,9 @@ impl PlotRenderer {
                 } else {
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 }
+                if let Some((buffer, _)) = instanced {
+                    render_pass.set_vertex_buffer(1, buffer.slice(..));
+                }
                 if let Some(index_buffer_ref) = index_buffer {
                     render_pass
                         .set_index_buffer(index_buffer_ref.slice(..), wgpu::IndexFormat::Uint32);
@@ -3239,7 +3333,7 @@ impl PlotRenderer {
                         for (index_range, instance_range) in
                             indexed_draw_ranges(&render_data.draw_calls, indices.len())
                         {
-                            render_pass.draw_indexed(index_range, 0, instance_range);
+                            render_pass.draw_indexed(index_range, 0, placements.clone().unwrap_or(instance_range));
                         }
                         if render_item_logs {
                             log::debug!(
@@ -3260,7 +3354,7 @@ impl PlotRenderer {
                     for dc in &render_data.draw_calls {
                         render_pass.draw(
                             dc.vertex_offset as u32..(dc.vertex_offset + dc.vertex_count) as u32,
-                            0..dc.instance_count as u32,
+                            placements.clone().unwrap_or(0..dc.instance_count as u32),
                         );
                         if render_item_logs {
                             log::debug!(

@@ -71,7 +71,10 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @l
         let hemisphere = 0.5 + 0.5 * n.y;
         let half_direction = normalize(key + vec3<f32>(0.0, 0.0, 1.0));
         let highlight = 0.03 * pow(max(dot(n, half_direction), 0.0), 24.0);
-        let lighting = clamp(0.20 + 0.40 * diffuse + 0.32 * head + 0.08 * fill_diffuse + 0.04 * hemisphere, 0.20, 1.0);
+        // A bounce from opposite the key lifts faces turned away from it (a housing's inner
+        // walls, the far side of a part) so they still read; faces the key lights don't change.
+        let bounce = 0.10 * max(dot(n, normalize(vec3<f32>(0.42, -0.52, 0.30))), 0.0);
+        let lighting = clamp(0.20 + 0.40 * diffuse + 0.32 * head + 0.08 * fill_diffuse + 0.04 * hemisphere + bounce, 0.20, 1.0);
         return vec4<f32>(clamp(input.color.rgb * lighting + vec3<f32>(highlight), vec3<f32>(0.0), vec3<f32>(1.0)), input.color.a);
     }
 
@@ -85,3 +88,32 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @l
     return vec4<f32>(clamp(input.color.rgb * lighting + highlight, vec3<f32>(0.0), vec3<f32>(1.0)), input.color.a);
 }
 "#;
+
+/// The triangle shader for an instanced node: the mesh is in its prototype's coordinates and
+/// each placement (`core::InstanceRaw`, locations 4 to 8) moves its points and normals, then
+/// paints its color toward the placement's tint (selection, hover, role highlights).
+pub fn instanced() -> String {
+    SHADER
+        .replace(
+            "struct VertexOutput {",
+            "struct InstanceInput {\n    @location(4) row0: vec4<f32>,\n    @location(5) row1: vec4<f32>,\n    @location(6) row2: vec4<f32>,\n    @location(7) tint: vec4<f32>,\n    @location(8) extra: vec4<f32>,\n}\n\nstruct VertexOutput {",
+        )
+        .replace("fn vs_main(input: VertexInput) -> VertexOutput {", "fn vs_main(input: VertexInput, inst: InstanceInput) -> VertexOutput {")
+        .replace(
+            "let world_position = uniforms.model * vec4<f32>(input.position, 1.0);",
+            "let local = vec4<f32>(input.position, 1.0);\n    let placed = vec3<f32>(dot(inst.row0, local), dot(inst.row1, local), dot(inst.row2, local));\n    let placed_normal = vec3<f32>(dot(inst.row0.xyz, input.normal), dot(inst.row1.xyz, input.normal), dot(inst.row2.xyz, input.normal));\n    let world_position = uniforms.model * vec4<f32>(placed, 1.0);",
+        )
+        .replace("out.color = input.color;", "out.color = vec4<f32>(mix(input.color.rgb, inst.tint.rgb, inst.tint.a), input.color.a);")
+        .replace("(uniforms.normal_matrix * input.normal).xyz", "(uniforms.normal_matrix * placed_normal).xyz")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_instanced_variant_places_points_normals_and_paint() {
+        let s = super::instanced();
+        for needle in ["inst: InstanceInput", "dot(inst.row0, local)", "placed_normal).xyz", "inst.tint.a"] {
+            assert!(s.contains(needle), "missing {needle}");
+        }
+    }
+}

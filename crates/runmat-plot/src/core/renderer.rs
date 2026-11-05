@@ -11,6 +11,8 @@ use wgpu::util::DeviceExt;
 use crate::core::DepthMode;
 
 mod edge_stroke_pipeline;
+mod instanced_pipeline;
+use crate::core::instances::InstanceRaw;
 use crate::{
     core::scene::{GpuIndirectDraw, GpuVertexBuffer},
     gpu::shaders,
@@ -318,6 +320,8 @@ pub struct WgpuRenderer {
     /// Device pixels per CSS pixel for screen-space stroke widths.
     pub pixels_per_point: f32,
     triangle_pipeline: Option<wgpu::RenderPipeline>,
+    /// Instanced prototypes and depth-probed edge strokes.
+    extra_pipelines: instanced_pipeline::ExtraPipelines,
 
     // Direct rendering pipelines (optimized coordinate transformation)
     pub direct_line_pipeline: Option<wgpu::RenderPipeline>,
@@ -740,6 +744,7 @@ impl WgpuRenderer {
             edge_stroke_no_depth_pipeline: None,
             pixels_per_point: 1.0,
             triangle_pipeline: None,
+            extra_pipelines: Default::default(),
             direct_line_pipeline: None,
             direct_triangle_pipeline: None,
             direct_point_pipeline: None,
@@ -829,6 +834,7 @@ impl WgpuRenderer {
             self.edge_stroke_pipeline = None;
             self.edge_stroke_no_depth_pipeline = None;
             self.triangle_pipeline = None;
+            self.extra_pipelines = Default::default();
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
             self.direct_point_pipeline = None;
@@ -858,6 +864,7 @@ impl WgpuRenderer {
             self.edge_stroke_pipeline = None;
             self.edge_stroke_no_depth_pipeline = None;
             self.triangle_pipeline = None;
+            self.extra_pipelines = Default::default();
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
             self.direct_point_pipeline = None;
@@ -906,7 +913,9 @@ impl WgpuRenderer {
                 sample_count: samples,
                 dimension: wgpu::TextureDimension::D2,
                 format: Self::depth_format(),
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                // Probed edge strokes read it (as a read-only attachment's texture).
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1743,55 +1752,7 @@ impl WgpuRenderer {
         &self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
     ) -> wgpu::RenderPipeline {
-        let shader = emission
-            .device()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Triangle Shader"),
-                source: wgpu::ShaderSource::Wgsl(shaders::vertex::TRIANGLE.into()),
-            });
-
-        let pipeline_layout =
-            emission
-                .device()
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("Triangle Pipeline Layout"),
-                    bind_group_layouts: &[&self.uniform_bind_group_layout],
-                    push_constant_ranges: &[],
-                });
-
-        emission.device()
-            .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
-                label: Some("Triangle Pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: crate::wgpu_compat::wgpu_vertex_state!(&shader, "vs_main", &[Vertex::desc()]),
-                fragment: Some(crate::wgpu_compat::wgpu_fragment_state!(&shader, "fs_main", &[Some(wgpu::ColorTargetState {
-                        format: self.surface_config.format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })])),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None, // Disable culling for 2D plotting
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: Self::depth_format(),
-                    depth_write_enabled: true,
-                    depth_compare: self.depth_compare(),
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: self.msaa_sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-            })
+        self.create_triangle_pipeline_variant(emission, false)
     }
 
     fn create_grid_plane_pipeline(
