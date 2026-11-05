@@ -1,6 +1,7 @@
 //! The properties a drawing reads from the parts it shows: a part's output properties for its
 //! own views and title block, and each BOM item's definition properties for parts lists
-//! (`description`, `finish`, `vendor` …).
+//! (`description`, `finish`, `vendor` …); a circuit board's description comes from its compiled
+//! board.
 use crate::runtime::{resolve_path, Files};
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::drawing::bom_table::material_name;
@@ -46,10 +47,20 @@ pub fn item_properties(assembly: &str, bom: &Bom, files: &Files) -> BTreeMap<Str
     let mut out = BTreeMap::new();
     for row in &bom.rows {
         let file = row.item.definition.file.as_str().to_owned();
-        if out.contains_key(&file) || !file.ends_with(".part") {
+        if out.contains_key(&file) {
             continue;
         }
         let at = resolve_path(assembly, &file, files);
+        // A circuit board: its description from the compiled board.
+        if file.ends_with(".circuit") || file.ends_with(".circuit.layout") {
+            if let Ok(description) = crate::board::board_description(&at, files) {
+                out.insert(file, BTreeMap::from([("description".to_owned(), description)]));
+            }
+            continue;
+        }
+        if !file.ends_with(".part") {
+            continue;
+        }
         let Some(source) = files.get(&at) else {
             continue;
         };

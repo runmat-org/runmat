@@ -25,7 +25,8 @@ use runmat_cad::assembly::bom::Bom;
 use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::build_drawing_index;
 use runmat_cad::drawing::{DrawingDocument, ModelRef, ModelReferences};
-use runmat_cad::ids::{FilePath, PropertyName};
+use runmat_cad::ids::{FeatureId, FilePath, PropertyName};
+use runmat_cad::model::sheet_metal::FlatLayout;
 use runmat_cad::model::PartDocument;
 use runmat_cad::refs::name::EntityName;
 use runmat_cad::refs::reference::Reference;
@@ -51,6 +52,8 @@ pub struct CompiledModels {
     boms: BTreeMap<String, Bom>,
     /// Assembly file → BOM item definition file → its properties (parts lists' description).
     item_properties: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
+    /// Part file → flat pattern or unfold feature → its layout, the outline as cut.
+    flats: BTreeMap<String, BTreeMap<FeatureId, FlatLayout>>,
 }
 
 fn names_in(reference: &Value, out: &mut Vec<Value>) {
@@ -115,6 +118,9 @@ impl ModelReferences for CompiledModels {
     }
     fn bom(&self, model: &ModelRef) -> Option<Bom> {
         self.boms.get(model.file.as_str()).cloned()
+    }
+    fn flat_layout(&self, model: &ModelRef, feature: &FeatureId) -> Option<FlatLayout> {
+        self.flats.get(model.file.as_str())?.get(feature).cloned()
     }
     fn item_property(
         &self,
@@ -250,6 +256,13 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                         pmi.datums.iter().map(|d| d.label.clone()).collect(),
                     ),
                 );
+                let flats = part
+                    .document
+                    .features
+                    .iter()
+                    .filter_map(|f| Some((f.id.clone(), crate::exchange::flat::flat_layout_of(&part, &f.id)?)))
+                    .collect();
+                models.flats.insert(file.clone(), flats);
                 documents.insert(file.clone(), part.document.clone());
                 displays.insert(
                     file.clone(),
@@ -295,7 +308,16 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         else {
             continue;
         };
-        if let Some(display) = displays.get(file) {
+        if let Some(full) = displays.get(file) {
+            // The occurrences the view leaves out (`exclude`), and everything under them.
+            let excluded: Vec<String> = document
+                .views
+                .iter()
+                .find(|v| v.name == name)
+                .map(|v| v.exclude.iter().map(|x| x.to_string()).collect())
+                .unwrap_or_default();
+            let shown = without_occurrences(full, &excluded);
+            let display = shown.as_ref().unwrap_or(full);
             let kind = &view["kind"];
             let parent = kind["from"].as_str().unwrap_or("");
             let parent_axes = crate::hlr::axes(crate::hlr::orientation(&views, parent, 0));
@@ -331,6 +353,18 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                         );
                     }
                     lines
+                }
+                // A flat pattern: the developed sheet (outline as cut, bend lines and notes,
+                // the bend table), in the layout's millimetres.
+                Some("flat_pattern") => {
+                    let sheet = document.views.iter().find(|v| v.name == name).and_then(|v| {
+                        let runmat_cad::drawing::ViewKind::FlatPattern { feature, .. } = &v.kind else {
+                            return None;
+                        };
+                        let layout = models.flat_layout(&v.model, feature)?;
+                        runmat_cad::drawing::flat_pattern::view_sheet(&v.kind, &layout)
+                    });
+                    json!({ "visible": [], "hidden": [], "flat": sheet })
                 }
                 _ => {
                     let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
@@ -705,5 +739,37 @@ mod tests {
             again.source
         );
         assert_eq!(again.source.matches("sheet \"1\" =").count(), 1);
+    }
+}
+
+/// An assembly display without the occurrences at these paths or under them; `None` when the
+/// view leaves nothing out.
+fn without_occurrences(display: &Value, paths: &[String]) -> Option<Value> {
+    if paths.is_empty() || display["kind"] != "assembly" {
+        return None;
+    }
+    let mut out = display.clone();
+    let occurrences = out["data"]["occurrences"].as_array_mut()?;
+    occurrences.retain(|occ| {
+        let path = occ["path"].as_str().unwrap_or("");
+        !paths.iter().any(|x| path == x || path.starts_with(&format!("{x}/")))
+    });
+    Some(out)
+}
+
+#[cfg(test)]
+mod exclude_tests {
+    use super::without_occurrences;
+    use serde_json::json;
+
+    #[test]
+    fn a_view_leaves_out_excluded_occurrences_and_everything_under_them() {
+        let display = json!({ "kind": "assembly", "data": { "prototypes": [], "occurrences": [
+            { "path": "housing" }, { "path": "lid" }, { "path": "lid_screw1" }, { "path": "pair/s1" }, { "path": "pair/s2" }, { "path": "pairs" }
+        ] } });
+        let shown = without_occurrences(&display, &["lid".into(), "pair".into()]).unwrap();
+        let paths: Vec<_> = shown["data"]["occurrences"].as_array().unwrap().iter().map(|o| o["path"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(paths, ["housing", "lid_screw1", "pairs"]);
+        assert!(without_occurrences(&display, &[]).is_none());
     }
 }

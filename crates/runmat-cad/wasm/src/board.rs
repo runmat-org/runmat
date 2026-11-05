@@ -16,8 +16,8 @@ pub fn layout_path(file: &str) -> String {
     }
 }
 
-/// The board's 3D model as a part display (metres), or why there is none.
-pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
+/// The board's layout compiled in a circuit session, or why it doesn't compile to a board.
+fn compiled_board(file: &str, files: &Files) -> Result<runmat_circuit::runtime::Session, String> {
     let layout = layout_path(file);
     let text = files
         .get(&layout)
@@ -37,13 +37,19 @@ pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
     circuit_files.remove(&layout);
     let mut session = runmat_circuit::runtime::Session::new();
     let out = session.compile(&layout, text, &circuit_files, &Default::default());
-    let model = session.board_model().ok_or_else(|| {
+    if session.board_model().is_none() {
         let first = out
             .diagnostics
             .iter()
             .find_map(|d| serde_json::to_value(d).ok().and_then(|v| v["message"].as_str().map(str::to_owned)));
-        format!("{layout} has no board{}", first.map(|m| format!(": {m}")).unwrap_or_default())
-    })?;
+        return Err(format!("{layout} has no board{}", first.map(|m| format!(": {m}")).unwrap_or_default()));
+    }
+    Ok(session)
+}
+
+/// The board's 3D model as a part display (metres), or why there is none.
+pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
+    let model = compiled_board(file, files)?.board_model().ok_or("no board")?;
     let mm = |v: f64| (v * 1e-3) as f32;
     let bodies = model
         .bodies
@@ -84,6 +90,32 @@ pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
     })
 }
 
+/// How a parts list describes a circuit board: its outline size, thickness, copper layer
+/// count and the components on it, e.g. `Circuit board daq, 90 x 60 x 1.6 mm, 6 copper layers,
+/// 38 components`.
+pub fn board_description(file: &str, files: &Files) -> Result<String, String> {
+    let session = compiled_board(file, files)?;
+    let index = session.index().ok_or("no board index")?;
+    let board = index.board.as_ref().ok_or("no board index")?;
+    let model = session.board_model().ok_or("no board")?;
+    let width = model.bounds.max[0] - model.bounds.min[0];
+    let depth = model.bounds.max[1] - model.bounds.min[1];
+    let thickness: f64 = board.layers.iter().map(|l| l.thickness_mm).sum();
+    let copper = board.layers.iter().filter(|l| l.kind == "copper").count();
+    let trim = |v: f64| {
+        let t = format!("{v:.1}");
+        t.strip_suffix(".0").map(str::to_owned).unwrap_or(t)
+    };
+    Ok(format!(
+        "Circuit board {}, {} x {} x {} mm, {copper} copper layers, {} components",
+        board.name,
+        trim(width),
+        trim(depth),
+        trim(thickness),
+        board.footprints.len()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +139,13 @@ mod tests {
         assert!(((b.max[1] - b.min[1]) - 0.060).abs() < 1e-3, "60 mm deep: {b:?}");
         assert!(display.bodies.len() > 3, "mask, copper, silk and component bodies");
         assert!(display.bodies.iter().all(|body| body.color.is_some()));
+    }
+
+    #[test]
+    fn a_parts_list_describes_a_board_by_size_layers_and_components() {
+        let d = board_description("/p/daq.circuit", &daq_files()).expect("the daq board");
+        assert!(d.starts_with("Circuit board daq, 90 x 60 x "), "{d}");
+        assert!(d.contains(" copper layers, ") && d.ends_with(" components"), "{d}");
     }
 
     #[test]
