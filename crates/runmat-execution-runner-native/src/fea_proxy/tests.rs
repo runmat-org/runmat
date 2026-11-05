@@ -378,10 +378,13 @@ fn delegated_work_owns_disjoint_capacity_until_verified_process_retirement() {
     let Reply::Budget { budget } = reply else {
         panic!("admitted child batch")
     };
-    assert_eq!(budget.granted_ops, OperationCount::from_operations(23));
+    // The child gets the 23 it needs plus equal headroom from the parent's
+    // free grant, so per-element reserves do not each renew. Settlement
+    // returns the unused headroom.
+    assert_eq!(budget.granted_ops, OperationCount::from_operations(46));
     assert_eq!(
         accounting.ledger().snapshot().unwrap().reserved,
-        OperationCount::from_operations(23)
+        OperationCount::from_operations(46)
     );
     assert_eq!(
         parent.call(Call {
