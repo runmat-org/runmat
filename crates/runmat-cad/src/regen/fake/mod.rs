@@ -44,6 +44,7 @@ mod analysis;
 mod cdt;
 mod display;
 mod exact;
+mod queries;
 mod extra;
 mod features;
 mod mesh;

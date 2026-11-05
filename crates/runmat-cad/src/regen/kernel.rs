@@ -7,3 +7,5 @@
 pub use runmat_geometry_kernel::op::*;
 // The display tessellation contract (`crate::display` joins its meshes with names).
 pub use runmat_geometry_kernel::display::*;
+// The exact queries: hidden-line projection, proximity and STEP export.
+pub use runmat_geometry_kernel::queries::*;

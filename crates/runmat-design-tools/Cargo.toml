@@ -25,11 +25,16 @@ hex = { workspace = true }
 runmat-plot = { workspace = true, optional = true }
 pollster = { version = "0.3", optional = true }
 glam = { version = "0.24", optional = true }
+# OCCT as the design kernel (native callers: the MCP and HTTP servers, the native LSP).
+runmat-geometry-io = { workspace = true, optional = true, features = ["occt-native", "occt-kernel"] }
 
 [features]
 default = []
 # `design.render` through the Desktop's renderer (runmat-plot on wgpu, headless).
 render = ["dep:runmat-plot", "dep:pollster", "dep:glam"]
+# Regenerate on OCCT (the kernel Desktop and the browser use), so check, inspect, render and
+# export answer as the Desktop does; STEP export writes exact AP242.
+occt = ["dep:runmat-geometry-io"]
 
 [lints.rust]
 unsafe_code = "forbid"

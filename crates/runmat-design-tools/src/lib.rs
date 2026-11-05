@@ -28,6 +28,7 @@ pub mod edit;
 pub mod exchange;
 pub mod guides;
 pub mod inspect;
+pub mod kernel;
 mod locate;
 #[cfg(feature = "render")]
 pub mod render;
@@ -246,6 +247,7 @@ pub fn call(name: &str, input: Value, files: &Files) -> ToolResult {
     fn out<T: Serialize>(v: T) -> ToolResult {
         serde_json::to_value(v).map_err(|e| ToolError::new("internal", e.to_string()))
     }
+    kernel::install();
     match name {
         "design.check" => out(check::check(&parse(input)?, files)?),
         "design.inspect" => out(inspect::inspect(&parse(input)?, files)?),

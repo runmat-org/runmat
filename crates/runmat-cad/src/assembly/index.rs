@@ -202,8 +202,13 @@ pub fn build_assembly_index(
             DefinitionState::OverDefined
         } else if n.pose == PoseStatus::Failed {
             DefinitionState::Failed
-        } else if n.fixed {
+        } else if n.fixed && !n.attached && n.origin == NodeOrigin::Authored {
+            // SolidWorks's `(f)`: fixed in space by its own placement. A pattern or mirror
+            // instance is driven by its pattern, and an attached occurrence by its frame, so
+            // both are fully defined.
             DefinitionState::Fixed
+        } else if n.fixed {
+            DefinitionState::FullyDefined
         } else if n.pose == PoseStatus::Floating || n.dof.is_some_and(|d| d > 0) {
             DefinitionState::UnderDefined
         } else {

@@ -50,13 +50,8 @@ fn encode<T: serde::Serialize>(value: &T, span: Span) -> Result<Json, LowerError
 
 // ----------------------------------------------------------------------------- printing
 
-fn role_word(role: PointRole) -> &'static str {
-    match role {
-        PointRole::At => "at",
-        PointRole::Start => "start",
-        PointRole::End => "end",
-        PointRole::Center => "center",
-    }
+fn role_word(role: PointRole) -> String {
+    role.word()
 }
 
 fn name(text: &str) -> Option<&str> {
@@ -95,6 +90,14 @@ fn print_entity(entity: &SketchEntity) -> Option<String> {
             format!("center = {}", print_point(center)?),
             format!("radius = {}", print_value(radius)?),
         ],
+        SketchGeometry::Spline { points, closed } => {
+            let points: Option<Vec<String>> = points.iter().map(print_point).collect();
+            let mut arguments = vec![format!("points = [{}]", points?.join(", "))];
+            if *closed {
+                arguments.push("closed".into());
+            }
+            arguments
+        }
     };
     if entity.construction {
         arguments.push("construction".into());
@@ -104,6 +107,7 @@ fn print_entity(entity: &SketchEntity) -> Option<String> {
         SketchGeometry::Line { .. } => "line",
         SketchGeometry::Arc { .. } => "arc",
         SketchGeometry::Circle { .. } => "circle",
+        SketchGeometry::Spline { .. } => "spline",
     };
     Some(format!(
         "{} = {kind}({})",
@@ -408,10 +412,14 @@ fn lower_entity(id: &str, value: &Expr) -> Result<SketchEntity, LowerError> {
     let span = value.span();
     let mut call = call_parts(value)?;
     let mut construction = false;
+    let mut closed = false;
     let positional = std::mem::take(&mut call.positional);
     for flag in positional {
         match &flag {
             Expr::Reference(r) if r.segments() == ["construction"] => construction = true,
+            Expr::Reference(r) if r.segments() == ["closed"] && call.word == "spline" => {
+                closed = true
+            }
             other => {
                 return Err(error(
                     other.span(),
@@ -437,10 +445,25 @@ fn lower_entity(id: &str, value: &Expr) -> Result<SketchEntity, LowerError> {
             center: lower_point(&call.need("center", span)?)?,
             radius: lower_value(&call.need("radius", span)?)?,
         },
+        "spline" => {
+            let points = call.need("points", span)?;
+            let Expr::List(list) = &points else {
+                return Err(error(points.span(), "a spline's `points` is a list of sketch points"));
+            };
+            let points = list
+                .items()
+                .iter()
+                .map(lower_point)
+                .collect::<Result<Vec<_>, _>>()?;
+            if points.len() < 2 {
+                return Err(error(span, "a spline passes through at least two points"));
+            }
+            SketchGeometry::Spline { points, closed }
+        }
         other => {
             return Err(error(
                 span,
-                format!("`{other}` is not a sketch entity (point, line, arc, circle)"),
+                format!("`{other}` is not a sketch entity (point, line, arc, circle, spline)"),
             ))
         }
     };

@@ -4,7 +4,7 @@ use runmat_cad::assembly::index::build_assembly_index;
 use runmat_cad::assembly::model::{AssemblyDocument, DefinitionKind, DefinitionRef};
 use runmat_cad::assembly::resolve::{resolve, ResolveContext, ResolveRequest};
 use runmat_cad::assembly::source::{Aabb, ConfiguredSummary, DefinitionSummary, MemorySource};
-use runmat_cad::display::{assembly_display, part_display, sketch_display, PartDisplay};
+use runmat_cad::display::{assembly_display_configured, part_display, sketch_display, PartDisplay};
 use runmat_cad::index::build_index;
 use runmat_cad::model::PartDocument;
 use runmat_cad::regen::kernel::TessellationOptions;
@@ -129,7 +129,18 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         return crate::drawing::dependencies(path, text);
     }
     if !is_assembly(path) {
-        return Vec::new();
+        // A part needs the files its imports read (STEP text the kernel is handed).
+        let Some(doc) = parse_part(path, text).document else {
+            return Vec::new();
+        };
+        return doc
+            .features
+            .iter()
+            .filter_map(|f| match &f.kind {
+                runmat_cad::model::FeatureKind::Import(i) => Some(resolve_path(path, &i.source, &Files::new())),
+                _ => None,
+            })
+            .collect();
     }
     let parsed = parse_assembly(path, text);
     let Some(doc) = parsed.document else {
@@ -261,6 +272,7 @@ pub fn compile_assembly(
     };
     let mut source = MemorySource::default();
     let mut displays: BTreeMap<String, PartDisplay> = BTreeMap::new();
+    let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
     let mut problems = Vec::new();
     let top_path = top.path.clone();
     // Breadth-first over sub-assemblies, each definition once.
@@ -308,6 +320,18 @@ pub fn compile_assembly(
                             .iter()
                             .map(|c| c.name.clone())
                             .collect();
+                        summary.inputs = part
+                            .document
+                            .inputs
+                            .iter()
+                            .map(|i| (i.name.clone(), i.kind.clone()))
+                            .collect();
+                        if let Some(output) = part.document.parts.first() {
+                            summary.material = output.material.clone();
+                            if summary.part_number.is_none() {
+                                summary.part_number = output.part_number.clone();
+                            }
+                        }
                         summary.digest = format!("text:{}", text.len());
                         let configured = ConfiguredSummary {
                             bbox: bbox(&part.display),
@@ -317,6 +341,7 @@ pub fn compile_assembly(
                         };
                         source.add_part(summary, configured);
                         displays.insert(key.clone(), part.display);
+                        documents.insert(key.clone(), part.document);
                     }
                     Err(mut d) => problems.append(&mut d),
                 },
@@ -352,7 +377,8 @@ pub fn compile_assembly(
         });
     }
     let index = build_assembly_index(&resolved, Some(&source));
-    let display = assembly_display(&resolved, &source, &displays);
+    let configured = crate::configured::configured_displays(&resolved, &documents);
+    let display = assembly_display_configured(&resolved, &source, &displays, &configured);
     Ok((
         serde_json::to_value(&index).unwrap_or(Value::Null),
         serde_json::to_value(&display).unwrap_or(Value::Null),

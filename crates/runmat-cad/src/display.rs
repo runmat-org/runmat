@@ -16,7 +16,7 @@
 use crate::assembly::model::DefinitionKind;
 use crate::assembly::resolve::ResolvedAssembly;
 use crate::assembly::source::DesignSource;
-use crate::model::sketch::{PointRole, SketchGeometry};
+use crate::model::sketch::SketchGeometry;
 use crate::model::{FeatureKind, PartDocument};
 use crate::refs::name::{EntityName, TopoKind};
 use crate::refs::Reference;
@@ -115,12 +115,16 @@ pub struct FrameDisplay {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SketchEntityDisplay {
     pub id: String,
-    /// `point`, `line`, `arc` or `circle`.
+    /// `point`, `line`, `arc`, `circle` or `spline`.
     pub kind: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub construction: bool,
-    /// Solved points by role (`at`, `start`, `end`, `center`).
+    /// Solved points by role (`at`, `start`, `end`, `center`, and `p<i>` for a spline's
+    /// interior through-points).
     pub points: BTreeMap<String, [f32; 2]>,
+    /// A spline's curve sampled as a polyline from start to end (empty for other kinds).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub samples: Vec<[f32; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radius: Option<f32>,
     /// Remaining degrees of freedom, where the solver reports them.
@@ -339,6 +343,10 @@ pub struct Prototype {
     pub file: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub configuration: Option<String>,
+    /// The material its occurrences are made of (the part's, or the occurrence's override):
+    /// what the canvas shades it by (glass, rubber, a metal, a composite).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
     #[serde(flatten)]
     pub shape: PrototypeShape,
 }
@@ -368,6 +376,27 @@ pub fn assembly_display(
     source: &dyn DesignSource,
     parts: &BTreeMap<String, PartDisplay>,
 ) -> AssemblyDisplay {
+    assembly_display_configured(resolved, source, parts, &BTreeMap::new())
+}
+
+/// The key of a part occurrence's configuration in [`assembly_display_configured`]'s
+/// `configured` map: the file and the resolved configuration as JSON.
+pub fn configuration_key(node: &crate::assembly::resolve::OccNode) -> (String, String) {
+    (
+        node.definition.file.as_str().to_string(),
+        serde_json::to_string(&node.configuration).unwrap_or_default(),
+    )
+}
+
+/// [`assembly_display`] where a part occurrence in a configuration other than the default
+/// draws that configuration's display from `configured` (keyed by [`configuration_key`]); the
+/// others draw the file's default display from `parts`.
+pub fn assembly_display_configured(
+    resolved: &ResolvedAssembly,
+    source: &dyn DesignSource,
+    parts: &BTreeMap<String, PartDisplay>,
+    configured: &BTreeMap<(String, String), PartDisplay>,
+) -> AssemblyDisplay {
     let mut out = AssemblyDisplay::default();
     let mut prototype_of: BTreeMap<(String, String), u32> = BTreeMap::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
@@ -376,14 +405,11 @@ pub fn assembly_display(
         }
         let file = node.definition.file.as_str().to_string();
         let configuration = node.configuration.name.as_ref().map(|c| c.to_string());
-        let key = (
-            file.clone(),
-            serde_json::to_string(&node.configuration).unwrap_or_default(),
-        );
+        let key = configuration_key(node);
         let prototype = match prototype_of.get(&key) {
             Some(p) => *p,
             None => {
-                let shape = match parts.get(&file) {
+                let shape = match configured.get(&key).or_else(|| parts.get(&file)) {
                     Some(part) => PrototypeShape::Mesh {
                         part: Box::new(part.clone()),
                     },
@@ -408,6 +434,7 @@ pub fn assembly_display(
                 out.prototypes.push(Prototype {
                     file,
                     configuration,
+                    material: node.material.as_ref().map(|m| m.0.clone()),
                     shape,
                 });
                 let p = (out.prototypes.len() - 1) as u32;
@@ -456,6 +483,37 @@ fn prototype_bounds(shape: &PrototypeShape) -> Option<Bounds> {
     }
 }
 
+/// A sketch spline's curve as a polyline (16 spans per through-point), from its solved
+/// points; empty when it doesn't solve.
+fn spline_samples(
+    id: &crate::ids::SketchEntityId,
+    count: usize,
+    closed: bool,
+    solved: &crate::model::sketch::SolvedSketch,
+) -> Vec<[f32; 2]> {
+    let points: Option<Vec<[f64; 2]>> = SketchGeometry::spline_roles(count, closed)
+        .into_iter()
+        .map(|r| solved.point(id, r))
+        .collect();
+    let Some(points) = points else {
+        return Vec::new();
+    };
+    let Some(kind) = runmat_geometry_kernel::interpolate::interpolate(&points, closed) else {
+        return Vec::new();
+    };
+    let segment = runmat_geometry_kernel::op::ProfileSegment {
+        curve: id.clone(),
+        kind,
+        start: points[0],
+        end: if closed { points[0] } else { points[points.len() - 1] },
+    };
+    segment
+        .polyline(16 * count.max(2))
+        .into_iter()
+        .map(|p| p.map(|x| x as f32))
+        .collect()
+}
+
 /// The solved sketches of a regenerated part, in document order.
 pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<SketchDisplay> {
     let f32s = |v: [f64; 3]| v.map(|x| x as f32);
@@ -476,25 +534,30 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
                         SketchGeometry::Line { .. } => "line",
                         SketchGeometry::Arc { .. } => "arc",
                         SketchGeometry::Circle { .. } => "circle",
+                        SketchGeometry::Spline { .. } => "spline",
                     };
-                    let points = [
-                        (PointRole::At, "at"),
-                        (PointRole::Start, "start"),
-                        (PointRole::End, "end"),
-                        (PointRole::Center, "center"),
-                    ]
-                    .into_iter()
-                    .filter_map(|(role, name)| {
-                        solved
-                            .point(&entity.id, role)
-                            .map(|p| (name.to_string(), p.map(|x| x as f32)))
-                    })
-                    .collect();
+                    let points = entity
+                        .geometry
+                        .points()
+                        .into_iter()
+                        .filter_map(|(role, _)| {
+                            solved
+                                .point(&entity.id, role)
+                                .map(|p| (role.word(), p.map(|x| x as f32)))
+                        })
+                        .collect();
+                    let samples = match &entity.geometry {
+                        SketchGeometry::Spline { points, closed } => {
+                            spline_samples(&entity.id, points.len(), *closed, solved)
+                        }
+                        _ => Vec::new(),
+                    };
                     SketchEntityDisplay {
                         id: entity.id.0.clone(),
                         kind: kind.into(),
                         construction: entity.construction,
                         points,
+                        samples,
                         radius: solved.radii.get(&entity.id).map(|r| *r as f32),
                         dof: solved.entity_dof.get(&entity.id).copied(),
                     }

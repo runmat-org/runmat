@@ -980,6 +980,7 @@ impl FeatureKind {
                             pe(&mut ptrs, center);
                             ptrs.push(radius);
                         }
+                        G::Spline { points, .. } => points.iter().for_each(|p| pe(&mut ptrs, p)),
                     }
                 }
                 for c in &s.constraints {

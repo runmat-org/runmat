@@ -310,23 +310,12 @@ pub fn print_axis(axis: &AxisRef) -> Option<String> {
     }
 }
 
-fn role_word(role: PointRole) -> &'static str {
-    match role {
-        PointRole::At => "at",
-        PointRole::Start => "start",
-        PointRole::End => "end",
-        PointRole::Center => "center",
-    }
+fn role_word(role: PointRole) -> String {
+    role.word()
 }
 
 pub fn role_of(word: &str) -> Option<PointRole> {
-    Some(match word {
-        "at" => PointRole::At,
-        "start" => PointRole::Start,
-        "end" => PointRole::End,
-        "center" => PointRole::Center,
-        _ => return None,
-    })
+    PointRole::from_word(word)
 }
 
 /// A point's text; `values` prints the coordinates.

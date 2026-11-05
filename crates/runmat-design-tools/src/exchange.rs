@@ -1,7 +1,7 @@
 //! `design.export` and `design.import`.
 //!
-//! Exports: parts and assemblies as STEP (AP214, a faceted B-rep of the regenerated bodies in
-//! millimetres), STL (binary, millimetres), 3MF (millimetres) and glTF (binary `.glb`, metres,
+//! Exports: parts and assemblies as STEP (AP242, the exact B-rep the installed kernel regenerated;
+//! a faceted AP214 B-rep in millimetres only on the grid test kernel), STL (binary, millimetres), 3MF (millimetres) and glTF (binary `.glb`, metres,
 //! Y up as glTF defines); drawing sheets and sheet-metal flat patterns as DXF (millimetres);
 //! circuits and boards as a KiCad project. Imports: KiCad projects to `.circuit`,
 //! `.circuit.layout` and `.circuit.lock` sources; STEP files to a `.part` whose `import` feature
@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 mod dxf;
+mod exact_step;
 mod mesh;
 mod step;
 
@@ -117,16 +118,22 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
         ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf => {
             let meshes = model_meshes(&input.path, files)?;
             match input.format {
-                ExportFormat::Step => {
-                    notes.push(
-                        "STEP AP214 faceted B-rep of the regenerated bodies, millimetres".into(),
-                    );
-                    vec![text_file(
-                        format!("{name}.step"),
-                        "model/step",
-                        step(&meshes, &name),
-                    )]
-                }
+                ExportFormat::Step => match exact_step::exact_step(&input.path, files)? {
+                    Some(bytes) => {
+                        notes.push("STEP AP242: the exact B-rep of the regenerated bodies".into());
+                        vec![text_file(
+                            format!("{name}.step"),
+                            "model/step",
+                            String::from_utf8_lossy(&bytes).into_owned(),
+                        )]
+                    }
+                    None => {
+                        notes.push(
+                            "STEP AP214 faceted B-rep (the grid test kernel has no exact STEP writer), millimetres".into(),
+                        );
+                        vec![text_file(format!("{name}.step"), "model/step", step(&meshes, &name))]
+                    }
+                },
                 ExportFormat::Stl => vec![binary_file(
                     format!("{name}.stl"),
                     "model/stl",

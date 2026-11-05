@@ -92,6 +92,10 @@ pub struct OccNode {
     pub world: Transform,
     /// Positioned by its placement (true) or by mates (false).
     pub fixed: bool,
+    /// Its placement attaches it to a frame (a skeleton's interface, another occurrence's
+    /// connector): positioned by that reference, as a mate would, rather than fixed in space.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub attached: bool,
     pub flexible: bool,
     pub pose: PoseStatus,
     /// Remaining degrees of freedom after the mate solve (`None`: not in a solve).
@@ -541,6 +545,7 @@ pub fn resolve_metered(
         local: Transform::IDENTITY,
         world: Transform::IDENTITY,
         fixed: true,
+        attached: false,
         flexible: false,
         pose: PoseStatus::Root,
         dof: None,

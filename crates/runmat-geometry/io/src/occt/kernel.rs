@@ -391,6 +391,9 @@ pub struct NamedBox {
 pub enum ImportSource {
     /// A STEP file on disk.
     Step(PathBuf),
+    /// A STEP file's text, passed in (the browser host has no project folder): written to a
+    /// scratch file named by its digest and read from there.
+    StepText(std::sync::Arc<str>),
     /// Named boxes.
     Boxes(Vec<NamedBox>),
 }
@@ -3256,7 +3259,21 @@ impl OcctKernel {
                 ImportSource::Step(p)
             }
         };
+        let resolved = match resolved {
+            ImportSource::StepText(text) => {
+                use sha2::Digest as _;
+                let name = hex::encode(sha2::Sha256::digest(text.as_bytes()));
+                let path = std::env::temp_dir().join(format!("runmat-import-{name}.step"));
+                if !path.exists() {
+                    std::fs::write(&path, text.as_bytes())
+                        .map_err(|e| failed(format!("cannot stage `{source}`: {e}")))?;
+                }
+                ImportSource::Step(path)
+            }
+            other => other,
+        };
         match resolved {
+            ImportSource::StepText(_) => unreachable!("staged above"),
             ImportSource::Boxes(boxes) => {
                 for b in &boxes {
                     let mut ints = Vec::new();

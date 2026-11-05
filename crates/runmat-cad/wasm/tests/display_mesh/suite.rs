@@ -504,3 +504,81 @@ fn the_showcase_bracket_is_watertight_with_its_cut_hole_and_fillet() {
         "volume {v} vs {v_exact}"
     );
 }
+
+/// A spline through seven points of a 20 mm half circle closed by its diameter, extruded
+/// 10 mm; and an airfoil (a spline from the trailing edge round the nose and back, closed by a
+/// line) lofted between two planes.
+const SPLINE_PARTS: &str = r#"runmat 0.7
+std 1
+
+part splines {
+    sketch s on origin.xy {
+        c = spline(points = [[20 mm, 0 mm], [17.3205 mm, 10 mm], [10 mm, 17.3205 mm], [0 mm, 20 mm], [-10 mm, 17.3205 mm], [-17.3205 mm, 10 mm], [-20 mm, 0 mm]])
+        l = line(start = c.end, end = c.start)
+    }
+    feature puck = extrude(profile = sketch.s, distance = 10 mm)
+}
+"#;
+
+const AIRFOIL_LOFT: &str = r#"runmat 0.7
+std 1
+
+part wing {
+    feature tip = plane.offset(base = origin.xy, distance = 100 mm)
+    sketch root on origin.xy {
+        c1 = spline(points = [[100 mm, 0.2 mm], [70 mm, 3.6 mm], [40 mm, 5.9 mm], [15 mm, 5.4 mm], [3 mm, 3 mm], [0 mm, 0 mm], [3 mm, -3 mm], [15 mm, -5.4 mm], [40 mm, -5.9 mm], [70 mm, -3.6 mm], [100 mm, -0.2 mm]])
+        c2 = line(start = c1.end, end = c1.start)
+    }
+    sketch outer on plane.tip {
+        c1 = spline(points = [[80 mm, 0.1 mm], [65 mm, 1.8 mm], [50 mm, 2.95 mm], [37.5 mm, 2.7 mm], [31.5 mm, 1.5 mm], [30 mm, 0 mm], [31.5 mm, -1.5 mm], [37.5 mm, -2.7 mm], [50 mm, -2.95 mm], [65 mm, -1.8 mm], [80 mm, -0.1 mm]])
+        c2 = line(start = c1.end, end = c1.start)
+    }
+    feature panel = loft(profiles = [sketch.root, sketch.outer])
+}
+"#;
+
+#[test]
+fn spline_profiles_extrude_and_loft_into_watertight_smooth_solids() {
+    let d = compile("/p/splines.part", SPLINE_PARTS);
+    let b = d.bodies.first().unwrap_or_else(|| {
+        let out = super::entry("/p/splines.part", SPLINE_PARTS);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let index = &v["projection"]["data"]["index"];
+        let keys: Vec<&String> = index.as_object().map(|o| o.keys().collect()).unwrap_or_default();
+        panic!("no body: {keys:?} {} {}", index["diagnostics"], v["display"]["data"]["problems"])
+    });
+    assert_watertight(b);
+    let r = 20.0 * MM;
+    let v = volume(b);
+    let v_exact = PI * r * r / 2.0 * 10.0 * MM;
+    assert!((v - v_exact).abs() < 0.01 * v_exact, "volume {v} vs {v_exact}");
+    // The side wall stays on the circle: an interpolating cubic through 12 points is within
+    // 0.05 % of the radius.
+    for f in &b.faces {
+        for q in pts(f) {
+            let rr = q[0].hypot(q[1]);
+            assert!(rr <= r * 1.01, "point {q:?} outside the circle ({rr})");
+        }
+    }
+    // Sketch mode draws the spline from its samples, through its points.
+    let sketch = d.sketches.first().unwrap_or_else(|| {
+        let out = super::entry("/p/splines.part", SPLINE_PARTS);
+        panic!("no sketch display: {}", &out[..out.len().min(3000)])
+    });
+    let e = &sketch.entities[0];
+    assert_eq!(e.kind, "spline");
+    assert!(e.points.contains_key("start") && e.points.contains_key("p5") && e.points.contains_key("end"), "{:?}", e.points.keys());
+    assert!(e.samples.len() > 100, "{} samples", e.samples.len());
+    for p in &e.samples {
+        let rr = (p[0] as f64).hypot(p[1] as f64);
+        assert!((rr - r).abs() < 0.01 * r, "sample {p:?} at radius {rr}");
+    }
+
+    let d = compile("/p/wing.part", AIRFOIL_LOFT);
+    let b = &d.bodies[0];
+    assert_watertight(b);
+    // Between the sections' areas times the length (a loft of similar sections at half scale:
+    // V = L/3 (A0 + A1 + sqrt(A0 A1)) for a frustum-like solid).
+    let v = volume(b);
+    assert!(v > 0.0 && v < 100.0 * MM * 100.0 * MM * 12.0 * MM, "volume {v}");
+}

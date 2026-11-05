@@ -1,5 +1,6 @@
 //! The dialect compilers behind a design document's diagnostics: the part regenerates on the
-//! reference kernel, assemblies resolve through the design tools' check, drawings and circuits
+//! design kernel (OCCT in the native server; the grid test double in the browser build),
+//! assemblies resolve through the design tools' check, drawings and circuits
 //! report their front ends and ERC.
 
 use super::*;
@@ -88,17 +89,18 @@ pub(super) fn byte_offset(text: &str, utf16: usize) -> usize {
     text.len()
 }
 
-/// A part regenerated on the reference kernel; regeneration diagnostics at their sites.
+/// A part regenerated on the design kernel (OCCT in the native server, as Desktop regenerates);
+/// regeneration diagnostics at their sites.
 fn compile_part(path: &str, text: &str, table: &SymbolTable) -> (Vec<Problem>, Option<Value>) {
-    use runmat_cad::regen::{regenerate, FakeKernel, RegenCache, RegenContext, RegenRequest};
+    use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest};
     let parsed = runmat_cad::syntax::parse_part(path, text);
     let mut problems = model_problems(&parsed.diagnostics);
     let Some(document) = parsed.document else {
         return (problems, None);
     };
-    let kernel = FakeKernel::new();
+    let kernel = runmat_design_tools::kernel::make();
     let ctx = RegenContext {
-        kernel: &kernel,
+        kernel: kernel.as_ref(),
         solver: &runmat_cad::sketch_solver::ExplicitSketchSolver,
         units: &runmat_cad::units::StubUnits,
         dynamic: &runmat_cad::value::NoDynamicValues,

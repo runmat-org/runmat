@@ -21,6 +21,26 @@ pub(super) fn rot_apply(r: &[[f64; 3]; 3], p: [f64; 3]) -> [f64; 3] {
     ]
 }
 
+/// A sketch spline as a kernel segment: the interpolating cubic through its solved points.
+pub(super) fn spline_segment(
+    id: &crate::ids::SketchEntityId,
+    count: usize,
+    closed: bool,
+    solved: &SolvedSketch,
+) -> Option<ProfileSegment> {
+    let points: Vec<[f64; 2]> = SketchGeometry::spline_roles(count, closed)
+        .into_iter()
+        .map(|r| solved.point(id, r))
+        .collect::<Option<_>>()?;
+    let kind = runmat_geometry_kernel::interpolate::interpolate(&points, closed)?;
+    Some(ProfileSegment {
+        curve: id.clone(),
+        kind,
+        start: points[0],
+        end: if closed { points[0] } else { *points.last()? },
+    })
+}
+
 /// Closed loops from a solved sketch: explicit loops as listed, or every closed chain of
 /// non-construction lines and arcs (circles are loops alone). The outer loop (largest area)
 /// comes first.
@@ -60,6 +80,7 @@ pub(super) fn build_loops(
                     end: [c[0] + r, c[1]],
                 })
             }
+            SketchGeometry::Spline { points, closed } => spline_segment(id, points.len(), *closed, solved),
             SketchGeometry::Point { .. } => None,
         }
     };
@@ -82,7 +103,7 @@ pub(super) fn build_loops(
             .collect();
         while !pool.is_empty() {
             let first = pool.remove(0);
-            if let SegmentKind::Circle { .. } = first.kind {
+            if first.is_closed_curve() {
                 loops.push(vec![first]);
                 continue;
             }
@@ -94,7 +115,7 @@ pub(super) fn build_loops(
                     break;
                 }
                 let Some(k) = pool.iter().position(|s| {
-                    !matches!(s.kind, SegmentKind::Circle { .. })
+                    !s.is_closed_curve()
                         && (close(s.start, end) || close(s.end, end))
                 }) else {
                     return Err(format!(
@@ -244,6 +265,9 @@ pub(super) fn build_path(
                     .point(&e.id, PointRole::End)
                     .ok_or("path arc not solved")?,
             },
+            SketchGeometry::Spline { points, closed } => {
+                spline_segment(&e.id, points.len(), *closed, solved).ok_or("path spline not solved")?
+            }
             _ => continue,
         };
         pool.push(seg);

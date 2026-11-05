@@ -9,7 +9,10 @@
 //! tests).
 
 use runmat_cad_wasm::{edit, kernel, runtime};
+use runmat_geometry_io::ImportSource;
 use runmat_geometry_io::OcctKernel;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 use serde::Deserialize;
 use std::ffi::{c_char, CStr, CString};
 
@@ -21,9 +24,36 @@ struct Request {
     args: Vec<String>,
 }
 
-/// Installs OCCT as the runtime's kernel (once per process; later calls do nothing).
+/// The STEP files of the request being served, by the names an `import(source = …)` may give
+/// them (the workspace path and the bare file name). The browser host has no project folder, so
+/// the files travel in the request and the kernel reads their text from here.
+static IMPORTS: Mutex<BTreeMap<String, ImportSource>> = Mutex::new(BTreeMap::new());
+
+fn set_imports(files: &runtime::Files) {
+    let mut map = BTreeMap::new();
+    for (path, text) in files {
+        let lower = path.to_ascii_lowercase();
+        if !(lower.ends_with(".step") || lower.ends_with(".stp")) {
+            continue;
+        }
+        let source = ImportSource::StepText(Arc::from(text.as_str()));
+        // Every tail of the path: `housing.step`, `supplier/housing.step`, … and the whole.
+        map.insert(path.clone(), source.clone());
+        for (i, _) in path.match_indices('/') {
+            map.entry(path[i + 1..].to_string()).or_insert_with(|| source.clone());
+        }
+    }
+    *IMPORTS.lock().unwrap_or_else(|e| e.into_inner()) = map;
+}
+
+/// Installs OCCT as the runtime's kernel (once per process; later calls do nothing). Each
+/// kernel it makes reads imported STEP files from the current request's files.
 pub fn install_occt() {
-    kernel::install("occt", || Box::new(OcctKernel::new()));
+    kernel::install("occt", || {
+        let mut k = OcctKernel::new();
+        k.imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        Box::new(k)
+    });
 }
 
 fn arg(args: &[String], i: usize) -> &str {
@@ -50,14 +80,20 @@ pub fn call(request: &str) -> String {
         "compile" => {
             let (path, text) = (arg(a, 0), arg(a, 1));
             match runtime::parse_files(arg(a, 2)) {
-                Ok(files) => runtime::compile_json(path, text, &files),
+                Ok(files) => {
+                    set_imports(&files);
+                    runtime::compile_json(path, text, &files)
+                }
                 Err(message) => runtime::error_json(path, &message),
             }
         }
         "edit" => {
             let (path, text, request) = (arg(a, 0), arg(a, 1), arg(a, 3));
             match runtime::parse_files(arg(a, 2)) {
-                Ok(files) => edit::edit_json(path, text, &files, request),
+                Ok(files) => {
+                    set_imports(&files);
+                    edit::edit_json(path, text, &files, request)
+                }
                 Err(message) => {
                     serde_json::json!({ "ok": false, "message": message, "diagnostics": [] })
                         .to_string()

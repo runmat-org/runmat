@@ -17,6 +17,7 @@
 #include <BRep_Builder.hxx>
 #include <Interface_Static.hxx>
 #include <Quantity_Color.hxx>
+#include <STEPCAFControl_Controller.hxx>
 #include <STEPCAFControl_Writer.hxx>
 #include <STEPControl_Writer.hxx>
 #include <Standard_Failure.hxx>
@@ -161,6 +162,9 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
       }
     }
     st->UpdateAssemblies();
+    // The STEP statics exist once the controller is initialised; setting one before that is
+    // silently ignored (the writer then falls back to AP214).
+    STEPCAFControl_Controller::Init();
     StaticGuard schema("write.step.schema", format == 1 ? "AP214IS" : "AP242DIS");
     StaticGuard unit("write.step.unit", "M");
     StaticGuard product("write.step.product.name", name.c_str());

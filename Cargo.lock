@@ -8167,6 +8167,7 @@ dependencies = [
  "runmat-circuit",
  "runmat-design-commands",
  "runmat-design-syntax",
+ "runmat-geometry-io",
  "runmat-plot",
  "runmat-rules",
  "schemars",

@@ -16,6 +16,7 @@ pub mod display;
 pub mod frame;
 pub mod history;
 pub mod ids;
+pub mod interpolate;
 pub mod names;
 pub mod op;
 pub mod queries;

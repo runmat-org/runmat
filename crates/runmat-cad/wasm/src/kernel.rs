@@ -11,11 +11,13 @@
 use runmat_cad::evaluate::GeometryAnalyzer;
 use runmat_cad::regen::kernel::{CadKernel, Tessellator};
 use runmat_cad::regen::FakeKernel;
+use runmat_cad::regen::kernel::ExactQueries;
 use std::sync::OnceLock;
 
-/// What the runtime needs of a kernel: operations, display tessellation and analyses.
-pub trait DesignKernel: CadKernel + Tessellator + GeometryAnalyzer {}
-impl<T: CadKernel + Tessellator + GeometryAnalyzer> DesignKernel for T {}
+/// What the runtime needs of a kernel: operations, display tessellation, analyses and the exact
+/// queries (hidden-line projection for drawings, STEP export).
+pub trait DesignKernel: CadKernel + Tessellator + GeometryAnalyzer + ExactQueries {}
+impl<T: CadKernel + Tessellator + GeometryAnalyzer + ExactQueries> DesignKernel for T {}
 
 /// Makes a fresh kernel for one regeneration.
 pub type KernelFactory = fn() -> Box<dyn DesignKernel>;

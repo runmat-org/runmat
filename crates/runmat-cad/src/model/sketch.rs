@@ -45,17 +45,113 @@ pub enum SketchGeometry {
         center: PointExpr,
         radius: ValueExpr,
     },
+    /// An interpolating cubic through `points` in order. Its points are `start` (the first),
+    /// `p1` … `p<n-2>` and `end` (the last); a closed spline runs back to `start` and has no
+    /// `end` (its last point is `p<n-1>`).
+    Spline {
+        points: Vec<PointExpr>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        closed: bool,
+    },
 }
 
-/// Which defining point of an entity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+impl SketchGeometry {
+    /// The roles of a spline's points, in order.
+    pub fn spline_roles(count: usize, closed: bool) -> Vec<PointRole> {
+        (0..count)
+            .map(|i| match i {
+                0 => PointRole::Start,
+                i if i + 1 == count && !closed => PointRole::End,
+                i => PointRole::Point(i as u16),
+            })
+            .collect()
+    }
+
+    /// Every defining point of the entity with its role, in order.
+    pub fn points(&self) -> Vec<(PointRole, &PointExpr)> {
+        match self {
+            SketchGeometry::Point { at } => vec![(PointRole::At, at)],
+            SketchGeometry::Line { start, end } => {
+                vec![(PointRole::Start, start), (PointRole::End, end)]
+            }
+            SketchGeometry::Arc { center, start, end } => vec![
+                (PointRole::Center, center),
+                (PointRole::Start, start),
+                (PointRole::End, end),
+            ],
+            SketchGeometry::Circle { center, .. } => vec![(PointRole::Center, center)],
+            SketchGeometry::Spline { points, closed } => {
+                Self::spline_roles(points.len(), *closed)
+                    .into_iter()
+                    .zip(points)
+                    .collect()
+            }
+        }
+    }
+
+    /// The expression of the point with `role`.
+    pub fn point(&self, role: PointRole) -> Option<&PointExpr> {
+        self.points()
+            .into_iter()
+            .find(|(r, _)| *r == role)
+            .map(|(_, p)| p)
+    }
+}
+
+/// Which defining point of an entity. Written and serialized as a word: `at`, `start`,
+/// `end`, `center`, or `p<i>` for a spline's interior point `i`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PointRole {
     /// A point entity's own position.
     At,
     Start,
     End,
     Center,
+    /// A spline's through-point by index (the first is `Start`, the last of an open spline
+    /// `End`).
+    Point(u16),
+}
+
+impl PointRole {
+    pub fn word(self) -> String {
+        match self {
+            PointRole::At => "at".into(),
+            PointRole::Start => "start".into(),
+            PointRole::End => "end".into(),
+            PointRole::Center => "center".into(),
+            PointRole::Point(i) => format!("p{i}"),
+        }
+    }
+
+    pub fn from_word(word: &str) -> Option<PointRole> {
+        Some(match word {
+            "at" => PointRole::At,
+            "start" => PointRole::Start,
+            "end" => PointRole::End,
+            "center" => PointRole::Center,
+            _ => {
+                let digits = word.strip_prefix('p')?;
+                if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                    return None;
+                }
+                PointRole::Point(digits.parse().ok()?)
+            }
+        })
+    }
+}
+
+impl Serialize for PointRole {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.word())
+    }
+}
+
+impl<'de> Deserialize<'de> for PointRole {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let word = String::deserialize(d)?;
+        PointRole::from_word(&word)
+            .ok_or_else(|| serde::de::Error::custom(format!("`{word}` is not a sketch point")))
+    }
 }
 
 /// A sketch point as written: coordinates, or another entity's point (`l1.end`), which makes the

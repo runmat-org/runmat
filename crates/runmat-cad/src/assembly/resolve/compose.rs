@@ -488,6 +488,12 @@ impl<'a, 'b> Resolver<'a, 'b> {
         ]);
         let id = self.nodes.len() as NodeId;
         let proto = self.prototype(&def, revision.as_ref(), &config, rep);
+        let attached = match here.get("position").map(|p| &p.kind) {
+            Some(OverrideKind::Position { placement }) if placement_fixed => {
+                matches!(placement, Placement::Attach { .. })
+            }
+            _ => matches!(o.placement, Placement::Attach { .. }),
+        };
         self.nodes.push(OccNode {
             parent: Some(parent),
             segment: segment.clone(),
@@ -502,6 +508,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             local: Transform::IDENTITY,
             world: Transform::IDENTITY,
             fixed: placement_fixed,
+            attached,
             flexible: flexible && def.kind == DefinitionKind::Assembly,
             pose: PoseStatus::Placed,
             dof: None,

@@ -1,8 +1,9 @@
 //! A generic airliner, authored as `.part` and `.assembly` text and compiled through the
-//! including crate's `super::entry(path, text, files_json) -> String` (the OCCT host's
-//! `runmat_cad_call` in `runmat-geometry-wasm-host`, the grid test double here): fuselage sections of frames, stringers and skin panels,
-//! wings of spars, ribs and skins, an empennage, landing gear and engine nacelles, with rivets
-//! patterned along the structure. A skeleton part publishes the frames the major assemblies
+//! including crate's `super::entry(path, text, files_json) -> String`: the OCCT host's
+//! `runmat_cad_call` in `runmat-geometry-wasm-host` (the grid test double cannot build its
+//! lofted and partly revolved parts, so the suite runs on OCCT only): fuselage sections of
+//! frames, stringers, skin panels and windows, lofted wings, an empennage, landing gear and
+//! engine nacelles, with flush rivets patterned along the structure. A skeleton part publishes the frames the major assemblies
 //! attach to, and the main sizes are inputs.
 //!
 //! `RUNMAT_AIRCRAFT_DIR=<folder>` writes the files there (the Desktop's shoot scenes load them).
@@ -94,6 +95,20 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
         .map(|o| o["path"].as_str().unwrap_or("").to_string())
         .collect();
     assert!(failed.is_empty(), "unplaced occurrences: {failed:?}");
+    // The Outline's markers follow SolidWorks: `(f)` only on an occurrence fixed in space by its
+    // own placement; attached ones and pattern copies are fully defined.
+    let rows = top["projection"]["data"]["occurrences"].as_array().cloned().unwrap_or_default();
+    let state = |path: &str| {
+        rows.iter()
+            .find(|o| o["path"] == path)
+            .map(|o| o["state"].as_str().unwrap_or("").to_string())
+            .unwrap_or_else(|| panic!("no occurrence {path} in {:?}", rows.iter().take(12).map(|o| o["path"].clone()).collect::<Vec<_>>()))
+    };
+    assert_eq!(state("skeleton"), "fixed");
+    assert_eq!(state("wing_starboard"), "fully_defined");
+    assert_eq!(state("fuselage/forward/frame@frames[2]"), "fully_defined");
+    let fixed = rows.iter().filter(|o| o["state"] == "fixed").count();
+    assert!(fixed * 10 < rows.len(), "{fixed} of {} occurrences fixed", rows.len());
     let display = &top["display"]["data"];
     let occurrences = display["occurrences"]
         .as_array()
@@ -108,10 +123,18 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
         display["bounds"]
     );
     assert!(occurrences >= 2000, "{occurrences} occurrences");
-    // True proportions: about 34 m long, a 34 m span, 11 m to the fin tip.
+    // True proportions: 38 m long, a 34.8 m span over the winglets, 12.3 m from the tyres to
+    // the fin tip.
     let b = &display["bounds"];
     let ext = |k: usize| b["max"][k].as_f64().unwrap() - b["min"][k].as_f64().unwrap();
-    assert!((ext(0) - 34.4).abs() < 1.0, "length {}", ext(0));
-    assert!((ext(1) - 32.4).abs() < 1.0, "span {}", ext(1));
-    assert!((ext(2) - 10.3).abs() < 1.0, "height {}", ext(2));
+    assert!((ext(0) - 38.0).abs() < 0.5, "length {}", ext(0));
+    assert!((ext(1) - 34.8).abs() < 0.6, "span {}", ext(1));
+    assert!((ext(2) - 12.3).abs() < 0.5, "height {}", ext(2));
+    // Configured parts draw their own configuration: every rib station and both gear legs'
+    // tyres are their own prototype.
+    let protos = display["prototypes"].as_array().cloned().unwrap_or_default();
+    let of = |file: &str| protos.iter().filter(|p| p["file"].as_str().is_some_and(|f| f == file || f.ends_with(&format!("/{file}")))).count();
+    assert!(of("rib.part") >= 20, "{} rib prototypes", of("rib.part"));
+    assert_eq!(of("tyre.part"), 2, "tyre prototypes");
+    assert!(protos.iter().any(|p| p["material"] == "glass"), "window panes carry their material");
 }

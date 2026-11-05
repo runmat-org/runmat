@@ -53,16 +53,7 @@ fn starting_points(
         .map(|e| (&e.id, &e.geometry))
         .collect();
     fn expr_of(g: &G, role: PointRole) -> Option<&PointExpr> {
-        match (g, role) {
-            (G::Point { at }, PointRole::At) => Some(at),
-            (G::Line { start, .. }, PointRole::Start) => Some(start),
-            (G::Line { end, .. }, PointRole::End) => Some(end),
-            (G::Arc { center, .. }, PointRole::Center) => Some(center),
-            (G::Arc { start, .. }, PointRole::Start) => Some(start),
-            (G::Arc { end, .. }, PointRole::End) => Some(end),
-            (G::Circle { center, .. }, PointRole::Center) => Some(center),
-            _ => None,
-        }
+        g.point(role)
     }
     fn point(
         by_id: &BTreeMap<&SketchEntityId, &G>,
@@ -96,10 +87,7 @@ fn starting_points(
     let mut points = BTreeMap::new();
     let mut radii = BTreeMap::new();
     for e in &sketch.entities {
-        let roles: &[PointRole] = match &e.geometry {
-            G::Point { .. } => &[PointRole::At],
-            G::Line { .. } => &[PointRole::Start, PointRole::End],
-            G::Arc { .. } => &[PointRole::Center, PointRole::Start, PointRole::End],
+        let roles: Vec<PointRole> = match &e.geometry {
             G::Circle { radius, .. } => {
                 let r = sketch
                     .solved
@@ -114,10 +102,11 @@ fn starting_points(
                             .map_err(|e| fail(e.to_string()))
                     })?;
                 radii.insert(e.id.clone(), r);
-                &[PointRole::Center]
+                vec![PointRole::Center]
             }
+            g => g.points().into_iter().map(|(r, _)| r).collect(),
         };
-        for &role in roles {
+        for role in roles {
             let p = match sketch.solved.points.get(&SolvedKey::Point {
                 entity: e.id.clone(),
                 role,
@@ -226,17 +215,7 @@ impl SketchSolver for ConstraintSketchSolver {
             if depth > 64 {
                 return (id.clone(), role);
             }
-            let e = by_id.get(id).and_then(|g| match (g, role) {
-                (G::Line { start, .. }, PointRole::Start)
-                | (G::Arc { start, .. }, PointRole::Start) => Some(start),
-                (G::Line { end, .. }, PointRole::End) | (G::Arc { end, .. }, PointRole::End) => {
-                    Some(end)
-                }
-                (G::Arc { center, .. }, PointRole::Center)
-                | (G::Circle { center, .. }, PointRole::Center) => Some(center),
-                (G::Point { at }, PointRole::At) => Some(at),
-                _ => None,
-            });
+            let e = by_id.get(id).and_then(|g| g.point(role));
             match e {
                 Some(PointExpr::Of { entity, role }) => canonical(by_id, entity, *role, depth + 1),
                 _ => (id.clone(), role),
@@ -278,8 +257,17 @@ impl SketchSolver for ConstraintSketchSolver {
                     sys.circle(c, radii0.get(&e.id).copied().unwrap_or(1.0))
                         .map_err(build)?
                 }
+                // Each through-point is a free point; the spline itself is named by its start.
+                G::Spline { points, closed } => {
+                    let mut first = None;
+                    for role in G::spline_roles(points.len(), *closed) {
+                        let p = get_point(&mut sys, &e.id, role);
+                        first.get_or_insert(p);
+                    }
+                    first.expect("a spline has points")
+                }
             };
-            if e.construction {
+            if e.construction && !matches!(e.geometry, G::Spline { .. }) {
                 sys.set_construction(id, true);
             }
             curves.insert(e.id.clone(), id);
