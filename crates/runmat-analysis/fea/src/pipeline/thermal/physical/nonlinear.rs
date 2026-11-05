@@ -107,8 +107,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
                 .then_some(*value)
         }))
     };
-    let mut residual =
-        evaluate(&current).map_err(super::thermal_assembly_failure)?;
+    let mut residual = evaluate(&current).map_err(super::thermal_assembly_failure)?;
     let mut backtracking_count = 0;
     let mut maximum_linear_residual = 0.0_f64;
     let mut host_sync_count = 0;

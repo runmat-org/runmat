@@ -781,9 +781,8 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         );
         let cleanup_runtime = &catch_runtime;
         let dispatch_future = async move {
-            // The inner dispatch future releases its completed captures before
-            // the post-poll publication inspects surviving workspace aliases.
-            let dispatch_future = async move { dispatch_future.await };
+            // The cleanup owner releases completed dispatch captures before
+            // post-poll publication inspects surviving workspace aliases.
             let (result, cleanup) = cleanup
                 .run_with_post_poll(cleanup_runtime, dispatch_future, |selected| {
                     // Completed slot changes must release their canonical owners

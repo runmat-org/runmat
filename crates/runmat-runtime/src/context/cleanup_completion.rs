@@ -10,6 +10,9 @@ use crate::builtins::introspection::on_cleanup::lifecycle::{
 };
 use crate::RuntimeError;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;
+
 /// Inline lazy authority: ordinary numeric execution retains no runtime clone,
 /// registry alias or cohort ID. Existing registry entries own callback storage.
 pub struct RuntimeFunctionCleanup {
@@ -127,7 +130,7 @@ impl RuntimeFunctionCleanup {
             // Declared before the future so its final destructor still runs
             // under the selected completion, without a guard across Pending.
             let selected_drop_guard;
-            let mut future = std::pin::pin!(future);
+            let mut future = std::pin::pin!(Some(future));
             let result = futures::future::poll_fn(|context| {
                 if let Err(error) = self.before_retirement(runtime) {
                     return Poll::Ready(Err(error));
@@ -137,10 +140,29 @@ impl RuntimeFunctionCleanup {
                     // this token actually owns work. The empty path adds no
                     // RuntimeContext clone or TLS scope activation.
                     let _selected = self.runtime.as_ref().map(RuntimeContext::enter);
-                    future.as_mut().poll(context)
+                    future
+                        .as_mut()
+                        .as_pin_mut()
+                        .expect("cleanup future remains present until completion")
+                        .poll(context)
                 };
                 let publication = if result.is_ready() {
-                    self.selected_context(runtime).and_then(&mut post_poll)
+                    match self.selected_context(runtime) {
+                        Ok(_) => {
+                            let _selected = self.runtime.as_ref().map(RuntimeContext::enter);
+                            // Pin::set destroys the completed future in place,
+                            // including !Unpin captures, before publication
+                            // inspects surviving owners. Numeric calls keep
+                            // their clone-free empty completion path.
+                            future.as_mut().set(None);
+                            post_poll(self.runtime.as_ref().unwrap_or(runtime))
+                        }
+                        Err(error) => {
+                            let _original = runtime.enter();
+                            future.as_mut().set(None);
+                            Err(error)
+                        }
+                    }
                 } else {
                     Ok(())
                 };
@@ -155,7 +177,11 @@ impl RuntimeFunctionCleanup {
                 }
             })
             .await;
-            selected_drop_guard = self.runtime.as_ref().map(RuntimeContext::enter);
+            selected_drop_guard = future
+                .as_ref()
+                .get_ref()
+                .is_some()
+                .then(|| self.runtime.as_ref().unwrap_or(runtime).enter());
             let _ = &selected_drop_guard;
             result
         };

@@ -84,9 +84,11 @@ fn scoped_completion_never_joins_an_unrelated_running_callback() {
             .now_or_never()
             .expect("independent completion")
             .is_ok());
-        running.complete(Err(crate::build_runtime_error("unrelated original failure")
-            .with_identifier("Cleanup:Unrelated")
-            .build()));
+        running.complete(Err(crate::build_runtime_error(
+            "unrelated original failure",
+        )
+        .with_identifier("Cleanup:Unrelated")
+        .build()));
         registry.mark_terminal(&running);
         assert!(drain_completion(&runtime, &registry, completion)
             .now_or_never()

@@ -176,7 +176,9 @@ impl ElectricalStaticWorkload {
     }
 }
 
-fn electrical_failure(error: crate::physics::electrical::ElectricalStaticError) -> AnalysisExecutionError {
+fn electrical_failure(
+    error: crate::physics::electrical::ElectricalStaticError,
+) -> AnalysisExecutionError {
     match error {
         crate::physics::electrical::ElectricalStaticError::Accounting(cause) => {
             AnalysisExecutionError::Usage(cause)

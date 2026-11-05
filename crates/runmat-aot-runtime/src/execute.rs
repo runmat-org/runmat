@@ -436,15 +436,20 @@ fn execute_with_linked_authority(
         interpreter_resume_points: resume_points,
         ..runmat_native_executor::NativeExecutorOptions::default()
     };
-    let liveness_admission = runmat_native_codegen::NativeLivenessAdmission::capture(&runtime)
-        .map_err(|source| {
-            runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+    let failure_reservation = failure::RuntimeFailureReservation::prepare(&runtime)?;
+    let liveness_admission = match runmat_native_codegen::NativeLivenessAdmission::capture(&runtime)
+    {
+        Ok(admission) => admission,
+        Err(source) => {
+            let cause = runmat_runtime::context::host_allocation::host_allocation_runtime_error(
                 Some(&runtime),
                 "RunMat:NativeLivenessAdmission",
                 "standalone native liveness metadata admission failed",
                 source,
-            )
-        })?;
+            );
+            return Err(failure_reservation.into_failure(cause));
+        }
+    };
     let executor = Rc::new(
         match &linked_selected {
             Some(linked) => runmat_native_executor::NativeExecutor::bind_linked_selected(
@@ -462,7 +467,7 @@ fn execute_with_linked_authority(
                 liveness_admission,
             ),
         }
-        .map_err(|error| ProcessFailure::from(error.into_runtime_error()))?,
+        .map_err(|error| failure_reservation.into_failure(error.into_runtime_error()))?,
     );
 
     // Keep the original session owner through foreign teardown and terminal
