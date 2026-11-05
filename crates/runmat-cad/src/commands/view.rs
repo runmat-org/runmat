@@ -74,6 +74,14 @@ pub(super) fn add(catalog: &mut Catalog) {
             .desc("Look at the model from the isometric corner.")
             .kw(&["iso"])
             .edit(view_action("isometric")),
+        cmd("view.perspective", "Perspective", "view-perspective", CAD_3D)
+            .desc("Draw the view with perspective: nearer parts look larger.")
+            .kw(&["projection", "camera"])
+            .edit(view_action("perspective")),
+        cmd("view.orthographic", "Orthographic", "view-orthographic", CAD_3D)
+            .desc("Draw the view as a parallel projection, so sizes don't change with depth.")
+            .kw(&["projection", "parallel", "camera"])
+            .edit(view_action("orthographic")),
         cmd(
             "view.normal-to",
             "Normal to",
@@ -192,6 +200,8 @@ pub(super) fn cluster_3d(extra: Vec<RowItem>) -> Vec<RowItem> {
                 e("view.normal-to"),
                 e("view.fit"),
                 e("view.zoom-selection"),
+                e("view.perspective"),
+                e("view.orthographic"),
             ],
         ),
     ];

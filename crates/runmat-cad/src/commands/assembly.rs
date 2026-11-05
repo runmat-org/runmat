@@ -8,6 +8,13 @@ use SelectKind as K;
 const A: &[EditorKind] = &[Assembly];
 
 pub(super) const MATE_TYPES: &[(&str, &str)] = &[
+    ("coincident", "Coincident"),
+    ("concentric", "Concentric"),
+    ("distance", "Distance"),
+    ("angle", "Angle"),
+    ("parallel", "Parallel"),
+    ("perpendicular", "Perpendicular"),
+    ("tangent", "Tangent"),
     ("fasten", "Fasten"),
     ("revolute", "Revolute"),
     ("slider", "Slider"),
@@ -15,10 +22,6 @@ pub(super) const MATE_TYPES: &[(&str, &str)] = &[
     ("planar", "Planar"),
     ("ball", "Ball"),
     ("pin_slot", "Pin slot"),
-    ("parallel", "Parallel"),
-    ("tangent", "Tangent"),
-    ("distance", "Distance"),
-    ("angle", "Angle"),
     ("width", "Width"),
     ("symmetric", "Symmetric"),
     ("path", "Path"),
@@ -180,6 +183,9 @@ pub(super) fn add(catalog: &mut Catalog) {
                 .drag(Manipulator::Triad),
             offset("dy", "Delta Y", 0.0).shown("mode", &["triad"]),
             offset("dz", "Delta Z", 0.0).shown("mode", &["triad"]),
+            angle("rx", "Rotate X", 0.0).shown("mode", &["triad"]),
+            angle("ry", "Rotate Y", 0.0).shown("mode", &["triad"]),
+            angle("rz", "Rotate Z", 0.0).shown("mode", &["triad"]),
             pick("along", "Along", &[K::Edge, K::Axis, K::Face]).shown("mode", &["align"]),
             flag("collisions", "Stop at collisions", false),
         ])

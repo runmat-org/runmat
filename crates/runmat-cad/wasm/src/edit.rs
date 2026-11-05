@@ -11,21 +11,17 @@
 //! cut, intersect or a new body, sketch-plane or offset start, draft and thin walls),
 //! `part.delete`, `part.suppress`, `part.unsuppress`, `part.move-up` and `part.move-down`.
 //! Sketches: `part.sketch` and the sketch tools ([`sketch`]).
-//! Assemblies: `assembly.delete`, `assembly.suppress` and `assembly.fix` on the file's own
-//! occurrences. Every other part command that adds a feature is built by [`crate::features`] from
+//! Assemblies: delete, suppress, fix, insert, move, pattern and mate ([`assembly`]). Every
+//! other part command that adds a feature is built by [`crate::features`] from
 //! its values and picks ([`crate::picks`]); a command or option the model lacks says so.
 
+mod assembly;
 mod sketch;
 
-use crate::runtime::{compile_assembly, Files};
-use runmat_cad::assembly::model::AssemblyDocument;
+use crate::runtime::Files;
 use runmat_cad::model::{Feature, PartDocument};
-use runmat_cad::syntax::edit::{
-    diff_source, edit_part, reorder_feature, EditFailure, SourceChange,
-};
-use runmat_cad::syntax::{parse_assembly, parse_part, print_assembly, ASSEMBLY};
-use runmat_design_syntax::edit::TextEdit;
-use runmat_types::Span;
+use runmat_cad::syntax::edit::{edit_part, reorder_feature, EditFailure, SourceChange};
+use runmat_cad::syntax::parse_part;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -217,103 +213,6 @@ fn part_edit(
     }
 }
 
-fn assembly_edit(
-    path: &str,
-    text: &str,
-    files: &Files,
-    request: &EditRequest,
-) -> Result<(SourceChange, String), EditFailure> {
-    let parsed = parse_assembly(path, text);
-    let (Some(mut document), true) = (parsed.document, parsed.diagnostics.is_empty()) else {
-        return Err(EditFailure::Invalid(parsed.diagnostics));
-    };
-    // Outline IDs carry occurrence UUIDs; the resolved index maps them to occurrence paths.
-    let (index, _, _) =
-        compile_assembly(path, text, files).map_err(|_| model("the assembly doesn't compile"))?;
-    let rows = index["occurrences"].as_array().cloned().unwrap_or_default();
-    let mut names = Vec::new();
-    for id in &request.selection {
-        let Some(uuid) = id.strip_prefix("occurrence:") else {
-            continue;
-        };
-        let row = rows
-            .iter()
-            .find(|r| r["uuid"].as_str() == Some(uuid))
-            .ok_or_else(|| model("the selected component isn't in this assembly any more"))?;
-        let occ_path = row["path"].as_str().unwrap_or_default();
-        if occ_path.contains('/') {
-            return Err(model(format!(
-                "`{occ_path}` is inside a sub-assembly; open that assembly to change it"
-            )));
-        }
-        names.push(occ_path.to_owned());
-    }
-    if names.is_empty() {
-        return Err(model("select a component first"));
-    }
-    let find = |document: &mut AssemblyDocument, name: &str| -> Result<usize, EditFailure> {
-        document
-            .occurrences
-            .iter()
-            .position(|o| o.name == name)
-            .ok_or_else(|| model(format!("the assembly has no component `{name}`")))
-    };
-    let summary = match request.command.as_str() {
-        "assembly.delete" => {
-            for name in &names {
-                let at = find(&mut document, name)?;
-                document.occurrences.remove(at);
-            }
-            format!("Deleted {}", names.join(", "))
-        }
-        "assembly.suppress" => {
-            for name in &names {
-                let at = find(&mut document, name)?;
-                document.occurrences[at].suppressed = true;
-            }
-            format!("Suppressed {}", names.join(", "))
-        }
-        "assembly.fix" => {
-            let fixed = text_value(&request.values, "state") != "float";
-            for name in &names {
-                let at = find(&mut document, name)?;
-                document.occurrences[at].fixed = fixed;
-            }
-            format!(
-                "{} {}",
-                if fixed { "Fixed" } else { "Floated" },
-                names.join(", ")
-            )
-        }
-        other => {
-            return Err(model(format!(
-                "`{other}` edits assemblies through the source editor in this build"
-            )))
-        }
-    };
-    // The minimal diff can't yet place every occurrence statement (one with a body block):
-    // then the file is reprinted whole and the change says so.
-    let change = match diff_source(&ASSEMBLY, path, text, &document, &parsed.uses, &[]) {
-        Ok(change) => change,
-        Err(EditFailure::Model(_)) => {
-            let printed = print_assembly(&document, &parsed.uses).map_err(EditFailure::Print)?;
-            SourceChange {
-                edits: vec![TextEdit::replace(
-                    Span {
-                        start: 0,
-                        end: text.len(),
-                    },
-                    printed.clone(),
-                )],
-                source: printed,
-                reprinted: true,
-            }
-        }
-        Err(other) => return Err(other),
-    };
-    Ok((change, summary))
-}
-
 fn text_value<'a>(values: &'a Map<String, Value>, id: &str) -> &'a str {
     values.get(id).and_then(Value::as_str).unwrap_or("")
 }
@@ -335,7 +234,7 @@ pub fn edit(
             }
         }
     } else if path.ends_with(".assembly") {
-        assembly_edit(path, text, files, request)?
+        assembly::edit(path, text, files, request)?
     } else {
         part_edit(path, text, request)?
     };
@@ -370,6 +269,7 @@ pub fn edit_json(path: &str, text: &str, files: &Files, request: &str) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::compile_assembly;
 
     const PLATE: &str = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])\n        l2 = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])\n        l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n    }\n}\n";
 
