@@ -147,7 +147,7 @@ impl Ctx<'_> {
                 let w = per * UPRIGHT_PITCH;
                 e[0] = e[0].min(-w / 2);
                 e[2] = e[2].max(w / 2 + (de[2] - de[0]) / 2);
-                e[1] = base[1] - rows * (GRID + de[3] - de[1]);
+                e[1] = base[1] + decap_lift(&places[i]) - rows * (GRID + de[3] - de[1]);
             }
             slot.insert(i, e);
         }
@@ -220,7 +220,7 @@ impl Ctx<'_> {
         // Decoupling in a row under its IC.
         for (&h, ds) in &decaps {
             let o = places[h].origin;
-            let bottom = up_ext(h, places)[1];
+            let bottom = up_ext(h, places)[1] + decap_lift(&places[h]);
             let de = up_ext(ds[0], places);
             let per = ds.len().min(DECAP_ROW) as Coord;
             let x0 = o.x - (per - 1) * UPRIGHT_PITCH / 2;
@@ -345,5 +345,17 @@ impl Ctx<'_> {
             out.push((i, o));
         }
         (out, bbox)
+    }
+}
+
+/// How far a decoupling row rises toward its IC: a boxed IC's extent keeps 3 grids under its
+/// lowest port for its value, which sits beside the body, and the row keeps one grid more, so
+/// the caps' port room meets the IC's ground-port room and the row sits about a port's height
+/// under the IC, as an engineer draws it.
+fn decap_lift(host: &Place) -> Coord {
+    if host.upright() {
+        0
+    } else {
+        4 * GRID
     }
 }
