@@ -520,6 +520,18 @@ part splines {
 }
 "#;
 
+/// A closed spline through twelve points of a 20 mm circle: one curve, one loop, extruded 10 mm.
+const CLOSED_SPLINE: &str = r#"runmat 0.7
+std 1
+
+part disc {
+    sketch s on origin.xy {
+        c = spline(points = [[20 mm, 0 mm], [17.3205 mm, 10 mm], [10 mm, 17.3205 mm], [0 mm, 20 mm], [-10 mm, 17.3205 mm], [-17.3205 mm, 10 mm], [-20 mm, 0 mm], [-17.3205 mm, -10 mm], [-10 mm, -17.3205 mm], [0 mm, -20 mm], [10 mm, -17.3205 mm], [17.3205 mm, -10 mm]], closed)
+    }
+    feature disc = extrude(profile = sketch.s, distance = 10 mm)
+}
+"#;
+
 const AIRFOIL_LOFT: &str = r#"runmat 0.7
 std 1
 
@@ -572,6 +584,24 @@ fn spline_profiles_extrude_and_loft_into_watertight_smooth_solids() {
     for p in &e.samples {
         let rr = (p[0] as f64).hypot(p[1] as f64);
         assert!((rr - r).abs() < 0.01 * r, "sample {p:?} at radius {rr}");
+    }
+
+    // A single closed spline is a loop on its own; the extruded disc is round with no seam kink.
+    let d = compile("/p/disc.part", CLOSED_SPLINE);
+    let b = d.bodies.first().unwrap_or_else(|| {
+        let out = super::entry("/p/disc.part", CLOSED_SPLINE);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        panic!("no body: {} {}", v["projection"]["data"]["index"]["diagnostics"], v["display"]["data"]["problems"])
+    });
+    assert_watertight(b);
+    let v = volume(b);
+    let v_exact = PI * r * r * 10.0 * MM;
+    assert!((v - v_exact).abs() < 0.005 * v_exact, "volume {v} vs {v_exact}");
+    for f in &b.faces {
+        for q in pts(f) {
+            let rr = q[0].hypot(q[1]);
+            assert!((rr - r).abs() < 0.002 * r || rr < r, "point {q:?} off the circle ({rr})");
+        }
     }
 
     let d = compile("/p/wing.part", AIRFOIL_LOFT);

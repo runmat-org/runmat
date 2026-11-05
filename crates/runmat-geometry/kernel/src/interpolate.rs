@@ -2,8 +2,11 @@
 //!
 //! [`interpolate`] fits a clamped cubic through every point in order (chord-length
 //! parameters, knots by averaging; The NURBS Book, algorithm A9.1). The curve passes through
-//! each point exactly and starts and ends at the first and last points. A closed spline repeats
-//! its first point at the end, so the curve closes on itself; the seam is where it starts.
+//! each point exactly and starts and ends at the first and last points. A closed spline
+//! (three points or more) is a cubic with knots at the points' parameters and periodic end
+//! conditions: it returns to its first point with the same tangent and curvature, so the seam
+//! is as smooth as the rest of the curve (C2). It is written clamped, starting and ending at
+//! the first point.
 
 use crate::op::SegmentKind;
 
@@ -11,30 +14,16 @@ use crate::op::SegmentKind;
 /// when there are fewer than two points or two consecutive points coincide. Two points give a
 /// straight degree-1 spline and three a degree-2 one.
 pub fn interpolate(points: &[[f64; 2]], closed: bool) -> Option<SegmentKind> {
-    let mut q: Vec<[f64; 2]> = points.to_vec();
-    if closed && q.len() > 2 {
-        q.push(q[0]);
+    if closed && points.len() > 2 {
+        return interpolate_closed(points);
     }
+    let q: Vec<[f64; 2]> = points.to_vec();
     let n = q.len();
     if n < 2 {
         return None;
     }
     let degree = (n - 1).min(3);
-    // Chord-length parameters on [0, 1].
-    let mut u = vec![0.0; n];
-    let mut total = 0.0;
-    for i in 1..n {
-        let d = (q[i][0] - q[i - 1][0]).hypot(q[i][1] - q[i - 1][1]);
-        if d <= 1e-12 {
-            return None;
-        }
-        total += d;
-        u[i] = total;
-    }
-    for x in u.iter_mut() {
-        *x /= total;
-    }
-    u[n - 1] = 1.0;
+    let u = chord_parameters(&q)?;
     // Knots: clamped ends, interior by averaging `degree` parameters.
     let mut flat = vec![0.0; degree + 1];
     for j in 1..n - degree {
@@ -55,6 +44,78 @@ pub fn interpolate(points: &[[f64; 2]], closed: bool) -> Option<SegmentKind> {
     Some(SegmentKind::Spline {
         degree: degree as u32,
         poles,
+        weights: Vec::new(),
+        knots,
+        multiplicities,
+    })
+}
+
+/// Chord-length parameters on [0, 1] through `q` in order, or `None` when two consecutive
+/// points coincide.
+fn chord_parameters(q: &[[f64; 2]]) -> Option<Vec<f64>> {
+    let n = q.len();
+    let mut u = vec![0.0; n];
+    let mut total = 0.0;
+    for i in 1..n {
+        let d = (q[i][0] - q[i - 1][0]).hypot(q[i][1] - q[i - 1][1]);
+        if d <= 1e-12 {
+            return None;
+        }
+        total += d;
+        u[i] = total;
+    }
+    for x in u.iter_mut() {
+        *x /= total;
+    }
+    u[n - 1] = 1.0;
+    Some(u)
+}
+
+/// The closed cubic through `points` (three or more): knots at the chord-length parameters of
+/// the points and the closing chord, and periodic end conditions C'(0) = C'(1) and
+/// C''(0) = C''(1), so the curve is C2 everywhere including the seam.
+fn interpolate_closed(points: &[[f64; 2]]) -> Option<SegmentKind> {
+    let mut q: Vec<[f64; 2]> = points.to_vec();
+    q.push(points[0]);
+    let u = chord_parameters(&q)?;
+    let p = 3;
+    let n = q.len(); // the points with the first repeated at the end
+    let poles = n + 2;
+    let mut flat = vec![0.0; p + 1];
+    flat.extend_from_slice(&u[1..n - 1]);
+    flat.extend(std::iter::repeat_n(1.0, p + 1));
+    let mut a = vec![vec![0.0; poles]; poles];
+    let mut rhs = vec![[0.0; 2]; poles];
+    for k in 0..n {
+        let span = find_span(poles, p, u[k], &flat);
+        let basis = basis_functions(span, u[k], p, &flat);
+        for (j, b) in basis.iter().enumerate() {
+            a[k][span - p + j] = *b;
+        }
+        rhs[k] = q[k];
+    }
+    // First- and second-derivative control points as rows over the poles (The NURBS Book 3.3).
+    let first = |i: usize| -> Vec<f64> {
+        let mut row = vec![0.0; poles];
+        let f = p as f64 / (flat[i + p + 1] - flat[i + 1]);
+        row[i + 1] += f;
+        row[i] -= f;
+        row
+    };
+    let second = |i: usize| -> Vec<f64> {
+        let f = (p - 1) as f64 / (flat[i + p + 1] - flat[i + 2]);
+        first(i + 1).iter().zip(first(i)).map(|(b, a)| f * (b - a)).collect()
+    };
+    a[n] = first(0).iter().zip(first(poles - 2)).map(|(s, e)| s - e).collect();
+    a[n + 1] = second(0).iter().zip(second(poles - 3)).map(|(s, e)| s - e).collect();
+    let mut poles_out = solve(a, &rhs)?;
+    // The ends are the first point exactly.
+    poles_out[0] = points[0];
+    *poles_out.last_mut()? = points[0];
+    let (knots, multiplicities) = distinct(&flat);
+    Some(SegmentKind::Spline {
+        degree: p as u32,
+        poles: poles_out,
         weights: Vec::new(),
         knots,
         multiplicities,
@@ -189,6 +250,30 @@ mod tests {
             let r = p[0].hypot(p[1]);
             assert!((r - 1.0).abs() < 0.01, "radius {r}");
         }
+    }
+
+    #[test]
+    fn a_closed_spline_is_smooth_across_its_seam() {
+        let pts = [[0.0, 0.0], [4.0, -1.0], [7.0, 2.0], [5.0, 6.0], [1.0, 4.5]];
+        let s = segment(&pts, true);
+        assert!(s.is_closed_curve());
+        for p in pts {
+            let d = s.polyline(40000).iter().map(|q| (q[0] - p[0]).hypot(q[1] - p[1])).fold(f64::MAX, f64::min);
+            assert!(d < 2e-3, "{p:?} misses by {d}");
+        }
+        // Tangent and curvature agree on both sides of the seam.
+        let h = 1e-5;
+        let at = |t: f64| s.point_at(t);
+        let d1 = |t: f64| { let (a, b) = (at(t - h), at(t + h)); [(b[0] - a[0]) / (2.0 * h), (b[1] - a[1]) / (2.0 * h)] };
+        let start = { let (a, b) = (at(0.0), at(h)); [(b[0] - a[0]) / h, (b[1] - a[1]) / h] };
+        let end = { let (a, b) = (at(1.0 - h), at(1.0)); [(b[0] - a[0]) / h, (b[1] - a[1]) / h] };
+        let len = start[0].hypot(start[1]);
+        assert!((start[0] - end[0]).hypot(start[1] - end[1]) < 1e-3 * len, "tangent jumps: {start:?} vs {end:?}");
+        let k = 1e-3;
+        let c0 = { let (a, b) = (d1(k), d1(2.0 * k)); [(b[0] - a[0]) / k, (b[1] - a[1]) / k] };
+        let c1 = { let (a, b) = (d1(1.0 - 2.0 * k), d1(1.0 - k)); [(b[0] - a[0]) / k, (b[1] - a[1]) / k] };
+        let mag = c0[0].hypot(c0[1]).max(1.0);
+        assert!((c0[0] - c1[0]).hypot(c0[1] - c1[1]) < 0.05 * mag, "curvature jumps: {c0:?} vs {c1:?}");
     }
 
     #[test]
