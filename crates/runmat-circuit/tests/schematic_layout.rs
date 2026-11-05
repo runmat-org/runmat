@@ -286,6 +286,13 @@ fn recorded_places_stick_through_an_edit() {
     let mut files = project("daq");
     let circuit = "/p/daq.circuit";
     let lock = "/p/daq.circuit.lock";
+    // Start from a lock with no places, so annotating records them.
+    let bare: String = files[lock]
+        .lines()
+        .filter(|l| !l.starts_with("place "))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    files.insert(lock.into(), bare);
     let request = |command: &str, values: serde_json::Value| EditRequest {
         command: command.into(),
         values: values.as_object().cloned().unwrap(),

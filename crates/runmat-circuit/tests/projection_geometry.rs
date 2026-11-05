@@ -173,39 +173,57 @@ fn schematic_has_a_page_per_sheet_with_every_pin_connected() {
                     assert!(page.no_connects.contains(&[pin.x_mm, pin.y_mm]));
                     continue;
                 };
-                // A connected pin starts a wire of its net.
-                let wire = page
-                    .wires
-                    .iter()
-                    .find(|w| {
-                        &w.net == net
-                            && (w.points[0] == [pin.x_mm, pin.y_mm]
-                                || *w.points.last().unwrap() == [pin.x_mm, pin.y_mm])
-                    })
-                    .unwrap_or_else(|| panic!("{}.{} has no wire", s.designator, pin.name));
-                let end = if wire.points[0] == [pin.x_mm, pin.y_mm] {
-                    *wire.points.last().unwrap()
-                } else {
-                    wire.points[0]
-                };
-                let labelled = page
+                // A connected pin ends a wire of its net, or carries its net's port or label.
+                let tip = [pin.x_mm, pin.y_mm];
+                let wired = page.wires.iter().any(|w| {
+                    &w.net == net && (w.points[0] == tip || *w.points.last().unwrap() == tip)
+                });
+                let ported = page
                     .labels
                     .iter()
-                    .any(|l| &l.net == net && [l.x_mm, l.y_mm] == end);
-                let to_pin = page
+                    .any(|l| &l.net == net && [l.x_mm, l.y_mm] == tip);
+                assert!(wired || ported, "{}.{} is connected", s.designator, pin.name);
+            }
+        }
+        // Every wire end lands on its net: a pin, a label or port, a sheet entry, or another
+        // wire of the net (a T, drawn with a junction dot).
+        let on_segment = |p: [f64; 2], w: &runmat_circuit::schematic::SchematicWire| {
+            w.points.windows(2).any(|seg| {
+                let (a, b) = (seg[0], seg[1]);
+                let within = |v: f64, x: f64, y: f64| v >= x.min(y) - 1e-6 && v <= x.max(y) + 1e-6;
+                ((a[0] - b[0]).abs() < 1e-6 && (p[0] - a[0]).abs() < 1e-6 && within(p[1], a[1], b[1]))
+                    || ((a[1] - b[1]).abs() < 1e-6 && (p[1] - a[1]).abs() < 1e-6 && within(p[0], a[0], b[0]))
+            })
+        };
+        for (k, w) in page.wires.iter().enumerate() {
+            for end in [w.points[0], *w.points.last().unwrap()] {
+                let pin = page
                     .symbols
                     .iter()
                     .flat_map(|o| &o.pins)
-                    .any(|p| p.net.as_ref() == Some(net) && [p.x_mm, p.y_mm] == end);
-                assert!(
-                    labelled || to_pin,
-                    "{}.{} ends at a label or a pin",
-                    s.designator,
-                    pin.name
-                );
-                if to_pin {
-                    direct += 1;
-                }
+                    .any(|p| p.net.as_ref() == Some(&w.net) && [p.x_mm, p.y_mm] == end);
+                let entry = page
+                    .sheet_symbols
+                    .iter()
+                    .flat_map(|o| &o.pins)
+                    .any(|p| p.net == w.net && [p.x_mm, p.y_mm] == end);
+                let label = page
+                    .labels
+                    .iter()
+                    .any(|l| l.net == w.net && [l.x_mm, l.y_mm] == end);
+                let joined = page
+                    .wires
+                    .iter()
+                    .enumerate()
+                    .any(|(j, o)| j != k && o.net == w.net && on_segment(end, o));
+                assert!(pin || entry || label || joined, "{} wire end {end:?} dangles", w.net);
+            }
+            // A wire with no label at either end: the net is drawn as a wire, not as labels.
+            let labelled = |p: [f64; 2]| {
+                page.labels.iter().any(|l| l.net == w.net && [l.x_mm, l.y_mm] == p)
+            };
+            if !labelled(w.points[0]) && !labelled(*w.points.last().unwrap()) {
+                direct += 1;
             }
         }
         for l in &page.labels {
@@ -281,23 +299,30 @@ fn schematic_texts_never_overlap() {
                 nm(xs.iter().cloned().fold(f64::MAX, f64::min)),
                 nm(xs.iter().cloned().fold(f64::MIN, f64::max)),
             );
-            let mut boxes: Vec<(String, [i64; 4])> = Vec::new();
+            let ys: Vec<f64> = symbol.body[0].iter().map(|p| p[1]).collect();
+            let (bottom, top) = (
+                nm(ys.iter().cloned().fold(f64::MAX, f64::min)),
+                nm(ys.iter().cloned().fold(f64::MIN, f64::max)),
+            );
+            let half = runmat_circuit::schematic::NO_CONNECT_HALF;
             for pin in &symbol.pins {
-                let on_left = pin.side == "left";
+                // Two-pin parts (R, C, L, D) hide pin names and numbers.
+                if pin.hidden {
+                    continue;
+                }
                 let name = text_box(
                     &pin.name,
                     PIN_TEXT,
                     nm(pin.name_at[0]),
                     nm(pin.name_at[1]),
-                    if on_left { "start" } else { "end" },
+                    &pin.name_anchor,
                 );
                 assert!(
-                    name[0] >= left && name[2] <= right,
+                    name[0] >= left && name[2] <= right && name[1] >= bottom && name[3] <= top,
                     "{} {} name leaves the body",
                     symbol.designator,
                     pin.name
                 );
-                boxes.push((format!("name {}", pin.name), name));
                 if pin.number != pin.name {
                     let number = text_box(
                         &pin.number_text,
@@ -306,66 +331,47 @@ fn schematic_texts_never_overlap() {
                         nm(pin.number_at[1]),
                         "middle",
                     );
-                    // Above the pin line, between the body and the tip.
-                    assert!(
-                        number[1] > nm(pin.y_mm),
-                        "{} {} number on its line",
-                        symbol.designator,
-                        pin.number
-                    );
-                    let (lo, hi) = if on_left {
-                        (nm(pin.x_mm), left)
-                    } else {
-                        (right, nm(pin.x_mm))
-                    };
-                    assert!(
-                        number[0] >= lo && number[2] <= hi,
-                        "{} {} number leaves its pin",
-                        symbol.designator,
-                        pin.number_text
-                    );
+                    let (tx, ty) = (nm(pin.x_mm), nm(pin.y_mm));
+                    match pin.side.as_str() {
+                        // Above the pin line, between the body and the tip.
+                        "left" | "right" => {
+                            assert!(number[1] > ty, "{} {} number on its line", symbol.designator, pin.number);
+                            let (lo, hi) = if pin.side == "left" { (tx, left) } else { (right, tx) };
+                            assert!(
+                                number[0] >= lo && number[2] <= hi,
+                                "{} {} number leaves its pin",
+                                symbol.designator,
+                                pin.number_text
+                            );
+                        }
+                        // Beside the pin line, between the body and the tip.
+                        _ => {
+                            assert!(number[0] > tx, "{} {} number on its line", symbol.designator, pin.number);
+                            let (lo, hi) = if pin.side == "bottom" { (ty, bottom) } else { (top, ty) };
+                            assert!(
+                                number[1] >= lo && number[3] <= hi,
+                                "{} {} number leaves its pin",
+                                symbol.designator,
+                                pin.number_text
+                            );
+                        }
+                    }
                     // Clear of a no-connect cross at the tip.
-                    let tip = nm(pin.x_mm);
-                    let half = runmat_circuit::schematic::NO_CONNECT_HALF;
+                    let cross = [tx - half, ty - half, tx + half, ty + half];
                     assert!(
-                        number[2] <= tip - half || number[0] >= tip + half,
+                        !meets(&number, &cross),
                         "{} {} number under the tip's cross",
                         symbol.designator,
                         pin.number_text
                     );
-                    boxes.push((format!("number {}", pin.number_text), number));
                 }
             }
-            let name = match &symbol.unit {
-                Some(u) => format!("{}{u}", symbol.designator),
-                None => symbol.designator.clone(),
-            };
-            let designator = match &symbol.unit_label {
-                Some(l) => format!("{name} · {l}"),
-                None => name,
-            };
-            boxes.push((
-                "designator".into(),
-                text_box(
-                    &designator,
-                    nm(symbol.designator_text_mm),
-                    nm(symbol.designator_at[0]),
-                    nm(symbol.designator_at[1]),
-                    "middle",
-                ),
-            ));
-            if let Some(value) = &symbol.value {
-                boxes.push((
-                    "value".into(),
-                    text_box(
-                        value,
-                        nm(symbol.value_text_mm),
-                        nm(symbol.value_at[0]),
-                        nm(symbol.value_at[1]),
-                        "middle",
-                    ),
-                ));
-            }
+            // Every text the symbol draws, as the canvas draws it: no two overlap.
+            let boxes: Vec<(String, [i64; 4])> = runmat_circuit::schematic::symbol_texts(symbol)
+                .into_iter()
+                .enumerate()
+                .map(|(k, b)| (format!("text {k}"), [nm(b[0]), nm(b[1]), nm(b[2]), nm(b[3])]))
+                .collect();
             for (i, (a, ba)) in boxes.iter().enumerate() {
                 for (b, bb) in &boxes[i + 1..] {
                     assert!(
