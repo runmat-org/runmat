@@ -247,9 +247,24 @@ impl IdChange {
     }
 }
 
+/// A schematic symbol's place, recorded so the user's moves and the first automatic layout
+/// stick: paper millimetres from the top-left corner (y down, as KiCad counts), in nm, with
+/// its quarter turn and mirror. Keyed by sheet definition and local name (`channel/RS`,
+/// `main/U1:A`, `main/ch[0]` for a sheet symbol), so every instance of a sheet shares one
+/// drawing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SchPlace {
+    pub x: i64,
+    pub y: i64,
+    pub rotation: u16,
+    pub mirror: bool,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LockSection {
     pub entries: BTreeMap<NamePath, LockEntry>,
+    /// Schematic places by key (`place` records).
+    pub places: BTreeMap<String, SchPlace>,
     /// Rename history: old path → new path. Followed transitively by `reconcile`.
     pub aliases: BTreeMap<NamePath, NamePath>,
     /// Fingerprints recorded at the last reconcile, for inferred renames.
@@ -455,6 +470,17 @@ impl LockSection {
         for (p, f) in &self.fingerprints {
             s.push_str(&format!("fp {p} {f}\n"));
         }
+        let mm = |v: i64| {
+            let t = format!("{:.4}", v as f64 / 1.0e6);
+            t.trim_end_matches('0').trim_end_matches('.').to_owned()
+        };
+        for (k, p) in &self.places {
+            s.push_str(&format!("place {k} {} {} {}", mm(p.x), mm(p.y), p.rotation));
+            if p.mirror {
+                s.push_str(" mirror");
+            }
+            s.push('\n');
+        }
         s
     }
 
@@ -497,6 +523,24 @@ impl LockSection {
                     let p = parts.next().ok_or(format!("line {}: bad fp", n + 1))?;
                     let f: Vec<&str> = parts.collect();
                     l.fingerprints.insert(NamePath::parse(p), f.join(" "));
+                }
+                Some("place") => {
+                    let bad = || format!("line {}: bad place", n + 1);
+                    let key = parts.next().ok_or_else(bad)?;
+                    let mut num = || -> Result<f64, String> {
+                        parts.next().and_then(|v| v.parse().ok()).ok_or_else(bad)
+                    };
+                    let (x, y, r) = (num()?, num()?, num()?);
+                    let mirror = parts.next() == Some("mirror");
+                    l.places.insert(
+                        key.to_owned(),
+                        SchPlace {
+                            x: (x * 1.0e6).round() as i64,
+                            y: (y * 1.0e6).round() as i64,
+                            rotation: (r as i64).rem_euclid(360) as u16,
+                            mirror,
+                        },
+                    );
                 }
                 Some(other) => return Err(format!("line {}: unknown record `{other}`", n + 1)),
                 None => {}

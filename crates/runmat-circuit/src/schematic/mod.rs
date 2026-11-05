@@ -1,42 +1,46 @@
 //! The schematic as drawn: one page per sheet instance, with every symbol placed, its pins,
-//! the wires between them, junctions, net labels, power ports, no-connect markers and the
-//! child sheets' symbols. The Desktop's schematic canvas and the projection read this layout.
+//! the wires between them, junctions, net labels, power ports, no-connect markers, the child
+//! sheets' symbols and a filled title block. The Desktop's schematic canvas, the projection and
+//! the KiCad export read this layout.
 //!
 //! A `.circuit` file describes connectivity, so the drawing is generated from it,
-//! deterministically:
+//! deterministically, the way an engineer draws a sheet:
 //!
-//! - **Pages.** One per sheet instance (`/`, `/ch[0]`, `/power`), holding the components whose
-//!   parent is that instance and a sheet symbol per child instance. The frame is the smallest
-//!   of A3, A2, A1 and A0 the page fits on (A0 grows taller when even that is full).
-//! - **Order.** Components follow connectivity: a breadth-first walk over shared signal nets
-//!   (rails and nets with more than eight pins don't order), starting from the most connected
-//!   component, so connected parts sit side by side.
-//! - **Placement.** Shelf packing in rows from the top left, on the 1.27 mm grid; each cell
-//!   reserves room for the symbol, its pins and its labels.
-//! - **Symbols.** A box per unit: inputs, power inputs and the first half of passive pins on the
-//!   left, the rest on the right; pins numbered by pad. A unit is a library gate, and a gate with
-//!   more than 64 pins (an FPGA, a large MCU) splits into units as KiCad and Altium draw them:
-//!   its signal pins by bank (a `_34` suffix or `BANK3` token in the pin name), else by port
-//!   prefix (`PA`, `PB`), in even units of at most 48 pins; its power pins in units of their own,
-//!   last. [`units`] is the one split; the canvas and the KiCad export both draw it.
-//! - **Connections.** A two-pin net between facing pins of neighbouring symbols in a row is
-//!   drawn as a wire. Every other connected pin gets a 2.54 mm stub and a label: a power port
-//!   for a power rail, a global label for other global nets, a hierarchical label for a net that
-//!   leaves the sheet through a port (it reaches a sheet outside this page's subtree), and a
-//!   local label otherwise (which also joins the pins of child sheets drawn on the page). Unconnected pins get a
-//!   no-connect marker. Junctions mark where three or more wire ends meet or a wire ends on
-//!   another wire.
+//! - **Pages.** One per sheet instance (`/`, `/ch[0]`), holding the components whose parent is
+//!   that instance and a sheet symbol per child instance. The frame is the smallest of A4 to A0
+//!   the page fits on, clear of the title block.
+//! - **Symbols** ([`symbol`]): supplies on the top edge and grounds on the bottom, inputs left,
+//!   outputs right; R, C, L and D with their standard art. A gate with more than 64 pins splits
+//!   into units by bank, port prefix and power ([`units`]).
+//! - **Placement** ([`place`]): signal flow left to right (connector, front end, converter,
+//!   FPGA), shunts upright under their nets, decoupling caps in a row under their IC, feedback
+//!   above its amplifier, each net's groups packed in rows.
+//! - **Connections** ([`route`]): orthogonal wires with junction dots that never cross a
+//!   symbol, power ports (VCC up, GND down) instead of rail wires, labels where a wire would be
+//!   long or a net leaves the sheet, no-connect markers on unused pins.
+//! - **Places stick.** A symbol whose place is recorded in the lock (`schematic.annotate` and
+//!   `schematic.move` record them) stays exactly there; new symbols go to the nearest free
+//!   spot, so one edit never reshuffles the sheet.
 //!
 //! Lengths are millimetres on the page (origin bottom left, y up); every list is sorted by
 //! placement, so identical designs give identical bytes.
 
+mod place;
+pub mod route;
+pub mod symbol;
+mod units;
+
+pub use symbol::{Art, PinSide, Place};
+pub(crate) use symbol::UnitLayout;
+pub use units::{units, Unit, SPLIT_ABOVE, UNIT_PINS};
+
 use crate::display::Xy;
 use crate::elab::Netlist;
 use crate::geom::{Coord, Point};
-use crate::ids::NamePath;
+use crate::ids::{NamePath, SchPlace};
 use crate::library::PinType;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const GRID: Coord = 1_270_000;
 pub(crate) const PIN_PITCH: Coord = 2_540_000;
@@ -46,14 +50,27 @@ pub const PIN_TEXT: Coord = 1_270_000;
 /// The designator's and the value's text heights.
 pub const DESIGNATOR_TEXT: Coord = 1_524_000;
 pub const VALUE_TEXT: Coord = 1_270_000;
+/// Net label and power port text height.
+pub const LABEL_TEXT: Coord = 1_270_000;
 /// The gap between the body edge and a pin name inside it (KiCad's default name offset).
 pub const NAME_OFFSET: Coord = 508_000;
-/// The gap between a pin line and the number above it.
-const NUMBER_LIFT: Coord = 254_000;
 /// Half the size of a no-connect cross drawn at a pin's tip.
 pub const NO_CONNECT_HALF: Coord = 800_000;
-/// The least gap between the left and right names across the body.
-const NAME_GAP: Coord = 1_270_000;
+/// The content's inset from the paper edge.
+pub(super) const MARGIN: Coord = 20 * GRID;
+/// The title block, bottom right inside the frame (mm).
+pub const TITLE_W_MM: f64 = 130.0;
+pub const TITLE_ROW_MM: f64 = 6.0;
+/// The frame's inset from the paper edge (mm).
+pub const FRAME_MM: f64 = 10.0;
+/// Sheet sizes tried in order, landscape (mm).
+pub(super) const FRAMES: [(&str, f64, f64); 5] = [
+    ("A4", 297.0, 210.0),
+    ("A3", 420.0, 297.0),
+    ("A2", 594.0, 420.0),
+    ("A1", 841.0, 594.0),
+    ("A0", 1189.0, 841.0),
+];
 
 /// How wide a line of text of height `size` is: an upper bound on the advance of the fonts the
 /// canvas (Inter) and KiCad (its stroke font) draw, 0.72 of the height per character.
@@ -74,11 +91,6 @@ pub fn text_box(text: &str, size: Coord, x: Coord, y: Coord, anchor: &str) -> [C
     [x0, y - size / 5, x0 + w, y + size * 4 / 5]
 }
 
-/// The baseline that centres capitals of height `size` on `y`.
-fn centred_baseline(y: Coord, size: Coord) -> Coord {
-    y - size * 3 / 10
-}
-
 /// A pin's number as drawn: its pad, or its first pad and how many more (`A1 +7`).
 pub fn number_text(pads: &[String]) -> String {
     match pads {
@@ -96,115 +108,6 @@ fn ceil_div(a: Coord, b: Coord) -> Coord {
 fn up_to_grid(v: Coord) -> Coord {
     ceil_div(v, GRID) * GRID
 }
-const STUB: Coord = 2_540_000;
-const MARGIN: Coord = 20 * GRID;
-/// Sheet sizes tried in order, landscape (mm).
-const FRAMES: [(&str, f64, f64); 4] = [
-    ("A3", 420.0, 297.0),
-    ("A2", 594.0, 420.0),
-    ("A1", 841.0, 594.0),
-    ("A0", 1189.0, 841.0),
-];
-
-/// One generated unit: pins on the left and right, in library coordinates (y up).
-#[derive(Clone, Debug)]
-pub(crate) struct UnitLayout {
-    /// (pin name, pad numbers, type, left side, library y of the pin row).
-    pub(crate) pins: Vec<(String, Vec<String>, PinType, bool, Coord)>,
-    pub(crate) half_w: Coord,
-    pub(crate) half_h: Coord,
-    /// Every pin's length: long enough for the widest number above its line.
-    pub(crate) pin_len: Coord,
-}
-
-impl UnitLayout {
-    pub(crate) fn new(pins: &[(String, Vec<String>, PinType)]) -> UnitLayout {
-        let passive: Vec<usize> = (0..pins.len())
-            .filter(|&i| pins[i].2 == PinType::Passive)
-            .collect();
-        let left_of = |i: usize| match pins[i].2 {
-            PinType::Input | PinType::PowerIn => true,
-            PinType::Passive => {
-                passive.iter().position(|&p| p == i).unwrap() < passive.len().div_ceil(2)
-            }
-            _ => false,
-        };
-        let (mut left, mut right): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
-        for i in 0..pins.len() {
-            if left_of(i) {
-                left.push(i)
-            } else {
-                right.push(i)
-            }
-        }
-        if right.is_empty() && left.len() > 1 {
-            right = left.split_off(left.len().div_ceil(2));
-        }
-        // A large part keeps both sides in use: the longer side gives half its excess to the
-        // other, from its end, so the box is half as tall.
-        if right.len() > left.len() + 8 {
-            let n = (right.len() - left.len()) / 2;
-            left.extend(right.split_off(right.len() - n));
-        } else if left.len() > right.len() + 8 {
-            let n = (left.len() - right.len()) / 2;
-            right.extend(left.split_off(left.len() - n));
-        }
-        let rows = left.len().max(right.len()).max(1) as Coord;
-        let half_h = (rows * PIN_PITCH) / 2 + GRID;
-        // The body holds the longest name on each side, inset by the name offset, with a gap
-        // between them; the pins hold the widest number. Nothing can overlap.
-        let widest = |list: &[usize]| {
-            list.iter()
-                .map(|&i| text_width(&pins[i].0, PIN_TEXT))
-                .max()
-                .unwrap_or(0)
-        };
-        let names = widest(&left) + widest(&right) + 2 * NAME_OFFSET + NAME_GAP;
-        let half_w = up_to_grid(ceil_div(names, 2)).max(2 * PIN_PITCH);
-        let number = pins
-            .iter()
-            .map(|p| text_width(&number_text(&p.1), PIN_TEXT))
-            .max()
-            .unwrap_or(0);
-        // The number sits centred on the pin, clear of the body and of a no-connect cross at the tip.
-        let pin_len = up_to_grid(number + 2 * NO_CONNECT_HALF + NAME_OFFSET).max(PIN_LEN);
-        let mut out = Vec::new();
-        for (side, list) in [(true, &left), (false, &right)] {
-            let top = (list.len() as Coord - 1) * PIN_PITCH / 2;
-            for (k, &i) in list.iter().enumerate() {
-                // Rows on the 2.54 mm grid from the top, centred.
-                let y = (top - k as Coord * PIN_PITCH).div_euclid(GRID) * GRID;
-                out.push((pins[i].0.clone(), pins[i].1.clone(), pins[i].2, side, y));
-            }
-        }
-        UnitLayout {
-            pins: out,
-            half_w,
-            half_h,
-            pin_len,
-        }
-    }
-    /// Pin tip in library coordinates.
-    pub(crate) fn tip(&self, left: bool, y: Coord) -> Point {
-        let x = self.half_w + self.pin_len;
-        Point::new(if left { -x } else { x }, y)
-    }
-    /// Where a pin's name sits (inside the body, centred on the pin line) and its anchor.
-    pub(crate) fn name_at(&self, left: bool, y: Coord) -> (Point, &'static str) {
-        let x = self.half_w - NAME_OFFSET;
-        let base = centred_baseline(y, PIN_TEXT);
-        if left {
-            (Point::new(-x, base), "start")
-        } else {
-            (Point::new(x, base), "end")
-        }
-    }
-    /// Where a pin's number sits: above the pin line, centred along it, outside the body.
-    pub(crate) fn number_at(&self, left: bool, y: Coord) -> Point {
-        let x = self.half_w + self.pin_len / 2;
-        Point::new(if left { -x } else { x }, y + NUMBER_LIFT + PIN_TEXT / 5)
-    }
-}
 
 /// The drawn schematic: one page per sheet instance, in hierarchy order.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -218,10 +121,13 @@ pub struct SchematicSheet {
     pub path: String,
     /// The sheet definition it instantiates.
     pub sheet: String,
-    /// `A3`, `A2`, `A1` or `A0`.
+    /// `A4` to `A0`.
     pub frame: String,
     pub width_mm: f64,
     pub height_mm: f64,
+    /// The title block's rows, top to bottom: (field, value).
+    #[serde(default)]
+    pub title_block: Vec<(String, String)>,
     pub symbols: Vec<SchematicSymbol>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sheet_symbols: Vec<SheetSymbol>,
@@ -246,18 +152,26 @@ pub struct SchematicSymbol {
     /// The component's instance path.
     pub path: String,
     pub sheet_path: String,
+    /// The place key the lock records this symbol's place under.
+    pub key: String,
     pub x_mm: f64,
     pub y_mm: f64,
     pub rotation: f64,
     pub mirror: bool,
+    /// `box`, `resistor`, `capacitor`, `inductor`, `diode` or `hole`.
+    pub art: String,
     /// Outlines: the body box first, then one line per pin from the body to its tip.
     pub body: Vec<Vec<Xy>>,
+    /// The art's strokes (open lines) for a part drawn by its symbol, not its box.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub strokes: Vec<Vec<Xy>>,
     pub pins: Vec<SchematicPin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
-    /// Where the designator and value texts sit.
+    /// Where the designator and value texts sit, and how they align (`start` or `middle`).
     pub designator_at: Xy,
     pub value_at: Xy,
+    pub text_anchor: String,
     /// Text heights (mm): pin names and numbers, the designator and the value.
     pub pin_text_mm: f64,
     pub designator_text_mm: f64,
@@ -272,14 +186,17 @@ pub struct SchematicPin {
     /// The connection point (the pin's tip).
     pub x_mm: f64,
     pub y_mm: f64,
-    /// `left` or `right` of the body.
+    /// `left`, `right`, `top` or `bottom` of the body, as placed.
     pub side: String,
-    /// The name's baseline point, inside the body: text starts there on a left pin and ends
-    /// there on a right pin.
+    /// The name's baseline point inside the body, and its anchor (`start`, `end`, `middle`).
     pub name_at: Xy,
-    /// The number as drawn (`A1`, `A1 +7`) and its baseline centre, above the pin line.
+    pub name_anchor: String,
+    /// The number as drawn (`A1`, `A1 +7`) and its baseline centre beside the pin line.
     pub number_text: String,
     pub number_at: Xy,
+    /// Small parts (R, C, L, D) hide pin names and numbers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
     /// `input`, `output`, `passive`, `power_in`…
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -291,6 +208,7 @@ pub struct SchematicPin {
 pub struct SheetSymbol {
     pub path: String,
     pub sheet: String,
+    pub key: String,
     /// Bottom-left corner.
     pub x_mm: f64,
     pub y_mm: f64,
@@ -305,6 +223,10 @@ pub struct SheetPin {
     pub x_mm: f64,
     pub y_mm: f64,
     pub side: String,
+    /// The port's name inside the child sheet (`IN`), as the entry shows it.
+    pub name: String,
+    /// `in` or `out`: whether the child drives the net.
+    pub direction: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -321,16 +243,45 @@ pub struct NetLabel {
     pub y_mm: f64,
     /// `local`, `global`, `hier` or `power`.
     pub kind: String,
-    /// The side the text extends to from the connection point: `left` or `right`.
+    /// The text shown: the net's name on this sheet (a port's name inside a channel).
+    pub text: String,
+    /// The way the label points from the connection point: `left` or `right` (text extends
+    /// that way), and for a power port also `up` (supplies) or `down` (grounds).
     pub side: String,
+}
+
+impl NetLabel {
+    /// The box the label covers on the page, `[x0, y0, x1, y1]` in mm.
+    pub fn extent(&self) -> [f64; 4] {
+        let side = match self.side.as_str() {
+            "left" => PinSide::Left,
+            "right" => PinSide::Right,
+            "up" => PinSide::Top,
+            _ => PinSide::Bottom,
+        };
+        let kind = match self.kind.as_str() {
+            "power" => "power",
+            "global" => "global",
+            "hier" => "hier",
+            _ => "local",
+        };
+        let l = route::Label {
+            net: 0,
+            at: Point::new(mm_to_nm(self.x_mm), mm_to_nm(self.y_mm)),
+            kind,
+            side,
+        };
+        let e = route::label_extent(&l, &self.text);
+        [mm(e[0]), mm(e[1]), mm(e[2]), mm(e[3])]
+    }
 }
 
 fn mm(v: Coord) -> f64 {
     (v as f64 / 1.0e6 * 1.0e6).round() / 1.0e6
 }
 
-fn xy(p: Point) -> Xy {
-    [mm(p.x), mm(p.y)]
+fn mm_to_nm(v: f64) -> Coord {
+    (v * 1.0e6).round() as Coord
 }
 
 pub fn pin_kind(k: PinType) -> &'static str {
@@ -350,7 +301,7 @@ pub fn pin_kind(k: PinType) -> &'static str {
     }
 }
 
-/// Whether a global net is a power rail (drawn as a power port): `GND`, `+3V3`, `VCC`, `VDD`…
+/// Whether a net is a power rail (drawn as a power port): `GND`, `+3V3`, `VCC`, `VDD`…
 pub fn is_rail(name: &str, class: Option<&str>) -> bool {
     let leaf = name.rsplit('/').next().unwrap_or(name).to_ascii_uppercase();
     class.is_some_and(|c| c.eq_ignore_ascii_case("power"))
@@ -363,172 +314,90 @@ pub fn is_rail(name: &str, class: Option<&str>) -> bool {
         .any(|r| leaf == *r || leaf.starts_with(&format!("{r}_")))
 }
 
-/// A gate with more pins than this splits into units.
-pub const SPLIT_ABOVE: usize = 64;
-/// The most pins a split unit holds.
-pub const UNIT_PINS: usize = 48;
-
-/// One schematic unit of a component: its name (`A`, `B`… for a split gate, else the gate's
-/// name), what it holds when split, and its pins (indices into the component's pins).
-#[derive(Clone, Debug, PartialEq)]
-pub struct Unit {
-    pub name: String,
-    pub label: Option<String>,
-    pub pins: Vec<usize>,
+/// The last path segment of a net name, as a label shows it.
+fn short(name: &str) -> &str {
+    name.rsplit('/').next().unwrap_or(name)
 }
 
-/// The bank a pin name declares: a trailing `_34` (`IO_L1P_T0_34`) or a `BANK3` token.
-fn bank_of(name: &str) -> Option<String> {
-    let upper = name.to_ascii_uppercase();
-    for token in upper.split(['_', '.', '-']) {
-        if let Some(n) = token.strip_prefix("BANK") {
-            if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
-                return Some(n.to_owned());
-            }
-        }
-    }
-    let (head, tail) = upper.rsplit_once('_')?;
-    (!head.is_empty() && !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()))
-        .then(|| tail.to_owned())
+/// A net's name as one sheet instance knows it: the alias declared there (a port's name inside
+/// a channel), else its leaf.
+pub(super) fn local_name(n: &crate::elab::NetInst, sheet: &NamePath) -> String {
+    std::iter::once(&n.name)
+        .chain(&n.aliases)
+        .find(|a| NamePath::parse(a).parent().as_ref() == Some(sheet))
+        .map(|a| short(a).to_owned())
+        .unwrap_or_else(|| short(&n.name).to_owned())
 }
 
-/// A pin name's leading letters (`PA` of `PA12`, `IO` of `IO7`).
-fn prefix_of(name: &str) -> String {
-    name.chars()
-        .take_while(|c| c.is_ascii_alphabetic())
-        .collect()
+/// What placement and routing know about a net on one page.
+#[derive(Clone, Debug, Default)]
+pub(super) struct NetInfo {
+    pub rail: bool,
+    pub ground: bool,
+    pub global: bool,
+    /// The net leaves this page's subtree through a port.
+    pub external: bool,
+    /// Expected to get labels rather than a wire.
+    pub labelled: bool,
+    pub short: String,
 }
 
-fn letters(mut k: usize) -> String {
-    let mut out = Vec::new();
-    loop {
-        out.push((b'A' + (k % 26) as u8) as char);
-        if k < 26 {
-            break;
-        }
-        k = k / 26 - 1;
-    }
-    out.iter().rev().collect()
-}
-
-/// A component's units, in drawing order: one per gate, a large gate split as the module
-/// docs describe. Deterministic: the same pins give the same units.
-pub fn units(c: &crate::elab::CompInst) -> Vec<Unit> {
-    let mut gates: Vec<&str> = Vec::new();
-    for p in &c.pins {
-        if !gates.contains(&p.gate.as_str()) {
-            gates.push(&p.gate);
-        }
-    }
-    let single = gates.len() == 1;
-    let mut out = Vec::new();
-    for g in &gates {
-        let idx: Vec<usize> = (0..c.pins.len())
-            .filter(|i| c.pins[*i].gate == *g)
-            .collect();
-        if idx.len() <= SPLIT_ABOVE {
-            out.push(Unit {
-                name: (*g).to_owned(),
-                label: None,
-                pins: idx,
-            });
-            continue;
-        }
-        let power = |i: &usize| matches!(c.pins[*i].kind, PinType::PowerIn | PinType::PowerOut);
-        let (pwr, signal): (Vec<usize>, Vec<usize>) = idx.iter().partition(|i| power(i));
-        // Groups of signal pins: by bank when every pin names one, else by port prefix.
-        let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
-        let banks: Vec<Option<String>> = signal.iter().map(|i| bank_of(&c.pins[*i].pin)).collect();
-        let by_bank = banks.iter().all(Option::is_some);
-        for (k, &pin) in signal.iter().enumerate() {
-            let label = match &banks[k] {
-                Some(b) if by_bank => format!("bank {b}"),
-                _ => prefix_of(&c.pins[pin].pin),
-            };
-            match groups.iter_mut().find(|(l, _)| *l == label) {
-                Some((_, v)) => v.push(pin),
-                None => groups.push((label, vec![pin])),
-            }
-        }
-        if !pwr.is_empty() {
-            groups.push(("power".to_owned(), pwr));
-        }
-        let mut n = 0;
-        for (label, pins) in groups {
-            // Even units: 200 pins make five of 40, not four of 48 and one of 8.
-            let chunks = pins.len().div_ceil(UNIT_PINS);
-            let size = pins.len().div_ceil(chunks.max(1));
-            for (k, chunk) in pins.chunks(size.max(1)).enumerate() {
-                let label = if chunks == 1 {
-                    label.clone()
-                } else {
-                    let first = &c.pins[chunk[0]].pin;
-                    let last = &c.pins[chunk[chunk.len() - 1]].pin;
-                    if label == "power" || label.starts_with("bank ") {
-                        format!("{label} ({}/{chunks})", k + 1)
-                    } else {
-                        format!("{first}–{last}")
-                    }
-                };
-                let name = if single {
-                    letters(n)
-                } else {
-                    format!("{g}{}", letters(n))
-                };
-                out.push(Unit {
-                    name,
-                    label: Some(label),
-                    pins: chunk.to_vec(),
-                });
-                n += 1;
-            }
-        }
-    }
-    out
-}
-
-/// A unit's pins as the symbol layout reads them: (name, pads, type).
-pub(crate) fn unit_pins(
-    c: &crate::elab::CompInst,
-    unit: &Unit,
-) -> Vec<(String, Vec<String>, PinType)> {
-    unit.pins
-        .iter()
-        .map(|i| {
-            let p = &c.pins[*i];
-            let pads = if p.pads.is_empty() {
-                vec![p.pin.clone()]
-            } else {
-                p.pads.clone()
-            };
-            (p.pin.clone(), pads, p.kind)
-        })
-        .collect()
-}
-
-/// One placed cell: a component's unit or a child sheet.
-enum Cell {
+pub(super) enum CellKind {
     Unit { comp: usize, gate: usize },
     Sheet { child: usize },
 }
 
+/// One placed thing on a page: a component's unit or a child sheet's symbol.
+pub(super) struct Cell {
+    pub key: String,
+    pub kind: CellKind,
+    pub lay: UnitLayout,
+    /// The net on each layout pin.
+    pub nets: Vec<Option<usize>>,
+    /// Each layout pin's netlist pin (units only).
+    pub pins: Vec<usize>,
+    pub designator: String,
+    pub connector: bool,
+    /// Sheets: whether the child drives each pin's net.
+    pub sheet_out: Vec<bool>,
+}
+
+/// Orders a sheet symbol's pins by side, top down, and sizes its box.
+pub(super) fn restack_sheet(lay: &mut UnitLayout) {
+    let mut rows = [0 as Coord; 2];
+    let count = |s: PinSide| lay.pins.iter().filter(|p| p.side == s).count() as Coord;
+    let (l, r) = (count(PinSide::Left), count(PinSide::Right));
+    let most = l.max(r).max(1);
+    for p in lay.pins.iter_mut() {
+        let k = usize::from(p.side == PinSide::Right);
+        let n = if k == 0 { l } else { r };
+        let first = (n - 1) * PIN_PITCH / 2;
+        p.at = (first - rows[k] * PIN_PITCH).div_euclid(GRID) * GRID;
+        rows[k] += 1;
+    }
+    lay.half_h = most * PIN_PITCH / 2 + 2 * GRID;
+    let widest = |s: PinSide| {
+        lay.pins
+            .iter()
+            .filter(|p| p.side == s)
+            .map(|p| text_width(short(&p.name), PIN_TEXT))
+            .max()
+            .unwrap_or(0)
+    };
+    let names = widest(PinSide::Left) + widest(PinSide::Right) + 4 * GRID;
+    lay.half_w = lay.half_w.max(up_to_grid(ceil_div(names, 2)));
+}
+
+fn connector(designator: &str) -> bool {
+    let p: String = designator
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect();
+    matches!(p.as_str(), "J" | "P" | "CN" | "X" | "CON")
+}
+
 /// Lays out the whole design.
 pub fn layout(nl: &Netlist) -> SchematicIndex {
-    // Units per component: (unit, symbol layout, pin indices).
-    let gates: Vec<Vec<(Unit, UnitLayout, Vec<usize>)>> = nl
-        .components
-        .iter()
-        .map(|c| {
-            units(c)
-                .into_iter()
-                .map(|u| {
-                    let lay = UnitLayout::new(&unit_pins(c, &u));
-                    let idx = u.pins.clone();
-                    (u, lay, idx)
-                })
-                .collect()
-        })
-        .collect();
     let comp_sheet: Vec<NamePath> = nl
         .components
         .iter()
@@ -545,482 +414,238 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
         sheets.insert(0, (NamePath::root(), nl.design.clone()));
     }
     sheets.sort();
-    // Signal neighbours for ordering.
-    let mut neighbours: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); nl.components.len()];
-    for n in &nl.nets {
-        if n.global || n.pins.len() > 8 {
-            continue;
-        }
-        let comps: BTreeSet<usize> = n.pins.iter().map(|p| p.0).collect();
-        for &a in &comps {
-            for &b in &comps {
-                if a != b {
-                    neighbours[a].insert(b);
-                }
-            }
-        }
+    let mut by_sheet: BTreeMap<&NamePath, Vec<usize>> = BTreeMap::new();
+    for (c, s) in comp_sheet.iter().enumerate() {
+        by_sheet.entry(s).or_default().push(c);
     }
     let mut out = SchematicIndex::default();
     for (path, sheet_name) in &sheets {
-        let members: Vec<usize> = (0..nl.components.len())
-            .filter(|c| &comp_sheet[*c] == path)
-            .collect();
-        let children: Vec<usize> = (0..sheets.len())
-            .filter(|k| sheets[*k].0.parent().as_ref() == Some(path))
-            .collect();
-        // Nets crossing each child's boundary (not global ones: those connect by name).
-        let crossing = |child: &NamePath| -> Vec<usize> {
-            (0..nl.nets.len())
-                .filter(|n| {
-                    !nl.nets[*n].global
-                        && net_sheets[*n].iter().any(|s| s.starts_with(child))
-                        && net_sheets[*n].iter().any(|s| !s.starts_with(child))
-                })
-                .collect()
-        };
-        let order = connectivity_order(&members, &neighbours);
-        let mut cells: Vec<Cell> = Vec::new();
-        for c in order {
-            for g in 0..gates[c].len() {
-                cells.push(Cell::Unit { comp: c, gate: g });
-            }
-        }
-        cells.extend(children.iter().map(|k| Cell::Sheet { child: *k }));
-        let sheet_pins: BTreeMap<usize, Vec<usize>> = children
-            .iter()
-            .map(|k| (*k, crossing(&sheets[*k].0)))
-            .collect();
-        let label_room = |nets: &mut dyn Iterator<Item = Option<usize>>| -> Coord {
-            let longest = nets
-                .filter_map(|n| n.map(|n| short(&nl.nets[n].name).chars().count()))
-                .max()
-                .unwrap_or(4) as Coord;
-            STUB + (longest + 4) * GRID
-        };
-        // Cell sizes (w, h) and, for sheets, the box size.
-        let sizes: Vec<(Coord, Coord)> = cells
-            .iter()
-            .map(|cell| match cell {
-                Cell::Unit { comp, gate } => {
-                    let (_, lay, idx) = &gates[*comp][*gate];
-                    let room =
-                        label_room(&mut idx.iter().map(|i| nl.components[*comp].pins[*i].net));
-                    (
-                        2 * (lay.half_w + lay.pin_len + room),
-                        2 * lay.half_h + 8 * GRID,
-                    )
-                }
-                Cell::Sheet { child } => {
-                    let pins = &sheet_pins[child];
-                    let room = label_room(&mut pins.iter().map(|n| Some(*n)));
-                    let (bw, bh) = sheet_box(&sheets[*child].0, pins.len());
-                    (bw + 2 * room, bh + 6 * GRID)
-                }
-            })
-            .collect();
-        // The smallest frame the shelves fit in.
-        let mut placed: Vec<Point> = Vec::new();
-        let mut rows: Vec<usize> = Vec::new();
-        let mut frame = FRAMES[FRAMES.len() - 1];
-        let mut height = mm_to_nm(frame.2);
-        for f in FRAMES {
-            let (w, h) = (mm_to_nm(f.1), mm_to_nm(f.2));
-            let (pos, row, used) = shelves(&sizes, w - 2 * MARGIN);
-            frame = f;
-            placed = pos;
-            rows = row;
-            height = h.max(used + 2 * MARGIN);
-            if used + 2 * MARGIN <= h {
-                break;
-            }
-        }
-        let top = height - MARGIN;
-        // Cell centres on the page (shelves come back as offsets from the top left).
-        let centres: Vec<Point> = placed
-            .iter()
-            .zip(&sizes)
-            .map(|(p, (w, h))| {
-                Point::new(
-                    (MARGIN + p.x + w / 2).div_euclid(GRID) * GRID,
-                    (top - p.y - h / 2).div_euclid(GRID) * GRID,
-                )
-            })
-            .collect();
-        let mut page = SchematicSheet {
-            path: path.to_string(),
-            sheet: sheet_name.clone(),
-            frame: frame.0.to_owned(),
-            width_mm: frame.1,
-            height_mm: mm(height),
-            ..Default::default()
-        };
-        // The top of each cell's body, for wires drawn over it.
-        let cell_tops: Vec<Coord> = cells
-            .iter()
-            .zip(&centres)
-            .map(|(cell, o)| match cell {
-                Cell::Unit { comp, gate } => o.y + gates[*comp][*gate].1.half_h,
-                Cell::Sheet { child } => {
-                    o.y + sheet_box(&sheets[*child].0, sheet_pins[child].len()).1 / 2
-                }
-            })
-            .collect();
-        // Pin tips: (net, tip, left side, cell index).
-        let mut tips: Vec<(Option<usize>, Point, bool, usize)> = Vec::new();
-        for (ci, cell) in cells.iter().enumerate() {
-            let o = centres[ci];
-            match cell {
-                Cell::Unit { comp, gate } => {
-                    let c = &nl.components[*comp];
-                    let (unit, lay, idx) = &gates[*comp][*gate];
-                    let (hw, hh) = (lay.half_w, lay.half_h);
-                    let corner = |dx: Coord, dy: Coord| xy(Point::new(o.x + dx, o.y + dy));
-                    let mut body = vec![vec![
-                        corner(-hw, -hh),
-                        corner(hw, -hh),
-                        corner(hw, hh),
-                        corner(-hw, hh),
-                        corner(-hw, -hh),
-                    ]];
-                    let mut pins = Vec::new();
-                    // The layout orders pins by side; each finds its netlist pin by name.
-                    let mut unused: Vec<usize> = idx.clone();
-                    for (name, pads, kind, left, ly) in &lay.pins {
-                        let at = unused
-                            .iter()
-                            .position(|i| &c.pins[*i].pin == name)
-                            .unwrap_or(0);
-                        let pin_index = &unused.remove(at);
-                        let tip = lay.tip(*left, *ly);
-                        let tip = Point::new(o.x + tip.x, o.y + tip.y);
-                        let edge = Point::new(o.x + if *left { -hw } else { hw }, tip.y);
-                        body.push(vec![xy(edge), xy(tip)]);
-                        let net = c.pins[*pin_index].net;
-                        let (name_at, _) = lay.name_at(*left, *ly);
-                        let number_at = lay.number_at(*left, *ly);
-                        pins.push(SchematicPin {
-                            name: name.clone(),
-                            number: pads.join(","),
-                            x_mm: mm(tip.x),
-                            y_mm: mm(tip.y),
-                            side: side(*left),
-                            name_at: xy(Point::new(o.x + name_at.x, o.y + name_at.y)),
-                            number_text: number_text(pads),
-                            number_at: xy(Point::new(o.x + number_at.x, o.y + number_at.y)),
-                            kind: pin_kind(*kind).to_owned(),
-                            net: net.map(|n| nl.nets[n].name.clone()),
-                        });
-                        tips.push((net, tip, *left, ci));
-                        if net.is_none() {
-                            page.no_connects.push(xy(tip));
-                        }
-                    }
-                    page.symbols.push(SchematicSymbol {
-                        designator: c.designator.clone(),
-                        unit: (gates[*comp].len() > 1).then(|| unit.name.clone()),
-                        unit_label: unit.label.clone(),
-                        path: c.path.to_string(),
-                        sheet_path: path.to_string(),
-                        x_mm: mm(o.x),
-                        y_mm: mm(o.y),
-                        rotation: 0.0,
-                        mirror: false,
-                        body,
-                        pins,
-                        value: crate::index::component_value(c),
-                        designator_at: xy(Point::new(o.x, o.y + hh + GRID)),
-                        value_at: xy(Point::new(o.x, o.y - hh - 2 * GRID)),
-                        pin_text_mm: mm(PIN_TEXT),
-                        designator_text_mm: mm(DESIGNATOR_TEXT),
-                        value_text_mm: mm(VALUE_TEXT),
-                    });
-                }
-                Cell::Sheet { child } => {
-                    let nets = &sheet_pins[child];
-                    let (bw, bh) = sheet_box(&sheets[*child].0, nets.len());
-                    let (x0, y0) = (o.x - bw / 2, o.y - bh / 2);
-                    let pins = nets
-                        .iter()
-                        .enumerate()
-                        .map(|(k, n)| {
-                            // Alternate sides, top down.
-                            let left = k % 2 == 0;
-                            let y = y0 + bh - 2 * GRID - (k as Coord / 2) * PIN_PITCH;
-                            let tip = Point::new(if left { x0 } else { x0 + bw }, y);
-                            tips.push((Some(*n), tip, left, ci));
-                            SheetPin {
-                                net: nl.nets[*n].name.clone(),
-                                x_mm: mm(tip.x),
-                                y_mm: mm(tip.y),
-                                side: side(left),
-                            }
-                        })
-                        .collect();
-                    page.sheet_symbols.push(SheetSymbol {
-                        path: sheets[*child].0.to_string(),
-                        sheet: sheets[*child].1.clone(),
-                        x_mm: mm(x0),
-                        y_mm: mm(y0),
-                        w_mm: mm(bw),
-                        h_mm: mm(bh),
-                        pins,
-                    });
-                }
-            }
-        }
-        // Two-pin nets between facing pins of neighbouring cells in a row: a wire.
-        let mut on_page: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-        for (t, (net, ..)) in tips.iter().enumerate() {
-            if let Some(n) = net {
-                on_page.entry(*n).or_default().push(t);
-            }
-        }
-        let mut wired: BTreeSet<usize> = BTreeSet::new();
-        let mut loops: BTreeMap<usize, (Coord, Coord)> = BTreeMap::new();
-        for (n, ts) in &on_page {
-            let net = &nl.nets[*n];
-            let local = net_sheets[*n].len() == 1 && !net.global;
-            if !local || ts.len() != 2 {
-                continue;
-            }
-            let (a, b) = {
-                let (x, y) = (&tips[ts[0]], &tips[ts[1]]);
-                if x.1.x <= y.1.x {
-                    (x, y)
-                } else {
-                    (y, x)
-                }
-            };
-            // A loop on one symbol (an amplifier's feedback): over the top of the body. Its
-            // sides run clear of the label points at the stub ends (a wire through a label
-            // would join its net): the first loop between the pin tips and the stub ends, later
-            // ones outside them.
-            if a.3 == b.3 && a.2 != b.2 {
-                let (top, count) = loops.entry(a.3).or_insert((cell_tops[a.3] + 3 * GRID, 0));
-                let y = *top;
-                let out = if *count == 0 {
-                    GRID
-                } else {
-                    STUB + *count * GRID
-                };
-                *top += GRID;
-                *count += 1;
-                let (l, r) = if a.2 { (a.1, b.1) } else { (b.1, a.1) };
-                let pts = [
-                    r,
-                    Point::new(r.x + out, r.y),
-                    Point::new(r.x + out, y),
-                    Point::new(l.x - out, y),
-                    Point::new(l.x - out, l.y),
-                    l,
-                ];
-                page.wires.push(SchematicWire {
-                    net: net.name.clone(),
-                    points: pts.into_iter().map(xy).collect(),
-                });
-                wired.extend(ts.iter().copied());
-                continue;
-            }
-            let neighbours = rows[a.3] == rows[b.3] && a.3.abs_diff(b.3) == 1;
-            if neighbours && !a.2 && b.2 && a.1.x < b.1.x {
-                let mx = ((a.1.x + b.1.x) / 2).div_euclid(GRID) * GRID;
-                let mut pts = vec![a.1];
-                if a.1.y != b.1.y {
-                    pts.push(Point::new(mx, a.1.y));
-                    pts.push(Point::new(mx, b.1.y));
-                }
-                pts.push(b.1);
-                page.wires.push(SchematicWire {
-                    net: net.name.clone(),
-                    points: pts.into_iter().map(xy).collect(),
-                });
-                wired.extend(ts.iter().copied());
-            }
-        }
-        // Every other connected pin: a stub and a label.
-        for (t, (net, tip, left, _)) in tips.iter().enumerate() {
-            let Some(n) = net else { continue };
-            if wired.contains(&t) {
-                continue;
-            }
-            let ni = &nl.nets[*n];
-            let end = Point::new(tip.x + if *left { -STUB } else { STUB }, tip.y);
-            page.wires.push(SchematicWire {
-                net: ni.name.clone(),
-                points: vec![xy(*tip), xy(end)],
-            });
-            let kind = if ni.global && is_rail(&ni.name, ni.class.as_deref()) {
-                "power"
-            } else if ni.global {
-                "global"
-            } else if net_sheets[*n].iter().any(|s| !s.starts_with(path)) {
-                "hier"
-            } else {
-                "local"
-            };
-            page.labels.push(NetLabel {
-                net: ni.name.clone(),
-                x_mm: mm(end.x),
-                y_mm: mm(end.y),
-                kind: kind.to_owned(),
-                side: side(*left),
-            });
-        }
-        page.junctions = junctions(&page.wires);
-        out.sheets.push(page);
+        let members = by_sheet.get(path).cloned().unwrap_or_default();
+        out.sheets.push(page(nl, path, sheet_name, &sheets, &members, &net_sheets));
     }
-    // The hierarchy's order: by path text.
+    // The hierarchy's order: by path text; then each title block's page count.
     out.sheets.sort_by(|a, b| a.path.cmp(&b.path));
+    let count = out.sheets.len();
+    for (k, s) in out.sheets.iter_mut().enumerate() {
+        s.title_block.insert(3, ("Page".into(), format!("{} of {count}", k + 1)));
+    }
     out
 }
 
-fn side(left: bool) -> String {
-    (if left { "left" } else { "right" }).to_owned()
-}
-
-/// The last path segment of a net name, as a label shows it.
-fn short(name: &str) -> &str {
-    name.rsplit('/').next().unwrap_or(name)
-}
-
-fn mm_to_nm(v: f64) -> Coord {
-    (v * 1.0e6).round() as Coord
-}
-
-/// A child sheet's box: wide enough for its path, tall enough for its pins on two sides.
-fn sheet_box(path: &NamePath, pins: usize) -> (Coord, Coord) {
-    let name = path.to_string().chars().count() as Coord;
-    let w = ((name + 6) * GRID).max(16 * GRID);
-    let h = ((pins.div_ceil(2) as Coord) * PIN_PITCH + 4 * GRID).max(10 * GRID);
-    (w.div_euclid(GRID) * GRID, h.div_euclid(GRID) * GRID)
-}
-
-/// Breadth-first order over signal neighbours, most connected first.
-fn connectivity_order(members: &[usize], neighbours: &[BTreeSet<usize>]) -> Vec<usize> {
-    let set: BTreeSet<usize> = members.iter().copied().collect();
-    let mut rest = members.to_vec();
-    rest.sort_by_key(|k| {
-        (
-            std::cmp::Reverse(neighbours[*k].intersection(&set).count()),
-            *k,
-        )
-    });
-    let (mut order, mut seen) = (Vec::new(), BTreeSet::new());
-    for &start in &rest {
-        if !seen.insert(start) {
-            continue;
+/// Every symbol's place on the drawn schematic, as the lock records it.
+pub fn places(index: &SchematicIndex) -> BTreeMap<String, SchPlace> {
+    let mut out = BTreeMap::new();
+    for s in &index.sheets {
+        let down = |y: f64| mm_to_nm(s.height_mm - y);
+        for sym in &s.symbols {
+            out.entry(sym.key.clone()).or_insert(SchPlace {
+                x: mm_to_nm(sym.x_mm),
+                y: down(sym.y_mm),
+                rotation: sym.rotation as u16,
+                mirror: sym.mirror,
+            });
         }
-        let mut q = VecDeque::from([start]);
-        while let Some(k) = q.pop_front() {
-            order.push(k);
-            for &n in &neighbours[k] {
-                if set.contains(&n) && seen.insert(n) {
-                    q.push_back(n);
+        for sh in &s.sheet_symbols {
+            // A sheet symbol's place is its top-left corner.
+            out.entry(sh.key.clone()).or_insert(SchPlace {
+                x: mm_to_nm(sh.x_mm),
+                y: down(sh.y_mm + sh.h_mm),
+                rotation: 0,
+                mirror: false,
+            });
+        }
+    }
+    out
+}
+
+fn page(
+    nl: &Netlist,
+    path: &NamePath,
+    sheet_name: &str,
+    sheets: &[(NamePath, String)],
+    members: &[usize],
+    net_sheets: &[BTreeSet<&NamePath>],
+) -> SchematicSheet {
+    let children: Vec<usize> = (0..sheets.len())
+        .filter(|k| sheets[*k].0.parent().as_ref() == Some(path))
+        .collect();
+    // Net facts for this page.
+    let infos: Vec<NetInfo> = nl
+        .nets
+        .iter()
+        .enumerate()
+        .map(|(k, n)| {
+            let on_page_only = net_sheets[k].iter().all(|s| s.starts_with(path));
+            let rail = is_rail(&n.name, n.class.as_deref()) && (n.global || on_page_only);
+            let external = !n.global && net_sheets[k].iter().any(|s| !s.starts_with(path));
+            NetInfo {
+                rail,
+                ground: route::text_is_ground(short(&n.name)),
+                global: n.global && !rail,
+                external,
+                labelled: !rail && (n.global || external),
+                short: local_name(n, path),
+            }
+        })
+        .collect();
+    let mut cells: Vec<Cell> = Vec::new();
+    for &ci in members {
+        let c = &nl.components[ci];
+        let us = units(c);
+        for (g, u) in us.iter().enumerate() {
+            let lay = UnitLayout::of(c, u, us.len());
+            let mut unused: Vec<usize> = u.pins.clone();
+            let pins: Vec<usize> = lay
+                .pins
+                .iter()
+                .map(|lp| {
+                    let at = unused
+                        .iter()
+                        .position(|i| c.pins[*i].pin == lp.name)
+                        .unwrap_or(0);
+                    unused.remove(at)
+                })
+                .collect();
+            let key = if us.len() > 1 {
+                format!("{}/{}:{}", c.sheet, c.path.leaf(), u.name)
+            } else {
+                format!("{}/{}", c.sheet, c.path.leaf())
+            };
+            cells.push(Cell {
+                key,
+                kind: CellKind::Unit { comp: ci, gate: g },
+                nets: pins.iter().map(|p| c.pins[*p].net).collect(),
+                pins,
+                lay,
+                designator: c.designator.clone(),
+                connector: connector(&c.designator),
+                sheet_out: Vec::new(),
+            });
+        }
+    }
+    let drives = |k: PinType| {
+        matches!(
+            k,
+            PinType::Output
+                | PinType::PowerOut
+                | PinType::TriState
+                | PinType::OpenCollector
+                | PinType::OpenEmitter
+        )
+    };
+    for &k in &children {
+        let child = &sheets[k].0;
+        let crossing: Vec<usize> = (0..nl.nets.len())
+            .filter(|n| {
+                !nl.nets[*n].global
+                    && net_sheets[*n].iter().any(|s| s.starts_with(child))
+                    && net_sheets[*n].iter().any(|s| !s.starts_with(child))
+            })
+            .collect();
+        let sheet_out: Vec<bool> = crossing
+            .iter()
+            .map(|&n| {
+                nl.nets[n].pins.iter().any(|(c, p)| {
+                    nl.components[*c].path.starts_with(child)
+                        && drives(nl.components[*c].pins[*p].kind)
+                })
+            })
+            .collect();
+        let name = child.to_string();
+        let mut lay = UnitLayout {
+            pins: crossing
+                .iter()
+                .map(|&n| symbol::LayoutPin {
+                    name: local_name(&nl.nets[n], child),
+                    pads: Vec::new(),
+                    kind: PinType::Passive,
+                    side: PinSide::Left,
+                    at: 0,
+                })
+                .collect(),
+            half_w: up_to_grid((text_width(&name, DESIGNATOR_TEXT) + 4 * GRID) / 2).max(8 * GRID),
+            half_h: 4 * GRID,
+            pin_len: 0,
+            art: Art::Box,
+        };
+        restack_sheet(&mut lay);
+        let parent_sheet = sheet_name;
+        cells.push(Cell {
+            key: format!("{parent_sheet}/{}", child.leaf()),
+            kind: CellKind::Sheet { child: k },
+            nets: crossing.iter().map(|n| Some(*n)).collect(),
+            pins: Vec::new(),
+            lay,
+            designator: name,
+            connector: false,
+            sheet_out,
+        });
+    }
+    let mut places = place::place(&mut cells, &infos);
+    let recorded = cells.iter().any(|c| nl.sch_places.contains_key(&c.key));
+    stick(&cells, &mut places, &nl.sch_places);
+    draw::page(nl, path, sheet_name, sheets, &cells, &places, &infos, !recorded)
+}
+
+/// Recorded places override the automatic ones (stored in paper mm, y down from the top; the
+/// content's top-left corner sits [`MARGIN`] in). Unrecorded symbols on a page with recorded
+/// ones move to the nearest spot clear of them.
+fn stick(cells: &[Cell], places: &mut [Place], stored: &BTreeMap<String, SchPlace>) {
+    let mut fixed: Vec<[Coord; 4]> = Vec::new();
+    let rect = |c: &Cell, p: &Place| {
+        let e = p.rect(c.lay.extent());
+        [e[0] - 3 * GRID, e[1] - 3 * GRID, e[2] + 3 * GRID, e[3] + 3 * GRID]
+    };
+    let mut free: Vec<usize> = Vec::new();
+    for (i, c) in cells.iter().enumerate() {
+        match stored.get(&c.key) {
+            Some(s) => {
+                let o = Point::new(s.x - MARGIN, MARGIN - s.y);
+                places[i] = match c.kind {
+                    // A sheet symbol is recorded by its top-left corner.
+                    CellKind::Sheet { .. } => Place::at(Point::new(
+                        o.x + c.lay.half_w,
+                        o.y - c.lay.half_h,
+                    )),
+                    _ => Place {
+                        origin: o,
+                        rotation: s.rotation,
+                        mirror: s.mirror,
+                    },
+                };
+                fixed.push(rect(c, &places[i]));
+            }
+            None => free.push(i),
+        }
+    }
+    if fixed.is_empty() {
+        return;
+    }
+    let hits = |r: &[Coord; 4], all: &[[Coord; 4]]| {
+        all.iter()
+            .any(|f| r[0] < f[2] && f[0] < r[2] && r[1] < f[3] && f[1] < r[3])
+    };
+    for i in free {
+        let base = places[i];
+        let mut best = base;
+        'search: for ring in 0..400 {
+            let d = ring as Coord * 2 * GRID;
+            let offsets = [(d, 0), (0, -d), (-d, 0), (0, d), (d, -d), (-d, -d), (d, d), (-d, d)];
+            for (dx, dy) in offsets {
+                let p = Place {
+                    origin: Point::new(base.origin.x + dx, base.origin.y + dy),
+                    ..base
+                };
+                if !hits(&rect(&cells[i], &p), &fixed) {
+                    best = p;
+                    break 'search;
                 }
             }
         }
-    }
-    order
-}
-
-/// Shelf packing in rows of `width`: each cell's offset from the top left, its row, and the
-/// height used.
-fn shelves(sizes: &[(Coord, Coord)], width: Coord) -> (Vec<Point>, Vec<usize>, Coord) {
-    let (mut x, mut y, mut row_h, mut row) = (0, 0, 0, 0);
-    let mut pos = Vec::with_capacity(sizes.len());
-    let mut rows = Vec::with_capacity(sizes.len());
-    for (w, h) in sizes {
-        if x + w > width && x > 0 {
-            x = 0;
-            y += row_h;
-            row_h = 0;
-            row += 1;
-        }
-        pos.push(Point::new(x, y));
-        rows.push(row);
-        x += w;
-        row_h = row_h.max(*h);
-    }
-    (pos, rows, y + row_h)
-}
-
-/// Where three or more wire ends meet, or a wire ends inside another wire's segment.
-fn junctions(wires: &[SchematicWire]) -> Vec<Xy> {
-    let mut ends: BTreeMap<(i64, i64), usize> = BTreeMap::new();
-    let key = |p: &Xy| ((p[0] * 1.0e4).round() as i64, (p[1] * 1.0e4).round() as i64);
-    for w in wires {
-        for p in [w.points.first(), w.points.last()].into_iter().flatten() {
-            *ends.entry(key(p)).or_default() += 1;
-        }
-    }
-    let mut out: BTreeSet<(i64, i64)> = ends
-        .iter()
-        .filter(|(_, n)| **n >= 3)
-        .map(|(k, _)| *k)
-        .collect();
-    for k in ends.keys() {
-        let p = [k.0 as f64 / 1.0e4, k.1 as f64 / 1.0e4];
-        let inside = wires.iter().any(|w| {
-            w.points.windows(2).any(|s| {
-                let (a, b) = (s[0], s[1]);
-                let on_x = (a[0] - b[0]).abs() < 1e-6
-                    && (p[0] - a[0]).abs() < 1e-6
-                    && p[1] > a[1].min(b[1]) + 1e-6
-                    && p[1] < a[1].max(b[1]) - 1e-6;
-                let on_y = (a[1] - b[1]).abs() < 1e-6
-                    && (p[1] - a[1]).abs() < 1e-6
-                    && p[0] > a[0].min(b[0]) + 1e-6
-                    && p[0] < a[0].max(b[0]) - 1e-6;
-                on_x || on_y
-            })
-        });
-        if inside {
-            out.insert(*k);
-        }
-    }
-    out.into_iter()
-        .map(|(x, y)| [x as f64 / 1.0e4, y as f64 / 1.0e4])
-        .collect()
-}
-
-#[cfg(test)]
-mod unit_split_tests {
-    use super::*;
-
-    #[test]
-    fn a_large_gate_splits_into_even_bank_and_power_units() {
-        let (_, _, nl, _) = crate::fixture::large(&crate::fixture::LargeParams {
-            channels: 2,
-            copper_layers: 4,
-            route_every: 0,
-            pours: false,
-        });
-        let fpga = nl
-            .components
-            .iter()
-            .find(|c| c.pins.len() > SPLIT_ABOVE)
-            .expect("an FPGA");
-        let units = units(fpga);
-        let sizes: Vec<usize> = units.iter().map(|u| u.pins.len()).collect();
-        // 200 IO pins in five units of 40, then the power unit.
-        assert_eq!(sizes, vec![40, 40, 40, 40, 40, 3], "{units:?}");
-        assert_eq!(units[0].name, "A");
-        assert_eq!(units[0].label.as_deref(), Some("IO0–IO39"));
-        assert_eq!(units[5].label.as_deref(), Some("power"));
-        let all: std::collections::BTreeSet<usize> =
-            units.iter().flat_map(|u| u.pins.clone()).collect();
-        assert_eq!(all.len(), fpga.pins.len(), "every pin in exactly one unit");
-    }
-
-    #[test]
-    fn banks_come_from_the_pin_name() {
-        assert_eq!(bank_of("IO_L1P_T0_34").as_deref(), Some("34"));
-        assert_eq!(bank_of("BANK3_IO7").as_deref(), Some("3"));
-        assert_eq!(bank_of("IO12"), None);
-        assert_eq!(bank_of("VCC_"), None);
-        assert_eq!(prefix_of("PA12"), "PA");
-        assert_eq!(letters(0), "A");
-        assert_eq!(letters(25), "Z");
-        assert_eq!(letters(26), "AA");
+        places[i] = best;
+        fixed.push(rect(&cells[i], &best));
     }
 }
+
+mod draw;
+pub use draw::{designator_text, page_boxes, symbol_texts};

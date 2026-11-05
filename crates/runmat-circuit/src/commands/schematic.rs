@@ -66,6 +66,9 @@ pub(super) fn add(c: &mut Catalog) {
                 "Items",
                 &[K::Component, K::Wire, K::Port, K::SheetSymbol],
             ),
+            offset("dx", "Delta X", 0.0).drag(Manipulator::Point),
+            offset("dy", "Delta Y", 0.0),
+            angle("rotation", "Rotation", 0.0),
             flag("drag_wires", "Keep wires attached", true),
         ])
         .when(selected(&[K::Component, K::Wire, K::Port, K::SheetSymbol]))

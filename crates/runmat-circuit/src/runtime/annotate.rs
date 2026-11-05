@@ -2,7 +2,11 @@
 //! numbering stays put as the design changes. With `reset`, the designators the compiler
 //! numbers (parts in repeated channels and `R?`-style names) are renumbered per prefix in
 //! sheet order: across then down (rows top to bottom, left to right in a row) or down then
-//! across. Designators written in the source keep their names.
+//! across. Designators written in the source keep their names. Annotating also records every
+//! symbol's schematic place in the lock, so the drawing stays put as the design changes.
+//!
+//! `schematic.move` moves (and turns) symbols and sheet symbols by a delta and records the
+//! places of the whole drawing, so the user's moves stick.
 
 use super::edit::{lock_change, EditError, EditOutput, EditRequest};
 use super::*;
@@ -48,6 +52,7 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
             }
         }
     }
+    lock.places = crate::schematic::places(&crate::schematic::layout(&project.netlist));
     let total = project.netlist.components.len();
     let summary = if reset {
         format!("Annotated {total} component(s); renumbered {renumbered}")
@@ -105,4 +110,60 @@ fn number(designator: &str) -> u64 {
         .trim_start_matches(|ch: char| !ch.is_ascii_digit())
         .parse()
         .unwrap_or(0)
+}
+
+/// `schematic.move`: `items` (or the selection) as the schematic canvas names them
+/// (`component:U1`, `sheet:/ch[0]`), moved by `dx`, `dy` (mm, y up) and turned by `rotation`
+/// (degrees, in quarter turns; two-pin parts and holes only).
+pub(super) fn move_items(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
+    let values = &request.values;
+    let mut ids: Vec<String> = match values.get("items") {
+        Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect(),
+        Some(Value::String(s)) => vec![s.clone()],
+        _ => Vec::new(),
+    };
+    if ids.is_empty() {
+        ids = request.selection.clone();
+    }
+    if ids.is_empty() {
+        return Err(EditError::new("select the symbols to move first"));
+    }
+    let num = |k: &str| values.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+    let (dx, dy) = ((num("dx") * 1.0e6).round() as i64, (num("dy") * 1.0e6).round() as i64);
+    let turn = ((num("rotation") / 90.0).round() as i64).rem_euclid(4) as u16 * 90;
+    let drawn = crate::schematic::layout(&project.netlist);
+    let mut places = crate::schematic::places(&drawn);
+    let mut keys: BTreeMap<String, bool> = BTreeMap::new();
+    for page in &drawn.sheets {
+        for s in &page.symbols {
+            if ids.iter().any(|id| *id == format!("component:{}", s.designator)) {
+                keys.insert(s.key.clone(), s.art != "box");
+            }
+        }
+        for s in &page.sheet_symbols {
+            if ids.iter().any(|id| *id == format!("sheet:{}", s.path)) {
+                keys.insert(s.key.clone(), false);
+            }
+        }
+    }
+    if keys.is_empty() {
+        return Err(EditError::new("none of the selected items is a schematic symbol"));
+    }
+    for (key, turns) in &keys {
+        if let Some(p) = places.get_mut(key) {
+            // Places are recorded y down, on the 1.27 mm grid.
+            let snap = |v: i64| (v as f64 / 1_270_000.0).round() as i64 * 1_270_000;
+            p.x = snap(p.x + dx);
+            p.y = snap(p.y - dy);
+            if *turns {
+                p.rotation = (p.rotation + turn) % 360;
+            }
+        }
+    }
+    let mut lock = project.lock.clone();
+    lock.places = places;
+    Ok(EditOutput {
+        summary: format!("Moved {} symbol(s)", keys.len()),
+        files: lock_change(project, &lock, true).into_iter().collect(),
+    })
 }

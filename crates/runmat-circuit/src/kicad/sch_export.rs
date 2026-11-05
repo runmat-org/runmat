@@ -25,7 +25,7 @@ use crate::elab::Netlist;
 use crate::geom::Coord;
 use crate::library::Pool;
 use crate::schematic::{
-    layout, unit_pins, units, NetLabel, SchematicSheet, UnitLayout, NAME_OFFSET,
+    layout, units, NetLabel, PinSide, SchematicSheet, UnitLayout, NAME_OFFSET,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -135,6 +135,7 @@ impl Page {
 /// `(paper …)` for a layout frame: the ISO size, or a user size when A0 grew taller.
 fn paper(sheet: &SchematicSheet) -> SExpr {
     let standard = match sheet.frame.as_str() {
+        "A4" => Some(210.0),
         "A3" => Some(297.0),
         "A2" => Some(420.0),
         "A1" => Some(594.0),
@@ -284,12 +285,20 @@ fn power_lib_symbol(net: &str) -> SExpr {
 /// A power port placed as its rail's power symbol, value text on the far side of the shape.
 fn power_symbol_node(page: &Page, label: &NetLabel, reference: &str, here: &str, project: &str, seed: &str) -> SExpr {
     let ground = is_ground_rail(&label.net);
+    // KiCad's power symbols point up (supplies) and down (grounds) at 0°; a port drawn
+    // another way turns by the quarter that takes it there.
+    let angle = match (ground, label.side.as_str()) {
+        (true, "up") | (false, "down") => 180.0,
+        (true, "right") | (false, "left") => 90.0,
+        (true, "left") | (false, "right") => 270.0,
+        _ => 0.0,
+    };
     let value_y = if ground { label.y_mm - 3.81 } else { label.y_mm + 3.556 };
     SExpr::list(
         "symbol",
         vec![
             SExpr::list("lib_id", vec![SExpr::str(&power_lib(&label.net))]),
-            page.at(label.x_mm, label.y_mm, 0.0),
+            page.at(label.x_mm, label.y_mm, angle),
             SExpr::list("unit", vec![SExpr::num(1.0)]),
             SExpr::list("in_bom", vec![SExpr::sym("no")]),
             SExpr::list("on_board", vec![SExpr::sym("yes")]),
@@ -369,20 +378,13 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
         let us = units(c);
         let layouts: Vec<(UnitLayout, Option<String>)> = us
             .iter()
-            .map(|u| (UnitLayout::new(&unit_pins(c, u)), u.label.clone()))
+            .map(|u| (UnitLayout::of(c, u, us.len()), u.label.clone()))
             .collect();
         let mut lib = format!("RunMat:{}", sanitize(&ename));
         let mut k = 1;
         while let Some(existing) = libs.get(&lib) {
             let same = existing.len() == layouts.len()
-                && existing.iter().zip(&layouts).all(|(a, b)| {
-                    a.1 == b.1
-                        && a.0.pins.iter().map(|p| (&p.0, &p.1)).eq(b
-                            .0
-                            .pins
-                            .iter()
-                            .map(|p| (&p.0, &p.1)))
-                });
+                && existing.iter().zip(&layouts).all(|(a, b)| a == b);
             if same {
                 break;
             }
@@ -452,7 +454,7 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
                 .unwrap_or_else(|| c.path.leaf().to_string());
             let mut sym = vec![
                 SExpr::list("lib_id", vec![SExpr::str(lib)]),
-                page.at(symbol.x_mm, symbol.y_mm, 0.0),
+                page.at(symbol.x_mm, symbol.y_mm, symbol.rotation),
                 SExpr::list("unit", vec![SExpr::num((u + 1) as f64)]),
                 SExpr::list("in_bom", vec![SExpr::sym("yes")]),
                 SExpr::list("on_board", vec![SExpr::sym("yes")]),
@@ -498,8 +500,11 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
                     ));
                 }
             }
-            for (_, pads, _, _, _) in &lay.pins {
-                for pad in pads {
+            if symbol.mirror {
+                sym.insert(2, SExpr::list("mirror", vec![SExpr::sym("y")]));
+            }
+            for lp in &lay.pins {
+                for pad in &lp.pads {
                     sym.push(SExpr::list(
                         "pin",
                         vec![SExpr::str(pad), uuid_node(&format!("{sseed}|pin|{pad}"))],
@@ -749,6 +754,9 @@ fn lib_symbol(lib: &str, units: &[(UnitLayout, Option<String>)]) -> SExpr {
             ],
         ),
     ];
+    if units.iter().any(|u| u.0.art.small()) {
+        v.insert(2, SExpr::list("pin_numbers", vec![SExpr::sym("hide")]));
+    }
     for (u, (lay, label)) in units.iter().enumerate() {
         let mut body = vec![SExpr::str(&format!("{short}_{}_1", u + 1))];
         if let Some(label) = label {
@@ -772,21 +780,25 @@ fn lib_symbol(lib: &str, units: &[(UnitLayout, Option<String>)]) -> SExpr {
                 ),
             ],
         )]);
-        for (name, pads, kind, left, y) in &lay.pins {
-            let tip = lay.tip(*left, *y);
-            for pad in pads {
+        for lp in &lay.pins {
+            let (name, kind) = (&lp.name, lp.kind);
+            let tip = lay.tip(lp.side, lp.at);
+            // The pin's direction from its tip to the body.
+            let angle = match lp.side {
+                PinSide::Left => 0.0,
+                PinSide::Right => 180.0,
+                PinSide::Top => 270.0,
+                PinSide::Bottom => 90.0,
+            };
+            for pad in &lp.pads {
                 body.push(SExpr::list(
                     "pin",
                     vec![
-                        SExpr::sym(crate::schematic::pin_kind(*kind)),
+                        SExpr::sym(crate::schematic::pin_kind(kind)),
                         SExpr::sym("line"),
                         SExpr::list(
                             "at",
-                            vec![
-                                mm(tip.x),
-                                mm(tip.y),
-                                SExpr::num(if *left { 0.0 } else { 180.0 }),
-                            ],
+                            vec![mm(tip.x), mm(tip.y), SExpr::num(angle)],
                         ),
                         SExpr::list("length", vec![mm(lay.pin_len)]),
                         SExpr::list("name", vec![SExpr::str(name), effects(None)]),

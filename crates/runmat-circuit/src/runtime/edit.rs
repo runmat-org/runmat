@@ -73,6 +73,7 @@ pub fn edit(
         "board.copy-room-formats" => room_formats(&project, request),
         "board.fanout" | "board.autoroute" => super::autoroute::run(&project, request),
         "schematic.annotate" => super::annotate::run(&project, request),
+        "schematic.move" => super::annotate::move_items(&project, request),
         command => {
             let layout = project.layout_or_err()?;
             let board = layout.parsed.board.as_ref().expect("read");

@@ -145,6 +145,8 @@ pub struct Netlist {
     /// New sheet-instance path → previous path, for renamed instances and their children.
     pub sheet_renames: BTreeMap<NamePath, NamePath>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Schematic places recorded in the lock (see [`crate::ids::SchPlace`]).
+    pub sch_places: BTreeMap<String, crate::ids::SchPlace>,
 }
 
 impl Netlist {
@@ -1296,6 +1298,7 @@ pub fn elaborate(
         no_erc,
         sheet_renames: cx.sheet_renames,
         diagnostics: diags,
+        sch_places: lock.map(|l| l.places.clone()).unwrap_or_default(),
     }
 }
 
