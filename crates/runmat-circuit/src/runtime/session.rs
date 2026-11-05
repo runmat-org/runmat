@@ -63,8 +63,23 @@ pub struct Session {
     pub timings: SessionTimings,
 }
 
-fn now() -> std::time::Instant {
-    std::time::Instant::now()
+/// A stopwatch for [`SessionTimings`]; wasm32 has no clock in `std`, so it reads zero there.
+struct Clock(#[cfg(not(target_arch = "wasm32"))] std::time::Instant);
+
+impl Clock {
+    fn elapsed(&self) -> Duration {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.0.elapsed();
+        #[cfg(target_arch = "wasm32")]
+        Duration::ZERO
+    }
+}
+
+fn now() -> Clock {
+    Clock(
+        #[cfg(not(target_arch = "wasm32"))]
+        std::time::Instant::now(),
+    )
 }
 
 /// The copper layers an item is on (all of them for footprints, whose pads may be through).
