@@ -21,6 +21,9 @@ impl Device for Resistor {
     fn probe_current(&self, x: &[f64], _s: &States) -> Option<f64> {
         Some((node_v(x, self.a) - node_v(x, self.b)) / self.ohms)
     }
+    fn noise(&self, sink: &mut crate::analysis::noise::NoiseSink) {
+        sink.thermal(self.a, self.b, 1.0 / self.ohms);
+    }
 }
 
 pub struct Capacitor {

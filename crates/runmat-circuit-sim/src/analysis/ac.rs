@@ -65,7 +65,7 @@ pub fn sweep(e: &mut Engine, freqs: &[f64]) -> Result<AcWave, SimError> {
 
 /// One frequency: the complex assembly (kept only when it fits under the limit), then the LU
 /// with what is left of the limit as its budget, then the solve when its fixed count fits.
-fn point(
+pub(super) fn point(
     e: &mut Engine,
     mat: &mut Matrix<Complex>,
     ord: &mut Vec<usize>,

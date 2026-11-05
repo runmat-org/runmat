@@ -3,6 +3,7 @@
 pub mod ac;
 pub mod dc;
 pub mod engine;
+pub mod noise;
 pub mod op;
 pub mod tran;
 

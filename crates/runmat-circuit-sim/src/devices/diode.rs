@@ -116,6 +116,14 @@ impl Device for Diode {
             ld.charge_at(self.state, self.ai, self.k, q, ctrl, [vd]);
         }
     }
+    /// Shot noise of the junction current, thermal noise of the series resistance.
+    fn noise(&self, sink: &mut crate::analysis::noise::NoiseSink) {
+        let x = sink.x;
+        let vd = node_v(x, self.ai) - node_v(x, self.k);
+        let id = self.id(Dual::<1>::constant(vd), 0.0).v;
+        sink.shot(self.ai, self.k, id);
+        sink.thermal(self.a, self.ai, self.gs);
+    }
     fn probe_current(&self, x: &[f64], s: &States) -> Option<f64> {
         if self.gs > 0.0 {
             return Some((node_v(x, self.a) - node_v(x, self.ai)) * self.gs);

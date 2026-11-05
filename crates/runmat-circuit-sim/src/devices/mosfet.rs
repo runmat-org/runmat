@@ -212,6 +212,23 @@ impl Device for Mosfet {
             }
         }
     }
+    /// Channel noise `(8/3)·kT·gm` and thermal noise of rd and rs.
+    fn noise(&self, sink: &mut crate::analysis::noise::NoiseSink) {
+        let x = sink.x;
+        let tp = self.tp;
+        let v = |n| node_v(x, n);
+        let (vgs, vds, vbs) = (tp * (v(self.g) - v(self.si)), tp * (v(self.di) - v(self.si)), tp * (v(self.b) - v(self.si)));
+        let gm = if vds >= 0.0 {
+            self.ids(Dual::var(vgs, 0), Dual::var(vds, 1), Dual::var(vbs, 2)).d[0]
+        } else {
+            self.ids(Dual::var(vgs - vds, 0), Dual::var(-vds, 1), Dual::var(vbs - vds, 2)).d[0]
+        };
+        if gm > 0.0 {
+            sink.push("channel", self.di, self.si, 8.0 / 3.0 * sink.kt * gm);
+        }
+        sink.thermal(self.d, self.di, self.gd);
+        sink.thermal(self.s, self.si, self.gs);
+    }
     /// Drain current (into the drain terminal).
     fn probe_current(&self, x: &[f64], _s: &States) -> Option<f64> {
         let tp = self.tp;

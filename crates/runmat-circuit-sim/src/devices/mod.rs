@@ -324,6 +324,9 @@ pub trait Device: Send + Sync {
     }
     /// Transient with `uic`: sets the device's initial charge or flux from its `ic` parameter.
     fn apply_ic(&self, _states: &mut States) {}
+    /// The device's noise generators at the operating point `sink.x` (see
+    /// [`crate::analysis::noise`]); noiseless by default.
+    fn noise(&self, _sink: &mut crate::analysis::noise::NoiseSink) {}
     /// Sets the DC value of an independent source (DC sweeps).
     fn set_dc(&self, _mem: &mut [f64], _value: f64) -> bool {
         false

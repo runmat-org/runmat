@@ -218,6 +218,18 @@ impl Device for Bjt {
         }
     }
     /// Collector current (into the collector terminal).
+    /// Collector and base shot noise, thermal noise of rb, rc and re.
+    fn noise(&self, sink: &mut crate::analysis::noise::NoiseSink) {
+        let x = sink.x;
+        let vbe = self.tp * (node_v(x, self.bi) - node_v(x, self.ei));
+        let vbc = self.tp * (node_v(x, self.bi) - node_v(x, self.ci));
+        let [ibe, ibc, ice, _, _] = self.eval(vbe, vbc, 0.0, false);
+        sink.shot(self.ci, self.ei, ice.v - ibc.v);
+        sink.shot(self.bi, self.ei, ibe.v + ibc.v);
+        sink.thermal(self.b, self.bi, self.gb);
+        sink.thermal(self.c, self.ci, self.gc);
+        sink.thermal(self.e, self.ei, self.ge);
+    }
     fn probe_current(&self, x: &[f64], s: &States) -> Option<f64> {
         let vbe = self.tp * (node_v(x, self.bi) - node_v(x, self.ei));
         let vbc = self.tp * (node_v(x, self.bi) - node_v(x, self.ci));
