@@ -24,7 +24,12 @@ impl WgpuRenderer {
 
     fn ensure_depth_probe_layout(&mut self, emission: &runmat_accelerate_api::WgpuEmission<'_>) {
         let multisampled = self.multisampled();
-        if self.extra_pipelines.depth_layout.as_ref().is_some_and(|(m, _)| *m == multisampled) {
+        if self
+            .extra_pipelines
+            .depth_layout
+            .as_ref()
+            .is_some_and(|(m, _)| *m == multisampled)
+        {
             return;
         }
         let layout = emission
@@ -43,7 +48,9 @@ impl WgpuRenderer {
                 }],
             });
         self.extra_pipelines.depth_layout = Some((multisampled, layout));
-        self.extra_pipelines.strokes.retain(|(_, probed), _| !probed);
+        self.extra_pipelines
+            .strokes
+            .retain(|(_, probed), _| !probed);
     }
 
     /// Builds the instanced triangle pipeline and the depth-tested stroke variants.
@@ -55,7 +62,11 @@ impl WgpuRenderer {
         }
         for instanced in [false, true] {
             for probed in [false, true] {
-                if self.extra_pipelines.strokes.contains_key(&(instanced, probed)) {
+                if self
+                    .extra_pipelines
+                    .strokes
+                    .contains_key(&(instanced, probed))
+                {
                     continue;
                 }
                 let variant = EdgeStrokeShader {
@@ -65,8 +76,14 @@ impl WgpuRenderer {
                     depth_probe: probed.then_some(self.multisampled()),
                 };
                 let layout = self.extra_pipelines.depth_layout.as_ref().map(|(_, l)| l);
-                let pipeline = self.create_edge_stroke_pipeline_variant(emission, variant, if probed { layout } else { None });
-                self.extra_pipelines.strokes.insert((instanced, probed), pipeline);
+                let pipeline = self.create_edge_stroke_pipeline_variant(
+                    emission,
+                    variant,
+                    if probed { layout } else { None },
+                );
+                self.extra_pipelines
+                    .strokes
+                    .insert((instanced, probed), pipeline);
             }
         }
     }
@@ -77,7 +94,11 @@ impl WgpuRenderer {
 
     /// A depth-tested edge stroke pipeline: `instanced` reads placements, `probed` samples the
     /// scene depth at group 2.
-    pub fn edge_stroke_variant(&self, instanced: bool, probed: bool) -> Option<&wgpu::RenderPipeline> {
+    pub fn edge_stroke_variant(
+        &self,
+        instanced: bool,
+        probed: bool,
+    ) -> Option<&wgpu::RenderPipeline> {
         self.extra_pipelines.strokes.get(&(instanced, probed))
     }
 
@@ -89,14 +110,18 @@ impl WgpuRenderer {
         depth_view: &wgpu::TextureView,
     ) -> Option<wgpu::BindGroup> {
         let (_, layout) = self.extra_pipelines.depth_layout.as_ref()?;
-        Some(emission.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Edge Stroke Scene Depth"),
-            layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(depth_view),
-            }],
-        }))
+        Some(
+            emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Edge Stroke Scene Depth"),
+                    layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(depth_view),
+                    }],
+                }),
+        )
     }
 
     pub fn create_instance_buffer(
@@ -130,13 +155,14 @@ impl WgpuRenderer {
                 label: Some("Triangle Shader"),
                 source: wgpu::ShaderSource::Wgsl(source.into()),
             });
-        let pipeline_layout = emission
-            .device()
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Triangle Pipeline Layout"),
-                bind_group_layouts: &[&self.uniform_bind_group_layout],
-                push_constant_ranges: &[],
-            });
+        let pipeline_layout =
+            emission
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Triangle Pipeline Layout"),
+                    bind_group_layouts: &[&self.uniform_bind_group_layout],
+                    push_constant_ranges: &[],
+                });
         let buffers = if instanced {
             vec![Vertex::desc(), InstanceRaw::desc()]
         } else {
