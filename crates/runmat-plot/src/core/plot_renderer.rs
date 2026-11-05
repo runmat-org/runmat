@@ -1184,6 +1184,11 @@ impl PlotRenderer {
         if !(largest.is_finite() && largest > 0.0) {
             return Vec3::ONE;
         }
+        // Geometry scenes are always true-scale; importing one clears `last_figure`, so its
+        // axis-equal flag lives in `figure_axis_equal`.
+        if self.last_geometry_scene.is_some() || self.figure_axis_equal {
+            return Vec3::splat(1.0 / largest);
+        }
         let figure = self.last_figure.as_ref();
         let meta = figure.and_then(|f| f.axes_metadata(axes_index));
         let has_geometry_mesh = figure.is_some_and(|f| {
