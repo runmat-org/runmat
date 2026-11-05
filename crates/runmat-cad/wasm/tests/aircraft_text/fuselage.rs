@@ -95,14 +95,19 @@ fn tail_cone() -> String {
             body += &format!("    feature st{k} = plane.offset(base = origin.yz, distance = {})\n", mm(*x));
         }
         let plane = if k == 0 { "origin.yz".to_string() } else { format!("plane.st{k}") };
-        body += &format!(
-            "    sketch s{k} on {plane} {{\n        c = circle(center = {}, radius = {})\n    }}\n",
-            pt(0.0, *zc),
-            mm(*r)
-        );
+        // The skin's outer circle and, 5 mm inside it, the inner one.
+        for (tag, radius) in [("s", *r), ("i", *r - 5.0)] {
+            body += &format!(
+                "    sketch {tag}{k} on {plane} {{\n        c = circle(center = {}, radius = {})\n    }}\n",
+                pt(0.0, *zc),
+                mm(radius)
+            );
+        }
     }
     body += "    feature cone = loft(profiles = [sketch.s0, sketch.s1, sketch.s2, sketch.s3])\n";
-    part("tail_cone", "FUS-TC-020", "aluminum_2024", "The tail cone: circles lofted aft from the barrel, closing and sweeping up to the APU exhaust.", &body, "cone")
+    // A 5 mm skin, open at the barrel joint and at the APU exhaust: the inner loft is cut away.
+    body += "    feature hollow = loft(profiles = [sketch.i0, sketch.i1, sketch.i2, sketch.i3], mode = cut)\n";
+    part("tail_cone", "FUS-TC-020", "aluminum_2024", "The tail cone: a 5 mm skin lofted aft through circles from the barrel, closing and sweeping up to the APU exhaust.", &body, "cone")
 }
 
 /// The wing-to-body fairing: a long flattened blister under the wing box, a 20 mm shell, cut

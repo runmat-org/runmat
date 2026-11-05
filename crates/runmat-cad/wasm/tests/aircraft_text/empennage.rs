@@ -2,7 +2,7 @@
 //! and their elevators, on NACA 0010/0011 sections. Coordinates are the tail frame's: the origin
 //! at the tail cone's front on the fuselage axis, x aft, y to starboard, z up.
 
-use super::airfoil::{nose, run, Naca, Placed};
+use super::airfoil::{run, Naca, Placed};
 use super::text::{loop_sketch, mm, part, use_, Curve, HEADER};
 
 /// Hinge line, fraction of chord: fixed surface ahead, control surface aft.
@@ -20,38 +20,62 @@ struct Surface {
 }
 
 impl Surface {
-    /// The two sections' planes and placements.
-    fn sections(&self, side: f64) -> [(String, Placed); 2] {
-        [(self.root_le, self.root_chord), (self.tip_le, self.tip_chord)].map(|(le, c)| {
-            if self.vertical {
-                // Horizontal planes at z: u = x, v = y.
-                (format!("plane.offset(base = origin.xy, distance = {})", mm(le.2)), Placed { chord: c, le: (le.0, le.1), chord_along_v: false, flip: false })
-            } else {
-                // Vertical planes at y: u = z, v = x.
-                (format!("plane.offset(base = origin.zx, distance = {})", mm(side * le.1)), Placed { chord: c, le: (le.2, le.0), chord_along_v: true, flip: false })
-            }
-        })
+    /// The section `t` of the way from root (0) to tip (1): its plane and placement.
+    fn section_at(&self, t: f64, side: f64) -> (String, Placed) {
+        let lerp = |a: f64, b: f64| a + (b - a) * t;
+        let le = (lerp(self.root_le.0, self.tip_le.0), lerp(self.root_le.1, self.tip_le.1), lerp(self.root_le.2, self.tip_le.2));
+        let c = lerp(self.root_chord, self.tip_chord);
+        if self.vertical {
+            // Horizontal planes at z: u = x, v = y.
+            (format!("plane.offset(base = origin.xy, distance = {})", mm(le.2)), Placed { chord: c, le: (le.0, le.1), chord_along_v: false, flip: false })
+        } else {
+            // Vertical planes at y: u = z, v = x.
+            (format!("plane.offset(base = origin.zx, distance = {})", mm(side * le.1)), Placed { chord: c, le: (le.2, le.0), chord_along_v: true, flip: false })
+        }
+    }
+
+    /// The root-to-tip distance along the section planes' normal.
+    fn span(&self) -> f64 {
+        if self.vertical { self.tip_le.2 - self.root_le.2 } else { self.tip_le.1 - self.root_le.1 }
     }
 
     fn piece(&self, name: &str, number: &str, comment: &str, control: bool, side: f64) -> String {
         let f = Naca::symmetric(self.thickness);
         let mut body = String::new();
-        for (k, (plane, at)) in self.sections(side).into_iter().enumerate() {
-            let m = |v: Vec<(f64, f64)>| v.into_iter().map(|p| at.map(p)).collect::<Vec<_>>();
-            let curves = if control {
-                vec![
-                    Curve::Spline(m(run(&f, HINGE, 1.0, true, 0.0, 6))),
-                    Curve::Line(vec![]),
-                    Curve::Spline(m(run(&f, 1.0, HINGE, false, 0.0, 6))),
-                    Curve::Line(vec![]),
-                ]
-            } else {
-                vec![Curve::Spline(m(nose(&f, HINGE, 12))), Curve::Line(vec![])]
-            };
-            body += &format!("    feature st{k} = {plane}\n");
-            body += &loop_sketch(&format!("s{k}"), &format!("plane.st{k}"), &curves);
-        }
+        let sketches = |body: &mut String, tag: &str, ts: [f64; 2], skin: f64| {
+            for (k, t) in ts.into_iter().enumerate() {
+                let (plane, at) = self.section_at(t, side);
+                let m = |v: Vec<(f64, f64)>| v.into_iter().map(|p| at.map(p)).collect::<Vec<_>>();
+                let curves = if control {
+                    vec![
+                        Curve::Spline(m(run(&f, HINGE, 1.0, true, 0.0, 6))),
+                        Curve::Line(vec![]),
+                        Curve::Spline(m(run(&f, 1.0, HINGE, false, 0.0, 6))),
+                        Curve::Line(vec![]),
+                    ]
+                } else {
+                    // The nose wrap, `skin` mm inside the surface, closed by the hinge line.
+                    let d = skin / at.chord;
+                    let a = HINGE - d;
+                    let mut pts = run(&f, a, 0.0, true, d, 12);
+                    pts.extend(run(&f, 0.0, a, false, d, 12).into_iter().skip(1));
+                    vec![Curve::Spline(m(pts)), Curve::Line(vec![])]
+                };
+                *body += &format!("    feature {tag}st{k} = {plane}\n");
+                *body += &loop_sketch(&format!("{tag}s{k}"), &format!("plane.{tag}st{k}"), &curves);
+            }
+        };
+        sketches(&mut body, "", [0.0, 1.0], 0.0);
         body += "    feature surface = loft(profiles = [sketch.s0, sketch.s1])\n";
+        if !control {
+            // The fixed surface is a 3 mm skin round a hollow box with end ribs: the same section
+            // 3 mm inside the skin, lofted from 3 mm inside the root to 3 mm inside the tip, is
+            // cut away. The control surface aft of the hinge stays solid (its sharp trailing edge
+            // leaves no room for a skin).
+            let t = 3.0 / self.span();
+            sketches(&mut body, "i", [t, 1.0 - t], 3.0);
+            body += "    feature hollow = loft(profiles = [sketch.is0, sketch.is1], mode = cut)\n";
+        }
         part(name, number, "composite", comment, &body, "surface")
     }
 }

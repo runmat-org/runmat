@@ -14,8 +14,8 @@ use super::{FLOOR_Z, FRAME_PITCH, RADIUS, SECTION};
 
 /// The frames' inner radius, and the linings' inner and outer radii.
 const FRAME_IN: f64 = RADIUS - 150.0;
-const LINING_OUT: f64 = RADIUS - 172.0;
-const LINING_IN: f64 = LINING_OUT - 8.0;
+pub const LINING_OUT: f64 = RADIUS - 172.0;
+pub const LINING_IN: f64 = LINING_OUT - 8.0;
 /// The sidewall lining runs from just above the floor to the bins, centred on the window belt.
 const WINDOW_Z: f64 = 350.0;
 /// Floor beam depth under the floor panels; floor panel thickness.

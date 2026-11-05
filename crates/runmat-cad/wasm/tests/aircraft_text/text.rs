@@ -162,6 +162,7 @@ fn paint(name: &str) -> Option<&'static str> {
         "floor_panel" | "cockpit_floor" => "#6A7078",
         "floor_beam" | "centre_wing_box" | "gear_bay" => "#A7B596",
         "sidewall_lining" | "ceiling_panel" | "nose_lining" => "#ECEDEF",
+        "hold_liner" | "hold_liner_aft" => "#C9CDD2",
         "overhead_bin" => "#E1E4E8",
         "galley" => "#D3D6DA",
         "lavatory" => "#E5E1D8",

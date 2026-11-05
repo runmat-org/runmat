@@ -1,8 +1,8 @@
 //! Below the cabin floor: the cargo holds' floors with their containers (four forward of the
 //! wing, four aft of the main gear bays, a bulk area behind them), the centre wing box through
-//! the fuselage and the two main landing gear bays behind it.
+//! the fuselage, the two main landing gear bays behind it and the holds' sidewall liners.
 
-use super::text::{mm, offset, part, polygon, rect, use_, HEADER};
+use super::text::{mm, num, offset, offset_rot, part, polygon, rect, use_, HEADER};
 use super::wing::{self, FRONT, REAR, ROOT_STATION, ROOT_X, ROOT_Z};
 use super::{FLOOR_Z, RADIUS};
 
@@ -27,6 +27,32 @@ fn cargo_floor(name: &str, number: &str, length: f64) -> String {
             rect("s", "plane.datum", 0.0, -half, length, half)
         ),
         "floor",
+    )
+}
+
+/// The hold liner's sector, from the cargo floor up to under the floor beams, at the cabin
+/// lining's radius: (start angle above the horizontal, sweep), in degrees.
+fn liner_sector() -> (f64, f64) {
+    let r = super::cabin::LINING_IN;
+    let low = (CARGO_Z / r).asin().to_degrees();
+    let high = ((FLOOR_Z - 170.0) / r).asin().to_degrees();
+    (low, high - low)
+}
+
+/// A hold's sidewall liner, one side, the length of the hold: an 8 mm panel inside the frames.
+fn liner(name: &str, number: &str, length: f64) -> String {
+    let (_, sweep) = liner_sector();
+    part(
+        name,
+        number,
+        "composite",
+        "A cargo hold's sidewall liner, one side, inside the frames from the cargo floor to the floor beams.",
+        &format!(
+            "{}    feature panel = revolve(profile = sketch.s, axis = origin.x, angle = {} deg)\n",
+            rect("s", "origin.xy", 0.0, super::cabin::LINING_IN, length, super::cabin::LINING_OUT),
+            num(sweep)
+        ),
+        "panel",
     )
 }
 
@@ -117,6 +143,8 @@ pub fn parts() -> Vec<(String, String)> {
     let [(a0, b0), (a1, b1)] = CARGO_FLOORS;
     out.push(("cargo_floor.part".into(), cargo_floor("cargo_floor", "FUS-CF-800", b0 - a0)));
     out.push(("cargo_floor_aft.part".into(), cargo_floor("cargo_floor_aft", "FUS-CF-801", b1 - a1)));
+    out.push(("hold_liner.part".into(), liner("hold_liner", "FUS-CL-810", b0 - a0)));
+    out.push(("hold_liner_aft.part".into(), liner("hold_liner_aft", "FUS-CL-811", b1 - a1)));
     out
 }
 
@@ -130,6 +158,11 @@ pub fn hold() -> String {
     s += &use_("part", "cargo_floor_aft", "cargo_floor_aft", &[offset(CARGO_FLOORS[1].0, 0.0, 0.0)]);
     for (name, x, _) in HOLDS {
         s += &use_("part", "cargo_container", &format!("container_{name}"), &[offset(x, 0.0, 0.0)]);
+    }
+    let (start, sweep) = liner_sector();
+    for ((a, _), part_name) in CARGO_FLOORS.iter().zip(["hold_liner", "hold_liner_aft"]) {
+        s += &use_("part", part_name, &format!("{part_name}_starboard"), &[offset_rot(*a, 0.0, 0.0, [1.0, 0.0, 0.0], start)]);
+        s += &use_("part", part_name, &format!("{part_name}_port"), &[offset_rot(*a, 0.0, 0.0, [1.0, 0.0, 0.0], 180.0 - start - sweep)]);
     }
     s += &use_("part", "centre_wing_box", "centre_wing_box", &[]);
     s += &use_("part", "gear_bay", "gear_bays", &[]);
