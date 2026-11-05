@@ -25,14 +25,16 @@ fn main() {
     let d = Design::from_netlist(DECK, &|_| None).unwrap();
     let mc = MonteCarlo {
         runs,
+        first: 0,
         seed: 7,
         tolerances: vec![
-            Tolerance { target: Target::Elements("r*".into()), dist: Distribution::Gaussian { sigma: 0.01 / 3.0 } },
-            Tolerance { target: Target::Elements("c*".into()), dist: Distribution::Gaussian { sigma: 0.05 / 3.0 } },
+            Tolerance::new(Target::Elements("r*".into()), Distribution::Gaussian { sigma: 0.01 / 3.0 }),
+            Tolerance::new(Target::Elements("c*".into()), Distribution::Gaussian { sigma: 0.05 / 3.0 }),
         ],
         analysis: Analysis::Tran(TranSpec { tstep: 0.1e-6, tstop: 20e-6, tstart: 0.0, tmax: None, uic: false }),
         measures: vec![("t50".into(), Measure::When { signal: "v(out)".into(), value: 0.5, edge: runmat_circuit_sim::measure::Edge::Rise, nth: 1 })],
         keep_results: 0,
+        limit: None,
     };
     let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
     let mut threads = vec![1];

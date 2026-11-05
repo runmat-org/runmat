@@ -6,6 +6,11 @@
 //! [`PIVOT_THRESHOLD`] of the largest candidate, else the largest. `refactor` reuses the pivot
 //! sequence and structure of an earlier factorization for a matrix with the same pattern and
 //! falls back to a fresh factorization when a reused pivot is too small.
+//!
+//! Both take an operation budget. A column's arithmetic is known from the structure before it
+//! runs (the reached columns of L, the candidate rows), so the factorization stops with
+//! [`LuError::Budget`] before the column that would pass the budget, never after it. Every
+//! operation done, including a partial or abandoned factorization's, is added to `spent`.
 
 use super::Pattern;
 use crate::num::Scalar;
@@ -18,6 +23,8 @@ pub enum LuError {
     /// No usable pivot in this (original) column.
     Singular { column: usize },
     NonFinite,
+    /// The next column's arithmetic would pass the operation budget.
+    Budget,
 }
 
 #[derive(Clone, Debug)]
@@ -36,12 +43,11 @@ pub struct Lu<T: Scalar> {
     u_idx: Vec<usize>,
     u_val: Vec<T>,
     diag: Vec<T>,
-    /// Real operations of the last factorization.
-    pub ops: u64,
 }
 
 impl<T: Scalar> Lu<T> {
-    pub fn factor(p: &Pattern, vals: &[T], q: &[usize]) -> Result<Self, LuError> {
+    /// Factors `A·Q`, spending at most `budget` operations; adds what it spent to `spent`.
+    pub fn factor(p: &Pattern, vals: &[T], q: &[usize], budget: u64, spent: &mut u64) -> Result<Self, LuError> {
         let n = p.n;
         let mut lu = Lu {
             n,
@@ -54,8 +60,8 @@ impl<T: Scalar> Lu<T> {
             u_idx: Vec::new(),
             u_val: Vec::new(),
             diag: Vec::with_capacity(n),
-            ops: 0,
         };
+        let mut used = 0u64;
         let mut pinv = vec![NONE; n];
         let mut x = vec![T::zero(); n];
         let mut mark = vec![NONE; n];
@@ -91,6 +97,21 @@ impl<T: Scalar> Lu<T> {
                     }
                 }
             }
+            // The column's arithmetic: every reached column of L, then at most one division per
+            // candidate row.
+            let mut cost = 0u64;
+            for &r in &post {
+                let k = pinv[r];
+                if k != NONE {
+                    cost += T::MUL_SUB_OPS * (lu.l_ptr[k + 1] - lu.l_ptr[k]) as u64;
+                } else {
+                    cost += T::DIV_OPS;
+                }
+            }
+            if used.saturating_add(cost) > budget {
+                *spent += used;
+                return Err(LuError::Budget);
+            }
             for &r in &post {
                 x[r] = T::zero();
             }
@@ -108,7 +129,7 @@ impl<T: Scalar> Lu<T> {
                     let i = lu.l_idx[t];
                     x[i] -= lu.l_val[t] * xr;
                 }
-                lu.ops += T::MUL_SUB_OPS * (lu.l_ptr[k + 1] - lu.l_ptr[k]) as u64;
+                used += T::MUL_SUB_OPS * (lu.l_ptr[k + 1] - lu.l_ptr[k]) as u64;
             }
             // Pivot.
             let mut best = NONE;
@@ -117,6 +138,7 @@ impl<T: Scalar> Lu<T> {
                 if pinv[r] == NONE {
                     let m = x[r].magnitude();
                     if !m.is_finite() {
+                        *spent += used;
                         return Err(LuError::NonFinite);
                     }
                     if m > best_mag {
@@ -126,6 +148,7 @@ impl<T: Scalar> Lu<T> {
                 }
             }
             if best == NONE || best_mag == 0.0 {
+                *spent += used;
                 return Err(LuError::Singular { column: col });
             }
             if pinv[col] == NONE && mark[col] == j && x[col].magnitude() >= PIVOT_THRESHOLD * best_mag {
@@ -146,7 +169,7 @@ impl<T: Scalar> Lu<T> {
                 } else {
                     lu.l_idx.push(r);
                     lu.l_val.push(x[r] / pivot);
-                    lu.ops += T::DIV_OPS;
+                    used += T::DIV_OPS;
                 }
             }
             ucol.sort_by_key(|e| e.0);
@@ -157,24 +180,36 @@ impl<T: Scalar> Lu<T> {
             lu.l_ptr.push(lu.l_idx.len());
             lu.u_ptr.push(lu.u_idx.len());
         }
+        *spent += used;
         Ok(lu)
     }
 
-    /// Refactors a matrix with the pattern of the one `self` came from, reusing pivots; `None`
-    /// when a reused pivot fails the threshold (call [`Lu::factor`] instead).
-    pub fn refactor(&mut self, p: &Pattern, vals: &[T]) -> Option<Result<(), LuError>> {
+    /// Refactors a matrix with the pattern of the one `self` came from, reusing pivots, spending
+    /// at most `budget` operations (added to `spent`); `None` when a reused pivot fails the
+    /// threshold (call [`Lu::factor`] instead, with what is left of the budget).
+    pub fn refactor(&mut self, p: &Pattern, vals: &[T], budget: u64, spent: &mut u64) -> Option<Result<(), LuError>> {
         let n = self.n;
         if p.n != n {
             return None;
         }
-        let mut pinv = vec![NONE; n];
-        for (k, &r) in self.prow.iter().enumerate() {
-            pinv[r] = k;
-        }
         let mut x = vec![T::zero(); n];
-        self.ops = 0;
-        for j in 0..n {
+        let mut used = 0u64;
+        let r = self.refactor_columns(p, vals, &mut x, budget, &mut used);
+        *spent += used;
+        r
+    }
+
+    fn refactor_columns(&mut self, p: &Pattern, vals: &[T], x: &mut [T], budget: u64, used: &mut u64) -> Option<Result<(), LuError>> {
+        for j in 0..self.n {
             let col = self.q[j];
+            let mut cost = T::DIV_OPS * (self.l_ptr[j + 1] - self.l_ptr[j]) as u64;
+            for t in self.u_ptr[j]..self.u_ptr[j + 1] {
+                let k = self.u_idx[t];
+                cost += T::MUL_SUB_OPS * (self.l_ptr[k + 1] - self.l_ptr[k]) as u64;
+            }
+            if used.saturating_add(cost) > budget {
+                return Some(Err(LuError::Budget));
+            }
             for t in self.u_ptr[j]..self.u_ptr[j + 1] {
                 x[self.prow[self.u_idx[t]]] = T::zero();
             }
@@ -193,7 +228,7 @@ impl<T: Scalar> Lu<T> {
                     let i = self.l_idx[s];
                     x[i] -= self.l_val[s] * xr;
                 }
-                self.ops += T::MUL_SUB_OPS * (self.l_ptr[k + 1] - self.l_ptr[k]) as u64;
+                *used += T::MUL_SUB_OPS * (self.l_ptr[k + 1] - self.l_ptr[k]) as u64;
                 self.u_val[t] = xr;
             }
             let pivot = x[self.prow[j]];
@@ -211,9 +246,14 @@ impl<T: Scalar> Lu<T> {
             for t in self.l_ptr[j]..self.l_ptr[j + 1] {
                 self.l_val[t] = x[self.l_idx[t]] / pivot;
             }
-            self.ops += T::DIV_OPS * (self.l_ptr[j + 1] - self.l_ptr[j]) as u64;
+            *used += T::DIV_OPS * (self.l_ptr[j + 1] - self.l_ptr[j]) as u64;
         }
         Some(Ok(()))
+    }
+
+    /// The operations [`Lu::solve`] will use: fixed by the structure.
+    pub fn solve_ops(&self) -> u64 {
+        T::MUL_SUB_OPS * (self.l_idx.len() + self.u_idx.len()) as u64 + T::DIV_OPS * self.n as u64
     }
 
     /// Solves `A x = b` in place; returns the real operations used.
@@ -262,9 +302,10 @@ mod tests {
             m.add(r, c, v);
         }
         let q = order::minimum_degree(&m.pattern);
-        let mut lu = Lu::factor(&m.pattern, &m.vals, &q).unwrap();
+        let mut spent = 0;
+        let mut lu = Lu::factor(&m.pattern, &m.vals, &q, u64::MAX, &mut spent).unwrap();
         let mut x = b.clone();
-        lu.solve(&mut x);
+        assert_eq!(lu.solve(&mut x), lu.solve_ops());
         for r in 0..n {
             let mut s = T::zero();
             for &(rr, c, v) in a {
@@ -274,7 +315,16 @@ mod tests {
             }
             assert!((s - b[r]).magnitude() < 1e-9, "row {r}: {s:?} vs {:?}", b[r]);
         }
-        assert!(lu.refactor(&m.pattern, &m.vals).unwrap().is_ok());
+        let mut again = 0;
+        assert!(lu.refactor(&m.pattern, &m.vals, u64::MAX, &mut again).unwrap().is_ok());
+        assert!(again <= spent);
+        // A budget one short of the whole stops before the last column's arithmetic.
+        let mut part = 0;
+        assert_eq!(Lu::factor(&m.pattern, &m.vals, &q, spent - 1, &mut part).unwrap_err(), LuError::Budget);
+        assert!(part < spent);
+        let mut part = 0;
+        assert_eq!(lu.refactor(&m.pattern, &m.vals, again - 1, &mut part), Some(Err(LuError::Budget)));
+        assert!(part < again);
         let mut x2 = b.clone();
         lu.solve(&mut x2);
         for (u, v) in x.iter().zip(&x2) {

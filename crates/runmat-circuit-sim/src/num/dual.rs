@@ -23,6 +23,20 @@ pub fn take_ops() -> u64 {
     OPS.with(|c| c.replace(0))
 }
 
+/// Runs `f` without counting its dual-number operations (work that is not simulation, such as
+/// asking a model whether it reports a current); the tally before it is kept.
+pub fn uncounted<R>(f: impl FnOnce() -> R) -> R {
+    let before = take_ops();
+    let r = f();
+    OPS.with(|c| c.set(before));
+    r
+}
+
+/// This thread's tally, left in place.
+pub fn peek_ops() -> u64 {
+    OPS.with(|c| c.get())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dual<const N: usize> {
     pub v: f64,

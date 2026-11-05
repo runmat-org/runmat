@@ -49,7 +49,7 @@ pub fn run(e: &mut Engine, spec: &TranSpec) -> Result<(RealWave, TranStats), Sim
         p.force_ic = !c.ics.is_empty();
         op::solve(e, &mut x, p)?;
     }
-    e.assemble(&x, &LoadParams::dc());
+    e.assemble(&x, &LoadParams::dc())?;
     if spec.uic {
         for d in &c.devices {
             d.apply_ic(&mut e.states);
@@ -59,7 +59,7 @@ pub fn run(e: &mut Engine, spec: &TranSpec) -> Result<(RealWave, TranStats), Sim
     let probes = Probes::new(c);
     let mut wave = RealWave::new("time".into(), &probes.names);
     if spec.tstart == 0.0 {
-        wave.push(0.0, probes.values(c, &x, &e.states));
+        wave.push(0.0, e.probe_values(&probes, &x)?);
     }
     let mut bps = vec![spec.tstop];
     for d in &c.devices {
@@ -98,11 +98,19 @@ pub fn run(e: &mut Engine, spec: &TranSpec) -> Result<(RealWave, TranStats), Sim
             for (k, v) in xn.iter_mut().enumerate() {
                 *v += (x[k] - x_prev[k]) * r;
             }
-            e.meter.other += 3 * x.len() as u64;
+            // At the operation limit: the accepted points so far are the result.
+            if e.charge_other(3 * x.len() as u64).is_err() {
+                break;
+            }
         }
         let saved_mem = e.mem.clone();
         let p = LoadParams { mode: Mode::Tran, time: t + h, ..LoadParams::dc() };
-        if e.newton(&mut xn, &p, o.itl4)?.is_none() {
+        let solved = match e.newton(&mut xn, &p, o.itl4) {
+            // At the operation limit: the accepted points so far are the result.
+            Err(SimError::Stopped) => break,
+            r => r?,
+        };
+        if solved.is_none() {
             e.mem = saved_mem;
             stats.rejected_newton += 1;
             h /= 8.0;
@@ -117,6 +125,9 @@ pub fn run(e: &mut Engine, spec: &TranSpec) -> Result<(RealWave, TranStats), Sim
         let need = if order == 1 { 3 } else { 4 };
         let mut ratio: Option<f64> = None;
         if since_bp + 1 >= need {
+            if e.charge_other(30 * e.states.q.len() as u64).is_err() {
+                break;
+            }
             let mut worst = 0.0f64;
             for s in 0..e.states.q.len() {
                 let q = e.states.q[s];
@@ -133,7 +144,6 @@ pub fn run(e: &mut Engine, spec: &TranSpec) -> Result<(RealWave, TranStats), Sim
                     * (o.reltol * i[0].abs().max(i[1].abs()) + abs).max((o.reltol * q[0].abs().max(q[1].abs()) + o.chgtol) / h);
                 worst = worst.max(lte / h / tol);
             }
-            e.meter.other += 30 * e.states.q.len() as u64;
             ratio = Some(worst);
             if worst > 1.0 && h > hmin * 10.0 {
                 e.mem = saved_mem;
@@ -151,7 +161,11 @@ pub fn run(e: &mut Engine, spec: &TranSpec) -> Result<(RealWave, TranStats), Sim
         stats.accepted += 1;
         since_bp += 1;
         if t >= spec.tstart - eps {
-            wave.push(t, probes.values(c, &x, &e.states));
+            match e.probe_values(&probes, &x) {
+                Ok(v) => wave.push(t, v),
+                // At the operation limit: the points before this one are the result.
+                Err(_) => break,
+            }
         }
         h_prev = h;
         let grow = match ratio {

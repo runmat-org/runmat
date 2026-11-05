@@ -36,7 +36,9 @@ impl Probes {
         let probe_x = vec![0.0; c.size()];
         let probe_s = States::new(c.state_is_flux.clone());
         for (k, d) in c.devices.iter().enumerate() {
-            if d.branch().is_none() && d.probe_current(&probe_x, &probe_s).is_some() {
+            // Asking a model whether it reports a current evaluates it at zero; that is not
+            // simulation work and is not counted.
+            if d.branch().is_none() && crate::num::dual::uncounted(|| d.probe_current(&probe_x, &probe_s)).is_some() {
                 names.push(format!("i({})", d.name()));
                 devices.push(k);
             }

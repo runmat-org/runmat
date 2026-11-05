@@ -114,6 +114,9 @@ pub enum SimError {
     NoConvergence { analysis: String, detail: String },
     TimestepTooSmall { time: f64 },
     CountOverflow,
+    /// The run reached its operation limit before it had a result to keep (an operating point
+    /// that had not converged).
+    Stopped,
 }
 
 impl std::fmt::Display for SimError {
@@ -129,6 +132,7 @@ impl std::fmt::Display for SimError {
             SimError::NoConvergence { analysis, detail } => write!(f, "{analysis} did not converge: {detail}"),
             SimError::TimestepTooSmall { time } => write!(f, "transient time step too small at t = {time:e} s"),
             SimError::CountOverflow => write!(f, "operation count exceeds u64"),
+            SimError::Stopped => write!(f, "the run reached its granted operations before it had a result"),
         }
     }
 }
@@ -163,6 +167,8 @@ pub struct Outcome {
     pub newton_iterations: u64,
     pub tran: Option<TranStats>,
     pub warnings: Vec<String>,
+    /// The run stopped at its operation limit; `result` holds the points solved before it.
+    pub stopped: bool,
 }
 
 /// A parsed and flattened netlist.
@@ -241,16 +247,52 @@ pub fn simulate(design: &Design, analysis: &Analysis) -> Result<Outcome, SimErro
 
 /// Runs one analysis on a built circuit.
 pub fn simulate_circuit(c: &Circuit, analysis: &Analysis) -> Result<Outcome, SimError> {
+    simulate_limited(c, analysis, None)
+}
+
+/// Runs one analysis, spending at most `limit` operations; the reported count never passes it.
+/// Work whose cost the structure fixes (each LU column, the solve, convergence tests, error
+/// estimates) is checked before it runs. Device evaluation is checked after: an assembly or a
+/// set of probe values that would pass the limit is discarded with its count. Either way the run
+/// stops and returns the points solved so far with `stopped` set; an operating point that had
+/// not converged by then is [`SimError::Stopped`].
+pub fn simulate_limited(c: &Circuit, analysis: &Analysis, limit: Option<u64>) -> Result<Outcome, SimError> {
+    simulate_spent(c, analysis, limit).0
+}
+
+/// [`simulate_limited`], with the operations spent whether or not the analysis succeeded (a
+/// failed or stopped run still did its work, and its count still bills).
+pub fn simulate_spent(c: &Circuit, analysis: &Analysis, limit: Option<u64>) -> (Result<Outcome, SimError>, Usage) {
     let _ = num::dual::take_ops();
     let mut e = Engine::new(c);
+    e.limit = limit;
+    let out = run_analysis(&mut e, analysis);
+    e.meter.assembly += num::dual::take_ops();
+    let usage = match e.meter.usage() {
+        Ok(u) => u,
+        Err(_) => return (Err(SimError::CountOverflow), Usage::default()),
+    };
+    let out = out.map(|(result, tran)| Outcome {
+        result,
+        usage,
+        newton_iterations: e.newton_iterations,
+        tran,
+        warnings: c.warnings.clone(),
+        stopped: e.stopped,
+    });
+    (out, usage)
+}
+
+fn run_analysis(e: &mut Engine, analysis: &Analysis) -> Result<(SimResult, Option<TranStats>), SimError> {
+    let c = e.c;
     let mut tran = None;
     let result = match analysis {
         Analysis::Op => {
             let mut x = vec![0.0; c.size()];
-            analysis::op::solve(&mut e, &mut x, LoadParams::dc())?;
-            e.assemble(&x, &LoadParams::dc());
+            analysis::op::solve(e, &mut x, LoadParams::dc())?;
+            e.assemble(&x, &LoadParams::dc())?;
             let probes = analysis::Probes::new(c);
-            let vals = probes.values(c, &x, &e.states);
+            let vals = e.probe_values(&probes, &x)?;
             SimResult::Op(probes.names.iter().cloned().zip(vals).collect::<BTreeMap<_, _>>())
         }
         Analysis::Dc { source, start, stop, step } => {
@@ -259,23 +301,17 @@ pub fn simulate_circuit(c: &Circuit, analysis: &Analysis) -> Result<Outcome, Sim
             }
             let n = ((stop - start) / step + 1e-9).floor() as usize;
             let vals: Vec<f64> = (0..=n).map(|k| start + step * k as f64).collect();
-            SimResult::Dc(analysis::dc::sweep(&mut e, source, &vals)?)
+            SimResult::Dc(analysis::dc::sweep(e, source, &vals)?)
         }
         Analysis::Ac { sweep, points, fstart, fstop } => {
             let f = analysis::ac::frequencies(*sweep, *points, *fstart, *fstop)?;
-            SimResult::Ac(analysis::ac::sweep(&mut e, &f)?)
+            SimResult::Ac(analysis::ac::sweep(e, &f)?)
         }
         Analysis::Tran(spec) => {
-            let (w, s) = analysis::tran::run(&mut e, spec)?;
+            let (w, s) = analysis::tran::run(e, spec)?;
             tran = Some(s);
             SimResult::Tran(w)
         }
     };
-    Ok(Outcome {
-        result,
-        usage: e.meter.usage().map_err(|_| SimError::CountOverflow)?,
-        newton_iterations: e.newton_iterations,
-        tran,
-        warnings: c.warnings.clone(),
-    })
+    Ok((result, tran))
 }

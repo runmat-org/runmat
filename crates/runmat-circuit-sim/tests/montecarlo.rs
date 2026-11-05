@@ -9,11 +9,11 @@ fn design(t: &str) -> Design {
 }
 
 fn mc(analysis: Analysis, tol: Vec<Tolerance>, measure: Measure, runs: usize) -> MonteCarlo {
-    MonteCarlo { runs, seed: 0x5EED, tolerances: tol, analysis, measures: vec![("m".into(), measure)], keep_results: 0 }
+    MonteCarlo { runs, first: 0, seed: 0x5EED, tolerances: tol, analysis, measures: vec![("m".into(), measure)], keep_results: 0, limit: None }
 }
 
 fn elements(pat: &str, dist: Distribution) -> Tolerance {
-    Tolerance { target: Target::Elements(pat.into()), dist }
+    Tolerance::new(Target::Elements(pat.into()), dist)
 }
 
 #[test]
@@ -74,4 +74,18 @@ fn results_do_not_depend_on_thread_count() {
     let many = run(&d, &m, Some(8)).unwrap();
     assert_eq!(one.values, many.values);
     assert_eq!(one.usage, many.usage);
+}
+
+#[test]
+fn a_monte_carlo_split_into_ranges_gives_the_same_runs() {
+    let d = design("rc\nV1 in 0 AC 1\nR1 in out 1k\nC1 out 0 1n\n");
+    let a = Analysis::Ac { sweep: AcSweep::Dec, points: 20, fstart: 1e3, fstop: 1e7 };
+    let whole = mc(a.clone(), vec![elements("*", Distribution::Gaussian { sigma: 0.02 })], Measure::Bandwidth { signal: "v(out)".into(), drop_db: 3.0103 }, 100);
+    let all = run(&d, &whole, Some(2)).unwrap();
+    let mut head = run(&d, &MonteCarlo { runs: 40, ..whole.clone() }, Some(2)).unwrap();
+    let tail = run(&d, &MonteCarlo { runs: 60, first: 40, ..whole.clone() }, Some(2)).unwrap();
+    head.merge(tail);
+    assert_eq!(head.values, all.values);
+    assert_eq!(head.usage, all.usage);
+    assert_eq!(head.completed, 100);
 }
