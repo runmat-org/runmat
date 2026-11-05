@@ -4178,9 +4178,13 @@ impl ExactQueries for OcctKernel {
                 ints: vec![
                     o.part.map(|p| p as i64).unwrap_or(-1),
                     o.parent.map(|p| p as i64).unwrap_or(-1),
+                    o.same_as.map(|p| p as i64).unwrap_or(-1),
                 ],
                 reals: transform_reals(&o.transform),
-                strs: vec![o.name.clone()],
+                strs: vec![
+                    o.name.clone(),
+                    o.definition.clone().unwrap_or_else(|| o.name.clone()),
+                ],
             });
         }
         backend::export_step(&instrs, &ids)

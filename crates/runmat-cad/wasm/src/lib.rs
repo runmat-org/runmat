@@ -26,6 +26,7 @@
 mod configured;
 pub mod drawing;
 pub mod edit;
+pub mod exchange;
 pub mod features;
 pub mod hlr;
 pub mod kernel;

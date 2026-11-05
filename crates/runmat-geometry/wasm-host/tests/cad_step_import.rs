@@ -66,3 +66,63 @@ fn a_part_exports_exact_ap242_and_imports_back_from_the_requests_files() {
     let ext = |k: usize| b["max"][k].as_f64().unwrap() - b["min"][k].as_f64().unwrap();
     assert!((ext(0) - 0.08).abs() < 1e-6 && (ext(1) - 0.05).abs() < 1e-6 && (ext(2) - 0.01).abs() < 1e-6, "bounds {b}");
 }
+
+const PAIR: &str = r#"runmat 0.7
+std 1
+
+assembly pair {
+    use part plate from "plate.part" as lower
+    use part plate from "plate.part" as upper {
+        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 10 mm] } }
+    }
+}
+"#;
+
+const STACK: &str = r#"runmat 0.7
+std 1
+
+assembly stack {
+    use assembly pair from "pair.assembly" as base
+    use assembly pair from "pair.assembly" as top {
+        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 20 mm] } }
+    }
+}
+"#;
+
+/// An assembly of a sub-assembly placed twice keeps its hierarchy in AP242 (the sub-assembly
+/// is one product used twice, holding its two plates), names its faces, and reads back at the
+/// size it was written.
+#[test]
+fn an_assembly_exports_its_hierarchy_and_face_names_as_ap242() {
+    runmat_geometry_wasm_host::cad::install_occt();
+    let files: std::collections::BTreeMap<String, String> = [
+        ("/p/plate.part", PLATE),
+        ("/p/pair.assembly", PAIR),
+        ("/p/stack.assembly", STACK),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let step = runmat_cad_wasm::exchange::assembly_step("/p/stack.assembly", STACK, &files)
+        .expect("exports")
+        .expect("OCCT writes STEP");
+    let text = String::from_utf8(step).expect("STEP is text");
+    assert!(text.contains("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING"), "not AP242");
+    // stack → base, top (2 uses of pair); pair → lower, upper (2 uses of plate): 4 usages.
+    let usages = text.matches("NEXT_ASSEMBLY_USAGE_OCCURRENCE").count();
+    assert_eq!(usages, 4, "usages {usages}");
+    for product in ["'stack'", "'pair'", "'plate'"] {
+        assert!(text.contains(&format!("PRODUCT({product}")), "no product {product}");
+    }
+    assert!(text.contains("feature.body.face.end"), "face names are not written");
+
+    // Read back: the stack is 80 x 50 x 40 mm (four 10 mm plates).
+    let mut files = files;
+    files.insert("/p/stack.step".into(), text);
+    let housing = "runmat 0.7\nstd 1\n\npart housing {\n    feature step = import(source = \"stack.step\", digest = \"unrecorded\")\n}\n";
+    files.insert("/p/housing.part".into(), housing.into());
+    let v = call("/p/housing.part", housing, &serde_json::to_value(&files).unwrap());
+    let b = &v["display"]["data"]["bounds"];
+    let ext = |k: usize| b["max"][k].as_f64().unwrap() - b["min"][k].as_f64().unwrap();
+    assert!((ext(0) - 0.08).abs() < 1e-6 && (ext(1) - 0.05).abs() < 1e-6 && (ext(2) - 0.04).abs() < 1e-6, "bounds {b}");
+}

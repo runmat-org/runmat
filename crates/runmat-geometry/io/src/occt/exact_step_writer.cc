@@ -7,9 +7,11 @@
 //                    call's bodies...], reals [has colour, r, g, b]
 //   op 3 face name:  ints [part, body in part, face], strs [name]
 //   op 4 face colour: ints [part, body in part, face], reals [r, g, b]
-//   op 5 occurrence: strs [name], ints [part (-1: a sub-assembly), parent (-1: the top)],
-//                    reals [transform: rows of R, then t]
-// Lengths are written in metres (the kernel's unit).
+//   op 5 occurrence: strs [name, sub-assembly product name], ints [part (-1: a sub-assembly),
+//                    parent (-1: the top), same_as (an earlier sub-assembly occurrence whose
+//                    product this one uses again; -1: none)], reals [transform: rows of R, then t]
+// Lengths are written in millimetres (SI_UNIT(.MILLI.,.METRE.)), the unit STEP files usually
+// carry; the document is in metres (the kernel's unit) and OCCT scales between them.
 
 #include "runmat-geometry-io/src/occt/kernel_ffi.rs.h"
 #include "exact_kernel.hxx"
@@ -142,9 +144,14 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
           if (into.IsNull()) fail("an occurrence's parent is not a sub-assembly");
           TDF_Label what;
           TDF_Label own_assembly;
-          if (part < 0) {
+          const std::int64_t same_as = in.ints.size() > 2 ? in.ints[2] : -1;
+          if (part < 0 && same_as >= 0) {
+            // Another use of a sub-assembly product an earlier occurrence defined.
+            what = assemblies.at(static_cast<std::size_t>(same_as));
+            if (what.IsNull()) fail("a reused sub-assembly was not defined");
+          } else if (part < 0) {
             own_assembly = st->NewShape();
-            set_name(own_assembly, std::string(in.strs.at(0)));
+            set_name(own_assembly, std::string(in.strs.size() > 1 ? in.strs[1] : in.strs.at(0)));
             what = own_assembly;
           } else {
             what = parts.at(static_cast<std::size_t>(part)).label;
@@ -154,7 +161,7 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
           if (comp.IsNull()) fail("an occurrence could not be placed");
           set_name(comp, std::string(in.strs.at(0)));
           occurrences.push_back(comp);
-          assemblies.push_back(own_assembly);
+          assemblies.push_back(part < 0 && same_as >= 0 ? what : own_assembly);
           break;
         }
         default:
@@ -166,8 +173,10 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
     // silently ignored (the writer then falls back to AP214).
     STEPCAFControl_Controller::Init();
     StaticGuard schema("write.step.schema", format == 1 ? "AP214IS" : "AP242DIS");
-    StaticGuard unit("write.step.unit", "M");
+    StaticGuard unit("write.step.unit", "MM");
     StaticGuard product("write.step.product.name", name.c_str());
+    // Face names travel as named sub-shapes (off by default in OCCT).
+    StaticGuard subshape_names("write.stepcaf.subshapes.name", "1");
     STEPCAFControl_Writer w;
     w.SetNameMode(Standard_True);
     w.SetColorMode(Standard_True);

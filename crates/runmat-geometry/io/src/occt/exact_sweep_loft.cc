@@ -35,6 +35,8 @@
 #include <Geom_RectangularTrimmedSurface.hxx>
 #include <Geom_Surface.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <Interface_Static.hxx>
+#include <STEPCAFControl_Controller.hxx>
 #include <STEPCAFControl_Reader.hxx>
 #include <Standard_Failure.hxx>
 #include <TCollection_AsciiString.hxx>
@@ -612,6 +614,12 @@ Handle(TDocStd_Document) read_step(const std::string& path) {
   Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
   Handle(TDocStd_Document) doc;
   app->NewDocument("MDTV-XCAF", doc);
+  // The kernel works in metres. The reader converts the file's lengths into the document's
+  // unit, which otherwise defaults to xstep.cascade.unit (millimetres).
+  XCAFDoc_DocumentTool::SetLengthUnit(doc, 1.0);
+  STEPCAFControl_Controller::Init();
+  // Face names come back from named sub-shapes (off by default in OCCT).
+  Interface_Static::SetIVal("read.stepcaf.subshapes.name", 1);
   STEPCAFControl_Reader reader;
   reader.SetNameMode(Standard_True);
   reader.SetColorMode(Standard_True);

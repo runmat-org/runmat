@@ -96,12 +96,19 @@ pub struct ExchangePart<'a> {
     pub face_colors: Vec<ExchangeFaceColor>,
 }
 
-/// One node of the assembly structure. `part: None` is a sub-assembly that holds the
-/// occurrences naming it as their parent.
+/// One node of the assembly structure. `part: None` is a sub-assembly: a product named
+/// `definition` that holds the occurrences naming this one as their parent, or, with `same_as`,
+/// another use of the sub-assembly an earlier occurrence defined (it holds nothing itself).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExchangeOccurrence {
     pub name: String,
     pub part: Option<u32>,
+    /// A sub-assembly's product name (its definition), when `part` is `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition: Option<String>,
+    /// A sub-assembly placed again: the earlier occurrence whose product this one uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub same_as: Option<u32>,
     /// The occurrence this one is placed in; `None`: the top assembly.
     pub parent: Option<u32>,
     /// Placement in the parent.
