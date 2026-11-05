@@ -121,7 +121,10 @@ pub fn rule_check(
         text_of(&key.file).map(|t| SourceRange::of(key, t))
     };
     let mut erc_findings = project.netlist.diagnostics.clone();
-    erc_findings.extend(erc::run(&project.netlist, &ErcOptions::default()));
+    erc_findings.extend(erc::run(
+            &project.netlist,
+            &ErcOptions::for_design(&project.design, &project.netlist),
+        ));
     let erc = erc_findings
         .iter()
         .map(|d| Violation {

@@ -261,6 +261,57 @@ pub struct CheckRow {
     pub fix: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Where a board finding is, mm: the DRC view zooms there and draws its marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Xy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<String>,
+    /// The scene regions of the objects involved (`track:17`, `pad:R1.2`, `component:R1`,
+    /// `net:GND`): the view highlights them and dims the rest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<String>,
+    /// The rule that set the limit (`power-clearance`), when one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
+    /// The rule's (or the item's) text in its file, for the link to the source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<SourceSpan>,
+}
+
+/// A range of a source file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceSpan {
+    pub path: String,
+    pub start: u32,
+    pub end: u32,
+}
+
+impl SourceSpan {
+    pub fn of(key: &runmat_rules::SourceKey) -> Option<Self> {
+        (!key.file.is_empty() && key.end > key.start).then(|| SourceSpan {
+            path: key.file.clone(),
+            start: key.start,
+            end: key.end,
+        })
+    }
+}
+
+/// A board item's scene region, as the board view names it.
+pub fn item_region(board: &Board, it: &BItem) -> Option<String> {
+    match it {
+        BItem::Edge => Some("board:outline".to_owned()),
+        BItem::Net(n) => board.nets.get(*n as usize).map(|n| format!("net:{}", n.name)),
+        BItem::Footprint(id) => board.footprints.get(id).map(|f| format!("component:{}", f.reference)),
+        BItem::Pad(id, pad) => board.footprints.get(id).and_then(|f| {
+            f.package
+                .pads
+                .get(*pad as usize)
+                .map(|p| format!("pad:{}.{}", f.reference, p.name))
+        }),
+        BItem::Track(id) => Some(format!("track:{}", id.0)),
+        BItem::Via(id) => Some(format!("via:{}", id.0)),
+        BItem::Zone(id) => Some(format!("zone:{}", id.0)),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -761,9 +812,14 @@ pub fn build_index(
                 code: d.code.clone(),
                 severity: severity(&d.severity),
                 message: d.message.clone(),
+                regions: items.iter().map(|i| erc_region(i)).collect(),
                 items,
                 fix: None,
                 source: Some(d.source.to_string()).filter(|s| !s.starts_with(':')),
+                at: None,
+                layer: None,
+                rule: None,
+                span: SourceSpan::of(&d.source),
             }
         })
         .collect();
@@ -779,6 +835,11 @@ pub fn build_index(
             items: f.items.clone(),
             fix: f.fix.as_ref().map(fix_label),
             source: None,
+            at: None,
+            layer: None,
+            regions: Vec::new(),
+            rule: None,
+            span: None,
         })
         .collect();
     review_rows.sort_by(|a, b| (&a.code, &a.items).cmp(&(&b.code, &b.items)));
@@ -1160,6 +1221,11 @@ pub fn add_board_reusing(
             items: f.items.iter().map(item_label).collect(),
             fix: None,
             source: Some(format!("rule {} at {}", f.rule, f.source)),
+            at: Some(xy(f.at)),
+            layer: f.layer.map(|l| crate::layout::copper_name(l, board.copper_count())),
+            regions: f.items.iter().filter_map(|it| item_region(board, it)).collect(),
+            rule: Some(f.rule.clone()).filter(|r| !r.is_empty() && r != "default"),
+            span: SourceSpan::of(&f.source),
         })
         .collect();
     index.board = Some(BoardIndex {
@@ -1316,5 +1382,13 @@ mod tests {
         assert_eq!(quantity_display(4.7e-6, Dim::INDUCTANCE), "4.7 \u{b5}H");
         assert_eq!(quantity_display(16.0, Dim::VOLTAGE), "16 V");
         assert!(natural("R2") < natural("R10"));
+    }
+}
+
+/// An ERC item's schematic region: `R1.2` (pin) is its component, a net name its net.
+fn erc_region(item: &str) -> String {
+    match item.split_once('.') {
+        Some((component, _)) if !component.is_empty() => format!("component:{component}"),
+        _ => format!("net:{item}"),
     }
 }

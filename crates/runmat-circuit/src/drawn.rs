@@ -256,6 +256,10 @@ pub fn drawn_edit(
                     Some("none") => PadConnect::None,
                     _ => PadConnect::Thermal,
                 },
+                priority: values
+                    .get("priority")
+                    .and_then(serde_json::Value::as_f64)
+                    .map_or(0, |p| p as i32),
             })
         }
         "board.keepout" => {

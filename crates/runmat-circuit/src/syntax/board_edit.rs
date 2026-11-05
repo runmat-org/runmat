@@ -677,6 +677,8 @@ pub enum BoardEdit {
         outline: Polygon,
         clearance: Option<Coord>,
         connect: PadConnect,
+        /// Fill order where pours overlap: the higher priority fills first.
+        priority: i32,
     },
     /// `board.keepout`.
     Keepout {
@@ -924,6 +926,7 @@ pub fn apply_board_edit(
             outline,
             clearance,
             connect,
+            priority,
         } => {
             let net = net_of(board, net)?;
             let layers = layers
@@ -934,6 +937,7 @@ pub fn apply_board_edit(
             let mut z = Zone::new(id, "", net, layers, outline.clone());
             z.clearance = *clearance;
             z.connect = *connect;
+            z.priority = *priority;
             board.zones.insert(id, z);
         }
         BoardEdit::Keepout {

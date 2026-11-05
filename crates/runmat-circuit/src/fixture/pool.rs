@@ -393,5 +393,6 @@ pub fn standard_pool() -> Pool {
     );
     let hdr = p.add_package(footprint::pin_header(5, 2, 2.54));
     make::part_by_name(&mut p, "HDR-2x05", "Generic", hdr_e, hdr);
+    super::pool_daq::add(&mut p);
     p
 }

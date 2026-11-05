@@ -90,6 +90,42 @@ pub struct ErcOptions {
     pub allow_single: BTreeSet<String>,
 }
 
+/// The net-declaration parameter that marks a net as driven from outside the design (a
+/// power flag): `net "+5V" = { class = power, global = true, power_flag = true }`.
+pub const POWER_FLAG: &str = "power_flag";
+
+impl ErcOptions {
+    /// The options a design's own text sets: its power flags.
+    pub fn for_design(design: &crate::ir::Design, nl: &Netlist) -> Self {
+        let flagged: BTreeSet<&str> = design
+            .sheets
+            .values()
+            .flat_map(|s| s.nets.iter())
+            .filter(|n| {
+                matches!(
+                    n.params.get(POWER_FLAG).map(|p| &p.value),
+                    Some(crate::ir::ParamValue::Bool(true))
+                )
+            })
+            .map(|n| n.name.as_str())
+            .collect();
+        let power_flags = nl
+            .nets
+            .iter()
+            .filter(|n| {
+                flagged.contains(n.name.as_str())
+                    || flagged.contains(n.path.leaf())
+                    || n.aliases.iter().any(|a| flagged.contains(a.as_str()))
+            })
+            .map(|n| n.name.clone())
+            .collect();
+        ErcOptions {
+            power_flags,
+            ..ErcOptions::default()
+        }
+    }
+}
+
 fn pin_ref(nl: &Netlist, ci: usize, pi: usize) -> String {
     let c = &nl.components[ci];
     let p = &c.pins[pi];

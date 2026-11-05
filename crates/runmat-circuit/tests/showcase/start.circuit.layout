@@ -1,0 +1,11 @@
+runmat 0.7
+std 1
+
+use circuit daq from "./daq.circuit"
+
+layout daq {
+    outline = [[2, 0], [88, 0], [90, 2], [90, 58], [88, 60], [2, 60], [0, 58], [0, 2]]
+    limits = { clearance = 0.15, track = 0.15, via_diameter = 0.45, drill = 0.2, annular = 0.1, hole_to_hole = 0.25, copper_to_edge = 0.3, silk_to_pad = 0.1, microvia_drill = 0.1 }
+    net_class power = { track_width = 0.4 mm, clearance = 0.2 mm }
+    net_class analog = { track_width = 0.2 mm, clearance = 0.2 mm }
+}

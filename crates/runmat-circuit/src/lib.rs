@@ -50,6 +50,8 @@
 //!
 //! Everything is deterministic: ordered maps, sorted outputs, exact integer predicates.
 
+pub mod autoroute;
+pub mod board3d;
 pub mod board_rules;
 pub mod commands;
 pub mod connectivity;

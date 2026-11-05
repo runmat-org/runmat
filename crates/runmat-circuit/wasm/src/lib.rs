@@ -10,6 +10,7 @@
 //! - `review(path, text, files, options)` → `{ eco?, back_annotation?, diagnostics }`
 //! - `edit(path, text, files, request)` → `{ ok: true, files, summary }` or
 //!   `{ ok: false, message, diagnostics }`
+//! - `board_model()` → the last compiled board in 3D as a part display, or `null`
 //!
 //! Malformed JSON input is reported the same way as a failed edit, never as a panic.
 
@@ -94,6 +95,16 @@ pub fn edit(path: &str, text: &str, files: &str, request: &str) -> String {
             v.to_string()
         }
     }
+}
+
+/// The last compiled board in 3D, as a part display (`runmat_circuit::board3d`), or `null`
+/// when the last compile had no board.
+#[wasm_bindgen]
+pub fn board_model() -> String {
+    SESSION.with(|s| match s.borrow().board_model() {
+        Some(m) => json(&m),
+        None => "null".into(),
+    })
 }
 
 #[cfg(test)]

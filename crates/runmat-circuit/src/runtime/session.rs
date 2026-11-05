@@ -166,7 +166,10 @@ impl Session {
         })?;
         let project = load_with(circuit_path, &circuit_text, &inputs, options, false)?;
         let mut erc = project.netlist.diagnostics.clone();
-        erc.extend(erc::run(&project.netlist, &ErcOptions::default()));
+        erc.extend(erc::run(
+            &project.netlist,
+            &ErcOptions::for_design(&project.design, &project.netlist),
+        ));
         let findings = review::run_all(&project.netlist, &project.pool, &ReviewOptions::default());
         let index = build_index(
             &project.design,
@@ -581,6 +584,12 @@ impl Session {
         }
     }
 
+    /// The last compiled board in 3D ([`crate::board3d`]), for the 3D tab.
+    pub fn board_model(&self) -> Option<crate::board3d::BoardModel> {
+        let state = self.board.as_ref()?;
+        state.parsed.board.as_ref().map(crate::board3d::board_model)
+    }
+
     /// [`edit`](super::edit): a board catalog command edits the session's reading of the
     /// layout; ECO and room commands run through the stateless runtime.
     pub fn edit(
@@ -592,7 +601,11 @@ impl Session {
     ) -> Result<EditOutput, EditError> {
         if matches!(
             request.command.as_str(),
-            "schematic.update-board" | "board.update-schematic" | "board.copy-room-formats"
+            "schematic.update-board"
+                | "board.update-schematic"
+                | "board.copy-room-formats"
+                | "board.fanout"
+                | "board.autoroute"
         ) {
             return super::edit(path, text, files, request);
         }

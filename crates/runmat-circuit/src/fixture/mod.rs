@@ -17,6 +17,7 @@
 mod eco;
 mod large;
 mod pool;
+mod pool_daq;
 
 pub use eco::*;
 pub use large::*;

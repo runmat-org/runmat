@@ -100,10 +100,19 @@ pub(super) fn add(c: &mut Catalog) {
             .inputs(vec![radio("mode", "Mode", &[("stitch", "Stitch a pour"), ("shield", "Shield a net")]), pick("target", "Pour or net", &[K::Zone, K::Net]), qty("pitch", "Pitch", "length", Some(1.5)), text("via", "Via", Some("0.3/0.6"))])
             .preview()
             .edit(add_to("via_array", Section::Copper)),
-        brd("board.fanout", "BGA fanout", "fanout", "Fan out a BGA's pads to vias.")
-            .inputs(vec![pick("component", "Component", &[K::Component]), choice("pattern", "Pattern", &[("dogbone", "Dog bone"), ("via_in_pad", "Via in pad")]), text("via", "Via", Some("0.2/0.45"))])
+        brd("board.fanout", "BGA fanout", "fanout", "Fan out a component's pads to vias: BGA balls to the diagonals, other pads past their outer end.")
+            .inputs(vec![picks("component", "Components", &[K::Component]), picks("nets", "Nets", &[K::Net]).optional().help("Empty: the nets poured on an inner layer."), flag("signals", "Fan out signal pads too", false), text("via", "Via", Some("0.2/0.45"))])
             .preview()
             .edit(add_to("fanout", Section::Copper)),
+        brd("board.autoroute", "Autoroute", "route", "Route the unrouted connections of the picked nets, or of every net not on a plane.")
+            .kw(&["auto route", "route all", "maze router"])
+            .inputs(vec![
+                picks("nets", "Nets", &[K::Net]).optional().help("Empty: every net with airwires that is not poured on an inner layer."),
+                text("layers", "Layers", Some("F.Cu, B.Cu")).optional(),
+                qty("width", "Width", "length", Some(0.2)).min(0.0).help("Nets whose class sets a track width use that."),
+                text("via", "Via", Some("0.2/0.45")),
+            ])
+            .edit(add_to("track", Section::Copper)),
         brd("board.teardrops", "Teardrops", "teardrop", "Add or remove teardrops at pads and vias.")
             .inputs(vec![radio("action", "Action", &[("add", "Add"), ("remove", "Remove")]), flag("all", "Whole board", true)])
             .edit(edit(EditOp::Edit, Section::Copper).item("teardrops")),
@@ -115,6 +124,7 @@ pub(super) fn add(c: &mut Catalog) {
                 layer().shown("action", &["draw", "split_plane"]),
                 qty("clearance", "Clearance", "length", Some(0.25)).shown("action", &["draw"]),
                 choice("connect", "Pad connection", &[("relief", "Thermal relief"), ("solid", "Solid"), ("none", "None")]).shown("action", &["draw"]),
+                count("priority", "Priority", 0, 0).shown("action", &["draw"]).help("Where pours overlap, the higher priority fills first."),
             ])
             .preview()
             .edit(add_to("zone", Section::Copper)),

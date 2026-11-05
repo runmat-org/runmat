@@ -1,0 +1,330 @@
+//! Automatic routing: fanout of pads to vias, and a gridded maze router.
+//!
+//! - [`fanout`]: dog-bone fanout. BGA balls get a short track to a via on the diagonal between
+//!   balls, away from the package centre; other SMD pads get a via just past the pad's outer
+//!   end (or beside it). Pads already joined to a via are left alone, so a run can repeat.
+//! - [`autoroute`]: routes airwires one at a time with an A* search over a square grid in the
+//!   eight 0°/45°/90° directions on the routing layers, changing layer through vias. Every
+//!   placed object keeps the given clearance from other nets, the hole-to-hole minimum and the
+//!   edge clearance, so routes pass DRC by construction. The path is then straightened: runs
+//!   merge into single segments and corners cut where a 0°/45°/90° shortcut stays clear.
+//!   Connections it cannot route stay airwires and are listed in the report.
+//!
+//! Both work on a [`Board`] model; the runtime's `board.fanout` and `board.autoroute` commands
+//! run them and write the new copper into the layout as statements.
+
+mod fanout;
+mod search;
+mod space;
+
+pub use fanout::{fanout, FanoutOptions, FanoutReport};
+pub use space::Space;
+
+use crate::connectivity::layer_mask;
+use crate::geom::shape::Prim;
+use crate::geom::{mm, Coord, Point};
+use crate::layout::{Board, NetId};
+use search::{Node, Query, Search};
+use std::collections::BTreeMap;
+
+/// What [`autoroute`] routes and how.
+#[derive(Clone, Debug)]
+pub struct RouteOptions {
+    /// Nets to route; airwires of other nets are left.
+    pub nets: Vec<NetId>,
+    /// Copper layers to route on, preferred first.
+    pub layers: Vec<u8>,
+    /// Track width per net; nets not listed use `default_width`.
+    pub widths: BTreeMap<NetId, Coord>,
+    pub default_width: Coord,
+    /// Via diameter and drill.
+    pub via: (Coord, Coord),
+    /// Clearance kept to other nets (at least the largest the board's rules require).
+    pub clearance: Coord,
+    /// Grid pitch.
+    pub grid: Coord,
+}
+
+impl RouteOptions {
+    pub fn new(nets: Vec<NetId>, layers: Vec<u8>, clearance: Coord) -> Self {
+        RouteOptions {
+            nets,
+            layers,
+            widths: BTreeMap::new(),
+            default_width: mm(0.2),
+            via: (mm(0.45), mm(0.2)),
+            clearance,
+            grid: mm(0.05),
+        }
+    }
+}
+
+/// What [`autoroute`] did.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RouteReport {
+    /// Airwires routed.
+    pub routed: u32,
+    /// Airwires left unrouted: net name and the two ends.
+    pub failed: Vec<(String, Point, Point)>,
+    pub tracks: u32,
+    pub vias: u32,
+}
+
+/// Routes the airwires of `opts.nets`, shortest first.
+pub fn autoroute(board: &mut Board, opts: &RouteOptions) -> RouteReport {
+    let mut space = Space::new(board, opts.clearance);
+    let wires = crate::route::ratsnest(board);
+    autoroute_in(board, &mut space, opts, wires)
+}
+
+/// [`autoroute`] over given airwires (a ratsnest that counts poured copper) with a [`Space`]
+/// the caller built (and keeps using).
+pub fn autoroute_in(
+    board: &mut Board,
+    space: &mut Space,
+    opts: &RouteOptions,
+    wires: Vec<crate::route::Airwire>,
+) -> RouteReport {
+    let mut report = RouteReport::default();
+    let wanted: std::collections::BTreeSet<NetId> = opts.nets.iter().copied().collect();
+    let mut wires: Vec<crate::route::Airwire> = wires
+        .into_iter()
+        .filter(|a| wanted.contains(&a.net))
+        .collect();
+    wires.sort_by(|a, b| {
+        a.length
+            .partial_cmp(&b.length)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| (a.net, a.a, a.b).cmp(&(b.net, b.a, b.b)))
+    });
+    let n = board.copper_count();
+    let layer_cost: Vec<f64> = opts
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(i, _)| 1.0 + 0.25 * i as f64)
+        .collect();
+    for w in wires {
+        let width = opts.widths.get(&w.net).copied().unwrap_or(opts.default_width);
+        let q = Query {
+            net: w.net,
+            width,
+            via: opts.via,
+            via_mask: layer_mask(0..n),
+            layers: &opts.layers,
+            grid: opts.grid,
+            origin: w.a,
+            via_cost: 25.0,
+            layer_cost: &layer_cost,
+            budget: 400_000,
+        };
+        match route_one(space, q, w.a, w.b) {
+            Some(route) => {
+                report.routed += 1;
+                for (layer, a, b) in route.tracks {
+                    board.add_track(Some(w.net), layer, width, a, b);
+                    space.add(Some(w.net), 1 << layer, Prim::segment(a, b, width));
+                    report.tracks += 1;
+                }
+                for p in route.vias {
+                    let id = board.add_via(Some(w.net), p, opts.via.0, opts.via.1);
+                    let v = &board.vias[&id];
+                    space.add(Some(w.net), layer_mask(v.layers()), Prim::circle(p, v.diameter / 2));
+                    space.add_hole(p, opts.via.1 / 2);
+                    report.vias += 1;
+                }
+            }
+            None => report
+                .failed
+                .push((board.net_name(w.net).to_owned(), w.a, w.b)),
+        }
+    }
+    report
+}
+
+struct Route {
+    tracks: Vec<(u8, Point, Point)>,
+    vias: Vec<Point>,
+}
+
+/// Grid nodes near `p` on the routing layers that the net's copper covers and that are open;
+/// else, where `p` is on the net's pour on another layer, open nodes over the pour where a via
+/// fits (the route ends with a via into the pour; the flag says so).
+fn ends(s: &mut Search, space: &Space, p: Point) -> (Vec<Node>, bool) {
+    let own = copper_ends(s, p);
+    if !own.is_empty() {
+        return (own, false);
+    }
+    if !space.own_fill(s.q.net, p) {
+        return (Vec::new(), false);
+    }
+    let g = s.q.grid;
+    let o = s.q.origin;
+    let (cx, cy) = ((p.x - o.x) / g, (p.y - o.y) / g);
+    let r = (mm(0.6) / g).max(1);
+    let mut out = Vec::new();
+    for x in cx - r..=cx + r {
+        for y in cy - r..=cy + r {
+            let at = search::point(&s.q, (x, y, 0));
+            if !space.own_fill(s.q.net, at) || !s.via_site(x, y) {
+                continue;
+            }
+            for l in 0..s.q.layers.len() as u8 {
+                if s.open_node((x, y, l)) {
+                    out.push((x, y, l));
+                }
+            }
+        }
+    }
+    (out, true)
+}
+
+fn copper_ends(s: &mut Search, p: Point) -> Vec<Node> {
+    let g = s.q.grid;
+    let o = s.q.origin;
+    let (cx, cy) = ((p.x - o.x) / g, (p.y - o.y) / g);
+    let r = (mm(1.2) / g).max(1);
+    let mut out = Vec::new();
+    let mut any_own = Vec::new();
+    for l in 0..s.q.layers.len() as u8 {
+        for x in cx - r..=cx + r {
+            for y in cy - r..=cy + r {
+                let n = (x, y, l);
+                if s.own(n) {
+                    any_own.push(n);
+                    if s.open_node(n) {
+                        out.push(n);
+                    }
+                }
+            }
+        }
+    }
+    if out.is_empty() {
+        any_own
+    } else {
+        out
+    }
+}
+
+fn route_one(space: &Space, q: Query, a: Point, b: Point) -> Option<Route> {
+    let mut s = Search::new(q, space);
+    let (sources, via_a) = ends(&mut s, space, a);
+    let (targets, via_b) = ends(&mut s, space, b);
+    if sources.is_empty() || targets.is_empty() {
+        return None;
+    }
+    let nodes = s.run(&sources, &targets, b)?;
+    let first = search::point(&s.q, nodes[0]);
+    let last = search::point(&s.q, *nodes.last().expect("a path"));
+    // A route that starts or ends on a pour does so with a via at its end node.
+    let (a, b) = (if via_a { first } else { a }, if via_b { last } else { b });
+    let mut route = geometry(&s, space, &nodes, a, b);
+    if via_a {
+        route.vias.push(first);
+    }
+    if via_b {
+        route.vias.push(last);
+    }
+    Some(route)
+}
+
+/// The node path as tracks and vias: straight runs merged, corners cut where clear, and short
+/// stubs to the two anchors (inside the net's own copper).
+fn geometry(s: &Search, space: &Space, nodes: &[Node], a: Point, b: Point) -> Route {
+    let q = &s.q;
+    // Split into per-layer runs.
+    let mut runs: Vec<(u8, Vec<Point>)> = Vec::new();
+    let mut vias = Vec::new();
+    for n in nodes {
+        let p = search::point(q, *n);
+        match runs.last_mut() {
+            Some((l, pts)) if *l == n.2 => pts.push(p),
+            Some(_) => {
+                vias.push(p);
+                runs.push((n.2, vec![p]));
+            }
+            None => runs.push((n.2, vec![p])),
+        }
+    }
+    let last = runs.len() - 1;
+    runs[0].1.insert(0, a);
+    runs[last].1.push(b);
+    let mut tracks = Vec::new();
+    for (i, (l, pts)) in runs.into_iter().enumerate() {
+        let layer = q.layers[l as usize];
+        let mut pts = merge(&pts);
+        pts = shortcut(space, q.net, layer, q.width, &pts, i == 0, i == last);
+        for w in pts.windows(2) {
+            if w[0] != w[1] {
+                tracks.push((layer, w[0], w[1]));
+            }
+        }
+    }
+    Route { tracks, vias }
+}
+
+fn direction(a: Point, b: Point) -> Option<(i64, i64)> {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    if dx == 0 && dy == 0 {
+        return None;
+    }
+    if dx == 0 || dy == 0 || dx.abs() == dy.abs() {
+        Some((dx.signum(), dy.signum()))
+    } else {
+        None
+    }
+}
+
+/// Drops the middle point of every straight run.
+fn merge(pts: &[Point]) -> Vec<Point> {
+    let mut out: Vec<Point> = Vec::new();
+    for p in pts {
+        if out.last() == Some(p) {
+            continue;
+        }
+        if out.len() >= 2 {
+            let (x, y) = (out[out.len() - 2], out[out.len() - 1]);
+            if direction(x, y).is_some() && direction(x, y) == direction(y, *p) {
+                out.pop();
+            }
+        }
+        out.push(*p);
+    }
+    out
+}
+
+/// Replaces sub-paths by one 0°/45°/90° segment where that segment keeps the clearance. The
+/// anchor stubs (first and last segment when `keep_first`/`keep_last`) stay as they are.
+fn shortcut(
+    space: &Space,
+    net: NetId,
+    layer: u8,
+    width: Coord,
+    pts: &[Point],
+    keep_first: bool,
+    keep_last: bool,
+) -> Vec<Point> {
+    let lo = usize::from(keep_first);
+    let hi = pts.len().saturating_sub(usize::from(keep_last) + 1);
+    if hi <= lo + 1 {
+        return pts.to_vec();
+    }
+    let mut out: Vec<Point> = pts[..=lo].to_vec();
+    let mut i = lo;
+    while i < hi {
+        let mut j = hi;
+        while j > i + 1 {
+            let (p, r) = (pts[i], pts[j]);
+            if direction(p, r).is_some()
+                && space.free(Some(net), 1 << layer, &Prim::segment(p, r, width), 0)
+            {
+                break;
+            }
+            j -= 1;
+        }
+        out.push(pts[j]);
+        i = j;
+    }
+    out.extend_from_slice(&pts[hi + 1..]);
+    merge(&out)
+}

@@ -622,6 +622,53 @@ pub fn tssop(pins: u32, density: Density) -> Package {
     )
 }
 
+/// MSOP-N / VSSOP-N, 3.0 mm body, 0.5 mm pitch (JEDEC MO-187).
+pub fn msop(pins: u32, density: Density) -> Package {
+    leaded(
+        &LeadedSpec {
+            family: "MSOP".into(),
+            pins,
+            rows: 2,
+            pitch: 0.5,
+            body: (3.0, 3.0),
+            height: 1.1,
+            span: Range::new(4.75, 5.05),
+            span_y: None,
+            terminal: Range::new(0.4, 0.7),
+            lead_width: Range::new(0.17, 0.27),
+            style: LeadStyle::GullWing,
+            exposed_pad: None,
+        },
+        density,
+    )
+}
+
+/// A plated mounting hole: drill `drill` mm in a round pad of `pad` mm, as pad `1` (it takes
+/// the net it is wired to, usually ground).
+pub fn mounting_hole(drill: f64, pad: f64) -> Package {
+    let pads = vec![PadDef::tht(
+        "1",
+        Point::ORIGIN,
+        PadShape::Circle { d: mm(pad) },
+        mm(drill),
+    )];
+    let mut pkg = finish(
+        format!("MountingHole_{drill}mm_Pad{pad}mm"),
+        format!("Mounting hole, drill {drill} mm, plated pad {pad} mm"),
+        pads,
+        pad,
+        pad,
+        0.0,
+        0.25,
+        None,
+        false,
+    );
+    // The pad is the hole's whole footprint: no body outline in silk or fabrication art.
+    pkg.silk.clear();
+    pkg.body = None;
+    pkg
+}
+
 /// QFP with square body `body` mm, `pins` total, `pitch` mm (LQFP/TQFP per JEDEC MS-026).
 pub fn qfp(pins: u32, body: f64, pitch: f64, density: Density) -> Package {
     let span = Range::nom_tol(body + 2.0, 0.2);

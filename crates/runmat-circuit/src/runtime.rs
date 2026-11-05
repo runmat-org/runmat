@@ -39,6 +39,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod autoroute;
 mod edit;
 mod kicad;
 mod rules;
@@ -566,7 +567,10 @@ pub fn compile(path: &str, text: &str, files: &Files, options: &CompileOptions) 
         }
     };
     let mut erc = project.netlist.diagnostics.clone();
-    erc.extend(erc::run(&project.netlist, &ErcOptions::default()));
+    erc.extend(erc::run(
+            &project.netlist,
+            &ErcOptions::for_design(&project.design, &project.netlist),
+        ));
     let findings = review::run_all(&project.netlist, &project.pool, &ReviewOptions::default());
     let mut index = build_index(
         &project.design,
@@ -621,7 +625,10 @@ pub fn check(path: &str, text: &str, files: &Files, options: &CompileOptions) ->
         }
     };
     let mut erc = project.netlist.diagnostics.clone();
-    erc.extend(erc::run(&project.netlist, &ErcOptions::default()));
+    erc.extend(erc::run(
+            &project.netlist,
+            &ErcOptions::for_design(&project.design, &project.netlist),
+        ));
     let findings = review::run_all(&project.netlist, &project.pool, &ReviewOptions::default());
     let index = build_index(
         &project.design,
