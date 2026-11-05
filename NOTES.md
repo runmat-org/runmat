@@ -284,7 +284,17 @@ Debug prints used for the traces below: $J/tmp/work/q-mesh-fix-6/qmf12-debug-r15
   (or the canonical validator applies different protection). Next: find the edit that created those
   cells (trace replace_cavity of cells containing P and S), and compare observed_change_violation with
   validate_constrained_delaunay_volume_topology on coplanar apexes.
-- Hero replay on 6f6abddf59: chain-r6 (~/logs/qmf6/r6h.out, r6-hero.log, r6-rss.txt, prof/r6-*.txt).
+- Tet lib on 6f6abddf59: 592/0/7 ign (~/logs/qmf6/r6.out).
+- Hero replay on 6f6abddf59 (~/logs/qmf6/r6h.out, r6-hero.log, r6-rss.txt, prof/r6-*.txt): still fails at
+  8566 after 761 s (p12: 755 s); peak RSS 17.95 GB (p12: 20.0 GB). New reason: the support-edge cascade on
+  z=.026 reaches a shared-vertex pair split whose admission finds cell [(-1.0048516,.2916515,.026),
+  (-1.0059688,.2909439,.026), (-1.0061875,.2921875,.029), (-1.005125,.2918823,.029)] with apex
+  (-1.0056562,.2913177,.029) in its circumsphere (spans the 3 mm TIM; apex coplanar with the two z=.029
+  corners). The canonical fallback fails validation with the same pattern (two z=.026 + two z=.029
+  corners, coplanar apex). Both sub-a (side face) and hero now fail on cells whose apex is coplanar with a
+  face plane of the cell's other corners: check whether the in-place admission and the canonical
+  validator treat coplanar (insphere-degenerate) apexes the same, and whether a pending (not yet
+  recovered) facet triangle in that plane needs a planar hull/facet flip that link flips miss.
 ### RSS 15.5 -> 20 GB (p12)
 - Peak is at the very end (14:24:52; sample 25 s earlier showed 7 GB footprint): the failing
   constraint's canonical fallback (try_split_recovered_segment_edge -> insert_conformingly_with:
