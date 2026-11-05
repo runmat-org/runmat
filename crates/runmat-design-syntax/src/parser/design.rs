@@ -443,8 +443,9 @@ impl FeaParser {
         let [first, second, rest @ ..] = significant else {
             return false;
         };
-        // A name that is not a word is quoted (`sheet "1" = { … }`).
-        let named = self.at(*second, FeaTokenKind::Identifier)
+        // A name that is not a word is quoted (`sheet "1" = { … }`). A word the FEA dialect
+        // reserves (`signal`, `table`, `load`) is still a name here (`net_class signal = { … }`).
+        let named = is_name_token_at(self, *second)
             || (self.at(*second, FeaTokenKind::String)
                 && rest.first().is_some_and(|index| {
                     self.at(*index, FeaTokenKind::Colon) || self.at(*index, FeaTokenKind::Equal)

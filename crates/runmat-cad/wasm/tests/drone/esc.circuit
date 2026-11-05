@@ -136,7 +136,7 @@ circuit esc {
         model "NMOS-40V-DFN8" = { library = "drone_models.lib", subckt = NMOS40, pins = [D, G, S] }
         analysis edges = tran { stop = 14 us, step = 2 ns }
         probe = [net.INHA, net.GHA, net.GLA, net.PHA, "QHA.D"]
-        measure rise = { of = edges, rise_time = net.PHA, from = 0.5 us, to = 4 us }
+        measure rise = { of = edges, rise_time = net.PHA, from = 0.9 us, to = 4 us, spec = { max = 40 ns } }
         measure overshoot = { of = edges, max = net.PHA, from = 0.5 us, to = 4 us, spec = { max = 30 V } }
         measure gate_high = { of = edges, max = net.GHA, spec = { max = 34 V } }
         measure on_current = { of = edges, rms = "QHA.D", from = 2 us, to = 10 us }

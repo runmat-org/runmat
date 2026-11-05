@@ -26,12 +26,14 @@ pub enum Measure {
     When { signal: String, value: f64, edge: Edge, nth: usize },
     /// `targ` crossing x minus `trig` crossing x.
     Delay { trig: (String, f64, Edge, usize), targ: (String, f64, Edge, usize) },
-    /// 10 %–90 % (or `low`–`high` fractions) rise time between the first and last values.
-    RiseTime { signal: String, low: f64, high: f64 },
-    /// Time after which the signal stays within `band` (a fraction of the step) of its final value.
-    Settling { signal: String, band: f64 },
-    /// Peak excursion beyond the final value, in percent of the step.
-    Overshoot { signal: String },
+    /// 10 %–90 % (or `low`–`high` fractions) rise time between the first and last values in the
+    /// `from`–`to` window (the whole run when unset), so a pulse train is measured on one edge.
+    RiseTime { signal: String, low: f64, high: f64, from: Option<f64>, to: Option<f64> },
+    /// Time after which the signal stays within `band` (a fraction of the step) of its final value,
+    /// from the window's start.
+    Settling { signal: String, band: f64, from: Option<f64>, to: Option<f64> },
+    /// Peak excursion beyond the final value, in percent of the step, in the window.
+    Overshoot { signal: String, from: Option<f64>, to: Option<f64> },
     Final { signal: String },
     /// The frequency where the magnitude falls `drop_db` below its first (lowest-frequency) value.
     Bandwidth { signal: String, drop_db: f64 },
@@ -93,6 +95,15 @@ fn window(x: &[f64], y: &[f64], from: Option<f64>, to: Option<f64>) -> (Vec<f64>
     let lo = from.unwrap_or(f64::NEG_INFINITY);
     let hi = to.unwrap_or(f64::INFINITY);
     x.iter().zip(y).filter(|(a, _)| **a >= lo && **a <= hi).map(|(a, b)| (*a, *b)).unzip()
+}
+
+/// The samples a step measure reads: the `from`–`to` window, with at least two points.
+fn step_window(x: &[f64], y: &[f64], from: Option<f64>, to: Option<f64>) -> Result<(Vec<f64>, Vec<f64>), String> {
+    let (xs, ys) = window(x, y, from, to);
+    if xs.len() < 2 {
+        return Err("the window holds no step (fewer than two points)".into());
+    }
+    Ok((xs, ys))
 }
 
 fn crossing(x: &[f64], y: &[f64], value: f64, edge: Edge, nth: usize, log_x: bool) -> Option<f64> {
@@ -171,8 +182,9 @@ pub fn evaluate(m: &Measure, r: &SimResult) -> Result<f64, String> {
             };
             Ok(at(targ)? - at(trig)?)
         }
-        Measure::RiseTime { signal, low, high } => {
+        Measure::RiseTime { signal, low, high, from, to } => {
             let (xs, ys, _) = series(r, signal)?;
+            let (xs, ys) = step_window(&xs, &ys, *from, *to)?;
             let (v0, v1) = (ys[0], ys[ys.len() - 1]);
             let lv = v0 + (v1 - v0) * low;
             let hv = v0 + (v1 - v0) * high;
@@ -181,8 +193,9 @@ pub fn evaluate(m: &Measure, r: &SimResult) -> Result<f64, String> {
             let t2 = crossing(&xs, &ys, hv, e, 1, false).ok_or_else(|| none("high crossing"))?;
             Ok(t2 - t1)
         }
-        Measure::Settling { signal, band } => {
+        Measure::Settling { signal, band, from, to } => {
             let (xs, ys, _) = series(r, signal)?;
+            let (xs, ys) = step_window(&xs, &ys, *from, *to)?;
             let (v0, v1) = (ys[0], ys[ys.len() - 1]);
             let tol = (v1 - v0).abs() * band;
             let last_out = ys.iter().rposition(|v| (v - v1).abs() > tol);
@@ -192,8 +205,9 @@ pub fn evaluate(m: &Measure, r: &SimResult) -> Result<f64, String> {
                 None => 0.0,
             })
         }
-        Measure::Overshoot { signal } => {
-            let (_, ys, _) = series(r, signal)?;
+        Measure::Overshoot { signal, from, to } => {
+            let (xs, ys, _) = series(r, signal)?;
+            let (_, ys) = step_window(&xs, &ys, *from, *to)?;
             let (v0, v1) = (ys[0], ys[ys.len() - 1]);
             let step = v1 - v0;
             if step == 0.0 {

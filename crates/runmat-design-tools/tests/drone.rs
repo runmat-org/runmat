@@ -84,4 +84,8 @@ fn the_esc_phase_switches_cleanly_into_the_motor() {
     assert!(gate > 22.2 + 8.0 && gate < 34.0, "{gate}");
     let on = measure(&out, "on_current");
     assert!(on > 10.0, "{on}");
+    // The phase node's 10-90 % rise on the high side's turn-on: the 2 Ohm driver charging the
+    // FET's 0.25 nF Miller capacitance through the 20 A commutation takes a few nanoseconds.
+    let rise = measure(&out, "rise");
+    assert!(rise > 2e-9 && rise < 40e-9, "{rise}");
 }

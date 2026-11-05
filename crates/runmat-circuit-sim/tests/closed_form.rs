@@ -213,3 +213,19 @@ fn singular_circuit_names_the_floating_node() {
     let e = simulate(&d, &Analysis::Op).unwrap_err().to_string();
     assert!(e.contains("singular"), "{e}");
 }
+
+/// A step measure reads its `from`–`to` window: an RC on a pulse train that starts and ends low
+/// has one rising edge per pulse, and the 10–90 % rise time of the second edge is tau ln 9.
+#[test]
+fn rise_time_settling_and_overshoot_read_their_window() {
+    let deck = "rc pulses\nV1 in 0 PULSE(0 1 0 1n 1n 10m 20m)\nR1 in out 1k\nC1 out 0 1u\n";
+    let res = run(deck, &tran(10e-6, 40e-3));
+    let tau = 1e-3;
+    let (from, to) = (Some(20e-3), Some(30e-3));
+    let rise = evaluate(&Measure::RiseTime { signal: "v(out)".into(), low: 0.1, high: 0.9, from, to }, &res).unwrap();
+    assert!((rise - tau * 9f64.ln()).abs() < 0.02e-3, "{rise}");
+    let settle = evaluate(&Measure::Settling { signal: "v(out)".into(), band: 0.01, from, to }, &res).unwrap();
+    assert!((settle - tau * 100f64.ln()).abs() < 0.05e-3, "{settle}");
+    let over = evaluate(&Measure::Overshoot { signal: "v(out)".into(), from, to }, &res).unwrap();
+    assert!(over < 0.1, "{over}");
+}
