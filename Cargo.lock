@@ -7998,6 +7998,9 @@ dependencies = [
  "libloading 0.8.9",
  "runmat-circuit",
  "runmat-circuit-sim",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -8005,6 +8008,9 @@ name = "runmat-circuit-wasm"
 version = "0.6.2"
 dependencies = [
  "runmat-circuit",
+ "runmat-circuit-sim",
+ "runmat-circuit-spice",
+ "runmat-simulation-usage",
  "serde",
  "serde_json",
  "wasm-bindgen",

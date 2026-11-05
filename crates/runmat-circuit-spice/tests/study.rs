@@ -41,8 +41,20 @@ fn section_reads_and_prints_back() {
     let sim = &design.simulations["front_end"];
     assert_eq!(sim.sheet.as_deref(), Some("channel"));
     assert_eq!(sim.analyses.len(), 3);
-    assert_eq!(sim.probes, ["IN", "INF", "AMP", "AIN"]);
+    assert_eq!(sim.probes.iter().map(|p| p.name()).collect::<Vec<_>>(), ["IN", "INF", "AMP", "AIN"]);
     let printed = print_circuit(&design).unwrap();
+    // Values print with their units, as an engineer writes them.
+    for line in [
+        "analysis step = tran { stop = 20 us, step = 10 ns }",
+        "analysis response = ac { from = 100 Hz, to = 100 MHz, points = 100 }",
+        "tolerance capacitors = { match = \"C*\", value = 5 % }",
+        "source VR = { p = net.VREF, dc = 4.096 V }",
+        "pulse = { from = 250 mV, to = 1.75 V, delay = 2 us, rise = 10 ns, fall = 10 ns }",
+        "gbw = 3 MHz",
+        "rout = 10 ohm",
+    ] {
+        assert!(printed.contains(line), "`{line}` not in\n{printed}");
+    }
     let again = parse_circuit("/p/daq.circuit", &printed);
     assert!(again.diagnostics.is_empty(), "{:?}\n{printed}", again.diagnostics);
     let strip = |mut m: std::collections::BTreeMap<String, runmat_circuit::simulation::SimulationDef>| {
@@ -87,4 +99,92 @@ fn channel_step_response_bandwidth_and_spread() {
     }
     let ain = tran.at(&s.probes[3].1, 19e-6).unwrap();
     assert!((ain - 3.5).abs() < 0.01, "settles to 2 × 1.75 V: {ain}");
+}
+
+fn with_section_lines(drop: &[&str], add: &str) -> runmat_circuit::ir::Design {
+    let mut text = daq_with_section();
+    for d in drop {
+        text = text.lines().filter(|l| !l.contains(d)).collect::<Vec<_>>().join("\n");
+    }
+    let text = text.replace("        probe = [", &format!("{add}\n        probe = ["));
+    let parsed = parse_circuit("/p/daq.circuit", &text);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    parsed.design.unwrap()
+}
+
+#[test]
+fn monte_carlo_takes_each_components_own_tolerance() {
+    // No tolerance statements: the parts' own bands apply (R0402 ±1 %, C0402-1N ±5 %).
+    let design = with_section_lines(&["tolerance resistors", "tolerance capacitors"], "");
+    let s = study::run(&design, &standard_pool(), "front_end", &|_| None, None).unwrap();
+    let rs = s.tolerances.iter().find(|t| t.elements == "rs").expect("RS varies by its part's ±1 %");
+    assert_eq!(rs.from, "component");
+    assert!((rs.band.0 - 0.99).abs() < 1e-12 && (rs.band.1 - 1.01).abs() < 1e-12);
+    let cf = s.tolerances.iter().find(|t| t.elements == "cf").unwrap();
+    assert!((cf.band.1 - 1.05).abs() < 1e-12);
+    let st = s.measures["f3db_spread"].stats.clone().unwrap();
+    let rel = st.std / st.mean;
+    let want = ((0.01f64 / 3.0).powi(2) + (0.05f64 / 3.0).powi(2)).sqrt();
+    assert!((rel / want - 1.0).abs() < 0.2, "spread {rel} vs {want}");
+}
+
+#[test]
+fn a_section_statement_replaces_the_component_band_it_matches() {
+    // RS and CF held to ±0.1 %: the corner spreads by √2·0.1 %/3 instead.
+    let design = with_section_lines(&["tolerance resistors", "tolerance capacitors"], "        tolerance input_rc = { match = \"?[SF]\", value = 0.1 % }");
+    let s = study::run(&design, &standard_pool(), "front_end", &|_| None, None).unwrap();
+    assert!(!s.tolerances.iter().any(|t| t.elements == "rs" || t.elements == "cf"));
+    assert!(s.tolerances.iter().any(|t| t.elements == "rg" && t.from == "component"));
+    let st = s.measures["f3db_spread"].stats.clone().unwrap();
+    let rel = st.std / st.mean;
+    let want = 2f64.sqrt() * 0.001 / 3.0;
+    assert!((rel / want - 1.0).abs() < 0.25, "spread {rel} vs {want}");
+}
+
+#[test]
+fn a_limited_study_stops_and_says_what_did_not_run() {
+    let design = parse_circuit("/p/daq.circuit", &daq_with_section()).design.unwrap();
+    let pool = standard_pool();
+    let full = study::run(&design, &pool, "front_end", &|_| None, None).unwrap();
+    let total = full.usage.total().unwrap().operations();
+    // Enough for the AC and transient analyses, not all 400 Monte Carlo runs.
+    let base = total - full.monte_carlo["spread"].usage.total().unwrap().operations();
+    let limit = base + (total - base) / 4;
+    let s = study::run_with(&design, &pool, "front_end", &|_| None, study::RunOptions { threads: Some(4), limit: Some(limit) }).unwrap();
+    assert!(s.usage.total().unwrap().operations() <= limit);
+    let mc = &s.monte_carlo["spread"];
+    assert!(mc.stopped && mc.completed > 0 && mc.completed < 400, "{}", mc.completed);
+    assert!(s.stopped.as_deref().unwrap().contains("Monte Carlo `spread`"));
+    assert_eq!(s.measures["f3db_spread"].stats.as_ref().unwrap().n, mc.completed);
+}
+
+#[test]
+fn a_pin_probe_reads_the_current_into_the_pin() {
+    // RS (1 kΩ) runs from IN to INF: the current into RS.1 is (V(IN) − V(INF))/1 kΩ, and the
+    // current into RS.2 is its negative.
+    let text = daq_with_section().replace("probe = [net.IN, net.INF, net.AMP, net.AIN]", "probe = [net.IN, net.INF, \"RS.1\", \"RS.2\"]");
+    let parsed = parse_circuit("/p/daq.circuit", &text);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let design = parsed.design.unwrap();
+    assert!(print_circuit(&design).unwrap().contains("probe = [net.IN, net.INF, \"RS.1\", \"RS.2\"]"));
+    let s = study::run(&design, &standard_pool(), "front_end", &|_| None, None).unwrap();
+    let labels: Vec<String> = s.probes.iter().map(|(p, _)| p.label()).collect();
+    assert_eq!(labels, ["V(IN)", "V(INF)", "I(RS.1)", "I(RS.2)"]);
+    let tran = s.results["step"].real().unwrap();
+    let (vin, vinf, i1, i2) = (tran.get(&s.probes[0].1).unwrap(), tran.get(&s.probes[1].1).unwrap(), tran.get(&s.probes[2].1).unwrap(), tran.get(&s.probes[3].1).unwrap());
+    let mut peak = 0f64;
+    for k in 0..tran.x.len() {
+        let want = (vin[k] - vinf[k]) / 1e3;
+        assert!((i1[k] - want).abs() < 1e-9 + 1e-6 * want.abs(), "t = {}: {} vs {want}", tran.x[k], i1[k]);
+        // Each pin node converges to the abstol of the Newton step.
+        assert!((i1[k] + i2[k]).abs() < 1e-9 + 1e-6 * want.abs(), "KCL through RS: {} vs {}", i1[k], i2[k]);
+        peak = peak.max(want.abs());
+    }
+    // The 1.5 V step charges CF through RS: the current peaks near 1.5 V / 1 kΩ.
+    assert!(peak > 1e-3, "peak {peak}");
+    let report = runmat_circuit_spice::report::report(&s, &design.simulations["front_end"], &Default::default());
+    let json = serde_json::to_value(&report).unwrap();
+    let step = json["analyses"].as_array().unwrap().iter().find(|a| a["name"] == "step").unwrap();
+    assert_eq!(step["signals"][2]["probe"], "RS.1");
+    assert_eq!(step["signals"][2]["quantity"], "current");
 }

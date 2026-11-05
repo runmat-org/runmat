@@ -19,7 +19,10 @@
 pub mod fake;
 pub mod native;
 pub mod netlist;
+// The ngspice shared library loads on native hosts only; the browser runs the native engine.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ngspice;
+pub mod report;
 pub mod study;
 
 use std::collections::BTreeMap;

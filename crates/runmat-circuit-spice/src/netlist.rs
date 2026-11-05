@@ -11,11 +11,12 @@
 //!
 //! Components that have none of these are reported as [`EmitError`]s (or skipped with
 //! [`EmitOptions::skip_unmodelled`]). Nets become nodes named after the net (sanitised);
-//! the ground nets become node `0`. With [`EmitOptions::sense_pins`], every pin of every
-//! element is fed through a zero-volt source `VS_<designator>_<k>` so the engine reports
-//! each pin current.
+//! the ground nets become node `0`. With [`EmitOptions::sense`], every pin of every element (or
+//! the pins it lists) is fed through a zero-volt source `VS_<designator>_<k>` so the engine
+//! reports each pin current.
 
 use runmat_circuit::elab::{FitState, Netlist};
+use runmat_circuit::ir::{ParamValue, Tolerance};
 use runmat_circuit::library::{Pool, SpiceModel};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -25,8 +26,8 @@ pub struct EmitOptions {
     pub title: String,
     /// Nets tied to node 0.
     pub ground: Vec<String>,
-    /// Feed every element pin through a 0 V sense source (for pin currents and power).
-    pub sense_pins: bool,
+    /// The pins fed through a 0 V sense source (for pin currents and power).
+    pub sense: SensePins,
     /// Leave out components with no model instead of failing.
     pub skip_unmodelled: bool,
     /// Sources and loads added to the circuit.
@@ -42,11 +43,30 @@ impl Default for EmitOptions {
         EmitOptions {
             title: "runmat".into(),
             ground: vec!["GND".into(), "0".into()],
-            sense_pins: true,
+            sense: SensePins::All,
             skip_unmodelled: false,
             stimuli: vec![],
             extra: vec![],
             part_models: BTreeMap::new(),
+        }
+    }
+}
+
+/// Which pins get a sense source.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SensePins {
+    None,
+    All,
+    /// `(designator, pin)` pairs; the pin matches its number or name, ignoring case.
+    Only(Vec<(String, String)>),
+}
+
+impl SensePins {
+    fn wants(&self, designator: &str, pin: &str) -> bool {
+        match self {
+            SensePins::None => false,
+            SensePins::All => true,
+            SensePins::Only(list) => list.iter().any(|(d, p)| d == designator && p.eq_ignore_ascii_case(pin)),
         }
     }
 }
@@ -148,6 +168,9 @@ pub struct Element {
     pub nodes: Vec<String>,
     /// The rest of the card (value or model and parameters).
     pub value: String,
+    /// The component's tolerance band on its primitive value (resistance, capacitance or
+    /// inductance), as `[min, max]` over nominal; `None` when exact or not a primitive.
+    pub band: Option<(f64, f64)>,
 }
 
 /// A pin sense source: current into `designator`'s pin from `net`.
@@ -290,13 +313,9 @@ pub fn emit(nl: &Netlist, pool: &Pool, opts: &EmitOptions) -> Result<Deck, Vec<E
                     .trim_end_matches(|ch: char| ch.is_ascii_digit())
                     .to_string()
             });
-        let param = |k: &str| {
-            c.params
-                .get(k)
-                .or_else(|| part.as_ref().and_then(|p| p.params.get(k)))
-                .and_then(|p| p.as_quantity())
-                .map(|q| q.value)
-        };
+        let param_of = |k: &str| c.params.get(k).or_else(|| part.as_ref().and_then(|p| p.params.get(k)));
+        let param = |k: &str| param_of(k).and_then(|p| p.as_quantity()).map(|q| q.value);
+        let mut band = None;
         let pin_net = |gate: &str, pin: &str| {
             c.pins
                 .iter()
@@ -334,12 +353,20 @@ pub fn emit(nl: &Netlist, pool: &Pool, opts: &EmitOptions) -> Result<Deck, Vec<E
                         .iter()
                         .map(|p| (p.pin.clone(), p.net.map(|n| nl.nets[n].name.clone())))
                         .collect();
-                    let prim = match entity_prefix.as_str() {
-                        "R" => param("resistance").map(|v| ('R', eng(v))),
-                        "C" => param("capacitance").map(|v| ('C', eng(v))),
-                        "L" => param("inductance").map(|v| ('L', eng(v))),
+                    let key = match entity_prefix.as_str() {
+                        "R" => Some(('R', "resistance")),
+                        "C" => Some(('C', "capacitance")),
+                        "L" => Some(('L', "inductance")),
                         _ => None,
                     };
+                    let prim = key.and_then(|(l, k)| param(k).map(|v| (l, eng(v))));
+                    band = key.and_then(|(_, k)| match param_of(k).map(|p| &p.value) {
+                        Some(ParamValue::Quantity { nominal, tol }) if *tol != Tolerance::Exact && nominal.value != 0.0 => {
+                            let (lo, hi) = tol.bounds(nominal.value);
+                            Some((lo / nominal.value, hi / nominal.value))
+                        }
+                        _ => None,
+                    });
                     match prim {
                         Some((l, v)) if two.len() == 2 => (l, two, v),
                         _ => {
@@ -365,7 +392,7 @@ pub fn emit(nl: &Netlist, pool: &Pool, opts: &EmitOptions) -> Result<Deck, Vec<E
                     format!("nc_{nc}")
                 }
             };
-            if opts.sense_pins && net.is_some() {
+            if net.is_some() && opts.sense.wants(&c.designator, label) {
                 let pin_node = format!("p_{}_{k}", node_name(&c.designator));
                 let source = format!("VS_{}_{k}", node_name(&c.designator));
                 deck.elements.push(Element {
@@ -373,6 +400,7 @@ pub fn emit(nl: &Netlist, pool: &Pool, opts: &EmitOptions) -> Result<Deck, Vec<E
                     designator: None,
                     nodes: vec![n.clone(), pin_node.clone()],
                     value: "0".into(),
+                    band: None,
                 });
                 deck.senses.push(Sense {
                     designator: c.designator.clone(),
@@ -397,6 +425,7 @@ pub fn emit(nl: &Netlist, pool: &Pool, opts: &EmitOptions) -> Result<Deck, Vec<E
             designator: Some(c.designator.clone()),
             nodes,
             value,
+            band,
         });
     }
     for s in &opts.stimuli {
@@ -421,6 +450,7 @@ pub fn emit(nl: &Netlist, pool: &Pool, opts: &EmitOptions) -> Result<Deck, Vec<E
             designator: None,
             nodes: vec![na, nb],
             value,
+            band: None,
         });
     }
     if errors.is_empty() {
