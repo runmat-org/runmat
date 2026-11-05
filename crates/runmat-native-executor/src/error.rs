@@ -40,6 +40,70 @@ impl From<Box<runmat_runtime::RuntimeError>> for NativeExecutorError {
     }
 }
 
+impl NativeExecutorError {
+    pub(crate) fn with_secondary(self, secondary: Self) -> Self {
+        match runmat_runtime::runtime_error::complete_with_cleanup::<()>(
+            Err(self.into_runtime_error()),
+            Err(secondary.into_runtime_error()),
+        ) {
+            Err(error) => error.into(),
+            Ok(()) => unreachable!("two failures cannot complete successfully"),
+        }
+    }
+
+    /// Canonical host mapping also used when an original native failure must
+    /// retain a secondary cleanup cause in RuntimeError's existing container.
+    pub fn into_runtime_error(self) -> runmat_runtime::RuntimeError {
+        use runmat_runtime::runtime_error::RuntimeFailureOrigin;
+        match self {
+            Self::Runtime(error) => *error,
+            Self::InvalidProgram(error) if error.allocation.is_some() => {
+                runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+                    None,
+                    "RunMat:NativeLivenessAdmission",
+                    error.message,
+                    error.allocation.expect("checked allocation cause"),
+                )
+            }
+            error @ Self::Cancelled => {
+                runmat_runtime::build_runtime_error("native execution was cancelled")
+                    .with_identifier("RunMat:ExecutionCancelled")
+                    .with_phase("native")
+                    .with_failure_origin(RuntimeFailureOrigin::ExecutionControlCancellation)
+                    .with_source(error)
+                    .build()
+            }
+            error @ Self::Deadline => {
+                runmat_runtime::build_runtime_error("native execution deadline elapsed")
+                    .with_identifier("RunMat:ExecutionDeadline")
+                    .with_phase("native")
+                    .with_source(error)
+                    .build()
+            }
+            Self::UnsupportedSite(message) => runmat_runtime::build_runtime_error(message)
+                .with_identifier("RunMat:NativeUnsupportedSite")
+                .with_phase("native")
+                .build(),
+            Self::SourceAdmission(error) => runmat_runtime::build_runtime_error(error.to_string())
+                .with_identifier("RunMat:NativeSourceAdmission")
+                .with_phase("native")
+                .with_source(error)
+                .build(),
+            Self::Unavailable => runmat_runtime::build_runtime_error(
+                "native execution is unavailable on this platform",
+            )
+            .with_identifier("RunMat:NativeUnavailable")
+            .with_phase("native")
+            .build(),
+            other => runmat_runtime::build_runtime_error(other.to_string())
+                .with_identifier("RunMat:NativeExecution")
+                .with_phase("native")
+                .with_source(other)
+                .build(),
+        }
+    }
+}
+
 /// Native metadata uses its original runtime for both control provenance and
 /// ordinary admission diagnostics, even if another session is currently entered.
 pub(crate) fn allocation_error(

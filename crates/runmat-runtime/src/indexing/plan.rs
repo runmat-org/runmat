@@ -370,6 +370,25 @@ pub(super) fn numeric_linear_output_shape_in_context(
     admission::shape(context, shape.len(), |dimension| Ok(shape[dimension]))
 }
 
+/// Linear logical selection keeps a vector source's orientation only when
+/// the mask is also a vector. Every other selection produces a column.
+pub(crate) fn logical_linear_output_shape_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    source_shape: &[usize],
+    mask_shape: &[usize],
+    selected_len: usize,
+) -> VmResult<SharedShape> {
+    let source_row = is_vector_shape(source_shape)
+        && is_vector_shape(mask_shape)
+        && source_shape.first().copied().unwrap_or(1) == 1;
+    let shape = if source_row {
+        [1, selected_len]
+    } else {
+        [selected_len, 1]
+    };
+    admission::shape(context, 2, |dimension| Ok(shape[dimension]))
+}
+
 fn checked_total_len_from_shape(shape: &[usize]) -> VmResult<usize> {
     if is_scalar_shape(shape) {
         return Ok(1);
@@ -430,13 +449,8 @@ fn numeric_linear_shape<'a>(
     selector_shape: &'a [usize],
     selected_len: usize,
 ) -> NumericLinearShape<'a> {
-    let vector = |shape: &[usize]| {
-        let rows = shape.first().copied().unwrap_or(1);
-        let cols = shape.get(1).copied().unwrap_or(1);
-        shape.iter().skip(2).all(|&extent| extent == 1) && (rows == 1 || cols == 1)
-    };
     let source_is_non_scalar = source_shape.iter().any(|&extent| extent != 1);
-    if vector(source_shape) && source_is_non_scalar && vector(selector_shape) {
+    if is_vector_shape(source_shape) && source_is_non_scalar && is_vector_shape(selector_shape) {
         if source_shape.first().copied().unwrap_or(1) == 1 {
             NumericLinearShape::Vector([1, selected_len])
         } else {
@@ -445,6 +459,12 @@ fn numeric_linear_shape<'a>(
     } else {
         NumericLinearShape::Borrowed(selector_shape)
     }
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
+    shape.iter().skip(2).all(|&extent| extent == 1) && (rows == 1 || cols == 1)
 }
 
 fn exact_index_from_f64(value: f64) -> Option<i64> {
@@ -1164,11 +1184,31 @@ where
                     .await_stage(materialize_index_value_in_context(context, value))
                     .await??;
                 match materialized.as_ref() {
-                    Value::Bool(value) => ExprSel::Indices(truth_indices(context, *value)?),
+                    Value::Bool(value) => {
+                        let values = truth_indices(context, *value)?;
+                        if spec.dims == 1 {
+                            linear_output_shape = Some(logical_linear_output_shape_in_context(
+                                context,
+                                spec.shape,
+                                &[1, 1],
+                                values.len(),
+                            )?);
+                        }
+                        ExprSel::Indices(values)
+                    }
                     Value::LogicalArray(value)
                         if value.data.len() == 1 && is_scalar_shape(&value.shape) =>
                     {
-                        ExprSel::Indices(truth_indices(context, value.data[0] != 0)?)
+                        let values = truth_indices(context, value.data[0] != 0)?;
+                        if spec.dims == 1 {
+                            linear_output_shape = Some(logical_linear_output_shape_in_context(
+                                context,
+                                spec.shape,
+                                &value.shape,
+                                values.len(),
+                            )?);
+                        }
+                        ExprSel::Indices(values)
                     }
                     Value::LogicalArray(value) => {
                         if spec.dims != 1 && value.data.len() != extent {
@@ -1179,10 +1219,12 @@ where
                         }
                         let values = logical_indices_linear_in_context(context, value, extent)?;
                         if spec.dims == 1 {
-                            linear_output_shape =
-                                Some(admission::shape(context, 2, |dimension| {
-                                    Ok(if dimension == 0 { values.len() } else { 1 })
-                                })?);
+                            linear_output_shape = Some(logical_linear_output_shape_in_context(
+                                context,
+                                spec.shape,
+                                &value.shape,
+                                values.len(),
+                            )?);
                         }
                         ExprSel::Indices(values)
                     }
@@ -2089,36 +2131,105 @@ mod tests {
     }
 
     #[test]
-    fn expr_plan_linear_logical_mask_matches_plain_shape() {
+    fn linear_logical_mask_preserves_vector_source_orientation_across_plans() {
         futures::executor::block_on(async {
-            let shape = vec![1, 5];
-            let numeric = vec![Value::LogicalArray(
-                LogicalArray::new(vec![1, 0, 1, 0, 1], vec![1, 5]).expect("logical selector"),
-            )];
-            let plain_selectors = build_slice_selectors(1, 0, 0, &numeric, &shape)
+            for (shape, mask_shape, data, expected) in [
+                (vec![1, 5], vec![1, 5], vec![1, 0, 1, 0, 1], vec![1, 3]),
+                (vec![1, 5], vec![5, 1], vec![1, 0, 1, 0, 1], vec![1, 3]),
+                (vec![5, 1], vec![1, 5], vec![1, 0, 1, 0, 1], vec![3, 1]),
+                (vec![2, 3], vec![1, 6], vec![1, 0, 1, 0, 1, 0], vec![3, 1]),
+                (vec![1, 6], vec![2, 3], vec![1, 0, 1, 0, 1, 0], vec![3, 1]),
+            ] {
+                let numeric = vec![Value::LogicalArray(
+                    LogicalArray::new(data, mask_shape).expect("logical selector"),
+                )];
+                let plain_selectors = build_slice_selectors(1, 0, 0, &numeric, &shape)
+                    .await
+                    .unwrap();
+                let plain = build_index_plan(&plain_selectors, 1, &shape).unwrap();
+                let host_selectors = crate::indexing::selectors::build_slice_selectors_host(
+                    1, 0, 0, &numeric, &shape,
+                )
+                .unwrap()
+                .expect("host logical selector stays available");
+                let host = build_index_plan(&host_selectors, 1, &shape).unwrap();
+                let object_selectors = crate::indexing::selectors::build_component_selectors(
+                    &[crate::object::indexing::ObjectIndexComponent::Value(
+                        numeric[0].clone(),
+                    )],
+                    &shape,
+                    false,
+                )
                 .await
                 .unwrap();
-            let plain = build_index_plan(&plain_selectors, 1, &shape).unwrap();
-            let expr = build_expr_index_plan(
-                ExprPlanSpec {
-                    dims: 1,
-                    colon_mask: 0,
-                    end_mask: 0,
-                    range_dims: &[],
-                    range_params: &[],
-                    range_start_exprs: &[],
-                    range_step_exprs: &[],
-                    range_end_exprs: &[],
-                    numeric: &numeric,
-                    shape: &shape,
-                },
-                |_dim_len, _expr| async move { unreachable!() },
-            )
-            .await
-            .unwrap();
-            assert_eq!(plain.indices, expr.indices);
-            assert_eq!(plain.output_shape, expr.output_shape);
-            assert_eq!(plain.selection_lengths, expr.selection_lengths);
+                let object = build_index_plan(&object_selectors, 1, &shape).unwrap();
+                let expr = build_expr_index_plan(
+                    ExprPlanSpec {
+                        dims: 1,
+                        colon_mask: 0,
+                        end_mask: 0,
+                        range_dims: &[],
+                        range_params: &[],
+                        range_start_exprs: &[],
+                        range_step_exprs: &[],
+                        range_end_exprs: &[],
+                        numeric: &numeric,
+                        shape: &shape,
+                    },
+                    |_dim_len, _expr| async move { unreachable!() },
+                )
+                .await
+                .unwrap();
+                for plan in [&plain, &host, &object, &expr] {
+                    assert_eq!(plan.output_shape, expected);
+                    assert_eq!(plan.indices, plain.indices);
+                    assert_eq!(plan.selection_lengths, plain.selection_lengths);
+                }
+            }
+            for (shape, expected) in [(vec![1, 5], vec![1, 0]), (vec![2, 3], vec![0, 1])] {
+                let numeric = vec![Value::Bool(false)];
+                let plain_selectors = build_slice_selectors(1, 0, 0, &numeric, &shape)
+                    .await
+                    .unwrap();
+                let plain = build_index_plan(&plain_selectors, 1, &shape).unwrap();
+                let host_selectors = crate::indexing::selectors::build_slice_selectors_host(
+                    1, 0, 0, &numeric, &shape,
+                )
+                .unwrap()
+                .expect("host scalar logical selector stays available");
+                let host = build_index_plan(&host_selectors, 1, &shape).unwrap();
+                let object_selectors = crate::indexing::selectors::build_component_selectors(
+                    &[crate::object::indexing::ObjectIndexComponent::Value(
+                        Value::Bool(false),
+                    )],
+                    &shape,
+                    false,
+                )
+                .await
+                .unwrap();
+                let object = build_index_plan(&object_selectors, 1, &shape).unwrap();
+                let expr = build_expr_index_plan(
+                    ExprPlanSpec {
+                        dims: 1,
+                        colon_mask: 0,
+                        end_mask: 0,
+                        range_dims: &[],
+                        range_params: &[],
+                        range_start_exprs: &[],
+                        range_step_exprs: &[],
+                        range_end_exprs: &[],
+                        numeric: &numeric,
+                        shape: &shape,
+                    },
+                    |_dim_len, _expr| async move { unreachable!() },
+                )
+                .await
+                .unwrap();
+                for plan in [&plain, &host, &object, &expr] {
+                    assert!(plan.indices.is_empty());
+                    assert_eq!(plan.output_shape, expected);
+                }
+            }
         })
     }
 
@@ -2196,7 +2307,7 @@ mod tests {
             .unwrap();
             assert!(plain.indices.is_empty());
             assert!(expr.indices.is_empty());
-            assert_eq!(plain.output_shape, vec![0, 1]);
+            assert_eq!(plain.output_shape, vec![1, 0]);
             assert_eq!(plain.output_shape, expr.output_shape);
             assert_eq!(plain.selection_lengths, expr.selection_lengths);
         })

@@ -1,4 +1,3 @@
-use futures::executor::block_on;
 use glam::Vec4;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_plot::plots::surface::ColorMap;
@@ -305,7 +304,6 @@ pub(crate) async fn tensor_from_value_async(
     context: &'static str,
 ) -> BuiltinResult<Tensor> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.clone()),
         Value::GpuTensor(handle) => {
             let tmp = Value::GpuTensor(handle.clone());
             let gathered = gather_if_needed_async(&tmp)
@@ -314,14 +312,24 @@ pub(crate) async fn tensor_from_value_async(
             Tensor::try_from(&gathered)
                 .map_err(|e| plotting_error(context, format!("{context}: {e}")))
         }
-        _ => {
-            Tensor::try_from(value).map_err(|e| plotting_error(context, format!("{context}: {e}")))
-        }
+        _ => tensor_from_value(value, context),
     }
 }
 
 pub(crate) fn tensor_from_value(value: &Value, context: &'static str) -> BuiltinResult<Tensor> {
-    block_on(tensor_from_value_async(value, context))
+    // Synchronous consumers have already materialized provider sources. Keep
+    // host projection usable inside an active async property transaction;
+    // provider readback belongs to the async conversion above.
+    match value {
+        Value::Tensor(tensor) => Ok(tensor.clone()),
+        Value::GpuTensor(_) => Err(plotting_error(
+            context,
+            format!("{context}: GPU point data requires async conversion"),
+        )),
+        _ => {
+            Tensor::try_from(value).map_err(|e| plotting_error(context, format!("{context}: {e}")))
+        }
+    }
 }
 
 pub(crate) fn convert_size_vector(
@@ -374,8 +382,7 @@ fn convert_size_tensor(
 }
 
 pub(crate) fn marker_area_points2_to_diameter_px(area_points2: f64) -> f32 {
-    let clamped = area_points2.max(0.1);
-    (clamped.sqrt() as f32 * POINTS_TO_PX).max(1.0)
+    runmat_plot::plots::scatter::marker_area_points2_to_diameter_px(area_points2)
 }
 
 pub(crate) fn marker_diameter_px_to_area_points2(diameter_px: f32) -> f64 {
@@ -610,6 +617,7 @@ pub fn validate_gpu_color_matrix(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
     use runmat_value::IntegerStorage;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -637,7 +645,9 @@ mod tests {
 
         let matrix = Tensor::new(vec![0.25, 0.5, 0.5, 0.75, 0.75, 1.0], vec![2, 3]).unwrap();
         assert_eq!(
-            convert_rgb_color_tensor(matrix, 2, "scatter").unwrap(),
+            block_on(async {
+                convert_rgb_color_matrix(&Value::Tensor(matrix), 2, "scatter").unwrap()
+            }),
             vec![expected, Vec4::new(0.5, 0.75, 1.0, 1.0)]
         );
     }
@@ -651,7 +661,11 @@ mod tests {
             Tensor::new_integer(IntegerStorage::I16(vec![7, 8]), vec![1, 2]).expect("colors"),
         );
 
-        let size_px = convert_size_vector(&sizes, 2, "scatter").expect("sizes");
+        // The sync host projection must also work while an async setter is
+        // being polled, without entering another executor.
+        let size_px = block_on(async {
+            convert_size_vector(&sizes, 2, "scatter").expect("sizes inside async transaction")
+        });
         let color_values =
             block_on(convert_scalar_color_values_async(&colors, 2, "scatter")).expect("colors");
 

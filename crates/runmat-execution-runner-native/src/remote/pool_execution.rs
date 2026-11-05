@@ -35,8 +35,11 @@ const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(2);
 const DRIVER_TICK_INTERVAL: Duration = Duration::from_millis(250);
 const CANCELLATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub(crate) enum RemotePoolExecutionOutcome {
-    Completed(RemotePoolExecutionResult),
+/// In-process completion transfers its original values without a control heap
+/// allocation. Only the authenticated root driver funds a retained publication.
+pub(crate) type RemotePoolExecutionOutcome = Result<RemotePoolExecutionResult, RemoteExecutionStop>;
+
+pub(crate) enum RemoteExecutionStop {
     Cancelled,
     Indeterminate(String),
 }
@@ -281,13 +284,17 @@ pub(super) async fn execute(
                         authoritative_unstarted.as_ref(),
                     )?;
                     if cancelled {
-                        return Ok(RemotePoolExecutionOutcome::Cancelled);
+                        return Ok(Err(
+                            crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                        ));
                     }
                     break;
                 }
                 StartupWait::Completed(Ok(None), cancelled) => {
                     if cancelled {
-                        return Ok(RemotePoolExecutionOutcome::Cancelled);
+                        return Ok(Err(
+                            crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                        ));
                     }
                     match await_startup_operation(
                         tokio::time::sleep(Duration::from_millis(250)),
@@ -300,7 +307,9 @@ pub(super) async fn execute(
                     {
                         StartupWait::Completed((), false) => {}
                         StartupWait::Completed((), true) | StartupWait::Deadline(true) => {
-                            return Ok(RemotePoolExecutionOutcome::Cancelled)
+                            return Ok(Err(
+                                crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                            ))
                         }
                         StartupWait::Deadline(false) => {
                             return Err(protocol(
@@ -310,7 +319,11 @@ pub(super) async fn execute(
                     }
                 }
                 StartupWait::Completed(Err(error), _) => return Err(protocol(error)),
-                StartupWait::Deadline(true) => return Ok(RemotePoolExecutionOutcome::Cancelled),
+                StartupWait::Deadline(true) => {
+                    return Ok(Err(
+                        crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                    ))
+                }
                 StartupWait::Deadline(false) => {
                     return Err(protocol(
                         "original worker tree retirement evidence timed out",
@@ -335,7 +348,9 @@ pub(super) async fn execute(
                 authority,
                 &worker_pool.resources,
                 worker_pool.generation,
-                Ok(RemotePoolExecutionOutcome::Cancelled),
+                Ok(Err(
+                    crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                )),
             )
             .await;
         }
@@ -449,7 +464,9 @@ async fn execute_with_allocated_workers(
     while registered.len() < desired_workers as usize {
         if *cancellation.borrow() {
             pool.cancel(CancellationReason::User)?;
-            return Ok(RemotePoolExecutionOutcome::Cancelled);
+            return Ok(Err(
+                crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+            ));
         }
         match await_startup_operation(
             reconcile_workers(
@@ -470,12 +487,16 @@ async fn execute_with_allocated_workers(
             StartupWait::Completed(result, cancelled) => {
                 result?;
                 if cancelled {
-                    return Ok(RemotePoolExecutionOutcome::Cancelled);
+                    return Ok(Err(
+                        crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                    ));
                 }
             }
             StartupWait::Deadline(cancelled) => {
                 if cancelled {
-                    return Ok(RemotePoolExecutionOutcome::Cancelled);
+                    return Ok(Err(
+                        crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                    ));
                 }
                 return Err(protocol(
                     "remote workers did not become ready before the deadline",
@@ -495,7 +516,9 @@ async fn execute_with_allocated_workers(
         .await?
         {
             StartupWait::Completed((), true) | StartupWait::Deadline(true) => {
-                return Ok(RemotePoolExecutionOutcome::Cancelled);
+                return Ok(Err(
+                    crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                ));
             }
             StartupWait::Completed((), false) => {}
             StartupWait::Deadline(false) => {
@@ -526,11 +549,15 @@ async fn execute_with_allocated_workers(
                 generation.store(worker_pool.generation, std::sync::atomic::Ordering::Release);
                 validate_pool_intent(&worker_pool, desired_workers, &resources)?;
                 if cancelled {
-                    return Ok(RemotePoolExecutionOutcome::Cancelled);
+                    return Ok(Err(
+                        crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                    ));
                 }
             }
             StartupWait::Deadline(true) => {
-                return Ok(RemotePoolExecutionOutcome::Cancelled);
+                return Ok(Err(
+                    crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                ));
             }
             StartupWait::Deadline(false) => {
                 return Err(protocol(
@@ -567,7 +594,9 @@ async fn execute_with_allocated_workers(
                 .await?;
                 if !supported {
                     pool.cancel(CancellationReason::User)?;
-                    return Ok(RemotePoolExecutionOutcome::Cancelled);
+                    return Ok(Err(
+                        crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+                    ));
                 }
             }
             return run_graph_root(
@@ -696,8 +725,10 @@ async fn execute_with_allocated_workers(
         .await
         .unwrap_or(false);
         if !cancellation_settled {
-            return Ok(RemotePoolExecutionOutcome::Indeterminate(
-                "remote cancellation settlement did not complete before its deadline".into(),
+            return Ok(Err(
+                crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(
+                    "remote cancellation settlement did not complete before its deadline".into(),
+                ),
             ));
         }
         // Persist the final scheduler state before exposing any terminal outcome,
@@ -804,9 +835,9 @@ async fn execute_with_allocated_workers(
                             return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
                         }
                         if cancellation_requested {
-                            return Ok(RemotePoolExecutionOutcome::Indeterminate(
+                            return Ok(Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(
                                 "remote cancellation was not quiescent before recovery publication timed out".into(),
-                            ));
+                            )));
                         }
                         return Err(protocol("remote recovery publication exceeded its deadline"));
                     }
@@ -848,7 +879,7 @@ async fn execute_with_allocated_workers(
                                 generation.as_ref(),
                                 format!("remote worker control failed: {error}"),
                             ).await {
-                                return Ok(outcome);
+                                return Ok(Err(outcome));
                             }
                             return Err(error);
                         }
@@ -862,15 +893,15 @@ async fn execute_with_allocated_workers(
                             generation.as_ref(),
                             "remote worker control operation exceeded its deadline",
                         ).await {
-                            return Ok(outcome);
+                            return Ok(Err(outcome));
                         }
                         if let Some(result) = completed {
                             return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
                         }
                         if cancellation_requested {
-                            return Ok(RemotePoolExecutionOutcome::Indeterminate(
+                            return Ok(Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(
                                 "remote cancellation was not quiescent before worker control timed out".into(),
-                            ));
+                            )));
                         }
                         return Err(protocol("remote worker control operation exceeded its deadline"));
                     }
@@ -919,15 +950,15 @@ async fn execute_with_allocated_workers(
                             generation.as_ref(),
                             "remote worker reconciliation exceeded its deadline",
                         ).await {
-                            return Ok(outcome);
+                            return Ok(Err(outcome));
                         }
                         if let Some(result) = completed {
                             return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
                         }
                         if cancellation_requested {
-                            return Ok(RemotePoolExecutionOutcome::Indeterminate(
+                            return Ok(Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(
                                 "remote cancellation control cleanup remained incomplete when worker reconciliation timed out".into(),
-                            ));
+                            )));
                         }
                         return Err(protocol("remote worker reconciliation exceeded its deadline"));
                     }
@@ -1037,10 +1068,10 @@ async fn run_graph_root(
             let drained = tokio::time::timeout(CANCELLATION_DRAIN_TIMEOUT, &mut execution).await;
             return Ok(match drained {
                 Ok(result) => super::pool_tasks::observed_execution(pool, result, true)?,
-                Err(_) => RemotePoolExecutionOutcome::Indeterminate(
+                Err(_) => Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(
                     "remote Graph cancellation did not prove worker retirement before the drain deadline"
                         .into(),
-                ),
+                )),
             });
         }
         tokio::select! {

@@ -370,6 +370,13 @@ where
         .idempotency_key
         .take()
         .unwrap_or_else(|| Uuid::new_v4().to_string());
+    // Ask the Server to authorize the child and its terminal control envelope
+    // together. The captured numerical policy and console budget keep the
+    // original child limit after the driver partitions the parent grant.
+    let driver_memory_bytes = i64::try_from(
+        runmat_execution::resource::remote_driver_memory_bytes(DRIVER_MEMORY_BYTES as u64)?,
+    )
+    .context("driver parent memory exceeds API range")?;
     let request_digest = request_digest(
         &idempotency_key,
         &revision,
@@ -377,6 +384,7 @@ where
         &options,
         &digest_accelerators,
         recovery_fingerprint.as_deref(),
+        driver_memory_bytes,
     );
     let run = client
         .api()
@@ -402,7 +410,7 @@ where
                 ]),
                 resources: types::ResourceRequestBody {
                     cpu_millicores: 1_000,
-                    memory_bytes: DRIVER_MEMORY_BYTES,
+                    memory_bytes: driver_memory_bytes,
                     scratch_bytes: 1024 * 1024 * 1024,
                     accelerators: driver_accelerators,
                     maximum_wall_millis: 60 * 60 * 1_000,
@@ -738,6 +746,7 @@ fn request_digest(
     options: &RemoteSubmissionOptions,
     accelerators: &[runmat_execution::resource::AcceleratorRequest],
     recovery_recipient_fingerprint: Option<&str>,
+    driver_memory_bytes: i64,
 ) -> String {
     let mut digest = Sha256::new();
     digest.update(b"runmat-remote-run-request-v2\0");
@@ -755,7 +764,7 @@ fn request_digest(
             digest.update(limits.max_text_bytes.to_be_bytes());
         }
     }
-    digest.update(DRIVER_MEMORY_BYTES.to_be_bytes());
+    digest.update(driver_memory_bytes.to_be_bytes());
     for accelerator in accelerators {
         digest.update(b"\0accelerator\0");
         digest.update(

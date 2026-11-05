@@ -1,7 +1,6 @@
 //! Short-lived publication preparation around one authentic projection install.
 
 use super::*;
-use crate::context::host_allocation::HostOutputPermit;
 use crate::workspace::base::projection::{
     PreparedProjectionCompletion, PreparedProjectionMutation, PreparedUnboundedProjectionMutation,
     UnboundedProjectionAction,
@@ -174,7 +173,6 @@ impl BaseWorkspaceProjectionService {
         &self,
         context: &RuntimeContext,
         prepared: PreparedProjectionMutation,
-        permit: &HostOutputPermit,
     ) -> Result<(), RuntimeError> {
         // The immutable projection borrow authenticates the candidate. The
         // protocol callback is synchronous metadata preparation, never user
@@ -202,7 +200,7 @@ impl BaseWorkspaceProjectionService {
             .map_err(|_| base_workspace_error_to_runtime(BaseWorkspaceError::BorrowConflict))?;
         let retired = state
             .projection
-            .install_prepared_mutation(prepared, permit)
+            .install_prepared_mutation(prepared)
             .map_err(base_workspace_error_to_runtime)?;
         state.last_publication_stamp = Some(stamp);
         drop(state);

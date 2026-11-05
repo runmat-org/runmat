@@ -74,7 +74,12 @@ fn rooted_sequence(
 fn compile_executor(
     assembly: runmat_native_codegen::NativeAssembly,
 ) -> Result<NativeExecutor, JitError> {
-    GenericCompiler::compile_executor_with_resume_points(assembly, None, BTreeMap::new())
+    GenericCompiler::compile_executor_with_resume_points(
+        assembly,
+        None,
+        BTreeMap::new(),
+        runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
+    )
 }
 
 fn advance_after_suspended_work(
@@ -106,6 +111,7 @@ fn specialized_product_still_rejects_mismatched_selected_entry_profile() {
         None,
         BTreeMap::new(),
         profile,
+        runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
     )
     .unwrap();
     let error = executor
@@ -325,6 +331,7 @@ fn native_symbol_constants_match_registered_values_in_generic_and_linked_entries
             )]))
             .unwrap(),
             NativeExecutorOptions::default(),
+            runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
         )
         .unwrap();
         for executor in [&generic, &linked] {
@@ -448,6 +455,7 @@ fn linked_static_entrypoint_uses_the_same_invocation_host() {
         assembly,
         NativeExecutable::linked(BTreeMap::from([(function, entrypoint)])).unwrap(),
         NativeExecutorOptions::default(),
+        runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
     )
     .unwrap();
 
@@ -642,6 +650,7 @@ fn interpreter_target_is_selected_only_for_verified_empty_stack_resume_points() 
         fixture_with_regions(vec![region]),
         None,
         BTreeMap::from([(point, 7)]),
+        runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
     )
     .unwrap();
     let policy = DeoptimizationPolicy {
@@ -1283,6 +1292,7 @@ fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
             None,
             BTreeMap::new(),
             profile,
+            runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
         )
         .unwrap(),
     );
@@ -1630,6 +1640,7 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
                     None,
                     BTreeMap::new(),
                     profile,
+                    runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
                 )
                 .unwrap()
             } else {

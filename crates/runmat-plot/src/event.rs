@@ -2450,7 +2450,7 @@ impl ScenePlot {
                 let (x_data, y_data, z_data) = scatter3
                     .export_numeric_xyz_data()
                     .await
-                    .map_err(SceneExportError::readback)?
+                    .map_err(SceneExportFailure::readback_typed)?
                     .ok_or_else(|| {
                         SceneExportError::unexportable("scatter3 plot has no exportable scene data")
                     })?;
@@ -2470,7 +2470,7 @@ impl ScenePlot {
                 let colors = scatter3
                     .export_scene_colors(points.len())
                     .await
-                    .map_err(SceneExportError::readback)?;
+                    .map_err(SceneExportFailure::readback_typed)?;
                 Self::Scatter3 {
                     points,
                     x_source: Some((&x_data).into()),
@@ -2478,7 +2478,10 @@ impl ScenePlot {
                     z_source: Some((&z_data).into()),
                     colors_rgba: colors.into_iter().map(vec4_to_rgba).collect(),
                     point_size: scatter3.point_size,
-                    point_sizes: scatter3.point_sizes.clone(),
+                    point_sizes: scatter3
+                        .export_scene_sizes()
+                        .await
+                        .map_err(SceneExportFailure::readback_typed)?,
                     axes_index,
                     label: scatter3.label.clone(),
                     visible: scatter3.visible,

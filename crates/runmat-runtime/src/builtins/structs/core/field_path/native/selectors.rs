@@ -49,17 +49,12 @@ pub(super) async fn path(
                         let mut values = values.iter().copied();
                         numeric(owner, shape, || values.next()).await?
                     }
+                    IndexComponent::LogicalScalar(value) => Value::Bool(*value),
                     IndexComponent::Logical(mask) => {
-                        let mut count = 0usize;
-                        for value in mask {
-                            count += usize::from(*value != 0);
-                            owner.checkpoint(1).await?;
-                        }
-                        let mut values = mask
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(index, value)| (*value != 0).then_some(index + 1));
-                        numeric(owner, &[count, 1], || values.next()).await?
+                        // Preserve the admitted logical mask and its shape for
+                        // the canonical object's linear-index planner. A
+                        // numeric index tensor would lose mask orientation.
+                        Value::LogicalArray(mask.clone())
                     }
                     IndexComponent::End => {
                         unreachable!("deferred selector retained before numeric conversion")

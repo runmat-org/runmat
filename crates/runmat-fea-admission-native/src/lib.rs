@@ -12,6 +12,9 @@ use runmat_server_client::{auth, simulation::*};
 use runmat_simulation_usage::{MeasurementVersion, OperationCount};
 use uuid::Uuid;
 
+mod client_session;
+use client_session::{LeaseClientSession, PersonalLeaseAuth};
+
 pub struct NativeFeaAdmission {
     org: FeaLocalOrganization,
     client: SimulationClientKind,
@@ -27,6 +30,7 @@ struct DriverLeaseAuthority {
     fencing_token: u64,
     credential: String,
 }
+
 impl NativeFeaAdmission {
     /// A typed host selector; this constructor performs no auth or transport work.
     pub fn from_selection(org: FeaLocalOrganization) -> Self {
@@ -232,7 +236,7 @@ impl FeaRunAdmission for NativeFeaAdmission {
                 };
                 runtime.block_on(async move {
                     let opened = open(org, driver, request, client_kind, lower_cap).await;
-                    let (client, lease, initial_budget) = match opened {
+                    let (mut client, lease, initial_budget) = match opened {
                         Ok(value) => value,
                         Err(error) => {
                             let _ = ready.send(Err(error));
@@ -247,26 +251,31 @@ impl FeaRunAdmission for NativeFeaAdmission {
                     while let Some(command) = receiver.recv().await {
                         match command {
                             Command::Heartbeat(usage, reply) => {
-                                let result = client
-                                    .usage(&lease.lease_id, &usage)
-                                    .await
-                                    .map_err(denial)
-                                    .and_then(|hold| {
-                                        budget(
-                                            hold.budget_ops,
-                                            hold.granted_ops,
-                                            hold.expires_at,
-                                            lease.heartbeat_seconds,
-                                        )
-                                    });
+                                let result = match client.current().await {
+                                    Ok(client) => {
+                                        client.usage(&lease.lease_id, &usage).await.map_err(denial)
+                                    }
+                                    Err(error) => Err(error),
+                                }
+                                .and_then(|hold| {
+                                    budget(
+                                        hold.budget_ops,
+                                        hold.granted_ops,
+                                        hold.expires_at,
+                                        lease.heartbeat_seconds,
+                                    )
+                                });
                                 let _ = reply.send(result);
                             }
                             Command::Settle(request, reply) => {
-                                let result = client
-                                    .settle(&lease.lease_id, &request)
-                                    .await
-                                    .map(|_| ())
-                                    .map_err(denial);
+                                let result = match client.current().await {
+                                    Ok(client) => client
+                                        .settle(&lease.lease_id, &request)
+                                        .await
+                                        .map(|_| ())
+                                        .map_err(denial),
+                                    Err(error) => Err(error),
+                                };
                                 let _ = reply.send(result);
                                 break;
                             }
@@ -287,21 +296,24 @@ impl FeaRunAdmission for NativeFeaAdmission {
 }
 
 async fn open(
-    org: Option<Uuid>,
+    org_override: Option<Uuid>,
     driver: Option<DriverLeaseAuthority>,
     request: FeaRunRequest,
     client_kind: SimulationClientKind,
     lower_cap: Option<OperationCount>,
-) -> Result<(SimulationLeaseClient, SimulationLease, FeaRunBudget), FeaRunDenied> {
+) -> Result<(LeaseClientSession, SimulationLease, FeaRunBudget), FeaRunDenied> {
     let (client, org) = if let Some(driver) = driver {
         (
-            SimulationLeaseClient::for_driver(
-                &driver.server,
-                driver.lease,
-                driver.fencing_token,
-                &driver.credential,
-            )
-            .map_err(denial)?,
+            LeaseClientSession {
+                client: SimulationLeaseClient::for_driver(
+                    &driver.server,
+                    driver.lease,
+                    driver.fencing_token,
+                    &driver.credential,
+                )
+                .map_err(denial)?,
+                personal: None,
+            },
             driver.org,
         )
     } else {
@@ -316,15 +328,26 @@ async fn open(
         .map_err(|_| FeaRunDenied::ServerUnreachable)?
         .map_err(auth_denial)?;
         let client = SimulationLeaseClient::new(&server, &token).map_err(denial)?;
-        let org = match auth::configured_public_org_id(&config, org)
-            .map_err(|_| FeaRunDenied::LicenseInvalid)?
-        {
+        let configured_org = auth::configured_public_org_id(&config, org_override)
+            .map_err(|_| FeaRunDenied::LicenseInvalid)?;
+        let org = match configured_org {
             Some(org) => org,
             None => client.sole_organization().await.map_err(denial)?,
         };
-        (client, org)
+        (
+            LeaseClientSession {
+                client,
+                personal: Some(PersonalLeaseAuth {
+                    server,
+                    config,
+                    token,
+                }),
+            },
+            org,
+        )
     };
     let lease = client
+        .client
         .start(
             &org,
             &StartSimulationLease {

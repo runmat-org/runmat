@@ -25,22 +25,14 @@ impl PreparedProjectionCompletion {
 }
 
 pub(super) enum PreparedProjectionAction {
-    Assignment {
-        storage: PreparedStorageExecutorAssignment,
-    },
-    Namespace {
-        plan: WorkspaceNamespaceMutationPlan,
-        name: WorkspaceName,
-        action: WorkspaceNamespaceAction,
-        target: Option<GlobalBindingTarget>,
-    },
+    Named { name: WorkspaceName },
     Clear,
 }
 
-/// The exact pending-delta candidate and its one authentic managed action.
-/// The live overlay is not cloned: repeated unique scalar stores can still
-/// replace their prior node in place when this mutation is installed.
+/// One entirely prepared live generation and its authentic pending effect.
+/// Installation swaps owners only; displaced roots retire after observers.
 pub(in crate::workspace::base) struct PreparedProjectionMutation {
+    pub(super) live: ManagedWorkspaceStorage,
     pub(super) pending: PreparedWorkspaceDeltaMutation,
     pub(super) action: PreparedProjectionAction,
     pub(super) captures_legacy: bool,
@@ -144,7 +136,15 @@ impl PreparedProjectionPublicationView<'_> {
                 Some(WorkspaceChangeData::Assign { .. })
                 | Some(WorkspaceChangeData::UnbindGlobal { .. })
                 | Some(WorkspaceChangeData::Clear) => None,
-                Some(WorkspaceChangeData::Remove { .. }) | None => self.base.global_target(name),
+                Some(WorkspaceChangeData::Remove { .. }) | None => self
+                    .managed_storage
+                    .expect("prepared live mutation")
+                    .global_target(name)
+                    .or_else(|| {
+                        (!self.captures_legacy)
+                            .then(|| self.base.global_target(name))
+                            .flatten()
+                    }),
             };
         }
         if let Some(globals) = self.globals {
@@ -184,9 +184,19 @@ impl PreparedProjectionPublicationView<'_> {
             ) {
                 return None;
             }
-            return self
-                .new_action(name)
-                .map_or_else(|| self.base.lookup(name), WorkspaceChange::value);
+            return self.new_action(name).map_or_else(
+                || {
+                    self.managed_storage
+                        .expect("prepared live mutation")
+                        .lookup(name)
+                        .or_else(|| {
+                            (!self.captures_legacy)
+                                .then(|| self.base.lookup(name))
+                                .flatten()
+                        })
+                },
+                WorkspaceChange::value,
+            );
         }
         if let Some(entries) = self.entries {
             return entries.get(name).map(RootedWorkspaceEntry::value);
@@ -222,10 +232,10 @@ impl PreparedProjectionMutation {
         Ok(PreparedProjectionPublicationView {
             base,
             pending,
-            managed_storage: None,
+            managed_storage: Some(&self.live),
             entries: None,
             globals: None,
-            captures_legacy: false,
+            captures_legacy: self.captures_legacy,
             source_start: 0,
             expected_revision: self.expected_revision,
             expected_generation: self.expected_generation,

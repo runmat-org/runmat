@@ -260,6 +260,8 @@ fn closed_world_native_callback_reuses_local_strcmp_feedback() {
                 interpreter_resume_points: input.interpreter_resume_points().clone(),
                 ..Default::default()
             },
+            runmat_native_codegen::NativeLivenessAdmission::capture(&runtime)
+                .expect("test liveness admission"),
         )
         .expect("bind Native IR and callback"),
     );

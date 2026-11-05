@@ -119,6 +119,21 @@ impl std::error::Error for ProviderHostMetadataError {}
 /// An actual host's scratch/memory policy may admit less.
 pub const MAX_GRAPH_PROGRAM_WIRE_BYTES: u64 = 24 * 1024 * 1024 * 1024;
 pub const GRAPH_PROGRAM_CHUNK_PLAINTEXT_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Parent-driver capacity reserved for one retained terminal control envelope.
+/// This portable component includes allocation headers and claim metadata.
+/// Native drivers must refuse a backing layout that exceeds this capacity.
+/// Unused capacity stays reserved; it is not numerical work or memory usage.
+pub const REMOTE_DRIVER_COMPLETION_CONTROL_BYTES: u64 = 512;
+
+/// Request the child limit plus its separate parent control component before
+/// allocation authorization. The child's signed numerical limit stays intact.
+pub fn remote_driver_memory_bytes(child_memory_bytes: u64) -> Result<u64, crate::ContractError> {
+    child_memory_bytes
+        .checked_add(REMOTE_DRIVER_COMPLETION_CONTROL_BYTES)
+        .ok_or_else(|| crate::ContractError::invalid("driver memory", "parent capacity overflows"))
+}
+
 pub const MAX_GRAPH_PROGRAM_CHUNKS: usize =
     (MAX_GRAPH_PROGRAM_WIRE_BYTES / GRAPH_PROGRAM_CHUNK_PLAINTEXT_BYTES) as usize;
 

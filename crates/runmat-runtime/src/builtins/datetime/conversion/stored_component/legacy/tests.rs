@@ -162,6 +162,20 @@ fn selected_component_text_uses_borrowed_strings_or_one_character_row_scratch() 
     .unwrap();
     let days = numeric(days, &[2, 1], &[2.0, 3.0]);
     drop(days);
+    let minutes = futures::executor::block_on(minute_builtin(
+        Some(runtime.clone()),
+        Value::StringArray(
+            runmat_value::StringArray::new(
+                vec!["2024-03-14 09:26".into(), "2024-03-14 09:26:00".into()],
+                vec![2, 1],
+            )
+            .unwrap(),
+        ),
+        builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
+    let minutes = numeric(minutes, &[2, 1], &[26.0, 26.0]);
+    drop(minutes);
     assert_eq!(before, ledger.snapshot().free_bytes());
 }
 

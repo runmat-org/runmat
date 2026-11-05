@@ -467,7 +467,7 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
         .expect("typed structural sweep timed out")
         .unwrap();
         match outcome {
-            crate::remote::pool_execution::RemotePoolExecutionOutcome::Completed(result) => {
+            Ok(result) => {
                 let runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
                     result_objects,
                     ..
@@ -534,10 +534,10 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
                     .iter()
                     .any(|observation| observation.observation_id.0 == "displacement"));
             }
-            crate::remote::pool_execution::RemotePoolExecutionOutcome::Cancelled => {
+            Err(crate::remote::pool_execution::RemoteExecutionStop::Cancelled) => {
                 panic!("typed structural sweep was cancelled")
             }
-            crate::remote::pool_execution::RemotePoolExecutionOutcome::Indeterminate(message) => {
+            Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(message)) => {
                 panic!("typed structural sweep was indeterminate: {message}")
             }
         }

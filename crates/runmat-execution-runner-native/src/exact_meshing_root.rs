@@ -1135,9 +1135,7 @@ mod tests {
             .await
             .expect("remote exact root timed out")
             .unwrap();
-            let crate::remote::pool_execution::RemotePoolExecutionOutcome::Completed(result) =
-                outcome
-            else {
+            let Ok(result) = outcome else {
                 panic!("remote exact root did not complete")
             };
             let ProgramExecutionResponse::ExternalizedSuccess {

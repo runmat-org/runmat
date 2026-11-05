@@ -687,6 +687,34 @@ mod tests {
         LQR_DESCRIPTOR, LQR_ERROR_INVALID_DIMENSIONS, LQR_ERROR_UNSUPPORTED_INPUT,
     };
     use runmat_value::{IntValue, IntegerStorage};
+    use std::rc::Rc;
+
+    use crate::context::host_effect::ManagedHostEffectLedger;
+    use crate::context::{
+        ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+        RuntimeServicePorts,
+    };
+
+    struct LqrManagedParallel(ManagedHostEffectLedger);
+
+    impl RuntimeParallelService for LqrManagedParallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..RuntimeParallelResources::default()
+            }
+        }
+
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("tensor"))
@@ -738,6 +766,60 @@ mod tests {
         assert!((s[(0, 0)] - 3.0_f64.sqrt()).abs() < 1.0e-8);
         assert!((s[(0, 1)] - 1.0).abs() < 1.0e-8);
         assert!((s[(1, 1)] - 3.0_f64.sqrt()).abs() < 1.0e-8);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn pendulum_lqr_runs_through_ordinary_and_managed_riccati_workers() {
+        let p = 0.0132;
+        let a = vec![
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            -0.0024 / p,
+            0.0,
+            -0.006 / p,
+            0.0,
+            0.035316 / p,
+            0.0,
+            0.41202 / p,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+        ];
+        let b = vec![0.0, 0.024 / p, 0.0, 0.06 / p];
+        let q = vec![
+            5000.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ];
+        let run = |runtime| {
+            block_on(lqr_builtin(
+                runtime,
+                tensor(a.clone(), 4, 4),
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    tensor(b.clone(), 4, 1),
+                    tensor(q.clone(), 4, 4),
+                    Value::Num(1.0),
+                ]),
+            ))
+            .expect("pendulum LQR gain")
+        };
+        let ordinary = matrix_from_value(&run(None));
+        let ledger = ManagedHostEffectLedger::new(16 * 1024 * 1024);
+        let runtime =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(
+                    RuntimeServicePorts::default()
+                        .with_parallel(Rc::new(LqrManagedParallel(ledger.clone()))),
+                );
+        let managed = matrix_from_value(&run(Some(runtime)));
+        for (index, expected) in [-70.711, -37.82, 105.56, 20.919].into_iter().enumerate() {
+            assert!((ordinary[(0, index)] - expected).abs() < 0.02);
+            assert!((managed[(0, index)] - ordinary[(0, index)]).abs() < 1.0e-7);
+        }
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

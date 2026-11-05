@@ -47,6 +47,7 @@ pub async fn get_properties_async(
         state.as_ref(),
         PlotChildHandleState::Line(_)
             | PlotChildHandleState::Scatter(_)
+            | PlotChildHandleState::Scatter3(_)
             | PlotChildHandleState::Line3(_)
     ) {
         return get_properties(handle, property, builtin);
@@ -118,6 +119,9 @@ async fn get_child_properties_from_source(
             let (x, y) = scatter_xy(scatter, builtin).await?;
             scatter_property_with_data(state, property, builtin, scatter, x, y)
         }
+        (PlotChildHandleState::Scatter3(state), Some(PlotElement::Scatter3(scatter))) => {
+            scatter3_data::get_async(state, scatter, property, builtin).await
+        }
         (PlotChildHandleState::Line3(state), Some(PlotElement::Line3(line)))
             if line3_property_needs_data(property) =>
         {
@@ -130,6 +134,7 @@ async fn get_child_properties_from_source(
         (
             PlotChildHandleState::Line(_)
             | PlotChildHandleState::Scatter(_)
+            | PlotChildHandleState::Scatter3(_)
             | PlotChildHandleState::Line3(_),
             _,
         ) => Err(plotting_error(
@@ -168,6 +173,7 @@ pub(crate) async fn set_properties_async_with_runtime(
         state.as_ref(),
         PlotChildHandleState::Line(_)
             | PlotChildHandleState::Scatter(_)
+            | PlotChildHandleState::Scatter3(_)
             | PlotChildHandleState::Line3(_)
     ) {
         return set_properties_with_runtime(runtime, handle, args, builtin);
@@ -258,6 +264,9 @@ async fn set_child_properties_from_source(
                 authority, state, &pairs, builtin, scatter, data, prepared, guard,
             )
         }
+        (PlotChildHandleState::Scatter3(state), Some(PlotElement::Scatter3(scatter))) => {
+            scatter3_data::apply_async(authority, state, scatter, &pairs, builtin, guard).await
+        }
         (PlotChildHandleState::Line3(state), Some(PlotElement::Line3(line))) => {
             let prepared = prepare_line3_data_updates(&pairs, builtin)?;
             if prepared.is_empty() {
@@ -271,6 +280,7 @@ async fn set_child_properties_from_source(
         (
             PlotChildHandleState::Line(_)
             | PlotChildHandleState::Scatter(_)
+            | PlotChildHandleState::Scatter3(_)
             | PlotChildHandleState::Line3(_),
             _,
         ) => Err(plotting_error(

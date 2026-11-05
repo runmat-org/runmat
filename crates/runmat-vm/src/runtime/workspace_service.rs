@@ -261,6 +261,19 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         self.ensure_effect_in_context(Some(context))
     }
 
+    fn publish_admitted_mutations_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_mutation_in_context(Some(context))?;
+        if self.should_publish() {
+            if let Some(delegate) = self.delegate() {
+                delegate.publish_admitted_mutations_with_context(context)?;
+            }
+        }
+        Ok(())
+    }
+
     fn workspace_revision(
         &self,
     ) -> Result<Option<runmat_runtime::workspace::WorkspaceRevision>, RuntimeError> {

@@ -6,14 +6,13 @@ use runmat_value::Value;
 use super::commit::PreparedDirectCommit;
 use super::delta::{
     PreparedUnboundedDeltaTransition, PreparedWorkspaceDeltaMutation, PreparedWorkspaceDeltaView,
-    WorkspaceChangeData, WorkspaceChangeStorage,
+    WorkspaceChangeData, WorkspaceChangeStorage, WorkspaceMutationOrigin,
 };
 use super::owner::BaseWorkspaceState;
 use super::storage::{
     ManagedWorkspaceGlobalNames, ManagedWorkspaceIter, ManagedWorkspaceStorage,
-    PreparedStorageExecutorAssignment, PrivateLiveGlobalNames, PrivateLiveLocalIter,
-    PrivateLiveStorage, WorkspaceExecutorWritePlan, WorkspaceNamespaceAction,
-    WorkspaceNamespaceMutationPlan, WorkspaceOverlay,
+    PrivateLiveGlobalNames, PrivateLiveLocalIter, PrivateLiveStorage, WorkspaceExecutorWritePlan,
+    WorkspaceNamespaceAction, WorkspaceNamespaceMutationPlan, WorkspaceOverlay,
 };
 use super::values::{RootedWorkspaceEntries, RootedWorkspaceEntry, WorkspaceEntryName};
 use super::{
@@ -386,6 +385,7 @@ impl PreparedOrderedProjection {
     pub(in crate::workspace::base) fn prepare_terminal_commit(
         &mut self,
         effect: WorkspaceDelta,
+        context: Option<&crate::context::RuntimeContext>,
     ) -> Result<PreparedDirectCommit, (BaseWorkspaceError, WorkspaceDelta)> {
         let Some(owner) = self.owner.upgrade() else {
             return Err((BaseWorkspaceError::Closed, effect));
@@ -399,8 +399,22 @@ impl PreparedOrderedProjection {
                 return Err((error, effect));
             }
         }
-        let mut storage = std::mem::take(&mut self.contents.managed_storage);
-        storage.publish_pending_over(&state.managed_storage);
+        let prepared_live = self.revision == state.revision
+            && self.contents.entries.is_empty()
+            && self.contents.global_bindings.is_empty()
+            && self.contents.managed_storage.is_prepared_live();
+        let storage = match if prepared_live {
+            Ok(self.contents.managed_storage.clone())
+        } else {
+            self.contents.managed_storage.prepare_publication_over(
+                context,
+                &state.managed_storage,
+                &self.contents.pending,
+            )
+        } {
+            Ok(storage) => storage,
+            Err(error) => return Err((BaseWorkspaceError::HostAllocation(error), effect)),
+        };
         let mut prepared = state
             .prepare_projection_commit(self.revision, &self.contents.pending, effect, storage)
             .expect("validated Base revision cannot change without a callback");
@@ -595,6 +609,7 @@ impl BaseWorkspaceProjection {
 
     pub(super) fn prepare_completion(
         &self,
+        context: &crate::context::RuntimeContext,
         source: &dyn WorkspaceCompletionSource,
         permit: &crate::context::host_allocation::HostOutputPermit,
     ) -> Result<PreparedProjectionCompletion, BaseWorkspaceError> {
@@ -761,7 +776,9 @@ impl BaseWorkspaceProjection {
         Ok(PreparedProjectionCompletion {
             entries: None,
             global_bindings: None,
-            managed_storage,
+            managed_storage: managed_storage
+                .prepare_live(Some(context))
+                .map_err(BaseWorkspaceError::HostAllocation)?,
             pending,
             captures_legacy,
             source_start,
@@ -861,12 +878,12 @@ impl BaseWorkspaceProjection {
                 }
             };
             let transition = pending
-                .prepare_unbounded_transition(change, None, false)
+                .prepare_unbounded_transition(change, None, false, WorkspaceMutationOrigin::Ordered)
                 .map_err(BaseWorkspaceError::HostAllocation)?;
             pending
                 .reserve_unbounded_transition(&transition)
                 .map_err(BaseWorkspaceError::HostAllocation)?;
-            pending.install_unbounded_transition(transition);
+            drop(pending.install_unbounded_transition(transition));
         }
         Ok(PreparedProjectionCompletion {
             entries: None,
@@ -1050,7 +1067,7 @@ impl BaseWorkspaceProjection {
         let effect = completion.prepare_effect_unbounded();
         let mut ordered = self.ordered_view_mut()?;
         let retired = ordered.install_completion(completion);
-        match ordered.publish_with_effect(effect) {
+        match ordered.publish_with_effect(effect, None) {
             Ok((commit, published_retired)) => {
                 drop(published_retired);
                 drop(retired);
@@ -1248,6 +1265,7 @@ impl BaseWorkspaceProjection {
 
     pub(super) fn prepare_assignment(
         &self,
+        context: &crate::context::RuntimeContext,
         plan: WorkspaceExecutorWritePlan,
         write: &PreparedWorkspaceWrite,
         permit: &crate::context::host_allocation::HostOutputPermit,
@@ -1289,9 +1307,20 @@ impl BaseWorkspaceProjection {
             permit,
         )
         .map_err(BaseWorkspaceError::HostAllocation)?;
+        let name = storage.name().clone();
+        let mut live = self.ordered_view()?.contents.managed_storage.clone();
+        drop(live.install_prepared_executor_assignment(storage));
+        let live = live
+            .prepare_live_with_globals(
+                context,
+                &self.ordered_view()?.contents.global_bindings,
+                Some(name.as_str()),
+            )
+            .map_err(BaseWorkspaceError::HostAllocation)?;
         Ok(PreparedProjectionMutation {
+            live,
             pending: pending_mutation,
-            action: PreparedProjectionAction::Assignment { storage },
+            action: PreparedProjectionAction::Named { name },
             captures_legacy,
             expected_revision: self.revision,
             expected_generation: self.ordered_view()?.contents.pending.generation(),
@@ -1301,71 +1330,23 @@ impl BaseWorkspaceProjection {
     pub(super) fn install_prepared_mutation(
         &mut self,
         prepared: PreparedProjectionMutation,
-        permit: &crate::context::host_allocation::HostOutputPermit,
     ) -> Result<ProjectionRetirements, BaseWorkspaceError> {
         assert_eq!(self.revision, prepared.expected_revision);
         let mut view = self.ordered_view_mut()?;
         assert_eq!(view.pending().generation(), prepared.expected_generation);
         let ordered = &mut view.contents;
-        // All assignment owners were prepared off-state. Do not clone the
-        // live overlay here: that would defeat unique-node replacement and
-        // retain every superseded Value until a later clear.
-        let mut retired = ProjectionRetirements::default();
-        match prepared.action {
-            PreparedProjectionAction::Assignment { storage } => {
-                let name = storage.name().clone();
-                if storage.replaces_base() {
-                    retired.storage = Some(std::mem::take(&mut ordered.managed_storage));
-                }
-                retired.overlay = ordered
-                    .managed_storage
-                    .install_prepared_executor_assignment(storage);
-                if prepared.captures_legacy {
-                    retired.entries = Some(std::mem::take(&mut ordered.entries));
-                } else {
-                    retired.legacy_entry = ordered.entries.remove(name.as_str());
-                }
-            }
-            PreparedProjectionAction::Namespace {
-                plan,
-                name,
-                action,
-                target,
-            } => {
-                // Namespace installation still prepares a fallible overlay
-                // node in place; retain the prior generation until it ends.
-                retired.storage = Some(ordered.managed_storage.clone());
-                ordered
-                    .managed_storage
-                    .prepare_namespace_mutation(
-                        plan,
-                        ordered
-                            .entries
-                            .iter()
-                            .enumerate()
-                            .map(|(slot, (name, entry))| (slot, name.as_str(), entry.value())),
-                        name.clone(),
-                        action,
-                        target,
-                        permit,
-                    )
-                    .map_err(BaseWorkspaceError::HostAllocation)?;
-                if prepared.captures_legacy {
-                    retired.entries = Some(std::mem::take(&mut ordered.entries));
-                } else {
-                    retired.legacy_entry = ordered.entries.remove(name.as_str());
-                }
-            }
-            PreparedProjectionAction::Clear => {
-                retired.storage = Some(
-                    ordered
-                        .managed_storage
-                        .prepare_clear(permit)
-                        .map_err(BaseWorkspaceError::HostAllocation)?,
-                );
-                retired.entries = Some(std::mem::take(&mut ordered.entries));
-                retired.globals = Some(std::mem::take(&mut ordered.global_bindings));
-            }
+        let mut retired = ProjectionRetirements {
+            storage: Some(std::mem::replace(
+                &mut ordered.managed_storage,
+                prepared.live,
+            )),
+            globals: Some(std::mem::take(&mut ordered.global_bindings)),
+            ..ProjectionRetirements::default()
+        };
+        if prepared.captures_legacy {
+            retired.entries = Some(std::mem::take(&mut ordered.entries));
+        } else if let PreparedProjectionAction::Named { name } = prepared.action {
+            retired.legacy_entry = ordered.entries.remove(name.as_str());
         }
         retired.delta_mutation = Some(ordered.pending.apply_prepared_mutation(prepared.pending));
         Ok(retired)
@@ -1479,6 +1460,7 @@ impl BaseWorkspaceProjection {
 
     pub(super) fn prepare_namespace_mutation(
         &self,
+        context: &crate::context::RuntimeContext,
         plan: WorkspaceNamespaceMutationPlan,
         name: WorkspaceName,
         action: WorkspaceNamespaceAction,
@@ -1522,14 +1504,32 @@ impl BaseWorkspaceProjection {
                 .prepare_unbind_global(entry_name, permit),
         }
         .map_err(BaseWorkspaceError::HostAllocation)?;
+        let mut live = self.ordered_view()?.contents.managed_storage.clone();
+        live.prepare_namespace_mutation(
+            plan,
+            self.ordered_view()?
+                .contents
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(slot, (name, entry))| (slot, name.as_str(), entry.value())),
+            name.clone(),
+            action,
+            target.clone(),
+            permit,
+        )
+        .map_err(BaseWorkspaceError::HostAllocation)?;
+        let live = live
+            .prepare_live_with_globals(
+                context,
+                &self.ordered_view()?.contents.global_bindings,
+                (action != WorkspaceNamespaceAction::Remove).then_some(name.as_str()),
+            )
+            .map_err(BaseWorkspaceError::HostAllocation)?;
         Ok(PreparedProjectionMutation {
+            live,
             pending: PreparedWorkspaceDeltaMutation::ReplaceDelta(pending),
-            action: PreparedProjectionAction::Namespace {
-                plan,
-                name,
-                action,
-                target,
-            },
+            action: PreparedProjectionAction::Named { name },
             captures_legacy,
             expected_revision: self.revision,
             expected_generation: self.ordered_view()?.contents.pending.generation(),
@@ -1540,11 +1540,7 @@ impl BaseWorkspaceProjection {
         &self,
     ) -> Result<u64, crate::context::host_allocation::HostAllocationError> {
         let ordered = self.ordered_allocation_view()?;
-        ordered
-            .managed_storage()
-            .clear_retained_bytes()?
-            .checked_add(ordered.pending().clear_retained_bytes()?)
-            .ok_or(crate::context::host_allocation::HostAllocationError::Overflow)
+        ordered.pending().clear_retained_bytes()
     }
 
     pub(super) fn prepare_clear_mutation(
@@ -1558,6 +1554,7 @@ impl BaseWorkspaceProjection {
             .prepare_clear(permit)
             .map_err(BaseWorkspaceError::HostAllocation)?;
         Ok(PreparedProjectionMutation {
+            live: ManagedWorkspaceStorage::empty_live(),
             pending: PreparedWorkspaceDeltaMutation::ReplaceDelta(pending),
             action: PreparedProjectionAction::Clear,
             captures_legacy: true,
@@ -1591,7 +1588,12 @@ impl BaseWorkspaceProjection {
         target: Option<&GlobalBindingTarget>,
     ) -> Result<ProjectionRetirements, BaseWorkspaceError> {
         self.capture_canonical_prefix(None)?;
-        let prepared = self.prepare_unbounded_namespace(name, action, target)?;
+        let prepared = self.prepare_unbounded_namespace(
+            name,
+            action,
+            target,
+            WorkspaceMutationOrigin::Ordered,
+        )?;
         self.reserve_unbounded_mutation_capacity(&prepared)?;
         Ok(self
             .ordered_view_mut()?
@@ -1607,7 +1609,7 @@ impl BaseWorkspaceProjection {
         &mut self,
     ) -> Result<ProjectionRetirements, BaseWorkspaceError> {
         self.capture_canonical_prefix(None)?;
-        let prepared = self.prepare_unbounded_clear()?;
+        let prepared = self.prepare_unbounded_clear(WorkspaceMutationOrigin::Ordered)?;
         self.reserve_unbounded_mutation_capacity(&prepared)?;
         Ok(self
             .ordered_view_mut()?
@@ -1651,7 +1653,7 @@ impl BaseWorkspaceProjection {
         let mut ordered = self.ordered_view_mut()?;
         let effect = ordered.pending().clone_unbounded();
         let (commit, retired) = ordered
-            .publish_with_effect(effect)
+            .publish_with_effect(effect, None)
             .map_err(|(error, _effect)| error)?;
         drop(retired);
         Ok(commit)
@@ -1666,6 +1668,7 @@ impl OrderedProjectionMut<'_> {
     pub(in crate::workspace::base) fn publish_with_effect(
         &mut self,
         effect: WorkspaceDelta,
+        context: Option<&crate::context::RuntimeContext>,
     ) -> Result<(BaseWorkspaceCommit, ProjectionRetirements), (BaseWorkspaceError, WorkspaceDelta)>
     {
         let Some(owner) = self.owner.upgrade() else {
@@ -1692,21 +1695,38 @@ impl OrderedProjectionMut<'_> {
             }
             return Ok((commit, retired));
         }
-        let canonical_prefix = {
+        let (canonical_prefix, canonical_revision) = {
             let Ok(state) = owner.try_borrow_mut() else {
                 return Err((BaseWorkspaceError::BorrowConflict, effect));
             };
             if let Err(error) = state.preflight_commit(*self.revision, &self.contents.pending) {
                 return Err((error, effect));
             }
-            state.managed_storage.clone()
+            (state.managed_storage.clone(), state.revision)
         };
         let mut retired = ProjectionRetirements {
             _projection_prefix: Some(self.contents.managed_storage.retained_published_prefix()),
             ..ProjectionRetirements::default()
         };
-        let mut storage = std::mem::take(&mut self.contents.managed_storage);
-        storage.publish_pending_over(&canonical_prefix);
+        // A complete prepared live tree already contains the admitted final
+        // state when no semantic canonical write has interleaved. Revision
+        // equality is required; shared allocation identity is not authority.
+        let prepared_live = *self.revision == canonical_revision
+            && self.contents.entries.is_empty()
+            && self.contents.global_bindings.is_empty()
+            && self.contents.managed_storage.is_prepared_live();
+        let storage = match if prepared_live {
+            Ok(self.contents.managed_storage.clone())
+        } else {
+            self.contents.managed_storage.prepare_publication_over(
+                context,
+                &canonical_prefix,
+                &self.contents.pending,
+            )
+        } {
+            Ok(storage) => storage,
+            Err(error) => return Err((BaseWorkspaceError::HostAllocation(error), effect)),
+        };
         let mut prepared = {
             let state = owner
                 .try_borrow()
@@ -1748,10 +1768,11 @@ impl BaseWorkspaceProjection {
     pub(in crate::workspace::base) fn publish_with_effect(
         &mut self,
         effect: WorkspaceDelta,
+        context: Option<&crate::context::RuntimeContext>,
     ) -> Result<(BaseWorkspaceCommit, ProjectionRetirements), (BaseWorkspaceError, WorkspaceDelta)>
     {
         match self.ordered_view_mut() {
-            Ok(mut ordered) => ordered.publish_with_effect(effect),
+            Ok(mut ordered) => ordered.publish_with_effect(effect, context),
             Err(error) => Err((error, effect)),
         }
     }
@@ -1762,9 +1783,10 @@ impl BaseWorkspaceProjection {
     pub(super) fn publish_terminal_with_effect(
         &mut self,
         effect: WorkspaceDelta,
+        context: Option<&crate::context::RuntimeContext>,
     ) -> Result<BaseWorkspaceCommit, BaseWorkspaceError> {
         let (commit, retired) = self
-            .publish_with_effect(effect)
+            .publish_with_effect(effect, context)
             .map_err(|(error, _effect)| error)?;
         drop(retired);
         Ok(commit)

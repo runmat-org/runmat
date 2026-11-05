@@ -10,7 +10,9 @@ pub(crate) mod gpu_device;
 pub(crate) use cancellation_context::RuntimeCancellationContext;
 pub use cancellation_context::RuntimeCancellationScope;
 mod callable_artifacts;
+mod cleanup_completion;
 mod cleanup_lifecycle;
+pub use cleanup_completion::RuntimeFunctionCleanup;
 mod current_class_product;
 mod graphics_presentation;
 #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
@@ -59,11 +61,11 @@ pub(crate) use console_scope::RuntimeConsoleScope;
 mod process_console;
 #[cfg(not(target_arch = "wasm32"))]
 pub use process_console::ProcessConsoleDecoder;
+mod acceleration_policy;
 mod preferences;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod process_invocation;
 pub(crate) mod provider_operation;
-mod acceleration_policy;
 pub use acceleration_policy::{
     current_acceleration_policy, RuntimeAccelerationPolicy, RuntimeProviderPreference,
 };

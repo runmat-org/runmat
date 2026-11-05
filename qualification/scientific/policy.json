@@ -30,7 +30,7 @@
     {
       "id": "driver-recovery-physics",
       "required_target": "linux-x86_64",
-      "expected_passed": 15,
+      "expected_passed": 18,
       "selected_filter": "remote::driver_replacement_tests::",
       "group": "tooling-distributed",
       "required": true,
@@ -51,7 +51,8 @@
       "expected_passed": 12,
       "count_unit": "qualification commands",
       "command": ["bash", "scripts/qualification/meshing-release.sh"],
-      "required": true,
+      "required": false,
+      "exception": "Owner-approved 0.7.0 deferral, 2026-11-04",
       "ordinary_skip": [],
       "description": "Complete governed meshing corpus and stable performance/resource qualification; existing meshing policy and numerical assertions apply."
     }

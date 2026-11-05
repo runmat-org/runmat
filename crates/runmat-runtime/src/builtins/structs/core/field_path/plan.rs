@@ -83,8 +83,31 @@ fn component_selector(
                 Ok(SliceSelector::Indices(values))
             }
         }
+        IndexComponent::LogicalScalar(selected) => {
+            if *selected && bound == 0 {
+                return Err(crate::runtime_error::semantic_error(
+                    "IndexOutOfBounds",
+                    "logical index contains a true value outside the selected dimension",
+                ));
+            }
+            let values = admission::array(context, usize::from(*selected), |_| Ok(1))?;
+            if linear {
+                Ok(SliceSelector::LinearIndices {
+                    output_shape: crate::indexing::plan::logical_linear_output_shape_in_context(
+                        context,
+                        target_shape,
+                        &[1, 1],
+                        values.len(),
+                    )?,
+                    values,
+                })
+            } else {
+                Ok(SliceSelector::Indices(values))
+            }
+        }
         IndexComponent::Logical(mask) => {
             if mask
+                .data
                 .iter()
                 .enumerate()
                 .any(|(index, selected)| *selected != 0 && index >= bound)
@@ -94,8 +117,9 @@ fn component_selector(
                     "logical index contains a true value outside the selected dimension",
                 ));
             }
-            let count = mask.iter().filter(|selected| **selected != 0).count();
+            let count = mask.data.iter().filter(|selected| **selected != 0).count();
             let mut source = mask
+                .data
                 .iter()
                 .enumerate()
                 .filter_map(|(index, selected)| (*selected != 0).then_some(index + 1));
@@ -104,9 +128,11 @@ fn component_selector(
             })?;
             if linear {
                 Ok(SliceSelector::LinearIndices {
-                    output_shape: admit_shape(
+                    output_shape: crate::indexing::plan::logical_linear_output_shape_in_context(
                         context,
-                        logical_linear_output_shape(target_shape, values.len()),
+                        target_shape,
+                        &mask.shape,
+                        values.len(),
                     )?,
                     values,
                 })
@@ -147,16 +173,6 @@ fn numeric_linear_output_shape<'a>(
         resize_vector(selector_shape, selected_len)
     } else {
         SelectionShape::Borrowed(selector_shape)
-    }
-}
-fn logical_linear_output_shape(
-    target_shape: &[usize],
-    selected_len: usize,
-) -> SelectionShape<'static> {
-    if is_non_scalar_vector(target_shape) {
-        resize_vector(target_shape, selected_len)
-    } else {
-        SelectionShape::Vector([selected_len, 1])
     }
 }
 fn resize_vector(shape: &[usize], selected_len: usize) -> SelectionShape<'static> {

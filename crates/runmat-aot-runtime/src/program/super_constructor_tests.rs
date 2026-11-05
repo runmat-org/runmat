@@ -227,6 +227,7 @@ fn standalone_derived_constructor_runs_retained_base_on_same_handle() {
                     interpreter_resume_points: input.interpreter_resume_points().clone(),
                     ..Default::default()
                 },
+                runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
             )
             .expect("bind Native IR"),
         );

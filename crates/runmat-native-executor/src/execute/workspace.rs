@@ -1186,6 +1186,23 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .map_err(|error| *error)
     }
 
+    fn publish_admitted_mutations_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        self.ensure_mutation_in_operation(Some(context))
+            .map_err(|error| *error)?;
+        // Function-local frames own a private current workspace. They must
+        // not publish a pending mutation from their caller's projection.
+        if self.publish {
+            self.canonical_for_operation()
+                .map_err(|error| *error)?
+                .ok_or_else(native_workspace_closed)?
+                .publish_admitted_mutations_with_context(context)?;
+        }
+        Ok(())
+    }
+
     fn workspace_revision(
         &self,
     ) -> Result<Option<runmat_runtime::workspace::WorkspaceRevision>, runmat_runtime::RuntimeError>

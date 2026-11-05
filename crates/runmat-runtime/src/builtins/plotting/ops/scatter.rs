@@ -9,6 +9,7 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::scatter2::{
     Scatter2GpuInputs, Scatter2GpuParams, ScatterAttributeBuffer, ScatterColorBuffer,
+    ScatterColorLayout, ScatterSizeUnit,
 };
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::scatter::{MarkerStyle, ScatterGpuStyle};
@@ -615,6 +616,7 @@ fn build_scatter_gpu_plot(
         let has_sizes = size_buffer.has_data();
         let color_buffer = build_color_buffer(style, point_count, &mut gpu_exports)?;
         let has_colors = color_buffer.has_data();
+        let color_layout = ScatterColorLayout::from_source(&color_buffer);
 
         let inputs = Scatter2GpuInputs {
             x_buffer: x_ref.clone().into(),
@@ -625,8 +627,10 @@ fn build_scatter_gpu_plot(
         let params = Scatter2GpuParams {
             color: style.uniform_color,
             point_size: style.marker_size,
+            size_unit: ScatterSizeUnit::from_source(&size_buffer),
             sizes: size_buffer,
             colors: color_buffer,
+            color_layout,
             lod_stride,
         };
 
@@ -642,7 +646,13 @@ fn build_scatter_gpu_plot(
                     source,
                 )
             })?
-            .map_err(|e| scatter_err(format!("scatter: failed to build GPU vertices: {e}")))?;
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    BUILTIN_NAME,
+                    format!("scatter: failed to build GPU vertices: {source}"),
+                    source,
+                )
+            })?;
         gpu_exports.record_completed_effect();
         let drawn_points = gpu_vertices.vertex_count;
 

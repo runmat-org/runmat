@@ -404,7 +404,63 @@ fn cleanup_callback_gate_prevents_command_publication_until_drained() {
     let request = request(
         &session,
         "<profiling-cleanup-gate>",
-        "cleanup_scope();\nfunction cleanup_scope()\n c = onCleanup(@() input('cleanup gate: '));\nend\n",
+        r#"
+global cleanup_trace;
+cleanup_trace = 0;
+cleanup_scope();
+assert(cleanup_trace == 3);
+escaped = escaped_scope();
+alias = escaped;
+clear escaped;
+assert(cleanup_trace == 3);
+clear alias;
+assert(cleanup_trace == 4);
+overwritten = escaped_scope();
+overwritten_alias = overwritten;
+overwritten = [];
+assert(cleanup_trace == 4);
+overwritten_alias = [];
+assert(cleanup_trace == 5);
+caught_original = false;
+try
+    failing_scope();
+catch original
+    assert(strcmp(original.identifier, 'Cleanup:Original'));
+    caught_original = true;
+end
+assert(caught_original);
+function cleanup_scope()
+    c = onCleanup(@cleanup_body);
+end
+function cleanup_body()
+    input('cleanup gate: ');
+    nested_scope();
+    global cleanup_trace;
+    assert(cleanup_trace == 2);
+    cleanup_trace = 3;
+end
+function nested_scope()
+    global cleanup_trace;
+    cleanup_trace = 1;
+    c = onCleanup(@nested_done);
+end
+function nested_done()
+    global cleanup_trace;
+    assert(cleanup_trace == 1);
+    cleanup_trace = 2;
+end
+function c = escaped_scope()
+    c = onCleanup(@escaped_done);
+end
+function escaped_done()
+    global cleanup_trace;
+    cleanup_trace = cleanup_trace + 1;
+end
+function failing_scope()
+    c = onCleanup(@() error('Cleanup:Secondary', 'cleanup failure'));
+    error('Cleanup:Original', 'original failure');
+end
+"#,
     );
     let host = tokio::runtime::Builder::new_current_thread()
         .enable_all()

@@ -11,6 +11,7 @@ impl GenericCompiler {
         assembly: runmat_native_codegen::NativeAssembly,
         program_capture: Option<Vec<u8>>,
         interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> JitResult<NativeExecutor> {
         Self::compile_executor_product(
             assembly,
@@ -18,6 +19,7 @@ impl GenericCompiler {
             interpreter_resume_points,
             BTreeMap::new(),
             None,
+            liveness_admission,
         )
     }
 
@@ -26,6 +28,7 @@ impl GenericCompiler {
         program_capture: Option<Vec<u8>>,
         interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
         coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> JitResult<NativeExecutor> {
         Self::compile_executor_product(
             assembly,
@@ -33,6 +36,7 @@ impl GenericCompiler {
             interpreter_resume_points,
             coverage_sites,
             None,
+            liveness_admission,
         )
     }
 
@@ -41,6 +45,7 @@ impl GenericCompiler {
         program_capture: Option<Vec<u8>>,
         interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
         profile: RepresentationProfile,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> JitResult<NativeExecutor> {
         Self::compile_executor_product(
             assembly,
@@ -48,6 +53,7 @@ impl GenericCompiler {
             interpreter_resume_points,
             BTreeMap::new(),
             Some(profile),
+            liveness_admission,
         )
     }
 
@@ -57,6 +63,7 @@ impl GenericCompiler {
         interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
         coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
         profile: RepresentationProfile,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> JitResult<NativeExecutor> {
         Self::compile_executor_product(
             assembly,
@@ -64,6 +71,7 @@ impl GenericCompiler {
             interpreter_resume_points,
             coverage_sites,
             Some(profile),
+            liveness_admission,
         )
     }
 
@@ -73,6 +81,7 @@ impl GenericCompiler {
         interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
         coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
         entry_profile: Option<RepresentationProfile>,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> JitResult<NativeExecutor> {
         Self::compile_executor_with_policy(
             assembly,
@@ -81,6 +90,7 @@ impl GenericCompiler {
             coverage_sites,
             entry_profile,
             CompilerOptimization::TierDefault,
+            liveness_admission,
         )
     }
 
@@ -91,6 +101,7 @@ impl GenericCompiler {
         coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
         entry_profile: Option<RepresentationProfile>,
         optimization: CompilerOptimization,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> JitResult<NativeExecutor> {
         let compile_started = std::time::Instant::now();
         let executable = if optimization != CompilerOptimization::TierDefault {
@@ -113,6 +124,7 @@ impl GenericCompiler {
                 entry_profile,
                 compile_duration_ns,
             },
+            liveness_admission,
         )
         .map_err(Into::into)
     }

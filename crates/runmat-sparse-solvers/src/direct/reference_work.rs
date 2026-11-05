@@ -6,6 +6,22 @@ pub(super) enum DirectPhase {
     Solve { rhs_columns: usize },
 }
 
+/// The rsua-1 decision for one sparse direct numeric kernel. An exclusion is
+/// explicit and does not imply that its enclosing solve has zero measured work.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DirectMeasurementCoverage {
+    Measured(DirectReferenceWork),
+    Excluded(ExcludedDirectKernel),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExcludedDirectKernel {
+    /// Pivot-dependent sparse LU factorization and substitution on faer.
+    SparseLu,
+    /// Pivot-dependent sparse Bunch–Kaufman LBLᴴ factorization and substitution.
+    SparseBunchKaufman,
+}
+
 /// One completed reference batch. Numerical buffers stay with their existing
 /// solver owner; the reservation borrows the admitted run's shared ledger.
 pub(super) fn with_direct_usage<R>(
@@ -17,10 +33,17 @@ pub(super) fn with_direct_usage<R>(
     let Some(context) = UsageContext::capture() else {
         return work();
     };
-    let reference = symbolic.reference_work().map_err(|error| match error {
-        ReferenceWorkError::Overflow(error) => crate::SolverError::Usage(error.into()),
-        error => crate::SolverError::Unsupported(error.to_string()),
-    })?;
+    let coverage = symbolic
+        .measurement_coverage()
+        .map_err(|error| match error {
+            ReferenceWorkError::Overflow(error) => crate::SolverError::Usage(error.into()),
+            error => crate::SolverError::Unsupported(error.to_string()),
+        })?;
+    let DirectMeasurementCoverage::Measured(reference) = coverage else {
+        // Only the named pivot-dependent sparse kernels are excluded. The
+        // caller still charges independently owned residual/vector batches.
+        return work();
+    };
     let (category, operations) = match phase {
         DirectPhase::Factorization => (
             UsageCategory::Factorization,
@@ -77,6 +100,23 @@ pub enum ReferenceWorkError {
 }
 
 impl SymbolicFactorization {
+    /// Classifies the exact rsua-1 arithmetic boundary for this symbolic kind.
+    /// A new factor kind must be classified here; an unsupported schedule must
+    /// never be interpreted as a measured zero.
+    pub fn measurement_coverage(&self) -> Result<DirectMeasurementCoverage, ReferenceWorkError> {
+        match self.kind {
+            FactorKind::Cholesky | FactorKind::Ldlt => self
+                .reference_work()
+                .map(DirectMeasurementCoverage::Measured),
+            FactorKind::Lu => Ok(DirectMeasurementCoverage::Excluded(
+                ExcludedDirectKernel::SparseLu,
+            )),
+            FactorKind::BunchKaufman => Ok(DirectMeasurementCoverage::Excluded(
+                ExcludedDirectKernel::SparseBunchKaufman,
+            )),
+        }
+    }
+
     /// LLT/LDLT reference arithmetic over the stored symbolic fill. This count is
     /// independent of the floating-point memory/performance planning estimate.
     /// Square roots are retained separately for diagnostics and included by

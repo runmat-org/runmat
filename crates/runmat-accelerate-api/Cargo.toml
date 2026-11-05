@@ -10,7 +10,7 @@ repository = "https://github.com/runmat-org/runmat"
 [features]
 default = []
 test-support = []
-wgpu = ["dep:wgpu"]
+wgpu = ["dep:wgpu", "dep:ash"]
 
 [dependencies]
 runmat-execution = { workspace = true }
@@ -31,3 +31,4 @@ wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = { workspace = true, optional = true }
+ash = { version = "0.38", optional = true }

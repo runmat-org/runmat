@@ -430,10 +430,12 @@ fn cancelled_context_drains_the_already_published_prefix_without_new_admission()
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn finite_borrowed_aggregate_write_refuses_before_publication() {
+    let ledger = ManagedHostEffectLedger::new(65_536);
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-        .with_service_ports(RuntimeServicePorts::default().with_parallel(Rc::new(
-            ManagedObserverMemory(ManagedHostEffectLedger::new(65_536)),
-        )));
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_parallel(Rc::new(ManagedObserverMemory(ledger.clone()))),
+        );
     let owner = BaseWorkspaceOwner::new();
     let service = BaseWorkspaceProjectionService::new_for_context(
         owner.begin_projection().unwrap(),
@@ -458,7 +460,15 @@ fn finite_borrowed_aggregate_write_refuses_before_publication() {
     service
         .assign_executor_slot_lease_with_context(&runtime, 3, "supported", retained.clone())
         .unwrap();
-    service.publish_with_context(&runtime).unwrap();
+    let held_headroom = ledger
+        .reserve_stage(ledger.snapshot().free_bytes())
+        .unwrap();
+    assert_eq!(ledger.snapshot().free_bytes(), 0);
+    service
+        .publish_admitted_mutations_with_context(&runtime)
+        .unwrap();
+    assert!(!service.has_pending_changes().unwrap());
+    drop(held_headroom);
     assert_eq!(
         owner.lookup("supported").unwrap(),
         Some(retained.value().clone())

@@ -41,14 +41,6 @@ impl WorkspaceOverlayAction {
             Self::Clear => None,
         }
     }
-
-    fn assigned_name(&self) -> Option<&str> {
-        match self {
-            Self::Assign(write) => Some(write.name().as_str()),
-            Self::OwnedAssign { name, .. } => Some(name.as_str()),
-            Self::Namespace { .. } | Self::Clear => None,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -103,13 +95,19 @@ pub(super) enum WorkspaceOverlayLookup<'a> {
 }
 
 impl WorkspaceOverlay {
-    /// Replay only this overlay's actions, not the whole workspace, into an
-    /// independent persistent tree. This is exclusively the explicitly
-    /// unbounded direct-owner preparation route, never Managed publication.
-    /// Borrowed action scratch gives chronological order without recursion or
-    /// copying values; every surviving name/value/root keeps its original owner.
+    /// Explicitly unbounded direct-owner entry to the same path-copy replay.
     pub(super) fn prepare_unbounded_tree(
         &self,
+        tree: BindingTree,
+    ) -> Result<BindingTree, HostAllocationError> {
+        self.prepare_tree(None, tree)
+    }
+
+    /// Replay only touched bindings. Scratch and path copies use the actual
+    /// operation owner; retained values and captured trees are shared.
+    pub(super) fn prepare_tree(
+        &self,
+        context: Option<&crate::context::RuntimeContext>,
         mut tree: BindingTree,
     ) -> Result<BindingTree, HostAllocationError> {
         let mut count = 0usize;
@@ -123,26 +121,57 @@ impl WorkspaceOverlay {
             count = count.checked_add(1).ok_or(HostAllocationError::Overflow)?;
             next = payload.previous.as_ref();
         }
-        let mut actions =
-            runmat_value::exact_capacity_vec(count).map_err(HostAllocationError::Numeric)?;
+        if count == 0 {
+            return Ok(tree);
+        }
+        let bytes = std::alloc::Layout::array::<&WorkspaceOverlayAction>(count)
+            .map_err(|_| HostAllocationError::Overflow)?
+            .size();
+        let retained = HostAllocationPlan::retained_exact_output_bytes(
+            u64::try_from(bytes).map_err(|_| HostAllocationError::Overflow)?,
+            usize::from(count != 0),
+        )?;
+        let receipt = crate::context::host_allocation::HostAllocationReceipt::admit(
+            context,
+            HostAllocationPlan::new(0, retained)?,
+        )?;
+        let claim = receipt
+            .as_ref()
+            .map(|receipt| {
+                receipt
+                    .output_permit(context.expect("managed replay has an operation owner"))?
+                    .reserve_exact_claim(bytes)
+                    .map_err(HostAllocationError::from)
+            })
+            .transpose()?;
+        // Fields drop in order: physical scratch before its funding claim.
+        struct Actions<'a> {
+            values: Vec<&'a WorkspaceOverlayAction>,
+            _claim: Option<ExactHostAllocationClaim>,
+        }
+        let mut actions = Actions {
+            values: runmat_value::exact_capacity_vec(count)
+                .map_err(HostAllocationError::Numeric)?,
+            _claim: claim,
+        };
         let mut next = self.latest.as_ref();
         for _ in 0..count {
             let payload = next.expect("counted immutable overlay actions").0.get();
-            actions.push(&payload.action);
+            actions.values.push(&payload.action);
             next = payload.previous.as_ref();
         }
-        for action in actions.into_iter().rev() {
+        for action in actions.values.iter().rev().copied() {
             match action {
                 WorkspaceOverlayAction::Assign(write) => {
                     tree = tree.prepare_set(
-                        None,
+                        context,
                         write.name().clone(),
                         BindingTreeValue::Local(RootedWorkspaceEntry::from_prepared(write)),
                     )?;
                 }
                 WorkspaceOverlayAction::OwnedAssign { name, entry } => {
                     tree = tree.prepare_set(
-                        None,
+                        context,
                         name.clone(),
                         BindingTreeValue::Local(entry.clone()),
                     )?;
@@ -155,7 +184,7 @@ impl WorkspaceOverlay {
                     WorkspaceNamespaceAction::BindGlobal => {
                         let target = target.as_ref().ok_or(HostAllocationError::StaleAuthority)?;
                         tree = tree.prepare_set(
-                            None,
+                            context,
                             name.clone(),
                             BindingTreeValue::Global(target.clone()),
                         )?;
@@ -163,7 +192,7 @@ impl WorkspaceOverlay {
                     WorkspaceNamespaceAction::Remove
                         if tree.global_target(name.as_str()).is_some() => {}
                     WorkspaceNamespaceAction::Remove | WorkspaceNamespaceAction::UnbindGlobal => {
-                        tree = tree.prepare_remove(None, name.as_str())?.unwrap_or(tree);
+                        tree = tree.prepare_remove(context, name.as_str())?.unwrap_or(tree);
                     }
                 },
                 WorkspaceOverlayAction::Clear => unreachable!("clear bounds the replay suffix"),
@@ -208,10 +237,6 @@ impl WorkspaceOverlay {
         )?;
         name.checked_add(Self::node_retained_bytes()?)
             .ok_or(HostAllocationError::Overflow)
-    }
-
-    pub(in crate::workspace::base) fn clear_retained_bytes() -> Result<u64, HostAllocationError> {
-        Self::node_retained_bytes()
     }
 
     fn node_retained_bytes() -> Result<u64, HostAllocationError> {
@@ -334,75 +359,6 @@ impl WorkspaceOverlay {
         )));
     }
 
-    /// Once the old projection owner has retired, fold an uninterrupted
-    /// repeated owned store into its unique predecessor. A shared suffix is
-    /// retained verbatim for already-captured readers.
-    pub(super) fn coalesce_latest_owned_assignment(&mut self) -> Option<Self> {
-        let mut head = self.latest.take()?;
-        if !head.0.is_unique() {
-            self.latest = Some(head);
-            return None;
-        }
-        if !matches!(
-            head.0.get().action,
-            WorkspaceOverlayAction::OwnedAssign { .. }
-        ) {
-            self.latest = Some(head);
-            return None;
-        }
-        let replaced = {
-            let payload = head.0.get_mut_unique();
-            let WorkspaceOverlayAction::OwnedAssign { name, entry } = &mut payload.action else {
-                unreachable!("checked owned assignment")
-            };
-            let mut current = payload.previous.as_mut();
-            let mut replaced = false;
-            while let Some(node) = current {
-                if !node.0.is_unique() {
-                    break;
-                }
-                let previous = node.0.get_mut_unique();
-                match &mut previous.action {
-                    WorkspaceOverlayAction::OwnedAssign {
-                        name: old_name,
-                        entry: retained,
-                    } if old_name.as_str() == name.as_str() => {
-                        std::mem::swap(retained, entry);
-                        replaced = true;
-                        break;
-                    }
-                    WorkspaceOverlayAction::Assign(write)
-                        if write.name().as_str() == name.as_str() =>
-                    {
-                        break;
-                    }
-                    WorkspaceOverlayAction::Namespace { name: changed, .. }
-                        if changed.as_str() == name.as_str() =>
-                    {
-                        break;
-                    }
-                    WorkspaceOverlayAction::Clear => break,
-                    _ => current = previous.previous.as_mut(),
-                }
-            }
-            replaced
-        };
-        if replaced {
-            self.latest = head.0.get_mut_unique().previous.take();
-            Some(Self { latest: Some(head) })
-        } else {
-            self.latest = Some(head);
-            None
-        }
-    }
-
-    pub(super) fn stage_clear(
-        &mut self,
-        permit: &HostOutputPermit,
-    ) -> Result<(), HostAllocationError> {
-        self.push(WorkspaceOverlayAction::Clear, permit)
-    }
-
     fn push(
         &mut self,
         action: WorkspaceOverlayAction,
@@ -494,25 +450,6 @@ impl WorkspaceOverlay {
         self.latest.is_none()
     }
 
-    pub(super) fn attach_canonical_tail(&mut self, canonical: &Self) {
-        let mut tail = canonical.latest.clone();
-        if let Some(previous) = tail.as_ref() {
-            if let Some(name) = previous.0.get().action.assigned_name() {
-                if !matches!(self.lookup(name), WorkspaceOverlayLookup::Unmentioned) {
-                    // The pending suffix has already superseded this one
-                    // committed assignment. An old snapshot owns its node;
-                    // the new chain can share its predecessor directly.
-                    tail = previous.0.get().previous.clone();
-                }
-            }
-        }
-        let Some(node) = self.latest.as_mut() else {
-            self.latest = tail;
-            return;
-        };
-        attach_tail(node, tail);
-    }
-
     pub(super) fn names(&self) -> WorkspaceOverlayNames<'_> {
         WorkspaceOverlayNames {
             next: self.latest.as_ref(),
@@ -536,22 +473,6 @@ impl<'a> Iterator for WorkspaceOverlayNames<'a> {
                 return Some(name.as_str());
             }
         }
-    }
-}
-
-fn attach_tail(node: &mut WorkspaceOverlayNode, canonical: Option<WorkspaceOverlayNode>) {
-    let mut current = node;
-    loop {
-        debug_assert!(
-            current.0.is_unique(),
-            "unpublished overlay suffix must be unique"
-        );
-        let payload = current.0.get_mut_unique();
-        if payload.previous.is_none() {
-            payload.previous = canonical;
-            return;
-        }
-        current = payload.previous.as_mut().expect("checked predecessor");
     }
 }
 

@@ -42,6 +42,12 @@ pub enum NativeInvocationStep {
 }
 
 impl NativeInvocation {
+    pub(super) fn cleanup_runtime(
+        &self,
+    ) -> NativeExecutorResult<runmat_runtime::context::RuntimeContext> {
+        Ok(self.active()?.state.runtime.clone())
+    }
+
     pub(super) fn new(
         state: HostState,
         entrypoint: NativeEntryPoint,

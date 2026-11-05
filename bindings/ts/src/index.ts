@@ -49,6 +49,10 @@ export {
   sameProgramAssignment,
   isRetiredProgramTerminal,
 } from "./execution/program-terminal.js";
+export {
+  remoteDriverMemoryBytes,
+  REMOTE_DRIVER_COMPLETION_CONTROL_BYTES,
+} from "./execution/remote-driver-resources.js";
 import type { InputManifest } from "./generated/collaboration-contracts.js";
 export type { InputManifest, AtomicCreateResult } from "./generated/collaboration-contracts.js";
 export { MAX_WORKSPACE_PUBLICATION_EDITS, MAX_WORKSPACE_PUBLICATION_BYTES } from "./generated/fea-workspace-contracts.js";

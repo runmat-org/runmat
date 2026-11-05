@@ -14,10 +14,10 @@ use crate::runtime_error::RuntimeErrorOwner;
 use super::super::ON_CLEANUP_CLASS;
 use super::dependencies::{mark_admissible_batch, ActiveCleanupIdentity};
 
-#[path = "registry/retirement.rs"]
-mod retirement;
 #[path = "registry/deferred.rs"]
 mod deferred;
+#[path = "registry/retirement.rs"]
+mod retirement;
 
 use deferred::{CleanupDeferredOrigin, CleanupFutureHandoff};
 
@@ -43,6 +43,8 @@ pub(crate) enum CleanupReceipt {
 }
 
 pub(crate) struct CleanupEntry {
+    completion: Cell<Option<CleanupCompletionId>>,
+    submission_failure: RefCell<Option<RuntimeErrorOwner>>,
     target: GcHandle,
     ordinal: u64,
     callback: RefCell<Option<Value>>,
@@ -56,10 +58,24 @@ pub(crate) struct CleanupEntry {
     queued_command_origin: RefCell<Option<CommandProfilingReceipt>>,
     deferred_origin: RefCell<CleanupDeferredOrigin>,
     future_handoff: Cell<CleanupFutureHandoff>,
+    retirement_waker: RefCell<Option<std::task::Waker>>,
+    retirement_settled: Cell<bool>,
     reported: Cell<bool>,
 }
 
 impl CleanupEntry {
+    pub(crate) fn submission_failure(&self) -> Option<RuntimeErrorOwner> {
+        self.submission_failure.borrow().clone()
+    }
+
+    pub(crate) fn note_submission_failure(&self, error: crate::RuntimeError) {
+        *self.submission_failure.borrow_mut() = Some(RuntimeErrorOwner::new(error));
+    }
+
+    pub(crate) fn completion(&self) -> Option<CleanupCompletionId> {
+        self.completion.get()
+    }
+
     pub(crate) fn phase(&self) -> CleanupPhase {
         self.phase.get()
     }
@@ -187,12 +203,17 @@ pub(crate) enum CleanupAdmission {
     Indeterminate,
 }
 
+/// Issued by one session registry, with no per-call heap ledger.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CleanupCompletionId(u64);
+
 /// The host owns this registry for exactly one RuntimeContextLocalId. A weak
 /// reference is published into cloneable RuntimeContext state; neither it nor
 /// a GC finalizer confers host ownership.
 pub(crate) struct CleanupRegistry {
     index: RefCell<CleanupIndex>,
     next_ordinal: Cell<u64>,
+    next_completion: Cell<u64>,
     last_pruned_collection: Cell<u64>,
     closed: Cell<bool>,
 }
@@ -209,10 +230,33 @@ struct CleanupIndex {
 }
 
 impl CleanupRegistry {
+    pub(crate) fn has_active(&self) -> bool {
+        !self.index.borrow().active.is_empty()
+    }
+
+    pub(crate) fn has_completion_work(&self, completion: CleanupCompletionId) -> bool {
+        let index = self.index.borrow();
+        index
+            .pending
+            .values()
+            .chain(index.unreported_errors.values())
+            .chain(
+                index
+                    .terminal
+                    .values()
+                    .filter(|entry| entry.completion_retirement_pending()),
+            )
+            .any(|entry| {
+                entry.completion() == Some(completion)
+                    && (!entry.reported.get() || entry.completion_retirement_pending())
+            })
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             index: RefCell::new(CleanupIndex::default()),
             next_ordinal: Cell::new(0),
+            next_completion: Cell::new(0),
             last_pruned_collection: Cell::new(runmat_gc::gc_collection_epoch()),
             closed: Cell::new(false),
         }
@@ -246,6 +290,8 @@ impl CleanupRegistry {
             "session onCleanup target".into(),
         )))?;
         let entry = Rc::new(CleanupEntry {
+            completion: Cell::new(None),
+            submission_failure: RefCell::new(None),
             target,
             ordinal,
             callback: RefCell::new(Some(callback)),
@@ -257,6 +303,8 @@ impl CleanupRegistry {
             queued_command_origin: RefCell::new(None),
             deferred_origin: RefCell::new(CleanupDeferredOrigin::Unowned),
             future_handoff: Cell::new(CleanupFutureHandoff::NotStarted),
+            retirement_waker: RefCell::new(None),
+            retirement_settled: Cell::new(false),
             reported: Cell::new(false),
         });
         let mut index = self.index.borrow_mut();
@@ -271,11 +319,38 @@ impl CleanupRegistry {
     }
 
     pub(crate) fn pending_entries(&self) -> Vec<Rc<CleanupEntry>> {
+        self.pending_entries_selected(None)
+    }
+
+    pub(crate) fn pending_completion(
+        &self,
+        completion: CleanupCompletionId,
+    ) -> Option<Rc<CleanupEntry>> {
+        let index = self.index.borrow();
+        index
+            .pending
+            .values()
+            .chain(
+                index
+                    .terminal
+                    .values()
+                    .filter(|entry| entry.completion_retirement_pending()),
+            )
+            .filter(|entry| entry.completion() == Some(completion))
+            .min_by_key(|entry| entry.ordinal)
+            .cloned()
+    }
+
+    fn pending_entries_selected(
+        &self,
+        completion: Option<CleanupCompletionId>,
+    ) -> Vec<Rc<CleanupEntry>> {
         let mut pending = self
             .index
             .borrow()
             .pending
             .values()
+            .filter(|entry| completion.is_none_or(|id| entry.completion() == Some(id)))
             .cloned()
             .collect::<Vec<_>>();
         pending.sort_unstable_by_key(|entry| entry.ordinal);
@@ -283,6 +358,26 @@ impl CleanupRegistry {
     }
 
     pub(crate) fn terminal_errors(&self) -> Vec<Rc<CleanupEntry>> {
+        self.terminal_errors_selected(None)
+    }
+
+    pub(crate) fn completion_errors(
+        &self,
+        completion: CleanupCompletionId,
+    ) -> Option<Rc<CleanupEntry>> {
+        self.index
+            .borrow()
+            .unreported_errors
+            .values()
+            .filter(|entry| !entry.reported.get() && entry.completion() == Some(completion))
+            .min_by_key(|entry| entry.ordinal)
+            .cloned()
+    }
+
+    fn terminal_errors_selected(
+        &self,
+        completion: Option<CleanupCompletionId>,
+    ) -> Vec<Rc<CleanupEntry>> {
         let mut index = self.index.borrow_mut();
         index
             .unreported_errors
@@ -290,6 +385,7 @@ impl CleanupRegistry {
         let mut errors = index
             .unreported_errors
             .values()
+            .filter(|entry| completion.is_none_or(|id| entry.completion() == Some(id)))
             .cloned()
             .collect::<Vec<_>>();
         errors.sort_unstable_by_key(|entry| entry.ordinal);
@@ -303,6 +399,26 @@ impl CleanupRegistry {
         &self,
         temporary: &[RootId],
         origin: Option<&CommandProfilingReceipt>,
+    ) -> CleanupAdmission {
+        self.admit_batch_for_completion(temporary, origin, None)
+    }
+
+    pub(crate) fn issue_completion(&self) -> Result<CleanupCompletionId, crate::RuntimeError> {
+        let id = self.next_completion.get();
+        self.next_completion.set(id.checked_add(1).ok_or_else(|| {
+            crate::runtime_error::semantic_error(
+                "RunMat:onCleanup:CompletionExhausted",
+                "cleanup completion identity is exhausted",
+            )
+        })?);
+        Ok(CleanupCompletionId(id))
+    }
+
+    pub(crate) fn admit_batch_for_completion(
+        &self,
+        temporary: &[RootId],
+        origin: Option<&CommandProfilingReceipt>,
+        completion: Option<CleanupCompletionId>,
     ) -> CleanupAdmission {
         self.prune_terminal_after_collection();
         let mut active = self
@@ -358,6 +474,7 @@ impl CleanupRegistry {
                         if any {
                             for (entry, queued) in active.iter().zip(&selected) {
                                 if *queued {
+                                    entry.completion.set(completion);
                                     entry.phase.set(CleanupPhase::Queued);
                                 }
                             }
@@ -395,12 +512,23 @@ impl CleanupRegistry {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn queue_explicit(
         &self,
         entry: &CleanupEntry,
         origin: Option<&CommandProfilingReceipt>,
     ) -> bool {
+        self.queue_explicit_for_completion(entry, origin, None)
+    }
+
+    pub(crate) fn queue_explicit_for_completion(
+        &self,
+        entry: &CleanupEntry,
+        origin: Option<&CommandProfilingReceipt>,
+        completion: Option<CleanupCompletionId>,
+    ) -> bool {
         if entry.phase.get() == CleanupPhase::Active {
+            entry.completion.set(completion);
             entry.queue_command_origin(origin);
             entry.phase.set(CleanupPhase::Queued);
             let mut index = self.index.borrow_mut();

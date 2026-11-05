@@ -29,6 +29,8 @@ fn measured_dense<R>(
 
 /// Eigen-decomposition of a real symmetric `n × n` matrix (lower triangle read). Returns
 /// ascending eigenvalues and column-major orthonormal eigenvectors.
+/// The opaque faer eigen kernel is explicitly excluded from rsua-1 in 0.7.0;
+/// independently measured caller kernels retain their own charges.
 pub fn symmetric_eigen(a: &[f64], n: usize) -> SolverResult<(Vec<f64>, Vec<f64>)> {
     assert_eq!(a.len(), n * n);
     let mut values = vec![0.0; n];

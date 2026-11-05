@@ -33,6 +33,53 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) enum FloatingSlice
     Double(&'a [f64]),
 }
 
+enum LogicalSlice<'a> {
+    Scalar(u8),
+    Array(&'a [u8]),
+}
+
+impl LogicalSlice<'_> {
+    fn get(&self, index: usize) -> Option<f64> {
+        match self {
+            Self::Scalar(value) => (index == 0).then_some(f64::from(*value)),
+            Self::Array(values) => values
+                .get(index)
+                .map(|&value| if value != 0 { 1.0 } else { 0.0 }),
+        }
+    }
+}
+
+enum ArithmeticSlice<'a> {
+    Floating(FloatingSlice<'a>),
+    Logical(LogicalSlice<'a>),
+}
+
+fn arithmetic_slice(value: &Value) -> BuiltinResult<ArithmeticSlice<'_>> {
+    match value {
+        Value::Bool(value) => Ok(ArithmeticSlice::Logical(LogicalSlice::Scalar(u8::from(
+            *value,
+        )))),
+        Value::LogicalArray(value) => Ok(ArithmeticSlice::Logical(LogicalSlice::Array(
+            value.data.as_slice(),
+        ))),
+        _ => floating_slice(value).map(ArithmeticSlice::Floating),
+    }
+}
+
+fn floating_value(values: &FloatingSlice<'_>, index: usize) -> Option<f64> {
+    match values {
+        FloatingSlice::Single(values) => values.get(index).copied().map(f64::from),
+        FloatingSlice::Double(values) => values.get(index).copied(),
+    }
+}
+
+fn floating_class(values: &FloatingSlice<'_>) -> NumericClass {
+    match values {
+        FloatingSlice::Single(_) => NumericClass::Single,
+        FloatingSlice::Double(_) => NumericClass::Double,
+    }
+}
+
 pub(in crate::builtins::math::elementwise::binary_arithmetic) fn invalid() -> RuntimeError {
     crate::build_runtime_error(
         "selected host arithmetic differs from its admitted native operands or output",
@@ -85,10 +132,13 @@ pub(crate) fn execute_value(
     if output.operation() != BuiltinPreparationOperation::ElementwiseBinary {
         return Err(invalid());
     }
-    // Dispatch on source storage once. The inner loop contains no Value or
-    // storage-enum dispatch, source materialization, or expanded input buffer.
-    let value = match (floating_slice(left)?, floating_slice(right)?) {
-        (FloatingSlice::Single(a), FloatingSlice::Single(b)) => generate(
+    // Read retained native storage without materializing expanded inputs.
+    // Floating-only pairs select their storage-specialized loop here.
+    let value = match (arithmetic_slice(left)?, arithmetic_slice(right)?) {
+        (
+            ArithmeticSlice::Floating(FloatingSlice::Single(a)),
+            ArithmeticSlice::Floating(FloatingSlice::Single(b)),
+        ) => generate(
             runtime,
             output,
             operator,
@@ -97,7 +147,10 @@ pub(crate) fn execute_value(
             |i| a.get(i).copied().map(f64::from),
             |i| b.get(i).copied().map(f64::from),
         ),
-        (FloatingSlice::Single(a), FloatingSlice::Double(b)) => generate(
+        (
+            ArithmeticSlice::Floating(FloatingSlice::Single(a)),
+            ArithmeticSlice::Floating(FloatingSlice::Double(b)),
+        ) => generate(
             runtime,
             output,
             operator,
@@ -106,7 +159,10 @@ pub(crate) fn execute_value(
             |i| a.get(i).copied().map(f64::from),
             |i| b.get(i).copied(),
         ),
-        (FloatingSlice::Double(a), FloatingSlice::Single(b)) => generate(
+        (
+            ArithmeticSlice::Floating(FloatingSlice::Double(a)),
+            ArithmeticSlice::Floating(FloatingSlice::Single(b)),
+        ) => generate(
             runtime,
             output,
             operator,
@@ -115,7 +171,10 @@ pub(crate) fn execute_value(
             |i| a.get(i).copied(),
             |i| b.get(i).copied().map(f64::from),
         ),
-        (FloatingSlice::Double(a), FloatingSlice::Double(b)) => generate(
+        (
+            ArithmeticSlice::Floating(FloatingSlice::Double(a)),
+            ArithmeticSlice::Floating(FloatingSlice::Double(b)),
+        ) => generate(
             runtime,
             output,
             operator,
@@ -123,6 +182,33 @@ pub(crate) fn execute_value(
             NumericClass::Double,
             |i| a.get(i).copied(),
             |i| b.get(i).copied(),
+        ),
+        (ArithmeticSlice::Logical(a), ArithmeticSlice::Logical(b)) => generate(
+            runtime,
+            output,
+            operator,
+            NumericClass::Double,
+            NumericClass::Double,
+            |i| a.get(i),
+            |i| b.get(i),
+        ),
+        (ArithmeticSlice::Logical(a), ArithmeticSlice::Floating(b)) => generate(
+            runtime,
+            output,
+            operator,
+            NumericClass::Double,
+            floating_class(&b),
+            |i| a.get(i),
+            |i| floating_value(&b, i),
+        ),
+        (ArithmeticSlice::Floating(a), ArithmeticSlice::Logical(b)) => generate(
+            runtime,
+            output,
+            operator,
+            floating_class(&a),
+            NumericClass::Double,
+            |i| floating_value(&a, i),
+            |i| b.get(i),
         ),
     }?;
     let Value::Tensor(tensor) = value else {

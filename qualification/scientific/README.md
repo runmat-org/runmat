@@ -14,6 +14,11 @@ test policy. CI rejects missing or outdated receipts. Extended transient-rod
 qualification remains deferred under RM-1297; its existing failures are recorded
 in that ticket.
 
+The 0.7.0 release also defers the governed `meshing-release` cohort under the
+owner's November 4 approval. Its 12 commands have no qualifying run or passing
+receipt for this release. Shorter meshing tests remain in ordinary CI. Authored
+CLI physics and driver recovery still require their scientific receipts.
+
 ## Run a cohort
 
 Print the command for a test group:
@@ -35,7 +40,7 @@ with their original assertions. Results include one log per command and an exit
 status table.
 
 Its 12 commands reuse the three driver-replacement cases measured by the
-separate required `driver-recovery-physics` cohort. All 15 recovery cases still
+separate required `driver-recovery-physics` cohort. All 18 recovery cases still
 need their receipt; the meshing recipe does not repeat those three solves.
 
 Use the workspace runner's `--include-extended` option to execute all test groups,

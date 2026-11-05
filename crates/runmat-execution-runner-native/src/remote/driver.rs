@@ -84,6 +84,14 @@ pub(super) async fn run_remote_driver(
         return Ok(());
     }
 
+    // This is a parent control component, separate from the child's signed
+    // numerical limits. Admission below must refuse a child that cannot fit
+    // the remaining capacity; it must not resize the program's request.
+    let (completion_grant, child_memory_bytes) =
+        super::completion::RemoteCompletionGrant::admit(bootstrap.driver_resources.memory_bytes)?;
+    let mut execution_resources = bootstrap.driver_resources.clone();
+    execution_resources.memory_bytes = child_memory_bytes;
+
     let admitted = program::admit(
         control.as_ref(),
         &run_key,
@@ -267,13 +275,13 @@ pub(super) async fn run_remote_driver(
                     let response = execute_local_direct(
                         *admitted,
                         input_objects,
-                        &bootstrap.driver_resources,
+                        &execution_resources,
                         Some(Arc::clone(&direct_cancellation)),
                         &config.authority,
                         original_clock,
                     )
                     .await?;
-                    Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(response))
+                    Ok(Ok(response))
                 }
                 AdmittedRemoteProgram::Graph(admitted) => {
                     let program::AdmittedGraphProgram {
@@ -283,7 +291,7 @@ pub(super) async fn run_remote_driver(
                         &config.authority.run_id,
                         request,
                         _staged,
-                        &bootstrap.driver_resources,
+                        &execution_resources,
                         &bootstrap.driver_accelerator_devices,
                         cancellation_receiver,
                     )
@@ -303,7 +311,7 @@ pub(super) async fn run_remote_driver(
                 checkpoint_sequence,
                 desired_workers: bootstrap.desired_worker_count,
                 resources: bootstrap.worker_resources,
-                driver_resources: bootstrap.driver_resources,
+                driver_resources: execution_resources,
                 cancellation: cancellation_receiver,
                 ready_v1: config.ready_v1,
                 clock_parent: config.clock_parent.clone(),
@@ -316,10 +324,10 @@ pub(super) async fn run_remote_driver(
         tokio::select! {
             response = &mut execution => {
                 match response? {
-                    super::pool_execution::RemotePoolExecutionOutcome::Completed(response) => {
-                        break response;
+                    Ok(response) => {
+                        break completion_grant.retain(response)?;
                     }
-                    super::pool_execution::RemotePoolExecutionOutcome::Cancelled => {
+                    Err(crate::remote::pool_execution::RemoteExecutionStop::Cancelled) => {
                         report_usage(
                             control.as_ref(),
                             &config,
@@ -335,7 +343,7 @@ pub(super) async fn run_remote_driver(
                         ).await?;
                         return Ok(());
                     }
-                    super::pool_execution::RemotePoolExecutionOutcome::Indeterminate(message) => {
+                    Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(message)) => {
                         let diagnostic = store_encrypted(
                             control.as_ref(),
                             &config.authority,
@@ -581,14 +589,14 @@ pub(super) async fn commit_response(
     control: &dyn DriverControlPlane,
     config: &RemoteDriverConfig,
     run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
-    result: super::pool_execution::RemotePoolExecutionResult,
+    mut completion: super::completion::OwnedRemoteCompletion,
 ) -> NativeExecutionResult<()> {
     let super::pool_execution::RemotePoolExecutionResult {
         response,
         objects,
         console,
         cancelled,
-    } = result;
+    } = completion.take_result();
     let failed = matches!(
         &response,
         ProgramExecutionResponse::Failure { .. } | ProgramExecutionResponse::RuntimeFailure { .. }

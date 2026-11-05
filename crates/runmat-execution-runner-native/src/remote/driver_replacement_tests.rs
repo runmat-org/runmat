@@ -475,7 +475,13 @@ impl DriverControlPlane for DurableControl {
                 .as_ref()
                 .map(|id| artifact_download(id, state.artifacts.get(id).unwrap())),
             cancellation_requested: false,
-            driver_resources: self.resources.clone(),
+            driver_resources: {
+                let mut resources = self.resources.clone();
+                resources.memory_bytes =
+                    runmat_execution::resource::remote_driver_memory_bytes(resources.memory_bytes)
+                        .unwrap();
+                resources
+            },
             driver_accelerator_devices: Vec::new(),
             desired_worker_count: 1,
             worker_resources: self.resources.clone(),

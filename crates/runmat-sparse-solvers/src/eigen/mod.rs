@@ -1,4 +1,6 @@
-//! Generalized symmetric eigensolvers.
+//! Generalized symmetric eigensolvers. Their eigen iterations and projected
+//! eigendecompositions are explicitly excluded from rsua-1 in 0.7.0; measured
+//! child matrix/vector/direct-solve kernels retain their separate charges.
 //!
 //! - [`modal`]: `K x = λ M x` (stiffness/mass, also prestressed `K + K_G`), eigenvalues nearest
 //!   above a shift via shift-invert thick-restart block Lanczos on `(K − σM)⁻¹ M` with a sparse

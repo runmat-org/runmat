@@ -153,6 +153,86 @@ fn symbolic_factors_use_stored_fill_and_reject_other_families() {
         symbolic.reference_work(),
         Err(ReferenceWorkError::FactorKind(FactorKind::Lu))
     ));
+    assert_eq!(
+        symbolic.measurement_coverage().unwrap(),
+        DirectMeasurementCoverage::Excluded(ExcludedDirectKernel::SparseLu)
+    );
+}
+
+#[test]
+fn excluded_sparse_pivot_kernels_keep_refined_execution_and_covered_batches() {
+    use crate::direct::{DirectSolvePhase, DirectSolver};
+    use runmat_simulation_usage::{UsageContext, UsageLedger};
+    use std::sync::Arc;
+
+    let count = OperationCount::from_operations;
+    let mut entries = TripletBuilder::<f64>::new(3, 3);
+    for row in 0..3 {
+        for column in 0..3 {
+            entries.push(row, column, if row == column { 4.0 } else { 1.0 });
+        }
+    }
+    let matrix = entries.build();
+    for (kind, exclusion) in [
+        (FactorKind::Lu, ExcludedDirectKernel::SparseLu),
+        (
+            FactorKind::BunchKaufman,
+            ExcludedDirectKernel::SparseBunchKaufman,
+        ),
+    ] {
+        let ledger = Arc::new(UsageLedger::new(count(100_000), count(100_000)).unwrap());
+        let context = UsageContext::new(Arc::clone(&ledger));
+        context.run_sync(|| {
+            let solver = DirectSolver::<f64>::new(
+                matrix.as_ref().into(),
+                DirectOptions {
+                    ordering: Ordering::Identity,
+                    ..DirectOptions::new(kind)
+                },
+                SolveControl::NONE,
+            )
+            .unwrap();
+            assert_eq!(
+                solver.symbolic().measurement_coverage().unwrap(),
+                DirectMeasurementCoverage::Excluded(exclusion)
+            );
+            let mut x = [0.0; 3];
+            let mut phases = Vec::new();
+            {
+                let future = solver.solve_refined_with_owner(
+                    matrix.as_ref().into(),
+                    &[6.0; 3],
+                    &mut x,
+                    1,
+                    |phase, operations| {
+                        phases.push((phase, operations));
+                        std::future::ready(Ok::<(), ()>(()))
+                    },
+                );
+                let mut future = std::pin::pin!(future);
+                let mut task = std::task::Context::from_waker(std::task::Waker::noop());
+                match std::future::Future::poll(future.as_mut(), &mut task) {
+                    std::task::Poll::Ready(Ok(report)) => report,
+                    std::task::Poll::Ready(Err(_)) => panic!("excluded direct solve failed"),
+                    std::task::Poll::Pending => panic!("ready direct owner suspended"),
+                };
+            }
+            assert!(x.iter().all(|value| (value - 1.0).abs() < 1e-12));
+            assert!(phases
+                .iter()
+                .any(|(phase, _)| *phase == DirectSolvePhase::Residual));
+            assert!(phases
+                .iter()
+                .any(|(phase, _)| *phase == DirectSolvePhase::Norm));
+            assert!(phases.iter().all(|(phase, _)| !matches!(
+                phase,
+                DirectSolvePhase::InitialSubstitution | DirectSolvePhase::RefinementSubstitution
+            )));
+        });
+        let usage = ledger.finish().unwrap();
+        assert_eq!(usage.factorization, OperationCount::ZERO);
+        assert!(usage.solve.operations() > 0);
+    }
 }
 
 #[test]

@@ -5,6 +5,105 @@ use crate::context::{
 };
 use std::{cell::Cell, pin::Pin, rc::Rc, task::Poll};
 
+#[test]
+fn logical_binary_uses_the_finite_double_output_owner() {
+    use crate::context::preparation::{AdmittedBuiltinPreparation, BuiltinPreparationAdmission};
+    use runmat_builtins::{BuiltinBindingIdentity, BuiltinPreparationFormId, MINUS_CATALOG_ENTRY};
+    use runmat_types::OperatorKind;
+    use runmat_value::{IntValue, LogicalArray, Tensor};
+
+    let ledger = ManagedHostEffectLedger::new_with_epoch(1_000_000, 297);
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(Managed(ledger.clone()))),
+        );
+    let admission = BuiltinPreparationAdmission {
+        binding: BuiltinBindingIdentity {
+            builtin: MINUS_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        form: BuiltinPreparationFormId(0),
+        signature: 0,
+        input_count: 2,
+        requested_outputs: None,
+    };
+    for (left, right, expected) in [
+        (
+            Value::LogicalArray(LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap()),
+            Value::Num(5.0),
+            vec![-4.0, -5.0, -4.0, -5.0],
+        ),
+        (
+            Value::Num(5.0),
+            Value::LogicalArray(LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap()),
+            vec![4.0, 5.0, 4.0, 5.0],
+        ),
+    ] {
+        let selected = super::super::selection::prepare(
+            Some(&runtime),
+            MINUS_CATALOG_ENTRY.identity,
+            OperatorKind::Subtract,
+            2,
+            left.clone(),
+            right.clone(),
+        )
+        .unwrap();
+        assert!(matches!(selected.branch, Branch::Admitted(_)));
+        let request =
+            AdmittedBuiltinPreparation::new(admission, vec![left.clone(), right.clone()]).unwrap();
+        let output = request
+            .prepare_host_numerical_output(&runtime)
+            .unwrap()
+            .unwrap();
+        let result =
+            managed::execute_value(&runtime, output, OperatorKind::Subtract, &left, &right)
+                .unwrap();
+        let Value::Tensor(result) = result else {
+            panic!("finite logical arithmetic changed result carrier");
+        };
+        assert_eq!(result.as_f64_slice(), Some(expected.as_slice()));
+    }
+    let logical = Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap());
+    let single = Value::Tensor(Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).unwrap());
+    let selected = super::super::selection::prepare(
+        Some(&runtime),
+        MINUS_CATALOG_ENTRY.identity,
+        OperatorKind::Subtract,
+        2,
+        logical.clone(),
+        single.clone(),
+    )
+    .unwrap();
+    assert!(matches!(selected.branch, Branch::Admitted(_)));
+    let output = AdmittedBuiltinPreparation::new(admission, vec![logical.clone(), single.clone()])
+        .unwrap()
+        .prepare_host_numerical_output(&runtime)
+        .unwrap()
+        .unwrap();
+    let value = managed::execute_value(&runtime, output, OperatorKind::Subtract, &logical, &single)
+        .unwrap();
+    let Value::Tensor(value) = value else {
+        panic!("logical and single retain the inferred single result")
+    };
+    assert_eq!(value.as_f32_slice(), Some(&[-1.0, -3.0][..]));
+    for other in [Value::Int(IntValue::I64(2)), Value::Complex(2.0, 1.0)] {
+        let selected = super::super::selection::prepare(
+            Some(&runtime),
+            MINUS_CATALOG_ENTRY.identity,
+            OperatorKind::Subtract,
+            2,
+            logical.clone(),
+            other,
+        )
+        .unwrap();
+        assert!(matches!(selected.branch, Branch::Ordinary));
+    }
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(value);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
 struct Managed(ManagedHostEffectLedger);
 impl RuntimeParallelService for Managed {
     fn supports(&self, _: ParallelCapability) -> bool {

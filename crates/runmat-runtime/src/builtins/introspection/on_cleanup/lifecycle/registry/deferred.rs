@@ -26,6 +26,40 @@ pub(crate) enum CleanupFutureHandoff {
 }
 
 impl CleanupEntry {
+    pub(super) fn completion_retirement_pending(&self) -> bool {
+        self.future_handoff.get() != CleanupFutureHandoff::NotStarted
+            && !self.retirement_settled.get()
+    }
+
+    pub(crate) fn finish_future_retirement(&self) {
+        self.retirement_settled.set(true);
+        self.wake_retired();
+    }
+
+    fn wake_retired(&self) {
+        let wake = self.retirement_waker.borrow_mut().take();
+        if let Some(wake) = wake {
+            wake.wake();
+        }
+    }
+
+    pub(crate) async fn wait_future_retired(&self) {
+        futures::future::poll_fn(|context| {
+            if !self.completion_retirement_pending() {
+                return std::task::Poll::Ready(());
+            }
+            let mut wake = self.retirement_waker.borrow_mut();
+            if !wake
+                .as_ref()
+                .is_some_and(|wake| wake.will_wake(context.waker()))
+            {
+                *wake = Some(context.waker().clone());
+            }
+            std::task::Poll::Pending
+        })
+        .await
+    }
+
     pub(super) fn queue_command_origin(&self, origin: Option<&CommandProfilingReceipt>) {
         *self.queued_command_origin.borrow_mut() = origin.cloned();
         *self.deferred_origin.borrow_mut() = match origin {

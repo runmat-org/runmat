@@ -173,9 +173,19 @@ pub async fn copy_readback_bytes(
     buffer: &GpuInputBuffer,
     byte_len: usize,
 ) -> Result<Vec<u8>, String> {
-    copy_readback_mapped(access, buffer, byte_len, |bytes| Ok(bytes.to_vec()))
+    copy_readback_bytes_typed(access, buffer, byte_len)
         .await
         .map_err(|error| error.to_string())
+}
+
+/// Typed byte export for plot-source consumers that retain device, mapping,
+/// and cleanup causes across graphics-property boundaries.
+pub(crate) async fn copy_readback_bytes_typed(
+    access: &WgpuDeviceAccess,
+    buffer: &GpuInputBuffer,
+    byte_len: usize,
+) -> Result<Vec<u8>, PlotReadbackError> {
+    copy_readback_mapped(access, buffer, byte_len, |bytes| Ok(bytes.to_vec())).await
 }
 
 /// Exact integer histogram evidence. Mapping/cancellation and original causes

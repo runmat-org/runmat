@@ -26,6 +26,11 @@ pub(super) fn execute(
     request: NativeSiteRequest,
     exit: &mut NativeExit,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
+    // A completed retirement resumes the already-executed site's exact POD
+    // control-flow decision. Never replay its mutation or edge binding.
+    if let Some(outcome) = super::call_suspension::take_completed_retirement(state, request)? {
+        return Ok(outcome);
+    }
     if state.region_observation.is_some() && !request_matches_function(state, request) {
         state.region_observation = None;
     } else {
@@ -37,6 +42,13 @@ pub(super) fn execute(
             Err(error) => return Err(error),
         }
     }
+    let initial_candidates = state.runtime.has_cleanup_candidates();
+    let mut cleanup = state.runtime.begin_value_retirement()?;
+    let _initial_selected = if initial_candidates {
+        Some(cleanup.selected_context(&state.runtime)?.enter())
+    } else {
+        None
+    };
     // The observation tail has settled and no current operand borrow exists.
     // Retire only obsolete generations, before the next operation can borrow
     // arena payloads or produce an outgoing exception token.
@@ -46,10 +58,95 @@ pub(super) fn execute(
     runmat_runtime::numeric_region::service::set_native_region_for_current_poll(
         super::region::observation::active_audit(state),
     );
-    match (result, observed) {
-        (Err(first), _) => Err(first),
+    let mut result = match (result, observed) {
+        (Err(first), secondary) => with_secondary(Err(first), secondary),
         (Ok(_), Err(error)) => Err(error),
         (Ok(outcome), Ok(())) => Ok(outcome),
+    };
+    // Select the exact completion before any post-site slot retirement or
+    // Base publication can make an active cleanup target unreachable. The
+    // guard covers this synchronous retirement only, never a suspension.
+    let selected_guard = if state.runtime.has_cleanup_candidates() {
+        let selected = match cleanup.selected_context(&state.runtime) {
+            Ok(selected) => selected,
+            Err(error) => return with_secondary(result, Err(error.into())),
+        };
+        Some(selected.enter())
+    } else {
+        None
+    };
+    if result
+        .as_ref()
+        .is_ok_and(|outcome| outcome.kind == runmat_runtime::native::NativeSiteOutcomeKind::EXIT)
+    {
+        return result;
+    }
+    if result.is_err() {
+        let retired = state.abandon_site_continuations();
+        result = with_secondary(result, retired);
+    }
+    if state.runtime.has_cleanup_candidates()
+        && !result.as_ref().is_ok_and(|outcome| {
+            outcome.kind == runmat_runtime::native::NativeSiteOutcomeKind::EDGE
+        })
+    {
+        let site = state
+            .function
+            .blocks
+            .iter()
+            .find(|block| block.id.0 == request.block)
+            .and_then(|block| {
+                block
+                    .instructions
+                    .iter()
+                    .find(|instruction| site_matches(instruction, request))
+            })
+            .map(|instruction| instruction.site.clone());
+        if let Some(site) = site {
+            result = with_secondary(result, state.retire_site_values(&site));
+        }
+    }
+    result = with_secondary(result, state.retire_obsolete_generations(call));
+    if state.runtime.has_cleanup_candidates() {
+        // The native frame stages its authentic Base mutation through the
+        // current workspace service. Publish that admitted prefix before the
+        // cleanup completion checks whether the displaced owner is still live.
+        let publication = cleanup
+            .selected_context(&state.runtime)
+            .and_then(|selected| {
+                selected
+                    .service_ports()
+                    .workspace()
+                    .map_or(Ok(()), |workspace| {
+                        workspace.publish_admitted_mutations_with_context(selected)
+                    })
+            })
+            .map_err(NativeExecutorError::from);
+        result = with_secondary(result, publication);
+    }
+    let _ = &selected_guard;
+    match cleanup.admit_retired_values(&state.runtime) {
+        Ok(true) => {
+            super::call_suspension::begin_retirement(state, request, cleanup, result)?;
+            super::call_suspension::publish(state, call, request, exit)
+        }
+        Ok(false) => result,
+        Err(error) => with_secondary(result, Err(error.into())),
+    }
+}
+
+fn with_secondary<T>(
+    result: NativeExecutorResult<T>,
+    secondary: NativeExecutorResult<()>,
+) -> NativeExecutorResult<T> {
+    match (result, secondary) {
+        (result, Ok(())) => result,
+        (Ok(_), Err(error)) => Err(error),
+        (Err(original), Err(secondary)) => runmat_runtime::runtime_error::complete_with_cleanup(
+            Err(original.into_runtime_error()),
+            Err(secondary.into_runtime_error()),
+        )
+        .map_err(Into::into),
     }
 }
 
@@ -785,6 +882,7 @@ pub(in crate::execute) fn take_edge(
         state.values.insert(parameter.value, bound);
     }
     state.take_control_edge(edge.target);
+    state.retire_edge_values(edge.target)?;
     Ok(NativeSiteOutcome::edge(index))
 }
 

@@ -15,6 +15,7 @@ use crate::context::host_allocation::{HostAllocationReceipt, HostTypedWorkspace}
 use crate::context::RuntimeContext;
 use crate::RuntimeError;
 
+mod balance;
 mod kernel;
 mod managed_workspace;
 
@@ -93,6 +94,8 @@ fn solve_owned(
         .map_err(|_| "Riccati cluster metadata allocation failed")?;
     let mut solution = exact_capacity_vec_with(plan.subspace_len, |_| 0.0_f64)
         .map_err(|_| "Riccati solution allocation failed")?;
+    let mut state_scales = exact_capacity_vec_with(n, |_| 1.0_f64)
+        .map_err(|_| "Riccati balancing workspace allocation failed")?;
     let mut qr_memory = MemBuffer::try_new(plan.qr_scratch)
         .map_err(|_| "Riccati QR workspace allocation failed")?;
     let mut qz_memory = MemBuffer::try_new(plan.qz_scratch)
@@ -118,6 +121,7 @@ fn solve_owned(
             rhs: &mut rhs,
             labels: &mut labels,
             solution: &mut solution,
+            state_scales: &mut state_scales,
             qr_scratch: &mut qr_memory,
             qz_scratch: &mut qz_memory,
         },
@@ -217,7 +221,9 @@ fn real_symmetric_subspace_solution(
     let mut rhs = complex_buffer(extent)?;
     let mut solution = exact_capacity_vec_with(extent, |_| 0.0_f64)
         .map_err(|_| "Riccati solution allocation failed")?;
-    kernel::subspace_into(right, n, &mut lu, &mut rhs, &mut solution)?;
+    let state_scales = exact_capacity_vec_with(n, |_| 1.0_f64)
+        .map_err(|_| "Riccati balancing workspace allocation failed")?;
+    kernel::subspace_into(right, n, &mut lu, &mut rhs, &mut solution, &state_scales)?;
     Ok(DMatrix::<f64>::from_vec(n, n, solution))
 }
 
@@ -304,6 +310,55 @@ mod tests {
         .expect("pivoted two-column subspace solve");
         for (row, col, expected) in [(0, 0, 2.0), (0, 1, 0.5), (1, 0, 0.5), (1, 1, 1.0)] {
             assert!((solution[(row, col)] - expected).abs() < 1.0e-12);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn balanced_pendulum_care_retains_real_symmetric_stabilizing_solution() {
+        // Maintained control-systems/pendulum-lqr example. Its semidefinite
+        // Q and full-rank controllable (A,B) are a supported CARE, despite the
+        // much larger state cost than the dynamics and input coefficients.
+        let p = 0.0132;
+        let a = DMatrix::from_column_slice(
+            4,
+            4,
+            &[
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                -0.0024 / p,
+                0.0,
+                -0.006 / p,
+                0.0,
+                0.035316 / p,
+                0.0,
+                0.41202 / p,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+            ],
+        );
+        let b = DMatrix::from_column_slice(4, 1, &[0.0, 0.024 / p, 0.0, 0.06 / p]);
+        let q = DMatrix::from_diagonal(&nalgebra::DVector::from_vec(vec![5000.0, 0.0, 100.0, 0.0]));
+        let factor = solve_owned(
+            a,
+            b,
+            q,
+            DMatrix::from_element(1, 1, 1.0),
+            DMatrix::zeros(4, 1),
+            RiccatiTimeDomain::Continuous,
+        )
+        .expect("balanced stable CARE subspace");
+        let x = &factor.solution;
+        for col in 0..4 {
+            for row in 0..4 {
+                assert!(x[(row, col)].is_finite());
+                assert!((x[(row, col)] - x[(col, row)]).abs() < 1.0e-9);
+            }
         }
     }
 }

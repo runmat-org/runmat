@@ -457,9 +457,11 @@ impl HostState {
             arena,
             locals,
             values: BTreeMap::new(),
+            liveness: None,
             roots,
             last_error: None,
             host_failure: None,
+            retirement_failure: None,
             current_source: runmat_runtime::native::NativeSourceLocation {
                 source,
                 ..runmat_runtime::native::NativeSourceLocation::default()

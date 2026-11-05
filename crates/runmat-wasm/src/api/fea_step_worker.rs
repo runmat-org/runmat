@@ -107,15 +107,10 @@ pub async fn execute_owned_fea_study_step(
                     js_error("Simulation cancelled.")
                 }
             })?;
-        let result = analysis::fea_run_admission::merge_lease_error(
+        let result = analysis::analysis_merge_study_step_admission(
             result,
-            context.scope().check().err().map(|denied| {
-                denied.into_operation_error(
-                    analysis::ANALYSIS_RUN_STUDY_OPERATION,
-                    analysis::ANALYSIS_RUN_STUDY_OP_VERSION,
-                    &operation_context,
-                )
-            }),
+            context.scope().check().err(),
+            &operation_context,
         );
         let successful = result.is_ok();
         let json = serde_json::to_string(&result).map_err(|error| js_error(&error.to_string()))?;

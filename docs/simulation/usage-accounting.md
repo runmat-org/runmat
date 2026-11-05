@@ -11,11 +11,10 @@ capacity over time. We chose operation-based accounting so that faster execution
 does not, by itself, change the usage charged. Our aim is to make simulations
 faster while giving you an allowance you can relate to practical engineering work.
 
-We calibrate the included allowances against representative projects: simple
-brackets and everyday objects for free use, and substantial design-and-simulation
-workflows for Scale. Published examples identify the model, physics, mesh, load
-cases, design iterations and measured usage. Geometry alone does not determine
-the amount of numerical work.
+The included allowances are intended for simple brackets and everyday objects
+under free use, and larger design-and-simulation workflows under Professional. Usage
+depends on the physics, mesh, load cases, iterations and numerical algorithms;
+geometry alone does not determine the amount of measured work.
 
 ## Units
 
@@ -107,8 +106,7 @@ meshing work uncharged; no arbitrary conversion weight is assigned to it.
 
 ## Numerical-operation schedule
 
-The released specification must identify exact reference algorithms or formulas
-for each supported measurement boundary:
+RunMat applies reference counting at these numerical boundaries:
 
 - Meshing: numerical geometry operations, including their special-function rules.
 - Assembly: element formulation, integration work and matrix/vector accumulation.
@@ -122,9 +120,8 @@ for each supported measurement boundary:
   fusion conventions, or an explicit exclusion such as OCCT preparation and
   tessellation in `rsua-1`.
 
-The table defines primitive costs. The remaining reference algorithms still
-need explicit schedules and a supported-operation inventory
-before this draft is published as version 1.
+The primitive costs above apply within these stages. The following sections
+describe the measured batches and explicit exclusions in `rsua-1`.
 
 ### Sparse LLT and LDLT reference arithmetic
 
@@ -151,6 +148,25 @@ Its unit-diagonal triangular substitutions and separate real-diagonal solve
 cost 4p + 1 operations per real column and right-hand side, or 16p + 2 for
 Hermitian complex values. Pivoting block factorizations require their own
 reference schedules; these formulas do not describe Bunch–Kaufman or LU.
+
+For `rsua-1` in RunMat 0.7.0, faer's sparse LU and sparse Bunch–Kaufman
+numeric factorization, refactorization and substitution kernels are explicitly
+excluded from the simulation operation count. Pivot choices and their resulting
+work do not have an approved exact reference schedule. The solver classifies
+these two kernels by factor kind before admitting a numerical batch; an
+unsupported or future kind cannot silently become measured zero. Their
+solutions remain available in a measured FEA run. Residual construction, norms,
+correction updates, assembly and other independently measured work in the same
+run still consume allowance. The hand-written small dense LU kernel has its own
+reference batches and is not part of this sparse-library exclusion.
+
+Modal and buckling eigen kernels are also excluded from `rsua-1` in 0.7.0:
+faer's dense symmetric eigen-decomposition and the outer Lanczos/LOBPCG,
+shift-selection, Ritz, inertia and eigenpair postprocessing algorithms do not
+have complete approved reference schedules. This exclusion applies to those
+eigen kernels, not to separately metered sparse matrix applications, vector
+operations, preconditioners or LLT/LDLT direct solves they invoke. The excluded
+kernels consume computing resources without consuming simulation allowance.
 
 An LLT or LDLT numeric factorization, refactorization or substitution is one reference
 batch. The solver reserves its count before numeric allocation or changes to

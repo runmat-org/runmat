@@ -5,6 +5,19 @@ use runmat_types::FunctionId;
 
 use crate::ExecutableUnit;
 
+pub(crate) fn capture_liveness_admission(
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> Result<runmat_native_codegen::NativeLivenessAdmission, runmat_runtime::RuntimeError> {
+    runmat_native_codegen::NativeLivenessAdmission::capture(runtime).map_err(|source| {
+        runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:NativeLivenessAdmission",
+            "native liveness metadata admission failed",
+            source,
+        )
+    })
+}
+
 pub(super) struct CompiledGenericUnit {
     pub executor: Rc<runmat_native_executor::NativeExecutor>,
     pub entrypoint: FunctionId,
@@ -27,6 +40,7 @@ pub(super) struct PreparedGenericUnit {
     specialization: Option<runmat_jit::tiering::RepresentationProfile>,
     prepare_ns: u64,
     optimization: runmat_jit::CompilerOptimization,
+    liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
 }
 
 pub(super) struct BackgroundCompiledGenericUnit {
@@ -54,6 +68,7 @@ pub(super) fn compile(
         unit,
         preferred_function,
         runmat_jit::CompilerOptimization::TierDefault,
+        runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
     )
 }
 
@@ -61,12 +76,14 @@ pub(super) fn compile_with_policy(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
     optimization: runmat_jit::CompilerOptimization,
+    liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
 ) -> Result<CompiledGenericUnit, runmat_runtime::RuntimeError> {
     let compiled = compile_prepared(prepare_with_policy(
         unit,
         preferred_function,
         None,
         optimization,
+        liveness_admission,
     )?)?;
     Ok(CompiledGenericUnit {
         executor: Rc::new(compiled.executor),
@@ -84,6 +101,7 @@ pub(super) fn prepare_with_policy(
     preferred_function: Option<&str>,
     specialization: Option<runmat_jit::tiering::RepresentationProfile>,
     optimization: runmat_jit::CompilerOptimization,
+    liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
 ) -> Result<PreparedGenericUnit, runmat_runtime::RuntimeError> {
     let started = std::time::Instant::now();
     let native = unit.prepare_native_compilation_for(preferred_function)?;
@@ -95,6 +113,7 @@ pub(super) fn prepare_with_policy(
         specialization,
         prepare_ns,
         optimization,
+        liveness_admission,
     })
 }
 
@@ -177,6 +196,7 @@ pub(super) fn compile_prepared(
         coverage_sites,
         prepared.specialization,
         prepared.optimization,
+        prepared.liveness_admission,
     )
     .map_err(super::error::from_jit_error)?;
     Ok(BackgroundCompiledGenericUnit {

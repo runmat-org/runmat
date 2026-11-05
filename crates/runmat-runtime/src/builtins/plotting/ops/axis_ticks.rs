@@ -191,9 +191,22 @@ fn clear_ticks(
     }
 }
 
+pub(super) fn tick_tensor_from_value(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<Tensor> {
+    // A scalar numeric Value is a one-element tick vector. Use the canonical
+    // checked conversion so native integers keep their exact storage until
+    // the graphics boundary. Resident controls remain unsupported.
+    match value {
+        Value::Num(_) | Value::Int(_) => tensor::value_into_tensor_for(builtin, value.clone()),
+        _ => Tensor::try_from(value),
+    }
+    .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))
+}
+
 fn ticks_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<f64>> {
-    let tensor =
-        Tensor::try_from(value).map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
+    let tensor = tick_tensor_from_value(value, builtin)?;
     let exact = (0..tensor.len())
         .map(|index| {
             tensor

@@ -167,9 +167,12 @@ impl Source {
             || handle_provenance(handle) != Some(GpuHandleProvenance::Automatic)
             || handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
             || !matches!(
-                handle.physical().element_type(),
-                runmat_accelerate_api::NumericElementType::F32
-                    | runmat_accelerate_api::NumericElementType::F64
+                (handle.view().is_logical(), handle.physical().element_type()),
+                (false, runmat_accelerate_api::NumericElementType::F32)
+                    | (false, runmat_accelerate_api::NumericElementType::F64)
+                    | (true, runmat_accelerate_api::NumericElementType::U8)
+                    | (true, runmat_accelerate_api::NumericElementType::F32)
+                    | (true, runmat_accelerate_api::NumericElementType::F64)
             )
             || handle.allocation_lease().validate_live().is_err()
             || handle.view().validate(handle.physical()).is_err()

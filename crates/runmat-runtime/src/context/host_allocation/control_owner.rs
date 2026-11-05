@@ -21,6 +21,12 @@ impl std::fmt::Debug for HostControlAllocationOwner {
 }
 
 impl HostControlAllocationOwner {
+    /// Recheck the original grant before new background allocation/publication.
+    /// Reading already-funded immutable storage does not require this check.
+    pub fn check_current(&self) -> Result<(), HostAllocationError> {
+        self.owner.check()
+    }
+
     /// An absent owner is the explicit unbounded policy. A finite context
     /// without its managed ledger is an error, not an unbounded substitute.
     pub fn capture(runtime: &RuntimeContext) -> Result<Option<Self>, HostAllocationError> {

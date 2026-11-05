@@ -56,10 +56,6 @@ impl PreparedStorageExecutorAssignment {
     pub(super) fn name(&self) -> &WorkspaceName {
         self.overlay.name()
     }
-
-    pub(super) fn replaces_base(&self) -> bool {
-        self.base.is_some()
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -138,6 +134,91 @@ pub(super) struct ManagedWorkspaceStorage {
 }
 
 impl ManagedWorkspaceStorage {
+    pub(super) fn is_prepared_live(&self) -> bool {
+        self.initialized
+            && self.view_current
+            && self.committed.is_empty()
+            && self.pending.is_empty()
+    }
+
+    pub(super) fn empty_live() -> Self {
+        Self {
+            initialized: true,
+            view_current: true,
+            base: None,
+            committed: WorkspaceOverlay::default(),
+            pending: WorkspaceOverlay::default(),
+        }
+    }
+
+    /// Migrate only legacy namespace rows not superseded by this mutation.
+    /// Local values were imported by the existing generation plan. Every
+    /// surviving namespace row now shares the same live tree authority.
+    pub(super) fn prepare_live_with_globals(
+        &self,
+        context: &crate::context::RuntimeContext,
+        globals: &std::collections::HashMap<String, GlobalBindingTarget>,
+        superseded: Option<&str>,
+    ) -> Result<Self, HostAllocationError> {
+        let mut live = self.prepare_live(Some(context))?;
+        for (name, target) in globals {
+            if superseded == Some(name.as_str()) || live.global(name).is_some() {
+                continue;
+            }
+            let retained = claimed_name_bytes(name)?
+                .checked_add(target.additional_retained_bytes()?)
+                .ok_or(HostAllocationError::Overflow)?;
+            let receipt = crate::context::host_allocation::HostAllocationReceipt::admit(
+                Some(context),
+                HostAllocationPlan::new(0, retained)?,
+            )?;
+            let (name, target) = match receipt {
+                Some(receipt) => {
+                    let permit = receipt.output_permit(context)?;
+                    (
+                        WorkspaceName::prepare(name, &permit)?,
+                        target.prepare_retained(&permit)?,
+                    )
+                }
+                None => (WorkspaceName::unbounded(name), target.clone()),
+            };
+            let tree = live
+                .base
+                .as_ref()
+                .map(|base| base.0.clone())
+                .unwrap_or_default();
+            live.base = Some(WorkspaceTableGeneration(tree.prepare_set(
+                Some(context),
+                name,
+                BindingTreeValue::Global(target),
+            )?));
+        }
+        Ok(live)
+    }
+
+    /// Seal the current logical view without retaining overwritten overlay
+    /// payloads. Only touched paths are copied; real captured trees keep their
+    /// own roots. Call on an offstate candidate before installing it.
+    pub(super) fn prepare_live(
+        &self,
+        context: Option<&crate::context::RuntimeContext>,
+    ) -> Result<Self, HostAllocationError> {
+        let tree = self
+            .base
+            .as_ref()
+            .map(|base| base.0.clone())
+            .unwrap_or_default();
+        let tree = self.committed.prepare_tree(context, tree)?;
+        let tree = self.pending.prepare_tree(context, tree)?;
+        Ok(Self {
+            initialized: self.initialized,
+            view_current: self.view_current,
+            base: Some(WorkspaceTableGeneration(tree)),
+            committed: WorkspaceOverlay::default(),
+            pending: WorkspaceOverlay::default(),
+        })
+    }
+
     /// Retain only the old published prefix while transferring this
     /// projection's unique pending suffix into a canonical publication.
     /// Cloning the suffix would make its tail non-unique and would turn
@@ -198,10 +279,6 @@ impl ManagedWorkspaceStorage {
         self.pending.stage_owned_unbounded(name, entry);
         self.initialized = true;
         self.view_current = true;
-    }
-
-    pub(super) fn coalesce_latest_unbounded_assignment(&mut self) -> Option<WorkspaceOverlay> {
-        self.pending.coalesce_latest_owned_assignment()
     }
 
     pub(super) fn stage_unbounded_namespace(
@@ -400,31 +477,6 @@ impl ManagedWorkspaceStorage {
         Ok(())
     }
 
-    pub(super) fn clear_retained_bytes(&self) -> Result<u64, HostAllocationError> {
-        WorkspaceOverlay::clear_retained_bytes()
-    }
-
-    pub(super) fn prepare_clear(
-        &mut self,
-        permit: &HostOutputPermit,
-    ) -> Result<Self, HostAllocationError> {
-        let mut pending = WorkspaceOverlay::default();
-        pending.stage_clear(permit)?;
-        // The complete namespace barrier needs none of the prior capture.
-        // Move it out so its Values retire after the caller releases its
-        // service borrow and finishes the publication observer.
-        Ok(std::mem::replace(
-            self,
-            Self {
-                initialized: true,
-                view_current: true,
-                base: None,
-                committed: WorkspaceOverlay::default(),
-                pending,
-            },
-        ))
-    }
-
     pub(super) fn global(&self, name: &str) -> Option<bool> {
         self.pending
             .global(name)
@@ -432,8 +484,8 @@ impl ManagedWorkspaceStorage {
             .or_else(|| {
                 self.base
                     .as_ref()
-                    .and_then(|base| base.global_target(name))
-                    .map(|_| true)
+                    .and_then(|base| base.0.get(name))
+                    .map(|binding| matches!(binding, BindingTreeValue::Global(_)))
             })
     }
 
@@ -602,22 +654,61 @@ impl ManagedWorkspaceStorage {
         !self.pending.is_empty()
     }
 
-    /// Publish this projection's exact suffix over the latest canonical
-    /// generation. Only retained owner handles are moved or cloned here; the
-    /// publication boundary performs no heap allocation.
-    pub(super) fn publish_pending_over(&mut self, canonical: &Self) {
-        if self.pending.is_empty() {
-            *self = canonical.clone();
-            return;
+    /// Prepare affected canonical paths before revision installation. New
+    /// nodes and legacy names use the supplied operation's exact admission;
+    /// the subsequent visible install only swaps retained owner handles.
+    pub(super) fn prepare_publication_over(
+        &self,
+        context: Option<&crate::context::RuntimeContext>,
+        canonical: &Self,
+        changes: &super::WorkspaceDelta,
+    ) -> Result<Self, HostAllocationError> {
+        let canonical = canonical.prepare_live(context)?;
+        let mut tree = canonical
+            .base
+            .as_ref()
+            .map(|base| base.0.clone())
+            .unwrap_or_default();
+        // The authentic delta names the affected paths. Resolve each name
+        // from the final projection, preserving unrelated canonical writes.
+        for change in changes.changes() {
+            let Some(name) = change.entry_name() else {
+                tree = BindingTree::default();
+                continue;
+            };
+            let name = match name {
+                super::values::WorkspaceEntryName::Prepared(name) => name.clone(),
+                super::values::WorkspaceEntryName::Owned(name) => {
+                    let retained = claimed_name_bytes(name)?;
+                    match crate::context::host_allocation::HostAllocationReceipt::admit(
+                        context,
+                        HostAllocationPlan::new(0, retained)?,
+                    )? {
+                        Some(receipt) => WorkspaceName::prepare(
+                            name,
+                            &receipt.output_permit(
+                                context.expect("managed name has an operation owner"),
+                            )?,
+                        )?,
+                        None => WorkspaceName::unbounded(name),
+                    }
+                }
+            };
+            if let Some(target) = self.global_target(name.as_str()) {
+                tree = tree.prepare_set(context, name, BindingTreeValue::Global(target.clone()))?;
+            } else if let Some(entry) = self.entry(name.as_str()) {
+                tree = tree.prepare_set(context, name, BindingTreeValue::Local(entry))?;
+            } else {
+                tree = tree.prepare_remove(context, name.as_str())?.unwrap_or(tree);
+            }
         }
-        self.pending.attach_canonical_tail(&canonical.committed);
-        // Only the current canonical prefix is authoritative. A projection's
-        // captured base may be older than unrelated canonical writes, and
-        // retaining it beside canonical legacy entries duplicates names.
-        self.base = canonical.base.clone();
-        self.committed = std::mem::take(&mut self.pending);
-        self.initialized = true;
-        self.view_current = (!canonical.initialized || canonical.view_current) && self.view_current;
+        Ok(Self {
+            initialized: true,
+            view_current: (!canonical.initialized || canonical.view_current) && self.view_current,
+            base: Some(WorkspaceTableGeneration(tree)),
+            committed: WorkspaceOverlay::default(),
+            pending: WorkspaceOverlay::default(),
+        })
     }
 
     pub(super) fn iter(&self) -> ManagedWorkspaceIter<'_> {

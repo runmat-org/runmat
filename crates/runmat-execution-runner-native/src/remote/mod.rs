@@ -5,6 +5,7 @@ mod checkpoint;
 mod clock_observer;
 pub(crate) use clock_observer::RemoteObservedWave;
 mod collective;
+mod completion;
 mod config;
 mod crypto;
 mod direct_admission;

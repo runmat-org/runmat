@@ -79,8 +79,8 @@ fn parse_component(
     uses_textual_index: &mut bool,
 ) -> Result<IndexComponent, PathError> {
     match value {
-        Value::Bool(value) => Ok(IndexComponent::Logical(vec![u8::from(*value)])),
-        Value::LogicalArray(array) => Ok(IndexComponent::Logical(array.data.to_vec())),
+        Value::Bool(value) => Ok(IndexComponent::LogicalScalar(*value)),
+        Value::LogicalArray(array) => Ok(IndexComponent::Logical(array.clone())),
         Value::CharArray(array) => {
             let text = runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
                 PathError {

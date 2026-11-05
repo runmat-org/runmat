@@ -342,7 +342,7 @@ fn package(
     for object in objects {
         pool.register_execution_object(object.reference, object.bytes)?;
     }
-    packaged(response, pool).map(RemotePoolExecutionOutcome::Completed)
+    packaged(response, pool).map(Ok)
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

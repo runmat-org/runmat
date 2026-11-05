@@ -149,8 +149,8 @@ pub use study_publication::*;
 pub use study_result::*;
 pub use study_step_execution::{
     analysis_execute_study_step, analysis_execute_study_step_with_capacity,
-    analysis_execute_study_sweep_with_step_executor,
-    analysis_execute_study_with_step_executor, analysis_validate_study_step_transfer,
+    analysis_execute_study_sweep_with_step_executor, analysis_execute_study_with_step_executor,
+    analysis_merge_study_step_admission, analysis_validate_study_step_transfer,
     AnalysisStudyStepExecutor, AnalysisStudyStepFuture, AnalysisStudyStepHost,
     AnalysisStudyStepRequest, AnalysisStudyStepResult,
 };

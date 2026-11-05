@@ -56,6 +56,16 @@ pub(super) async fn invoke(
     unit: &ExecutableUnit,
     request: DeoptimizationRequest,
 ) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
+    let runtime = request.runtime.clone();
+    let cleanup = runtime.function_cleanup_scope()?;
+    let (result, cleanup) = cleanup.run(&runtime, invoke_inner(unit, request)).await?;
+    runmat_runtime::runtime_error::complete_with_cleanup(result, cleanup)
+}
+
+async fn invoke_inner(
+    unit: &ExecutableUnit,
+    request: DeoptimizationRequest,
+) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
     let roots = match &request.inputs {
         Inputs::Source { .. } => Some(
             runmat_runtime::execution::RootedValueLease::for_values(
@@ -219,15 +229,23 @@ pub(super) fn drive_prepared_invocation(
 > {
     let unit = unit.clone();
     let admission_runtime = runtime.clone();
-    runmat_runtime::execution::admit_rooted_result_with(&admission_runtime, move || {
-        drive_prepared_invocation_inner(
-            unit,
-            invocation,
-            requested_outputs,
-            runtime,
-            dynamic_admission,
-            had_lexical_environment,
-        )
+    let cleanup = runtime.function_cleanup_scope()?;
+    runmat_runtime::execution::admit_rooted_result_with(&admission_runtime, move || async move {
+        let cleanup_runtime = runtime.clone();
+        let (result, cleanup) = cleanup
+            .run(
+                &cleanup_runtime,
+                drive_prepared_invocation_inner(
+                    unit,
+                    invocation,
+                    requested_outputs,
+                    runtime,
+                    dynamic_admission,
+                    had_lexical_environment,
+                ),
+            )
+            .await?;
+        runmat_runtime::runtime_error::complete_with_cleanup(result, cleanup)
     })
 }
 

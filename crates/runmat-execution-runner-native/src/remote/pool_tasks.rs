@@ -45,7 +45,7 @@ pub(super) async fn execute_single_root(
                 result.console =
                     Some(super::pool_execution::RemoteTerminalConsole::Task { pool, task_id });
             }
-            Ok(RemotePoolExecutionOutcome::Completed(result))
+            Ok(Ok(result))
         }
         Err(failure) => task_failure_outcome(pool, task_id, failure),
     }
@@ -109,14 +109,14 @@ pub(super) async fn execute_graph_root(
     match completion.wait().await {
         Ok(runmat_execution_runner::AttemptSuccess::Graph { graph, .. }) => {
             wave.close().await?;
-            Ok(RemotePoolExecutionOutcome::Completed(
-                RemotePoolExecutionResult::without_objects(
-                    ProgramExecutionResponse::GraphSuccess { graph },
-                ),
-            ))
+            Ok(Ok(RemotePoolExecutionResult::without_objects(
+                ProgramExecutionResponse::GraphSuccess { graph },
+            )))
         }
-        Ok(_) => Ok(RemotePoolExecutionOutcome::Indeterminate(
-            "remote Graph root returned a non-Graph result".into(),
+        Ok(_) => Ok(Err(
+            crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(
+                "remote Graph root returned a non-Graph result".into(),
+            ),
         )),
         Err(failure) => task_failure_outcome(pool, task_id, failure),
     }
@@ -142,17 +142,21 @@ pub(super) fn observed_execution(
     }
     let (indeterminate, cancelled) = pool.cancellation_state_flags();
     if indeterminate {
-        return Ok(RemotePoolExecutionOutcome::Indeterminate(
-            "remote cancellation lost worker ownership before quiescence was proven".into(),
+        return Ok(Err(
+            crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(
+                "remote cancellation lost worker ownership before quiescence was proven".into(),
+            ),
         ));
     }
     if cancelled {
         match completed {
-            Ok(RemotePoolExecutionOutcome::Completed(mut result)) => {
+            Ok(Ok(mut result)) => {
                 result.cancelled = true;
-                Ok(RemotePoolExecutionOutcome::Completed(result))
+                Ok(Ok(result))
             }
-            _ => Ok(RemotePoolExecutionOutcome::Cancelled),
+            _ => Ok(Err(
+                crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+            )),
         }
     } else {
         completed
@@ -217,8 +221,8 @@ pub(super) fn task_failure_outcome(
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
     let state = pool.task_state(task_id);
     if state == Some(TaskState::Indeterminate) {
-        return Ok(RemotePoolExecutionOutcome::Indeterminate(
-            failure.to_string(),
+        return Ok(Err(
+            crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(failure.to_string()),
         ));
     }
     let response = match failure {
@@ -227,7 +231,9 @@ pub(super) fn task_failure_outcome(
             ProgramExecutionResponse::Failure { message }
         }
         crate::NativeProgramFailure::WorkerLost(message) => {
-            return Ok(RemotePoolExecutionOutcome::Indeterminate(message));
+            return Ok(Err(
+                crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(message),
+            ));
         }
         crate::NativeProgramFailure::Cancelled => {
             let mut result = packaged(
@@ -241,7 +247,7 @@ pub(super) fn task_failure_outcome(
                 result.console =
                     Some(super::pool_execution::RemoteTerminalConsole::Task { pool, task_id });
             }
-            return Ok(RemotePoolExecutionOutcome::Completed(result));
+            return Ok(Ok(result));
         }
         crate::NativeProgramFailure::Runtime(failure) => {
             ProgramExecutionResponse::RuntimeFailure { failure }
@@ -251,7 +257,7 @@ pub(super) fn task_failure_outcome(
     if pool.task_console_requested(task_id) {
         result.console = Some(super::pool_execution::RemoteTerminalConsole::Task { pool, task_id });
     }
-    Ok(RemotePoolExecutionOutcome::Completed(result))
+    Ok(Ok(result))
 }
 
 pub(super) fn execution_failure_outcome(
@@ -259,10 +265,11 @@ pub(super) fn execution_failure_outcome(
     message: String,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
     if pool.has_task_state(TaskState::Indeterminate) {
-        Ok(RemotePoolExecutionOutcome::Indeterminate(message))
+        Ok(Err(
+            crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(message),
+        ))
     } else {
-        packaged(ProgramExecutionResponse::Failure { message }, pool)
-            .map(RemotePoolExecutionOutcome::Completed)
+        packaged(ProgramExecutionResponse::Failure { message }, pool).map(Ok)
     }
 }
 

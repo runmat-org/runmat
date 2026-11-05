@@ -7724,6 +7724,7 @@ name = "runmat-accelerate-api"
 version = "0.7.0"
 dependencies = [
  "anyhow",
+ "ash",
  "futures",
  "once_cell",
  "runmat-execution",
@@ -8236,6 +8237,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-server-client",
  "runmat-simulation-usage",
+ "serde_json",
  "tokio",
  "uuid",
 ]
@@ -8718,6 +8720,7 @@ dependencies = [
  "runmat-mir",
  "runmat-runtime",
  "runmat-types",
+ "runmat-value",
  "serde",
  "serde_json",
  "target-lexicon 0.12.16",

@@ -32,6 +32,8 @@
     "generate:builtins": "node ./scripts/generate-builtins.cjs",
     "generate:collaboration-contracts": "node ./scripts/generate-collaboration-contracts.cjs",
     "check:collaboration-contracts": "node ./scripts/generate-collaboration-contracts.cjs --check",
+    "generate:execution-resources": "node ./scripts/generate-execution-resources.cjs",
+    "check:execution-resources": "node ./scripts/generate-execution-resources.cjs --check",
     "generate:fea-contracts": "node ./scripts/test-fea-semantic-typegen.cjs && node ./scripts/generate-fea-contracts.cjs && node ./scripts/test-fea-signal-shape.cjs && node ./scripts/test-fea-fluid-contracts.cjs && node ./scripts/generate-fea-semantic-contracts.cjs && node ./scripts/generate-fea-workspace-contracts.cjs && node ./scripts/test-fea-workspace-contracts.cjs && node ./scripts/test-fea-execution-evidence.cjs",
     "build:registry": "node ../../scripts/regenerate-wasm-registry.mjs",
     "build:wasm:bundler": "wasm-pack build ../../crates/runmat-wasm --target bundler --out-dir ../../bindings/ts/pkg --out-name runmat_wasm --release -- --features occt-wasm-host",
@@ -39,7 +41,7 @@
     "build:wasm:web:core": "wasm-pack build ../../crates/runmat-wasm --target web --out-dir ../../bindings/ts/pkg-web --out-name runmat_wasm_web --release",
     "build:occt": "bash ../../scripts/runtime/build-exact-cad-wasm.sh",
     "build:lsp": "wasm-pack build ../../crates/runmat-lsp --target web --out-dir ../../bindings/ts/lsp-web --out-name runmat_lsp --release -- --no-default-features --features wasm",
-    "build:types": "npm run generate:builtins && npm run generate:fea-contracts && npm run generate:collaboration-contracts && tsc -p tsconfig.json",
+    "build:types": "npm run generate:builtins && npm run generate:fea-contracts && npm run generate:collaboration-contracts && npm run generate:execution-resources && tsc -p tsconfig.json",
     "build": "npm run clean && npm run build:registry && npm run build:wasm:web && npm run build:occt && npm run build:lsp && npm run build:types && npm run sync:wasm",
     "build:examples": "rimraf dist/pkg-web pkg-web ../../crates/runmat-wasm/pkg-web && npm run build:registry && npm run build:wasm:web:core && npm run sync:wasm",
     "ci": "npm run build && npm run lint && npm test && npm run test:fea-assessments:wasm && cargo check -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host",
@@ -63,6 +65,10 @@
     "./execution/program-terminal": {
       "types": "./dist/execution/program-terminal.d.ts",
       "import": "./dist/execution/program-terminal.js"
+    },
+    "./execution/remote-driver-resources": {
+      "types": "./dist/execution/remote-driver-resources.d.ts",
+      "import": "./dist/execution/remote-driver-resources.js"
     },
     "./fea-contracts": {
       "types": "./dist/fea-contracts.d.ts",

@@ -118,6 +118,7 @@ struct SpecializedCompilationRequest<'a> {
     current: &'a runmat_jit::invalidation::DependencySnapshot,
     dependency_keys: &'a BTreeSet<DependencyKey>,
     compilation: &'a CompilationKey,
+    liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -277,6 +278,7 @@ impl GenericNativeCache {
         &mut self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> Result<PublishedEntry, runmat_runtime::RuntimeError> {
         let dependency_keys = self.observe_unit_dependencies(unit, preferred_function)?;
         let current = self.dependencies.snapshot_all();
@@ -285,8 +287,12 @@ impl GenericNativeCache {
             return Ok(entry);
         }
 
-        let compiled =
-            super::compile::compile_with_policy(unit, preferred_function, self.optimization)?;
+        let compiled = super::compile::compile_with_policy(
+            unit,
+            preferred_function,
+            self.optimization,
+            liveness_admission,
+        )?;
         #[cfg(test)]
         {
             self.compilations += 1;
@@ -334,6 +340,7 @@ impl GenericNativeCache {
             invocation_profile,
             None,
             false,
+            runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
         )
         .map(|scheduled| scheduled.published)
     }
@@ -351,6 +358,7 @@ impl GenericNativeCache {
             profile,
             Some((runtime, invocation)),
             capture_ready,
+            super::compile::capture_liveness_admission(runtime)?,
         )
     }
 
@@ -364,6 +372,7 @@ impl GenericNativeCache {
             super::placement::ReadyInvocation<'_>,
         )>,
         capture_ready: bool,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> Result<ScheduledInvocation, runmat_runtime::RuntimeError> {
         let dependency_keys = self.observe_unit_dependencies(unit, preferred_function)?;
         let current = self.dependencies.snapshot_all();
@@ -387,6 +396,7 @@ impl GenericNativeCache {
                 current,
                 key,
             },
+            liveness_admission,
         )?;
         Ok(ScheduledInvocation {
             published,
@@ -404,6 +414,7 @@ impl GenericNativeCache {
             super::placement::ReadyInvocation<'_>,
         )>,
         prepared: PreparedInvocation,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
         let PreparedInvocation {
             dependency_keys,
@@ -456,6 +467,7 @@ impl GenericNativeCache {
                             unit,
                             preferred_function,
                             self.optimization,
+                            liveness_admission,
                         ) {
                             Ok(compiled) => compiled,
                             Err(error) => {
@@ -498,6 +510,7 @@ impl GenericNativeCache {
                             compilation.clone(),
                             None,
                             self.dependencies.snapshot(dependency_keys.iter()),
+                            liveness_admission,
                         ) {
                             log::warn!("adaptive native compilation was not scheduled: {error}");
                             self.failed_compilations.insert(compilation);
@@ -529,19 +542,19 @@ impl GenericNativeCache {
                 if self.failed_compilations.contains(&compilation) {
                     return Ok(self.entries.resolve(&key, &current));
                 }
-                let compile = |this: &mut Self| {
-                    this.compile_specialized_now(SpecializedCompilationRequest {
-                        unit,
-                        preferred_function,
-                        profile: invocation_profile,
-                        key: &key,
-                        current: &current,
-                        dependency_keys: &dependency_keys,
-                        compilation: &compilation,
-                    })
-                };
                 match mode {
-                    CompilationMode::DeterministicSynchronous => compile(self),
+                    CompilationMode::DeterministicSynchronous => {
+                        self.compile_specialized_now(SpecializedCompilationRequest {
+                            unit,
+                            preferred_function,
+                            profile: invocation_profile,
+                            key: &key,
+                            current: &current,
+                            dependency_keys: &dependency_keys,
+                            compilation: &compilation,
+                            liveness_admission,
+                        })
+                    }
                     CompilationMode::Background => {
                         if let Err(error) = self.schedule_background(
                             unit,
@@ -549,6 +562,7 @@ impl GenericNativeCache {
                             compilation.clone(),
                             Some(invocation_profile.clone()),
                             self.dependencies.snapshot(dependency_keys.iter()),
+                            liveness_admission,
                         ) {
                             log::warn!(
                                 "adaptive specialized compilation was not scheduled: {error}"
@@ -613,6 +627,7 @@ impl GenericNativeCache {
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
         profile: Option<&RepresentationProfile>,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> Result<Option<(PublishedEntry, runmat_types::ProgramPointId)>, runmat_runtime::RuntimeError>
     {
         let Some(profile) = profile else {
@@ -656,6 +671,7 @@ impl GenericNativeCache {
                     current: &current,
                     dependency_keys: &dependency_keys,
                     compilation: &compilation,
+                    liveness_admission,
                 })?;
                 Ok(published.map(|published| (published, point)))
             }
@@ -666,6 +682,7 @@ impl GenericNativeCache {
                     compilation.clone(),
                     Some(profile.clone()),
                     self.dependencies.snapshot(dependency_keys.iter()),
+                    liveness_admission,
                 ) {
                     log::warn!("adaptive OSR compilation was not scheduled: {error}");
                     self.failed_compilations.insert(compilation);
@@ -687,6 +704,7 @@ impl GenericNativeCache {
         key: CompilationKey,
         specialization: Option<RepresentationProfile>,
         dependencies: runmat_jit::invalidation::DependencySnapshot,
+        liveness_admission: runmat_native_codegen::NativeLivenessAdmission,
     ) -> Result<(), runmat_runtime::RuntimeError> {
         if self.pending.contains_key(&key) {
             return Ok(());
@@ -696,6 +714,7 @@ impl GenericNativeCache {
             preferred_function,
             specialization,
             self.optimization,
+            liveness_admission,
         )?;
         diagnostics::scheduled(&key, &dependencies);
         let (sender, receiver) = mpsc::sync_channel(1);
@@ -726,6 +745,7 @@ impl GenericNativeCache {
             request.preferred_function,
             Some(request.profile.clone()),
             self.optimization,
+            request.liveness_admission,
         )?)?;
         if self
             .entries
@@ -996,6 +1016,7 @@ impl GenericNativeCache {
             preferred_function,
             Some(profile.clone()),
             self.optimization,
+            runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
         )
         .and_then(super::compile::compile_prepared)
         .map(|compiled| compiled.executor.optimized_region_count())

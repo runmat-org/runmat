@@ -34,7 +34,10 @@ impl RuntimeContext {
             .as_ref()
             .and_then(|owner| owner.begin_deferred_work());
         let selected = if deferred.is_some() { selected } else { None };
-        let task_context = self.clone().with_cleanup_command_origin(selected);
+        let task_context = self
+            .clone()
+            .with_cleanup_command_origin(selected)
+            .with_cleanup_completion(None);
         let future = make_future(task_context);
         match canonical {
             Some(canonical) => canonical.spawn_admitted(self.local_identity(), future, deferred),

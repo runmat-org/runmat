@@ -225,7 +225,9 @@ async fn run_owned_attempt(
         console_budget,
     } = attempt;
     if cancellation.is_cancelled() {
-        return Ok(RemotePoolExecutionOutcome::Cancelled);
+        return Ok(Err(
+            crate::remote::pool_execution::RemoteExecutionStop::Cancelled,
+        ));
     }
     let mut config = NativeExecutionConfig::for_current_executable()
         .map_err(|error| NativeExecutionError::Configuration(error.to_string()))?;
@@ -277,13 +279,15 @@ async fn run_owned_attempt(
     loop {
         if let Some(result) = completion.try_value() {
             let mut outcome = match result {
-                Ok(AttemptSuccess::Graph { graph, .. }) => RemotePoolExecutionOutcome::Completed(
-                    RemotePoolExecutionResult::without_objects(
+                Ok(AttemptSuccess::Graph { graph, .. }) => {
+                    Ok(RemotePoolExecutionResult::without_objects(
                         ProgramExecutionResponse::GraphSuccess { graph },
+                    ))
+                }
+                Ok(_) => Err(
+                    crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(
+                        "isolated Graph attempt returned a non-Graph result".into(),
                     ),
-                ),
-                Ok(_) => RemotePoolExecutionOutcome::Indeterminate(
-                    "isolated Graph attempt returned a non-Graph result".into(),
                 ),
                 Err(TransferFailure::Cancelled) if console_budget.is_some() => {
                     let mut result = RemotePoolExecutionResult::without_objects(
@@ -292,30 +296,28 @@ async fn run_owned_attempt(
                         },
                     );
                     result.cancelled = true;
-                    RemotePoolExecutionOutcome::Completed(result)
+                    Ok(result)
                 }
-                Err(TransferFailure::Cancelled) => RemotePoolExecutionOutcome::Cancelled,
+                Err(TransferFailure::Cancelled) => {
+                    Err(crate::remote::pool_execution::RemoteExecutionStop::Cancelled)
+                }
                 Err(TransferFailure::RetirementUnverified(message))
                 | Err(TransferFailure::WorkerLost(message)) => {
-                    RemotePoolExecutionOutcome::Indeterminate(message)
+                    Err(crate::remote::pool_execution::RemoteExecutionStop::Indeterminate(message))
                 }
-                Err(TransferFailure::Runtime(failure)) => RemotePoolExecutionOutcome::Completed(
-                    RemotePoolExecutionResult::without_objects(
+                Err(TransferFailure::Runtime(failure)) => {
+                    Ok(RemotePoolExecutionResult::without_objects(
                         ProgramExecutionResponse::RuntimeFailure { failure: *failure },
-                    ),
-                ),
+                    ))
+                }
                 Err(TransferFailure::Execution(message))
                 | Err(TransferFailure::Infrastructure(message)) => {
-                    RemotePoolExecutionOutcome::Completed(
-                        RemotePoolExecutionResult::without_objects(
-                            ProgramExecutionResponse::Failure { message },
-                        ),
-                    )
+                    Ok(RemotePoolExecutionResult::without_objects(
+                        ProgramExecutionResponse::Failure { message },
+                    ))
                 }
             };
-            if let (Some(budget), RemotePoolExecutionOutcome::Completed(result)) =
-                (console_budget, &mut outcome)
-            {
+            if let (Some(budget), Ok(result)) = (console_budget, &mut outcome) {
                 // Keep the original scheduler owner until terminal encoding.
                 // Its physical root and descendants retain their own typed
                 // identities; no transcript is cloned or relabelled here.

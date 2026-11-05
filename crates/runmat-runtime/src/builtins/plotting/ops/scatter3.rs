@@ -7,7 +7,9 @@ use glam::{Vec3, Vec4};
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
-use runmat_plot::gpu::scatter2::{ScatterAttributeBuffer, ScatterColorBuffer};
+use runmat_plot::gpu::scatter2::{
+    ScatterAttributeBuffer, ScatterColorBuffer, ScatterColorLayout, ScatterSizeUnit,
+};
 use runmat_plot::gpu::scatter3::{Scatter3GpuInputs, Scatter3GpuParams};
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::scatter::MarkerStyle;
@@ -591,21 +593,30 @@ async fn build_scatter3_gpu_plot(
         let lod_stride = scatter3_lod_stride(len_u32, extent_hint);
 
         let size_buffer = build_scatter3_size_buffer(style, point_count, &mut gpu_exports)?;
+        let size_unit = ScatterSizeUnit::from_source(&size_buffer);
         let color_buffer = build_scatter3_color_buffer(style, point_count, &mut gpu_exports)?;
+        let color_layout = ScatterColorLayout::from_source(&color_buffer);
 
-        let inputs = Scatter3GpuInputs {
+        let mut inputs = Scatter3GpuInputs {
             x_buffer: x_ref.clone().into(),
             y_buffer: y_ref.clone().into(),
             z_buffer: z_ref.clone().into(),
             len: len_u32,
             scalar,
-            colors: color_buffer.clone(),
+            // Packing reads params.sizes. Move that same retained source into
+            // the plot after packing succeeds, without cloning a Host(Vec).
+            sizes: ScatterAttributeBuffer::None,
+            size_unit,
+            colors: ScatterColorBuffer::None,
+            color_layout,
         };
-        let params = Scatter3GpuParams {
+        let mut params = Scatter3GpuParams {
             color: style.uniform_color,
             point_size: style.point_size,
             sizes: size_buffer,
+            size_unit,
             colors: color_buffer,
+            color_layout,
             lod_stride,
         };
 
@@ -621,7 +632,15 @@ async fn build_scatter3_gpu_plot(
                     source,
                 )
             })?
-            .map_err(|e| scatter3_err(format!("scatter3: failed to build GPU vertices: {e}")))?;
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    BUILTIN_NAME,
+                    format!("scatter3: failed to build GPU vertices: {source}"),
+                    source,
+                )
+            })?;
+        inputs.sizes = std::mem::replace(&mut params.sizes, ScatterAttributeBuffer::None);
+        inputs.colors = std::mem::replace(&mut params.colors, ScatterColorBuffer::None);
 
         let drawn_points = gpu_vertices.vertex_count;
         let gpu_style = Scatter3GpuStyle {

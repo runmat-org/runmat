@@ -5,11 +5,14 @@ use crate::core::{
     vertex_utils, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData,
     Vertex,
 };
-use crate::gpu::scatter2::ScatterColorBuffer;
+use crate::gpu::scatter2::{
+    ScatterAttributeBuffer, ScatterColorBuffer, ScatterColorLayout, ScatterSizeUnit,
+};
 use crate::gpu::scatter3::Scatter3GpuInputs;
-use crate::gpu::util::{copy_readback_bytes, readback_scalar_buffer_f64};
-use crate::plots::scatter::MarkerStyle;
-use crate::plots::NumericPlotData;
+use crate::gpu::util::{copy_readback_bytes_typed, readback_scalar_buffer_f64_typed};
+use crate::gpu::PlotReadbackError;
+use crate::plots::scatter::{marker_area_points2_to_diameter_px, MarkerStyle};
+use crate::plots::{NumericPlotData, PlotDataExportError};
 use glam::{Vec3, Vec4};
 use runmat_value::NumericStorage;
 
@@ -64,7 +67,7 @@ pub struct Scatter3Plot {
 }
 
 impl Scatter3Plot {
-    pub async fn export_scene_points(&self) -> Result<Vec<Vec3>, String> {
+    pub async fn export_scene_points(&self) -> Result<Vec<Vec3>, PlotDataExportError> {
         if let Some((x, y, z)) = self.export_numeric_xyz_data().await? {
             return Ok(x
                 .materialize_f64()
@@ -83,30 +86,46 @@ impl Scatter3Plot {
 
     pub async fn export_numeric_xyz_data(
         &self,
-    ) -> Result<Option<(NumericPlotData, NumericPlotData, NumericPlotData)>, String> {
+    ) -> Result<Option<(NumericPlotData, NumericPlotData, NumericPlotData)>, PlotDataExportError>
+    {
         match (&self.source_x, &self.source_y, &self.source_z) {
             (Some(x), Some(y), Some(z)) if x.len() == y.len() && x.len() == z.len() => {
                 return Ok(Some((x.clone(), y.clone(), z.clone())));
             }
             (None, None, None) => {}
-            _ => return Err("scatter3 plot has incomplete CPU source data".to_string()),
+            _ => {
+                return Err(PlotDataExportError::SourceUnavailable(
+                    "scatter3 plot has incomplete CPU source data",
+                ))
+            }
         }
 
         if let Some(inputs) = &self.gpu_inputs {
-            let context = shared_wgpu_context().ok_or_else(|| {
-                "scatter3 plot has GPU source data but no shared WGPU context is installed"
-                    .to_string()
-            })?;
+            let context = shared_wgpu_context().ok_or(PlotDataExportError::SourceUnavailable(
+                "scatter3 plot has GPU source data but no shared WGPU context is installed",
+            ))?;
             let len = inputs.len as usize;
-            let x =
-                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
-                    .await?;
-            let y =
-                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
-                    .await?;
-            let z =
-                readback_scalar_buffer_f64(&context.access, &inputs.z_buffer, len, inputs.scalar)
-                    .await?;
+            let x = readback_scalar_buffer_f64_typed(
+                &context.access,
+                &inputs.x_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let y = readback_scalar_buffer_f64_typed(
+                &context.access,
+                &inputs.y_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
+            let z = readback_scalar_buffer_f64_typed(
+                &context.access,
+                &inputs.z_buffer,
+                len,
+                inputs.scalar,
+            )
+            .await?;
             let shape = vec![1, len];
             let wrap = |values: Vec<f64>| match inputs.scalar {
                 crate::gpu::ScalarType::F64 => {
@@ -117,20 +136,27 @@ impl Scatter3Plot {
                     shape.clone(),
                 ),
             };
-            return Ok(Some((wrap(x)?, wrap(y)?, wrap(z)?)));
+            return Ok(Some((
+                wrap(x).map_err(PlotDataExportError::InvalidSourceLayout)?,
+                wrap(y).map_err(PlotDataExportError::InvalidSourceLayout)?,
+                wrap(z).map_err(PlotDataExportError::InvalidSourceLayout)?,
+            )));
         }
 
         if self.gpu_vertices.is_some() {
-            return Err(
-                "scatter3 plot has GPU render vertices but no exportable source data".to_string(),
-            );
+            return Err(PlotDataExportError::SourceUnavailable(
+                "scatter3 plot has GPU render vertices but no exportable source data",
+            ));
         }
 
         Ok(None)
     }
 
-    pub async fn export_scene_colors(&self, point_count: usize) -> Result<Vec<Vec4>, String> {
-        if self.colors.len() == point_count {
+    pub async fn export_scene_colors(
+        &self,
+        point_count: usize,
+    ) -> Result<Vec<Vec4>, PlotDataExportError> {
+        if self.colors.len() == point_count && !self.has_resident_color_source() {
             return Ok(self.colors.clone());
         }
         if self.colors.len() == 1 && !self.gpu_has_per_point_colors {
@@ -145,10 +171,10 @@ impl Scatter3Plot {
                 }
                 ScatterColorBuffer::Host(colors) => {
                     if colors.len() != point_count {
-                        return Err(format!(
+                        return Err(PlotDataExportError::InvalidSourceLayout(format!(
                             "scatter3 color count ({}) does not match point count ({point_count})",
                             colors.len()
-                        ));
+                        )));
                     }
                     return Ok(colors
                         .iter()
@@ -156,37 +182,45 @@ impl Scatter3Plot {
                         .collect());
                 }
                 ScatterColorBuffer::Gpu { buffer, components } => {
-                    let context = shared_wgpu_context().ok_or_else(|| {
-                        "scatter3 plot has GPU color data but no shared WGPU context is installed"
-                            .to_string()
-                    })?;
+                    let context = shared_wgpu_context()
+                        .ok_or(PlotDataExportError::SourceUnavailable(
+                        "scatter3 plot has GPU color data but no shared WGPU context is installed",
+                    ))?;
                     let components = *components as usize;
                     if components != 3 && components != 4 {
-                        return Err(format!(
+                        return Err(PlotDataExportError::InvalidSourceLayout(format!(
                             "scatter3 GPU color source has unsupported component count {components}"
-                        ));
+                        )));
                     }
                     let value_count = point_count
                         .checked_mul(components)
-                        .ok_or_else(|| "scatter3 GPU color source size overflowed".to_string())?;
+                        .ok_or(PlotReadbackError::ByteSizeOverflow)?;
                     let byte_len = value_count
                         .checked_mul(std::mem::size_of::<f32>())
-                        .ok_or_else(|| {
-                            "scatter3 GPU color source byte size overflowed".to_string()
-                        })?;
-                    let bytes = copy_readback_bytes(&context.access, buffer, byte_len).await?;
-                    let values: &[f32] = bytemuck::try_cast_slice(&bytes)
-                        .map_err(|err| format!("scatter3 GPU color readback failed: {err}"))?;
+                        .ok_or(PlotReadbackError::ByteSizeOverflow)?;
+                    let bytes =
+                        copy_readback_bytes_typed(&context.access, buffer, byte_len).await?;
+                    let values: &[f32] = bytemuck::try_cast_slice(&bytes).map_err(|err| {
+                        PlotDataExportError::InvalidSourceLayout(format!(
+                            "scatter3 GPU color readback failed: {err}"
+                        ))
+                    })?;
                     if values.len() != value_count {
-                        return Err(format!(
+                        return Err(PlotDataExportError::InvalidSourceLayout(format!(
                             "scatter3 GPU color readback returned {} values, expected {value_count}",
                             values.len()
-                        ));
+                        )));
                     }
                     let mut colors = Vec::with_capacity(point_count);
-                    for chunk in values.chunks_exact(components) {
-                        let alpha = if components == 4 { chunk[3] } else { 1.0 };
-                        colors.push(Vec4::new(chunk[0], chunk[1], chunk[2], alpha));
+                    for point in 0..point_count {
+                        let component = |channel: usize| match inputs.color_layout {
+                            ScatterColorLayout::Interleaved => values[point * components + channel],
+                            ScatterColorLayout::ColumnMajor => {
+                                values[point + channel * point_count]
+                            }
+                        };
+                        let alpha = if components == 4 { component(3) } else { 1.0 };
+                        colors.push(Vec4::new(component(0), component(1), component(2), alpha));
                     }
                     return Ok(colors);
                 }
@@ -194,17 +228,67 @@ impl Scatter3Plot {
         }
 
         if self.gpu_has_per_point_colors {
-            return Err(
-                "scatter3 plot has GPU per-point colors but no exportable color source".to_string(),
-            );
+            return Err(PlotDataExportError::SourceUnavailable(
+                "scatter3 plot has GPU per-point colors but no exportable color source",
+            ));
         }
         if self.colors.is_empty() {
             return Ok(vec![Vec4::ONE; point_count]);
         }
-        Err(format!(
+        Err(PlotDataExportError::InvalidSourceLayout(format!(
             "scatter3 color count ({}) does not match point count {point_count}",
             self.colors.len()
-        ))
+        )))
+    }
+
+    /// Read the retained per-point size source, if one was supplied. GPU
+    /// readback uses the same exported buffer owner used by vertex packing.
+    pub async fn export_scene_sizes(&self) -> Result<Option<Vec<f32>>, PlotDataExportError> {
+        if let Some(sizes) = &self.point_sizes {
+            return Ok(Some(sizes.clone()));
+        }
+        let Some(inputs) = &self.gpu_inputs else {
+            return Ok(None);
+        };
+        let count = inputs.len as usize;
+        match &inputs.sizes {
+            ScatterAttributeBuffer::None => Ok(None),
+            ScatterAttributeBuffer::Host(sizes) if sizes.len() == count => Ok(Some(sizes.clone())),
+            ScatterAttributeBuffer::Host(sizes) => {
+                Err(PlotDataExportError::InvalidSourceLayout(format!(
+                    "scatter3 size count ({}) does not match point count {count}",
+                    sizes.len()
+                )))
+            }
+            ScatterAttributeBuffer::Gpu(buffer) => {
+                let context =
+                    shared_wgpu_context().ok_or(PlotDataExportError::SourceUnavailable(
+                        "scatter3 plot has GPU size data but no shared WGPU context is installed",
+                    ))?;
+                let byte_len = count
+                    .checked_mul(std::mem::size_of::<f32>())
+                    .ok_or(PlotReadbackError::ByteSizeOverflow)?;
+                let bytes = copy_readback_bytes_typed(&context.access, buffer, byte_len).await?;
+                let values: &[f32] = bytemuck::try_cast_slice(&bytes).map_err(|err| {
+                    PlotDataExportError::InvalidSourceLayout(format!(
+                        "scatter3 GPU size readback failed: {err}"
+                    ))
+                })?;
+                if values.len() != count {
+                    return Err(PlotDataExportError::InvalidSourceLayout(format!(
+                        "scatter3 GPU size readback returned {} values, expected {count}",
+                        values.len()
+                    )));
+                }
+                Ok(Some(match inputs.size_unit {
+                    ScatterSizeUnit::DiameterPixels => values.to_vec(),
+                    ScatterSizeUnit::AreaPointsSquared => values
+                        .iter()
+                        .map(|value| marker_area_points2_to_diameter_px(f64::from(*value)))
+                        .collect(),
+                }))
+            }
+        }
     }
 
     /// Create a new scatter3 plot. Colors default to a blue colormap.
@@ -289,6 +373,7 @@ impl Scatter3Plot {
         self.source_x = Some(x);
         self.source_y = Some(y);
         self.source_z = Some(z);
+        self.bounds = None;
         self.invalidate_gpu_vertices();
         self.clear_gpu_source_inputs();
         Ok(())
@@ -338,6 +423,27 @@ impl Scatter3Plot {
             (Some(x), Some(y), Some(z)) => Some((x, y, z)),
             _ => None,
         }
+    }
+
+    pub fn point_count(&self) -> usize {
+        self.source_x
+            .as_ref()
+            .map(NumericPlotData::len)
+            .or_else(|| self.gpu_inputs.as_ref().map(|input| input.len as usize))
+            .or(self.gpu_point_count)
+            .unwrap_or(self.points.len())
+    }
+
+    pub fn has_resident_size_source(&self) -> bool {
+        self.gpu_inputs
+            .as_ref()
+            .is_some_and(|inputs| inputs.sizes.has_data())
+    }
+
+    pub fn has_resident_color_source(&self) -> bool {
+        self.gpu_inputs
+            .as_ref()
+            .is_some_and(|inputs| inputs.colors.has_data())
     }
 
     fn invalidate_gpu_vertices(&mut self) {
@@ -618,6 +724,9 @@ impl Scatter3Plot {
             crate::plots::clone_budget::vec::<f32>(
                 self.point_sizes.as_ref().map_or(0, Vec::capacity),
             )?,
+            crate::plots::clone_budget::vec::<f64>(
+                self.color_values.as_ref().map_or(0, Vec::capacity),
+            )?,
             crate::plots::clone_budget::vec::<Vertex>(
                 self.vertices.as_ref().map_or(0, Vec::capacity),
             )?,
@@ -631,6 +740,12 @@ impl Scatter3Plot {
             crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
         }
         if let Some(inputs) = &self.gpu_inputs {
+            if let ScatterAttributeBuffer::Host(sizes) = &inputs.sizes {
+                crate::plots::clone_budget::add(
+                    &mut total,
+                    crate::plots::clone_budget::vec::<f32>(sizes.capacity())?,
+                )?;
+            }
             if let crate::gpu::scatter2::ScatterColorBuffer::Host(colors) = &inputs.colors {
                 crate::plots::clone_budget::add(
                     &mut total,

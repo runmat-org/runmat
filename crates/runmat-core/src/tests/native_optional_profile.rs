@@ -198,7 +198,12 @@ fn cache_selects_generic_when_specialized_code_exists_but_current_profile_is_una
             runmat_jit::entry::PublishedTier::Generic
         ));
         assert!(cache
-            .resolve_or_schedule_osr(&unit, Some("profiled"), None)
+            .resolve_or_schedule_osr(
+                &unit,
+                Some("profiled"),
+                None,
+                runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
+            )
             .unwrap()
             .is_none());
         cache

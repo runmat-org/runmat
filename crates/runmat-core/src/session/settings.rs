@@ -197,7 +197,11 @@ mod tests {
         .unwrap();
         let retained = session
             .generic_native_cache
-            .resolve_or_compile(&unit, Some("settingsPolicy"))
+            .resolve_or_compile(
+                &unit,
+                Some("settingsPolicy"),
+                runmat_native_codegen::NativeLivenessAdmission::AuthorizedUnbounded,
+            )
             .unwrap();
         assert!(session.generic_native_cache.has_retained_entries());
         for (level, backend, specialized) in [
