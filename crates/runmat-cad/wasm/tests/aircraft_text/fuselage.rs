@@ -105,24 +105,27 @@ fn tail_cone() -> String {
     part("tail_cone", "FUS-TC-020", "aluminum_2024", "The tail cone: circles lofted aft from the barrel, closing and sweeping up to the APU exhaust.", &body, "cone")
 }
 
-/// The wing-to-body fairing: a long flattened blister under the wing box.
+/// The wing-to-body fairing: a long flattened blister under the wing box, a 20 mm shell, cut
+/// back to the fuselage skin so nothing of it stands inside the cabin or the hold.
 fn fairing() -> String {
     let len = 11_000.0;
-    let pts: Vec<(f64, f64)> = (0..=14)
-        .map(|k| {
-            let t = k as f64 / 14.0;
-            let x = len * t;
-            (x, 1_350.0 * (4.0 * t * (1.0 - t)).powf(0.45))
-        })
-        .collect();
+    let r = |t: f64| 1_350.0 * (4.0 * t * (1.0 - t)).powf(0.45);
+    let pts: Vec<(f64, f64)> = (0..=14).map(|k| k as f64 / 14.0).map(|t| (len * t, r(t))).collect();
+    let inner: Vec<(f64, f64)> = (0..=14).map(|k| 0.03 + 0.94 * k as f64 / 14.0).map(|t| (len * t, (r(t) - 20.0).max(5.0))).collect();
+    // The fairing's frame sits 1250 mm below the fuselage axis.
+    let axis_z = 1_250.0;
     part(
         "fairing",
         "FUS-FR-050",
         "composite",
-        "The wing-to-body fairing: a long blister turned about its own axis under the wing box.",
+        "The wing-to-body fairing: a long blister shell under the wing box, cut back to the fuselage skin.",
         &format!(
-            "{}    feature blister = revolve(profile = sketch.s, axis = origin.x, angle = 360 deg)\n",
-            loop_sketch("s", "origin.xy", &[Curve::Spline(pts), Curve::Line(vec![])])
+            "{}    feature blister = revolve(profile = sketch.s, axis = origin.x, angle = 360 deg)\n{}    feature hollow = revolve(profile = sketch.i, axis = origin.x, angle = 360 deg, mode = cut)\n    sketch body_line on origin.yz {{\n        c = circle(center = {}, radius = {})\n    }}\n    feature skin_line = extrude(profile = sketch.body_line, distance = {}, mode = cut)\n",
+            loop_sketch("s", "origin.xy", &[Curve::Spline(pts), Curve::Line(vec![])]),
+            loop_sketch("i", "origin.xy", &[Curve::Spline(inner), Curve::Line(vec![(0.97 * len, 0.0), (0.03 * len, 0.0)])]),
+            pt(0.0, axis_z),
+            mm(RADIUS - 2.0),
+            mm(len)
         ),
         "blister",
     )

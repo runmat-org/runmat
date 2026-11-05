@@ -204,17 +204,45 @@ fn pane(p: &Pane) -> String {
     part(p.name, p.number, "glass", p.comment, &body, "glass")
 }
 
+/// Where the nose lining starts aft of the tip, behind the windshield.
+const LINING_X: f64 = 1_800.0;
+
+/// The nose lining: an 8 mm plastic shell 60 mm inside the skin from behind the windshield to
+/// the barrel, above the floor, with a reveal cut through it at each side window (the window's
+/// own outline, so the reveal frames the pane).
+fn nose_lining() -> String {
+    let stations: Vec<f64> = std::iter::once(LINING_X).chain(STATIONS.iter().copied().filter(|x| *x > LINING_X)).collect();
+    let mut body = loft("lining", &stations, 0.0, 60.0, "");
+    body += &loft("lining_in", &stations, 0.0, 68.0, ", mode = cut");
+    for (k, pane) in panes().iter().enumerate().filter(|(_, p)| matches!(p.plane, Plane::Side { .. })) {
+        body += &prism(pane, &format!("r{k}"), &format!("reveal{k}"), "cut");
+    }
+    body += &format!(
+        "{}    feature below = extrude(profile = sketch.below_s, distance = 5000 mm, symmetric, mode = cut)\n",
+        super::text::rect("below_s", "origin.zx", -3_000.0, LINING_X - 10.0, super::FLOOR_Z, NOSE + 10.0)
+    );
+    part(
+        "nose_lining",
+        "FD-LN-380",
+        "polycarbonate",
+        "The flight deck lining: sidewalls and ceiling from behind the windshield to the barrel, with reveals at the side windows.",
+        &body,
+        "lining",
+    )
+}
+
 pub fn parts() -> Vec<(String, String)> {
-    let mut out = vec![("nose.part".to_string(), nose())];
+    let mut out = vec![("nose.part".to_string(), nose()), ("nose_lining.part".to_string(), nose_lining())];
     for p in panes() {
         out.push((format!("{}.part", p.name), pane(&p)));
     }
     out
 }
 
-/// The nose's occurrences in `fuselage.assembly`: the shell and its six panes.
+/// The nose's occurrences in `fuselage.assembly`: the shell, its lining and its six panes.
 pub fn uses() -> String {
     let mut s = use_("part", "nose", "nose", &[]);
+    s += &use_("part", "nose_lining", "nose_lining", &[]);
     for p in panes() {
         let alias = p.name.trim_start_matches("cockpit_");
         s += &use_("part", p.name, alias, &[]);

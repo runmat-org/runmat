@@ -1,7 +1,7 @@
 //! The cockpit behind the windshield: its floor (which runs aft under the forward galley to the
 //! first barrel section), the two pilot seats, the instrument panel with six display units
-//! under the glareshield, the centre pedestal, the two control columns and the bulkhead with
-//! its door at x 3600.
+//! under the glareshield, the centre pedestal, the overhead panel, the two control columns and
+//! the bulkhead with its door at x 3600.
 
 use super::nose::half_width;
 use super::text::{mm, offset, part, polygon, rect, use_, HEADER};
@@ -121,10 +121,10 @@ fn display_unit() -> String {
 fn pedestal() -> String {
     let pts: Vec<(f64, f64)> = [
         (PANEL_X + 120.0, FLOOR_Z),
-        (SEAT_X + 300.0, FLOOR_Z),
-        (SEAT_X + 300.0, FLOOR_Z + 640.0),
-        (PANEL_X + 520.0, FLOOR_Z + 700.0),
-        (PANEL_X + 120.0, PANEL_TOP - 40.0),
+        (SEAT_X + 100.0, FLOOR_Z),
+        (SEAT_X + 100.0, FLOOR_Z + 560.0),
+        (PANEL_X + 480.0, FLOOR_Z + 640.0),
+        (PANEL_X + 120.0, PANEL_TOP - 120.0),
     ]
     .iter()
     .map(|&(x, z)| (z, x))
@@ -134,7 +134,29 @@ fn pedestal() -> String {
         "FD-PD-350",
         "aluminum_6061",
         "The centre pedestal: throttle quadrant and radio panels between the pilot seats.",
-        &format!("{}    feature body = extrude(profile = sketch.s, distance = 360 mm, symmetric)\n", super::text::outline("s", "origin.zx", &pts, 30.0)),
+        &format!("{}    feature body = extrude(profile = sketch.s, distance = 300 mm, symmetric)\n", super::text::outline("s", "origin.zx", &pts, 30.0)),
+        "body",
+    )
+}
+
+/// The overhead panel in the flight deck's roof, between the windshield brow and the seats: its
+/// side profile (x, z) follows the roof 90 mm inside the skin and stands 110 mm deep, 760 mm
+/// wide across the centre line.
+fn overhead_panel() -> String {
+    let (x0, x1) = (PANEL_X + 520.0, SEAT_X + 260.0);
+    let roof = |x: f64| {
+        let (zc, b, _) = super::nose::section(x);
+        zc + b - 90.0
+    };
+    let xs: Vec<f64> = (0..=6).map(|k| x0 + (x1 - x0) * k as f64 / 6.0).collect();
+    let mut pts: Vec<(f64, f64)> = xs.iter().map(|&x| (roof(x), x)).collect();
+    pts.extend(xs.iter().rev().map(|&x| (roof(x) - 110.0, x)));
+    part(
+        "overhead_panel",
+        "FD-OH-370",
+        "aluminum_6061",
+        "The overhead panel in the flight deck roof: the systems switches over the pilots' heads.",
+        &format!("{}    feature body = extrude(profile = sketch.s, distance = 760 mm, symmetric)\n", polygon("s", "origin.zx", &pts)),
         "body",
     )
 }
@@ -166,6 +188,7 @@ pub fn parts() -> Vec<(String, String)> {
         ("display_unit.part".into(), display_unit()),
         ("pedestal.part".into(), pedestal()),
         ("control_column.part".into(), control_column()),
+        ("overhead_panel.part".into(), overhead_panel()),
     ]
 }
 
@@ -179,6 +202,7 @@ pub fn cockpit() -> String {
     s += &use_("part", "instrument_panel", "panel", &[]);
     s += &use_("part", "glareshield", "glareshield", &[]);
     s += &use_("part", "pedestal", "pedestal", &[]);
+    s += &use_("part", "overhead_panel", "overhead_panel", &[]);
     // The screens: each pilot's primary flight and navigation displays, and the engine and
     // system displays one above the other in the middle.
     let screens = [(-780.0, 230.0), (-540.0, 230.0), (540.0, 230.0), (780.0, 230.0), (0.0, 280.0), (0.0, 60.0)];

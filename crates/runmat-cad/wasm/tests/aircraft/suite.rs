@@ -155,3 +155,33 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
     let wing = appearance("wing_box_skin_upper.part");
     assert!(skin[0] > 0.85 && wing[0] < skin[0] - 0.08, "fuselage {skin:?}, wing {wing:?}");
 }
+
+/// The airliner example in runmat-examples (`aerospace/airliner`) holds exactly the files this
+/// generator writes, byte for byte, plus its project files (`runmat.toml`, `example.json`,
+/// `.artifacts/`). `RUNMAT_EXAMPLES_DIR` names the runmat-examples checkout; by default it is
+/// the sibling of this repository.
+#[test]
+fn the_runmat_examples_airliner_holds_the_generated_files() {
+    let root = std::env::var("RUNMAT_EXAMPLES_DIR").unwrap_or_else(|_| format!("{}/../../../../runmat-examples", env!("CARGO_MANIFEST_DIR")));
+    let dir = std::path::Path::new(&root).join("aerospace/airliner");
+    if !dir.is_dir() {
+        eprintln!("no runmat-examples checkout at {root}; set RUNMAT_EXAMPLES_DIR to check the airliner example");
+        return;
+    }
+    let generated: BTreeMap<String, String> = files().into_iter().collect();
+    let mut on_disk: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".part") || n.ends_with(".assembly"))
+        .collect();
+    on_disk.sort();
+    assert_eq!(on_disk, generated.keys().cloned().collect::<Vec<_>>(), "the example's design files");
+    for (name, text) in &generated {
+        let disk = std::fs::read_to_string(dir.join(name)).unwrap();
+        assert!(&disk == text, "{name} differs from the generator; rerun with RUNMAT_AIRCRAFT_DIR={}", dir.display());
+    }
+    for project in ["runmat.toml", "example.json", ".artifacts/workspace.json"] {
+        assert!(dir.join(project).is_file(), "the example has {project}");
+    }
+}
