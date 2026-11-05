@@ -204,6 +204,8 @@ pub(super) fn add(c: &mut Catalog) {
             flag("pours", "Copy pours", true)
                 .help("Replaces the pours on the matching nets inside each target room."),
             flag("room_shape", "Copy room shape", true),
+            flag("rotate", "Turn about the board center", false)
+                .help("For channels set around the board's center: each copy turns by the quarter turns between the rooms."),
         ])
         .when(selected(&[K::Room]))
         .on(&[K::Room])

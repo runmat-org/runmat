@@ -1,0 +1,144 @@
+runmat 0.7
+std 1
+
+// The 4-in-1 ESC: four identical motor channels, each a small MCU that reads its motor signal
+// and runs six-step commutation, a three-phase gate driver with bootstrap high sides, three
+// half bridges of 40 V N-channel MOSFETs and a low-side current shunt. The battery comes in on
+// two 12 AWG pads with bulk capacitance; a 3.3 V LDO feeds the channel MCUs; the 8-pin harness
+// carries the battery, the four motor signals and telemetry to the flight controller. The board
+// is 52 x 52 mm on the 30.5 mm stack pattern, its channels set around the center.
+circuit esc {
+    root = main
+    net_class power = { track_width = "1.00 mm", clearance = "0.20 mm" }
+    net_class gate = { track_width = "0.25 mm" }
+
+    sheet channel {
+        port SIG : in
+        port TLM : inout
+        component MCU = { part = "MCU-QFN32" }
+        component DRV = { part = "GATEDRV-3PH-QFN24" }
+        component QHA = { part = "NMOS-40V-DFN8" }
+        component QLA = { part = "NMOS-40V-DFN8" }
+        component QHB = { part = "NMOS-40V-DFN8" }
+        component QLB = { part = "NMOS-40V-DFN8" }
+        component QHC = { part = "NMOS-40V-DFN8" }
+        component QLC = { part = "NMOS-40V-DFN8" }
+        component RGHA = { part = "R0402-10R" }
+        component RGLA = { part = "R0402-10R" }
+        component RGHB = { part = "R0402-10R" }
+        component RGLB = { part = "R0402-10R" }
+        component RGHC = { part = "R0402-10R" }
+        component RGLC = { part = "R0402-10R" }
+        component CBA = { part = "C0402-100N" }
+        component CBB = { part = "C0402-100N" }
+        component CBC = { part = "C0402-100N" }
+        component CVCC = { part = "C0603-1U-50V" }
+        component CDRV = { part = "C0603-1U-50V" }
+        component CMCU = { part = "C0402-100N" }
+        component RBOOT = { part = "R0402-10K" }
+        component RSH = { part = "R2512-0M5" }
+        component RIS = { part = "R0402-1K" }
+        component CIS = { part = "C0402-10N" }
+        component CB1 = { part = "C1206-10U-50V" }
+        component PA = { part = "PAD-WIRE-20AWG" }
+        component PB = { part = "PAD-WIRE-20AWG" }
+        component PC = { part = "PAD-WIRE-20AWG" }
+        net GND = { class = power, global = true }
+        net VBAT = { class = power, global = true }
+        net "+3V3" = { class = power, global = true }
+        net PHA = { class = power }
+        net PHB = { class = power }
+        net PHC = { class = power }
+        net SRC = { class = power }
+        connect = [port.SIG, net.SIG, MCU.PA0]
+        connect = [port.TLM, net.TLM, MCU.PA10]
+        connect = [net.INHA, MCU.PA1, DRV.INHA]
+        connect = [net.INLA, MCU.PA2, DRV.INLA]
+        connect = [net.INHB, MCU.PA3, DRV.INHB]
+        connect = [net.INLB, MCU.PA4, DRV.INLB]
+        connect = [net.INHC, MCU.PA5, DRV.INHC]
+        connect = [net.INLC, MCU.PA6, DRV.INLC]
+        connect = [net.DRV_EN, MCU.PA7, DRV.EN]
+        connect = [net.FAULT, MCU.PA8, DRV.FAULT]
+        connect = [net.ISENSE, MCU.PA9, "RIS.2", "CIS.1"]
+        connect = ["net.+3V3", MCU.VDD, "CMCU.1"]
+        connect = [net.BOOT0, MCU.BOOT0, "RBOOT.1"]
+        connect = [net.VBAT, DRV.VCC, "CVCC.1", QHA.D, QHB.D, QHC.D, "CB1.1"]
+        connect = [net.VDRV, DRV.VDRV, "CDRV.1"]
+        connect = [net.GHA_D, DRV.GHA, "RGHA.1"]
+        connect = [net.GHA, "RGHA.2", QHA.G]
+        connect = [net.GLA_D, DRV.GLA, "RGLA.1"]
+        connect = [net.GLA, "RGLA.2", QLA.G]
+        connect = [net.GHB_D, DRV.GHB, "RGHB.1"]
+        connect = [net.GHB, "RGHB.2", QHB.G]
+        connect = [net.GLB_D, DRV.GLB, "RGLB.1"]
+        connect = [net.GLB, "RGLB.2", QLB.G]
+        connect = [net.GHC_D, DRV.GHC, "RGHC.1"]
+        connect = [net.GHC, "RGHC.2", QHC.G]
+        connect = [net.GLC_D, DRV.GLC, "RGLC.1"]
+        connect = [net.GLC, "RGLC.2", QLC.G]
+        connect = [net.BSTA, DRV.BSTA, "CBA.1"]
+        connect = [net.BSTB, DRV.BSTB, "CBB.1"]
+        connect = [net.BSTC, DRV.BSTC, "CBC.1"]
+        connect = [net.PHA, DRV.SHA, "CBA.2", QHA.S, QLA.D, "PA.1"]
+        connect = [net.PHB, DRV.SHB, "CBB.2", QHB.S, QLB.D, "PB.1"]
+        connect = [net.PHC, DRV.SHC, "CBC.2", QHC.S, QLC.D, "PC.1"]
+        connect = [net.SRC, QLA.S, QLB.S, QLC.S, "RSH.1", "RIS.1"]
+        connect = [net.GND, "RSH.2", DRV.GND, "CVCC.2", "CDRV.2", MCU.VSS, "CMCU.2", "RBOOT.2", "CIS.2", "CB1.2"]
+        no_erc = [MCU.NRST, MCU.OSC_IN, MCU.OSC_OUT, MCU.SCL, MCU.SDA, MCU.USB_DP, MCU.USB_DN, MCU.PA11, MCU.PA12, MCU.PA13, MCU.PA14, MCU.PA15, MCU.PA16, MCU.PA17, MCU.PA18, MCU.PA19]
+    }
+
+    sheet main {
+        component J1 = { part = "CONN-SH-8P" }
+        component P1 = { part = "PAD-WIRE-12AWG" }
+        component P2 = { part = "PAD-WIRE-12AWG" }
+        component C1 = { part = "C2512-220U-35V" }
+        component C2 = { part = "C2512-220U-35V" }
+        component U1 = { part = "LDO-3V3-SOT23" }
+        component C3 = { part = "C0603-1U-50V" }
+        component C4 = { part = "C0402-1U" }
+        component H1 = { part = "MH-M3-GROMMET" }
+        component H2 = { part = "MH-M3-GROMMET" }
+        component H3 = { part = "MH-M3-GROMMET" }
+        component H4 = { part = "MH-M3-GROMMET" }
+        net GND = { class = power, global = true, power_flag = true }
+        net VBAT = { class = power, global = true, power_flag = true }
+        net "+3V3" = { class = power, global = true, power_flag = true }
+        bus SIG = [M1, M2, M3, M4]
+        instance ch = { sheet = channel, repeat = 4, bind = { SIG = { bus = SIG, offset = 0 }, TLM = net.TLM } }
+        connect = [net.VBAT, "P1.1", "C1.1", "C2.1", U1.VIN, U1.EN, "C3.1", "J1.1"]
+        connect = [net.GND, "P2.1", "C1.2", "C2.2", U1.GND, "C3.2", "C4.2", "J1.2"]
+        connect = ["net.+3V3", U1.VOUT, "C4.1"]
+        connect = [net.TLM, "J1.4"]
+        connect = [net.M1, "J1.5"]
+        connect = [net.M2, "J1.6"]
+        connect = [net.M3, "J1.7"]
+        connect = [net.M4, "J1.8"]
+        no_erc = ["J1.3", U1.NC, "H1.1", "H2.1", "H3.1", "H4.1"]
+    }
+
+    // Phase A's half bridge switching 20 A of motor current at 48 kHz from a 22.2 V battery:
+    // the gate driver's turn-on and turn-off, the switch node's edges and the dead time between
+    // the high and low sides. Phases B and C hold their low sides on.
+    simulation gate_drive {
+        sheet = channel
+        source VB = { p = net.VBAT, dc = 22.2 V }
+        source V3 = { p = "net.+3V3", dc = 3.3 V }
+        source HA = { p = net.INHA, pulse = { from = 0 V, to = 3.3 V, delay = 1 us, rise = 5 ns, fall = 5 ns, width = 10 us, period = 20.83 us } }
+        source LA = { p = net.INLA, pulse = { from = 3.3 V, to = 0 V, delay = 0.7 us, rise = 5 ns, fall = 5 ns, width = 10.6 us, period = 20.83 us } }
+        source HB = { p = net.INHB, dc = 0 V }
+        source LB = { p = net.INLB, dc = 3.3 V }
+        source HC = { p = net.INHC, dc = 0 V }
+        source LC = { p = net.INLC, dc = 3.3 V }
+        source EN = { p = net.DRV_EN, dc = 3.3 V }
+        source IMOT = { p = net.PHA, n = net.PHB, dc = 20 A, current = true }
+        model "GATEDRV-3PH-QFN24" = { library = "drone_models.lib", subckt = GATEDRV3, pins = [INHA, INLA, INHB, INLB, INHC, INLC, EN, GND, VCC, VDRV, BSTA, GHA, SHA, GLA, BSTB, GHB, SHB, GLB, BSTC, GHC, SHC, GLC, FAULT] }
+        model "NMOS-40V-DFN8" = { library = "drone_models.lib", subckt = NMOS40, pins = [D, G, S] }
+        analysis edges = tran { stop = 14 us, step = 2 ns }
+        probe = [net.INHA, net.GHA, net.GLA, net.PHA, "QHA.D"]
+        measure rise = { of = edges, rise_time = net.PHA, from = 0.5 us, to = 4 us }
+        measure overshoot = { of = edges, max = net.PHA, from = 0.5 us, to = 4 us, spec = { max = 30 V } }
+        measure gate_high = { of = edges, max = net.GHA, spec = { max = 34 V } }
+        measure on_current = { of = edges, rms = "QHA.D", from = 2 us, to = 10 us }
+    }
+}

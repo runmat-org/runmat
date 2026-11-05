@@ -1,0 +1,85 @@
+* Behavioural models for the quadcopter boards' circuit simulations. Each is written from the
+* part type's published behaviour (reference, switching frequency, drive strength), not from a
+* vendor netlist.
+
+* 36 V 2 A synchronous buck, 500 kHz, 0.8 V reference, 1 ms internal soft start, voltage mode
+* with input feedforward and an internal type-II compensator. Pins: VIN EN BST SW FB GND.
+.subckt BUCK36V vin en bst sw fb gnd
+Bref ref gnd V = {0.8*min(1, time/1m)*0.5*(1+tanh((V(en,gnd)-1.2)*20))}
+Gea gnd comp VALUE = {300u*(V(ref,gnd)-V(fb,gnd))}
+Rea comp gnd 5Meg
+Rc comp cz 22k
+Cc cz gnd 4.7n
+Cp comp gnd 47p
+Vramp ramp gnd PULSE(0 1 0 1.96u 20n 20n 2u)
+Bpwm ctl gnd V = {0.5*(1+tanh((limit(V(comp,gnd)*10/max(V(vin,gnd),5), 0, 0.95) - V(ramp,gnd))*60))}
+Bctlb ctlb gnd V = {1 - V(ctl,gnd)}
+S1 vin sw ctl gnd SWHS
+S2 sw gnd ctlb gnd SWLS
+.model SWHS SW(vt=0.5 vh=0 ron=0.09 roff=10Meg)
+.model SWLS SW(vt=0.5 vh=0 ron=0.05 roff=10Meg)
+Rbst bst sw 1Meg
+Ren en gnd 10Meg
+Rfb fb gnd 100Meg
+.ends BUCK36V
+
+* The same buck averaged over a switching period: its error amplifier holds FB at the 0.8 V
+* reference, so the operating point gives the set output voltage. Pins as BUCK36V.
+.subckt BUCK36V_AVG vin en bst sw fb gnd
+Eout sw gnd VALUE = {limit(2e4*(0.8 - V(fb,gnd)), 0, V(vin,gnd))}
+Rbst bst sw 1Meg
+Ren en gnd 10Meg
+Rfb fb gnd 100Meg
+.ends BUCK36V_AVG
+
+* 3.3 V 300 mA LDO, 250 mV dropout. Pins: VIN EN VOUT GND.
+.subckt LDO33 vin en vout gnd
+Bldo vout gnd V = {min(3.3, max(V(vin,gnd)-0.25, 0))*0.5*(1+tanh((V(en,gnd)-1)*20))}
+Rq vin gnd 50k
+Ren en gnd 10Meg
+.ends LDO33
+
+* 40 V N-channel power MOSFET, 1.6 mOhm at VGS = 10 V, 3.3 x 3.3 mm package: a level-1 channel
+* with its gate charge (Ciss 2.4 nF, Crss 0.25 nF), internal gate resistance and body diode.
+* Pins: D G S.
+.subckt NMOS40 d g s
+Rgi g gi 1.2
+M1 d gi s s NM40 L=1u W=1u
+Cgs gi s 2.2n
+Cgd gi d 0.25n
+Cds d s 0.8n
+Dbody s d DBODY
+.model NM40 NMOS(level=1 vto=2.2 kp=80 lambda=0.002)
+.model DBODY D(is=1e-9 n=1.2 rs=4m cjo=1n tt=20n)
+.ends NMOS40
+
+* Three-phase half-bridge gate driver, 40 V: a 10 V drive regulator (VDRV), bootstrap diodes to
+* each BSTx, 2 Ohm high-side and 1.5 Ohm low-side output stages, inputs at 1.6 V. Pins: INHA INLA
+* INHB INLB INHC INLC EN GND VCC VDRV BSTA GHA SHA GLA BSTB GHB SHB GLB BSTC GHC SHC GLC FAULT.
+.subckt GATEDRV3 inha inla inhb inlb inhc inlc en gnd vcc vdrv bsta gha sha gla bstb ghb shb glb bstc ghc shc glc fault
+Bdrv vdrv gnd V = {max(0, min(10, V(vcc,gnd)-0.5))}
+Ren en gnd 1Meg
+Rf fault gnd 10Meg
+Riha inha gnd 1Meg
+Rila inla gnd 1Meg
+Dbsa vdrv bsta DBS
+Bgha gha_i sha V = {max(0, V(bsta,sha))*0.5*(1+tanh((V(inha,gnd)-1.6)*20))*0.5*(1-tanh((V(inla,gnd)-1.6)*20))*0.5*(1+tanh((V(en,gnd)-1.6)*20))}
+Rgha gha_i gha 2
+Bgla gla_i gnd V = {V(vdrv,gnd)*0.5*(1+tanh((V(inla,gnd)-1.6)*20))*0.5*(1-tanh((V(inha,gnd)-1.6)*20))*0.5*(1+tanh((V(en,gnd)-1.6)*20))}
+Rgla gla_i gla 1.5
+Rihb inhb gnd 1Meg
+Rilb inlb gnd 1Meg
+Dbsb vdrv bstb DBS
+Bghb ghb_i shb V = {max(0, V(bstb,shb))*0.5*(1+tanh((V(inhb,gnd)-1.6)*20))*0.5*(1-tanh((V(inlb,gnd)-1.6)*20))*0.5*(1+tanh((V(en,gnd)-1.6)*20))}
+Rghb ghb_i ghb 2
+Bglb glb_i gnd V = {V(vdrv,gnd)*0.5*(1+tanh((V(inlb,gnd)-1.6)*20))*0.5*(1-tanh((V(inhb,gnd)-1.6)*20))*0.5*(1+tanh((V(en,gnd)-1.6)*20))}
+Rglb glb_i glb 1.5
+Rihc inhc gnd 1Meg
+Rilc inlc gnd 1Meg
+Dbsc vdrv bstc DBS
+Bghc ghc_i shc V = {max(0, V(bstc,shc))*0.5*(1+tanh((V(inhc,gnd)-1.6)*20))*0.5*(1-tanh((V(inlc,gnd)-1.6)*20))*0.5*(1+tanh((V(en,gnd)-1.6)*20))}
+Rghc ghc_i ghc 2
+Bglc glc_i gnd V = {V(vdrv,gnd)*0.5*(1+tanh((V(inlc,gnd)-1.6)*20))*0.5*(1-tanh((V(inhc,gnd)-1.6)*20))*0.5*(1+tanh((V(en,gnd)-1.6)*20))}
+Rglc glc_i glc 1.5
+.model DBS D(is=1e-12 rs=1 cjo=20p)
+.ends GATEDRV3

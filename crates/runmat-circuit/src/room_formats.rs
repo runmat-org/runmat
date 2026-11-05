@@ -8,7 +8,10 @@
 //! parts' pads: a source net maps to the net the counterpart pads carry, so channel-local nets
 //! map to their own channel's nets, and shared nets (`GND`, a supply) map to themselves.
 //!
-//! [`copy_room_formats`] translates by the offset between the rooms' lower-left corners. It:
+//! [`copy_room_formats`] translates by the offset between the rooms' lower-left corners, or,
+//! with [`RoomFormatOptions::rotate`], turns each copy about the board's center by the quarter
+//! turns that carry the source room's center onto the target's (rooms set around the center, as
+//! the four channels of a 4-in-1 motor controller are). It:
 //! - places each counterpart footprint at the source part's offset position, rotation and
 //!   side (a locked counterpart stays where it is and is reported);
 //! - copies the tracks and vias inside the source room on mapped nets, onto the mapped nets,
@@ -39,6 +42,9 @@ pub struct RoomFormatOptions {
     /// Copper pours on the mapped nets (and pours with no net) that lie inside the source room,
     /// replacing the target room's unlocked pours on those nets.
     pub pours: bool,
+    /// Turn each copy about the board outline's center, by the multiple of 90 degrees between
+    /// the source and target rooms' centers as seen from it, instead of only translating.
+    pub rotate: bool,
 }
 
 impl Default for RoomFormatOptions {
@@ -48,8 +54,52 @@ impl Default for RoomFormatOptions {
             routing: true,
             room_shape: true,
             pours: true,
+            rotate: false,
         }
     }
+}
+
+/// Where a copy goes: `p ↦ R(p − from) + to`, with `R` a turn of `quarter` × 90°
+/// counter-clockwise (exact on the nanometre grid).
+#[derive(Clone, Copy, Debug)]
+struct Map {
+    quarter: u8,
+    from: Point,
+    to: Point,
+}
+
+impl Map {
+    fn apply(&self, p: Point) -> Point {
+        let v = p - self.from;
+        let r = match self.quarter % 4 {
+            0 => v,
+            1 => Point::new(-v.y, v.x),
+            2 => Point::new(-v.x, -v.y),
+            _ => Point::new(v.y, -v.x),
+        };
+        r + self.to
+    }
+    fn degrees(&self) -> f64 {
+        90.0 * f64::from(self.quarter % 4)
+    }
+}
+
+fn center(p: &Polygon) -> Point {
+    let b = p.bbox();
+    Point::new((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2)
+}
+
+/// The map from the source room to the target room: a translation between their lower-left
+/// corners, or a turn about `pivot` (the board's center) followed by the translation that puts
+/// the turned source center on the target center.
+fn room_map(src: &Polygon, dst: &Polygon, pivot: Option<Point>) -> Map {
+    let Some(c) = pivot else {
+        return Map { quarter: 0, from: src.bbox().min, to: dst.bbox().min };
+    };
+    let (a, b) = (center(src) - c, center(dst) - c);
+    let angle = (b.y as f64).atan2(b.x as f64) - (a.y as f64).atan2(a.x as f64);
+    let quarter = ((angle.to_degrees() / 90.0).round() as i64).rem_euclid(4) as u8;
+    Map { quarter, from: center(src), to: center(dst) }
 }
 
 /// What one target room received.
@@ -137,24 +187,24 @@ fn track_inside(room: &Polygon, t: &Track) -> bool {
     }
 }
 
-fn moved(geom: &TrackGeom, d: Point) -> TrackGeom {
+fn moved(geom: &TrackGeom, d: Map) -> TrackGeom {
     match *geom {
-        TrackGeom::Segment { a, b } => TrackGeom::Segment { a: a + d, b: b + d },
+        TrackGeom::Segment { a, b } => TrackGeom::Segment { a: d.apply(a), b: d.apply(b) },
         TrackGeom::Arc { start, mid, end } => TrackGeom::Arc {
-            start: start + d,
-            mid: mid + d,
-            end: end + d,
+            start: d.apply(start),
+            mid: d.apply(mid),
+            end: d.apply(end),
         },
     }
 }
 
-fn moved_outline(p: &Polygon, d: Point) -> Polygon {
+fn moved_outline(p: &Polygon, d: Map) -> Polygon {
     Polygon {
-        outer: p.outer.iter().map(|q| *q + d).collect(),
+        outer: p.outer.iter().map(|q| d.apply(*q)).collect(),
         holes: p
             .holes
             .iter()
-            .map(|h| h.iter().map(|q| *q + d).collect())
+            .map(|h| h.iter().map(|q| d.apply(*q)).collect())
             .collect(),
     }
 }
@@ -211,7 +261,8 @@ pub fn copy_room_formats(
     let mut copies = Vec::new();
     for target in &targets {
         let dst = room(&next, target)?.clone();
-        let d = dst.outline.bbox().min - src.outline.bbox().min;
+        let pivot = o.rotate.then(|| center(&next.outline));
+        let d = room_map(&src.outline, &dst.outline, pivot);
         let mut copy = RoomCopy {
             room: target.clone(),
             ..RoomCopy::default()
@@ -272,8 +323,8 @@ pub fn copy_room_formats(
                     copy.skipped.push(format!("{}: locked", tf.reference));
                     continue;
                 }
-                tf.at = sf.at + d;
-                tf.rotation = sf.rotation;
+                tf.at = d.apply(sf.at);
+                tf.rotation = (sf.rotation + d.degrees()).rem_euclid(360.0);
                 tf.side = sf.side;
                 copy.placed.push(tf.reference.clone());
             }
@@ -333,7 +384,7 @@ pub fn copy_room_formats(
                 .map(|(v, net)| Via {
                     id: ItemId(0),
                     net: Some(net),
-                    at: v.at + d,
+                    at: d.apply(v.at),
                     ..v.clone()
                 })
                 .collect();
@@ -417,5 +468,31 @@ mod tests {
         assert_eq!(within("ch[0]", "/ch[0]/amp/U1"), Some("amp/U1"));
         assert_eq!(within("ch[0]", "/ch[01]/R1"), None);
         assert_eq!(within("ch[0]", "/ch[0]"), None);
+    }
+
+    fn square(x0: f64, y0: f64, side: f64) -> Polygon {
+        let p = |x: f64, y: f64| Point::mm(x, y);
+        Polygon {
+            outer: vec![p(x0, y0), p(x0 + side, y0), p(x0 + side, y0 + side), p(x0, y0 + side)],
+            holes: vec![],
+        }
+    }
+
+    /// Quadrant rooms around a board centerd on the origin: the lower-right room is the
+    /// lower-left one turned a quarter counter-clockwise, the upper-right a half turn, and a
+    /// point carries onto its rotated image exactly. Without a pivot the map is the corner offset.
+    #[test]
+    fn quarter_turns_about_the_board_center() {
+        let (ll, lr, ur, ul) = (square(-20.0, -20.0, 18.0), square(2.0, -20.0, 18.0), square(2.0, 2.0, 18.0), square(-20.0, 2.0, 18.0));
+        let c = Some(Point::ORIGIN);
+        let a = Point::mm(-15.25, -15.25);
+        let m = room_map(&ll, &lr, c);
+        assert_eq!((m.quarter, m.apply(a)), (1, Point::mm(15.25, -15.25)));
+        let m = room_map(&ll, &ur, c);
+        assert_eq!((m.quarter, m.apply(a), m.degrees()), (2, Point::mm(15.25, 15.25), 180.0));
+        let m = room_map(&ll, &ul, c);
+        assert_eq!((m.quarter, m.apply(a)), (3, Point::mm(-15.25, 15.25)));
+        let m = room_map(&ll, &lr, None);
+        assert_eq!((m.quarter, m.apply(a)), (0, Point::mm(6.75, -15.25)));
     }
 }

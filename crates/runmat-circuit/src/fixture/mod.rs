@@ -18,6 +18,7 @@ mod eco;
 mod large;
 mod pool;
 mod pool_daq;
+mod pool_drone;
 mod project;
 
 pub use eco::*;

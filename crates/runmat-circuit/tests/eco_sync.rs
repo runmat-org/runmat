@@ -545,7 +545,8 @@ fn copy_room_formats_is_a_board_command_on_rooms() {
             "placement",
             "routing",
             "pours",
-            "room_shape"
+            "room_shape",
+            "rotate"
         ]
     );
     let menu = catalog
@@ -615,6 +616,7 @@ fn copy_room_formats_copies_pours_on_the_mapped_nets() {
         routing: false,
         room_shape: false,
         pours: true,
+        rotate: false,
     };
     let report = copy_room_formats(&mut board, "ch[0]", &["ch[1]".to_owned()], &o).unwrap();
     let copy = &report.copies[0];

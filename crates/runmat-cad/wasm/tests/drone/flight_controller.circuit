@@ -1,0 +1,198 @@
+runmat 0.7
+std 1
+
+// The flight controller: a Cortex-M4-class MCU reads a six-axis IMU over SPI and a barometer over
+// I2C, takes the receiver on UART2 and the video transmitter on UART1, and drives the four motor
+// signals to the 4-in-1 ESC through its 8-pin harness. A 36 V buck makes 5 V from the 6S battery
+// and an LDO makes 3.3 V. The board is 36 x 36 mm on the 30.5 mm stack pattern.
+circuit flight_controller {
+    root = main
+    net_class power = { track_width = "0.40 mm" }
+    net_class supply = { track_width = "0.25 mm" }
+    net_class digital = { track_width = "0.10 mm" }
+
+    sheet power {
+        port VBAT_SENSE : out
+        component U2 = { part = "BUCK-36V-2A" }
+        component L1 = { part = "L1210-10U" }
+        component C12 = { part = "C1206-10U-50V" }
+        component C13 = { part = "C1206-10U-50V" }
+        component C14 = { part = "C0402-100N" }
+        component C15 = { part = "C0805-22U" }
+        component C16 = { part = "C0805-22U" }
+        component R6 = { part = "R0402-52K3" }
+        component R7 = { part = "R0402-10K" }
+        component C17 = { part = "C0402-220P" }
+        component R8 = { part = "R0402-100K" }
+        component U3 = { part = "LDO-3V3-SOT23" }
+        component C18 = { part = "C0402-1U" }
+        component C19 = { part = "C0402-1U" }
+        component R9 = { part = "R0402-200K" }
+        component R10 = { part = "R0402-10K" }
+        component C20 = { part = "C0402-100N" }
+        net GND = { class = supply, global = true }
+        net VBAT = { class = power, global = true }
+        net "+5V" = { class = power, global = true }
+        net "+3V3" = { class = supply, global = true }
+        net SW = { class = power }
+        connect = [net.VBAT, U2.VIN, "C12.1", "C13.1", "R8.1", "R9.1"]
+        connect = [net.EN, U2.EN, "R8.2"]
+        connect = [net.SW, U2.SW, "L1.1", "C14.2"]
+        connect = [net.BST, U2.BST, "C14.1"]
+        connect = ["net.+5V", "L1.2", "C15.1", "C16.1", "R6.1", "C17.1", U3.VIN, U3.EN, "C18.1"]
+        connect = [net.FB, U2.FB, "R6.2", "C17.2", "R7.1"]
+        connect = ["net.+3V3", U3.VOUT, "C19.1"]
+        connect = [net.VSENSE, port.VBAT_SENSE, "R9.2", "R10.1", "C20.1"]
+        connect = [net.GND, U2.GND, "C12.2", "C13.2", "C15.2", "C16.2", "R7.2", U3.GND, "C18.2", "C19.2", "R10.2", "C20.2"]
+    }
+
+    sheet sensors {
+        port SCK : in
+        port MISO : out
+        port MOSI : in
+        port CS : in
+        port INT : out
+        port SCL : in
+        port SDA : inout
+        component U4 = { part = "IMU-6AX-LGA14" }
+        component U5 = { part = "BARO-LGA8" }
+        component C21 = { part = "C0402-100N" }
+        component C22 = { part = "C0402-1U" }
+        component C23 = { part = "C0402-100N" }
+        component R11 = { part = "R0402-4K7" }
+        component R12 = { part = "R0402-4K7" }
+        net GND = { class = supply, global = true }
+        net "+3V3" = { class = supply, global = true }
+        connect = [net.SCK, port.SCK, U4.SCLK]
+        connect = [net.MISO, port.MISO, U4.SDO]
+        connect = [net.MOSI, port.MOSI, U4.SDI]
+        connect = [net.CS, port.CS, U4.CS]
+        connect = [net.INT, port.INT, U4.INT1]
+        connect = [net.SCL, port.SCL, U5.SCL, "R11.2"]
+        connect = [net.SDA, port.SDA, U5.SDA, "R12.2"]
+        connect = ["net.+3V3", U4.VDD, U4.VDDIO, "C21.1", "C22.1", U5.VDD, U5.VDDIO, U5.CSB, "C23.1", "R11.1", "R12.1"]
+        connect = [net.GND, U4.GND, "C21.2", "C22.2", U5.GND, U5.SDO, "C23.2"]
+        no_erc = [U4.INT2, U4.NC]
+    }
+
+    sheet main {
+        component U1 = { part = "MCU-M4-LQFP48" }
+        component Y1 = { part = "XTAL-3225" }
+        component C1 = { part = "C0402-12P" }
+        component C2 = { part = "C0402-12P" }
+        component C3 = { part = "C0402-100N" }
+        component C4 = { part = "C0402-100N" }
+        component C5 = { part = "C0402-100N" }
+        component C6 = { part = "C0402-100N" }
+        component C7 = { part = "C0402-1U" }
+        component C8 = { part = "C0402-100N" }
+        component C9 = { part = "C0402-1U" }
+        component C10 = { part = "C0603-4U7" }
+        component C11 = { part = "C0402-100N" }
+        component R1 = { part = "R0402-10K" }
+        component R2 = { part = "R0402-5K1" }
+        component R3 = { part = "R0402-5K1" }
+        component R4 = { part = "R0402-1K" }
+        component R5 = { part = "R0402-1K" }
+        component D1 = { part = "LED0603-G" }
+        component D2 = { part = "LED0603-G" }
+        component D3 = { part = "D-SCHOTTKY-1A" }
+        component J1 = { part = "USBC-RCPT-16P" }
+        component J2 = { part = "CONN-SH-4P" }
+        component J3 = { part = "CONN-SH-8P" }
+        component J4 = { part = "CONN-SH-4P" }
+        component H1 = { part = "MH-M3-GROMMET" }
+        component H2 = { part = "MH-M3-GROMMET" }
+        component H3 = { part = "MH-M3-GROMMET" }
+        component H4 = { part = "MH-M3-GROMMET" }
+        net GND = { class = supply, global = true, power_flag = true }
+        net VBAT = { class = power, global = true, power_flag = true }
+        net "+5V" = { class = power, global = true, power_flag = true }
+        net "+3V3" = { class = supply, global = true, power_flag = true }
+        instance pwr = { sheet = power, bind = { VBAT_SENSE = net.VBAT_SENSE } }
+        instance sens = { sheet = sensors, bind = { SCK = net.SPI_SCK, MISO = net.SPI_MISO, MOSI = net.SPI_MOSI, CS = net.IMU_CS, INT = net.IMU_INT, SCL = net.I2C_SCL, SDA = net.I2C_SDA } }
+        connect = [net.SPI_SCK, U1.PA5]
+        connect = [net.SPI_MISO, U1.PA6]
+        connect = [net.SPI_MOSI, U1.PA7]
+        connect = [net.IMU_CS, U1.PA4]
+        connect = [net.IMU_INT, U1.PA1]
+        connect = [net.I2C_SCL, U1.PB8]
+        connect = [net.I2C_SDA, U1.PB9]
+        connect = [net.VBAT_SENSE, U1.PA0]
+        connect = ["net.+3V3", U1.VDD, U1.VDDA, "C3.1", "C4.1", "C5.1", "C6.1", "C7.1", "C8.1", "C9.1"]
+        connect = [net.GND, U1.VSS, U1.VSSA, "C3.2", "C4.2", "C5.2", "C6.2", "C7.2", "C8.2", "C9.2", "C10.2", "C11.2", "C1.2", "C2.2", "R1.2"]
+        connect = [net.VCAP, U1.VCAP, "C10.1"]
+        connect = [net.NRST, U1.NRST, "C11.1"]
+        connect = [net.BOOT0, U1.BOOT0, "R1.1"]
+        connect = [net.OSC_IN, U1.OSC_IN, "Y1.1", "C1.1"]
+        connect = [net.OSC_OUT, U1.OSC_OUT, "Y1.2", "C2.1"]
+        // USB-C: device, powered from VBUS through the Schottky when the battery is off.
+        connect = [net.VBUS, J1.VBUS, D3.A]
+        connect = ["net.+5V", D3.K]
+        connect = [net.USB_DP, J1.DP, U1.PA12]
+        connect = [net.USB_DN, J1.DN, U1.PA11]
+        connect = [net.CC1, J1.CC1, "R2.1"]
+        connect = [net.CC2, J1.CC2, "R3.1"]
+        connect = [net.GND, J1.GND, J1.SHIELD, "R2.2", "R3.2"]
+        // Status LEDs.
+        connect = [net.LED1, U1.PC13, "R4.1"]
+        connect = [net.LED1_K, "R4.2", D1.A]
+        connect = [net.LED2, U1.PC14, "R5.1"]
+        connect = [net.LED2_K, "R5.2", D2.A]
+        connect = [net.GND, D1.K, D2.K]
+        // Receiver (UART2, on the MCU's side facing it): 5 V, GND, RX, TX.
+        connect = ["net.+5V", "J2.1"]
+        connect = [net.GND, "J2.2"]
+        connect = [net.RC_RX, "J2.3", U1.PA3]
+        connect = [net.RC_TX, "J2.4", U1.PA2]
+        // ESC harness: battery, ground, current, telemetry, four motor signals.
+        connect = [net.VBAT, "J3.1"]
+        connect = [net.GND, "J3.2"]
+        connect = [net.CURR, "J3.3", U1.PB1]
+        connect = [net.TLM, "J3.4", U1.PB10]
+        connect = [net.M1, "J3.5", U1.PB6]
+        connect = [net.M2, "J3.6", U1.PB7]
+        connect = [net.M3, "J3.7", U1.PB4]
+        connect = [net.M4, "J3.8", U1.PB5]
+        // Video transmitter control and telemetry (UART1): 5 V, GND, TX, RX.
+        connect = ["net.+5V", "J4.1"]
+        connect = [net.GND, "J4.2"]
+        connect = [net.VTX_TX, "J4.3", U1.PA9]
+        connect = [net.VTX_RX, "J4.4", U1.PA10]
+        no_erc = [U1.PC15, U1.PA8, U1.PA13, U1.PA14, U1.PA15, U1.PB0, U1.PB2, U1.PB3, U1.PB12, U1.PB13, U1.PB14, U1.PB15, J1.SBU1, J1.SBU2]
+        no_erc = ["H1.1", "H2.1", "H3.1", "H4.1"]
+    }
+
+    // The 5 V buck's start-up from a 6S battery into a 1.5 A load: the soft-start ramp, the
+    // inductor current and the output ripple, switching at 500 kHz.
+    simulation buck_startup {
+        sheet = power
+        source VB = { p = net.VBAT, pwl = [[0 s, 0 V], [20 us, 22.2 V], [3 ms, 22.2 V]] }
+        source ILOAD = { p = "net.+5V", dc = 1.5 A, current = true }
+        model "BUCK-36V-2A" = { library = "drone_models.lib", subckt = BUCK36V, pins = [VIN, EN, BST, SW, FB, GND] }
+        model "LDO-3V3-SOT23" = { library = "drone_models.lib", subckt = LDO33, pins = [VIN, EN, VOUT, GND] }
+        analysis startup = tran { stop = 1.6 ms, step = 20 ns }
+        probe = [net.VBAT, "net.+5V", net.SW, "net.+3V3", "L1.1"]
+        measure v5 = { of = startup, average = "net.+5V", from = 1.4 ms, to = 1.6 ms, spec = { min = 4.85 V, max = 5.15 V } }
+        measure ripple = { of = startup, peak_to_peak = "net.+5V", from = 1.4 ms, to = 1.6 ms, spec = { max = 50 mV } }
+        measure overshoot = { of = startup, overshoot = "net.+5V" }
+        measure v33 = { of = startup, average = "net.+3V3", from = 1.4 ms, to = 1.6 ms, spec = { min = 3.25 V, max = 3.35 V } }
+        measure peak_inductor = { of = startup, max = "L1.1", spec = { max = 3 A } }
+    }
+
+    // The 5 V setpoint over component tolerance: the feedback divider's 1 % resistors in 2,000
+    // Monte Carlo runs of the regulated operating point.
+    simulation buck_tolerance {
+        sheet = power
+        source VB = { p = net.VBAT, dc = 22.2 V }
+        source ILOAD = { p = "net.+5V", dc = 1.5 A, current = true }
+        model "BUCK-36V-2A" = { library = "drone_models.lib", subckt = BUCK36V_AVG, pins = [VIN, EN, BST, SW, FB, GND] }
+        model "LDO-3V3-SOT23" = { library = "drone_models.lib", subckt = LDO33, pins = [VIN, EN, VOUT, GND] }
+        tolerance resistors = { match = "R*", value = 1 % }
+        analysis point = op {}
+        analysis spread = monte_carlo { of = point, runs = 2000, seed = 11 }
+        probe = ["net.+5V"]
+        measure v5 = { of = point, value = "net.+5V" }
+        measure v5_spread = { of = spread, value = "net.+5V", spec = { min = 4.9 V, max = 5.1 V } }
+    }
+}

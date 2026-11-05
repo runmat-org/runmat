@@ -375,6 +375,7 @@ fn room_formats(project: &Project, request: &EditRequest) -> Result<EditOutput, 
         routing: flag(&request.values, "routing", true),
         room_shape: flag(&request.values, "room_shape", true),
         pours: flag(&request.values, "pours", true),
+        rotate: flag(&request.values, "rotate", false),
     };
     let (change, report) =
         board_edit::copy_room_formats(&layout.path, &layout.text, &source, &targets, &options)

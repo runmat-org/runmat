@@ -1,0 +1,12 @@
+runmat 0.7
+std 1
+
+use circuit flight_controller from "./flight_controller.circuit"
+
+layout flight_controller {
+    outline = [[-17, -18], [17, -18], [18, -17], [18, 17], [17, 18], [-17, 18], [-18, 17], [-18, -17]]
+    limits = { clearance = 0.1, track = 0.1, via_diameter = 0.45, drill = 0.2, annular = 0.1, hole_to_hole = 0.25, copper_to_edge = 0.3, silk_to_pad = 0.1, microvia_drill = 0.1 }
+    net_class power = { track_width = 0.4 mm, clearance = 0.15 mm }
+    net_class supply = { track_width = 0.25 mm, clearance = 0.1 mm }
+    net_class digital = { track_width = 0.1 mm, clearance = 0.1 mm }
+}
