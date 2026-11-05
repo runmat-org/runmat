@@ -78,7 +78,7 @@ pub async fn ensure_available_capacity(
     additional: runmat_simulation_usage::OperationCount,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> Result<(), FeaRunDenied> {
-    use runmat_simulation_usage::{LedgerError, OperationCount};
+    use runmat_simulation_usage::LedgerError;
     loop {
         FeaRunScope::check_current()?;
         let state = super::scope::current()
@@ -89,24 +89,7 @@ pub async fn ensure_available_capacity(
         }
         state.check()?;
         let snapshot = usage.ledger().snapshot()?;
-        // A child assignment owns one numerical phase. Outstanding primitive reservations
-        // imply overlapping work, which this grant-only path cannot safely pre-admit.
-        if snapshot.reserved != OperationCount::ZERO {
-            return Err(LedgerError::OutstandingWork.into());
-        }
-        let required = snapshot
-            .completed
-            .total()
-            .map_err(LedgerError::from)?
-            .checked_add(additional)
-            .map_err(LedgerError::from)?;
-        if required > snapshot.budget {
-            return Err(LedgerError::BudgetExceeded {
-                required,
-                budget: snapshot.budget,
-            }
-            .into());
-        }
+        let required = usage.ledger().exclusive_work_requirement(additional)?;
         if required <= snapshot.granted {
             return Ok(());
         }

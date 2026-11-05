@@ -34,6 +34,7 @@ pub use sampled::{
 };
 mod topology;
 pub use topology::resources::solid_observation_topology_resident_bytes;
+pub use topology::structural_observation_derivation_work_upper_bound;
 
 pub use source::{
     ObservationFieldSelection, ObservationFieldSelectionIdentity, ObservationFieldSource,

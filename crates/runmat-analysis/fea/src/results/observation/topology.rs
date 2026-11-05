@@ -13,10 +13,47 @@ use crate::{
     results::field::{
         RecoveredFieldEntityCounts, RecoveredFieldEntityDomain, SampledVolumeFieldTopology,
     },
-    topology::{quadrature::TETRAHEDRON_FOUR_POINT_RULE, AnalysisProjection},
+    topology::{
+        quadrature::{volume_shape_work, TETRAHEDRON_FOUR_POINT_RULE},
+        AnalysisProjection, AnalysisProjectionError,
+    },
 };
 
 use super::ObservationError;
+use runmat_simulation_usage::{LedgerError, OperationCount};
+
+fn projection_error(error: AnalysisProjectionError) -> ObservationError {
+    match error {
+        AnalysisProjectionError::Accounting(cause) => ObservationError::Accounting(cause),
+        other => ObservationError::Invalid(other.to_string()),
+    }
+}
+
+/// Maximum currently metered reference work in one structural observation
+/// topology derivation. A solid mesh is projected once, then each element's
+/// four integration-point shape values are evaluated once.
+pub fn structural_observation_derivation_work_upper_bound(
+    mesh: Option<&SolverMeshArtifact>,
+) -> Result<OperationCount, ObservationError> {
+    let Some(mesh) = mesh else {
+        return Ok(OperationCount::ZERO);
+    };
+    let mut work =
+        AnalysisProjection::derivation_work_upper_bound(mesh).map_err(projection_error)?;
+    let samples = u64::try_from(TETRAHEDRON_FOUR_POINT_RULE.len())
+        .map_err(|_| ObservationError::Accounting(LedgerError::CountOverflow))?;
+    for element in &mesh.topology.volume_elements {
+        let shape_work = volume_shape_work(element.order)
+            .checked_mul(samples)
+            .map_err(LedgerError::from)
+            .map_err(ObservationError::Accounting)?;
+        work = work
+            .checked_add(shape_work)
+            .map_err(LedgerError::from)
+            .map_err(ObservationError::Accounting)?;
+    }
+    Ok(work)
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct ObservationNode {
@@ -265,7 +302,7 @@ impl<'a> ObservationTopology<'a> {
         let projection = mesh
             .map(AnalysisProjection::derive)
             .transpose()
-            .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+            .map_err(projection_error)?;
         if !has_explicit {
             let mut topology = projection
                 .map(|projection| Self::from_solid_projection(Cow::Owned(projection)))

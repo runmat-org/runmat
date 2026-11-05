@@ -123,6 +123,11 @@ RunMat applies reference counting at these numerical boundaries:
 The primitive costs above apply within these stages. The following sections
 describe the measured batches and explicit exclusions in `rsua-1`.
 
+Before synchronous topology preparation, RunMat requests capacity from a checked
+upper bound derived from the mesh and the same reference schedule as the kernels.
+The kernels record the work they complete. Unused preparation capacity does not
+consume the simulation allowance.
+
 ### Sparse LLT and LDLT reference arithmetic
 
 For a column of an LLT factor with p stored entries below its diagonal, the

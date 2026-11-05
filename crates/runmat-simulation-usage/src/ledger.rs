@@ -184,6 +184,29 @@ impl UsageLedger {
         })
     }
 
+    /// Capacity for a synchronous phase whose caller owns the ledger
+    /// exclusively. Quoting neither reserves nor completes numerical work.
+    pub fn exclusive_work_requirement(
+        &self,
+        additional: OperationCount,
+    ) -> Result<OperationCount, LedgerError> {
+        let state = self.lock()?;
+        if state.closed {
+            return Err(LedgerError::Closed);
+        }
+        if state.active != 0 {
+            return Err(LedgerError::OutstandingWork);
+        }
+        let required = state.completed.total()?.checked_add(additional)?;
+        if required > state.budget {
+            return Err(LedgerError::BudgetExceeded {
+                required,
+                budget: state.budget,
+            });
+        }
+        Ok(required)
+    }
+
     /// Final usage is available only after every numerical owner relinquishes its
     /// reservation. Closing is idempotent and prevents later numerical admission.
     pub fn finish(&self) -> Result<CompletedUsage, LedgerError> {

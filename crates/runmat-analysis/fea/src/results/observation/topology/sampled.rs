@@ -7,7 +7,7 @@ impl ObservationTopology<'_> {
         mesh: &SolverMeshArtifact,
     ) -> Result<Self, ObservationError> {
         sampling.validate_for_mesh(mesh).map_err(invalid)?;
-        let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
+        let projection = AnalysisProjection::derive(mesh).map_err(projection_error)?;
         let node_coordinates = SortedValues::derive(
             projection
                 .nodes

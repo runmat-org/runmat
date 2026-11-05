@@ -334,21 +334,41 @@ impl StructuralSequenceCoordinator {
         self.phase == CoordinatorPhase::Complete
     }
 
-    pub fn prepare_next_solve_wave(&mut self) -> AnalysisBridgeResult<PreparedStructuralSolveWave> {
+    fn next_solve_level(&self) -> AnalysisBridgeResult<&[ProcedureStepId]> {
         if self.phase != CoordinatorPhase::ReadyForSolve {
             return Err(AnalysisBridgeError::Invalid(
                 "structural sequence is not ready to prepare a solve wave".into(),
             ));
         }
-        let level = self
-            .sequence
+        self.sequence
             .parallel_levels()
             .get(self.next_level)
+            .map(Vec::as_slice)
             .ok_or_else(|| {
                 AnalysisBridgeError::Invalid(
                     "structural sequence has no remaining solve wave".into(),
                 )
-            })?;
+            })
+    }
+
+    /// Shared metered topology work for each task in the next synchronous
+    /// preparation wave. The preparation kernels record completed work.
+    pub fn next_solve_wave_work_upper_bound(
+        &self,
+    ) -> AnalysisBridgeResult<runmat_simulation_usage::OperationCount> {
+        use runmat_analysis_fea::results::observation::{
+            structural_observation_derivation_work_upper_bound, ObservationError,
+        };
+        let count = u64::try_from(self.next_solve_level()?.len()).map_err(|_| {
+            ObservationError::Accounting(runmat_simulation_usage::LedgerError::CountOverflow)
+        })?;
+        structural_observation_derivation_work_upper_bound(self.preparation.mesh.as_ref())?
+            .checked_mul(count)
+            .map_err(|cause| AnalysisBridgeError::from(ObservationError::Accounting(cause.into())))
+    }
+
+    pub fn prepare_next_solve_wave(&mut self) -> AnalysisBridgeResult<PreparedStructuralSolveWave> {
+        let level = self.next_solve_level()?;
         let mut tasks = Vec::with_capacity(level.len());
         for step_id in level {
             let step = self

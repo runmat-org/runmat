@@ -4,7 +4,8 @@ mod boundary_nodes;
 mod boundary_tensor;
 mod volume;
 pub(crate) use volume::{
-    tensor_tetrahedron_rule, visit_volume_quadrature, visit_volume_rule, volume_shape,
+    tensor_tetrahedron_rule, visit_volume_quadrature, visit_volume_rule, volume_rule_work,
+    volume_shape, volume_shape_work,
 };
 
 pub(super) use boundary_nodes::boundary_nodal_area_vectors;

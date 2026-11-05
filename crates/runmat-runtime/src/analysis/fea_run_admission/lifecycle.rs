@@ -298,6 +298,19 @@ pub struct FeaRunControl {
     state: Arc<RunState>,
 }
 impl FeaRunControl {
+    /// Quote cumulative capacity for an exclusive synchronous phase. Its
+    /// primitive reservations remain the only completed-work owners.
+    pub fn exclusive_work_requirement(
+        &self,
+        additional: OperationCount,
+    ) -> Result<OperationCount, FeaRunDenied> {
+        self.state.check()?;
+        self.state
+            .accounting
+            .ledger()
+            .exclusive_work_requirement(additional)
+            .map_err(Into::into)
+    }
     /// Reserve disjoint child capacity under this root outside its scoped poll.
     /// The host retains the returned owner until authenticated child retirement.
     pub fn delegate(

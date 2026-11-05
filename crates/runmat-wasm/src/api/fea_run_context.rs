@@ -266,6 +266,43 @@ impl LocalFeaRunContext {
         .map_err(|error| js_error(&error.to_string()))?;
         self.refresh("check", &report).await.map(|_| ())
     }
+    /// Await only the shared preparation quote, before entering synchronous
+    /// topology work. A delegated worker must retire before the root uses it.
+    pub(crate) async fn ensure_preparation_capacity(
+        &self,
+        additional: OperationCount,
+    ) -> Result<(), JsValue> {
+        if self.worker_authority.is_some()
+            || self
+                .worker
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_some()
+        {
+            return Err(denied_to_js(FeaRunDenied::LicenseInvalid));
+        }
+        self.check().await?;
+        if additional == OperationCount::ZERO {
+            return self.scope.check().map_err(denied_to_js);
+        }
+        let required = self
+            .scope
+            .control()
+            .exclusive_work_requirement(additional)
+            .map_err(denied_to_js)?;
+        let count = crate::wire::json_contract_to_js(&required)
+            .map_err(|error| js_error(&error.to_string()))?;
+        let state = self.refresh("grant", &count).await?;
+        if state.lease.granted_ops < required {
+            return Err(denied_to_js(FeaRunDenied::Accounting(
+                LedgerError::MoreGrantRequired {
+                    required,
+                    granted: state.lease.granted_ops,
+                },
+            )));
+        }
+        self.scope.check().map_err(denied_to_js)
+    }
     pub(crate) async fn retire_finished(&self) -> Result<(), JsValue> {
         let host = self
             .host

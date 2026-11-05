@@ -8044,6 +8044,7 @@ dependencies = [
  "runmat-process-host",
  "runmat-python",
  "runmat-runtime",
+ "runmat-simulation-usage",
  "runmat-static-analysis",
  "runmat-telemetry",
  "runmat-test",

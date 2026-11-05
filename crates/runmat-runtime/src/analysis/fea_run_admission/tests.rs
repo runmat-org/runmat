@@ -73,8 +73,17 @@ fn retained_parent_control_and_supervised_child_conserve_one_grant() {
     .unwrap();
     let parent = FeaRunScope::admit_with(request.clone(), &Host(Arc::clone(&events))).unwrap();
     let control = parent.control();
+    assert_eq!(control.exclusive_work_requirement(ops(7)).unwrap(), ops(7));
+    assert_eq!(
+        control.usage().unwrap().completed_ops.total().unwrap(),
+        ops(0)
+    );
     // The retained control can delegate outside an installed numerical scope.
     let mut child_owner = control.delegate(ops(0)).unwrap();
+    assert_eq!(
+        control.exclusive_work_requirement(ops(1)),
+        Err(FeaRunDenied::Accounting(LedgerError::OutstandingWork))
+    );
     assert!(matches!(
         parent.state.accounting.ledger().finish(),
         Err(LedgerError::OutstandingWork)
@@ -103,6 +112,11 @@ fn retained_parent_control_and_supervised_child_conserve_one_grant() {
         .reservation
         .finish(child_control.settled_usage().unwrap().completed_ops)
         .unwrap();
+    assert_eq!(control.exclusive_work_requirement(ops(3)).unwrap(), ops(8));
+    assert!(matches!(
+        control.exclusive_work_requirement(budget().budget_ops),
+        Err(FeaRunDenied::Accounting(LedgerError::BudgetExceeded { .. }))
+    ));
     parent.settle(FeaRunOutcome::Completed).unwrap();
     assert_eq!(control.settled_usage().unwrap().completed_ops.solve, ops(5));
     assert_eq!(events.lock().unwrap().settled.len(), 1);

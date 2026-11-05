@@ -597,6 +597,21 @@ pub(super) async fn commit_response(
         console,
         cancelled,
     } = completion.take_result();
+    // A proven cancellation without a requested console has no terminal
+    // result to publish. Resolve it before the response-specific fast paths;
+    // a worker may have produced either a failure or a Graph result while
+    // cancellation and physical retirement were being observed.
+    if cancelled && console.is_none() {
+        return transition(
+            control,
+            config,
+            DriverRunTarget::Cancelled,
+            Some("cancelled-during-execution"),
+            None,
+            None,
+        )
+        .await;
+    }
     let failed = matches!(
         &response,
         ProgramExecutionResponse::Failure { .. } | ProgramExecutionResponse::RuntimeFailure { .. }

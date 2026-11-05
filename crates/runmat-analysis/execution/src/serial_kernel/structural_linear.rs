@@ -108,6 +108,12 @@ pub(crate) async fn execute_with_capacity(
         runmat_analysis_fea::progress::phase_timer("structural_kernel.resource_plan_rederivation");
     let field_definitions = structural_static_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if let Some(capacity) = capacity {
+        let work = runmat_analysis_fea::results::observation::structural_observation_derivation_work_upper_bound(mesh.as_ref())?;
+        capacity.ensure_capacity(work).await.map_err(|cause| {
+            AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(cause))
+        })?;
+    }
     let observations =
         runmat_analysis_fea::results::observation::resolve_structural_observation_plan(
             solve.procedure_step()?,
@@ -117,7 +123,7 @@ pub(crate) async fn execute_with_capacity(
             &field_definitions,
             ObservationLimits::default(),
         )
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        .map_err(AnalysisBridgeError::from)?;
     let accelerator_requests = resource_plan.request.accelerators.clone();
     let local_execution =
         runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(

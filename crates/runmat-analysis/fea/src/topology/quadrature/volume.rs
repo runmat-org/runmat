@@ -8,6 +8,30 @@ use crate::topology::{
 use runmat_meshing_core::{ElementOrder, TETRAHEDRON_MIDSIDE_EDGE_CORNERS};
 use runmat_simulation_usage::{LedgerError, OperationCount, UsageCategory, UsageContext};
 
+/// The same reference batches reserved by `visit_volume_rule` and `volume_shape`.
+pub(crate) fn volume_point_work(order: ElementOrder) -> OperationCount {
+    let nodes = match order {
+        ElementOrder::Tet4 => 4,
+        ElementOrder::Tet10 => 10,
+    };
+    OperationCount::from_operations(39 * nodes + 105)
+}
+
+pub(crate) fn volume_shape_work(order: ElementOrder) -> OperationCount {
+    OperationCount::from_operations(if order == ElementOrder::Tet10 { 116 } else { 0 })
+}
+
+pub(crate) fn volume_rule_work(
+    order: ElementOrder,
+    points: usize,
+) -> Result<OperationCount, LedgerError> {
+    let points = u64::try_from(points).map_err(|_| LedgerError::CountOverflow)?;
+    volume_point_work(order)
+        .checked_add(volume_shape_work(order))
+        .and_then(|per_point| per_point.checked_mul(points))
+        .map_err(LedgerError::from)
+}
+
 pub(crate) fn visit_volume_quadrature(
     order: ElementOrder,
     coordinates: &[[f64; 3]],
@@ -34,17 +58,12 @@ pub(crate) fn visit_volume_rule(
         // Nine n-term Jacobian dots, cross/dot determinant (14), inverse
         // cofactors and normalization (42), n physical three-term gradients,
         // one weighted position, volume scaling, and four barycentric gradients.
-        let full = 39 * node_count as u64 + 105;
+        let full = volume_point_work(order);
         let determinant_prefix = 9 * (2 * node_count as u64 - 1) + 14;
         let usage = UsageContext::capture();
         let mut batch = usage
             .as_ref()
-            .map(|usage| {
-                usage.ledger().reserve(
-                    UsageCategory::Assembly,
-                    OperationCount::from_operations(full),
-                )
-            })
+            .map(|usage| usage.ledger().reserve(UsageCategory::Assembly, full))
             .transpose()?;
         let jacobian = std::array::from_fn::<_, 3, _>(|reference_axis| {
             std::array::from_fn(|physical_axis| {
@@ -96,7 +115,7 @@ pub(crate) fn visit_volume_rule(
             node_count,
         };
         if let Some(batch) = &mut batch {
-            batch.complete(OperationCount::from_operations(full))?;
+            batch.complete(full)?;
         }
         visit(point);
     }
@@ -119,10 +138,9 @@ pub(crate) fn volume_shape(
     let mut batch = usage
         .as_ref()
         .map(|usage| {
-            usage.ledger().reserve(
-                UsageCategory::Assembly,
-                OperationCount::from_operations(116),
-            )
+            usage
+                .ledger()
+                .reserve(UsageCategory::Assembly, volume_shape_work(order))
         })
         .transpose()?;
     values = runmat_meshing_core::interpolation::tetrahedron10_lagrange_weights(barycentric);
@@ -137,7 +155,7 @@ pub(crate) fn volume_shape(
         });
     }
     if let Some(batch) = &mut batch {
-        batch.complete(OperationCount::from_operations(116))?;
+        batch.complete(volume_shape_work(order))?;
     }
     Ok((values, derivatives))
 }
