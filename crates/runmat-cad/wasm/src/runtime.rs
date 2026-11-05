@@ -9,7 +9,7 @@ use runmat_cad::index::build_index;
 use runmat_cad::model::PartDocument;
 use runmat_cad::regen::kernel::TessellationOptions;
 use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest, RegenResult};
-use runmat_cad::sketch_solver::ExplicitSketchSolver;
+use runmat_cad::sketch_solver::ConstraintSketchSolver;
 use runmat_cad::syntax::{parse_assembly, parse_part};
 use runmat_cad::units::StubUnits;
 use runmat_cad::value::NoDynamicValues;
@@ -181,7 +181,7 @@ pub fn regenerate_part(path: &str, text: &str) -> Result<RegeneratedPart, Vec<Di
     let kernel = crate::kernel::make();
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
-        solver: &ExplicitSketchSolver,
+        solver: &ConstraintSketchSolver,
         units: &StubUnits,
         dynamic: &NoDynamicValues,
         lock: None,

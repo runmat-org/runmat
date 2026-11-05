@@ -9,6 +9,7 @@ mod references;
 mod inputs;
 mod compile;
 mod apply;
+mod sketch_status;
 mod profiles;
 use profiles::*;
 
@@ -91,6 +92,9 @@ pub struct PartState {
     pub bodies: Vec<LiveBody>,
     pub datums: BTreeMap<FeatureId, DatumValue>,
     pub sketches: BTreeMap<FeatureId, (SolvedSketch, Frame)>,
+    /// Sketches whose constraints conflict, kept for display only (written coordinates, the
+    /// conflict set marked); no feature reads them.
+    pub over_defined_sketches: BTreeMap<FeatureId, (SolvedSketch, Frame)>,
     pub burials: BTreeMap<(TopoKind, EntityName), FeatureId>,
     /// Every one-level name this regeneration produced, by token.
     pub names: NameTable,

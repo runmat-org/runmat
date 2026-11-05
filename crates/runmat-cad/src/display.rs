@@ -524,7 +524,11 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
             let FeatureKind::Sketch(sketch) = &feature.kind else {
                 return None;
             };
-            let (solved, frame) = result.state.sketches.get(&feature.id)?;
+            let (solved, frame) = result
+                .state
+                .sketches
+                .get(&feature.id)
+                .or_else(|| result.state.over_defined_sketches.get(&feature.id))?;
             let entities = sketch
                 .entities
                 .iter()

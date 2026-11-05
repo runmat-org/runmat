@@ -12,8 +12,8 @@
 //!
 //! Lines, rectangles (four lines sharing their corners, two horizontal, two vertical), circles,
 //! centre-point arcs, straight slots (two lines and two arcs, tangent), points, offsets of lines
-//! and circles, and the relations and dimensions the sketch model has. A tool the sketch model
-//! lacks (splines, ellipses, text) says so.
+//! and circles, trim and extend (`modify`), and the relations and dimensions the sketch model
+//! has. A tool the sketch model lacks (splines, ellipses, text) says so.
 
 use super::{model, EditFailure, SourceChange};
 use runmat_cad::ids::SketchEntityId;
@@ -589,6 +589,8 @@ pub fn sketch_edit(
                 summary = format!("Dimensioned {id}");
                 sketch.constraints.push(c);
             }
+            "sketch.trim" => summary = modify::trim(values, sketch, &id)?,
+            "sketch.extend" => summary = modify::extend(values, sketch, &id)?,
             _ => {
                 let (entities, relations) = draw(command, values, sketch)?;
                 summary = format!(
@@ -640,6 +642,8 @@ fn new_sketch(
     })?;
     Ok((change, format!("Added {added}")))
 }
+
+mod modify;
 
 #[cfg(test)]
 mod tests;

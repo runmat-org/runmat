@@ -168,3 +168,37 @@ fn relations_and_dimensions_take_canvas_picks() {
     );
     assert_eq!(bad["ok"], false);
 }
+
+/// A plate with a line across it (l5, x = 20) and a circle on the right edge (c1).
+const CROSSED: &str = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])\n        l2 = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])\n        l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n        l5 = line(start = [20 mm, -10 mm], end = [20 mm, 30 mm])\n        c1 = circle(center = [40 mm, 10 mm], radius = 5 mm)\n    }\n}\n";
+
+#[test]
+fn trim_removes_the_piece_around_the_click() {
+    // The end of l5 outside the plate, above l3, goes: l5 now ends on l3.
+    let top = applied(CROSSED, "sketch.trim", json!({ "sketch": "s1", "entities": ["sketch.s1.l5"], "at": { "x": 20, "y": 26 } }));
+    assert!(top.contains("l5 = line(start = [20 mm, -10 mm], end = [20 mm, 20 mm])"), "{top}");
+    // l1's piece left of l5 goes: l1 now starts on l5.
+    let left = applied(CROSSED, "sketch.trim", json!({ "sketch": "s1", "entities": ["sketch.s1.l1"], "at": { "x": 10, "y": 0 } }));
+    assert!(left.contains("l1 = line(start = [20 mm, 0 mm], end = [40 mm, 0 mm])"), "{left}");
+    // Nothing crosses l4 but its own corners: a click on it deletes it.
+    let gone = applied(CROSSED, "sketch.trim", json!({ "sketch": "s1", "entities": ["sketch.s1.l4"], "at": { "x": 0, "y": 10 } }));
+    assert!(!gone.contains("l4 = line"), "{gone}");
+    // The middle of l2, inside the circle, goes: l2 splits at the circle.
+    let split = applied(CROSSED, "sketch.trim", json!({ "sketch": "s1", "entities": ["sketch.s1.l2"], "at": { "x": 40, "y": 10 } }));
+    assert!(split.contains("l2 = line(start = [40 mm, 0 mm], end = [40 mm, 5 mm])"), "{split}");
+    assert!(split.contains("line(start = [40 mm, 15 mm], end = [40 mm, 20 mm])"), "{split}");
+    // The circle's half inside the plate goes: an arc remains, outside.
+    let arc = applied(CROSSED, "sketch.trim", json!({ "sketch": "s1", "entities": ["sketch.s1.c1"], "at": { "x": 35, "y": 10 } }));
+    assert!(arc.contains("c1 = arc(center = [40 mm, 10 mm], start = [40 mm, 5 mm], end = [40 mm, 15 mm])"), "{arc}");
+}
+
+#[test]
+fn extend_runs_a_line_end_to_the_next_curve() {
+    let text = CROSSED.replace("l5 = line(start = [20 mm, -10 mm], end = [20 mm, 30 mm])", "l5 = line(start = [20 mm, 5 mm], end = [20 mm, 12 mm])");
+    let up = applied(&text, "sketch.extend", json!({ "sketch": "s1", "entities": ["sketch.s1.l5"], "at": { "x": 20, "y": 11 } }));
+    assert!(up.contains("l5 = line(start = [20 mm, 5 mm], end = [20 mm, 20 mm])"), "{up}");
+    let down = applied(&text, "sketch.extend", json!({ "sketch": "s1", "entities": ["sketch.s1.l5"], "at": { "x": 20, "y": 6 } }));
+    assert!(down.contains("l5 = line(start = [20 mm, 0 mm], end = [20 mm, 12 mm])"), "{down}");
+    let none = run(&text.replace("l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n", ""), "sketch.extend", json!({ "sketch": "s1", "entities": ["sketch.s1.l5"], "at": { "x": 20, "y": 11 } }));
+    assert_eq!(none["ok"], false, "{none}");
+}

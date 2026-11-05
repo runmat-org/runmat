@@ -141,13 +141,18 @@ impl<'a, 'b> Run<'a, 'b> {
                         }
                         Ok(Compiled::Sketch(solved, frame))
                     }
-                    Err(e) => Err(self.error(
-                        id,
-                        Some("constraints"),
-                        DiagCode::SketchSolveFailed,
-                        e.message,
-                        Vec::new(),
-                    )),
+                    Err(e) => {
+                        if !e.constraints.is_empty() {
+                            self.keep_over_defined_sketch(id, s, frame, &e.constraints);
+                        }
+                        Err(self.error(
+                            id,
+                            Some("constraints"),
+                            DiagCode::SketchSolveFailed,
+                            e.message,
+                            Vec::new(),
+                        ))
+                    }
                 }
             }
             FeatureKind::Plane(p) => {

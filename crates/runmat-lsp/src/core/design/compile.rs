@@ -101,7 +101,7 @@ fn compile_part(path: &str, text: &str, table: &SymbolTable) -> (Vec<Problem>, O
     let kernel = runmat_design_tools::kernel::make();
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
-        solver: &runmat_cad::sketch_solver::ExplicitSketchSolver,
+        solver: &runmat_cad::sketch_solver::ConstraintSketchSolver,
         units: &runmat_cad::units::StubUnits,
         dynamic: &runmat_cad::value::NoDynamicValues,
         lock: None,
