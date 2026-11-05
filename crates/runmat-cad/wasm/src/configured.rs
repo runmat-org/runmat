@@ -10,8 +10,7 @@ use runmat_cad::assembly::resolve::ResolvedAssembly;
 use runmat_cad::assembly::source::ConfigKey;
 use runmat_cad::display::{configuration_key, part_display, PartDisplay};
 use runmat_cad::model::PartDocument;
-use runmat_cad::regen::kernel::TessellationOptions;
-use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest};
+use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest, RegenResult};
 use runmat_cad::sketch_solver::ConstraintSketchSolver;
 use runmat_cad::units::{StubUnits, UnitAuthority};
 use runmat_cad::value::{NoDynamicValues, ValueExpr};
@@ -30,6 +29,31 @@ fn configured_document(document: &PartDocument, key: &ConfigKey) -> PartDocument
         };
     }
     doc
+}
+
+/// The part `document` regenerated in configuration `key` (a named configuration and input
+/// values on top of it) on a fresh kernel, which holds the result's bodies.
+pub fn regenerate_configured(
+    document: &PartDocument,
+    key: &ConfigKey,
+) -> (RegenResult, Box<dyn crate::kernel::DesignKernel>) {
+    let doc = configured_document(document, key);
+    let kernel = crate::kernel::make();
+    let ctx = RegenContext {
+        kernel: kernel.as_ref(),
+        solver: &ConstraintSketchSolver,
+        units: &StubUnits,
+        dynamic: &NoDynamicValues,
+        lock: None,
+        catalog: None,
+        policy: Default::default(),
+        slots: None,
+    };
+    let request = RegenRequest {
+        configuration: key.name.clone(),
+    };
+    let result = regenerate(&doc, &ctx, &request, &mut RegenCache::default());
+    (result, kernel)
 }
 
 /// Displays of every non-default part configuration `resolved` places, keyed as
@@ -53,23 +77,8 @@ pub fn configured_displays(
         let Some(document) = documents.get(&key.0) else {
             continue;
         };
-        let doc = configured_document(document, &node.configuration);
-        let kernel = crate::kernel::make();
-        let ctx = RegenContext {
-            kernel: kernel.as_ref(),
-            solver: &ConstraintSketchSolver,
-            units: &StubUnits,
-            dynamic: &NoDynamicValues,
-            lock: None,
-            catalog: None,
-            policy: Default::default(),
-            slots: None,
-        };
-        let request = RegenRequest {
-            configuration: node.configuration.name.clone(),
-        };
-        let result = regenerate(&doc, &ctx, &request, &mut RegenCache::default());
-        let display = part_display(&result, kernel.as_ref(), &TessellationOptions::default());
+        let (result, kernel) = regenerate_configured(document, &node.configuration);
+        let display = part_display(&result, kernel.as_ref(), &crate::runtime::ASSEMBLY_TESSELLATION);
         out.insert(key, display);
     }
     out

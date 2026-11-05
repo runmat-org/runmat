@@ -236,23 +236,34 @@ impl ConfigKey {
         s
     }
 
-    /// A short label for people: `light`, `light{thickness=0.005}`, `default`.
+    /// A short label for people: `light`, `default`, `light (thickness 0.005)`, or for input
+    /// values alone `chord 5.97206, thickness 0.14147`. Input values are SI, to six
+    /// significant digits.
     pub fn label(&self) -> String {
-        let mut s = self
-            .name
-            .as_ref()
-            .map(|n| n.0.clone())
-            .unwrap_or_else(|| "default".into());
-        if !self.inputs.is_empty() {
-            s.push('{');
-            for (i, (k, v)) in self.inputs.iter().enumerate() {
-                if i > 0 {
-                    s.push_str(", ");
-                }
-                let _ = write!(s, "{}={}", k, v);
-            }
-            s.push('}');
+        let inputs: Vec<String> = self
+            .inputs
+            .iter()
+            .map(|(k, v)| format!("{k} {}", significant(*v, 6)))
+            .collect();
+        match (&self.name, inputs.is_empty()) {
+            (Some(n), true) => n.0.clone(),
+            (None, true) => "default".into(),
+            (Some(n), false) => format!("{} ({})", n.0, inputs.join(", ")),
+            (None, false) => inputs.join(", "),
         }
+    }
+}
+
+/// `v` to `digits` significant digits, without trailing zeros.
+fn significant(v: f64, digits: i32) -> String {
+    if v == 0.0 || !v.is_finite() {
+        return format!("{v}");
+    }
+    let decimals = (digits - 1 - v.abs().log10().floor() as i32).max(0) as usize;
+    let s = format!("{v:.decimals$}");
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
         s
     }
 }

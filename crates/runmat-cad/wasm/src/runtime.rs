@@ -154,6 +154,8 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
 
 /// A part regenerated on the installed kernel: its projection and display.
 pub struct CompiledPart {
+    /// The regeneration's diagnostics (kernel and feature errors among them) at their spans.
+    pub diagnostics: Vec<Diagnostic>,
     pub document: PartDocument,
     pub index: runmat_cad::index::PartIndex,
     pub projection: Value,
@@ -174,6 +176,25 @@ pub struct RegeneratedPart {
 
 /// Regenerates the part `path` from its text; syntax errors are the `Err` diagnostics.
 pub fn regenerate_part(path: &str, text: &str) -> Result<RegeneratedPart, Vec<Diagnostic>> {
+    regenerate_part_with(path, text, &TessellationOptions::default())
+}
+
+/// How parts tessellate inside an assembly's display: coarser than a part on its own (a chord
+/// of 0.2 % of each body's size, at most 5 mm; 12° per segment), as large-assembly modes do,
+/// so a 2,000-part assembly fits the scene budget. Normals stay exact, so surfaces shade
+/// smoothly; a part opened on its own uses the default.
+pub const ASSEMBLY_TESSELLATION: TessellationOptions = TessellationOptions {
+    chord_tolerance: 5.0e-4,
+    angle_tolerance: 12.0 * std::f64::consts::PI / 180.0,
+    size_fraction: 2.0e-3,
+};
+
+/// [`regenerate_part`] with the display tessellated under `tessellation`.
+pub fn regenerate_part_with(
+    path: &str,
+    text: &str,
+    tessellation: &TessellationOptions,
+) -> Result<RegeneratedPart, Vec<Diagnostic>> {
     let parsed = parse_part(path, text);
     let Some(document) = parsed.document else {
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
@@ -197,7 +218,7 @@ pub fn regenerate_part(path: &str, text: &str) -> Result<RegeneratedPart, Vec<Di
     );
     result.diagnostics.attach_spans(&parsed.spans);
     let index = build_index(&document, &result, None);
-    let mut display = part_display(&result, kernel.as_ref(), &TessellationOptions::default());
+    let mut display = part_display(&result, kernel.as_ref(), tessellation);
     display.sketches = sketch_display(&document, &result);
     Ok(RegeneratedPart {
         document,
@@ -213,11 +234,37 @@ pub fn compile_part(path: &str, text: &str) -> Result<CompiledPart, Vec<Diagnost
     let part = regenerate_part(path, text)?;
     let projection = json!({ "document": &part.document, "index": &part.index });
     Ok(CompiledPart {
+        diagnostics: regen_diagnostics(path, &part),
         document: part.document,
         index: part.index,
         projection,
         display: part.display,
     })
+}
+
+/// A regeneration's diagnostics as the compile output reports them: each at its source span
+/// (the whole file when it has none), a cascade error (one caused by an earlier failure) as a
+/// warning.
+pub fn regen_diagnostics(path: &str, part: &RegeneratedPart) -> Vec<Diagnostic> {
+    use runmat_cad::diagnostics::{Cause, Severity};
+    part.result
+        .diagnostics
+        .diagnostics
+        .iter()
+        .map(|d| Diagnostic {
+            path: path.to_owned(),
+            start: d.span.as_ref().map_or(0, |s| s.start as usize),
+            end: d.span.as_ref().map_or(0, |s| s.end as usize),
+            severity: match (d.severity, &d.cause) {
+                (Severity::Error, Cause::Cascade { .. }) => "warning",
+                (Severity::Error, _) => "error",
+                (Severity::Warning, _) => "warning",
+                (Severity::Info, _) => "info",
+            }
+            .into(),
+            message: d.message.clone(),
+        })
+        .collect()
 }
 
 /// The datum frames, planes, axes and points a part publishes, from its regeneration: what an
@@ -261,11 +308,19 @@ fn bbox(display: &PartDisplay) -> Option<Aabb> {
 }
 
 /// An assembly resolved over the parts and sub-assemblies in `files`.
-pub fn compile_assembly(
-    path: &str,
-    text: &str,
-    files: &Files,
-) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
+/// An assembly resolved from its text and `files`: every definition it uses, each part file
+/// regenerated once (its document and display), the resolved occurrence tree, and what went
+/// wrong on the way.
+pub struct AssemblyResolution {
+    pub source: MemorySource,
+    pub displays: BTreeMap<String, PartDisplay>,
+    pub documents: BTreeMap<String, PartDocument>,
+    pub resolved: runmat_cad::assembly::resolve::ResolvedAssembly,
+    pub problems: Vec<Diagnostic>,
+}
+
+/// Resolves the assembly `path` from its text; syntax errors are the `Err` diagnostics.
+pub fn resolve_assembly(path: &str, text: &str, files: &Files) -> Result<AssemblyResolution, Vec<Diagnostic>> {
     let parsed = parse_assembly(path, text);
     let Some(top) = parsed.document else {
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
@@ -311,8 +366,21 @@ pub fn compile_assembly(
                         message: format!("{key} has errors"),
                     }),
                 },
-                _ => match regenerate_part(&key, text) {
+                _ => match regenerate_part_with(&key, text, &ASSEMBLY_TESSELLATION) {
                     Ok(part) => {
+                        // A part that regenerates with errors (a feature the kernel refused)
+                        // says so on the assembly, at the assembly's top.
+                        for d in regen_diagnostics(&key, &part) {
+                            if d.severity == "error" {
+                                problems.push(Diagnostic {
+                                    path: path.to_owned(),
+                                    start: 0,
+                                    end: 0,
+                                    severity: "error".into(),
+                                    message: format!("{key}: {}", d.message),
+                                });
+                            }
+                        }
                         let mut summary = DefinitionSummary::new(def.clone());
                         summary.configurations = part
                             .document
@@ -376,6 +444,28 @@ pub fn compile_assembly(
             message: d.message.clone(),
         });
     }
+    Ok(AssemblyResolution {
+        source,
+        displays,
+        documents,
+        resolved,
+        problems,
+    })
+}
+
+/// Compiles the assembly `path`: its index (the projection), its display, and diagnostics.
+pub fn compile_assembly(
+    path: &str,
+    text: &str,
+    files: &Files,
+) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
+    let AssemblyResolution {
+        source,
+        displays,
+        documents,
+        resolved,
+        problems,
+    } = resolve_assembly(path, text, files)?;
     let index = build_assembly_index(&resolved, Some(&source));
     let configured = crate::configured::configured_displays(&resolved, &documents);
     let display = assembly_display_configured(&resolved, &source, &displays, &configured);
@@ -406,7 +496,7 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
             Ok(part) => json!({
                 "projection": { "kind": "part", "data": part.projection },
                 "display": { "kind": "part", "data": part.display },
-                "diagnostics": [],
+                "diagnostics": part.diagnostics,
                 "kernel": crate::kernel::name(),
             }),
             Err(diagnostics) => json!({ "diagnostics": diagnostics }),

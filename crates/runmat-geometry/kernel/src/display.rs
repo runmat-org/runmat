@@ -16,6 +16,14 @@ pub struct TessellationOptions {
     pub chord_tolerance: f64,
     /// The largest angle between the normals at the ends of one segment of a curve.
     pub angle_tolerance: f64,
+    /// A kernel that sizes its chord to the body may make it this fraction of the body's
+    /// diagonal (within `chord_tolerance` scaled up for large bodies): finer for small parts.
+    #[serde(default = "default_size_fraction")]
+    pub size_fraction: f64,
+}
+
+fn default_size_fraction() -> f64 {
+    5.0e-4
 }
 
 impl Default for TessellationOptions {
@@ -23,6 +31,7 @@ impl Default for TessellationOptions {
         Self {
             chord_tolerance: 1.0e-4,
             angle_tolerance: 8.0_f64.to_radians(),
+            size_fraction: default_size_fraction(),
         }
     }
 }
