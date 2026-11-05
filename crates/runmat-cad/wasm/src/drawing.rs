@@ -43,6 +43,8 @@ pub struct CompiledModels {
     occurrences: BTreeMap<String, BTreeSet<String>>,
     /// File → (tolerances, sizes, datums) the part's PMI declares.
     pmi: BTreeMap<String, PmiNames>,
+    /// File → the assembly's flat BOM (its index's), for BOM tables and balloons.
+    boms: BTreeMap<String, Bom>,
 }
 
 fn names_in(reference: &Value, out: &mut Vec<Value>) {
@@ -105,8 +107,8 @@ impl ModelReferences for CompiledModels {
             .cloned()
             .unwrap_or_default()
     }
-    fn bom(&self, _: &ModelRef) -> Option<Bom> {
-        None
+    fn bom(&self, model: &ModelRef) -> Option<Bom> {
+        self.boms.get(model.file.as_str()).cloned()
     }
 }
 
@@ -183,6 +185,9 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
                         })
                         .unwrap_or_default();
                     models.occurrences.insert(file.clone(), occ);
+                    if let Ok(bom) = serde_json::from_value::<Bom>(index["bom"].clone()) {
+                        models.boms.insert(file.clone(), bom);
+                    }
                     models.names.insert(file.clone(), BTreeSet::new());
                     displays.insert(file.clone(), json!({ "kind": "assembly", "data": display }));
                 }
