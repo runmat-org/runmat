@@ -29,7 +29,7 @@ struct TaskBinding {
 }
 
 impl RemotePoolCheckpoint {
-    #[cfg(test)]
+    #[cfg(all(test, feature = "occt-native"))]
     pub(crate) fn test_completed_task_wall_millis(&self, task: TaskId) -> Option<u64> {
         self.completed_task_wall_millis.get(&task).copied()
     }
