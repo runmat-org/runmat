@@ -776,6 +776,115 @@ impl Sampled {
                 self.draft_breaks(x, out);
             }
         }
+        self.thin_wall_breaks(out);
+    }
+
+    /// Breaks along the curved walls of a profile thinner than the uniform cells (a skin, a
+    /// tube): grid lines through points along each curve, about one wall thickness apart, so
+    /// cell centres fall inside the wall all the way along it. A revolve adds them at even
+    /// angles about its axis too.
+    fn thin_wall_breaks(&self, out: &mut [Vec<f64>; 3]) {
+        let revolve = matches!(self.shape, Shape::Revolve { .. });
+        let curves: Vec<&Curve2> = match &self.shape {
+            Shape::Prism { loops, .. } | Shape::Revolve { loops, .. } => loops
+                .iter()
+                .flatten()
+                .map(|(c, _)| c)
+                .filter(|c| !self.on_axis(c))
+                .collect(),
+            Shape::Extrusion(x) if x.draft.is_none() && x.thin.is_none() => {
+                x.loops.iter().flatten().map(|(c, _, _)| c).collect()
+            }
+            _ => return,
+        };
+        let cell = (0..3)
+            .map(|a| (self.hi[a] - self.lo[a]) / RES as f64)
+            .filter(|w| *w > 1e-12)
+            .fold(f64::INFINITY, f64::min);
+        // The wall: the least distance from a wall curve's middle to another curve (a revolve's
+        // straight walls turn into cylinders and cones, so they count too).
+        let mut wall = f64::INFINITY;
+        for (i, c) in curves.iter().enumerate() {
+            if c.line().is_some() && !revolve {
+                continue;
+            }
+            let mid = c.at(c.length() / 2.0);
+            for (j, d) in curves.iter().enumerate() {
+                if i != j {
+                    // A wall is long beside its thickness; a short end cap is not one.
+                    let dist = d.distance(mid);
+                    if dist > 1e-9 && c.length() > 8.0 * dist {
+                        wall = wall.min(dist);
+                    }
+                }
+            }
+        }
+        if !(wall.is_finite() && wall < 0.5 * cell) {
+            return;
+        }
+        let world = self.to_local.inverse();
+        let mut push = |p: [f64; 3]| {
+            let w = world.apply(p);
+            for a in 0..3 {
+                out[a].push(w[a]);
+            }
+        };
+        let step = wall.max(cell / 64.0);
+        let sampled = |c: &Curve2| -> Vec<[f64; 2]> {
+            let n = if c.line().is_some() {
+                1
+            } else {
+                ((c.length() / step).ceil() as usize).clamp(8, 512)
+            };
+            c.polyline(n)
+        };
+        if let Shape::Revolve {
+            ap,
+            ad,
+            e1,
+            sense,
+            angle,
+            ..
+        } = &self.shape
+        {
+            // Every radius the profile reaches, at even angles about the axis.
+            let mut radii: Vec<f64> = Vec::new();
+            let mut hs: Vec<f64> = Vec::new();
+            for c in &curves {
+                for q in sampled(c) {
+                    let rel = [q[0] - ap[0], q[1] - ap[1]];
+                    hs.push(rel[0] * ad[0] + rel[1] * ad[1]);
+                    radii.push(rel[0] * e1[0] + rel[1] * e1[1]);
+                }
+            }
+            radii.sort_by(f64::total_cmp);
+            radii.dedup_by(|a, b| (*a - *b).abs() < wall / 4.0);
+            radii.truncate(128);
+            let h = hs.iter().sum::<f64>() / hs.len().max(1) as f64;
+            let ez = sense * (ad[0] * e1[1] - ad[1] * e1[0]);
+            // Steps about one wall thickness long at the outer radius.
+            let rmax = radii.iter().fold(0.0f64, |a, r| a.max(r.abs()));
+            let m = ((angle * rmax / wall).ceil() as usize).clamp(4, 512);
+            for r in radii {
+                for k in 0..=m {
+                    let th = angle * k as f64 / m as f64;
+                    push([
+                        ap[0] + h * ad[0] + r * th.cos() * e1[0],
+                        ap[1] + h * ad[1] + r * th.cos() * e1[1],
+                        r * th.sin() * ez,
+                    ]);
+                }
+            }
+            return;
+        }
+        for c in &curves {
+            if c.line().is_some() {
+                continue;
+            }
+            for q in sampled(c) {
+                push([q[0], q[1], 0.0]);
+            }
+        }
     }
 
     /// Breaks along a drafted extrusion's tapered sides. Each of `RES` slices of the
