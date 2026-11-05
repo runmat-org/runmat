@@ -4,7 +4,57 @@
 //! bodies, one body per material in its color. The model is in millimetres with z = 0 at the
 //! board's bottom face; the display is in metres.
 use crate::runtime::Files;
-use runmat_cad::display::{BodyDisplay, Bounds, FaceDisplay, PartDisplay};
+use runmat_cad::display::{BodyDisplay, Bounds, EdgeDisplay, FaceDisplay, PartDisplay};
+use std::collections::BTreeMap;
+
+/// The bodies a drawing and the 3D view outline: the substrate and its mask (the board
+/// outline and cutouts), drills (holes) and component bodies, terminals and leads. Copper,
+/// pads and silkscreen are surface art: outlining them would bury the drawing in strokes.
+fn outlined(body: &str) -> bool {
+    !matches!(body, "Copper" | "Pads" | "Silkscreen")
+}
+
+/// A mesh's feature edges as polylines of segments (mm): where only one triangle meets a
+/// segment (an open boundary, such as a cap's rim), or where the two triangles meeting there
+/// turn by more than 20° (a box's corner, the board's edge). Vertices are matched by position,
+/// so triangle soup and shared-vertex meshes give the same edges, and coplanar triangles
+/// (a quad's diagonal) give none.
+fn feature_edges(positions: &[f64], triangles: &[u32]) -> Vec<[[f64; 3]; 2]> {
+    let at = |i: u32| -> [f64; 3] {
+        let k = 3 * i as usize;
+        [positions[k], positions[k + 1], positions[k + 2]]
+    };
+    let key = |p: [f64; 3]| p.map(|v| (v * 1e3).round() as i64);
+    let normal = |a: [f64; 3], b: [f64; 3], c: [f64; 3]| -> Option<[f64; 3]> {
+        let (u, v) = ([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]);
+        let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        (l > 1e-12).then(|| n.map(|x| x / l))
+    };
+    type Key = [i64; 3];
+    let mut uses: BTreeMap<(Key, Key), (Vec<[f64; 3]>, [f64; 3], [f64; 3])> = BTreeMap::new();
+    for t in triangles.chunks_exact(3) {
+        if t.iter().any(|&i| 3 * i as usize + 2 >= positions.len()) {
+            continue;
+        }
+        let (a, b, c) = (at(t[0]), at(t[1]), at(t[2]));
+        let Some(n) = normal(a, b, c) else { continue };
+        for (p, q) in [(a, b), (b, c), (c, a)] {
+            let (kp, kq) = (key(p), key(q));
+            let id = if kp <= kq { (kp, kq) } else { (kq, kp) };
+            uses.entry(id).or_insert_with(|| (Vec::new(), p, q)).0.push(n);
+        }
+    }
+    let crease = 20f64.to_radians().cos();
+    uses.into_values()
+        .filter(|(normals, _, _)| match normals.as_slice() {
+            [_] => true,
+            [m, n] => m[0] * n[0] + m[1] * n[1] + m[2] * n[2] < crease,
+            _ => true,
+        })
+        .map(|(_, p, q)| [p, q])
+        .collect()
+}
 
 /// The layout a circuit occurrence draws: the `.circuit.layout` itself, or a `.circuit`'s
 /// sibling layout.
@@ -74,7 +124,24 @@ pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
                     surface: None,
                 })
                 .collect(),
-            edges: Vec::new(),
+            // The outline a drawing projects and the 3D view draws over the shading: each
+            // feature segment its own edge on the body's face.
+            edges: if outlined(&body.reference) {
+                body.faces
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(f, face)| feature_edges(&face.positions, &face.triangles).into_iter().map(move |s| (f as u32, s)))
+                    .enumerate()
+                    .map(|(e, (f, [p, q]))| EdgeDisplay {
+                        index: e as u32,
+                        reference: None,
+                        faces: [f, f],
+                        points: p.into_iter().chain(q).map(mm).collect(),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
             vertices: Vec::new(),
             triangle_count: body.triangle_count as u32,
             color: Some(body.color.map(|c| c as f32)),
@@ -139,6 +206,25 @@ mod tests {
         assert!(((b.max[1] - b.min[1]) - 0.060).abs() < 1e-3, "60 mm deep: {b:?}");
         assert!(display.bodies.len() > 3, "mask, copper, silk and component bodies");
         assert!(display.bodies.iter().all(|body| body.color.is_some()));
+        // The board's outline and the component bodies carry their edges; surface art doesn't.
+        let edges = |name: &str| display.bodies.iter().filter(|b| b.reference.as_deref() == Some(name)).map(|b| b.edges.len()).sum::<usize>();
+        assert!(edges("Board edge") >= 8, "the substrate's top and bottom outline and its corners");
+        assert!(edges("Packages") >= 12, "a package body is at least a box: {}", edges("Packages"));
+        assert_eq!(edges("Silkscreen"), 0);
+        assert_eq!(edges("Copper"), 0);
+    }
+
+    #[test]
+    fn feature_edges_follow_creases_and_open_rims_but_not_coplanar_diagonals() {
+        // A unit square as two triangles: four rim edges, no diagonal.
+        let square = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0];
+        assert_eq!(feature_edges(&square, &[0, 1, 2, 0, 2, 3]).len(), 4);
+        // The same square as soup (no shared vertices) gives the same four.
+        let soup = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0];
+        assert_eq!(feature_edges(&soup, &[0, 1, 2, 3, 4, 5]).len(), 4);
+        // Folded 90° along the diagonal: the fold is an edge too.
+        let folded = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        assert_eq!(feature_edges(&folded, &[0, 1, 2, 0, 2, 3]).len(), 5);
     }
 
     #[test]
