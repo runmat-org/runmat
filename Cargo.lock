@@ -8161,6 +8161,7 @@ dependencies = [
  "base64 0.22.1",
  "glam",
  "hex",
+ "miniz_oxide",
  "pollster 0.3.0",
  "runmat-cad",
  "runmat-cad-wasm",

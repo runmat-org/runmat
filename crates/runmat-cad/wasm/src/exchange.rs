@@ -1,7 +1,8 @@
 //! Exact STEP AP242 of parts and assemblies on the installed kernel.
 //!
-//! - **Parts.** One product: the regenerated bodies' exact B-rep, the part's material, and
-//!   every named face under its reference text (`feature.body.face.side(s1.l1)`).
+//! - **Parts.** One product: the regenerated bodies' exact B-rep, the part's material, every
+//!   named face under its reference text (`feature.body.face.side(s1.l1)`), and the part's
+//!   semantic PMI (datums, geometric tolerances, sizes and locations on those faces; [`pmi`]).
 //! - **Assemblies.** The resolved tree as written: each sub-assembly is its own assembly
 //!   product holding its occurrences, each at its placement in its parent, so the hierarchy
 //!   reads back as authored; a sub-assembly placed twice is one product used twice. A part file placed in several configurations is one product per
@@ -10,7 +11,7 @@
 //! The kernel that cannot write STEP (the grid test double) gives `None`.
 
 use crate::configured::regenerate_configured;
-use crate::runtime::{regenerate_part, resolve_assembly, Diagnostic, Files};
+use crate::runtime::{resolve_assembly, Diagnostic, Files};
 use runmat_cad::assembly::model::DefinitionKind;
 use runmat_cad::assembly::source::ConfigKey;
 use runmat_cad::display::{part_display, PartDisplay};
@@ -20,6 +21,8 @@ use runmat_cad::regen::kernel::{
 };
 use runmat_cad::regen::RegenResult;
 use std::collections::BTreeMap;
+
+pub mod pmi;
 
 fn stem(path: &str) -> String {
     let name = path.rsplit('/').next().unwrap_or(path);
@@ -76,7 +79,13 @@ fn first_message(d: &[Diagnostic]) -> String {
 
 /// The part at `path` as exact STEP AP242, or `None` when the kernel writes no STEP.
 pub fn part_step(path: &str, text: &str) -> Result<Option<Vec<u8>>, String> {
-    let part = regenerate_part(path, text).map_err(|d| first_message(&d))?;
+    part_step_in(path, text, None)
+}
+
+/// [`part_step`] in the named configuration `configuration`.
+pub fn part_step_in(path: &str, text: &str, configuration: Option<&str>) -> Result<Option<Vec<u8>>, String> {
+    let part = crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
+        .map_err(|d| first_message(&d))?;
     let product = Product {
         name: stem(path),
         material: part
@@ -94,7 +103,16 @@ pub fn part_step(path: &str, text: &str) -> Result<Option<Vec<u8>>, String> {
         parts: vec![product.part()],
         occurrences: Vec::new(),
     };
-    Ok(product.kernel.export(&doc, ExchangeFormat::Ap242).ok())
+    let Ok(step) = product.kernel.export(&doc, ExchangeFormat::Ap242) else {
+        return Ok(None);
+    };
+    if part.document.pmi.is_empty() {
+        return Ok(Some(step));
+    }
+    let (semantic, _) = pmi::step_pmi(&part.document, &product.result, &product.display);
+    let text = String::from_utf8(step).map_err(|_| "the kernel's STEP file is not text".to_owned())?;
+    let (text, _) = runmat_cad::step::pmi::embed(&text, &semantic)?;
+    Ok(Some(text.into_bytes()))
 }
 
 /// The assembly at `path` as exact STEP AP242 with its hierarchy, or `None` when the kernel

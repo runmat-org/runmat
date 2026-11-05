@@ -71,7 +71,7 @@ pub(super) fn concat(outs: Vec<KernelOutput>) -> KernelOutput {
     KernelOutput { bodies, history }
 }
 
-fn keep_job<'a>(operands: Vec<&'a FakeSolid>, ids: Vec<u32>) -> GridJob<'a> {
+pub(super) fn keep_job<'a>(operands: Vec<&'a FakeSolid>, ids: Vec<u32>) -> GridJob<'a> {
     GridJob {
         operands,
         operand_ids: ids,

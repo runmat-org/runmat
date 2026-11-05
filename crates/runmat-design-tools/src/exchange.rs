@@ -1,11 +1,14 @@
 //! `design.export` and `design.import`.
 //!
-//! Exports: parts and assemblies as STEP (AP242, the exact B-rep the installed kernel regenerated;
+//! Exports: parts and assemblies as STEP (AP242, the exact B-rep the installed kernel regenerated,
+//! with the part's semantic PMI;
 //! a faceted AP214 B-rep in millimetres only on the grid test kernel), STL (binary, millimetres), 3MF (millimetres) and glTF (binary `.glb`, metres,
 //! Y up as glTF defines); drawing sheets and sheet-metal flat patterns as DXF (millimetres);
-//! circuits and boards as a KiCad project. Imports: KiCad projects to `.circuit`,
+//! assemblies' bills of materials as CSV; circuits and boards as a KiCad project. A product
+//! family exports every configuration at once (`allConfigurations`). Imports: KiCad projects to `.circuit`,
 //! `.circuit.layout` and `.circuit.lock` sources; STEP files to a `.part` whose `import` feature
-//! names the file (the names inside the STEP file become the part's face names).
+//! names the file (the names inside the STEP file become the part's face names, and its AP242
+//! semantic PMI becomes the part's datums, tolerances, sizes and locations on those faces).
 
 use crate::edit::{stage, StagedChange};
 use crate::{kind_of, text_of, DesignKind, Files, ToolError};
@@ -17,12 +20,15 @@ use std::collections::BTreeMap;
 
 mod dxf;
 mod exact_step;
+pub mod family;
 mod mesh;
 mod step;
+mod three_mf;
 
 use dxf::{drawing_dxf, flat_pattern_dxf};
 use mesh::floats;
-pub use mesh::{glb, model_meshes, stl, three_mf, zip_stored, Mesh};
+pub use mesh::{glb, model_meshes, model_scene, model_scene_in, stl, Mesh, Placed, Scene3d, Shape};
+pub use three_mf::{scene_model, three_mf};
 pub use step::step;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -34,6 +40,8 @@ pub enum ExportFormat {
     ThreeMf,
     Gltf,
     Dxf,
+    /// An assembly's flat bill of materials as CSV.
+    Bom,
     Kicad,
 }
 
@@ -49,6 +57,13 @@ pub struct ExportInput {
     /// KiCad: the project name (default the circuit's file stem).
     #[serde(default)]
     pub project_name: Option<String>,
+    /// A product family: one file per configuration (the default, then each named one) of a
+    /// part (STEP) or of the part a drawing shows (every sheet as DXF).
+    #[serde(default)]
+    pub all_configurations: bool,
+    /// The named configuration to export (a part's STEP, 3MF, STL or glTF; a drawing's part).
+    #[serde(default)]
+    pub configuration: Option<String>,
 }
 
 /// One exported file.
@@ -114,13 +129,22 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
     let text = text_of(files, &input.path)?;
     let name = stem(&input.path);
     let mut notes = Vec::new();
+    let config = input.configuration.as_deref();
     let files_out = match input.format {
+        ExportFormat::Step if input.all_configurations && kind == DesignKind::Part => {
+            family::part_family_step(&input.path, files, &mut notes)?
+        }
+        ExportFormat::Dxf if input.all_configurations && kind == DesignKind::Drawing => {
+            family::drawing_family_dxf(&input.path, files, &mut notes)?
+        }
+        ExportFormat::Bom => vec![family::bom_csv(&input.path, files)?],
         ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf => {
-            let meshes = model_meshes(&input.path, files)?;
+            let scene = model_scene_in(&input.path, files, config)?;
+            let meshes = scene.world_meshes();
             match input.format {
-                ExportFormat::Step => match exact_step::exact_step(&input.path, files)? {
+                ExportFormat::Step => match exact_step::exact_step_in(&input.path, files, config)? {
                     Some(bytes) => {
-                        notes.push("STEP AP242: the exact B-rep of the regenerated bodies".into());
+                        notes.push("STEP AP242: the exact B-rep of the regenerated bodies, with the part's semantic PMI".into());
                         vec![text_file(
                             format!("{name}.step"),
                             "model/step",
@@ -142,7 +166,7 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
                 ExportFormat::ThreeMf => vec![binary_file(
                     format!("{name}.3mf"),
                     "model/3mf",
-                    &three_mf(&meshes),
+                    &three_mf(&scene, &input.path, &name),
                 )],
                 _ => vec![binary_file(
                     format!("{name}.glb"),
@@ -154,7 +178,7 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
         ExportFormat::Dxf => match kind {
             DesignKind::Drawing => {
                 let (sheet, dxf, n) =
-                    drawing_dxf(&input.path, text, files, input.sheet.as_deref())?;
+                    drawing_dxf(&input.path, text, files, input.sheet.as_deref(), config)?;
                 notes.extend(n);
                 vec![text_file(
                     format!("{name}-{sheet}.dxf"),
@@ -337,8 +361,12 @@ pub fn import(input: &ImportInput, files: &Files) -> Result<StagedChange, ToolEr
                     }
                 })
                 .collect();
+            // AP242 semantic PMI in the file becomes the part's PMI on the imported faces.
+            let pmi = runmat_cad::step::pmi::read(&content)
+                .map(|p| runmat_cad_wasm::exchange::pmi::part_statements(&p, "step"))
+                .unwrap_or_default();
             let part = format!(
-                "runmat 0.7\nstd 1\n\npart {part_name} {{\n    feature step = import(source = \"{step_name}\", digest = sha256_{digest})\n}}\n"
+                "runmat 0.7\nstd 1\n\npart {part_name} {{\n    feature step = import(source = \"{step_name}\", digest = sha256_{digest})\n{pmi}}}\n"
             );
             let summary = format!("Import {step_name} as {part_path}");
             let mut change = stage(

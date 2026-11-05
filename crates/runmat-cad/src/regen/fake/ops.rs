@@ -33,15 +33,18 @@ impl CadKernel for FakeKernel {
                         .ok_or_else(|| KernelError::Failed {
                             message: "pattern with no seeds".into(),
                         })?;
-                if seeds.iter().any(|s| s.combine != combine) || combine == Combine::New {
+                if seeds.iter().any(|s| s.combine != combine) {
                     return Err(KernelError::NotSupported {
-                        what: "fake kernel: patterns of new-body or mixed tools".into(),
+                        what: "fake kernel: patterns of mixed tools".into(),
                     });
                 }
                 if !varied.is_empty() && varied.len() != instances.len() {
                     return Err(KernelError::Failed {
                         message: "a variable pattern needs tools for every instance".into(),
                     });
+                }
+                if combine == Combine::New {
+                    return self.pattern_new_bodies(seeds, instances, varied, &solids);
                 }
                 let mut tools = Vec::new();
                 for (ii, inst) in instances.iter().enumerate() {
@@ -713,5 +716,59 @@ pub(super) fn shift(s: &mut FakeSolid, t: [f64; 3]) {
             piece.0 += t[d.along];
             piece.1 += t[d.along];
         }
+    }
+}
+
+impl FakeKernel {
+    /// A pattern of new-body seeds: one body per instance and seed (as OCCT makes them); the
+    /// operands are kept as they are.
+    fn pattern_new_bodies(
+        &self,
+        seeds: &[ToolOp],
+        instances: &[Instance],
+        varied: &[Vec<ToolOp>],
+        solids: &[&FakeSolid],
+    ) -> Result<KernelOutput, KernelError> {
+        let mut outs = Vec::new();
+        for (ii, inst) in instances.iter().enumerate() {
+            let these = if varied.is_empty() { seeds } else { &varied[ii] };
+            for (si, seed) in these.iter().enumerate() {
+                let mut tools = Vec::new();
+                for p in &self.tools(seed, solids, si as u32)? {
+                    let mut q = p.transformed(&inst.transform);
+                    q.relabel(si as u32, &inst.key);
+                    tools.push(q);
+                }
+                let label = HistorySource::Generated {
+                    role: Role::Body,
+                    tag: KernelTag::None,
+                    ordinal: None,
+                    seed: Some(si as u32),
+                    instance: Some(inst.key.clone()),
+                };
+                let res = run_grid(GridJob {
+                    operands: Vec::new(),
+                    operand_ids: Vec::new(),
+                    body_label: Some(vec![label; tools.len()]),
+                    tools,
+                    mode: Mode::New,
+                    split: None,
+                    separate_tools: false,
+                    modifier: None,
+                    merge_collinear: seed.shape.merge_collinear(),
+                    carve: Vec::new(),
+                })?;
+                outs.push(self.finish(&[], &[], res, Vec::new(), Vec::new())?);
+            }
+        }
+        for (k, s) in solids.iter().enumerate() {
+            let res = run_grid(super::features::keep_job(vec![*s], vec![k as u32]))?;
+            let mut out = self.finish(&[*s], &[k as u32], res, Vec::new(), Vec::new())?;
+            for r in &mut out.history.faces {
+                r.evolution = Evolution::Kept;
+            }
+            outs.push(out);
+        }
+        Ok(super::features::concat(outs))
     }
 }

@@ -148,6 +148,17 @@ pub struct SizeTolerance {
     pub fit: Option<String>,
 }
 
+/// A toleranced distance between two features (a dimensional location):
+/// `location slot = { from = feature.body.face.start, to = feature.cut.face.side(s.c1), distance = 20 mm +0.1 -0.1 }`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LocationTolerance {
+    pub name: String,
+    pub from: Reference,
+    pub to: Reference,
+    /// Usually [`ValueExpr::Toleranced`].
+    pub distance: ValueExpr,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SurfaceFinish {
     pub on: Vec<Reference>,
@@ -177,6 +188,8 @@ pub struct PmiSet {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sizes: Vec<SizeTolerance>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<LocationTolerance>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub finishes: Vec<SurfaceFinish>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub treatments: Vec<Treatment>,
@@ -188,6 +201,9 @@ pub struct ResolvedPmi {
     pub datums: BTreeMap<String, Vec<Vec<EntityName>>>,
     pub tolerances: BTreeMap<String, Vec<Vec<EntityName>>>,
     pub sizes: BTreeMap<String, Vec<Vec<EntityName>>>,
+    /// Per location: the `from` entities, then the `to` entities.
+    #[serde(default)]
+    pub locations: BTreeMap<String, [Vec<Vec<EntityName>>; 2]>,
     pub diagnostics: DiagnosticReport,
 }
 
@@ -206,6 +222,7 @@ impl PmiSet {
             && self.targets.is_empty()
             && self.tolerances.is_empty()
             && self.sizes.is_empty()
+            && self.locations.is_empty()
             && self.finishes.is_empty()
             && self.treatments.is_empty()
     }
@@ -433,6 +450,22 @@ pub fn resolve_pmi_with(
             all.extend(resolve(&mut out, s(&format!("on[{}]", k)), r, None));
         }
         out.sizes.insert(z.name.clone(), all);
+    }
+    for l in &pmi.locations {
+        let s = |p: &str| site(&l.name, p);
+        if let Err(e) = ev.eval_as(&l.distance, &result.values, Dimension::LENGTH) {
+            out.diagnostics.push(
+                DiagCode::PmiInvalid,
+                Severity::Error,
+                s("distance"),
+                format!("`{}`: {}", l.name, e),
+                Cause::Root,
+                Vec::new(),
+            );
+        }
+        let from = resolve(&mut out, s("from"), &l.from, None);
+        let to = resolve(&mut out, s("to"), &l.to, None);
+        out.locations.insert(l.name.clone(), [from, to]);
     }
     for (i, f) in pmi.finishes.iter().enumerate() {
         if let Err(e) = ev.eval_as(&f.ra, &result.values, Dimension::LENGTH) {

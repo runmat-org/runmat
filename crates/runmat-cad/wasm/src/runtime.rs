@@ -195,6 +195,17 @@ pub fn regenerate_part_with(
     text: &str,
     tessellation: &TessellationOptions,
 ) -> Result<RegeneratedPart, Vec<Diagnostic>> {
+    regenerate_part_in(path, text, None, tessellation)
+}
+
+/// [`regenerate_part_with`] in the named configuration `configuration` (the default when
+/// `None`): its input values, suppressions and parameter overrides apply.
+pub fn regenerate_part_in(
+    path: &str,
+    text: &str,
+    configuration: Option<&str>,
+    tessellation: &TessellationOptions,
+) -> Result<RegeneratedPart, Vec<Diagnostic>> {
     let parsed = parse_part(path, text);
     let Some(document) = parsed.document else {
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
@@ -210,12 +221,10 @@ pub fn regenerate_part_with(
         policy: Default::default(),
         slots: None,
     };
-    let mut result = regenerate(
-        &document,
-        &ctx,
-        &RegenRequest::default(),
-        &mut RegenCache::default(),
-    );
+    let request = RegenRequest {
+        configuration: configuration.map(runmat_cad::ids::ConfigurationName::new),
+    };
+    let mut result = regenerate(&document, &ctx, &request, &mut RegenCache::default());
     result.diagnostics.attach_spans(&parsed.spans);
     let index = build_index(&document, &result, None);
     let mut display = part_display(&result, kernel.as_ref(), tessellation);

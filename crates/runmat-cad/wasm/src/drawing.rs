@@ -19,7 +19,7 @@
 pub mod auto;
 mod values;
 
-use crate::runtime::{compile_assembly, regenerate_part, resolve_path, Diagnostic, Files, RegeneratedPart};
+use crate::runtime::{compile_assembly, regenerate_part_in, resolve_path, Diagnostic, Files, RegeneratedPart};
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::build_drawing_index;
@@ -137,6 +137,12 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
 
 /// `compile` for a `.drawing`, as JSON.
 pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
+    compile_json_in(path, text, files, None)
+}
+
+/// [`compile_json`] with every part the drawing shows regenerated in the named configuration
+/// `configuration` (a product family's sheet per configuration).
+pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Option<&str>) -> String {
     let parsed = parse_drawing(path, text);
     // A new, empty file is an empty drawing named after the file: the editor shows its empty
     // prompt (Auto-drawing, add a view), not a syntax error.
@@ -202,7 +208,7 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
             }
             continue;
         }
-        match regenerate_part(&at, source) {
+        match regenerate_part_in(&at, source, configuration, &Default::default()) {
             Ok(part) => {
                 let mut names = BTreeSet::new();
                 for body in &part.index.bodies {

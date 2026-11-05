@@ -68,10 +68,15 @@ pub(super) fn drawing_dxf(
     text: &str,
     files: &Files,
     sheet: Option<&str>,
+    configuration: Option<&str>,
 ) -> Result<(String, String, Vec<String>), ToolError> {
-    let compiled: Value =
-        serde_json::from_str(&runmat_cad_wasm::drawing::compile_json(path, text, files))
-            .unwrap_or(Value::Null);
+    let compiled: Value = serde_json::from_str(&runmat_cad_wasm::drawing::compile_json_in(
+        path,
+        text,
+        files,
+        configuration,
+    ))
+    .unwrap_or(Value::Null);
     let data = &compiled["projection"]["data"];
     let doc = &data["document"];
     let sheets = doc["sheets"].as_array().cloned().unwrap_or_default();

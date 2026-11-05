@@ -144,6 +144,7 @@ pub const PART: DocumentGrammar = DocumentGrammar {
         },
         named("tolerance", "tolerances", "tolerance"),
         named("size", "sizes", "size"),
+        named("location", "locations", "location"),
     ],
     links: Some(LINKS),
 };

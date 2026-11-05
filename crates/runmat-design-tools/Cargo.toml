@@ -22,6 +22,8 @@ schemars = "0.8"
 base64 = "0.22"
 sha2 = { workspace = true }
 hex = { workspace = true }
+# Inflate for reading deflated ZIP entries (3MF packages from other applications). MIT OR Zlib OR Apache-2.0.
+miniz_oxide = "0.8"
 runmat-plot = { workspace = true, optional = true }
 pollster = { version = "0.3", optional = true }
 glam = { version = "0.24", optional = true }

@@ -26,6 +26,7 @@ use std::collections::BTreeMap;
 pub mod check;
 pub mod edit;
 pub mod exchange;
+pub mod formats;
 pub mod guides;
 pub mod inspect;
 pub mod kernel;

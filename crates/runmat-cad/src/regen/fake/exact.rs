@@ -92,6 +92,11 @@ impl Curve2 {
             }
             Curve2::Poly { pts } => {
                 let n = pts.len();
+                // A closed polyline wraps; an open one extends straight past its ends.
+                let u = match self.period() {
+                    Some(p) if p > 0.0 => u.rem_euclid(p),
+                    _ => u,
+                };
                 let mut acc = 0.0;
                 for k in 0..n - 1 {
                     let l = d2(pts[k], pts[k + 1]);
@@ -139,6 +144,7 @@ impl Curve2 {
                 let mut best = (f64::INFINITY, 0.0);
                 let mut acc = 0.0;
                 let n = pts.len();
+                let closed = self.period().is_some();
                 for k in 0..n - 1 {
                     let (a, b) = (pts[k], pts[k + 1]);
                     let d = [b[0] - a[0], b[1] - a[1]];
@@ -149,8 +155,8 @@ impl Curve2 {
                     } else {
                         0.0
                     };
-                    let lo = if k == 0 { f64::NEG_INFINITY } else { 0.0 };
-                    let hi = if k == n - 2 { f64::INFINITY } else { 1.0 };
+                    let lo = if k == 0 && !closed { f64::NEG_INFINITY } else { 0.0 };
+                    let hi = if k == n - 2 && !closed { f64::INFINITY } else { 1.0 };
                     t = t.clamp(lo, hi);
                     let p = [a[0] + t * d[0], a[1] + t * d[1]];
                     let dist = d2(p, q);

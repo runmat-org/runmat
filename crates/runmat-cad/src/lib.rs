@@ -25,6 +25,7 @@
 //!   grammar: parse, print, structured edits and the model projection.
 //! - [`metering`]: the usage-metering seam (sketch solves, mate solves, regenerations).
 
+pub mod appearance;
 pub mod assembly;
 pub mod commands;
 pub mod config;
@@ -45,6 +46,7 @@ pub mod regen;
 pub mod scope;
 mod serde_rows;
 pub mod sketch_solver;
+pub mod step;
 pub mod syntax;
 pub mod units;
 pub mod value;
