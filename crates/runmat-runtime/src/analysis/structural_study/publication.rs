@@ -365,12 +365,28 @@ pub(in crate::analysis) fn complete_study_run_prepared(
         &entry_scoped_state_steps,
         &staging,
     )?;
+    // A frequency sweep saves the render tiles of the mesh it was solved on, as every
+    // standard run does, so its figures replay from the saved record alone.
+    let frequency_render_topology = if frequency_runs_to_persist.is_empty() {
+        None
+    } else {
+        solver_mesh_artifact_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .map(crate::analysis::solver_mesh_artifact::load_solver_mesh_artifact)
+            .transpose()
+            .map_err(|error| {
+                completion_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
+            })?
+            .and_then(|mesh| crate::analysis::render_topology_from_solver_mesh(Some(&mesh)))
+    };
     for (step, persistence) in &frequency_runs_to_persist {
         staging
             .stage_structural_frequency(
                 step,
                 &persistence.object_catalog,
                 &persistence.artifact_roots,
+                frequency_render_topology.as_ref(),
                 persistence.source.as_ref(),
             )
             .map_err(|error| {

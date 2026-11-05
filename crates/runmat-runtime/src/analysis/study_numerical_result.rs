@@ -11,6 +11,8 @@ pub enum StructuralStudyNumericalResult {
     LinearSequence(StructuralStudySequenceNumericalResult),
     StructuralModal(Box<StructuralStudyModalNumericalResult>),
     StructuralModalTransient(Box<StructuralStudyModalTransientNumericalResult>),
+    /// Modal extraction followed by a modal-reduced frequency sweep (`modal_harmonic`).
+    StructuralModalFrequency(Box<StructuralStudyModalFrequencyNumericalResult>),
     StructuralModalResponseSpectrum(Box<StructuralStudyModalResponseSpectrumNumericalResult>),
     StructuralRandomResponse(Box<StructuralStudyRandomResponseNumericalResult>),
     StructuralBuckling(Box<StructuralStudyBucklingNumericalResult>),

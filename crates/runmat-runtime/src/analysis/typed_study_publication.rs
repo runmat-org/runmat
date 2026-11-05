@@ -233,6 +233,15 @@ enum StructuralStudyNumericalEvidence {
             runmat_analysis_fea::execution::StructuralTransientNumericalReceipt,
         basis_state: PersistedStateEvidence,
     },
+    StructuralModalFrequency {
+        frozen_project_digest: Option<Digest>,
+        modal_step_id: ProcedureStepId,
+        frequency_step_id: ProcedureStepId,
+        modal_numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
+        basis_state: PersistedStateEvidence,
+        /// The publication itself is persisted once with the frequency run record.
+        frequency_publication_digest: Digest,
+    },
     StructuralModalResponseSpectrum {
         frozen_project_digest: Option<Digest>,
         modal_step_id: ProcedureStepId,
@@ -377,6 +386,22 @@ impl StructuralStudyNumericalEvidence {
                         &result.basis_state,
                         study_digest,
                         staging,
+                    )?,
+                }
+            }
+            super::StructuralStudyNumericalResult::StructuralModalFrequency(result) => {
+                Self::StructuralModalFrequency {
+                    frozen_project_digest: result.frozen_project_digest,
+                    modal_step_id: result.modal_step_id.clone(),
+                    frequency_step_id: result.frequency_step_id.clone(),
+                    modal_numerical_receipt: result.modal_numerical_receipt.clone(),
+                    basis_state: PersistedStateEvidence::persist(
+                        &result.basis_state,
+                        study_digest,
+                        staging,
+                    )?,
+                    frequency_publication_digest: frequency_publication_digest(
+                        &result.frequency.publication,
                     )?,
                 }
             }

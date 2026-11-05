@@ -23,6 +23,22 @@ pub(super) struct EdgeWitness {
     pub points_m: Vec<[f64; 3]>,
 }
 
+/// Whether the space between features bounding the solids `left` and `right` lies outside
+/// every meshed region the features bound. The mesh fills solids only, and a face bounds the
+/// solids on both of its sides (a face shared by two regions bounds both). Features of one
+/// solid, or of solids that share a bounding region, face each other across material of that
+/// region: a thin wall, or a thin layer of a region bonded between them. Features with no
+/// bounded solid in common belong to bodies that meet only where an authored contact joins
+/// them; elsewhere the space between them is either the exterior of both, which is never
+/// meshed, or a third region, whose own bounding features measure its thickness. Sheet
+/// geometry bounds no solid, so it keeps every gap.
+fn gap_is_unmeshed_void(
+    left: &BTreeSet<PersistentEntityId>,
+    right: &BTreeSet<PersistentEntityId>,
+) -> bool {
+    !left.is_empty() && !right.is_empty() && left.is_disjoint(right)
+}
+
 #[derive(Clone, Debug, Default)]
 pub(super) struct ContactProximityPairs {
     pub faces: BTreeSet<(PersistentEntityId, PersistentEntityId)>,
@@ -102,6 +118,13 @@ pub(super) fn derive_proximity_contributions(
             } else {
                 MetricSourceKind::Proximity
             };
+            if source == MetricSourceKind::Proximity
+                && gap_is_unmeshed_void(&left.solid_ids, &right.solid_ids)
+            {
+                // Separate bodies across a void (or seated together, coincident): no meshed
+                // gap to resolve, so neither body is refined by the other.
+                continue;
+            }
             let mut minimum = f64::INFINITY;
             let mut separation_direction = [0.0; 3];
             for left_point in &left.points_m {
@@ -123,16 +146,12 @@ pub(super) fn derive_proximity_contributions(
                 }
             }
             if minimum <= coincidence_tolerance_m(left, right) {
-                // Edges of separate bodies that touch (a part seated in a recess, stacked
-                // blocks) coincide; that is contact, with no gap to resolve. Two separately
+                // Authored contact edges that coincide have no gap to resolve. Two separately
                 // evaluated coincident edges agree only to their geometric tolerance and
                 // coordinate roundoff, so a separation inside that is coincidence, not a gap
-                // to size for. Within one body, coincident nonincident edges are a topology
-                // defect.
-                let separate_bodies = !left.solid_ids.is_empty()
-                    && !right.solid_ids.is_empty()
-                    && left.solid_ids.is_disjoint(&right.solid_ids);
-                if source == MetricSourceKind::Contact || separate_bodies {
+                // to size for. Edges of separate bodies never reach here. Within one body (or
+                // bodies sharing a region), coincident nonincident edges are a topology defect.
+                if source == MetricSourceKind::Contact {
                     continue;
                 }
                 return Err(SharedCurveError::new(
@@ -194,6 +213,8 @@ pub(super) struct FaceWitness {
     /// The largest geometric tolerance of the face's edges.
     pub tolerance_m: f64,
     pub vertex_ids: BTreeSet<PersistentEntityId>,
+    /// Solids the face bounds (both sides of a shared face); empty for sheet geometry.
+    pub solid_ids: BTreeSet<PersistentEntityId>,
     /// World-space points where the face's edges land on it, with the unit surface normal.
     pub samples: Vec<([f64; 3], [f64; 3])>,
 }
@@ -204,6 +225,7 @@ impl FaceWitness {
             face_id,
             tolerance_m: 0.0,
             vertex_ids: BTreeSet::new(),
+            solid_ids: BTreeSet::new(),
             samples: Vec::new(),
         }
     }
@@ -220,8 +242,8 @@ const FACING_COSINE: f64 = 0.9;
 /// `g / cells_across_gap` over both faces, so the surface mesh and every volume cell touching
 /// either face resolve the gap with that many cells (the volume grades from there). Edges alone
 /// measure the gap only along the faces' boundaries; this is the same proximity source applied
-/// to the surfaces between them. Contact pairs and coincident faces of separate bodies have no
-/// gap to resolve.
+/// to the surfaces between them. Contact pairs, coincident faces, and faces of separate bodies
+/// with no region in common (the space between them is unmeshed) have no gap to resolve.
 pub(super) fn derive_face_proximity_contributions(
     mut witnesses: Vec<FaceWitness>,
     contact_pairs: &ContactProximityPairs,
@@ -262,6 +284,7 @@ pub(super) fn derive_face_proximity_contributions(
                 break;
             }
             if !left.vertex_ids.is_disjoint(&right.vertex_ids)
+                || gap_is_unmeshed_void(&left.solid_ids, &right.solid_ids)
                 || bounds_distance(left_bounds, right_bounds) > search_radius_m
                 || contact_pairs
                     .faces
@@ -661,9 +684,9 @@ mod tests {
         seated.tolerance_m = 1.0e-7;
         offset.tolerance_m = 1.0e-7;
         assert!(derive(seated.clone(), offset.clone()).unwrap().is_empty());
-        // A real gap beyond the tolerance still sizes both edges.
+        // A gap beyond the tolerance between separate bodies is unmeshed void: no sizing.
         offset.points_m = vec![[0.08, 0.0, 1.0e-3]];
-        assert_eq!(derive(seated, offset).unwrap().len(), 2);
+        assert!(derive(seated, offset).unwrap().is_empty());
         right.solid_ids = left.solid_ids.clone();
         assert!(derive(left, right).is_err());
     }
@@ -773,6 +796,111 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn solids(seeds: &[u8]) -> BTreeSet<PersistentEntityId> {
+        seeds
+            .iter()
+            .map(|seed| id(PersistentEntityKind::Solid, *seed))
+            .collect()
+    }
+
+    /// A box's facing edge and face witnesses across `gap` in z: an edge and a face on the
+    /// bottom of the upper box (z = gap, outward normal -z) and on the top of the lower box
+    /// (z = 0, outward normal +z), each bounding the given solids.
+    fn facing_pair(gap: f64, lower: &[u8], upper: &[u8]) -> (Vec<EdgeWitness>, Vec<FaceWitness>) {
+        let line = |z: f64| {
+            (0..5)
+                .map(|i| [i as f64 * 0.025, 0.0, z])
+                .collect::<Vec<_>>()
+        };
+        let grid = |z: f64, normal: [f64; 3]| {
+            (0..5)
+                .flat_map(|i| {
+                    (0..5).map(move |j| ([i as f64 * 0.025, j as f64 * 0.025, z], normal))
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut low_edge = witness(1, 0.0);
+        low_edge.points_m = line(0.0);
+        low_edge.solid_ids = solids(lower);
+        let mut high_edge = witness(2, 0.0);
+        high_edge.points_m = line(gap);
+        high_edge.solid_ids = solids(upper);
+        let mut low_face = face(1, &[1, 3], grid(0.0, [0.0, 0.0, 1.0]));
+        low_face.solid_ids = solids(lower);
+        let mut high_face = face(2, &[2, 4], grid(gap, [0.0, 0.0, -1.0]));
+        high_face.solid_ids = solids(upper);
+        (vec![low_edge, high_edge], vec![low_face, high_face])
+    }
+
+    fn proximity_sizing(
+        (edges, faces): (Vec<EdgeWitness>, Vec<FaceWitness>),
+    ) -> Vec<MetricContribution> {
+        let mut contributions = derive_proximity_contributions(
+            edges,
+            &ContactProximityPairs::default(),
+            MetricTensor3::isotropic_length_m(0.012).unwrap(),
+            0.024,
+            2,
+            &Control,
+        )
+        .unwrap();
+        contributions.extend(
+            derive_face_proximity_contributions(
+                faces,
+                &ContactProximityPairs::default(),
+                0.024,
+                2,
+                &Control,
+            )
+            .unwrap(),
+        );
+        contributions
+    }
+
+    /// Two cells 2 mm apart (battery cells with the barrier left out): the void between
+    /// them is never meshed, so neither body is refined to gap / cells_across_gap.
+    #[test]
+    fn disjoint_boxes_a_small_gap_apart_do_not_refine_each_other() {
+        assert!(proximity_sizing(facing_pair(0.002, &[21], &[22])).is_empty());
+    }
+
+    /// A 2 mm wall of one body: both sides bound the same solid, so the material between
+    /// them is resolved with cells_across_gap cells.
+    #[test]
+    fn one_thin_walled_body_still_refines_across_its_wall() {
+        let contributions = proximity_sizing(facing_pair(0.002, &[21], &[21]));
+        assert_eq!(contributions.len(), 4);
+        let face_size = MetricTensor3::isotropic_length_m(0.001).unwrap();
+        assert_eq!(
+            contributions
+                .iter()
+                .filter(|contribution| contribution.metric == face_size)
+                .count(),
+            2
+        );
+        let across: [f64; 3] = [0.0, 0.0, 1.0];
+        for contribution in &contributions {
+            let metric = contribution.metric;
+            let density = metric.xx * across[0].powi(2)
+                + metric.yy * across[1].powi(2)
+                + metric.zz * across[2].powi(2);
+            assert!((density * 0.001_f64.powi(2) - 1.0).abs() < 1e-9);
+        }
+    }
+
+    /// Two bodies bonded through a 2 mm layer of a meshed region (a shared interface on each
+    /// side of the layer): the features bound the layer's region, so its thickness refines.
+    /// Without the shared region the same pair is void and stays coarse.
+    #[test]
+    fn bodies_bonded_through_a_shared_meshed_region_still_refine() {
+        assert_eq!(
+            proximity_sizing(facing_pair(0.002, &[21, 23], &[22, 23])).len(),
+            4
+        );
+        // Sheet geometry bounds no solid and keeps its gaps.
+        assert_eq!(proximity_sizing(facing_pair(0.002, &[], &[22])).len(), 4);
     }
 
     fn witness(seed: u8, x: f64) -> EdgeWitness {

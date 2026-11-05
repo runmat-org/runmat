@@ -33,14 +33,16 @@ pub enum VertexDraw<'a> {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct GridUniforms {
-    pub major_step: f32,
-    pub minor_step: f32,
+    /// Grid line spacing along x, in data units. Each axis has its own step because 3-D axes
+    /// may scale x and y differently (a surface over spot 60..140 and expiry 0..2 years).
+    pub major_step_x: f32,
+    pub minor_step_x: f32,
     pub fade_start: f32,
     pub fade_end: f32,
     pub camera_pos: [f32; 3],
-    pub _pad0: f32,
+    pub major_step_y: f32,
     pub target_pos: [f32; 3],
-    pub _pad1: f32,
+    pub minor_step_y: f32,
     pub major_color: [f32; 4],
     pub minor_color: [f32; 4],
 }
@@ -48,14 +50,14 @@ pub struct GridUniforms {
 impl Default for GridUniforms {
     fn default() -> Self {
         Self {
-            major_step: 1.0,
-            minor_step: 0.1,
+            major_step_x: 1.0,
+            minor_step_x: 0.1,
             fade_start: 10.0,
             fade_end: 15.0,
             camera_pos: [0.0, 0.0, 0.0],
-            _pad0: 0.0,
+            major_step_y: 1.0,
             target_pos: [0.0, 0.0, 0.0],
-            _pad1: 0.0,
+            minor_step_y: 0.1,
             major_color: [0.90, 0.92, 0.96, 0.30],
             minor_color: [0.82, 0.84, 0.88, 0.18],
         }

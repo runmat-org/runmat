@@ -12,6 +12,18 @@ fn real() -> ComplexRepresentation {
     ComplexRepresentation::Real
 }
 
+/// The statistic a field's values are when they are not one state of the solution: a
+/// random-response root-mean-square or variance, or a response-spectrum combined peak
+/// envelope (the per-component magnitude envelope of the combined modal responses). A field
+/// without a statistic is the state itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldStatistic {
+    ComponentMagnitudeEnvelope,
+    RootMeanSquare,
+    Variance,
+}
+
 /// What the published state index of a field means.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "index")]
@@ -42,6 +54,9 @@ pub struct AnalysisFieldLayout {
     pub representation: ComplexRepresentation,
     #[serde(default)]
     pub ordinal: FieldOrdinal,
+    /// The statistic the values are; `None` for a state of the solution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statistic: Option<FieldStatistic>,
 }
 
 impl AnalysisFieldLayout {
@@ -56,6 +71,7 @@ impl AnalysisFieldLayout {
             value_shape,
             representation: ComplexRepresentation::Real,
             ordinal: FieldOrdinal::Single,
+            statistic: None,
         }
     }
 
@@ -103,6 +119,11 @@ impl AnalysisFieldLayout {
 
     pub fn with_ordinal(mut self, ordinal: FieldOrdinal) -> Self {
         self.ordinal = ordinal;
+        self
+    }
+
+    pub fn statistic(mut self, statistic: FieldStatistic) -> Self {
+        self.statistic = Some(statistic);
         self
     }
 

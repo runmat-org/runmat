@@ -23,19 +23,21 @@ pub struct CompletedStructuralModalFrequencyStudy {
     pub frequency: crate::CompletedStructuralFrequencyStudy,
 }
 
-pub async fn execute_structural_modal_frequency_study_locally(
+/// Runs the study locally and returns the session's object source, from which the frequency
+/// publication's original objects are read when the study is published.
+pub async fn execute_structural_modal_frequency_study_locally_with_source(
     mut config: NativeExecutionConfig,
     preparation: StructuralModalFrequencyStudyPreparation,
     policy: StructuralSequenceExecutionPolicy,
-) -> NativeExecutionResult<CompletedStructuralModalFrequencyStudy> {
+) -> NativeExecutionResult<(
+    CompletedStructuralModalFrequencyStudy,
+    crate::NativeProgramObjectSource,
+)> {
     configure_local_analysis(&mut config, &policy.resources);
     let session = NativeProgramSession::new(config)?;
-    execute_with_pool(
-        &mut LocalAnalysisTaskPool::new(session),
-        preparation,
-        policy,
-    )
-    .await
+    let mut pool = LocalAnalysisTaskPool::new(session);
+    let completion = execute_with_pool(&mut pool, preparation, policy).await?;
+    Ok((completion, pool.object_source()))
 }
 
 pub async fn execute_structural_modal_frequency_study_remotely(

@@ -1148,7 +1148,7 @@ pub struct AnalysisFieldDescriptor {
     /// and `component_count` below are its result-facing projections.
     pub layout: runmat_analysis_core::AnalysisFieldLayout,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub statistic: Option<AnalysisFieldStatistic>,
+    pub statistic: Option<runmat_analysis_core::FieldStatistic>,
     #[serde(default)]
     pub topology_id: Option<String>,
     #[serde(default)]
@@ -1215,7 +1215,7 @@ impl AnalysisFieldDescriptor {
             numeric_representation: None,
             family: infer_field_family(&field.field_id).to_string(),
             layout: layout.clone(),
-            statistic: infer_field_statistic(&field.field_id),
+            statistic: layout.statistic,
             topology_id: infer_field_topology_id(&field.field_id, location).map(str::to_string),
             element_kind: infer_field_element_kind(&field.field_id, location).map(str::to_string),
             class_name,
@@ -1293,8 +1293,8 @@ impl AnalysisFieldDescriptor {
             sample: Some(entry.sample),
             numeric_representation: Some(entry.definition.numeric_representation()),
             family: infer_field_family(entry.definition.field_id()).to_string(),
+            statistic: layout.statistic,
             layout: layout.with_ordinal(ordinal),
-            statistic: None,
             topology_id: None,
             element_kind: None,
             class_name: "fea.Field".to_string(),
@@ -1326,30 +1326,10 @@ impl AnalysisFieldDescriptor {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisFieldStatistic {
-    ComponentMagnitudeEnvelope,
-    RootMeanSquare,
-    Variance,
-}
-
 fn infer_field_family(field_id: &str) -> &str {
     field_id
         .split_once('.')
         .map_or("unknown", |(family, _)| family)
-}
-
-fn infer_field_statistic(field_id: &str) -> Option<AnalysisFieldStatistic> {
-    if field_id.starts_with("structural.response_spectrum.") {
-        Some(AnalysisFieldStatistic::ComponentMagnitudeEnvelope)
-    } else if field_id.starts_with("structural.random_response.rms.") {
-        Some(AnalysisFieldStatistic::RootMeanSquare)
-    } else if field_id.starts_with("structural.random_response.variance.") {
-        Some(AnalysisFieldStatistic::Variance)
-    } else {
-        None
-    }
 }
 
 fn infer_field_topology_id(
@@ -2470,6 +2450,19 @@ mod tests {
             AnalysisSolverOptions::defaults_for(&prestressed_frequency),
             Ok(AnalysisSolverOptions::StructuralFrequency(_))
         ));
+
+        // A modal -> harmonic consumer runs in the modal-reduced space with the frequency
+        // options its publication operation is dispatched with.
+        let modal_frequency =
+            ProcedureStep::structural_modal_harmonic("modal_frequency", "modes", "basis");
+        assert_eq!(modal_frequency.solution_space, SolutionSpace::ModalReduced);
+        let options = AnalysisSolverOptions::defaults_for(&modal_frequency)
+            .expect("modal-reduced harmonic defaults");
+        assert!(matches!(
+            options,
+            AnalysisSolverOptions::StructuralFrequency(_)
+        ));
+        assert!(options.supports(&modal_frequency));
 
         let thermal_static = ProcedureStep::thermal_steady("thermal_static");
         assert!(matches!(

@@ -13,6 +13,9 @@ pub(super) struct EvaluatorBindings {
     pub curves: BTreeMap<CurveEvaluatorId, u64>,
     pub pcurves: BTreeMap<PcurveEvaluatorId, PcurveKey>,
     pub surfaces: BTreeMap<SurfaceEvaluatorId, u64>,
+    /// The first surface evaluator (in id order) bound to each session face, so per-sample
+    /// pcurve evaluation names its surface without scanning every binding.
+    pub surface_by_face: BTreeMap<u64, SurfaceEvaluatorId>,
     pub trims: BTreeMap<TrimClassifierId, u64>,
     pub mass_properties: BTreeMap<MassPropertiesEvaluatorId, MassPropertiesBinding>,
 }
@@ -251,10 +254,15 @@ impl EvaluatorBindings {
                 .collect(),
             mass_properties.keys().collect(),
         )?;
+        let mut surface_by_face = BTreeMap::new();
+        for (surface, face) in &surfaces {
+            surface_by_face.entry(*face).or_insert_with(|| surface.clone());
+        }
         Ok(Self {
             curves,
             pcurves,
             surfaces,
+            surface_by_face,
             trims,
             mass_properties,
         })

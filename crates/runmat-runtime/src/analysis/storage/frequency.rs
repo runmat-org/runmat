@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis::contracts::AnalysisArtifactRecord;
 use crate::analysis::frequency_result::StructuralFrequencyArtifactRootIndex;
+use crate::analysis::render_tiles::{self, RenderTileIndex};
+use crate::analysis::AnalysisRenderTopology;
 use crate::analysis::{
     result_policy, run_operation_for_identity, AnalysisFieldRequestOptions, AnalysisFieldSelection,
     AnalysisStudyStepNumericalResultData, AnalysisStudyStepRunData, QualityGate,
@@ -26,14 +28,29 @@ pub(super) struct PersistedStructuralFrequencyArtifact {
     pub step: AnalysisStudyStepRunData,
     pub object_catalog: PublishedObjectCatalog,
     pub artifact_roots: StructuralFrequencyArtifactRootIndex,
+    /// Render tiles of the solver mesh the sweep was solved on, saved with the record like a
+    /// standard run's, so a figure of the sweep replays without the mesh file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_tiles: Option<RenderTileIndex>,
 }
+
+/// Immutable objects a frequency record saves beside its published catalog.
+pub(super) type RenderTileObjects = Vec<(Digest, Vec<u8>)>;
 
 pub(super) fn prepare_artifact(
     step: &AnalysisStudyStepRunData,
     object_catalog: &PublishedObjectCatalog,
     artifact_roots: &StructuralFrequencyArtifactRootIndex,
+    render_topology: Option<&AnalysisRenderTopology>,
     created_at: String,
-) -> Result<PersistedStructuralFrequencyArtifact, String> {
+) -> Result<(PersistedStructuralFrequencyArtifact, RenderTileObjects), String> {
+    let (render_tiles, tile_objects) = match render_topology {
+        Some(topology) => {
+            let (index, objects) = render_tiles::partition(topology)?;
+            (Some(index), objects)
+        }
+        None => (None, Vec::new()),
+    };
     let artifact = PersistedStructuralFrequencyArtifact {
         schema_version: FREQUENCY_ARTIFACT_SCHEMA_VERSION.to_string(),
         created_at,
@@ -41,9 +58,10 @@ pub(super) fn prepare_artifact(
         step: step.clone(),
         object_catalog: object_catalog.clone(),
         artifact_roots: artifact_roots.clone(),
+        render_tiles,
     };
     validate_artifact(&artifact, &step.run_id)?;
-    Ok(artifact)
+    Ok((artifact, tile_objects))
 }
 
 pub(super) fn decode_artifact(
@@ -81,6 +99,9 @@ pub(super) fn validate_artifact(
     artifact
         .artifact_roots
         .validate(&result.publication, &artifact.object_catalog)?;
+    if let Some(index) = &artifact.render_tiles {
+        index.validate()?;
+    }
     let operation = run_operation_for_identity(&artifact.step.identity).ok_or_else(|| {
         "structural frequency result identity has no runtime operation".to_string()
     })?;
@@ -105,6 +126,7 @@ pub(super) fn validate_artifact(
 
 pub(super) fn ingest_objects(
     artifact: &PersistedStructuralFrequencyArtifact,
+    tile_objects: RenderTileObjects,
     source: &dyn PublishedObjectSource,
 ) -> Result<BTreeMap<Digest, Vec<u8>>, String> {
     validate_artifact(artifact, &artifact.step.run_id)?;
@@ -121,6 +143,17 @@ pub(super) fn ingest_objects(
         }
     }
     validate_closure(artifact, |digest| objects.get(&digest).cloned())?;
+    for (digest, bytes) in tile_objects {
+        match objects.get(&digest) {
+            Some(existing) if existing != &bytes => {
+                return Err("render tile digest collision".into());
+            }
+            Some(_) => {}
+            None => {
+                objects.insert(digest, bytes);
+            }
+        }
+    }
     Ok(objects)
 }
 
@@ -144,6 +177,7 @@ pub(super) fn same_content(
         && left.step == right.step
         && left.object_catalog == right.object_catalog
         && left.artifact_roots == right.artifact_roots
+        && left.render_tiles == right.render_tiles
 }
 
 pub(super) fn field_page(

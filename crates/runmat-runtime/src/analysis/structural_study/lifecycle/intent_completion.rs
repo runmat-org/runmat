@@ -157,6 +157,21 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
             runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
                 workloads,
             },
+            StructuralStudyNumericalResult::StructuralModalFrequency(result),
+        ) => complete_structural_modal_frequency(
+            intent,
+            study_model,
+            persisted_mesh,
+            meshing_output.artifact,
+            workloads,
+            *result,
+            completion_identity,
+            preparation,
+        ),
+        (
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                workloads,
+            },
             StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result),
         ) => complete_structural_response_spectrum(
             intent,

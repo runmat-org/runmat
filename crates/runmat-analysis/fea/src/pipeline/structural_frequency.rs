@@ -78,6 +78,30 @@ pub fn admit_prestressed_structural_frequency_publication(
     )
 }
 
+/// Admits a modal-reduced frequency publication (`modal_harmonic`) against the modal-basis state
+/// its workload names.
+pub fn admit_modal_structural_frequency_publication(
+    workload: &StructuralFrequencyWorkload,
+    solver_mesh: &SolverMeshArtifact,
+    modal_state: &CanonicalSemanticState,
+    result: &crate::execution::StructuralFrequencySolverResult,
+    publication: &crate::execution::StructuralFrequencyPublicationManifest,
+) -> AnalysisExecutionResult<AnalysisRunIdentity> {
+    if workload.prestress_transition().is_some() {
+        return Err(AnalysisExecutionError::Invalid(
+            "prestressed structural frequency publication requires its exact base state".into(),
+        ));
+    }
+    admit_structural_frequency_publication_with_state(
+        workload,
+        solver_mesh,
+        result,
+        publication,
+        None,
+        Some(modal_state),
+    )
+}
+
 pub fn admit_prestressed_modal_structural_frequency_publication(
     workload: &StructuralFrequencyWorkload,
     solver_mesh: &SolverMeshArtifact,

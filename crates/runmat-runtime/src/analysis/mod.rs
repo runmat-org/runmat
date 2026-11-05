@@ -273,7 +273,7 @@ pub use study_numerical_result::StructuralStudyNumericalResult;
 pub use frequency_result::{
     StructuralFrequencyArtifactRootIndex, StructuralFrequencyFinalizedHistoryArtifactRoots,
     StructuralFrequencyHistoryArtifactRoot, StructuralStudyFrequencyNumericalResult,
-    StructuralStudyPrestressedFrequencyNumericalResult,
+    StructuralStudyModalFrequencyNumericalResult, StructuralStudyPrestressedFrequencyNumericalResult,
     StructuralStudyPrestressedFrequencyReductionResult,
     StructuralStudyPrestressedModalFrequencyReductionResult,
 };
@@ -353,7 +353,7 @@ pub use contracts::{
     AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
     AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
-    AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef,
+    AnalysisFieldStorage, AnalysisFieldStorageRef,
     AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
     AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
     AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,

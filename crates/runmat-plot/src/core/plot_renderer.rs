@@ -169,7 +169,6 @@ pub struct PlotRenderer {
     last_scene_viewport_px: Option<(u32, u32)>,
     /// Per-axes tick step and length of each 3-D origin axis, as last drawn, so the overlay
     /// labels the same ticks.
-    world_axis_triads: std::collections::HashMap<usize, ([f64; 3], [f32; 3])>,
     /// Last per-axes plot viewport sizes used to build viewport-dependent geometry.
     last_axes_plot_sizes_px: Option<Vec<(u32, u32)>>,
     /// Last per-axes orthographic view bounds used for viewport-dependent 2D stroke geometry.
@@ -396,7 +395,6 @@ impl PlotRenderer {
             geometry_node_owner_ids: HashMap::new(),
             geometry_hidden_owner_node_ids: BTreeSet::new(),
             last_scene_viewport_px: None,
-            world_axis_triads: std::collections::HashMap::new(),
             last_axes_plot_sizes_px: None,
             last_axes_view_bounds: None,
             last_axes_view_contract: None,
@@ -1159,6 +1157,71 @@ impl PlotRenderer {
         self.current_3d_display_bounds_for_axes(axes_index)
     }
 
+    /// The initial 3-D view before any `view` call: MATLAB's default `view(-37.5, 30)` for
+    /// plots, and the CAD isometric view from (+x, -y, +z) for geometry.
+    fn default_3d_view_direction(&self, axes_index: usize) -> Vec3 {
+        if self.axes_shows_geometry(axes_index) {
+            Vec3::new(1.0, -1.0, 1.0)
+        } else {
+            Camera::view_direction_deg(-37.5, 30.0)
+        }
+    }
+
+    /// Whether this axes shows CAD geometry (a geometry scene or a geometry mesh), whose axes
+    /// are anchored at the world origin like a CAD view.
+    fn axes_shows_geometry(&self, axes_index: usize) -> bool {
+        self.last_geometry_scene.is_some()
+            || self.last_figure.as_ref().is_some_and(|f| {
+                f.plots().enumerate().any(|(idx, plot)| {
+                    f.plot_axes_indices().get(idx).copied().unwrap_or(0) == axes_index
+                        && matches!(plot, crate::plots::PlotElement::Mesh(_))
+                })
+            })
+    }
+
+    /// The 3-D axis frame of one axes: where its three axis lines start, how long they are, and
+    /// the tick values along them. The renderer draws the lines and tick marks from it and the
+    /// overlay labels the same ticks, so both read this one function.
+    ///
+    /// Plots (`surf`, `mesh`, `plot3`, ...) anchor the axes at the lower corner of the axis
+    /// limits and tick the limits on each axis, as MATLAB's plot box does: a surface over spot
+    /// 60..140 shows ticks from 60 to 140 along its own edge. CAD geometry keeps a world-origin
+    /// triad that reaches the far edge of the model.
+    pub fn axis_frame_3d(&self, axes_index: usize) -> Option<AxisFrame3d> {
+        let bounds = if self.last_geometry_scene.is_some() {
+            self.last_geometry_scene.as_ref().map(|scene| scene.bounds)
+        } else {
+            self.display_bounds_3d_for_axes(axes_index)
+        }?;
+        let mut frame = AxisFrame3d::from_bounds(
+            bounds.min,
+            bounds.max,
+            self.axes_shows_geometry(axes_index),
+        )?;
+        if !frame.world_origin {
+            // Stand the z-axis on the bottom corner that sits leftmost on screen, as MATLAB's
+            // plot box does, so it frames the data instead of crossing in front of it.
+            if let Some(camera) = self.axes_cameras.get(axes_index) {
+                let forward = camera.target - camera.position;
+                let right = forward.cross(camera.up);
+                let scale = camera.axis_scale;
+                let leftmost = [
+                    Vec3::new(bounds.min.x, bounds.min.y, bounds.min.z),
+                    Vec3::new(bounds.max.x, bounds.min.y, bounds.min.z),
+                    Vec3::new(bounds.min.x, bounds.max.y, bounds.min.z),
+                    Vec3::new(bounds.max.x, bounds.max.y, bounds.min.z),
+                ]
+                .into_iter()
+                .filter(|corner| right.is_finite() && right.length_squared() > 0.0 && corner.is_finite())
+                .min_by(|a, b| (*a * scale).dot(right).total_cmp(&(*b * scale).dot(right)));
+                if let Some(corner) = leftmost {
+                    frame.z_base = corner;
+                }
+            }
+        }
+        Some(frame)
+    }
+
     /// A tick step per data axis for the 3-D origin triad: a nice value near `target_px` on
     /// screen along that axis.
     pub(crate) fn world_axis_steps(
@@ -1192,10 +1255,20 @@ impl PlotRenderer {
                     && matches!(plot, crate::plots::PlotElement::Mesh(_))
             })
         });
-        let fixed_aspect =
-            meta.is_some_and(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual");
-        if fixed_aspect || has_geometry_mesh {
+        if has_geometry_mesh {
             return Vec3::splat(1.0 / largest);
+        }
+        if let Some(meta) =
+            meta.filter(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual")
+        {
+            // One data unit along axis k is `ratio[k]` long relative to the others; the largest
+            // relative extent fills the unit box and the limits stay as they are.
+            let ratio = if meta.data_aspect_ratio_mode == "manual" {
+                meta.data_aspect_ratio.map(|r| (r.abs() as f32).max(1.0e-12))
+            } else {
+                [1.0; 3]
+            };
+            return data_aspect_axis_scale(size, ratio);
         }
         let axis = |extent: f32| {
             if extent > largest * 1.0e-6 {
@@ -1219,7 +1292,7 @@ impl PlotRenderer {
                 cam.axis_scale = self.axes_3d_axis_scale(idx, bounds);
                 cam.target = center * cam.axis_scale;
                 cam.up = Vec3::Z;
-                cam.position = cam.target + Vec3::new(1.0, -1.0, 1.0);
+                cam.position = cam.target + self.default_3d_view_direction(idx);
                 cam.fit_bounds(bounds.min, bounds.max);
                 self.axes_cameras[idx] = cam;
                 applied = true;
@@ -1320,7 +1393,7 @@ impl PlotRenderer {
             cam.axis_scale = self.axes_3d_axis_scale(0, bounds);
             cam.target = center * cam.axis_scale;
             cam.up = Vec3::Z;
-            cam.position = cam.target + Vec3::new(1.0, -1.0, 1.0);
+            cam.position = cam.target + self.default_3d_view_direction(0);
             cam.fit_bounds(bounds.min, bounds.max);
             if let Some(axis_cam) = self.axes_cameras.get_mut(0) {
                 *axis_cam = cam;
@@ -2348,8 +2421,17 @@ impl PlotRenderer {
         );
 
         // 3D helpers: a horizontal world grid and world-axis ticks. Keeping the
-        // grid on XY gives it a stable meaning as the camera moves.
-        if !is_2d && self.overlay_show_grid_for_axes(axes_index) {
+        // grid on XY gives it a stable meaning as the camera moves. `axis off` hides them all;
+        // a plot keeps its axis lines under `grid off`, while CAD geometry's world triad follows
+        // the grid toggle.
+        let axes_visible = self
+            .overlay_axes_style_for_axes(axes_index)
+            .is_none_or(|style| style.visible);
+        if !is_2d
+            && axes_visible
+            && (self.overlay_show_grid_for_axes(axes_index)
+                || !self.axes_shows_geometry(axes_index))
+        {
             let view_proj = view_proj_matrix * model_matrix;
             let inv_view_proj = view_proj.inverse();
             // The camera lives in axis-scaled space (3-D axes stretch to a cube); this helper is
@@ -2517,6 +2599,19 @@ impl PlotRenderer {
                 helper_vertices.push(Vertex::new(b, color));
             };
 
+            // World-axis helper for spatial awareness at model scale. Each axis has its own
+            // tick step, since 3-D axes may scale each data axis differently.
+            // Each axis reaches the far edge of the data from the origin, with about four
+            // ticks; without data bounds, the step follows the on-screen scale instead.
+            let frame = self.axis_frame_3d(axes_index).unwrap_or_else(|| {
+                // No finite bounds: size the triad from the on-screen scale at the origin.
+                let steps = Self::world_axis_steps(&project_to_px, center, &nice_step);
+                let lens = steps.map(|step| {
+                    (step as f32 * 5.0)
+                        .clamp((step as f32).min(0.5), (dx.max(dy) * 0.6).max(step as f32))
+                });
+                AxisFrame3d::origin_triad(steps, lens)
+            });
             // Procedural ground grid (depth-tested, no depth writes).
             let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
             let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
@@ -2545,29 +2640,53 @@ impl PlotRenderer {
                 if !show_minor_grid {
                     minor_alpha = 0.0;
                 }
+                // A plot's grid fills the floor of its axis limits with lines at its tick values,
+                // as MATLAB's plot box does. CAD geometry keeps the view-filling ground grid that
+                // fades out around the model.
+                let grid_steps = if frame.world_origin {
+                    GridPlaneExtent {
+                        min: (min_x, min_y),
+                        max: (max_x, max_y),
+                        major: [major_step as f32; 2],
+                        minor: [minor_step as f32; 2],
+                        fade: [
+                            (0.85 * dx.max(dy)).max(major_step as f32),
+                            (1.40 * dx.max(dy)).max((major_step as f32) * 2.0),
+                        ],
+                    }
+                } else {
+                    let major = [frame.steps[0] as f32, frame.steps[1] as f32];
+                    GridPlaneExtent {
+                        min: (frame.origin.x, frame.origin.y),
+                        max: (frame.origin.x + frame.lens[0], frame.origin.y + frame.lens[1]),
+                        major,
+                        minor: major.map(|step| step / 5.0),
+                        fade: [f32::MAX * 0.5, f32::MAX],
+                    }
+                };
                 self.wgpu_renderer.ensure_grid_plane_pipeline(emission);
                 self.wgpu_renderer.update_grid_uniforms_for_axes(
                     emission,
                     axes_index,
                     crate::core::renderer::GridUniforms {
-                        major_step: major_step as f32,
-                        minor_step: minor_step as f32,
-                        fade_start: (0.85 * dx.max(dy)).max(major_step as f32),
-                        fade_end: (1.40 * dx.max(dy)).max((major_step as f32) * 2.0),
+                        major_step_x: grid_steps.major[0],
+                        minor_step_x: grid_steps.minor[0],
+                        fade_start: grid_steps.fade[0],
+                        fade_end: grid_steps.fade[1],
                         camera_pos: position_data.to_array(),
-                        _pad0: 0.0,
+                        major_step_y: grid_steps.major[1],
                         target_pos: [target_data.x, target_data.y, plane_level],
-                        _pad1: 0.0,
+                        minor_step_y: grid_steps.minor[1],
                         major_color: [major_rgb[0], major_rgb[1], major_rgb[2], major_alpha],
                         minor_color: [minor_rgb[0], minor_rgb[1], minor_rgb[2], minor_alpha],
                     },
                 );
 
                 let quad_vertices = [
-                    Vertex::new(on_grid(min_x, min_y), Vec4::ONE),
-                    Vertex::new(on_grid(max_x, min_y), Vec4::ONE),
-                    Vertex::new(on_grid(max_x, max_y), Vec4::ONE),
-                    Vertex::new(on_grid(min_x, max_y), Vec4::ONE),
+                    Vertex::new(on_grid(grid_steps.min.0, grid_steps.min.1), Vec4::ONE),
+                    Vertex::new(on_grid(grid_steps.max.0, grid_steps.min.1), Vec4::ONE),
+                    Vertex::new(on_grid(grid_steps.max.0, grid_steps.max.1), Vec4::ONE),
+                    Vertex::new(on_grid(grid_steps.min.0, grid_steps.max.1), Vec4::ONE),
                 ];
                 let quad_indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
                 let vb = self
@@ -2579,64 +2698,45 @@ impl PlotRenderer {
                 grid_plane_buffers = Some((vb, ib));
             }
 
-            // World-axis helper for spatial awareness at model scale. Each axis has its own
-            // tick step, since 3-D axes may scale each data axis differently.
-            // Each axis reaches the far edge of the data from the origin, with about four
-            // ticks; without data bounds, the step follows the on-screen scale instead.
-            let (axis_steps, axis_lens) = match scene_bounds {
-                Some(bounds) if bounds.min.is_finite() && bounds.max.is_finite() => {
-                    let reach = bounds.min.abs().max(bounds.max.abs());
-                    let reach = [reach.x, reach.y, reach.z];
-                    let steps = reach.map(|r| nice_step((r as f64 / 4.0).max(1e-9)));
-                    let lens = [0, 1, 2].map(|k| reach[k].max(steps[k] as f32));
-                    (steps, lens)
-                }
-                _ => {
-                    let steps = Self::world_axis_steps(&project_to_px, center, &nice_step);
-                    let lens = steps.map(|step| {
-                        (step as f32 * 5.0)
-                            .clamp((step as f32).min(0.5), (dx.max(dy) * 0.6).max(step as f32))
-                    });
-                    (steps, lens)
-                }
-            };
-            let origin = Vec3::new(0.0, 0.0, 0.0);
+            let origin = frame.origin;
             let col_x = Vec4::new(0.92, 0.25, 0.25, 0.85);
             let col_y = Vec4::new(0.35, 0.90, 0.45, 0.85);
             let col_z = Vec4::new(0.35, 0.62, 0.98, 0.85);
-            push_line(origin, origin + Vec3::new(axis_lens[0], 0.0, 0.0), col_x);
-            push_line(origin, origin + Vec3::new(0.0, axis_lens[1], 0.0), col_y);
-            push_line(origin, origin + Vec3::new(0.0, 0.0, axis_lens[2]), col_z);
+            push_line(origin, origin + Vec3::new(frame.lens[0], 0.0, 0.0), col_x);
+            push_line(origin, origin + Vec3::new(0.0, frame.lens[1], 0.0), col_y);
+            push_line(
+                frame.z_base,
+                frame.z_base + Vec3::new(0.0, 0.0, frame.lens[2]),
+                col_z,
+            );
 
-            // Dynamic tick marks on the origin triad (major step only). Labels are drawn in the
-            // overlay so they stay crisp; these marks provide a depth-correct anchor in the scene.
-            self.world_axis_triads
-                .insert(axes_index, (axis_steps, axis_lens));
-            let max_ticks = 6usize;
-            let mut add_ticks = |axis: Vec3, perp: Vec3, step: f64, axis_len: f32, col: Vec4| {
-                if step <= 0.0 {
-                    return;
-                }
+            // Tick marks on the axis lines (major step only). Labels are drawn in the overlay
+            // from the same frame so they stay crisp; these marks anchor them in depth.
+            for (axis_index, (axis, perp, perp_index, col)) in [
+                (Vec3::X, Vec3::Y, 1, col_x),
+                (Vec3::Y, Vec3::X, 0, col_y),
+                (Vec3::Z, Vec3::X, 0, col_z),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                // A tick mark extends along the perpendicular axis, so its length is measured in
+                // that axis's units: 3-D axes may scale x, y and z differently.
+                let perp_len = frame.lens[perp_index];
+                let perp_step = frame.steps[perp_index] as f32;
                 // `f32::clamp` panics if min > max; keep the minimum below the maximum.
-                let tick_max = (step as f32 * 0.25).max(1.0e-6);
-                let tick_min = 0.01_f32.min(tick_max);
-                let tick_len = (axis_len * 0.04).clamp(tick_min, tick_max);
-                for i in 1..=max_ticks {
-                    let t = (i as f32) * (step as f32);
-                    if t >= axis_len * 0.999 {
-                        break;
-                    }
-                    let p = origin + axis * t;
+                let tick_max = (perp_step * 0.25).max(1.0e-6);
+                let tick_min = (perp_len * 0.002).min(tick_max);
+                let tick_len = (perp_len * 0.02).clamp(tick_min, tick_max);
+                for (offset, _value) in frame.ticks(axis_index) {
+                    let p = frame.axis_start(axis_index) + axis * offset;
                     push_line(
                         p - perp * tick_len,
                         p + perp * tick_len,
                         Vec4::new(col.x, col.y, col.z, col.w * 0.85),
                     );
                 }
-            };
-            add_ticks(Vec3::X, Vec3::Y, axis_steps[0], axis_lens[0], col_x);
-            add_ticks(Vec3::Y, Vec3::X, axis_steps[1], axis_lens[1], col_y);
-            add_ticks(Vec3::Z, Vec3::X, axis_steps[2], axis_lens[2], col_z);
+            }
 
             if !helper_vertices.is_empty() {
                 let rd = Box::new(crate::core::RenderData {
@@ -4229,11 +4329,6 @@ impl PlotRenderer {
             .unwrap_or_default()
     }
 
-    /// The tick step and length of each 3-D origin axis (x, y, z) as last drawn.
-    pub fn world_axis_triad_for_axes(&self, axes_index: usize) -> Option<([f64; 3], [f32; 3])> {
-        self.world_axis_triads.get(&axes_index).copied()
-    }
-
     pub fn cell_label_marks_for_axes(
         &self,
         axes_index: usize,
@@ -4773,8 +4868,20 @@ mod tests {
 
         let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, Some(&figure), 0);
 
-        assert_eq!(display.min, Vec3::new(0.0, 0.0, -1.5));
-        assert_eq!(display.max, Vec3::new(1.0, 2.0, 2.5));
+        // A fixed data aspect keeps the limits; the axis scale carries the aspect.
+        assert_eq!(display.min, Vec3::ZERO);
+        assert_eq!(display.max, Vec3::new(1.0, 2.0, 1.0));
+    }
+
+    #[test]
+    fn data_aspect_scales_one_data_unit_per_axis_without_moving_limits() {
+        // daspect([1 2 4]) over a 1 x 2 x 1 box: units = max(1/1, 2/2, 1/4) = 1, so one data
+        // unit is 1, 2 and 4 box units long along x, y and z.
+        let scale = data_aspect_axis_scale(Vec3::new(1.0, 2.0, 1.0), [1.0, 2.0, 4.0]);
+        assert!((scale - Vec3::new(1.0, 0.5, 0.25)).abs().max_element() < 1.0e-6);
+        // axis equal on a flat 2320 x 1320 x 220 mm pack: one shared scale, no cube.
+        let scale = data_aspect_axis_scale(Vec3::new(2320.0, 1320.0, 220.0), [1.0; 3]);
+        assert!((scale - Vec3::splat(1.0 / 2320.0)).abs().max_element() < 1.0e-9);
     }
 
     #[test]
@@ -5283,5 +5390,171 @@ pub mod plot_utils {
         }
 
         lines
+    }
+}
+
+/// The floor rectangle and line spacing of a 3-D grid plane, in data units.
+struct GridPlaneExtent {
+    min: (f32, f32),
+    max: (f32, f32),
+    major: [f32; 2],
+    minor: [f32; 2],
+    /// Distances from the view target where the grid starts and finishes fading out.
+    fade: [f32; 2],
+}
+
+/// One axes' 3-D axis lines: the shared origin, each line's length in data units, and its tick
+/// step. Ticks sit at multiples of the step that lie on the line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AxisFrame3d {
+    pub origin: Vec3,
+    /// A CAD world-origin triad, whose shared origin carries no tick.
+    pub world_origin: bool,
+    /// Where the z-axis stands: the origin for a CAD triad, otherwise a bottom corner of the
+    /// axis limits chosen for the view.
+    pub z_base: Vec3,
+    pub lens: [f32; 3],
+    pub steps: [f64; 3],
+}
+
+impl AxisFrame3d {
+    const TARGET_TICKS: f64 = 4.0;
+    const MAX_TICKS: usize = 12;
+
+    fn origin_triad(steps: [f64; 3], lens: [f32; 3]) -> Self {
+        Self {
+            origin: Vec3::ZERO,
+            world_origin: true,
+            z_base: Vec3::ZERO,
+            lens,
+            steps,
+        }
+    }
+
+    fn from_bounds(min: Vec3, max: Vec3, world_origin: bool) -> Option<Self> {
+        if !(min.is_finite() && max.is_finite()) || min.cmpgt(max).any() {
+            return None;
+        }
+        if world_origin {
+            let reach = min.abs().max(max.abs());
+            let reach = [reach.x, reach.y, reach.z];
+            let steps = reach.map(|r| nice_tick_step((r as f64 / Self::TARGET_TICKS).max(1e-9)));
+            let lens = [0, 1, 2].map(|k| reach[k].max(steps[k] as f32));
+            return Some(Self::origin_triad(steps, lens));
+        }
+        let span = max - min;
+        let largest = span.max_element().max(1.0e-9);
+        let span = [span.x, span.y, span.z].map(|extent| extent.max(largest * 1.0e-6));
+        let steps = span.map(|extent| nice_tick_step(extent as f64 / Self::TARGET_TICKS));
+        Some(Self {
+            origin: min,
+            world_origin: false,
+            z_base: min,
+            lens: span,
+            steps,
+        })
+    }
+
+    /// Where one axis line starts.
+    pub fn axis_start(&self, axis: usize) -> Vec3 {
+        if axis == 2 {
+            self.z_base
+        } else {
+            self.origin
+        }
+    }
+
+    /// The ticks on one axis as (offset from the axis start along the axis, data value).
+    pub fn ticks(&self, axis: usize) -> Vec<(f32, f64)> {
+        let step = self.steps[axis];
+        let start = self.origin[axis] as f64;
+        let len = self.lens[axis] as f64;
+        if !(step.is_finite() && step > 0.0 && len.is_finite() && len > 0.0) {
+            return Vec::new();
+        }
+        let first = (start / step).ceil() as i64;
+        let mut ticks = Vec::new();
+        let mut index = first;
+        while ticks.len() < Self::MAX_TICKS {
+            let value = index as f64 * step;
+            let offset = value - start;
+            if offset > len * (1.0 + 1.0e-6) {
+                break;
+            }
+            // The world-origin triad leaves its own origin unlabelled.
+            if !(self.world_origin && index == 0) {
+                ticks.push((offset as f32, value));
+            }
+            index += 1;
+        }
+        ticks
+    }
+}
+
+/// The axis scale of a fixed data aspect: one data unit along axis k is `ratio[k]` long relative
+/// to the others, and the largest relative extent of `size` fills the unit box.
+fn data_aspect_axis_scale(size: Vec3, ratio: [f32; 3]) -> Vec3 {
+    let units = (size.x / ratio[0])
+        .max(size.y / ratio[1])
+        .max(size.z / ratio[2])
+        .max(f32::MIN_POSITIVE);
+    Vec3::new(
+        1.0 / (units * ratio[0]),
+        1.0 / (units * ratio[1]),
+        1.0 / (units * ratio[2]),
+    )
+}
+
+/// A 1-2-5 step at or above `raw`.
+pub(crate) fn nice_tick_step(raw: f64) -> f64 {
+    if !raw.is_finite() || raw <= 0.0 {
+        return 1.0;
+    }
+    let pow10 = 10.0_f64.powf(raw.log10().floor());
+    let norm = raw / pow10;
+    let mult = if norm <= 1.0 {
+        1.0
+    } else if norm <= 2.0 {
+        2.0
+    } else if norm <= 5.0 {
+        5.0
+    } else {
+        10.0
+    };
+    mult * pow10
+}
+
+#[cfg(test)]
+mod axis_frame_tests {
+    use super::*;
+
+    #[test]
+    fn plot_axes_tick_their_own_limits_from_the_lower_corner() {
+        let frame =
+            AxisFrame3d::from_bounds(Vec3::new(60.0, 0.05, 0.0), Vec3::new(140.0, 2.0, 48.0), false)
+                .unwrap();
+        assert_eq!(frame.origin, Vec3::new(60.0, 0.05, 0.0));
+        let x: Vec<f64> = frame.ticks(0).into_iter().map(|(_, v)| v).collect();
+        assert_eq!(x, vec![60.0, 80.0, 100.0, 120.0, 140.0]);
+        let y: Vec<f64> = frame.ticks(1).into_iter().map(|(_, v)| v).collect();
+        assert_eq!(y, vec![0.5, 1.0, 1.5, 2.0]);
+        let z = frame.ticks(2);
+        assert_eq!(z.first(), Some(&(0.0, 0.0)));
+        assert!(z.iter().all(|(offset, _)| *offset <= 48.0 + 1.0e-3));
+    }
+
+    #[test]
+    fn cad_axes_keep_a_world_origin_triad_reaching_the_model() {
+        let frame = AxisFrame3d::from_bounds(
+            Vec3::new(-1160.0, -660.0, -40.0),
+            Vec3::new(1160.0, 660.0, 180.0),
+            true,
+        )
+        .unwrap();
+        assert_eq!(frame.origin, Vec3::ZERO);
+        assert_eq!(frame.lens[0], 1160.0);
+        let x: Vec<f64> = frame.ticks(0).into_iter().map(|(_, v)| v).collect();
+        assert_eq!(x, vec![500.0, 1000.0]);
+        assert!(AxisFrame3d::from_bounds(Vec3::ONE, Vec3::ZERO, false).is_none());
     }
 }
