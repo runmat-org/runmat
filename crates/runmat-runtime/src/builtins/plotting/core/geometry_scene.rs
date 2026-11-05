@@ -102,13 +102,22 @@ pub fn encode_geometry_figure_scene(
     crate::replay::export_figure_scene_payload_with_limits(scene, geometry_scene_limits())
 }
 
-/// Geometry scene payload limits: the configured scene budget, never below the replay default.
+/// The floor of a geometry scene payload (64 MiB). A geometry scene is a compiled model the host
+/// built (an assembly's instanced prototypes with their levels of detail and edges), larger than
+/// a figure: a 2,500-occurrence airliner's packed payload runs past the replay default of 16 MiB.
+/// Decoding 64 MiB stays a few hundred MiB of peak memory in a browser worker; figure archives
+/// on disk keep the replay default.
+#[cfg(feature = "plot-core")]
+pub const GEOMETRY_SCENE_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+
+/// Geometry scene payload limits: the configured scene budget, never below
+/// [`GEOMETRY_SCENE_PAYLOAD_BYTES`].
 #[cfg(feature = "plot-core")]
 fn geometry_scene_limits() -> crate::replay::limits::ReplayLimits {
     let defaults = crate::replay::limits::ReplayLimits::default();
     crate::replay::limits::ReplayLimits {
-        max_scene_payload_bytes: defaults
-            .max_scene_payload_bytes
+        max_scene_payload_bytes: GEOMETRY_SCENE_PAYLOAD_BYTES
+            .max(defaults.max_scene_payload_bytes)
             .max(super::perf::scene_export_budget_bytes()),
         ..defaults
     }
@@ -296,5 +305,18 @@ fn merge_warnings(current: &mut Vec<String>, incoming: Vec<String>) {
         if !current.iter().any(|item| item == &warning) {
             current.push(warning);
         }
+    }
+}
+
+#[cfg(all(test, feature = "plot-core"))]
+mod limit_tests {
+    #[test]
+    fn geometry_scenes_import_past_the_replay_default() {
+        let limits = super::geometry_scene_limits();
+        assert!(limits.max_scene_payload_bytes >= super::GEOMETRY_SCENE_PAYLOAD_BYTES);
+        assert!(
+            limits.max_scene_payload_bytes
+                > crate::replay::limits::ReplayLimits::default().max_scene_payload_bytes
+        );
     }
 }
