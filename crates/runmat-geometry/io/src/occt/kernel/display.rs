@@ -32,17 +32,25 @@ pub(crate) fn diagonal(topology: &Topology) -> f64 {
     }
 }
 
-/// The chordal deflection a large body may reach, as a fraction of its diagonal: a 10 m
-/// fairing to 2 mm, under a pixel when the body fills the view (normals stay exact, so shading
+/// The chordal deflection a large body may reach, as a fraction of its diagonal (a 3 m rib to
+/// 0.6 mm; larger bodies stop at [`CHORD_MAX`]), under a pixel when the body fills the view (normals stay exact, so shading
 /// is smooth at any density).
 const CHORD_OF_SIZE_LARGE: f64 = 2.0e-4;
 
+/// The largest chordal deflection any body gets, 1 mm. A thin wall's chords sag inside its
+/// true surface by up to the deflection, so structure under a 3 mm skin (an airliner's frames
+/// and stringers, a wing box's ribs under 4 mm skins) pokes through a skin meshed to 5 mm; at
+/// 1 mm it stays under. Cylinders and cones stay cheap (they refine only around), and normals
+/// stay exact.
+const CHORD_MAX: f64 = 1.0e-3;
+
 /// The chordal deflection for a body of diagonal `size`: the caller's fraction of its size, at
 /// most ten times the caller's tolerance (or [`CHORD_OF_SIZE_LARGE`] of the size, when that is
-/// larger: metre-scale bodies), at least [`CHORD_MIN`].
+/// larger: metre-scale bodies), never past [`CHORD_MAX`], at least [`CHORD_MIN`].
 pub(crate) fn chord_for(size: f64, options: &TessellationOptions) -> f64 {
     (size * options.size_fraction)
         .min((options.chord_tolerance * 10.0).max(size * CHORD_OF_SIZE_LARGE))
+        .min(CHORD_MAX)
         .max(CHORD_MIN)
 }
 
@@ -142,8 +150,13 @@ mod tests {
         // A 100 mm part: 0.05 mm; a 2 m skin: capped at ten times the caller's 0.1 mm.
         assert!((chord_for(0.1, &o) - 5.0e-5).abs() < 1e-12);
         assert!((chord_for(2.0, &o) - 1.0e-3).abs() < 1e-12);
-        assert!((chord_for(10.0, &o) - 2.0e-3).abs() < 1e-12);
+        // A 10 m fairing stops at 1 mm, so a skin's chords never sag through the structure under it.
+        assert!((chord_for(10.0, &o) - 1.0e-3).abs() < 1e-12);
         assert_eq!(chord_for(0.0, &o), CHORD_MIN);
+        // Coarser callers (assembly display: 0.5 mm tolerance, 0.2 % of size) stop there too.
+        let coarse = TessellationOptions { chord_tolerance: 5.0e-4, size_fraction: 2.0e-3, ..o };
+        assert!((chord_for(8.0, &coarse) - CHORD_MAX).abs() < 1e-12);
+        assert!((chord_for(0.3, &coarse) - 6.0e-4).abs() < 1e-12);
     }
 
     #[test]

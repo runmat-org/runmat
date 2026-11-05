@@ -4,8 +4,10 @@ use crate::core::DepthMode;
 
 impl WgpuRenderer {
     /// Edge strokes are alpha-blended triangles widened in the vertex shader. The depth-tested
-    /// variant is biased toward the camera, so an edge drawn on its own face wins the depth test
-    /// against that face and doesn't flicker; it doesn't write depth, so crossing edges and the
+    /// variant moves each stroke toward the camera by a fixed share of its view depth (the
+    /// shader's `EDGE_DEPTH_SHARE`), so an edge drawn on its own face wins the depth test at any
+    /// distance while an edge a few millimetres under another surface stays hidden; a small
+    /// slope bias covers faces seen edge-on. It doesn't write depth, so crossing edges and the
     /// translucent faces drawn after them composite normally.
     pub(super) fn create_edge_stroke_pipeline(
         &self,
@@ -21,7 +23,13 @@ impl WgpuRenderer {
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(label),
-                source: wgpu::ShaderSource::Wgsl(shaders::vertex::EDGE_STROKE.into()),
+                source: wgpu::ShaderSource::Wgsl(
+                    shaders::vertex::edge_stroke::source(
+                        depth_tested,
+                        self.depth_mode == DepthMode::ReversedZ,
+                    )
+                    .into(),
+                ),
             });
         let layout = emission
             .device()
@@ -41,8 +49,8 @@ impl WgpuRenderer {
             (
                 self.depth_compare(),
                 wgpu::DepthBiasState {
-                    constant: toward_camera * 64,
-                    slope_scale: toward_camera as f32 * 1.5,
+                    constant: 0,
+                    slope_scale: toward_camera as f32 * 1.0,
                     clamp: 0.0,
                 },
             )

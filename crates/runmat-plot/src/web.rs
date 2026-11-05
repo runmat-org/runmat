@@ -296,7 +296,7 @@ impl WebRenderer {
         .filter(|mode| {
             mode.supported_by_formats(
                 format_features(format),
-                format_features(wgpu::TextureFormat::Depth24Plus),
+                format_features(crate::core::renderer::WgpuRenderer::depth_format()),
             )
         })
         .collect();

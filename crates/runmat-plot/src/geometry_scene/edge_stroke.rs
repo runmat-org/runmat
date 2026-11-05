@@ -12,7 +12,8 @@ pub const HAIRLINE_WIDTH_PX: f32 = 1.0;
 
 /// Whether `render_data` is a line item that draws as a stroke at `width_px`.
 pub fn widens(render_data: &RenderData, width_px: Option<f32>) -> bool {
-    width_px.is_some_and(|w| w.is_finite() && w > HAIRLINE_WIDTH_PX)
+    (width_px.is_some_and(|w| w.is_finite() && w > HAIRLINE_WIDTH_PX)
+        || render_data.vertices.iter().any(|v| weight(v) > 1.0))
         && render_data.gpu_vertices.is_none()
         && matches!(
             render_data.pipeline_type,
@@ -90,10 +91,22 @@ fn segments(render_data: &RenderData) -> Vec<[&Vertex; 2]> {
     out
 }
 
+/// A line vertex's stroke weight: above 1 where selection or hover painted its segment (the
+/// paint stores it in the vertex's second UV), else 1.
+fn weight(vertex: &Vertex) -> f32 {
+    let w = vertex.tex_coords[1];
+    if w.is_finite() && w > 1.0 {
+        w
+    } else {
+        1.0
+    }
+}
+
 fn append_segment(out: &mut Vec<Vertex>, [a, b]: [&Vertex; 2], width_px: f32) {
     if a.position == b.position || (a.color[3] <= 0.0 && b.color[3] <= 0.0) {
         return;
     }
+    let width_px = width_px * weight(a).max(weight(b));
     let corner = |own: &Vertex, other: &Vertex, side: f32| {
         let mut v = *own;
         v.normal = other.position;

@@ -59,7 +59,15 @@ fn plotting_shader_sources_parse_and_validate_for_every_declared_variant() {
         validate(name, source, &mut failures);
         variants += 1;
     }
-    assert_eq!(variants, 72, "the declared shader inventory changed");
+    for (depth_tested, reversed_z) in [(true, true), (true, false), (false, true)] {
+        validate(
+            &format!("vertex/edge-stroke depth={depth_tested} reversed={reversed_z}"),
+            &vertex::edge_stroke::source(depth_tested, reversed_z),
+            &mut failures,
+        );
+        variants += 1;
+    }
+    assert_eq!(variants, 75, "the declared shader inventory changed");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 

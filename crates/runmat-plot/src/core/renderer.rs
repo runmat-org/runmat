@@ -873,16 +873,11 @@ impl WgpuRenderer {
         }
     }
 
+    /// 32-bit float depth on every target (WebGPU supports it everywhere). With reversed-Z its
+    /// precision is relative to view distance, so a 3 mm skin over a frame still separates at
+    /// 60 m; a 24-bit buffer lets edges under the skin show through on a large assembly.
     pub(crate) fn depth_format() -> wgpu::TextureFormat {
-        // Prefer a higher-precision depth buffer on native; keep a web-friendly format on wasm.
-        #[cfg(target_arch = "wasm32")]
-        {
-            wgpu::TextureFormat::Depth24Plus
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            wgpu::TextureFormat::Depth32Float
-        }
+        wgpu::TextureFormat::Depth32Float
     }
 
     fn depth_compare(&self) -> wgpu::CompareFunction {

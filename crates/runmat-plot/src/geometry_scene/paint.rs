@@ -2,7 +2,7 @@
 //! filled or tinted, and a line chunk's segment regions (a face's boundary edges) drawn in the
 //! selection or hover color.
 use super::{GeometrySceneChunk, GEOMETRY_HOVER_REGION_COLOR, GEOMETRY_SELECTED_REGION_COLOR};
-use crate::core::{PipelineType, RenderData};
+use crate::core::{PipelineType, RenderData, Vertex};
 
 /// Selection keeps the face's shading: the face color moves this far toward the selection color,
 /// and the face's boundary edges draw in the full selection color (as SolidWorks shows it).
@@ -58,7 +58,22 @@ impl RegionPaint {
         };
         [color[0], color[1], color[2], base[3].min(color[3])]
     }
+
+    /// How much wider a painted segment draws than the scene's edge width: selected edges
+    /// stand out by weight as well as color, as SolidWorks draws them; hover a little less.
+    pub(super) fn edge_weight(self) -> f32 {
+        match self {
+            Self::Fill(_) => 1.0,
+            Self::Tint { amount, .. } if amount >= GEOMETRY_SELECTED_TINT => SELECTED_EDGE_WEIGHT,
+            Self::Tint { .. } => HOVER_EDGE_WEIGHT,
+        }
+    }
 }
+
+/// Selected edges draw at twice the scene's edge width (1.25 px edges select at 2.5 px).
+pub(super) const SELECTED_EDGE_WEIGHT: f32 = 2.0;
+/// Hovered edges draw at 1.6 times the edge width.
+pub(super) const HOVER_EDGE_WEIGHT: f32 = 1.6;
 
 impl GeometrySceneChunk {
     pub(super) fn apply_region_color(
@@ -96,7 +111,7 @@ impl GeometrySceneChunk {
                     render_data,
                     primitive,
                     3,
-                    |color| paint.face(color),
+                    |vertex| vertex.color = paint.face(vertex.color),
                 ) {
                     colored += 1;
                 }
@@ -129,7 +144,12 @@ impl GeometrySceneChunk {
                     render_data,
                     primitive,
                     2,
-                    |color| paint.edge(color),
+                    |vertex| {
+                        vertex.color = paint.edge(vertex.color);
+                        // The stroke weight rides on the line vertex's spare UV until
+                        // `edge_stroke::widen` turns segments into strokes.
+                        vertex.tex_coords[1] = paint.edge_weight();
+                    },
                 ) {
                     colored += 1;
                 }
@@ -152,7 +172,7 @@ impl GeometrySceneChunk {
             render_data,
             triangle_index,
             3,
-            |color| paint.face(color),
+            |vertex| vertex.color = paint.face(vertex.color),
         );
     }
 }
@@ -165,7 +185,7 @@ fn recolor_primitive(
     render_data: &mut RenderData,
     primitive: usize,
     corners: usize,
-    paint: impl Fn([f32; 4]) -> [f32; 4],
+    paint: impl Fn(&mut Vertex),
 ) -> bool {
     let base = primitive.saturating_mul(corners);
     let (Some(source_indices), Some(render_indices)) = (source_indices, render_data.indices.as_mut())
@@ -177,7 +197,7 @@ fn recolor_primitive(
             return false;
         };
         for vertex in vertices {
-            vertex.color = paint(vertex.color);
+            paint(vertex);
         }
         return true;
     };
@@ -192,7 +212,7 @@ fn recolor_primitive(
         let Some(mut vertex) = render_data.vertices.get(index as usize).copied() else {
             return false;
         };
-        vertex.color = paint(vertex.color);
+        paint(&mut vertex);
         let Ok(next_index) = u32::try_from(render_data.vertices.len()) else {
             return false;
         };

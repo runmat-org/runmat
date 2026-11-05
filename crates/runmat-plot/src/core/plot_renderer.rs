@@ -708,11 +708,7 @@ impl PlotRenderer {
             .flatten();
         let preserved_xray_enabled = same_scene_identity.then_some(self.geometry_xray_enabled);
         self.geometry_overlay = geometry_scene.overlay.clone();
-        let geometry_xray_enabled = geometry_scene.chunks.iter().any(|chunk| {
-            chunk.render_data.pipeline_type == crate::core::PipelineType::Triangles
-                && (chunk.material.albedo.w < 0.95
-                    || matches!(chunk.material.alpha_mode, crate::core::AlphaMode::Blend))
-        });
+        let geometry_xray_enabled = scene_authored_as_xray(&geometry_scene);
         if self.last_geometry_scene_key.as_ref() == Some(&cache_key) {
             self.last_geometry_scene = Some(geometry_scene.clone());
             let show_grid = presentation.show_grid.unwrap_or(geometry_scene.show_grid);
@@ -4665,6 +4661,22 @@ fn relative_luminance(color: Vec4) -> f32 {
     0.2126 * color.x + 0.7152 * color.y + 0.0722 * color.z
 }
 
+/// A scene opens in x-ray when every one of its surfaces is see-through (a scene authored as
+/// x-ray). One translucent part among opaque ones, such as glass in an assembly or a command
+/// preview, draws blended on its own and leaves the rest of the model solid.
+fn scene_authored_as_xray(geometry_scene: &GeometryScene) -> bool {
+    let mut surfaces = geometry_scene
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.render_data.pipeline_type == crate::core::PipelineType::Triangles)
+        .peekable();
+    surfaces.peek().is_some()
+        && surfaces.all(|chunk| {
+            chunk.material.albedo.w < 0.95
+                || matches!(chunk.material.alpha_mode, crate::core::AlphaMode::Blend)
+        })
+}
+
 /// Scene line colors are stored with the scene, independent of theme. Near-white lines (such
 /// as the undeformed outline) read well on a dark background but vanish on a light one, so on
 /// a light background they are darkened to a slate of the same hue and made a little more opaque.
@@ -4727,6 +4739,30 @@ mod tests {
         assert_eq!(outline.w, 0.5);
         // Mid-tone wireframe edges already contrast with white and stay as saved.
         assert_eq!(render_data.vertices[1].color, [0.58, 0.72, 0.88, 0.95]);
+    }
+
+    #[test]
+    fn xray_opens_only_for_scenes_whose_every_surface_is_see_through() {
+        use crate::geometry_scene::{cad_default_material, vertex, GeometrySceneChunk};
+        let surface = |id: &str, alpha: f32| {
+            let mut material = cad_default_material();
+            material.albedo.w = alpha;
+            GeometrySceneChunk::indexed_triangles(
+                id,
+                vec![
+                    vertex([0.0, 0.0, 0.0], [0.8, 0.8, 0.8, alpha], [0.0, 0.0, 1.0]),
+                    vertex([1.0, 0.0, 0.0], [0.8, 0.8, 0.8, alpha], [0.0, 0.0, 1.0]),
+                    vertex([0.0, 1.0, 0.0], [0.8, 0.8, 0.8, alpha], [0.0, 0.0, 1.0]),
+                ],
+                vec![0, 1, 2],
+                material,
+            )
+        };
+        let scene = |chunks| GeometryScene::new("scene", 1, chunks);
+        // Glass among opaque parts stays blended on its own; the rest stays solid.
+        assert!(!scene_authored_as_xray(&scene(vec![surface("skin", 1.0), surface("glass", 0.35)])));
+        assert!(scene_authored_as_xray(&scene(vec![surface("a", 0.38), surface("b", 0.38)])));
+        assert!(!scene_authored_as_xray(&scene(Vec::new())));
     }
 
     #[test]

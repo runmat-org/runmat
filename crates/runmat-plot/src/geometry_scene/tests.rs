@@ -861,6 +861,14 @@ fn selection_tints_the_face_and_draws_its_boundary_edges_in_the_selection_color(
     });
     let hi = hovered.indices.clone().unwrap();
     assert_eq!(hovered.vertices[hi[0] as usize].color, GEOMETRY_HOVER_EDGE_COLOR);
+
+    // Selected edges draw heavier than the rest, hovered ones a little less.
+    let stroke = super::edge_stroke::widen(lines, Some(1.25));
+    let widths: Vec<f32> = stroke.vertices.iter().map(|v| v.tex_coords[1]).collect();
+    assert_eq!(&widths[..12], &[2.5; 12], "the two boundary segments");
+    assert_eq!(&widths[12..], &[1.25; 6], "the third segment keeps the edge width");
+    let hover_stroke = super::edge_stroke::widen(hovered, Some(1.25));
+    assert_eq!(hover_stroke.vertices[0].tex_coords[1], 2.0);
 }
 
 #[test]
