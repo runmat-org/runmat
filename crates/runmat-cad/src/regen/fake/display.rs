@@ -240,6 +240,14 @@ fn facet_mesh(s: &FakeSolid, options: &TessellationOptions) -> BodyMesh {
                 if let Some(&(bi, lo, hi)) = blend_of.get(face) {
                     let blend = &blends[bi];
                     let other = e.faces[1 - k] as usize;
+                    // An end arc: the blend's profile where it meets the face across its end.
+                    let across = s.faces.get(other).and_then(|f| f.plane);
+                    if across.is_some_and(|p| p.axis == blend.dec.along) {
+                        let at = geom.start[blend.dec.along];
+                        return (0..=segments)
+                            .map(|i| blend.point(FRAC_PI_2 * i as f64 / segments as f64, at))
+                            .collect();
+                    }
                     let on_first = s
                         .faces
                         .get(other)

@@ -9,6 +9,7 @@ use super::{
 use crate::diagnostics::Diagnostic;
 use crate::ids::PropertyName;
 use crate::refs::name::EntityName;
+use crate::refs::reference::Reference;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -28,6 +29,10 @@ pub trait AnnotationValues {
     }
     /// A PMI tolerance's feature control frame as text: symbol, value and datums.
     fn tolerance_frame(&self, _model: &ModelRef, _tolerance: &str) -> Option<String> {
+        None
+    }
+    /// A hole callout's text (`⌀4 THRU`), from the hole the callout names.
+    fn hole_callout(&self, _model: &ModelRef, _hole: &Reference) -> Option<String> {
         None
     }
 }
@@ -83,7 +88,9 @@ pub fn build_drawing_index(
                         value
                     }
                 }
-                AnnotationKind::HoleCallout { .. } => "Hole callout".into(),
+                AnnotationKind::HoleCallout { hole } => values
+                    .hole_callout(at, hole)
+                    .unwrap_or_else(|| "Hole callout".into()),
                 AnnotationKind::Gdt { tolerance } => values
                     .tolerance_frame(at, tolerance)
                     .unwrap_or_else(|| tolerance.clone()),

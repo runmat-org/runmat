@@ -136,6 +136,14 @@ pub const PART: DocumentGrammar = DocumentGrammar {
             "configuration_table",
         ),
         named("feature_def", "feature_defs", "feature_def"),
+        // Semantic PMI: `datum A = { on = feature.body.face.start }`,
+        // `tolerance top_flat = { characteristic = flatness, on = [ … ], tolerance = 0.05 mm }`.
+        Collection {
+            id: Some("label"),
+            ..named("datum", "datums", "datum")
+        },
+        named("tolerance", "tolerances", "tolerance"),
+        named("size", "sizes", "size"),
     ],
     links: Some(LINKS),
 };

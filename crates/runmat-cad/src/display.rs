@@ -45,6 +45,10 @@ pub struct FaceDisplay {
     pub features: Vec<String>,
     pub positions: Vec<f32>,
     pub triangles: Vec<u32>,
+    /// The face's surface where the kernel knows it: a plane's normal, a cylinder's axis and
+    /// radius (drawing centerlines, mates on axes and faces).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface: Option<crate::refs::history::SurfaceKind>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -205,6 +209,11 @@ fn body_display(
                     .unwrap_or_default(),
                 positions: flat(&f.positions),
                 triangles: f.triangles.iter().flatten().copied().collect(),
+                surface: topology
+                    .faces
+                    .get(i)
+                    .map(|t| t.geom.surface)
+                    .filter(|k| !matches!(k, crate::refs::history::SurfaceKind::Other)),
             }
         })
         .collect();

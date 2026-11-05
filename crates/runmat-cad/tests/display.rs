@@ -148,12 +148,21 @@ fn convex_fillet_draws_rounded_and_trims_neighbours() {
         (end_area - (0.08 * 0.05 - 0.08 * 0.002)).abs() < 1e-9,
         "end cap trimmed: {end_area}"
     );
-    let tangent = body
+    // Two tangent lines along the edge and an end arc at each end bound the blend.
+    let bounding: Vec<_> = body
         .edges
         .iter()
         .filter(|e| e.faces.contains(&blend.index))
+        .collect();
+    assert_eq!(bounding.len(), 4, "the blend's boundary");
+    let arcs = bounding
+        .iter()
+        .filter(|e| {
+            let p = &e.points;
+            p.len() >= 9 && (p[0] - p[p.len() - 3]).abs() < 1e-6
+        })
         .count();
-    assert_eq!(tangent, 2, "two tangent edges bound the blend");
+    assert_eq!(arcs, 2, "an end arc at each end of the blend");
 }
 
 /// The tessellator refuses a body another kernel made.

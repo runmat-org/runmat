@@ -11,6 +11,11 @@
 //!   it toward the viewer meets a triangle of any other face. Triangles are bucketed on a grid
 //!   in view space, so a sample tests only the triangles over it.
 //!
+//! - **Centerlines.** Every cylindrical face that turns more than half way around its axis (a
+//!   hole, a boss, a shaft) gives a center mark where its axis points at the viewer and a
+//!   centerline along its axis where the axis lies in the view (ISO 128-2 type 04.1 lines).
+//!   The sheet draws them as chain lines, extended past the circle by its own text rules.
+//!
 //! Output lines are flat `[u, v, u, v, …]` in view millimetres (model millimetres projected).
 
 use serde::Serialize;
@@ -78,6 +83,39 @@ pub fn orientation<'a>(views: &'a Value, name: &str, depth: usize) -> &'a str {
 pub struct ViewLines {
     pub visible: Vec<Vec<f64>>,
     pub hidden: Vec<Vec<f64>>,
+    /// Center marks and centerlines of holes, bosses and shafts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub centers: Vec<Center>,
+    /// A section view's cut regions, closed loops to hatch.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hatch: Vec<Vec<f64>>,
+}
+
+/// A center mark (`at`, the circle's `radius`) or a centerline (`from`–`to` along the axis,
+/// the cylinder's `radius`), in view millimetres.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum Center {
+    Mark {
+        at: [f64; 2],
+        radius: f64,
+    },
+    Line {
+        from: [f64; 2],
+        to: [f64; 2],
+        radius: f64,
+    },
+}
+
+/// A cylindrical face's axis in model millimetres: a point, the unit direction, the radius and
+/// the face's extent along the axis from the point.
+#[derive(Clone, Copy)]
+struct Axis {
+    point: P3,
+    dir: P3,
+    radius: f64,
+    lo: f64,
+    hi: f64,
 }
 
 type P3 = [f64; 3];
@@ -112,6 +150,7 @@ struct Edge {
 struct Model {
     faces: Vec<Face>,
     edges: Vec<Edge>,
+    axes: Vec<Axis>,
 }
 
 fn floats(v: &Value) -> Vec<f64> {
@@ -171,6 +210,9 @@ fn add_bodies(model: &mut Model, bodies: &Value, t: &[f64]) {
                 .filter(|c| c.iter().all(|i| 3 * i + 2 < pos.len()))
                 .map(|c| [at(c[0]), at(c[1]), at(c[2])])
                 .collect();
+            if let Some(axis) = cylinder_axis(&f["surface"], t, (0..pos.len() / 3).map(at)) {
+                model.axes.push(axis);
+            }
             model.faces.push(Face { tris });
         }
         for e in body["edges"].as_array().into_iter().flatten() {
@@ -205,10 +247,148 @@ fn add_bodies(model: &mut Model, bodies: &Value, t: &[f64]) {
     }
 }
 
+fn norm(a: P3) -> P3 {
+    let l = dot(a, a).sqrt().max(1e-12);
+    a.map(|x| x / l)
+}
+
+/// The axis of a cylindrical face (`surface` as the display writes it, in metres) placed by
+/// `t`, when the face turns more than half way around it: fillets and partial rounds have no
+/// centerline.
+fn cylinder_axis(surface: &Value, t: &[f64], points: impl Iterator<Item = P3>) -> Option<Axis> {
+    if surface["surface"] != "cylinder" {
+        return None;
+    }
+    let p = floats(&surface["axis_point"]);
+    let d = floats(&surface["axis_direction"]);
+    let radius = surface["radius"].as_f64()? * 1000.0;
+    if p.len() != 3 || d.len() != 3 || radius <= 0.0 {
+        return None;
+    }
+    let point = transform(t, [p[0], p[1], p[2]]).map(|x| x * 1000.0);
+    let origin = transform(t, [0.0; 3]);
+    let tip = transform(t, [d[0], d[1], d[2]]);
+    let dir = norm(sub(tip, origin));
+    // Two directions across the axis, to measure the angle each mesh point sits at.
+    let helper = if dir[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+    let e1 = norm(cross(dir, helper));
+    let e2 = cross(dir, e1);
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    let mut angles = Vec::new();
+    for q in points {
+        let v = sub(q, point);
+        let along = dot(v, dir);
+        lo = lo.min(along);
+        hi = hi.max(along);
+        angles.push(dot(v, e2).atan2(dot(v, e1)));
+    }
+    if angles.len() < 3 {
+        return None;
+    }
+    angles.sort_by(f64::total_cmp);
+    let tau = std::f64::consts::TAU;
+    let mut gap = angles[0] + tau - angles[angles.len() - 1];
+    for w in angles.windows(2) {
+        gap = gap.max(w[1] - w[0]);
+    }
+    (tau - gap > std::f64::consts::PI + 1e-3).then_some(Axis {
+        point,
+        dir,
+        radius,
+        lo,
+        hi,
+    })
+}
+
+/// Center marks for axes that point at the viewer and centerlines for axes in the view's
+/// plane; each drawn once (a counterbore's two cylinders share one mark).
+fn centers(model: &Model, axes: &Axes) -> Vec<Center> {
+    let project = |p: P3| [dot(p, axes.u), dot(p, axes.v)];
+    let r = |x: f64| (x * 100.0).round() as i64;
+    let mut seen = BTreeMap::new();
+    for a in &model.axes {
+        let facing = dot(a.dir, axes.depth).abs();
+        let (key, center) = if facing > 0.999 {
+            let at = project(a.point);
+            (
+                [r(at[0]), r(at[1]), 0, 0],
+                Center::Mark {
+                    at,
+                    radius: a.radius,
+                },
+            )
+        } else if facing < 1e-3 {
+            let from = project([0, 1, 2].map(|i| a.point[i] + a.dir[i] * a.lo));
+            let to = project([0, 1, 2].map(|i| a.point[i] + a.dir[i] * a.hi));
+            let (from, to) = if (r(from[0]), r(from[1])) <= (r(to[0]), r(to[1])) {
+                (from, to)
+            } else {
+                (to, from)
+            };
+            (
+                [r(from[0]), r(from[1]), r(to[0]), r(to[1])],
+                Center::Line {
+                    from,
+                    to,
+                    radius: a.radius,
+                },
+            )
+        } else {
+            continue;
+        };
+        // The largest circle at a spot draws its mark (the counterbore over the hole).
+        let keep = match seen.get(&key) {
+            Some(Center::Mark { radius, .. } | Center::Line { radius, .. }) => a.radius > *radius,
+            None => true,
+        };
+        if keep {
+            seen.insert(key, center);
+        }
+    }
+    // Centerlines that lie on one axis line (a counterbore and its hole) join into one.
+    let mut out: Vec<Center> = Vec::new();
+    for c in seen.into_values() {
+        if let Center::Line { from, to, radius } = &c {
+            let joined = out.iter_mut().any(|o| match o {
+                Center::Line {
+                    from: f,
+                    to: t,
+                    radius: rr,
+                } => {
+                    let (dx, dy) = (t[0] - f[0], t[1] - f[1]);
+                    let len = (dx * dx + dy * dy).sqrt().max(1e-9);
+                    let off = |p: [f64; 2]| ((p[0] - f[0]) * dy - (p[1] - f[1]) * dx).abs() / len;
+                    if off(*from) < 1e-3 && off(*to) < 1e-3 {
+                        let along = |p: [f64; 2]| ((p[0] - f[0]) * dx + (p[1] - f[1]) * dy) / len;
+                        let (a0, a1) = (along(*from).min(0.0), along(*to).max(len));
+                        let at = |s: f64| [f[0] + dx / len * s, f[1] + dy / len * s];
+                        (*f, *t) = (at(a0), at(a1));
+                        *rr = rr.max(*radius);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                Center::Mark { .. } => false,
+            });
+            if joined {
+                continue;
+            }
+        }
+        out.push(c);
+    }
+    out
+}
+
 fn model_of(display: &Value) -> Model {
     let mut model = Model {
         faces: Vec::new(),
         edges: Vec::new(),
+        axes: Vec::new(),
     };
     let data = &display["data"];
     if display["kind"] == "assembly" {
@@ -387,12 +567,155 @@ fn hidden(model: &Model, grid: &Grid, axes: &Axes, p: P3, own: [usize; 2]) -> bo
 
 /// Every edge of the drawn model under `axes`, split into visible and hidden runs.
 pub fn view_lines(display: &Value, axes: &Axes) -> ViewLines {
+    lines_of(&model_of(display), axes)
+}
+
+/// A section view: the model beyond the cutting plane through `point` (normal to `axes.depth`,
+/// looking along it), its visible edges, the cut faces' outlines as visible lines, and the cut
+/// regions as closed loops for hatching. Sections draw no hidden lines (ISO 128-40).
+pub fn section_lines(display: &Value, axes: &Axes, point: P3) -> ViewLines {
     let model = model_of(display);
-    let grid = Grid::new(&model, axes);
+    let side = |p: P3| dot(sub(p, point), axes.depth);
+    let eps = 1e-6;
+    let mut cut: Vec<(P3, P3)> = Vec::new();
+    let faces = model
+        .faces
+        .iter()
+        .map(|f| {
+            let mut tris = Vec::new();
+            for t in &f.tris {
+                let s = t.map(side);
+                if s.iter().all(|x| *x >= -eps) {
+                    tris.push(*t);
+                    continue;
+                }
+                if s.iter().all(|x| *x < -eps) {
+                    continue;
+                }
+                // Clip the triangle to the far side; the crossing is a piece of the cut outline.
+                let mut poly: Vec<P3> = Vec::new();
+                let mut crossing: Vec<P3> = Vec::new();
+                for k in 0..3 {
+                    let (a, b) = (t[k], t[(k + 1) % 3]);
+                    let (sa, sb) = (s[k], s[(k + 1) % 3]);
+                    if sa >= -eps {
+                        poly.push(a);
+                    }
+                    if (sa >= -eps) != (sb >= -eps) {
+                        let u = sa / (sa - sb);
+                        let q = [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * u);
+                        poly.push(q);
+                        crossing.push(q);
+                    }
+                }
+                for k in 1..poly.len().saturating_sub(1) {
+                    tris.push([poly[0], poly[k], poly[k + 1]]);
+                }
+                if let [a, b] = crossing.as_slice() {
+                    cut.push((*a, *b));
+                }
+            }
+            Face { tris }
+        })
+        .collect();
+    let mut edges = Vec::new();
+    for e in &model.edges {
+        let mut run: Vec<P3> = Vec::new();
+        let flush = |run: &mut Vec<P3>, edges: &mut Vec<Edge>| {
+            if run.len() >= 2 {
+                edges.push(Edge {
+                    points: std::mem::take(run),
+                    faces: e.faces,
+                });
+            }
+            run.clear();
+        };
+        for w in e.points.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let (sa, sb) = (side(a), side(b));
+            match (sa >= -eps, sb >= -eps) {
+                (true, true) => {
+                    if run.is_empty() {
+                        run.push(a);
+                    }
+                    run.push(b);
+                }
+                (true, false) => {
+                    let u = sa / (sa - sb);
+                    if run.is_empty() {
+                        run.push(a);
+                    }
+                    run.push([0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * u));
+                    flush(&mut run, &mut edges);
+                }
+                (false, true) => {
+                    let u = sa / (sa - sb);
+                    run.push([0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * u));
+                    run.push(b);
+                }
+                (false, false) => flush(&mut run, &mut edges),
+            }
+        }
+        flush(&mut run, &mut edges);
+    }
+    let clipped = Model {
+        faces,
+        edges,
+        axes: model.axes.iter().map(|a| Axis { ..*a }).collect(),
+    };
+    let mut out = lines_of(&clipped, axes);
+    out.hidden.clear();
+    let project = |p: P3| [dot(p, axes.u), dot(p, axes.v)];
+    for (a, b) in &cut {
+        let (pa, pb) = (project(*a), project(*b));
+        out.visible.push(vec![pa[0], pa[1], pb[0], pb[1]]);
+    }
+    out.hatch = loops(&cut, &project);
+    out
+}
+
+/// Cut segments chained into closed loops, projected.
+fn loops(cut: &[(P3, P3)], project: &dyn Fn(P3) -> [f64; 2]) -> Vec<Vec<f64>> {
+    let k = |p: P3| p.map(|x| (x * 1.0e3).round() as i64);
+    let mut next: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
+    for (i, (a, b)) in cut.iter().enumerate() {
+        next.entry(k(*a)).or_default().push(i);
+        next.entry(k(*b)).or_default().push(i);
+    }
+    let mut used = vec![false; cut.len()];
+    let mut out = Vec::new();
+    for start in 0..cut.len() {
+        if used[start] {
+            continue;
+        }
+        used[start] = true;
+        let (first, mut at) = cut[start];
+        let mut ring = vec![project(first), project(at)];
+        loop {
+            let Some(&n) = next.get(&k(at)).and_then(|v| v.iter().find(|i| !used[**i])) else {
+                break;
+            };
+            used[n] = true;
+            let (a, b) = cut[n];
+            at = if k(a) == k(at) { b } else { a };
+            ring.push(project(at));
+            if k(at) == k(first) {
+                break;
+            }
+        }
+        if ring.len() >= 4 {
+            out.push(ring.into_iter().flatten().collect());
+        }
+    }
+    out
+}
+
+fn lines_of(model: &Model, axes: &Axes) -> ViewLines {
+    let grid = Grid::new(model, axes);
     let mut out = ViewLines::default();
     let project = |p: P3| [dot(p, axes.u), dot(p, axes.v)];
     let mut edges: Vec<&Edge> = model.edges.iter().collect();
-    let sil = silhouettes(&model, axes.depth);
+    let sil = silhouettes(model, axes.depth);
     edges.extend(sil.iter());
     // A segment seen end-on draws as a point; leave it out.
     let mut seen: BTreeMap<[i64; 4], bool> = BTreeMap::new();
@@ -419,7 +742,7 @@ pub fn view_lines(display: &Value, axes: &Axes) -> ViewLines {
             let lerp = |t: f64| -> P3 { [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t) };
             for s in 0..steps {
                 let (t0, t1) = (s as f64 / steps as f64, (s + 1) as f64 / steps as f64);
-                let h = hidden(&model, &grid, axes, lerp((t0 + t1) / 2.0), edge.faces);
+                let h = hidden(model, &grid, axes, lerp((t0 + t1) / 2.0), edge.faces);
                 let (p0, p1) = (project(lerp(t0)), project(lerp(t1)));
                 match &mut run {
                     Some((state, pts)) if *state == h => pts.extend([p1[0], p1[1]]),
@@ -447,6 +770,7 @@ pub fn view_lines(display: &Value, axes: &Axes) -> ViewLines {
         }
     }
     merge_overlaps(&mut out);
+    out.centers = centers(model, axes);
     out
 }
 
@@ -563,6 +887,44 @@ mod tests {
             (around - 4.0 * std::f64::consts::PI).abs() < 1.0,
             "hole outline {around} mm"
         );
+    }
+
+    #[test]
+    fn holes_carry_center_marks_and_centerlines_and_fillets_none() {
+        // Top: the 4 mm hole's axis points at the viewer, a mark at (60, 10).
+        let top = lines("top");
+        assert_eq!(top.centers.len(), 1, "{:?}", top.centers);
+        let Center::Mark { at, radius } = top.centers[0] else {
+            panic!("{:?}", top.centers);
+        };
+        assert!(near(at[0], 60.0) && near(at[1], 10.0) && near(radius, 2.0));
+        // Front: the axis lies in the view, a centerline at x = 60 through the plate.
+        let front = lines("front");
+        assert_eq!(front.centers.len(), 1, "{:?}", front.centers);
+        let Center::Line { from, to, radius } = front.centers[0] else {
+            panic!("{:?}", front.centers);
+        };
+        assert!(near(from[0], 60.0) && near(to[0], 60.0) && near(radius, 2.0));
+        assert!(near(from[1].min(to[1]), 0.0) && near(from[1].max(to[1]), 10.0));
+    }
+
+    #[test]
+    fn a_fillet_draws_its_end_arcs_so_every_outline_closes() {
+        // Front (u = x, v = z): the 1.5 mm round on the top front edge ends in arcs at x = 0
+        // and x = 80, from the tangent line at z = 8.5 to the top at z = 10.
+        let visible = segments(&lines("front").visible);
+        for x in [0.0, 80.0] {
+            let end = vertical(&visible, x, 8.5, 10.0);
+            assert!(
+                end > 1.4,
+                "front: the outline at x = {x} has {end} mm of 1.5 above the tangent line"
+            );
+        }
+        // Top (u = x, v = y): the end of the round closes the outline from y = 0 to 1.5.
+        let top = segments(&lines("top").visible);
+        for x in [0.0, 80.0] {
+            assert!(vertical(&top, x, 0.0, 1.5) > 1.4, "top: no end at x = {x}");
+        }
     }
 
     #[test]

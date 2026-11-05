@@ -270,7 +270,19 @@ pub(super) fn zebra(bodies: &[&BodyHandle]) -> Result<AnalysisResult, KernelErro
         .enumerate()
         .map(|(i, e)| {
             let [a, b] = e.faces;
-            let c = if blend(a) || blend(b) {
+            // A blend's end arc meets the face across its end at a crease (G0).
+            let end_arc = [(a, b), (b, a)].iter().any(|&(f, other)| {
+                blend(f)
+                    && s.decorations.iter().any(|d| {
+                        d.pieces.iter().any(|p| p.2 == f)
+                            && s.faces[other as usize]
+                                .plane
+                                .is_some_and(|pl| pl.axis == d.along)
+                    })
+            });
+            let c = if end_arc {
+                EdgeContinuity::G0
+            } else if blend(a) || blend(b) {
                 if g2(a) || g2(b) {
                     EdgeContinuity::G2
                 } else {

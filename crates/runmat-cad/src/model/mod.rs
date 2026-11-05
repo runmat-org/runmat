@@ -82,8 +82,9 @@ pub struct PartDocument {
     pub configurations: Vec<Configuration>,
     #[serde(default)]
     pub configuration_tables: Vec<ConfigurationTable>,
-    /// Semantic PMI (datums, GD&T, sizes, finishes), resolved by regeneration.
-    #[serde(default, skip_serializing_if = "PmiSet::is_empty")]
+    /// Semantic PMI (datums, GD&T, sizes, finishes), resolved by regeneration. Its lists sit
+    /// beside the features in the text: `datum A = { on = … }`, `tolerance flat = { … }`.
+    #[serde(default, flatten)]
     pub pmi: PmiSet,
     /// The owner marked the file closed: auto-publish is refused.
     #[serde(default)]

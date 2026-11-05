@@ -13,17 +13,24 @@
 //!   <display> }, diagnostics }`; a view whose model is missing or doesn't compile is reported
 //!   as a warning and the sheet draws its frame without geometry.
 
+pub mod auto;
+mod values;
+
 use crate::runtime::{compile_assembly, compile_part, resolve_path, Diagnostic, Files};
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::assembly::model::RelPath;
-use runmat_cad::drawing::index::{build_drawing_index, NoAnnotationValues};
+use runmat_cad::drawing::index::build_drawing_index;
 use runmat_cad::drawing::{ModelRef, ModelReferences};
 use runmat_cad::ids::PropertyName;
+use runmat_cad::model::PartDocument;
 use runmat_cad::refs::name::EntityName;
 use runmat_cad::refs::reference::Reference;
 use runmat_cad::syntax::parse_drawing;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A part's PMI names: tolerances, sizes and datums.
+type PmiNames = (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
 
 /// What the drawn models are, as checking reads them.
 #[derive(Default)]
@@ -34,6 +41,8 @@ pub struct CompiledModels {
     properties: BTreeMap<String, BTreeMap<String, String>>,
     /// File → occurrence paths (assemblies).
     occurrences: BTreeMap<String, BTreeSet<String>>,
+    /// File → (tolerances, sizes, datums) the part's PMI declares.
+    pmi: BTreeMap<String, PmiNames>,
 }
 
 fn names_in(reference: &Value, out: &mut Vec<Value>) {
@@ -90,8 +99,11 @@ impl ModelReferences for CompiledModels {
             .get(model.file.as_str())
             .is_some_and(|o| o.contains(&path.to_string()))
     }
-    fn pmi(&self, _: &ModelRef) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>) {
-        (BTreeSet::new(), BTreeSet::new(), BTreeSet::new())
+    fn pmi(&self, model: &ModelRef) -> PmiNames {
+        self.pmi
+            .get(model.file.as_str())
+            .cloned()
+            .unwrap_or_default()
     }
     fn bom(&self, _: &ModelRef) -> Option<Bom> {
         None
@@ -131,6 +143,7 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
     };
     let mut models = CompiledModels::default();
     let mut displays = serde_json::Map::new();
+    let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
     let mut problems: Vec<Diagnostic> = Vec::new();
     let warn = |message: String| Diagnostic {
         path: path.to_owned(),
@@ -187,8 +200,11 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
                         props.insert("part_number".to_owned(), pn.clone());
                     }
                     if let Some(material) = &output.material {
+                        // `material.aluminum` names the material the part uses: its name shows.
                         let text = serde_json::to_value(material).ok().and_then(|v| match v {
-                            Value::String(s) => Some(s),
+                            Value::String(s) => {
+                                Some(s.strip_prefix("material.").map(capitalized).unwrap_or(s))
+                            }
                             other => other.get("name").and_then(Value::as_str).map(str::to_owned),
                         });
                         if let Some(text) = text {
@@ -210,6 +226,16 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
                     }
                 }
                 models.properties.insert(file.clone(), props);
+                let pmi = &part.document.pmi;
+                models.pmi.insert(
+                    file.clone(),
+                    (
+                        pmi.tolerances.iter().map(|t| t.name.clone()).collect(),
+                        pmi.sizes.iter().map(|t| t.name.clone()).collect(),
+                        pmi.datums.iter().map(|d| d.label.clone()).collect(),
+                    ),
+                );
+                documents.insert(file.clone(), part.document.clone());
                 displays.insert(
                     file.clone(),
                     json!({ "kind": "part", "data": part.display }),
@@ -220,7 +246,14 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
             ))),
         }
     }
-    let index = build_drawing_index(&document, &models, &NoAnnotationValues);
+    let index = build_drawing_index(
+        &document,
+        &models,
+        &values::Values {
+            displays: &displays,
+            documents: &documents,
+        },
+    );
     let mut data = serde_json::to_value(&index).unwrap_or(Value::Null);
     // Each view's edges, visible and hidden, from the drawn model's display.
     let views = serde_json::to_value(&document.views).unwrap_or(Value::Null);
@@ -231,16 +264,72 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
             continue;
         };
         if let Some(display) = displays.get(file) {
-            let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
-            let lines = crate::hlr::view_lines(display, &axes);
-            hlr.insert(
-                name.to_owned(),
-                serde_json::to_value(&lines).unwrap_or(Value::Null),
-            );
+            let kind = &view["kind"];
+            let parent = kind["from"].as_str().unwrap_or("");
+            let parent_axes = crate::hlr::axes(crate::hlr::orientation(&views, parent, 0));
+            let entry = match kind["view"].as_str() {
+                // A section through the plane the view names, seen across the parent's cutting
+                // line: the parent's right stays right and its depth becomes up.
+                Some("section") => {
+                    section_entry(display, &document, name, &parent_axes, &views, parent)
+                }
+                // A detail: the parent's lines, clipped by the sheet to the circle around the
+                // centre the view names.
+                Some("detail") => {
+                    let axes = parent_axes;
+                    let mut lines = serde_json::to_value(crate::hlr::view_lines(display, &axes))
+                        .unwrap_or(Value::Null);
+                    let center = document
+                        .views
+                        .iter()
+                        .find(|v| v.name == name)
+                        .and_then(|v| match &v.kind {
+                            runmat_cad::drawing::ViewKind::Detail { center, radius, .. } => {
+                                Some((center, radius))
+                            }
+                            _ => None,
+                        })
+                        .and_then(|(center, radius)| {
+                            Some((point_of(display, center)?, radius_mm(radius)?))
+                        });
+                    if let (Some((c, r)), Value::Object(o)) = (center, &mut lines) {
+                        o.insert(
+                            "detail".into(),
+                            json!({ "center": [dot(c, axes.u), dot(c, axes.v)], "radius": r }),
+                        );
+                    }
+                    lines
+                }
+                _ => {
+                    let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
+                    serde_json::to_value(crate::hlr::view_lines(display, &axes))
+                        .unwrap_or(Value::Null)
+                }
+            };
+            hlr.insert(name.to_owned(), entry);
+        }
+    }
+    // Where each dimension's references sit in the model (mm): the sheet measures between them.
+    let mut anchors = serde_json::Map::new();
+    for a in &document.annotations {
+        let runmat_cad::drawing::AnnotationKind::Dimension { references, .. } = &a.kind else {
+            continue;
+        };
+        let Some(view) = document.views.iter().find(|v| v.name == a.view) else {
+            continue;
+        };
+        let Some(display) = displays.get(view.model.file.as_str()) else {
+            continue;
+        };
+        let points: Option<Vec<[f64; 3]>> =
+            references.iter().map(|r| point_of(display, r)).collect();
+        if let Some(points) = points {
+            anchors.insert(a.id.clone(), json!(points));
         }
     }
     if let Value::Object(o) = &mut data {
         o.insert("hlr".into(), Value::Object(hlr));
+        o.insert("anchors".into(), Value::Object(anchors));
     }
     json!({
         "projection": { "kind": "drawing", "data": data },
@@ -248,6 +337,104 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
         "diagnostics": problems,
     })
     .to_string()
+}
+
+fn capitalized(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn radius_mm(v: &runmat_cad::value::ValueExpr) -> Option<f64> {
+    match v {
+        runmat_cad::value::ValueExpr::Quantity { value, unit } if unit == "mm" => Some(*value),
+        runmat_cad::value::ValueExpr::Number { value } => Some(*value),
+        _ => None,
+    }
+}
+
+/// A model point (mm) a reference names: a cylindrical face's axis at its middle, a face's
+/// centre, or where two faces meet (`edges_between`, also after a blend rounded it away).
+fn point_of(
+    display: &Value,
+    reference: &runmat_cad::refs::reference::Reference,
+) -> Option<[f64; 3]> {
+    use runmat_cad::refs::reference::Reference as R;
+    let text = |r: &R| runmat_cad::syntax::refs::print_reference(r);
+    let mean = |pts: &[[f64; 3]]| {
+        let n = pts.len().max(1) as f64;
+        [0, 1, 2].map(|i| pts.iter().map(|p| p[i]).sum::<f64>() / n)
+    };
+    if let R::EdgesBetween { a, b, .. } = reference {
+        let (pa, _) = values::face(display, &text(a.as_ref())?)?;
+        let (pb, _) = values::face(display, &text(b.as_ref())?)?;
+        let mut best = (f64::MAX, [0.0; 3]);
+        for p in &pa {
+            for q in &pb {
+                let d = (0..3).map(|i| (p[i] - q[i]).powi(2)).sum::<f64>();
+                if d < best.0 {
+                    best = (d, [0, 1, 2].map(|i| (p[i] + q[i]) / 2.0));
+                }
+            }
+        }
+        return (best.0 < f64::MAX).then_some(best.1);
+    }
+    let (pts, surface) = values::face(display, &text(reference)?)?;
+    if let Some((p, d, _)) = values::cylinder(surface) {
+        let c = mean(&pts);
+        let t = dot([c[0] - p[0], c[1] - p[1], c[2] - p[2]], d);
+        return Some([0, 1, 2].map(|i| p[i] + d[i] * t));
+    }
+    Some(mean(&pts))
+}
+
+/// A section view's lines and hatch, and its cutting line on the parent view (at `v` in the
+/// parent's view millimetres, with the label and the direction the arrows point).
+fn section_entry(
+    display: &Value,
+    document: &runmat_cad::drawing::DrawingDocument,
+    name: &str,
+    parent: &crate::hlr::Axes,
+    views: &Value,
+    from: &str,
+) -> Value {
+    let Some((plane, label)) =
+        document
+            .views
+            .iter()
+            .find(|v| v.name == name)
+            .and_then(|v| match &v.kind {
+                runmat_cad::drawing::ViewKind::Section { plane, label, .. } => {
+                    Some((plane, label.clone()))
+                }
+                _ => None,
+            })
+    else {
+        return Value::Null;
+    };
+    let _ = views;
+    let Some(p0) = point_of(display, plane) else {
+        return Value::Null;
+    };
+    let axes = crate::hlr::Axes {
+        u: parent.u,
+        v: parent.depth.map(|x| -x),
+        depth: parent.v,
+    };
+    let mut lines =
+        serde_json::to_value(crate::hlr::section_lines(display, &axes, p0)).unwrap_or(Value::Null);
+    if let Value::Object(o) = &mut lines {
+        o.insert(
+            "cut".into(),
+            json!({ "view": from, "at": dot(p0, parent.v), "label": label, "toward": [dot(axes.depth, parent.u), dot(axes.depth, parent.v)] }),
+        );
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -282,6 +469,70 @@ mod tests {
         );
     }
 
+    /// The Desktop's standard drawing of the showcase bracket: three views at 2:1, section
+    /// A–A through the hole, detail B of the round, model dimensions, a hole callout and a
+    /// GD&T frame from the part's PMI.
+    #[test]
+    fn the_standard_drawing_measures_its_model_and_cuts_its_section() {
+        const PART: &str = include_str!(
+            "../../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures/bracket.part"
+        );
+        const STANDARD: &str = include_str!(
+            "../../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures/bracket-standard.drawing"
+        );
+        let files: Files = [("/p/bracket.part".to_owned(), PART.to_owned())]
+            .into_iter()
+            .collect();
+        let out: Value =
+            serde_json::from_str(&compile_json("/p/bracket.drawing", STANDARD, &files)).unwrap();
+        let data = &out["projection"]["data"];
+        assert_eq!(
+            out["diagnostics"].as_array().map(Vec::len),
+            Some(0),
+            "{}",
+            out["diagnostics"]
+        );
+        assert_eq!(
+            data["diagnostics"].as_array().map(Vec::len),
+            Some(0),
+            "{}",
+            data["diagnostics"]
+        );
+        let text = &data["text"];
+        assert_eq!(text["width"], "80");
+        assert_eq!(text["thickness"], "10");
+        assert_eq!(text["depth"], "50");
+        assert_eq!(text["hole"], "⌀4 THRU");
+        assert_eq!(text["parallel"], "∥|0.05|A");
+        // The width's references: the two side faces, 80 mm apart along x.
+        let w = &data["anchors"]["width"];
+        assert!(
+            (w[1][0].as_f64().unwrap() - w[0][0].as_f64().unwrap() - 80.0).abs() < 1e-3,
+            "{w}"
+        );
+        let rows = data["title_blocks"]["1"].to_string();
+        assert!(
+            rows.contains("Aluminum") && rows.contains("BR-100") && rows.contains("2:1"),
+            "{rows}"
+        );
+        // Section A–A: the cut through the hole's axis, hatched in two pieces either side of
+        // the hole, and its cutting line on the top view at y = 10 mm.
+        let section = &data["hlr"]["a_a"];
+        let hatch = section["hatch"].as_array().map(Vec::len).unwrap_or(0);
+        assert!(hatch >= 2, "{} hatch loops", hatch);
+        assert_eq!(section["cut"]["view"], "top");
+        assert!(
+            (section["cut"]["at"].as_f64().unwrap() - 10.0).abs() < 1e-6,
+            "{}",
+            section["cut"]
+        );
+        assert!(section["hidden"].as_array().is_some_and(|h| h.is_empty()));
+        // Detail B: centred on the rounded edge as the right view sees it (y = 0, z = 10).
+        let c = &data["hlr"]["b"]["detail"]["center"];
+        let (u, v) = (c[0].as_f64().unwrap(), c[1].as_f64().unwrap());
+        assert!(u.abs() < 1.6 && (v - 10.0).abs() < 1.6, "{c}");
+    }
+
     #[test]
     fn a_missing_model_is_a_warning_and_the_drawing_still_compiles() {
         let out: Value =
@@ -301,5 +552,54 @@ mod tests {
                 .unwrap();
         assert!(out.get("projection").is_none());
         assert!(!out["diagnostics"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn auto_drawing_lays_out_views_a_section_and_hole_callouts() {
+        const PART: &str = include_str!(
+            "../../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures/bracket.part"
+        );
+        let files: Files = [("/p/bracket.part".to_owned(), PART.to_owned())]
+            .into_iter()
+            .collect();
+        let values = serde_json::json!({ "model": "bracket.part" });
+        let (change, summary) =
+            auto::auto("/p/auto.drawing", "", &files, values.as_object().unwrap()).unwrap();
+        assert!(
+            summary.contains("2:1") && summary.contains("section A-A"),
+            "{summary}"
+        );
+        let out: Value =
+            serde_json::from_str(&compile_json("/p/auto.drawing", &change.source, &files)).unwrap();
+        let data = &out["projection"]["data"];
+        assert_eq!(
+            data["diagnostics"].as_array().map(Vec::len),
+            Some(0),
+            "{}\n{}",
+            data["diagnostics"],
+            change.source
+        );
+        assert_eq!(data["document"]["views"].as_array().map(Vec::len), Some(4));
+        assert_eq!(data["text"]["width"], "80");
+        assert_eq!(data["text"]["depth"], "50");
+        assert_eq!(data["text"]["thickness"], "10");
+        assert_eq!(data["text"]["hole1"], "⌀4 THRU");
+        assert!(data["hlr"]["a_a"]["hatch"]
+            .as_array()
+            .is_some_and(|h| !h.is_empty()));
+        // Run again: the drawing keeps its sheet and gains fresh names.
+        let (again, _) = auto::auto(
+            "/p/auto.drawing",
+            &change.source,
+            &files,
+            values.as_object().unwrap(),
+        )
+        .unwrap();
+        assert!(
+            again.source.contains("view front2 = standard("),
+            "{}",
+            again.source
+        );
+        assert_eq!(again.source.matches("sheet \"1\" =").count(), 1);
     }
 }

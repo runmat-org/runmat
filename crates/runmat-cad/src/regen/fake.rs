@@ -2242,6 +2242,82 @@ fn build_topology(s: &mut FakeSolid) {
             }
         }
     }
+    // Each blend piece meets the face across each of its ends along an arc (a chamfer: a
+    // line) between its two tangent points, the edge a B-rep kernel builds there.
+    let mut arcs: Vec<EdgeRow> = Vec::new();
+    for dec in &decorations {
+        for &(_, _, fidx) in &dec.pieces {
+            let Some((sharp, ends)) = final_edges
+                .iter()
+                .find(|(e, _, _)| e.faces[1] == fidx)
+                .map(|(e, _, ends)| (e, ends.clone()))
+            else {
+                continue;
+            };
+            let (f0, f1) = (sharp.faces[0], {
+                let other = final_edges
+                    .iter()
+                    .find(|(e, _, _)| e.faces[0] == fidx)
+                    .map(|(e, _, _)| e.faces[1]);
+                match other {
+                    Some(f) => f,
+                    None => continue,
+                }
+            });
+            for end in ends {
+                // The face across the end: it shares an edge at this corner with both faces.
+                let at_end = |f: u32| -> BTreeSet<u32> {
+                    final_edges
+                        .iter()
+                        .filter(|(e, _, ends)| ends.contains(&end) && e.faces.contains(&f))
+                        .flat_map(|(e, _, _)| e.faces)
+                        .filter(|x| *x != f && *x != fidx)
+                        .collect()
+                };
+                let across: Vec<u32> = at_end(f0)
+                    .intersection(&at_end(f1))
+                    .copied()
+                    .filter(|x| *x != f0 && *x != f1)
+                    .collect();
+                let [x] = across.as_slice() else {
+                    continue;
+                };
+                let corner = world(end);
+                let [(a0, s0), (a1, s1)] = dec.planes.map(|p| (p.axis, p.dir as f64));
+                let mut t0 = corner;
+                t0[a1] -= s1 * dec.size;
+                let mut t1 = corner;
+                t1[a0] -= s0 * dec.size;
+                let (start, finish) = if t0 <= t1 { (t0, t1) } else { (t1, t0) };
+                let length = dec.size
+                    * if dec.role == Role::Chamfer {
+                        std::f64::consts::SQRT_2
+                    } else {
+                        std::f64::consts::FRAC_PI_2
+                    };
+                arcs.push((
+                    EdgeTopo {
+                        faces: [*x, fidx],
+                        geom: EdgeGeom {
+                            start,
+                            end: finish,
+                            length,
+                        },
+                        laminar: false,
+                    },
+                    EdgeMeta {
+                        along: dec.along,
+                        at: corner,
+                        lo: corner[dec.along],
+                        hi: corner[dec.along],
+                        planes: None,
+                    },
+                    vec![end],
+                ));
+            }
+        }
+    }
+    final_edges.extend(arcs);
     for (f, g) in new_faces {
         s.faces.push(f);
         topo.faces.push(FaceTopo { geom: g });

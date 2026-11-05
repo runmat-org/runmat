@@ -10,9 +10,12 @@
 //! Parts: `part.extrude` (blind, mid-plane and through-all ends in one or two directions, add,
 //! cut, intersect or a new body, sketch-plane or offset start, draft and thin walls),
 //! `part.delete`, `part.suppress`, `part.unsuppress`, `part.move-up` and `part.move-down`.
+//! Sketches: `part.sketch` and the sketch tools ([`sketch`]).
 //! Assemblies: `assembly.delete`, `assembly.suppress` and `assembly.fix` on the file's own
 //! occurrences. Every other part command that adds a feature is built by [`crate::features`] from
 //! its values and picks ([`crate::picks`]); a command or option the model lacks says so.
+
+mod sketch;
 
 use crate::runtime::{compile_assembly, Files};
 use runmat_cad::assembly::model::AssemblyDocument;
@@ -84,7 +87,7 @@ fn file_change(path: &str, old: &str, change: SourceChange) -> FileChange {
     }
 }
 
-fn model(message: impl Into<String>) -> EditFailure {
+pub(crate) fn model(message: impl Into<String>) -> EditFailure {
     EditFailure::Model(message.into())
 }
 
@@ -190,6 +193,10 @@ fn part_edit(
                 .document
                 .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
             let picks = crate::picks::Picks::new(&document, path, text);
+            if let Some(result) = sketch::sketch_edit(path, text, command, &request.values, &picks)
+            {
+                return result;
+            }
             let Some((stem, kind)) =
                 crate::features::feature_kind(command, &request.values, &picks)?
             else {
@@ -318,7 +325,16 @@ pub fn edit(
     files: &Files,
     request: &EditRequest,
 ) -> Result<EditOutput, EditFailure> {
-    let (change, summary) = if path.ends_with(".assembly") {
+    let (change, summary) = if path.ends_with(".drawing") {
+        match request.command.as_str() {
+            "drawing.auto" => crate::drawing::auto::auto(path, text, files, &request.values)?,
+            other => {
+                return Err(model(format!(
+                    "`{other}` edits drawings through the source editor in this build"
+                )))
+            }
+        }
+    } else if path.ends_with(".assembly") {
         assembly_edit(path, text, files, request)?
     } else {
         part_edit(path, text, request)?
