@@ -44,15 +44,19 @@ fn saved(chunks: Vec<GeometrySceneChunk>) -> GeometryScene {
 }
 
 async fn render(name: &str, scene: &GeometryScene) -> Vec<u8> {
+    render_at(name, scene, SIZE, SIZE).await
+}
+
+async fn render_at(name: &str, scene: &GeometryScene, width: u32, height: u32) -> Vec<u8> {
     let exporter = ImageExporter::with_settings(ImageExportSettings {
-        width: SIZE,
-        height: SIZE,
+        width,
+        height,
         ..Default::default()
     })
     .await
     .unwrap();
     let mut camera = Camera::new();
-    camera.update_aspect_ratio(1.0);
+    camera.update_aspect_ratio(width as f32 / height as f32);
     camera.target = Vec3::ZERO;
     camera.up = Vec3::Y;
     camera.position = Vec3::new(0.0, 0.0, 6.0);
@@ -68,7 +72,7 @@ async fn render(name: &str, scene: &GeometryScene) -> Vec<u8> {
     image::load_from_memory(&png).unwrap().to_rgba8().into_raw()
 }
 
-/// The colour at the image centre.
+/// The color at the image center.
 fn centre(rgba: &[u8]) -> [i32; 3] {
     let index = (((SIZE / 2) * SIZE + SIZE / 2) * 4) as usize;
     [0, 1, 2].map(|channel| rgba[index + channel] as i32)
@@ -286,4 +290,112 @@ async fn a_result_scene_draws_its_caption_as_title() {
         cad <= without + 5,
         "CAD source title drawn: {cad} vs {without}"
     );
+}
+
+/// Rows (from the top) holding caption ink: pixels across the middle third of the width that
+/// differ from the background, above the result.
+fn caption_rows(rgba: &[u8], width: u32, height: u32) -> Vec<u32> {
+    let background = &rgba[(((height - 2) * width + 4) * 4) as usize..][..3];
+    (0..height / 6)
+        .filter(|&y| {
+            (width / 3..2 * width / 3).any(|x| {
+                let i = ((y * width + x) * 4) as usize;
+                (0..3)
+                    .map(|c| (rgba[i + c] as i32 - background[c] as i32).abs())
+                    .sum::<i32>()
+                    > 90
+            })
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_result_caption_is_laid_out_inside_the_frame() {
+    let (width, height) = (640, 400);
+    let mut scene = saved(vec![square("result", 0.0, 0.5, RESULT)]);
+    scene.overlay = Some(result_overlay());
+    scene.title = Some("Steady thermal on the cells".into());
+    let rows = caption_rows(
+        &render_at("caption-inside", &scene, width, height).await,
+        width,
+        height,
+    );
+    assert!(rows.len() >= 6, "caption not drawn: rows {rows:?}");
+    // The whole caption sits below the top edge: its glyphs are not cut off.
+    assert!(
+        rows[0] >= 2,
+        "caption clipped at the top edge: rows {rows:?}"
+    );
+}
+
+/// A grey square below the world origin, so the origin triad (at z = 0, nearer the camera on
+/// +z) would be drawn over it.
+fn grey_scene(result: bool, show_grid: bool, show_triad: bool) -> GeometryScene {
+    let mut scene = GeometryScene::new(
+        "triad",
+        1,
+        vec![square("plate", -0.5, 0.5, [0.45, 0.45, 0.45, 1.0])],
+    );
+    scene.show_grid = show_grid;
+    scene.show_orientation_triad = show_triad;
+    if result {
+        scene.overlay = Some(result_overlay());
+    }
+    FigureScene::from_geometry_scene(&scene)
+        .into_geometry_scene("triad", 1)
+        .unwrap()
+}
+
+/// Pixels whose color is dominated by red or green, the triad's x and y axis colors, in a
+/// region given as fractions of the frame (x0, y0, x1, y1).
+fn triad_ink(rgba: &[u8], region: [f32; 4]) -> usize {
+    let at = |fraction: f32| (fraction * SIZE as f32) as u32;
+    (at(region[1])..at(region[3]))
+        .flat_map(|y| (at(region[0])..at(region[2])).map(move |x| ((y * SIZE + x) * 4) as usize))
+        .filter(|&i| {
+            let [r, g, b] = [0, 1, 2].map(|c| rgba[i + c] as i32);
+            (r > g + 70 && r > b + 70) || (g > r + 70 && g > b + 70)
+        })
+        .count()
+}
+
+#[tokio::test]
+async fn result_scenes_never_draw_the_world_triad() {
+    // Away from the corner triad: the right part of the frame below the legend.
+    let middle = [0.35, 0.45, 1.0, 1.0];
+    let cad = triad_ink(
+        &render("triad-cad", &grey_scene(false, true, false)).await,
+        middle,
+    );
+    let result = triad_ink(
+        &render("triad-result", &grey_scene(true, true, false)).await,
+        middle,
+    );
+    assert!(
+        cad > 20,
+        "a CAD preview draws its world triad: {cad} pixels"
+    );
+    assert!(
+        result <= 2,
+        "a result scene drew the world triad: {result} pixels"
+    );
+}
+
+#[tokio::test]
+async fn the_corner_triad_and_grid_are_scene_options() {
+    let corner = [0.0, 0.6, 0.4, 1.0];
+    let on = triad_ink(
+        &render("corner-on", &grey_scene(true, false, true)).await,
+        corner,
+    );
+    let off = triad_ink(
+        &render("corner-off", &grey_scene(true, false, false)).await,
+        corner,
+    );
+    assert!(on > 20, "corner triad missing: {on} pixels");
+    assert!(off <= 2, "corner triad drawn while off: {off} pixels");
+    // The options survive the saved scene.
+    let saved = grey_scene(true, false, false);
+    assert!(!saved.show_grid && !saved.show_orientation_triad);
+    assert!(grey_scene(true, true, true).show_orientation_triad);
 }

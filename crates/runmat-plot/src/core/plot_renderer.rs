@@ -2710,43 +2710,46 @@ impl PlotRenderer {
                 grid_plane_buffers = Some((vb, ib));
             }
 
-            let origin = frame.origin;
-            let col_x = Vec4::new(0.92, 0.25, 0.25, 0.85);
-            let col_y = Vec4::new(0.35, 0.90, 0.45, 0.85);
-            let col_z = Vec4::new(0.35, 0.62, 0.98, 0.85);
-            push_line(origin, origin + Vec3::new(frame.lens[0], 0.0, 0.0), col_x);
-            push_line(origin, origin + Vec3::new(0.0, frame.lens[1], 0.0), col_y);
-            push_line(
-                frame.z_base,
-                frame.z_base + Vec3::new(0.0, 0.0, frame.lens[2]),
-                col_z,
-            );
+            // A result scene leaves the world triad out (see `shows_world_triad`).
+            if self.shows_world_triad(axes_index) {
+                let origin = frame.origin;
+                let col_x = Vec4::new(0.92, 0.25, 0.25, 0.85);
+                let col_y = Vec4::new(0.35, 0.90, 0.45, 0.85);
+                let col_z = Vec4::new(0.35, 0.62, 0.98, 0.85);
+                push_line(origin, origin + Vec3::new(frame.lens[0], 0.0, 0.0), col_x);
+                push_line(origin, origin + Vec3::new(0.0, frame.lens[1], 0.0), col_y);
+                push_line(
+                    frame.z_base,
+                    frame.z_base + Vec3::new(0.0, 0.0, frame.lens[2]),
+                    col_z,
+                );
 
-            // Tick marks on the axis lines (major step only). Labels are drawn in the overlay
-            // from the same frame so they stay crisp; these marks anchor them in depth.
-            for (axis_index, (axis, perp, perp_index, col)) in [
-                (Vec3::X, Vec3::Y, 1, col_x),
-                (Vec3::Y, Vec3::X, 0, col_y),
-                (Vec3::Z, Vec3::X, 0, col_z),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                // A tick mark extends along the perpendicular axis, so its length is measured in
-                // that axis's units: 3-D axes may scale x, y and z differently.
-                let perp_len = frame.lens[perp_index];
-                let perp_step = frame.steps[perp_index] as f32;
-                // `f32::clamp` panics if min > max; keep the minimum below the maximum.
-                let tick_max = (perp_step * 0.25).max(1.0e-6);
-                let tick_min = (perp_len * 0.002).min(tick_max);
-                let tick_len = (perp_len * 0.02).clamp(tick_min, tick_max);
-                for (offset, _value) in frame.ticks(axis_index) {
-                    let p = frame.axis_start(axis_index) + axis * offset;
-                    push_line(
-                        p - perp * tick_len,
-                        p + perp * tick_len,
-                        Vec4::new(col.x, col.y, col.z, col.w * 0.85),
-                    );
+                // Tick marks on the axis lines (major step only). Labels are drawn in the overlay
+                // from the same frame so they stay crisp; these marks anchor them in depth.
+                for (axis_index, (axis, perp, perp_index, col)) in [
+                    (Vec3::X, Vec3::Y, 1, col_x),
+                    (Vec3::Y, Vec3::X, 0, col_y),
+                    (Vec3::Z, Vec3::X, 0, col_z),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    // A tick mark extends along the perpendicular axis, so its length is measured in
+                    // that axis's units: 3-D axes may scale x, y and z differently.
+                    let perp_len = frame.lens[perp_index];
+                    let perp_step = frame.steps[perp_index] as f32;
+                    // `f32::clamp` panics if min > max; keep the minimum below the maximum.
+                    let tick_max = (perp_step * 0.25).max(1.0e-6);
+                    let tick_min = (perp_len * 0.002).min(tick_max);
+                    let tick_len = (perp_len * 0.02).clamp(tick_min, tick_max);
+                    for (offset, _value) in frame.ticks(axis_index) {
+                        let p = frame.axis_start(axis_index) + axis * offset;
+                        push_line(
+                            p - perp * tick_len,
+                            p + perp * tick_len,
+                            Vec4::new(col.x, col.y, col.z, col.w * 0.85),
+                        );
+                    }
                 }
             }
 
@@ -3959,6 +3962,27 @@ impl PlotRenderer {
         }
     }
 
+    /// Whether a geometry scene is a result: one colored by a field, with a scalar legend.
+    pub fn geometry_scene_is_result(&self) -> bool {
+        self.geometry_overlay
+            .as_ref()
+            .is_some_and(|overlay| overlay.scalar_legend.is_some())
+    }
+
+    /// Whether one 3-D axes draws its world-axis lines, tick marks and tick labels. A result
+    /// scene never does: a CAD world-origin triad drawn through a colored field reads as data.
+    pub fn shows_world_triad(&self, axes_index: usize) -> bool {
+        !(self.axes_shows_geometry(axes_index) && self.geometry_scene_is_result())
+    }
+
+    /// Whether the corner orientation triad is drawn: a geometry scene's own setting; figures
+    /// follow `axis on`/`axis off` alone.
+    pub fn shows_orientation_triad(&self) -> bool {
+        self.last_geometry_scene
+            .as_ref()
+            .is_none_or(|scene| scene.show_orientation_triad)
+    }
+
     pub fn geometry_xray_enabled(&self) -> bool {
         self.geometry_xray_enabled
     }
@@ -4244,7 +4268,16 @@ impl PlotRenderer {
     pub fn overlay_sg_title_style(&self) -> &TextStyle {
         &self.figure_sg_title_style
     }
+    /// The title of one axes. A geometry scene that draws its title (see
+    /// [`Self::shows_geometry_title`]) has it on its one axes, so the overlay lays out a title
+    /// band for it as it does for a figure's axes title.
     pub fn overlay_title_for_axes(&self, axes_index: usize) -> Option<&String> {
+        if self.last_figure.is_none() && self.has_geometry_scene() {
+            return self
+                .figure_title
+                .as_ref()
+                .filter(|_| axes_index == 0 && self.shows_geometry_title());
+        }
         self.last_figure
             .as_ref()
             .and_then(|f| f.axes_metadata(axes_index))

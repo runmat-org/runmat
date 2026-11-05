@@ -29,6 +29,8 @@ pub struct GeometryScene {
     pub chunks: Vec<GeometrySceneChunk>,
     pub bounds: BoundingBox,
     pub show_grid: bool,
+    /// Draw the corner orientation triad (on by default).
+    pub show_orientation_triad: bool,
     pub axis_equal: bool,
     /// Unit provenance is attached to the rendered representation, not supplied
     /// by a later measurement caller. Legacy/unitless scenes remain explicit.
@@ -69,6 +71,7 @@ impl GeometryScene {
             chunks,
             bounds,
             show_grid: true,
+            show_orientation_triad: true,
             axis_equal: true,
             observation_callouts: Vec::new(),
             physical_context: None,

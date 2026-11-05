@@ -35,6 +35,15 @@ struct ContextGeometry {
     chunks: Vec<GeometrySceneChunk>,
 }
 
+/// What the poster camera frames.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(in crate::commands::fea) enum Frame {
+    /// Every view's whole scene: the result and its context geometry.
+    All,
+    /// The solved mesh alone; context geometry may reach past the frame.
+    Result,
+}
+
 pub(in crate::commands::fea) struct Presentation {
     context: Vec<ContextGeometry>,
     pub caption: Option<String>,
@@ -42,6 +51,13 @@ pub(in crate::commands::fea) struct Presentation {
     pub poster_height: u32,
     /// MATLAB `view(az, el)` in degrees, when not the standard poster view.
     pub view_angle: Option<(f32, f32)>,
+    pub frame: Frame,
+    /// The camera frames this multiple of the framed bounds, about their center.
+    pub frame_padding: f32,
+    pub show_grid: bool,
+    pub show_triad: bool,
+    /// Text and overlay size relative to the standard poster.
+    pub text_scale: f32,
 }
 
 impl Default for Presentation {
@@ -52,6 +68,11 @@ impl Default for Presentation {
             poster_width: 1200,
             poster_height: 750,
             view_angle: None,
+            frame: Frame::All,
+            frame_padding: 1.0,
+            show_grid: true,
+            show_triad: true,
+            text_scale: 1.0,
         }
     }
 }
@@ -76,11 +97,18 @@ impl Presentation {
             poster_width,
             poster_height,
             view_angle: args.view_angle.as_deref().map(parse_angle).transpose()?,
+            frame: parse_frame(&args.frame)?,
+            frame_padding: parse_padding(args.frame_padding)?,
+            show_grid: !args.no_grid,
+            show_triad: !args.no_triad,
+            text_scale: parse_text_scale(args.text_scale)?,
         })
     }
 
-    /// Add the context geometry and caption to one view's scene.
+    /// Add the context geometry, caption and display settings to one view's scene.
     pub fn dress(&self, scene: &mut GeometryScene) {
+        scene.show_grid &= self.show_grid;
+        scene.show_orientation_triad &= self.show_triad;
         let chunks: Vec<_> = self
             .context
             .iter()
@@ -102,7 +130,7 @@ impl Presentation {
     }
 
     pub fn pixels_per_point(&self) -> f32 {
-        (self.poster_width as f32 / POSTER_REFERENCE_WIDTH).max(1.0)
+        (self.poster_width as f32 / POSTER_REFERENCE_WIDTH).max(1.0) * self.text_scale
     }
 
     pub fn aspect_ratio(&self) -> f32 {
@@ -259,6 +287,30 @@ fn parse_angle(text: &str) -> Result<(f32, f32)> {
     Ok((azimuth, elevation))
 }
 
+fn parse_frame(text: &str) -> Result<Frame> {
+    Ok(match text.to_ascii_lowercase().as_str() {
+        "all" => Frame::All,
+        "result" => Frame::Result,
+        other => bail!("poster frame must be 'all' or 'result', got '{other}'"),
+    })
+}
+
+fn parse_padding(padding: f32) -> Result<f32> {
+    ensure!(
+        padding.is_finite() && (1.0..=50.0).contains(&padding),
+        "frame padding must be 1 to 50, got {padding}"
+    );
+    Ok(padding)
+}
+
+fn parse_text_scale(scale: f32) -> Result<f32> {
+    ensure!(
+        scale.is_finite() && (0.5..=4.0).contains(&scale),
+        "text scale must be 0.5 to 4, got {scale}"
+    );
+    Ok(scale)
+}
+
 fn parse_units(text: &str) -> Result<LengthUnit> {
     Ok(match text.to_ascii_lowercase().as_str() {
         "m" | "meter" | "meters" | "metre" | "metres" => LengthUnit::Meter,
@@ -358,5 +410,59 @@ mod tests {
             runmat_plot::core::AlphaMode::Blend
         );
         assert_eq!(presentation.records()[0].shows, "geometry");
+        // The standard presentation keeps the scene's grid and corner triad.
+        assert!(scene.show_grid && scene.show_orientation_triad);
+    }
+
+    #[test]
+    fn hero_dressing_turns_the_grid_and_corner_triad_off() {
+        let presentation = Presentation {
+            show_grid: false,
+            show_triad: false,
+            ..Default::default()
+        };
+        let triangle = GeometrySceneChunk::indexed_triangles(
+            "result",
+            (0..3)
+                .map(|i| {
+                    runmat_plot::geometry_scene_vertex(
+                        [i as f32, (i * i) as f32, 0.0],
+                        [0.9, 0.1, 0.1, 1.0],
+                        [0.0, 0.0, 1.0],
+                    )
+                })
+                .collect(),
+            vec![0, 1, 2],
+            runmat_plot::cad_default_material(),
+        );
+        let mut scene = GeometryScene::new("result", 1, vec![triangle]);
+        presentation.dress(&mut scene);
+        assert!(!scene.show_grid);
+        assert!(!scene.show_orientation_triad);
+        // Both survive the saved scene payload the poster and the live viewer draw.
+        let saved = runmat_plot::event::FigureScene::from_geometry_scene(&scene);
+        let json = serde_json::to_string(&saved).unwrap();
+        let restored: runmat_plot::event::FigureScene = serde_json::from_str(&json).unwrap();
+        assert!(!restored.geometry_orientation_triad);
+        assert!(!restored.metadata.grid_enabled);
+    }
+
+    #[test]
+    fn framing_and_text_scale_parse() {
+        assert_eq!(parse_frame("all").unwrap(), Frame::All);
+        assert_eq!(parse_frame("Result").unwrap(), Frame::Result);
+        assert!(parse_frame("module").is_err());
+        assert_eq!(parse_padding(1.6).unwrap(), 1.6);
+        assert!(parse_padding(0.8).is_err());
+        assert!(parse_padding(f32::NAN).is_err());
+        assert_eq!(parse_text_scale(2.0).unwrap(), 2.0);
+        assert!(parse_text_scale(0.0).is_err());
+        let hero = Presentation {
+            poster_width: 2400,
+            poster_height: 1500,
+            text_scale: 1.5,
+            ..Default::default()
+        };
+        assert_eq!(hero.pixels_per_point(), 3.0);
     }
 }

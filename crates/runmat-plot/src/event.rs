@@ -46,6 +46,14 @@ pub struct FigureSnapshot {
     pub plots: Vec<PlotDescriptor>,
 }
 
+fn orientation_triad_default() -> bool {
+    true
+}
+
+fn orientation_triad_is_default(shown: &bool) -> bool {
+    *shown
+}
+
 /// Full replay scene payload capable of reconstructing a figure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +64,13 @@ pub struct FigureScene {
     pub geometry_overlay: Option<crate::geometry_scene::GeometrySceneOverlay>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub geometry_lines: Vec<GeometryLines>,
+    /// A geometry scene's corner orientation triad (see
+    /// [`crate::geometry_scene::GeometryScene::show_orientation_triad`]); written only when off.
+    #[serde(
+        default = "orientation_triad_default",
+        skip_serializing_if = "orientation_triad_is_default"
+    )]
+    pub geometry_orientation_triad: bool,
     pub schema_version: u32,
     pub layout: FigureLayout,
     pub metadata: FigureMetadata,
@@ -744,6 +759,7 @@ impl FigureScene {
             geometry_overlay: None,
             geometry_physical_context: None,
             geometry_lines: Vec::new(),
+            geometry_orientation_triad: true,
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots,
@@ -780,6 +796,7 @@ impl FigureScene {
             geometry_overlay: None,
             geometry_physical_context: None,
             geometry_lines: Vec::new(),
+            geometry_orientation_triad: true,
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots,
@@ -822,6 +839,7 @@ impl FigureScene {
                 .iter()
                 .filter_map(|chunk| GeometryLines::capture(chunk, grid))
                 .collect(),
+            geometry_orientation_triad: scene.show_orientation_triad,
             layout: FigureLayout {
                 axes_rows: 1,
                 axes_cols: 1,
@@ -918,6 +936,7 @@ impl FigureScene {
         scene.overlay = self.geometry_overlay;
         scene.physical_context = self.geometry_physical_context;
         scene.show_grid = self.metadata.grid_enabled;
+        scene.show_orientation_triad = self.geometry_orientation_triad;
         scene.axis_equal = self.metadata.axis_equal;
         Ok(scene)
     }
@@ -4449,6 +4468,7 @@ mod tests {
             geometry_overlay: None,
             geometry_physical_context: None,
             geometry_lines: Vec::new(),
+            geometry_orientation_triad: true,
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots: vec![ScenePlot::Surface {
@@ -5555,6 +5575,7 @@ mod tests {
             geometry_overlay: None,
             geometry_physical_context: None,
             geometry_lines: Vec::new(),
+            geometry_orientation_triad: true,
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots: vec![ScenePlot::Surface {

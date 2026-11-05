@@ -67,6 +67,7 @@ struct Encoded {
     maximum: Option<f64>,
     position_error_m: f64,
     bounds: runmat_plot::core::BoundingBox,
+    result_bounds: runmat_plot::core::BoundingBox,
     bytes: Vec<u8>,
     deformation_scale: f64,
     scalar_scale: f64,
@@ -76,7 +77,10 @@ struct Encoded {
 
 struct Written {
     view: View,
+    /// The whole scene, context geometry included.
     bounds: runmat_plot::core::BoundingBox,
+    /// The result alone.
+    result_bounds: runmat_plot::core::BoundingBox,
 }
 
 /// Mesh coordinates and element corners of one run, kept only while its views are captured.
@@ -88,7 +92,7 @@ type MeshEntities = (Vec<[f64; 3]>, Vec<Vec<usize>>);
 /// Views stream: each scene is built, encoded and written before the next one is built, so
 /// at most one view's geometry is in memory. Posters are drawn in a second pass from the
 /// written scenes (the persisted representation, the same one the live viewer loads) with one
-/// camera framed on the union of every view's bounds.
+/// camera framed on the union of every view's bounds (or of their results alone).
 pub(super) async fn capture(
     output: &Path,
     profile: CaptureProfile,
@@ -181,6 +185,7 @@ pub(super) async fn capture(
                     (scene, deformation_scale, Some(surface), None)
                 }
             };
+            let result_bounds = scene.bounds;
             presentation.dress(&mut scene);
             let mut scalar_scale = 1.0;
             if let Some(legend) = scene
@@ -208,6 +213,7 @@ pub(super) async fn capture(
                     &scene,
                 ),
                 bounds: scene.bounds,
+                result_bounds,
                 bytes: plotting::encode_geometry_figure_scene(
                     &runmat_plot::event::FigureScene::from_geometry_scene(&scene),
                 )?,
@@ -226,6 +232,7 @@ pub(super) async fn capture(
             maximum,
             position_error_m,
             bounds,
+            result_bounds,
             bytes,
             deformation_scale,
             scalar_scale,
@@ -257,6 +264,7 @@ pub(super) async fn capture(
             .map(|deformation| deformation.field_id);
         written.push(Written {
             bounds,
+            result_bounds,
             view: View {
                 poster: format!("{id}.png"),
                 id,
@@ -298,7 +306,12 @@ pub(super) async fn capture(
     }
     drop(mesh);
     let camera = camera::shared_camera(
+        written.iter().map(|view| match presentation.frame {
+            presentation::Frame::All => view.bounds,
+            presentation::Frame::Result => view.result_bounds,
+        }),
         written.iter().map(|view| view.bounds),
+        presentation.frame_padding,
         presentation
             .view_angle
             .map(|(azimuth, elevation)| camera::view_direction(azimuth, elevation)),

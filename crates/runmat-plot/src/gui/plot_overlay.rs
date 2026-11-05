@@ -2615,6 +2615,9 @@ impl PlotOverlay {
         axes_index: usize,
         font_scale: f32,
     ) {
+        if !plot_renderer.shows_orientation_triad() {
+            return;
+        }
         let cam_ref = plot_renderer
             .axes_camera(axes_index)
             .unwrap_or_else(|| plot_renderer.camera());
@@ -2735,6 +2738,9 @@ impl PlotOverlay {
         axes_index: usize,
         font_scale: f32,
     ) {
+        if !plot_renderer.shows_world_triad(axes_index) {
+            return;
+        }
         let cam_ref = plot_renderer
             .axes_camera(axes_index)
             .unwrap_or_else(|| plot_renderer.camera());

@@ -19,7 +19,7 @@ impl FeaRootArgs {
 
 /// How `snapshot` and `render-snapshot` draw their posters and scenes. Context geometry is drawn
 /// in every view's scene, so the live viewer shows it too.
-#[derive(Args, Clone, Debug, Default)]
+#[derive(Args, Clone, Debug)]
 pub struct SnapshotPresentationArgs {
     /// Draw this CAD file around the result as translucent context geometry (repeatable).
     /// Append `@OPACITY` (0 to 1, default 0.12) to set its surface opacity. Context geometry
@@ -39,4 +39,22 @@ pub struct SnapshotPresentationArgs {
     /// poster view, about view(19, 23))
     #[arg(long, value_name = "AZ,EL", allow_hyphen_values = true)]
     pub view_angle: Option<String>,
+    /// What the poster camera frames: `all` (the result and its context geometry) or `result`
+    /// (the solved mesh alone, with context geometry reaching past the frame)
+    #[arg(long, default_value = "all", value_name = "all|result")]
+    pub frame: String,
+    /// Frame this multiple of the framed bounds (1 or more), centered on them, so a `result`
+    /// frame keeps some of the surrounding context in view
+    #[arg(long, default_value_t = 1.0, value_name = "FACTOR")]
+    pub frame_padding: f32,
+    /// Leave the floor grid out of posters and scenes
+    #[arg(long)]
+    pub no_grid: bool,
+    /// Leave the corner orientation triad out of posters and scenes
+    #[arg(long)]
+    pub no_triad: bool,
+    /// Draw poster text (caption, legend, triad) this many times its standard size; a poster
+    /// shown small, such as a website hero on a phone, uses about 2
+    #[arg(long, default_value_t = 1.0, value_name = "FACTOR")]
+    pub text_scale: f32,
 }
