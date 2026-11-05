@@ -13,6 +13,7 @@ members = [
     "crates/runmat-circuit",
     "crates/runmat-circuit/wasm",
     "crates/runmat-circuit-spice",
+    "crates/runmat-circuit-sim",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",
