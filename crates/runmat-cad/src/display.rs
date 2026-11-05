@@ -89,6 +89,11 @@ pub struct BodyDisplay {
     /// absent: the part's appearance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 4]>,
+    /// The sheet metal's flat pattern (`sheet_metal.flat_pattern`), as SolidWorks keeps it: the
+    /// folded model hides it, its bounds leave it out and an assembly never draws it; the flat
+    /// pattern drawing and an on-demand show draw it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flat_pattern: bool,
 }
 
 /// A body the kernel could not draw, with why.
@@ -154,7 +159,11 @@ pub fn display_levels(
                 chord_max: Some(DISPLAY_CHORD_CEILING * scale),
             };
             let mut level = DisplayLevel::default();
-            for body in &result.state.bodies {
+            for (index, body) in result.state.bodies.iter().enumerate() {
+                // Levels draw an assembly's occurrences: the folded part only.
+                if is_flat_pattern_body(result, index) {
+                    continue;
+                }
                 let Ok(mesh) = kernel.tessellate(&body.handle, &coarse) else {
                     continue;
                 };
@@ -371,7 +380,25 @@ fn body_display(
         vertices,
         triangle_count: mesh.triangle_count() as u32,
         color: None,
+        flat_pattern: false,
     }
+}
+
+/// Whether the regeneration's body `index` is a sheet metal flat pattern: the body a
+/// `sheet_metal.flat_pattern` feature made.
+pub fn is_flat_pattern_body(result: &RegenResult, index: usize) -> bool {
+    let Some(body) = result.state.bodies.get(index) else {
+        return false;
+    };
+    let flat = |name: &EntityName| match name {
+        EntityName::Generated(g) => matches!(
+            result.state.records.get(&g.feature),
+            Some(crate::regen::records::FeatureRecord::FlatPattern { .. })
+        ),
+        _ => false,
+    };
+    body.names.body.iter().any(flat)
+        || (!body.names.faces.is_empty() && body.names.faces.iter().all(|names| names.iter().any(flat)))
 }
 
 /// The display projection of a regenerated part. A body the kernel cannot draw is listed in
@@ -390,26 +417,35 @@ pub fn part_display(
             regions.entry(name).or_default().push(region.as_str().to_string());
         }
     }
+    // The flat pattern's bounds count only when nothing folded draws.
+    let mut flat_bounds = None;
     for (i, body) in result.state.bodies.iter().enumerate() {
         match kernel.tessellate(&body.handle, options) {
             Ok(mesh) => {
+                let flat_pattern = is_flat_pattern_body(result, i);
                 if let Some((lo, hi)) = mesh.bounds() {
-                    out.bounds = Some(union(out.bounds.take(), lo, hi));
+                    let into = if flat_pattern { &mut flat_bounds } else { &mut out.bounds };
+                    *into = Some(union(into.take(), lo, hi));
                 }
-                out.bodies.push(body_display(
+                let mut display = body_display(
                     i as u32,
                     &mesh,
                     &body.names.body,
                     &body.names.faces,
                     &body.topology,
                     &regions,
-                ));
+                );
+                display.flat_pattern = flat_pattern;
+                out.bodies.push(display);
             }
             Err(error) => out.problems.push(DisplayProblem {
                 body: i as u32,
                 message: display_error(&error),
             }),
         }
+    }
+    if out.bounds.is_none() {
+        out.bounds = flat_bounds;
     }
     out
 }
@@ -507,8 +543,12 @@ pub fn assembly_display_configured(
             Some(p) => *p,
             None => {
                 let shape = match configured.get(&key).or_else(|| parts.get(&file)) {
+                    // An occurrence is the folded part: a sheet metal flat pattern stays out.
                     Some(part) => PrototypeShape::Mesh {
-                        part: Box::new(part.clone()),
+                        part: Box::new(PartDisplay {
+                            bodies: part.bodies.iter().filter(|b| !b.flat_pattern).cloned().collect(),
+                            ..part.clone()
+                        }),
                     },
                     None => match source
                         .configured(

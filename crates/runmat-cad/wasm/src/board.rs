@@ -147,6 +147,7 @@ pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
             vertices: Vec::new(),
             triangle_count: body.triangle_count as u32,
             color: Some(body.color.map(|c| c as f32)),
+            flat_pattern: false,
         })
         .collect();
     Ok(PartDisplay {

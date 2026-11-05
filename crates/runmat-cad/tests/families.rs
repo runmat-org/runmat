@@ -225,6 +225,41 @@ pub fn count_faces(r: &RegenResult, d: &PartDocument, refs: &[Reference]) -> Vec
         .collect()
 }
 
+/// The flat pattern's body draws only on demand: the display marks it, the folded part's bounds
+/// leave it out and the assembly levels skip it, as SolidWorks shows the folded state.
+#[test]
+fn the_flat_pattern_body_is_marked_and_kept_out_of_the_folded_display() {
+    use runmat_cad::display::{display_levels, is_flat_pattern_body, part_display};
+    use runmat_cad::regen::kernel::TessellationOptions;
+    let env = Env::new();
+    let mut d = sheet_doc(&[(0.0, 30.0), (0.0, 0.0), (50.0, 0.0)], &["up", "base"]);
+    let folded = part_display(&env.regen(&d), &env.kernel, &TessellationOptions::default());
+    d.features.push(Feature::new(
+        "flat",
+        FeatureKind::SheetMetal(SheetMetalFeature::FlatPattern {
+            fixed_face: sheet_face("base", 0),
+            grain: None,
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 2);
+    assert!(!is_flat_pattern_body(&r, 0));
+    assert!(is_flat_pattern_body(&r, 1));
+    let shown = part_display(&r, &env.kernel, &TessellationOptions::default());
+    let flags: Vec<bool> = shown.bodies.iter().map(|b| b.flat_pattern).collect();
+    assert_eq!(flags, vec![false, true]);
+    assert_eq!(shown.bounds, folded.bounds, "the folded part's bounds only");
+    let levels = display_levels(&r, &env.kernel, &TessellationOptions::default());
+    let mut unflattened = d.clone();
+    unflattened.features.pop();
+    let folded_levels = display_levels(&env.regen(&unflattened), &env.kernel, &TessellationOptions::default());
+    assert_eq!(levels[0].positions.len(), folded_levels[0].positions.len());
+    let json = serde_json::to_value(&shown).unwrap();
+    assert!(json["bodies"][0].get("flat_pattern").is_none());
+    assert_eq!(json["bodies"][1]["flat_pattern"], true);
+}
+
 #[test]
 fn base_flange_flat_pattern_and_edge_flange_on_the_kernel() {
     let env = Env::new();
