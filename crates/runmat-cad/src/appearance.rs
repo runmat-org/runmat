@@ -19,6 +19,8 @@ const FAMILIES: &[(&str, &[&str], [f32; 4])] = &[
     ("aluminum", &["aluminum", "aluminium", "al_6061", "al_7075", "al_2024"], [0.78, 0.8, 0.83, 1.0]),
     ("carbon", &["carbon_fiber", "carbon_fibre", "cfrp"], [0.22, 0.23, 0.25, 1.0]),
     ("composite", &["composite", "gfrp", "fiberglass", "fibreglass", "laminate"], [0.88, 0.89, 0.9, 1.0]),
+    // Moulded package bodies (ICs, regulators): near-black epoxy.
+    ("epoxy", &["epoxy", "mold_compound", "mould_compound"], [0.16, 0.16, 0.17, 1.0]),
     ("fr4", &["fr4", "fr_4"], [0.3, 0.42, 0.24, 1.0]),
     ("plastic", &["plastic", "abs", "nylon", "pom", "acetal", "delrin", "pla", "petg", "polypropylene", "polyethylene", "hdpe", "peek", "pvc", "polycarbonate"], [0.9, 0.9, 0.88, 1.0]),
     ("wood", &["wood", "oak", "pine", "plywood", "birch"], [0.72, 0.56, 0.38, 1.0]),
@@ -66,6 +68,8 @@ mod tests {
         assert_eq!(material_appearance(Some("steel_300m")).0, "steel");
         assert_eq!(material_appearance(Some("unobtainium")).0, "default");
         assert_eq!(material_appearance(None).1, CAD_FACE_RGBA);
+        assert_eq!(material_appearance(Some("material.epoxy")).0, "epoxy");
+        assert!(material_appearance(Some("glass")).1[3] < 0.5, "glass is see-through");
         assert_eq!(srgb_hex([1.0, 0.0, 0.0, 1.0]), "#FF0000FF");
     }
 }

@@ -229,6 +229,10 @@ pub fn regenerate_part_in(
     let index = build_index(&document, &result, None);
     let mut display = part_display(&result, kernel.as_ref(), tessellation);
     display.sketches = sketch_display(&document, &result);
+    // The part draws in its (first) output's material appearance, the CAD grey without one.
+    let material = document.parts.iter().find_map(|p| p.material.as_ref());
+    display.appearance =
+        Some(runmat_cad::appearance::material_appearance(material.map(|m| m.0.as_str())).1);
     Ok(RegeneratedPart {
         document,
         spans: parsed.spans,

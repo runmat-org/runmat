@@ -100,6 +100,10 @@ pub struct PartDisplay {
     /// Solved sketches on their planes (see [`sketch_display`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sketches: Vec<SketchDisplay>,
+    /// The color the part draws in: its material's appearance ([`crate::appearance`]), sRGB
+    /// and opacity. Absent: the CAD face color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<[f32; 4]>,
 }
 
 /// A sketch plane in part coordinates.
@@ -347,6 +351,8 @@ pub struct Prototype {
     /// what the canvas shades it by (glass, rubber, a metal, a composite).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
+    /// The color its occurrences draw in: the material's appearance ([`crate::appearance`]).
+    pub appearance: [f32; 4],
     #[serde(flatten)]
     pub shape: PrototypeShape,
 }
@@ -435,6 +441,10 @@ pub fn assembly_display_configured(
                     file,
                     configuration,
                     material: node.material.as_ref().map(|m| m.0.clone()),
+                    appearance: crate::appearance::material_appearance(
+                        node.material.as_ref().map(|m| m.0.as_str()),
+                    )
+                    .1,
                     shape,
                 });
                 let p = (out.prototypes.len() - 1) as u32;

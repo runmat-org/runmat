@@ -103,9 +103,9 @@ fn t01_flat_bom_tables_sort_number_and_keep_numbers() {
     assert_eq!(
         cells(&d),
         strs(&[
-            &["1", "BR-100", "Bracket", "steel_1018", "2"],
-            &["2", "PL-200", "Base plate", "al_6061", "1"],
-            &["3", "PN-010", "", "steel_1018", "4"],
+            &["1", "BR-100", "Bracket", "Steel 1018", "2"],
+            &["2", "PL-200", "Base plate", "Al 6061", "1"],
+            &["3", "PN-010", "", "Steel 1018", "4"],
         ])
     );
     assert_eq!(d.total_quantity, 7);
@@ -176,9 +176,9 @@ fn t02_grouped_and_property_columns() {
         vec![
             "[:1]",
             "1|Hex bolt|fastener|8",
-            "[al_6061:1]",
+            "[Al 6061:1]",
             "2|Base plate|part|1",
-            "[steel_1018:2]",
+            "[Steel 1018:2]",
             "3|Bracket|part|2",
             "4||part|4",
         ]

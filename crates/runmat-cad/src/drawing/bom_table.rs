@@ -174,6 +174,17 @@ pub trait BomProperties {
     fn property(&self, item: &BomItem, name: &PropertyName) -> Option<String>;
 }
 
+/// A material as a parts list names it: `material.aluminum_6061` → `Aluminum 6061` (the
+/// library scope and the identifier's underscores dropped).
+pub fn material_name(id: &str) -> String {
+    let name = id.strip_prefix("material.").unwrap_or(id).replace('_', " ");
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 /// No properties: property columns are empty (and reported).
 pub struct NoBomProperties;
 
@@ -409,7 +420,7 @@ pub fn render_bom_table(
                 .item
                 .material
                 .as_ref()
-                .map(|m| m.0.clone())
+                .map(|m| material_name(&m.0))
                 .unwrap_or_default(),
             BomColumn::Configuration => l.item.configuration.clone(),
             BomColumn::Revision => l
