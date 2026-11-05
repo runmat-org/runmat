@@ -37,12 +37,12 @@ pub(crate) fn diagonal(topology: &Topology) -> f64 {
 /// is smooth at any density).
 const CHORD_OF_SIZE_LARGE: f64 = 2.0e-4;
 
-/// The largest chordal deflection any body gets, 1 mm. A thin wall's chords sag inside its
+/// The largest chordal deflection any body gets, 1.5 mm. A thin wall's chords sag inside its
 /// true surface by up to the deflection, so structure under a 3 mm skin (an airliner's frames
 /// and stringers, a wing box's ribs under 4 mm skins) pokes through a skin meshed to 5 mm; at
-/// 1 mm it stays under. Cylinders and cones stay cheap (they refine only around), and normals
-/// stay exact.
-const CHORD_MAX: f64 = 1.0e-3;
+/// 1.5 mm it stays under (with the edge depth offset, 0.9 mm at 60 m), and a 10 m doubly curved
+/// fairing costs under twice the triangles it had at 2e-4 of its size. Normals stay exact.
+const CHORD_MAX: f64 = 1.5e-3;
 
 /// The chordal deflection for a body of diagonal `size`: the caller's fraction of its size, at
 /// most ten times the caller's tolerance (or [`CHORD_OF_SIZE_LARGE`] of the size, when that is
@@ -150,8 +150,9 @@ mod tests {
         // A 100 mm part: 0.05 mm; a 2 m skin: capped at ten times the caller's 0.1 mm.
         assert!((chord_for(0.1, &o) - 5.0e-5).abs() < 1e-12);
         assert!((chord_for(2.0, &o) - 1.0e-3).abs() < 1e-12);
-        // A 10 m fairing stops at 1 mm, so a skin's chords never sag through the structure under it.
-        assert!((chord_for(10.0, &o) - 1.0e-3).abs() < 1e-12);
+        // A 10 m fairing: 1.5 mm, the ceiling, so a skin's chords never sag through the structure under it.
+        assert!((chord_for(10.0, &o) - CHORD_MAX).abs() < 1e-12);
+        assert!((chord_for(40.0, &o) - CHORD_MAX).abs() < 1e-12);
         assert_eq!(chord_for(0.0, &o), CHORD_MIN);
         // Coarser callers (assembly display: 0.5 mm tolerance, 0.2 % of size) stop there too.
         let coarse = TessellationOptions { chord_tolerance: 5.0e-4, size_fraction: 2.0e-3, ..o };
