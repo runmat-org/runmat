@@ -164,3 +164,15 @@ fn a_run_gathers_the_model_libraries_its_section_names() {
     let deps = runtime::dependencies(PATH, &text);
     assert!(deps.contains(&"/models/opa171.lib".to_string()), "{deps:?}");
 }
+
+#[test]
+fn noise_and_temperature_sweeps_are_added_with_units() {
+    let text = with_section(SECTION);
+    let out = edit(&text, "simulate.noise", json!({ "output": "net.OUT", "input": "VIN", "start": 10.0, "stop": 1e7, "points": 20 })).unwrap();
+    assert_eq!(line_diff(&text, &out).0, ["        analysis hiss = noise { output = net.OUT, input = VIN, from = 10 Hz, to = 10 MHz, points = 20 }"]);
+    let out = edit(&out, "simulate.temperature", json!({ "of": "step", "values": "-40, 25, 85" })).unwrap();
+    assert!(out.contains("        analysis corners = temperature { of = step, values = [-40 degC, 25 degC, 85 degC] }"), "{out}");
+    assert_eq!(edit(&text, "simulate.noise", json!({ "output": "OUT", "input": "V9", "start": 10.0, "stop": 1e3 })).unwrap_err(), "the simulation has no source `V9` to refer the noise to");
+    assert_eq!(edit(&text, "simulate.temperature", json!({ "of": "step", "values": "hot" })).unwrap_err(), "temperatures are numbers in °C (`-40, 25, 85`)");
+    assert_eq!(edit(&out, "simulate.temperature", json!({ "of": "corners", "values": [0.0] })).unwrap_err(), "`corners` already reruns another analysis; name that one");
+}

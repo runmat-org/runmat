@@ -110,3 +110,27 @@ fn a_limited_run_stops_under_the_grant_with_what_it_solved() {
     let e = call("design.simulate", json!({ "path": "/p/daq.circuit", "limitOps": "lots" }), &files()).unwrap_err();
     assert_eq!(e.code, "invalid_arguments");
 }
+
+/// The Desktop's simulation scene (`runmat.simulation.scene`): the daq showcase's own section
+/// with a current probe on RO.1 and a measurement of its peak, run through `design.simulate`.
+/// The capture script (desktop/scripts/site-captures/simulation-scene) pastes the same text.
+/// With RUNMAT_SIMULATION_SCENE_OUT set, the report is written there for the Desktop.
+#[test]
+fn the_desktop_simulation_scene_reports_the_current_probe() {
+    let text = DAQ
+        .replace("probe = [net.IN, net.INF, net.AMP, net.AIN]", "probe = [net.IN, net.AMP, net.AIN, \"RO.1\"]")
+        .replace("        measure rise = {", "        measure i_ro = { of = step, max = \"RO.1\" }\n        measure rise = {");
+    assert!(text.contains("\"RO.1\"]") && text.contains("measure i_ro"), "the daq section changed; update the scene");
+    let files: Files = [("/p/daq.circuit".to_owned(), text)].into();
+    let out = call("design.simulate", json!({ "path": "/p/daq.circuit", "maxPoints": 160 }), &files).unwrap();
+    assert_eq!(out["probes"], json!(["IN", "AMP", "AIN", "RO.1"]));
+    let i = out["measures"].as_array().unwrap().iter().find(|m| m["name"] == "i_ro").unwrap();
+    assert_eq!((i["quantity"].as_str(), i["unit"].as_str()), (Some("current"), Some("A")));
+    // The op-amp slews at 1.5 V/µs into RO and CO (1 nF): while it slews, RO carries
+    // C·dV/dt = 1 nF × 1.5 V/µs = 1.5 mA, and that is the peak.
+    let peak = i["value"].as_f64().unwrap();
+    assert!((peak / 1.5e-3 - 1.0).abs() < 0.03, "peak {peak}");
+    if let Ok(path) = std::env::var("RUNMAT_SIMULATION_SCENE_OUT") {
+        std::fs::write(path, serde_json::to_string(&out).unwrap() + "\n").unwrap();
+    }
+}
