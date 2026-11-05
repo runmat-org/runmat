@@ -1,0 +1,163 @@
+//! DWG R2018: sheets written and read back entity by entity, the same sheet's DXF read back
+//! to the same records, and drawings and flat patterns exported through `design.export`.
+
+use base64::Engine;
+use runmat_design_tools::exchange::dxf;
+use runmat_design_tools::formats::dwg;
+use runmat_design_tools::formats::sheet::{canonical, standard_linetypes, Block, Dimension, DimensionKind, Layer, Shape, Sheet};
+use runmat_design_tools::{call, Files};
+use serde_json::json;
+
+/// A sheet with every entity kind the writers write, a block and a dimension block.
+fn sample() -> Sheet {
+    let mut s = Sheet {
+        paper: [420.0, 297.0],
+        layers: vec![
+            Layer { name: "VISIBLE".into(), color: 7, linetype: "CONTINUOUS".into() },
+            Layer { name: "HIDDEN".into(), color: 8, linetype: "DASHED".into() },
+            Layer { name: "NOTES".into(), color: 3, linetype: "CONTINUOUS".into() },
+        ],
+        linetypes: standard_linetypes(),
+        ..Sheet::default()
+    };
+    s.line("VISIBLE", [10.0, 10.0], [410.0, 10.0]);
+    s.line("HIDDEN", [20.5, 30.25], [20.5, 130.75]);
+    s.add("VISIBLE", Shape::Arc { center: [100.0, 100.0], radius: 12.5, start: 0.25, end: 2.5 });
+    s.add("VISIBLE", Shape::Circle { center: [150.0, 120.0], radius: 2.0 });
+    s.rect("VISIBLE", 50.0, 50.0, 80.0, 50.0);
+    s.add("VISIBLE", Shape::Polyline { points: vec![[0.0, 0.0], [1.0, 2.0], [3.0, 2.0]], closed: false });
+    s.text("NOTES", [30.0, 20.0], 3.0, "FRONT  SCALE 2:1");
+    s.add("NOTES", Shape::Text { at: [60.0, 20.0], height: 2.5, rotation: std::f64::consts::FRAC_PI_2, text: "⌀4 THRU ±0.1 90°".into() });
+    s.add("NOTES", Shape::MText { at: [200.0, 200.0], height: 2.5, width: 40.0, text: "∥ | 0.05 | A".into() });
+    s.add("VISIBLE", Shape::Hatch { loops: vec![vec![[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]]], pattern: "ANSI31".into(), angle: 0.0, scale: 1.0 });
+    s.add("VISIBLE", Shape::Hatch { loops: vec![vec![[20.0, 0.0], [30.0, 0.0], [25.0, 5.0]]], pattern: "SOLID".into(), angle: 0.0, scale: 1.0 });
+    let mut tb = Sheet::default();
+    tb.rect("NOTES", -120.0, 0.0, 120.0, 7.0);
+    tb.text("NOTES", [-118.0, 2.2], 2.2, "Title");
+    s.blocks.push(Block { name: "TITLE_BLOCK".into(), base: [0.0, 0.0], entities: tb.entities });
+    s.add("NOTES", Shape::Insert { block: "TITLE_BLOCK".into(), at: [410.0, 10.0], scale: 1.0, rotation: 0.0 });
+    s.add("NOTES", Shape::Insert { block: "TITLE_BLOCK".into(), at: [300.0, 250.0], scale: 0.5, rotation: 0.0 });
+    s.dimension(
+        "NOTES",
+        Dimension {
+            kind: DimensionKind::Linear { from: [50.0, 50.0], to: [130.0, 50.0], line: [50.0, 40.0], rotation: 0.0 },
+            text_at: [90.0, 41.5],
+            measurement: 80.0,
+            text: Some("80".into()),
+            block: String::new(),
+        },
+    );
+    s.dimension(
+        "NOTES",
+        Dimension { kind: DimensionKind::Radius { center: [100.0, 100.0], on: [112.5, 100.0] }, text_at: [115.0, 102.0], measurement: 12.5, text: None, block: String::new() },
+    );
+    s.dimension(
+        "NOTES",
+        Dimension { kind: DimensionKind::Diameter { from: [148.0, 120.0], to: [152.0, 120.0] }, text_at: [155.0, 122.0], measurement: 4.0, text: None, block: String::new() },
+    );
+    s
+}
+
+#[test]
+fn a_sheet_round_trips_through_dwg() {
+    let sheet = sample();
+    let bytes = dwg::write(&sheet);
+    assert_eq!(&bytes[..6], b"AC1032");
+    let (back, report) = dwg::read(&bytes).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(report.version, "AC1032");
+    assert_eq!(report.classes, ["LWPOLYLINE", "HATCH", "LAYOUT"]);
+    for name in ["AcDb:Header", "AcDb:Classes", "AcDb:Handles", "AcDb:AcDbObjects", "AcDb:AuxHeader", "AcDb:Template", "AcDb:SummaryInfo"] {
+        assert!(report.sections.iter().any(|s| s == name), "{name}");
+    }
+    assert_eq!(back.entities, sheet.entities, "model space comes back entity by entity");
+    assert_eq!(back.blocks, sheet.blocks);
+    assert_eq!(back.layers, sheet.layers);
+    assert_eq!(back.linetypes, sheet.linetypes);
+    assert_eq!(dwg::write(&sheet), bytes, "the same sheet writes the same bytes");
+}
+
+#[test]
+fn a_damaged_dwg_is_refused() {
+    let bytes = dwg::write(&sample());
+    let mut bad = bytes.clone();
+    let n = bad.len();
+    bad[n / 2] ^= 0x5A;
+    assert!(dwg::read(&bad).is_err());
+}
+
+#[test]
+fn dwg_and_dxf_of_one_sheet_carry_the_same_records() {
+    let sheet = sample();
+    let (from_dwg, _) = dwg::read(&dwg::write(&sheet)).unwrap();
+    let from_dxf = dxf::read(&dxf::write(&sheet)).unwrap();
+    assert_eq!(canonical(&from_dwg), canonical(&from_dxf));
+    assert_eq!(canonical(&from_dwg), canonical(&sheet));
+}
+
+const BRACKET: &str = r#"runmat 0.7
+std 1
+
+part bracket {
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 50 mm])
+        l3 = line(start = [80 mm, 50 mm], end = [0 mm, 50 mm])
+        l4 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = 10 mm)
+    feature h = hole(face = feature.body.face.end, at = { a = point(60 mm, 10 mm, 10 mm) }, diameter = 4 mm, through_all)
+    output bracket = { body = feature.body.body, part_number = "BR-100" }
+}
+"#;
+
+const DRAWING: &str = r#"runmat 0.7
+std 1
+
+drawing standard {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [
+            { label = "Title", source = { source = literal, text = "Bracket" } },
+            { label = "Part number", source = { source = property, name = part_number } }
+        ]
+    }
+    sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
+    view front = standard(orientation = front, sheet = "1", model = { file = "bracket.part" }, at = [115, 85], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { file = "bracket.part" }, at = [115, 185], display = hidden_lines)
+    annotation width = dimension(style = linear, references = [feature.body.face.side(s1.l4), feature.body.face.side(s1.l2)], view = front)
+    annotation hole = hole_callout(hole = feature.h.face.wall(a), view = top)
+}
+"#;
+
+fn files() -> Files {
+    [("/p/bracket.part", BRACKET), ("/p/standard.drawing", DRAWING)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect()
+}
+
+#[test]
+fn a_drawing_exports_as_dwg_with_the_content_of_its_dxf() {
+    let out = call("design.export", json!({ "path": "/p/standard.drawing", "format": "dwg" }), &files()).unwrap_or_else(|e| panic!("{e}"));
+    let file = &out["files"][0];
+    assert_eq!(file["name"], "standard-1.dwg");
+    let bytes = base64::engine::general_purpose::STANDARD.decode(file["content"].as_str().unwrap()).unwrap();
+    let (sheet, _) = dwg::read(&bytes).unwrap_or_else(|e| panic!("{e}"));
+    let kinds = |k: fn(&Shape) -> bool| sheet.entities.iter().filter(|e| k(&e.shape)).count();
+    assert!(kinds(|s| matches!(s, Shape::Polyline { .. } | Shape::Line { .. })) > 10, "frame and view edges");
+    assert_eq!(kinds(|s| matches!(s, Shape::Insert { .. })), 1, "the title block");
+    assert!(sheet.blocks.iter().any(|b| b.name == "TITLE_BLOCK" && b.entities.iter().any(|e| e.shape == Shape::Text { at: [-80.0, 2.2], height: 2.6, rotation: 0.0, text: "Bracket".into() })));
+    let dims: Vec<&Dimension> = sheet.entities.iter().filter_map(|e| if let Shape::Dimension(d) = &e.shape { Some(d) } else { None }).collect();
+    assert_eq!(dims.len(), 1, "{:?}", sheet.entities.iter().map(|e| &e.layer).collect::<Vec<_>>());
+    assert_eq!(dims[0].text.as_deref(), Some("80"));
+    // The views' edges come from the display tessellation, which holds positions as f32
+    // (2e-6 mm at this size).
+    assert!((dims[0].measurement - 80.0).abs() < 1e-4, "{}", dims[0].measurement);
+    assert!(sheet.entities.iter().any(|e| matches!(&e.shape, Shape::MText { text, .. } if text.contains("THRU"))), "the hole callout");
+    let dxf_out = call("design.export", json!({ "path": "/p/standard.drawing", "format": "dxf" }), &files()).unwrap();
+    let from_dxf = dxf::read(dxf_out["files"][0]["content"].as_str().unwrap()).unwrap();
+    assert_eq!(canonical(&sheet), canonical(&from_dxf));
+}
+
+#[test]
+fn a_part_without_a_flat_pattern_says_so() {
+    let err = call("design.export", json!({ "path": "/p/bracket.part", "format": "dwg" }), &files()).unwrap_err().to_string();
+    assert!(err.contains("flat pattern"), "{err}");
+}

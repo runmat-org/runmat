@@ -1,7 +1,7 @@
 //! `runmat-design`: the design tools from the command line, for scripts and batch jobs.
 //!
 //! ```text
-//! runmat-design export <file> --format <step|3mf|stl|gltf|dxf|bom|kicad>
+//! runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|bom|kicad>
 //!     [--all-configurations] [--configuration <name>] [--sheet <name>] [--out <dir>]
 //! ```
 //!
@@ -37,7 +37,7 @@ fn walk(dir: &Path, files: &mut Files, depth: usize) {
 }
 
 fn usage() -> ExitCode {
-    eprintln!("usage: runmat-design export <file> --format <step|3mf|stl|gltf|dxf|bom|kicad> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>]");
+    eprintln!("usage: runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|bom|kicad> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>]");
     ExitCode::from(2)
 }
 

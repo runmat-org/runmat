@@ -69,7 +69,6 @@ fn system_page(kind: u32, data: &[u8]) -> Vec<u8> {
 
 struct PageOut {
     number: u32,
-    address: usize,
     size: usize,
 }
 
@@ -110,7 +109,7 @@ impl Container {
                 file.extend(&payload);
                 pad_to(&mut file, 0x20);
                 local.push((number, payload.len() as u32, (k * sec.page_size) as u64));
-                pages.push(PageOut { number, address, size: file.len() - address });
+                pages.push(PageOut { number, size: file.len() - address });
             }
             descriptions.push((sec, id, local));
         }
@@ -139,7 +138,7 @@ impl Container {
         let address = file.len();
         file.extend(system_page(SECTION_MAP, &map));
         pad_to(&mut file, 0x20);
-        pages.push(PageOut { number: section_map_number, address, size: file.len() - address });
+        pages.push(PageOut { number: section_map_number, size: file.len() - address });
         // The page map lists every page, its own included; its size is known before it is
         // written only up to padding, so its entry is computed from the written length.
         let page_map_address = file.len();
@@ -304,8 +303,13 @@ mod tests {
 
     #[test]
     fn the_magic_sequence_matches_the_specification() {
-        assert_eq!(&magic(16), &[0x29, 0x23, 0xBE, 0x84, 0xE1, 0x6C, 0xD6, 0xAE, 0x52, 0x90, 0x49, 0xF1, 0xF1, 0xBB, 0xE9, 0xEB]);
-        assert_eq!(&magic(0x6C)[0x68..], &[0x6B, 0xC4, 0x30, 0xB7]);
+        // The 92 bytes 4.1 lists.
+        let listed = "29 23 BE 84 E1 6C D6 AE 52 90 49 F1 F1 BB E9 EB B3 A6 DB 3C 87 0C 3E 99 24 5E 0D 1C 06 B7 47 DE \
+                      B3 12 4D C8 43 BB 8B A6 1F 03 5A 7D 09 38 25 1F 5D D4 CB FC 96 F5 45 3B 13 0D 89 0A 1C DB AE 32 \
+                      20 9A 50 EE 40 78 36 FD 12 49 32 F6 9E 7D 49 DC AD 4F 14 F2 44 40 66 D0 6B C4 30 B7";
+        let want: Vec<u8> = listed.split_whitespace().map(|b| u8::from_str_radix(b, 16).unwrap()).collect();
+        assert_eq!(want.len(), 92);
+        assert_eq!(magic(92), want);
     }
 
     #[test]

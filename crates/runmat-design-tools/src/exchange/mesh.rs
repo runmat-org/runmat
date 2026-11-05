@@ -118,6 +118,33 @@ fn body_mesh(name: String, material: Option<String>, body: &Value) -> Mesh {
     mesh
 }
 
+/// A body's mesh from the kernel's tessellation, its faces welded at shared positions.
+fn exact_body_mesh(name: String, material: Option<String>, body: &runmat_cad::regen::kernel::BodyMesh) -> Mesh {
+    let mut mesh = Mesh { name, material, positions: Vec::new(), triangles: Vec::new() };
+    let mut index: BTreeMap<[i64; 3], u32> = BTreeMap::new();
+    for face in &body.faces {
+        let local: Vec<u32> = face
+            .positions
+            .iter()
+            .map(|w| {
+                let key = w.map(|v| (v * 1e8).round() as i64);
+                *index.entry(key).or_insert_with(|| {
+                    mesh.positions.push(*w);
+                    (mesh.positions.len() - 1) as u32
+                })
+            })
+            .collect();
+        for t in &face.triangles {
+            let g = |i: u32| local.get(i as usize).copied().unwrap_or(0);
+            let tri = [g(t[0]), g(t[1]), g(t[2])];
+            if tri[0] != tri[1] && tri[1] != tri[2] && tri[0] != tri[2] {
+                mesh.triangles.push(tri);
+            }
+        }
+    }
+    mesh
+}
+
 /// A part's bodies (one shape, placed once) or an assembly's prototypes and occurrences.
 pub fn model_scene(path: &str, files: &Files) -> Result<Scene3d, ToolError> {
     model_scene_in(path, files, None)
@@ -149,7 +176,17 @@ pub fn model_scene_in(path: &str, files: &Files, configuration: Option<&str>) ->
                     .as_str()
                     .map(str::to_owned)
                     .unwrap_or_else(|| format!("{}_body{}", stem(path), body["index"]));
-                bodies.push(body_mesh(name, material.clone(), body));
+                // The kernel's tessellation in f64 (the display holds f32 for the canvas).
+                let exact = part
+                    .result
+                    .state
+                    .bodies
+                    .get(body["index"].as_u64().unwrap_or(0) as usize)
+                    .and_then(|b| part.kernel.tessellate(&b.handle, &Default::default()).ok());
+                bodies.push(match exact {
+                    Some(m) => exact_body_mesh(name, material.clone(), &m),
+                    None => body_mesh(name, material.clone(), body),
+                });
             }
             // A part's bodies are placed where they are, each under its own name.
             for (i, b) in bodies.iter().enumerate() {

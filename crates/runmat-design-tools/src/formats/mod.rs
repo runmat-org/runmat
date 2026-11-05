@@ -3,5 +3,6 @@
 
 pub mod dwg;
 pub mod opc;
+pub mod sheet;
 pub mod xml;
 pub mod three_mf;

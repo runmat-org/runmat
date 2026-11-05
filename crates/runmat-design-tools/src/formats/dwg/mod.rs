@@ -10,8 +10,22 @@
 //!   runs, which every reader decompresses).
 //! - [`container`]: the R2004+ file container: the file header and its masked header data,
 //!   system pages (page map and section map) and masked data pages, written and read back.
+//! - [`stream`]: the R2010+ object frame (data, string and handle streams, CRC).
+//! - [`header`], [`sections`]: AcDb:Header and the other data sections.
+//! - [`tables`], [`entities`]: the database objects and the entities.
+//! - [`write`], [`read`]: a [`Sheet`](crate::formats::sheet::Sheet) to DWG bytes and back.
 
 pub mod bits;
 pub mod container;
 pub mod crc;
+pub mod entities;
+pub mod header;
 pub mod lz77;
+pub mod read;
+pub mod sections;
+pub mod stream;
+pub mod tables;
+pub mod write;
+
+pub use read::read;
+pub use write::write;

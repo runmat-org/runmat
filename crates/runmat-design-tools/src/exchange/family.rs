@@ -2,11 +2,11 @@
 //! (every sheet as DXF), and BOMs as CSV, so a family's documents come from one model in one
 //! call.
 
-use super::dxf::drawing_dxf;
+use super::sheet::drawing_sheet;
 use super::exact_step::exact_step_in;
 use super::mesh::model_scene_in;
 use super::step::step;
-use super::{stem, text_file, ExportedFile};
+use super::{binary_file, stem, text_file, ExportedFile};
 use crate::{kind_of, text_of, DesignKind, Files, ToolError};
 use serde_json::Value;
 
@@ -51,8 +51,8 @@ pub fn part_family_step(path: &str, files: &Files, notes: &mut Vec<String>) -> R
     Ok(out)
 }
 
-/// Every sheet of a drawing as DXF, once per configuration of the part it shows.
-pub fn drawing_family_dxf(path: &str, files: &Files, notes: &mut Vec<String>) -> Result<Vec<ExportedFile>, ToolError> {
+/// Every sheet of a drawing as DXF (or DWG), once per configuration of the part it shows.
+pub fn drawing_family(path: &str, files: &Files, dwg: bool, notes: &mut Vec<String>) -> Result<Vec<ExportedFile>, ToolError> {
     let text = text_of(files, path)?;
     let name = stem(path);
     let configs = drawn_part(path, text, files).map(|p| part_configurations(&p, files)).unwrap_or_default();
@@ -63,9 +63,13 @@ pub fn drawing_family_dxf(path: &str, files: &Files, notes: &mut Vec<String>) ->
     let mut out = Vec::new();
     for c in family(configs) {
         for sheet in &sheets {
-            let (sheet, dxf, n) = drawing_dxf(path, text, files, Some(sheet), c.as_deref())?;
+            let (sheet, laid, n) = drawing_sheet(path, text, files, Some(sheet), c.as_deref())?;
             notes.extend(n);
-            out.push(text_file(format!("{name}{}-{sheet}.dxf", suffix(&c)), "image/vnd.dxf", dxf));
+            out.push(if dwg {
+                binary_file(format!("{name}{}-{sheet}.dwg", suffix(&c)), "image/vnd.dwg", &crate::formats::dwg::write(&laid))
+            } else {
+                text_file(format!("{name}{}-{sheet}.dxf", suffix(&c)), "image/vnd.dxf", super::dxf::write(&laid))
+            });
         }
     }
     Ok(out)

@@ -3,7 +3,7 @@
 //! Exports: parts and assemblies as STEP (AP242, the exact B-rep the installed kernel regenerated,
 //! with the part's semantic PMI;
 //! a faceted AP214 B-rep in millimetres only on the grid test kernel), STL (binary, millimetres), 3MF (millimetres) and glTF (binary `.glb`, metres,
-//! Y up as glTF defines); drawing sheets and sheet-metal flat patterns as DXF (millimetres);
+//! Y up as glTF defines); drawing sheets and sheet-metal flat patterns as DXF and DWG (R2018; millimetres);
 //! assemblies' bills of materials as CSV; circuits and boards as a KiCad project. A product
 //! family exports every configuration at once (`allConfigurations`). Imports: KiCad projects to `.circuit`,
 //! `.circuit.layout` and `.circuit.lock` sources; STEP files to a `.part` whose `import` feature
@@ -18,10 +18,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
-mod dxf;
+pub mod dxf;
 mod exact_step;
 pub mod family;
 mod mesh;
+pub mod sheet;
 mod step;
 mod three_mf;
 
@@ -40,6 +41,8 @@ pub enum ExportFormat {
     ThreeMf,
     Gltf,
     Dxf,
+    /// AutoCAD R2018 DWG of a drawing sheet or a part's flat pattern.
+    Dwg,
     /// An assembly's flat bill of materials as CSV.
     Bom,
     Kicad,
@@ -58,7 +61,7 @@ pub struct ExportInput {
     #[serde(default)]
     pub project_name: Option<String>,
     /// A product family: one file per configuration (the default, then each named one) of a
-    /// part (STEP) or of the part a drawing shows (every sheet as DXF).
+    /// part (STEP) or of the part a drawing shows (every sheet as DXF or DWG).
     #[serde(default)]
     pub all_configurations: bool,
     /// The named configuration to export (a part's STEP, 3MF, STL or glTF; a drawing's part).
@@ -134,8 +137,8 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
         ExportFormat::Step if input.all_configurations && kind == DesignKind::Part => {
             family::part_family_step(&input.path, files, &mut notes)?
         }
-        ExportFormat::Dxf if input.all_configurations && kind == DesignKind::Drawing => {
-            family::drawing_family_dxf(&input.path, files, &mut notes)?
+        ExportFormat::Dxf | ExportFormat::Dwg if input.all_configurations && kind == DesignKind::Drawing => {
+            family::drawing_family(&input.path, files, input.format == ExportFormat::Dwg, &mut notes)?
         }
         ExportFormat::Bom => vec![family::bom_csv(&input.path, files)?],
         ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf => {
@@ -198,6 +201,24 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
                         "DXF exports drawings and part flat patterns; {} is a {other:?} file",
                         input.path
                     ),
+                ))
+            }
+        },
+        ExportFormat::Dwg => match kind {
+            DesignKind::Drawing => {
+                let (sheet_name, sheet, n) = sheet::drawing_sheet(&input.path, text, files, input.sheet.as_deref(), config)?;
+                notes.extend(n);
+                vec![binary_file(format!("{name}-{sheet_name}.dwg"), "image/vnd.dwg", &crate::formats::dwg::write(&sheet))]
+            }
+            DesignKind::Part => vec![binary_file(
+                format!("{name}-flat.dwg"),
+                "image/vnd.dwg",
+                &crate::formats::dwg::write(&sheet::flat_pattern(&input.path, text)?),
+            )],
+            other => {
+                return Err(ToolError::new(
+                    "unsupported",
+                    format!("DWG exports drawings and part flat patterns; {} is a {other:?} file", input.path),
                 ))
             }
         },

@@ -199,6 +199,18 @@ impl BitWriter {
             self.rs(t);
         }
     }
+    /// Append every bit another writer holds.
+    pub fn append(&mut self, other: &BitWriter) {
+        for k in 0..other.bit {
+            self.b(other.bytes[k / 8] & (0x80 >> (k % 8)) != 0);
+        }
+    }
+    /// Pad with zero bits to the next byte boundary.
+    pub fn pad(&mut self) {
+        while !self.bit.is_multiple_of(8) {
+            self.b(false);
+        }
+    }
     pub fn finish(self) -> Vec<u8> {
         self.bytes
     }

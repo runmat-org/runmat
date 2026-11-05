@@ -10,13 +10,8 @@ fn not_compiled(path: &str, message: String) -> ToolError {
     ToolError::new("not_compiled", format!("{path} doesn't compile (design.check lists why): {message}"))
 }
 
-/// The STEP AP242 text of the part or assembly at `path`, or `None` when the installed kernel
-/// does not write STEP.
-pub fn exact_step(path: &str, files: &Files) -> Result<Option<Vec<u8>>, ToolError> {
-    exact_step_in(path, files, None)
-}
-
-/// [`exact_step`] of a part in its named configuration `configuration`.
+/// The STEP AP242 text of the part (in its named configuration `configuration`, when given)
+/// or assembly at `path`, or `None` when the installed kernel does not write STEP.
 pub fn exact_step_in(path: &str, files: &Files, configuration: Option<&str>) -> Result<Option<Vec<u8>>, ToolError> {
     let text = text_of(files, path)?;
     match kind_of(path)? {

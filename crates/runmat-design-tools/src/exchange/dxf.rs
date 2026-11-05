@@ -1,68 +1,323 @@
-//! DXF export: drawing sheets (frame, title block, visible and hidden edges at the sheet
-//! scale) and sheet-metal flat patterns.
+//! DXF export (R12 ASCII, `AC1009`) of a laid-out [`Sheet`], and a reader for the files it
+//! writes. R12 has no paragraph text or hatch entities: paragraph text is written one TEXT per
+//! paragraph, and a hatch as its closed boundary polylines on the hatch's layer.
 
+use crate::formats::sheet::{Block, Dimension, DimensionKind, Entity, Shape, Sheet};
 use crate::{Files, ToolError};
-use serde_json::Value;
 use std::fmt::Write;
 
-use super::floats;
+use super::sheet::{drawing_sheet, flat_pattern};
 
-struct Dxf {
-    body: String,
-}
-
-impl Dxf {
-    fn line(&mut self, layer: &str, a: [f64; 2], b: [f64; 2]) {
-        let _ = write!(
-            self.body,
-            "0\nLINE\n8\n{layer}\n10\n{:.4}\n20\n{:.4}\n30\n0.0\n11\n{:.4}\n21\n{:.4}\n31\n0.0\n",
-            a[0], a[1], b[0], b[1]
-        );
-    }
-    fn text(&mut self, layer: &str, at: [f64; 2], height: f64, text: &str) {
-        let _ = write!(
-            self.body,
-            "0\nTEXT\n8\n{layer}\n10\n{:.4}\n20\n{:.4}\n30\n0.0\n40\n{height:.3}\n1\n{text}\n",
-            at[0], at[1]
-        );
-    }
-    fn rect(&mut self, layer: &str, x: f64, y: f64, w: f64, h: f64) {
-        self.line(layer, [x, y], [x + w, y]);
-        self.line(layer, [x + w, y], [x + w, y + h]);
-        self.line(layer, [x + w, y + h], [x, y + h]);
-        self.line(layer, [x, y + h], [x, y]);
-    }
-    fn finish(self, layers: &[(&str, u8, &str)]) -> String {
-        let mut s = String::from(
-            "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLTYPE\n70\n2\n0\nLTYPE\n2\nCONTINUOUS\n70\n0\n3\nSolid line\n72\n65\n73\n0\n40\n0.0\n0\nLTYPE\n2\nDASHED\n70\n0\n3\n__ __ __\n72\n65\n73\n2\n40\n4.5\n49\n3.0\n49\n-1.5\n0\nENDTAB\n0\nTABLE\n2\nLAYER\n",
-        );
-        let _ = write!(s, "70\n{}\n", layers.len());
-        for (name, color, ltype) in layers {
-            let _ = write!(s, "0\nLAYER\n2\n{name}\n70\n0\n62\n{color}\n6\n{ltype}\n");
+/// DXF text: `%%d`, `%%c` and `%%p` for degree, diameter and plus-minus, `\U+XXXX` for any
+/// other character outside ASCII.
+fn encode(text: &str) -> String {
+    let mut s = String::new();
+    for c in text.chars() {
+        match c {
+            '°' => s.push_str("%%d"),
+            '⌀' | 'Ø' => s.push_str("%%c"),
+            '±' => s.push_str("%%p"),
+            c if c.is_ascii() => s.push(c),
+            c => {
+                let _ = write!(s, "\\U+{:04X}", c as u32);
+            }
         }
-        s.push_str("0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n");
-        s.push_str(&self.body);
-        s.push_str("0\nENDSEC\n0\nEOF\n");
-        s
+    }
+    s
+}
+
+fn decode(text: &str) -> String {
+    let t = text.replace("%%d", "°").replace("%%c", "⌀").replace("%%p", "±");
+    let mut out = String::new();
+    let mut rest = t.as_str();
+    while let Some(i) = rest.find("\\U+") {
+        out.push_str(&rest[..i]);
+        let hex = rest.get(i + 3..i + 7).unwrap_or("");
+        match u32::from_str_radix(hex, 16).ok().and_then(char::from_u32) {
+            Some(c) if hex.len() == 4 => {
+                out.push(c);
+                rest = &rest[i + 7..];
+            }
+            _ => {
+                out.push_str("\\U+");
+                rest = &rest[i + 3..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+struct Out(String);
+
+impl Out {
+    fn g(&mut self, code: i32, value: impl std::fmt::Display) {
+        let _ = write!(self.0, "{code}\n{value}\n");
+    }
+    fn f(&mut self, code: i32, v: f64) {
+        self.g(code, format!("{v:.6}"));
+    }
+    fn xy(&mut self, code: i32, p: [f64; 2]) {
+        self.f(code, p[0]);
+        self.f(code + 10, p[1]);
+        self.f(code + 20, 0.0);
+    }
+    fn entity(&mut self, e: &Entity) {
+        let l = e.layer.as_str();
+        let head = |o: &mut Out, kind: &str| {
+            o.g(0, kind);
+            o.g(8, l);
+        };
+        match &e.shape {
+            Shape::Line { a, b } => {
+                head(self, "LINE");
+                self.xy(10, *a);
+                self.xy(11, *b);
+            }
+            Shape::Arc { center, radius, start, end } => {
+                head(self, "ARC");
+                self.xy(10, *center);
+                self.f(40, *radius);
+                self.f(50, start.to_degrees());
+                self.f(51, end.to_degrees());
+            }
+            Shape::Circle { center, radius } => {
+                head(self, "CIRCLE");
+                self.xy(10, *center);
+                self.f(40, *radius);
+            }
+            Shape::Polyline { points, closed } => self.polyline(l, points, *closed),
+            Shape::Text { at, height, rotation, text } => {
+                head(self, "TEXT");
+                self.xy(10, *at);
+                self.f(40, *height);
+                self.g(1, encode(text));
+                if *rotation != 0.0 {
+                    self.f(50, rotation.to_degrees());
+                }
+            }
+            Shape::MText { at, height, text, .. } => {
+                for (i, line) in text.split("\\P").enumerate() {
+                    head(self, "TEXT");
+                    self.xy(10, [at[0], at[1] - height - i as f64 * height * 1.6]);
+                    self.f(40, *height);
+                    self.g(1, encode(line));
+                }
+            }
+            Shape::Dimension(d) => {
+                head(self, "DIMENSION");
+                self.g(2, &d.block);
+                let (def, p13, p14, flag, rot) = match &d.kind {
+                    DimensionKind::Linear { from, to, line, rotation } => (*line, *from, *to, 0, *rotation),
+                    DimensionKind::Radius { center, on } => (*center, *on, *on, 4, 0.0),
+                    DimensionKind::Diameter { from, to } => (*from, *to, *to, 3, 0.0),
+                };
+                self.xy(10, def);
+                self.xy(11, d.text_at);
+                self.g(70, flag);
+                if let Some(t) = &d.text {
+                    self.g(1, encode(t));
+                }
+                match d.kind {
+                    DimensionKind::Linear { .. } => {
+                        self.xy(13, p13);
+                        self.xy(14, p14);
+                        self.f(50, rot.to_degrees());
+                    }
+                    _ => {
+                        self.xy(15, p13);
+                    }
+                }
+            }
+            Shape::Hatch { loops, .. } => {
+                for lp in loops {
+                    self.polyline(l, lp, true);
+                }
+            }
+            Shape::Insert { block, at, scale, rotation } => {
+                head(self, "INSERT");
+                self.g(2, block);
+                self.xy(10, *at);
+                if *scale != 1.0 {
+                    self.f(41, *scale);
+                    self.f(42, *scale);
+                }
+                if *rotation != 0.0 {
+                    self.f(50, rotation.to_degrees());
+                }
+            }
+        }
+    }
+    fn polyline(&mut self, layer: &str, points: &[[f64; 2]], closed: bool) {
+        self.g(0, "POLYLINE");
+        self.g(8, layer);
+        self.g(66, 1);
+        self.xy(10, [0.0, 0.0]);
+        self.g(70, closed as i32);
+        for p in points {
+            self.g(0, "VERTEX");
+            self.g(8, layer);
+            self.xy(10, *p);
+        }
+        self.g(0, "SEQEND");
+        self.g(8, layer);
     }
 }
 
-/// Sheet sizes in millimetres, landscape.
-fn sheet_size(name: &str) -> [f64; 2] {
-    match name.to_ascii_uppercase().as_str() {
-        "A0" => [1189.0, 841.0],
-        "A1" => [841.0, 594.0],
-        "A2" => [594.0, 420.0],
-        "A4" => [297.0, 210.0],
-        "B" => [431.8, 279.4],
-        "C" => [558.8, 431.8],
-        "D" => [863.6, 558.8],
-        _ => [420.0, 297.0],
+/// A sheet as R12 DXF.
+pub fn write(sheet: &Sheet) -> String {
+    let mut o = Out(String::new());
+    let (lo, hi) = sheet.extents();
+    o.g(0, "SECTION");
+    o.g(2, "HEADER");
+    o.g(9, "$ACADVER");
+    o.g(1, "AC1009");
+    o.g(9, "$INSUNITS");
+    o.g(70, 4);
+    o.g(9, "$EXTMIN");
+    o.xy(10, lo);
+    o.g(9, "$EXTMAX");
+    o.xy(10, hi);
+    o.g(0, "ENDSEC");
+    o.g(0, "SECTION");
+    o.g(2, "TABLES");
+    o.g(0, "TABLE");
+    o.g(2, "LTYPE");
+    o.g(70, sheet.linetypes.len() + 1);
+    for (name, description, pattern) in
+        std::iter::once(("CONTINUOUS", "Solid line", &[][..])).chain(sheet.linetypes.iter().map(|t| (t.name.as_str(), t.description.as_str(), &t.pattern[..])))
+    {
+        o.g(0, "LTYPE");
+        o.g(2, name);
+        o.g(70, 0);
+        o.g(3, description);
+        o.g(72, 65);
+        o.g(73, pattern.len());
+        o.f(40, pattern.iter().map(|d| d.abs()).sum());
+        for d in pattern {
+            o.f(49, *d);
+        }
     }
+    o.g(0, "ENDTAB");
+    o.g(0, "TABLE");
+    o.g(2, "LAYER");
+    o.g(70, sheet.layers.len());
+    for l in &sheet.layers {
+        o.g(0, "LAYER");
+        o.g(2, &l.name);
+        o.g(70, 0);
+        o.g(62, l.color);
+        o.g(6, &l.linetype);
+    }
+    o.g(0, "ENDTAB");
+    o.g(0, "ENDSEC");
+    o.g(0, "SECTION");
+    o.g(2, "BLOCKS");
+    for b in &sheet.blocks {
+        o.g(0, "BLOCK");
+        o.g(8, "0");
+        o.g(2, &b.name);
+        o.g(70, if b.name.starts_with('*') { 1 } else { 0 });
+        o.xy(10, b.base);
+        o.g(3, &b.name);
+        for e in &b.entities {
+            o.entity(e);
+        }
+        o.g(0, "ENDBLK");
+        o.g(8, "0");
+    }
+    o.g(0, "ENDSEC");
+    o.g(0, "SECTION");
+    o.g(2, "ENTITIES");
+    for e in &sheet.entities {
+        o.entity(e);
+    }
+    o.g(0, "ENDSEC");
+    o.g(0, "EOF");
+    o.0
 }
 
-/// A drawing sheet as DXF: the frame and title block, each view's visible edges (`VISIBLE`,
-/// continuous) and hidden edges (`HIDDEN`, dashed) at the sheet's scale, and view labels.
+/// Read a DXF this writer wrote back into a sheet (paragraph text comes back as single-line
+/// text, hatches as their boundary polylines).
+pub fn read(text: &str) -> Result<Sheet, String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let pairs: Vec<(i32, &str)> = lines
+        .chunks_exact(2)
+        .map(|p| Ok((p[0].trim().parse::<i32>().map_err(|_| format!("bad group code {:?}", p[0]))?, p[1].trim_end())))
+        .collect::<Result<_, String>>()?;
+    let mut sheet = Sheet::default();
+    let mut i = 0;
+    let mut section = "";
+    let mut block: Option<Block> = None;
+    while i < pairs.len() {
+        let (code, value) = pairs[i];
+        if code != 0 {
+            i += 1;
+            continue;
+        }
+        // The record: this 0 group and every pair to the next 0 group.
+        let end = (i + 1..pairs.len()).find(|&k| pairs[k].0 == 0).unwrap_or(pairs.len());
+        let rec = &pairs[i + 1..end];
+        let s = |c: i32| rec.iter().find(|p| p.0 == c).map(|p| p.1).unwrap_or("");
+        let f = |c: i32| s(c).parse::<f64>().unwrap_or(0.0);
+        let xy = |c: i32| [f(c), f(c + 10)];
+        let layer = s(8).to_owned();
+        let mut shape = None;
+        match value {
+            "SECTION" => section = if s(2) == "ENTITIES" { "ENTITIES" } else if s(2) == "BLOCKS" { "BLOCKS" } else { "" },
+            "LAYER" => sheet.layers.push(crate::formats::sheet::Layer { name: s(2).into(), color: f(62) as i16, linetype: s(6).into() }),
+            "LTYPE" if s(2) != "CONTINUOUS" => sheet.linetypes.push(crate::formats::sheet::Linetype {
+                name: s(2).into(),
+                description: s(3).into(),
+                pattern: rec.iter().filter(|p| p.0 == 49).filter_map(|p| p.1.parse().ok()).collect(),
+            }),
+            "BLOCK" => block = Some(Block { name: s(2).into(), base: xy(10), entities: Vec::new() }),
+            "ENDBLK" => sheet.blocks.extend(block.take()),
+            "LINE" => shape = Some(Shape::Line { a: xy(10), b: xy(11) }),
+            "ARC" => shape = Some(Shape::Arc { center: xy(10), radius: f(40), start: f(50).to_radians(), end: f(51).to_radians() }),
+            "CIRCLE" => shape = Some(Shape::Circle { center: xy(10), radius: f(40) }),
+            "TEXT" => shape = Some(Shape::Text { at: xy(10), height: f(40), rotation: f(50).to_radians(), text: decode(s(1)) }),
+            "INSERT" => {
+                let scale = if s(41).is_empty() { 1.0 } else { f(41) };
+                shape = Some(Shape::Insert { block: s(2).into(), at: xy(10), scale, rotation: f(50).to_radians() })
+            }
+            "DIMENSION" => {
+                let text = rec.iter().find(|p| p.0 == 1).map(|p| decode(p.1));
+                let kind = match f(70) as i32 & 7 {
+                    4 => DimensionKind::Radius { center: xy(10), on: xy(15) },
+                    3 => DimensionKind::Diameter { from: xy(10), to: xy(15) },
+                    _ => DimensionKind::Linear { from: xy(13), to: xy(14), line: xy(10), rotation: f(50).to_radians() },
+                };
+                shape = Some(Shape::Dimension(Dimension { kind, text_at: xy(11), measurement: 0.0, text, block: s(2).into() }))
+            }
+            "POLYLINE" => {
+                let closed = f(70) as i32 & 1 == 1;
+                let mut points = Vec::new();
+                let mut k = end;
+                while k < pairs.len() && pairs[k] == (0, "VERTEX") {
+                    let e = (k + 1..pairs.len()).find(|&j| pairs[j].0 == 0).unwrap_or(pairs.len());
+                    let g = |c: i32| pairs[k + 1..e].iter().find(|p| p.0 == c).and_then(|p| p.1.parse::<f64>().ok()).unwrap_or(0.0);
+                    points.push([g(10), g(20)]);
+                    k = e;
+                }
+                shape = Some(Shape::Polyline { points, closed });
+            }
+            _ => {}
+        }
+        if let Some(shape) = shape {
+            let e = Entity { layer, shape };
+            match (&mut block, section) {
+                (Some(b), _) => b.entities.push(e),
+                (None, "ENTITIES") => sheet.entities.push(e),
+                _ => {}
+            }
+        }
+        i = end;
+    }
+    Ok(sheet)
+}
+
+/// A drawing sheet as DXF: (sheet name, DXF text, notes).
 pub(super) fn drawing_dxf(
     path: &str,
     text: &str,
@@ -70,166 +325,11 @@ pub(super) fn drawing_dxf(
     sheet: Option<&str>,
     configuration: Option<&str>,
 ) -> Result<(String, String, Vec<String>), ToolError> {
-    let compiled: Value = serde_json::from_str(&runmat_cad_wasm::drawing::compile_json_in(
-        path,
-        text,
-        files,
-        configuration,
-    ))
-    .unwrap_or(Value::Null);
-    let data = &compiled["projection"]["data"];
-    let doc = &data["document"];
-    let sheets = doc["sheets"].as_array().cloned().unwrap_or_default();
-    let Some(sheet) = sheets
-        .iter()
-        .find(|s| sheet.is_none_or(|n| s["name"].as_str() == Some(n)))
-    else {
-        return Err(ToolError::invalid(format!(
-            "{path} has no sheet {}",
-            sheet.unwrap_or("")
-        )));
-    };
-    let sheet_name = sheet["name"].as_str().unwrap_or("1").to_owned();
-    let format = doc["formats"]
-        .as_array()
-        .and_then(|f| f.iter().find(|f| f["name"] == sheet["format"]))
-        .cloned()
-        .unwrap_or(Value::Null);
-    let size_name = format["size"]["name"].as_str().unwrap_or("A3");
-    let [w, h] = sheet_size(size_name);
-    let ratio = floats(&sheet["scale"]);
-    let scale = if ratio.len() == 2 && ratio[1] != 0.0 {
-        ratio[0] / ratio[1]
-    } else {
-        1.0
-    };
-    let mut dxf = Dxf {
-        body: String::new(),
-    };
-    let mut notes = Vec::new();
-    dxf.rect("FRAME", 10.0, 10.0, w - 20.0, h - 20.0);
-    let rows = data["title_blocks"][&sheet_name]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    for (i, row) in rows.iter().enumerate() {
-        let y = 10.0 + i as f64 * 7.0;
-        let x = w - 130.0;
-        dxf.rect("FRAME", x, y, 120.0, 7.0);
-        dxf.text(
-            "FRAME",
-            [x + 2.0, y + 2.2],
-            2.2,
-            row[0].as_str().unwrap_or(""),
-        );
-        dxf.text(
-            "FRAME",
-            [x + 40.0, y + 2.2],
-            2.6,
-            row[1].as_str().unwrap_or(""),
-        );
-    }
-    let views: Vec<&Value> = doc["views"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|v| v["sheet"].as_str() == Some(sheet_name.as_str()))
-        .collect();
-    for (n, view) in views.iter().enumerate() {
-        let name = view["name"].as_str().unwrap_or("view");
-        let hlr = &data["hlr"][name];
-        let own = floats(&view["scale"]);
-        let s = if own.len() == 2 && own[1] != 0.0 {
-            own[0] / own[1]
-        } else {
-            scale
-        } * 1e3;
-        let runs = |key: &str| -> Vec<Vec<f64>> {
-            hlr[key]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(floats)
-                .collect()
-        };
-        let (visible, hidden) = (runs("visible"), runs("hidden"));
-        if visible.is_empty() && hidden.is_empty() {
-            notes.push(format!(
-                "view {name} has no edges (its model isn't in the workspace or doesn't compile)"
-            ));
-        }
-        let mut lo = [f64::INFINITY; 2];
-        let mut hi = [f64::NEG_INFINITY; 2];
-        for run in visible.iter().chain(&hidden) {
-            for p in run.chunks_exact(2) {
-                lo = [lo[0].min(p[0]), lo[1].min(p[1])];
-                hi = [hi[0].max(p[0]), hi[1].max(p[1])];
-            }
-        }
-        let centre = if lo[0].is_finite() {
-            [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0]
-        } else {
-            [0.0, 0.0]
-        };
-        let at = floats(&view["at"]);
-        let origin = if at.len() == 2 {
-            [at[0], at[1]]
-        } else {
-            [
-                w * (0.3 + 0.38 * (n % 2) as f64),
-                h * (0.62 - 0.37 * (n / 2 % 2) as f64),
-            ]
-        };
-        let place = |p: &[f64]| {
-            [
-                origin[0] + (p[0] - centre[0]) * s,
-                origin[1] + (p[1] - centre[1]) * s,
-            ]
-        };
-        for (layer, set) in [("VISIBLE", &visible), ("HIDDEN", &hidden)] {
-            for run in set.iter() {
-                for seg in run.chunks_exact(2).collect::<Vec<_>>().windows(2) {
-                    dxf.line(layer, place(seg[0]), place(seg[1]));
-                }
-            }
-        }
-        let half_h = if lo[1].is_finite() {
-            (hi[1] - lo[1]) * s / 2.0
-        } else {
-            10.0
-        };
-        let shown = s / 1e3;
-        let label = format!(
-            "{}  SCALE {}",
-            name.to_uppercase(),
-            if shown >= 1.0 {
-                format!("{shown}:1")
-            } else {
-                format!("1:{}", (1.0 / shown).round())
-            }
-        );
-        dxf.text("NOTES", [origin[0], origin[1] - half_h - 7.0], 3.0, &label);
-    }
-    let out = dxf.finish(&[
-        ("FRAME", 7, "CONTINUOUS"),
-        ("VISIBLE", 7, "CONTINUOUS"),
-        ("HIDDEN", 8, "DASHED"),
-        ("NOTES", 3, "CONTINUOUS"),
-    ]);
-    Ok((sheet_name, out, notes))
+    let (name, sheet, notes) = drawing_sheet(path, text, files, sheet, configuration)?;
+    Ok((name, write(&sheet), notes))
 }
 
 /// The DXF of a part's flat pattern, when it has one.
 pub(super) fn flat_pattern_dxf(path: &str, text: &str) -> Result<String, ToolError> {
-    let part = runmat_cad_wasm::runtime::regenerate_part(path, text)
-        .map_err(|_| ToolError::new("not_compiled", format!("{path} has syntax errors")))?;
-    for record in part.result.state.records.values() {
-        if let runmat_cad::regen::records::FeatureRecord::FlatPattern { layout, .. } = record {
-            return Ok(runmat_cad::drawing::flat_pattern::flat_pattern_sheet(layout).to_dxf());
-        }
-    }
-    Err(ToolError::new(
-        "unsupported",
-        format!("{path} has no flat pattern; DXF exports drawings and sheet-metal flat patterns (add a flat_pattern feature)"),
-    ))
+    Ok(write(&flat_pattern(path, text)?))
 }
