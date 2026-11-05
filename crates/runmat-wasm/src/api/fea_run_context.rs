@@ -547,8 +547,15 @@ impl ActiveFeaLease {
                         delegation_id: None,
                     }).map_err(|error| js_error(&error.to_string()));
                 }
-                Err(LedgerError::MoreGrantRequired { required, .. }) => {
-                    let count = crate::wire::json_contract_to_js(&required)
+                Err(LedgerError::MoreGrantRequired { required, granted }) => {
+                    // Ask the host ahead by the shared doubling law so
+                    // per-element reserves do not each call the host.
+                    let target = runmat_simulation_usage::grant_target(
+                        required,
+                        granted,
+                        lease.budget_ops,
+                    );
+                    let count = crate::wire::json_contract_to_js(&target)
                         .map_err(|error| js_error(&error.to_string()))?;
                     let state: LeaseState = serde_wasm_bindgen::from_value(
                         call_host(&host, "grant", &request, &count).await?,

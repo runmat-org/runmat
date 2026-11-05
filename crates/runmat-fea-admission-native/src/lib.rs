@@ -1,6 +1,7 @@
 //! Lazy native FEA lease host shared by CLI and standalone native images.
 //! Construction captures only a typed selector. Each admitted root owns its transport thread.
 use std::sync::mpsc::{self, SyncSender};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use runmat_runtime::analysis::fea_run_admission::{
@@ -98,6 +99,8 @@ struct Permit {
     commands: Mutex<tokio::sync::mpsc::Sender<Command>>,
     initial: FeaRunBudget,
     measurement_version: MeasurementVersion,
+    /// Grant from the latest server reply, for sizing the next request.
+    granted: AtomicU64,
 }
 
 impl Permit {
@@ -106,7 +109,7 @@ impl Permit {
         value: &FeaRunUsage,
         target: Option<OperationCount>,
     ) -> Result<FeaRunBudget, FeaRunDenied> {
-        self.request(|reply| {
+        let budget = self.request(|reply| {
             Command::Heartbeat(
                 ReportSimulationUsage {
                     measurement_version: self.measurement_version.clone(),
@@ -116,7 +119,19 @@ impl Permit {
                 },
                 reply,
             )
-        })
+        })?;
+        self.granted
+            .store(budget.granted_ops.operations(), Ordering::Release);
+        Ok(budget)
+    }
+    /// The server adds what it can toward an absolute target within the
+    /// budget and allowance; ask ahead by the shared doubling law.
+    fn grant_target(&self, required: OperationCount) -> OperationCount {
+        runmat_simulation_usage::grant_target(
+            required,
+            OperationCount::from_operations(self.granted.load(Ordering::Acquire)),
+            self.initial.budget_ops,
+        )
     }
     fn request<T>(&self, command: impl FnOnce(Reply<T>) -> Command) -> Result<T, FeaRunDenied> {
         // One exchange owns the bounded command slot until its reply arrives.
@@ -280,6 +295,7 @@ impl FeaRunAdmission for NativeFeaAdmission {
             .map_err(|_| FeaRunDenied::ServerUnreachable)??;
         Ok(Box::new(Permit {
             commands: Mutex::new(commands),
+            granted: AtomicU64::new(initial.granted_ops.operations()),
             initial,
             measurement_version,
         }))
@@ -385,7 +401,7 @@ impl FeaRunPermit for Permit {
         value: &FeaRunUsage,
         required: OperationCount,
     ) -> Result<FeaRunBudget, FeaRunDenied> {
-        self.report(value, Some(required))
+        self.report(value, Some(self.grant_target(required)))
     }
     fn settle(
         self: Box<Self>,
@@ -429,6 +445,42 @@ mod tests {
         assert!(budget(ops(0), ops(0), expiry, 30).is_err());
         assert!(budget(ops(1), ops(2), expiry, 30).is_err());
         assert!(budget(ops(1), ops(1), expiry, 0).is_err());
+    }
+
+    #[test]
+    fn grant_requests_ask_ahead_by_the_current_grant_within_the_budget() {
+        let expiry = chrono::Utc::now() + chrono::Duration::seconds(60);
+        let initial = budget(ops(10_000), ops(100), expiry, 30).unwrap();
+        let (commands, _receiver) = tokio::sync::mpsc::channel(1);
+        let permit = Permit {
+            commands: Mutex::new(commands),
+            granted: AtomicU64::new(initial.granted_ops.operations()),
+            initial,
+            measurement_version: MeasurementVersion::reference_v1(),
+        };
+        // Within the current grant: exactly what is required.
+        assert_eq!(permit.grant_target(ops(80)), ops(80));
+        // One element past the grant: ask for the grant again on top.
+        assert_eq!(permit.grant_target(ops(110)), ops(210));
+        // A large jump asks for twice the jump.
+        assert_eq!(permit.grant_target(ops(1_000)), ops(1_900));
+        // Never past the budget, and never below what is required.
+        permit.granted.store(6_000, Ordering::Release);
+        assert_eq!(permit.grant_target(ops(6_010)), ops(10_000));
+        permit.granted.store(10_000, Ordering::Release);
+        assert_eq!(permit.grant_target(ops(10_000)), ops(10_000));
+        // 60 per-element requests of 10 ops starting from no grant.
+        permit.granted.store(0, Ordering::Release);
+        let mut renewals = 0;
+        for element in 1..=60u64 {
+            let required = element * 10;
+            if required > permit.granted.load(Ordering::Acquire) {
+                let target = permit.grant_target(ops(required));
+                permit.granted.store(target.operations(), Ordering::Release);
+                renewals += 1;
+            }
+        }
+        assert!(renewals <= 7, "{renewals} renewals for 60 elements");
     }
 
     #[test]
@@ -494,6 +546,7 @@ mod tests {
         });
         let permit = Box::new(Permit {
             commands: Mutex::new(commands),
+            granted: AtomicU64::new(initial.granted_ops.operations()),
             initial,
             measurement_version: MeasurementVersion::reference_v1(),
         });

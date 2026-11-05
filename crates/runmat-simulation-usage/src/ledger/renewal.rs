@@ -9,6 +9,33 @@ pub trait GrantRenewal: Send + Sync {
     fn request_grant(&self, required: OperationCount) -> Result<(), LedgerError>;
 }
 
+/// The absolute grant target for a renewal that must cover `required`.
+///
+/// Kernels reserve small counts per element, so asking a host for exactly
+/// `required` costs one host round trip per element once the grant runs out.
+/// A request past the current grant asks for up to the current grant again:
+/// the grant doubles and renewals grow with the logarithm of the work. The
+/// target never passes the budget and is never below `required`. Hosts add
+/// what they can toward the target; only `required` must be covered, and
+/// settlement returns unused grant.
+pub fn grant_target(
+    required: OperationCount,
+    granted: OperationCount,
+    budget: OperationCount,
+) -> OperationCount {
+    let (required, granted) = (required.operations(), granted.operations());
+    if required <= granted {
+        return OperationCount::from_operations(required);
+    }
+    let headroom = granted.max(required - granted);
+    OperationCount::from_operations(
+        required
+            .saturating_add(headroom)
+            .min(budget.operations())
+            .max(required),
+    )
+}
+
 impl UsageLedger {
     /// Bind the original host before sharing this ledger with numerical workers.
     /// Weak ownership avoids a cycle between a root and its numerical ledger.
@@ -52,6 +79,27 @@ impl UsageLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grant_targets_double_within_the_budget_and_cover_the_requirement() {
+        let c = OperationCount::from_operations;
+        assert_eq!(grant_target(c(80), c(100), c(10_000)), c(80));
+        assert_eq!(grant_target(c(110), c(100), c(10_000)), c(210));
+        assert_eq!(grant_target(c(1_000), c(100), c(10_000)), c(1_900));
+        assert_eq!(grant_target(c(6_010), c(6_000), c(10_000)), c(10_000));
+        assert_eq!(grant_target(c(10_000), c(10_000), c(10_000)), c(10_000));
+        // A requirement over the budget is passed through for the host to refuse.
+        assert_eq!(grant_target(c(12_000), c(100), c(10_000)), c(12_000));
+        let (mut granted, mut renewals) = (0, 0);
+        for element in 1..=60u64 {
+            let required = element * 10;
+            if required > granted {
+                granted = grant_target(c(required), c(granted), c(10_000)).operations();
+                renewals += 1;
+            }
+        }
+        assert!(renewals <= 7, "{renewals} renewals for 60 elements");
+    }
     use crate::{CompletedUsage, UsageCategory};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
