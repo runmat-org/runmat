@@ -533,6 +533,89 @@ pub(in crate::cdt) fn observed_change_violation(
     Ok(None)
 }
 
+/// The reflex edges of the illegal faces that [`observed_change_violation`] reports, as sorted
+/// node-index pairs. For an unprotected face `abc` between created cell `pabc` and neighbor
+/// `qabc` with `q` strictly inside the sphere of `pabc`, a 2-3 flip needs segment `pq` to cross
+/// the interior of `abc`. Where `pq` crosses the plane of `abc` beyond (or on) edge `ab`, only a
+/// flip that removes `ab` can repair the face; when `ab` must stay (a recovered segment edge),
+/// no flip does, and the producer has to split `ab` in the same edit. Exact predicates.
+pub(in crate::cdt) fn observed_change_reflex_edges(
+    topology: &TopologyMutation,
+    changes: &crate::cdt::mutation::ObservedCellChanges,
+    protected_faces: &BTreeSet<[StableDigest; 3]>,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<BTreeSet<[u32; 2]>, DelaunayInsertionError> {
+    use super::topology_access::TetrahedralTopology;
+    validate_options(options)?;
+    let mut work = InsertionWork::new(options, cancellation);
+    let mut reflex = BTreeSet::new();
+    let orient = |vertices: [u32; 4]| {
+        orient_volume_nodes(vertices.map(|vertex| topology.nodes[vertex as usize]))
+            .map_err(super::predicate_error)
+    };
+    for left_index in &changes.created {
+        let Some(left) = topology.tetrahedron(*left_index) else {
+            continue;
+        };
+        for (opposite, neighbor) in left.neighbors.iter().enumerate() {
+            let Some(right) = neighbor.and_then(|index| topology.tetrahedron(index)) else {
+                continue;
+            };
+            work.checkpoint()?;
+            if left.region_id != right.region_id
+                || protected_faces.contains(&stable_face(topology, left.vertex_indices, opposite))
+            {
+                continue;
+            }
+            let Some(q) = right
+                .vertex_indices
+                .iter()
+                .copied()
+                .find(|vertex| !left.vertex_indices.contains(vertex))
+            else {
+                continue;
+            };
+            work.predicate()?;
+            let points = left
+                .vertex_indices
+                .map(|vertex| topology.nodes[vertex as usize]);
+            if topology
+                .insphere_nodes([
+                    points[0],
+                    points[1],
+                    points[2],
+                    points[3],
+                    topology.nodes[q as usize],
+                ])
+                .map_err(super::predicate_error)?
+                != PredicateSign::Positive
+            {
+                continue;
+            }
+            let p = left.vertex_indices[opposite];
+            let mut face = [0_u32; 3];
+            for (cursor, slot) in (0..4).filter(|slot| *slot != opposite).enumerate() {
+                face[cursor] = left.vertex_indices[slot];
+            }
+            for (a, b, c) in [
+                (face[0], face[1], face[2]),
+                (face[1], face[2], face[0]),
+                (face[2], face[0], face[1]),
+            ] {
+                let towards_c = orient([p, a, b, c])?;
+                let towards_q = orient([p, a, b, q])?;
+                if towards_q == PredicateSign::Zero || towards_q != towards_c {
+                    let mut edge = [a, b];
+                    edge.sort_unstable();
+                    reflex.insert(edge);
+                }
+            }
+        }
+    }
+    Ok(reflex)
+}
+
 /// Which link flips restore the Delaunay property around an inserted node.
 #[derive(Clone, Copy)]
 pub(in crate::cdt) enum LinkFlips<'a> {

@@ -506,17 +506,23 @@ fn split_pair_at_shared_vertex(
             "a split point duplicates an existing node position".to_owned()
         ));
     }
-    let encroached = match encroached_corner_segments(
-        working,
-        &[(edge, edge_node), (other, other_node)],
-        constraint_index,
-    )? {
-        Ok(encroached) => encroached,
-        Err(reason) => return Ok(Err(reason)),
-    };
-    let insertion = work.options.segment_recovery.insertion;
-    let cancellation = work.cancellation;
-    let outcome = working.edit(|topology| {
+    // Recovered segment edges that an earlier attempt of this edit found blocking: an illegal
+    // face whose only repair removes that edge (see `observed_change_reflex_edges`). Each is
+    // split in the same edit on the next attempt.
+    let mut forced = Vec::<EncroachedCornerSegment>::new();
+    loop {
+        let mut seeds = vec![(edge, edge_node), (other, other_node)];
+        seeds.extend(forced.iter().map(|(split, node, _)| (*split, *node)));
+        let mut encroached = match encroached_corner_segments(working, &seeds, constraint_index)? {
+            Ok(encroached) => encroached,
+            Err(reason) => return Ok(Err(reason)),
+        };
+        // Split first: the blocking edges are kept by every other split of the edit.
+        encroached.extend(forced.iter().cloned());
+        let mut blocking = Vec::<[StableDigest; 2]>::new();
+        let insertion = work.options.segment_recovery.insertion;
+        let cancellation = work.cancellation;
+        let outcome = working.edit(|topology| {
         let mut trial = topology.cavity_trial();
         let outcome = (|| -> Result<Result<Vec<ProtectedFacetSplit>, String>, DelaunayFacetRecoveryError> {
             let mut observed = trial.observe_edge_changes();
@@ -689,7 +695,32 @@ fn split_pair_at_shared_vertex(
                 cancellation,
             ) {
                 Ok(None) => Ok(Ok(all_splits)),
-                Ok(Some(violation)) => Ok(Err(violation)),
+                Ok(Some(violation)) => {
+                    let reflex = crate::cdt::insertion::observed_change_reflex_edges(
+                        &observed,
+                        &observed.changed_cells(),
+                        &protected_faces,
+                        insertion,
+                        cancellation,
+                    )
+                    .map_err(|failure| {
+                        insertion_error(failure.kind, failure.to_string(), constraint_index)
+                    })?;
+                    for pair in reflex {
+                        let mut key = pair.map(|index| observed.nodes[index as usize].identity);
+                        key.sort_unstable();
+                        if !replaced.contains(&key)
+                            && protected_edges.iter().any(|candidate| {
+                                let mut candidate = *candidate;
+                                candidate.sort_unstable();
+                                candidate == key
+                            })
+                        {
+                            blocking.push(key);
+                        }
+                    }
+                    Ok(Err(violation))
+                }
                 Err(failure) => Err(insertion_error(
                     failure.kind,
                     failure.to_string(),
@@ -703,22 +734,50 @@ fn split_pair_at_shared_vertex(
         }
         Ok::<_, DelaunayFacetRecoveryError>((outcome, changed))
     })?;
-    if outcome.is_ok() {
-        working.record_segment_split(other_location.0, other_location.1, other_recovered)?;
-        let edge_location = segment_edge_location(&working.segments, edge)
-            .ok_or_else(|| invalid(constraint_index, "split edge left its recovered segment"))?;
-        working.record_segment_split(edge_location.0, edge_location.1, edge_recovered)?;
-        for (split, _, recovered) in encroached {
-            let location = segment_edge_location(&working.segments, split).ok_or_else(|| {
-                invalid(
-                    constraint_index,
-                    "encroached edge left its recovered segment",
+        if outcome.is_err() && encroached.len() < MAXIMUM_ENCROACHED_CORNER_SPLITS {
+            if let Some(location) = blocking
+                .first()
+                .and_then(|key| segment_edge_location(&working.segments, *key).map(|at| (*key, at)))
+            {
+                let (key, (segment, interval)) = location;
+                let (midpoint, recovered) = recovered_segment_midpoint_on(
+                    working.topology(),
+                    &working.segments,
+                    segment,
+                    interval,
                 )
-            })?;
-            working.record_segment_split(location.0, location.1, recovered)?;
+                .map_err(super::segment_error)?;
+                if !working.topology().nodes.iter().any(|existing| {
+                    crate::cdt::segment_recovery::coordinates_share_representable_location(
+                        existing.coordinates_m.canonical_value(),
+                        midpoint.coordinates_m.canonical_value(),
+                    )
+                }) {
+                    forced.push((key, midpoint, recovered));
+                    continue;
+                }
+            }
         }
+        if outcome.is_ok() {
+            working.record_segment_split(other_location.0, other_location.1, other_recovered)?;
+            let edge_location =
+                segment_edge_location(&working.segments, edge).ok_or_else(|| {
+                    invalid(constraint_index, "split edge left its recovered segment")
+                })?;
+            working.record_segment_split(edge_location.0, edge_location.1, edge_recovered)?;
+            for (split, _, recovered) in encroached {
+                let location =
+                    segment_edge_location(&working.segments, split).ok_or_else(|| {
+                        invalid(
+                            constraint_index,
+                            "encroached edge left its recovered segment",
+                        )
+                    })?;
+                working.record_segment_split(location.0, location.1, recovered)?;
+            }
+        }
+        return Ok(outcome);
     }
-    Ok(outcome)
 }
 
 type EncroachedCornerSegment = (

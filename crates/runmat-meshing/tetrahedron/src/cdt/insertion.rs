@@ -43,8 +43,8 @@ pub(in crate::cdt) use mutable::{
     insert_delaunay_volume_node_into_mutation_with_barriers,
     insert_delaunay_volume_node_into_mutation_with_prepared_barriers_from_hint,
     legalize_inserted_node_and_check_star, legalize_inserted_node_and_check_star_with_facet_flips,
-    legalize_inserted_nodes, legalize_inserted_nodes_with_facet_flips, observed_change_violation,
-    FacetFlip,
+    legalize_inserted_nodes, legalize_inserted_nodes_with_facet_flips,
+    observed_change_reflex_edges, observed_change_violation, FacetFlip,
 };
 use topology_access::TetrahedralTopology;
 #[cfg(test)]

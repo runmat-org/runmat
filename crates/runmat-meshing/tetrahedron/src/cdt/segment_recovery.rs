@@ -704,7 +704,8 @@ pub(in crate::cdt) enum InPlaceTemporarySegment {
         chain: Vec<DelaunayRecoveredSegmentNode>,
         inserted_nodes: Vec<DelaunayVolumeNode>,
     },
-    /// The chain would remove these protected edges; the topology is unchanged.
+    /// The chain would remove these protected edges, or leaves an illegal face that only their
+    /// removal repairs; the topology is unchanged.
     Conflicts(Vec<[StableDigest; 2]>),
     /// Local flips did not restore a constrained-Delaunay complex, or the chain did not survive
     /// them; the topology is unchanged and the caller uses the complete repair.
@@ -728,7 +729,8 @@ pub(in crate::cdt) fn recover_temporary_delaunay_segment_in_place(
         cancellation,
     } = request;
     validate_options(options)?;
-    let [Some(first), Some(last)] = endpoints.map(|identity| find_node(&*topology, identity).copied())
+    let [Some(first), Some(last)] =
+        endpoints.map(|identity| find_node(&*topology, identity).copied())
     else {
         return Err(error(
             DelaunaySegmentRecoveryErrorKind::InvalidTopology,
@@ -775,9 +777,13 @@ pub(in crate::cdt) fn recover_temporary_delaunay_segment_in_place(
         let inserted = (original_node_count..observed.nodes.len())
             .map(|index| index as u32)
             .collect::<Vec<_>>();
-        let kept_edges = sorted_edge_keys(protected_edges.iter().copied().chain(
-            chain.windows(2).map(|pair| [pair[0].identity, pair[1].identity]),
-        ));
+        let kept_edges = sorted_edge_keys(
+            protected_edges.iter().copied().chain(
+                chain
+                    .windows(2)
+                    .map(|pair| [pair[0].identity, pair[1].identity]),
+            ),
+        );
         match legalize_inserted_nodes(
             &mut observed,
             &inserted,
@@ -824,7 +830,38 @@ pub(in crate::cdt) fn recover_temporary_delaunay_segment_in_place(
             options,
             cancellation,
         )? {
-            InPlaceTemporarySegment::Declined(violation)
+            // An illegal face whose only repair removes a protected segment edge (the chain node
+            // lies in the sphere of a cell across that edge, for example inside the circumcircle
+            // of a coplanar recovered triangle of another facet on the far side of the edge):
+            // no constrained-Delaunay complex holds the chain while the edge stays, so the
+            // caller splits that edge first, as for an edge the chain removed.
+            let reflex = crate::cdt::insertion::observed_change_reflex_edges(
+                &observed,
+                &observed.changed_cells(),
+                &protected_face_set,
+                options.insertion,
+                cancellation,
+            )
+            .map_err(|failure| insertion_error(failure, constraint_index))?;
+            let blocking = protected_edges
+                .iter()
+                .copied()
+                .filter(|edge| {
+                    let [Some(first), Some(second)] =
+                        edge.map(|identity| observed.node_index(identity))
+                    else {
+                        return false;
+                    };
+                    let mut key = [first, second];
+                    key.sort_unstable();
+                    reflex.contains(&key)
+                })
+                .collect::<Vec<_>>();
+            if blocking.is_empty() {
+                InPlaceTemporarySegment::Declined(violation)
+            } else {
+                InPlaceTemporarySegment::Conflicts(blocking)
+            }
         } else {
             InPlaceTemporarySegment::Recovered {
                 chain,
