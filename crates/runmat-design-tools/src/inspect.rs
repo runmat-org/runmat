@@ -3,7 +3,7 @@
 
 use crate::check::display_value;
 use crate::{kind_of, name_matches, text_of, DesignKind, Files, ToolError};
-use runmat_cad::evaluate::{AnalysisRequest, AnalysisResult, GeometryAnalyzer};
+use runmat_cad::evaluate::{AnalysisRequest, AnalysisResult};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
