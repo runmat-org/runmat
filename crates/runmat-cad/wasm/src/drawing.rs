@@ -20,8 +20,8 @@ use crate::runtime::{compile_assembly, compile_part, resolve_path, Diagnostic, F
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::build_drawing_index;
-use runmat_cad::drawing::{ModelRef, ModelReferences};
-use runmat_cad::ids::PropertyName;
+use runmat_cad::drawing::{DrawingDocument, ModelRef, ModelReferences};
+use runmat_cad::ids::{FilePath, PropertyName};
 use runmat_cad::model::PartDocument;
 use runmat_cad::refs::name::EntityName;
 use runmat_cad::refs::reference::Reference;
@@ -133,7 +133,18 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
 /// `compile` for a `.drawing`, as JSON.
 pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
     let parsed = parse_drawing(path, text);
-    let Some(document) = parsed.document else {
+    // A new, empty file is an empty drawing named after the file: the editor shows its empty
+    // prompt (Auto-drawing, add a view), not a syntax error.
+    let empty = text.trim().is_empty().then(|| DrawingDocument {
+        path: FilePath::new(path),
+        header: Default::default(),
+        formats: Vec::new(),
+        sheets: Vec::new(),
+        views: Vec::new(),
+        annotations: Vec::new(),
+        tables: Vec::new(),
+    });
+    let Some(document) = parsed.document.or(empty) else {
         let diagnostics: Vec<Value> = parsed
             .diagnostics
             .iter()
@@ -311,6 +322,10 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
     }
     // Where each dimension's references sit in the model (mm): the sheet measures between them.
     let mut anchors = serde_json::Map::new();
+    // And how far each planar reference reaches (its box, mm), so extension lines start at the
+    // feature's end nearest the dimension line. Holes and edges have none: their extension
+    // lines leave the anchor (a hole's centre line).
+    let mut extents = serde_json::Map::new();
     for a in &document.annotations {
         let runmat_cad::drawing::AnnotationKind::Dimension { references, .. } = &a.kind else {
             continue;
@@ -325,11 +340,14 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
             references.iter().map(|r| point_of(display, r)).collect();
         if let Some(points) = points {
             anchors.insert(a.id.clone(), json!(points));
+            let boxes: Vec<Value> = references.iter().map(|r| extent_of(display, r)).collect();
+            extents.insert(a.id.clone(), Value::Array(boxes));
         }
     }
     if let Value::Object(o) = &mut data {
         o.insert("hlr".into(), Value::Object(hlr));
         o.insert("anchors".into(), Value::Object(anchors));
+        o.insert("extents".into(), Value::Object(extents));
     }
     json!({
         "projection": { "kind": "drawing", "data": data },
@@ -360,6 +378,22 @@ fn radius_mm(v: &runmat_cad::value::ValueExpr) -> Option<f64> {
 
 /// A model point (mm) a reference names: a cylindrical face's axis at its middle, a face's
 /// centre, or where two faces meet (`edges_between`, also after a blend rounded it away).
+/// A planar reference's box `[min, max]` (mm), or null for cylinders and edges.
+fn extent_of(display: &Value, reference: &runmat_cad::refs::reference::Reference) -> Value {
+    let Some(text) = runmat_cad::syntax::refs::print_reference(reference) else {
+        return Value::Null;
+    };
+    let Some((pts, surface)) = values::face(display, &text) else {
+        return Value::Null;
+    };
+    if values::cylinder(surface).is_some() || pts.is_empty() {
+        return Value::Null;
+    }
+    let lo = [0, 1, 2].map(|i| pts.iter().map(|p| p[i]).fold(f64::MAX, f64::min));
+    let hi = [0, 1, 2].map(|i| pts.iter().map(|p| p[i]).fold(f64::MIN, f64::max));
+    json!([lo, hi])
+}
+
 fn point_of(
     display: &Value,
     reference: &runmat_cad::refs::reference::Reference,
@@ -444,6 +478,27 @@ mod tests {
     const BRACKET: &str = include_str!("../../tests/corpus/documents/bracket.part");
     pub(crate) const DRAWING: &str = "runmat 0.7\nstd 1\n\ndrawing bracket {\n    format a3 = {\n        size = { size = iso, name = A3 },\n        title_block = [\n            { label = \"Part number\", source = { source = property, name = part_number } }\n        ]\n    }\n\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n\n    view front = standard(\n        orientation = front,\n        sheet = \"1\",\n        model = { file = \"bracket.part\" },\n        at = [100, 100],\n        display = hidden_lines\n    )\n    view top = projected(\n        from = front,\n        direction = up,\n        sheet = \"1\",\n        model = { file = \"bracket.part\" },\n        at = [100, 200],\n        display = hidden_lines\n    )\n}\n";
 
+    /// The Desktop's sheet tests read what the worker gets for its fixtures. Set
+    /// `RUNMAT_DESKTOP_FIXTURES=1` to write it; otherwise the checked-in copy must be current.
+    fn desktop_fixture(name: &str, json: &str) {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../runmat-private-cad/desktop/src/app/components/cad/fixtures");
+        if !dir.exists() {
+            return;
+        }
+        let path = dir.join(name);
+        if std::env::var("RUNMAT_DESKTOP_FIXTURES").is_ok() {
+            std::fs::write(&path, json).unwrap();
+            return;
+        }
+        let checked_in = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            checked_in == json,
+            "{} is stale; rerun with RUNMAT_DESKTOP_FIXTURES=1",
+            path.display()
+        );
+    }
+
     #[test]
     fn a_drawing_compiles_from_its_text_with_the_displays_of_its_models() {
         let deps = dependencies("/p/bracket.drawing", DRAWING);
@@ -483,8 +538,9 @@ mod tests {
         let files: Files = [("/p/bracket.part".to_owned(), PART.to_owned())]
             .into_iter()
             .collect();
-        let out: Value =
-            serde_json::from_str(&compile_json("/p/standard.drawing", STANDARD, &files)).unwrap();
+        let compiled = compile_json("/p/standard.drawing", STANDARD, &files);
+        desktop_fixture("standard.drawing.compiled.json", &compiled);
+        let out: Value = serde_json::from_str(&compiled).unwrap();
         let data = &out["projection"]["data"];
         assert_eq!(
             out["diagnostics"].as_array().map(Vec::len),
@@ -510,6 +566,21 @@ mod tests {
             (w[1][0].as_f64().unwrap() - w[0][0].as_f64().unwrap() - 80.0).abs() < 1e-3,
             "{w}"
         );
+        // Every feature located and sized (ASME Y14.5): the cut's 20 x 10 and its position
+        // from the datum edges, and the hole's position to its axis.
+        for (id, value) in [
+            ("cut_width", "20"),
+            ("cut_height", "10"),
+            ("cut_x", "20"),
+            ("cut_y", "20"),
+            ("hole_x", "60"),
+            ("hole_y", "10"),
+        ] {
+            assert_eq!(text[id], value, "{id}: {text}");
+        }
+        // A planar reference carries its box; the hole (a cylinder) locates by its axis.
+        let e = &data["extents"]["hole_x"];
+        assert!(e[0].is_array() && e[1].is_null(), "{e}");
         let rows = data["title_blocks"]["1"].to_string();
         assert!(
             rows.contains("Aluminum") && rows.contains("BR-100") && rows.contains("2:1"),
@@ -543,6 +614,19 @@ mod tests {
         assert!(out["diagnostics"]
             .as_array()
             .is_some_and(|d| d.iter().any(|d| d["severity"] == "warning")));
+    }
+
+    #[test]
+    fn an_empty_file_is_an_empty_drawing() {
+        let out: Value =
+            serde_json::from_str(&compile_json("/p/new.drawing", "\n  \n", &Files::new()))
+                .unwrap();
+        assert_eq!(out["projection"]["kind"], "drawing", "{out}");
+        let document = &out["projection"]["data"]["document"];
+        assert_eq!(document["sheets"].as_array().map(Vec::len), Some(0), "{out}");
+        assert!(out["diagnostics"]
+            .as_array()
+            .is_some_and(|d| d.iter().all(|d| d["severity"] != "error")));
     }
 
     #[test]
