@@ -1,6 +1,6 @@
 //! Product families through `design.export` and the `runmat-design` CLI: every configuration
-//! of a part as STEP, a drawing's sheets once per configuration of its part, and an
-//! assembly's BOM as CSV.
+//! of a part as STEP, every configuration of an assembly as 3MF, STEP, STL and glTF, a drawing's
+//! sheets once per configuration of its part, and an assembly's BOM as CSV.
 
 use runmat_design_tools::{call, Files};
 use serde_json::{json, Value};
@@ -34,8 +34,25 @@ assembly pair {
 }
 "#;
 
+/// An assembly whose configurations move a plate (an input override), suppress one, and
+/// place a part configuration.
+const STACK: &str = r#"runmat 0.7
+std 1
+
+assembly stack {
+    input gap : length = 10 mm
+    use part plate from "plate.part" as lower
+    use part plate from "plate.part" as upper {
+        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, input.gap] } }
+        configuration = { select = named, name = wide }
+    }
+    configuration tall = { overrides = { gap = 30 mm } }
+    configuration single = { suppress = ["upper"] }
+}
+"#;
+
 fn files() -> Files {
-    [("/p/plate.part", PLATE), ("/p/pair.assembly", PAIR)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect()
+    [("/p/plate.part", PLATE), ("/p/pair.assembly", PAIR), ("/p/stack.assembly", STACK)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect()
 }
 
 fn export(input: Value) -> Value {
@@ -65,6 +82,51 @@ fn every_configuration_of_a_part_exports_its_own_step() {
     assert!((x_extent(one["files"][0]["content"].as_str().unwrap()) - 120.0).abs() < 1e-6);
 }
 
+/// The extents (mm) of a 3MF package's placed triangles.
+fn three_mf_extents(file: &Value) -> [f64; 3] {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(file["content"].as_str().unwrap()).unwrap();
+    let m = runmat_design_tools::formats::three_mf::read(&bytes).expect("reads back");
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for p in m.world_triangles().iter().flatten() {
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    }
+    [0, 1, 2].map(|k| hi[k] - lo[k])
+}
+
+#[test]
+fn every_configuration_of_an_assembly_exports_its_own_files() {
+    // 3MF: the default stacks a wide plate 10 mm up; `tall` 30 mm up; `single` drops it.
+    let out = export(json!({ "path": "/p/stack.assembly", "format": "3mf", "allConfigurations": true }));
+    let exported = out["files"].as_array().unwrap();
+    let names: Vec<&str> = exported.iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["stack.3mf", "stack-tall.3mf", "stack-single.3mf"]);
+    let extents: Vec<[f64; 3]> = exported.iter().map(three_mf_extents).collect();
+    for (e, want) in extents.iter().zip([[120.0, 50.0, 20.0], [120.0, 50.0, 40.0], [80.0, 50.0, 10.0]]) {
+        for k in 0..3 {
+            assert!((e[k] - want[k]).abs() < 1e-9, "{extents:?}");
+        }
+    }
+    // STEP, STL and glTF batch the same way.
+    for (format, ext) in [("step", "step"), ("stl", "stl"), ("gltf", "glb")] {
+        let out = export(json!({ "path": "/p/stack.assembly", "format": format, "allConfigurations": true }));
+        let names: Vec<String> = out["files"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(names, [format!("stack.{ext}"), format!("stack-tall.{ext}"), format!("stack-single.{ext}")]);
+    }
+    // One configuration on its own, and a name the assembly lacks.
+    let one = export(json!({ "path": "/p/stack.assembly", "format": "3mf", "configuration": "tall" }));
+    let e = three_mf_extents(&one["files"][0]);
+    assert!((e[2] - 40.0).abs() < 1e-9, "{e:?}");
+    let err = call("design.export", json!({ "path": "/p/stack.assembly", "format": "3mf", "configuration": "short" }), &files())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("no configuration `short`"), "{err}");
+}
+
 #[test]
 fn an_assembly_bom_exports_as_csv() {
     let out = export(json!({ "path": "/p/pair.assembly", "format": "bom" }));
@@ -92,6 +154,20 @@ fn the_cli_writes_a_family_to_a_folder() {
     for f in ["plate.step", "plate-wide.step", "plate-narrow.step"] {
         let text = std::fs::read_to_string(dir.join("out").join(f)).unwrap();
         assert!(text.starts_with("ISO-10303-21;"), "{f}");
+    }
+    // An assembly family from the CLI: one 3MF per configuration.
+    std::fs::write(work.join("stack.assembly"), STACK).unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_runmat-design"))
+        .args(["export"])
+        .arg(work.join("stack.assembly"))
+        .args(["--format", "3mf", "--all-configurations", "--out"])
+        .arg(dir.join("asm"))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    for f in ["stack.3mf", "stack-tall.3mf", "stack-single.3mf"] {
+        let bytes = std::fs::read(dir.join("asm").join(f)).unwrap();
+        assert!(bytes.starts_with(b"PK"), "{f}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

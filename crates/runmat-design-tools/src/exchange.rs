@@ -61,10 +61,12 @@ pub struct ExportInput {
     #[serde(default)]
     pub project_name: Option<String>,
     /// A product family: one file per configuration (the default, then each named one) of a
-    /// part (STEP) or of the part a drawing shows (every sheet as DXF or DWG).
+    /// part or an assembly (STEP, 3MF, STL or glTF) or of the part a drawing shows (every sheet
+    /// as DXF or DWG).
     #[serde(default)]
     pub all_configurations: bool,
-    /// The named configuration to export (a part's STEP, 3MF, STL or glTF; a drawing's part).
+    /// The named configuration to export (a part's or an assembly's STEP, 3MF, STL or glTF; a
+    /// drawing's part).
     #[serde(default)]
     pub configuration: Option<String>,
 }
@@ -127,6 +129,48 @@ fn binary_file(name: String, mime: &str, bytes: &[u8]) -> ExportedFile {
     }
 }
 
+/// A part or assembly (in its named configuration `configuration`) as one 3D file named
+/// `file_stem` plus the format's extension.
+pub(crate) fn model_export(
+    path: &str,
+    files: &Files,
+    format: ExportFormat,
+    configuration: Option<&str>,
+    file_stem: &str,
+    notes: &mut Vec<String>,
+) -> Result<Vec<ExportedFile>, ToolError> {
+    let name = stem(path);
+    let scene = model_scene_in(path, files, configuration)?;
+    let meshes = scene.world_meshes();
+    let mut note = |n: &str| {
+        if !notes.iter().any(|x| x == n) {
+            notes.push(n.to_owned());
+        }
+    };
+    Ok(match format {
+        ExportFormat::Step => match exact_step::exact_step_in(path, files, configuration)? {
+            Some(bytes) => {
+                note("STEP AP242: the exact B-rep of the regenerated bodies, with the part's semantic PMI");
+                vec![text_file(format!("{file_stem}.step"), "model/step", String::from_utf8_lossy(&bytes).into_owned())]
+            }
+            None => {
+                note("STEP AP214 faceted B-rep (the grid test kernel has no exact STEP writer), millimetres");
+                vec![text_file(format!("{file_stem}.step"), "model/step", step(&meshes, &name))]
+            }
+        },
+        ExportFormat::Stl => vec![binary_file(format!("{file_stem}.stl"), "model/stl", &stl(&meshes, &name))],
+        ExportFormat::ThreeMf => {
+            // UUIDs derive from the path, and a configuration's file from its name too.
+            let seed = if file_stem == name { path.to_owned() } else { format!("{path}#{file_stem}") };
+            vec![binary_file(format!("{file_stem}.3mf"), "model/3mf", &three_mf(&scene, &seed, &name))]
+        }
+        ExportFormat::Gltf => vec![binary_file(format!("{file_stem}.glb"), "model/gltf-binary", &glb(&meshes))],
+        other => {
+            return Err(ToolError::new("unsupported", format!("{other:?} is not a 3D model format")));
+        }
+    })
+}
+
 pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolError> {
     let kind = kind_of(&input.path)?;
     let text = text_of(files, &input.path)?;
@@ -134,49 +178,17 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
     let mut notes = Vec::new();
     let config = input.configuration.as_deref();
     let files_out = match input.format {
-        ExportFormat::Step if input.all_configurations && kind == DesignKind::Part => {
-            family::part_family_step(&input.path, files, &mut notes)?
+        ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf
+            if input.all_configurations =>
+        {
+            family::model_family(&input.path, files, input.format, &mut notes)?
         }
         ExportFormat::Dxf | ExportFormat::Dwg if input.all_configurations && kind == DesignKind::Drawing => {
             family::drawing_family(&input.path, files, input.format == ExportFormat::Dwg, &mut notes)?
         }
         ExportFormat::Bom => vec![family::bom_csv(&input.path, files)?],
         ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf => {
-            let scene = model_scene_in(&input.path, files, config)?;
-            let meshes = scene.world_meshes();
-            match input.format {
-                ExportFormat::Step => match exact_step::exact_step_in(&input.path, files, config)? {
-                    Some(bytes) => {
-                        notes.push("STEP AP242: the exact B-rep of the regenerated bodies, with the part's semantic PMI".into());
-                        vec![text_file(
-                            format!("{name}.step"),
-                            "model/step",
-                            String::from_utf8_lossy(&bytes).into_owned(),
-                        )]
-                    }
-                    None => {
-                        notes.push(
-                            "STEP AP214 faceted B-rep (the grid test kernel has no exact STEP writer), millimetres".into(),
-                        );
-                        vec![text_file(format!("{name}.step"), "model/step", step(&meshes, &name))]
-                    }
-                },
-                ExportFormat::Stl => vec![binary_file(
-                    format!("{name}.stl"),
-                    "model/stl",
-                    &stl(&meshes, &name),
-                )],
-                ExportFormat::ThreeMf => vec![binary_file(
-                    format!("{name}.3mf"),
-                    "model/3mf",
-                    &three_mf(&scene, &input.path, &name),
-                )],
-                _ => vec![binary_file(
-                    format!("{name}.glb"),
-                    "model/gltf-binary",
-                    &glb(&meshes),
-                )],
-            }
+            model_export(&input.path, files, input.format, config, &name, &mut notes)?
         }
         ExportFormat::Dxf => match kind {
             DesignKind::Drawing => {

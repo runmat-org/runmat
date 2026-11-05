@@ -150,7 +150,7 @@ pub fn model_scene(path: &str, files: &Files) -> Result<Scene3d, ToolError> {
     model_scene_in(path, files, None)
 }
 
-/// [`model_scene`] of a part in its named configuration `configuration`.
+/// [`model_scene`] of a part or an assembly in its named configuration `configuration`.
 pub fn model_scene_in(path: &str, files: &Files, configuration: Option<&str>) -> Result<Scene3d, ToolError> {
     let text = text_of(files, path)?;
     let not_compiled = |d: Vec<runmat_cad_wasm::runtime::Diagnostic>| {
@@ -202,43 +202,28 @@ pub fn model_scene_in(path: &str, files: &Files, configuration: Option<&str>) ->
             }
         }
         DesignKind::Assembly => {
-            let (_, display, _) = runmat_cad_wasm::runtime::compile_assembly(path, text, files)
+            // Exact: the kernel's f64 tessellation of each part configuration, placed at the
+            // resolved tree's f64 world transforms (the canvas display holds f32).
+            let exact = runmat_cad_wasm::exchange::meshes::assembly_meshes(path, text, files, configuration)
                 .map_err(not_compiled)?;
-            let prototypes = display["prototypes"].as_array().cloned().unwrap_or_default();
-            let mut shape_of: Vec<Option<usize>> = vec![None; prototypes.len()];
-            for (k, p) in prototypes.iter().enumerate() {
-                if p["shape"] != "mesh" {
-                    continue;
-                }
-                let file = p["file"].as_str().unwrap_or("part");
-                let mut name = stem(file);
-                if let Some(c) = p["configuration"].as_str() {
+            for p in &exact.prototypes {
+                let mut name = stem(&p.file);
+                if let Some(c) = &p.configuration {
                     name = format!("{name} [{c}]");
                 }
-                let material = p["material"].as_str().map(str::to_owned);
-                let bodies: Vec<Mesh> = p["part"]["bodies"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
+                let bodies = p
+                    .bodies
+                    .iter()
                     .enumerate()
                     .map(|(i, body)| {
                         let n = if i == 0 { name.clone() } else { format!("{name}#{i}") };
-                        body_mesh(n, material.clone(), body)
+                        exact_body_mesh(n, p.material.clone(), body)
                     })
                     .collect();
-                shape_of[k] = Some(scene.shapes.len());
-                scene.shapes.push(Shape { name, part_number: None, bodies });
+                scene.shapes.push(Shape { name, part_number: p.part_number.clone(), bodies });
             }
-            for occ in display["occurrences"].as_array().into_iter().flatten() {
-                let Some(Some(shape)) = shape_of.get(occ["prototype"].as_u64().unwrap_or(u64::MAX) as usize) else {
-                    continue;
-                };
-                let t = floats(&occ["transform"]);
-                scene.placed.push(Placed {
-                    name: occ["path"].as_str().unwrap_or("occurrence").to_owned(),
-                    shape: *shape,
-                    transform: t.get(..12).map(|t| t.try_into().expect("12 numbers")),
-                });
+            for occ in exact.occurrences {
+                scene.placed.push(Placed { name: occ.path, shape: occ.prototype, transform: Some(occ.world) });
             }
         }
         other => {

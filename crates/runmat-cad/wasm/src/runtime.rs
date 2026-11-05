@@ -345,10 +345,32 @@ pub struct AssemblyResolution {
 
 /// Resolves the assembly `path` from its text; syntax errors are the `Err` diagnostics.
 pub fn resolve_assembly(path: &str, text: &str, files: &Files) -> Result<AssemblyResolution, Vec<Diagnostic>> {
+    resolve_assembly_in(path, text, files, None)
+}
+
+/// [`resolve_assembly`] in the top assembly's named configuration `configuration` (its input
+/// values and suppressed children apply; the default when `None`).
+pub fn resolve_assembly_in(
+    path: &str,
+    text: &str,
+    files: &Files,
+    configuration: Option<&str>,
+) -> Result<AssemblyResolution, Vec<Diagnostic>> {
     let parsed = parse_assembly(path, text);
     let Some(top) = parsed.document else {
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
     };
+    if let Some(c) = configuration {
+        if !top.configurations.iter().any(|k| k.name.as_str() == c) {
+            return Err(vec![Diagnostic {
+                path: path.to_owned(),
+                start: 0,
+                end: 0,
+                severity: "error".into(),
+                message: format!("{path} has no configuration `{c}`"),
+            }]);
+        }
+    }
     let mut source = MemorySource::default();
     let mut displays: BTreeMap<String, PartDisplay> = BTreeMap::new();
     let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
@@ -474,7 +496,11 @@ pub fn resolve_assembly(path: &str, text: &str, files: &Files) -> Result<Assembl
         tables: None,
         gauge: None,
     };
-    let resolved = resolve(&top_path, &ResolveRequest::default(), &ctx);
+    let request = ResolveRequest {
+        configuration: configuration.map(runmat_cad::ids::ConfigurationName::new),
+        ..ResolveRequest::default()
+    };
+    let resolved = resolve(&top_path, &request, &ctx);
     // What resolution could not do (a placement whose frame is missing, a pattern that does
     // not expand) is shown on the assembly, not dropped.
     for d in &resolved.diagnostics.diagnostics {

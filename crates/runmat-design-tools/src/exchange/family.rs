@@ -1,12 +1,9 @@
-//! Product families: one export per configuration of a part (its STEP), of a drawing's part
-//! (every sheet as DXF), and BOMs as CSV, so a family's documents come from one model in one
-//! call.
+//! Product families: one export per configuration of a part or an assembly (STEP, 3MF, STL or
+//! glTF) or of a drawing's part (every sheet as DXF or DWG), and BOMs as CSV, so a family's
+//! documents come from one model in one call.
 
 use super::sheet::drawing_sheet;
-use super::exact_step::exact_step_in;
-use super::mesh::model_scene_in;
-use super::step::step;
-use super::{binary_file, stem, text_file, ExportedFile};
+use super::{binary_file, model_export, stem, text_file, ExportFormat, ExportedFile};
 use crate::{kind_of, text_of, DesignKind, Files, ToolError};
 use serde_json::Value;
 
@@ -33,19 +30,33 @@ fn family(names: Vec<String>) -> Vec<Option<String>> {
     std::iter::once(None).chain(names.into_iter().map(Some)).collect()
 }
 
-/// STEP of every configuration of a part.
-pub fn part_family_step(path: &str, files: &Files, notes: &mut Vec<String>) -> Result<Vec<ExportedFile>, ToolError> {
+/// The named configurations of the assembly at `path` (empty when it has none or doesn't
+/// parse).
+pub fn assembly_configurations(path: &str, files: &Files) -> Vec<String> {
+    let Ok(text) = text_of(files, path) else { return Vec::new() };
+    runmat_cad::syntax::parse_assembly(path, text)
+        .document
+        .map(|d| d.configurations.iter().map(|c| c.name.to_string()).collect())
+        .unwrap_or_default()
+}
+
+/// A part's or an assembly's 3D file (STEP, 3MF, STL or glTF) once per configuration: the
+/// default as `<name>.<ext>`, then each named one as `<name>-<configuration>.<ext>`.
+pub fn model_family(path: &str, files: &Files, format: ExportFormat, notes: &mut Vec<String>) -> Result<Vec<ExportedFile>, ToolError> {
+    let names = match kind_of(path)? {
+        DesignKind::Part => part_configurations(path, files),
+        DesignKind::Assembly => assembly_configurations(path, files),
+        other => {
+            return Err(ToolError::new(
+                "unsupported",
+                format!("3D formats export parts and assemblies; {path} is a {other:?} file"),
+            ))
+        }
+    };
     let name = stem(path);
     let mut out = Vec::new();
-    for c in family(part_configurations(path, files)) {
-        let file = format!("{name}{}.step", suffix(&c));
-        match exact_step_in(path, files, c.as_deref())? {
-            Some(bytes) => out.push(text_file(file, "model/step", String::from_utf8_lossy(&bytes).into_owned())),
-            None => {
-                let meshes = model_scene_in(path, files, c.as_deref())?.world_meshes();
-                out.push(text_file(file, "model/step", step(&meshes, &name)));
-            }
-        }
+    for c in family(names) {
+        out.extend(model_export(path, files, format, c.as_deref(), &format!("{name}{}", suffix(&c)), notes)?);
     }
     notes.push(format!("{} configurations of {path}", out.len()));
     Ok(out)

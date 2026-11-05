@@ -11,7 +11,7 @@
 //! The kernel that cannot write STEP (the grid test double) gives `None`.
 
 use crate::configured::regenerate_configured;
-use crate::runtime::{resolve_assembly, Diagnostic, Files};
+use crate::runtime::{resolve_assembly_in, Diagnostic, Files};
 use runmat_cad::assembly::model::DefinitionKind;
 use runmat_cad::assembly::source::ConfigKey;
 use runmat_cad::display::{part_display, PartDisplay};
@@ -22,6 +22,7 @@ use runmat_cad::regen::kernel::{
 use runmat_cad::regen::RegenResult;
 use std::collections::BTreeMap;
 
+pub mod meshes;
 pub mod pmi;
 
 fn stem(path: &str) -> String {
@@ -118,7 +119,18 @@ pub fn part_step_in(path: &str, text: &str, configuration: Option<&str>) -> Resu
 /// The assembly at `path` as exact STEP AP242 with its hierarchy, or `None` when the kernel
 /// writes no STEP or the assembly places no part.
 pub fn assembly_step(path: &str, text: &str, files: &Files) -> Result<Option<Vec<u8>>, String> {
-    let resolution = resolve_assembly(path, text, files).map_err(|d| first_message(&d))?;
+    assembly_step_in(path, text, files, None)
+}
+
+/// [`assembly_step`] in the assembly's named configuration `configuration`.
+pub fn assembly_step_in(
+    path: &str,
+    text: &str,
+    files: &Files,
+    configuration: Option<&str>,
+) -> Result<Option<Vec<u8>>, String> {
+    let resolution =
+        resolve_assembly_in(path, text, files, configuration).map_err(|d| first_message(&d))?;
     let resolved = &resolution.resolved;
     let mut products: Vec<Product> = Vec::new();
     let mut by_key: BTreeMap<(String, String), u32> = BTreeMap::new();
