@@ -17,16 +17,17 @@
 //!   `{ ok: false, message, diagnostics }`: a catalog command run from the canvas, written as
 //!   the smallest text change ([`edit`]).
 //!
-//! Geometry comes from the reference kernel ([`runmat_cad::regen::fake::FakeKernel`]): exact
-//! for prismatic parts, sampled for curved tools. The OCCT kernel slots in behind the same
-//! `GeometryKernel` and `Tessellator` traits when it is built for the browser or reached
-//! through the Tauri host; the JSON shapes stay the same. Malformed input is reported as a
+//! Geometry comes from the kernel installed with [`kernel::install`]: OCCT in the product (the
+//! browser and Desktop worker run this runtime inside the OCCT geometry host,
+//! `runmat-geometry-wasm-host`). Without one, the grid reference kernel stands in as the test
+//! double. Every compile result names its kernel (`kernel`). Malformed input is reported as a
 //! diagnostic, never a panic.
 
 pub mod drawing;
 pub mod edit;
 pub mod features;
 pub mod hlr;
+pub mod kernel;
 pub mod picks;
 pub mod runtime;
 

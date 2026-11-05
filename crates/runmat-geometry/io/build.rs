@@ -70,6 +70,7 @@ fn build_occt_backend() {
         // hidden lines, AP242 export).
         for f in [
             "src/occt/exact_kernel.cc",
+            "src/occt/exact_kernel_display.cc",
             "src/occt/exact_sketch_profile.cc",
             "src/occt/exact_sweep_loft.cc",
             "src/occt/exact_hlr.cc",
@@ -133,6 +134,7 @@ fn build_occt_backend() {
         "src/occt/exact_kernel.hxx",
         "src/occt/exact_kernel_ffi.hxx",
         "src/occt/exact_kernel.cc",
+        "src/occt/exact_kernel_display.cc",
         "src/occt/exact_sketch_profile.cc",
         "src/occt/exact_sweep_loft.cc",
         "src/occt/exact_hlr.cc",

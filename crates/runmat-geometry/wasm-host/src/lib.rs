@@ -1,5 +1,6 @@
-//! Emscripten ABI for the same validated OCCT import used by desktop.
-//! Runs in the runtime worker, never on the UI thread.
+//! Emscripten ABI for the same validated OCCT import used by desktop, the FEA meshing
+//! execution, and the CAD design runtime on OCCT (`runmat_cad_call`, see [`cad`]).
+//! Runs in a worker, never on the UI thread.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use runmat_geometry_io::import::GeometryImportError;
 use runmat_geometry_io::{
@@ -96,6 +97,7 @@ pub unsafe extern "C" fn runmat_occt_exact_free(value: *mut c_char) {
     }
 }
 
+pub mod cad;
 mod execution;
 /// Caller supplies bounded NUL-terminated UTF-8 JSON. The response is freed with
 /// runmat_occt_exact_free, just like the import ABI.

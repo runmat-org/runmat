@@ -114,6 +114,15 @@ pub(crate) struct RProjected {
     pub points: Vec<f64>,
 }
 
+/// A body's display mesh as the C++ side returns it, in summary order: per face its flat
+/// positions and triangle indices, per edge its flat points, and the flat vertex points.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RDisplay {
+    pub faces: Vec<(Vec<f64>, Vec<u32>)>,
+    pub edges: Vec<Vec<f64>>,
+    pub vertices: Vec<f64>,
+}
+
 const ORIGIN_INPUT: u8 = 0;
 const ORIGIN_LABEL: u8 = 1;
 const ORIGIN_COPY: u8 = 2;
@@ -257,6 +266,18 @@ mod backend {
     pub fn proximity(a: u64, ta: &[f64], bb: u64, tb: &[f64]) -> Result<Vec<f64>, KernelError> {
         b::kernel_proximity(a, ta, bb, tb).map_err(err)
     }
+    pub fn tessellate(id: u64, chord: f64, angle: f64) -> Result<RDisplay, KernelError> {
+        let d = b::kernel_tessellate(id, chord, angle).map_err(err)?;
+        Ok(RDisplay {
+            faces: d
+                .faces
+                .into_iter()
+                .map(|f| (f.positions, f.triangles))
+                .collect(),
+            edges: d.edges.into_iter().map(|e| e.points).collect(),
+            vertices: d.vertices,
+        })
+    }
     pub fn export_step(doc: &[Instr], bodies: &[u64]) -> Result<Vec<u8>, KernelError> {
         b::kernel_export_step(&instrs(doc), bodies).map_err(err)
     }
@@ -308,6 +329,9 @@ mod backend {
     pub fn proximity(_: u64, _: &[f64], _: u64, _: &[f64]) -> Result<Vec<f64>, KernelError> {
         Err(no())
     }
+    pub fn tessellate(_: u64, _: f64, _: f64) -> Result<RDisplay, KernelError> {
+        Err(no())
+    }
     pub fn export_step(_: &[Instr], _: &[u64]) -> Result<Vec<u8>, KernelError> {
         Err(no())
     }
@@ -323,6 +347,8 @@ mod backend {
 pub fn occt_kernel_live_bodies() -> u64 {
     backend::live_bodies()
 }
+
+mod display;
 
 // ------------------------------------------------------------------------- bodies
 

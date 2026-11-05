@@ -78,11 +78,33 @@ pub(crate) mod bridge {
         points: Vec<f64>,
     }
 
+    /// One face's display triangles: positions (x, y, z per node) and node indices (three per
+    /// triangle, counter-clockwise seen from outside).
+    #[derive(Debug, Clone, Default)]
+    struct KFaceMesh {
+        positions: Vec<f64>,
+        triangles: Vec<u32>,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct KPolyline {
+        points: Vec<f64>,
+    }
+
+    /// A body's display mesh in summary order: faces, edges, then vertices (x, y, z each).
+    #[derive(Debug, Clone, Default)]
+    struct KDisplay {
+        faces: Vec<KFaceMesh>,
+        edges: Vec<KPolyline>,
+        vertices: Vec<f64>,
+    }
+
     unsafe extern "C++" {
         include!("src/occt/exact_kernel_ffi.hxx");
 
         fn kernel_execute(program: &[KInstr], operands: &[u64]) -> Result<KResult>;
         fn kernel_release(id: u64);
+        fn kernel_tessellate(id: u64, chord: f64, angle: f64) -> Result<KDisplay>;
         fn kernel_live_bodies() -> u64;
         fn kernel_ray_hits(bodies: &[u64], face_filter: &[i64], ray: &[f64]) -> Result<Vec<f64>>;
         fn kernel_extent(bodies: &[u64], axis: &[f64]) -> Result<Vec<f64>>;

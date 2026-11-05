@@ -4,13 +4,16 @@ version = "0.6.2"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
-description = "WebAssembly entry points of the RunMat CAD design layer: compile .part and .assembly files to their projection and display for the Desktop and the browser"
+description = "The RunMat CAD design runtime: compile .part, .assembly and .drawing files to their projection and display for the Desktop and the browser, on the installed geometry kernel"
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 publish = false
 
+# A Rust library only: the browser and Desktop worker run it inside the OCCT geometry host
+# (runmat-geometry-wasm-host, emscripten), which links it like any dependency. A cdylib here
+# would be linked on its own for emscripten too, and nothing loads it.
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 runmat-cad = { path = "..", version = "=0.6.2" }

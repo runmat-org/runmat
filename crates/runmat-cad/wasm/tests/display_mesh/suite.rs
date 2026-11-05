@@ -1,6 +1,9 @@
-//! The display meshes the Desktop draws, through the wasm `compile` entry it calls: holes,
-//! fillets and bends are watertight, round, well shaped and smoothly shaded, and they hold the
-//! same closed-form volume and area as the solid.
+//! The display meshes the Desktop draws: holes, fillets and bends are watertight, round, well
+//! shaped and smoothly shaded, and they hold the same closed-form volume and area as the solid.
+//!
+//! The including test crate supplies `super::entry(path, text) -> String`, the compile entry
+//! under test: the OCCT geometry host's `runmat_cad_call` (what the Desktop and browser worker
+//! call) in `runmat-geometry-wasm-host`, and the grid test double here.
 
 use runmat_cad::display::{BodyDisplay, FaceDisplay, PartDisplay};
 use std::collections::BTreeMap;
@@ -9,7 +12,7 @@ use std::f64::consts::PI;
 const MM: f64 = 1e-3;
 
 fn compile(path: &str, text: &str) -> PartDisplay {
-    let out = runmat_cad_wasm::compile(path, text, "{}", "{}");
+    let out = super::entry(path, text);
     let v: serde_json::Value = serde_json::from_str(&out).expect("json");
     let diags = v["diagnostics"].as_array().cloned().unwrap_or_default();
     let errors: Vec<_> = diags.iter().filter(|d| d["severity"] == "error").collect();

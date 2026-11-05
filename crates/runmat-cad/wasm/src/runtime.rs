@@ -8,9 +8,7 @@ use runmat_cad::display::{assembly_display, part_display, sketch_display, PartDi
 use runmat_cad::index::build_index;
 use runmat_cad::model::PartDocument;
 use runmat_cad::regen::kernel::TessellationOptions;
-use runmat_cad::regen::{
-    regenerate, FakeKernel, RegenCache, RegenContext, RegenRequest, RegenResult,
-};
+use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest, RegenResult};
 use runmat_cad::sketch_solver::ExplicitSketchSolver;
 use runmat_cad::syntax::{parse_assembly, parse_part};
 use runmat_cad::units::StubUnits;
@@ -143,7 +141,7 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         .collect()
 }
 
-/// A part regenerated on the reference kernel: its projection and display.
+/// A part regenerated on the installed kernel: its projection and display.
 pub struct CompiledPart {
     pub document: PartDocument,
     pub index: runmat_cad::index::PartIndex,
@@ -151,14 +149,14 @@ pub struct CompiledPart {
     pub display: PartDisplay,
 }
 
-/// A part regenerated on the reference kernel with everything a caller may ask of it: the
-/// regeneration (bodies, values, diagnostics with their source spans attached), the kernel that
+/// A part regenerated on the installed kernel ([`crate::kernel`]) with everything a caller may
+/// ask of it: the regeneration (bodies, values, diagnostics with their source spans attached), the kernel that
 /// holds its bodies (for analyses such as mass properties), the projection and the display.
 pub struct RegeneratedPart {
     pub document: PartDocument,
     pub spans: runmat_cad::diagnostics::SpanMap,
     pub result: RegenResult,
-    pub kernel: FakeKernel,
+    pub kernel: Box<dyn crate::kernel::DesignKernel>,
     pub index: runmat_cad::index::PartIndex,
     pub display: PartDisplay,
 }
@@ -169,9 +167,9 @@ pub fn regenerate_part(path: &str, text: &str) -> Result<RegeneratedPart, Vec<Di
     let Some(document) = parsed.document else {
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
     };
-    let kernel = FakeKernel::new();
+    let kernel = crate::kernel::make();
     let ctx = RegenContext {
-        kernel: &kernel,
+        kernel: kernel.as_ref(),
         solver: &ExplicitSketchSolver,
         units: &StubUnits,
         dynamic: &NoDynamicValues,
@@ -188,7 +186,7 @@ pub fn regenerate_part(path: &str, text: &str) -> Result<RegeneratedPart, Vec<Di
     );
     result.diagnostics.attach_spans(&parsed.spans);
     let index = build_index(&document, &result, None);
-    let mut display = part_display(&result, &kernel, &TessellationOptions::default());
+    let mut display = part_display(&result, kernel.as_ref(), &TessellationOptions::default());
     display.sketches = sketch_display(&document, &result);
     Ok(RegeneratedPart {
         document,
@@ -373,6 +371,7 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
                 "projection": { "kind": "assembly", "data": index },
                 "display": { "kind": "assembly", "data": display },
                 "diagnostics": diagnostics,
+                "kernel": crate::kernel::name(),
             }),
             Err(diagnostics) => json!({ "diagnostics": diagnostics }),
         }
@@ -382,6 +381,7 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
                 "projection": { "kind": "part", "data": part.projection },
                 "display": { "kind": "part", "data": part.display },
                 "diagnostics": [],
+                "kernel": crate::kernel::name(),
             }),
             Err(diagnostics) => json!({ "diagnostics": diagnostics }),
         }

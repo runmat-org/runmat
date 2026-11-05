@@ -8496,6 +8496,8 @@ version = "0.6.2"
 dependencies = [
  "base64 0.22.1",
  "runmat-analysis-execution",
+ "runmat-cad",
+ "runmat-cad-wasm",
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-geometry-io",

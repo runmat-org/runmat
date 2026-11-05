@@ -41,6 +41,7 @@ struct KOrigin;
 struct KResult;
 struct KBody;
 struct KProjected;
+struct KDisplay;
 
 // Error prefixes the Rust side maps to the kernel error taxonomy.
 [[noreturn]] void fail(const std::string& message);         // KernelError::Failed
@@ -168,6 +169,9 @@ rust::Vec<double> kernel_extent(rust::Slice<const std::uint64_t> bodies,
 KResult kernel_execute(rust::Slice<const KInstr> program,
                        rust::Slice<const std::uint64_t> operands);
 void kernel_release(std::uint64_t id);
+// Display tessellation in summary order (exact_kernel_display.cc): chordal deflection in
+// metres, angular deflection in radians.
+KDisplay kernel_tessellate(std::uint64_t id, double chord, double angle);
 std::uint64_t kernel_live_bodies();
 rust::Vec<double> kernel_analyze(std::uint32_t kind, rust::Slice<const double> reals,
                                  rust::Slice<const std::uint64_t> bodies);

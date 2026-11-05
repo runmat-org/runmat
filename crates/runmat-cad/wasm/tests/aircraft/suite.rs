@@ -1,5 +1,6 @@
-//! A generic airliner, authored as `.part` and `.assembly` text and compiled through the wasm
-//! `compile` entry the Desktop calls: fuselage sections of frames, stringers and skin panels,
+//! A generic airliner, authored as `.part` and `.assembly` text and compiled through the
+//! including crate's `super::entry(path, text, files_json) -> String` (the OCCT host's
+//! `runmat_cad_call` in `runmat-geometry-wasm-host`, the grid test double here): fuselage sections of frames, stringers and skin panels,
 //! wings of spars, ribs and skins, an empennage, landing gear and engine nacelles, with rivets
 //! patterned along the structure. A skeleton part publishes the frames the major assemblies
 //! attach to, and the main sizes are inputs.
@@ -9,12 +10,11 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-mod aircraft_text;
-use aircraft_text::files;
+use super::aircraft_text::files;
 
 fn compile(path: &str, all: &BTreeMap<String, String>) -> Value {
     let files_json = serde_json::to_string(all).unwrap();
-    let out = runmat_cad_wasm::compile(path, &all[path], &files_json, "{}");
+    let out = super::entry(path, &all[path], &files_json);
     serde_json::from_str(&out).expect("json")
 }
 
@@ -31,6 +31,7 @@ fn errors(v: &Value) -> Vec<String> {
 
 #[test]
 fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
+    let started = std::time::Instant::now();
     let all: BTreeMap<String, String> = files()
         .into_iter()
         .map(|(n, t)| (format!("/p/aircraft/{n}"), t))
@@ -77,8 +78,22 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 
+    eprintln!("aircraft parts: {:.2?}", started.elapsed());
+    let started = std::time::Instant::now();
     let top = compile("/p/aircraft/airliner.assembly", &all);
+    eprintln!("airliner assembly compile: {:.2?}", started.elapsed());
     eprintln!("airliner diagnostics: {}", top["diagnostics"]);
+    // What the Outline shows: every occurrence placed (no red ✕), no error on the assembly.
+    assert!(errors(&top).is_empty(), "{:?}", errors(&top));
+    let failed: Vec<String> = top["projection"]["data"]["occurrences"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter(|o| o["state"] == "failed")
+        .map(|o| o["path"].as_str().unwrap_or("").to_string())
+        .collect();
+    assert!(failed.is_empty(), "unplaced occurrences: {failed:?}");
     let display = &top["display"]["data"];
     let occurrences = display["occurrences"]
         .as_array()

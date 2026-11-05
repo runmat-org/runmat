@@ -15,7 +15,7 @@ export CXXFLAGS="${CXXFLAGS:-} -fwasm-exceptions -UOCC_CONVERT_SIGNALS"
 # Rust errors cross this ABI as Results; Rust panics terminate the worker.
 # Rust 1.93 uses Wasm exception handling. Compile OCCT with the same ABI so
 # its caught C++ import errors remain recoverable across repeated requests.
-export CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS="-C panic=abort -C link-arg=-sMODULARIZE=1 -C link-arg=-sEXPORT_ES6=1 -C link-arg=-sALLOW_MEMORY_GROWTH=1 -C link-arg=-sSTACK_SIZE=8388608 -C link-arg=-sINITIAL_MEMORY=33554432 -C link-arg=-sENVIRONMENT=web,worker,node -C link-arg=-sEXPORTED_RUNTIME_METHODS=cwrap,UTF8ToString,HEAPU8 -C link-arg=-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_runmat_occt_exact_import,_runmat_occt_exact_free,_runmat_occt_exact_execute -C link-arg=-fwasm-exceptions -C link-arg=-sNO_EXIT_RUNTIME=1"
+export CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS="-C panic=abort -C link-arg=-sMODULARIZE=1 -C link-arg=-sEXPORT_ES6=1 -C link-arg=-sALLOW_MEMORY_GROWTH=1 -C link-arg=-sSTACK_SIZE=8388608 -C link-arg=-sINITIAL_MEMORY=33554432 -C link-arg=-sENVIRONMENT=web,worker,node -C link-arg=-sEXPORTED_RUNTIME_METHODS=cwrap,UTF8ToString,HEAPU8 -C link-arg=-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_runmat_occt_exact_import,_runmat_occt_exact_free,_runmat_occt_exact_execute,_runmat_cad_call -C link-arg=-fwasm-exceptions -C link-arg=-sNO_EXIT_RUNTIME=1"
 cd "$runmat_root"
 # This is a leaf-link constraint, so changing the foreign-kernel heap ceiling
 # does not invalidate every Rust dependency's compilation cache.
