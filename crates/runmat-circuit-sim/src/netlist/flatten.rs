@@ -7,8 +7,12 @@
 //!   parameters; references to them, to controlling sources (`F`, `H`) and to coupled inductors
 //!   (`K`) are renamed to match;
 //! - parameters: the subcircuit's defaults, overridden by the instance's `name=value` pairs
-//!   (evaluated in the caller's scope), then the body's `.param` lines.
+//!   (evaluated in the caller's scope), then the body's `.param` lines;
+//! - behavioural expressions (`B`, `E`/`G` VALUE and TABLE) are compiled with the instance's
+//!   node and source names and parameters, and the visible `.func` definitions (see
+//!   [`super::behave`]).
 
+use super::behave::{compile_card, Behave, Env, Func};
 use super::expr::{eval, Scope};
 use super::parse::{Body, Card, Model, Parsed, Subckt, Tok};
 use super::value::parse_number;
@@ -21,6 +25,8 @@ pub struct FlatElement {
     pub kind: char,
     pub nodes: Vec<String>,
     pub args: Vec<Tok>,
+    /// The compiled expression of a behavioural source (`B`, `E`/`G` with VALUE or TABLE).
+    pub behave: Option<Behave>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -105,6 +111,19 @@ fn find_subckt<'a>(chain: &[&'a Body], name: &str) -> Option<&'a Subckt> {
     chain.iter().rev().find_map(|b| b.subckts.iter().find(|s| s.name == name))
 }
 
+/// A `B` source, or an `E`/`G` with `VALUE` or `TABLE`.
+fn is_behavioural(c: &Card) -> bool {
+    match c.kind() {
+        'b' => true,
+        'e' | 'g' => match c.toks.get(2) {
+            Some(Tok::W(w)) => w == "value" || w == "table",
+            Some(Tok::Kv(k, _)) => k == "value",
+            None => false,
+        },
+        _ => false,
+    }
+}
+
 /// Indices of the node tokens of a card.
 fn node_positions(c: &Card, is_model: &dyn Fn(&str) -> bool) -> Result<Vec<usize>, String> {
     let w = |i: usize| c.toks.get(i).and_then(|t| t.word());
@@ -117,7 +136,7 @@ fn node_positions(c: &Card, is_model: &dyn Fn(&str) -> bool) -> Result<Vec<usize
         }
     };
     match c.kind() {
-        'r' | 'c' | 'l' | 'v' | 'i' | 'd' | 'f' | 'h' | 'w' => need(2),
+        'r' | 'c' | 'l' | 'v' | 'i' | 'd' | 'f' | 'h' | 'w' | 'b' => need(2),
         'e' | 'g' => {
             if w(2) == Some("poly") {
                 let n: usize = w(3).and_then(|s| s.parse().ok()).ok_or("POLY needs a dimension")?;
@@ -127,8 +146,10 @@ fn node_positions(c: &Card, is_model: &dyn Fn(&str) -> bool) -> Result<Vec<usize
                     return Err(format!("`{}`: POLY({n}) needs {} controlling nodes", c.name, 2 * n));
                 }
                 Ok(v)
-            } else if w(2).is_some_and(|s| s == "value" || s == "table" || s == "laplace") {
-                Err(format!("`{}`: behavioural {} sources are not supported yet", c.name, w(2).unwrap()))
+            } else if is_behavioural(c) {
+                need(2)
+            } else if w(2) == Some("laplace") {
+                Err(format!("`{}`: LAPLACE sources are not supported yet", c.name))
             } else {
                 need(4)
             }
@@ -192,6 +213,16 @@ fn expand<'a>(
         let chain = cx.chain.clone();
         let is_model = |s: &str| find_model(&chain, s).is_some();
         let pos = node_positions(c, &is_model).map_err(|m| FlattenError { line: c.line, message: m })?;
+        if is_behavioural(c) {
+            let funcs: Vec<&[Func]> = chain.iter().map(|b| b.funcs.as_slice()).collect();
+            let node = |n: &str| map_node(n, cx);
+            let source = |n: &str| scoped(n);
+            let env = Env { scope, funcs: &funcs, node: &node, source: &source };
+            let behave = compile_card(c.kind(), &c.raw, &env).map_err(|m| FlattenError { line: c.line, message: format!("`{}`: {m}", c.name) })?;
+            let nodes = pos.iter().map(|&i| map_node(c.toks[i].word().unwrap_or_default(), cx)).collect();
+            cx.out.elements.push(FlatElement { line: c.line, name: scoped(&c.name), kind: c.kind(), nodes, args: vec![], behave: Some(behave) });
+            continue;
+        }
         let mut nodes = vec![];
         let mut args = vec![];
         for (i, t) in c.toks.iter().enumerate() {
@@ -263,7 +294,7 @@ fn expand<'a>(
             if find_subckt(&chain, &sub_name).is_none() && find_model(&chain, &sub_name).is_some() {
                 args.retain(|t| t.word() != Some(sub_name.as_str()));
                 args.insert(0, Tok::W(rename(&sub_name)));
-                cx.out.elements.push(FlatElement { line: c.line, name: scoped(&c.name), kind: 'x', nodes, args });
+                cx.out.elements.push(FlatElement { line: c.line, name: scoped(&c.name), kind: 'x', nodes, args, behave: None });
                 continue;
             }
             let sub = find_subckt(&chain, &sub_name)
@@ -295,7 +326,7 @@ fn expand<'a>(
             expand(cx, &sub.body, &inst, &port_map, &inner, depth + 1)?;
             continue;
         }
-        cx.out.elements.push(FlatElement { line: c.line, name: scoped(&c.name), kind: c.kind(), nodes, args });
+        cx.out.elements.push(FlatElement { line: c.line, name: scoped(&c.name), kind: c.kind(), nodes, args, behave: None });
     }
     cx.chain.pop();
     Ok(())

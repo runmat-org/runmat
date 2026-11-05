@@ -4,7 +4,8 @@
 //! resistance nodes, op-amp gain nodes) and branch currents (`i(<name>)`).
 
 use crate::devices::bjt::Bjt;
-use crate::devices::controlled::{Controlled, Output, Poly};
+use crate::devices::controlled::{Controlled, Law, Output, Poly};
+use crate::netlist::behave::{Behave, Ctl, Drives};
 use crate::devices::diode::Diode;
 use crate::devices::junction::Params;
 use crate::devices::mosfet::Mosfet;
@@ -75,7 +76,7 @@ impl Circuit {
         }
         s.n_nodes = s.names.len();
         let mut b = Builder { flat, s, node_index, devices: vec![], inductors: vec![], branches: BTreeMap::new(), warnings: vec![], temp_k: options.temp_c + 273.15 };
-        let (first, later): (Vec<&FlatElement>, Vec<&FlatElement>) = flat.elements.iter().partition(|e| !matches!(e.kind, 'f' | 'h' | 'w' | 'k'));
+        let (first, later): (Vec<&FlatElement>, Vec<&FlatElement>) = flat.elements.iter().partition(|e| !matches!(e.kind, 'f' | 'h' | 'w' | 'k') && e.behave.is_none());
         for e in first.into_iter().chain(later) {
             b.element(e).map_err(|message| BuildError { element: e.name.clone(), line: e.line, message })?;
         }
@@ -160,7 +161,35 @@ impl<'a> Builder<'a> {
         self.branches.get(name).copied().ok_or_else(|| format!("controlling source `{name}` is not a voltage source or branch device"))
     }
 
+    /// A behavioural source: its controls become unknown pairs, its expression the law.
+    fn behavioural(&mut self, e: &FlatElement, b: &Behave) -> Result<(), String> {
+        let mut ctrl = vec![];
+        for c in &b.ctl {
+            ctrl.push(match c {
+                Ctl::V(p, n) => {
+                    let node = |x: &str| if is_ground(x) { Ok(GND) } else { self.node_index.get(x).copied().ok_or_else(|| format!("V({x}): no element connects node `{x}`")) };
+                    (node(p)?, node(n)?)
+                }
+                Ctl::I(s) => (self.branch_of(s)?, GND),
+            });
+        }
+        let output = match b.drives {
+            Drives::Voltage => {
+                let branch = self.s.branch(&e.name);
+                self.branches.insert(e.name.clone(), branch);
+                Output::Voltage { branch }
+            }
+            Drives::Current => Output::Current,
+        };
+        let (p, n) = (self.node(&e.nodes[0]), self.node(&e.nodes[1]));
+        self.devices.push(Box::new(Controlled { name: e.name.clone(), p, n, output, ctrl, law: Law::Expr(b.expr.clone()) }));
+        Ok(())
+    }
+
     fn element(&mut self, e: &FlatElement) -> Result<(), String> {
+        if let Some(b) = &e.behave {
+            return self.behavioural(e, b);
+        }
         let nodes: Vec<usize> = e.nodes.iter().map(|n| self.node(n)).collect();
         let name = e.name.as_str();
         let value = || num(e.args.first()).ok_or_else(|| "needs a numeric value".to_string());
@@ -224,8 +253,8 @@ impl<'a> Builder<'a> {
                 } else {
                     Output::Current
                 };
-                let poly = if poly { Poly::new(dim, coeffs) } else { Poly::linear(coeffs[1]) };
-                self.devices.push(Box::new(Controlled { name: name.into(), p: nodes[0], n: nodes[1], output, ctrl, poly }));
+                let law = Law::Poly(if poly { Poly::new(dim, coeffs) } else { Poly::linear(coeffs[1]) });
+                self.devices.push(Box::new(Controlled { name: name.into(), p: nodes[0], n: nodes[1], output, ctrl, law }));
             }
             'd' => {
                 let m = self.model(e.args.first().and_then(|t| t.word()), &["d"])?;

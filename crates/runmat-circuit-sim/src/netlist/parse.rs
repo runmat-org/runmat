@@ -31,6 +31,8 @@ pub struct Card {
     /// Lowercased element name (`r1`, `xu1`).
     pub name: String,
     pub toks: Vec<Tok>,
+    /// The card's text after its name, as written (behavioural expressions read it).
+    pub raw: String,
 }
 
 impl Card {
@@ -52,6 +54,7 @@ pub struct Body {
     pub models: Vec<Model>,
     pub subckts: Vec<Subckt>,
     pub params: Vec<(String, String)>,
+    pub funcs: Vec<super::behave::Func>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -107,6 +110,10 @@ pub fn parse(text: &str, resolve: Resolver<'_>) -> Result<Parsed, ParseError> {
             continue;
         };
         let rest = toks[1..].to_vec();
+        let raw = {
+            let t = line.trim_start();
+            t[t.find(char::is_whitespace).unwrap_or(t.len())..].trim().to_string()
+        };
         if in_control {
             if head == ".endc" {
                 in_control = false;
@@ -119,7 +126,7 @@ pub fn parse(text: &str, resolve: Resolver<'_>) -> Result<Parsed, ParseError> {
             None => &mut out.body,
         };
         if !head.starts_with('.') {
-            body.cards.push(Card { line: ln, name: head, toks: rest });
+            body.cards.push(Card { line: ln, name: head, toks: rest, raw });
             continue;
         }
         match head.as_str() {
@@ -178,11 +185,11 @@ pub fn parse(text: &str, resolve: Resolver<'_>) -> Result<Parsed, ParseError> {
             ".global" => out.globals.extend(rest.into_iter().filter_map(|t| t.word().map(String::from))),
             ".temp" => out.temp = rest.first().and_then(|t| t.word().map(String::from)),
             ".op" | ".dc" | ".ac" | ".tran" | ".meas" | ".measure" => {
-                out.controls.push(Card { line: ln, name: head, toks: rest })
+                out.controls.push(Card { line: ln, name: head, toks: rest, raw })
             }
             ".control" => in_control = true,
             ".end" | ".save" | ".print" | ".probe" | ".plot" | ".backanno" | ".width" | ".endl" => {}
-            ".func" => return Err(err(".func is not supported yet; write the expression inline".into())),
+            ".func" => body.funcs.push(super::behave::read_func(&raw).map_err(err)?),
             other => return Err(err(format!("unknown control line `{other}`"))),
         }
     }

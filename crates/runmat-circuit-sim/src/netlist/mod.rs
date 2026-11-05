@@ -1,5 +1,7 @@
 //! SPICE netlists: numbers, parameter expressions, parsing and subcircuit flattening.
 
+pub mod behave;
+pub mod behave_eval;
 pub mod expr;
 pub mod flatten;
 pub mod parse;

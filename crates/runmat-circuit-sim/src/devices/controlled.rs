@@ -4,8 +4,12 @@
 //! node voltages for `E` and `G`, or a source's branch current paired with ground for `F` and
 //! `H`. `POLY(n)` coefficients follow SPICE's order: the constant, the n linear terms, then for
 //! each higher degree the products `x_i·x_j·…` with `i ≤ j ≤ …` in lexicographic order.
+//!
+//! Behavioural sources (`B`, `E`/`G` VALUE and TABLE) stamp the same way, with a compiled
+//! expression of their controls (and time) as the law.
 
 use super::{Device, Load};
+use crate::netlist::behave::Ex;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Poly {
@@ -73,13 +77,34 @@ pub enum Output {
     Current,
 }
 
+/// How the output follows the controls.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Law {
+    Poly(Poly),
+    Expr(Ex),
+}
+
+impl Law {
+    /// Value and gradient at controls `x` and time `t`, and the real operations used.
+    pub fn eval(&self, x: &[f64], t: f64) -> (f64, Vec<f64>, u64) {
+        match self {
+            Law::Poly(p) => p.eval(x),
+            Law::Expr(e) => {
+                let mut ops = 0;
+                let g = e.eval(x, t, &mut ops);
+                (g.v, g.d, ops)
+            }
+        }
+    }
+}
+
 pub struct Controlled {
     pub name: String,
     pub p: usize,
     pub n: usize,
     pub output: Output,
     pub ctrl: Vec<(usize, usize)>,
-    pub poly: Poly,
+    pub law: Law,
 }
 
 impl Device for Controlled {
@@ -88,7 +113,7 @@ impl Device for Controlled {
     }
     fn load(&self, ld: &mut Load) {
         let xs: Vec<f64> = self.ctrl.iter().map(|&(p, n)| ld.v(p) - ld.v(n)).collect();
-        let (f, g, ops) = self.poly.eval(&xs);
+        let (f, g, ops) = self.law.eval(&xs, ld.time);
         ld.ops += ops + 3 * xs.len() as u64;
         let lin: f64 = g.iter().zip(&xs).map(|(a, b)| a * b).sum();
         let feq = f - lin;

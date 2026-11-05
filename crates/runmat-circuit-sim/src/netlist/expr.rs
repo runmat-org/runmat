@@ -26,14 +26,14 @@ pub fn eval(text: &str, scope: &Scope) -> Result<f64, String> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum T {
+pub(super) enum T {
     Num(f64),
     Id(String),
     Op(&'static str),
 }
 
 impl T {
-    fn text(&self) -> String {
+    pub(super) fn text(&self) -> String {
         match self {
             T::Num(v) => v.to_string(),
             T::Id(s) => s.clone(),
@@ -42,7 +42,7 @@ impl T {
     }
 }
 
-fn lex(s: &str) -> Result<Vec<T>, String> {
+pub(super) fn lex(s: &str) -> Result<Vec<T>, String> {
     const OPS: [&str; 19] = [
         "**", "<=", ">=", "==", "!=", "&&", "||", "+", "-", "*", "/", "^", "(", ")", ",", "<", ">", "?",
         ":",
