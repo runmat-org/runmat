@@ -7,6 +7,20 @@ use crate::{
     topology::AnalysisProjection,
 };
 
+/// A model connector plan projects a supplied solid mesh once. Empty plans
+/// have no targets to resolve and perform no numerical projection.
+pub(crate) fn connector_plan_projection_work_upper_bound(
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+) -> Result<runmat_simulation_usage::OperationCount, crate::topology::AnalysisProjectionError> {
+    if model.connectors.is_empty() {
+        return Ok(runmat_simulation_usage::OperationCount::ZERO);
+    }
+    mesh.map(AnalysisProjection::derivation_work_upper_bound)
+        .transpose()
+        .map(|work| work.unwrap_or(runmat_simulation_usage::OperationCount::ZERO))
+}
+
 /// Compile the same canonical connector realization used by numerical assembly without
 /// constructing sparse operators. Observation and resource admission may call this before solve.
 pub(crate) fn compile_model_connector_plan(
@@ -23,10 +37,25 @@ pub(crate) fn compile_model_connector_plan(
         (None, None) => return Err(StructuralAssemblyError::MissingDiscretization),
     }
     .map_err(|error| StructuralAssemblyError::MixedTopology(error.to_string()))?;
-    let projection = mesh
-        .map(AnalysisProjection::derive)
-        .transpose()
-        .map_err(|error| StructuralAssemblyError::MixedTopology(error.to_string()))?;
+    if model.connectors.is_empty() {
+        return CanonicalStructuralConnectorPlan::empty(topology.identity, topology.nodes.len())
+            .map_err(|_| StructuralAssemblyError::InvalidExplicitConnector {
+                connector_id: "connector-plan".into(),
+                reason: "canonical connector realization is invalid",
+            });
+    }
+    let projection =
+        mesh.map(AnalysisProjection::derive)
+            .transpose()
+            .map_err(|error| match error {
+                crate::topology::AnalysisProjectionError::Cancelled => {
+                    StructuralAssemblyError::Cancelled
+                }
+                crate::topology::AnalysisProjectionError::Accounting(cause) => {
+                    StructuralAssemblyError::Accounting(cause)
+                }
+                other => StructuralAssemblyError::MixedTopology(other.to_string()),
+            })?;
     let layout = super::super::mixed_dof_layout(&topology, reference_point_count);
     let coordinates_m = topology
         .nodes

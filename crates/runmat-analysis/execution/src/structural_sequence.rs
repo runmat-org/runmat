@@ -356,18 +356,25 @@ impl StructuralSequenceCoordinator {
     pub fn next_solve_wave_work_upper_bound(
         &self,
     ) -> AnalysisBridgeResult<runmat_simulation_usage::OperationCount> {
-        let count = u64::try_from(self.next_solve_level()?.len()).map_err(|_| {
-            AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(
-                runmat_simulation_usage::LedgerError::CountOverflow,
-            ))
-        })?;
-        runmat_analysis_fea::structural_linear_preparation_work_upper_bound(
-            self.preparation.mesh.as_ref(),
-        )?
-        .checked_mul(count)
-        .map_err(|cause| {
-            AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(cause.into()))
-        })
+        self.next_solve_level()?.iter().try_fold(
+            runmat_simulation_usage::OperationCount::ZERO,
+            |total, step_id| {
+                let workload = self.preparation.workloads.get(step_id).ok_or(
+                    AnalysisBridgeError::Identity(
+                        "validated sequence step has no exact solver workload",
+                    ),
+                )?;
+                let work = runmat_analysis_fea::structural_linear_preparation_work_upper_bound(
+                    &workload.model,
+                    self.preparation.mesh.as_ref(),
+                )?;
+                total.checked_add(work).map_err(|cause| {
+                    AnalysisBridgeError::FeaRun(runmat_analysis_fea::FeaRunError::Usage(
+                        cause.into(),
+                    ))
+                })
+            },
+        )
     }
 
     pub fn prepare_next_solve_wave(&mut self) -> AnalysisBridgeResult<PreparedStructuralSolveWave> {

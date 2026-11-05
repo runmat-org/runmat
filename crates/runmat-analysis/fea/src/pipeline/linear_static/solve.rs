@@ -86,10 +86,14 @@ where
         options.preconditioner_kind
     };
     if summary.affine_constraint_reduction.is_some() || summary.constraint_matrix.is_some() {
-        let derived_reduction = summary
-            .constraint_matrix
-            .as_ref()
-            .and_then(|matrix| matrix.affine_reduction().ok());
+        let derived_reduction = if summary.affine_constraint_reduction.is_none() {
+            summary
+                .constraint_matrix
+                .as_ref()
+                .and_then(|matrix| matrix.affine_reduction().ok())
+        } else {
+            None
+        };
         let reduction = summary
             .affine_constraint_reduction
             .as_ref()

@@ -78,6 +78,11 @@ use reduced_material_summary::structural_material_summary;
 pub(crate) enum StructuralCapacityPhase {
     Solid(solver_solid::SolidCapacityPhase),
     Explicit(explicit_elements::ExplicitCapacityPhase),
+    ConnectorProjection,
+    SolidLoadProjection,
+    ConstraintValidation,
+    BodyLoadQuadrature,
+    ThermoelasticLoadProjection,
     ThermoelasticLoadElement { element: usize },
     SolidRecoveryElement { element: usize },
 }
@@ -248,6 +253,20 @@ impl From<SolverSolidAssemblyError> for LinearAssemblyError {
 impl From<StructuralAssemblyError> for LinearAssemblyError {
     fn from(error: StructuralAssemblyError) -> Self {
         Self::Structural(error)
+    }
+}
+
+impl From<structural_loads::StructuralLoadPlanError> for LinearAssemblyError {
+    fn from(error: structural_loads::StructuralLoadPlanError) -> Self {
+        match error {
+            structural_loads::StructuralLoadPlanError::Accounting(cause) => {
+                Self::Structural(StructuralAssemblyError::Accounting(cause))
+            }
+            structural_loads::StructuralLoadPlanError::Cancelled => {
+                Self::Structural(StructuralAssemblyError::Cancelled)
+            }
+            other => Self::Structural(StructuralAssemblyError::InvalidLoadPlan(other.to_string())),
+        }
     }
 }
 
@@ -581,6 +600,7 @@ pub enum StructuralFormulationRequirement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SolverMeshRegionMappingError {
+    Projection(crate::topology::AnalysisProjectionError),
     InvalidAnalysisProjection(String),
     UnmappedLoadRegion {
         load_id: String,
@@ -610,6 +630,7 @@ pub enum SolverMeshRegionMappingError {
 impl fmt::Display for SolverMeshRegionMappingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            SolverMeshRegionMappingError::Projection(error) => write!(f, "solver mesh analysis projection failed: {error}"),
             SolverMeshRegionMappingError::InvalidAnalysisProjection(reason) => {
                 write!(f, "solver mesh analysis projection failed: {reason}")
             }
@@ -851,6 +872,16 @@ where
         .as_ref()
         .map(|structural| structural.elements.len())
         .unwrap_or(0);
+    if awaited_elements && structural_requirement.is_some() {
+        let work = crate::constraints::structural_constraint_normal_projection_work_upper_bound(
+            model,
+            solver_mesh,
+        )
+        .map_err(LinearAssemblyError::ConstraintPlan)?;
+        if work > runmat_simulation_usage::OperationCount::ZERO {
+            before_block(StructuralCapacityPhase::ConstraintValidation, work).await?;
+        }
+    }
     if structural_requirement.is_some() && explicit_element_count > 0 {
         if let Some(solver_mesh) = solver_mesh {
             return mixed_structural::assemble_mixed_structural_system_with_owner(
@@ -867,6 +898,15 @@ where
                         }
                         mixed_structural::MixedCapacityPhase::Explicit(phase) => {
                             StructuralCapacityPhase::Explicit(phase)
+                        }
+                        mixed_structural::MixedCapacityPhase::ConnectorProjection => {
+                            StructuralCapacityPhase::ConnectorProjection
+                        }
+                        mixed_structural::MixedCapacityPhase::SolidLoadProjection => {
+                            StructuralCapacityPhase::SolidLoadProjection
+                        }
+                        mixed_structural::MixedCapacityPhase::BodyLoadQuadrature => {
+                            StructuralCapacityPhase::BodyLoadQuadrature
                         }
                     };
                     before_block(phase, required)
@@ -929,7 +969,7 @@ where
         _ => None,
     };
     let constraint_plan = supplied_constraint_plan.or(compiled_constraint_plan.as_ref());
-    if let (Some(plan), Some(mesh)) = (constraint_plan, solver_mesh) {
+    if let (Some(plan), Some(mesh)) = (supplied_constraint_plan, solver_mesh) {
         plan.validate_against(model, mesh)
             .map_err(LinearAssemblyError::ConstraintPlan)?;
     }
@@ -1042,13 +1082,28 @@ where
                     "canonical solid assembly has no compiled constraint plan".into(),
                 ))
             })?;
+            if awaited_elements {
+                let work =
+                    transient_basis::forcing::SolidLoadDomain::projection_work_upper_bound(mesh)?;
+                if work > runmat_simulation_usage::OperationCount::ZERO {
+                    before_block(StructuralCapacityPhase::SolidLoadProjection, work).await?;
+                }
+            }
+            let load_domain = transient_basis::forcing::SolidLoadDomain::derive(mesh)?;
+            if awaited_elements {
+                let work = load_domain.body_load_work_upper_bound(excitations)?;
+                if work > runmat_simulation_usage::OperationCount::ZERO {
+                    before_block(StructuralCapacityPhase::BodyLoadQuadrature, work).await?;
+                }
+            }
             let forcing = transient_basis::forcing::lower(
                 excitations,
                 mesh,
                 constraint_plan,
                 &structural_dof_layout,
-                &transient_basis::forcing::SolidLoadDomain::derive(mesh)?,
+                &load_domain,
             )?;
+            drop(load_domain);
             rhs = forcing.rhs;
             physical_load = forcing.physical_load;
             constrained = forcing.constrained;
@@ -1081,11 +1136,16 @@ where
             mesh,
             properties,
             temperatures,
-            &mut |element, count| {
-                before_block(
-                    StructuralCapacityPhase::ThermoelasticLoadElement { element },
-                    count,
-                )
+            &mut |phase, count| {
+                let phase = match phase {
+                    thermoelastic_load::ThermoelasticCapacityPhase::Projection => {
+                        StructuralCapacityPhase::ThermoelasticLoadProjection
+                    }
+                    thermoelastic_load::ThermoelasticCapacityPhase::Element { element } => {
+                        StructuralCapacityPhase::ThermoelasticLoadElement { element }
+                    }
+                };
+                before_block(phase, count)
             },
         )
         .await
@@ -1111,11 +1171,16 @@ where
                     mesh,
                     properties,
                     context,
-                    &mut |element, count| {
-                        before_block(
-                            StructuralCapacityPhase::ThermoelasticLoadElement { element },
-                            count,
-                        )
+                    &mut |phase, count| {
+                        let phase = match phase {
+                            thermoelastic_load::ThermoelasticCapacityPhase::Projection => {
+                                StructuralCapacityPhase::ThermoelasticLoadProjection
+                            }
+                            thermoelastic_load::ThermoelasticCapacityPhase::Element { element } => {
+                                StructuralCapacityPhase::ThermoelasticLoadElement { element }
+                            }
+                        };
+                        before_block(phase, count)
                     },
                 )
                 .await
@@ -1382,11 +1447,27 @@ where
                     error.to_string(),
                 ))
             })?;
-        let projection = crate::topology::AnalysisProjection::derive(mesh).map_err(|error| {
-            LinearAssemblyError::Structural(StructuralAssemblyError::MixedTopology(
-                error.to_string(),
-            ))
-        })?;
+        let projection_error = |error| {
+            LinearAssemblyError::Structural(match error {
+                crate::topology::AnalysisProjectionError::Accounting(cause) => {
+                    StructuralAssemblyError::Accounting(cause)
+                }
+                crate::topology::AnalysisProjectionError::Cancelled => {
+                    StructuralAssemblyError::Cancelled
+                }
+                other => StructuralAssemblyError::MixedTopology(other.to_string()),
+            })
+        };
+        if awaited_elements {
+            let work =
+                explicit_connectors::connector_plan_projection_work_upper_bound(model, Some(mesh))
+                    .map_err(projection_error)?;
+            if work > runmat_simulation_usage::OperationCount::ZERO {
+                before_block(StructuralCapacityPhase::ConnectorProjection, work).await?;
+            }
+        }
+        let projection =
+            crate::topology::AnalysisProjection::derive(mesh).map_err(projection_error)?;
         let coordinates_m = topology
             .nodes
             .iter()

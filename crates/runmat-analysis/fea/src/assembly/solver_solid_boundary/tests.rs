@@ -11,6 +11,27 @@ use runmat_meshing_core::{BoundaryTriangleOrder, CanonicalMeshingContract};
 
 mod nodal_body_density;
 
+fn apply_solver_mesh_structural_loads(
+    excitations: &RealizedExcitations,
+    mesh: &SolverMeshArtifact,
+    constraint_plan: &CanonicalStructuralConstraintPlan,
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+    strict_region_mapping: bool,
+) -> Result<StructuralSourceProjection, SolverMeshRegionMappingError> {
+    let projection = AnalysisProjection::derive(mesh).map_err(|error| {
+        SolverMeshRegionMappingError::InvalidAnalysisProjection(error.to_string())
+    })?;
+    apply_solver_mesh_structural_loads_on_projection(
+        excitations,
+        mesh,
+        &projection,
+        constraint_plan,
+        layout,
+        rhs,
+        strict_region_mapping,
+    )
+}
 fn mesh(quadratic: bool, scale: f64) -> SolverMeshArtifact {
     let mut mesh = if quadratic {
         crate::topology::test_meshes::quadratic_slab_mesh(2)

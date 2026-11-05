@@ -20,8 +20,10 @@ use crate::{
 
 mod model_targets;
 mod scoped;
-pub(crate) use model_targets::compile_model_connector_plan;
 pub(super) use model_targets::resolve_projected_surface;
+pub(crate) use model_targets::{
+    compile_model_connector_plan, connector_plan_projection_work_upper_bound,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ExplicitConnectorSummary {

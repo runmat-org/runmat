@@ -34,6 +34,19 @@ pub use reference_points::{
     constraint_reference_point_workspace_profile, ConstraintReferencePointWorkspaceProfile,
 };
 
+/// The solid lowering calls `boundary_node_normals` once for each of these
+/// authored constraints. Mixed explicit-owned targets use a separate surface
+/// lowering, so this classification is an upper bound for mixed topology.
+pub(super) fn invokes_boundary_node_normals(constraint: &StructuralConstraint) -> bool {
+    matches!(
+        &constraint.kind,
+        StructuralConstraintKind::NormalDisplacement { .. }
+            | StructuralConstraintKind::Symmetry { .. }
+            | StructuralConstraintKind::Antisymmetry { .. }
+    ) || (matches!(&constraint.kind, StructuralConstraintKind::Prescribed(_))
+        && matches!(&constraint.frame, CoordinateFrame::BoundaryNormalTangent))
+}
+
 pub(super) fn compile_constraint(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,

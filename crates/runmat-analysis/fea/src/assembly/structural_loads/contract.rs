@@ -57,6 +57,10 @@ pub(crate) struct CanonicalStructuralLoadPlan {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub(crate) enum StructuralLoadPlanError {
+    #[error("structural load numerical accounting failed: {0}")]
+    Accounting(runmat_simulation_usage::LedgerError),
+    #[error("structural load projection was cancelled")]
+    Cancelled,
     #[error("structural excitation `{excitation_id}` uses unsupported {policy} `{value}`")]
     UnsupportedPolicy {
         excitation_id: String,

@@ -2,6 +2,8 @@ use runmat_execution::resource::Capability;
 
 #[derive(Clone, Debug, thiserror::Error, Eq, PartialEq)]
 pub enum ResourcePlanningError {
+    #[error("FEA_CANCELLED: resource planning cancelled")]
+    Cancelled,
     #[error("canonical numeric inventory requires {required} items, maximum {maximum}")]
     CanonicalCollectionCapacity { required: u64, maximum: u64 },
     #[error("canonical numeric inventory requires {required} encoded bytes, maximum {maximum}")]
@@ -72,6 +74,7 @@ impl ResourcePlanningError {
         match error {
             crate::FeaRunError::Resource(error) => error,
             crate::FeaRunError::Usage(cause) => Self::Accounting(cause),
+            crate::FeaRunError::Cancelled => Self::Cancelled,
             other => Self::Invalid(other.to_string()),
         }
     }
@@ -79,6 +82,7 @@ impl ResourcePlanningError {
     pub(crate) fn from_projection_error(error: crate::topology::AnalysisProjectionError) -> Self {
         match error {
             crate::topology::AnalysisProjectionError::Accounting(cause) => Self::Accounting(cause),
+            crate::topology::AnalysisProjectionError::Cancelled => Self::Cancelled,
             other => Self::Invalid(other.to_string()),
         }
     }

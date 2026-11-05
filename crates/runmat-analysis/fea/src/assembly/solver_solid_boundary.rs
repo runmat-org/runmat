@@ -15,36 +15,14 @@ use crate::topology::AnalysisProjection;
 
 mod body_force;
 mod surface_vector;
+pub(super) use body_force::body_load_quadrature_work_upper_bound;
 use body_force::{apply_projected_body_force, BodyDensity};
 use surface_vector::{apply_projected_force, apply_projected_traction};
 
 #[cfg(test)]
 mod tests;
 
-pub(super) fn apply_solver_mesh_structural_loads(
-    excitations: &RealizedExcitations,
-    mesh: &SolverMeshArtifact,
-    constraint_plan: &CanonicalStructuralConstraintPlan,
-    layout: &StructuralDofLayout,
-    rhs: &mut [f64],
-    strict_region_mapping: bool,
-) -> Result<StructuralSourceProjection, SolverMeshRegionMappingError> {
-    let projection = AnalysisProjection::derive(mesh).map_err(|error| {
-        SolverMeshRegionMappingError::InvalidAnalysisProjection(error.to_string())
-    })?;
-    apply_solver_mesh_structural_loads_on_projection(
-        excitations,
-        mesh,
-        &projection,
-        constraint_plan,
-        layout,
-        rhs,
-        strict_region_mapping,
-    )
-}
-
-/// [`apply_solver_mesh_structural_loads`] on the analysis projection already derived from
-/// `mesh`, so repeated load samples (transient steps, per-load compilation) derive it once.
+/// Apply structural loads using the caller's admitted analysis projection.
 pub(super) fn apply_solver_mesh_structural_loads_on_projection(
     excitations: &RealizedExcitations,
     mesh: &SolverMeshArtifact,

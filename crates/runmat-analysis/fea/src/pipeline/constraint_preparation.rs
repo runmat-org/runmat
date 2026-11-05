@@ -26,6 +26,7 @@ pub(super) fn compile_inventory<'a>(
             maximum,
         }),
         ConstraintPlanError::Cancelled => FeaRunError::Cancelled,
+        ConstraintPlanError::Accounting(cause) => FeaRunError::Usage(cause),
         other => FeaRunError::Assembly(other.to_string()),
     })
 }

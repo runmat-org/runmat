@@ -15,6 +15,7 @@ use reference_diagnostics::{
 };
 mod static_thermomechanical;
 mod thermal_state;
+mod work;
 use crate::{
     algebra::apply_k,
     assembly::{
@@ -57,18 +58,24 @@ pub use thermal_state::{
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 
-/// Shared quote for the two metered topology derivations in static preassembly:
-/// observation resolution and structural resource planning.
+/// Shared quote for constraint compilation, observation resolution and structural
+/// resource planning, including their model-dependent connector projections.
 pub fn structural_linear_preparation_work_upper_bound(
+    model: &AnalysisModel,
     mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
 ) -> Result<runmat_simulation_usage::OperationCount, FeaRunError> {
-    preflight::structural_linear_preparation_work_upper_bound(mesh)
+    work::preparation_work_upper_bound(model, mesh)
 }
 
 impl From<LinearAssemblyError> for FeaRunError {
     fn from(error: LinearAssemblyError) -> Self {
         match error {
             LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Accounting(cause))
+            | LinearAssemblyError::SolverMeshRegionMapping(
+                crate::assembly::SolverMeshRegionMappingError::Projection(
+                    crate::topology::AnalysisProjectionError::Accounting(cause),
+                ),
+            )
             | LinearAssemblyError::Structural(
                 crate::assembly::StructuralAssemblyError::Accounting(cause),
             )
@@ -76,6 +83,11 @@ impl From<LinearAssemblyError> for FeaRunError {
                 crate::constraints::ConstraintPlanError::Accounting(cause),
             ) => Self::Usage(cause),
             LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)
+            | LinearAssemblyError::SolverMeshRegionMapping(
+                crate::assembly::SolverMeshRegionMappingError::Projection(
+                    crate::topology::AnalysisProjectionError::Cancelled,
+                ),
+            )
             | LinearAssemblyError::Structural(
                 crate::assembly::StructuralAssemblyError::Cancelled,
             )
@@ -263,7 +275,8 @@ where
     }
     let phase_clock = crate::progress::phase_timer("structural_static.preflight");
     if awaited_solid {
-        let work = structural_linear_preparation_work_upper_bound(options.solver_mesh.as_ref())?;
+        let work =
+            structural_linear_preparation_work_upper_bound(model, options.solver_mesh.as_ref())?;
         if work > runmat_simulation_usage::OperationCount::ZERO {
             before_block(
                 crate::algebra::NumericalCapacityPhase::StaticPreassembly,
@@ -329,6 +342,21 @@ where
             maximum_block_elements,
             |phase, required| {
                 let phase = match phase {
+                    crate::assembly::StructuralCapacityPhase::ConstraintValidation => {
+                        crate::algebra::NumericalCapacityPhase::ConstraintValidation
+                    }
+                    crate::assembly::StructuralCapacityPhase::BodyLoadQuadrature => {
+                        crate::algebra::NumericalCapacityPhase::BodyLoadQuadrature
+                    }
+                    crate::assembly::StructuralCapacityPhase::ThermoelasticLoadProjection => {
+                        crate::algebra::NumericalCapacityPhase::ThermoelasticLoadProjection
+                    }
+                    crate::assembly::StructuralCapacityPhase::ConnectorProjection => {
+                        crate::algebra::NumericalCapacityPhase::ConnectorProjection
+                    }
+                    crate::assembly::StructuralCapacityPhase::SolidLoadProjection => {
+                        crate::algebra::NumericalCapacityPhase::SolidLoadProjection
+                    }
                     crate::assembly::StructuralCapacityPhase::Solid(
                         crate::assembly::solver_solid::SolidCapacityPhase::Block { elements },
                     ) => crate::algebra::NumericalCapacityPhase::SolidAssemblyBlock { elements },
@@ -386,7 +414,7 @@ where
     // field before solving; only the canonical transition must survive into the result.
     let thermal_transition = thermal_transfer.map(|transfer| transfer.transition);
     if awaited_solid && assembly_constraint_plan.is_some() {
-        let work = preflight::resource_projection_work_upper_bound(options.solver_mesh.as_ref())?;
+        let work = work::resource_derivation_work_upper_bound(model, options.solver_mesh.as_ref())?;
         if work > runmat_simulation_usage::OperationCount::ZERO {
             before_block(
                 crate::algebra::NumericalCapacityPhase::StaticStorageVerification,

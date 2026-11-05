@@ -49,7 +49,10 @@ pub use compile::{
     constraint_reference_point_workspace_profile, ConstraintReferencePointWorkspaceProfile,
 };
 pub use coupling::{constraint_coupling_workspace_profile, ConstraintCouplingWorkspaceProfile};
-pub use normal::{constraint_normal_workspace_profile, ConstraintNormalWorkspaceProfile};
+pub use normal::{
+    constraint_normal_workspace_profile, structural_constraint_normal_projection_work_upper_bound,
+    ConstraintNormalWorkspaceProfile,
+};
 pub(crate) use pairing::pair_targets;
 pub use pairing::{constraint_pairing_workspace_profile, ConstraintPairingWorkspaceProfile};
 pub use phase::{build_phase_reduction, UnitPhaseConstraintError, UnitPhaseRelation};

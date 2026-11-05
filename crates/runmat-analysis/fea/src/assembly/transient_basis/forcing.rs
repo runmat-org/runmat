@@ -13,6 +13,38 @@ pub(in crate::assembly) struct SolidLoadDomain {
 }
 
 impl SolidLoadDomain {
+    pub(in crate::assembly) fn body_load_work_upper_bound(
+        &self,
+        excitations: &RealizedExcitations,
+    ) -> Result<runmat_simulation_usage::OperationCount, LinearAssemblyError> {
+        let Ok(projection) = &self.projection else {
+            return Ok(runmat_simulation_usage::OperationCount::ZERO);
+        };
+        excitations.iter().try_fold(
+            runmat_simulation_usage::OperationCount::ZERO,
+            |total, load| {
+                let work =
+                    crate::assembly::solver_solid_boundary::body_load_quadrature_work_upper_bound(
+                        projection, load,
+                    )
+                    .map_err(|cause| {
+                        LinearAssemblyError::Structural(StructuralAssemblyError::Accounting(cause))
+                    })?;
+                total.checked_add(work).map_err(|cause| {
+                    LinearAssemblyError::Structural(StructuralAssemblyError::Accounting(
+                        cause.into(),
+                    ))
+                })
+            },
+        )
+    }
+    pub(in crate::assembly) fn projection_work_upper_bound(
+        mesh: &SolverMeshArtifact,
+    ) -> Result<runmat_simulation_usage::OperationCount, LinearAssemblyError> {
+        crate::topology::AnalysisProjection::derivation_work_upper_bound(mesh)
+            .map_err(projection_error)
+    }
+
     pub(in crate::assembly) fn derive(
         mesh: &SolverMeshArtifact,
     ) -> Result<Self, LinearAssemblyError> {
@@ -22,10 +54,27 @@ impl SolidLoadDomain {
         Ok(Self {
             topology: crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_solid(mesh)
                 .map_err(|error| invalid(error.to_string()))?,
-            projection: crate::topology::AnalysisProjection::derive(mesh)
-                .map_err(|error| error.to_string()),
+            projection: match crate::topology::AnalysisProjection::derive(mesh) {
+                Ok(projection) => Ok(projection),
+                Err(error @ crate::topology::AnalysisProjectionError::Accounting(_))
+                | Err(error @ crate::topology::AnalysisProjectionError::Cancelled) => {
+                    return Err(projection_error(error));
+                }
+                Err(error) => Err(error.to_string()),
+            },
         })
     }
+}
+
+fn projection_error(error: crate::topology::AnalysisProjectionError) -> LinearAssemblyError {
+    let structural = match error {
+        crate::topology::AnalysisProjectionError::Accounting(cause) => {
+            StructuralAssemblyError::Accounting(cause)
+        }
+        crate::topology::AnalysisProjectionError::Cancelled => StructuralAssemblyError::Cancelled,
+        other => StructuralAssemblyError::InvalidLoadPlan(other.to_string()),
+    };
+    LinearAssemblyError::Structural(structural)
 }
 
 pub(in crate::assembly) struct SolidForcing {
@@ -59,9 +108,7 @@ pub(in crate::assembly) fn lower(
         topology,
         structural_dof_layout,
     )
-    .map_err(|error| {
-        LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(error.to_string()))
-    })?;
+    .map_err(LinearAssemblyError::from)?;
     apply_structural_load_plan(
         &source_projection.plan,
         &topology,

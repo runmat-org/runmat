@@ -1,6 +1,45 @@
 use super::*;
 use crate::excitation::field::NodalVectorField;
 use runmat_execution::Digest;
+use runmat_simulation_usage::{LedgerError, OperationCount};
+
+fn selects_body_element(
+    load: &RealizedExcitation,
+    element: &crate::topology::ProjectedElement,
+) -> bool {
+    match &load.target {
+        RealizedExcitationTarget::WholeModel => true,
+        RealizedExcitationTarget::Region(target) => {
+            target.matches_persistent_entity(&element.region_id)
+        }
+        _ => false,
+    }
+}
+
+/// Quote the same selected-element quadrature batches that body-load application records.
+/// This borrows the admitted projection and never reserves or completes work.
+pub(in crate::assembly) fn body_load_quadrature_work_upper_bound(
+    projection: &AnalysisProjection,
+    load: &RealizedExcitation,
+) -> Result<OperationCount, LedgerError> {
+    if !matches!(
+        &load.kind,
+        RealizedExcitationKind::BodyForce(_) | RealizedExcitationKind::BodyForceField(_)
+    ) {
+        return Ok(OperationCount::ZERO);
+    }
+    projection
+        .elements
+        .iter()
+        .filter(|element| selects_body_element(load, element))
+        .try_fold(OperationCount::ZERO, |work, element| {
+            work.checked_add(crate::topology::quadrature::volume_rule_work(
+                element.order,
+                crate::topology::quadrature::KEAST_FIFTEEN.len(),
+            )?)
+            .map_err(LedgerError::from)
+        })
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum BodyDensity<'a> {
@@ -49,13 +88,7 @@ pub(super) fn apply_projected_body_force(
     let elements = projection
         .elements
         .iter()
-        .filter(|element| match &load.target {
-            RealizedExcitationTarget::WholeModel => true,
-            RealizedExcitationTarget::Region(target) => {
-                target.matches_persistent_entity(&element.region_id)
-            }
-            _ => false,
-        })
+        .filter(|element| selects_body_element(load, element))
         .collect::<Vec<_>>();
     if elements.is_empty() {
         return Ok((0, None));
@@ -98,9 +131,7 @@ pub(super) fn apply_projected_body_force(
                     evidence.add_projected_force(node_index, nodal_force);
                 }
             })
-            .map_err(|error| {
-                SolverMeshRegionMappingError::InvalidAnalysisProjection(error.to_string())
-            })?;
+            .map_err(SolverMeshRegionMappingError::Projection)?;
         if let Some(error) = frame_error {
             return Err(SolverMeshRegionMappingError::InvalidAnalysisProjection(
                 format!("excitation `{}` {error}", load.excitation_id.0),

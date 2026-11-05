@@ -6,41 +6,19 @@ use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     contracts::{ComputeBackend, FeaRunError, LinearStaticSolveOptions},
     planning::resource::{
-        build_static_resource_plan_selecting, structural_resource_derivation_work_upper_bound,
-        verify_assembled_structural_storage, FeaResourceDemand, ResourcePlanningError,
-        SolveResourcePolicy, SolverAdmissionResourcePolicy, StaticResourcePreflight,
-        StaticSolvePath, StaticSolveSelection,
+        build_static_resource_plan_selecting, verify_assembled_structural_storage,
+        FeaResourceDemand, ResourcePlanningError, SolveResourcePolicy,
+        SolverAdmissionResourcePolicy, StaticResourcePreflight, StaticSolvePath,
+        StaticSolveSelection,
     },
     post::fields::structural_static_observable_field_definitions,
     results::observation::{
-        resolve_structural_observation_plan_with_connectors,
-        structural_observation_derivation_work_upper_bound, ObservationError,
+        resolve_structural_observation_plan_with_connectors, ObservationError,
         ObservationExecutionPolicy, ObservationLimits,
     },
 };
-use runmat_meshing_core::SolverMeshArtifact;
-use runmat_simulation_usage::{LedgerError, OperationCount};
 
 use super::StaticResourceAdmission;
-
-pub(super) fn resource_projection_work_upper_bound(
-    mesh: Option<&SolverMeshArtifact>,
-) -> Result<OperationCount, FeaRunError> {
-    structural_resource_derivation_work_upper_bound(mesh).map_err(FeaRunError::from)
-}
-
-pub(super) fn structural_linear_preparation_work_upper_bound(
-    mesh: Option<&SolverMeshArtifact>,
-) -> Result<OperationCount, FeaRunError> {
-    let observation =
-        structural_observation_derivation_work_upper_bound(mesh).map_err(|error| match error {
-            ObservationError::Accounting(cause) => FeaRunError::Usage(cause),
-            other => FeaRunError::Assembly(other.to_string()),
-        })?;
-    observation
-        .checked_add(resource_projection_work_upper_bound(mesh)?)
-        .map_err(|overflow| FeaRunError::Usage(LedgerError::from(overflow)))
-}
 
 pub(super) struct StaticPreassembly {
     pub constraints: Option<CanonicalStructuralConstraintPlan>,
@@ -116,7 +94,7 @@ pub(super) fn prepare_static_preassembly(
         options.solver_mesh.as_ref(),
         constraints.reference_points.len(),
     )
-    .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    .map_err(FeaRunError::from)?;
     let fields = structural_static_observable_field_definitions()
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let observations = resolve_structural_observation_plan_with_connectors(

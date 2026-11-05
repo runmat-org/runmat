@@ -37,15 +37,26 @@ pub(super) struct StructuralResourceFacts {
 }
 
 /// Metered projection work for one structural resource-fact derivation.
-/// Static solve candidates share those facts; selecting a fallback does not
-/// derive or charge another projection. This quote does not complete any work.
+/// Includes the connector realization used by symbolic planning. Static solve
+/// candidates share these facts; selecting a fallback does not derive another
+/// projection. This quote does not complete any work.
 pub fn structural_resource_derivation_work_upper_bound(
+    model: &AnalysisModel,
     mesh: Option<&SolverMeshArtifact>,
 ) -> Result<runmat_simulation_usage::OperationCount, ResourcePlanningError> {
-    mesh.map(AnalysisProjection::derivation_work_upper_bound)
+    let projection = mesh
+        .map(AnalysisProjection::derivation_work_upper_bound)
         .transpose()
         .map(|work| work.unwrap_or(runmat_simulation_usage::OperationCount::ZERO))
-        .map_err(ResourcePlanningError::from_projection_error)
+        .map_err(ResourcePlanningError::from_projection_error)?;
+    let connectors =
+        crate::assembly::explicit_connectors::connector_plan_projection_work_upper_bound(
+            model, mesh,
+        )
+        .map_err(ResourcePlanningError::from_projection_error)?;
+    projection
+        .checked_add(connectors)
+        .map_err(|cause| ResourcePlanningError::Accounting(cause.into()))
 }
 
 pub(super) fn derive_structural_resource_facts(

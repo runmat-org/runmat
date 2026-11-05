@@ -4,6 +4,45 @@ use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use super::vector::{add, magnitude, scale};
 use super::{workspace::check_cancelled, ConstraintPlanError, ResolvedConstraintTarget};
 use crate::topology::AnalysisProjection;
+use runmat_analysis_core::AnalysisModel;
+use runmat_simulation_usage::{LedgerError, OperationCount};
+
+/// Upper bound for projection batches in one canonical constraint compilation.
+/// Solid lowering derives one projection for each authored normal-dependent
+/// constraint. Explicit lowering derives none; mixed explicit-owned targets may
+/// use fewer than this bound, and their unused grant is never completed.
+pub fn structural_constraint_normal_projection_work_upper_bound(
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+) -> Result<OperationCount, ConstraintPlanError> {
+    let Some(mesh) = mesh else {
+        return Ok(OperationCount::ZERO);
+    };
+    let repetitions = model
+        .constraints
+        .iter()
+        .filter_map(|constraint| constraint.structural())
+        .filter(|constraint| super::compile::invokes_boundary_node_normals(constraint))
+        .try_fold(0u64, |count, _| {
+            count
+                .checked_add(1)
+                .ok_or(ConstraintPlanError::Accounting(LedgerError::CountOverflow))
+        })?;
+    if repetitions == 0 {
+        return Ok(OperationCount::ZERO);
+    }
+    let per_projection =
+        AnalysisProjection::derivation_work_upper_bound(mesh).map_err(|error| match error {
+            crate::topology::AnalysisProjectionError::Accounting(cause) => {
+                ConstraintPlanError::Accounting(cause)
+            }
+            crate::topology::AnalysisProjectionError::Cancelled => ConstraintPlanError::Cancelled,
+            other => ConstraintPlanError::Invalid(other.to_string()),
+        })?;
+    per_projection
+        .checked_mul(repetitions)
+        .map_err(|overflow| ConstraintPlanError::Accounting(LedgerError::from(overflow)))
+}
 
 pub(super) fn boundary_node_normals(
     mesh: &SolverMeshArtifact,

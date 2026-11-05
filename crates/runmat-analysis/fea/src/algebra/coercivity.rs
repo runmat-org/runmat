@@ -25,6 +25,11 @@ pub(crate) use symbolic::CoercivityWorkEnvelope;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NumericalCapacityPhase {
     StaticPreassembly,
+    SolidLoadProjection,
+    ConstraintValidation,
+    BodyLoadQuadrature,
+    ThermoelasticLoadProjection,
+    ConnectorProjection,
     StaticStorageVerification,
     SolidAssemblyBlock { elements: std::ops::Range<usize> },
     Tet4AssemblyElement { element: usize },
