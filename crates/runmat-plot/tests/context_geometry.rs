@@ -7,8 +7,10 @@
 use glam::{Vec3, Vec4};
 use runmat_plot::core::{AlphaMode, Camera};
 use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
+use runmat_plot::geometry_scene::GeometrySceneScalarLegend;
 use runmat_plot::{
     cad_default_material, geometry_scene_vertex, FigureScene, GeometryScene, GeometrySceneChunk,
+    GeometrySceneCompleteness, GeometrySceneOverlay,
 };
 
 const SIZE: u32 = 200;
@@ -219,4 +221,69 @@ fn merged_context_draws_every_piece_as_one_chunk() {
         .wireframe_edges(GHOST_EDGE)
         .unwrap();
     assert!(GeometrySceneChunk::merged("mixed", vec![ghost("a", 1.0, 0.8), edges]).is_none());
+}
+
+fn result_overlay() -> GeometrySceneOverlay {
+    GeometrySceneOverlay {
+        source_name: None,
+        status: GeometrySceneCompleteness::Complete,
+        quality_label: None,
+        format: None,
+        source_label: None,
+        allow_create_fea_study: false,
+        byte_count: None,
+        mesh_count: 1,
+        vertex_count: 4,
+        triangle_count: 2,
+        progress_percent: None,
+        scalar_legend: Some(GeometrySceneScalarLegend {
+            label: "Temperature".into(),
+            unit: "K".into(),
+            minimum: 301.0,
+            maximum: 304.0,
+        }),
+        region_count: 0,
+        mapped_region_count: 0,
+        assembly_nodes: vec![],
+        regions: vec![],
+        warnings: vec![],
+    }
+}
+
+/// Pixels in the top band, left of the legend, that differ from the background.
+fn title_band_ink(rgba: &[u8]) -> usize {
+    let background = &rgba[((SIZE * 4) * (SIZE - 2) + 8) as usize..][..3];
+    (0..SIZE / 8)
+        .flat_map(|y| (0..SIZE / 2).map(move |x| ((y * SIZE + x) * 4) as usize))
+        .filter(|&i| {
+            (0..3)
+                .map(|c| (rgba[i + c] as i32 - background[c] as i32).abs())
+                .sum::<i32>()
+                > 60
+        })
+        .count()
+}
+
+#[tokio::test]
+async fn a_result_scene_draws_its_caption_as_title() {
+    let mut captioned = saved(vec![square("result", 0.0, 0.5, RESULT)]);
+    captioned.overlay = Some(result_overlay());
+    let mut bare = captioned.clone();
+    captioned.title = Some("Steady thermal".into());
+    let with = title_band_ink(&render("captioned", &captioned).await);
+    let without = title_band_ink(&render("uncaptioned", &bare).await);
+    assert!(
+        with > without + 20,
+        "caption not drawn: {with} vs {without} ink pixels"
+    );
+    // A CAD preview's title is its file name: still not drawn without a result legend.
+    bare.title = Some("pack.step".into());
+    if let Some(overlay) = bare.overlay.as_mut() {
+        overlay.scalar_legend = None;
+    }
+    let cad = title_band_ink(&render("cad-title", &bare).await);
+    assert!(
+        cad <= without + 5,
+        "CAD source title drawn: {cad} vs {without}"
+    );
 }

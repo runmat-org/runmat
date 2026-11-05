@@ -891,7 +891,7 @@ impl NativeSurfaceRenderContext {
                     show_cad_overlay: false,
                     font_scale: 1.25,
                     show_axes: true,
-                    show_title: self.renderer.geometry_overlay().is_none(),
+                    show_title: self.renderer.shows_geometry_title(),
                     title: self.renderer.overlay_title().cloned(),
                     x_label: self.renderer.overlay_x_label().cloned(),
                     y_label: self.renderer.overlay_y_label().cloned(),

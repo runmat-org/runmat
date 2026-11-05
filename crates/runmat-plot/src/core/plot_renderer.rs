@@ -3949,6 +3949,16 @@ impl PlotRenderer {
     pub fn has_geometry_scene(&self) -> bool {
         self.last_geometry_scene.is_some()
     }
+    /// Whether the overlay draws the figure title. A CAD preview's title is its source name,
+    /// which the host shows elsewhere; a result scene (one with a scalar legend) draws its
+    /// title, such as a caption stating what was solved.
+    pub fn shows_geometry_title(&self) -> bool {
+        match &self.geometry_overlay {
+            None => true,
+            Some(overlay) => overlay.scalar_legend.is_some() && self.figure_title.is_some(),
+        }
+    }
+
     pub fn geometry_xray_enabled(&self) -> bool {
         self.geometry_xray_enabled
     }

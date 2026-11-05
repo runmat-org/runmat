@@ -132,7 +132,7 @@ fn load_context(
         },
         ..Default::default()
     };
-    let asset = runmat_runtime::geometry::geometry_load_with_options_op(
+    let mut asset = runmat_runtime::geometry::geometry_load_with_options_op(
         &name,
         &bytes,
         options,
@@ -140,13 +140,29 @@ fn load_context(
     )
     .map_err(|error| anyhow::anyhow!("context geometry {name}: {}", error.message))?
     .data;
+    // Preview coordinates stay in the file's unit; results are drawn in meters.
+    let meters_per_unit = asset
+        .coordinate_units
+        .with_context(|| format!("context geometry {name} has no resolved length unit"))?
+        .meters_per_unit();
+    if meters_per_unit != 1.0 {
+        for mesh in &mut asset.surface_meshes {
+            for vertex in &mut mesh.vertices {
+                for coordinate in vertex.iter_mut() {
+                    *coordinate *= meters_per_unit;
+                }
+            }
+        }
+    }
     let scene = runmat_runtime::geometry::geometry_preview_scene(
         &asset,
         name.clone(),
         runmat_runtime::geometry::GeometryPreviewSceneOptions::default(),
     )
     .map_err(|error| anyhow::anyhow!("context geometry {name}: {error}"))?;
-    let edge_opacity = (0.15 + 1.5 * opacity).min(0.9);
+    // Faint edges: an assembly of thousands of parts drawn with strong edges reads as a
+    // wireframe and buries the result.
+    let edge_opacity = (0.03 + 0.6 * opacity).min(0.9);
     let [r, g, b] = CONTEXT_FACE_RGB;
     let [er, eg, eb] = CONTEXT_EDGE_RGB;
     // Context is drawn as one piece: merge the per-part chunks of the import (one surface and
