@@ -17,6 +17,7 @@ mod instances;
 mod paint;
 mod pick;
 mod pick_instances;
+mod section_cap;
 
 pub use pick::{
     GeometryScenePickIndex, GeometryScenePickMode, GeometryScenePickRequest, GeometryScenePickResult,
@@ -957,7 +958,20 @@ impl GeometrySceneChunk {
             return render_data;
         };
         match render_data.pipeline_type {
-            PipelineType::Triangles => clip_triangle_render_data(render_data, plane),
+            PipelineType::Triangles => {
+                // The solid's cut faces close what the clip opens.
+                let cap = section_cap::section_cap(&triangles_of(&render_data), plane);
+                let mut clipped = clip_triangle_render_data(render_data, plane);
+                if !cap.is_empty() {
+                    clipped.vertices.extend(cap);
+                    let count = clipped.vertices.len();
+                    clipped.bounds = Some(bounds_from_vertices(&clipped.vertices));
+                    if let Some(call) = clipped.draw_calls.first_mut() {
+                        call.vertex_count = count;
+                    }
+                }
+                clipped
+            }
             PipelineType::Lines => clip_line_render_data(render_data, plane),
             _ => render_data,
         }
@@ -1075,6 +1089,21 @@ fn clip_line_render_data(mut render_data: RenderData, plane: (Vec3, Vec3)) -> Re
         instance_count: 1,
     }];
     render_data
+}
+
+/// Every triangle of `render_data`, indexed or not.
+fn triangles_of(render_data: &RenderData) -> Vec<[Vertex; 3]> {
+    match render_data.indices.as_ref() {
+        Some(indices) => indices
+            .chunks_exact(3)
+            .filter_map(|t| triangle_vertices_from_indices(&render_data.vertices, t))
+            .collect(),
+        None => render_data
+            .vertices
+            .chunks_exact(3)
+            .map(|t| [t[0], t[1], t[2]])
+            .collect(),
+    }
 }
 
 fn triangle_vertices_from_indices(vertices: &[Vertex], triangle: &[u32]) -> Option<[Vertex; 3]> {
