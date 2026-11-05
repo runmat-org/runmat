@@ -93,6 +93,34 @@ pub fn loop_sketch(name: &str, plane: &str, curves: &[Curve]) -> String {
     s
 }
 
+/// A corner of an outline rounded by a short spline: from `r` before `p` (towards `a`) through
+/// a point inside the corner to `r` after it (towards `b`).
+pub fn rounded(a: (f64, f64), p: (f64, f64), b: (f64, f64), r: f64) -> Vec<(f64, f64)> {
+    let unit = |q: (f64, f64)| {
+        let (du, dv) = (q.0 - p.0, q.1 - p.1);
+        let l = du.hypot(dv);
+        (du / l, dv / l)
+    };
+    let (ua, ub) = (unit(a), unit(b));
+    vec![
+        (p.0 + r * ua.0, p.1 + r * ua.1),
+        (p.0 + 0.3 * r * (ua.0 + ub.0), p.1 + 0.3 * r * (ua.1 + ub.1)),
+        (p.0 + r * ub.0, p.1 + r * ub.1),
+    ]
+}
+
+/// A closed outline through `corners`, each corner rounded over `r`.
+pub fn outline(name: &str, plane: &str, corners: &[(f64, f64)], r: f64) -> String {
+    let n = corners.len();
+    let mut curves = Vec::new();
+    for k in 0..n {
+        let (a, p, b) = (corners[(k + n - 1) % n], corners[k], corners[(k + 1) % n]);
+        curves.push(Curve::Spline(rounded(a, p, b, r)));
+        curves.push(Curve::Line(vec![]));
+    }
+    loop_sketch(name, plane, &curves)
+}
+
 pub fn rect(name: &str, plane: &str, u0: f64, v0: f64, u1: f64, v1: f64) -> String {
     polygon(name, plane, &[(u0, v0), (u1, v0), (u1, v1), (u0, v1)])
 }
@@ -113,7 +141,7 @@ fn paint(name: &str) -> Option<&'static str> {
     Some(match stem {
         "nose" | "skin_panel" | "tail_cone" => "#F4F5F7",
         "fairing" | "pylon" => "#C7CCD3",
-        "cockpit_windshield" => "#1F2B36",
+        "cockpit_window_front" | "cockpit_window_side" | "cockpit_window_aft" => "#16202A",
         "cabin_window" => "#252E38",
         "frame" | "stringer" | "rib" | "front_spar" | "rear_spar" => "#A7B596",
         "rivet" => "#BFC4CB",
@@ -124,6 +152,26 @@ fn paint(name: &str) -> Option<&'static str> {
         "fan" | "spinner" => "#363C44",
         "core_nozzle" | "plug" => "#8A9097",
         "gear_strut" | "axle" | "hub" => "#A2A8AF",
+        // The interior: fabric and leather seats, light plastic linings and monuments, a grey
+        // carpeted floor, primer-green structure, dark flight-deck panels and screens.
+        "seat_cushion" => "#2E4A6B",
+        "seat_cushion_business" => "#5A2E3B",
+        "pilot_seat_cushion" => "#3A3E44",
+        "seat_frame" | "seat_track" => "#8C9299",
+        "seat_armrest" => "#4C535B",
+        "floor_panel" | "cockpit_floor" => "#6A7078",
+        "floor_beam" | "centre_wing_box" | "gear_bay" => "#A7B596",
+        "sidewall_lining" | "ceiling_panel" => "#ECEDEF",
+        "overhead_bin" => "#E1E4E8",
+        "galley" => "#D3D6DA",
+        "lavatory" => "#E5E1D8",
+        "cockpit_bulkhead" => "#C9CDD2",
+        "instrument_panel" | "pedestal" => "#3C4148",
+        "glareshield" | "control_column" => "#2A2E33",
+        "display_unit" => "#0D1318",
+        "cargo_floor" | "cargo_floor_aft" => "#5D6369",
+        "cargo_container" => "#B7BDC5",
+        "passenger_door" | "passenger_door_aft" | "overwing_exit" | "cargo_door" | "cargo_door_aft" => "#EEF0F2",
         _ => return None,
     })
 }

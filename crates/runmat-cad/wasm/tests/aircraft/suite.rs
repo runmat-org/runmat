@@ -107,8 +107,8 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
     assert_eq!(state("skeleton"), "fixed");
     assert_eq!(state("wing_starboard"), "fully_defined");
     assert_eq!(state("fuselage/forward/frame@frames[2]"), "fully_defined");
-    let fixed = rows.iter().filter(|o| o["state"] == "fixed").count();
-    assert!(fixed * 10 < rows.len(), "{fixed} of {} occurrences fixed", rows.len());
+    let fixed: Vec<&str> = rows.iter().filter(|o| o["state"] == "fixed").filter_map(|o| o["path"].as_str()).collect();
+    assert!(fixed.len() * 10 < rows.len(), "{} of {} occurrences fixed: {:?}", fixed.len(), rows.len(), fixed.iter().step_by(fixed.len() / 40 + 1).collect::<Vec<_>>());
     let display = &top["display"]["data"];
     let occurrences = display["occurrences"]
         .as_array()
@@ -149,7 +149,7 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
     // It opens on its saved hero view.
     let views = top["projection"]["data"]["views"].as_array().cloned().unwrap_or_default();
     assert!(views.iter().any(|v| v["name"] == "hero" && v["default"] == true), "views {views:?}");
-    let glass = appearance("cockpit_windshield.part");
+    let glass = appearance("cockpit_window_front.part");
     assert!(glass[0] < 0.15 && glass[3] > 0.99, "cockpit glazing {glass:?}");
     let skin = appearance("skin_panel.part");
     let wing = appearance("wing_box_skin_upper.part");

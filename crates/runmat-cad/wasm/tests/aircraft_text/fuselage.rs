@@ -1,95 +1,9 @@
-//! The fuselage: an elliptical nose with its windshield, three barrel sections (frames,
+//! The fuselage (the nose and its glazing are in `nose.rs`): three barrel sections (frames,
 //! stringers, skin panels, flush rivet rings and a row of cabin windows each side), an upswept
 //! tail cone and a wing-to-body fairing.
 
 use super::text::{loop_sketch, mm, offset, offset_rot, part, polygon, pt, rect, use_, Curve, HEADER};
 use super::{FRAME_PITCH, NOSE, RADIUS, SECTION, SKIN_PANELS, STRINGERS, TAIL};
-
-/// The nose's radius at `x` aft of its tip: a quarter ellipse, blunt at the tip and tangent to
-/// the barrel at `NOSE`.
-pub fn nose_radius(x: f64) -> f64 {
-    let s = (1.0 - x / NOSE).clamp(0.0, 1.0);
-    RADIUS * (1.0 - s.powf(2.2)).max(0.0).powf(1.0 / 2.2)
-}
-
-fn nose_profile(x0: f64, x1: f64, lift: f64, n: usize) -> Vec<(f64, f64)> {
-    (0..=n)
-        .map(|k| {
-            let x = x0 + (x1 - x0) * k as f64 / n as f64;
-            (x, nose_radius(x) + lift)
-        })
-        .collect()
-}
-
-fn nose() -> String {
-    // Stations closer together at the tip, where the profile turns fastest.
-    let pts: Vec<(f64, f64)> = (0..=16)
-        .map(|k| {
-            let t = k as f64 / 16.0;
-            let x = NOSE * (1.0 - (t * std::f64::consts::FRAC_PI_2).cos());
-            (x, nose_radius(x))
-        })
-        .collect();
-    part(
-        "nose",
-        "FUS-NS-010",
-        "composite",
-        "The nose: a blunt quarter-ellipse profile turned about the fuselage axis, tangent to the barrel.",
-        &format!(
-            "{}    feature dome = revolve(profile = sketch.s, axis = origin.x, angle = 360 deg)\n",
-            loop_sketch("s", "origin.xy", &[Curve::Spline(pts), Curve::Line(vec![(NOSE, 0.0)])])
-        ),
-        "dome",
-    )
-}
-
-/// A corner of the windshield's outline rounded by a short spline: from `r` before `p` (towards
-/// `a`) through a point inside the corner to `r` after it (towards `b`).
-fn rounded(a: (f64, f64), p: (f64, f64), b: (f64, f64), r: f64) -> Vec<(f64, f64)> {
-    let unit = |q: (f64, f64)| {
-        let (du, dv) = (q.0 - p.0, q.1 - p.1);
-        let l = du.hypot(dv);
-        (du / l, dv / l)
-    };
-    let (ua, ub) = (unit(a), unit(b));
-    vec![
-        (p.0 + r * ua.0, p.1 + r * ua.1),
-        (p.0 + 0.3 * r * (ua.0 + ub.0), p.1 + 0.3 * r * (ua.1 + ub.1)),
-        (p.0 + r * ub.0, p.1 + r * ub.1),
-    ]
-}
-
-/// The windshield: one tinted pane flush with the nose (0.5 mm proud, so it shades over the
-/// skin), a shell of the nose's own profile cut to the side-view outline of the cockpit
-/// glazing. The outline's sill falls aft from the crown and its brow falls more slowly, so the
-/// front panes meet on the centerline and the side panes taper aft, as on a narrow-body.
-fn windshield() -> String {
-    let (x0, x1) = (1_900.0, 4_700.0);
-    let outer = nose_profile(x0, x1, 0.5, 14);
-    let mut inner = nose_profile(x0, x1, -6.0, 14);
-    inner.reverse();
-    // Side view, (z, x): forward sill, aft sill, aft brow, forward brow.
-    let corners = [(1_736.0, 2_000.0), (1_150.0, 4_400.0), (1_560.0, 4_150.0), (2_125.0, 2_000.0)];
-    let mut outline = Vec::new();
-    for k in 0..4 {
-        let (a, p, b) = (corners[(k + 3) % 4], corners[k], corners[(k + 1) % 4]);
-        outline.push(Curve::Spline(rounded(a, p, b, 110.0)));
-        outline.push(Curve::Line(vec![]));
-    }
-    part(
-        "cockpit_windshield",
-        "FUS-WS-030",
-        "glass",
-        "The cockpit windshield: a shell of the nose's profile cut to the glazing's side-view outline.",
-        &format!(
-            "{}    feature shell = revolve(profile = sketch.s, axis = origin.x, angle = 360 deg)\n{}    feature pane = extrude(profile = sketch.o, distance = 4400 mm, symmetric, mode = intersect)\n",
-            loop_sketch("s", "origin.xy", &[Curve::Spline(outer), Curve::Line(vec![]), Curve::Spline(inner), Curve::Line(vec![])]),
-            loop_sketch("o", "origin.zx", &outline)
-        ),
-        // The intersect trims the shell's body in place.
-        "shell",
-    )
-}
 
 fn frame() -> String {
     part(
@@ -216,8 +130,6 @@ fn fairing() -> String {
 
 pub fn parts() -> Vec<(String, String)> {
     vec![
-        ("nose.part".into(), nose()),
-        ("cockpit_windshield.part".into(), windshield()),
         ("frame.part".into(), frame()),
         ("stringer.part".into(), stringer()),
         ("skin_panel.part".into(), skin_panel()),
@@ -256,22 +168,27 @@ pub fn fuselage_section() -> String {
     // The pane faces +y; turned about x it faces the belt's normal on each side.
     s += &use_("part", "cabin_window", "window_starboard", &[offset_rot(FRAME_PITCH / 2.0, yc, zw, [1.0, 0.0, 0.0], tilt)]);
     s += &use_("part", "cabin_window", "window_port", &[offset_rot(FRAME_PITCH / 2.0, -yc, zw, [1.0, 0.0, 0.0], 180.0 - tilt)]);
+    let (cabin_uses, cabin_patterns) = super::cabin::section_uses(frames, windows);
+    s += &cabin_uses;
     s += &format!("\n    pattern frames = linear(seeds = [frame], direction = [1, 0, 0], spacing = input.frame_pitch, count = {frames})\n");
     s += &format!("    pattern stringers = circular(seeds = [stringer], axis_point = [0 mm, 0 mm, 0 mm], axis = [1, 0, 0], count = {STRINGERS}, angle = 360 deg)\n");
     s += &format!("    pattern panels = circular(seeds = [panel], axis_point = [0 mm, 0 mm, 0 mm], axis = [1, 0, 0], count = {SKIN_PANELS}, angle = 360 deg)\n");
     s += &format!("    pattern rivet_rings = linear(seeds = [rivets], direction = [1, 0, 0], spacing = input.frame_pitch, count = {frames})\n");
     s += &format!("    pattern windows = linear(seeds = [window_starboard, window_port], direction = [1, 0, 0], spacing = input.frame_pitch, count = {windows})\n");
+    s += &cabin_patterns;
     s += "}\n";
     s
 }
 
 pub fn fuselage() -> String {
-    let mut s = format!("{HEADER}// The fuselage: the nose and its cockpit windows, three barrel sections, the tail cone and the\n// wing-to-body fairing, along x.\nassembly fuselage {{\n");
-    s += &use_("part", "nose", "nose", &[]);
-    s += &use_("part", "cockpit_windshield", "windshield", &[]);
+    let mut s = format!("{HEADER}// The fuselage: the nose and its cockpit glazing, three barrel sections, the tail cone and the\n// wing-to-body fairing, along x.\nassembly fuselage {{\n");
+    s += &super::nose::uses();
     for (k, name) in ["forward", "center", "aft"].iter().enumerate() {
         s += &use_("assembly", "fuselage_section", name, &[offset(NOSE + k as f64 * SECTION, 0.0, 0.0)]);
     }
+    s += &use_("assembly", "cockpit", "cockpit", &[]);
+    s += &use_("assembly", "cabin", "cabin", &[]);
+    s += &use_("assembly", "hold", "hold", &[]);
     s += &use_("part", "tail_cone", "tail_cone", &[offset(NOSE + 3.0 * SECTION, 0.0, 0.0)]);
     s += &use_("part", "fairing", "fairing", &[offset(super::wing::ROOT_X - 1_200.0, 0.0, -1_250.0)]);
     s += "}\n";

@@ -4,10 +4,13 @@
 //!
 //! - `airliner.assembly`: the skeleton, the fuselage, both wings, the empennage and the landing
 //!   gear, each attached to a frame `airliner_skeleton.part` publishes.
-//! - `fuselage.assembly`: the nose and cockpit windows, three barrel sections, the tail cone and
+//! - `fuselage.assembly`: the drooped nose and its six cockpit panes, three barrel sections, the tail cone and
 //!   the wing-to-body fairing.
 //! - `fuselage_section.assembly`: frames at the frame pitch, stringers, skin panels, flush rivet
-//!   rings and cabin windows.
+//!   rings and cabin windows, and the cabin's floor beams, floor, seat tracks, linings, ceiling
+//!   and overhead bins.
+//! - `cockpit.assembly`, `cabin.assembly`, `hold.assembly`: the flight deck, the seat rows,
+//!   galleys, lavatories and doors, and the cargo holds, centre wing box and gear bays.
 //! - `wing_starboard.assembly`, `wing_port.assembly`: lofted slats, box skins, spars, ribs at the
 //!   rib pitch, flaps, aileron and winglet on cambered sections, rivet rows along the spar caps,
 //!   and an engine (the port wing uses the opposite-hand pieces).
@@ -15,9 +18,14 @@
 //! - `nacelle.assembly`, `main_gear.assembly`, `nose_gear.assembly`, `rivet_ring.assembly`.
 
 mod airfoil;
+mod cabin;
+mod cockpit;
 mod empennage;
 mod fuselage;
+mod hold;
 mod nacelle_gear;
+mod nose;
+mod seats;
 mod text;
 mod wing;
 
@@ -33,6 +41,8 @@ const RIB_PITCH: f64 = 650.0;
 const STRINGERS: usize = 24;
 const SKIN_PANELS: usize = 8;
 const RIVET_PITCH: f64 = 150.0;
+/// The cabin and flight deck floor's top, below the fuselage axis.
+const FLOOR_Z: f64 = -400.0;
 
 /// The skeleton's frames: where each major assembly's origin sits.
 fn frames() -> Vec<(&'static str, f64, f64, f64)> {
@@ -102,7 +112,15 @@ fn airliner() -> String {
 /// Every file of the airliner, by file name.
 pub fn files() -> Vec<(String, String)> {
     let mut out = vec![("airliner_skeleton.part".to_string(), skeleton())];
+    out.extend(nose::parts());
     out.extend(fuselage::parts());
+    out.extend(cabin::parts());
+    out.extend(seats::parts());
+    out.extend(cockpit::parts());
+    out.extend(hold::parts());
+    out.push(("cabin.assembly".into(), cabin::cabin()));
+    out.push(("cockpit.assembly".into(), cockpit::cockpit()));
+    out.push(("hold.assembly".into(), hold::hold()));
     out.extend(wing::parts());
     out.extend(empennage::parts());
     out.extend(nacelle_gear::parts());

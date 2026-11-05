@@ -24,8 +24,8 @@ pub const DIHEDRAL_SLOPE: f64 = 0.096_289;
 pub const ROOT_THICKNESS: f64 = 0.145;
 pub const TIP_THICKNESS: f64 = 0.105;
 /// Spar stations, fractions of chord.
-const FRONT: f64 = 0.15;
-const REAR: f64 = 0.65;
+pub const FRONT: f64 = 0.15;
+pub const REAR: f64 = 0.65;
 const SKIN: f64 = 4.0;
 
 pub fn chord(y: f64) -> f64 {
@@ -37,7 +37,7 @@ pub fn x_le(y: f64) -> f64 {
 pub fn z_le(y: f64) -> f64 {
     DIHEDRAL_SLOPE * y
 }
-fn section(y: f64) -> Naca {
+pub fn section(y: f64) -> Naca {
     Naca { m: 0.02, p: 0.4, t: ROOT_THICKNESS - (ROOT_THICKNESS - TIP_THICKNESS) * y / SEMISPAN }
 }
 /// The section at `y`, mapped into its zx sketch plane (u = z, v = x).
