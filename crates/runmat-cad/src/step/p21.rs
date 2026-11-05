@@ -255,7 +255,7 @@ fn decode_string(s: &str) -> String {
         rest = &rest[k..];
         if let Some(r) = rest.strip_prefix("\\X2\\") {
             let end = r.find("\\X0\\").unwrap_or(r.len());
-            let units: Vec<u16> = r[..end].as_bytes().chunks(4).filter_map(|c| u16::from_str_radix(std::str::from_utf8(c).ok()?, 16).ok()).collect();
+            let units: Vec<u16> = r.as_bytes()[..end].chunks(4).filter_map(|c| u16::from_str_radix(std::str::from_utf8(c).ok()?, 16).ok()).collect();
             out.push_str(&String::from_utf16_lossy(&units));
             rest = r.get(end + 4..).unwrap_or("");
         } else if let Some(r) = rest.strip_prefix("\\X\\") {

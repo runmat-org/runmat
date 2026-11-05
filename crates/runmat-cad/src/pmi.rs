@@ -137,7 +137,7 @@ pub struct GeometricTolerance {
     pub datums: Vec<DatumReference>,
 }
 
-/// A toleranced size or a fit (`10 mm +0.02 -0`, `H7`).
+/// A toleranced size or a fit (`10 mm ± [0.02 mm, 0 mm]` is +0.02/-0, `H7`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SizeTolerance {
     pub name: String,
@@ -149,7 +149,7 @@ pub struct SizeTolerance {
 }
 
 /// A toleranced distance between two features (a dimensional location):
-/// `location slot = { from = feature.body.face.start, to = feature.cut.face.side(s.c1), distance = 20 mm +0.1 -0.1 }`.
+/// `location slot = { from = feature.body.face.start, to = feature.cut.face.side(s.c1), distance = 20 mm ± 0.1 mm }`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocationTolerance {
     pub name: String,

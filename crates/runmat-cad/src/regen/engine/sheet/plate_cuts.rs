@@ -2,8 +2,8 @@
 //! notches in its flats develop onto the flat pattern.
 //!
 //! The developed plate is split into flat regions by its bends: the plate's unmoved part,
-//! and the flat each sketched bend or jog moved (minus the flats bends of that flat moved in
-//! turn). A region carries the rigid motion `M` from the developed plate to where its flat
+//! the flat each sketched bend or jog moved and the flat of each edge flange (minus the flats
+//! bends and flanges of that flat moved in turn). A region carries the rigid motion `M` from the developed plate to where its flat
 //! lies in the part (the identity for the unmoved part). For each region the steps are:
 //!
 //! 1. a slab: the region's area of the developed plane (ending 1 µm short of each bend's
@@ -24,24 +24,7 @@
 use super::super::families::inverse;
 use super::*;
 
-/// A flat region of a developed plate: `keep` half-planes `(p − o)·n ≥ d` (all must hold),
-/// and the motion from the developed plate to where the flat lies.
-struct Region {
-    key: String,
-    keep: Vec<([f64; 2], [f64; 2], f64)>,
-    motion: Option<Transform>,
-}
-
-/// How far short of a bend's tangent line a region's slab stops.
-const SHY: f64 = 1e-6;
-
-impl Region {
-    fn holds(&self, p: [f64; 2], tol: f64) -> bool {
-        self.keep
-            .iter()
-            .all(|(o, n, d)| (p[0] - o[0]) * n[0] + (p[1] - o[1]) * n[1] >= d - tol)
-    }
-}
+use super::plate_flanges::SHY;
 
 /// The convex polygon `poly` clipped to `(p − o)·n ≥ d`.
 fn clip(poly: &[[f64; 2]], o: [f64; 2], n: [f64; 2], d: f64) -> Vec<[f64; 2]> {
@@ -103,54 +86,6 @@ impl Positions {
 }
 
 impl<'a, 'b> Run<'a, 'b> {
-    /// The flat regions of a plate bent by `bends`.
-    fn plate_regions(&self, bends: &[(FeatureId, Vec<FlatBendLine>)]) -> Vec<Region> {
-        let mut out = vec![Region {
-            key: "plate".into(),
-            keep: Vec::new(),
-            motion: None,
-        }];
-        let record = |f: &FeatureId| match self.st.records.get(f) {
-            Some(FeatureRecord::PlateBend {
-                lines,
-                moved,
-                motion,
-                parent,
-                ..
-            }) => Some((lines.clone(), *moved, *motion, parent.clone())),
-            _ => None,
-        };
-        for (b, _) in bends {
-            let Some((lines, (o, n), motion, _)) = record(b) else {
-                continue;
-            };
-            // The moved flat starts past the last bend line's allowance.
-            let start = lines
-                .iter()
-                .map(|l| {
-                    let mid = [(l.start[0] + l.end[0]) / 2.0, (l.start[1] + l.end[1]) / 2.0];
-                    (mid[0] - o[0]) * n[0] + (mid[1] - o[1]) * n[1] + l.allowance / 2.0
-                })
-                .fold(0.0, f64::max);
-            out.push(Region {
-                key: b.0.clone(),
-                keep: vec![(o, n, start + SHY)],
-                motion: Some(motion),
-            });
-        }
-        // Each bend's moved half-plane leaves its parent's region (the plate's, without one).
-        for (b, _) in bends {
-            let Some((_, (o, n), _, parent)) = record(b) else {
-                continue;
-            };
-            let owner = parent.map(|p| p.0).unwrap_or_else(|| "plate".into());
-            if let Some(r) = out.iter_mut().find(|r| r.key == owner) {
-                r.keep.push((o, [-n[0], -n[1]], SHY));
-            }
-        }
-        out
-    }
-
     /// The steps that cut the developed plate (body `developed`, already made by the first
     /// step) by what features besides the bends removed from the flats of `body`. `foreign`
     /// are the faces of `body` those features made. Returns the steps after the first, and the
@@ -161,12 +96,13 @@ impl<'a, 'b> Run<'a, 'b> {
         id: &FeatureId,
         body: usize,
         bends: &[(FeatureId, Vec<FlatBendLine>)],
+        flanges: &[FeatureId],
         plate: &CanonicalProfile,
         t: f64,
         foreign: &[usize],
         naming: &NamingContext,
     ) -> Result<(Vec<Step>, usize), Halt> {
-        let regions = self.plate_regions(bends);
+        let regions = self.plate_regions(bends, flanges);
         let frame = plate.frame;
         let local = |p: [f64; 3]| {
             let q = sub(p, frame.origin);

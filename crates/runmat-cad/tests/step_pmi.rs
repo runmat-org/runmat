@@ -3,6 +3,7 @@
 
 use runmat_cad::pmi::{Characteristic, DatumReference, MaterialCondition};
 use runmat_cad::step::p21::parse;
+use runmat_cad::value::ValueExpr;
 use runmat_cad::step::pmi::{self, schema, Limits, StepDatum, StepLocation, StepPmi, StepSize, StepTolerance};
 
 /// The shape of a kernel-written AP242 part: a product definition shape, its B-rep
@@ -148,9 +149,9 @@ part plate {
     datum A = { on = feature.body.face.start }
     tolerance top_parallel = { characteristic = parallelism, on = [feature.body.face.end], tolerance = 0.05 mm, datums = [{ label = "A" }] }
     tolerance hole_pos = { characteristic = position, on = [feature.body.face.end], tolerance = 0.1 mm, diametral = true, modifier = mmc, datums = [{ label = "A", modifier = mmc }] }
-    size thickness = { on = [feature.body.face.start, feature.body.face.end], size = 10 mm +0.1 -0.1 }
+    size thickness = { on = [feature.body.face.start, feature.body.face.end], size = 10 mm ± [0.1 mm, 0.05 mm] }
     size bore = { on = [feature.body.face.end], size = 4 mm, fit = "H7" }
-    location edge = { from = feature.body.face.side(s.l1), to = feature.body.face.side(s.l3), distance = 50 mm +0.2 -0.2 }
+    location edge = { from = feature.body.face.side(s.l1), to = feature.body.face.side(s.l3), distance = 50 mm ± 0.2 mm }
 }
 "#;
     let parsed = runmat_cad::syntax::parse_part("/p/plate.part", text);
@@ -162,6 +163,9 @@ part plate {
     assert_eq!(p.tolerances[1].modifier, MaterialCondition::Mmc);
     assert!(p.tolerances[1].diametral);
     assert_eq!(p.sizes.len(), 2);
+    let ValueExpr::Toleranced { plus, minus, .. } = &p.sizes[0].size else { panic!("{:?}", p.sizes[0].size) };
+    assert_ne!(plus, minus, "an asymmetric tolerance keeps both bounds");
+    assert!(matches!(p.locations[0].distance, ValueExpr::Toleranced { .. }), "{:?}", p.locations[0].distance);
     assert_eq!(p.sizes[1].fit.as_deref(), Some("H7"));
     assert_eq!(p.locations.len(), 1, "{p:?}");
 }

@@ -19,7 +19,10 @@ impl<'a, 'b> Run<'a, 'b> {
         body: usize,
         maker: &FeatureId,
     ) -> Result<Vec<(FeatureId, Vec<FlatBendLine>)>, FeatureId> {
-        let (bends, others) = self.plate_bends_and_others(body, maker);
+        let (bends, flanges, others) = self.plate_bends_and_others(body, maker);
+        if let Some(f) = flanges.first() {
+            return Err(f.clone());
+        }
         match others.first() {
             None => Ok(bends),
             Some(&f) => Err(self.st.bodies[body].names.faces[f]
@@ -31,16 +34,24 @@ impl<'a, 'b> Run<'a, 'b> {
     }
 
     /// The bend features that made faces on `body`, besides the base flange `maker`, with
-    /// their plate-bend records, and the faces of `body` other features made.
+    /// their plate-bend records; the edge flanges and hems on the plate; and the faces of
+    /// `body` other features made.
+    #[allow(clippy::type_complexity)]
     pub(super) fn plate_bends_and_others(
         &self,
         body: usize,
         maker: &FeatureId,
-    ) -> (Vec<(FeatureId, Vec<FlatBendLine>)>, Vec<usize>) {
+    ) -> (Vec<(FeatureId, Vec<FlatBendLine>)>, Vec<FeatureId>, Vec<usize>) {
         let is_bend = |f: &FeatureId| {
             matches!(
                 self.st.records.get(f),
                 Some(FeatureRecord::PlateBend { base, .. }) if base == maker
+            )
+        };
+        let is_flange = |f: &FeatureId| {
+            matches!(
+                self.st.records.get(f),
+                Some(FeatureRecord::PlateFlange { base, .. }) if base == maker
             )
         };
         // Each face answers to the plate or one of its bends (a fold's faces answer to the
@@ -50,7 +61,7 @@ impl<'a, 'b> Run<'a, 'b> {
         for (index, names) in self.st.bodies[body].names.faces.iter().enumerate() {
             let mut accounted = false;
             for n in names {
-                if n.maker() == maker {
+                if n.maker() == maker || is_flange(n.maker()) {
                     accounted = true;
                 } else if is_bend(n.maker()) {
                     accounted = true;
@@ -71,7 +82,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 }
             }
         }
-        (out, others)
+        (out, self.plate_flanges_on(body, maker), others)
     }
 
     /// The sketched bends and jogs of plate `maker` made before feature `i`, in order.
@@ -514,19 +525,21 @@ impl<'a, 'b> Run<'a, 'b> {
                     Some(m) => Some(m),
                     None => return Err(self.not_lowered(
                         id,
-                        "flat patterns fixed on a bend face (fix the flat on a flat of the plate)",
+                        "flat patterns fixed on a bend face or a flange (fix the flat on the plate or on a flat a sketched bend moved)",
                     )),
                 }
             };
         // Cuts and holes other features made in the flats develop onto the flat pattern.
-        let (bends, others) = self.plate_bends_and_others(body, maker);
+        let (bends, flanges, others) = self.plate_bends_and_others(body, maker);
         let profile_ref = match self.doc.feature(maker).map(|f| &f.kind) {
             Some(FeatureKind::SheetMetal(SheetMetalFeature::BaseFlange { profile, .. })) => {
                 profile.clone()
             }
             _ => return Err(self.not_lowered(id, "flat patterns of this sheet")),
         };
-        let plate = self.profile(i, id, "fixed_face", &profile_ref)?;
+        let sketched = self.profile(i, id, "fixed_face", &profile_ref)?;
+        // Edge flanges develop as strips spliced into the outline along their edges.
+        let plate = self.developed_plate(id, &sketched, &flanges)?;
         let t = rules.thickness;
         let mut tool = LabeledTool::new(ToolShape::prism(plate.clone(), 0.0, t));
         for seg in plate.loops.iter().flatten() {
@@ -541,7 +554,11 @@ impl<'a, 'b> Run<'a, 'b> {
             frame: plate.frame,
             depth: t,
             loops: plate.loops.clone(),
-            bend_lines: bends.iter().flat_map(|(_, l)| l.clone()).collect(),
+            bend_lines: bends
+                .iter()
+                .flat_map(|(_, l)| l.clone())
+                .chain(self.flange_bend_lines(&flanges))
+                .collect(),
         };
         self.st.records.insert(
             id.clone(),
@@ -554,7 +571,7 @@ impl<'a, 'b> Run<'a, 'b> {
         let (cuts, at) = if others.is_empty() {
             (Vec::new(), self.st.bodies.len())
         } else {
-            self.plate_cut_steps(id, body, &bends, &plate, t, &others, naming)?
+            self.plate_cut_steps(id, body, &bends, &flanges, &plate, t, &others, naming)?
         };
         if motion.is_none() && cuts.is_empty() {
             return Ok(op(develop, Vec::new(), naming.clone()));

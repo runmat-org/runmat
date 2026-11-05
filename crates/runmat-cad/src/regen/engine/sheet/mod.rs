@@ -29,7 +29,10 @@
 mod miter;
 mod plate_bends;
 mod plate_cuts;
+mod plate_flanges;
 mod strips;
+
+pub(in crate::regen::engine) use plate_flanges::FlangeEdgeIn;
 
 use super::families::{bend_tool, frame_of, labeled, op, plane_normal, polygon};
 use super::*;

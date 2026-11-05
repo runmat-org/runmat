@@ -111,9 +111,15 @@ pub fn part_step_in(path: &str, text: &str, configuration: Option<&str>) -> Resu
     if part.document.pmi.is_empty() {
         return Ok(Some(step));
     }
-    let (semantic, _) = pmi::step_pmi(&part.document, &product.result, &product.display);
+    // A PMI item that can't be written refuses the export: a STEP file missing a tolerance
+    // the part declares would pass for the complete definition.
+    let (semantic, mut lost) = pmi::step_pmi(&part.document, &product.result, &product.display);
     let text = String::from_utf8(step).map_err(|_| "the kernel's STEP file is not text".to_owned())?;
-    let (text, _) = runmat_cad::step::pmi::embed(&text, &semantic)?;
+    let (text, missing) = runmat_cad::step::pmi::embed(&text, &semantic)?;
+    lost.extend(missing);
+    if !lost.is_empty() {
+        return Err(format!("the part's PMI can't be written to STEP: {}", lost.join("; ")));
+    }
     Ok(Some(text.into_bytes()))
 }
 

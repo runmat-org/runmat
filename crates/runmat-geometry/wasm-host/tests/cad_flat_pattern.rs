@@ -97,3 +97,95 @@ fn a_cut_plates_flat_layout_draws_its_hole_and_window_where_they_develop() {
         "{lo:?} {hi:?}"
     );
 }
+
+/// The plate with an edge flange on its side x = 80 mm and a hole, flattened.
+const FLANGED_PLATE: &str = r#"runmat 0.7
+std 1
+
+part plate_sm {
+    sketch s_plate on origin.xy {
+        e1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        e2 = line(start = [80 mm, 0 mm], end = [80 mm, 40 mm])
+        e3 = line(start = [80 mm, 40 mm], end = [0 mm, 40 mm])
+        e4 = line(start = [0 mm, 40 mm], end = [0 mm, 0 mm])
+    }
+    feature base = sheet_metal.base_flange(
+        profile = sketch.s_plate,
+        rules = { thickness = 2 mm, bend_radius = 3 mm, rule = k_factor(k = 0.44) }
+    )
+    feature lip = sheet_metal.edge_flange(
+        edges = [edges_between(feature.base.face.sheet(plate, ordinal = 1), feature.base.face.sheet_edge(e2))],
+        length = 20 mm,
+        angle = 90 deg,
+        length_reference = tangent
+    )
+    feature h = hole(
+        face = feature.base.face.sheet(plate, ordinal = 1),
+        at = { h1 = point(20 mm, 20 mm, 2 mm) },
+        diameter = 8 mm,
+        through_all
+    )
+    feature flat = sheet_metal.flat_pattern(fixed_face = feature.base.face.sheet(plate, ordinal = 1))
+}
+"#;
+
+const FLAT_DRAWING: &str = r#"runmat 0.7
+std 1
+
+drawing plate_flat {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = []
+    }
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+    view flat = flat_pattern(feature = flat, sheet = "1", model = { file = "plate_sm.part" }, at = [150, 150], display = visible_lines)
+}
+"#;
+
+#[test]
+fn a_drawings_flat_pattern_view_carries_the_developed_sheet_and_its_bend_table() {
+    runmat_geometry_wasm_host::cad::install_occt();
+    let files: runmat_cad_wasm::runtime::Files = [
+        ("/p/plate_sm.part".to_string(), FLANGED_PLATE.to_string()),
+        ("/p/plate_flat.drawing".to_string(), FLAT_DRAWING.to_string()),
+    ]
+    .into_iter()
+    .collect();
+    let out: serde_json::Value = serde_json::from_str(&runmat_cad_wasm::drawing::compile_json(
+        "/p/plate_flat.drawing",
+        FLAT_DRAWING,
+        &files,
+    ))
+    .expect("json");
+    let data = &out["projection"]["data"];
+    let errors: Vec<_> = data["diagnostics"]["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain(out["diagnostics"].as_array().into_iter().flatten())
+        .filter(|d| d["severity"] == "error")
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let sheet = &data["hlr"]["flat"]["flat"];
+    // The plate and the flange's strip, BA + 20 mm past x = 80 mm, in millimetres.
+    let ba = std::f64::consts::FRAC_PI_2 * (3.0 + 0.44 * 2.0);
+    let max = sheet["max"].as_array().expect("extents");
+    assert!((max[0].as_f64().unwrap() - (80.0 + ba + 20.0)).abs() < 1e-6, "{sheet}");
+    assert!((max[1].as_f64().unwrap() - 40.0).abs() < 1e-6, "{sheet}");
+    // The hole is a circle of the outline; one bend line and one row of the bend table.
+    let circles = sheet["outline"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|l| l.as_array().cloned().unwrap_or_default())
+        .filter(|c| c["curve"] == "circle")
+        .count();
+    assert_eq!(circles, 1, "{sheet}");
+    let lines = sheet["bend_lines"].as_array().expect("bend lines");
+    assert_eq!(lines.len(), 1, "{sheet}");
+    assert!((lines[0]["start"][0].as_f64().unwrap() - (80.0 + ba / 2.0)).abs() < 1e-6, "{sheet}");
+    assert!(lines[0]["note"].as_str().unwrap_or("").contains("UP"), "{sheet}");
+    let table = sheet["bend_table"].as_array().expect("bend table");
+    assert_eq!(table.len(), 1, "{sheet}");
+    assert!((table[0]["angle"].as_f64().unwrap() - 90.0).abs() < 1e-9, "{sheet}");
+}

@@ -19,28 +19,33 @@ use runmat_cad::regen::records::FeatureRecord;
 /// The layout of the part's first flat pattern, with its outline from the flat body when the
 /// kernel projects exactly (else the layout as recorded); `None` without a flat pattern.
 pub fn flat_layout(part: &RegeneratedPart) -> Option<(FeatureId, FlatLayout)> {
-    let (feature, mut layout) =
-        part.document
-            .features
-            .iter()
-            .find_map(|f| match part.result.state.records.get(&f.id) {
-                Some(FeatureRecord::FlatPattern { layout, .. }) => {
-                    Some((f.id.clone(), layout.clone()))
-                }
-                _ => None,
-            })?;
+    let feature = part
+        .document
+        .features
+        .iter()
+        .find(|f| matches!(part.result.state.records.get(&f.id), Some(FeatureRecord::FlatPattern { .. })))?;
+    Some((feature.id.clone(), flat_layout_of(part, &feature.id)?))
+}
+
+/// The layout the flat pattern or unfold feature `feature` made, its outline from the body it
+/// made as in [`flat_layout`]; `None` when the feature made no flat pattern.
+pub fn flat_layout_of(part: &RegeneratedPart, feature: &FeatureId) -> Option<FlatLayout> {
+    let Some(FeatureRecord::FlatPattern { layout, .. }) = part.result.state.records.get(feature) else {
+        return None;
+    };
+    let mut layout = layout.clone();
     let body = part
         .result
         .state
         .bodies
         .iter()
-        .find(|b| b.names.body.iter().any(|n| n.maker() == &feature));
+        .find(|b| b.names.body.iter().any(|n| n.maker() == feature));
     if let Some(body) = body {
         if let Some(loops) = projected_loops(part, &body.handle, &layout) {
             layout.loops = loops;
         }
     }
-    Some((feature, layout))
+    Some(layout)
 }
 
 fn projected_loops(

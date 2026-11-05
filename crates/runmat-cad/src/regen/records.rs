@@ -72,6 +72,12 @@ pub enum FeatureRecord {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent: Option<crate::ids::FeatureId>,
     },
+    /// The flanges an edge flange or hem grew on the edges of a flat plate (the base flange
+    /// `base`), one per edge, developed onto the plate's flat pattern.
+    PlateFlange {
+        base: crate::ids::FeatureId,
+        edges: Vec<PlateFlangeEdge>,
+    },
     /// Structural members and their cut list.
     Weldment {
         cuts: Vec<MemberCut>,
@@ -88,6 +94,30 @@ pub enum FeatureRecord {
         /// Edges between a positive and a negative face: the parting line.
         parting_edges: Vec<[EntityName; 2]>,
     },
+}
+
+/// One flange of a [`FeatureRecord::PlateFlange`], in the developed plate's frame (the base
+/// flange's profile frame, metres). The flange grows from the outline's edge `start..end`
+/// along `out`: the plate stops at `shift` past that edge line (negative when the flange sits
+/// inside the edge), its bend zone spans the next `allowance`, and its flat the `flat` after.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlateFlangeEdge {
+    /// The flange's flat region: `<feature>.<edge ordinal>`.
+    pub key: String,
+    pub start: [f64; 2],
+    pub end: [f64; 2],
+    pub out: [f64; 2],
+    pub shift: f64,
+    pub allowance: f64,
+    pub flat: f64,
+    pub line: FlatBendLine,
+    /// The rigid motion that carries the developed flange flat to where the flange put it
+    /// (world coordinates).
+    pub motion: crate::regen::kernel::Transform,
+    /// The flat region the flange grew from: a sketched bend's feature id, another flange's
+    /// `key`, or none for the plate's unmoved part.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 impl FeatureRecord {

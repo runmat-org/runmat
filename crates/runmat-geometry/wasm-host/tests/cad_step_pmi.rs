@@ -23,8 +23,8 @@ part bracket {
     tolerance top_flat = { characteristic = flatness, on = [feature.body.face.end], tolerance = 0.02 mm }
     tolerance top_parallel = { characteristic = parallelism, on = [feature.body.face.end], tolerance = 0.05 mm, datums = [{ label = "A" }] }
     tolerance side_square = { characteristic = perpendicularity, on = [feature.body.face.side(s.l2)], tolerance = 0.1 mm, modifier = mmc, datums = [{ label = "A" }, { label = "B", modifier = mmc }] }
-    size thickness = { on = [feature.body.face.start, feature.body.face.end], size = 10 mm +0.1 -0.05 }
-    location width = { from = feature.body.face.side(s.l4), to = feature.body.face.side(s.l2), distance = 80 mm +0.2 -0.2 }
+    size thickness = { on = [feature.body.face.start, feature.body.face.end], size = 10 mm ± [0.1 mm, 0.05 mm] }
+    location width = { from = feature.body.face.side(s.l4), to = feature.body.face.side(s.l2), distance = 80 mm ± 0.2 mm }
 }
 "#;
 
@@ -64,6 +64,7 @@ fn part_pmi_exports_as_ap242_semantic_pmi_and_imports_back() {
 
     // Import: a part on the STEP file with the PMI on its faces, which resolves on OCCT.
     let statements = runmat_cad_wasm::exchange::pmi::part_statements(&pmi, "step");
+    assert!(statements.contains("size = 10 mm ± [0.1 mm, 0.05 mm]") && statements.contains("distance = 80 mm ± 0.2 mm"), "{statements}");
     let housing = format!(
         "runmat 0.7\nstd 1\n\npart housing {{\n    feature step = import(source = \"bracket.step\", digest = \"unrecorded\")\n{statements}}}\n"
     );
@@ -76,4 +77,13 @@ fn part_pmi_exports_as_ap242_semantic_pmi_and_imports_back() {
     assert_eq!(doc["datums"].as_array().map(Vec::len), Some(2));
     assert_eq!(doc["sizes"].as_array().map(Vec::len), Some(1));
     assert_eq!(doc["locations"].as_array().map(Vec::len), Some(1));
+}
+
+#[test]
+fn a_size_that_does_not_evaluate_refuses_the_step_export() {
+    runmat_geometry_wasm_host::cad::install_occt();
+    // `+0.1` here is arithmetic on a length, not a tolerance: the size has no value.
+    let bad = BRACKET.replace("10 mm ± [0.1 mm, 0.05 mm]", "10 mm + 0.1");
+    let err = runmat_cad_wasm::exchange::part_step("/p/bracket.part", &bad).expect_err("refused");
+    assert!(err.contains("thickness"), "{err}");
 }

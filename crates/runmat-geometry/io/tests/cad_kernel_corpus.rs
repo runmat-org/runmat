@@ -17,6 +17,9 @@ mod k1_ops;
 #[path = "cad_corpus/k1_sheet.rs"]
 mod k1_sheet;
 
+#[path = "cad_corpus/k1_sheet_flanges.rs"]
+mod k1_sheet_flanges;
+
 #[path = "../../../runmat-cad/tests/common/mod.rs"]
 mod common;
 

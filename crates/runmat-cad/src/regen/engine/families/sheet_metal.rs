@@ -554,6 +554,12 @@ impl<'a, 'b> Run<'a, 'b> {
                 if sec.is_some() {
                     let rebuilders = self.sheet_rebuilders(i, &maker);
                     self.only_made_by(id, body, &rebuilders, "unfold")?;
+                } else if !self.plate_flanges_on(body, &maker).is_empty() {
+                    // A fold replays only the plate's sketched bends.
+                    return Err(self.not_lowered(
+                        id,
+                        "unfolding a plate with edge flanges or hems (its flat pattern develops them)",
+                    ));
                 }
                 // The flat pattern's strip, in place of the bent sheet.
                 let flat = SheetMetalFeature::FlatPattern {

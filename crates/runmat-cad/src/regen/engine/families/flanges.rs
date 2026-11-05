@@ -52,7 +52,7 @@ impl<'a, 'b> Run<'a, 'b> {
             ));
         }
         let body = operands[0];
-        let Some((_, rules, _, _)) = self.sheet_of(body) else {
+        let Some((maker, rules, section, _)) = self.sheet_of(body) else {
             return Err(self.error(
                 id,
                 Some("edges"),
@@ -87,6 +87,8 @@ impl<'a, 'b> Run<'a, 'b> {
         }
         let mut tools = Vec::new();
         let mut carve = Vec::new();
+        // On a flat plate, what each flange develops to on the plate's flat pattern.
+        let mut developed = Vec::new();
         for h in &set {
             let topo = &self.st.bodies[body].topology;
             let e = topo.edges[h.index as usize].clone();
@@ -156,6 +158,15 @@ impl<'a, 'b> Run<'a, 'b> {
             }
             let origin = add(e.geom.start, scale(n_thick, shift));
             let fr = frame_of(origin, n_thick, n_sheet);
+            developed.push(crate::regen::engine::sheet::FlangeEdgeIn {
+                start: e.geom.start,
+                end: e.geom.end,
+                frame: fr,
+                shift,
+                theta,
+                radius: r,
+                flat,
+            });
             let s0 = dot(sub(e.geom.start, fr.origin), fr.z);
             let s1 = dot(sub(e.geom.end, fr.origin), fr.z);
             let (z0, z1) = (s0.min(s1), s0.max(s1));
@@ -241,6 +252,9 @@ impl<'a, 'b> Run<'a, 'b> {
                 ct.sides.push((sid("c0"), lab(Role::Relief, 0)));
                 carve.push(ct);
             }
+        }
+        if section.is_none() {
+            self.record_plate_flange(i, id, body, &maker, &rules, developed)?;
         }
         Ok(op(
             labeled(tools, carve, Combine::Add, false),

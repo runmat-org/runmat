@@ -151,7 +151,13 @@ fn limits_text(l: &Limits) -> String {
     if l.fit.is_some() || (l.lower == 0.0 && l.upper == 0.0) {
         format!("{} mm", mm(l.nominal))
     } else {
-        format!("{} mm +{} -{}", mm(l.nominal), mm(l.upper), mm(-l.lower))
+        // The `.part` tolerance form: `± b` when symmetric, else `± [plus, minus]` (magnitudes).
+        let (plus, minus) = (mm(l.upper), mm(-l.lower));
+        if plus == minus {
+            format!("{} mm ± {plus} mm", mm(l.nominal))
+        } else {
+            format!("{} mm ± [{plus} mm, {minus} mm]", mm(l.nominal))
+        }
     }
 }
 

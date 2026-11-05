@@ -193,7 +193,7 @@ fn detach(sketch: &mut Sketch, id: &SketchEntityId) {
                 fix(end);
             }
             G::Circle { center, .. } => fix(center),
-            G::Spline { points, .. } => points.iter_mut().for_each(|p| fix(p)),
+            G::Spline { points, .. } => points.iter_mut().for_each(fix),
         }
     }
 }
