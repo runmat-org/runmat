@@ -239,3 +239,57 @@ b. If the hero passes 8566: regression test from the sub-a dump, release CLIs on
    q-hero-pack-2 (a3654a9036a5ac106).
 c. Explain the 15.5 -> 20 GB RSS rise (p12 samples).
 - Disk: removed my stale builtins/runtime/fea artifacts (Nov 3) and ~/targets/q-mesh-fix-6-base; my target is ~27 GB.
+
+## q-mesh-fix-12 (2026-11-04, handed back; WIP, sub-a 1869 and hero 8566 still fail)
+Commit 6f6abddf59 on q-mesh-fix-6 (base 2312ef4919). Sub-a replay: `~/runs/qmf6/suba-new.sh <tag>`.
+Debug prints used for the traces below: scratchpad patch with-debug.patch (QMF_DEBUG env), not committed.
+
+### What 1869 really was (sub-a, z=.029 = TIM top, on the convex hull)
+- Each surface triangle is its own constraint, and every surface triangle edge is a segment.
+- Cascade at 1869 splits side-face segment D-F (D=(-1.073,.3234375,.029), 4.9 mm). Its midpoint
+  encroaches in-plane segment D-C (2.5 mm, 27 degrees at D) -> shared-vertex pair split.
+- Old pair split put the D-C point at the long edge's midpoint distance: B at 96.5% of D-C, 8.9e-5 m
+  from C. Child triangle A-B-C is a sliver; E (vertex of the coplanar surface triangle A-C-E across
+  segment A-C) lies in its circumcircle. A-C is a kept segment and A-B-C, A-C-E are different
+  constraints, so no facet flip applies (the q-mesh-fix-11 4-4 facet flips never fire here: hull,
+  two-cell star, different facets).
+### Changes in 6f6abddf59
+1. Pair split shell distance = half the shorter edge (shared_vertex_split_points; unit test
+   shared_vertex_pair_split_stays_inside_the_shorter_edge).
+2. Blocked-segment splits (encroached_corner_segments): a segment edge at a split endpoint whose
+   opposite coplanar vertex lies in the new child triangle's circumcircle is split at its midpoint in
+   the same trial; bounded cascade (64). Diametral-ball encroachment was tried first: it spreads over
+   the whole top face (>64 splits) because the surface mesh has obtuse triangles; the circumcircle
+   test needs 5 splits here. Extras are split FIRST (deepest first) by constrained cavity: split last,
+   the pair nodes' cavities swallowed the still-kept extras and fell back to edge stars, whose link
+   flips stall.
+3. Link flips: 2-2 hull flip (both boundary triangles protected = facet flip, or both unprotected);
+   4-4 facet flip may span two regions across the facet plane; star scan for planar illegal faces
+   through the inserted node (no link flip reaches them). Unit test
+   boundary_facet_flip_repairs_an_illegal_face_through_the_inserted_node.
+4. Encroachment cascade stops (tries edge star) when a new swallowed edge shares an endpoint with an
+   edge it already split: r15 showed a Zeno loop (halves shrinking toward one vertex until "retries
+   exhausted").
+5. Memory: canonical_call releases the working mutation while the provider runs (rebuilt from the
+   result anyway; all callers end on provider Err); finish_conforming_insertion no longer clones the
+   whole input topology.
+### Results
+- Tet lib 592/0/7 ign (~/logs/qmf6/r16.out) before item 4; rerun in chain-r6 (r6.out).
+- Sub-a progression (~/logs/qmf6/rN-suba.log): r1 (2312ef4919) 1869 pair admission; r5-r14 pair
+  admission at successive cells; r15 pair split accepted, then support-edge cascade Zeno loop; r17
+  (6f6abddf59): runs 332 s, then FacetRecovery InvalidTopology inside a canonical segment recovery:
+  a cell on the side face x=-1.073 has a coplanar Steiner apex in its circumsphere
+  (P=(-1.073,.3194572,.0287141), R=(-1.073,.315625,.029), S=(-1.073,.3165970,.0288839), W=(-1.08,..,.026)).
+  So some earlier in-place edit left a planar non-Delaunay pair that local admission did not reject
+  (or the canonical validator applies different protection). Next: find the edit that created those
+  cells (trace replace_cavity of cells containing P and S), and compare observed_change_violation with
+  validate_constrained_delaunay_volume_topology on coplanar apexes.
+- Hero replay on 6f6abddf59: chain-r6 (~/logs/qmf6/r6h.out, r6-hero.log, r6-rss.txt, prof/r6-*.txt).
+### RSS 15.5 -> 20 GB (p12)
+- Peak is at the very end (14:24:52; sample 25 s earlier showed 7 GB footprint): the failing
+  constraint's canonical fallback (try_split_recovered_segment_edge -> insert_conformingly_with:
+  from_canonical(clone) + freeze + legalize + validate) runs while the working mutation and its
+  retained canonical copy are alive, i.e. 2 mutations + ~4 canonical topologies at once. A
+  TopologyMutation (face_uses/tetrahedron_indices/vertex_stars B-trees) is several times a canonical
+  topology. Item 5 removes one mutation and one canonical copy from that peak; ConstrainedCavity then
+  EdgeStar run the whole sequence twice (sequential, not additive).
