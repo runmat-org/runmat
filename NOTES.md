@@ -390,3 +390,31 @@ qmf15-est.py (surface growth estimate), qmf15-dbgpatch.py (FACEGAP prints to $QM
   ... projected encoded bytes exceed the contract limit" (~/runs/qmf6/f1/hero.out). Face gaps found
   (~/logs/qmf6/f2-facegap.txt): 2 mm on 14 cell/barrier faces (500x95) and lid faces, 3 mm on TIM faces.
   Estimate from the old dump: 1.46M -> 1.70M surface triangles.
+- Surface byte limit: indexed global surface (exact-surface-mesh/indexed-v2) is capped at 512 MB. Old hero
+  surface: 1.46M triangles = 337 MB (231 B/tri). The default request (2 layers on edges, 1 on faces)
+  exceeds 512 MB, so roughly 2.2M+ triangles. The surface mesher puts median edges near 0.6x the face
+  size, so the growth is about 2.5x the area estimate.
+- hero with `cells_across_gap = 1` (f5; harness env QMF_CELLS_ACROSS_GAP=1): surface fine, passes the old
+  8566 family, volume fails after 4277 s at constraint 32323, peak RSS 13.8 GB (~/runs/qmf6/f5/hero.out,
+  ~/logs/qmf6/f5.out). Dump: ~/runs/qmf6/dumps/f5-hero/volume-input-27484-0.json (2.7 GB).
+  New failure: a cell spanning the 1 mm void between the cell 8 end face (x=-0.787, 500x95, edges up to
+  8 mm) and the +x compression endplate face (x=-0.786). Apex on the endplate's far face (x=-0.778)
+  lies in its sphere. Same encroachment family, but across an unmeshed void between separate bodies,
+  which the 167efa2926 void rule correctly leaves unsized.
+- (b) tried, not committed: $J/tmp/work/q-mesh-fix-6/qmf15-gabriel-protection.patch. Segment recovery
+  splits present intervals whose diametral sphere holds a vertex off the planes of the segment's
+  incident facets, and repeats passes until a pass splits none. Unit tests for it pass. Lib: 588/9
+  failed, all exact Steiner/node-count assertions on small fixtures. Hero replay of the f5 dump (f7h):
+  SegmentRecovery ResourceLimit after 779 s (1e9 search steps, 848M of them point-index queries),
+  peak RSS 18.5 GB. Every pass re-queries every interval, and the splits spread.
+### Next
+1. Gabriel protection limited to where it is needed: check only intervals whose incident facets face
+   another surface across a gap, or only on the first pass plus intervals near new nodes (the queue
+   already has requeue_lost; add requeue-by-region for protecting splits). That removes the
+   all-intervals-every-pass cost.
+2. Or keep (a) and add the cross-void case at the volume input: refine the facets of two separate
+   bodies facing across a void narrower than their edges, scoped to the volume mesher's
+   facet-recovery input, so the metric's void rule (sizing) stays unchanged.
+3. Hero study: author `cells_across_gap = 1` in the tetrahedra block of m01-module-thermal.fea (thermal
+   only; one linear layer is exact for 1-D conduction across the layer). With the default, the surface
+   exceeds the 512 MB contract.
