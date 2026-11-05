@@ -18,8 +18,9 @@
 //! depth-probed variant ([`EdgeStrokeShader::depth_probe`]) decides visibility once per point of
 //! the line instead: the fragment samples the opaque scene's depth across the line's own center,
 //! interpolates the surface there, and drops the whole stroke width when the line lies behind
-//! it. Where the samples straddle a crease or a silhouette (the depth isn't one smooth surface
-//! across the line) it keeps the depth test's answer, so an edge's own faces never hide it.
+//! it. The surface there is estimated three ways: the mean of the two samples beside the line,
+//! and each side's depth rate carried on to the center. The line is hidden only when all three
+//! lie in front of it, so creases and silhouettes keep their own edges.
 
 /// The share of view depth a depth-tested edge stroke moves toward the camera.
 pub const EDGE_DEPTH_SHARE: f32 = 1.5e-5;
@@ -140,16 +141,18 @@ const PROBE_FRAGMENT: &str = r#"
     let m05 = depth_at(center - 0.5 * across);
     let p05 = depth_at(center + 0.5 * across);
     let p15 = depth_at(center + 1.5 * across);
-    let left = m05 - m15;
-    let right = p15 - p05;
-    // One smooth surface across the line: its depth changes at a steady rate (a plane's depth
-    // is affine across the screen). A crease or a silhouette breaks the rate.
-    let smooth_surface = abs(left - right) <= 0.5 * max(abs(left), abs(right)) + 1.0e-7;
-    if smooth_surface {
-        let surface = 0.5 * (m05 + p05);
-        if surface NEARER line_depth {
-            discard;
-        }
+    // The surface at the line's center, three ways: the mean of the two near samples, and each
+    // side's rate carried on to the center. Over one smooth surface all three agree. Beside a
+    // valley crease the mean comes nearer than the crease, but each side's extrapolation meets
+    // the crease itself; on a convex surface the mean falls behind the surface; across a
+    // silhouette the background side extrapolates far. The line is hidden only when all three
+    // put the surface in front of it, so an edge's own faces never hide it, and no tolerance
+    // on depth quantization decides it.
+    let mean = 0.5 * (m05 + p05);
+    let from_left = m05 + 0.5 * (m05 - m15);
+    let from_right = p05 + 0.5 * (p05 - p15);
+    if mean NEARER line_depth && from_left NEARER line_depth && from_right NEARER line_depth {
+        discard;
     }
 "#;
 

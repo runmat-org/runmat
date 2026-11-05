@@ -12,6 +12,7 @@ use runmat_circuit_sim::montecarlo::histogram;
 use runmat_circuit_spice::study;
 use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
 use runmat_plot::plots::line::LineStyle;
+use runmat_plot::plots::figure::LegendStyle;
 use runmat_plot::plots::{AreaPlot, Figure, LinePlot, ReferenceLine, ReferenceLineOrientation};
 use runmat_plot::styling::{PlotThemeConfig, ThemeVariant};
 
@@ -80,6 +81,7 @@ fn main() {
         fig.set_axis_labels("Time (µs)", "Voltage (V)");
         fig.set_grid(true);
         fig.set_legend(true);
+        best_legend(&mut fig);
         let t: Vec<f64> = w.x.iter().map(|x| x * 1e6).collect();
         for (k, (probe, sig)) in s.probes.iter().enumerate() {
             let net = probe.name();
@@ -99,6 +101,7 @@ fn main() {
         fig.set_axes_log_modes(1, true, false);
         fig.set_grid(true);
         fig.set_legend(true);
+        best_legend(&mut fig);
         for (k, (probe, sig)) in s.probes.iter().enumerate().filter(|(_, (p, _))| p.name() != "IN") {
             let net = probe.name();
             let db = a.db(sig).unwrap();
@@ -140,6 +143,7 @@ fn main() {
         fig.set_axis_labels("−3 dB frequency at AIN (kHz)", "Runs");
         fig.set_grid(true);
         fig.set_legend(true);
+        best_legend(&mut fig);
         fig.add_area_plot(AreaPlot::new(x.clone(), y_in).unwrap().with_style(color(0, dark) * Vec4::new(1.0, 1.0, 1.0, 0.8), 0.0).with_label("runs in spec"));
         fig.add_area_plot(AreaPlot::new(x, y_out).unwrap().with_style(red * Vec4::new(1.0, 1.0, 1.0, 0.8), 0.0).with_label("runs out of spec"));
         let line = |v: f64, c: Vec4, w: f32, style: LineStyle, name: Option<String>| {
@@ -159,5 +163,12 @@ fn main() {
         let pad = 0.05 * (x1 - x0);
         fig.set_axes_limits(0, Some(((x0 - pad) / 1e3, (x1 + pad) / 1e3)), None);
         save(&mut fig, dark, &format!("{out}/{th}-circuit-sim-montecarlo.png"));
+    }
+}
+
+/// Every axes' legend placed where it covers the fewest curves (MATLAB's `legend('Location', 'best')`).
+fn best_legend(fig: &mut Figure) {
+    for axes in 0..fig.axes_count().max(1) {
+        fig.set_axes_legend_style(axes, LegendStyle { location: Some("best".into()), ..LegendStyle::default() });
     }
 }

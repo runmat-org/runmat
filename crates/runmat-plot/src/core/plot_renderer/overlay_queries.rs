@@ -479,6 +479,47 @@ impl PlotRenderer {
         Some(crate::core::BoundingBox { min, max })
     }
 
+    /// Up to `limit` of an axes' drawn data positions in its camera's world space (as
+    /// `view_bounds_for_axes` frames it), evenly strided across every visible node: what a
+    /// legend placed "best" avoids. Nodes whose vertices live only on the GPU add nothing.
+    pub fn overlay_data_points_for_axes(&self, axes_index: usize, limit: usize) -> Vec<[f32; 2]> {
+        let nodes: Vec<_> = self
+            .scene
+            .get_visible_nodes()
+            .into_iter()
+            .filter(|n| n.axes_index == axes_index)
+            .filter_map(|n| n.render_data.as_ref().map(|d| (n.transform, d)))
+            .collect();
+        let total: usize = nodes.iter().map(|(_, d)| d.vertices.len()).sum();
+        let stride = total.div_ceil(limit.max(1)).max(1);
+        let mut out = Vec::with_capacity(total.min(limit));
+        for (transform, data) in nodes {
+            for v in data.vertices.iter().step_by(stride) {
+                let p = transform.transform_point3(Vec3::from(v.position));
+                if p.x.is_finite() && p.y.is_finite() {
+                    out.push([p.x, p.y]);
+                }
+            }
+        }
+        out
+    }
+
+    /// Every visible reference line on an axes (orientation and value).
+    pub fn overlay_reference_lines_for_axes(&self, axes_index: usize) -> Vec<(crate::plots::ReferenceLineOrientation, f64)> {
+        self.last_figure
+            .as_ref()
+            .map(|f| f.reference_lines_for_axes(axes_index))
+            .unwrap_or_default()
+    }
+
+    /// The legend style of an axes (its `Location` and box), when the figure set one.
+    pub fn overlay_legend_style_for_axes(&self, axes_index: usize) -> Option<&crate::plots::figure::LegendStyle> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| &m.legend_style)
+    }
+
     /// Prefer exporting the original figure if available
     pub fn export_figure_clone(&self) -> crate::plots::Figure {
         if let Some(f) = &self.last_figure {

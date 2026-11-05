@@ -204,16 +204,10 @@ impl PlotOverlay {
         font_size: f32,
         color: Color32,
         bold: bool,
-        shadow_alpha: u8,
     ) {
+        // One fill per glyph: a drop shadow doubles text on a light page, and MATLAB, Cadence and
+        // Ansys draw plot text without one.
         let font = FontId::proportional(font_size);
-        painter.text(
-            pos + egui::vec2(1.0, 1.0),
-            align,
-            text,
-            font.clone(),
-            Color32::from_rgba_premultiplied(0, 0, 0, shadow_alpha),
-        );
         painter.text(pos, align, text, font.clone(), color);
         if bold {
             painter.text(pos + egui::vec2(0.6, 0.0), align, text, font.clone(), color);
@@ -1386,8 +1380,7 @@ impl PlotOverlay {
                         );
                     }
                     if plot_renderer.overlay_show_legend_for_axes(i) {
-                        let entries = plot_renderer.overlay_legend_entries_for_axes(i);
-                        self.draw_legend(ui, r, &entries, config.font_scale);
+                        self.draw_axes_legend(ui, r, plot_renderer, i, config.font_scale);
                     }
                     self.draw_colorbar(ui, r, plot_renderer, i, config.font_scale);
                     continue;
@@ -1480,8 +1473,7 @@ impl PlotOverlay {
                     self.draw_pie_label(ui, r, plot_renderer, i, &label, pos, config.font_scale);
                 }
                 if plot_renderer.overlay_show_legend_for_axes(i) {
-                    let entries = plot_renderer.overlay_legend_entries_for_axes(i);
-                    self.draw_legend(ui, r, &entries, config.font_scale);
+                    self.draw_axes_legend(ui, r, plot_renderer, i, config.font_scale);
                 }
             }
         } else {
@@ -1669,8 +1661,7 @@ impl PlotOverlay {
         // Draw legend if enabled and entries available
         if rows * cols <= 1 && axes_count <= 1 && plot_renderer.overlay_show_legend_for_axes(0) {
             // Per-axes entries include each pie slice.
-            let entries = plot_renderer.overlay_legend_entries_for_axes(0);
-            self.draw_legend(ui, centered_plot_rect, &entries, config.font_scale);
+            self.draw_axes_legend(ui, centered_plot_rect, plot_renderer, 0, config.font_scale);
         }
 
         if let Some(legend) = plot_renderer
@@ -2787,7 +2778,6 @@ impl PlotOverlay {
                     Self::style_font_size(&style, 12.0, scale),
                     Self::style_color(&style, col_x),
                     Self::style_is_bold(&style),
-                    110,
                 );
             }
         }
@@ -2807,7 +2797,6 @@ impl PlotOverlay {
                     Self::style_font_size(&style, 12.0, scale),
                     Self::style_color(&style, col_y),
                     Self::style_is_bold(&style),
-                    110,
                 );
             }
         }
@@ -2826,7 +2815,6 @@ impl PlotOverlay {
                     Self::style_font_size(&style, 12.0, scale),
                     Self::style_color(&style, col_z),
                     Self::style_is_bold(&style),
-                    110,
                 );
             }
         }
@@ -2848,13 +2836,6 @@ impl PlotOverlay {
                 // Offset labels slightly away from the axis in screen-space based on camera right/up.
                 let offset =
                     outward_offset(pos, 7.0 * scale) + egui::Vec2::new(3.0 * scale, -3.0 * scale);
-                painter.text(
-                    pos + offset + egui::vec2(1.0, 1.0),
-                    Align2::LEFT_CENTER,
-                    plot_utils::format_tick_label((i as f64) * major_step),
-                    font.clone(),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 90),
-                );
                 painter.text(
                     pos + offset,
                     Align2::LEFT_CENTER,
@@ -2893,7 +2874,6 @@ impl PlotOverlay {
                 font_size,
                 Self::style_color(&style, self.theme_text_color()),
                 Self::style_is_bold(&style),
-                110,
             );
         }
     }
@@ -2936,7 +2916,6 @@ impl PlotOverlay {
                 Self::style_font_size(&first_style, 16.0, scale),
                 Self::style_color(&first_style, self.theme_text_color()),
                 Self::style_is_bold(&first_style),
-                110,
             );
             Self::paint_styled_text(
                 ui.painter(),
@@ -2946,11 +2925,66 @@ impl PlotOverlay {
                 Self::style_font_size(&second_style, 13.0, scale),
                 Self::style_color(&second_style, self.theme_text_color()),
                 Self::style_is_bold(&second_style),
-                110,
             );
         } else {
             self.draw_title_in_rect(ui, rect, first_text, first_style, scale);
         }
+    }
+
+    /// An axes' data positions on screen in `plot_rect`, for a legend placed `best`. Log axes
+    /// keep data units in the scene and map by their logarithm, as the ticks do.
+    fn legend_obstacles(plot_renderer: &PlotRenderer, axes_index: usize, plot_rect: Rect) -> Vec<Pos2> {
+        let Some((l, r, b, t)) = plot_renderer.view_bounds_for_axes(axes_index) else {
+            return Vec::new();
+        };
+        let along = |log: bool, lo: f64, hi: f64| -> Option<Box<dyn Fn(f32) -> Option<f32>>> {
+            if log {
+                if lo <= 0.0 || hi <= 0.0 {
+                    return None;
+                }
+                let (a, z) = (lo.log10(), hi.log10());
+                ((z - a).abs() > f64::EPSILON)
+                    .then(|| Box::new(move |v: f32| (v > 0.0).then(|| ((f64::from(v).log10() - a) / (z - a)) as f32)) as Box<dyn Fn(f32) -> Option<f32>>)
+            } else {
+                ((hi - lo).abs() > f64::EPSILON).then(|| Box::new(move |v: f32| Some(((f64::from(v) - lo) / (hi - lo)) as f32)) as Box<dyn Fn(f32) -> Option<f32>>)
+            }
+        };
+        let (Some(fx), Some(fy)) = (
+            along(plot_renderer.overlay_x_log_for_axes(axes_index), l, r),
+            along(plot_renderer.overlay_y_log_for_axes(axes_index), b, t),
+        ) else {
+            return Vec::new();
+        };
+        // Reference lines (spec limits, a mean) are data too: sample each across the axes.
+        let mut data = plot_renderer.overlay_data_points_for_axes(axes_index, 20_000);
+        for (orientation, value) in plot_renderer.overlay_reference_lines_for_axes(axes_index) {
+            for k in 0..=64 {
+                let f = k as f64 / 64.0;
+                data.push(match orientation {
+                    crate::plots::ReferenceLineOrientation::Vertical => [value as f32, (b + f * (t - b)) as f32],
+                    crate::plots::ReferenceLineOrientation::Horizontal => [(l + f * (r - l)) as f32, value as f32],
+                });
+            }
+        }
+        data.into_iter()
+            .filter_map(|[x, y]| {
+                let (u, v) = (fx(x)?, fy(y)?);
+                Some(Pos2::new(plot_rect.min.x + u * plot_rect.width(), plot_rect.max.y - v * plot_rect.height()))
+            })
+            .collect()
+    }
+
+    fn draw_axes_legend(&self, ui: &mut egui::Ui, plot_rect: Rect, plot_renderer: &PlotRenderer, axes_index: usize, scale: f32) {
+        let entries = plot_renderer.overlay_legend_entries_for_axes(axes_index);
+        let location = plot_renderer
+            .overlay_legend_style_for_axes(axes_index)
+            .and_then(|s| s.location.clone());
+        let points = if location.as_deref().is_some_and(|l| l.trim().eq_ignore_ascii_case("best")) {
+            Self::legend_obstacles(plot_renderer, axes_index, plot_rect)
+        } else {
+            Vec::new()
+        };
+        self.draw_legend(ui, plot_rect, &entries, scale, location.as_deref(), &points);
     }
 
     fn draw_legend(
@@ -2959,6 +2993,8 @@ impl PlotOverlay {
         plot_rect: Rect,
         entries: &[crate::plots::figure::LegendEntry],
         scale: f32,
+        location: Option<&str>,
+        points: &[Pos2],
     ) {
         if entries.is_empty() {
             return;
@@ -3001,12 +3037,11 @@ impl PlotOverlay {
         let legend_w = (text_x_gap + widest_label + pad)
             .max(92.0)
             .min((plot_rect.width() - 2.0 * pad).max(92.0));
-        let x = plot_rect.max.x - legend_w - pad;
-        let mut y = plot_rect.min.y + pad + 4.0 * scale;
-        let legend_rect = Rect::from_min_max(
-            egui::pos2(x - pad, plot_rect.min.y + pad),
-            egui::pos2(x + legend_w, y + entries.len() as f32 * row_h + pad),
-        );
+        let size = egui::vec2(legend_w + pad, 4.0 * scale + entries.len() as f32 * row_h + pad);
+        let origin = super::legend_placement::legend_origin(plot_rect, size, pad, location, points);
+        let x = origin.x + pad;
+        let mut y = origin.y + 4.0 * scale;
+        let legend_rect = Rect::from_min_size(origin, size);
         ui.painter().rect_filled(legend_rect, 4.0, legend_bg);
         y += 10.0 * scale;
         for e in entries {
@@ -3377,7 +3412,6 @@ impl PlotOverlay {
                 font_size,
                 color,
                 Self::style_is_bold(&style),
-                if is_3d { 120 } else { 90 },
             );
         }
     }

@@ -2368,6 +2368,20 @@ impl Figure {
         out
     }
 
+    /// Every visible reference line on an axes, labelled or not: where `best` legend placement
+    /// keeps clear of them.
+    pub fn reference_lines_for_axes(&self, axes_index: usize) -> Vec<(ReferenceLineOrientation, f64)> {
+        self.plots
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *self.plot_axes_indices.get(*i).unwrap_or(&0) == axes_index)
+            .filter_map(|(_, plot)| match plot {
+                PlotElement::ReferenceLine(line) if line.visible => Some((line.orientation, line.value)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Give reference lines without a set color the theme's axes color (in this copy).
     pub fn resolve_auto_reference_line_colors(&mut self, axes_color: Vec4) {
         for plot in &mut self.plots {
