@@ -28,6 +28,11 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             text("file", "File", Some("bracket.part")),
             text("configuration", "Configuration", Some("default")).optional(),
             count("quantity", "Instances", 1, 1),
+            // Where the first instance lands (mm): the canvas ghosts it there with an arrow per
+            // axis to drag it into place.
+            offset("x", "X", 0.0).drag(Manipulator::Arrow),
+            offset("y", "Y", 0.0).drag(Manipulator::Arrow),
+            offset("z", "Z", 0.0).drag(Manipulator::Arrow),
             flag("fix", "Fix in place", false),
         ])
         .preview()
