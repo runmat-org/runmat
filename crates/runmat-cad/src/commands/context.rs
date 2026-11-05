@@ -32,13 +32,20 @@ pub(super) fn add(catalog: &mut Catalog) {
             .desc("Move the feature one place later in the tree.")
             .when(selected_one(tree))
             .edit(edit(EditOp::Reorder, Section::Features).variant("direction", "down")),
-        cmd("part.parents-children", "Parents and children", "references", P)
-            .desc("List what the item is built on and what is built on it.")
-            .kw(&["dependencies", "references"])
-            .when(selected_one(&[K::Feature, K::Sketch, K::Body]))
-            .edit(analyze("parents_children")),
+        cmd(
+            "part.parents-children",
+            "Parents and children",
+            "references",
+            P,
+        )
+        .desc("List what the item is built on and what is built on it.")
+        .kw(&["dependencies", "references"])
+        .when(selected_one(&[K::Feature, K::Sketch, K::Body]))
+        .edit(analyze("parents_children")),
         cmd("part.where-used", "Where used", "where-used", P)
-            .desc("Find the files and features that use this item, through references and publishes.")
+            .desc(
+                "Find the files and features that use this item, through references and publishes.",
+            )
             .when(selected_one(&[K::Feature, K::Sketch, K::Body, K::Input]))
             .edit(analyze("where_used")),
         cmd("part.hide", "Hide/show", "hide", P)
@@ -69,11 +76,20 @@ pub(super) fn add(catalog: &mut Catalog) {
             .when(selected(&[K::Body]))
             .edit(export("body")),
         // Assembly.
-        cmd("assembly.component-configuration", "Configuration", "configuration", A)
-            .desc("Use another configuration of the component's file.")
-            .inputs(vec![text("configuration", "Configuration", Some("default"))])
-            .when(selected(&[K::Occurrence]))
-            .edit(edit(EditOp::Set, Section::Occurrences).item("configuration")),
+        cmd(
+            "assembly.component-configuration",
+            "Configuration",
+            "configuration",
+            A,
+        )
+        .desc("Use another configuration of the component's file.")
+        .inputs(vec![text(
+            "configuration",
+            "Configuration",
+            Some("default"),
+        )])
+        .when(selected(&[K::Occurrence]))
+        .edit(edit(EditOp::Set, Section::Occurrences).item("configuration")),
         cmd("assembly.show-mates", "Show mates", "mate", A)
             .desc("Highlight the component's mates and list them in Properties.")
             .when(selected_one(&[K::Occurrence]))
@@ -82,10 +98,15 @@ pub(super) fn add(catalog: &mut Catalog) {
             .desc("Flip the mate's alignment.")
             .when(selected(&[K::Mate]))
             .edit(edit(EditOp::Set, Section::Mates).item("flip")),
-        cmd("assembly.show-mate-entities", "Show entities", "highlight", A)
-            .desc("Highlight the faces, edges and connectors the mate uses.")
-            .when(selected_one(&[K::Mate]))
-            .edit(view_action("show_mate_entities")),
+        cmd(
+            "assembly.show-mate-entities",
+            "Show entities",
+            "highlight",
+            A,
+        )
+        .desc("Highlight the faces, edges and connectors the mate uses.")
+        .when(selected_one(&[K::Mate]))
+        .edit(view_action("show_mate_entities")),
         // Drawing.
         cmd("drawing.view-scale", "Scale", "scale", D)
             .desc("Use the sheet scale or a custom scale for the view.")
@@ -128,7 +149,11 @@ pub(super) fn add(catalog: &mut Catalog) {
             .edit(edit(EditOp::Edit, Section::Annotations)),
         cmd("drawing.reattach", "Reattach", "reference", D)
             .desc("Attach the annotation to another edge, face or point.")
-            .inputs(vec![pick("target", "Attach to", &[K::Edge, K::Face, K::Vertex, K::Point])])
+            .inputs(vec![pick(
+                "target",
+                "Attach to",
+                &[K::Edge, K::Face, K::Vertex, K::Point],
+            )])
             .when(selected_one(&[K::Annotation, K::DrawingDimension]))
             .edit(edit(EditOp::Set, Section::Annotations).item("attachment")),
         cmd("drawing.show-in-model", "Show in model", "open", D)
@@ -141,18 +166,26 @@ pub(super) fn add(catalog: &mut Catalog) {
         "appearance",
         "Appearance",
         "appearance",
-        choice_pairs(catalog.command("manage.appearance").expect("appearance"), "finish")
-            .iter()
-            .map(|(value, label)| preset("manage.appearance", label, "finish", value))
-            .chain([labeled("manage.appearance", "Edit appearance…")])
-            .collect(),
+        choice_pairs(
+            catalog.command("manage.appearance").expect("appearance"),
+            "finish",
+        )
+        .iter()
+        .map(|(value, label)| preset("manage.appearance", label, "finish", value))
+        .chain([labeled("manage.appearance", "Edit appearance…")])
+        .collect(),
     );
     let material = menu(
         "material",
         "Material",
         "material",
         vec![
-            preset("manage.material", "Aluminum 6061-T6", "material", "Al 6061-T6"),
+            preset(
+                "manage.material",
+                "Aluminum 6061-T6",
+                "material",
+                "Al 6061-T6",
+            ),
             preset("manage.material", "Steel 1018", "material", "Steel 1018"),
             preset("manage.material", "Stainless 304", "material", "SS 304"),
             preset("manage.material", "ABS", "material", "ABS"),
@@ -164,7 +197,12 @@ pub(super) fn add(catalog: &mut Catalog) {
         "Configuration",
         "configuration",
         vec![
-            preset("assembly.component-configuration", "Default", "configuration", "default"),
+            preset(
+                "assembly.component-configuration",
+                "Default",
+                "configuration",
+                "default",
+            ),
             labeled("assembly.component-configuration", "Choose…"),
         ],
     );
@@ -176,7 +214,14 @@ pub(super) fn add(catalog: &mut Catalog) {
         "assembly.representation",
         "representation",
     );
-    let scale = choice_submenu(catalog, "view-scale", "Scale", "scale", "drawing.view-scale", "scale");
+    let scale = choice_submenu(
+        catalog,
+        "view-scale",
+        "Scale",
+        "scale",
+        "drawing.view-scale",
+        "scale",
+    );
     let display = choice_submenu(
         catalog,
         "view-display",
@@ -232,7 +277,11 @@ pub(super) fn add(catalog: &mut Catalog) {
                 vec![c("part.edit-sketch"), c("part.edit-sketch-plane")],
                 vec![c("part.hide")],
                 vec![c("sketch.fully-define"), c("sketch.check")],
-                vec![c("part.rename"), c("design.show-source"), c("design.copy-reference")],
+                vec![
+                    c("part.rename"),
+                    c("design.show-source"),
+                    c("design.copy-reference"),
+                ],
                 vec![c("part.delete")],
             ],
         ),
@@ -269,7 +318,11 @@ pub(super) fn add(catalog: &mut Catalog) {
             ],
             vec![
                 vec![c("assembly.open"), c("assembly.edit-in-context")],
-                vec![c("assembly.hide"), c("assembly.isolate"), c("assembly.transparency")],
+                vec![
+                    c("assembly.hide"),
+                    c("assembly.isolate"),
+                    c("assembly.transparency"),
+                ],
                 vec![c("assembly.fix"), configuration, representation],
                 vec![c("assembly.replace"), c("assembly.pattern")],
                 vec![c("assembly.mate"), c("assembly.show-mates")],
@@ -287,7 +340,11 @@ pub(super) fn add(catalog: &mut Catalog) {
                 "assembly.show-mate-entities",
             ],
             vec![
-                vec![c("assembly.edit-mate"), c("assembly.suppress"), c("assembly.flip-mate")],
+                vec![
+                    c("assembly.edit-mate"),
+                    c("assembly.suppress"),
+                    c("assembly.flip-mate"),
+                ],
                 vec![c("assembly.show-mate-entities"), c("design.show-source")],
                 vec![c("assembly.delete")],
             ],
@@ -305,7 +362,11 @@ pub(super) fn add(catalog: &mut Catalog) {
             ],
             vec![
                 vec![c("drawing.edit-view")],
-                vec![c("drawing.projected"), c("drawing.section"), c("drawing.detail")],
+                vec![
+                    c("drawing.projected"),
+                    c("drawing.section"),
+                    c("drawing.detail"),
+                ],
                 vec![scale, display],
                 vec![c("drawing.model-items"), c("drawing.show-in-model")],
                 vec![c("drawing.hide-view"), c("design.copy-reference")],
