@@ -118,7 +118,8 @@ pub(crate) struct RProjected {
 /// positions and triangle indices, per edge its flat points, and the flat vertex points.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RDisplay {
-    pub faces: Vec<(Vec<f64>, Vec<u32>)>,
+    /// Per face: positions, triangles, normals (flat).
+    pub faces: Vec<(Vec<f64>, Vec<u32>, Vec<f64>)>,
     pub edges: Vec<Vec<f64>>,
     pub vertices: Vec<f64>,
 }
@@ -272,7 +273,7 @@ mod backend {
             faces: d
                 .faces
                 .into_iter()
-                .map(|f| (f.positions, f.triangles))
+                .map(|f| (f.positions, f.triangles, f.normals))
                 .collect(),
             edges: d.edges.into_iter().map(|e| e.points).collect(),
             vertices: d.vertices,

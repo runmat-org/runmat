@@ -12,6 +12,7 @@
 #include "exact_kernel.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
@@ -44,6 +45,17 @@ KFaceMesh face_mesh(const TopoDS_Face& face) {
   const gp_Trsf& to_world = location.Transformation();
   for (Standard_Integer i = 1; i <= t->NbNodes(); ++i) {
     push_point(out.positions, t->Node(i).Transformed(to_world));
+  }
+  // The surface's own normal at each node (smooth shading on the true surface, not averaged
+  // over triangles). The Rust side orients them by the triangles' winding.
+  if (!t->HasNormals()) BRepLib_ToolTriangulatedShape::ComputeNormals(face, t);
+  if (t->HasNormals()) {
+    for (Standard_Integer i = 1; i <= t->NbNodes(); ++i) {
+      const gp_Dir n = t->Normal(i).Transformed(to_world);
+      out.normals.push_back(n.X());
+      out.normals.push_back(n.Y());
+      out.normals.push_back(n.Z());
+    }
   }
   // Triangles wind counter-clockwise seen from outside: a reversed face flips them.
   const bool reversed = face.Orientation() == TopAbs_REVERSED;

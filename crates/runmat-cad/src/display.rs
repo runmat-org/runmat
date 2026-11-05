@@ -45,6 +45,10 @@ pub struct FaceDisplay {
     pub features: Vec<String>,
     pub positions: Vec<f32>,
     pub triangles: Vec<u32>,
+    /// The surface's outward unit normal at each position (x, y, z), when the kernel knows it;
+    /// empty otherwise (the renderer then averages triangle normals over shared vertices).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub normals: Vec<f32>,
     /// The face's surface where the kernel knows it: a plane's normal, a cylinder's axis and
     /// radius (drawing centerlines, mates on axes and faces).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -209,6 +213,7 @@ fn body_display(
                     .unwrap_or_default(),
                 positions: flat(&f.positions),
                 triangles: f.triangles.iter().flatten().copied().collect(),
+                normals: flat(&f.normals),
                 surface: topology
                     .faces
                     .get(i)

@@ -78,12 +78,14 @@ pub(crate) mod bridge {
         points: Vec<f64>,
     }
 
-    /// One face's display triangles: positions (x, y, z per node) and node indices (three per
-    /// triangle, counter-clockwise seen from outside).
+    /// One face's display triangles: positions (x, y, z per node), node indices (three per
+    /// triangle, counter-clockwise seen from outside) and surface normals per node.
     #[derive(Debug, Clone, Default)]
     struct KFaceMesh {
         positions: Vec<f64>,
         triangles: Vec<u32>,
+        /// The surface normal at each node (x, y, z), or empty.
+        normals: Vec<f64>,
     }
 
     #[derive(Debug, Clone, Default)]

@@ -129,7 +129,17 @@ fn area(b: &BodyDisplay) -> f64 {
 }
 
 /// Area-weighted vertex normals, the way the renderer shades a face.
+/// The normals the renderer shades with: the kernel's surface normals when the display carries
+/// them (OCCT), otherwise the area-weighted triangle normals over shared vertices.
 fn vertex_normals(f: &FaceDisplay) -> Vec<P> {
+    if !f.normals.is_empty() {
+        assert_eq!(f.normals.len(), f.positions.len(), "one normal per position");
+        return f
+            .normals
+            .chunks(3)
+            .map(|c| unit([c[0] as f64, c[1] as f64, c[2] as f64]))
+            .collect();
+    }
     let p = pts(f);
     let mut n = vec![[0.0; 3]; p.len()];
     for t in tris(f) {

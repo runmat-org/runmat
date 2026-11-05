@@ -34,6 +34,10 @@ pub struct FaceMesh {
     pub positions: Vec<[f64; 3]>,
     /// Counter-clockwise seen from outside the solid.
     pub triangles: Vec<[u32; 3]>,
+    /// The surface's outward unit normal at each position, when the kernel knows the surface
+    /// (OCCT); empty otherwise, and a renderer averages the triangles' normals instead.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub normals: Vec<[f64; 3]>,
 }
 
 impl FaceMesh {
