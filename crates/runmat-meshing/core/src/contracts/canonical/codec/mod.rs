@@ -42,7 +42,10 @@ impl MeshingCanonicalLimits {
     pub const IDENTITY: Self = Self::new(4 * 1024 * 1024, 65_536, 1024 * 1024, 64);
     pub const REQUEST: Self = Self::new(32 * 1024 * 1024, 100_000, 1024 * 1024, 64);
     pub const MANIFEST: Self = Self::new(64 * 1024 * 1024, 100_000, 1024 * 1024, 64);
-    pub const ARTIFACT: Self = Self::new(512 * 1024 * 1024, 20_000_000, 8 * 1024 * 1024, 64);
+    /// Solver mesh artifacts and projections. A module-scale thermal mesh with one layer across each
+    /// thin plate (M01 heat path: cells, 3 mm pad, 2 mm lid, cold-plate base) encodes above 512 MiB,
+    /// so the ceiling is 2 GiB and 50M items (the volume-mesh codec's item ceiling).
+    pub const ARTIFACT: Self = Self::new(2 * 1024 * 1024 * 1024, 50_000_000, 8 * 1024 * 1024, 64);
 
     pub const fn new(
         maximum_encoded_bytes: usize,
