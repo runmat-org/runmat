@@ -1121,6 +1121,56 @@ impl GeometrySceneChunk {
         self
     }
 
+    /// One chunk drawing every chunk in `chunks`, which must share a pipeline and be all indexed
+    /// or all unindexed; the first chunk's material and display flags apply to all. Regions,
+    /// owners and mesh ids are dropped: use it for geometry drawn as one piece, such as context.
+    /// Returns `None` for no chunks, mixed chunks or more than `u32::MAX` vertices.
+    pub fn merged(chunk_id: impl Into<String>, chunks: Vec<Self>) -> Option<Self> {
+        let first = chunks.first()?;
+        let pipeline_type = first.render_data.pipeline_type;
+        let indexed = first.indices.is_some();
+        let material = first.material.clone();
+        let wireframe_only = first.wireframe_only;
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        for chunk in &chunks {
+            if chunk.render_data.pipeline_type != pipeline_type
+                || chunk.indices.is_some() != indexed
+            {
+                return None;
+            }
+            let offset = u32::try_from(vertices.len()).ok()?;
+            vertices.extend_from_slice(&chunk.vertices);
+            if let Some(chunk_indices) = &chunk.indices {
+                indices.extend(chunk_indices.iter().map(|index| index + offset));
+            }
+        }
+        u32::try_from(vertices.len()).ok()?;
+        let vertex_count = vertices.len();
+        let index_count = indices.len();
+        let mut merged = Self::from_render_data(
+            chunk_id,
+            RenderData {
+                pipeline_type,
+                vertices,
+                indices: indexed.then_some(indices),
+                gpu_vertices: None,
+                bounds: None,
+                material,
+                draw_calls: vec![DrawCall {
+                    vertex_offset: 0,
+                    vertex_count,
+                    index_offset: indexed.then_some(0),
+                    index_count: indexed.then_some(index_count),
+                    instance_count: 1,
+                }],
+                image: None,
+            },
+        );
+        merged.wireframe_only = wireframe_only;
+        Some(merged)
+    }
+
     /// Restyle this chunk as translucent context geometry: surfaces take `face` (its alpha
     /// below 1 makes them blended), edge lines take `edge`. A scene that also holds opaque
     /// surfaces draws these after them without depth writes, so context never hides a result.

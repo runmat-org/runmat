@@ -201,3 +201,22 @@ async fn context_touching_a_result_face_does_not_tint_it() {
         "coplanar context tinted the result: alone {alone:?}, touching {touching:?}"
     );
 }
+
+#[test]
+fn merged_context_draws_every_piece_as_one_chunk() {
+    let merged =
+        GeometrySceneChunk::merged("context", vec![ghost("a", 1.0, 0.8), ghost("b", 0.5, 0.4)])
+            .unwrap();
+    assert_eq!(merged.vertices.len(), 8);
+    let indices = merged.indices.as_ref().unwrap();
+    assert_eq!(indices.len(), 12);
+    assert_eq!(&indices[6..], &[4, 5, 6, 4, 6, 7]);
+    assert_eq!(merged.render_data.material.alpha_mode, AlphaMode::Blend);
+    assert_eq!(merged.triangle_count(), 4);
+    assert!((merged.bounds.max.z - 1.0).abs() < 1e-6 && (merged.bounds.min.z - 0.5).abs() < 1e-6);
+    // Lines and triangles never merge.
+    let edges = square("e", 0.0, 1.0, RESULT)
+        .wireframe_edges(GHOST_EDGE)
+        .unwrap();
+    assert!(GeometrySceneChunk::merged("mixed", vec![ghost("a", 1.0, 0.8), edges]).is_none());
+}

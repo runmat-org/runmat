@@ -6,6 +6,8 @@ use runmat_plot::{GeometryScene, GeometrySceneChunk};
 use serde::Serialize;
 use std::path::Path;
 
+/// Largest merged context chunk.
+const CONTEXT_CHUNK_VERTICES: usize = 1 << 20;
 /// Default surface opacity of context geometry.
 const CONTEXT_OPACITY: f32 = 0.12;
 /// Context surfaces: a light neutral slate, unlike any colormap colour of a result.
@@ -137,15 +139,41 @@ fn load_context(
     let edge_opacity = (0.15 + 1.5 * opacity).min(0.9);
     let [r, g, b] = CONTEXT_FACE_RGB;
     let [er, eg, eb] = CONTEXT_EDGE_RGB;
-    let chunks = scene
+    // Context is drawn as one piece: merge the per-part chunks of the import (one surface and
+    // one edge chunk per CAD part; a pack has thousands) into a few large ones.
+    let (surfaces, edges): (Vec<_>, Vec<_>) = scene
         .chunks
         .into_iter()
-        .map(|mut chunk| {
+        .map(|chunk| chunk.into_context([r, g, b, opacity], [er, eg, eb, edge_opacity]))
+        .partition(|chunk| {
+            chunk.render_data.pipeline_type == runmat_plot::core::PipelineType::Triangles
+        });
+    let mut chunks = Vec::new();
+    for (kind, group) in [("surface", surfaces), ("edges", edges)] {
+        let mut batch = Vec::new();
+        let mut batch_vertices = 0;
+        let mut flush = |batch: &mut Vec<GeometrySceneChunk>| -> Result<()> {
+            if batch.is_empty() {
+                return Ok(());
+            }
             // Unique beside the result's chunks and the other context files' chunks.
-            chunk.chunk_id = format!("context{index}:{}", chunk.chunk_id);
-            chunk.into_context([r, g, b, opacity], [er, eg, eb, edge_opacity])
-        })
-        .collect();
+            let id = format!("context{index}:{kind}:{}", chunks.len());
+            chunks.push(
+                GeometrySceneChunk::merged(id, std::mem::take(batch))
+                    .context("context geometry chunks do not merge")?,
+            );
+            Ok(())
+        };
+        for chunk in group {
+            if batch_vertices + chunk.vertices.len() > CONTEXT_CHUNK_VERTICES {
+                flush(&mut batch)?;
+                batch_vertices = 0;
+            }
+            batch_vertices += chunk.vertices.len();
+            batch.push(chunk);
+        }
+        flush(&mut batch)?;
+    }
     log::info!(
         "context geometry {name}: {} triangles; peak resident {} MiB",
         asset
