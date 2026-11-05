@@ -27,6 +27,7 @@ Each case below compares a RunMat result with an independent reference: a closed
 | Structural prestressed harmonic (modal superposition) | yes | — |
 | Structural response spectrum (modal superposition) | yes | — |
 | Structural random response (modal superposition) | yes | — |
+| Modal residual vectors and applied-load static correction for modal-reduced structural steps | yes | — |
 | Nonlinear structural steps inside procedure graphs (preload → nonlinear → modal; thermal prefix → nonlinear) | [not yet in the current release](pending:structural.nonlinear.sequence) | — |
 
 ## Reference cases

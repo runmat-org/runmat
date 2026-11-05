@@ -2721,7 +2721,8 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
     ] {
         let descriptor = descriptor(&field_id);
         assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
+        // Typed layouts count one component per scalar value.
+        assert_eq!(descriptor.component_count, Some(1));
     }
     let displacement_descriptor = descriptor(&fea_thermo_mechanical_displacement_field_id(0));
     assert_eq!(displacement_descriptor.kind, AnalysisFieldKind::Vector);
@@ -6044,7 +6045,7 @@ fn analysis_run_transient_returns_native_transient_result() {
     ] {
         let descriptor = descriptor(&field_id);
         assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
+        assert_eq!(descriptor.component_count, Some(1));
     }
 }
 
@@ -6550,7 +6551,11 @@ fn analysis_run_modal_returns_native_modal_result() {
         orthogonality_descriptor.shape,
         vec![modal.frequencies_hz().len(), modal.frequencies_hz().len()]
     );
-    assert_eq!(orthogonality_descriptor.component_count, None);
+    // One global mode-by-mode matrix: every entry is a component of the single tensor.
+    assert_eq!(
+        orthogonality_descriptor.component_count,
+        Some(modal.frequencies_hz().len() * modal.frequencies_hz().len())
+    );
     assert!(!envelope
         .data
         .quality_reasons

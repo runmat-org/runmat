@@ -297,7 +297,11 @@ impl CoercivityCertificate {
         let control = crate::solve::shared_sparse::control();
         let symbolic =
             SymbolicFactorization::analyze::<f64>(arrays.view().into(), &options, control)
-                .map_err(|_| CoercivityError::SymbolicOrdering)?;
+                .map_err(|error| match error {
+                    // A cancelled ordering is a terminal cancellation, not an ordering defect.
+                    runmat_sparse_solvers::SolverError::Cancelled => CoercivityError::Cancelled,
+                    _ => CoercivityError::SymbolicOrdering,
+                })?;
         let estimate = symbolic.estimate();
         if let Some(admission) = admission {
             if admission.dimension.0 != dimension as u64 {

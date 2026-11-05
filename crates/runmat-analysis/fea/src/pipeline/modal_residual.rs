@@ -99,6 +99,7 @@ pub(super) fn build_directional_residual_vectors(
         let solution = static_solver.solve(&load)?;
         let equilibrium_ratio = solution.equilibrium_residual_ratio;
         let mut shape = solution.displacement;
+        let initial_mass = dot(&shape, &apply_m(&summary.operator, &shape));
         for mode in modes {
             let coefficient = dot(mode.dof_shape(), &load) / mode.modal_stiffness();
             subtract_scaled(&mut shape, mode.dof_shape(), coefficient)?;
@@ -108,7 +109,12 @@ pub(super) fn build_directional_residual_vectors(
         }
         let mass_applied = apply_m(&summary.operator, &shape);
         let modal_mass = dot(&shape, &mass_applied);
-        if !modal_mass.is_finite() || modal_mass <= f64::EPSILON {
+        // Dependence is relative to the static response itself: an absolute bound on a modal
+        // mass in kg m^2 rejects every physically small (stiff, SI-unit) residual vector.
+        if !modal_mass.is_finite()
+            || !initial_mass.is_finite()
+            || modal_mass.sqrt() <= STATIC_CORRECTION_DEPENDENCE_RATIO * initial_mass.sqrt()
+        {
             return Err(FeaRunError::Solve(
                 "residual vector is linearly dependent on the retained modal basis".into(),
             ));
@@ -229,4 +235,63 @@ fn dot(left: &[f64], right: &[f64]) -> f64 {
         .zip(right)
         .map(|(left, right)| left * right)
         .sum()
+}
+
+/// Relative mass norm below which a static correction already lies in the retained space.
+const STATIC_CORRECTION_DEPENDENCE_RATIO: f64 = 1.0e-8;
+
+/// Static corrections for the applied loads of a modal-reduced frequency sweep: for each nonzero
+/// load `f`, the static response `K⁻¹ f` with every retained shape removed in the mass metric,
+/// scaled to unit reference modal mass. With these in the reduced space the quasi-static part of
+/// the response is exact, so the full-space balance error is left to the dynamic truncation.
+/// A load whose static response the retained space already spans adds no vector.
+pub(crate) fn applied_load_static_corrections(
+    summary: &AssemblySummary,
+    retained: &[&[f64]],
+    loads: &[&[f64]],
+) -> Result<Vec<Vec<f64>>, FeaRunError> {
+    if loads
+        .iter()
+        .all(|load| load.iter().all(|value| *value == 0.0))
+    {
+        return Ok(Vec::new());
+    }
+    let static_solver = HomogeneousStaticSolver::new(summary)?;
+    let reference = super::modal_basis::ModalBasisCoordinates::canonical_reference_mass();
+    let mut corrections: Vec<Vec<f64>> = Vec::with_capacity(loads.len());
+    for load in loads {
+        if load.iter().all(|value| *value == 0.0) {
+            continue;
+        }
+        let mut shape = static_solver.solve(load)?.displacement;
+        let initial_mass = dot(&shape, &apply_m(&summary.operator, &shape));
+        for _ in 0..RESIDUAL_MASS_ORTHOGONALIZATION_PASSES {
+            for vector in retained
+                .iter()
+                .copied()
+                .chain(corrections.iter().map(Vec::as_slice))
+            {
+                let denominator = dot(vector, &apply_m(&summary.operator, vector));
+                let coefficient = dot(vector, &apply_m(&summary.operator, &shape)) / denominator;
+                subtract_scaled(&mut shape, vector, coefficient)?;
+            }
+        }
+        let modal_mass = dot(&shape, &apply_m(&summary.operator, &shape));
+        if !modal_mass.is_finite() || !initial_mass.is_finite() || initial_mass <= 0.0 {
+            return Err(FeaRunError::Solve(
+                "applied-load static correction is not finite".into(),
+            ));
+        }
+        if modal_mass.sqrt() <= STATIC_CORRECTION_DEPENDENCE_RATIO * initial_mass.sqrt() {
+            continue;
+        }
+        let scale = runmat_types::physical::Mass::new(modal_mass)
+            .ratio_to(reference)
+            .canonical_value()
+            .sqrt()
+            .recip();
+        shape.iter_mut().for_each(|value| *value *= scale);
+        corrections.push(shape);
+    }
+    Ok(corrections)
 }
