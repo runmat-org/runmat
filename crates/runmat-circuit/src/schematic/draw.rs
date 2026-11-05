@@ -70,6 +70,7 @@ pub(super) fn page(
     let mut page = SchematicSheet {
         path: path.to_string(),
         sheet: sheet_name.to_owned(),
+        page: 1,
         ..Default::default()
     };
     let mut terms: Vec<Term> = Vec::new();
@@ -410,7 +411,7 @@ fn frame(page: &mut SchematicSheet, nl: &Netlist, centre: bool) {
     }
 }
 
-fn shift(page: &mut SchematicSheet, dx: f64, dy: f64) {
+pub(super) fn shift(page: &mut SchematicSheet, dx: f64, dy: f64) {
     let r = |v: f64| (v * 1.0e6).round() / 1.0e6;
     let m = |p: &mut Xy| {
         p[0] = r(p[0] + dx);

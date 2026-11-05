@@ -25,7 +25,7 @@ use crate::elab::Netlist;
 use crate::geom::Coord;
 use crate::library::Pool;
 use crate::schematic::{
-    layout, units, NetLabel, PinSide, SchematicSheet, UnitLayout, NAME_OFFSET,
+    layout, merge_pages, units, NetLabel, PinSide, SchematicSheet, UnitLayout, NAME_OFFSET,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -293,7 +293,8 @@ fn label_node(page: &Page, label: &NetLabel, seed: &str) -> SExpr {
 /// file is `{project}.kicad_sch`.
 pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<String, String> {
     let project = sanitize(&opts.project);
-    let drawn = layout(nl);
+    // KiCad keeps one file per sheet instance: an instance's second page joins its first.
+    let drawn = merge_pages(&layout(nl));
     // Library symbols: one per entity and unit layouts; each component's units by name.
     let mut libs: BTreeMap<String, Vec<(UnitLayout, Option<String>)>> = BTreeMap::new();
     let mut lib_of: Vec<String> = Vec::new();

@@ -25,6 +25,7 @@
 //! Lengths are millimetres on the page (origin bottom left, y up); every list is sorted by
 //! placement, so identical designs give identical bytes.
 
+mod pages;
 mod place;
 pub mod route;
 pub mod symbol;
@@ -32,6 +33,7 @@ mod units;
 
 pub use symbol::{Art, PinSide, Place};
 pub(crate) use symbol::UnitLayout;
+pub use pages::{merge_pages, SPARE_TITLE};
 pub use units::{units, Unit, SPLIT_ABOVE, UNIT_PINS};
 
 use crate::display::Xy;
@@ -121,6 +123,12 @@ pub struct SchematicSheet {
     pub path: String,
     /// The sheet definition it instantiates.
     pub sheet: String,
+    /// The instance's page: 1, or 2 for its large parts' unused units ([`pages`]).
+    #[serde(default = "pages::one", skip_serializing_if = "pages::is_one")]
+    pub page: u32,
+    /// What a page after the first holds ([`SPARE_TITLE`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holds: Option<String>,
     /// `A4` to `A0`.
     pub frame: String,
     pub width_mm: f64,
@@ -421,10 +429,11 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
     let mut out = SchematicIndex::default();
     for (path, sheet_name) in &sheets {
         let members = by_sheet.get(path).cloned().unwrap_or_default();
-        out.sheets.push(page(nl, path, sheet_name, &sheets, &members, &net_sheets));
+        out.sheets.extend(page(nl, path, sheet_name, &sheets, &members, &net_sheets));
     }
-    // The hierarchy's order: by path text; then each title block's page count.
-    out.sheets.sort_by(|a, b| a.path.cmp(&b.path));
+    // The hierarchy's order: by path text, an instance's pages together; then each title
+    // block's page count.
+    out.sheets.sort_by(|a, b| (&a.path, a.page).cmp(&(&b.path, b.page)));
     let count = out.sheets.len();
     for (k, s) in out.sheets.iter_mut().enumerate() {
         s.title_block.insert(3, ("Page".into(), format!("{} of {count}", k + 1)));
@@ -443,6 +452,7 @@ pub fn places(index: &SchematicIndex) -> BTreeMap<String, SchPlace> {
                 y: down(sym.y_mm),
                 rotation: sym.rotation as u16,
                 mirror: sym.mirror,
+                page: s.page as u16,
             });
         }
         for sh in &s.sheet_symbols {
@@ -452,6 +462,7 @@ pub fn places(index: &SchematicIndex) -> BTreeMap<String, SchPlace> {
                 y: down(sh.y_mm + sh.h_mm),
                 rotation: 0,
                 mirror: false,
+                page: s.page as u16,
             });
         }
     }
@@ -465,7 +476,7 @@ fn page(
     sheets: &[(NamePath, String)],
     members: &[usize],
     net_sheets: &[BTreeSet<&NamePath>],
-) -> SchematicSheet {
+) -> Vec<SchematicSheet> {
     let children: Vec<usize> = (0..sheets.len())
         .filter(|k| sheets[*k].0.parent().as_ref() == Some(path))
         .collect();
@@ -489,6 +500,8 @@ fn page(
         })
         .collect();
     let mut cells: Vec<Cell> = Vec::new();
+    // A large part's unconnected units, for page 2.
+    let mut spare: Vec<Cell> = Vec::new();
     for &ci in members {
         let c = &nl.components[ci];
         let us = units(c);
@@ -511,7 +524,8 @@ fn page(
             } else {
                 format!("{}/{}", c.sheet, c.path.leaf())
             };
-            cells.push(Cell {
+            let to = if us.len() > 1 && pages::unused(nl, ci, u) { &mut spare } else { &mut cells };
+            to.push(Cell {
                 key,
                 kind: CellKind::Unit { comp: ci, gate: g },
                 nets: pins.iter().map(|p| c.pins[*p].net).collect(),
@@ -581,10 +595,36 @@ fn page(
             sheet_out,
         });
     }
-    let mut places = place::place(&mut cells, &infos);
-    let recorded = cells.iter().any(|c| nl.sch_places.contains_key(&c.key));
-    stick(&cells, &mut places, &nl.sch_places);
-    draw::page(nl, path, sheet_name, sheets, &cells, &places, &infos, !recorded)
+    if cells.is_empty() {
+        cells = std::mem::take(&mut spare);
+    }
+    let mut out = Vec::new();
+    for (k, mut cells) in [cells, spare].into_iter().enumerate() {
+        if k > 0 && cells.is_empty() {
+            continue;
+        }
+        let page_no = k as u16 + 1;
+        // A place recorded on the other page is in that page's coordinates: it doesn't apply.
+        let stored: BTreeMap<String, SchPlace> = nl
+            .sch_places
+            .iter()
+            .filter(|(_, p)| p.page == page_no)
+            .map(|(key, p)| (key.clone(), *p))
+            .collect();
+        let mut places = place::place(&mut cells, &infos);
+        let recorded = cells.iter().any(|c| stored.contains_key(&c.key));
+        stick(&cells, &mut places, &stored);
+        let mut drawn = draw::page(nl, path, sheet_name, sheets, &cells, &places, &infos, !recorded);
+        if k > 0 {
+            drawn.page = 2;
+            drawn.holds = Some(SPARE_TITLE.to_owned());
+            if let Some(row) = drawn.title_block.iter_mut().find(|(f, _)| f == "Sheet") {
+                row.1 = format!("{sheet_name}, page 2 ({SPARE_TITLE})");
+            }
+        }
+        out.push(drawn);
+    }
+    out
 }
 
 /// Recorded places override the automatic ones (stored in paper mm, y down from the top; the
@@ -649,3 +689,4 @@ fn stick(cells: &[Cell], places: &mut [Place], stored: &BTreeMap<String, SchPlac
 
 mod draw;
 pub use draw::{designator_text, page_boxes, symbol_texts};
+use draw::shift;

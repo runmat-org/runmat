@@ -136,19 +136,25 @@ fn board_items_carry_their_positions() {
 fn schematic_has_a_page_per_sheet_with_every_pin_connected() {
     let (index, _) = scenario_index();
     let sch = &index.schematic;
-    let pages: Vec<&str> = sch.sheets.iter().map(|s| s.path.as_str()).collect();
+    // One first page per sheet instance; a second page follows its first (unused units).
+    let pages: Vec<&str> = sch.sheets.iter().filter(|s| s.page == 1).map(|s| s.path.as_str()).collect();
     let hierarchy: Vec<&str> = index.hierarchy.iter().map(|s| s.path.as_str()).collect();
     assert_eq!(pages, hierarchy);
-    // Every component appears on its own sheet, once per gate.
+    for (k, s) in sch.sheets.iter().enumerate().filter(|(_, s)| s.page > 1) {
+        assert_eq!(sch.sheets[k - 1].path, s.path, "page {} of {} follows its first", s.page, s.path);
+    }
+    // Every component appears on its own sheet instance, once per gate.
     for c in &index.components {
         let sheet = c
             .path
             .rsplit_once('/')
             .map(|(p, _)| if p.is_empty() { "/" } else { p })
             .unwrap();
-        let page = sch.sheets.iter().find(|s| s.path == sheet).unwrap();
         assert!(
-            page.symbols.iter().any(|s| s.designator == c.designator),
+            sch.sheets
+                .iter()
+                .filter(|s| s.path == sheet)
+                .any(|page| page.symbols.iter().any(|s| s.designator == c.designator)),
             "{}",
             c.designator
         );

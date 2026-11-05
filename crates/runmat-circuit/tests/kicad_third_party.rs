@@ -1,4 +1,4 @@
-//! Real KiCad 8 boards by other authors (`tests/kicad/third_party`, licenses in its README):
+//! Real KiCad 7 and 8 boards by other authors (`tests/kicad/third_party`, licenses in its README):
 //! read, written back token for token, and exported from RunMat's own model with every pad
 //! where it was, on its net.
 
@@ -6,7 +6,7 @@ use runmat_circuit::geom::Point;
 use runmat_circuit::kicad::{pcb, sexpr};
 use runmat_circuit::layout::Board;
 
-const BOARDS: [(&str, &str); 2] = [
+const BOARDS: [(&str, &str); 4] = [
     (
         "atmega328p-datalogger-4l",
         include_str!("kicad/third_party/atmega328p-datalogger-4l.kicad_pcb"),
@@ -14,6 +14,14 @@ const BOARDS: [(&str, &str); 2] = [
     (
         "unipa-bioamp-pro",
         include_str!("kicad/third_party/unipa-bioamp-pro.kicad_pcb"),
+    ),
+    (
+        "esp32-flight-controller",
+        include_str!("kicad/third_party/esp32-flight-controller/flight_controller_rev2.kicad_pcb"),
+    ),
+    (
+        "ottercast-audio-v2",
+        include_str!("kicad/third_party/ottercast-audio-v2/OtterCastAudioV2.kicad_pcb"),
     ),
 ];
 

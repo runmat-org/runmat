@@ -451,17 +451,25 @@ pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
         boxes_out.push(bbox);
     }
     // Pack clusters in rows from the top left, as wide as the smallest frame (A4 to A0) whose
-    // height then holds them, clear of the title block.
+    // height then holds them, clear of the title block: the last row may run down beside the
+    // title block, but not over it.
     let widest = boxes_out.iter().map(|b| b[2] - b[0]).max().unwrap_or(0);
     let mut chosen = Vec::new();
     for (w, h) in super::FRAMES.iter().map(|f| (f.1, f.2)) {
         let nm = |v: f64| (v * 1.0e6) as Coord;
         // Labels and texts can reach past the cluster boxes: keep 20 mm spare.
         let width = (nm(w) - 2 * super::MARGIN - nm(20.0)).max(widest);
-        let room = nm(h) - 2 * super::MARGIN - nm(super::TITLE_ROW_MM * 6.0);
+        let full = nm(h) - 2 * super::MARGIN - nm(10.0);
+        let band = full - nm(super::TITLE_ROW_MM * 6.0);
+        // The title block's left edge, from the content's left (with the same 20 mm spare).
+        let title_x = nm(w - super::FRAME_MM - super::TITLE_W_MM - 22.0) - super::MARGIN;
         let (offsets, used) = pack(&boxes_out, width);
+        let clear = offsets.iter().zip(&boxes_out).all(|((dx, dy), b)| {
+            let (right, bottom) = (b[2] + dx, b[1] + dy);
+            -bottom <= band || right <= title_x
+        });
         chosen = offsets;
-        if used <= room {
+        if used <= full && clear {
             break;
         }
     }
@@ -473,22 +481,39 @@ pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
     places
 }
 
-/// Shelf packing of cluster boxes in rows of `width`: each box's offset and the height used.
+/// Shelf packing of cluster boxes in rows of `width`, first fit: each box goes in the first
+/// row with room for it, so a small cluster fills the gap a large one left, and the clusters
+/// keep their order along each row. Returns each box's offset and the height used.
 fn pack(boxes: &[[Coord; 4]], width: Coord) -> (Vec<(Coord, Coord)>, Coord) {
-    let (mut x, mut y, mut row_h) = (0, 0, 0);
-    let mut out = Vec::new();
+    // Per row: the next x and the height so far.
+    let mut rows: Vec<(Coord, Coord)> = Vec::new();
+    let mut at: Vec<(usize, Coord)> = Vec::with_capacity(boxes.len());
     for b in boxes {
         let (w, h) = (b[2] - b[0], b[3] - b[1]);
-        if x > 0 && x + w > width {
-            x = 0;
-            y -= row_h + CLUSTER_GAP;
-            row_h = 0;
-        }
-        out.push((snap(x - b[0]), snap(y - b[3])));
-        x += w + CLUSTER_GAP;
-        row_h = row_h.max(h);
+        let row = rows
+            .iter()
+            .position(|(x, _)| *x + w <= width)
+            .unwrap_or_else(|| {
+                rows.push((0, 0));
+                rows.len() - 1
+            });
+        let (x, row_h) = &mut rows[row];
+        at.push((row, *x));
+        *x += w + CLUSTER_GAP;
+        *row_h = (*row_h).max(h);
     }
-    (out, row_h - y)
+    let mut tops = Vec::with_capacity(rows.len());
+    let mut y = 0;
+    for (_, h) in &rows {
+        tops.push(y);
+        y -= h + CLUSTER_GAP;
+    }
+    let out = boxes
+        .iter()
+        .zip(&at)
+        .map(|(b, (row, x))| (snap(x - b[0]), snap(tops[*row] - b[3])))
+        .collect();
+    (out, -y - CLUSTER_GAP.min(-y))
 }
 
 pub(super) fn snap(v: Coord) -> Coord {

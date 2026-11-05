@@ -220,7 +220,8 @@ fn dump(name: &str, index: &SchematicIndex) {
         return;
     };
     for page in &index.sheets {
-        let file = format!("{name}{}.svg", page.path.replace(['/', '[', ']'], "_"));
+        let more = if page.page > 1 { format!("p{}", page.page) } else { String::new() };
+        let file = format!("{name}{}{more}.svg", page.path.replace(['/', '[', ']'], "_"));
         std::fs::write(PathBuf::from(&dir).join(file), svg(page)).unwrap();
     }
 }
@@ -266,6 +267,32 @@ fn the_showcase_schematic_is_drawn_to_the_bar() {
         root.wires.iter().any(|w| w.net.ends_with("SDO0")),
         "the channels' SDO is wired to the FPGA"
     );
+    // The FPGA's unused banks (U1B–U1E, every pin no_erc) are page 2 of the top sheet, so the
+    // top sheet's frame holds only what is wired.
+    let spare = index
+        .sheets
+        .iter()
+        .find(|s| s.path == "/" && s.page == 2)
+        .expect("the top sheet's second page");
+    let units = |page: &SchematicSheet| -> Vec<String> {
+        page.symbols
+            .iter()
+            .filter(|s| s.designator == "U1")
+            .filter_map(|s| s.unit.clone())
+            .collect()
+    };
+    assert_eq!(units(spare), ["B", "C", "D", "E"]);
+    assert_eq!(spare.symbols.len(), 4, "only the unused units");
+    assert_eq!(spare.holds.as_deref(), Some("unused units"));
+    assert!(units(root).contains(&"A".to_owned()) && !units(root).contains(&"B".to_owned()));
+    let row = |page: &SchematicSheet, field: &str| {
+        page.title_block.iter().find(|(f, _)| f == field).map(|(_, v)| v.clone()).unwrap()
+    };
+    assert_eq!(row(spare, "Sheet"), "main, page 2 (unused units)");
+    let count = index.sheets.len();
+    assert_eq!(row(root, "Page"), format!("1 of {count}"));
+    assert_eq!(row(spare, "Page"), format!("2 of {count}"));
+    assert!(root.width_mm <= 420.0, "the top sheet fits A3 without the banks: {}", root.frame);
     // Same design, same bytes.
     assert_eq!(index, drawn(&files, "/p/daq.circuit"));
 }

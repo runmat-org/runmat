@@ -386,9 +386,18 @@ fn fresh_schematic_export_reimports_with_the_same_connectivity() {
             project: "large".into(),
         },
     );
-    // One file per sheet instance, as the schematic canvas pages it.
-    let drawn = runmat_circuit::schematic::layout(&nl);
+    // One file per sheet instance: an instance's second page (the FPGA's unused units) sits
+    // right of its first on the same paper.
+    let pages = runmat_circuit::schematic::layout(&nl);
+    let drawn = runmat_circuit::schematic::merge_pages(&pages);
     assert_eq!(files.len(), drawn.sheets.len());
+    let spare: Vec<_> = pages.sheets.iter().filter(|s| s.page == 2).collect();
+    assert_eq!(spare.len(), 1, "the root's unused FPGA units are a page of their own");
+    let root = &drawn.sheets[0];
+    let first = &pages.sheets[0];
+    assert_eq!(root.frame, "User");
+    assert!((root.width_mm - first.width_mm - spare[0].width_mm).abs() < 1e-6);
+    assert_eq!(root.symbols.len(), first.symbols.len() + spare[0].symbols.len());
     assert!(files.len() >= 25, "{} files", files.len());
     assert_eq!(
         files,

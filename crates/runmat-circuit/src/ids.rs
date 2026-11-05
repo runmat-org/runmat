@@ -251,13 +251,27 @@ impl IdChange {
 /// stick: paper millimetres from the top-left corner (y down, as KiCad counts), in nm, with
 /// its quarter turn and mirror. Keyed by sheet definition and local name (`channel/RS`,
 /// `main/U1:A`, `main/ch[0]` for a sheet symbol), so every instance of a sheet shares one
-/// drawing.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+/// drawing. `page` is the instance's page it sits on: 1, or 2 for a large part's unused units
+/// (the lock writes `page=2`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SchPlace {
     pub x: i64,
     pub y: i64,
     pub rotation: u16,
     pub mirror: bool,
+    pub page: u16,
+}
+
+impl Default for SchPlace {
+    fn default() -> Self {
+        SchPlace {
+            x: 0,
+            y: 0,
+            rotation: 0,
+            mirror: false,
+            page: 1,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -479,6 +493,9 @@ impl LockSection {
             if p.mirror {
                 s.push_str(" mirror");
             }
+            if p.page != 1 {
+                s.push_str(&format!(" page={}", p.page));
+            }
             s.push('\n');
         }
         s
@@ -531,7 +548,14 @@ impl LockSection {
                         parts.next().and_then(|v| v.parse().ok()).ok_or_else(bad)
                     };
                     let (x, y, r) = (num()?, num()?, num()?);
-                    let mirror = parts.next() == Some("mirror");
+                    let (mut mirror, mut page) = (false, 1);
+                    for flag in parts {
+                        match flag.strip_prefix("page=") {
+                            Some(v) => page = v.parse().map_err(|_| bad())?,
+                            None if flag == "mirror" => mirror = true,
+                            None => return Err(bad()),
+                        }
+                    }
                     l.places.insert(
                         key.to_owned(),
                         SchPlace {
@@ -539,6 +563,7 @@ impl LockSection {
                             y: (y * 1.0e6).round() as i64,
                             rotation: (r as i64).rem_euclid(360) as u16,
                             mirror,
+                            page,
                         },
                     );
                 }
@@ -641,5 +666,17 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn a_place_records_its_page_after_the_first() {
+        let text = "place main/U1:A 10.16 20.32 0 mirror\nplace main/U1:B 30.48 40.64 90 page=2\n";
+        let l = LockSection::from_text(text).unwrap();
+        assert_eq!(l.places["main/U1:A"].page, 1);
+        assert!(l.places["main/U1:A"].mirror);
+        assert_eq!(l.places["main/U1:B"].page, 2);
+        assert_eq!(l.to_text(), text);
+        assert!(LockSection::from_text("place main/U1:B 1 2 0 page=x").is_err());
+        assert!(LockSection::from_text("place main/U1:B 1 2 0 sideways").is_err());
     }
 }
