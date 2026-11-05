@@ -34,6 +34,7 @@ runmat-design-syntax = { workspace = true }
 # hover values and completion come from their front ends and regeneration.
 runmat-cad = { path = "../runmat-cad", version = "=0.6.2" }
 runmat-circuit = { path = "../runmat-circuit", version = "=0.6.2" }
+runmat-design-tools = { path = "../runmat-design-tools", version = "=0.6.2" }
 runmat-vm = { workspace = true }
 runmat-config = { workspace = true }
 runmat-package = { workspace = true }

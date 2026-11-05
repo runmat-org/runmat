@@ -18,7 +18,9 @@ use crate::core::analysis::{
     hover_at, quick_information_at, references_locations_at_async, semantic_document_facts,
     semantic_tokens_full, semantic_tokens_lexical, signature_help_at, CompatMode, DocumentAnalysis,
 };
-use crate::core::design::{design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles};
+use crate::core::design::{
+    design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles,
+};
 use crate::core::fea::{is_fea_uri, resolve_project_facts, FeaDocumentAnalysis};
 use crate::core::workspace::workspace_symbols_with_project_async;
 
@@ -580,7 +582,12 @@ pub async fn definition(_uri: String, _line: u32, _character: u32) -> Result<JsV
     let position = Position::new(_line, _character);
     let uri = Url::parse(&_uri).unwrap_or_else(|_| Url::parse("file:///").unwrap());
     if let Some(analysis) = doc.design_analysis.as_ref() {
-        return to_js(&analysis.definition(&position).into_iter().collect::<Vec<_>>());
+        return to_js(
+            &analysis
+                .definition(&position)
+                .into_iter()
+                .collect::<Vec<_>>(),
+        );
     }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return to_js(
@@ -713,8 +720,15 @@ pub async fn workspace_symbols_all() -> Result<JsValue, JsValue> {
             .values()
             .filter_map(|document| document.fea_analysis.clone())
             .collect::<Vec<_>>();
-        (docs, fea_analyses)
+        let design_symbols = documents
+            .docs
+            .values()
+            .filter_map(|document| document.design_analysis.as_ref())
+            .flat_map(|analysis| analysis.workspace_symbols(None))
+            .collect::<Vec<_>>();
+        (docs, (fea_analyses, design_symbols))
     });
+    let (fea_analyses, design_symbols) = fea_analyses;
     let mut syms: Vec<SymbolInformation> =
         workspace_symbols_with_project_async(&docs, compat, None).await;
     syms.extend(
@@ -722,6 +736,7 @@ pub async fn workspace_symbols_all() -> Result<JsValue, JsValue> {
             .iter()
             .flat_map(|analysis| analysis.workspace_symbols(None)),
     );
+    syms.extend(design_symbols);
     syms.sort_by(|left, right| {
         left.name
             .cmp(&right.name)
@@ -806,13 +821,21 @@ pub fn prepare_rename(uri: String, line: u32, character: u32) -> Result<JsValue,
 
 /// Renames a design document's symbol at its declaration and every use (a workspace edit).
 #[wasm_bindgen]
-pub fn rename(uri: String, line: u32, character: u32, new_name: String) -> Result<JsValue, JsValue> {
+pub fn rename(
+    uri: String,
+    line: u32,
+    character: u32,
+    new_name: String,
+) -> Result<JsValue, JsValue> {
     let entry = DOCS.with(|d| d.borrow().docs.get(&uri).cloned());
     let Some(analysis) = entry.and_then(|doc| doc.design_analysis) else {
         return Ok(JsValue::NULL);
     };
     match analysis.rename(&Position::new(line, character), &new_name) {
-        Ok(Some(edit)) => to_js(&edit),
+        // `changes` is a map keyed by URI: a plain object, as LSP clients read a WorkspaceEdit.
+        Ok(Some(edit)) => edit
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|e| JsValue::from_str(&e.to_string())),
         Ok(None) => Ok(JsValue::NULL),
         Err(message) => Err(JsValue::from_str(&message)),
     }

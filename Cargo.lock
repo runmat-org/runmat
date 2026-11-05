@@ -8155,6 +8155,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-design-tools"
+version = "0.6.2"
+dependencies = [
+ "base64 0.22.1",
+ "glam",
+ "hex",
+ "pollster 0.3.0",
+ "runmat-cad",
+ "runmat-cad-wasm",
+ "runmat-circuit",
+ "runmat-design-commands",
+ "runmat-design-syntax",
+ "runmat-plot",
+ "runmat-rules",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "runmat-execution"
 version = "0.6.2"
 dependencies = [
@@ -8597,6 +8618,7 @@ dependencies = [
  "runmat-circuit",
  "runmat-config",
  "runmat-design-syntax",
+ "runmat-design-tools",
  "runmat-filesystem",
  "runmat-hir",
  "runmat-lexer",

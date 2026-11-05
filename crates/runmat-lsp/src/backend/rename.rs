@@ -33,10 +33,12 @@ pub(super) async fn prepare(
     if let Some(design) = server.design_of(&params.text_document.uri).await {
         return Ok(design
             .prepare_rename(&params.position)
-            .map(|(range, placeholder)| PrepareRenameResponse::RangeWithPlaceholder {
-                range,
-                placeholder,
-            }));
+            .map(
+                |(range, placeholder)| PrepareRenameResponse::RangeWithPlaceholder {
+                    range,
+                    placeholder,
+                },
+            ));
     }
     let Some(target) = target_at(server, &params).await else {
         return Ok(None);

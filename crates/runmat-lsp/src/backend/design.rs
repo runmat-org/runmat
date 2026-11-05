@@ -5,7 +5,9 @@
 
 use tower_lsp::lsp_types::Url;
 
-use crate::core::design::{design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles};
+use crate::core::design::{
+    design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles,
+};
 
 use super::{RunMatLanguageServer, RunmatStatusNotification};
 
@@ -71,7 +73,12 @@ pub(super) async fn reanalyze_open_documents(server: &RunMatLanguageServer) {
 
 /// The files a design source reads, open documents first, then the disk, until nothing new
 /// is named.
-fn gather(dialect: runmat_design_syntax::Dialect, path: &str, text: &str, open: &DesignFiles) -> DesignFiles {
+fn gather(
+    dialect: runmat_design_syntax::Dialect,
+    path: &str,
+    text: &str,
+    open: &DesignFiles,
+) -> DesignFiles {
     let mut files = DesignFiles::new();
     let mut queue: Vec<(runmat_design_syntax::Dialect, String, String)> =
         vec![(dialect, path.to_string(), text.to_string())];

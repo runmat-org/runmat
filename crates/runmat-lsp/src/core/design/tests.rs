@@ -1,7 +1,8 @@
 use super::*;
 
 const BRACKET: &str = include_str!("../../../../runmat-cad/tests/corpus/documents/bracket.part");
-const ASSEMBLY: &str = include_str!("../../../../runmat-cad/tests/corpus/documents/synth0.assembly");
+const ASSEMBLY: &str =
+    include_str!("../../../../runmat-cad/tests/corpus/documents/synth0.assembly");
 const DRAWING: &str = include_str!("../../../../runmat-cad/tests/corpus/documents/rig.drawing");
 const CIRCUIT: &str = include_str!("../../../../runmat-circuit/tests/projects/io/io.circuit");
 const LAYOUT: &str = include_str!("../../../../runmat-circuit/tests/projects/io/io.circuit.layout");
@@ -60,14 +61,21 @@ fn every_design_file_type_gets_tokens_and_diagnostics() {
         let analysis = analyze(path, text, &files);
         let lexical = DesignDocumentAnalysis::lexical_semantic_tokens(analysis.dialect(), text);
         let tokens = analysis.semantic_tokens();
-        assert!(lexical.data.len() > 20, "{path}: {} lexical tokens", lexical.data.len());
+        assert!(
+            lexical.data.len() > 20,
+            "{path}: {} lexical tokens",
+            lexical.data.len()
+        );
         assert!(tokens.data.len() >= lexical.data.len(), "{path}");
         assert!(
             tokens.data.iter().any(|t| t.token_type == KEYWORD),
             "{path}: no keyword tokens"
         );
         assert!(
-            tokens.data.iter().any(|t| t.token_modifiers_bitset & DECLARATION != 0),
+            tokens
+                .data
+                .iter()
+                .any(|t| t.token_modifiers_bitset & DECLARATION != 0),
             "{path}: no declared names marked"
         );
         // Tokens never overlap and stay in order.
@@ -82,7 +90,10 @@ fn every_design_file_type_gets_tokens_and_diagnostics() {
             }
             end = start + t.length;
         }
-        assert!(!analysis.document_symbols().is_empty(), "{path}: no symbols");
+        assert!(
+            !analysis.document_symbols().is_empty(),
+            "{path}: no symbols"
+        );
         let _ = analysis.diagnostics();
     }
 }
@@ -129,10 +140,28 @@ fn part_completion_offers_features_topology_and_roles() {
     for name in ["body", "cut", "h", "round"] {
         assert!(labels(&items).contains(&name), "{:?}", labels(&items));
     }
-    let topology = analysis.completion_items(&at(BRACKET, "feature.body.face.end", 0, "feature.body.".len()));
-    assert!(labels(&topology).contains(&"face"), "{:?}", labels(&topology));
-    let roles = analysis.completion_items(&at(BRACKET, "feature.body.face.end", 0, "feature.body.face.".len()));
-    assert!(labels(&roles).contains(&"end") && labels(&roles).contains(&"side"), "{:?}", labels(&roles));
+    let topology = analysis.completion_items(&at(
+        BRACKET,
+        "feature.body.face.end",
+        0,
+        "feature.body.".len(),
+    ));
+    assert!(
+        labels(&topology).contains(&"face"),
+        "{:?}",
+        labels(&topology)
+    );
+    let roles = analysis.completion_items(&at(
+        BRACKET,
+        "feature.body.face.end",
+        0,
+        "feature.body.face.".len(),
+    ));
+    assert!(
+        labels(&roles).contains(&"end") && labels(&roles).contains(&"side"),
+        "{:?}",
+        labels(&roles)
+    );
     let inputs = analysis.completion_items(&at(BRACKET, "input.width", 0, "input.".len()));
     assert_eq!(labels(&inputs), vec!["depth", "thickness", "width"]);
     let entities = analysis.completion_items(&at(BRACKET, "s1.l1)", 0, "s1.".len()));
@@ -146,7 +175,10 @@ fn definition_references_and_rename_follow_the_names() {
     let analysis = analyze("/p/bracket.part", BRACKET, &DesignFiles::new());
     let use_site = at(BRACKET, "sketch.s1", 0, "sketch.".len());
     let definition = analysis.definition(&use_site).expect("a definition");
-    assert_eq!(definition.range.start, at(BRACKET, "sketch s1 on", 0, "sketch ".len()));
+    assert_eq!(
+        definition.range.start,
+        at(BRACKET, "sketch s1 on", 0, "sketch ".len())
+    );
     // `input.width`: the declaration and four uses.
     let refs = analysis.references(&at(BRACKET, "input width", 0, 6), true);
     assert_eq!(refs.len(), 5, "{refs:#?}");
@@ -160,7 +192,9 @@ fn definition_references_and_rename_follow_the_names() {
     // A sketch entity through its sketch: `s1.l1`.
     let entity = analysis.definition(&at(BRACKET, "s1.l1)", 0, 3)).unwrap();
     assert_eq!(entity.range.start, at(BRACKET, "l1 = line", 0, 0));
-    assert!(analysis.rename(&at(BRACKET, "input.width", 0, 7), "depth").is_err());
+    assert!(analysis
+        .rename(&at(BRACKET, "input.width", 0, 7), "depth")
+        .is_err());
 }
 
 #[test]
@@ -181,16 +215,26 @@ fn circuit_hover_shows_parts_instances_and_pins() {
         .filter(|d| d.severity == Some(DiagnosticSeverity::ERROR))
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
-    let u = hover_text(&analysis, at(CIRCUIT, "component U =", 0, "component ".len()));
+    let u = hover_text(
+        &analysis,
+        at(CIRCUIT, "component U =", 0, "component ".len()),
+    );
     assert!(u.contains("OPA4171"), "{u}");
     assert!(u.contains("Instances"), "{u}");
     let gnd = hover_text(&analysis, at(CIRCUIT, "net.GND", 0, 5));
     assert!(gnd.contains("pins"), "{gnd}");
     // `"RS.1"` names component RS.
     let rs = analysis.definition(&at(CIRCUIT, "\"RS.1\"", 0, 1)).unwrap();
-    assert_eq!(rs.range.start, at(CIRCUIT, "component RS", 0, "component ".len()));
+    assert_eq!(
+        rs.range.start,
+        at(CIRCUIT, "component RS", 0, "component ".len())
+    );
     let parts = analysis.completion_items(&at(CIRCUIT, "part = OPA4171", 0, "part = ".len()));
-    assert!(labels(&parts).contains(&"OPA4171"), "{:?}", &labels(&parts)[..10.min(parts.len())]);
+    assert!(
+        labels(&parts).contains(&"OPA4171"),
+        "{:?}",
+        &labels(&parts)[..10.min(parts.len())]
+    );
     let nets = analysis.completion_items(&at(CIRCUIT, "net.IN,", 0, "net.".len()));
     assert!(labels(&nets).contains(&"GND"));
 }
@@ -200,7 +244,10 @@ fn a_layout_names_nets_from_its_tracks() {
     let analysis = analyze("/p/io.circuit.layout", LAYOUT, &circuit_files());
     let refs = analysis.references(&at(LAYOUT, "net GND", 0, 4), false);
     assert!(refs.len() > 10, "{}", refs.len());
-    let u1 = hover_text(&analysis, at(LAYOUT, "footprint U1 ", 0, "footprint ".len()));
+    let u1 = hover_text(
+        &analysis,
+        at(LAYOUT, "footprint U1 ", 0, "footprint ".len()),
+    );
     assert!(u1.contains("OPA4171"), "{u1}");
 }
 
@@ -212,4 +259,20 @@ fn formatting_is_stable_on_formatted_sources() {
         let again = analyze("/p/bracket.part", &edit.new_text, &DesignFiles::new());
         assert!(again.formatting_edits().is_empty());
     }
+}
+
+#[test]
+fn workspace_symbols_name_declarations_by_kind() {
+    let analysis = analyze("/p/bracket.part", BRACKET, &DesignFiles::new());
+    let all = analysis.workspace_symbols(None);
+    let names: Vec<&str> = all.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.contains(&"feature.body"), "{names:?}");
+    assert!(names.contains(&"input.width"), "{names:?}");
+    let found = analysis.workspace_symbols(Some("WIDTH"));
+    assert!(
+        !found.is_empty()
+            && found
+                .iter()
+                .all(|s| s.name.to_ascii_lowercase().contains("width"))
+    );
 }

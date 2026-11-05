@@ -1142,35 +1142,7 @@ pub fn add_board_reusing(
             footprint_row(f)
         })
         .collect();
-    let item_label = |it: &BItem| match it {
-        BItem::Edge => "board edge".to_owned(),
-        BItem::Net(n) => board
-            .nets
-            .get(*n as usize)
-            .map(|n| n.name.clone())
-            .unwrap_or_default(),
-        BItem::Footprint(id) => board
-            .footprints
-            .get(id)
-            .map(|f| f.reference.clone())
-            .unwrap_or_default(),
-        BItem::Pad(id, pad) => format!(
-            "{}.{}",
-            board
-                .footprints
-                .get(id)
-                .map(|f| f.reference.as_str())
-                .unwrap_or("?"),
-            pad + 1
-        ),
-        BItem::Track(id) => format!("track {}", id.0),
-        BItem::Via(id) => format!("via {}", id.0),
-        BItem::Zone(id) => board
-            .zones
-            .get(id)
-            .map(|z| format!("pour {}", z.name))
-            .unwrap_or_default(),
-    };
+    let item_label = |it: &BItem| item_label(board, it);
     let drc_rows = drc
         .findings()
         .into_iter()
@@ -1289,6 +1261,40 @@ pub fn to_json(index: &CircuitIndex) -> String {
     let mut json = serde_json::to_string_pretty(index).expect("circuit index serializes");
     json.push('\n');
     json
+}
+
+/// How an error list names a board item: `board edge`, a net name, `U3`, `U3.4` (pads count
+/// from one), `track 12`, `via 3`, `pour GND`.
+pub fn item_label(board: &Board, it: &BItem) -> String {
+    match it {
+        BItem::Edge => "board edge".to_owned(),
+        BItem::Net(n) => board
+            .nets
+            .get(*n as usize)
+            .map(|n| n.name.clone())
+            .unwrap_or_default(),
+        BItem::Footprint(id) => board
+            .footprints
+            .get(id)
+            .map(|f| f.reference.clone())
+            .unwrap_or_default(),
+        BItem::Pad(id, pad) => format!(
+            "{}.{}",
+            board
+                .footprints
+                .get(id)
+                .map(|f| f.reference.as_str())
+                .unwrap_or("?"),
+            pad + 1
+        ),
+        BItem::Track(id) => format!("track {}", id.0),
+        BItem::Via(id) => format!("via {}", id.0),
+        BItem::Zone(id) => board
+            .zones
+            .get(id)
+            .map(|z| format!("pour {}", z.name))
+            .unwrap_or_default(),
+    }
 }
 
 #[cfg(test)]

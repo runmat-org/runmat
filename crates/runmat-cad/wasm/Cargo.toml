@@ -18,4 +18,11 @@ runmat-design-syntax = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-wasm-bindgen = "0.2"
+wasm-bindgen = { version = "0.2", optional = true }
+
+[features]
+# The `#[wasm_bindgen]` entry points. Native and in-wasm Rust callers (the language server, the
+# design tools) use the plain-Rust modules with `default-features = false`, so two crates'
+# exports never meet in one wasm binary.
+default = ["bindings"]
+bindings = ["dep:wasm-bindgen"]

@@ -669,7 +669,9 @@ impl LanguageServer for RunMatLanguageServer {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         if let Some(design) = self.design_of(&uri).await {
-            return Ok(Some(CompletionResponse::Array(design.completion_items(&position))));
+            return Ok(Some(CompletionResponse::Array(
+                design.completion_items(&position),
+            )));
         }
 
         let (text, analysis, fea_analysis) = {
@@ -757,8 +759,7 @@ impl LanguageServer for RunMatLanguageServer {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         if let Some(design) = self.design_of(&uri).await {
-            let locations =
-                design.references(&position, params.context.include_declaration);
+            let locations = design.references(&position, params.context.include_declaration);
             return Ok((!locations.is_empty()).then_some(locations));
         }
 
@@ -917,7 +918,9 @@ impl LanguageServer for RunMatLanguageServer {
     ) -> RpcResult<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
         if let Some(design) = self.design_of(&uri).await {
-            return Ok(Some(DocumentSymbolResponse::Nested(design.document_symbols())));
+            return Ok(Some(DocumentSymbolResponse::Nested(
+                design.document_symbols(),
+            )));
         }
 
         let (text, analysis, fea_analysis) = {
@@ -968,6 +971,15 @@ impl LanguageServer for RunMatLanguageServer {
                     .values()
                     .filter_map(|document| document.fea_analysis.as_ref())
                     .flat_map(|analysis| analysis.workspace_symbols(Some(_params.query.as_str())))
+                    .chain(
+                        state
+                            .documents
+                            .values()
+                            .filter_map(|document| document.design_analysis.as_ref())
+                            .flat_map(|analysis| {
+                                analysis.workspace_symbols(Some(_params.query.as_str()))
+                            }),
+                    )
                     .collect::<Vec<_>>(),
                 state.compat_mode,
             )

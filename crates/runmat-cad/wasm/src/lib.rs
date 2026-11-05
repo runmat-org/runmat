@@ -30,15 +30,18 @@ pub mod hlr;
 pub mod picks;
 pub mod runtime;
 
+#[cfg(feature = "bindings")]
 use wasm_bindgen::prelude::*;
 
 /// The files `path` needs beyond itself.
+#[cfg(feature = "bindings")]
 #[wasm_bindgen]
 pub fn dependencies(path: &str, text: &str) -> String {
     serde_json::to_string(&runtime::dependencies(path, text)).unwrap_or_else(|_| "[]".into())
 }
 
 /// The projection and display of the part or assembly `path`.
+#[cfg(feature = "bindings")]
 #[wasm_bindgen]
 pub fn compile(path: &str, text: &str, files: &str, options: &str) -> String {
     let files = match runtime::parse_files(files) {
@@ -50,6 +53,7 @@ pub fn compile(path: &str, text: &str, files: &str, options: &str) -> String {
 }
 
 /// Runs a catalog command on the part or assembly `path`.
+#[cfg(feature = "bindings")]
 #[wasm_bindgen]
 pub fn edit(path: &str, text: &str, files: &str, request: &str) -> String {
     match runtime::parse_files(files) {

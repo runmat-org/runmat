@@ -1,0 +1,35 @@
+[package]
+name = "runmat-design-tools"
+version = "0.6.2"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "The design tool layer: check, render, inspect, DRC and ERC, import, export and staged edits on .part, .assembly, .drawing, .circuit and .circuit.layout files, declared once for MCP clients and the in-app agent"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+publish = false
+
+[dependencies]
+runmat-cad = { path = "../runmat-cad", version = "=0.6.2" }
+runmat-cad-wasm = { path = "../runmat-cad/wasm", version = "=0.6.2", default-features = false }
+runmat-circuit = { path = "../runmat-circuit", version = "=0.6.2" }
+runmat-design-commands = { path = "../runmat-design-commands", version = "=0.6.2" }
+runmat-design-syntax = { workspace = true }
+runmat-rules = { path = "../runmat-rules", version = "=0.6.2" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = "0.8"
+base64 = "0.22"
+sha2 = { workspace = true }
+hex = { workspace = true }
+runmat-plot = { workspace = true, optional = true }
+pollster = { version = "0.3", optional = true }
+glam = { version = "0.24", optional = true }
+
+[features]
+default = []
+# `design.render` through the Desktop's renderer (runmat-plot on wgpu, headless).
+render = ["dep:runmat-plot", "dep:pollster", "dep:glam"]
+
+[lints.rust]
+unsafe_code = "forbid"

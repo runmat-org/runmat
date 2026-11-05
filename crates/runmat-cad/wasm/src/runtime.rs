@@ -8,7 +8,9 @@ use runmat_cad::display::{assembly_display, part_display, sketch_display, PartDi
 use runmat_cad::index::build_index;
 use runmat_cad::model::PartDocument;
 use runmat_cad::regen::kernel::TessellationOptions;
-use runmat_cad::regen::{regenerate, FakeKernel, RegenCache, RegenContext, RegenRequest};
+use runmat_cad::regen::{
+    regenerate, FakeKernel, RegenCache, RegenContext, RegenRequest, RegenResult,
+};
 use runmat_cad::sketch_solver::ExplicitSketchSolver;
 use runmat_cad::syntax::{parse_assembly, parse_part};
 use runmat_cad::units::StubUnits;
@@ -149,7 +151,20 @@ pub struct CompiledPart {
     pub display: PartDisplay,
 }
 
-pub fn compile_part(path: &str, text: &str) -> Result<CompiledPart, Vec<Diagnostic>> {
+/// A part regenerated on the reference kernel with everything a caller may ask of it: the
+/// regeneration (bodies, values, diagnostics with their source spans attached), the kernel that
+/// holds its bodies (for analyses such as mass properties), the projection and the display.
+pub struct RegeneratedPart {
+    pub document: PartDocument,
+    pub spans: runmat_cad::diagnostics::SpanMap,
+    pub result: RegenResult,
+    pub kernel: FakeKernel,
+    pub index: runmat_cad::index::PartIndex,
+    pub display: PartDisplay,
+}
+
+/// Regenerates the part `path` from its text; syntax errors are the `Err` diagnostics.
+pub fn regenerate_part(path: &str, text: &str) -> Result<RegeneratedPart, Vec<Diagnostic>> {
     let parsed = parse_part(path, text);
     let Some(document) = parsed.document else {
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
@@ -165,22 +180,68 @@ pub fn compile_part(path: &str, text: &str) -> Result<CompiledPart, Vec<Diagnost
         policy: Default::default(),
         slots: None,
     };
-    let result = regenerate(
+    let mut result = regenerate(
         &document,
         &ctx,
         &RegenRequest::default(),
         &mut RegenCache::default(),
     );
+    result.diagnostics.attach_spans(&parsed.spans);
     let index = build_index(&document, &result, None);
     let mut display = part_display(&result, &kernel, &TessellationOptions::default());
     display.sketches = sketch_display(&document, &result);
-    let projection = json!({ "document": &document, "index": &index });
-    Ok(CompiledPart {
+    Ok(RegeneratedPart {
         document,
+        spans: parsed.spans,
+        result,
+        kernel,
         index,
-        projection,
         display,
     })
+}
+
+pub fn compile_part(path: &str, text: &str) -> Result<CompiledPart, Vec<Diagnostic>> {
+    let part = regenerate_part(path, text)?;
+    let projection = json!({ "document": &part.document, "index": &part.index });
+    Ok(CompiledPart {
+        document: part.document,
+        index: part.index,
+        projection,
+        display: part.display,
+    })
+}
+
+/// The datum frames, planes, axes and points a part publishes, from its regeneration: what an
+/// assembly attaches to (a skeleton's interface).
+fn published_datums(
+    part: &RegeneratedPart,
+) -> BTreeMap<runmat_cad::ids::PublishName, runmat_cad::assembly::source::PublishedGeometry> {
+    use runmat_cad::assembly::source::PublishedGeometry as G;
+    use runmat_cad::model::datum::{DatumRef, DatumValue};
+    use runmat_cad::model::items::PublishTarget;
+    let mut out = BTreeMap::new();
+    for p in &part.document.publishes {
+        let PublishTarget::Datum {
+            datum: DatumRef::Feature { feature },
+        } = &p.target
+        else {
+            continue;
+        };
+        let Some(value) = part.result.state.datums.get(feature) else {
+            continue;
+        };
+        let g = match value {
+            DatumValue::Frame { frame } => G::Frame { frame: *frame },
+            DatumValue::Plane { frame } => G::Plane { frame: *frame },
+            DatumValue::Axis { point, direction } => G::Axis {
+                point: *point,
+                direction: *direction,
+            },
+            DatumValue::Point { at } => G::Point { at: *at },
+        };
+        out.insert(p.name.clone(), g);
+    }
+    out
 }
 
 fn bbox(display: &PartDisplay) -> Option<Aabb> {
@@ -240,7 +301,7 @@ pub fn compile_assembly(
                         message: format!("{key} has errors"),
                     }),
                 },
-                _ => match compile_part(&key, text) {
+                _ => match regenerate_part(&key, text) {
                     Ok(part) => {
                         let mut summary = DefinitionSummary::new(def.clone());
                         summary.configurations = part
@@ -253,6 +314,7 @@ pub fn compile_assembly(
                         let configured = ConfiguredSummary {
                             bbox: bbox(&part.display),
                             artifact: format!("text:{key}"),
+                            publishes: published_datums(&part),
                             ..Default::default()
                         };
                         source.add_part(summary, configured);
@@ -275,6 +337,22 @@ pub fn compile_assembly(
         gauge: None,
     };
     let resolved = resolve(&top_path, &ResolveRequest::default(), &ctx);
+    // What resolution could not do (a placement whose frame is missing, a pattern that does
+    // not expand) is shown on the assembly, not dropped.
+    for d in &resolved.diagnostics.diagnostics {
+        problems.push(Diagnostic {
+            path: path.to_owned(),
+            start: 0,
+            end: 0,
+            severity: match d.severity {
+                runmat_cad::diagnostics::Severity::Error => "error",
+                runmat_cad::diagnostics::Severity::Warning => "warning",
+                runmat_cad::diagnostics::Severity::Info => "info",
+            }
+            .into(),
+            message: d.message.clone(),
+        });
+    }
     let index = build_assembly_index(&resolved, Some(&source));
     let display = assembly_display(&resolved, &source, &displays);
     Ok((

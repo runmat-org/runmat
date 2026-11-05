@@ -46,6 +46,7 @@ pub fn design_dialect(uri: &Url) -> Option<Dialect> {
     Dialect::for_path(path).filter(|dialect| *dialect != Dialect::Fea)
 }
 
+#[cfg_attr(not(feature = "wasm"), allow(dead_code))] // the browser server's exports
 pub fn is_design_uri(uri: &Url) -> bool {
     design_dialect(uri).is_some()
 }
@@ -146,6 +147,7 @@ impl DesignDocumentAnalysis {
         }
     }
 
+    #[cfg_attr(not(feature = "wasm"), allow(dead_code))] // the browser server's exports
     pub fn dialect(&self) -> Dialect {
         self.dialect
     }
@@ -193,6 +195,7 @@ impl DesignDocumentAnalysis {
     }
 
     /// Tokens with the grammar's classes, before any compile: the first paint.
+    #[cfg_attr(not(feature = "wasm"), allow(dead_code))] // the browser server's exports
     pub fn lexical_semantic_tokens(dialect: Dialect, text: &str) -> SemanticTokens {
         let syntax = parse_source(dialect, text);
         encode(text, classify(&syntax, None))
@@ -216,6 +219,37 @@ impl DesignDocumentAnalysis {
             ),
             new_text: formatted.source,
         }]
+    }
+
+    /// Every declaration as `kind.name` (`feature.boss`, `net.VCC`, `footprint.U1`), for
+    /// workspace symbol search across open design files.
+    pub fn workspace_symbols(&self, query: Option<&str>) -> Vec<lsp_types::SymbolInformation> {
+        let query = query.map(str::to_ascii_lowercase);
+        let table = &self.symbols;
+        table
+            .symbols
+            .iter()
+            .filter_map(|s| {
+                let name = format!("{}.{}", s.kind, s.name);
+                if query
+                    .as_deref()
+                    .is_some_and(|q| !q.is_empty() && !name.to_ascii_lowercase().contains(q))
+                {
+                    return None;
+                }
+                let container = s.parent.map(|p| {
+                    let p = &table.symbols[p];
+                    format!("{}.{}", p.kind, p.name)
+                });
+                serde_json::from_value(serde_json::json!({
+                    "name": name,
+                    "kind": symbol_kind(&s.kind),
+                    "location": { "uri": self.uri.clone(), "range": self.range(s.name_span) },
+                    "containerName": container,
+                }))
+                .ok()
+            })
+            .collect()
     }
 
     pub fn document_symbols(&self) -> Vec<DocumentSymbol> {
@@ -313,7 +347,11 @@ impl DesignDocumentAnalysis {
 
     /// Renames the symbol under the cursor at its declaration and every use. A name that
     /// isn't a plain identifier is written quoted where it stands as a declared name.
-    pub fn rename(&self, position: &Position, new_name: &str) -> Result<Option<WorkspaceEdit>, String> {
+    pub fn rename(
+        &self,
+        position: &Position,
+        new_name: &str,
+    ) -> Result<Option<WorkspaceEdit>, String> {
         let Some((symbol, _)) = self.symbol_at(position) else {
             return Ok(None);
         };
@@ -357,7 +395,12 @@ impl DesignDocumentAnalysis {
         let (symbol, span) = self.symbol_at(position)?;
         let s = &self.symbols.symbols[symbol];
         let statement = self.source().get(s.span.start..s.span.end).unwrap_or("");
-        let head = statement.lines().next().unwrap_or("").trim_end_matches('{').trim();
+        let head = statement
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim_end_matches('{')
+            .trim();
         let head = if head.chars().count() > 160 {
             format!("{}…", head.chars().take(160).collect::<String>())
         } else {
@@ -403,10 +446,7 @@ impl DesignDocumentAnalysis {
                                 out.push(format!("**Value:** doesn't evaluate: {error}"));
                             } else if let Some(si) = row["si"].as_f64() {
                                 let kind = row["kind"].as_str().unwrap_or("");
-                                out.push(format!(
-                                    "**Value:** {} ({kind})",
-                                    si_text(si, kind)
-                                ));
+                                out.push(format!("**Value:** {} ({kind})", si_text(si, kind)));
                             }
                         }
                     }
@@ -450,7 +490,11 @@ impl DesignDocumentAnalysis {
                                 "**{} region**, {count} {}{}",
                                 row["kind"].as_str().unwrap_or(""),
                                 if count == 1 { "entity" } else { "entities" },
-                                if row["ok"].as_bool() == Some(false) { ", doesn't resolve" } else { "" }
+                                if row["ok"].as_bool() == Some(false) {
+                                    ", doesn't resolve"
+                                } else {
+                                    ""
+                                }
                             ));
                         }
                     }
@@ -479,7 +523,10 @@ impl DesignDocumentAnalysis {
                 }
             }
             Dialect::Circuit | Dialect::CircuitLayout => {
-                let components = projection["components"].as_array().cloned().unwrap_or_default();
+                let components = projection["components"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
                 match s.kind.as_str() {
                     "component" | "footprint" => {
                         let sheet = s.parent.map(|p| self.symbols.symbols[p].name.clone());
@@ -491,7 +538,9 @@ impl DesignDocumentAnalysis {
                                 }
                                 let path = row["path"].as_str().unwrap_or("");
                                 path.rsplit('/').next() == Some(s.name.as_str())
-                                    && sheet.as_deref().is_none_or(|sh| row["sheet"].as_str() == Some(sh))
+                                    && sheet
+                                        .as_deref()
+                                        .is_none_or(|sh| row["sheet"].as_str() == Some(sh))
                             })
                             .collect();
                         if let Some(first) = rows.first() {
@@ -546,7 +595,10 @@ impl DesignDocumentAnalysis {
                                 .flatten()
                                 .filter_map(Value::as_str)
                                 .collect();
-                            let class = row["class"].as_str().map(|c| format!(", class {c}")).unwrap_or_default();
+                            let class = row["class"]
+                                .as_str()
+                                .map(|c| format!(", class {c}"))
+                                .unwrap_or_default();
                             let shown: Vec<&str> = pins.iter().take(12).copied().collect();
                             out.push(format!(
                                 "**{}**{class}: {} pin{} ({}{})",
@@ -554,7 +606,11 @@ impl DesignDocumentAnalysis {
                                 pins.len(),
                                 if pins.len() == 1 { "" } else { "s" },
                                 shown.join(", "),
-                                if pins.len() > shown.len() { ", …" } else { "" }
+                                if pins.len() > shown.len() {
+                                    ", …"
+                                } else {
+                                    ""
+                                }
                             ));
                         }
                         if rows.len() > 4 {
@@ -577,7 +633,11 @@ impl DesignDocumentAnalysis {
                             out.push(format!(
                                 "**{} nets**{}",
                                 row["nets"].as_u64().unwrap_or(0),
-                                if params.is_empty() { String::new() } else { format!(": {}", params.join(", ")) }
+                                if params.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(": {}", params.join(", "))
+                                }
                             ));
                         }
                     }
@@ -648,7 +708,10 @@ impl DesignDocumentAnalysis {
             } else {
                 format!("{}.{}", s.kind, s.name)
             };
-            if !circuit && s.parent.is_some_and(|p| self.symbols.symbols[p].parent.is_some()) {
+            if !circuit
+                && s.parent
+                    .is_some_and(|p| self.symbols.symbols[p].parent.is_some())
+            {
                 continue;
             }
             items.push(CompletionItem {
@@ -696,10 +759,16 @@ impl DesignDocumentAnalysis {
         if self.dialect == Dialect::Part || self.dialect == Dialect::Assembly {
             match path {
                 [_] if head == "origin" => {
-                    return words(&["xy", "yz", "zx", "x", "y", "z", "point"], CompletionItemKind::ENUM_MEMBER)
+                    return words(
+                        &["xy", "yz", "zx", "x", "y", "z", "point"],
+                        CompletionItemKind::ENUM_MEMBER,
+                    )
                 }
                 [f, _] if f == "feature" => {
-                    return words(runmat_cad::syntax::refs::TOPOLOGY, CompletionItemKind::PROPERTY)
+                    return words(
+                        runmat_cad::syntax::refs::TOPOLOGY,
+                        CompletionItemKind::PROPERTY,
+                    )
                 }
                 [f, _, topo] if f == "feature" && (topo == "face" || topo == "edge") => {
                     let mut roles: Vec<&str> = runmat_cad::syntax::refs::ROLES
@@ -722,16 +791,17 @@ impl DesignDocumentAnalysis {
         }
         // A path through declared names: the last one's members.
         let probe = symbols::Path {
-            segments: path
-                .iter()
-                .map(|s| (s.clone(), Span::default()))
-                .collect(),
+            segments: path.iter().map(|s| (s.clone(), Span::default())).collect(),
             scope,
         };
         let mut resolved = table.resolve(self.dialect, &probe);
         if resolved.is_empty() && path.len() == 1 {
             // `s1.` in a part: the sketch's entities (a bare name only resolves once dotted).
-            resolved.extend(table.lookup(None, head, scope).map(|s| (s, Span::default())));
+            resolved.extend(
+                table
+                    .lookup(None, head, scope)
+                    .map(|s| (s, Span::default())),
+            );
         }
         if let Some(&(last, _)) = resolved.last() {
             let consumed = resolved.len() + usize::from(table.has_kind(head) && path.len() >= 2);
@@ -741,7 +811,10 @@ impl DesignDocumentAnalysis {
                     return named(children);
                 }
                 if let Some(pins) = self.pins_of(last) {
-                    return words(&pins.iter().map(String::as_str).collect::<Vec<_>>(), CompletionItemKind::FIELD);
+                    return words(
+                        &pins.iter().map(String::as_str).collect::<Vec<_>>(),
+                        CompletionItemKind::FIELD,
+                    );
                 }
             }
         }
@@ -758,7 +831,11 @@ impl DesignDocumentAnalysis {
         let components = self.projection.as_ref()?["components"].as_array()?.clone();
         let designators: Vec<String> = components
             .iter()
-            .filter(|row| row["path"].as_str().is_some_and(|p| p.rsplit('/').next() == Some(s.name.as_str())))
+            .filter(|row| {
+                row["path"]
+                    .as_str()
+                    .is_some_and(|p| p.rsplit('/').next() == Some(s.name.as_str()))
+            })
             .filter_map(|row| row["designator"].as_str().map(str::to_string))
             .collect();
         let mut pins: Vec<String> = nets
@@ -767,7 +844,10 @@ impl DesignDocumentAnalysis {
             .filter_map(|pin| {
                 let pin = pin.as_str()?;
                 let (designator, name) = pin.split_once('.')?;
-                designators.iter().any(|d| d == designator).then(|| name.to_string())
+                designators
+                    .iter()
+                    .any(|d| d == designator)
+                    .then(|| name.to_string())
             })
             .collect();
         pins.sort();
@@ -852,7 +932,10 @@ fn dotted_prefix(before: &str) -> Option<Vec<String>> {
 /// The field a value is being written for (`part = ` → `part`).
 fn assigned_field(before: &str) -> Option<&str> {
     let trimmed = before.trim_end_matches(|c: char| c.is_alphanumeric() || matches!(c, '_' | '-'));
-    let trimmed = trimmed.trim_end().trim_end_matches(['[', ',', ' ']).trim_end();
+    let trimmed = trimmed
+        .trim_end()
+        .trim_end_matches(['[', ',', ' '])
+        .trim_end();
     let head = trimmed.strip_suffix('=')?.trim_end();
     let start = head
         .char_indices()
@@ -962,10 +1045,15 @@ fn classify(syntax: &SourceSyntax, table: Option<&SymbolTable>) -> Vec<(Span, To
     };
     let mut marks: BTreeMap<usize, (Span, TokenClass)> = BTreeMap::new();
     for s in &table.symbols {
-        marks.insert(s.name_span.start, (s.name_span, class(VARIABLE, DECLARATION)));
+        marks.insert(
+            s.name_span.start,
+            (s.name_span, class(VARIABLE, DECLARATION)),
+        );
     }
     for o in &table.occurrences {
-        marks.entry(o.span.start).or_insert((o.span, class(VARIABLE, 0)));
+        marks
+            .entry(o.span.start)
+            .or_insert((o.span, class(VARIABLE, 0)));
     }
     // A mark replaces the token it starts (a quoted name's mark sits inside its string token).
     for entry in out.iter_mut() {
@@ -977,7 +1065,10 @@ fn classify(syntax: &SourceSyntax, table: Option<&SymbolTable>) -> Vec<(Span, To
     }
     let mut extra: Vec<(Span, TokenClass)> = Vec::new();
     for (span, mark) in marks.values() {
-        if !out.iter().any(|(s, _)| s.start == span.start && s.end == span.end) {
+        if !out
+            .iter()
+            .any(|(s, _)| s.start == span.start && s.end == span.end)
+        {
             extra.push((*span, *mark));
         }
     }
@@ -996,13 +1087,25 @@ fn classify(syntax: &SourceSyntax, table: Option<&SymbolTable>) -> Vec<(Span, To
             let mut at = span.start;
             for (e, mark) in inside {
                 if e.start > at {
-                    split.push((Span { start: at, end: e.start }, token_class));
+                    split.push((
+                        Span {
+                            start: at,
+                            end: e.start,
+                        },
+                        token_class,
+                    ));
                 }
                 split.push((*e, *mark));
                 at = e.end;
             }
             if at < span.end {
-                split.push((Span { start: at, end: span.end }, token_class));
+                split.push((
+                    Span {
+                        start: at,
+                        end: span.end,
+                    },
+                    token_class,
+                ));
             }
         }
         out = split;
@@ -1022,7 +1125,11 @@ fn encode(source: &str, tokens: Vec<(Span, TokenClass)>) -> SemanticTokens {
             let content = piece.trim_end_matches(['\n', '\r']);
             if !content.is_empty() {
                 let position = offset_to_position(source, start);
-                let delta_line = if first { position.line } else { position.line - previous.line };
+                let delta_line = if first {
+                    position.line
+                } else {
+                    position.line - previous.line
+                };
                 let delta_start = if first || delta_line > 0 {
                     position.character
                 } else {
@@ -1057,8 +1164,22 @@ fn compile(
 ) -> (Vec<Problem>, Option<Value>) {
     match dialect {
         Dialect::Part => compile_part(path, text, table),
-        Dialect::Assembly => cad_front_end(runmat_cad::syntax::parse_assembly(path, text), path, files, text),
-        Dialect::Drawing => cad_front_end(runmat_cad::syntax::parse_drawing(path, text), path, files, text),
+        Dialect::Assembly => {
+            let (mut problems, projection) = cad_front_end(
+                runmat_cad::syntax::parse_assembly(path, text),
+                path,
+                files,
+                text,
+            );
+            problems.extend(assembly_problems(path, text, files));
+            (problems, projection)
+        }
+        Dialect::Drawing => cad_front_end(
+            runmat_cad::syntax::parse_drawing(path, text),
+            path,
+            files,
+            text,
+        ),
         Dialect::Circuit | Dialect::CircuitLayout => {
             let out = runmat_circuit::runtime::check(path, text, files, &Default::default());
             let problems = out
@@ -1085,7 +1206,10 @@ fn compile(
                     }
                 })
                 .collect();
-            (problems, out.index.and_then(|index| serde_json::to_value(index).ok()))
+            (
+                problems,
+                out.index.and_then(|index| serde_json::to_value(index).ok()),
+            )
         }
         Dialect::Fea => (Vec::new(), None),
     }
@@ -1222,7 +1346,11 @@ fn cad_front_end<T>(
             continue;
         }
         let resolved = runmat_circuit::runtime::resolve_path(path, inner);
-        if !files.contains_key(&resolved) && !files.keys().any(|k| k.ends_with(&format!("/{}", inner.trim_start_matches("./")))) {
+        if !files.contains_key(&resolved)
+            && !files
+                .keys()
+                .any(|k| k.ends_with(&format!("/{}", inner.trim_start_matches("./"))))
+        {
             problems.push(Problem {
                 span,
                 severity: DiagnosticSeverity::WARNING,
@@ -1232,4 +1360,38 @@ fn cad_front_end<T>(
         }
     }
     (problems, None)
+}
+
+/// An assembly's resolve diagnostics (mates, patterns, occurrences, configurations), from the
+/// design tools' check over the parts it uses. Front-end and missing-file problems are left to
+/// [`cad_front_end`], which places them on the `use` line.
+fn assembly_problems(path: &str, text: &str, files: &DesignFiles) -> Vec<Problem> {
+    let mut all = files.clone();
+    all.insert(path.to_owned(), text.to_owned());
+    let Ok(out) = runmat_design_tools::check::check(
+        &runmat_design_tools::check::CheckInput {
+            path: path.to_owned(),
+        },
+        &all,
+    ) else {
+        return Vec::new();
+    };
+    out.diagnostics
+        .into_iter()
+        .filter(|d| d.code.is_some())
+        .map(|d| Problem {
+            span: d
+                .range
+                .as_ref()
+                .filter(|r| r.path == path)
+                .map(|r| Span {
+                    start: byte_offset(text, r.start),
+                    end: byte_offset(text, r.end),
+                })
+                .unwrap_or_default(),
+            severity: severity(&d.severity),
+            code: d.code,
+            message: d.message,
+        })
+        .collect()
 }

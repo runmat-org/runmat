@@ -105,7 +105,9 @@ impl SymbolTable {
             }
             table.paths.push(path);
         }
-        table.occurrences.sort_by_key(|o| (o.span.start, o.span.end));
+        table
+            .occurrences
+            .sort_by_key(|o| (o.span.start, o.span.end));
         table.occurrences.dedup();
         table
     }
@@ -146,10 +148,7 @@ impl SymbolTable {
                 let parent = self.symbols[i].parent;
                 match parent {
                     None => ancestors.len(),
-                    Some(p) => ancestors
-                        .iter()
-                        .position(|&a| a == p)
-                        .unwrap_or(usize::MAX),
+                    Some(p) => ancestors.iter().position(|&a| a == p).unwrap_or(usize::MAX),
                 }
             })
             .or_else(|| candidates.first().copied())
@@ -321,8 +320,7 @@ fn collect(
                     .expect("a value statement node");
                 if let Some(name) = v.name() {
                     let keyword = v.keyword();
-                    if dialect == Dialect::CircuitLayout && NET_NAMED.contains(&keyword.as_str())
-                    {
+                    if dialect == Dialect::CircuitLayout && NET_NAMED.contains(&keyword.as_str()) {
                         net_named.push((
                             name.text(),
                             name_span(source, name.syntax()),
@@ -347,7 +345,8 @@ fn collect(
                 let a = runmat_design_syntax::ast::Assignment::cast(child.clone())
                     .expect("an assignment node");
                 let target = a.target();
-                if let (Some(_), [name], Some(Expr::Call(call))) = (parent, target.as_slice(), a.value())
+                if let (Some(_), [name], Some(Expr::Call(call))) =
+                    (parent, target.as_slice(), a.value())
                 {
                     let kind = call
                         .callee()
