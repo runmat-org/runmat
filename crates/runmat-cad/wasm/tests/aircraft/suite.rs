@@ -138,7 +138,7 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
     assert_eq!(of("tyre.part"), 2, "tyre prototypes");
     assert!(protos.iter().any(|p| p["material"] == "glass"), "window panes carry their material");
     // Each part draws in its own color (its finish), apart from its material: dark tinted
-    // cockpit glazing, a light-grey fuselage, a darker wing grey.
+    // windshield, a near-white fuselage, a darker wing grey.
     let appearance = |file: &str| -> Vec<f64> {
         let p = protos
             .iter()
@@ -149,7 +149,7 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
     // It opens on its saved hero view.
     let views = top["projection"]["data"]["views"].as_array().cloned().unwrap_or_default();
     assert!(views.iter().any(|v| v["name"] == "hero" && v["default"] == true), "views {views:?}");
-    let glass = appearance("cockpit_window_front.part");
+    let glass = appearance("cockpit_windshield.part");
     assert!(glass[0] < 0.15 && glass[3] > 0.99, "cockpit glazing {glass:?}");
     let skin = appearance("skin_panel.part");
     let wing = appearance("wing_box_skin_upper.part");

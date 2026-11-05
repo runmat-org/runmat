@@ -111,6 +111,10 @@ fn spar(name: &str, number: &str, at: f64, side: f64) -> String {
     part(name, number, "aluminum_7075", &format!("A spar web at {} % chord, root to tip.", (at * 100.0).round()), &body, "web")
 }
 
+/// How far a rib's caps sit inside the box skins' inner face: deep enough that the rib's spline
+/// section never meets the lofted skin between their stations.
+const RIB_CLEARANCE: f64 = 12.0;
+
 /// A rib between the spars, 20 mm thick, for any station: its chord and thickness ratio are
 /// inputs, so one definition serves every rib (each occurrence sets them).
 fn rib() -> String {
@@ -127,7 +131,7 @@ fn rib() -> String {
                     "[input.chord * ({} + input.thickness * {}) {s} {}, input.chord * {}]",
                     num(camber),
                     num(thick),
-                    mm(SKIN + 1.0),
+                    mm(SKIN + RIB_CLEARANCE),
                     num(x)
                 )
             })

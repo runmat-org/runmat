@@ -104,23 +104,23 @@ pub fn part(name: &str, number: &str, material: &str, comment: &str, body: &str,
     )
 }
 
-/// A generic airliner's finish by part, apart from its material: a light-grey fuselage, slightly
-/// darker wing and tail greys, dark tinted glazing, dark intakes, bare-metal exhaust and gear,
+/// A generic airliner's finish by part, apart from its material: a near-white fuselage and tail,
+/// darker wing greys, dark tinted glazing, dark intakes, bare-metal exhaust and gear,
 /// primer-green inner structure. No airline's livery.
 fn paint(name: &str) -> Option<&'static str> {
     let stem = name.strip_prefix("wing_").unwrap_or(name);
     let stem = stem.strip_suffix("_port").unwrap_or(stem);
     Some(match stem {
-        "nose" | "skin_panel" | "tail_cone" => "#E6E9ED",
+        "nose" | "skin_panel" | "tail_cone" => "#F4F5F7",
         "fairing" | "pylon" => "#C7CCD3",
-        n if n.starts_with("cockpit_window") => "#1A222B",
+        "cockpit_windshield" => "#1F2B36",
         "cabin_window" => "#252E38",
         "frame" | "stringer" | "rib" | "front_spar" | "rear_spar" => "#A7B596",
         "rivet" => "#BFC4CB",
-        "leading_edge" | "slat" | "box_skin_upper" | "box_skin_lower" | "trailing_edge_tip" => "#B6BCC4",
-        "flap_inboard" | "flap_outboard" | "aileron" => "#BDC2C9",
-        "winglet" | "fin" | "rudder" | "stabilizer" | "elevator" => "#CED2D8",
-        "cowl" => "#DCDFE3",
+        "leading_edge" | "slat" | "box_skin_upper" | "box_skin_lower" | "trailing_edge_tip" => "#A8AFB8",
+        "flap_inboard" | "flap_outboard" | "aileron" => "#B1B7BF",
+        "winglet" | "fin" | "rudder" | "stabilizer" | "elevator" => "#E4E7EB",
+        "cowl" => "#E6E9EC",
         "fan" | "spinner" => "#363C44",
         "core_nozzle" | "plug" => "#8A9097",
         "gear_strut" | "axle" | "hub" => "#A2A8AF",

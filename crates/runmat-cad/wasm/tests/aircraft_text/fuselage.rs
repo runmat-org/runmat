@@ -1,4 +1,4 @@
-//! The fuselage: an elliptical nose with cockpit windows, three barrel sections (frames,
+//! The fuselage: an elliptical nose with its windshield, three barrel sections (frames,
 //! stringers, skin panels, flush rivet rings and a row of cabin windows each side), an upswept
 //! tail cone and a wing-to-body fairing.
 
@@ -43,22 +43,51 @@ fn nose() -> String {
     )
 }
 
-/// A cockpit window pane: a band flush with the nose (0.5 mm proud, so it shades over the skin)
-/// between `x0` and `x1`, `angle` round.
-fn cockpit_window(name: &str, x0: f64, x1: f64, angle: f64) -> String {
-    let outer = nose_profile(x0, x1, 0.5, 6);
-    let mut inner = nose_profile(x0, x1, -6.0, 6);
+/// A corner of the windshield's outline rounded by a short spline: from `r` before `p` (towards
+/// `a`) through a point inside the corner to `r` after it (towards `b`).
+fn rounded(a: (f64, f64), p: (f64, f64), b: (f64, f64), r: f64) -> Vec<(f64, f64)> {
+    let unit = |q: (f64, f64)| {
+        let (du, dv) = (q.0 - p.0, q.1 - p.1);
+        let l = du.hypot(dv);
+        (du / l, dv / l)
+    };
+    let (ua, ub) = (unit(a), unit(b));
+    vec![
+        (p.0 + r * ua.0, p.1 + r * ua.1),
+        (p.0 + 0.3 * r * (ua.0 + ub.0), p.1 + 0.3 * r * (ua.1 + ub.1)),
+        (p.0 + r * ub.0, p.1 + r * ub.1),
+    ]
+}
+
+/// The windshield: one tinted pane flush with the nose (0.5 mm proud, so it shades over the
+/// skin), a shell of the nose's own profile cut to the side-view outline of the cockpit
+/// glazing. The outline's sill falls aft from the crown and its brow falls more slowly, so the
+/// front panes meet on the centerline and the side panes taper aft, as on a narrow-body.
+fn windshield() -> String {
+    let (x0, x1) = (1_900.0, 4_700.0);
+    let outer = nose_profile(x0, x1, 0.5, 14);
+    let mut inner = nose_profile(x0, x1, -6.0, 14);
     inner.reverse();
+    // Side view, (z, x): forward sill, aft sill, aft brow, forward brow.
+    let corners = [(1_736.0, 2_000.0), (1_150.0, 4_400.0), (1_560.0, 4_150.0), (2_125.0, 2_000.0)];
+    let mut outline = Vec::new();
+    for k in 0..4 {
+        let (a, p, b) = (corners[(k + 3) % 4], corners[k], corners[(k + 1) % 4]);
+        outline.push(Curve::Spline(rounded(a, p, b, 110.0)));
+        outline.push(Curve::Line(vec![]));
+    }
     part(
-        name,
+        "cockpit_windshield",
         "FUS-WS-030",
         "glass",
-        "A cockpit window pane on the nose's surface, turned about the fuselage axis.",
+        "The cockpit windshield: a shell of the nose's profile cut to the glazing's side-view outline.",
         &format!(
-            "{}    feature pane = revolve(profile = sketch.s, axis = origin.x, angle = {angle} deg)\n",
-            loop_sketch("s", "origin.xy", &[Curve::Spline(outer), Curve::Line(vec![]), Curve::Spline(inner), Curve::Line(vec![])])
+            "{}    feature shell = revolve(profile = sketch.s, axis = origin.x, angle = 360 deg)\n{}    feature pane = extrude(profile = sketch.o, distance = 4400 mm, symmetric, mode = intersect)\n",
+            loop_sketch("s", "origin.xy", &[Curve::Spline(outer), Curve::Line(vec![]), Curve::Spline(inner), Curve::Line(vec![])]),
+            loop_sketch("o", "origin.zx", &outline)
         ),
-        "pane",
+        // The intersect trims the shell's body in place.
+        "shell",
     )
 }
 
@@ -188,9 +217,7 @@ fn fairing() -> String {
 pub fn parts() -> Vec<(String, String)> {
     vec![
         ("nose.part".into(), nose()),
-        ("cockpit_window_front.part".into(), cockpit_window("cockpit_window_front", 2_650.0, 3_450.0, 24.0)),
-        ("cockpit_window_side.part".into(), cockpit_window("cockpit_window_side", 3_250.0, 4_150.0, 22.0)),
-        ("cockpit_window_aft.part".into(), cockpit_window("cockpit_window_aft", 4_250.0, 4_800.0, 16.0)),
+        ("cockpit_windshield.part".into(), windshield()),
         ("frame.part".into(), frame()),
         ("stringer.part".into(), stringer()),
         ("skin_panel.part".into(), skin_panel()),
@@ -241,12 +268,7 @@ pub fn fuselage_section() -> String {
 pub fn fuselage() -> String {
     let mut s = format!("{HEADER}// The fuselage: the nose and its cockpit windows, three barrel sections, the tail cone and the\n// wing-to-body fairing, along x.\nassembly fuselage {{\n");
     s += &use_("part", "nose", "nose", &[]);
-    // Cockpit panes, each side: (part, start angle up from starboard horizontal, sweep).
-    for (name, a0, sweep) in [("cockpit_window_front", 62.0, 24.0), ("cockpit_window_side", 30.0, 22.0), ("cockpit_window_aft", 34.0, 16.0)] {
-        let short = name.trim_start_matches("cockpit_window_");
-        s += &use_("part", name, &format!("{short}_window_starboard"), &[offset_rot(0.0, 0.0, 0.0, [1.0, 0.0, 0.0], a0)]);
-        s += &use_("part", name, &format!("{short}_window_port"), &[offset_rot(0.0, 0.0, 0.0, [1.0, 0.0, 0.0], 180.0 - a0 - sweep)]);
-    }
+    s += &use_("part", "cockpit_windshield", "windshield", &[]);
     for (k, name) in ["forward", "center", "aft"].iter().enumerate() {
         s += &use_("assembly", "fuselage_section", name, &[offset(NOSE + k as f64 * SECTION, 0.0, 0.0)]);
     }
