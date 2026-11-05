@@ -98,44 +98,13 @@ impl PlotRenderer {
             sh,
             is_2d
         );
-        match cam.projection {
-            crate::core::camera::ProjectionType::Orthographic {
-                left,
-                right,
-                bottom,
-                top,
-                ..
-            } => {
-                log::debug!(
-                    target: "runmat_plot.draw_camera",
-                    "draw camera axes_index={} is_2d=true viewport=({}, {}, {}, {}) bounds=({}, {})..({}, {}) cfg_wh=({}, {})",
-                    axes_index,
-                    sx,
-                    sy,
-                    sw,
-                    sh,
-                    left,
-                    bottom,
-                    right,
-                    top,
-                    config.width,
-                    config.height
-                );
-            }
-            crate::core::camera::ProjectionType::Perspective { .. } => {
-                log::debug!(
-                    target: "runmat_plot.draw_camera",
-                    "draw camera axes_index={} is_2d=false viewport=({}, {}, {}, {}) cfg_wh=({}, {})",
-                    axes_index,
-                    sx,
-                    sy,
-                    sw,
-                    sh,
-                    config.width,
-                    config.height
-                );
-            }
-        }
+        log::debug!(
+            target: "runmat_plot.draw_camera",
+            "draw camera axes_index={axes_index} is_2d={is_2d} viewport=({sx}, {sy}, {sw}, {sh}) projection={:?} cfg_wh=({}, {})",
+            cam.projection,
+            config.width,
+            config.height
+        );
 
         // 3D helpers: a horizontal world grid and world-axis ticks. Keeping the
         // grid on XY gives it a stable meaning as the camera moves. Built before the scene's
@@ -412,55 +381,76 @@ impl PlotRenderer {
                 clear_background
             );
 
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Plot Camera Viewport Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target.view,
-                    resolve_target: if use_msaa {
-                        target.resolve_target
+            // Depth-tested edge strokes draw in a second pass that reads the scene's depth, so an
+            // edge under a surface (a fuselage's frames under its skin) stays hidden across the
+            // stroke's whole width (see `edge_stroke::EdgeStrokeShader::depth_probe`).
+            let depth_probe = (!is_2d
+                && render_items
+                    .iter()
+                    .any(|(d, _, _)| d.pipeline_type == crate::core::PipelineType::EdgeStroke))
+            .then(|| {
+                self.wgpu_renderer
+                    .depth_probe_bind_group(emission, &depth_view)
+            })
+            .flatten();
+            for stroke_pass in [false, true] {
+                if stroke_pass && depth_probe.is_none() {
+                    break;
+                }
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(if stroke_pass {
+                        "Plot Camera Viewport Edge Stroke Pass"
                     } else {
-                        None
-                    },
-                    ops: wgpu::Operations {
-                        load: if clear_background {
-                            wgpu::LoadOp::Clear(wgpu::Color {
-                                r: config.background_color.x as f64,
-                                g: config.background_color.y as f64,
-                                b: config.background_color.z as f64,
-                                a: config.background_color.w as f64,
-                            })
-                        } else {
-                            wgpu::LoadOp::Load
-                        },
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: depth_view.as_ref(),
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(match config.depth_mode {
-                            DepthMode::Standard => 1.0,
-                            DepthMode::ReversedZ => 0.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
+                        "Plot Camera Viewport Pass"
                     }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target.view,
+                        resolve_target: if use_msaa {
+                            target.resolve_target
+                        } else {
+                            None
+                        },
+                        ops: wgpu::Operations {
+                            load: if clear_background && !stroke_pass {
+                                wgpu::LoadOp::Clear(wgpu::Color {
+                                    r: config.background_color.x as f64,
+                                    g: config.background_color.y as f64,
+                                    b: config.background_color.z as f64,
+                                    a: config.background_color.w as f64,
+                                })
+                            } else {
+                                wgpu::LoadOp::Load
+                            },
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth_view.as_ref(),
+                        // Read-only in the stroke pass, which samples it.
+                        depth_ops: (!stroke_pass).then_some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(match config.depth_mode {
+                                DepthMode::Standard => 1.0,
+                                DepthMode::ReversedZ => 0.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
 
-            // Apply viewport and scissor rectangle to draw into the plot rect
-            render_pass.set_viewport(
-                sx as f32,
-                sy as f32,
-                sw.max(1) as f32,
-                sh.max(1) as f32,
-                0.0,
-                1.0,
-            );
-            render_pass.set_scissor_rect(sx, sy, sw.max(1), sh.max(1));
-            log::debug!(
+                // Apply viewport and scissor rectangle to draw into the plot rect
+                render_pass.set_viewport(
+                    sx as f32,
+                    sy as f32,
+                    sw.max(1) as f32,
+                    sh.max(1) as f32,
+                    0.0,
+                    1.0,
+                );
+                render_pass.set_scissor_rect(sx, sy, sw.max(1), sh.max(1));
+                log::debug!(
                 "runmat-plot: renderer.camera_to_target_viewport.render_pass_ready axes_index={} viewport=({}, {}, {}, {})",
                 axes_index,
                 sx,
@@ -468,95 +458,101 @@ impl PlotRenderer {
                 sw.max(1),
                 sh.max(1)
             );
-            if let Some(ref vb_grid) = grid_vb_opt {
-                if let Some(ref pipeline) = self.wgpu_renderer.direct_line_pipeline {
-                    log::debug!(
+                if let Some(ref vb_grid) = grid_vb_opt.as_ref().filter(|_| !stroke_pass) {
+                    if let Some(ref pipeline) = self.wgpu_renderer.direct_line_pipeline {
+                        log::debug!(
                         "runmat-plot: renderer.camera_to_target_viewport.draw_grid_start axes_index={} vertex_buffer_size={}",
                         axes_index,
                         vb_grid.size()
                     );
-                    render_pass.set_pipeline(pipeline);
-                    render_pass.set_bind_group(
-                        0,
-                        self.wgpu_renderer
-                            .get_direct_uniform_bind_group_for_axes(axes_index),
-                        &[],
-                    );
-                    render_pass.set_vertex_buffer(0, vb_grid.slice(..));
-                    // Each grid line is two vertices (LineList)
-                    // Draw full buffer
-                    // Note: vertex count equals number of vertices
-                    // wgpu will interpret as lines via pipeline topology
-                    render_pass.draw(
-                        0..(vb_grid.size() / std::mem::size_of::<Vertex>() as u64) as u32,
-                        0..1,
-                    );
-                    log::debug!(
+                        render_pass.set_pipeline(pipeline);
+                        render_pass.set_bind_group(
+                            0,
+                            self.wgpu_renderer
+                                .get_direct_uniform_bind_group_for_axes(axes_index),
+                            &[],
+                        );
+                        render_pass.set_vertex_buffer(0, vb_grid.slice(..));
+                        // Each grid line is two vertices (LineList)
+                        // Draw full buffer
+                        // Note: vertex count equals number of vertices
+                        // wgpu will interpret as lines via pipeline topology
+                        render_pass.draw(
+                            0..(vb_grid.size() / std::mem::size_of::<Vertex>() as u64) as u32,
+                            0..1,
+                        );
+                        log::debug!(
                         "runmat-plot: renderer.camera_to_target_viewport.draw_grid_ok axes_index={}",
                         axes_index
                     );
+                    }
                 }
-            }
 
-            // Use direct pipelines for precise 2D mapping inside the viewport
-            let use_direct_for_triangles = is_2d;
-            let use_direct_for_lines = is_2d;
-            let direct_tri_pipeline = if use_direct_for_triangles && bounds_opt.is_some() {
-                self.wgpu_renderer
-                    .direct_triangle_pipeline
-                    .as_ref()
-                    .map(|p| p as *const wgpu::RenderPipeline)
-            } else {
-                None
-            };
-            let direct_line_pipeline = if use_direct_for_lines && bounds_opt.is_some() {
-                self.wgpu_renderer
-                    .direct_line_pipeline
-                    .as_ref()
-                    .map(|p| p as *const wgpu::RenderPipeline)
-            } else {
-                None
-            };
-            let direct_point_pipeline = if is_2d && bounds_opt.is_some() {
-                self.wgpu_renderer
-                    .direct_point_pipeline
-                    .as_ref()
-                    .map(|p| p as *const wgpu::RenderPipeline)
-            } else {
-                None
-            };
+                // Use direct pipelines for precise 2D mapping inside the viewport
+                let use_direct_for_triangles = is_2d;
+                let use_direct_for_lines = is_2d;
+                let direct_tri_pipeline = if use_direct_for_triangles && bounds_opt.is_some() {
+                    self.wgpu_renderer
+                        .direct_triangle_pipeline
+                        .as_ref()
+                        .map(|p| p as *const wgpu::RenderPipeline)
+                } else {
+                    None
+                };
+                let direct_line_pipeline = if use_direct_for_lines && bounds_opt.is_some() {
+                    self.wgpu_renderer
+                        .direct_line_pipeline
+                        .as_ref()
+                        .map(|p| p as *const wgpu::RenderPipeline)
+                } else {
+                    None
+                };
+                let direct_point_pipeline = if is_2d && bounds_opt.is_some() {
+                    self.wgpu_renderer
+                        .direct_point_pipeline
+                        .as_ref()
+                        .map(|p| p as *const wgpu::RenderPipeline)
+                } else {
+                    None
+                };
 
-            for (idx, (render_data, vertex_buffer, index_buffer)) in render_items.iter().enumerate()
-            {
-                let instanced = instance_buffers[idx].as_ref();
-                if instanced.is_some_and(|(_, count)| *count == 0) {
-                    continue;
-                }
-                let placements = instanced.map(|(_, count)| 0..*count);
-                let is_triangles = matches!(
-                    render_data.pipeline_type,
-                    crate::core::PipelineType::Triangles
-                );
-                let is_lines = matches!(
-                    render_data.pipeline_type,
-                    crate::core::PipelineType::Lines | crate::core::PipelineType::LinesNoDepth
-                );
-                let is_points = matches!(
-                    render_data.pipeline_type,
-                    crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
-                );
-                let is_textured = matches!(
-                    render_data.pipeline_type,
-                    crate::core::PipelineType::Textured
-                );
-                // Use direct mapping for lines/triangles/points for correct pixel-sized markers in GUI
-                let use_direct = is_2d
-                    && ((use_direct_for_triangles && is_triangles)
-                        || (use_direct_for_lines && is_lines)
-                        || is_points)
-                    && bounds_opt.is_some();
-                if render_item_logs {
-                    log::debug!(
+                for (idx, (render_data, vertex_buffer, index_buffer)) in
+                    render_items.iter().enumerate()
+                {
+                    let probed_stroke = depth_probe.is_some()
+                        && render_data.pipeline_type == crate::core::PipelineType::EdgeStroke;
+                    if probed_stroke != stroke_pass {
+                        continue;
+                    }
+                    let instanced = instance_buffers[idx].as_ref();
+                    if instanced.is_some_and(|(_, count)| *count == 0) {
+                        continue;
+                    }
+                    let placements = instanced.map(|(_, count)| 0..*count);
+                    let is_triangles = matches!(
+                        render_data.pipeline_type,
+                        crate::core::PipelineType::Triangles
+                    );
+                    let is_lines = matches!(
+                        render_data.pipeline_type,
+                        crate::core::PipelineType::Lines | crate::core::PipelineType::LinesNoDepth
+                    );
+                    let is_points = matches!(
+                        render_data.pipeline_type,
+                        crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+                    );
+                    let is_textured = matches!(
+                        render_data.pipeline_type,
+                        crate::core::PipelineType::Textured
+                    );
+                    // Use direct mapping for lines/triangles/points for correct pixel-sized markers in GUI
+                    let use_direct = is_2d
+                        && ((use_direct_for_triangles && is_triangles)
+                            || (use_direct_for_lines && is_lines)
+                            || is_points)
+                        && bounds_opt.is_some();
+                    if render_item_logs {
+                        log::debug!(
                         "runmat-plot: renderer.camera_to_target_viewport.draw_item_start axes_index={} item_index={} pipeline={:?} use_direct={} textured={} indexed={} draw_calls={} point_buffer={} ",
                         axes_index,
                         idx,
@@ -567,166 +563,175 @@ impl PlotRenderer {
                         render_data.draw_calls.len(),
                         point_buffers[idx].is_some()
                     );
-                }
-
-                if use_direct {
-                    // Safe because we only read pointers here within pass
-                    let pipeline_ref: &wgpu::RenderPipeline = unsafe {
-                        if is_triangles {
-                            direct_tri_pipeline.unwrap().as_ref().unwrap()
-                        } else if is_lines {
-                            direct_line_pipeline.unwrap().as_ref().unwrap()
-                        } else {
-                            direct_point_pipeline.unwrap().as_ref().unwrap()
-                        }
-                    };
-                    let uniform_bg = self
-                        .wgpu_renderer
-                        .get_direct_uniform_bind_group_for_axes(axes_index);
-                    render_pass.set_pipeline(pipeline_ref);
-                    render_pass.set_bind_group(0, uniform_bg, &[]);
-                    if is_points {
-                        if let Some(ref bg) = point_style_bind_groups[idx] {
-                            render_pass.set_bind_group(1, bg, &[]);
-                        }
                     }
-                    if render_item_logs {
-                        log::debug!(
+
+                    if use_direct {
+                        // Safe because we only read pointers here within pass
+                        let pipeline_ref: &wgpu::RenderPipeline = unsafe {
+                            if is_triangles {
+                                direct_tri_pipeline.unwrap().as_ref().unwrap()
+                            } else if is_lines {
+                                direct_line_pipeline.unwrap().as_ref().unwrap()
+                            } else {
+                                direct_point_pipeline.unwrap().as_ref().unwrap()
+                            }
+                        };
+                        let uniform_bg = self
+                            .wgpu_renderer
+                            .get_direct_uniform_bind_group_for_axes(axes_index);
+                        render_pass.set_pipeline(pipeline_ref);
+                        render_pass.set_bind_group(0, uniform_bg, &[]);
+                        if is_points {
+                            if let Some(ref bg) = point_style_bind_groups[idx] {
+                                render_pass.set_bind_group(1, bg, &[]);
+                            }
+                        }
+                        if render_item_logs {
+                            log::debug!(
                             "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=direct",
                             axes_index,
                             idx
                         );
-                    }
-                } else if is_textured {
-                    let pipeline = self
-                        .wgpu_renderer
-                        .get_pipeline(crate::core::PipelineType::Textured);
-                    render_pass.set_pipeline(pipeline);
-                    render_pass.set_bind_group(
-                        0,
-                        self.wgpu_renderer
-                            .get_direct_uniform_bind_group_for_axes(axes_index),
-                        &[],
-                    );
-                    if let Some(ref bg) = image_bind_groups[idx] {
-                        render_pass.set_bind_group(1, bg, &[]);
-                    }
-                    if render_item_logs {
-                        log::debug!(
+                        }
+                    } else if is_textured {
+                        let pipeline = self
+                            .wgpu_renderer
+                            .get_pipeline(crate::core::PipelineType::Textured);
+                        render_pass.set_pipeline(pipeline);
+                        render_pass.set_bind_group(
+                            0,
+                            self.wgpu_renderer
+                                .get_direct_uniform_bind_group_for_axes(axes_index),
+                            &[],
+                        );
+                        if let Some(ref bg) = image_bind_groups[idx] {
+                            render_pass.set_bind_group(1, bg, &[]);
+                        }
+                        if render_item_logs {
+                            log::debug!(
                             "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=textured",
                             axes_index,
                             idx
                         );
-                    }
-                } else {
-                    let variant = match render_data.pipeline_type {
-                        crate::core::PipelineType::Triangles if instanced.is_some() => {
-                            self.wgpu_renderer.instanced_triangle_pipeline()
                         }
-                        crate::core::PipelineType::EdgeStroke if instanced.is_some() => {
-                            self.wgpu_renderer.edge_stroke_variant(true, false)
-                        }
-                        _ => None,
-                    };
-                    let pipeline = variant.unwrap_or_else(|| {
-                        self.wgpu_renderer.get_pipeline(render_data.pipeline_type)
-                    });
-                    render_pass.set_pipeline(pipeline);
-                    render_pass.set_bind_group(
-                        0,
-                        self.wgpu_renderer
-                            .get_uniform_bind_group_for_axes(axes_index),
-                        &[],
-                    );
-                    if is_points {
-                        if let Some(ref bg) = point_style_bind_groups[idx] {
-                            render_pass.set_bind_group(1, bg, &[]);
-                        }
+                    } else {
+                        let variant = match render_data.pipeline_type {
+                            crate::core::PipelineType::Triangles if instanced.is_some() => {
+                                self.wgpu_renderer.instanced_triangle_pipeline()
+                            }
+                            crate::core::PipelineType::EdgeStroke
+                                if instanced.is_some() || probed_stroke =>
+                            {
+                                self.wgpu_renderer
+                                    .edge_stroke_variant(instanced.is_some(), probed_stroke)
+                            }
+                            _ => None,
+                        };
+                        let pipeline = variant.unwrap_or_else(|| {
+                            self.wgpu_renderer.get_pipeline(render_data.pipeline_type)
+                        });
+                        render_pass.set_pipeline(pipeline);
                         render_pass.set_bind_group(
-                            2,
+                            0,
                             self.wgpu_renderer
-                                .get_marker_screen_bind_group_for_axes(axes_index),
+                                .get_uniform_bind_group_for_axes(axes_index),
                             &[],
                         );
-                    } else if render_data.pipeline_type.binds_screen_uniforms() {
-                        render_pass.set_bind_group(
-                            1,
-                            self.wgpu_renderer
-                                .get_marker_screen_bind_group_for_axes(axes_index),
-                            &[],
-                        );
-                    }
-                    if render_item_logs {
-                        log::debug!(
+                        if let Some(depth) = depth_probe.as_ref().filter(|_| probed_stroke) {
+                            render_pass.set_bind_group(2, depth, &[]);
+                        }
+                        if is_points {
+                            if let Some(ref bg) = point_style_bind_groups[idx] {
+                                render_pass.set_bind_group(1, bg, &[]);
+                            }
+                            render_pass.set_bind_group(
+                                2,
+                                self.wgpu_renderer
+                                    .get_marker_screen_bind_group_for_axes(axes_index),
+                                &[],
+                            );
+                        } else if render_data.pipeline_type.binds_screen_uniforms() {
+                            render_pass.set_bind_group(
+                                1,
+                                self.wgpu_renderer
+                                    .get_marker_screen_bind_group_for_axes(axes_index),
+                                &[],
+                            );
+                        }
+                        if render_item_logs {
+                            log::debug!(
                             "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=standard",
                             axes_index,
                             idx
                         );
+                        }
                     }
-                }
 
-                if is_points && use_direct {
-                    if let Some((ref buf, len)) = point_buffers[idx] {
-                        render_pass.set_vertex_buffer(0, buf.slice(..));
-                        render_pass.draw(0..len as u32, 0..1);
-                        if render_item_logs {
-                            log::debug!(
+                    if is_points && use_direct {
+                        if let Some((ref buf, len)) = point_buffers[idx] {
+                            render_pass.set_vertex_buffer(0, buf.slice(..));
+                            render_pass.draw(0..len as u32, 0..1);
+                            if render_item_logs {
+                                log::debug!(
                                 "runmat-plot: renderer.camera_to_target_viewport.draw_item_ok axes_index={} item_index={} mode=direct_points vertices={}",
                                 axes_index,
                                 idx,
                                 len
                             );
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                } else if is_points {
-                    if let Some((ref buf, _len)) = point_buffers[idx] {
-                        render_pass.set_vertex_buffer(0, buf.slice(..));
+                    } else if is_points {
+                        if let Some((ref buf, _len)) = point_buffers[idx] {
+                            render_pass.set_vertex_buffer(0, buf.slice(..));
+                        } else {
+                            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                        }
                     } else {
                         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                     }
-                } else {
-                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                }
-                if let Some((buffer, _)) = instanced {
-                    render_pass.set_vertex_buffer(1, buffer.slice(..));
-                }
-                if let Some(index_buffer_ref) = index_buffer {
-                    render_pass
-                        .set_index_buffer(index_buffer_ref.slice(..), wgpu::IndexFormat::Uint32);
-                    if let Some(indices) = &render_data.indices {
-                        for (index_range, instance_range) in
-                            indexed_draw_ranges(&render_data.draw_calls, indices.len())
-                        {
-                            render_pass.draw_indexed(
-                                index_range,
-                                0,
-                                placements.clone().unwrap_or(instance_range),
-                            );
-                        }
-                        if render_item_logs {
-                            log::debug!(
+                    if let Some((buffer, _)) = instanced {
+                        render_pass.set_vertex_buffer(1, buffer.slice(..));
+                    }
+                    if let Some(index_buffer_ref) = index_buffer {
+                        render_pass.set_index_buffer(
+                            index_buffer_ref.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        if let Some(indices) = &render_data.indices {
+                            for (index_range, instance_range) in
+                                indexed_draw_ranges(&render_data.draw_calls, indices.len())
+                            {
+                                render_pass.draw_indexed(
+                                    index_range,
+                                    0,
+                                    placements.clone().unwrap_or(instance_range),
+                                );
+                            }
+                            if render_item_logs {
+                                log::debug!(
                                 "runmat-plot: renderer.camera_to_target_viewport.draw_item_ok axes_index={} item_index={} mode=indexed indices={}",
                                 axes_index,
                                 idx,
                                 indices.len()
                             );
+                            }
                         }
-                    }
-                } else {
-                    if is_points {
-                        if let Some((_, len)) = point_buffers[idx] {
-                            render_pass.draw(0..len as u32, 0..1);
-                            continue;
+                    } else {
+                        if is_points {
+                            if let Some((_, len)) = point_buffers[idx] {
+                                render_pass.draw(0..len as u32, 0..1);
+                                continue;
+                            }
                         }
-                    }
-                    for dc in &render_data.draw_calls {
-                        render_pass.draw(
-                            dc.vertex_offset as u32..(dc.vertex_offset + dc.vertex_count) as u32,
-                            placements.clone().unwrap_or(0..dc.instance_count as u32),
-                        );
-                        if render_item_logs {
-                            log::debug!(
+                        for dc in &render_data.draw_calls {
+                            render_pass.draw(
+                                dc.vertex_offset as u32
+                                    ..(dc.vertex_offset + dc.vertex_count) as u32,
+                                placements.clone().unwrap_or(0..dc.instance_count as u32),
+                            );
+                            if render_item_logs {
+                                log::debug!(
                                 "runmat-plot: renderer.camera_to_target_viewport.draw_call_ok axes_index={} item_index={} mode=draw vertex_offset={} vertex_count={} instances={}",
                                 axes_index,
                                 idx,
@@ -734,38 +739,40 @@ impl PlotRenderer {
                                 dc.vertex_count,
                                 dc.instance_count
                             );
+                            }
                         }
                     }
                 }
-            }
 
-            // Draw procedural 3D grid plane after data, depth-tested (no depth writes).
-            if let Some((ref vb, ref ib)) = grid_plane_buffers {
-                if let Some(pipeline) = self.wgpu_renderer.grid_plane_pipeline() {
-                    log::debug!(
+                // Draw procedural 3D grid plane after data, depth-tested (no depth writes).
+                if let Some((ref vb, ref ib)) = grid_plane_buffers.as_ref().filter(|_| !stroke_pass)
+                {
+                    if let Some(pipeline) = self.wgpu_renderer.grid_plane_pipeline() {
+                        log::debug!(
                         "runmat-plot: renderer.camera_to_target_viewport.draw_grid_plane_start axes_index={}",
                         axes_index
                     );
-                    render_pass.set_pipeline(pipeline);
-                    render_pass.set_bind_group(
-                        0,
-                        self.wgpu_renderer
-                            .get_uniform_bind_group_for_axes(axes_index),
-                        &[],
-                    );
-                    render_pass.set_bind_group(
-                        1,
-                        self.wgpu_renderer
-                            .get_grid_uniform_bind_group_for_axes(axes_index),
-                        &[],
-                    );
-                    render_pass.set_vertex_buffer(0, vb.slice(..));
-                    render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-                    render_pass.draw_indexed(0..6, 0, 0..1);
-                    log::debug!(
+                        render_pass.set_pipeline(pipeline);
+                        render_pass.set_bind_group(
+                            0,
+                            self.wgpu_renderer
+                                .get_uniform_bind_group_for_axes(axes_index),
+                            &[],
+                        );
+                        render_pass.set_bind_group(
+                            1,
+                            self.wgpu_renderer
+                                .get_grid_uniform_bind_group_for_axes(axes_index),
+                            &[],
+                        );
+                        render_pass.set_vertex_buffer(0, vb.slice(..));
+                        render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                        render_pass.draw_indexed(0..6, 0, 0..1);
+                        log::debug!(
                         "runmat-plot: renderer.camera_to_target_viewport.draw_grid_plane_ok axes_index={}",
                         axes_index
                     );
+                    }
                 }
             }
         }
