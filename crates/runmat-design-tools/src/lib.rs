@@ -26,6 +26,7 @@ use std::collections::BTreeMap;
 pub mod check;
 pub mod edit;
 pub mod exchange;
+pub mod guides;
 pub mod inspect;
 mod locate;
 #[cfg(feature = "render")]
