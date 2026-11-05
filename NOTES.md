@@ -431,3 +431,11 @@ qmf15-est.py (surface growth estimate), qmf15-dbgpatch.py (FACEGAP prints to $QM
   is gone), then OrderElevation fails: solver projection needs > 536,870,912 bytes (ARTIFACT 512 MiB limit),
   3030 s, peak RSS 20.1 GB. The thin plates sized to one layer (lid 2 mm, pad 3 mm) dominate.
 - mod2: target 20 mm, maximum_grading_ratio 2.0 (cell interiors only).
+- mod2 (20 mm, grading 2.0): same projection failure (> 512 MiB) after 2814 s, peak RSS 10.8 GB.
+- e554a9dde5: MeshingCanonicalLimits::ARTIFACT 512 MiB / 20M items -> 2 GiB / 50M items (solver mesh
+  artifact and projection). The error's own remediation names this budget; coordinator may veto.
+  CLI ~/fea-cli/runmat-qmf16-e554a9dde5.
+- mod3 (e554a9dde5, mod2 settings): meshing and projection pass; fails after 3922 s (peak RSS 13.7 GB) in
+  thermal solve preparation: "invalid FEA resource fact: thermal host demand requires numerical storage,
+  samples and valid inputs without accelerators" (planning/resource/estimate/thermal.rs, 6 conditions in
+  one message). 188302a06e splits the check so the error names the condition and its byte counts.
