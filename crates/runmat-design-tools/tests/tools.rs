@@ -359,6 +359,7 @@ fn the_catalog_declares_every_tool_with_object_schemas() {
         "design.import",
         "design.export",
         "design.propose_edit",
+        "design.overview",
     ] {
         assert!(names.iter().any(|x| x == n), "{n}");
     }

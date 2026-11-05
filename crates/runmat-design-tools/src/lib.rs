@@ -11,6 +11,7 @@
 //! | `design.drc`, `design.erc` | Structured violations: rule, objects, location and source range. |
 //! | `design.import` | KiCad projects and STEP files in, as staged RunMat sources. |
 //! | `design.export` | STEP, STL, 3MF, glTF, DXF (drawing sheets and flat patterns) and KiCad out. |
+//! | `design.overview` | What a file is, its state from the checks above, the files linked to it and their status, the decisions its guides still need, and two or three next steps. |
 //! | `design.propose_edit` | Source text or a catalog command with its values, as a staged change with its diff and the diagnostics after it. |
 //!
 //! Every tool is a pure function of its input and the workspace [`Files`] (path → text) the
@@ -31,6 +32,7 @@ pub mod guides;
 pub mod inspect;
 pub mod kernel;
 mod locate;
+pub mod overview;
 #[cfg(feature = "render")]
 pub mod render;
 pub mod rules;
@@ -231,6 +233,11 @@ pub fn catalog() -> Vec<ToolDefinition> {
             "Simulate circuit",
             "Use this to simulate a .circuit: runs its `simulation` section (operating point, DC sweep, AC, transient and Monte Carlo over component tolerances) on RunMat's circuit engine and returns the probed nets' waveforms (transient and DC in volts, AC as dB and degrees), each measurement (Monte Carlo ones with mean, standard deviation and a histogram), the parts left out for want of a model, and the measured operations.",
         ),
+        definition::<overview::OverviewInput, overview::OverviewOutput>(
+            "design.overview",
+            "Overview design file",
+            "Use this first when a design file is opened or before planning work on it: says what the file is, its state from the real checks (regeneration, ERC and DRC counts, whether the board has the schematic's changes, unplaced parts, simulation sections), the project files linked to it (a part's studies and drawings, a schematic's board and the board's studies and enclosure) with their status, the decisions its guides still need, and two or three next steps, each a guide or a catalog command. Every fact names the check it came from.",
+        ),
         definition::<edit::ProposeEditInput, edit::StagedChange>(
             "design.propose_edit",
             "Propose design edit",
@@ -264,6 +271,7 @@ pub fn call(name: &str, input: Value, files: &Files) -> ToolResult {
         "design.import" => out(exchange::import(&parse(input)?, files)?),
         "design.propose_edit" => out(edit::propose(&parse(input)?, files)?),
         "design.simulate" => out(simulate::simulate(&parse(input)?, files)?),
+        "design.overview" => out(overview::overview(&parse(input)?, files)?),
         "design.render" => render_call(input, files),
         other => Err(ToolError::new(
             "unknown_tool",
@@ -366,7 +374,7 @@ mod tests {
         names.sort();
         names.dedup();
         assert_eq!(names.len(), tools.len());
-        assert_eq!(names.len(), 9);
+        assert_eq!(names.len(), 10);
         for t in &tools {
             assert!(t.name.starts_with("design."));
             assert!(t.description.starts_with("Use this"));
