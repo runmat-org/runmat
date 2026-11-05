@@ -41,6 +41,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod annotate;
 mod autoroute;
+pub mod delta;
 mod edit;
 mod kicad;
 mod rules;

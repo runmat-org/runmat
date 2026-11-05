@@ -7,6 +7,8 @@
 //! - `dependencies(path, text)` → `["/p/io.circuit", …]`
 //! - `compile(path, text, files, options)` → `{ index?, diagnostics }`; the module keeps the
 //!   last circuit's state, so recompiling after a small edit patches it
+//! - `compile_delta(path, text, files, options, base)` → `{ seq, index? | delta?, diagnostics }`:
+//!   what changed since projection `base` ([`delta`])
 //! - `review(path, text, files, options)` → `{ eco?, back_annotation?, diagnostics }`
 //! - `edit(path, text, files, request)` → `{ ok: true, files, summary }` or
 //!   `{ ok: false, message, diagnostics }`
@@ -14,7 +16,9 @@
 //!
 //! Malformed JSON input is reported the same way as a failed edit, never as a panic.
 
+mod delta;
 mod simulate;
+pub use delta::{compile_delta, large_project};
 pub use simulate::{simulate_begin, simulate_end, simulate_step, simulation_setup};
 
 use runmat_circuit::runtime::{self, CompileOptions, EditRequest, Files, Session};
@@ -25,7 +29,7 @@ use wasm_bindgen::prelude::*;
 thread_local! {
     /// The module's runtime session: the last circuit's compiled state, so a small edit
     /// recompiles only what it changed (`runmat_circuit::runtime::Session`).
-    static SESSION: RefCell<Session> = RefCell::new(Session::new());
+    pub(crate) static SESSION: RefCell<Session> = RefCell::new(Session::new());
 }
 
 fn json<T: Serialize>(value: &T) -> String {
@@ -33,11 +37,11 @@ fn json<T: Serialize>(value: &T) -> String {
         .unwrap_or_else(|e| error_json(&format!("the result can't be written: {e}")))
 }
 
-fn error_json(message: &str) -> String {
+pub(crate) fn error_json(message: &str) -> String {
     serde_json::json!({ "ok": false, "message": message, "diagnostics": [] }).to_string()
 }
 
-fn parse<T: serde::de::DeserializeOwned + Default>(text: &str, what: &str) -> Result<T, String> {
+pub(crate) fn parse<T: serde::de::DeserializeOwned + Default>(text: &str, what: &str) -> Result<T, String> {
     if text.trim().is_empty() {
         return Ok(T::default());
     }

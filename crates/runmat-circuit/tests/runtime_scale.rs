@@ -5,15 +5,11 @@
 //!
 //! Run with `--release --nocapture` for the timing lines.
 
-use runmat_circuit::fixture::{self, LargeParams};
+use runmat_circuit::fixture;
 use runmat_circuit::runtime::{self, CompileOptions, EditRequest, Files, Session};
-use runmat_circuit::syntax::board::print_board;
-use runmat_circuit::syntax::print_circuit;
-use runmat_design_syntax::document::UseItem;
 use std::time::{Duration, Instant};
 
-const CIRCUIT: &str = "/p/big.circuit";
-const LAYOUT: &str = "/p/big.circuit.layout";
+const LAYOUT: &str = fixture::LARGE_LAYOUT;
 
 /// The edit budget: edit and recompile under 0.5 s in release. Debug builds run the same
 /// code unoptimised, about ten times slower.
@@ -26,31 +22,7 @@ fn budget() -> Duration {
 }
 
 fn project() -> (Files, usize) {
-    let params = LargeParams {
-        channels: 700,
-        copper_layers: 8,
-        route_every: 1,
-        pours: true,
-    };
-    let (_, mut design, _, mut board) = fixture::large(&params);
-    design.name = "big".into();
-    board.name = "big".into();
-    let primitives = board.footprints.len()
-        + board.tracks.len()
-        + board.vias.len()
-        + board.zones.len()
-        + board.all_pads().len();
-    let uses = vec![UseItem {
-        symbol: Some(("circuit".into(), "big".into())),
-        from: "./big.circuit".into(),
-        alias: None,
-        revision: None,
-        span: Default::default(),
-    }];
-    let mut files = Files::new();
-    files.insert(CIRCUIT.into(), print_circuit(&design).expect("prints"));
-    files.insert(LAYOUT.into(), print_board(&board, &uses));
-    (files, primitives)
+    fixture::large_files(&fixture::scale_params())
 }
 
 fn request(command: &str, values: serde_json::Value, selection: &[String]) -> EditRequest {
@@ -122,8 +94,34 @@ fn small_edits_on_a_large_board_stay_within_budget() {
         serde_json::json!({ "dx": 0.5, "dy": 0.0 }),
         &[format!("component:{fp}")],
     );
+    let before = session.index().cloned().expect("compiled");
     let (edit, compile) = edit_and_compile(&mut session, &mut files, &mv);
     eprintln!("move {fp}: edit {edit:?}, recompile {compile:?}");
+    // The worker sends the change, not the projection: a few rows, and applying them gives
+    // the new projection exactly.
+    let after = session.index().expect("compiled");
+    let t = Instant::now();
+    let snapshot = after.clone();
+    eprintln!("projection clone (the module keeps one per recompile): {:?}", t.elapsed());
+    drop(snapshot);
+    let t = Instant::now();
+    let delta = runtime::delta::index_delta(&before, after);
+    let delta_text = delta.to_string();
+    let delta_time = t.elapsed();
+    let whole_text = serde_json::to_string(after).unwrap();
+    eprintln!("move delta: {} bytes in {delta_time:?}; whole projection {} bytes", delta_text.len(), whole_text.len());
+    for part in ["fields", "board"] {
+        for (k, v) in delta[part].as_object().into_iter().flatten() {
+            for (k2, v2) in v.as_object().into_iter().flatten() {
+                eprintln!("  {part}.{k}.{k2}: {} bytes", v2.to_string().len());
+            }
+            if !v.is_object() {
+                eprintln!("  {part}.{k}: {} bytes", v.to_string().len());
+            }
+        }
+    }
+    assert!(delta_text.len() < 64 * 1024, "delta {} bytes, projection {}", delta_text.len(), whole_text.len());
+    assert!(runtime::delta::apply_index_delta(&before, &delta).unwrap() == *after, "the delta applied to the old projection differs from the new one");
     assert!(edit + compile < budget(), "move took {:?}", edit + compile);
     // The patched projection is the one a fresh compile gives.
     let fresh = runtime::compile(LAYOUT, &files[LAYOUT], &files, &CompileOptions::default());
