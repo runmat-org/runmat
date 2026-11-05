@@ -1,21 +1,33 @@
-//! MOSFET, level 1 (Shichman–Hodges): square-law drain current with body effect and
-//! channel-length modulation, symmetric source/drain, drain and source resistances, and
+//! MOSFET, levels 1 (Shichman–Hodges: square-law drain current with body effect and
+//! channel-length modulation), 2 and 3 (see [`super::mos_levels`]): symmetric source/drain,
+//! drain and source resistances, and
 //! constant gate capacitances (overlap plus two-thirds of the channel's oxide capacitance on the
 //! gate–source side) and bulk junction capacitances.
 //!
-//! Model `NMOS`/`PMOS` parameters: `level=1 vto kp gamma phi lambda rd rs cgso cgdo cgbo cbd cbs
-//! tox ld uo`. The instance takes `l w` and `off`.
+//! Model `NMOS`/`PMOS` parameters: `level vto kp gamma phi lambda rd rs cgso cgdo cgbo cbd cbs
+//! tox ld uo nsub`, at level 2 also `delta ucrit uexp utra`, at level 3 `delta theta eta vmax
+//! kappa xj`. Without `gamma` or `phi`, `nsub` (cm⁻³) and `tox` give them as SPICE does:
+//! `γ = √(2·q·εsi·Nsub)/Cox`, `φ = 2·Vt·ln(Nsub/ni)`. The instance takes `l w` and `off`.
 
 use super::junction::Params;
+use super::mos_levels::{Geometry, Level2, Level3};
 use super::{node_v, Device, Load, Setup, States};
 use crate::num::Dual;
 
 pub const KNOWN: &[&str] = &[
     "level", "vto", "vt0", "kp", "gamma", "phi", "lambda", "rd", "rs", "cgso", "cgdo", "cgbo", "cbd", "cbs", "tox", "ld", "uo", "u0", "l", "w",
+    "nsub", "delta", "ucrit", "uexp", "utra", "theta", "eta", "vmax", "kappa", "xj",
 ];
 pub const IGNORED: &[&str] = &[
-    "is", "js", "pb", "cj", "mj", "cjsw", "mjsw", "fc", "kf", "af", "nsub", "nss", "tpg", "xj", "rsh", "tnom", "mfg", "nfs", "neff",
+    "is", "js", "pb", "cj", "mj", "cjsw", "mjsw", "fc", "kf", "af", "nss", "tpg", "rsh", "tnom", "mfg", "nfs", "neff",
 ];
+
+/// The drain-current law of the model's level.
+pub enum Law {
+    One,
+    Two(Level2),
+    Three(Level3),
+}
 
 pub struct Mosfet {
     pub name: String,
@@ -38,14 +50,15 @@ pub struct Mosfet {
     pub states: usize,
     pub mem: usize,
     pub off: bool,
+    pub law: Law,
 }
 
 impl Mosfet {
     #[allow(clippy::too_many_arguments)]
     pub fn new(name: &str, pmos: bool, nodes: [usize; 4], p: &Params, l: Option<f64>, w: Option<f64>, off: bool, s: &mut Setup) -> Result<Mosfet, String> {
         let level = p.get("level", 1.0);
-        if level != 1.0 {
-            return Err(format!("`{name}`: MOSFET level {level} is not supported yet (level 1 is)"));
+        if ![1.0, 2.0, 3.0].contains(&level) {
+            return Err(format!("`{name}`: MOSFET level {level} is not supported yet (levels 1, 2 and 3 are)"));
         }
         let l = l.unwrap_or(p.get("l", 100e-6));
         let w = w.unwrap_or(p.get("w", 100e-6));
@@ -60,6 +73,19 @@ impl Mosfet {
             p.get("uo", p.get("u0", 600.0)) * 1e-4 * cox
         } else {
             2e-5
+        };
+        // Substrate doping gives γ and φ where the card leaves them out.
+        let nsub = p.get("nsub", 0.0) * 1e6;
+        let (eps_si, q, ni) = (11.7 * 8.854_187_8e-12, 1.602_176_634e-19, 1.45e16);
+        let gamma = if p.has("gamma") || nsub <= 0.0 || cox <= 0.0 { p.get("gamma", 0.0) } else { (2.0 * q * eps_si * nsub).sqrt() / cox };
+        let phi = if p.has("phi") || nsub <= ni { p.get("phi", 0.6) } else { 2.0 * super::K_OVER_Q * 300.15 * (nsub / ni).ln() };
+        let vto = p.get("vto", p.get("vt0", 0.0));
+        let beta = kp * w / leff;
+        let geo = Geometry::new(p, leff, w, cox);
+        let law = match level as i32 {
+            2 => Law::Two(Level2::new(p, &geo, vto, beta, gamma, phi)),
+            3 => Law::Three(Level3::new(p, &geo, vto, beta, gamma, phi)),
+            _ => Law::One,
         };
         let [d, g, src, b] = nodes;
         let (rd, rs) = (p.get("rd", 0.0), p.get("rs", 0.0));
@@ -81,10 +107,10 @@ impl Mosfet {
             b,
             di,
             si,
-            vto: p.get("vto", p.get("vt0", 0.0)),
-            beta: kp * w / leff,
-            gamma: p.get("gamma", 0.0),
-            phi: p.get("phi", 0.6),
+            vto,
+            beta,
+            gamma,
+            phi,
             lambda: p.get("lambda", 0.0),
             gd: if rd > 0.0 { 1.0 / rd } else { 0.0 },
             gs: if rs > 0.0 { 1.0 / rs } else { 0.0 },
@@ -98,11 +124,17 @@ impl Mosfet {
             states,
             mem,
             off,
+            law,
         })
     }
 
     /// Drain current (drain to source, NMOS orientation) for `vds ≥ 0`.
     fn ids(&self, vgs: Dual<3>, vds: Dual<3>, vbs: Dual<3>) -> Dual<3> {
+        match &self.law {
+            Law::Two(l) => return l.ids(vgs, vds, vbs),
+            Law::Three(l) => return l.ids(vgs, vds, vbs),
+            Law::One => {}
+        }
         let sphi = self.phi.sqrt();
         let sarg = if vbs.v <= 0.0 {
             (self.phi - vbs).sqrt()

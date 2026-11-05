@@ -14,6 +14,7 @@ pub mod bjt;
 pub mod controlled;
 pub mod diode;
 pub mod junction;
+pub mod mos_levels;
 pub mod mosfet;
 pub mod opamp;
 pub mod passive;
