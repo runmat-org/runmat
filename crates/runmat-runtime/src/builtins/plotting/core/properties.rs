@@ -1270,6 +1270,13 @@ fn apply_text_property(
                 plotting_error(builtin, format!("{builtin}: Visible must be logical"))
             })?
         }
+        // MATLAB's text anchors: where the point sits on the text's box.
+        "horizontalalignment" => {
+            style.horizontal_alignment = Some(text_alignment(&text_input, builtin, "HorizontalAlignment", &["left", "center", "right"])?)
+        }
+        "verticalalignment" => {
+            style.vertical_alignment = Some(text_alignment(&text_input, builtin, "VerticalAlignment", &["middle", "top", "bottom", "baseline", "cap"])?)
+        }
         other => {
             return Err(plotting_error(
                 builtin,
@@ -1278,6 +1285,15 @@ fn apply_text_property(
         }
     }
     Ok(())
+}
+
+/// A text alignment value, lowercased, from MATLAB's set for `name`.
+fn text_alignment(input: &ValidatedStyleValue<'_>, builtin: &'static str, name: &str, allowed: &[&str]) -> BuiltinResult<String> {
+    let value = input.text().map(|t| t.trim().to_ascii_lowercase());
+    match value {
+        Some(v) if allowed.contains(&v.as_str()) => Ok(v),
+        _ => Err(plotting_error(builtin, format!("{builtin}: {name} must be one of {}", allowed.join(", ")))),
+    }
 }
 
 fn apply_legend_property(

@@ -20,6 +20,9 @@ mod grid_lines;
 mod geometry_presentation;
 #[path = "plot_renderer/overlay_queries.rs"]
 mod overlay_queries;
+#[path = "plot_renderer/data_primitives.rs"]
+mod data_primitives;
+pub use data_primitives::DataPrimitive;
 #[path = "plot_renderer/free_helpers.rs"]
 mod free_helpers;
 #[cfg(test)]

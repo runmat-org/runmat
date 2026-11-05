@@ -2931,12 +2931,14 @@ impl PlotOverlay {
         }
     }
 
-    /// An axes' data positions on screen in `plot_rect`, for a legend placed `best`. Log axes
-    /// keep data units in the scene and map by their logarithm, as the ticks do.
-    fn legend_obstacles(plot_renderer: &PlotRenderer, axes_index: usize, plot_rect: Rect) -> Vec<Pos2> {
-        let Some((l, r, b, t)) = plot_renderer.view_bounds_for_axes(axes_index) else {
-            return Vec::new();
-        };
+    /// An axes' drawn data on screen in `plot_rect`, for a legend placed `best`: lines as their
+    /// segments and filled marks as their triangles. Log axes keep data units in the scene and
+    /// map by their logarithm, as the ticks do.
+    /// Maps an axes' data coordinates to screen points in `plot_rect`. Log axes keep data units
+    /// in the scene and map by their logarithm, as the ticks do; a value a log axis can't show
+    /// (zero or negative) maps to nothing.
+    fn data_to_screen(plot_renderer: &PlotRenderer, axes_index: usize, plot_rect: Rect) -> Option<impl Fn([f32; 2]) -> Option<Pos2>> {
+        let (l, r, b, t) = plot_renderer.view_bounds_for_axes(axes_index)?;
         let along = |log: bool, lo: f64, hi: f64| -> Option<Box<dyn Fn(f32) -> Option<f32>>> {
             if log {
                 if lo <= 0.0 || hi <= 0.0 {
@@ -2949,29 +2951,51 @@ impl PlotOverlay {
                 ((hi - lo).abs() > f64::EPSILON).then(|| Box::new(move |v: f32| Some(((f64::from(v) - lo) / (hi - lo)) as f32)) as Box<dyn Fn(f32) -> Option<f32>>)
             }
         };
-        let (Some(fx), Some(fy)) = (
-            along(plot_renderer.overlay_x_log_for_axes(axes_index), l, r),
-            along(plot_renderer.overlay_y_log_for_axes(axes_index), b, t),
-        ) else {
-            return Vec::new();
+        let fx = along(plot_renderer.overlay_x_log_for_axes(axes_index), l, r)?;
+        let fy = along(plot_renderer.overlay_y_log_for_axes(axes_index), b, t)?;
+        Some(move |[x, y]: [f32; 2]| -> Option<Pos2> {
+            let (u, v) = (fx(x)?, fy(y)?);
+            Some(Pos2::new(plot_rect.min.x + u * plot_rect.width(), plot_rect.max.y - v * plot_rect.height()))
+        })
+    }
+
+    fn legend_obstacles(plot_renderer: &PlotRenderer, axes_index: usize, plot_rect: Rect) -> super::legend_placement::Obstacles {
+        use crate::core::plot_renderer::DataPrimitive;
+        let mut obstacles = super::legend_placement::Obstacles::new(plot_rect);
+        let (Some((l, r, b, t)), Some(screen)) = (plot_renderer.view_bounds_for_axes(axes_index), Self::data_to_screen(plot_renderer, axes_index, plot_rect)) else {
+            return obstacles;
         };
-        // Reference lines (spec limits, a mean) are data too: sample each across the axes.
-        let mut data = plot_renderer.overlay_data_points_for_axes(axes_index, 20_000);
-        for (orientation, value) in plot_renderer.overlay_reference_lines_for_axes(axes_index) {
-            for k in 0..=64 {
-                let f = k as f64 / 64.0;
-                data.push(match orientation {
-                    crate::plots::ReferenceLineOrientation::Vertical => [value as f32, (b + f * (t - b)) as f32],
-                    crate::plots::ReferenceLineOrientation::Horizontal => [(l + f * (r - l)) as f32, value as f32],
-                });
+        for primitive in plot_renderer.overlay_data_primitives_for_axes(axes_index, 200_000) {
+            match primitive {
+                DataPrimitive::Point(p) => {
+                    if let Some(p) = screen(p) {
+                        obstacles.point(p);
+                    }
+                }
+                DataPrimitive::Segment([a, b]) => {
+                    if let (Some(a), Some(b)) = (screen(a), screen(b)) {
+                        obstacles.segment(a, b);
+                    }
+                }
+                DataPrimitive::Triangle([a, b, c]) => {
+                    if let (Some(a), Some(b), Some(c)) = (screen(a), screen(b), screen(c)) {
+                        obstacles.triangle(a, b, c);
+                    }
+                }
             }
         }
-        data.into_iter()
-            .filter_map(|[x, y]| {
-                let (u, v) = (fx(x)?, fy(y)?);
-                Some(Pos2::new(plot_rect.min.x + u * plot_rect.width(), plot_rect.max.y - v * plot_rect.height()))
-            })
-            .collect()
+        // Reference lines (spec limits, a mean) are data too: each spans the axes.
+        for (orientation, value) in plot_renderer.overlay_reference_lines_for_axes(axes_index) {
+            let v = value as f32;
+            let (p, q) = match orientation {
+                crate::plots::ReferenceLineOrientation::Vertical => ([v, b as f32], [v, t as f32]),
+                crate::plots::ReferenceLineOrientation::Horizontal => ([l as f32, v], [r as f32, v]),
+            };
+            if let (Some(p), Some(q)) = (screen(p), screen(q)) {
+                obstacles.segment(p, q);
+            }
+        }
+        obstacles
     }
 
     fn draw_axes_legend(&self, ui: &mut egui::Ui, plot_rect: Rect, plot_renderer: &PlotRenderer, axes_index: usize, scale: f32) {
@@ -2979,12 +3003,12 @@ impl PlotOverlay {
         let location = plot_renderer
             .overlay_legend_style_for_axes(axes_index)
             .and_then(|s| s.location.clone());
-        let points = if location.as_deref().is_some_and(|l| l.trim().eq_ignore_ascii_case("best")) {
+        let obstacles = if location.as_deref().is_some_and(|l| l.trim().to_ascii_lowercase().starts_with("best")) {
             Self::legend_obstacles(plot_renderer, axes_index, plot_rect)
         } else {
-            Vec::new()
+            super::legend_placement::Obstacles::new(plot_rect)
         };
-        self.draw_legend(ui, plot_rect, &entries, scale, location.as_deref(), &points);
+        self.draw_legend(ui, plot_rect, &entries, scale, location.as_deref(), &obstacles);
     }
 
     fn draw_legend(
@@ -2994,7 +3018,7 @@ impl PlotOverlay {
         entries: &[crate::plots::figure::LegendEntry],
         scale: f32,
         location: Option<&str>,
-        points: &[Pos2],
+        obstacles: &super::legend_placement::Obstacles,
     ) {
         if entries.is_empty() {
             return;
@@ -3038,7 +3062,7 @@ impl PlotOverlay {
             .max(92.0)
             .min((plot_rect.width() - 2.0 * pad).max(92.0));
         let size = egui::vec2(legend_w + pad, 4.0 * scale + entries.len() as f32 * row_h + pad);
-        let origin = super::legend_placement::legend_origin(plot_rect, size, pad, location, points);
+        let origin = super::legend_placement::legend_origin(plot_rect, size, pad, location, obstacles);
         let x = origin.x + pad;
         let mut y = origin.y + 4.0 * scale;
         let legend_rect = Rect::from_min_size(origin, size);
@@ -3381,14 +3405,24 @@ impl PlotOverlay {
         };
         let annotations = plot_renderer.world_text_annotations_for_axes(axes_index);
         let is_3d = Self::axes_is_3d(plot_renderer, axes_index);
+        // On a 2D axes with a log scale, the scene keeps data units and the shaders map them by
+        // their logarithm; text maps the same way, so `text(1.5e5, y, …)` sits at 1.5e5.
+        let log_2d = !is_3d && (plot_renderer.overlay_x_log_for_axes(axes_index) || plot_renderer.overlay_y_log_for_axes(axes_index));
+        let to_screen = if log_2d { Self::data_to_screen(plot_renderer, axes_index, plot_rect) } else { None };
         for (position, text, style) in annotations {
             if !style.visible || text.trim().is_empty() {
                 continue;
             }
-            let position = plot_renderer
-                .axes_model_matrix(axes_index)
-                .transform_point3(position);
-            let Some(screen) = self.project_world_to_screen(plot_rect, camera, position) else {
+            let screen = match &to_screen {
+                Some(map) => map([position.x, position.y]),
+                None => {
+                    let position = plot_renderer
+                        .axes_model_matrix(axes_index)
+                        .transform_point3(position);
+                    self.project_world_to_screen(plot_rect, camera, position)
+                }
+            };
+            let Some(screen) = screen else {
                 continue;
             };
             let color = Self::style_color(&style, self.theme_text_color());
@@ -3524,9 +3558,11 @@ impl PlotOverlay {
         else {
             return;
         };
-        let camera = plot_renderer
-            .axes_camera(axes_index)
-            .unwrap_or_else(|| plot_renderer.camera());
+        // The label sits at its line's value through the axes' own scale, so a line on a log
+        // axis is labelled where it is drawn.
+        let Some(to_screen) = Self::data_to_screen(plot_renderer, axes_index, plot_rect) else {
+            return;
+        };
         let scale = scale.max(0.75);
         let pad = 4.0 * scale;
         let painter = ui.painter().with_clip_rect(plot_rect);
@@ -3546,8 +3582,8 @@ impl PlotOverlay {
             let size = galley.size();
             match orientation {
                 crate::plots::ReferenceLineOrientation::Vertical => {
-                    let mid = glam::Vec3::new(value as f32, ((y_min + y_max) * 0.5) as f32, 0.0);
-                    let Some(at) = self.project_world_to_screen(plot_rect, camera, mid) else {
+                    let mid = [value as f32, ((y_min + y_max) * 0.5) as f32];
+                    let Some(at) = to_screen(mid) else {
                         continue;
                     };
                     let pos = Pos2::new(at.x + 2.0 * scale, plot_rect.min.y + pad + size.x);
@@ -3557,8 +3593,8 @@ impl PlotOverlay {
                     painter.add(shape);
                 }
                 crate::plots::ReferenceLineOrientation::Horizontal => {
-                    let mid = glam::Vec3::new(((x_min + x_max) * 0.5) as f32, value as f32, 0.0);
-                    let Some(at) = self.project_world_to_screen(plot_rect, camera, mid) else {
+                    let mid = [((x_min + x_max) * 0.5) as f32, value as f32];
+                    let Some(at) = to_screen(mid) else {
                         continue;
                     };
                     let pos =
