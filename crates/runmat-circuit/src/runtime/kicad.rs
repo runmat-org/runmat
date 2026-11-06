@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod parts;
+
 /// The circuit `path` belongs to as a KiCad project: one `.kicad_sch` per sheet instance (the
 /// root named `<project>.kicad_sch`) and, with a board, `<project>.kicad_pcb`. File name → text.
 pub fn export_kicad(
@@ -39,8 +41,9 @@ pub fn export_kicad(
 /// RunMat sources read from a KiCad project.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct KicadImport {
-    /// Workspace path → text: `<stem>.circuit`, `<stem>.circuit.lock` and, with a board,
-    /// `<stem>.circuit.layout`.
+    /// Workspace path → text: `<stem>.circuit` (a `part` declaration per symbol and value),
+    /// `<stem>.circuit.lock` and, with a board, `<stem>.circuit.layout` and the board's
+    /// footprints as `<stem>-footprints/<name>.kicad_mod`, the parts' packages.
     pub files: BTreeMap<String, String>,
     /// What the reader passed over (unsupported tokens, unknown footprints).
     pub warnings: Vec<String>,
@@ -80,18 +83,7 @@ pub fn import_kicad(
             })
             .map(|k| (*k).clone())
     });
-    if let Some(root) = root {
-        let imp = crate::kicad::sch::read_hierarchy(files, &root)?;
-        warnings.extend(imp.warnings.iter().cloned());
-        let mut design = imp.design.clone();
-        design.name = circuit_name.clone();
-        report.count("sheets", design.sheets.len());
-        report.count("components", design.sheets.values().map(|s| s.components.len()).sum());
-        report.count("connections", design.sheets.values().map(|s| s.connections.len()).sum());
-        let text = crate::syntax::print_circuit(&design).map_err(|e| format!("{e:?}"))?;
-        out.insert(circuit_path.clone(), text);
-        out.insert(lock_path_for(&circuit_path), imp.lock.to_text());
-    }
+    let mut packages = BTreeMap::new();
     if let Some((name, pcb)) = files.iter().find(|(k, _)| k.ends_with(".kicad_pcb")) {
         let read = crate::kicad::pcb::read(pcb).map_err(|e| format!("{name}: {e}"))?;
         warnings.extend(read.warnings.iter().map(|w| format!("{name}: {w}")));
@@ -109,10 +101,31 @@ pub fn import_kicad(
             revision: None,
             span: Default::default(),
         }];
+        // The layout takes the circuit's name, as its file does.
+        let mut board = read.board.clone();
+        board.name = circuit_name.clone();
         out.insert(
             format!("{target_stem}{LAYOUT_SUFFIX}"),
-            crate::syntax::board::print_board(&read.board, &uses),
+            crate::syntax::board::print_board(&board, &uses),
         );
+        packages = parts::board_packages(&read.board);
+    }
+    if let Some(root) = root {
+        let imp = crate::kicad::sch::read_hierarchy(files, &root)?;
+        warnings.extend(imp.warnings.iter().cloned());
+        let mut design = imp.design.clone();
+        design.name = circuit_name.clone();
+        let footprint_dir = format!("{circuit_name}-footprints");
+        let folder = target_stem.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
+        for (path, text) in parts::declare_parts(&mut design, &imp.pool, &packages, &footprint_dir, &mut report) {
+            out.insert(format!("{folder}{path}"), text);
+        }
+        report.count("sheets", design.sheets.len());
+        report.count("components", design.sheets.values().map(|s| s.components.len()).sum());
+        report.count("connections", design.sheets.values().map(|s| s.connections.len()).sum());
+        let text = crate::syntax::print_circuit(&design).map_err(|e| format!("{e:?}"))?;
+        out.insert(circuit_path.clone(), text);
+        out.insert(lock_path_for(&circuit_path), imp.lock.to_text());
     }
     if out.is_empty() {
         return Err("the KiCad project has no .kicad_sch or .kicad_pcb file".into());

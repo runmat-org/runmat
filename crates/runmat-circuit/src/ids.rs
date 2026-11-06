@@ -285,6 +285,15 @@ pub struct LockSection {
     pub fingerprints: BTreeMap<NamePath, String>,
 }
 
+/// A path as the lock text writes it: spaces and percent signs escaped.
+fn lock_path(p: &NamePath) -> String {
+    p.to_string().replace('%', "%25").replace(' ', "%20").replace('\t', "%09")
+}
+
+fn unescape(s: &str) -> String {
+    s.replace("%20", " ").replace("%09", "\t").replace("%25", "%")
+}
+
 impl LockSection {
     pub fn new() -> Self {
         Self::default()
@@ -468,10 +477,13 @@ impl LockSection {
         out
     }
 
-    /// Canonical text: one `entry` line per path, then `alias` and `fp` lines, sorted.
+    /// Canonical text: one `entry` line per path, then `alias` and `fp` lines, sorted. Fields
+    /// are separated by spaces, so a path's spaces and percent signs are written `%20` and
+    /// `%25` (a sheet named `MIPI & ETH` is `/MIPI%20&%20ETH/U1`).
     pub fn to_text(&self) -> String {
         let mut s = String::new();
         for (p, e) in &self.entries {
+            let p = lock_path(p);
             s.push_str(&format!("entry {} {} {}", e.uuid, e.kind, p));
             if let Some(d) = &e.designator {
                 s.push_str(&format!(" designator={d}"));
@@ -479,10 +491,10 @@ impl LockSection {
             s.push('\n');
         }
         for (a, b) in &self.aliases {
-            s.push_str(&format!("alias {a} -> {b}\n"));
+            s.push_str(&format!("alias {} -> {}\n", lock_path(a), lock_path(b)));
         }
         for (p, f) in &self.fingerprints {
-            s.push_str(&format!("fp {p} {f}\n"));
+            s.push_str(&format!("fp {} {f}\n", lock_path(p)));
         }
         let mm = |v: i64| {
             let t = format!("{:.4}", v as f64 / 1.0e6);
@@ -522,7 +534,7 @@ impl LockSection {
                         .and_then(|x| x.strip_prefix("designator="))
                         .map(|x| x.to_string());
                     l.entries.insert(
-                        NamePath::parse(path),
+                        NamePath::parse(&unescape(path)),
                         LockEntry {
                             uuid: u,
                             kind: kind.to_string(),
@@ -534,12 +546,12 @@ impl LockSection {
                     let a = parts.next().ok_or(format!("line {}: bad alias", n + 1))?;
                     let _ = parts.next();
                     let b = parts.next().ok_or(format!("line {}: bad alias", n + 1))?;
-                    l.aliases.insert(NamePath::parse(a), NamePath::parse(b));
+                    l.aliases.insert(NamePath::parse(&unescape(a)), NamePath::parse(&unescape(b)));
                 }
                 Some("fp") => {
                     let p = parts.next().ok_or(format!("line {}: bad fp", n + 1))?;
                     let f: Vec<&str> = parts.collect();
-                    l.fingerprints.insert(NamePath::parse(p), f.join(" "));
+                    l.fingerprints.insert(NamePath::parse(&unescape(p)), f.join(" "));
                 }
                 Some("place") => {
                     let bad = || format!("line {}: bad place", n + 1);
@@ -581,6 +593,19 @@ mod tests {
 
     fn item(p: &str, k: &str) -> LockItem {
         LockItem::new(NamePath::parse(p), k)
+    }
+
+    #[test]
+    fn lock_text_keeps_paths_with_spaces() {
+        let mut lock = LockSection::new();
+        let p = NamePath::parse("/MIPI & ETH/U1");
+        lock.entries.insert(p.clone(), LockEntry { uuid: Uuid(7), kind: "component".into(), designator: Some("U2".into()) });
+        lock.fingerprints.insert(NamePath::parse("/100% load/R1"), "r 10k".into());
+        let text = lock.to_text();
+        assert!(text.contains("/MIPI%20&%20ETH/U1 designator=U2"), "{text}");
+        let back = LockSection::from_text(&text).unwrap();
+        assert_eq!(back.entries[&p].designator.as_deref(), Some("U2"));
+        assert!(back.fingerprints.contains_key(&NamePath::parse("/100% load/R1")));
     }
 
     #[test]

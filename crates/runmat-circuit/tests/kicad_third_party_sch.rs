@@ -1,6 +1,8 @@
 //! Real KiCad schematics by other authors (`tests/kicad/third_party`, licenses in its README):
 //! each hierarchy is read into RunMat's model, exported back to KiCad and read again with the
-//! same connectivity, and its parts match the board drawn from it.
+//! same connectivity, and its parts match the board drawn from it. Imported with its board as
+//! RunMat sources (a `part` declaration per symbol and value, the board's footprints as their
+//! packages), each project compiles with the parts, designators and nets KiCad gave it.
 
 use runmat_circuit::elab::{elaborate, ElabOptions, Netlist};
 use runmat_circuit::kicad::sch::read_hierarchy;
@@ -171,5 +173,45 @@ fn third_party_schematics_export_and_read_back_with_the_same_connectivity() {
         };
         assert_eq!(designators(&back), designators(&nl), "{}: parts", p.name);
         assert_eq!(partition(&back), partition(&nl), "{}: nets", p.name);
+    }
+}
+
+#[test]
+fn third_party_projects_import_to_sources_that_compile_with_the_same_connectivity() {
+    use runmat_circuit::runtime::{compile, import_kicad, netlist_and_pool, CompileOptions, Files};
+    for p in &PROJECTS {
+        let original = netlist(&files(p), p.root, p.name);
+        let mut given = files(p);
+        given.insert(format!("{}.kicad_pcb", p.name), p.board.to_string());
+        let stem = p.name.replace('-', "_");
+        let out = import_kicad(&given, Some(p.root), &format!("boards/{stem}"))
+            .unwrap_or_else(|e| panic!("{}: {e}", p.name));
+        let fs: Files = out
+            .files
+            .iter()
+            .map(|(k, v)| (format!("/p/{k}"), v.clone()))
+            .collect();
+        let path = format!("/p/boards/{stem}.circuit");
+        let text = &fs[&path];
+        // Each symbol and value is a part declaration, its package a footprint the board gave.
+        assert!(text.contains("part \""), "{}: {text}", p.name);
+        let footprints = fs.keys().filter(|k| k.ends_with(".kicad_mod")).count();
+        assert!(footprints >= 10, "{}: {footprints} footprints", p.name);
+        let (back, _) = netlist_and_pool(&path, text, &fs, &CompileOptions::default())
+            .unwrap_or_else(|d| panic!("{}: {:#?}", p.name, d.iter().map(|d| &d.message).collect::<Vec<_>>()));
+        let designators = |nl: &Netlist| -> BTreeSet<String> {
+            nl.components.iter().map(|c| c.designator.clone()).collect()
+        };
+        assert_eq!(designators(&back), designators(&original), "{}: parts", p.name);
+        assert_eq!(partition(&back), partition(&original), "{}: nets", p.name);
+        let layout = format!("/p/boards/{stem}.circuit.layout");
+        let compiled = compile(&layout, &fs[&layout], &fs, &CompileOptions::default());
+        let errors: Vec<_> = compiled
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == "error")
+            .map(|d| &d.message)
+            .collect();
+        assert!(errors.is_empty(), "{}: {errors:#?}", p.name);
     }
 }
