@@ -71,7 +71,8 @@ struct Integrated {
     density: Option<(f64, DensitySource)>,
 }
 
-/// The first output's bodies of a regenerated part (all of them when it has one output).
+/// The first output's solid bodies of a regenerated part (all of them when it has one output).
+/// Surface bodies (sheets, with laminar edges) hold no volume and are left out.
 fn output_bodies<'a>(
     document: &PartDocument,
     result: &'a RegenResult,
@@ -83,7 +84,9 @@ fn output_bodies<'a>(
         .bodies
         .iter()
         .filter(|b| document.parts.len() < 2 || b.reference.as_deref() == first.as_deref())
-        .filter_map(|b| result.state.bodies.get(b.index as usize).map(|s| &s.handle))
+        .filter_map(|b| result.state.bodies.get(b.index as usize))
+        .filter(|s| !s.topology.edges.iter().any(|e| e.laminar))
+        .map(|s| &s.handle)
         .collect()
 }
 

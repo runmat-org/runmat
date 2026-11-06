@@ -216,8 +216,32 @@ impl<'a, 'b> Run<'a, 'b> {
                     simple(profiles.iter().map(|p| p.sketch.clone()).collect()),
                 )
             }
-            SurfaceFeature::Boundary { .. } => {
-                return Err(self.not_lowered(id, "boundary surfaces"))
+            SurfaceFeature::Boundary { first, second } => {
+                let mut operands: Vec<usize> = Vec::new();
+                let mut lower = |run: &mut Self, param: &str, list: &[crate::model::surface::BoundaryEdge]| -> Result<Vec<(OperandEntity, crate::model::surface::Continuity)>, Halt> {
+                    let mut out = Vec::new();
+                    for (k, b) in list.iter().enumerate() {
+                        let h = run.single(i, id, &format!("{param}[{k}]"), &b.edge, Some(TopoKind::Edge))?;
+                        let e = *h.entities().iter().next().expect("one");
+                        let body = e.body as usize;
+                        let operand = match operands.iter().position(|x| *x == body) {
+                            Some(p) => p,
+                            None => {
+                                operands.push(body);
+                                operands.len() - 1
+                            }
+                        };
+                        out.push((OperandEntity { operand: operand as u32, entity: e.index }, b.continuity));
+                    }
+                    Ok(out)
+                };
+                let first = lower(self, "first", first)?;
+                let second = lower(self, "second", second)?;
+                op(
+                    KernelOp::Surface(SurfaceOp::Boundary { first, second }),
+                    operands,
+                    simple(Vec::new()),
+                )
             }
             SurfaceFeature::Fill { boundary } => {
                 let refs: Vec<Reference> = boundary.iter().map(|b| b.edge.clone()).collect();

@@ -3608,6 +3608,33 @@ impl OcctKernel {
                 );
                 Ok(())
             }
+            SurfaceOp::Boundary { first, second } => {
+                // As a fill: the operands come back as they are, then the patch as a sheet.
+                l.keep_operands(0..n)?;
+                let face = l.label(gen(Role::SurfacePatch, KernelTag::None, None));
+                // A surface through one direction's edges has two side edges of its own.
+                let sides = [0, 1].map(|k| l.label(gen(Role::Boundary, KernelTag::None, Some(k))));
+                let mut ints = vec![face, sides[0], sides[1], first.len() as i64, second.len() as i64];
+                for (e, c) in first.iter().chain(second) {
+                    let continuity = match c {
+                        runmat_geometry_kernel::names::Continuity::G0 => 0,
+                        runmat_geometry_kernel::names::Continuity::G1 => 1,
+                        runmat_geometry_kernel::names::Continuity::G2 => 2,
+                    };
+                    let b = l.label(gen(Role::Boundary, KernelTag::InputEdge { edge: *e }, None));
+                    ints.extend_from_slice(&[e.operand as i64, e.entity as i64, continuity, b]);
+                }
+                let r = l.push(44, ints, vec![]);
+                l.output(
+                    r,
+                    false,
+                    OutputSpec {
+                        body: Some(gen(Role::Body, KernelTag::None, None)),
+                        ..Default::default()
+                    },
+                );
+                Ok(())
+            }
             SurfaceOp::Ruled {
                 edges,
                 distance,

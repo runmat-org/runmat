@@ -1798,6 +1798,32 @@ Tracked do_fill(const Exec& x, const KInstr& in) {
   return out;
 }
 
+// op 44: ints [face label, side label 0, side label 1, n1, n2, then per edge (first's, then
+// second's): operand, edge, continuity, boundary label]. Built in exact_boundary.cc.
+Tracked do_boundary(const Exec& x, const KInstr& in) {
+  const auto& I = in.ints;
+  const std::int64_t n1 = I[3], n2 = I[4];
+  std::vector<BoundaryCurve> first, second;
+  for (std::int64_t k = 0; k < n1 + n2; ++k) {
+    const std::int64_t* q = &I[5 + 4 * k];
+    BoundaryCurve c;
+    c.edge = x.edge(q[0], q[1]);
+    c.continuity = static_cast<int>(q[2]);
+    c.label = lab(q[3]);
+    if (c.continuity > 0) {
+      TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
+      TopExp::MapShapesAndUniqueAncestors(x.operand(q[0]).shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+      const TopTools_ListOfShape* fs = edge_faces.Seek(c.edge);
+      if (fs == nullptr || fs->IsEmpty()) fail("a tangent or curvature boundary edge needs a face to meet");
+      c.face = TopoDS::Face(fs->First());
+    }
+    (k < n1 ? first : second).push_back(c);
+  }
+  Tracked out = build_boundary(first, second, lab(I[0]), lab(I[1]), lab(I[2]));
+  require_labels(out, "the boundary surface");
+  return out;
+}
+
 // ---- extend sheet edges
 
 // op 37: ints [slot, operand, n, then per edge: edge, extension label], reals [distance]. Each
@@ -2078,13 +2104,14 @@ Tracked do_sew(const Exec& x, const KInstr& in) {
     TopExp::MapShapes(out.shape, TopAbs_EDGE, edges);
     for (int k = 1; k <= t.faces.Extent(); ++k) {
       const TopoDS_Shape& f = t.faces.FindKey(k);
-      TopoDS_Shape m = sew.IsModified(f) ? sew.Modified(f) : f;
+      // A face or edge of an added sheet is a sub-shape: sewing records its image there.
+      TopoDS_Shape m = sew.IsModifiedSubShape(f) ? sew.ModifiedSubShape(f) : f;
       for (TopExp_Explorer ex(m, TopAbs_FACE); ex.More(); ex.Next())
         if (faces.Contains(ex.Current())) add_origins(out.faces, ex.Current(), t.faces(k));
     }
     for (int k = 1; k <= t.edges.Extent(); ++k) {
       const TopoDS_Shape& e = t.edges.FindKey(k);
-      TopoDS_Shape m = sew.IsModified(e) ? sew.Modified(e) : e;
+      TopoDS_Shape m = sew.IsModifiedSubShape(e) ? sew.ModifiedSubShape(e) : e;
       for (TopExp_Explorer ex(m, TopAbs_EDGE); ex.More(); ex.Next())
         if (edges.Contains(ex.Current())) add_origins(out.edges, ex.Current(), t.edges(k));
     }
@@ -2704,6 +2731,7 @@ KResult kernel_execute(rust::Slice<const KInstr> program,
         case 43: t = do_section_blend(x, in); break;
         case 35: t = do_delete_hole(x, in); break;
         case 36: t = do_fill(x, in); break;
+        case 44: t = do_boundary(x, in); break;
         case 34: t = do_ruled(x, in); t.sheet = true; break;
         case 33: t = do_full_round(x.slot(I[0]), lab(I[1]), R.data()); break;
         case 32: t = do_cut_with_sheet(x.slot(I[0]), x.slot(I[1]), I[2] != 0, lab(I[3])); break;

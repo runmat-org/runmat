@@ -1123,6 +1123,15 @@ pub enum SurfaceOp {
     Fill {
         edges: Vec<(OperandEntity, crate::names::Continuity)>,
     },
+    /// A new sheet through boundary curves: with `second` empty, a smooth surface through the
+    /// `first` edges in order (at least two); with both, a patch bounded by the outer edges of
+    /// each direction (the first and last of each, closing one loop) that passes through the
+    /// inner ones. A bounding edge meets its face with its continuity. The operands are kept.
+    Boundary {
+        first: Vec<(OperandEntity, crate::names::Continuity)>,
+        #[serde(default)]
+        second: Vec<(OperandEntity, crate::names::Continuity)>,
+    },
     /// A new sheet of ruled strips, one face per edge, `distance` wide: along the bounded
     /// face's normal turned `angle` outward across the edge. The operands are kept.
     Ruled {

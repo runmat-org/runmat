@@ -204,7 +204,10 @@ fn part_edit(
             }
             let lowered = match crate::direct_edits::direct_kind(command, &request.values, &picks)? {
                 Some(kind) => Some(kind),
-                None => crate::features::feature_kind(command, &request.values, &picks)?,
+                None => match crate::surface_edits::surface_kind(command, &request.values, &picks)? {
+                    Some(kind) => Some(kind),
+                    None => crate::features::feature_kind(command, &request.values, &picks)?,
+                },
             };
             let Some((stem, kind)) = lowered else {
                 return Err(model(format!(

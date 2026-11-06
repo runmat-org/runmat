@@ -150,6 +150,19 @@ Tracked build_sweep(const Profile& p, const std::vector<gp_Pnt>& path, std::uint
                     std::uint32_t end_label);
 Tracked build_loft(const std::vector<const Profile*>& sections, std::uint32_t start_label,
                    std::uint32_t end_label);
+// A boundary surface's curve: the edge, the face it bounds (for a tangent or curvature
+// condition), its continuity (0 G0, 1 G1, 2 G2) and the label its image takes.
+struct BoundaryCurve {
+  TopoDS_Edge edge;
+  TopoDS_Face face;
+  int continuity = 0;
+  std::uint32_t label = 0xffffffffu;  // kNoLabel
+};
+// exact_boundary.cc: a sheet through `first` (second empty), or bounded by the outer curves of
+// both directions and passing through the inner ones.
+Tracked build_boundary(const std::vector<BoundaryCurve>& first,
+                       const std::vector<BoundaryCurve>& second, std::uint32_t face_label,
+                       std::uint32_t side_label0, std::uint32_t side_label1);
 Tracked boolean_op(int op, const std::vector<const Tracked*>& args,
                    const std::vector<const Tracked*>& tools);
 

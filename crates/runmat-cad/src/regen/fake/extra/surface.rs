@@ -553,6 +553,9 @@ impl FakeKernel {
                     .collect::<Result<Vec<_>, _>>()?;
                 sheet::output(&kernel, builds, extra, Vec::new())
             }
+            SurfaceOp::Boundary { .. } => Err(KernelError::NotSupported {
+                what: "fake kernel: boundary surfaces (they regenerate on the exact kernel)".into(),
+            }),
             SurfaceOp::Ruled {
                 edges,
                 distance,

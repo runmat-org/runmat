@@ -204,18 +204,8 @@ pub(super) fn surfaces() -> Vec<CommandDescriptor> {
             "boundary",
             "Make a surface from curves in two directions.",
             vec![
-                picks("direction1", "Direction 1", &[K::Curve, K::Edge, K::Sketch]),
-                picks("direction2", "Direction 2", &[K::Curve, K::Edge, K::Sketch]).optional(),
-            ],
-        ),
-        s(
-            "surface.fill",
-            "Fill",
-            "surface-fill",
-            "fill",
-            "Patch a closed boundary with G0, G1 or G2 continuity.",
-            vec![
-                picks("boundary", "Boundary edges", &[K::Edge, K::Curve]),
+                picks("direction1", "Direction 1", &[K::Edge]),
+                picks("direction2", "Direction 2", &[K::Edge]).optional(),
                 choice(
                     "continuity",
                     "Continuity",
@@ -225,13 +215,25 @@ pub(super) fn surfaces() -> Vec<CommandDescriptor> {
                         ("g2", "Curvature (G2)"),
                     ],
                 ),
-                picks(
-                    "constraints",
-                    "Constraint curves",
-                    &[K::Curve, K::SketchEntity],
-                )
-                .optional(),
-                flag("merge", "Merge result", true),
+            ],
+        ),
+        s(
+            "surface.fill",
+            "Fill",
+            "surface-fill",
+            "fill",
+            "Patch a closed boundary with G0, G1 or G2 continuity.",
+            vec![
+                picks("boundary", "Boundary edges", &[K::Edge]),
+                choice(
+                    "continuity",
+                    "Continuity",
+                    &[
+                        ("g0", "Contact (G0)"),
+                        ("g1", "Tangent (G1)"),
+                        ("g2", "Curvature (G2)"),
+                    ],
+                ),
             ],
         ),
         s(
@@ -295,14 +297,14 @@ pub(super) fn surfaces() -> Vec<CommandDescriptor> {
             "Trim",
             "surface-trim",
             "trim",
-            "Trim surfaces with other surfaces, planes or sketches.",
+            "Trim surfaces with a plane, keeping one side.",
             vec![
-                picks("tools", "Trim tools", &[K::Face, K::Plane, K::Sketch]),
-                picks("keep", "Pieces to keep", &[K::Face]),
+                picks("bodies", "Surfaces", &[K::Face, K::Body]),
+                pick("tool", "Trim plane", &[K::Plane, K::Face]),
                 radio(
-                    "mode",
-                    "Mode",
-                    &[("standard", "Standard"), ("mutual", "Mutual")],
+                    "keep",
+                    "Keep",
+                    &[("positive", "Above the plane"), ("negative", "Below the plane")],
                 ),
             ],
         ),
@@ -321,9 +323,8 @@ pub(super) fn surfaces() -> Vec<CommandDescriptor> {
             "knit",
             "Knit surfaces together, and make a solid when they close.",
             vec![
-                picks("faces", "Surfaces", &[K::Face, K::Body]),
+                picks("bodies", "Surfaces", &[K::Face, K::Body]),
                 flag("solid", "Make a solid", true),
-                length("tolerance", "Gap tolerance", 0.01),
             ],
         ),
         s(

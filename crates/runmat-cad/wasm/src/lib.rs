@@ -42,6 +42,7 @@ pub mod mass;
 pub mod picks;
 pub mod runtime;
 pub mod study_checks;
+mod surface_edits;
 
 #[cfg(feature = "bindings")]
 use wasm_bindgen::prelude::*;

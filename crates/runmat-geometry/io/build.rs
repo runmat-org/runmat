@@ -73,6 +73,7 @@ fn build_occt_backend() {
             "src/occt/exact_kernel_display.cc",
             "src/occt/exact_sketch_profile.cc",
             "src/occt/exact_sweep_loft.cc",
+            "src/occt/exact_boundary.cc",
             "src/occt/exact_hlr.cc",
             "src/occt/exact_step_writer.cc",
         ] {
@@ -137,6 +138,7 @@ fn build_occt_backend() {
         "src/occt/exact_kernel_display.cc",
         "src/occt/exact_sketch_profile.cc",
         "src/occt/exact_sweep_loft.cc",
+        "src/occt/exact_boundary.cc",
         "src/occt/exact_hlr.cc",
         "src/occt/exact_step_writer.cc",
     ] {
