@@ -76,6 +76,9 @@ pub struct Parsed {
     pub nodesets: Vec<(String, String)>,
     pub globals: Vec<String>,
     pub temp: Option<String>,
+    /// Lines read but not run, as warnings: `.step` and `.meas` in a deck (the simulation
+    /// section sweeps and measures), so nothing is dropped without a word.
+    pub ignored: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -130,7 +133,34 @@ pub fn parse(text: &str, resolve: Resolver<'_>) -> Result<Parsed, ParseError> {
             continue;
         }
         match head.as_str() {
-            ".model" => body.models.push(model(&rest).map_err(err)?),
+            ".model" => {
+                let mut m = model(&rest).map_err(err)?;
+                // PSpice `AKO:<base>` ("a kind of"): the base model's type and parameters, with
+                // this card's parameters over them. The base is defined above, here or outside.
+                if let Some(base) = m.kind.strip_prefix("ako:") {
+                    let base = if base.is_empty() { rest.get(2).and_then(|t| t.word()).unwrap_or_default().to_string() } else { base.to_string() };
+                    let found = stack
+                        .iter()
+                        .rev()
+                        .map(|s| &s.body)
+                        .chain(std::iter::once(&out.body))
+                        .find_map(|b| b.models.iter().rev().find(|x| x.name == base))
+                        .cloned();
+                    let Some(b) = found else {
+                        return Err(err(format!(".model {} is AKO:{base}, but no model {base} is defined above it", m.name)));
+                    };
+                    let mut params = b.params.clone();
+                    for (k, v) in m.params {
+                        params.retain(|(pk, _)| *pk != k);
+                        params.push((k, v));
+                    }
+                    m = Model { name: m.name, kind: b.kind, params };
+                }
+                match stack.last_mut() {
+                    Some(sub) => sub.body.models.push(m),
+                    None => out.body.models.push(m),
+                }
+            }
             ".subckt" => {
                 let mut words = vec![];
                 let mut defaults = vec![];
@@ -188,6 +218,7 @@ pub fn parse(text: &str, resolve: Resolver<'_>) -> Result<Parsed, ParseError> {
                 out.controls.push(Card { line: ln, name: head, toks: rest, raw })
             }
             ".control" => in_control = true,
+            ".step" | ".four" | ".wave" => out.ignored.push(format!("line {ln}: `{head}` isn't run; sweep and measure in the circuit's simulation section")),
             ".end" | ".save" | ".print" | ".probe" | ".plot" | ".backanno" | ".width" | ".endl" => {}
             ".func" => body.funcs.push(super::behave::read_func(&raw).map_err(err)?),
             other => return Err(err(format!("unknown control line `{other}`"))),
@@ -392,5 +423,27 @@ mod tests {
         assert_eq!(p.body.subckts[0].defaults, vec![("g".into(), "2".into())]);
         assert_eq!(p.body.models[0].kind, "d");
         assert_eq!(p.controls[0].name, ".op");
+    }
+
+    #[test]
+    fn an_ako_model_takes_its_base_and_overrides_it() {
+        let deck = "t\n.model D1N D(IS=1n N=1.8 RS=0.1)\n.model D2N AKO:D1N D(IS=2n)\n.subckt s a b\n.model D3N AKO: D2N (RS=0.5)\n.ends\n";
+        let p = parse(deck, &|_| None).unwrap();
+        let d2 = &p.body.models[1];
+        assert_eq!((d2.name.as_str(), d2.kind.as_str()), ("d2n", "d"));
+        assert_eq!(d2.params, [("n".to_string(), "1.8".to_string()), ("rs".into(), "0.1".into()), ("is".into(), "2n".into())]);
+        let d3 = &p.body.subckts[0].body.models[0];
+        assert_eq!(d3.kind, "d");
+        assert!(d3.params.contains(&("rs".into(), "0.5".into())) && d3.params.contains(&("is".into(), "2n".into())));
+        let missing = parse("t\n.model Q2 AKO:QX NPN(BF=50)\n", &|_| None).unwrap_err();
+        assert!(missing.message.contains("no model qx is defined above it"), "{}", missing.message);
+    }
+
+    #[test]
+    fn step_and_meas_lines_are_reported_not_dropped() {
+        let p = parse("t\nR1 a 0 {r}\n.param r=1k\n.step param r list 1k 2k\n.meas tran vmax MAX V(a)\n.op\n", &|_| None).unwrap();
+        assert_eq!(p.ignored.len(), 1);
+        assert!(p.ignored[0].starts_with("line 4: `.step` isn't run"), "{:?}", p.ignored);
+        assert!(p.controls.iter().any(|c| c.name == ".meas"));
     }
 }

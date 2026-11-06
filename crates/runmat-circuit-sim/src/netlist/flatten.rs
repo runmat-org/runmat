@@ -326,10 +326,59 @@ fn expand<'a>(
             expand(cx, &sub.body, &inst, &port_map, &inner, depth + 1)?;
             continue;
         }
-        cx.out.elements.push(FlatElement { line: c.line, name: scoped(&c.name), kind: c.kind(), nodes, args, behave: None });
+        let e = FlatElement { line: c.line, name: scoped(&c.name), kind: c.kind(), nodes, args, behave: None };
+        cx.out.elements.extend(with_parasitics(e));
     }
     cx.chain.pop();
     Ok(())
+}
+
+/// A capacitor's or inductor's written parasitics as their own elements, as LTspice reads them:
+/// on a capacitor `Rser` and `Lser` in series and `Rpar` and `Cpar` across it; on an inductor
+/// `Rser` in series and `Rpar` and `Cpar` across it. The series parts sit on internal nodes
+/// `<name>#1`, `<name>#2` between the first node and the element, which keeps its own name, so
+/// probes, initial conditions and `K` couplings still find it. A zero value adds nothing.
+fn with_parasitics(mut e: FlatElement) -> Vec<FlatElement> {
+    let (series, parallel): (&[(&str, char)], &[(&str, char)]) = match e.kind {
+        'c' => (&[("rser", 'r'), ("lser", 'l')], &[("rpar", 'r'), ("cpar", 'c')]),
+        'l' => (&[("rser", 'r')], &[("rpar", 'r'), ("cpar", 'c')]),
+        _ => return vec![e],
+    };
+    let take = |args: &mut Vec<Tok>, key: &str| -> Option<String> {
+        let i = args.iter().position(|t| matches!(t, Tok::Kv(k, _) if k == key))?;
+        match args.remove(i) {
+            Tok::Kv(_, v) => Some(v).filter(|v| parse_number(v) != Some(0.0)),
+            Tok::W(_) => None,
+        }
+    };
+    let part = |e: &FlatElement, suffix: &str, kind: char, a: &str, b: &str, value: String| FlatElement {
+        line: e.line,
+        name: format!("{}#{suffix}", e.name),
+        kind,
+        nodes: vec![a.to_string(), b.to_string()],
+        args: vec![Tok::W(value)],
+        behave: None,
+    };
+    let mut out = vec![];
+    let (a, b) = (e.nodes[0].clone(), e.nodes[1].clone());
+    for (key, kind) in parallel {
+        if let Some(v) = take(&mut e.args, key) {
+            out.push(part(&e, key, *kind, &a, &b, v));
+        }
+    }
+    let mut at = a;
+    let mut k = 0;
+    for (key, kind) in series {
+        if let Some(v) = take(&mut e.args, key) {
+            k += 1;
+            let mid = format!("{}#{k}", e.name);
+            out.push(part(&e, key, *kind, &at, &mid, v));
+            at = mid;
+        }
+    }
+    e.nodes[0] = at;
+    out.push(e);
+    out
 }
 
 #[cfg(test)]
@@ -350,5 +399,27 @@ mod tests {
         assert_eq!(f.elements[3].nodes, ["xt.x2.m", "0"]);
         assert_eq!(f.elements[1].args[0], Tok::W(format!("{:e}", 4000.0)));
         assert_eq!(f.elements[3].args[0], Tok::W(format!("{:e}", 2000.0)));
+    }
+
+    #[test]
+    fn a_capacitors_and_an_inductors_parasitics_become_their_own_elements() {
+        let deck = "t\nC1 a 0 10u Rser=10m Lser=1n Rpar=1Meg ic=1\nL1 a b 4.7u Rser=0.05\nC2 b 0 1n Rser=0\n";
+        let f = flatten(&parse(deck, &|_| None).unwrap()).unwrap();
+        let shape: Vec<(&str, char, Vec<&str>)> = f.elements.iter().map(|e| (e.name.as_str(), e.kind, e.nodes.iter().map(String::as_str).collect())).collect();
+        assert_eq!(
+            shape,
+            [
+                ("c1#rpar", 'r', vec!["a", "0"]),
+                ("c1#rser", 'r', vec!["a", "c1#1"]),
+                ("c1#lser", 'l', vec!["c1#1", "c1#2"]),
+                ("c1", 'c', vec!["c1#2", "0"]),
+                ("l1#rser", 'r', vec!["a", "l1#1"]),
+                ("l1", 'l', vec!["l1#1", "b"]),
+                ("c2", 'c', vec!["b", "0"]),
+            ]
+        );
+        // The element keeps its value and initial condition; the parasitics are gone from it.
+        assert_eq!(f.elements[3].args.len(), 2);
+        assert!(matches!(&f.elements[3].args[1], Tok::Kv(k, _) if k == "ic"));
     }
 }

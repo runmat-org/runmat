@@ -203,7 +203,12 @@ impl Design {
     }
 
     pub fn circuit(&self) -> Result<Circuit, SimError> {
-        Circuit::build(&self.flat, self.options.clone(), &self.ics, &self.nodesets).map_err(|e| SimError::Build(e.to_string()))
+        let mut c = Circuit::build(&self.flat, self.options.clone(), &self.ics, &self.nodesets).map_err(|e| SimError::Build(e.to_string()))?;
+        c.warnings.extend(self.parsed.ignored.iter().cloned());
+        c.warnings.extend(self.parsed.controls.iter().filter(|m| m.name == ".meas" || m.name == ".measure").map(|m| {
+            format!("line {}: `{}` isn't run; sweep and measure in the circuit's simulation section", m.line, m.name)
+        }));
+        Ok(c)
     }
 
     /// The analyses the netlist's own control lines ask for.
