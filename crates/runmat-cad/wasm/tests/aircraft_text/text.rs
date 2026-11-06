@@ -248,6 +248,25 @@ pub fn mirror_port(name: &str, kind: &str, design: &str, seeds: &[&str], extra: 
     )
 }
 
+/// A handed part's `port` configuration, the opposite hand (`side = -1`) under its own part
+/// number, written last in the part.
+pub fn with_port_configuration(part: &str, number: &str) -> String {
+    let end = part.rfind('}').expect("a part block");
+    format!("{}
+    configuration port = {{ side = -1, part_number = \"{number}\" }}
+}}
+", part[..end].trim_end())
+}
+
+/// [`mirror_port`] for a part with a `port` configuration ([`with_port_configuration`]): the
+/// image is that configuration, so it carries the port part number.
+pub fn mirror_port_named(name: &str, kind: &str, design: &str, seeds: &[&str]) -> String {
+    format!(
+        "    mirror {name} = {{\n        seeds = [{}],\n        plane = {{ plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] }},\n        hand = opposite(source = {{ definition = {{ kind = {kind}, name = {design} }} }}, configuration = {{ select = named, name = port }}, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0])\n    }}\n",
+        seeds.join(", ")
+    )
+}
+
 /// The input a handed part or assembly takes: 1 builds it to starboard, -1 its mirror image to
 /// port (the opposite hand a mirror places).
 pub const SIDE_INPUT: &str = "    input side : real = 1\n\n";

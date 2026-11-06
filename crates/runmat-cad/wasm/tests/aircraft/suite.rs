@@ -177,7 +177,7 @@ fn part_placements(rows: &[Value]) -> BTreeMap<String, Vec<[f64; 12]>> {
         if let Some(n) = name.strip_suffix("_port") {
             name = n.to_string();
             hand = "|port";
-        } else if config.contains("side") && config.contains("-1") {
+        } else if (config.contains("side") && config.contains("-1")) || config == "\"port\"" {
             hand = "|port";
         }
         let w = &row["world"];
@@ -201,6 +201,16 @@ fn part_placements(rows: &[Value]) -> BTreeMap<String, Vec<[f64; 12]>> {
 /// `RUNMAT_AIRCRAFT_OCCURRENCES_WRITE=1`). The folders, the mirrored port side and the patterns
 /// are a different way to write the same aircraft.
 fn the_parts_sit_where_they_did(rows: &[Value]) {
+    // The port cockpit panes are the starboard designs' `port` configurations, under the port
+    // parts' own numbers.
+    for (design, number) in [("cockpit_window_front", "FUS-WS-032"), ("cockpit_window_side", "FUS-WS-034"), ("cockpit_window_aft", "FUS-WS-036")] {
+        let port: Vec<&Value> = rows
+            .iter()
+            .filter(|r| r["definition"]["file"].as_str().is_some_and(|f| f.ends_with(&format!("{design}.part"))) && r["configuration"] == "port")
+            .collect();
+        assert!(!port.is_empty(), "{design} has no port occurrence");
+        assert!(port.iter().all(|r| r["part_number"] == number), "{design}'s port hand is {number}: {:?}", port.iter().map(|r| &r["part_number"]).collect::<Vec<_>>());
+    }
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../runmat-cad/wasm/tests/aircraft/occurrences.json");
     let now = part_placements(rows);
     if std::env::var("RUNMAT_AIRCRAFT_OCCURRENCES_WRITE").is_ok() {

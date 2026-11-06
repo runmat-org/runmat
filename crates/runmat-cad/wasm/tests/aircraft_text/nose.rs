@@ -206,7 +206,10 @@ fn pane(p: &Pane) -> String {
     body += &loft("inside", &stations, 10.0, 18.0, ", mode = cut");
     body += &prism(p, "o", "pane", "intersect", true);
     // The intersect trims the glass body in place.
-    part(p.name, p.number, "glass", p.comment, &body, "glass")
+    let text = part(p.name, p.number, "glass", p.comment, &body, "glass");
+    // The port pane is the other hand: its own part number, in the `port` configuration.
+    let port = panes().into_iter().find(|q| q.name == format!("{}_port", p.name)).expect("each pane has a port hand");
+    super::text::with_port_configuration(&text, port.number)
 }
 
 /// Where the nose lining starts aft of the tip, behind the windshield.
@@ -256,7 +259,7 @@ pub fn uses() -> String {
     }
     for name in &starboard {
         let alias = name.trim_start_matches("cockpit_");
-        s += &super::text::mirror_port(&format!("{alias}_port"), "part", name, &[alias], &[]);
+        s += &super::text::mirror_port_named(&format!("{alias}_port"), "part", name, &[alias]);
     }
     s
 }
