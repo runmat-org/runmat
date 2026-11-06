@@ -28,6 +28,7 @@ pub mod job;
 pub mod odb;
 pub mod plan;
 pub mod preview;
+pub mod progress;
 pub mod set;
 pub mod settings;
 pub mod assembly_drawing;

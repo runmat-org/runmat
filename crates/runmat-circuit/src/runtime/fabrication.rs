@@ -57,6 +57,7 @@ pub fn export_fabrication(
             format!("{path} has no board: fabrication outputs need its .circuit.layout"),
         )]);
     };
+    crate::fab::progress::step("board");
     let mut board = board.clone();
     let (mut rules, _) = BoardRules::new(&board.limits, &board.rules);
     rules.rebuild(&BoardGraph::new(&board, &[]));

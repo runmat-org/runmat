@@ -176,7 +176,7 @@ fn write_stackup(s: &Stackup) -> SExpr {
 }
 
 /// Chains Edge.Cuts segments into rings: the largest is the outline, the rest are cutouts.
-fn outline_from(segments: &[(Point, Point)], rings: Vec<Ring>) -> Option<Polygon> {
+pub(crate) fn outline_from(segments: &[(Point, Point)], rings: Vec<Ring>) -> Option<Polygon> {
     let mut rings = rings;
     let mut used = vec![false; segments.len()];
     let tol = 1000;

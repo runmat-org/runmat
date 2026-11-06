@@ -70,6 +70,7 @@ pub mod geom;
 pub mod ids;
 pub mod index;
 pub mod ipc2581;
+pub mod import;
 pub mod ir;
 pub mod kicad;
 pub mod netlists;

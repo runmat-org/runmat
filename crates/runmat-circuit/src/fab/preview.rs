@@ -74,7 +74,7 @@ impl Sink for Svg {
 }
 
 /// `layer` of `board` as an SVG document: the image in `currentColor`, the board outline as a
-/// thin frame (class `outline`), framed by the outline with a small margin.
+/// thin frame (`data-role="board-outline"`; no class, so a page's stylesheet doesn't restyle it), framed by the outline with a small margin.
 pub fn layer_svg(board: &Board, layer: GerberLayer) -> String {
     let mut svg = Svg { apertures: Vec::new(), body: String::new() };
     image(board, layer, &mut svg);
@@ -87,8 +87,8 @@ pub fn layer_svg(board: &Board, layer: GerberLayer) -> String {
         concat!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{} {} {} {}" data-layer="{}">"#,
             r#"<g transform="scale(1,-1)">"#,
-            r#"<g class="outline" fill="none" stroke="currentColor" opacity="0.45">{}</g>"#,
-            r#"<g class="image" fill="currentColor">{}</g>"#,
+            r#"<g data-role="board-outline" fill="none" stroke="currentColor" opacity="0.45">{}</g>"#,
+            r#"<g data-role="layer-image" fill="currentColor">{}</g>"#,
             "</g></svg>"
         ),
         n(x0 - margin),

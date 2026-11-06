@@ -102,7 +102,9 @@ pub fn fabrication(
     let name = &board.name;
     let rev = req.revision.as_deref();
     let drills = drill::excellon(board);
+    use super::progress::step;
     if req.gerber {
+        step("gerber");
         let layers = super::plan::included(&super::plan::layer_rows(board), req.layers.as_ref());
         for (file, layer) in &layers {
             out.insert(format!("gerber/{file}"), super::gerber_in(board, *layer, req.gerber_format, rev));
@@ -128,23 +130,27 @@ pub fn fabrication(
         );
     }
     if req.drill {
+        step("drill");
         for (file, text) in &drills {
             out.insert(format!("drill/{file}"), text.clone());
         }
     }
     if req.drill_map {
+        step("drill_map");
         out.insert(
             format!("drill/{name}-drill-map.gbr"),
             drawing::drill_map(board).gerber_in(board, "Drillmap", req.gerber_format, rev),
         );
     }
     if req.drawing {
+        step("drawing");
         out.insert(
             format!("drawing/{name}-fab-drawing.gbr"),
             drawing::fabrication_drawing(board).gerber_in(board, "FabricationDrawing", req.gerber_format, rev),
         );
     }
     if req.assembly_drawing {
+        step("assembly_drawing");
         for (side, drawing) in super::assembly_drawing::assembly_drawings(board) {
             out.insert(
                 format!("assembly/{name}-assembly-{side}.gbr"),
@@ -152,36 +158,40 @@ pub fn fabrication(
             );
         }
     }
-    for v in variants {
-        let suffix = v.name.as_ref().map(|n| format!("-{n}")).unwrap_or_default();
-        if req.pick_place {
-            let f = req.pick_place_format;
+    let suffix = |v: &VariantSet| v.name.as_ref().map(|n| format!("-{n}")).unwrap_or_default();
+    if req.pick_place {
+        step("pick_place");
+        let f = req.pick_place_format;
+        for v in variants {
             for (side_suffix, side) in f.sides.files() {
                 out.insert(
-                    format!("assembly/{name}{suffix}-pos{side_suffix}.csv"),
+                    format!("assembly/{name}{}-pos{side_suffix}.csv", suffix(v)),
                     assembly::pick_place_in(board, req.include_through_hole, Some(&v.fitted), side, f.units),
                 );
             }
         }
-        if req.bom {
-            out.insert(
-                format!("assembly/{name}{suffix}-bom.csv"),
-                assembly::bom_csv_in(&v.bom, &req.bom_format),
-            );
+    }
+    if req.bom {
+        step("bom");
+        for v in variants {
+            out.insert(format!("assembly/{name}{}-bom.csv", suffix(v)), assembly::bom_csv_in(&v.bom, &req.bom_format));
         }
     }
     if req.ipc2581 {
+        step("ipc2581");
         out.insert(
             format!("ipc2581/{name}.xml"),
             crate::ipc2581::export(board, parts),
         );
     }
     if req.odb {
+        step("odb");
         for (path, text) in odb::odb(board, parts) {
             out.insert(format!("odb/{path}"), text);
         }
     }
     if req.ipc356 {
+        step("ipc356");
         out.insert(format!("netlist/{name}.ipc"), assembly::ipc356(board));
     }
     out
