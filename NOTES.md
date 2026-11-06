@@ -443,3 +443,13 @@ qmf15-est.py (surface growth estimate), qmf15-dbgpatch.py (FACEGAP prints to $QM
   encoded payload 863798052 B". The closure counts content-addressed chunks once; the big mesh repeats
   region/provenance runs, so it is smaller. 946e1be80d applies acoustic's existing rule (closure nonzero)
   to thermal, result publication, state publication, fluid recovery and fluid admission; tests updated.
+- Tests (build Mac debug, ~/targets/q-mesh-fix-6): runmat-analysis-fea --lib planning::resource 189/0 (2 ign),
+  runmat-meshing-core --lib 187/0 (~/logs/qmf6/q16-resource.log, q16-core.log).
+- mod5 (946e1be80d; attempt 1 lost to the 18:50 server stop, attempt 2 from 19:21): meshing, projection and
+  thermal planning pass; fails after 3257 s, peak RSS 19.9 GB: the thermal solve task requests 14000 mc and
+  68,641,907,958 B memory; the build Mac pool limit is 22,474,850,304 B. No result, no frames.
+### Next
+1. Find what dominates the 68.6 GB thermal reservation (direct factorization fill on ~one-layer plates?).
+   If thermal steady can use an iterative (CG/AMG) solve, its reservation should be a few GB.
+2. Or cut the mesh: the plates sized to one layer (2 mm lid, 3 mm pad, 3 mm under the channel) dominate.
+3. Stage-2 frames, verify-snapshot, 1-D check (reference in m01-module-thermal.fea header: 303.86 K peak).
