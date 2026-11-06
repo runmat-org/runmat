@@ -370,6 +370,7 @@ fn stitching_and_shield_vias_land_where_drc_passes() {
         let mut edited = files.clone();
         let text = out.files.iter().find(|f| f.path == layout).unwrap().text.clone();
         edited.insert(layout.into(), text.clone());
+        write_when_asked(&format!("daq-{label}.circuit.layout"), &text);
         let after = runmat_circuit::syntax::board::parse_board(layout, &text).board.unwrap();
         let placed = after.vias.len() - vias;
         assert!(placed >= 4, "{label}: {placed} via(s): {}", out.summary);
@@ -400,6 +401,7 @@ fn teardrops_are_added_where_drc_passes_and_removed_again() {
         (out.files.iter().find(|c| c.path == layout).unwrap().text.clone(), out.summary)
     };
     let (added, summary) = run(&files[layout], "add");
+    write_when_asked("daq-teardrops.circuit.layout", &added);
     let board = runmat_circuit::syntax::board::parse_board(layout, &added).board.unwrap();
     let drops = board.zones.values().filter(|z| z.name == "teardrop").count();
     assert!(drops >= 20 && board.zones.len() == zones + drops, "{drops} teardrops: {summary}");
@@ -415,4 +417,12 @@ fn teardrops_are_added_where_drc_passes_and_removed_again() {
     assert_eq!(summary, format!("Removed {drops} teardrop(s)"));
     let board = runmat_circuit::syntax::board::parse_board(layout, &removed).board.unwrap();
     assert_eq!(board.zones.len(), zones);
+}
+
+/// With `RUNMAT_BOARD_TOOLS_OUT` set to a folder, a board-tool test writes its edited layout
+/// there, for the pictures.
+fn write_when_asked(name: &str, text: &str) {
+    if let Ok(dir) = std::env::var("RUNMAT_BOARD_TOOLS_OUT") {
+        std::fs::write(PathBuf::from(dir).join(name), text).expect("write the edited layout");
+    }
 }
