@@ -25,7 +25,7 @@ part camera_head {
     sketch barrel_s on plane.lens_base {
         c = circle(center = [0 mm, 0.5 mm], radius = 8.5 mm)
     }
-    feature barrel = extrude(profile = sketch.barrel_s, distance = 4.5 mm)
+    feature barrel = extrude(profile = sketch.barrel_s, distance = 4.5 mm, mode = add)
     feature bezel_base = plane.offset(base = origin.yz, distance = 17.4 mm)
     sketch bezel_s on plane.bezel_base {
         c = circle(center = [0 mm, 0.5 mm], radius = 6.4 mm)

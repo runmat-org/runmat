@@ -35,6 +35,6 @@ part leg {
     sketch foot_s on plane.foot_base {
         c = circle(center = [0 mm, 0 mm], radius = 3.6 mm)
     }
-    feature foot = extrude(profile = sketch.foot_s, distance = 4.5 mm)
+    feature foot = extrude(profile = sketch.foot_s, distance = 4.5 mm, mode = add)
     output leg = { body = feature.fin.body, part_number = "CD-AR-250", material = "glass_filled_nylon", color = "#4A4F57" }
 }

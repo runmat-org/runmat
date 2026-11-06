@@ -33,6 +33,6 @@ part prop_blade {
     sketch blade_s5 on plane.blade_st5 {
         c = spline(points = [[1.709 mm, 1.377 mm], [1.509 mm, 1.48 mm], [1.006 mm, 1.507 mm], [0.303 mm, 1.436 mm], [-0.458 mm, 1.269 mm], [-1.125 mm, 1.037 mm], [-1.571 mm, 0.801 mm], [-1.709 mm, 0.623 mm], [-1.515 mm, 0.547 mm], [-1.024 mm, 0.579 mm], [-0.332 mm, 0.697 mm], [0.429 mm, 0.865 mm], [1.107 mm, 1.049 mm], [1.565 mm, 1.226 mm]], closed)
     }
-    feature blade = loft(profiles = [sketch.blade_s0, sketch.blade_s1, sketch.blade_s2, sketch.blade_s3, sketch.blade_s4, sketch.blade_s5])
+    feature blade = loft(profiles = [sketch.blade_s0, sketch.blade_s1, sketch.blade_s2, sketch.blade_s3, sketch.blade_s4, sketch.blade_s5], mode = add)
     output prop_blade = { body = feature.boss.body, part_number = "CD-PR-320", material = "glass_filled_nylon", color = "#202226" }
 }

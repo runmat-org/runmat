@@ -80,7 +80,9 @@ fn the_drone_compiles_part_by_part_and_as_one_assembly() {
                 .map(|f| format!("{} {}", f["id"], f["status"]))
                 .collect();
             let skeleton = path.ends_with("skeleton.part");
-            if problems > 0 || (bodies == 0 && !skeleton) || !failed.is_empty() {
+            // Each drone part is one solid: a second body is a feature left out of the union
+            // (STEP then carries overlapping solids, which the FEA rejects as interpenetrating).
+            if problems > 0 || (bodies != 1 && !skeleton) || !failed.is_empty() {
                 failures.push(format!("{path}: {bodies} bodies, problems {:?}, features {failed:?}", data["problems"]));
             }
         }
@@ -155,7 +157,7 @@ fn the_hinge_lug_sketches_are_fully_defined() {
 }
 
 /// The study geometry as exact AP242: the arm with its motor pod, and the lower shell with the
-/// ESC board on its bosses. Each solid is its product, and each face in a region travels under
+/// ESC board on its bosses. Each product is one solid, and each face in a region travels under
 /// the region's name, which is what the studies' `select name` reads (`root`, `motor_seat`,
 /// `skin`). `RUNMAT_DRONE_STEP_DIR=<folder>` writes the files there (the example's geometry/).
 #[test]
@@ -181,5 +183,7 @@ fn the_study_assemblies_export_with_their_region_names() {
         for f in faces {
             assert!(text.contains(f), "{file}: no {f}");
         }
+        let solids = text.matches("MANIFOLD_SOLID_BREP(").count();
+        assert_eq!(solids, products.len(), "{file}: {solids} solids for {} products", products.len());
     }
 }

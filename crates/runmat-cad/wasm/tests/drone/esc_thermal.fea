@@ -24,7 +24,7 @@ geometry esc {
     file = "./geometry/esc_thermal.step"
     units = mm
     interfaces = shared
-    region board : solid { select name "esc_board"; expect exactly_one }
+    region board : solid { select name "esc_board_thermal"; expect exactly_one }
     region shell : solid { select name "body_bottom"; expect exactly_one }
     region skin : face { select name "skin"; expect one_or_more }
 }

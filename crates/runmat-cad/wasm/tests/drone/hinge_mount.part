@@ -52,7 +52,7 @@ part hinge_mount {
         constrain length(l1) = 14 mm
         constrain radius(pin) = 2 mm
     }
-    feature lower = extrude(profile = sketch.lower_s, distance = 3.4 mm)
+    feature lower = extrude(profile = sketch.lower_s, distance = 3.4 mm, mode = add)
     feature back_base = plane.offset(base = origin.xy, distance = -10.1 mm)
     sketch back_s on plane.back_base {
         k1 = line(start = [-20 mm, -7.5 mm], end = [-12 mm, -7.5 mm])
@@ -60,7 +60,7 @@ part hinge_mount {
         k3 = line(start = [-12 mm, 7.5 mm], end = [-20 mm, 7.5 mm])
         k4 = line(start = [-20 mm, 7.5 mm], end = [-20 mm, -7.5 mm])
     }
-    feature back = extrude(profile = sketch.back_s, distance = 20.2 mm)
+    feature back = extrude(profile = sketch.back_s, distance = 20.2 mm, mode = add)
     feature bore_base = plane.offset(base = origin.xy, distance = -10.5 mm)
     sketch bore_s on plane.bore_base {
         s1 = circle(center = [-16 mm, -3.5 mm], radius = 1.1 mm)

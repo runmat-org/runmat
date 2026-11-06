@@ -25,12 +25,12 @@ part arm {
     sketch beam_s2 on plane.beam_st2 {
         c = spline(points = [[0 mm, 4 mm + input.rise], [1.783 mm, 3.858 mm + input.rise], [3.087 mm, 3.435 mm + input.rise], [4.12 mm, 2.746 mm + input.rise], [4.879 mm, 1.806 mm + input.rise], [5.343 mm, 0.621 mm + input.rise], [5.5 mm, -1 mm + input.rise], [5.343 mm, -2.621 mm + input.rise], [4.879 mm, -3.806 mm + input.rise], [4.12 mm, -4.746 mm + input.rise], [3.087 mm, -5.435 mm + input.rise], [1.783 mm, -5.858 mm + input.rise], [0 mm, -6 mm + input.rise], [-1.783 mm, -5.858 mm + input.rise], [-3.087 mm, -5.435 mm + input.rise], [-4.12 mm, -4.746 mm + input.rise], [-4.879 mm, -3.806 mm + input.rise], [-5.343 mm, -2.621 mm + input.rise], [-5.5 mm, -1 mm + input.rise], [-5.343 mm, 0.621 mm + input.rise], [-4.879 mm, 1.806 mm + input.rise], [-4.12 mm, 2.746 mm + input.rise], [-3.087 mm, 3.435 mm + input.rise], [-1.783 mm, 3.858 mm + input.rise]], closed)
     }
-    feature beam = loft(profiles = [sketch.beam_s0, sketch.beam_s1, sketch.beam_s2])
+    feature beam = loft(profiles = [sketch.beam_s0, sketch.beam_s1, sketch.beam_s2], mode = add)
     feature pad_base = plane.offset(base = origin.xy, distance = input.rise - 4 mm)
     sketch pad_s on plane.pad_base {
         c = circle(center = [input.length, 0 mm], radius = 9 mm)
     }
-    feature pad = extrude(profile = sketch.pad_s, distance = 8 mm)
+    feature pad = extrude(profile = sketch.pad_s, distance = 8 mm, mode = add)
     feature knuckle_cut = plane.offset(base = origin.xy, distance = -7 mm)
     sketch bores_s on plane.knuckle_cut {
         pin = circle(center = [0 mm, 0 mm], radius = 2.05 mm)

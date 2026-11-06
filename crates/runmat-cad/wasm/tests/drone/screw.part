@@ -13,7 +13,7 @@ part screw {
     sketch shank_s on origin.xy {
         c = circle(center = [0 mm, 0 mm], radius = 1.5 mm)
     }
-    feature shank = extrude(profile = sketch.shank_s, distance = input.length, reverse)
+    feature shank = extrude(profile = sketch.shank_s, distance = input.length, reverse, mode = add)
     feature top = plane.offset(base = origin.xy, distance = 1.65 mm)
     sketch hex_s on plane.top {
         l1 = line(start = [1.155 mm, 0 mm], end = [0.577 mm, 1 mm])

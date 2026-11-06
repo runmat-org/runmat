@@ -24,6 +24,6 @@ part gimbal_yoke {
         r3 = line(start = [24 mm, -16.5 mm], end = [0 mm, -16.5 mm])
         r4 = line(start = [0 mm, -16.5 mm], end = [0 mm, -19 mm])
     }
-    feature sides = extrude(profile = sketch.side_s, distance = 12 mm)
+    feature sides = extrude(profile = sketch.side_s, distance = 12 mm, mode = add)
     output gimbal_yoke = { body = feature.back.body, part_number = "CD-GB-540", material = "aluminum_6061", color = "#2A2D32" }
 }

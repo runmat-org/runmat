@@ -19,6 +19,6 @@ part gimbal_yaw_arm {
         d3 = line(start = [7 mm, 0 mm], end = [-7 mm, 0 mm])
         d4 = line(start = [-7 mm, 0 mm], end = [-7 mm, -21 mm])
     }
-    feature drop = extrude(profile = sketch.drop_s, distance = 3.5 mm)
+    feature drop = extrude(profile = sketch.drop_s, distance = 3.5 mm, mode = add)
     output gimbal_yaw_arm = { body = feature.plate.body, part_number = "CD-GB-520", material = "aluminum_6061", color = "#2A2D32" }
 }

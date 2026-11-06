@@ -18,9 +18,9 @@ part motor_pod {
     // The skirt's slot, where the arm runs in under the pocket (0.8 mm clear each side).
     feature slot_base = plane.offset(base = origin.xy, distance = -7.5 mm)
     sketch slot_s on plane.slot_base {
-        s1 = line(start = [-20 mm, -6.5 mm], end = [-8 mm, -6.5 mm])
-        s2 = line(start = [-8 mm, -6.5 mm], end = [-8 mm, 6.5 mm])
-        s3 = line(start = [-8 mm, 6.5 mm], end = [-20 mm, 6.5 mm])
+        s1 = line(start = [-20 mm, -6.5 mm], end = [-5 mm, -6.5 mm])
+        s2 = line(start = [-5 mm, -6.5 mm], end = [-5 mm, 6.5 mm])
+        s3 = line(start = [-5 mm, 6.5 mm], end = [-20 mm, 6.5 mm])
         s4 = line(start = [-20 mm, 6.5 mm], end = [-20 mm, -6.5 mm])
     }
     feature slot = extrude(profile = sketch.slot_s, distance = 7.5 mm, mode = cut)

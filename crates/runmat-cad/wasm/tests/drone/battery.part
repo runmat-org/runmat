@@ -25,6 +25,6 @@ part battery {
     sketch cap_s2 on plane.cap_st2 {
         c = spline(points = [[0 mm, 48 mm], [14.09 mm, 47.535 mm], [22.552 mm, 46.145 mm], [28.886 mm, 43.833 mm], [33.387 mm, 40.581 mm], [36.095 mm, 36.235 mm], [37 mm, 29 mm], [36.095 mm, 21.765 mm], [33.387 mm, 17.419 mm], [28.886 mm, 14.167 mm], [22.552 mm, 11.855 mm], [14.09 mm, 10.465 mm], [0 mm, 10 mm], [-14.09 mm, 10.465 mm], [-22.552 mm, 11.855 mm], [-28.886 mm, 14.167 mm], [-33.387 mm, 17.419 mm], [-36.095 mm, 21.765 mm], [-37 mm, 29 mm], [-36.095 mm, 36.235 mm], [-33.387 mm, 40.581 mm], [-28.886 mm, 43.833 mm], [-22.552 mm, 46.145 mm], [-14.09 mm, 47.535 mm]], closed)
     }
-    feature cap = loft(profiles = [sketch.cap_s0, sketch.cap_s1, sketch.cap_s2])
+    feature cap = loft(profiles = [sketch.cap_s0, sketch.cap_s1, sketch.cap_s2], mode = add)
     output battery = { body = feature.pack.body, part_number = "CD-PW-4S3500", material = "polycarbonate", color = "#2C3036" }
 }
