@@ -450,16 +450,20 @@ pub enum Repair {
         assembly: FilePath,
         mate: String,
     },
-    /// Delete an override whose target no longer exists.
+    /// Delete an override whose target no longer exists: override `index` of component
+    /// `occurrence` in `assembly`.
     RemoveOverride {
         assembly: FilePath,
+        occurrence: String,
         index: usize,
     },
-    /// Point an override at one of these occurrence paths instead.
+    /// Point override `index` of component `occurrence` at one of these targets instead (each a
+    /// whole path, relative to the component).
     RetargetOverride {
         assembly: FilePath,
+        occurrence: String,
         index: usize,
-        candidates: Vec<String>,
+        candidates: Vec<crate::assembly::RelPath>,
     },
     /// Narrow an occurrence's `when` so it excludes this configuration (written as axis values).
     ExcludeConfiguration {

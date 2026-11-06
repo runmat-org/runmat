@@ -309,3 +309,36 @@ fn a_broken_mates_repair_suppresses_it() {
     let errors: Vec<_> = index["diagnostics"].as_array().unwrap().iter().filter(|d| d["severity"] == "error").collect();
     assert!(errors.is_empty(), "{errors:?}\n{fixed}");
 }
+
+#[test]
+fn an_override_on_a_missing_component_is_retargeted_or_removed() {
+    // `sub` holds a plate and a block; the outer assembly's override names `block2`, which
+    // `sub` doesn't have, so the repair offers `block` (a close name) or removing the override.
+    let sub = "runmat 0.7\nstd 1\n\nassembly sub {\n    use part plate as plate\n    use part block as block {\n        placement = { placement = offset, offset = { translation = [30 mm, 10 mm, 40 mm] } }\n    }\n}\n";
+    let top = "runmat 0.7\nstd 1\n\nassembly top {\n    use assembly sub as s {\n        override block2 {\n            suppressed = true\n        }\n    }\n}\n";
+    let mut files = files();
+    files.insert("/p/sub.assembly".into(), sub.into());
+    let (index, _, _) = compile_assembly("/p/top.assembly", top, &files).expect("compiles with an error");
+    let diagnostic = index["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["repairs"].as_array().is_some_and(|r| r.iter().any(|r| r["repair"] == "retarget_override")))
+        .unwrap_or_else(|| panic!("no retarget repair in {}", index["diagnostics"]))
+        .clone();
+    let repairs = diagnostic["repairs"].as_array().unwrap();
+    assert_eq!(repairs[0]["occurrence"], "s", "{diagnostic}");
+    assert_eq!(repairs[0]["candidates"], json!([[{ "name": "block" }]]), "{diagnostic}");
+    let apply = |at: usize| {
+        let request = json!({ "command": "repair.repair", "values": { "diagnostic": diagnostic["id"], "repair": at, "candidate": 0 } }).to_string();
+        let out: Value = serde_json::from_str(&edit_json("/p/top.assembly", top, &files, &request)).unwrap();
+        assert_eq!(out["ok"], true, "{out}");
+        out["files"][0]["text"].as_str().unwrap().to_owned()
+    };
+    let retargeted = apply(0);
+    assert!(retargeted.contains("override block {"), "{retargeted}");
+    let (index, _, _) = compile_assembly("/p/top.assembly", &retargeted, &files).expect("compiles");
+    assert!(index["diagnostics"].as_array().unwrap().iter().all(|d| d["severity"] != "error"), "{}", index["diagnostics"]);
+    let removed = apply(1);
+    assert!(!removed.contains("override"), "{removed}");
+}

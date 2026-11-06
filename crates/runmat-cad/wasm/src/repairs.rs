@@ -157,6 +157,34 @@ pub fn apply(text: &str, path: &str, diagnostic: &Diagnostic, at: usize, candida
     })
 }
 
+/// Gives each repair that offers candidates their text (`candidate_labels`), so a problem
+/// list can offer one action per candidate: a re-pick's references as written in the source,
+/// a retarget's component paths.
+pub fn label_candidates(diagnostics: &mut Value) {
+    for d in diagnostics.as_array_mut().into_iter().flatten() {
+        for r in d["repairs"].as_array_mut().into_iter().flatten() {
+            let labels: Option<Vec<String>> = match r["repair"].as_str() {
+                Some("re_pick" | "disambiguate") => r["candidates"].as_array().map(|c| {
+                    c.iter()
+                        .filter_map(|c| serde_json::from_value::<Reference>(c.clone()).ok())
+                        .map(|c| runmat_cad::syntax::refs::print_reference(&c).unwrap_or_else(|| "a candidate".into()))
+                        .collect()
+                }),
+                Some("retarget_override") => r["candidates"].as_array().map(|c| {
+                    c.iter()
+                        .filter_map(|c| serde_json::from_value::<runmat_cad::assembly::RelPath>(c.clone()).ok())
+                        .map(|c| c.to_string())
+                        .collect()
+                }),
+                _ => None,
+            };
+            if let Some(labels) = labels.filter(|l| !l.is_empty()) {
+                r["candidate_labels"] = labels.into();
+            }
+        }
+    }
+}
+
 /// `repair.repair` on a part: regenerates it and applies the repair the values name.
 pub fn repair_part(path: &str, text: &str, values: &Values) -> Result<(SourceChange, String), EditFailure> {
     let id = index(values, "diagnostic").ok_or_else(|| model("name the problem to repair"))?;

@@ -403,6 +403,9 @@ pub fn lock_assembly(
 #[derive(Clone, Debug)]
 pub(super) struct Pending {
     pub remaining: Vec<PathSegment>,
+    /// The override's whole target as written, and the component that carries it.
+    pub target: RelPath,
+    pub occurrence: String,
     pub kind: OverrideKind,
     pub file: FilePath,
     pub index: usize,

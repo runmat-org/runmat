@@ -627,22 +627,28 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
     }
     let out = if is_assembly(path) {
         match compile_assembly(path, text, files) {
-            Ok((index, display, diagnostics)) => json!({
-                "projection": { "kind": "assembly", "data": index },
-                "display": { "kind": "assembly", "data": display },
-                "diagnostics": diagnostics,
-                "kernel": crate::kernel::name(),
-            }),
+            Ok((mut index, display, diagnostics)) => {
+                crate::repairs::label_candidates(&mut index["diagnostics"]);
+                json!({
+                    "projection": { "kind": "assembly", "data": index },
+                    "display": { "kind": "assembly", "data": display },
+                    "diagnostics": diagnostics,
+                    "kernel": crate::kernel::name(),
+                })
+            }
             Err(diagnostics) => json!({ "diagnostics": diagnostics }),
         }
     } else {
         match compile_part_in(path, text, configuration) {
-            Ok(part) => json!({
-                "projection": { "kind": "part", "data": part.projection },
-                "display": { "kind": "part", "data": part.display },
-                "diagnostics": part.diagnostics,
-                "kernel": crate::kernel::name(),
-            }),
+            Ok(mut part) => {
+                crate::repairs::label_candidates(&mut part.projection["index"]["diagnostics"]);
+                json!({
+                    "projection": { "kind": "part", "data": part.projection },
+                    "display": { "kind": "part", "data": part.display },
+                    "diagnostics": part.diagnostics,
+                    "kernel": crate::kernel::name(),
+                })
+            }
             Err(diagnostics) => json!({ "diagnostics": diagnostics }),
         }
     };

@@ -148,11 +148,19 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 continue;
             };
             if self.child(node, first).is_none() && !present.contains(first) {
-                let candidates: Vec<String> = self.nodes[node as usize]
+                // Each candidate is the whole target with the missing segment replaced by a
+                // child whose name is close to it.
+                let at = p.target.0.len() - p.remaining.len();
+                let candidates: Vec<RelPath> = self.nodes[node as usize]
                     .children
                     .iter()
-                    .map(|c| self.nodes[*c as usize].segment.to_string())
-                    .filter(|s| s.contains(&first.name) || first.name.contains(s.as_str()))
+                    .map(|c| &self.nodes[*c as usize].segment)
+                    .filter(|s| s.name.contains(&first.name) || first.name.contains(s.name.as_str()))
+                    .map(|s| {
+                        let mut target = p.target.clone();
+                        target.0[at] = s.clone();
+                        target
+                    })
                     .collect();
                 let path = self.display_path(node);
                 self.diag(
@@ -170,17 +178,20 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     if candidates.is_empty() {
                         vec![Repair::RemoveOverride {
                             assembly: p.file.clone(),
+                            occurrence: p.occurrence.clone(),
                             index: p.index,
                         }]
                     } else {
                         vec![
                             Repair::RetargetOverride {
                                 assembly: p.file.clone(),
+                                occurrence: p.occurrence.clone(),
                                 index: p.index,
                                 candidates,
                             },
                             Repair::RemoveOverride {
                                 assembly: p.file.clone(),
+                                occurrence: p.occurrence.clone(),
                                 index: p.index,
                             },
                         ]
@@ -571,6 +582,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
                         }
                         child_pending.push(Pending {
                             remaining: ov.target.0.clone(),
+                            target: ov.target.clone(),
+                            occurrence: o.name.to_string(),
                             kind: ov.set.clone(),
                             file: file.clone(),
                             index: i,
@@ -611,6 +624,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     ),
                     vec![Repair::RemoveOverride {
                         assembly: file.clone(),
+                        occurrence: o.name.to_string(),
                         index: i,
                     }],
                 );

@@ -156,7 +156,21 @@ fn find(document: &AssemblyDocument, name: &str) -> Result<usize, EditFailure> {
         .ok_or_else(|| model(format!("the assembly has no component `{name}`")))
 }
 
-/// Applies repair `values.repair` (an index, 0 when absent) of the assembly's diagnostic
+/// Component `occurrence`, which must carry override `index`.
+fn override_owner<'a>(document: &'a mut AssemblyDocument, occurrence: &str, index: usize) -> Result<&'a mut runmat_cad::assembly::Occurrence, EditFailure> {
+    let o = document
+        .occurrences
+        .iter_mut()
+        .find(|o| o.name == occurrence)
+        .ok_or_else(|| model(format!("the assembly has no component `{occurrence}`")))?;
+    if index >= o.overrides.len() {
+        return Err(model(format!("{occurrence} has no override {index}")));
+    }
+    Ok(o)
+}
+
+/// Applies repair `values.repair` (an index, 0 when absent; `values.candidate` picks a
+/// retarget's target) of the assembly's diagnostic
 /// `values.diagnostic` (its id). This file's own repairs apply here; a repair that edits
 /// another file says which.
 fn repair(
@@ -190,7 +204,24 @@ fn repair(
             found.suppressed = true;
             Ok(format!("Suppressed mate {mate}"))
         }
-        Repair::SuppressMate { assembly, .. } => Err(model(format!("this repair edits {}; open it to apply", assembly.0))),
+        Repair::RemoveOverride { assembly, occurrence, index } if assembly.0 == path => {
+            let o = override_owner(document, &occurrence, index)?;
+            o.overrides.remove(index);
+            Ok(format!("Removed override {index} of {occurrence}"))
+        }
+        Repair::RetargetOverride { assembly, occurrence, index, candidates } if assembly.0 == path => {
+            let candidate = number("candidate").unwrap_or(0);
+            let target = candidates
+                .get(candidate)
+                .cloned()
+                .ok_or_else(|| model(format!("the repair offers {} targets; choose one of them", candidates.len())))?;
+            let o = override_owner(document, &occurrence, index)?;
+            o.overrides[index].target = target.clone();
+            Ok(format!("Pointed override {index} of {occurrence} at {target}"))
+        }
+        Repair::SuppressMate { assembly, .. } | Repair::RemoveOverride { assembly, .. } | Repair::RetargetOverride { assembly, .. } => {
+            Err(model(format!("this repair edits {}; open it to apply", assembly.0)))
+        }
         other => Err(model(format!("`{other:?}` applies from the source editor in this build"))),
     }
 }
