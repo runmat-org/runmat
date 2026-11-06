@@ -40,6 +40,7 @@ pub mod hlr;
 pub mod kernel;
 pub mod mass;
 pub mod picks;
+mod repairs;
 pub mod runtime;
 pub mod study_checks;
 mod surface_edits;

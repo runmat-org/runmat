@@ -151,6 +151,45 @@ fn find(document: &AssemblyDocument, name: &str) -> Result<usize, EditFailure> {
         .ok_or_else(|| model(format!("the assembly has no component `{name}`")))
 }
 
+/// Applies repair `values.repair` (an index, 0 when absent) of the assembly's diagnostic
+/// `values.diagnostic` (its id). This file's own repairs apply here; a repair that edits
+/// another file says which.
+fn repair(
+    path: &str,
+    text: &str,
+    files: &Files,
+    document: &mut AssemblyDocument,
+    values: &serde_json::Map<String, serde_json::Value>,
+) -> Result<String, EditFailure> {
+    use runmat_cad::diagnostics::Repair;
+    let number = |id: &str| values.get(id).and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok())).map(|v| v as usize);
+    let id = number("diagnostic").ok_or_else(|| model("name the problem to repair"))?;
+    let at = number("repair").unwrap_or(0);
+    let (index, _, _) = crate::runtime::compile_assembly(path, text, files)
+        .map_err(|_| model("the assembly doesn't compile; fix the source first"))?;
+    let diagnostic = index["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|d| d["id"].as_u64() == Some(id as u64))
+        .ok_or_else(|| model("that problem is gone; the assembly changed since it was reported"))?;
+    let repair: Repair = serde_json::from_value(diagnostic["repairs"][at].clone())
+        .map_err(|_| model("that problem has no such repair"))?;
+    match repair {
+        Repair::SuppressMate { assembly, mate } if assembly.0 == path => {
+            let found = document
+                .mates
+                .iter_mut()
+                .find(|m| m.name == mate)
+                .ok_or_else(|| model(format!("the assembly has no mate `{mate}`")))?;
+            found.suppressed = true;
+            Ok(format!("Suppressed mate {mate}"))
+        }
+        Repair::SuppressMate { assembly, .. } => Err(model(format!("this repair edits {}; open it to apply", assembly.0))),
+        other => Err(model(format!("`{other:?}` applies from the source editor in this build"))),
+    }
+}
+
 pub(super) fn edit(
     path: &str,
     text: &str,
@@ -203,6 +242,7 @@ pub(super) fn edit(
             place::pattern(&mut document, &compiled, &names, &request.values)?
         }
         "assembly.mate" => mate::mate(&mut document, &compiled, &request.values)?,
+        "repair.repair" => repair(path, text, files, &mut document, &request.values)?,
         other => {
             return Err(model(format!(
                 "`{other}` edits assemblies through the source editor in this build"

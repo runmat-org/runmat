@@ -282,3 +282,30 @@ fn linear_and_circular_patterns_repeat_the_component() {
     assert!(text.contains("pattern pattern1 = circular("), "{text}");
     compile(&text);
 }
+
+#[test]
+fn a_broken_mates_repair_suppresses_it() {
+    let c = compile(RIG);
+    let text = mate(RIG, "coincident", c.face("plate", top), c.face("block", bottom), json!({}));
+    // The mate's second reference names a component the assembly doesn't have.
+    let broken: String = text
+        .lines()
+        .map(|l| if l.contains("mate coincident1") { l.replace("block", "ghost") } else { l.to_owned() })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (index, _, _) = compile_assembly("/p/rig.assembly", &broken, &files()).expect("compiles with an error");
+    let diagnostic = index["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["repairs"].as_array().is_some_and(|r| r.iter().any(|r| r["repair"] == "suppress_mate")))
+        .unwrap_or_else(|| panic!("no suppress-mate repair in {}", index["diagnostics"]))
+        .clone();
+    let at = diagnostic["repairs"].as_array().unwrap().iter().position(|r| r["repair"] == "suppress_mate").unwrap();
+    let fixed = run(&broken, json!({ "command": "repair.repair", "values": { "diagnostic": diagnostic["id"], "repair": at } }));
+    let line = fixed.lines().find(|l| l.contains("mate coincident1")).unwrap_or("");
+    assert!(line.contains("suppressed"), "{fixed}");
+    let (index, _, _) = compile_assembly("/p/rig.assembly", &fixed, &files()).expect("compiles");
+    let errors: Vec<_> = index["diagnostics"].as_array().unwrap().iter().filter(|d| d["severity"] == "error").collect();
+    assert!(errors.is_empty(), "{errors:?}\n{fixed}");
+}

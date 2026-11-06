@@ -191,6 +191,7 @@ fn part_edit(
             let change = reorder_feature(text, path, id, after)?;
             Ok((change, format!("Moved {id}")))
         }
+        "repair.repair" => crate::repairs::repair_part(path, text, &request.values),
         command => {
             // A command that adds a feature: its values and picks as the feature's model.
             let parsed = parse_part(path, text);
