@@ -37,7 +37,6 @@ fn one_partition_reuses_one_prepared_producer_field_across_geometry_and_acceptan
         &topology,
         &evaluator,
         &evaluator,
-        &evaluator,
         &UniformCurveMetric::from_target_size_m(0.5).unwrap(),
         &Control,
         curve_options(),

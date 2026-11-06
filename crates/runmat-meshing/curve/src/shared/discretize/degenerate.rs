@@ -1,7 +1,4 @@
-use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, ExactPcurveEvaluator, ExactSurfaceEvaluator,
-    GeometryEvaluationControl,
-};
+use runmat_geometry_core::ExactEdge;
 
 use crate::shared::{
     shared_curve_vertex_node_id, CurveMetricResolutionEvidence, CurveResolutionEvidence,
@@ -14,18 +11,20 @@ use super::{
     math::{norm, sub},
     pcurves::face_uses_for_parameters,
     sampling::interval_parameters,
-    types::SharedCurveDiscretizationOptions,
+    types::{SharedCurveDiscretizationOptions, SharedCurveEvaluationContext},
 };
 
 pub(super) fn discretize_degenerate_edge(
-    topology: &ExactBRepTopology,
+    context: SharedCurveEvaluationContext<'_>,
     edge: &ExactEdge,
-    curves: &dyn ExactCurveEvaluator,
-    pcurves: &dyn ExactPcurveEvaluator,
-    surfaces: &dyn ExactSurfaceEvaluator,
-    control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<SharedCurve, SharedCurveError> {
+    let SharedCurveEvaluationContext {
+        topology,
+        curves,
+        control,
+        ..
+    } = context;
     let parameter_range = curves
         .parameter_range(&edge.curve_evaluator_id)
         .map_err(|error| geometry_error(edge, error))?;
@@ -81,16 +80,7 @@ pub(super) fn discretize_degenerate_edge(
             >::new(anchor),
         })
         .collect();
-    let face_uses = face_uses_for_parameters(
-        topology,
-        edge,
-        pcurves,
-        surfaces,
-        control,
-        parameter_range,
-        &parameters,
-        options,
-    )?;
+    let face_uses = face_uses_for_parameters(context, edge, parameter_range, &parameters, options)?;
     Ok(SharedCurve {
         source_edge_id: edge.id.clone(),
         parameter_range,

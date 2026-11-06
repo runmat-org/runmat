@@ -118,6 +118,8 @@ pub enum CoercivityError {
     SymbolicOrdering,
     #[error("coercivity proof was cancelled")]
     Cancelled,
+    #[error("coercivity factorization usage: {0}")]
+    Usage(runmat_simulation_usage::LedgerError),
     #[error("coercivity evidence does not match its prepared operator or right-hand side")]
     BindingMismatch,
     #[error("coercivity evidence identity encoding failed: {0}")]
@@ -365,6 +367,7 @@ impl CoercivityCertificate {
                 }
             }
             runmat_sparse_solvers::SolverError::Cancelled => CoercivityError::Cancelled,
+            runmat_sparse_solvers::SolverError::Usage(error) => CoercivityError::Usage(error),
             _ => CoercivityError::SymbolicOrdering,
         })?;
         // Scaled pivots l_jj² / a_jj are the pivots of D^{-1/2} A D^{-1/2}; a tiny one is a

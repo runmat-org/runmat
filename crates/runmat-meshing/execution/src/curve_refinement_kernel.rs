@@ -204,7 +204,6 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveRefineme
                 &geometry.topology,
                 evaluator.as_ref(),
                 evaluator.as_ref(),
-                evaluator.as_ref(),
                 &metric,
                 &control,
             ),

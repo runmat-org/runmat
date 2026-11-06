@@ -91,7 +91,6 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
         &topology,
         &evaluator,
         &evaluator,
-        &evaluator,
         &metric,
         &UnlimitedControl,
         options,
@@ -127,7 +126,6 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
             &topology,
             &evaluator,
             &evaluator,
-            &evaluator,
             &metric,
             &UnlimitedControl,
             options,
@@ -138,7 +136,6 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
     let report = validate_shared_curve_geometry(
         &mesh,
         &topology,
-        &evaluator,
         &evaluator,
         &evaluator,
         &metric,
@@ -184,15 +181,16 @@ fn nonperiodic_closed_face_rejects_distinct_pcurve_endpoints() {
         &topology,
         &evaluator,
         &evaluator,
-        &evaluator,
         &UniformCurveMetric::from_target_size_m(0.25).unwrap(),
         &UnlimitedControl,
         shared_options(),
     )
     .unwrap_err();
 
+    // The circle's seam vertex closes the edge, so the pcurve end at (2*pi, 0) is checked against
+    // that vertex: its image on the face lies far outside the vertex tolerance.
     assert_eq!(error.kind, SharedCurveErrorKind::GeometricMismatch);
-    assert_eq!(error.field, "closed pcurve endpoint");
+    assert_eq!(error.field, "vertex pcurve coordinate");
 }
 
 #[test]
@@ -209,7 +207,6 @@ fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering()
         &topology,
         &evaluator,
         &evaluator,
-        &evaluator,
         &metric,
         &UnlimitedControl,
         options,
@@ -221,7 +218,6 @@ fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering()
             &topology,
             &evaluator,
             &evaluator,
-            &evaluator,
             &metric,
             &UnlimitedControl,
             options,
@@ -231,7 +227,6 @@ fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering()
     let cancelled = validate_shared_curve_geometry(
         &mesh,
         &topology,
-        &evaluator,
         &evaluator,
         &evaluator,
         &metric,
@@ -335,7 +330,6 @@ fn constructive_curve_discretization_fails_at_its_hard_node_limit() {
         &topology,
         &evaluator,
         &evaluator,
-        &evaluator,
         &metric,
         &UnlimitedControl,
         options,
@@ -358,7 +352,6 @@ fn constructive_curve_discretization_reports_incompatible_minimum_length() {
     options.resolution.minimum_metric_edge_length = 0.9;
     let error = discretize_shared_curves(
         &topology,
-        &evaluator,
         &evaluator,
         &evaluator,
         &metric,
@@ -384,7 +377,6 @@ fn constructive_curves_apply_occurrence_scale_to_coordinates_and_arc_length() {
     let metric = UniformCurveMetric::from_target_size_m(0.5).unwrap();
     let mesh = discretize_shared_curves(
         &topology,
-        &evaluator,
         &evaluator,
         &evaluator,
         &metric,
@@ -427,7 +419,6 @@ fn constructive_curves_integrate_arc_length_under_nonconformal_affine_placement(
         &topology,
         &evaluator,
         &evaluator,
-        &evaluator,
         &metric,
         &UnlimitedControl,
         shared_options(),
@@ -455,7 +446,6 @@ fn constructive_curves_preserve_typed_evaluator_cancellation() {
         &topology,
         &evaluator,
         &evaluator,
-        &evaluator,
         &metric,
         &CancelledControl,
         shared_options(),
@@ -481,7 +471,6 @@ fn singular_edge_preserves_pcurve_interval_as_one_collapsed_mesh_node() {
     let options = shared_options();
     let mesh = discretize_shared_curves(
         &topology,
-        &evaluator,
         &evaluator,
         &evaluator,
         &metric,
@@ -515,7 +504,6 @@ fn singular_edge_preserves_pcurve_interval_as_one_collapsed_mesh_node() {
     let report = validate_shared_curve_geometry(
         &mesh,
         &topology,
-        &evaluator,
         &evaluator,
         &evaluator,
         &metric,
@@ -556,7 +544,6 @@ fn declared_degenerate_edge_must_geometrically_collapse() {
     false_topology.edges[0].is_periodic = false;
     let error = discretize_shared_curves(
         &false_topology,
-        &evaluator,
         &evaluator,
         &evaluator,
         &CountingMetric::new(),
@@ -604,7 +591,6 @@ fn resolved_curve_metric_combines_all_incident_typed_sources() {
 
     let mesh = discretize_shared_curves(
         &topology,
-        &evaluator,
         &evaluator,
         &evaluator,
         &metric,
@@ -830,7 +816,6 @@ fn canonical_edge_batches_join_independently_of_layout_and_completion_order() {
                     &topology,
                     &evaluator,
                     &evaluator,
-                    &evaluator,
                     &metric,
                     &UnlimitedControl,
                     options,
@@ -859,7 +844,6 @@ fn canonical_edge_batches_join_independently_of_layout_and_completion_order() {
                 &topology,
                 &evaluator,
                 &evaluator,
-                &evaluator,
                 &metric,
                 &UnlimitedControl,
                 options,
@@ -873,7 +857,6 @@ fn canonical_edge_batches_join_independently_of_layout_and_completion_order() {
     let descriptors = curve_partition_descriptors(&topology, 2).unwrap();
     let first = discretize_shared_curve_partition(
         &topology,
-        &evaluator,
         &evaluator,
         &evaluator,
         &metric,

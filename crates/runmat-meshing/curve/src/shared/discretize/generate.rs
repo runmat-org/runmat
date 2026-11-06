@@ -1,6 +1,5 @@
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, ExactPcurveEvaluator, ExactSurfaceEvaluator,
-    GeometryEvaluationControl, ParameterRange,
+    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, GeometryEvaluationControl, ParameterRange,
 };
 
 use crate::shared::{
@@ -16,27 +15,23 @@ use super::{
     error::{edge_error, geometry_error, require_parameter_range, validate_options},
     pcurves::face_uses_for_parameters,
     sampling::{interval_evidence, EvaluatedPoint, EvaluationCache},
-    types::{CurveMetricField, SharedCurveDiscretizationOptions, SharedCurveEvaluationContext},
+    types::{
+        CurveMetricField, ExactFacePcurveEvaluator, SharedCurveDiscretizationOptions,
+        SharedCurveEvaluationContext,
+    },
 };
 
 pub fn discretize_shared_curves(
     topology: &ExactBRepTopology,
     curves: &dyn ExactCurveEvaluator,
-    pcurves: &dyn ExactPcurveEvaluator,
-    surfaces: &dyn ExactSurfaceEvaluator,
+    pcurves: &dyn ExactFacePcurveEvaluator,
     metric_field: &dyn CurveMetricField,
     control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<SharedCurveMesh, SharedCurveError> {
     validate_options(options)?;
-    let context = SharedCurveEvaluationContext::new(
-        topology,
-        curves,
-        pcurves,
-        surfaces,
-        metric_field,
-        control,
-    );
+    let context =
+        SharedCurveEvaluationContext::new(topology, curves, pcurves, metric_field, control);
     let mut edges = Vec::with_capacity(context.topology.edges.len());
     for edge in &context.topology.edges {
         context
@@ -82,15 +77,7 @@ pub(crate) fn discretize_edge_with_parameters(
                 "a degenerate exact edge cannot accept an interior mesh split",
             ));
         }
-        return discretize_degenerate_edge(
-            context.topology,
-            edge,
-            context.curves,
-            context.pcurves,
-            context.surfaces,
-            context.control,
-            options,
-        );
+        return discretize_degenerate_edge(context, edge, options);
     }
     let parameter_range = context
         .curves
@@ -191,16 +178,7 @@ pub(crate) fn discretize_edge_with_parameters(
         .iter()
         .map(|sample| sample.parameter)
         .collect::<Vec<_>>();
-    let face_uses = face_uses_for_parameters(
-        context.topology,
-        edge,
-        context.pcurves,
-        context.surfaces,
-        context.control,
-        parameter_range,
-        &parameters,
-        options,
-    )?;
+    let face_uses = face_uses_for_parameters(context, edge, parameter_range, &parameters, options)?;
 
     Ok(SharedCurve {
         source_edge_id: edge.id.clone(),

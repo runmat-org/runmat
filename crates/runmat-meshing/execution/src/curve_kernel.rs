@@ -82,7 +82,6 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveStageKer
             &geometry.topology,
             evaluator.as_ref(),
             evaluator.as_ref(),
-            evaluator.as_ref(),
             &metric,
             &control,
             options,

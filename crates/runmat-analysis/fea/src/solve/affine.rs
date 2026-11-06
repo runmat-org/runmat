@@ -90,12 +90,19 @@ pub(crate) fn affine_rhs_work(
         },
     )?;
     let shift_work = affine_count(reduction.full_dof_count)?;
-    let transpose_work = affine_count(reduction.recovery_coefficients.len())?
-        .checked_mul(2)
-        .map_err(|error| ScopedSpmvError::Usage(error.into()))?;
+    let transpose_work = affine_transpose_work(reduction)?;
     dot_work
         .checked_add(shift_work)
         .and_then(|work| work.checked_add(transpose_work))
+        .map_err(|error| ScopedSpmvError::Usage(error.into()))
+}
+
+/// `Tᵀ f`: one multiply and one add per stored recovery coefficient.
+pub(crate) fn affine_transpose_work(
+    reduction: &AffineConstraintReduction,
+) -> Result<OperationCount, ScopedSpmvError> {
+    affine_count(reduction.recovery_coefficients.len())?
+        .checked_mul(2)
         .map_err(|error| ScopedSpmvError::Usage(error.into()))
 }
 
@@ -607,18 +614,7 @@ pub(crate) fn affine_expand_work(
     reduction: &AffineConstraintReduction,
     plan: Option<LocalExecutionPlan>,
 ) -> Result<OperationCount, ScopedSpmvError> {
-    let dot_work = reduction.recovery_row_offsets.windows(2).try_fold(
-        OperationCount::ZERO,
-        |total, row| {
-            let terms = u64::try_from(row[1] - row[0])
-                .map_err(|_| ScopedSpmvError::Usage(LedgerError::CountOverflow))?;
-            let row_work = OperationCount::direct_real_dot(terms)
-                .map_err(|error| ScopedSpmvError::Usage(error.into()))?;
-            total
-                .checked_add(row_work)
-                .map_err(|error| ScopedSpmvError::Usage(error.into()))
-        },
-    )?;
+    let dot_work = affine_recovery_work(reduction)?;
     let offset_work = affine_count(reduction.full_dof_count)?
         .checked_mul(if plan.is_some_and(|plan| !plan.is_serial()) {
             2
@@ -632,7 +628,26 @@ pub(crate) fn affine_expand_work(
     Ok(work)
 }
 
-fn expand_linear(
+/// `T u` without the affine offset: one recovery dot per full DOF.
+pub(crate) fn affine_recovery_work(
+    reduction: &AffineConstraintReduction,
+) -> Result<OperationCount, ScopedSpmvError> {
+    reduction
+        .recovery_row_offsets
+        .windows(2)
+        .try_fold(OperationCount::ZERO, |total, row| {
+            let terms = u64::try_from(row[1] - row[0])
+                .map_err(|_| ScopedSpmvError::Usage(LedgerError::CountOverflow))?;
+            let row_work = OperationCount::direct_real_dot(terms)
+                .map_err(|error| ScopedSpmvError::Usage(error.into()))?;
+            total
+                .checked_add(row_work)
+                .map_err(|error| ScopedSpmvError::Usage(error.into()))
+        })
+}
+
+/// Unmetered `T u`; callers reserve [`affine_recovery_work`] around it.
+pub(crate) fn expand_linear(
     reduction: &AffineConstraintReduction,
     reduced: &[f64],
     plan: Option<LocalExecutionPlan>,

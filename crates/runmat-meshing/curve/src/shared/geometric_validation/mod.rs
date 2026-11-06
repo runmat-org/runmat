@@ -4,15 +4,15 @@ mod sampler;
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, ExactPcurveEvaluator, ExactSurfaceEvaluator,
-    GeometryEvaluationControl, GeometryTransform, ParameterRange,
+    ExactBRepTopology, ExactCurveEvaluator, ExactEdge, GeometryEvaluationControl,
+    GeometryTransform, ParameterRange,
 };
 
 use super::{
     discretize::{
         edge_error, face_uses_for_parameters, geometry_error, sub, validate_options,
-        world_arc_length, CurveMetricField, SharedCurveDiscretizationOptions,
-        SharedCurveEvaluationContext,
+        world_arc_length, CurveMetricField, ExactFacePcurveEvaluator,
+        SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
     },
     SharedCurve, SharedCurveError, SharedCurveErrorKind, SharedCurveMesh,
 };
@@ -30,21 +30,14 @@ pub fn validate_shared_curve_geometry(
     mesh: &SharedCurveMesh,
     topology: &ExactBRepTopology,
     curves: &dyn ExactCurveEvaluator,
-    pcurves: &dyn ExactPcurveEvaluator,
-    surfaces: &dyn ExactSurfaceEvaluator,
+    pcurves: &dyn ExactFacePcurveEvaluator,
     metric_field: &dyn CurveMetricField,
     control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
 ) -> Result<SharedCurveGeometryValidationReport, SharedCurveError> {
     validate_options(options)?;
-    let context = SharedCurveEvaluationContext::new(
-        topology,
-        curves,
-        pcurves,
-        surfaces,
-        metric_field,
-        control,
-    );
+    let context =
+        SharedCurveEvaluationContext::new(topology, curves, pcurves, metric_field, control);
     mesh.validate_against(context.topology)?;
     let edge_by_id = context
         .topology
@@ -222,8 +215,9 @@ fn validate_nodes(
     Ok(())
 }
 
-/// Stored face-use images equal an independent derivation: the exact pcurve image at every
-/// node, with source-vertex nodes on their admitted canonical face coordinate.
+/// Stored face-use coordinates must equal an independent derivation from the exact pcurves:
+/// interior nodes evaluate their own pcurve, and endpoints on non-periodic faces take the
+/// vertex's canonical coordinate admitted against the vertex tolerance.
 fn validate_pcurves(
     curve: &SharedCurve,
     edge: &ExactEdge,
@@ -235,29 +229,28 @@ fn validate_pcurves(
         .iter()
         .map(|node| node.parameter)
         .collect::<Vec<_>>();
-    let derived = face_uses_for_parameters(
-        context.topology,
-        edge,
-        context.pcurves,
-        context.surfaces,
-        context.control,
-        curve.parameter_range,
-        &parameters,
-        options,
-    )?;
+    let expected =
+        face_uses_for_parameters(context, edge, curve.parameter_range, &parameters, options)?;
+    let expected_by_coedge = expected
+        .iter()
+        .map(|face_use| (&face_use.coedge_id, face_use))
+        .collect::<BTreeMap<_, _>>();
     for face_use in &curve.face_uses {
-        let expected = derived
-            .iter()
-            .find(|derived| derived.coedge_id == face_use.coedge_id)
-            .ok_or_else(|| mismatch(edge, "curve face-use UV", "face use has no exact coedge"))?;
-        if expected.node_uv.len() != face_use.node_uv.len() {
+        let Some(exact) = expected_by_coedge.get(&face_use.coedge_id) else {
             return Err(mismatch(
                 edge,
                 "curve face-use UV",
-                "stored pcurve image count differs from the curve nodes",
+                "stored face use has no exact coedge",
+            ));
+        };
+        if exact.node_uv.len() != face_use.node_uv.len() {
+            return Err(mismatch(
+                edge,
+                "curve face-use UV",
+                "stored face use node count differs from the curve",
             ));
         }
-        for (exact_uv, stored_uv) in expected.node_uv.iter().zip(&face_use.node_uv) {
+        for (exact_uv, stored_uv) in exact.node_uv.iter().zip(&face_use.node_uv) {
             if ((exact_uv[0] - stored_uv[0]).powi(2) + (exact_uv[1] - stored_uv[1]).powi(2)).sqrt()
                 > options.pcurve_absolute_error
             {

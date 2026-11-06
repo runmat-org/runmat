@@ -472,7 +472,10 @@ impl CoordinateLift<'_> {
             return Err(ExactFaceChartError::new(
                 ExactFaceChartErrorKind::InvalidInput,
                 &self.source.source_face_id,
-                "periodic chart lift is not the nearest canonical image",
+                format!(
+                    "periodic chart lift is not the nearest canonical image: axis {} value {value} lifted to {lifted} against reference {reference} (period {period}, residual {residual}, tolerance {tolerance}, equivalent {require_equivalent})",
+                    self.axis
+                ),
             )
             .with_witness(self.wire_id, self.axis, residual));
         }

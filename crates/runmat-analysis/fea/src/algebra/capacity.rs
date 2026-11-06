@@ -85,3 +85,19 @@ where
             NumericalCapacityError::Admission(never) => match never {},
         })
 }
+
+/// Reference work of one real CSR product `y = A x`: a length-k dot per stored row
+/// (`k` products and `k - 1` additions). Empty rows cost nothing.
+pub(crate) fn real_spmv_work(
+    matrix: &super::RealSparseMatrix,
+) -> Result<OperationCount, LedgerError> {
+    matrix
+        .pattern()
+        .row_offsets()
+        .windows(2)
+        .try_fold(OperationCount::ZERO, |total, row| {
+            total
+                .checked_add(OperationCount::direct_real_dot(row[1] - row[0])?)
+                .map_err(LedgerError::from)
+        })
+}

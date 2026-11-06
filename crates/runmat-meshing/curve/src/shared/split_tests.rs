@@ -20,7 +20,7 @@ fn exact_splits_are_deduplicated_and_order_independent() {
     let metric = UniformCurveMetric::from_target_size_m(0.5).unwrap();
     let options = options();
     let curves = discretize_shared_curves(
-        &topology, &evaluator, &evaluator, &evaluator, &metric, &Control, options,
+        &topology, &evaluator, &evaluator, &metric, &Control, options,
     )
     .unwrap();
     let nodes = &curves.edges[0].nodes;
@@ -38,9 +38,8 @@ fn exact_splits_are_deduplicated_and_order_independent() {
             .kind,
         crate::SharedCurveErrorKind::InvalidRequest
     );
-    let context = SharedCurveEvaluationContext::new(
-        &topology, &evaluator, &evaluator, &evaluator, &metric, &Control,
-    );
+    let context =
+        SharedCurveEvaluationContext::new(&topology, &evaluator, &evaluator, &metric, &Control);
 
     let refined = apply_shared_curve_splits(
         &curves,
@@ -107,13 +106,12 @@ fn split_rejects_stale_segment_identity_and_noninterior_parameters() {
     let metric = UniformCurveMetric::from_target_size_m(0.5).unwrap();
     let options = options();
     let curves = discretize_shared_curves(
-        &topology, &evaluator, &evaluator, &evaluator, &metric, &Control, options,
+        &topology, &evaluator, &evaluator, &metric, &Control, options,
     )
     .unwrap();
     let nodes = &curves.edges[0].nodes;
-    let context = SharedCurveEvaluationContext::new(
-        &topology, &evaluator, &evaluator, &evaluator, &metric, &Control,
-    );
+    let context =
+        SharedCurveEvaluationContext::new(&topology, &evaluator, &evaluator, &metric, &Control);
     let mut stale = SharedCurveSegmentSplit {
         source_edge_id: curves.edges[0].source_edge_id.clone(),
         endpoint_node_ids: [nodes[0].node_id, nodes[1].node_id],
@@ -152,7 +150,6 @@ fn split_rejects_stale_segment_identity_and_noninterior_parameters() {
 
     let cancelled = SharedCurveEvaluationContext::new(
         &topology,
-        &evaluator,
         &evaluator,
         &evaluator,
         &metric,

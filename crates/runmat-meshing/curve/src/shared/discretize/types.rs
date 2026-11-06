@@ -40,12 +40,19 @@ pub trait CurveMetricField: Send + Sync {
     ) -> Result<CurveMetricEvaluation, SharedCurveError>;
 }
 
+/// Pcurves together with the surfaces they lie on. Curve meshing maps a coedge's endpoint UV
+/// onto its face to compare it with the vertex in 3D, against the vertex's own tolerance.
+pub trait ExactFacePcurveEvaluator: ExactPcurveEvaluator + ExactSurfaceEvaluator {}
+
+impl<T> ExactFacePcurveEvaluator for T where T: ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized
+{}
+
 #[derive(Clone, Copy)]
 pub struct SharedCurveEvaluationContext<'a> {
     pub topology: &'a ExactBRepTopology,
     pub curves: &'a dyn ExactCurveEvaluator,
-    pub pcurves: &'a dyn ExactPcurveEvaluator,
-    pub surfaces: &'a dyn ExactSurfaceEvaluator,
+    /// Pcurves and the face surfaces they lie on, from one evaluator.
+    pub pcurves: &'a dyn ExactFacePcurveEvaluator,
     pub metric_field: &'a dyn CurveMetricField,
     pub control: &'a dyn GeometryEvaluationControl,
 }
@@ -54,8 +61,7 @@ impl<'a> SharedCurveEvaluationContext<'a> {
     pub fn new(
         topology: &'a ExactBRepTopology,
         curves: &'a dyn ExactCurveEvaluator,
-        pcurves: &'a dyn ExactPcurveEvaluator,
-        surfaces: &'a dyn ExactSurfaceEvaluator,
+        pcurves: &'a dyn ExactFacePcurveEvaluator,
         metric_field: &'a dyn CurveMetricField,
         control: &'a dyn GeometryEvaluationControl,
     ) -> Self {
@@ -63,7 +69,6 @@ impl<'a> SharedCurveEvaluationContext<'a> {
             topology,
             curves,
             pcurves,
-            surfaces,
             metric_field,
             control,
         }

@@ -1,13 +1,10 @@
-use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, ExactSurfaceEvaluator,
-    GeometryEvaluationControl,
-};
+use runmat_geometry_core::{ExactBRepTopology, ExactCurveEvaluator, GeometryEvaluationControl};
 use runmat_meshing_core::{CanonicalEntityRange, MeshingPartitionDescriptor, MeshingPartitionKind};
 
 use super::{
     discretize::{
         discretize_edge, geometry_error, validate_options, CurveMetricField,
-        SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
+        ExactFacePcurveEvaluator, SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
     },
     SharedCurveBatch, SharedCurveError, SharedCurveMesh, SHARED_CURVE_BATCH_SCHEMA_VERSION,
     SHARED_CURVE_MESH_SCHEMA_VERSION,
@@ -49,8 +46,7 @@ pub fn curve_partition_descriptors(
 pub fn discretize_shared_curve_partition(
     topology: &ExactBRepTopology,
     curves: &dyn ExactCurveEvaluator,
-    pcurves: &dyn ExactPcurveEvaluator,
-    surfaces: &dyn ExactSurfaceEvaluator,
+    pcurves: &dyn ExactFacePcurveEvaluator,
     metric_field: &dyn CurveMetricField,
     control: &dyn GeometryEvaluationControl,
     options: SharedCurveDiscretizationOptions,
@@ -58,14 +54,8 @@ pub fn discretize_shared_curve_partition(
 ) -> Result<SharedCurveBatch, SharedCurveError> {
     validate_options(options)?;
     validate_partition(&partition)?;
-    let context = SharedCurveEvaluationContext::new(
-        topology,
-        curves,
-        pcurves,
-        surfaces,
-        metric_field,
-        control,
-    );
+    let context =
+        SharedCurveEvaluationContext::new(topology, curves, pcurves, metric_field, control);
     let range = partition.entity_range.as_ref().expect("kind validated");
     let selected = context
         .topology
