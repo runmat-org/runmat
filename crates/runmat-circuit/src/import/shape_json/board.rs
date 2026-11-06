@@ -7,7 +7,9 @@
 //!   taken back to the part's own frame from where the file places them, on the bottom when its
 //!   pads are on the bottom copper;
 //! - tracks, arcs, vias and copper areas carry their nets; the default design rules give the
-//!   board's clearance, track and drill limits.
+//!   board's clearance, track and drill limits;
+//! - solid copper regions become zones of their net; a board hole outside a part becomes a
+//!   footprint of one unplated hole (`H901` …), on the board only.
 
 use super::{arc_mid, attributes, length, pairs, path, Document, Fields, Frame, PathStep};
 use crate::geom::poly::{Polygon, Ring};
@@ -259,6 +261,7 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
     let (mut segments, mut rings) = (Vec::new(), Vec::new());
     let (mut tracks, mut vias, mut zones, mut texts) = (0, 0, 0, 0);
     let mut unnamed = 0;
+    let mut holes = 0;
     for s in shapes {
         let mut items = s.split("#@$");
         let f = Fields::of(items.next().unwrap_or(""));
@@ -421,8 +424,32 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
                 texts += 1;
                 report.approximated("board texts are drawn in RunMat's stroke font from their start point");
             }
-            "HOLE" => report.not_carried("board holes outside a placed part"),
-            "SOLIDREGION" => report.not_carried("solid regions"),
+            "HOLE" => {
+                // A board hole: a footprint of one unplated hole, on the board only.
+                let d = length(f.num(3));
+                let key = file_safe(&format!("hole_{:.3}mm", crate::geom::to_mm(d)));
+                let pkg = Package { name: key.clone(), uuid: crate::library::make::uuid("package", &key), description: String::new(), pads: vec![PadDef::npth("", Point::ORIGIN, d)], courtyard: vec![], silk: vec![], fab: vec![], model: None, body: None, smd: false };
+                let pkg = packages.entry(key).or_insert(pkg).clone();
+                holes += 1;
+                let id = board.alloc();
+                board.footprints.insert(id, Footprint { id, reference: format!("H{}", 900 + holes), component: None, value: String::new(), package: pkg, at: frame.point(f.num(1), f.num(2)), rotation: 0.0, side: Side::Top, locked: true, pad_nets: BTreeMap::new(), fitted: true, properties: Default::default() });
+            }
+            "SOLIDREGION" => {
+                // A solid copper region is a zone of its net, filled where nothing else is.
+                let (Some(li), "solid") = (index(layer_of(&f, 1)), f.str(4)) else {
+                    report.not_carried(format!("solid regions of kind {} on layer {}", f.str(4), layer_of(&f, 1)));
+                    continue;
+                };
+                let Some(ring) = path_points(&frame, f.str(3)).and_then(|r| r.into_iter().max_by_key(|r| r.len())).filter(|r| r.len() >= 3) else {
+                    report.not_carried("solid regions whose outline uses curves other than arcs");
+                    continue;
+                };
+                let n = net(&mut board, f.str(2));
+                let id = board.alloc();
+                board.zones.insert(id, Zone::new(id, f.str(2), n, vec![li], Polygon::from_ring(Ring::from(ring))));
+                zones += 1;
+                report.approximated("solid copper regions are carried as zones of their net");
+            }
             "DIMENSION" => report.not_carried("dimensions"),
             "" => {}
             other => report.not_carried(format!("{other} items")),
@@ -432,7 +459,8 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
         Some(o) => board.outline = o,
         None => report.not_carried("the outline: the outline layer has no closed ring"),
     }
-    report.count("footprints placed", board.footprints.len());
+    report.count("footprints placed", board.footprints.len() - holes);
+    report.count("board holes", holes);
     report.count("tracks", tracks);
     report.count("vias", vias);
     report.count("zones", zones);

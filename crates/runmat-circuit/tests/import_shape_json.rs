@@ -20,6 +20,7 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
             "boards/blinky-footprints/0603.kicad_mod",
             "boards/blinky-footprints/HDR-1x2.kicad_mod",
             "boards/blinky-footprints/LED0603.kicad_mod",
+            "boards/blinky-footprints/hole_0.381mm.kicad_mod",
             "boards/blinky.circuit",
             "boards/blinky.circuit.layout",
         ]
@@ -36,9 +37,12 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
     assert_eq!(r.carried["footprints placed"], 3);
     assert_eq!(r.carried["tracks"], 8, "{:?}", r.lines());
     assert_eq!(r.carried["vias"], 1);
-    assert_eq!(r.carried["zones"], 1);
+    // The copper area, and the bottom solid region over the GND track.
+    assert_eq!(r.carried["zones"], 2);
     assert_eq!(r.carried["board texts"], 1);
-    assert_eq!(r.not_carried["solid regions"], 1, "{:?}", r.lines());
+    assert_eq!(r.carried["board holes"], 1);
+    assert_eq!(r.approximated["solid copper regions are carried as zones of their net"], 1);
+    assert_eq!(r.not_carried["solid regions of kind solid on layer 3"], 1, "{:?}", r.lines());
 
     let files: Files = out.files.iter().map(|(k, v)| (format!("/p/{k}"), v.clone())).collect();
     let layout = "/p/boards/blinky.circuit.layout";
@@ -54,6 +58,8 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
     let led = parsed.footprints.values().find(|f| f.reference == "D1").unwrap();
     assert_eq!(led.side, runmat_circuit::layout::Side::Bottom);
     assert_eq!(led.rotation, 90.0);
+    let hole = parsed.footprints.values().find(|f| f.reference == "H901").expect("the board hole is a footprint");
+    assert_eq!(hole.package.pads[0].kind, runmat_circuit::library::PadKind::Npth);
     // 80 × 40 canvas units of 10 mil.
     assert_eq!(parsed.outline.bbox().width(), 20_320_000);
     assert_eq!(parsed.outline.bbox().min.x, 0);

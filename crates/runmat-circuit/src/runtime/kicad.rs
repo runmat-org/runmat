@@ -44,6 +44,8 @@ pub struct KicadImport {
     pub files: BTreeMap<String, String>,
     /// What the reader passed over (unsupported tokens, unknown footprints).
     pub warnings: Vec<String>,
+    /// What the import carried over, and each warning as an item it left out.
+    pub report: crate::import::Report,
 }
 
 /// Reads a KiCad project (`files`: KiCad file name → text) into RunMat sources at
@@ -56,6 +58,7 @@ pub fn import_kicad(
 ) -> Result<KicadImport, String> {
     let mut out = BTreeMap::new();
     let mut warnings = Vec::new();
+    let mut report = crate::import::Report::new("KiCad");
     let circuit_path = format!("{target_stem}{CIRCUIT_SUFFIX}");
     let circuit_name = target_stem
         .rsplit('/')
@@ -82,6 +85,9 @@ pub fn import_kicad(
         warnings.extend(imp.warnings.iter().cloned());
         let mut design = imp.design.clone();
         design.name = circuit_name.clone();
+        report.count("sheets", design.sheets.len());
+        report.count("components", design.sheets.values().map(|s| s.components.len()).sum());
+        report.count("connections", design.sheets.values().map(|s| s.connections.len()).sum());
         let text = crate::syntax::print_circuit(&design).map_err(|e| format!("{e:?}"))?;
         out.insert(circuit_path.clone(), text);
         out.insert(lock_path_for(&circuit_path), imp.lock.to_text());
@@ -89,6 +95,12 @@ pub fn import_kicad(
     if let Some((name, pcb)) = files.iter().find(|(k, _)| k.ends_with(".kicad_pcb")) {
         let read = crate::kicad::pcb::read(pcb).map_err(|e| format!("{name}: {e}"))?;
         warnings.extend(read.warnings.iter().map(|w| format!("{name}: {w}")));
+        let b = &read.board;
+        report.count("footprints placed", b.footprints.len());
+        report.count("tracks", b.tracks.len());
+        report.count("vias", b.vias.len());
+        report.count("zones", b.zones.len());
+        report.count("copper layers", b.stackup.copper_count() as usize);
         let uses = [runmat_design_syntax::document::UseItem {
             symbol: Some(("circuit".into(), circuit_name.clone())),
             // The circuit is written beside the layout, in the same folder.
@@ -105,8 +117,12 @@ pub fn import_kicad(
     if out.is_empty() {
         return Err("the KiCad project has no .kicad_sch or .kicad_pcb file".into());
     }
+    for w in &warnings {
+        report.not_carried(w.clone());
+    }
     Ok(KicadImport {
         files: out,
         warnings,
+        report,
     })
 }

@@ -29,28 +29,28 @@ fn pin_kind(electric: &str) -> &'static str {
 }
 
 /// Union-find over the schematic's connection points and wires.
-struct Joins(Vec<usize>);
+pub(crate) struct Joins(pub(crate) Vec<usize>);
 
 impl Joins {
-    fn add(&mut self) -> usize {
+    pub(crate) fn add(&mut self) -> usize {
         self.0.push(self.0.len());
         self.0.len() - 1
     }
-    fn root(&mut self, mut i: usize) -> usize {
+    pub(crate) fn root(&mut self, mut i: usize) -> usize {
         while self.0[i] != i {
             self.0[i] = self.0[self.0[i]];
             i = self.0[i];
         }
         i
     }
-    fn join(&mut self, a: usize, b: usize) {
+    pub(crate) fn join(&mut self, a: usize, b: usize) {
         let (a, b) = (self.root(a), self.root(b));
         self.0[a] = b;
     }
 }
 
 /// `p` lies on the segment `a`–`b` (canvas units, within a hundredth).
-fn on_segment(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> bool {
+pub(crate) fn on_segment(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> bool {
     let (dx, dy) = (b.0 - a.0, b.1 - a.1);
     let l2 = dx * dx + dy * dy;
     if l2 < 1e-12 {

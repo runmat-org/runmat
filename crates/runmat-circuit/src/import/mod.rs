@@ -6,8 +6,10 @@
 //!
 //! - [`eagle`]: EAGLE XML schematics (`.sch`) and boards (`.brd`).
 //! - [`shape_json`]: shape-string JSON schematics and boards (standard edition).
+//! - [`pipe_record`]: pipe-record schematics and boards, ASCII and binary.
 
 pub mod eagle;
+pub mod pipe_record;
 pub mod shape_json;
 pub mod xml;
 
