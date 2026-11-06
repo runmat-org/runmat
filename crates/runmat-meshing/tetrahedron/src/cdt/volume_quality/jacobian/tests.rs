@@ -9,7 +9,10 @@ fn prepared_score_settles_one_owned_batch_and_invalid_edge_prefix() {
 
     let metric = MetricTensor3::isotropic_length_m(1.0).unwrap();
     let prepared = PreparedJacobian::new(metric).unwrap().unwrap();
-    let budget = OperationCount::from_operations(382 + 57);
+    // Each kernel reserves its full bound before it runs, so the ledger needs room for the
+    // second kernel's 382-operation reservation; settlement keeps only its 57-operation prefix.
+    let budget = OperationCount::from_operations(382 + 382);
+    let settled = OperationCount::from_operations(382 + 57);
     let ledger = Arc::new(UsageLedger::new(budget, budget).unwrap());
     let context = UsageContext::new(Arc::clone(&ledger));
     context.run_sync(|| {
@@ -25,7 +28,7 @@ fn prepared_score_settles_one_owned_batch_and_invalid_edge_prefix() {
         assert!(prepared.score([[0.0; 3]; 4]).unwrap().is_none());
     });
     let snapshot = ledger.snapshot().unwrap();
-    assert_eq!(snapshot.completed.meshing, budget);
+    assert_eq!(snapshot.completed.meshing, settled);
     assert_eq!(snapshot.reserved, OperationCount::ZERO);
 }
 
