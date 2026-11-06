@@ -5,6 +5,8 @@ use runmat_circuit::import::xml_project;
 use runmat_circuit::runtime::{compile, CompileOptions, Files};
 use std::collections::BTreeMap;
 
+mod import_check;
+
 fn fixture(names: &[&str]) -> BTreeMap<String, String> {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/import/xml_project");
     names.iter().map(|n| (n.to_string(), std::fs::read_to_string(format!("{dir}/{n}")).unwrap())).collect()
@@ -48,6 +50,8 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
     let compiled = compile(layout, &files[layout], &files, &CompileOptions::default());
     let errors: Vec<_> = compiled.diagnostics.iter().filter(|d| d.severity == "error").map(|d| &d.message).collect();
     assert!(errors.is_empty(), "{errors:#?}");
+    let errors = import_check::design_errors(&files, "/p/boards/blinky.circuit", Some(layout));
+    assert!(errors.is_empty(), "{errors:#?}");
     let index = compiled.index.expect("the imported board compiles");
     let board = index.board.expect("the layout has a board");
     // The wires reach every pad: nothing is left unrouted, the mirrored LED's pads included.
@@ -78,7 +82,7 @@ fn a_file_that_isnt_an_xml_project_is_refused_with_the_reason() {
 }
 
 /// `RUNMAT_XML_PROJECT_CORPUS=<dir>`: every schematic and board pair under it (same stem, same
-/// folder) imports, compiles without errors and leaves nothing unrouted. The corpus stays
+/// folder) imports, passes the design check without errors and leaves nothing unrouted. The corpus stays
 /// outside the repository; without the variable the test checks nothing.
 #[test]
 fn a_local_corpus_imports_and_compiles_when_named() {
@@ -111,7 +115,8 @@ fn a_local_corpus_imports_and_compiles_when_named() {
         let files: Files = out.files.iter().map(|(k, v)| (format!("/p/{k}"), v.clone())).collect();
         let layout = format!("/p/{stem}.circuit.layout");
         let compiled = compile(&layout, &files[&layout], &files, &CompileOptions::default());
-        let errors: Vec<_> = compiled.diagnostics.iter().filter(|d| d.severity == "error").map(|d| d.message.clone()).collect();
+        let mut errors: Vec<_> = compiled.diagnostics.iter().filter(|d| d.severity == "error").map(|d| d.message.clone()).collect();
+        errors.extend(import_check::design_errors(&files, &format!("/p/{stem}.circuit"), Some(&layout)));
         let board = compiled.index.and_then(|i| i.board);
         let unrouted: Vec<String> = board.iter().flat_map(|b| b.unrouted.iter().map(|u| format!("{u:?}"))).collect();
         let drc = board.iter().flat_map(|b| b.drc.iter()).filter(|r| r.severity == "error").count();

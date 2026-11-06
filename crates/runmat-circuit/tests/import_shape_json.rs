@@ -5,6 +5,8 @@ use runmat_circuit::import::shape_json;
 use runmat_circuit::runtime::{compile, CompileOptions, Files};
 use std::collections::BTreeMap;
 
+mod import_check;
+
 fn fixture(names: &[&str]) -> BTreeMap<String, String> {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/import/shape_json");
     names.iter().map(|n| (n.to_string(), std::fs::read_to_string(format!("{dir}/{n}")).unwrap())).collect()
@@ -50,6 +52,8 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
     let compiled = compile(layout, &files[layout], &files, &CompileOptions::default());
     let errors: Vec<_> = compiled.diagnostics.iter().filter(|d| d.severity == "error").map(|d| &d.message).collect();
     assert!(errors.is_empty(), "{errors:#?}");
+    let errors = import_check::design_errors(&files, "/p/boards/blinky.circuit", Some(layout));
+    assert!(errors.is_empty(), "{errors:#?}");
     let board = compiled.index.expect("the imported board compiles").board.expect("the layout has a board");
     // Every track ends on its pad, the bottom LED's included: nothing is unrouted.
     assert!(board.unrouted.is_empty(), "{:?}", board.unrouted);
@@ -90,6 +94,8 @@ fn a_board_alone_imports_to_a_layout_that_compiles() {
     let layout = "/p/boards/blinky.circuit.layout";
     let compiled = compile(layout, &files[layout], &files, &CompileOptions::default());
     let errors: Vec<_> = compiled.diagnostics.iter().filter(|d| d.severity == "error").map(|d| &d.message).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    let errors = import_check::design_errors(&files, "/p/boards/blinky.circuit", Some(layout));
     assert!(errors.is_empty(), "{errors:#?}");
     assert!(compiled.index.and_then(|i| i.board).is_some(), "the layout compiles to a board");
 }

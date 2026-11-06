@@ -10,6 +10,8 @@ use runmat_circuit::layout::*;
 use runmat_circuit::library::footprint as gen;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod import_check;
+
 const BOARD: &str = include_str!("kicad/board.kicad_pcb");
 const ROOT: &str = include_str!("kicad/root.kicad_sch");
 const CHILD: &str = include_str!("kicad/power.kicad_sch");
@@ -938,5 +940,12 @@ fn an_imported_project_keeps_its_net_classes_and_rules() {
     // as footprints not carried, so they have no package) is in error.
     let parsed = runmat_circuit::syntax::parse_circuit("io.circuit", circuit);
     let errors: Vec<_> = parsed.diagnostics.iter().map(|d| d.message.as_str()).filter(|m| !m.ends_with("needs its `package`")).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    // The design check (elaboration and ERC) finds no error beyond those two parts.
+    let fs: runmat_circuit::runtime::Files = out.files.iter().map(|(k, v)| (format!("/p/{k}"), v.clone())).collect();
+    let errors: Vec<_> = import_check::design_errors(&fs, "/p/boards/io.circuit", Some("/p/boards/io.circuit.layout"))
+        .into_iter()
+        .filter(|m| !m.ends_with("needs its `package`"))
+        .collect();
     assert!(errors.is_empty(), "{errors:#?}");
 }

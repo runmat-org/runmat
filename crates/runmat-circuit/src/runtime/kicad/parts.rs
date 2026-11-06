@@ -56,8 +56,20 @@ pub(crate) fn declare_parts(design: &mut Design, pool: &Pool, packages: &BTreeMa
             }
             let footprint = package.clone().unwrap_or_default();
             // The board's footprint for the component, else one the board places for another
-            // component of the same footprint name (a part the board leaves off).
-            let placed = packages.get(&c.name).or_else(|| packages.values().find(|p| !footprint.is_empty() && p.name == footprint));
+            // component of the same footprint (a part the board leaves off): the same library
+            // id, else the same footprint name in another library (a library id is
+            // `library:footprint`, and the library's name is local to a project).
+            let item = |id: &str| id.rsplit(':').next().unwrap_or(id).to_string();
+            let placed = packages.get(&c.name).or_else(|| {
+                (!footprint.is_empty())
+                    .then(|| {
+                        packages
+                            .values()
+                            .find(|p| p.name == footprint)
+                            .or_else(|| packages.values().find(|p| item(&p.name) == item(&footprint)))
+                    })
+                    .flatten()
+            });
             let package_ref = match placed {
                 Some(pkg) => {
                     let key = file_safe(&pkg.name);

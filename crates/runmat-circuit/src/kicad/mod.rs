@@ -24,6 +24,7 @@ pub mod footprint;
 pub mod pcb;
 pub mod project;
 pub mod sch;
+mod sch_connect;
 pub mod sch_export;
 pub mod sexpr;
 

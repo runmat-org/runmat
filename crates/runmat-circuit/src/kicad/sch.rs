@@ -9,9 +9,11 @@
 //!   types mapped to [`PinType`]. Unit-0 pins (common to all units) go to the first gate.
 //! - Symbol instances with the same reference are one component; the `Footprint` property
 //!   becomes the package of a [`PartRef::Entity`]. Power symbols are not components: their
-//!   pin joins a global net named by their value.
-//! - Connectivity is geometric: wire and bus segments join their end points and any pin,
-//!   label, junction, sheet pin or wire end lying on them. Each group becomes one connection;
+//!   power-input pin joins a global net named by their value, and a power flag (a power
+//!   symbol whose pin is an output) marks its net as driven (`power_flag`) without naming it.
+//! - Connectivity follows KiCad's rules ([`super::sch_connect`]): wires join at coinciding
+//!   ends, pins and sheet pins; junctions split the wires through them; labels attach anywhere
+//!   along a wire; collinear overlapping wires merge. Each group becomes one connection;
 //!   local labels name it (same name, same net within a sheet — which also realises bus
 //!   members), global labels and power symbols make it global, hierarchical labels make it a
 //!   port of the sheet, sheet pins bind it to the child instance's port. Bus labels such as
@@ -27,6 +29,7 @@
 //! angle, then translated.
 
 use super::at_of;
+use super::sch_connect::{Kind, Seg};
 use super::sexpr::{self, SExpr};
 use crate::geom::{Point, Transform};
 use crate::ids::{LockEntry, LockSection, NamePath};
@@ -216,39 +219,6 @@ pub struct SchImport {
     sheet_uuid: BTreeMap<String, String>,
 }
 
-#[derive(Default)]
-struct Points {
-    pts: Vec<Point>,
-    parent: Vec<usize>,
-    index: BTreeMap<Point, usize>,
-}
-
-impl Points {
-    fn id(&mut self, p: Point) -> usize {
-        if let Some(i) = self.index.get(&p) {
-            return *i;
-        }
-        let i = self.pts.len();
-        self.pts.push(p);
-        self.parent.push(i);
-        self.index.insert(p, i);
-        i
-    }
-    fn find(&mut self, mut x: usize) -> usize {
-        while self.parent[x] != x {
-            self.parent[x] = self.parent[self.parent[x]];
-            x = self.parent[x];
-        }
-        x
-    }
-    fn union(&mut self, a: usize, b: usize) {
-        let (x, y) = (self.find(a), self.find(b));
-        if x != y {
-            self.parent[x.max(y)] = x.min(y);
-        }
-    }
-}
-
 enum Attach {
     Pin { component: String, pin: String },
     Power(String),
@@ -257,6 +227,8 @@ enum Attach {
     Hier(String),
     SheetPin { instance: String, port: String },
     NoConnect,
+    /// A power flag: the net is driven from outside the design.
+    Flag,
 }
 
 fn read_sheet(
@@ -279,9 +251,9 @@ fn read_sheet(
             libs.insert(l.name.clone(), l);
         }
     }
-    let mut pts = Points::default();
     let mut attach: Vec<(Point, Attach)> = Vec::new();
-    let mut segments: Vec<(Point, Point)> = Vec::new();
+    let mut segments: Vec<Seg> = Vec::new();
+    let mut junctions: Vec<Point> = Vec::new();
     let mut comps: BTreeMap<String, ComponentDecl> = BTreeMap::new();
     for node in tree.items().iter().skip(1) {
         match node.head() {
@@ -309,9 +281,16 @@ fn read_sheet(
                     .unwrap_or_default();
                 pins.extend(lib.units.get(&0).into_iter().flatten());
                 if lib.power {
+                    // A power symbol's power-input pin makes a global net named by its value;
+                    // any other pin (a power flag's output) only marks its net as driven.
                     let net = prop("Value");
                     for p in pins {
-                        attach.push((t.apply(p.at), Attach::Power(net.clone())));
+                        let a = if p.kind == PinType::PowerIn {
+                            Attach::Power(net.clone())
+                        } else {
+                            Attach::Flag
+                        };
+                        attach.push((t.apply(p.at), a));
                     }
                     continue;
                 }
@@ -360,16 +339,19 @@ fn read_sheet(
                     c.variants.insert("default".into(), Fitting::NotFitted);
                 }
             }
-            Some("wire") | Some("bus") => {
+            Some(head @ ("wire" | "bus")) => {
                 let p = super::pts_of(node.child("pts"));
+                let stroke = node.child("stroke").map(sexpr::write_compact).unwrap_or_default();
                 for w in p.windows(2) {
-                    segments.push((w[0], w[1]));
+                    segments.push(Seg {
+                        a: w[0],
+                        b: w[1],
+                        bus: head == "bus",
+                        stroke: stroke.clone(),
+                    });
                 }
             }
-            Some("junction") => {
-                let (p, _) = at_of(node.child("at"));
-                pts.id(p);
-            }
+            Some("junction") => junctions.push(at_of(node.child("at")).0),
             Some("no_connect") => attach.push((at_of(node.child("at")).0, Attach::NoConnect)),
             Some("label") => attach.push((
                 at_of(node.child("at")).0,
@@ -441,38 +423,35 @@ fn read_sheet(
             _ => {}
         }
     }
-    // Geometry: segment ends, then anything lying on a segment.
-    for (a, b) in &segments {
-        let (i, j) = (pts.id(*a), pts.id(*b));
-        pts.union(i, j);
-    }
-    let attach_ids: Vec<usize> = attach.iter().map(|(p, _)| pts.id(*p)).collect();
-    let all: Vec<Point> = pts.pts.clone();
-    for (a, b) in &segments {
-        let ia = pts.id(*a);
-        for (k, p) in all.iter().enumerate() {
-            if crate::geom::orient(*a, *b, *p) == 0
-                && p.x >= a.x.min(b.x)
-                && p.x <= a.x.max(b.x)
-                && p.y >= a.y.min(b.y)
-                && p.y <= a.y.max(b.y)
-            {
-                pts.union(ia, k);
-            }
-        }
-    }
+    // Connectivity by KiCad's rules (see `sch_connect`).
+    let kinds: Vec<(Point, Kind)> = attach
+        .iter()
+        .map(|(p, a)| {
+            let k = match a {
+                Attach::Pin { .. } | Attach::Power(_) | Attach::Flag => Kind::Pin,
+                Attach::SheetPin { .. } => Kind::SheetPin,
+                Attach::Label(_) | Attach::Global(_) | Attach::Hier(_) => Kind::Label,
+                Attach::NoConnect => Kind::Marker,
+            };
+            (*p, k)
+        })
+        .collect();
     let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-    for (k, id) in attach_ids.iter().enumerate() {
-        let r = pts.find(*id);
-        groups.entry(r).or_default().push(k);
+    for (k, g) in super::sch_connect::groups(segments, &junctions, &kinds)
+        .into_iter()
+        .enumerate()
+    {
+        groups.entry(g).or_default().push(k);
     }
     let mut globals: BTreeSet<String> = BTreeSet::new();
+    let mut flagged: BTreeSet<String> = BTreeSet::new();
     // Labels on a wire or pin: a label touching nothing names no net, so it pairs with nothing.
     let mut connected_labels: BTreeSet<String> = BTreeSet::new();
     for (g, (_, members)) in groups.iter().enumerate() {
         let mut ends = Vec::new();
         let mut name: Option<String> = None;
         let mut nc = false;
+        let mut flag = false;
         for &k in members {
             match &attach[k].1 {
                 Attach::Label(n) => {
@@ -500,6 +479,7 @@ fn read_sheet(
                 }),
                 Attach::Pin { component, pin } => ends.push(Endpoint::pin(component, pin)),
                 Attach::NoConnect => nc = true,
+                Attach::Flag => flag = true,
             }
         }
         if nc {
@@ -525,17 +505,38 @@ fn read_sheet(
             // An unnamed group of pins only: a local net with an automatic name.
             ends.insert(0, Endpoint::Net(format!("N${g}")));
         }
+        if flag {
+            if let Some(Endpoint::Net(n)) = ends.iter().find(|e| matches!(e, Endpoint::Net(_))) {
+                flagged.insert(n.clone());
+            }
+        }
         sheet.connections.push(Connection {
             ends,
             source: Default::default(),
         });
     }
-    for gname in globals {
+    let flagged_locals: Vec<String> = flagged.difference(&globals).cloned().collect();
+    for (gname, global) in globals
+        .into_iter()
+        .map(|n| (n, true))
+        .chain(flagged_locals.into_iter().map(|n| (n, false)))
+    {
+        let mut params = BTreeMap::new();
+        if flagged.contains(&gname) {
+            params.insert(
+                crate::erc::POWER_FLAG.to_string(),
+                Param {
+                    value: ParamValue::Bool(true),
+                    source: Default::default(),
+                    call: None,
+                },
+            );
+        }
         sheet.nets.push(NetDecl {
             name: gname,
             class: None,
-            global: true,
-            params: Default::default(),
+            global,
+            params,
             renamed_from: None,
             source: Default::default(),
         });
@@ -598,6 +599,7 @@ pub fn read_hierarchy(files: &BTreeMap<String, String>, root: &str) -> Result<Sc
     }
     // Per-instance references → lock entries keyed by RunMat path.
     let mut lock = LockSection::new();
+    let mut placed: BTreeMap<String, BTreeSet<NamePath>> = BTreeMap::new();
     for (kpath, _file, local, reference) in std::mem::take(&mut imp.lock_paths) {
         let mut np = NamePath::root();
         for seg in kpath.split('/').filter(|s| !s.is_empty()) {
@@ -608,6 +610,10 @@ pub fn read_hierarchy(files: &BTreeMap<String, String>, root: &str) -> Result<Sc
                 np = np.child(name.clone());
             }
         }
+        placed
+            .entry(reference.clone())
+            .or_default()
+            .insert(np.clone());
         let path = np.child(local);
         lock.entries.insert(
             path.clone(),
@@ -620,6 +626,16 @@ pub fn read_hierarchy(files: &BTreeMap<String, String>, root: &str) -> Result<Sc
                 designator: Some(reference),
             },
         );
+    }
+    // A part whose units sit on different sheets is one part in KiCad; RunMat declares a
+    // part on one sheet, so each sheet's units import as a part of their own.
+    for (reference, sheets) in placed.iter().filter(|(_, s)| s.len() > 1) {
+        let names: Vec<String> = sheets.iter().map(|s| s.to_string()).collect();
+        imp.warnings.push(format!(
+            "{reference}: its units are on several sheets ({}); each sheet's units are imported \
+             as a separate part",
+            names.join(", ")
+        ));
     }
     imp.lock = lock;
     imp.design = design;

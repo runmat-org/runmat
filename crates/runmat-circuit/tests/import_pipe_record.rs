@@ -10,6 +10,8 @@ use runmat_circuit::import::Imported;
 use runmat_circuit::runtime::{compile, CompileOptions, Files};
 use std::collections::BTreeMap;
 
+mod import_check;
+
 fn fixture(name: &str) -> String {
     std::fs::read_to_string(format!("{}/tests/import/pipe_record/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
 }
@@ -20,6 +22,8 @@ fn compiles(out: &Imported) -> runmat_circuit::layout::Board {
     let layout = "/p/boards/blinky.circuit.layout";
     let compiled = compile(layout, &files[layout], &files, &CompileOptions::default());
     let errors: Vec<_> = compiled.diagnostics.iter().filter(|d| d.severity == "error").map(|d| &d.message).collect();
+    assert!(errors.is_empty(), "{errors:#?}\n{}", files["/p/boards/blinky.circuit"]);
+    let errors = import_check::design_errors(&files, "/p/boards/blinky.circuit", Some(layout));
     assert!(errors.is_empty(), "{errors:#?}\n{}", files["/p/boards/blinky.circuit"]);
     let board = compiled.index.expect("the imported board compiles").board.expect("the layout has a board");
     assert!(board.unrouted.is_empty(), "{:?}", board.unrouted);

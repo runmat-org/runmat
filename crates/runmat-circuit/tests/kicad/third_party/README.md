@@ -7,8 +7,9 @@ authors. They are copied unchanged, and each one's license allows that.
   file has the same tokens. It then exports the board from RunMat's own model and checks that
   every pad comes back where it was, on the same net.
 - `tests/kicad_third_party_sch.rs` reads each schematic hierarchy into RunMat's model, checks
-  that every part on the board is in it, exports it back to KiCad and checks that the export
-  reads back with the same parts and the same nets.
+  that every part on the board is in it and that its nets are the board's pad nets, exports it
+  back to KiCad and checks that the export reads back with the same parts and the same nets.
+  The imports and the round trip pass the full design check.
 
 | File | Board | Source | Commit | License |
 |---|---|---|---|---|
