@@ -35,8 +35,9 @@ fn scenes_dir() -> std::path::PathBuf {
         .join("../../../runmat-private-cad/desktop/scripts/site-captures/agent-scenes")
 }
 
-/// The scene workspace: every scene file at the root, as the capture creates them, plus the I/O
-/// project and the ECO scene's daq project (its edited schematic under the name `daq.circuit`).
+/// The scene workspace: every scene file at the root, as the capture creates them (with the
+/// drone's flight controller, a snapshot of runmat-cad-wasm's drone board), plus the I/O project
+/// and the ECO scene's daq project (its edited schematic under the name `daq.circuit`).
 fn workspace(dir: &Path) -> Files {
     let mut files: Files = [
         ("/io.circuit".to_owned(), IO_CIRCUIT.to_owned()),
@@ -205,6 +206,7 @@ const OVERVIEW_PATHS: &[&str] = &[
     "/bracket.drawing",
     "/bracket.part",
     "/daq.circuit",
+    "/flight_controller.circuit",
     "/hook-mount.assembly",
     "/io.circuit",
     "/wall_bracket.part",
