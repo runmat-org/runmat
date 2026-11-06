@@ -130,7 +130,8 @@ pub(super) fn add(c: &mut Catalog) {
                 "mode",
                 "Angle",
                 &[("ortho", "90°"), ("diagonal", "45°"), ("any", "Any angle")],
-            ),
+            )
+            .help("Shift+Space steps it while the wire is drawn."),
             text("net", "Net", None).optional(),
         ])
         .preview()
@@ -190,7 +191,8 @@ pub(super) fn add(c: &mut Catalog) {
             "Place a power or ground symbol.",
         )
         .inputs(vec![
-            text("net", "Rail", Some("GND")).help("A global net: an existing rail, or a new one declared here."),
+            suggested_text("net", "Rail", Some("GND"), Suggest::Rails)
+                .help("A global net: pick one of the project's rails, or type a new one to declare it here."),
             pick("on", "On pin or wire", &[K::Pin, K::Wire, K::Net]),
             flag("power_flag", "Power flag", false)
                 .help("The rail enters the board here (a connector or a test supply), so ERC sees it driven."),
@@ -239,6 +241,13 @@ pub(super) fn add(c: &mut Catalog) {
         .inputs(vec![
             pick("symbol", "Sheet symbol", &[K::SheetSymbol]),
             text("port", "Port", Some("VIN")),
+            pick("to", "Bind to", &[K::Pin, K::Wire, K::Net])
+                .optional()
+                .help("A pin or wire on the symbol's sheet: the entry joins it."),
+            text("bus", "Bus", Some("D"))
+                .optional()
+                .help("A bus on the symbol's sheet: channel i of a repeated symbol takes member offset + i."),
+            count("offset", "Offset", 0, 0).optional(),
         ])
         .when(selected_one(&[K::SheetSymbol]))
         .edit(place("binding", Section::Components)),

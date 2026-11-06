@@ -351,6 +351,20 @@ pub fn text(id: &str, label: &str, placeholder: Option<&str>) -> Field {
         FieldKind::Text {
             default: None,
             placeholder: placeholder.map(str::to_owned),
+            suggest: None,
+        },
+    )
+}
+
+/// A text field that offers names from the open file as it is typed (see [`Suggest`]).
+pub fn suggested_text(id: &str, label: &str, placeholder: Option<&str>, source: Suggest) -> Field {
+    field(
+        id,
+        label,
+        FieldKind::Text {
+            default: None,
+            placeholder: placeholder.map(str::to_owned),
+            suggest: Some(source),
         },
     )
 }

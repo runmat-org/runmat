@@ -173,6 +173,19 @@ fn a_net_label_renames_a_named_net_and_keeps_its_identity() {
 }
 
 #[test]
+fn a_parameter_set_directive_writes_the_nets_parameters() {
+    let t = wired_regulator();
+    let (t, summary) = run(&t, "schematic.directive", json!({ "type": "parameters", "nets": ["net:VIN"], "value": "max_length = 50 mm, current = 1.5 A" })).unwrap();
+    assert_eq!(summary, "current, max_length on 1 net(s)");
+    let line = t.lines().find(|l| l.trim_start().starts_with("net VIN =")).unwrap_or_else(|| panic!("{t}"));
+    assert!(line.contains("max_length = 0.05 m") && line.contains("current = 1.5 A") && line.contains("global = true"), "{line}");
+    index(&t);
+    for bad in ["50 mm", "class = power", "max_length ="] {
+        assert!(run(&t, "schematic.directive", json!({ "type": "parameters", "nets": ["net:VIN"], "value": bad })).is_err(), "{bad}");
+    }
+}
+
+#[test]
 fn hierarchy_sheet_symbols_entries_ports_and_channels() {
     let mut t = wired_regulator();
     t = step(&t, "schematic.sheet-symbol", json!({ "name": "led", "sheet": "indicator", "channels": 1 }));
@@ -188,6 +201,31 @@ fn hierarchy_sheet_symbols_entries_ports_and_channels() {
     let t = step(&t, "schematic.port", json!({ "name": "OUT", "direction": "output", "on": ["pin:C2.1"] }));
     assert!(t.contains("port OUT : out"), "{t}");
     assert!(t.contains("port.OUT"), "{t}");
+}
+
+#[test]
+fn a_sheet_entry_binds_to_a_pin_or_a_bus_from_the_canvas() {
+    let mut t = step(&wired_regulator(), "schematic.sheet-symbol", json!({ "name": "led", "sheet": "indicator", "channels": 1 }));
+    // The child sheet draws a resistor on its PWR port, so the entry shows on the symbol.
+    t = t.replace("sheet indicator {\n    }", "sheet indicator {\n        port PWR : passive\n        component R1 = { part = \"R0402-10K\" }\n        connect = [port.PWR, \"R1.1\"]\n    }");
+    let (t, summary) = run(&t, "schematic.sheet-entry", json!({ "symbol": ["sheet:/led"], "port": "PWR", "to": ["pin:J1.3"] })).unwrap();
+    assert_eq!(summary, "Entry PWR of led bound to \"J1.3\"");
+    assert!(t.contains("instance led = { sheet = indicator, bind = { PWR = \"J1.3\" } }"), "{t}");
+    assert_eq!(t.matches("port PWR").count(), 1, "the port is declared once: {t}");
+    let drawn = index(&t);
+    let entry = drawn.schematic.sheets.iter().flat_map(|s| s.sheet_symbols.iter()).flat_map(|s| s.pins.iter()).find(|p| p.name == "PWR").expect("the PWR entry is drawn");
+    assert_eq!(format!("net:{}", entry.net), net_of(&t, "J1", "3"), "the entry joins J1.3's net");
+
+    // Rebinding the port replaces its binding; a bus binds channel i to member offset + i.
+    let t = step(&t, "schematic.place-bus", json!({ "name": "D[0..7]" }));
+    let t = step(&t, "schematic.repeat-channel", json!({ "symbol": ["sheet:/led"], "channels": 3 }));
+    let (t, summary) = run(&t, "schematic.sheet-entry", json!({ "symbol": ["sheet:/led"], "port": "PWR", "bus": "D", "offset": 2 })).unwrap();
+    assert_eq!(summary, "Entry PWR of led bound to bus D from member 2");
+    assert!(t.contains("instance led = { sheet = indicator, repeat = 3, bind = { PWR = { bus = D, offset = 2 } } }"), "{t}");
+    index(&t);
+    // What can't be bound is refused.
+    assert!(run(&t, "schematic.sheet-entry", json!({ "symbol": ["sheet:/led"], "port": "PWR", "bus": "Q" })).unwrap_err().contains("no bus `Q`"));
+    assert!(run(&t, "schematic.sheet-entry", json!({ "symbol": ["sheet:/led"], "port": "PWR", "bus": "D", "to": ["pin:J1.3"] })).unwrap_err().contains("not both"));
 }
 
 #[test]

@@ -169,6 +169,32 @@ fn paste_copies_parts_under_fresh_designators_with_their_properties() {
 }
 
 #[test]
+fn a_pasted_group_keeps_the_wires_between_its_parts_and_its_rails() {
+    // U1 and C1 share the VIN net; C1.2 and U1.GND sit on the global GND rail.
+    let text = BLANK.replace(
+        "connect = [U1.VIN, \"C1.1\"]",
+        "net GND = { global = true }\n        connect = [U1.VIN, \"C1.1\"]\n        connect = [net.GND, U1.GND, \"C1.2\"]",
+    );
+    let p = Project { circuit: text, lock: None }.step("schematic.annotate", json!({}));
+    let (p2, summary) = p.run("schematic.paste", json!({ "items": ["component:U1", "component:C1"], "dx": 25.4, "dy": 0 })).unwrap();
+    assert_eq!(summary, "pasted U1 as U2, C1 as C2 with 2 connections");
+    // The copies are wired to each other on a new net, and to the rail they were on.
+    assert!(p2.circuit.contains("component C2 = { part = \"C0603-1U-50V\" }\n        connect = [U1.GND, U2.GND, \"C2.2\"]\n        connect = [U2.VIN, \"C2.1\"]\n"), "{}", p2.circuit);
+    let index = p2.index();
+    let pins: Vec<_> = index.schematic.sheets.iter().flat_map(|s| s.symbols.iter()).flat_map(|s| s.pins.iter().map(move |p| (format!("{}.{}", s.designator, p.name), p.net.clone()))).collect();
+    let net = |pin: &str| pins.iter().find(|(n, _)| n == pin).and_then(|(_, net)| net.clone()).unwrap_or_else(|| panic!("{pin} has a net: {pins:?}"));
+    assert_eq!(net("U2.VIN"), net("C2.1"));
+    assert_ne!(net("U2.VIN"), net("U1.VIN"), "the copy's VIN is a net of its own");
+    assert_eq!(net("U2.GND"), "GND");
+    assert_eq!(net("C2.2"), "GND");
+
+    // A part copied alone keeps its rail but not the net it shared with a part left behind.
+    let (p3, summary) = p.run("schematic.paste", json!({ "items": ["component:C1"] })).unwrap();
+    assert_eq!(summary, "pasted C1 as C2 with 1 connection");
+    assert!(p3.circuit.contains("connect = [\"C1.2\", \"C2.2\"]"), "{}", p3.circuit);
+}
+
+#[test]
 fn a_moved_part_keeps_its_wires_and_mirror_flips_it() {
     let p = blank();
     let (x, y, _, _) = p.symbol("C1");

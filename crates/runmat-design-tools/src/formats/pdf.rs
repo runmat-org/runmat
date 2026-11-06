@@ -297,6 +297,17 @@ impl Page<'_> {
                 lines.push(arc);
             }
             '∠' => lines.push(vec![[0.6, 0.6], [0.0, 0.0], [0.6, 0.0]]),
+            // Ohm (component values: `5.1 kΩ`): a horseshoe open at the bottom, on two feet.
+            '\u{3a9}' | '\u{2126}' => {
+                let (a0, a1) = (-0.3 * std::f64::consts::PI, 1.3 * std::f64::consts::PI);
+                let mut arc: Vec<[f64; 2]> = vec![[0.05, 0.0]];
+                arc.extend((0..=16).rev().map(|i| {
+                    let a = a0 + (a1 - a0) * i as f64 / 16.0;
+                    [0.3 + 0.24 * a.cos(), 0.4 + 0.3 * a.sin()]
+                }));
+                arc.push([0.55, 0.0]);
+                lines.push(arc);
+            }
             '⌯' => lines.extend([vec![[0.0, 0.12], [0.6, 0.12]], vec![[0.0, 0.36], [0.6, 0.36]], vec![[0.0, 0.6], [0.6, 0.6]]]),
             '↗' => lines.extend([vec![[0.05, 0.05], [0.55, 0.65]], vec![[0.3, 0.6], [0.55, 0.65], [0.5, 0.4]]]),
             '⌰' => lines.extend([vec![[0.0, 0.05], [0.4, 0.65]], vec![[0.2, 0.05], [0.6, 0.65]], vec![[0.0, 0.05], [0.6, 0.05]]]),
@@ -374,6 +385,11 @@ mod tests {
         assert!(text.contains("/MediaBox [0 0 1190.551 841.890]"), "{text}");
         // The diameter draws as geometry; the rest sets as text, the parentheses escaped.
         assert!(text.contains("(4.1 +0.018/0 \\(A\\)) Tj"), "{text}");
+        // An ohm sign draws as strokes; the text around it stays text.
+        let mut o = Sheet { paper: [420.0, 297.0], ..Sheet::default() };
+        o.text("NOTES", [20.0, 20.0], 3.5, "5.1 kΩ");
+        let ohm = String::from_utf8_lossy(&write(&o)).into_owned();
+        assert!(ohm.contains("(5.1 k) Tj") && !ohm.contains("(?) Tj"), "{ohm}");
         // The xref offsets point at their objects (bytes: the header's comment is binary).
         let find = |hay: &[u8], needle: &[u8]| hay.windows(needle.len()).rposition(|w| w == needle).unwrap();
         let after = find(&pdf, b"startxref\n") + b"startxref\n".len();

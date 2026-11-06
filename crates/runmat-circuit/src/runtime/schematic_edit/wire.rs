@@ -44,7 +44,7 @@ pub(super) fn written_name(e: &Editor, instance: &NamePath, n: usize) -> Option<
 
 /// The endpoint that joins `end` to another group: the pin itself, or for a wire one of its
 /// net's endpoints on this sheet (or its written name).
-fn endpoint_of(e: &Editor, at: &Place, end: &End) -> Result<Endpoint, EditError> {
+pub(super) fn endpoint_of(e: &Editor, at: &Place, end: &End) -> Result<Endpoint, EditError> {
     match end {
         End::Pin { comp, pin } => Ok(e.pin_endpoint(*comp, *pin)),
         End::Net(n) => {

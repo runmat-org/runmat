@@ -265,6 +265,14 @@ pub struct ChoiceOption {
     pub label: String,
 }
 
+/// Where a text field's suggestions come from, filled by the editor from the open file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Suggest {
+    /// The circuit's global nets (power and ground rails), with their pin counts.
+    Rails,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChoiceDisplay {
@@ -323,6 +331,10 @@ pub enum FieldKind {
         default: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         placeholder: Option<String>,
+        /// Names the editor offers as the field is typed (a menu on focus); any other text is
+        /// still accepted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        suggest: Option<Suggest>,
     },
     /// Several values of one kind (hole positions, variable fillet radii, table rows).
     List {

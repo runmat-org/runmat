@@ -26,19 +26,22 @@ A part the built-in library doesn't have is written into the circuit as a `part 
 
 A `connect` list joins every endpoint it names into one net. A wire drawn on the canvas between two pins adds them to a list. Pins are `U1.VIN` by name or `"J1.1"` by number; `net.SDA` names the net, which needs no declaration unless it has settings.
 
-The canvas routes each wire for you. To route one by hand, click its corners on the empty sheet between the two pins; the Angle setting draws the segments at 90°, at 45° or at any angle. The corners are kept in the circuit's lock file, beside the places of the symbols, so the `.circuit` file still lists only the connection. Moving a part keeps the corners and turns the wire's end once to reach the pin. Removing the connection removes its corners.
+The canvas routes each wire for you. To route one by hand, click its corners on the empty sheet between the two pins; the Angle setting draws the segments at 90°, at 45° or at any angle, and Shift+Space steps through the three while you draw. The corners are kept in the circuit's lock file, beside the places of the symbols, so the `.circuit` file still lists only the connection. Moving a part keeps the corners and turns the wire's end once to reach the pin. Removing the connection removes its corners.
 
 A `text` statement puts a note on the sheet, such as `text note1 = "5 V in from J1"`. The Text tool writes one where you click.
+
+Copying a group of parts and pasting it keeps the wiring inside the group. A net that joins two or more of the copied pins becomes a new net joining their copies, and a copied pin on a rail such as `GND` joins the same rail. A net that leaves the group stays with the originals, so the copy's pin is left open for you to wire. The Power port tool lists the project's rails as you type its Rail field, and a name that isn't on the list declares a new rail.
 
 Settings go on a `net` statement:
 
 - `global = true` joins nets of the same name on every sheet, as ground and supply rails do.
 - `power_flag = true` marks a net driven from outside the schematic, such as the 5 V on the connector, so the electrical rules don't report its power inputs as undriven.
 - `class = power` puts the net in a net class, whose track width and clearance the board uses.
+- Other entries are the net's parameters, such as `max_length = 50 mm`. The Directive tool's Parameter set writes them onto the picked nets.
 
 ## 3. Split the design into sheets
 
-A sheet with `port` statements can be placed in another sheet as a block. Here the sensor and its decoupling capacitor sit on sheet `pressure`, and sheet `main` places it once as `instance sensor`. Endpoints such as `instance.sensor.SDA` connect the block's ports. The `+3V3` and `GND` nets are global, so they reach the sensor sheet with no port. R3's value calls `ledResistor.m`, which sits beside the circuit (step 4):
+A sheet with `port` statements can be placed in another sheet as a block. Here the sensor and its decoupling capacitor sit on sheet `pressure`, and sheet `main` places it once as `instance sensor`. Endpoints such as `instance.sensor.SDA` connect the block's ports. On the canvas, the Sheet entry tool adds a port and can bind it in the same step: pick a pin or wire for Bind to and the instance gets `bind = { SDA = U1.SDA }`. For a repeated sheet, Bus and Offset bind channel i to member offset + i of a bus (`bind = { DATA = { bus = D, offset = 0 } }`). The `+3V3` and `GND` nets are global, so they reach the sensor sheet with no port. R3's value calls `ledResistor.m`, which sits beside the circuit (step 4):
 
 ```matlab file=ledResistor.m
 function r = ledResistor(vs, vf, i)

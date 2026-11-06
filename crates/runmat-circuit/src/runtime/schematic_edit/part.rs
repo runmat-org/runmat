@@ -16,6 +16,7 @@
 use super::super::edit::{lock_change, EditError, EditOutput, EditRequest};
 use super::super::{file_change, load_with, Files, Project};
 use crate::ids::SchPlace;
+use crate::ir::Endpoint;
 use crate::library::catalog::{prefix_for, CatalogPart};
 use crate::syntax::board_edit::SourceChange;
 use crate::syntax::{parse_circuit, part_decl, words};
@@ -23,7 +24,7 @@ use runmat_design_syntax::edit::{apply_edits, TextEdit};
 use runmat_design_syntax::json::{quote, INDENT};
 use runmat_types::Span;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The schematic grid recorded places snap to (nm).
 const GRID_NM: i64 = 1_270_000;
@@ -346,6 +347,7 @@ pub(super) fn paste(project: &Project, files: &Files, request: &EditRequest) -> 
     let mut by_sheet: Vec<(String, SheetText, Vec<String>)> = Vec::new();
     let mut places = Vec::new();
     let mut names = Vec::new();
+    let mut copies: BTreeMap<usize, String> = BTreeMap::new();
     for d in &designators {
         let (_, c) = project.netlist.component(d).ok_or_else(|| EditError::new(format!("{d} isn't in the design")))?;
         let sheet = c.sheet.clone();
@@ -359,6 +361,9 @@ pub(super) fn paste(project: &Project, files: &Files, request: &EditRequest) -> 
         let statement = &text[start..end];
         let new = next_free(&used, &prefix_of(c.path.leaf()));
         used.insert(new.clone());
+        if let Some((ci, _)) = project.netlist.component(d) {
+            copies.insert(ci, new.clone());
+        }
         // `component R1 = { … }` → `component R3 = { … }`: the name is the second word.
         let rest = statement.trim_start().strip_prefix(words::COMPONENT).unwrap_or(statement).trim_start();
         let after = rest.find(|ch: char| ch.is_whitespace() || ch == '=').unwrap_or(rest.len());
@@ -374,10 +379,62 @@ pub(super) fn paste(project: &Project, files: &Files, request: &EditRequest) -> 
             None => by_sheet.push((sheet, st, vec![line])),
         }
     }
+    let wires = group_wires(project, &copies)?;
+    let mut kept = 0;
     let mut edits = Vec::new();
-    for (_, st, lines) in &by_sheet {
+    for (sheet, st, lines) in &mut by_sheet {
+        for (s, line) in &wires {
+            if s == sheet {
+                lines.push(line.clone());
+                kept += 1;
+            }
+        }
         let indent = st.component_ends.last().map(|&e| super::indent_at(text, e)).unwrap_or_default();
         edits.push(component_edit(text, st, &lines.join(&format!("\n{indent}"))));
     }
-    finish(project, files, request, edits, places, format!("pasted {}", names.join(", ")))
+    let mut summary = format!("pasted {}", names.join(", "));
+    if kept > 0 {
+        summary += &format!(" with {kept} connection{}", if kept == 1 { "" } else { "s" });
+    }
+    finish(project, files, request, edits, places, summary)
+}
+
+/// The connections a pasted group keeps, as `(sheet, connect statement)`:
+/// - a net that joins two or more copied pins on one sheet joins their copies on a new net of
+///   their own, so the group arrives wired as it was;
+/// - a global net (a rail such as GND or +3V3) takes the copies of its copied pins too, as a
+///   pasted power port keeps its rail;
+/// - any other net (one that leaves the group) stays with the originals, and the copy's pin
+///   is left open.
+fn group_wires(project: &Project, copies: &BTreeMap<usize, String>) -> Result<Vec<(String, String)>, EditError> {
+    let nl = &project.netlist;
+    let end = |ci: usize, pi: usize, name: &str| {
+        let c = &nl.components[ci];
+        let p = &c.pins[pi];
+        let pin = if c.pins.iter().filter(|q| q.pin == p.pin).count() > 1 { format!("{}.{}", p.gate, p.pin) } else { p.pin.clone() };
+        crate::syntax::endpoint(&Endpoint::pin(name, &pin)).map_err(|e| EditError::new(e.0))
+    };
+    let mut out = Vec::new();
+    for net in &nl.nets {
+        let mut by_sheet: BTreeMap<&str, Vec<(usize, usize)>> = BTreeMap::new();
+        for &(ci, pi) in &net.pins {
+            if copies.contains_key(&ci) {
+                by_sheet.entry(nl.components[ci].sheet.as_str()).or_default().push((ci, pi));
+            }
+        }
+        for (sheet, pins) in by_sheet {
+            let mut ends = Vec::new();
+            if net.global {
+                let (ci, pi) = pins[0];
+                ends.push(end(ci, pi, nl.components[ci].path.leaf())?);
+            } else if pins.len() < 2 {
+                continue;
+            }
+            for &(ci, pi) in &pins {
+                ends.push(end(ci, pi, &copies[&ci])?);
+            }
+            out.push((sheet.to_owned(), format!("connect = [{}]", ends.join(", "))));
+        }
+    }
+    Ok(out)
 }
