@@ -15,6 +15,10 @@ fn drone() -> PathBuf {
 }
 
 fn flight_controller() -> FabricationExport {
+    flight_controller_with(&FabRequest::default())
+}
+
+fn flight_controller_with(request: &FabRequest) -> FabricationExport {
     let dir = drone();
     let files: Files = [".circuit", ".circuit.layout", ".circuit.lock"]
         .iter()
@@ -32,7 +36,7 @@ fn flight_controller() -> FabricationExport {
         &files[path],
         &files,
         &CompileOptions::default(),
-        &FabRequest::default(),
+        request,
         None,
     )
     .unwrap_or_else(|d| panic!("{:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>()));
@@ -327,12 +331,17 @@ fn the_layout_keeps_its_fabrication_settings() {
     settings.variants = vec!["".into(), "lite".into()];
     settings.folder = Some("fab/fc-A".into());
     settings.include_through_hole = true;
+    settings.revision = Some("B".into());
+    settings.gerber = runmat_circuit::fab::GerberFormat { units: runmat_circuit::fab::LengthUnit::Inch, decimals: 5 };
+    settings.pick_place.sides = runmat_circuit::fab::assembly::PlaceSides::Separate;
+    settings.bom.columns = vec![runmat_circuit::fab::assembly::BomColumn::Designators, runmat_circuit::fab::assembly::BomColumn::Mpn];
+    settings.bom.group_by_value = false;
     board.fabrication = Some(settings.clone());
     let printed = print_board(&board, &[]);
     assert!(printed.contains("fabrication = { preset = custom, outputs = [gerber, drill, drill_map, drawing, ipc356, odb]"), "{}", printed.lines().find(|l| l.contains("fabrication")).unwrap_or(""));
     let again = parse_board("/p/daq.circuit.layout", &printed);
     assert!(again.diagnostics.is_empty(), "{:?}", again.diagnostics);
-    assert_eq!(again.board.unwrap().fabrication, Some(settings));
+    assert_eq!(again.board.unwrap().fabrication, Some(settings.clone()));
     // Written into the file in place: once added, then replaced, the rest kept.
     let added = runmat_circuit::syntax::board::with_fabrication_settings(&text, &settings).unwrap();
     let replaced = runmat_circuit::syntax::board::with_fabrication_settings(&added, &Default::default()).unwrap();
@@ -340,4 +349,74 @@ fn the_layout_keeps_its_fabrication_settings() {
     assert_eq!(replaced.len() - text.len(), replaced.lines().find(|l| l.contains("fabrication = ")).unwrap().len() + 1);
     let back = parse_board("/p/daq.circuit.layout", &added).board.unwrap();
     assert_eq!(back.fabrication, Some(settings));
+}
+
+#[test]
+fn gerber_units_and_decimals_set_the_coordinate_format() {
+    use runmat_circuit::fab::{GerberFormat, LengthUnit};
+    let out = flight_controller();
+    let mut req = FabRequest { revision: Some("B".into()), ..Default::default() };
+    req.gerber_format = GerberFormat { units: LengthUnit::Inch, decimals: 5 };
+    let files = runmat_circuit::fab::set::fabrication(&out.filled, &[], &Default::default(), &req);
+    let inch = &files["gerber/flight_controller-F_Cu.gbr"];
+    assert!(inch.contains("%FSLAX25Y25*%\n%MOIN*%"), "{}", &inch[..400]);
+    assert!(inch.contains(",B*%"), "the revision in the project attribute");
+    assert!(files["gerber/flight_controller.gbrjob"].contains("\"Revision\": \"B\""));
+    // The independent reader takes it, and the image is the same: the outline's extent in
+    // inches is the millimetre extent / 25.4, within the 10 µin resolution.
+    let mm = &out.files["gerber/flight_controller-Edge_Cuts.gbr"];
+    let span = |text: &str| {
+        let xs: Vec<i64> = text.lines().filter_map(|l| l.strip_prefix('X')?.split('Y').next()?.parse().ok()).collect();
+        (xs.iter().max().unwrap() - xs.iter().min().unwrap()) as f64
+    };
+    for (name, text) in &files {
+        if name.ends_with(".gbr") {
+            parse_gerber(name, text);
+        }
+    }
+    let w_mm = span(mm) / 1e6;
+    let w_in = span(&files["gerber/flight_controller-Edge_Cuts.gbr"]) / 1e5;
+    assert!((w_mm / 25.4 - w_in).abs() < 2e-5, "{w_mm} mm vs {w_in} in");
+    // The drill map and drawing follow the same format.
+    assert!(files["drill/flight_controller-drill-map.gbr"].contains("%MOIN*%"));
+}
+
+#[test]
+fn pick_and_place_sides_and_units_and_bom_columns() {
+    use runmat_circuit::fab::assembly::{BomColumn, PlaceSides};
+    use runmat_circuit::fab::LengthUnit;
+    let base = flight_controller().files;
+    let mut req = FabRequest::default();
+    req.pick_place_format.sides = PlaceSides::Separate;
+    req.pick_place_format.units = LengthUnit::Inch;
+    req.bom_format.columns = vec![BomColumn::Designators, BomColumn::Value];
+    req.bom_format.group_by_value = false;
+    let files = flight_controller_with(&req).files;
+    let both = &base["assembly/flight_controller-pos.csv"];
+    let top = &files["assembly/flight_controller-pos-top.csv"];
+    let bottom = &files["assembly/flight_controller-pos-bottom.csv"];
+    assert!(!files.contains_key("assembly/flight_controller-pos.csv"));
+    assert!(top.starts_with("Designator,Value,Package,X_in,Y_in,Rotation,Side\n"));
+    // Every part of this board is on top: the top file lists them all, the bottom none.
+    assert_eq!(top.lines().count(), both.lines().count());
+    assert_eq!(bottom.lines().count(), 1);
+    let first = |t: &str, col: usize| -> f64 { t.lines().nth(1).unwrap().split(',').nth(col).unwrap().parse().unwrap() };
+    assert!((first(both, 3) / 25.4 - first(top, 3)).abs() < 1e-5);
+    let bom = &files["assembly/flight_controller-bom.csv"];
+    let grouped = &base["assembly/flight_controller-bom.csv"];
+    assert!(bom.starts_with("Designators,Value\n"));
+    // Ungrouped: one line per designator, as many as the grouped quantities add up to.
+    let parts: usize = grouped.lines().skip(1).map(|l| l.split(',').nth(1).unwrap().parse::<usize>().unwrap()).sum();
+    assert_eq!(bom.lines().count() - 1, parts);
+    assert!(bom.lines().skip(1).all(|l| !l.split(',').next().unwrap().contains(' ')));
+}
+
+#[test]
+fn the_default_folder_names_the_revision() {
+    let mut s = runmat_circuit::fab::settings::FabSettings::default();
+    assert_eq!(s.folder_or_default("fc"), "fab/fc");
+    s.revision = Some("B".into());
+    assert_eq!(s.folder_or_default("fc"), "fab/fc-B");
+    s.folder = Some("out".into());
+    assert_eq!(s.folder_or_default("fc"), "out");
 }

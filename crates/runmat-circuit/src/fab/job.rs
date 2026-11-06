@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 /// The job file for the Gerbers in `layers` (file name and layer) and the drill files named
 /// in `drill_files` (file name → X2 file function). `date` is the ISO 8601 creation date;
 /// without it the header carries none, so the output stays deterministic.
-pub fn gerber_job(board: &Board, layers: &[(String, super::GerberLayer)], drill_files: &[(String, String)], date: Option<&str>) -> String {
+pub fn gerber_job(board: &Board, layers: &[(String, super::GerberLayer)], drill_files: &[(String, String)], date: Option<&str>, revision: Option<&str>) -> String {
     let n = board.copper_count();
     let bb = board.outline.bbox();
     let thickness: crate::geom::Coord = board.stackup.layers.iter().map(|l| l.thickness).sum();
@@ -28,7 +28,7 @@ pub fn gerber_job(board: &Board, layers: &[(String, super::GerberLayer)], drill_
         "ProjectId": {
             "Name": board.name,
             "GUID": crate::ids::Uuid(crate::ids::fnv128(board.name.as_bytes())).with_version(8).to_string(),
-            "Revision": "rev?",
+            "Revision": revision.unwrap_or("rev?"),
         },
         "Size": { "X": to_mm(bb.width()), "Y": to_mm(bb.height()) },
         "LayerNumber": n,

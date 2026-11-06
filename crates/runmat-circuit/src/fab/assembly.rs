@@ -1,6 +1,8 @@
 //! Assembly and test outputs: IPC-D-356A netlist, bill of materials, pick-and-place.
 
-use crate::geom::{to_mm, Coord};
+use super::LengthUnit;
+use crate::geom::Coord;
+use serde::{Deserialize, Serialize};
 use crate::layout::{Board, Footprint, Side};
 use crate::library::PadKind;
 use std::collections::BTreeMap;
@@ -171,20 +173,149 @@ pub fn bom(nl: &crate::elab::Netlist, pool: &crate::library::Pool) -> Vec<BomLin
     out
 }
 
+/// A column of the bill of materials.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BomColumn {
+    Designators,
+    Quantity,
+    Value,
+    Package,
+    Mpn,
+    Manufacturer,
+}
+
+impl BomColumn {
+    pub const ALL: [BomColumn; 6] = [
+        BomColumn::Designators,
+        BomColumn::Quantity,
+        BomColumn::Value,
+        BomColumn::Package,
+        BomColumn::Mpn,
+        BomColumn::Manufacturer,
+    ];
+    pub fn word(self) -> &'static str {
+        match self {
+            BomColumn::Designators => "designators",
+            BomColumn::Quantity => "quantity",
+            BomColumn::Value => "value",
+            BomColumn::Package => "package",
+            BomColumn::Mpn => "mpn",
+            BomColumn::Manufacturer => "manufacturer",
+        }
+    }
+    pub fn from_word(word: &str) -> Option<BomColumn> {
+        BomColumn::ALL.into_iter().find(|c| c.word() == word)
+    }
+    fn header(self) -> &'static str {
+        match self {
+            BomColumn::Designators => "Designators",
+            BomColumn::Quantity => "Quantity",
+            BomColumn::Value => "Value",
+            BomColumn::Package => "Package",
+            BomColumn::Mpn => "MPN",
+            BomColumn::Manufacturer => "Manufacturer",
+        }
+    }
+    fn cell(self, l: &BomLine) -> String {
+        match self {
+            BomColumn::Designators => l.designators.join(" "),
+            BomColumn::Quantity => l.quantity.to_string(),
+            BomColumn::Value => l.value.clone(),
+            BomColumn::Package => l.package.clone(),
+            BomColumn::Mpn => l.mpn.clone(),
+            BomColumn::Manufacturer => l.manufacturer.clone(),
+        }
+    }
+}
+
+/// How the bill of materials is written: its columns, in order, and whether parts with the
+/// same part number, value and package share a line (else one line per designator).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BomFormat {
+    pub columns: Vec<BomColumn>,
+    pub group_by_value: bool,
+}
+
+impl Default for BomFormat {
+    fn default() -> Self {
+        BomFormat { columns: BomColumn::ALL.to_vec(), group_by_value: true }
+    }
+}
+
+/// The bill of materials as CSV, every column, grouped.
 pub fn bom_csv(lines: &[BomLine]) -> String {
-    let mut s = String::from("Designators,Quantity,Value,Package,MPN,Manufacturer\n");
-    for l in lines {
-        s.push_str(&csv(&[
-            l.designators.join(" "),
-            l.quantity.to_string(),
-            l.value.clone(),
-            l.package.clone(),
-            l.mpn.clone(),
-            l.manufacturer.clone(),
-        ]));
+    bom_csv_in(lines, &BomFormat::default())
+}
+
+/// The bill of materials as CSV in `format`. Ungrouped, each designator has its own line
+/// (quantity 1), in designator order.
+pub fn bom_csv_in(lines: &[BomLine], format: &BomFormat) -> String {
+    let columns = if format.columns.is_empty() { BomColumn::ALL.to_vec() } else { format.columns.clone() };
+    let mut rows: Vec<BomLine> = if format.group_by_value {
+        lines.to_vec()
+    } else {
+        let mut one: Vec<BomLine> = lines
+            .iter()
+            .flat_map(|l| l.designators.iter().map(move |d| BomLine { designators: vec![d.clone()], quantity: 1, ..l.clone() }))
+            .collect();
+        one.sort_by_key(|l| natural_key(&l.designators[0]));
+        one
+    };
+    rows.retain(|l| !l.designators.is_empty());
+    let mut s = csv(&columns.iter().map(|c| c.header().to_string()).collect::<Vec<_>>());
+    s.push('\n');
+    for l in &rows {
+        s.push_str(&csv(&columns.iter().map(|c| c.cell(l)).collect::<Vec<_>>()));
         s.push('\n');
     }
     s
+}
+
+/// Which sides the pick-and-place lists, and in how many files.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaceSides {
+    /// Both sides in one file, with a side column.
+    #[default]
+    Both,
+    /// One file per side.
+    Separate,
+    Top,
+    Bottom,
+}
+
+impl PlaceSides {
+    pub const ALL: [PlaceSides; 4] = [PlaceSides::Both, PlaceSides::Separate, PlaceSides::Top, PlaceSides::Bottom];
+    pub fn word(self) -> &'static str {
+        match self {
+            PlaceSides::Both => "both",
+            PlaceSides::Separate => "separate",
+            PlaceSides::Top => "top",
+            PlaceSides::Bottom => "bottom",
+        }
+    }
+    pub fn from_word(word: &str) -> Option<PlaceSides> {
+        PlaceSides::ALL.into_iter().find(|s| s.word() == word)
+    }
+    /// The files: a name suffix (`""`, `-top`, `-bottom`) and the side each lists (`None`: both).
+    pub fn files(self) -> Vec<(&'static str, Option<Side>)> {
+        match self {
+            PlaceSides::Both => vec![("", None)],
+            PlaceSides::Separate => vec![("-top", Some(Side::Top)), ("-bottom", Some(Side::Bottom))],
+            PlaceSides::Top => vec![("-top", Some(Side::Top))],
+            PlaceSides::Bottom => vec![("-bottom", Some(Side::Bottom))],
+        }
+    }
+}
+
+/// How the pick-and-place is written: the sides and the unit of the positions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PickPlaceFormat {
+    pub sides: PlaceSides,
+    pub units: LengthUnit,
 }
 
 /// Pick-and-place CSV for fitted footprints (SMD only unless `include_tht`), origin at the
@@ -200,13 +331,29 @@ pub fn pick_place_of(
     include_tht: bool,
     fitted: Option<&std::collections::BTreeSet<String>>,
 ) -> String {
+    pick_place_in(board, include_tht, fitted, None, LengthUnit::Mm)
+}
+
+/// [`pick_place_of`] for one side (`None`: both) with positions in `units` (4 decimals in
+/// millimetres, 5 in inches).
+pub fn pick_place_in(
+    board: &Board,
+    include_tht: bool,
+    fitted: Option<&std::collections::BTreeSet<String>>,
+    side: Option<Side>,
+    units: LengthUnit,
+) -> String {
     let origin = board.outline.bbox().min;
+    let pos = |v: Coord| match units {
+        LengthUnit::Mm => format!("{:.4}", units.of(v)),
+        LengthUnit::Inch => format!("{:.5}", units.of(v)),
+    };
     let mut rows: Vec<(Footprint, String)> = Vec::new();
     let is_fitted = |f: &Footprint| fitted.map_or(f.fitted, |s| s.contains(&f.reference));
     for f in board
         .footprints
         .values()
-        .filter(|f| is_fitted(f) && (f.package.smd || include_tht))
+        .filter(|f| is_fitted(f) && (f.package.smd || include_tht) && side.map_or(true, |s| f.side == s))
     {
         let p = f.at - origin;
         rows.push((
@@ -215,8 +362,8 @@ pub fn pick_place_of(
                 f.reference.clone(),
                 f.value.clone(),
                 f.package.name.clone(),
-                format!("{:.4}", to_mm(p.x)),
-                format!("{:.4}", to_mm(p.y)),
+                pos(p.x),
+                pos(p.y),
                 format!("{:.2}", f.rotation),
                 if f.side == Side::Top {
                     "top".into()
@@ -227,7 +374,11 @@ pub fn pick_place_of(
         ));
     }
     rows.sort_by_key(|(f, _)| natural_key(&f.reference));
-    let mut s = String::from("Designator,Value,Package,X_mm,Y_mm,Rotation,Side\n");
+    let u = match units {
+        LengthUnit::Mm => "mm",
+        LengthUnit::Inch => "in",
+    };
+    let mut s = format!("Designator,Value,Package,X_{u},Y_{u},Rotation,Side\n");
     for (_, r) in rows {
         s.push_str(&r);
         s.push('\n');

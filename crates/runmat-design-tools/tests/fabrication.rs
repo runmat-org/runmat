@@ -295,3 +295,26 @@ fn saved_settings_make_the_same_set_as_the_call_that_saved_them() {
     assert!(names(&again).iter().any(|n| n.ends_with("-assembly-top.pdf")), "{:?}", names(&again));
     assert_eq!(again["files"], explicit["files"]);
 }
+
+#[test]
+fn output_formats_and_the_revision_are_saved_and_made_again() {
+    let options = json!({
+        "preset": "full", "zip": false, "revision": "B", "gerberUnits": "inch", "gerberDecimals": 5,
+        "pickPlaceSides": "separate", "pickPlaceUnits": "inch", "bomColumns": ["designators", "mpn"], "bomGroupByValue": false, "remember": true
+    });
+    let explicit = call("design.export", json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication", "fabrication": options }), &files()).unwrap();
+    assert_eq!(explicit["fabrication"]["folder"], "fab/flight_controller-B");
+    let n = names(&explicit);
+    assert!(n.contains(&"assembly/flight_controller-pos-top.csv".to_string()) && n.contains(&"assembly/flight_controller-pos-bottom.csv".to_string()), "{n:?}");
+    let cu = String::from_utf8(bytes(&explicit, "gerber/flight_controller-F_Cu.gbr")).unwrap();
+    assert!(cu.contains("%MOIN*%") && cu.contains("%FSLAX25Y25*%"));
+    assert!(String::from_utf8(bytes(&explicit, "assembly/flight_controller-bom.csv")).unwrap().starts_with("Designators,MPN\n"));
+    let saved = files_with_saved(options);
+    let layout = &saved["/p/flight_controller.circuit.layout"];
+    assert!(layout.contains(r#"revision = "B""#) && layout.contains("gerber = { units = inch, decimals = 5 }"), "{}", layout.lines().find(|l| l.contains("fabrication")).unwrap_or(""));
+    let again = call("design.export", json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication" }), &saved).unwrap();
+    assert_eq!(again["files"], explicit["files"]);
+    // Bad values are refused with what's expected.
+    let bad = call("design.export", json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication", "fabrication": { "gerberUnits": "furlong" } }), &files());
+    assert!(format!("{:?}", bad.unwrap_err()).contains("expected mm or inch"));
+}

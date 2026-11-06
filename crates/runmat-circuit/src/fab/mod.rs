@@ -42,9 +42,79 @@ use crate::library::{Graphic, PadKind, PadShape};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-/// Gerber coordinate: 4.6 format in mm (nanometre resolution).
-fn gc(v: Coord) -> String {
-    v.to_string()
+/// The length unit of a Gerber file or a pick-and-place list.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LengthUnit {
+    #[default]
+    Mm,
+    Inch,
+}
+
+impl LengthUnit {
+    pub fn word(self) -> &'static str {
+        match self {
+            LengthUnit::Mm => "mm",
+            LengthUnit::Inch => "inch",
+        }
+    }
+    pub fn from_word(word: &str) -> Option<LengthUnit> {
+        match word {
+            "mm" => Some(LengthUnit::Mm),
+            "inch" | "in" => Some(LengthUnit::Inch),
+            _ => None,
+        }
+    }
+    /// `v` in this unit.
+    pub fn of(self, v: Coord) -> f64 {
+        match self {
+            LengthUnit::Mm => to_mm(v),
+            LengthUnit::Inch => to_mm(v) / 25.4,
+        }
+    }
+}
+
+/// A Gerber file's coordinate format: the unit and the decimals kept. Millimetres use 4 integer
+/// digits and inches 2 (`%FSLAX46Y46*%`, `%FSLAX26Y26*%`), as the Gerber specification
+/// recommends; 6 decimals is 1 nm in millimetres, 5 is 10 nm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GerberFormat {
+    pub units: LengthUnit,
+    /// 5 or 6.
+    pub decimals: u8,
+}
+
+impl Default for GerberFormat {
+    fn default() -> Self {
+        GerberFormat { units: LengthUnit::Mm, decimals: 6 }
+    }
+}
+
+impl GerberFormat {
+    /// The decimals clamped to the two the format offers.
+    fn decimals(self) -> u8 {
+        self.decimals.clamp(5, 6)
+    }
+    /// A coordinate in the file's integer units.
+    fn coord(self, v: Coord) -> String {
+        if self == GerberFormat::default() {
+            return v.to_string();
+        }
+        let scale = 10f64.powi(self.decimals() as i32);
+        ((self.units.of(v) * scale).round() as i64).to_string()
+    }
+    /// An aperture size in the file's unit.
+    fn size(self, v: Coord) -> String {
+        format!("{:.6}", self.units.of(v))
+    }
+    fn statement(self) -> String {
+        let d = self.decimals();
+        match self.units {
+            LengthUnit::Mm => format!("%FSLAX4{d}Y4{d}*%\n%MOMM*%\n"),
+            LengthUnit::Inch => format!("%FSLAX2{d}Y2{d}*%\n%MOIN*%\n"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -55,8 +125,8 @@ pub(crate) enum Aperture {
 }
 
 impl Aperture {
-    fn def(&self) -> String {
-        let f = |v: Coord| format!("{:.6}", to_mm(v));
+    fn def(&self, format: GerberFormat) -> String {
+        let f = |v: Coord| format.size(v);
         match self {
             Aperture::Circle(d) => format!("C,{}", f(*d)),
             Aperture::Rect(w, h) => format!("R,{}X{}", f(*w), f(*h)),
@@ -70,6 +140,7 @@ pub(crate) struct Writer {
     apertures: Vec<(Aperture, String)>,
     current: Option<usize>,
     attrs: Vec<String>,
+    format: GerberFormat,
 }
 
 /// Where a layer's image goes: a Gerber file, or an ODB++ features file.
@@ -115,7 +186,7 @@ impl Sink for Writer {
     }
     fn flash(&mut self, ap: usize, p: Point) {
         self.select(ap);
-        let _ = writeln!(self.body, "X{}Y{}D03*", gc(p.x), gc(p.y));
+        let _ = writeln!(self.body, "X{}Y{}D03*", self.format.coord(p.x), self.format.coord(p.y));
     }
     fn draw(&mut self, ap: usize, pts: &[Point]) {
         self.select(ap);
@@ -123,8 +194,8 @@ impl Sink for Writer {
             let _ = writeln!(
                 self.body,
                 "X{}Y{}D0{}*",
-                gc(p.x),
-                gc(p.y),
+                self.format.coord(p.x),
+                self.format.coord(p.y),
                 if i == 0 { 2 } else { 1 }
             );
         }
@@ -139,8 +210,8 @@ impl Sink for Writer {
             let _ = writeln!(
                 self.body,
                 "X{}Y{}D0{}*",
-                gc(p.x),
-                gc(p.y),
+                self.format.coord(p.x),
+                self.format.coord(p.y),
                 if i == 0 { 2 } else { 1 }
             );
         }
@@ -149,12 +220,13 @@ impl Sink for Writer {
 }
 
 impl Writer {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(format: GerberFormat) -> Self {
         Writer {
             body: String::new(),
             apertures: Vec::new(),
             current: None,
             attrs: Vec::new(),
+            format,
         }
     }
     fn select(&mut self, i: usize) {
@@ -165,13 +237,14 @@ impl Writer {
     }
     fn finish(self, header: &str) -> String {
         let mut s = String::from(header);
-        s.push_str("%FSLAX46Y46*%\n%MOMM*%\n%LPD*%\nG01*\n");
+        s.push_str(&self.format.statement());
+        s.push_str("%LPD*%\nG01*\n");
         for (i, (a, f)) in self.apertures.iter().enumerate() {
             let _ = writeln!(
                 s,
                 "%TA.AperFunction,{f}*%\n%ADD{}{}*%\n%TD*%",
                 i + 10,
-                a.def()
+                a.def(self.format)
             );
         }
         s.push_str(&self.body);
@@ -195,13 +268,22 @@ pub enum GerberLayer {
     Profile,
 }
 
-pub(crate) fn header(board: &Board, function: &str, polarity: &str) -> String {
+/// The X2 file attributes; the project's revision is `rev?` when none is given, as the
+/// Gerber specification asks.
+pub(crate) fn header(board: &Board, function: &str, polarity: &str, revision: Option<&str>) -> String {
     format!(
-        "%TF.GenerationSoftware,RunMat,runmat-circuit,{}*%\n%TF.ProjectId,{},{},rev?*%\n%TF.SameCoordinates,Original*%\n%TF.Part,Single*%\n%TF.FileFunction,{function}*%\n%TF.FilePolarity,{polarity}*%\n",
+        "%TF.GenerationSoftware,RunMat,runmat-circuit,{}*%\n%TF.ProjectId,{},{},{}*%\n%TF.SameCoordinates,Original*%\n%TF.Part,Single*%\n%TF.FileFunction,{function}*%\n%TF.FilePolarity,{polarity}*%\n",
         env!("CARGO_PKG_VERSION"),
         board.name,
-        crate::ids::Uuid(crate::ids::fnv128(board.name.as_bytes())).with_version(8)
+        crate::ids::Uuid(crate::ids::fnv128(board.name.as_bytes())).with_version(8),
+        revision.map(project_field).unwrap_or_else(|| "rev?".into())
     )
+}
+
+/// A project field of an X2 attribute: the characters an attribute value can't hold (`,` and
+/// `*`, `%`) become `_`.
+fn project_field(text: &str) -> String {
+    text.chars().map(|c| if matches!(c, ',' | '*' | '%') { '_' } else { c }).collect()
 }
 
 pub(crate) fn pad_aperture(shape: &PadShape, rot: f64) -> Option<Aperture> {
@@ -221,12 +303,17 @@ fn prim_rings(p: &Prim, grow: Coord) -> Vec<Ring> {
     p.outline(grow, crate::geom::mm(0.005))
 }
 
-/// One Gerber file.
+/// One Gerber file, in millimetres with 6 decimals.
 pub fn gerber(board: &Board, layer: GerberLayer) -> String {
-    let mut w = Writer::new();
+    gerber_in(board, layer, GerberFormat::default(), None)
+}
+
+/// One Gerber file in `format`; `revision` names the board revision in its project attribute.
+pub fn gerber_in(board: &Board, layer: GerberLayer, format: GerberFormat, revision: Option<&str>) -> String {
+    let mut w = Writer::new(format);
     image(board, layer, &mut w);
     let (function, polarity) = file_function(board, layer);
-    w.finish(&header(board, &function, polarity))
+    w.finish(&header(board, &function, polarity, revision))
 }
 
 /// The layer's X2 file function and polarity.

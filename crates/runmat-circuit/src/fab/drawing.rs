@@ -87,7 +87,12 @@ impl Drawing {
     /// The drawing as one Gerber X2 file of the given file function (`Drillmap`,
     /// `FabricationDrawing`).
     pub fn gerber(&self, board: &Board, function: &str) -> String {
-        let mut w = super::Writer::new();
+        self.gerber_in(board, function, super::GerberFormat::default(), None)
+    }
+
+    /// [`Self::gerber`] in `format`.
+    pub fn gerber_in(&self, board: &Board, function: &str, format: super::GerberFormat, revision: Option<&str>) -> String {
+        let mut w = super::Writer::new(format);
         for m in &self.marks {
             match m {
                 Mark::Line { points, width } => {
@@ -110,7 +115,7 @@ impl Drawing {
                 }
             }
         }
-        w.finish(&super::header(board, function, "Positive"))
+        w.finish(&super::header(board, function, "Positive", revision))
     }
 }
 

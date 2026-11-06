@@ -26,8 +26,11 @@
 //! layout keeps (`fabrication = { … }`, the ones the Desktop's Fabrication outputs saved), so a
 //! re-export makes the same files. Each flag overrides them: `--preset` picks a preset's
 //! outputs, `--outputs` lists them, `--layers` the Gerber layers, `--variant` the variants that
-//! get assembly files (`--variant ""` is the default variant). `--remember` saves the result
-//! into the layout.
+//! get assembly files (`--variant ""` is the default variant), `--gerber-units` and
+//! `--gerber-decimals` the Gerber format, `--pick-place-sides` and `--pick-place-units` the
+//! pick-and-place, `--bom-columns` and `--bom-ungrouped` the bill of materials, `--revision` the board
+//! revision. `--remember`
+//! saves the result into the layout.
 //!
 //! The workspace is the file's folder and everything under it (`--root <dir>` names another).
 //! `--all-configurations` exports a product family: a part's STEP, or every sheet of a
@@ -42,7 +45,7 @@ use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!("usage: runmat-design check <file>... [--json] [--no-simulate] [--root <dir>]");
-    eprintln!("usage: runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|bom|kicad|fabrication> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>] [--preset <name>] [--outputs <list>] [--layers <list>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip] [--remember]");
+    eprintln!("usage: runmat-design export <file> --format <step|3mf|stl|gltf|dxf|dwg|pdf|bom|kicad|fabrication> [--all-configurations] [--configuration <name>] [--sheet <name>] [--root <dir>] [--out <dir>] [--preset <name>] [--outputs <list>] [--layers <list>] [--variant <name>]... [--include-through-hole] [--zip|--no-zip] [--gerber-units mm|inch] [--gerber-decimals 5|6] [--pick-place-sides both|separate|top|bottom] [--pick-place-units mm|inch] [--bom-columns <list>] [--bom-ungrouped] [--revision <text>] [--remember]");
     ExitCode::from(2)
 }
 
@@ -112,9 +115,18 @@ fn main() -> ExitCode {
     let mut all = false;
     let (mut outputs, mut variants, mut tht): (Option<String>, Vec<String>, Option<bool>) = (None, Vec::new(), None);
     let (mut preset, mut layers, mut zip, mut remember): (Option<String>, Option<String>, Option<bool>, bool) = (None, None, None, false);
+    // Output formats (fabrication): passed through as design.export's fabrication fields.
+    let mut formats = serde_json::Map::new();
     let mut it = args[2..].iter();
     while let Some(a) = it.next() {
         match a.as_str() {
+            "--gerber-units" => drop(formats.insert("gerberUnits".into(), json!(it.next()))),
+            "--gerber-decimals" => drop(formats.insert("gerberDecimals".into(), json!(it.next().and_then(|d| d.parse::<u8>().ok())))),
+            "--pick-place-sides" => drop(formats.insert("pickPlaceSides".into(), json!(it.next()))),
+            "--pick-place-units" => drop(formats.insert("pickPlaceUnits".into(), json!(it.next()))),
+            "--bom-columns" => drop(formats.insert("bomColumns".into(), json!(it.next().map(|l| l.split(',').map(str::trim).collect::<Vec<_>>())))),
+            "--revision" => drop(formats.insert("revision".into(), json!(it.next()))),
+            "--bom-ungrouped" => drop(formats.insert("bomGroupByValue".into(), json!(false))),
             "--format" => format = it.next().cloned(),
             "--out" => out = it.next().map(PathBuf::from),
             "--root" => root = it.next().map(PathBuf::from),
@@ -189,6 +201,7 @@ fn main() -> ExitCode {
         if let Some(z) = zip {
             fab.insert("zip".into(), Value::Bool(z));
         }
+        fab.extend(formats);
         fab.insert("remember".into(), Value::Bool(remember));
         input["fabrication"] = Value::Object(fab);
     }

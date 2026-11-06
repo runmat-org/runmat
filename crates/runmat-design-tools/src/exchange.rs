@@ -103,6 +103,21 @@ pub struct FabricationOptions {
     pub folder: Option<String>,
     /// Also pack every file into `<board>-fab.zip`.
     pub zip: Option<bool>,
+    /// The board revision: named in the Gerber and job files and the default folder
+    /// (`fab/<board>-<revision>`); an empty text clears it.
+    pub revision: Option<String>,
+    /// The Gerber files' unit: `mm` or `inch`.
+    pub gerber_units: Option<String>,
+    /// The Gerber coordinates' decimals: 5 or 6.
+    pub gerber_decimals: Option<u8>,
+    /// The pick-and-place's sides: `both` (one file), `separate` (a file per side), `top` or `bottom`.
+    pub pick_place_sides: Option<String>,
+    /// The pick-and-place's unit: `mm` or `inch`.
+    pub pick_place_units: Option<String>,
+    /// The bill of materials' columns, in order: `designators`, `quantity`, `value`, `package`, `mpn`, `manufacturer`.
+    pub bom_columns: Option<Vec<String>>,
+    /// Parts with the same part number, value and package share a BOM line (else a line per designator).
+    pub bom_group_by_value: Option<bool>,
     /// Report the pre-flight checks (DRC, ERC, unrouted connections, pending schematic changes).
     #[serde(default)]
     pub preflight: bool,
@@ -169,6 +184,34 @@ impl FabricationOptions {
         }
         if let Some(z) = self.zip {
             s.zip = z;
+        }
+        if let Some(r) = &self.revision {
+            s.revision = Some(r.trim().to_string()).filter(|r| !r.is_empty());
+        }
+        let unit = |u: &str| runmat_circuit::fab::LengthUnit::from_word(u).ok_or_else(|| ToolError::invalid(format!("`{u}` is not a unit; expected mm or inch")));
+        if let Some(u) = &self.gerber_units {
+            s.gerber.units = unit(u)?;
+        }
+        if let Some(d) = self.gerber_decimals {
+            if d != 5 && d != 6 {
+                return Err(ToolError::invalid("gerberDecimals is 5 or 6"));
+            }
+            s.gerber.decimals = d;
+        }
+        if let Some(w) = &self.pick_place_sides {
+            s.pick_place.sides = runmat_circuit::fab::assembly::PlaceSides::from_word(w).ok_or_else(|| ToolError::invalid(format!("`{w}` is not a side choice; expected both, separate, top or bottom")))?;
+        }
+        if let Some(u) = &self.pick_place_units {
+            s.pick_place.units = unit(u)?;
+        }
+        if let Some(cols) = &self.bom_columns {
+            s.bom.columns = cols
+                .iter()
+                .map(|c| runmat_circuit::fab::assembly::BomColumn::from_word(c).ok_or_else(|| ToolError::invalid(format!("`{c}` is not a BOM column; expected designators, quantity, value, package, mpn or manufacturer"))))
+                .collect::<Result<_, _>>()?;
+        }
+        if let Some(g) = self.bom_group_by_value {
+            s.bom.group_by_value = g;
         }
         Ok(s)
     }

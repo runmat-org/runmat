@@ -5,10 +5,12 @@
 //! the same files wherever it runs.
 //!
 //! ```text
-//! fabrication = { preset = fab_house, outputs = [gerber, drill, drill_map, drawing, ipc356], layers = ["F.Cu", "B.Cu", "F.Mask", "B.Mask", "F.Silkscreen", "Edge.Cuts"], folder = "fab/daq-A", zip = true }
+//! fabrication = { preset = fab_house, outputs = [gerber, drill, drill_map, drawing, ipc356], layers = ["F.Cu", "B.Cu", "F.Mask", "B.Mask", "F.Silkscreen", "Edge.Cuts"], folder = "fab/daq-A", zip = true, gerber = { units = inch, decimals = 5 }, pick_place = { sides = separate, units = mm }, bom = { columns = [designators, quantity, value, mpn], group_by_value = false } }
 //! ```
 
+use super::assembly::{BomFormat, PickPlaceFormat};
 use super::set::FabRequest;
+use super::GerberFormat;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -132,6 +134,15 @@ pub struct FabSettings {
     pub zip: bool,
     /// Pick-and-place lists through-hole parts too.
     pub include_through_hole: bool,
+    /// The Gerber files' unit and decimals.
+    pub gerber: GerberFormat,
+    /// The pick-and-place's sides and unit.
+    pub pick_place: PickPlaceFormat,
+    /// The bill of materials' columns and grouping.
+    pub bom: BomFormat,
+    /// The board revision: in the Gerber and job files' project attribute and the default
+    /// folder (`fab/<board>-<revision>`).
+    pub revision: Option<String>,
 }
 
 impl Default for FabSettings {
@@ -144,6 +155,10 @@ impl Default for FabSettings {
             folder: None,
             zip: true,
             include_through_hole: false,
+            gerber: GerberFormat::default(),
+            pick_place: PickPlaceFormat::default(),
+            bom: BomFormat::default(),
+            revision: None,
         }
     }
 }
@@ -166,11 +181,19 @@ impl FabSettings {
             include_through_hole: self.include_through_hole,
             layers: self.layers.clone(),
             date: None,
+            gerber_format: self.gerber,
+            pick_place_format: self.pick_place,
+            bom_format: self.bom.clone(),
+            revision: self.revision.clone(),
         }
     }
-    /// The folder the set goes to, relative to the board's folder.
+    /// The folder the set goes to, relative to the board's folder: `fab/<board>-<revision>`
+    /// (`fab/<board>` without a revision) unless the settings name one.
     pub fn folder_or_default(&self, board: &str) -> String {
-        self.folder.clone().filter(|f| !f.trim().is_empty()).unwrap_or_else(|| format!("fab/{board}"))
+        self.folder.clone().filter(|f| !f.trim().is_empty()).unwrap_or_else(|| match self.revision.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+            Some(rev) => format!("fab/{board}-{rev}"),
+            None => format!("fab/{board}"),
+        })
     }
 }
 

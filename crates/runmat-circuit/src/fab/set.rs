@@ -6,7 +6,7 @@
 //! | Drill | `drill/<board>-<span>.drl` (plated per span, `NPTH`) |
 //! | Drill map | `drill/<board>-drill-map.gbr` |
 //! | Fabrication drawing | `drawing/<board>-fab-drawing.gbr` |
-//! | Pick-and-place | `assembly/<board>[-<variant>]-pos.csv` |
+//! | Pick-and-place | `assembly/<board>[-<variant>]-pos[-top\|-bottom].csv` |
 //! | BOM | `assembly/<board>[-<variant>]-bom.csv` |
 //! | Assembly drawing | `assembly/<board>-assembly-top.gbr`, `-bottom.gbr` |
 //! | IPC-2581C | `ipc2581/<board>.xml` |
@@ -42,6 +42,14 @@ pub struct FabRequest {
     pub layers: Option<BTreeSet<String>>,
     /// ISO 8601 date for the Gerber job file's header; none keeps the set deterministic.
     pub date: Option<String>,
+    /// The Gerber files' unit and decimals (the layers, drill map and drawings).
+    pub gerber_format: super::GerberFormat,
+    /// The pick-and-place's sides and unit.
+    pub pick_place_format: assembly::PickPlaceFormat,
+    /// The bill of materials' columns and grouping.
+    pub bom_format: assembly::BomFormat,
+    /// The board revision the Gerber files and the job file name (`rev?` when none).
+    pub revision: Option<String>,
 }
 
 impl Default for FabRequest {
@@ -60,6 +68,10 @@ impl Default for FabRequest {
             include_through_hole: false,
             layers: None,
             date: None,
+            gerber_format: Default::default(),
+            pick_place_format: Default::default(),
+            bom_format: Default::default(),
+            revision: None,
         }
     }
 }
@@ -88,11 +100,12 @@ pub fn fabrication(
 ) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     let name = &board.name;
+    let rev = req.revision.as_deref();
     let drills = drill::excellon(board);
     if req.gerber {
         let layers = super::plan::included(&super::plan::layer_rows(board), req.layers.as_ref());
         for (file, layer) in &layers {
-            out.insert(format!("gerber/{file}"), super::gerber(board, *layer));
+            out.insert(format!("gerber/{file}"), super::gerber_in(board, *layer, req.gerber_format, rev));
         }
         let drill_functions: Vec<(String, String)> = if req.drill {
             drills
@@ -111,7 +124,7 @@ pub fn fabrication(
         };
         out.insert(
             format!("gerber/{name}.gbrjob"),
-            job::gerber_job(board, &layers, &drill_functions, req.date.as_deref()),
+            job::gerber_job(board, &layers, &drill_functions, req.date.as_deref(), rev),
         );
     }
     if req.drill {
@@ -122,35 +135,38 @@ pub fn fabrication(
     if req.drill_map {
         out.insert(
             format!("drill/{name}-drill-map.gbr"),
-            drawing::drill_map(board).gerber(board, "Drillmap"),
+            drawing::drill_map(board).gerber_in(board, "Drillmap", req.gerber_format, rev),
         );
     }
     if req.drawing {
         out.insert(
             format!("drawing/{name}-fab-drawing.gbr"),
-            drawing::fabrication_drawing(board).gerber(board, "FabricationDrawing"),
+            drawing::fabrication_drawing(board).gerber_in(board, "FabricationDrawing", req.gerber_format, rev),
         );
     }
     if req.assembly_drawing {
         for (side, drawing) in super::assembly_drawing::assembly_drawings(board) {
             out.insert(
                 format!("assembly/{name}-assembly-{side}.gbr"),
-                drawing.gerber(board, &format!("AssemblyDrawing,{}", if side == "top" { "Top" } else { "Bot" })),
+                drawing.gerber_in(board, &format!("AssemblyDrawing,{}", if side == "top" { "Top" } else { "Bot" }), req.gerber_format, rev),
             );
         }
     }
     for v in variants {
         let suffix = v.name.as_ref().map(|n| format!("-{n}")).unwrap_or_default();
         if req.pick_place {
-            out.insert(
-                format!("assembly/{name}{suffix}-pos.csv"),
-                assembly::pick_place_of(board, req.include_through_hole, Some(&v.fitted)),
-            );
+            let f = req.pick_place_format;
+            for (side_suffix, side) in f.sides.files() {
+                out.insert(
+                    format!("assembly/{name}{suffix}-pos{side_suffix}.csv"),
+                    assembly::pick_place_in(board, req.include_through_hole, Some(&v.fitted), side, f.units),
+                );
+            }
         }
         if req.bom {
             out.insert(
                 format!("assembly/{name}{suffix}-bom.csv"),
-                assembly::bom_csv(&v.bom),
+                assembly::bom_csv_in(&v.bom, &req.bom_format),
             );
         }
     }

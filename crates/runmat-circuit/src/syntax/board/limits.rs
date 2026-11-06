@@ -143,6 +143,7 @@ pub(super) fn read_rule(id: &str, v: &Val) -> Read<RuleSpec> {
 
 /// `fabrication = { preset = fab_house, outputs = [gerber, drill], layers = ["F.Cu"], variants = [""], folder = "fab/x", zip = true, through_hole = false }`.
 pub(super) fn read_fabrication(v: &Val) -> Read<crate::fab::settings::FabSettings> {
+    use crate::fab::assembly::{BomColumn, PlaceSides};
     use crate::fab::settings::{FabOutput, FabPreset, FabSettings};
     let mut f = Fields::of(v, "fabrication settings")?;
     let mut out = FabSettings::default();
@@ -167,10 +168,55 @@ pub(super) fn read_fabrication(v: &Val) -> Read<crate::fab::settings::FabSetting
         out.variants = list(l)?.iter().map(text).collect::<Read<_>>()?;
     }
     out.folder = f.opt("folder", text)?;
+    out.revision = f.opt("revision", text)?;
     out.zip = f.or("zip", false, boolean)?;
     out.include_through_hole = f.or("through_hole", false, boolean)?;
+    if let Some(g) = f.get("gerber") {
+        let mut gf = Fields::of(g, "Gerber format")?;
+        if let Some(u) = gf.get("units") {
+            out.gerber.units = unit_of(u)?;
+        }
+        if let Some(d) = gf.get("decimals") {
+            let n = whole(d)?;
+            if n != 5 && n != 6 {
+                return Err(diagnostic(d.span, "Gerber decimals are 5 or 6"));
+            }
+            out.gerber.decimals = n as u8;
+        }
+        gf.finish()?;
+    }
+    if let Some(p) = f.get("pick_place") {
+        let mut pf = Fields::of(p, "pick-and-place format")?;
+        if let Some(s) = pf.get("sides") {
+            let t = text(s)?;
+            out.pick_place.sides = PlaceSides::from_word(&t).ok_or_else(|| diagnostic(s.span, format!("`{t}` is not a side choice; expected both, separate, top or bottom")))?;
+        }
+        if let Some(u) = pf.get("units") {
+            out.pick_place.units = unit_of(u)?;
+        }
+        pf.finish()?;
+    }
+    if let Some(b) = f.get("bom") {
+        let mut bf = Fields::of(b, "bill of materials format")?;
+        if let Some(c) = bf.get("columns") {
+            out.bom.columns = list(c)?
+                .iter()
+                .map(|i| {
+                    let t = text(i)?;
+                    BomColumn::from_word(&t).ok_or_else(|| diagnostic(i.span, format!("`{t}` is not a BOM column; expected designators, quantity, value, package, mpn or manufacturer")))
+                })
+                .collect::<Read<_>>()?;
+        }
+        out.bom.group_by_value = bf.or("group_by_value", true, boolean)?;
+        bf.finish()?;
+    }
     f.finish()?;
     Ok(out)
+}
+
+fn unit_of(v: &Val) -> Read<crate::fab::LengthUnit> {
+    let t = text(v)?;
+    crate::fab::LengthUnit::from_word(&t).ok_or_else(|| diagnostic(v.span, format!("`{t}` is not a unit; expected mm or inch")))
 }
 
 /// The settings as the layout writes them; [`read_fabrication`] reads them back.
@@ -189,11 +235,25 @@ pub(super) fn fabrication_text(s: &crate::fab::settings::FabSettings) -> String 
     if !s.variants.is_empty() {
         r.put("variants", names(&mut s.variants.iter()));
     }
+    if let Some(rev) = &s.revision {
+        r.put("revision", quote(rev));
+    }
     if let Some(folder) = &s.folder {
         r.put("folder", quote(folder));
     }
     r.flag("zip", s.zip);
     r.flag("through_hole", s.include_through_hole);
+    // Formats are written only when they differ from the defaults.
+    if s.gerber != crate::fab::GerberFormat::default() {
+        r.put("gerber", format!("{{ units = {}, decimals = {} }}", s.gerber.units.word(), s.gerber.decimals));
+    }
+    if s.pick_place != Default::default() {
+        r.put("pick_place", format!("{{ sides = {}, units = {} }}", s.pick_place.sides.word(), s.pick_place.units.word()));
+    }
+    if s.bom != Default::default() {
+        let cols: Vec<&str> = s.bom.columns.iter().map(|c| c.word()).collect();
+        r.put("bom", format!("{{ columns = [{}], group_by_value = {} }}", cols.join(", "), s.bom.group_by_value));
+    }
     r.text()
 }
 
