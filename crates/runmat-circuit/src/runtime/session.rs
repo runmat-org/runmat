@@ -234,9 +234,9 @@ impl Session {
         self.timings = SessionTimings::default();
         let t = now();
         let (circuit_path, layout_path) = if is_layout(path) {
-            let circuit = layout_circuit(path, &head_uses(Dialect::CircuitLayout, text));
-            let Some(circuit) = circuit else {
-                // The whole reader reports the missing `use circuit` line.
+            let circuit = layout_circuit(path, &head_uses(Dialect::CircuitLayout, text), files);
+            let Some(Ok(circuit)) = circuit else {
+                // The whole reader reports a missing or unresolved `use circuit` line.
                 return load(path, text, files, options).map(|_| ());
             };
             (circuit, path.to_owned())

@@ -46,6 +46,7 @@ mod edit;
 mod fabrication;
 mod kicad;
 mod library_edit;
+pub mod modules;
 mod rules;
 mod session;
 mod sim_edit;
@@ -244,27 +245,39 @@ fn head_uses(dialect: Dialect, text: &str) -> Vec<runmat_design_syntax::document
         .collect()
 }
 
-/// The circuit file a layout lays out (its `use circuit … from` line), resolved.
-fn layout_circuit(path: &str, uses: &[runmat_design_syntax::document::UseItem]) -> Option<String> {
+/// A layout's `use circuit <name>` line.
+fn layout_use(uses: &[runmat_design_syntax::document::UseItem]) -> Option<&runmat_design_syntax::document::UseItem> {
     uses.iter()
         .find(|u| u.symbol.as_ref().is_some_and(|(kind, _)| kind == "circuit"))
-        .map(|u| resolve_path(path, &u.from))
 }
 
-/// The files `path` needs, beyond itself: for a layout, its circuit and that circuit's lock;
-/// for a circuit, the circuits its `use` lines name, its lock and its sibling layout. The
-/// caller reads each that exists and asks again for each file it read, until nothing is new.
+/// The circuit file a layout lays out: its `use circuit <name>` line, resolved through the
+/// folder scope among `files`. `None` without the line.
+fn layout_circuit(
+    path: &str,
+    uses: &[runmat_design_syntax::document::UseItem],
+    files: &Files,
+) -> Option<Result<String, String>> {
+    let u = layout_use(uses)?;
+    let (_, name) = u.symbol.as_ref()?;
+    Some(modules::locate(path, "circuit", name, &u.from, files))
+}
+
+/// The files `path` needs, beyond itself: for a layout, the folder its circuit is named in
+/// (written `<folder>/`, for the host to list); for a circuit, the folders its `use` lines
+/// name, its lock and its sibling layout. The caller reads each that exists (each file of a
+/// listed folder) and asks again for each file it read, until nothing is new; a circuit read
+/// that way names its own lock.
 pub fn dependencies(path: &str, text: &str) -> Vec<String> {
     let mut out = Vec::new();
     if is_layout(path) {
-        if let Some(circuit) = layout_circuit(path, &head_uses(Dialect::CircuitLayout, text)) {
-            out.push(lock_path_for(&circuit));
-            out.push(circuit);
+        if let Some(u) = layout_use(&head_uses(Dialect::CircuitLayout, text)) {
+            out.extend(modules::folder_dependencies(path, &u.from));
         }
     } else if path.to_ascii_lowercase().ends_with(CIRCUIT_SUFFIX) {
         for u in head_uses(Dialect::Circuit, text) {
             if u.symbol.as_ref().is_some_and(|(kind, _)| kind != "library") {
-                out.push(resolve_path(path, &u.from));
+                out.extend(modules::folder_dependencies(path, &u.from));
             }
         }
         out.push(lock_path_for(path));
@@ -445,15 +458,22 @@ fn load_with(
                 .map(|d| Diagnostic::syntax(path, text, d))
                 .collect());
         }
-        let Some(circuit) = layout_circuit(path, &parsed.uses) else {
-            return Err(vec![Diagnostic::error(
-                path,
-                Some(text),
-                0,
-                0,
-                "a layout names its schematic with `use circuit <name> from \"<file>.circuit\"`"
-                    .into(),
-            )]);
+        let circuit = match layout_circuit(path, &parsed.uses, files) {
+            Some(Ok(circuit)) => circuit,
+            Some(Err(message)) => {
+                let span = layout_use(&parsed.uses).map(|u| u.span).unwrap_or_default();
+                return Err(vec![Diagnostic::error(path, Some(text), span.start, span.end, message)]);
+            }
+            None => {
+                return Err(vec![Diagnostic::error(
+                    path,
+                    Some(text),
+                    0,
+                    0,
+                    "a layout names its schematic with `use circuit <name>` (from its folder, or `from \"./<folder>\"`)"
+                        .into(),
+                )])
+            }
         };
         (
             circuit,
@@ -494,7 +514,7 @@ fn load_with(
                 Some(text),
                 0,
                 0,
-                format!("{circuit_path} can't be read; the layout's `use circuit` line names it"),
+                format!("{circuit_path} can't be read; the layout's `use circuit` line names its circuit"),
             )]
         })?
     };
@@ -508,10 +528,10 @@ fn load_with(
     };
     let mut design = own.clone();
     let mut used_errors: Vec<Diagnostic> = Vec::new();
-    let loader = |from: &str| -> Option<Design> {
-        let p = resolve_path(&circuit_path, from);
-        let t = files.get(&p)?;
-        parse_circuit(&p, t).design
+    let loader = |u: &crate::ir::CircuitUse| -> Result<Design, String> {
+        let (kind, name) = u.symbol.as_ref().ok_or("a whole folder holds no design")?;
+        let p = modules::locate(&circuit_path, kind, name, &u.from, files)?;
+        parse_circuit(&p, &files[&p]).design.ok_or_else(|| format!("{p} has errors"))
     };
     if let Err(message) = resolve_uses(&mut design, &loader) {
         used_errors.push(Diagnostic::error(
@@ -524,7 +544,8 @@ fn load_with(
     }
     // A used file with errors is reported in that file.
     for u in &own.uses {
-        let p = resolve_path(&circuit_path, &u.from);
+        let Some((kind, name)) = u.symbol.as_ref().filter(|(k, _)| k != "library") else { continue };
+        let Ok(p) = modules::locate(&circuit_path, kind, name, &u.from, files) else { continue };
         if let Some(t) = files.get(&p) {
             used_errors.extend(
                 parse_circuit(&p, t)

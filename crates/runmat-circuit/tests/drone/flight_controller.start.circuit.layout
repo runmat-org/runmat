@@ -1,7 +1,7 @@
 runmat 0.7
 std 1
 
-use circuit flight_controller from "./flight_controller.circuit"
+use circuit flight_controller
 
 layout flight_controller {
     outline = [[-17, -18], [17, -18], [18, -17], [18, 17], [17, 18], [-17, 18], [-18, 17], [-18, -17]]

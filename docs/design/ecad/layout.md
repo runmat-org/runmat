@@ -63,7 +63,7 @@ circuit sensor {
 runmat 0.7
 std 1
 
-use circuit sensor from "./sensor.circuit"
+use circuit sensor
 
 layout sensor {
     outline = [[0, 0], [40, 0], [40, 25], [0, 25]]
@@ -106,7 +106,7 @@ package R0402 {
 
 | Statement | Declares |
 |---|---|
-| `use circuit <name> from "./<name>.circuit"` | the circuit the board belongs to (at file level) |
+| `use circuit <name>` | the circuit the board belongs to (at file level), declared by a `.circuit` file in the same folder; add `from "./<folder>"` for another folder |
 | `stackup <name> { finish, layer … }` | the layer stack: copper, prepreg, core and mask layers with thickness, copper weight and material (`fr4`, or a record with `dk`, `df`, thermal conductivity, density and heat capacity) |
 | `region <name> = { stackup, outline, bends }` | a rigid-flex region with its own stackup and bend lines |
 | `outline`, `cutout` | the board edge and holes in it, as point rings |

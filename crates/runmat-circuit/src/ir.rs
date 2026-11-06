@@ -337,10 +337,11 @@ pub struct VariantDef {
 
 /// A `use` line of a `.circuit` file: what the file takes from another circuit or a library.
 ///
-/// - `use circuit power from "./power.circuit"`: every sheet, interface and net class of that
-///   circuit;
-/// - `use sheet buck from "./power.circuit" as reg`: one sheet, under a local name;
-/// - `use interface usb2 from "lib/interfaces.circuit"`: one interface;
+/// - `use circuit power`: every sheet, interface and net class of the circuit `power`, declared
+///   by a `.circuit` file of this folder (`from "./power"` for another folder);
+/// - `use sheet buck from "./power" as reg`: one sheet of a circuit in that folder, under a
+///   local name;
+/// - `use interface usb2 from "./lib"`: one interface;
 /// - `use library passives from "lib/passives" @ "R3"`: a part library, pinned to a revision;
 /// - `use "lib/connectors" as conn`: a whole library folder.
 #[derive(Clone, Debug, PartialEq, Eq)]

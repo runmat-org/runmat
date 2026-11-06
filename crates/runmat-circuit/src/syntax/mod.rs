@@ -265,9 +265,14 @@ fn read_use(
 fn use_text(u: &crate::ir::CircuitUse) -> String {
     let mut out = String::from("use ");
     if let Some((kind, name)) = &u.symbol {
-        out.push_str(&format!("{kind} {name} from "));
+        out.push_str(&format!("{kind} {name}"));
+        if !u.from.is_empty() {
+            out.push_str(" from ");
+        }
     }
-    out.push_str(&quote(&u.from));
+    if !u.from.is_empty() {
+        out.push_str(&quote(&u.from));
+    }
     if let Some(r) = &u.revision {
         out.push_str(&format!(" @ {}", quote(r)));
     }
@@ -278,13 +283,13 @@ fn use_text(u: &crate::ir::CircuitUse) -> String {
 }
 
 /// Brings in what a design's `use` lines name: the sheets, interfaces and net classes of used
-/// circuits (`load` reads a used file's design by its `from` path). A `sheet` or `interface`
+/// circuits (`load` resolves a `use` line to the design that declares it). A `sheet` or `interface`
 /// use takes that one item under its local name, with the sheets it instances. The design's
 /// own declarations win over used ones of the same name; a name two uses bring in is an
 /// error. `library` uses name part libraries, which the pool resolves.
 pub fn resolve_uses(
     design: &mut Design,
-    load: &dyn Fn(&str) -> Option<Design>,
+    load: &dyn Fn(&crate::ir::CircuitUse) -> Result<Design, String>,
 ) -> Result<(), String> {
     let mut brought: BTreeMap<String, String> = BTreeMap::new();
     let mut claim = |kind: &str, name: &str, from: &str| -> Result<(), String> {
@@ -302,7 +307,7 @@ pub fn resolve_uses(
         if kind == "library" {
             continue;
         }
-        let used = load(&u.from).ok_or_else(|| format!("\"{}\" cannot be read", u.from))?;
+        let used = load(&u)?;
         let local = u.local_name().unwrap_or(name).to_owned();
         let mut add_sheet = |design: &mut Design, sheet: &str, as_name: &str| -> Result<(), String> {
             // The sheet and every sheet it instances, transitively.

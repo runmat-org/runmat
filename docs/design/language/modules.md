@@ -127,4 +127,4 @@ Structured edits from the editor's commands and the agent reprint an assembly or
 
 ## Boards and their circuits
 
-A board file belongs to one circuit and names it by file: `use circuit flight_controller from "./flight_controller.circuit"` at the top of `flight_controller.circuit.layout`. See [Board layout](/docs/ecad/layout).
+A board file belongs to one circuit and names it by symbol, as other designs do: `use circuit flight_controller` at the top of `flight_controller.circuit.layout` names the circuit that a `.circuit` file in the same folder declares. A circuit reuses another circuit, sheet or interface the same way: `use circuit power`, or `use sheet buck from "./power" as reg` for a sheet of a circuit in the folder `power`. Naming a design by its file (`from "./power.circuit"`) is an error that gives the symbol to write. See [Board layout](/docs/ecad/layout).

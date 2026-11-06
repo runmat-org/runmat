@@ -174,8 +174,19 @@ pub(crate) fn use_item(u: &ast::UseDeclaration) -> Read<UseItem> {
     let from = match u.source() {
         Some(ast::UseSource::Path(path)) => path,
         Some(ast::UseSource::Package(segments)) => segments.join("."),
+        // `use circuit esc as board`: a design of this folder.
+        None if u.symbol().is_some() => String::new(),
         None => return Err(diagnostic(u.span(), "`use` needs a source")),
     };
+    if let Some((kind, name)) = u.symbol() {
+        let kind = kind.text();
+        if kind != "library" && crate::runtime::modules::is_file_form(&from) {
+            return Err(diagnostic(
+                u.span(),
+                crate::runtime::modules::file_form_message(&kind, &name.text(), &from),
+            ));
+        }
+    }
     if u.overrides().is_some() {
         return Err(diagnostic(
             u.span(),

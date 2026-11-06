@@ -91,10 +91,8 @@ pub fn import_kicad(
         warnings.extend(read.warnings.iter().map(|w| format!("{name}: {w}")));
         let uses = [runmat_design_syntax::document::UseItem {
             symbol: Some(("circuit".into(), circuit_name.clone())),
-            from: format!(
-                "{}{CIRCUIT_SUFFIX}",
-                target_stem.rsplit('/').next().unwrap_or(target_stem)
-            ),
+            // The circuit is written beside the layout, in the same folder.
+            from: String::new(),
             alias: None,
             revision: None,
             span: Default::default(),

@@ -9,7 +9,7 @@
 //! runmat 0.7
 //! std 1
 //!
-//! use circuit ctl from "./ctl.circuit"
+//! use circuit ctl
 //!
 //! layout ctl {
 //!     stackup main {

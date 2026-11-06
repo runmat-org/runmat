@@ -234,7 +234,7 @@ fn design_punctuation_stays_invalid_in_fea_sources() {
 
 #[test]
 fn a_name_the_fea_dialect_reserves_is_a_name_in_a_design() {
-    let text = "runmat 0.7\nstd 1\n\nuse circuit esc from \"./esc.circuit\"\n\nlayout esc {\n    net_class signal = { track_width = 0.15 mm, clearance = 0.15 mm }\n    net_class table = { track_width = 0.2 mm }\n    net DRV_EN : signal\n}\n";
+    let text = "runmat 0.7\nstd 1\n\nuse circuit esc\n\nlayout esc {\n    net_class signal = { track_width = 0.15 mm, clearance = 0.15 mm }\n    net_class table = { track_width = 0.2 mm }\n    net DRV_EN : signal\n}\n";
     let syntax = parse_source(Dialect::CircuitLayout, text);
     let messages: Vec<&str> = syntax.diagnostics.iter().map(|d| d.message.as_str()).collect();
     assert!(messages.is_empty(), "{messages:?}");

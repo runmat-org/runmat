@@ -31,7 +31,7 @@ fn project_files() -> [(&'static str, String); 3] {
     let circuit = print_circuit(&sc.design).expect("the scenario prints");
     let uses = vec![UseItem {
         symbol: Some(("circuit".into(), "io".into())),
-        from: "./io.circuit".into(),
+        from: String::new(),
         alias: None,
         revision: None,
         span: Default::default(),
@@ -139,7 +139,9 @@ fn either_file_opens_the_same_circuit_and_board() {
     let files = files();
     assert_eq!(
         runtime::dependencies(LAYOUT, &files[LAYOUT]),
-        vec![CIRCUIT.to_owned(), LOCK.to_owned()]
+        // The layout names its circuit by symbol: the host lists the folder, and the circuit
+        // it reads there names its lock.
+        vec!["/p/".to_owned()]
     );
     assert_eq!(
         runtime::dependencies(CIRCUIT, &files[CIRCUIT]),
@@ -184,7 +186,10 @@ fn errors_are_diagnostics_in_their_own_file() {
         &missing,
         &CompileOptions::default(),
     );
-    assert!(out.diagnostics[0].message.contains(CIRCUIT));
+    // The layout names its circuit by symbol: with no file of the folder declaring it, the
+    // error is on the layout's `use circuit` line.
+    assert_eq!(out.diagnostics[0].message, "no `circuit io` in this folder");
+    assert_eq!(out.diagnostics[0].path, LAYOUT);
 }
 
 #[test]

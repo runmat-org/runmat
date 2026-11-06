@@ -1,7 +1,7 @@
 runmat 0.7
 std 1
 
-use circuit daq from "./daq.circuit"
+use circuit daq
 
 layout daq_drc {
     stackup rigid {

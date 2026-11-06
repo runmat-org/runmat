@@ -210,9 +210,15 @@ impl UseItem {
     pub fn print(&self) -> String {
         let mut out = String::from("use ");
         if let Some((kind, name)) = &self.symbol {
-            out.push_str(&format!("{kind} {name} from "));
+            out.push_str(&format!("{kind} {name}"));
+            // An empty source is the file's own folder (`use circuit esc as board`).
+            if !self.from.is_empty() {
+                out.push_str(" from ");
+            }
         }
-        out.push_str(&quote(&self.from));
+        if !self.from.is_empty() {
+            out.push_str(&quote(&self.from));
+        }
         if let Some(revision) = &self.revision {
             out.push_str(&format!(" @ {}", quote(revision)));
         }

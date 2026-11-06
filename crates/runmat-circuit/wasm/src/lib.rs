@@ -198,20 +198,18 @@ mod tests {
 
     #[test]
     fn a_layout_without_its_circuit_is_a_diagnostic() {
-        let text = "runmat 0.7\nstd 1\n\nuse circuit io from \"./io.circuit\"\n\nlayout io {\n}\n";
+        let text = "runmat 0.7\nstd 1\n\nuse circuit io\n\nlayout io {\n}\n";
+        // The circuit is named by symbol, so the host lists the layout's folder.
         let deps: Vec<String> =
             serde_json::from_str(&dependencies("/p/io.circuit.layout", text)).unwrap();
-        assert_eq!(
-            deps,
-            vec!["/p/io.circuit".to_owned(), "/p/io.circuit.lock".to_owned()]
-        );
+        assert_eq!(deps, vec!["/p/".to_owned()]);
         let out: serde_json::Value =
             serde_json::from_str(&compile("/p/io.circuit.layout", text, "{}", "")).unwrap();
         assert!(out.get("index").is_none());
         assert!(out["diagnostics"][0]["message"]
             .as_str()
             .unwrap()
-            .contains("/p/io.circuit"));
+            .contains("no `circuit io` in this folder"));
     }
 }
 

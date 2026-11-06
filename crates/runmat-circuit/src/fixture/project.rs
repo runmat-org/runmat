@@ -20,7 +20,7 @@ pub fn large_files(params: &LargeParams) -> (Files, usize) {
     let primitives = board.footprints.len() + board.tracks.len() + board.vias.len() + board.zones.len() + board.all_pads().len();
     let uses = vec![UseItem {
         symbol: Some(("circuit".into(), "big".into())),
-        from: "./big.circuit".into(),
+        from: String::new(),
         alias: None,
         revision: None,
         span: Default::default(),

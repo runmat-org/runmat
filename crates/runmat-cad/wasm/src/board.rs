@@ -77,7 +77,21 @@ fn compiled_board(file: &str, files: &Files) -> Result<runmat_circuit::runtime::
     let mut circuit_files = runmat_circuit::runtime::Files::new();
     // The circuit, its lock and what they name (resolved paths, as the session reads them).
     let mut queue = runmat_circuit::runtime::dependencies(&layout, text);
+    let mut listed = std::collections::BTreeSet::new();
     while let Some(dep) = queue.pop() {
+        // A folder (`/p/esc/`): the layout names its circuit by symbol, so every file directly
+        // in the folder is a candidate.
+        if dep.ends_with('/') {
+            if listed.insert(dep.clone()) {
+                queue.extend(
+                    files
+                        .keys()
+                        .filter(|p| p.strip_prefix(dep.as_str()).is_some_and(|rest| !rest.contains('/')))
+                        .cloned(),
+                );
+            }
+            continue;
+        }
         if circuit_files.contains_key(&dep) {
             continue;
         }

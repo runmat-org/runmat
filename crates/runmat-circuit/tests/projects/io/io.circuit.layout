@@ -1,7 +1,7 @@
 runmat 0.7
 std 1
 
-use circuit io from "./io.circuit"
+use circuit io
 
 layout io {
     stackup rigid {

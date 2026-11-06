@@ -65,7 +65,7 @@ Its board, before placement:
 runmat 0.7
 std 1
 
-use circuit sensor from "./sensor.circuit"
+use circuit sensor
 
 layout sensor {
     outline = [[0, 0], [40, 0], [40, 25], [0, 25]]

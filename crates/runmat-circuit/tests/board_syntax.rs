@@ -621,14 +621,23 @@ fn written_forms_and_diagnostics() {
     let used = parse_board(
         PATH,
         &format!(
-            "runmat 0.7\nuse circuit ctl from \"./ctl.circuit\"\n{}",
+            "runmat 0.7\nuse circuit ctl\n{}",
             file("")
         ),
     );
     assert!(used.diagnostics.is_empty(), "{:#?}", used.diagnostics);
     assert_eq!(used.uses[0].symbol, Some(("circuit".into(), "ctl".into())));
     let printed = print_board(used.board.as_ref().unwrap(), &used.uses);
-    assert!(printed.contains("use circuit ctl from \"./ctl.circuit\"\n"));
+    assert!(printed.contains("use circuit ctl\n"));
+    // A circuit named by its file is an error that gives the symbol form.
+    let file_form = parse_board(
+        PATH,
+        &format!("runmat 0.7\nuse circuit ctl from \"./ctl.circuit\"\n{}", file("")),
+    );
+    assert_eq!(
+        file_form.diagnostics[0].message,
+        "name the design: write `use circuit ctl as …`, not the file \"./ctl.circuit\""
+    );
 }
 
 fn changed_lines(before: &str, after: &str) -> (usize, usize) {

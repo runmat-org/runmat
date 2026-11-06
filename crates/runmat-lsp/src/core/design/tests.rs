@@ -198,10 +198,11 @@ fn definition_references_and_rename_follow_the_names() {
 }
 
 #[test]
-fn a_use_path_goes_to_its_file() {
+fn a_layouts_circuit_symbol_goes_to_its_file() {
+    // `use circuit io` names the circuit by symbol; the folder's io.circuit declares it.
     let analysis = analyze("/p/io.circuit.layout", LAYOUT, &circuit_files());
     let location = analysis
-        .definition(&at(LAYOUT, "\"./io.circuit\"", 0, 3))
+        .definition(&at(LAYOUT, "use circuit io", 0, "use circuit ".len() + 1))
         .expect("the circuit file");
     assert_eq!(location.uri.path(), "/p/io.circuit");
 }
