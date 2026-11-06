@@ -82,8 +82,8 @@ pub fn call(request: &str) -> String {
             match runtime::parse_files(arg(a, 2)) {
                 Ok(files) => {
                     set_imports(&files);
-                    let configuration = runtime::compile_options(arg(a, 3));
-                    runtime::compile_json_in(path, text, &files, configuration.as_deref())
+                    // `.m` values compile in two phases: `pending_values` lists the calls to run.
+                    runtime::values_host::compile_json_with_values(path, text, &files, arg(a, 3))
                 }
                 Err(message) => runtime::error_json(path, &message),
             }
