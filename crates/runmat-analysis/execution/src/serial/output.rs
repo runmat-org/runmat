@@ -23,22 +23,29 @@ impl AnalysisOutputPolicy {
         Ok(())
     }
 
-    /// The invocation chooses transport; placement supplies only upper limits.
-    pub fn require_within(self, ceiling: Self) -> AnalysisBridgeResult<()> {
+    /// The invocation chooses transport; placement supplies only upper limits. The chunk size
+    /// is part of the transport identity and must fit the worker. The inventory is the
+    /// intersection: a study-wide output policy is admitted by the run budget, while a reserved
+    /// worker holds only what its task reservation admits, so the worker enforces the smaller
+    /// of the two and an output past it fails with a typed capacity error.
+    pub fn bounded_by(self, ceiling: Self) -> AnalysisBridgeResult<Self> {
         self.validate()?;
         ceiling.validate()?;
-        let actual = self.inventory_limits;
-        let maximum = ceiling.inventory_limits;
-        if self.chunk_bytes > ceiling.chunk_bytes
-            || actual.max_objects > maximum.max_objects
-            || actual.max_object_bytes > maximum.max_object_bytes
-            || actual.max_total_bytes > maximum.max_total_bytes
-        {
+        if self.chunk_bytes > ceiling.chunk_bytes {
             return Err(AnalysisBridgeError::Invalid(
-                "analysis invocation transport exceeds worker limits".into(),
+                "analysis invocation chunk size exceeds worker limits".into(),
             ));
         }
-        Ok(())
+        let actual = self.inventory_limits;
+        let maximum = ceiling.inventory_limits;
+        Self::new(
+            self.chunk_bytes,
+            ObjectInventoryLimits {
+                max_objects: actual.max_objects.min(maximum.max_objects),
+                max_object_bytes: actual.max_object_bytes.min(maximum.max_object_bytes),
+                max_total_bytes: actual.max_total_bytes.min(maximum.max_total_bytes),
+            },
+        )
     }
     pub fn new(
         chunk_bytes: usize,
