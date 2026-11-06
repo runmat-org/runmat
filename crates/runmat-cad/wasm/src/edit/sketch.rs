@@ -12,8 +12,9 @@
 //!
 //! Lines, rectangles (four lines sharing their corners, two horizontal, two vertical), circles,
 //! centre-point arcs, straight slots (two lines and two arcs, tangent), points, offsets of lines
-//! and circles, trim and extend (`modify`), and the relations and dimensions the sketch model
-//! has. A tool the sketch model lacks (splines, ellipses, text) says so.
+//! and circles, trim and extend (`modify`), mirror, pattern, transform, split and the
+//! construction toggle (`repeat`), fillet and chamfer (`corners`), auto-constrain (`infer`), and
+//! the relations and dimensions the sketch model has. A tool the sketch model lacks (splines, ellipses, text) says so.
 
 use super::{model, EditFailure, SourceChange};
 use runmat_cad::ids::SketchEntityId;
@@ -597,6 +598,14 @@ pub fn sketch_edit(
             }
             "sketch.trim" => summary = modify::trim(values, sketch, &id)?,
             "sketch.extend" => summary = modify::extend(values, sketch, &id)?,
+            "sketch.construction" => summary = repeat::construction(values, sketch, &id)?,
+            "sketch.mirror" => summary = repeat::mirror(values, sketch, &id)?,
+            "sketch.pattern" => summary = repeat::pattern(values, sketch, &id)?,
+            "sketch.transform" => summary = repeat::transform(values, sketch, &id)?,
+            "sketch.split" => summary = repeat::split(values, sketch, &id)?,
+            "sketch.fillet" => summary = corners::fillet(values, sketch, &id)?,
+            "sketch.chamfer" => summary = corners::chamfer(values, sketch, &id)?,
+            "sketch.auto-constrain" => summary = infer::auto_constrain(values, sketch, &id)?,
             _ => {
                 let (entities, relations) = draw(command, values, sketch)?;
                 summary = format!(
@@ -649,7 +658,10 @@ fn new_sketch(
     Ok((change, format!("Added {added}")))
 }
 
+mod corners;
+mod infer;
 mod modify;
+mod repeat;
 
 #[cfg(test)]
 mod tests;

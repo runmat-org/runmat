@@ -202,3 +202,50 @@ fn extend_runs_a_line_end_to_the_next_curve() {
     let none = run(&text.replace("l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n", ""), "sketch.extend", json!({ "sketch": "s1", "entities": ["sketch.s1.l5"], "at": { "x": 20, "y": 11 } }));
     assert_eq!(none["ok"], false, "{none}");
 }
+
+#[test]
+fn fillet_and_chamfer_round_and_bevel_a_corner_and_the_part_still_extrudes() {
+    let round = applied(PLATE, "sketch.fillet", json!({ "sketch": "s1", "corners": ["sketch.s1.l1.end"], "radius": 5 }));
+    let new = added(PLATE, &round);
+    assert!(new.iter().any(|l| l.contains("l1 = line(start = [0 mm, 0 mm], end = [35 mm, 0 mm])")), "{round}");
+    assert!(new.iter().any(|l| l.contains("arc(center = [35 mm, 5 mm]") && l.contains("l1.end") && l.contains("l2.start")), "{round}");
+    assert!(new.iter().any(|l| l.contains("tangent")) && new.iter().any(|l| l.contains("radius")), "{round}");
+    // Picked as the two lines that meet there.
+    let bevel = applied(PLATE, "sketch.chamfer", json!({ "sketch": "s1", "corners": ["sketch.s1.l2", "sketch.s1.l3"], "distance": 4, "angle": 45 }));
+    assert!(bevel.contains("[40 mm, 16 mm]") && bevel.contains("[36 mm, 20 mm]"), "{bevel}");
+    let too_big = run(PLATE, "sketch.fillet", json!({ "sketch": "s1", "corners": ["sketch.s1.l1.end"], "radius": 30 }));
+    assert_eq!(too_big["ok"], false, "{too_big}");
+}
+
+#[test]
+fn mirror_pattern_and_transform_copy_or_move_the_picked_entities() {
+    let holes = PLATE.replace("        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n", "        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n        c1 = circle(center = [10 mm, 10 mm], radius = 3 mm)\n        l5 = line(start = [20 mm, 0 mm], end = [20 mm, 20 mm])\n");
+    let mirrored = applied(&holes, "sketch.mirror", json!({ "sketch": "s1", "entities": ["sketch.s1.c1"], "about": ["sketch.s1.l5"] }));
+    assert!(added(&holes, &mirrored).iter().any(|l| l.contains("c2 = circle(center = [30 mm, 10 mm], radius = 3 mm)")), "{mirrored}");
+    let row = applied(&holes, "sketch.pattern", json!({ "sketch": "s1", "layout": "linear", "entities": ["sketch.s1.c1"], "spacing": 8, "direction": 0, "instances": 3 }));
+    assert!(row.contains("center = [18 mm, 10 mm]") && row.contains("center = [26 mm, 10 mm]"), "{row}");
+    let ring = applied(&holes, "sketch.pattern", json!({ "sketch": "s1", "layout": "circular", "entities": ["sketch.s1.c1"], "center": { "x": 20, "y": 10 }, "angle": 360, "instances": 2 }));
+    assert!(ring.contains("center = [30 mm, 10 mm]"), "{ring}");
+    let moved = applied(&holes, "sketch.transform", json!({ "sketch": "s1", "type": "move", "entities": ["sketch.s1.c1"], "dx": 2, "dy": -1 }));
+    assert!(moved.contains("c1 = circle(center = [12 mm, 9 mm]"), "{moved}");
+    let scaled = applied(&holes, "sketch.transform", json!({ "sketch": "s1", "type": "scale", "entities": ["sketch.s1.c1"], "base": { "x": 10, "y": 10 }, "factor": 2 }));
+    assert!(scaled.contains("radius = 6 mm"), "{scaled}");
+}
+
+#[test]
+fn split_construction_and_auto_constrain() {
+    let split = applied(PLATE, "sketch.split", json!({ "sketch": "s1", "entity": ["sketch.s1.l1"], "at": { "x": 15, "y": 0 } }));
+    assert!(split.contains("l1 = line(start = [0 mm, 0 mm], end = [15 mm, 0 mm])") && split.contains("start = l1.end, end = [40 mm, 0 mm]"), "{split}");
+    let open = PLATE.replace("    feature body = extrude(profile = sketch.s1, distance = 5 mm)\n", "");
+    let toggled = applied(&open, "sketch.construction", json!({ "sketch": "s1", "entities": ["sketch.s1.l4"] }));
+    assert_ne!(toggled, open);
+    let back = applied(&toggled, "sketch.construction", json!({ "sketch": "s1", "entities": ["sketch.s1.l4"] }));
+    assert_eq!(back, open);
+    let auto = applied(PLATE, "sketch.auto-constrain", json!({ "sketch": "s1" }));
+    let new = added(PLATE, &auto);
+    assert_eq!(new.iter().filter(|l| l.contains("horizontal")).count(), 2, "{auto}");
+    assert_eq!(new.iter().filter(|l| l.contains("vertical")).count(), 2, "{auto}");
+    assert_eq!(new.iter().filter(|l| l.contains("coincident")).count(), 4, "{auto}");
+    let again = run(&auto, "sketch.auto-constrain", json!({ "sketch": "s1" }));
+    assert_eq!(again["ok"], false, "{again}");
+}

@@ -20,10 +20,10 @@ use runmat_cad::model::sketch::{
 use serde_json::{Map, Value};
 use std::f64::consts::TAU;
 
-type P = (f64, f64);
+pub(super) type P = (f64, f64);
 
 /// Where a point sits, in millimetres: written coordinates, followed through shared points.
-fn position(sketch: &Sketch, p: &PointExpr, depth: u32) -> Option<P> {
+pub(super) fn position(sketch: &Sketch, p: &PointExpr, depth: u32) -> Option<P> {
     match p {
         PointExpr::Coords { .. } => coords(p),
         PointExpr::Of { entity, role } if depth < 64 => {
@@ -34,7 +34,7 @@ fn position(sketch: &Sketch, p: &PointExpr, depth: u32) -> Option<P> {
     }
 }
 
-fn point_expr(g: &G, role: PointRole) -> Option<&PointExpr> {
+pub(super) fn point_expr(g: &G, role: PointRole) -> Option<&PointExpr> {
     match (g, role) {
         (G::Point { at }, PointRole::At) => Some(at),
         (G::Line { start, .. } | G::Arc { start, .. }, PointRole::Start) => Some(start),
@@ -47,13 +47,13 @@ fn point_expr(g: &G, role: PointRole) -> Option<&PointExpr> {
 
 /// A curve's resolved shape, in millimetres.
 #[derive(Clone, Copy, Debug)]
-enum Shape {
+pub(super) enum Shape {
     Segment(P, P),
     /// Centre, radius, start angle, counter-clockwise sweep (TAU for a circle).
     Round(P, f64, f64, f64),
 }
 
-fn shape(sketch: &Sketch, e: &SketchEntity) -> Option<Shape> {
+pub(super) fn shape(sketch: &Sketch, e: &SketchEntity) -> Option<Shape> {
     let at = |p: &PointExpr| position(sketch, p, 0);
     Some(match &e.geometry {
         G::Line { start, end } => Shape::Segment(at(start)?, at(end)?),
@@ -132,7 +132,7 @@ fn crossings(a: Shape, b: Shape) -> Vec<P> {
 }
 
 /// A point's parameter along a shape: 0..1 along a segment, 0..sweep (radians) round an arc.
-fn param(s: Shape, p: P) -> f64 {
+pub(super) fn param(s: Shape, p: P) -> f64 {
     match s {
         Shape::Segment(a, b) => {
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
@@ -171,7 +171,7 @@ fn cuts(sketch: &Sketch, id: &SketchEntityId, own: Shape) -> Vec<P> {
 
 /// Writes out, as coordinates, every point other curves took from `id` (`start = l1.end`), so
 /// they stay put when `id` changes or goes.
-fn detach(sketch: &mut Sketch, id: &SketchEntityId) {
+pub(super) fn detach(sketch: &mut Sketch, id: &SketchEntityId) {
     let snapshot = sketch.clone();
     for e in sketch.entities.iter_mut().filter(|e| e.id != *id) {
         let fix = |p: &mut PointExpr| {
@@ -199,16 +199,16 @@ fn detach(sketch: &mut Sketch, id: &SketchEntityId) {
 }
 
 /// Drops relations and dimensions that name `id` (its curve or its points).
-fn drop_constraints_on(sketch: &mut Sketch, id: &SketchEntityId) {
+pub(super) fn drop_constraints_on(sketch: &mut Sketch, id: &SketchEntityId) {
     let needle = format!("\"entity\":\"{}\"", id.0);
     sketch.constraints.retain(|c| !serde_json::to_string(c).unwrap_or_default().contains(&needle));
 }
 
-fn at(p: P) -> PointExpr {
+pub(super) fn at(p: P) -> PointExpr {
     PointExpr::Coords { x: mm(p.0), y: mm(p.1) }
 }
 
-fn fresh_like(sketch: &Sketch, stem: &str) -> SketchEntityId {
+pub(super) fn fresh_like(sketch: &Sketch, stem: &str) -> SketchEntityId {
     SketchEntityId::new(super::fresh(sketch, &[], stem))
 }
 
@@ -285,7 +285,7 @@ pub(super) fn trim(values: &Map<String, Value>, sketch: &mut Sketch, sketch_id: 
 
 /// Relations that a shorter curve can't keep: its dimensions and point relations (a line's
 /// horizontal, vertical, parallel and perpendicular relations stay).
-fn drop_size_constraints(sketch: &mut Sketch, id: &SketchEntityId, keep_orientation: bool) {
+pub(super) fn drop_size_constraints(sketch: &mut Sketch, id: &SketchEntityId, keep_orientation: bool) {
     let needle = format!("\"entity\":\"{}\"", id.0);
     sketch.constraints.retain(|c| {
         let text = serde_json::to_string(c).unwrap_or_default();
@@ -296,7 +296,7 @@ fn drop_size_constraints(sketch: &mut Sketch, id: &SketchEntityId, keep_orientat
     });
 }
 
-fn set_end(g: &mut G, role: PointRole, p: PointExpr) {
+pub(super) fn set_end(g: &mut G, role: PointRole, p: PointExpr) {
     match (g, role) {
         (G::Line { start, .. } | G::Arc { start, .. }, PointRole::Start) => *start = p,
         (G::Line { end, .. } | G::Arc { end, .. }, PointRole::End) => *end = p,
