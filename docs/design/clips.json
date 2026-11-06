@@ -10,7 +10,7 @@
     },
     {
       "id": "mcad/extrude",
-      "alt": "The 8 by 5 mm sketch centred between the hinge mount's screw bores and pin bore is extruded: the preview shows a 10 mm boss, the depth on the model is set to 4 mm, and the boss joins the part.",
+      "alt": "The 8 by 5 mm sketch centered between the hinge mount's screw bores and pin bore is extruded: the preview shows a 10 mm boss, the depth on the model is set to 4 mm, and the boss joins the part.",
       "width": 1664,
       "height": 1180,
       "seconds": 7.4,
