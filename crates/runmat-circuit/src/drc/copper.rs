@@ -30,12 +30,12 @@ impl Drc {
                     return;
                 }
                 let mut req = rules.pair_len_id(o, np.owner, pid);
-                // Pads of one footprint are spaced by its land pattern: the board's clearance
-                // applies to them only through a rule written for them; otherwise only pads
+                // Pads of one footprint are spaced by its land pattern: the board's and the net
+                // classes' clearances apply to them only through a rule written for them; otherwise only pads
                 // that touch are a finding (a land pattern that shorts its pins).
                 let same_footprint = matches!((o, np.owner), (BItem::Pad(a, _), BItem::Pad(b, _)) if a == b);
                 if same_footprint
-                    && BoardRules::is_fallback(&rules.pair_origin(o, np.owner, props::CLEARANCE).0)
+                    && BoardRules::is_board_wide(&rules.pair_origin(o, np.owner, props::CLEARANCE).0)
                 {
                     req = 1;
                 }

@@ -59,7 +59,7 @@ pub fn export_fabrication(
     };
     crate::fab::progress::step("board");
     let mut board = board.clone();
-    let (mut rules, _) = BoardRules::new(&board.limits, &board.rules);
+    let (mut rules, _) = BoardRules::for_board(&board);
     rules.rebuild(&BoardGraph::new(&board, &[]));
     fill_zones(&mut board, &rules, &[]);
 

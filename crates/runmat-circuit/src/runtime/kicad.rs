@@ -25,7 +25,7 @@ pub fn export_kicad(
         .and_then(|l| l.parsed.board.as_ref())
     {
         let mut board = board.clone();
-        let (mut rules, _) = BoardRules::new(&board.limits, &board.rules);
+        let (mut rules, _) = BoardRules::for_board(&board);
         rules.rebuild(&BoardGraph::new(&board, &[]));
         fill_zones(&mut board, &rules, &[]);
         out.insert(

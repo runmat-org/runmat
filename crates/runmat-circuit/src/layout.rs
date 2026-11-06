@@ -806,13 +806,23 @@ pub struct Board {
     /// The board's design rules, in source order.
     pub rules: Vec<crate::board_rules::RuleSpec>,
     /// Board-side parameters per net class (`track_width`, `clearance`, …). They override the
-    /// schematic's net-class parameters and compile to rules on `:net-class(<name>)`.
-    pub net_class_rules: BTreeMap<String, Vec<(String, crate::board_rules::RuleValue)>>,
+    /// schematic's net-class parameters and compile to rules on `:net-class(<name>)` (see
+    /// [`Board::rule_specs`]).
+    pub net_class_rules: BTreeMap<String, NetClassRules>,
     pub next_id: u64,
     /// What the board last took from the schematic: the ECO's base for three-way compares.
     pub sync: crate::eco::BoardSync,
     /// The fabrication settings last used (`fabrication = { … }`).
     pub fabrication: Option<crate::fab::settings::FabSettings>,
+}
+
+/// A layout's `net_class <name> = { … }`: the board-side parameters and where they are written.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct NetClassRules {
+    pub decls: Vec<(String, crate::board_rules::RuleValue)>,
+    /// The `net_class` line, which findings from its rules name.
+    pub source: runmat_rules::SourceKey,
+    pub order: runmat_rules::SourceOrder,
 }
 
 impl Board {
@@ -945,20 +955,58 @@ impl Board {
         );
         id
     }
-    /// The board's rules as compiled specs: each net class's parameters as a rule on
-    /// `:net-class(<name>)` (priority 0), then the board's own rules.
+    /// The board's rules as compiled specs: each net class's parameters, then the board's own
+    /// rules. DRC, zone fill and the routers all check against these.
+    ///
+    /// A class's single-item parameters (`track_width`, …) are one rule on
+    /// `:net-class(<name>)`. Each pair parameter (`clearance`, …) is its own rule between
+    /// `:net-class(<name>)` and any item (`*`), so a power net keeps its clearance to every
+    /// other copper item. Between two classes the larger value holds: a pair parameter's
+    /// class rules are ranked by value, smallest first. Every class rule ranks below the
+    /// board's own rules ([`crate::board_rules::NET_CLASS_PRIORITY`]), so a written rule of
+    /// the same specificity overrides a class. Each rule is named `net_class.<name>` and
+    /// keeps its class's source.
     pub fn rule_specs(&self) -> Vec<crate::board_rules::RuleSpec> {
-        let mut specs: Vec<crate::board_rules::RuleSpec> = self
+        use crate::board_rules::{is_pair_property, RuleSpec, NET_CLASS_PRIORITY};
+        let id = |class: &str| format!("net_class.{class}");
+        let selector = |class: &str| format!(":net-class({class})");
+        let mut specs = Vec::new();
+        for (class, c) in &self.net_class_rules {
+            let single: Vec<_> = c
+                .decls
+                .iter()
+                .filter(|(k, _)| !is_pair_property(k))
+                .cloned()
+                .collect();
+            if !single.is_empty() {
+                specs.push(RuleSpec {
+                    decls: single,
+                    ..RuleSpec::single(&id(class), &selector(class))
+                        .priority(NET_CLASS_PRIORITY)
+                        .at(c.source.clone(), c.order)
+                });
+            }
+        }
+        let mut pairs: Vec<(&str, &str, &crate::board_rules::RuleValue, &NetClassRules)> = self
             .net_class_rules
             .iter()
-            .map(|(class, decls)| crate::board_rules::RuleSpec {
-                decls: decls.clone(),
-                ..crate::board_rules::RuleSpec::single(
-                    &format!("net_class.{class}"),
-                    &format!(":net-class({class})"),
-                )
+            .flat_map(|(class, c)| {
+                c.decls
+                    .iter()
+                    .filter(|(k, _)| is_pair_property(k))
+                    .map(move |(k, v)| (k.as_str(), class.as_str(), v, c))
             })
             .collect();
+        let size = |v: &crate::board_rules::RuleValue| v.num().unwrap_or(0.0);
+        pairs.sort_by(|a, b| a.0.cmp(b.0).then(size(a.2).total_cmp(&size(b.2))));
+        for (rank, (prop, class, value, c)) in pairs.into_iter().enumerate() {
+            specs.push(
+                RuleSpec::pair(&id(class), &selector(class), "*")
+                    .set(prop, value.clone())
+                    .priority(NET_CLASS_PRIORITY + rank as i32)
+                    .at(c.source.clone(), c.order),
+            );
+        }
         specs.extend(self.rules.iter().cloned());
         specs
     }

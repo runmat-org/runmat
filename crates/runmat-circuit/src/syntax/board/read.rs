@@ -457,7 +457,15 @@ impl Reader<'_> {
                             .collect::<Read<Vec<_>>>()
                     });
                     if let Some(decls) = self.note(r) {
-                        if board.net_class_rules.insert(name.clone(), decls).is_some() {
+                        let c = crate::layout::NetClassRules {
+                            decls,
+                            source: SourceKey::new(self.path, at.start as u32, at.end as u32),
+                            order: SourceOrder {
+                                file_rank: 0,
+                                offset: at.start as u32,
+                            },
+                        };
+                        if board.net_class_rules.insert(name.clone(), c).is_some() {
                             self.out
                                 .diagnostics
                                 .push(diagnostic(at, format!("net class `{name}` is given twice")));

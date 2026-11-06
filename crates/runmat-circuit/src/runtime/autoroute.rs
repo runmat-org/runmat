@@ -94,7 +94,7 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
                 let mut report = autoroute::RouteReport::default();
                 for _ in 0..4 {
                     let mut filled = board.clone();
-                    let (mut rules, _) = BoardRules::new(&filled.limits, &filled.rules);
+                    let (mut rules, _) = BoardRules::for_board(&filled);
                     rules.rebuild(&BoardGraph::new(&filled, &[]));
                     crate::zone::fill_zones(&mut filled, &rules, &[]);
                     let wires = crate::route::ratsnest(&filled);
@@ -145,7 +145,7 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
 
 /// The largest clearance the board's rules can require, plus 5 µm of rounding margin.
 fn clearance(board: &Board) -> Coord {
-    let (rules, _) = BoardRules::new(&board.limits, &board.rules);
+    let (rules, _) = BoardRules::for_board(board);
     rules.max_clearance().max(board.limits.min_clearance) + 5_000
 }
 
@@ -154,8 +154,8 @@ fn widths(board: &Board) -> BTreeMap<NetId, Coord> {
     let mut out = BTreeMap::new();
     for (i, n) in board.nets.iter().enumerate() {
         let Some(class) = &n.class else { continue };
-        let width = board.net_class_rules.get(class).and_then(|decls| {
-            decls
+        let width = board.net_class_rules.get(class).and_then(|c| {
+            c.decls
                 .iter()
                 .find(|(k, _)| k == crate::board_rules::props::TRACK_WIDTH)
                 .and_then(|(_, v)| v.as_len())

@@ -691,3 +691,51 @@ fn a_footprints_own_pads_are_spaced_by_its_land_pattern() {
     assert_eq!(f.rule, "limits.clearance");
     assert_eq!((f.source.start, f.source.end), (300, 304));
 }
+
+#[test]
+fn a_net_class_clearance_reaches_drc_and_names_its_line() {
+    use runmat_circuit::syntax::board::{parse_board, print_board};
+    // VCC (class power, 0.2 mm) runs 0.17 mm from DAT (class fine, 0.1 mm), and DAT runs
+    // 0.12 mm from SIG (no class). The board's own clearance is 0.15 mm.
+    let mut b = small_board();
+    let dat = Some(b.add_net("DAT", Some("fine")));
+    let (vcc, sig) = (b.net("VCC"), b.net("SIG"));
+    let w = mm(0.3);
+    b.add_track(vcc, 0, w, Point::mm(5.0, 5.0), Point::mm(15.0, 5.0));
+    b.add_track(dat, 0, w, Point::mm(5.0, 5.47), Point::mm(15.0, 5.47));
+    b.add_track(sig, 0, w, Point::mm(5.0, 5.89), Point::mm(15.0, 5.89));
+    for (class, clearance) in [("power", 0.2), ("fine", 0.1)] {
+        b.net_class_rules.insert(
+            class.into(),
+            NetClassRules {
+                decls: vec![(props::CLEARANCE.into(), RuleValue::Len(mm(clearance)))],
+                ..Default::default()
+            },
+        );
+    }
+    // Read back from its text, the board keeps where each net class is written.
+    let text = print_board(&b, &[]);
+    let parsed = parse_board("t.circuit.layout", &text);
+    assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
+    let b = parsed.board.expect("the printed board reads back");
+    let power = &b.net_class_rules["power"].source;
+    assert!(text[power.start as usize..].starts_with("net_class power"), "{power:?}");
+    let (mut r, errs) = BoardRules::for_board(&b);
+    assert!(errs.is_empty(), "{errs:?}");
+    r.rebuild(&BoardGraph::new(&b, &[]));
+    let drc = Drc::run(&b, &r, &[], &[]);
+    let clearance: Vec<_> = drc.findings().into_iter().filter(|f| f.code == "clearance").collect();
+    // The board default allows 0.17 mm; the power class flags it, and the larger class value
+    // holds between two classes. The fine class relaxes DAT to SIG to 0.1 mm.
+    assert_eq!(clearance.len(), 1, "{clearance:#?}");
+    let f = &clearance[0];
+    assert_eq!(f.rule, "net_class.power");
+    assert_eq!(&f.source, power);
+    // Without the net classes, only the 0.12 mm gap is a finding.
+    let mut plain = b.clone();
+    plain.net_class_rules.clear();
+    let drc = Drc::run(&plain, &rules(&plain, &plain.rules), &[], &[]);
+    let gaps: Vec<_> = drc.findings().into_iter().filter(|f| f.code == "clearance").collect();
+    assert_eq!(gaps.len(), 1, "{gaps:#?}");
+    assert!(BoardRules::is_fallback(&gaps[0].rule));
+}

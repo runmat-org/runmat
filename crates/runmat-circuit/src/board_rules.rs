@@ -111,6 +111,22 @@ pub mod props {
     pub const EDGE_CLEARANCE: &str = "edge_clearance";
 }
 
+/// Whether `prop` is a pair property (a clearance between two items).
+pub fn is_pair_property(prop: &str) -> bool {
+    matches!(
+        prop,
+        props::CLEARANCE
+            | props::HOLE_TO_HOLE
+            | props::SILK_CLEARANCE
+            | props::COURTYARD_CLEARANCE
+            | props::EDGE_CLEARANCE
+    )
+}
+
+/// The priority net-class rules start from (see [`Board::rule_specs`]): below any written
+/// rule's, so a board rule of the same specificity overrides a class.
+pub const NET_CLASS_PRIORITY: i32 = -1000;
+
 /// The id of the hypothetical track a router is about to place (see [`BoardGraph::probe`]).
 pub const PROBE_TRACK: ItemId = ItemId(u64::MAX);
 
@@ -628,6 +644,12 @@ fn default_origins(limits: &FabLimits) -> BTreeMap<&'static str, (String, Source
 }
 
 impl BoardRules {
+    /// The rules a board is checked against: its limits, its net classes and its own rules
+    /// ([`Board::rule_specs`]).
+    pub fn for_board(board: &Board) -> (BoardRules, Vec<(String, SelectorError)>) {
+        BoardRules::new(&board.limits, &board.rule_specs())
+    }
+
     /// Compiles rules; selector errors (syntax or schema) are returned per rule id.
     pub fn new(
         limits: &FabLimits,
@@ -819,6 +841,11 @@ impl BoardRules {
     /// Whether `rule` is a fallback value (a `limits` entry or RunMat's default), not a rule.
     pub fn is_fallback(rule: &str) -> bool {
         rule.starts_with("limits.") || rule.starts_with("default.")
+    }
+    /// Whether `rule` applies board-wide by net (a fallback or a net class) rather than being
+    /// written for particular items.
+    pub fn is_board_wide(rule: &str) -> bool {
+        BoardRules::is_fallback(rule) || rule.starts_with("net_class.")
     }
 }
 

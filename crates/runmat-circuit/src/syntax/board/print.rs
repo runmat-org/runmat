@@ -263,9 +263,9 @@ pub fn statements_where(board: &Board, want: &dyn Fn(ItemId) -> bool) -> Vec<Pri
             None,
         );
     }
-    for (class, decls) in &board.net_class_rules {
+    for (class, c) in &board.net_class_rules {
         let mut r = Rec::new();
-        for (k, v) in decls {
+        for (k, v) in &c.decls {
             r.put(k, rule_value_text(v));
         }
         push(
@@ -711,6 +711,10 @@ pub fn canonical(board: &Board) -> Board {
     for r in &mut b.rules {
         r.source = SourceKey::default();
         r.order = SourceOrder::default();
+    }
+    for c in b.net_class_rules.values_mut() {
+        c.source = SourceKey::default();
+        c.order = SourceOrder::default();
     }
     b
 }

@@ -256,7 +256,7 @@ pub fn large_index(params: &LargeParams) -> crate::index::CircuitIndex {
     use crate::board_rules::{BoardGraph, BoardRules};
     let (pool, design, nl, mut board) = large(params);
     let mut index = crate::index::build_index(&design, &nl, &pool, &nl.diagnostics, &[]);
-    let (mut rules, _) = BoardRules::new(&board.limits, &board.rules);
+    let (mut rules, _) = BoardRules::for_board(&board);
     rules.rebuild(&BoardGraph::new(&board, &[]));
     let fills = crate::zone::fill_zones(&mut board, &rules, &[]);
     let drc = crate::drc::Drc::run(&board, &rules, &[], &fills);

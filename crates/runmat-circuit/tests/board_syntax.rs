@@ -55,10 +55,13 @@ fn rich_board() -> Board {
     b.limits.min_clearance = mm(0.1);
     b.net_class_rules.insert(
         "power".into(),
-        vec![
-            ("track_width".into(), RuleValue::Len(mm(0.5))),
-            ("clearance".into(), RuleValue::Len(mm(0.2))),
-        ],
+        NetClassRules {
+            decls: vec![
+                ("track_width".into(), RuleValue::Len(mm(0.5))),
+                ("clearance".into(), RuleValue::Len(mm(0.2))),
+            ],
+            ..Default::default()
+        },
     );
     b.rules.push(
         RuleSpec::single("hv", ":net-class(hv)")

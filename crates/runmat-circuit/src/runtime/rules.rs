@@ -148,7 +148,7 @@ pub fn rule_check(
     let mut diagnostics = Vec::new();
     let drc = project.layout.as_ref().and_then(|layout| {
         let mut board = layout.parsed.board.clone()?;
-        let (mut rules, errors) = BoardRules::new(&board.limits, &board.rules);
+        let (mut rules, errors) = BoardRules::for_board(&board);
         for e in errors {
             diagnostics.push(Diagnostic::error(
                 &layout.path,
