@@ -104,15 +104,25 @@ fn scratch_slots_are_checked_and_empty_inventory_allocates_no_slots() {
 fn admitted_inventory_follows_the_run_budget_within_platform_ceilings() {
     let budget = 14 * 1024 * 1024 * 1024_u64;
     let limits = ObjectInventoryLimits::admitted(budget);
-    assert_eq!(limits.max_total_bytes, budget.min(super::PLATFORM_ADDRESS_SPACE_BYTES));
+    assert_eq!(
+        limits.max_total_bytes,
+        budget.min(super::PLATFORM_ADDRESS_SPACE_BYTES)
+    );
     assert_eq!(
         limits.max_object_bytes,
-        limits.max_total_bytes.min(super::PLATFORM_MAXIMUM_OBJECT_BYTES)
+        limits
+            .max_total_bytes
+            .min(super::PLATFORM_MAXIMUM_OBJECT_BYTES)
     );
     // A thermal projection past the former fixed 4 GiB / 512 MiB ceilings fits a 14 GiB run.
     #[cfg(target_pointer_width = "64")]
     limits
-        .require_projection("projection", 2_000, 1024 * 1024 * 1024, 6 * 1024 * 1024 * 1024)
+        .require_projection(
+            "projection",
+            2_000,
+            1024 * 1024 * 1024,
+            6 * 1024 * 1024 * 1024,
+        )
         .unwrap();
     let small = ObjectInventoryLimits::admitted(1024);
     assert_eq!(small.max_objects, 1024);

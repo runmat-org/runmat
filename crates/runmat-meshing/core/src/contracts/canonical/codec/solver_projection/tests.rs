@@ -304,7 +304,10 @@ fn run_data_limits_are_platform_bounded_and_control_documents_stay_small() {
         runmat_canonical_codec::PLATFORM_MAXIMUM_ENCODED_BYTES
     );
     // Every collection item takes at least one byte, so the byte ceiling bounds collections.
-    assert_eq!(artifact.maximum_collection_items, artifact.maximum_encoded_bytes);
+    assert_eq!(
+        artifact.maximum_collection_items,
+        artifact.maximum_encoded_bytes
+    );
     assert_eq!(
         <crate::SolverMeshArtifact as CanonicalMeshingContract>::LIMITS,
         artifact
@@ -313,9 +316,18 @@ fn run_data_limits_are_platform_bounded_and_control_documents_stay_small() {
     assert!(artifact.maximum_encoded_bytes as u64 > 2 * 1024 * 1024 * 1024);
     #[cfg(target_pointer_width = "32")]
     assert_eq!(artifact.maximum_encoded_bytes, i32::MAX as usize);
-    assert_eq!(MeshingCanonicalLimits::MANIFEST.maximum_encoded_bytes, 64 * 1024 * 1024);
-    assert_eq!(MeshingCanonicalLimits::REQUEST.maximum_encoded_bytes, 32 * 1024 * 1024);
-    assert_eq!(MeshingCanonicalLimits::IDENTITY.maximum_encoded_bytes, 4 * 1024 * 1024);
+    assert_eq!(
+        MeshingCanonicalLimits::MANIFEST.maximum_encoded_bytes,
+        64 * 1024 * 1024
+    );
+    assert_eq!(
+        MeshingCanonicalLimits::REQUEST.maximum_encoded_bytes,
+        32 * 1024 * 1024
+    );
+    assert_eq!(
+        MeshingCanonicalLimits::IDENTITY.maximum_encoded_bytes,
+        4 * 1024 * 1024
+    );
 }
 
 /// A budget the run admitted: each allocation request draws from what remains, and a refusal
@@ -369,7 +381,11 @@ fn run_budget_admits_the_artifact_when_it_fits_and_refuses_it_with_both_sizes_wh
     )
     .unwrap_err();
     assert_eq!(refused.field, "run budget");
-    assert!(refused.reason.contains("bytes admitted"), "{}", refused.reason);
+    assert!(
+        refused.reason.contains("bytes admitted"),
+        "{}",
+        refused.reason
+    );
 }
 
 #[test]
@@ -384,12 +400,14 @@ fn platform_bounded_run_data_still_refuses_malformed_and_noncanonical_input() {
     wrong_domain[at] ^= 0xff;
     for hostile in [trailing.as_slice(), truncated, wrong_domain.as_slice()] {
         assert!(SolverMeshProjection::canonical_decode(hostile).is_err());
-        assert!(SolverMeshProjection::canonical_decode_with_resource_admission(
-            hostile,
-            &control,
-            &NeverCancelled,
-            |_| Ok(()),
-        )
-        .is_err());
+        assert!(
+            SolverMeshProjection::canonical_decode_with_resource_admission(
+                hostile,
+                &control,
+                &NeverCancelled,
+                |_| Ok(()),
+            )
+            .is_err()
+        );
     }
 }

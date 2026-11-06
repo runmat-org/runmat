@@ -92,12 +92,11 @@ pub async fn execute_prepared_study_locally_with_observers(
         .store_root
         .join("whole-studies")
         .join(uuid::Uuid::new_v4().simple().to_string());
-    let mut composition_store =
-        crate::FilesystemObjectStore::open(
-            composition_root,
-            runmat_execution_artifact::object::PLATFORM_MAXIMUM_OBJECT_BYTES,
-        )
-            .map_err(protocol)?;
+    let mut composition_store = crate::FilesystemObjectStore::open(
+        composition_root,
+        runmat_execution_artifact::object::PLATFORM_MAXIMUM_OBJECT_BYTES,
+    )
+    .map_err(protocol)?;
     prepared.write_to(&mut composition_store)?;
     drop(prepared);
 

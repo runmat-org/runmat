@@ -50,8 +50,7 @@ impl ObjectInventoryLimits {
     pub fn admitted(budget_bytes: u64) -> Self {
         let total = budget_bytes.clamp(1, PLATFORM_ADDRESS_SPACE_BYTES);
         Self {
-            max_objects: usize::try_from(total.min(PLATFORM_MAXIMUM_OBJECTS))
-                .unwrap_or(usize::MAX),
+            max_objects: usize::try_from(total.min(PLATFORM_MAXIMUM_OBJECTS)).unwrap_or(usize::MAX),
             max_object_bytes: total.min(PLATFORM_MAXIMUM_OBJECT_BYTES),
             max_total_bytes: total,
         }
@@ -79,7 +78,11 @@ impl ObjectInventoryLimits {
             }
         };
         check("output bytes", total_bytes, self.max_total_bytes)?;
-        check("bytes in one object", largest_object_bytes, self.max_object_bytes)?;
+        check(
+            "bytes in one object",
+            largest_object_bytes,
+            self.max_object_bytes,
+        )?;
         check("objects", objects, self.max_objects as u64)
     }
 }
