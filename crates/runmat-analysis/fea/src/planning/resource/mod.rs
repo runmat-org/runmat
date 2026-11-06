@@ -107,7 +107,7 @@ pub use static_profiles::{
     structural_state_profiles_output_resource_facts,
 };
 mod admission;
-pub use accuracy::preflight_fluid_accuracy_source;
+pub use accuracy::fluid_accuracy_source_workspace;
 pub use accuracy::{
     build_accuracy_resource_plan, build_accuracy_resource_plan_with_source_workspace,
 };
