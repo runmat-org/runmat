@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
              dir + "plane-channel.step"))
     return 3;
   // Long plane channel: 3 m long (L/h = 30), same section. The uniform-inlet entrance adds about
-  // 0.8 h of equivalent length to the developed drop, under 3% of the drop at this length.
+  // 0.9 h of equivalent length to the developed drop, about 3% of the drop at this length.
   if (!write(BRepPrimAPI_MakeBox(3.0, 0.1, 0.02).Shape(), "Channel",
              {"Inlet", "Outlet", "Lower wall", "Upper wall", "Back", "Front"},
              dir + "plane-channel-long.step"))

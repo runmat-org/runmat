@@ -1171,7 +1171,7 @@ fn passed_assessment(payload: &Value, id: &str) -> f64 {
 //   incompressible_laminar_steady/tet4/public_study;
 //   coverage: partial; boundary: pressure_drop on the public plane Poiseuille example
 //   (L/h = 30, Re = 1) lies within 5% of the fully developed 12 mu U L / h^2 = 36 Pa; the
-//   uniform inlet's entrance loss (about 0.8 h of equivalent length, +2.6%) is inside the band.
+//   uniform inlet's entrance loss (about 0.9 h of equivalent length, +3%) is inside the band.
 #[test]
 fn plane_poiseuille_example_publishes_the_analytic_pressure_drop() {
     let temp = TempDir::new().unwrap();
