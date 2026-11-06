@@ -66,7 +66,83 @@ impl<'a, 'b> Run<'a, 'b> {
                 ))
             }
             MoldFeature::ShutOff { .. } => Err(self.not_lowered(id, "shut-off surfaces")),
-            MoldFeature::CoreCavity { .. } => Err(self.not_lowered(id, "core/cavity split")),
+            MoldFeature::CoreCavity { part, parting, margin } => {
+                // A block round the part (its box, `margin` out on every side, square to the
+                // parting plane), less the part, which stays, split along the parting plane:
+                // the core below it (`side = negative`), the cavity above (`side = positive`).
+                let b = self.single(i, id, "part", part, Some(TopoKind::Body))?;
+                let bi = b.entities().iter().next().expect("one").body as usize;
+                let frame = self.plane(i, id, "parting", parting)?;
+                let m = self.value(id, "margin", margin, Dimension::LENGTH)?;
+                if m <= 0.0 {
+                    return Err(self.error(
+                        id,
+                        Some("margin"),
+                        DiagCode::RegenInvalid,
+                        "a mold block's margin is more than zero".into(),
+                        Vec::new(),
+                    ));
+                }
+                let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+                for f in &self.st.bodies[bi].topology.faces {
+                    for c in 0..8 {
+                        let corner = [0, 1, 2].map(|k| if c >> k & 1 == 0 { f.geom.bbox_min[k] } else { f.geom.bbox_max[k] });
+                        let local = [
+                            dot(sub(corner, frame.origin), frame.x),
+                            dot(sub(corner, frame.origin), frame.y),
+                            dot(sub(corner, frame.origin), frame.z),
+                        ];
+                        for k in 0..3 {
+                            lo[k] = lo[k].min(local[k]);
+                            hi[k] = hi[k].max(local[k]);
+                        }
+                    }
+                }
+                if !lo[0].is_finite() || lo[2] >= 0.0 || hi[2] <= 0.0 {
+                    return Err(self.error(
+                        id,
+                        Some("parting"),
+                        DiagCode::RegenInvalid,
+                        "the parting plane passes through the part, so the block splits into a core and a cavity".into(),
+                        Vec::new(),
+                    ));
+                }
+                let corners: Vec<(String, [f64; 2])> = [
+                    ("south", [lo[0] - m, lo[1] - m]),
+                    ("east", [hi[0] + m, lo[1] - m]),
+                    ("north", [hi[0] + m, hi[1] + m]),
+                    ("west", [lo[0] - m, hi[1] + m]),
+                ]
+                .into_iter()
+                .map(|(n, p)| (n.to_owned(), p))
+                .collect();
+                let mut block = LabeledTool::new(ToolShape::prism(polygon(frame, &corners), lo[2] - m, hi[2] + m));
+                for (c, _) in &corners {
+                    block.sides.push((crate::ids::SketchEntityId::new(c.clone()), FaceLabel::key(Role::Side, c.clone())));
+                }
+                block.start = Some(FaceLabel::key(Role::StartCap, "block"));
+                block.end = Some(FaceLabel::key(Role::EndCap, "block"));
+                block.body = Some(FaceLabel::key(Role::Body, "block"));
+                let n = self.st.bodies.len();
+                Ok(Compiled::Steps(vec![
+                    Step {
+                        op: labeled(vec![block], Vec::new(), Combine::New, false),
+                        operands: Vec::new(),
+                        naming: simple.at_step(Some("block".into()), Vec::new()),
+                    },
+                    // The block less the part; the part is kept, after the block.
+                    Step {
+                        op: KernelOp::Boolean { combine: Combine::Cut, keep_tools: true },
+                        operands: vec![n, bi],
+                        naming: simple.at_step(Some("cavity".into()), Vec::new()),
+                    },
+                    Step {
+                        op: KernelOp::Split { frame },
+                        operands: vec![n - 1],
+                        naming: simple,
+                    },
+                ]))
+            }
         }
     }
 

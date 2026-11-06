@@ -4,7 +4,7 @@
 //! The Desktop's drawing Outline reads this.
 
 use super::{
-    check_drawing, AnnotationKind, DimensionStyle, DrawingDocument, ModelRef, ModelReferences,
+    check_drawing, AnnotationKind, ArcCondition, DimensionStyle, DrawingDocument, ModelRef, ModelReferences,
 };
 use crate::diagnostics::Diagnostic;
 use crate::ids::PropertyName;
@@ -26,6 +26,20 @@ pub trait AnnotationValues {
         _entities: &[Vec<EntityName>],
     ) -> Option<String> {
         None
+    }
+    /// A linear dimension's value measured to the near or far sides of its cylindrical
+    /// references (`condition` min or max); at their axes it is `dimension`'s value.
+    fn dimension_to(
+        &self,
+        model: &ModelRef,
+        style: DimensionStyle,
+        condition: ArcCondition,
+        entities: &[Vec<EntityName>],
+    ) -> Option<String> {
+        match condition {
+            ArcCondition::Center => self.dimension(model, style, entities),
+            ArcCondition::Min | ArcCondition::Max => None,
+        }
     }
     /// A PMI tolerance's feature control frame as text: symbol, value and datums.
     fn tolerance_frame(&self, _model: &ModelRef, _tolerance: &str) -> Option<String> {
@@ -88,10 +102,11 @@ pub fn build_drawing_index(
                     style,
                     pmi,
                     reference,
+                    condition,
                     ..
                 } => {
                     let tolerance = pmi.as_ref().and_then(|name| values.pmi_tolerance(at, name));
-                    let value = match (values.dimension(at, *style, entities), tolerance) {
+                    let value = match (values.dimension_to(at, *style, *condition, entities), tolerance) {
                         (Some(v), Some(t)) => format!("{v} {t}"),
                         (Some(v), None) => v,
                         (None, _) => pmi.clone().unwrap_or_else(|| "Dimension".into()),

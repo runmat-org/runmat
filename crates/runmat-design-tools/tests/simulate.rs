@@ -135,17 +135,13 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
     }
 }
 
-/// The Desktop's simulation scene on the camera drone: the ESC's current sense
-/// (tests/fixtures/esc_current_sense.simulation, which the capture script pastes too) added to
-/// the drone's esc.circuit. Every measurement carries a spec, so each row reads pass or fail.
-/// With RUNMAT_SIMULATION_SCENE_ESC_OUT set, the report is written there for the Desktop.
+/// The Desktop's simulation scene on the camera drone: the ESC's current sense, the drone's
+/// esc.circuit's second simulation. Every measurement carries a spec, so each row reads pass or
+/// fail. With RUNMAT_SIMULATION_SCENE_ESC_OUT set, the report is written there for the Desktop.
 #[test]
 fn the_desktop_simulation_scene_reads_the_esc_current_sense() {
     const ESC: &str = include_str!("../../runmat-cad/wasm/tests/drone/esc.circuit");
-    const SENSE: &str = include_str!("fixtures/esc_current_sense.simulation");
-    let end = ESC.rfind('}').unwrap();
-    let text = format!("{}\n{SENSE}}}\n", ESC[..end].trim_end());
-    let files: Files = [("/p/esc.circuit".to_owned(), text)].into();
+    let files: Files = [("/p/esc.circuit".to_owned(), ESC.to_owned())].into();
     let out = call("design.simulate", json!({ "path": "/p/esc.circuit", "simulation": "current_sense", "maxPoints": 160 }), &files).unwrap();
     assert_eq!(out["probes"], json!(["ISENSE", "SRC"]));
     let m = |name: &str| out["measures"].as_array().unwrap().iter().find(|m| m["name"] == name).unwrap().clone();

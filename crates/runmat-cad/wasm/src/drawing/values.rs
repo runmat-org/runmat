@@ -10,7 +10,7 @@
 //! dropped (`80`, `12.5`).
 
 use runmat_cad::drawing::index::AnnotationValues;
-use runmat_cad::drawing::{DimensionStyle, ModelRef};
+use runmat_cad::drawing::{ArcCondition, DimensionStyle, ModelRef};
 use runmat_cad::model::PartDocument;
 use runmat_cad::pmi::{Characteristic, MaterialCondition};
 use runmat_cad::refs::name::{EntityName, TopoKind};
@@ -118,6 +118,64 @@ fn symbol(c: Characteristic) -> &'static str {
     }
 }
 
+/// The distance a linear dimension between two faces measures: between two parallel axes, or
+/// along a plane's normal (to a hole's axis).
+fn linear((a, sa): &(Vec<P3>, &Value), (b, sb): &(Vec<P3>, &Value)) -> Option<f64> {
+    // Two holes with parallel axes: the distance between the axes.
+    if let (Some((pa, da, _)), Some((pb, _, _))) = (cylinder(sa), cylinder(sb)) {
+        let v = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+        let along = dot(v, da);
+        return Some((0..3).map(|i| (v[i] - along * da[i]).powi(2)).sum::<f64>().sqrt());
+    }
+    // Two parallel planes, or a plane and a hole: the distance along the plane's normal, to the
+    // hole's axis (a mesh's points are not spread evenly round a cylinder, so their centroid is
+    // off the axis).
+    let n = vec3(&sa["normal"]).or_else(|| vec3(&sb["normal"])).unwrap_or([0.0, 0.0, 1.0]);
+    let anchor = |points: &[P3], surface: &Value| cylinder(surface).map_or_else(|| centroid(points), |(p, _, _)| p);
+    let (ca, cb) = (anchor(a, sa), anchor(b, sb));
+    Some((0..3).map(|i| (cb[i] - ca[i]) * n[i]).sum::<f64>().abs())
+}
+
+/// A linear dimension's anchors moved from its cylinders' axes to the near (`min`) or far
+/// (`max`) sides of their outlines, along the line the dimension measures, so its extension
+/// lines meet the outline where the value is measured to.
+pub fn arc_anchors(display: &Value, references: &[Reference], points: &mut [P3], condition: ArcCondition) {
+    let sign = match condition {
+        ArcCondition::Center => return,
+        ArcCondition::Min => -1.0,
+        ArcCondition::Max => 1.0,
+    };
+    let [pa, pb] = points else {
+        return;
+    };
+    let surfaces: Vec<Option<&Value>> = references
+        .iter()
+        .map(|r| print_reference(r).and_then(|t| face(display, &t)).map(|(_, s)| s))
+        .collect();
+    let cyl = |i: usize| surfaces.get(i).copied().flatten().and_then(cylinder);
+    let mut v = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+    // Across a cylinder's axis, or along a plane's normal.
+    if let Some((_, d, _)) = cyl(0).or_else(|| cyl(1)) {
+        let along = dot(v, d);
+        v = [0, 1, 2].map(|i| v[i] - along * d[i]);
+    }
+    if let Some(n) = surfaces.iter().flatten().find_map(|s| vec3(&s["normal"])) {
+        let k = dot(v, n);
+        v = n.map(|x| x * k);
+    }
+    let l = dot(v, v).sqrt();
+    if l < 1e-9 {
+        return;
+    }
+    let u = v.map(|x| x / l);
+    if let Some((_, _, r)) = cyl(0) {
+        *pa = [0, 1, 2].map(|i| pa[i] - sign * r * u[i]);
+    }
+    if let Some((_, _, r)) = cyl(1) {
+        *pb = [0, 1, 2].map(|i| pb[i] + sign * r * u[i]);
+    }
+}
+
 fn modifier(m: MaterialCondition) -> &'static str {
     match m {
         MaterialCondition::Rfs => "",
@@ -158,27 +216,35 @@ impl AnnotationValues for Values<'_> {
             .collect();
         match faces.as_slice() {
             [(_, surface)] => cylinder(surface).map(|(_, _, r)| format!("⌀{}", number(2.0 * r))),
-            [(a, sa), (b, sb)] => {
-                // Two holes with parallel axes: the distance between the axes.
-                if let (Some((pa, da, _)), Some((pb, _, _))) = (cylinder(sa), cylinder(sb)) {
-                    let v = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
-                    let along = dot(v, da);
-                    let off = (0..3).map(|i| (v[i] - along * da[i]).powi(2)).sum::<f64>().sqrt();
-                    return Some(number(off));
-                }
-                // Two parallel planes, or a plane and a hole: the distance along the plane's
-                // normal, to the hole's axis (a mesh's points are not spread evenly round a
-                // cylinder, so their centroid is off the axis).
-                let n = vec3(&sa["normal"]).or_else(|| vec3(&sb["normal"])).unwrap_or([0.0, 0.0, 1.0]);
-                let anchor = |points: &[P3], surface: &Value| {
-                    cylinder(surface).map_or_else(|| centroid(points), |(p, _, _)| p)
-                };
-                let (ca, cb) = (anchor(a, sa), anchor(b, sb));
-                let d = (0..3).map(|i| (cb[i] - ca[i]) * n[i]).sum::<f64>().abs();
-                Some(number(d))
-            }
+            [a, b] => linear(a, b).map(number),
             _ => None,
         }
+    }
+
+    fn dimension_to(
+        &self,
+        model: &ModelRef,
+        style: DimensionStyle,
+        condition: ArcCondition,
+        entities: &[Vec<EntityName>],
+    ) -> Option<String> {
+        let sign = match condition {
+            ArcCondition::Center => return self.dimension(model, style, entities),
+            ArcCondition::Min => -1.0,
+            ArcCondition::Max => 1.0,
+        };
+        let display = self.displays.get(model.file.as_str())?;
+        let faces: Vec<(Vec<P3>, &Value)> = entities
+            .iter()
+            .filter_map(|e| e.first())
+            .filter_map(text_of)
+            .filter_map(|t| face(display, &t))
+            .collect();
+        let [a, b] = faces.as_slice() else {
+            return None;
+        };
+        let radii: f64 = [a, b].iter().filter_map(|(_, s)| cylinder(s)).map(|(_, _, r)| r).sum();
+        Some(number(linear(a, b)? + sign * radii))
     }
 
     fn tolerance_frame(&self, model: &ModelRef, tolerance: &str) -> Option<String> {

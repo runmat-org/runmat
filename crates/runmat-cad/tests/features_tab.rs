@@ -879,6 +879,53 @@ fn parting_line_drafts_hinge_at_their_edges() {
     assert!(volume(&env, &neutral) < 32_000.0 * MM3);
 }
 
+/// Core and cavity: a block 5 mm round the 40 x 40 x 20 mm part, less the part, split at the
+/// parting plane 10 mm up. The core (below) and the cavity (above) each hold 50 x 50 x 15 mm of
+/// block less 40 x 40 x 10 mm of part, 21,500 mm^3, and the part stays whole beside them.
+#[test]
+fn core_and_cavity_split_a_block_round_the_part_at_the_parting_plane() {
+    let env = Env::new();
+    let mut d = tall();
+    d.features.push(feature(
+        "parting",
+        FeatureKind::Plane(PlaneDef::Offset { base: PlaneRef::origin_xy(), distance: mm(10.0) }),
+    ));
+    d.features.push(feature(
+        "mold",
+        FeatureKind::Mold(runmat_cad::model::mold::MoldFeature::CoreCavity {
+            part: Reference::feature_body("body"),
+            parting: PlaneRef::datum("parting"),
+            margin: mm(5.0),
+        }),
+    ));
+    let r = env.regen(&d);
+    assert_clean(&r);
+    assert_eq!(r.state.bodies.len(), 3, "core, cavity and the part");
+    let each = |b: &runmat_cad::regen::LiveBody| {
+        let AnalysisResult::MassProperties(m) =
+            env.kernel.analyze(&AnalysisRequest::MassProperties { density: 1.0 }, &[&b.handle]).unwrap()
+        else {
+            panic!()
+        };
+        m.volume / MM3
+    };
+    let mut v: Vec<f64> = r.state.bodies.iter().map(each).collect();
+    v.sort_by(f64::total_cmp);
+    assert!(near(v[0], 21_500.0, 1e-6) && near(v[1], 21_500.0, 1e-6), "{v:?}");
+    assert!(near(v[2], 32_000.0, 1e-6), "{v:?}");
+    // A parting plane clear of the part has nothing to part.
+    let mut off = tall();
+    off.features.push(feature(
+        "mold",
+        FeatureKind::Mold(runmat_cad::model::mold::MoldFeature::CoreCavity {
+            part: Reference::feature_body("body"),
+            parting: PlaneRef::origin_xy(),
+            margin: mm(5.0),
+        }),
+    ));
+    assert!(has(&env.regen(&off), runmat_cad::diagnostics::DiagCode::RegenInvalid));
+}
+
 // =========================================================================== patterns
 
 fn pocket_doc(depth: ValueExpr) -> PartDocument {

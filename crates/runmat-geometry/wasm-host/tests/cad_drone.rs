@@ -133,6 +133,8 @@ fn the_arm_drawing_dimensions_read_the_part() {
         ("knuckle_height", "13"),
         ("pad_thickness", "8"),
         ("pin_to_motor", "88.2 ±0.1"),
+        // Overall, over the R7 knuckle and the R9 pad: 7 + 88.2 + 9, a reference dimension.
+        ("overall_length", "(104.2)"),
         ("bolt_circle", "12 ±0.05"),
         ("pin_bore", "⌀4.1 +0.018/0"),
         ("motor_holes", "4× ⌀2.2 THRU"),
@@ -151,6 +153,11 @@ fn the_arm_drawing_dimensions_read_the_part() {
     for name in ["bore_square", "motor_position", "datum_a", "datum_b", "datum_c", "seat_finish"] {
         assert!(v["projection"]["data"]["anchors"][name].is_array(), "{name} has no leader anchor");
     }
+    // The overall length's extension lines leave the knuckle's and the pad's far sides (x = -7
+    // and 97.2), not their axes.
+    let ends = &v["projection"]["data"]["anchors"]["overall_length"];
+    let xs: Vec<f64> = ends.as_array().unwrap().iter().map(|p| p[0].as_f64().unwrap()).collect();
+    assert!((xs[0] + 7.0).abs() < 1e-3 && (xs[1] - 97.2).abs() < 1e-3, "overall_length anchors {ends}");
     // The bore's frame leader ends on the R2.05 bore, not the R7 knuckle round it.
     let r = v["projection"]["data"]["radii"]["bore_square"].as_f64().unwrap_or(0.0);
     assert!((r - 2.05).abs() < 1e-6, "bore_square radius {r}");
@@ -175,17 +182,18 @@ fn the_hinge_lug_sketches_are_fully_defined() {
     }
 }
 
-/// The study geometry as exact AP242: the arm with its motor pod, and the lower shell with the
-/// ESC board on its bosses. Each product is one solid, and each face in a region travels under
-/// the region's name, which is what the studies' `select name` reads (`root`, `motor_seat`,
-/// `skin`). `RUNMAT_DRONE_STEP_DIR=<folder>` writes the files there (the example's geometry/).
+/// The study geometry as exact AP242: the arm with its motor pod, and the ESC heatsink with the
+/// gap pad and the ESC board on it. Each product is one solid, and each face in a region travels
+/// under the region's name, which is what the studies' `select name` reads (`root`,
+/// `motor_seat`, `fins`). `RUNMAT_DRONE_STEP_DIR=<folder>` writes the files there (the example's
+/// geometry/).
 #[test]
 fn the_study_assemblies_export_with_their_region_names() {
     runmat_geometry_wasm_host::cad::install_occt();
     let all = project();
     for (file, products, faces) in [
         ("arm_study", &["'arm'", "'motor_pod'"][..], &["ADVANCED_FACE('root'", "ADVANCED_FACE('motor_seat'"][..]),
-        ("esc_thermal", &["'body_bottom'", "'esc_board_thermal'"][..], &["ADVANCED_FACE('skin'", "ADVANCED_FACE('boss_tops'"][..]),
+        ("esc_thermal", &["'esc_heatsink'", "'thermal_pad'", "'esc_board_thermal'"][..], &["ADVANCED_FACE('fins'", "ADVANCED_FACE('pad_seat'"][..]),
     ] {
         let path = format!("/p/drone/{file}.assembly");
         let step = runmat_cad_wasm::exchange::assembly_step(&path, &all[&path], &all)

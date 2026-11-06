@@ -294,6 +294,24 @@ impl DimensionStyle {
     }
 }
 
+/// Where a linear dimension meets a cylinder (ASME Y14.5 and ISO 129-1 measure an overall
+/// length over two bosses to their far sides): `center` the axis, `min` the side facing the
+/// other reference, `max` the side away from it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArcCondition {
+    #[default]
+    Center,
+    Min,
+    Max,
+}
+
+impl ArcCondition {
+    pub fn is_center(&self) -> bool {
+        *self == ArcCondition::Center
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "annotation")]
 pub enum AnnotationKind {
@@ -309,6 +327,10 @@ pub enum AnnotationKind {
         /// Reference (driven) dimension, shown in parentheses.
         #[serde(default)]
         reference: bool,
+        /// Where a linear dimension meets a cylindrical reference: its axis (the default), or
+        /// the near or far side of its outline, as an overall length over two bosses measures.
+        #[serde(default, skip_serializing_if = "ArcCondition::is_center")]
+        condition: ArcCondition,
     },
     HoleCallout {
         hole: Reference,
@@ -792,8 +814,22 @@ pub fn check_drawing_with(
                 style,
                 references,
                 pmi,
+                condition,
                 ..
             } => {
+                if !condition.is_center()
+                    && !matches!(style, DimensionStyle::Linear | DimensionStyle::Aligned)
+                {
+                    err(
+                        &mut rep,
+                        DiagCode::DrawingInvalid,
+                        s("condition"),
+                        format!(
+                            "dimension `{}`: an arc condition applies to linear and aligned dimensions, not {:?}",
+                            a.id, style
+                        ),
+                    );
+                }
                 let (lo, hi) = style.arity();
                 if references.len() < lo || references.len() > hi {
                     err(

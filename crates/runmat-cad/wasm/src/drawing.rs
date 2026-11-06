@@ -400,12 +400,13 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             }
             continue;
         }
-        let runmat_cad::drawing::AnnotationKind::Dimension { references, .. } = &a.kind else {
+        let runmat_cad::drawing::AnnotationKind::Dimension { references, condition, .. } = &a.kind else {
             continue;
         };
         let points: Option<Vec<[f64; 3]>> =
             references.iter().map(|r| point_of(display, r)).collect();
-        if let Some(points) = points {
+        if let Some(mut points) = points {
+            values::arc_anchors(display, references, &mut points, *condition);
             anchors.insert(a.id.clone(), json!(points));
             let boxes: Vec<Value> = references.iter().map(|r| extent_of(display, r)).collect();
             extents.insert(a.id.clone(), Value::Array(boxes));

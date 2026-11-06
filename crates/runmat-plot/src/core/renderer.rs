@@ -546,9 +546,10 @@ impl WgpuRenderer {
             .unwrap_or(&self.grid_uniform_bind_group)
     }
 
-    /// Camera-relative studio lighting is restricted to retained CAD scenes.
-    pub fn configure_cad_lighting(&mut self, view: Mat4, enabled: bool) {
-        self.uniforms.cad_lighting = [u32::from(enabled), 0, 0, 0];
+    /// Camera-relative studio lighting is restricted to retained CAD scenes. Over a dark
+    /// background it adds a rim light, so dark parts keep their outline (`dark_background`).
+    pub fn configure_cad_lighting(&mut self, view: Mat4, enabled: bool, dark_background: bool) {
+        self.uniforms.cad_lighting = [u32::from(enabled), u32::from(dark_background), 0, 0];
         self.uniforms.cad_view_rotation = [
             [view.x_axis.x, view.x_axis.y, view.x_axis.z, 0.0],
             [view.y_axis.x, view.y_axis.y, view.y_axis.z, 0.0],

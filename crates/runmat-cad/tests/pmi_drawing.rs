@@ -264,6 +264,7 @@ fn drawing() -> DrawingDocument {
                     pmi: Some("thickness".into()),
                     group: None,
                     reference: false,
+                    condition: Default::default(),
                 },
                 at: [0.0, 0.0],
             },
@@ -352,6 +353,7 @@ fn d02_broken_references_are_reported_with_view_and_annotation() {
             pmi: None,
             group: None,
             reference: true,
+            condition: Default::default(),
         },
         at: [0.0, 0.0],
     });

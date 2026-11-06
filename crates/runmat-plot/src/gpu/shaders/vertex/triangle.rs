@@ -77,7 +77,18 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @l
         // walls, the far side of a part) so they still read; faces the key lights don't change.
         let bounce = 0.10 * max(dot(n, normalize(vec3<f32>(0.42, -0.52, 0.30))), 0.0);
         let lighting = clamp(0.32 + 0.37 * diffuse + 0.30 * head + 0.08 * fill_diffuse + 0.04 * hemisphere + bounce, 0.32, 1.0);
-        return vec4<f32>(clamp(input.color.rgb * lighting + vec3<f32>(highlight), vec3<f32>(0.0), vec3<f32>(1.0)), input.color.a);
+        var lit = input.color.rgb * lighting + vec3<f32>(highlight);
+        if uniforms.cad_lighting.y != 0u {
+            // Over a dark viewport, as SolidWorks and Onshape light black parts there: a cool rim
+            // light from behind catches faces turning away from the eye, so a carbon arm or a
+            // black prop keeps its outline, and a sharper key highlight shows its form. The rim
+            // weighs by how dark the material is, so light parts keep their shading.
+            let luminance = dot(input.color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+            let rim = pow(1.0 - clamp(abs(n.z), 0.0, 1.0), 2.5);
+            let sheen = 0.12 * pow(max(dot(n, half_direction), 0.0), 40.0);
+            lit = lit + (vec3<f32>(0.34, 0.38, 0.44) * rim + vec3<f32>(sheen)) * (1.0 - 0.7 * luminance);
+        }
+        return vec4<f32>(clamp(lit, vec3<f32>(0.0), vec3<f32>(1.0)), input.color.a);
     }
 
     let light_dir = normalize(vec3<f32>(0.36, 0.48, 0.80));

@@ -3,7 +3,7 @@
 //! Exports: parts and assemblies as STEP (AP242, the exact B-rep the installed kernel regenerated,
 //! with the part's semantic PMI;
 //! a faceted AP214 B-rep in millimetres only on the grid test kernel), STL (binary, millimetres), 3MF (millimetres) and glTF (binary `.glb`, metres,
-//! Y up as glTF defines); drawing sheets and sheet-metal flat patterns as DXF and DWG (R2018; millimetres);
+//! Y up as glTF defines); drawing sheets and sheet-metal flat patterns as DXF and DWG (R2018; millimetres), drawing sheets as vector PDF;
 //! assemblies' bills of materials as CSV; circuits and boards as a KiCad project. A product
 //! family exports every configuration at once (`allConfigurations`). Imports: KiCad projects to `.circuit`,
 //! `.circuit.layout` and `.circuit.lock` sources; STEP files to a `.part` whose `import` feature
@@ -43,6 +43,8 @@ pub enum ExportFormat {
     Dxf,
     /// AutoCAD R2018 DWG of a drawing sheet or a part's flat pattern.
     Dwg,
+    /// A drawing sheet as a one-page vector PDF at true size.
+    Pdf,
     /// An assembly's flat bill of materials as CSV.
     Bom,
     Kicad,
@@ -231,6 +233,19 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
                 return Err(ToolError::new(
                     "unsupported",
                     format!("DWG exports drawings and part flat patterns; {} is a {other:?} file", input.path),
+                ))
+            }
+        },
+        ExportFormat::Pdf => match kind {
+            DesignKind::Drawing => {
+                let (sheet_name, sheet, n) = sheet::drawing_sheet(&input.path, text, files, input.sheet.as_deref(), config)?;
+                notes.extend(n);
+                vec![binary_file(format!("{name}-{sheet_name}.pdf"), "application/pdf", &crate::formats::pdf::write(&sheet))]
+            }
+            other => {
+                return Err(ToolError::new(
+                    "unsupported",
+                    format!("PDF exports drawing sheets; {} is a {other:?} file", input.path),
                 ))
             }
         },

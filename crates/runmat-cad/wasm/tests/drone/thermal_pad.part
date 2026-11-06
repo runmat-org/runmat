@@ -1,0 +1,16 @@
+runmat 0.7
+std 1
+
+// The gap pad between the ESC's underside and the heatsink's pedestal: 36 x 36 x 0.5 mm of
+// 3 W/m/K silicone filler, compressed between the board and the pedestal. Its origin is its
+// centre on its underside.
+part thermal_pad {
+    sketch s on origin.xy {
+        p_l1 = line(start = [-18 mm, -18 mm], end = [18 mm, -18 mm])
+        p_l2 = line(start = [18 mm, -18 mm], end = [18 mm, 18 mm])
+        p_l3 = line(start = [18 mm, 18 mm], end = [-18 mm, 18 mm])
+        p_l4 = line(start = [-18 mm, 18 mm], end = [-18 mm, -18 mm])
+    }
+    feature pad = extrude(profile = sketch.s, distance = 0.5 mm)
+    output thermal_pad = { body = feature.pad.body, part_number = "CD-TH-311", material = "silicone", color = "#C9A227" }
+}

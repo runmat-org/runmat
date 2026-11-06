@@ -107,6 +107,31 @@ part bracket {
     feature body = extrude(profile = sketch.s1, distance = 10 mm)
     feature h = hole(face = feature.body.face.end, at = { a = point(60 mm, 10 mm, 10 mm) }, diameter = 4 mm, through_all)
     output bracket = { body = feature.body.body, part_number = "BR-100" }
+    datum A = { on = feature.body.face.start }
+    tolerance top_flat = { characteristic = flatness, on = [feature.body.face.end], tolerance = 0.05 mm }
+    tolerance hole_square = { characteristic = perpendicularity, on = [feature.h.face.wall(a)], tolerance = 0.02 mm, diametral = true, datums = [{ label = "A" }] }
+    finish top = { on = [feature.body.face.end], ra = 1.6 um }
+}
+"#;
+
+/// The bracket's production drawing: frames, a datum, a finish mark, a hole callout, a
+/// diameter dimension, a notes block and a revision table.
+const PRODUCTION: &str = r#"runmat 0.7
+std 1
+
+drawing production {
+    format a3 = { size = { size = iso, name = A3 }, title_block = [{ label = "Title", source = { source = literal, text = "Bracket" } }] }
+    sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
+    view front = standard(orientation = front, sheet = "1", model = { file = "bracket.part" }, at = [115, 85], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { file = "bracket.part" }, at = [115, 185], display = hidden_lines)
+    annotation hole = hole_callout(hole = feature.h.face.wall(a), view = top)
+    annotation hole_size = dimension(style = diameter, references = [feature.h.face.wall(a)], view = top)
+    annotation flat = gdt(tolerance = top_flat, view = front)
+    annotation square = gdt(tolerance = hole_square, view = top)
+    annotation datum_a = datum_symbol(label = A, view = front)
+    annotation top_finish = surface_finish(on = feature.body.face.end, view = front)
+    annotation notes = note(text = "NOTES:\n1. BREAK SHARP EDGES.", view = front, at = [250, 120])
+    table revisions = revision(rows = [{ rev = "A", description = "Initial release", date = "2026-11-05", by = "RM" }], sheet = "1", at = [410, 287])
 }
 "#;
 
@@ -130,7 +155,7 @@ drawing standard {
 "#;
 
 fn files() -> Files {
-    [("/p/bracket.part", BRACKET), ("/p/standard.drawing", DRAWING)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect()
+    [("/p/bracket.part", BRACKET), ("/p/standard.drawing", DRAWING), ("/p/production.drawing", PRODUCTION)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect()
 }
 
 #[test]
@@ -150,10 +175,39 @@ fn a_drawing_exports_as_dwg_with_the_content_of_its_dxf() {
     // The views' edges come from the display tessellation, which holds positions as f32
     // (2e-6 mm at this size).
     assert!((dims[0].measurement - 80.0).abs() < 1e-4, "{}", dims[0].measurement);
-    assert!(sheet.entities.iter().any(|e| matches!(&e.shape, Shape::MText { text, .. } if text.contains("THRU"))), "the hole callout");
+    assert!(sheet.entities.iter().any(|e| matches!(&e.shape, Shape::Text { text, .. } if text.contains("THRU"))), "the hole callout");
     let dxf_out = call("design.export", json!({ "path": "/p/standard.drawing", "format": "dxf" }), &files()).unwrap();
     let from_dxf = dxf::read(dxf_out["files"][0]["content"].as_str().unwrap()).unwrap();
     assert_eq!(canonical(&sheet), canonical(&from_dxf));
+}
+
+/// DXF carries a production drawing's callouts as the Desktop's sheet draws them: the feature
+/// control frames' cells boxed on leaders, the datum's boxed letter, the finish mark's value, the
+/// hole callout and diameter on leaders, the notes block's lines and the revision table's rows.
+#[test]
+fn a_production_drawing_exports_its_callouts_as_dxf() {
+    let out = call("design.export", json!({ "path": "/p/production.drawing", "format": "dxf" }), &files()).unwrap_or_else(|e| panic!("{e}"));
+    let sheet = dxf::read(out["files"][0]["content"].as_str().unwrap()).unwrap();
+    let texts: Vec<&str> = sheet.entities.iter().filter_map(|e| if let Shape::Text { text, .. } = &e.shape { Some(text.as_str()) } else { None }).collect();
+    for want in ["⏥", "0.05", "⊥", "⌀0.02", "A", "Ra 1.6", "⌀4 THRU", "⌀4", "NOTES:", "1. BREAK SHARP EDGES.", "REVISIONS", "DESCRIPTION", "APPROVED", "Initial release", "2026-11-05"] {
+        assert!(texts.contains(&want), "no {want:?} in {texts:?}");
+    }
+    // Arrowheads and the datum triangle are solid fills; R12 DXF carries a fill as its closed
+    // boundary, a triangle.
+    let solids = sheet.entities.iter().filter(|e| matches!(&e.shape, Shape::Polyline { points, closed: true } if points.len() == 3)).count();
+    assert!(solids >= 5, "{solids} filled triangles");
+    // The revision table's top-right corner is where the drawing puts it.
+    let corner = sheet.entities.iter().any(|e| matches!(&e.shape, Shape::Polyline { points, closed: true } if points.iter().any(|p| (p[0] - 410.0).abs() < 1e-6 && (p[1] - 287.0).abs() < 1e-6)));
+    assert!(corner, "the revision table's frame");
+    // The PDF of the same sheet carries the same callouts.
+    let out = call("design.export", json!({ "path": "/p/production.drawing", "format": "pdf" }), &files()).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(out["files"][0]["name"], "production-1.pdf");
+    assert_eq!(out["files"][0]["mimeType"], "application/pdf");
+    let pdf = base64::engine::general_purpose::STANDARD.decode(out["files"][0]["content"].as_str().unwrap()).unwrap();
+    let body = String::from_utf8_lossy(&pdf);
+    for want in ["(Ra 1.6) Tj", "(REVISIONS) Tj", "(Initial release) Tj", "(NOTES:) Tj", "(0.05) Tj", "(4 THRU) Tj"] {
+        assert!(body.contains(want), "no {want} in the PDF");
+    }
 }
 
 #[test]

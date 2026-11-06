@@ -526,6 +526,7 @@ fn dim(refs: Vec<Reference>) -> AnnotationKind {
         pmi: None,
         group: None,
         reference: false,
+        condition: Default::default(),
     }
 }
 

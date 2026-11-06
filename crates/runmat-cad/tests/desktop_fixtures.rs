@@ -476,6 +476,7 @@ fn drawing() -> DrawingDocument {
                     pmi: Some("thickness".into()),
                     group: None,
                     reference: false,
+                    condition: Default::default(),
                 },
                 at: [0.0, 0.0],
             },

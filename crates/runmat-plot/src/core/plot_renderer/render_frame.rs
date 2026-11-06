@@ -21,7 +21,11 @@ impl PlotRenderer {
         cam.update_aspect_ratio(aspect_ratio);
         let view_proj_matrix = cam.view_proj_matrix();
         self.wgpu_renderer
-            .configure_cad_lighting(cam.view_matrix(), self.last_geometry_scene.is_some());
+            .configure_cad_lighting(
+                cam.view_matrix(),
+                self.last_geometry_scene.is_some(),
+                !self.theme_background_is_light(),
+            );
         let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
             .update_uniforms(emission, view_proj_matrix, model_matrix);

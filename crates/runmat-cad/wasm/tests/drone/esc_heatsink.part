@@ -1,0 +1,121 @@
+runmat 0.7
+std 1
+
+// The ESC's heatsink and stack mount, machined from 6061-T6: a 56 x 56 x 2 mm belly plate that
+// closes a window in the lower shell, a 36 x 36 mm pedestal that rises to the ESC's underside
+// through a 0.5 mm gap pad, four standoffs that carry the stack on the 30.5 mm pattern (M3 tap
+// drills, 5 mm deep), and fourteen 0.8 mm fins, 10 mm deep, below the belly in the propellers'
+// downwash. The fins run fore and aft, so forward flight blows along them too. Its origin is the
+// stack's centre on the shell's base plane (z = 0), where drone.assembly places it.
+//
+// Hand check at full throttle (6.2 W from the ESC's losses, 25 W/m^2/K downwash at 35 degC):
+// - wetted area below the belly: fins 14 x 2 x 56 x 10 = 15,680 mm^2, fin tips 627 mm^2, the
+//   plate's underside between the fins 2,509 mm^2 and its edges 448 mm^2, about 19,260 mm^2;
+// - fin efficiency: m = sqrt(2 h / (k t)) = sqrt(2 x 25 / (167 x 0.8e-3)) = 19.3 /m, m L = 0.19,
+//   eta = tanh(m L) / (m L) = 0.99;
+// - convection: R = 1 / (h eta A) = 1 / (25 x 0.99 x 0.01926) = 2.1 K/W, so 13 K;
+// - gap pad: 0.5 mm at 3 W/m/K over 36 x 36 mm, R = 0.13 K/W, 0.8 K; pedestal: 6 mm of
+//   aluminium over the same area, R = 0.028 K/W, 0.2 K.
+// The board's pad sits about 14 K over ambient, about 49 degC. The four polycarbonate bosses
+// gave 258 K/W (1,600 K) on the same losses. Mass: 21,300 mm^3 of aluminium, 57 g.
+part esc_heatsink {
+    feature base_plane = plane.offset(base = origin.xy, distance = 1.5 mm)
+    sketch base_s on plane.base_plane {
+        b_l1 = line(start = [-28 mm, -28 mm], end = [28 mm, -28 mm])
+        b_l2 = line(start = [28 mm, -28 mm], end = [28 mm, 28 mm])
+        b_l3 = line(start = [28 mm, 28 mm], end = [-28 mm, 28 mm])
+        b_l4 = line(start = [-28 mm, 28 mm], end = [-28 mm, -28 mm])
+    }
+    feature base = extrude(profile = sketch.base_s, distance = 2 mm)
+    feature pedestal_plane = plane.offset(base = origin.xy, distance = 3.5 mm)
+    sketch pedestal_s on plane.pedestal_plane {
+        p_l1 = line(start = [-18 mm, -18 mm], end = [18 mm, -18 mm])
+        p_l2 = line(start = [18 mm, -18 mm], end = [18 mm, 18 mm])
+        p_l3 = line(start = [18 mm, 18 mm], end = [-18 mm, 18 mm])
+        p_l4 = line(start = [-18 mm, 18 mm], end = [-18 mm, -18 mm])
+    }
+    feature pedestal = extrude(profile = sketch.pedestal_s, distance = 6 mm, mode = add)
+    sketch standoff_s on plane.pedestal_plane {
+        s0 = circle(center = [15.25 mm, 15.25 mm], radius = 3.4 mm)
+        s1 = circle(center = [-15.25 mm, 15.25 mm], radius = 3.4 mm)
+        s2 = circle(center = [-15.25 mm, -15.25 mm], radius = 3.4 mm)
+        s3 = circle(center = [15.25 mm, -15.25 mm], radius = 3.4 mm)
+    }
+    feature standoffs = extrude(profile = sketch.standoff_s, distance = 6.5 mm, mode = add)
+    feature taps = hole(
+        face = feature.standoffs.face.end,
+        at = {
+            t0 = point(15.25 mm, 15.25 mm, 10 mm),
+            t1 = point(-15.25 mm, 15.25 mm, 10 mm),
+            t2 = point(-15.25 mm, -15.25 mm, 10 mm),
+            t3 = point(15.25 mm, -15.25 mm, 10 mm)
+        },
+        diameter = 2.5 mm,
+        depth = 5 mm
+    )
+    feature fin_plane = plane.offset(base = origin.xy, distance = -8.5 mm)
+    sketch fins_s on plane.fin_plane {
+        f0_l1 = line(start = [-28 mm, -26.4 mm], end = [28 mm, -26.4 mm])
+        f0_l2 = line(start = [28 mm, -26.4 mm], end = [28 mm, -25.6 mm])
+        f0_l3 = line(start = [28 mm, -25.6 mm], end = [-28 mm, -25.6 mm])
+        f0_l4 = line(start = [-28 mm, -25.6 mm], end = [-28 mm, -26.4 mm])
+        f1_l1 = line(start = [-28 mm, -22.4 mm], end = [28 mm, -22.4 mm])
+        f1_l2 = line(start = [28 mm, -22.4 mm], end = [28 mm, -21.6 mm])
+        f1_l3 = line(start = [28 mm, -21.6 mm], end = [-28 mm, -21.6 mm])
+        f1_l4 = line(start = [-28 mm, -21.6 mm], end = [-28 mm, -22.4 mm])
+        f2_l1 = line(start = [-28 mm, -18.4 mm], end = [28 mm, -18.4 mm])
+        f2_l2 = line(start = [28 mm, -18.4 mm], end = [28 mm, -17.6 mm])
+        f2_l3 = line(start = [28 mm, -17.6 mm], end = [-28 mm, -17.6 mm])
+        f2_l4 = line(start = [-28 mm, -17.6 mm], end = [-28 mm, -18.4 mm])
+        f3_l1 = line(start = [-28 mm, -14.4 mm], end = [28 mm, -14.4 mm])
+        f3_l2 = line(start = [28 mm, -14.4 mm], end = [28 mm, -13.6 mm])
+        f3_l3 = line(start = [28 mm, -13.6 mm], end = [-28 mm, -13.6 mm])
+        f3_l4 = line(start = [-28 mm, -13.6 mm], end = [-28 mm, -14.4 mm])
+        f4_l1 = line(start = [-28 mm, -10.4 mm], end = [28 mm, -10.4 mm])
+        f4_l2 = line(start = [28 mm, -10.4 mm], end = [28 mm, -9.6 mm])
+        f4_l3 = line(start = [28 mm, -9.6 mm], end = [-28 mm, -9.6 mm])
+        f4_l4 = line(start = [-28 mm, -9.6 mm], end = [-28 mm, -10.4 mm])
+        f5_l1 = line(start = [-28 mm, -6.4 mm], end = [28 mm, -6.4 mm])
+        f5_l2 = line(start = [28 mm, -6.4 mm], end = [28 mm, -5.6 mm])
+        f5_l3 = line(start = [28 mm, -5.6 mm], end = [-28 mm, -5.6 mm])
+        f5_l4 = line(start = [-28 mm, -5.6 mm], end = [-28 mm, -6.4 mm])
+        f6_l1 = line(start = [-28 mm, -2.4 mm], end = [28 mm, -2.4 mm])
+        f6_l2 = line(start = [28 mm, -2.4 mm], end = [28 mm, -1.6 mm])
+        f6_l3 = line(start = [28 mm, -1.6 mm], end = [-28 mm, -1.6 mm])
+        f6_l4 = line(start = [-28 mm, -1.6 mm], end = [-28 mm, -2.4 mm])
+        f7_l1 = line(start = [-28 mm, 1.6 mm], end = [28 mm, 1.6 mm])
+        f7_l2 = line(start = [28 mm, 1.6 mm], end = [28 mm, 2.4 mm])
+        f7_l3 = line(start = [28 mm, 2.4 mm], end = [-28 mm, 2.4 mm])
+        f7_l4 = line(start = [-28 mm, 2.4 mm], end = [-28 mm, 1.6 mm])
+        f8_l1 = line(start = [-28 mm, 5.6 mm], end = [28 mm, 5.6 mm])
+        f8_l2 = line(start = [28 mm, 5.6 mm], end = [28 mm, 6.4 mm])
+        f8_l3 = line(start = [28 mm, 6.4 mm], end = [-28 mm, 6.4 mm])
+        f8_l4 = line(start = [-28 mm, 6.4 mm], end = [-28 mm, 5.6 mm])
+        f9_l1 = line(start = [-28 mm, 9.6 mm], end = [28 mm, 9.6 mm])
+        f9_l2 = line(start = [28 mm, 9.6 mm], end = [28 mm, 10.4 mm])
+        f9_l3 = line(start = [28 mm, 10.4 mm], end = [-28 mm, 10.4 mm])
+        f9_l4 = line(start = [-28 mm, 10.4 mm], end = [-28 mm, 9.6 mm])
+        f10_l1 = line(start = [-28 mm, 13.6 mm], end = [28 mm, 13.6 mm])
+        f10_l2 = line(start = [28 mm, 13.6 mm], end = [28 mm, 14.4 mm])
+        f10_l3 = line(start = [28 mm, 14.4 mm], end = [-28 mm, 14.4 mm])
+        f10_l4 = line(start = [-28 mm, 14.4 mm], end = [-28 mm, 13.6 mm])
+        f11_l1 = line(start = [-28 mm, 17.6 mm], end = [28 mm, 17.6 mm])
+        f11_l2 = line(start = [28 mm, 17.6 mm], end = [28 mm, 18.4 mm])
+        f11_l3 = line(start = [28 mm, 18.4 mm], end = [-28 mm, 18.4 mm])
+        f11_l4 = line(start = [-28 mm, 18.4 mm], end = [-28 mm, 17.6 mm])
+        f12_l1 = line(start = [-28 mm, 21.6 mm], end = [28 mm, 21.6 mm])
+        f12_l2 = line(start = [28 mm, 21.6 mm], end = [28 mm, 22.4 mm])
+        f12_l3 = line(start = [28 mm, 22.4 mm], end = [-28 mm, 22.4 mm])
+        f12_l4 = line(start = [-28 mm, 22.4 mm], end = [-28 mm, 21.6 mm])
+        f13_l1 = line(start = [-28 mm, 25.6 mm], end = [28 mm, 25.6 mm])
+        f13_l2 = line(start = [28 mm, 25.6 mm], end = [28 mm, 26.4 mm])
+        f13_l3 = line(start = [28 mm, 26.4 mm], end = [-28 mm, 26.4 mm])
+        f13_l4 = line(start = [-28 mm, 26.4 mm], end = [-28 mm, 25.6 mm])
+    }
+    feature fins = extrude(profile = sketch.fins_s, distance = 10 mm, mode = add)
+
+    // The faces in the downwash: the fins' flanks and tips, the plate's underside and edges.
+    region fins : face = { select = [feature.fins.face.side(fins_s.f0_l1), feature.fins.face.side(fins_s.f0_l3), feature.fins.face.side(fins_s.f1_l1), feature.fins.face.side(fins_s.f1_l3), feature.fins.face.side(fins_s.f2_l1), feature.fins.face.side(fins_s.f2_l3), feature.fins.face.side(fins_s.f3_l1), feature.fins.face.side(fins_s.f3_l3), feature.fins.face.side(fins_s.f4_l1), feature.fins.face.side(fins_s.f4_l3), feature.fins.face.side(fins_s.f5_l1), feature.fins.face.side(fins_s.f5_l3), feature.fins.face.side(fins_s.f6_l1), feature.fins.face.side(fins_s.f6_l3), feature.fins.face.side(fins_s.f7_l1), feature.fins.face.side(fins_s.f7_l3), feature.fins.face.side(fins_s.f8_l1), feature.fins.face.side(fins_s.f8_l3), feature.fins.face.side(fins_s.f9_l1), feature.fins.face.side(fins_s.f9_l3), feature.fins.face.side(fins_s.f10_l1), feature.fins.face.side(fins_s.f10_l3), feature.fins.face.side(fins_s.f11_l1), feature.fins.face.side(fins_s.f11_l3), feature.fins.face.side(fins_s.f12_l1), feature.fins.face.side(fins_s.f12_l3), feature.fins.face.side(fins_s.f13_l1), feature.fins.face.side(fins_s.f13_l3), feature.fins.face.start, feature.base.face.start, feature.base.face.side(base_s.b_l1), feature.base.face.side(base_s.b_l2), feature.base.face.side(base_s.b_l3), feature.base.face.side(base_s.b_l4)], expect = at_least_one }
+    region pad_seat : face = { select = [feature.pedestal.face.end], expect = at_least_one }
+    output esc_heatsink = { body = feature.base.body, part_number = "CD-TH-310", material = "aluminum_6061", color = "#9EA4AB" }
+}

@@ -51,6 +51,9 @@ drawing arm {
 
     annotation knuckle_height = dimension(style = linear, references = [feature.knuckle.face.start, feature.knuckle.face.end], view = front)
     annotation pad_thickness = dimension(style = linear, references = [feature.pad.face.start, feature.pad.face.end], view = front)
+    // The overall length over the knuckle and the pad, a reference dimension: the toleranced
+    // bore-to-motor distance and the two radii set it.
+    annotation overall_length = dimension(style = linear, references = [feature.knuckle.face.side(knuckle_b.c), feature.pad.face.side(pad_s.c)], condition = max, reference = true, view = top)
     annotation pin_to_motor = dimension(style = linear, references = [feature.bores.face.side(bores_s.pin), feature.pad.face.side(pad_s.c)], pmi = pin_to_motor, view = top)
     annotation bolt_circle = dimension(style = linear, references = [feature.motor_holes.face.wall(c), feature.motor_holes.face.wall(a)], pmi = motor_bolt_circle, view = top)
     annotation pin_bore = dimension(style = diameter, references = [feature.bores.face.side(bores_s.pin)], pmi = pin_bore, view = b)

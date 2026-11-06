@@ -311,7 +311,11 @@ impl PlotRenderer {
         let mut cam = self.camera().clone();
         let view_proj_matrix = cam.view_proj_matrix();
         self.wgpu_renderer
-            .configure_cad_lighting(cam.view_matrix(), self.last_geometry_scene.is_some());
+            .configure_cad_lighting(
+                cam.view_matrix(),
+                self.last_geometry_scene.is_some(),
+                !self.theme_background_is_light(),
+            );
 
         let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer

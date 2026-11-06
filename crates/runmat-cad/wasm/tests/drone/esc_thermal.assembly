@@ -1,11 +1,16 @@
 runmat 0.7
 std 1
 
-// The ESC's thermal study geometry: the lower shell with its bosses and the ESC board (as its
-// thermal plate) on the bosses' tops, where it sits in drone.assembly. Exported to
-// geometry/esc_thermal.step for esc_thermal.fea.
+// The ESC's thermal study geometry, as drone.assembly places it: the aluminium heatsink, the gap
+// pad on its pedestal and the ESC board (as its thermal plate) on its standoffs' tops. Exported
+// to geometry/esc_thermal.step for esc_thermal.fea.
 assembly esc_thermal {
-    use part body_bottom from "body_bottom.part" as body_bottom
+    use part esc_heatsink from "esc_heatsink.part" as esc_heatsink {
+        placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 0 mm] } }
+    }
+    use part thermal_pad from "thermal_pad.part" as thermal_pad {
+        placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 9.5 mm] } }
+    }
     use part esc_board_thermal from "esc_board_thermal.part" as esc_board {
         placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 10 mm] } }
     }
