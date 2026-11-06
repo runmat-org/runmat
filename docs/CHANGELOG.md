@@ -2,6 +2,87 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
+## v0.7.0
+
+### Runtime
+
+#### Added
+
+* Added native Python interoperability through `py.*`, `pyrun`, and `pyrunfile`, with Python objects, keyword arguments, supported array conversions, and RunMat callbacks. Projects can select an interpreter and choose in-process or separate-process execution. Compatible in-process NumPy arrays can share read-only host storage; conversions and process boundaries use copies where required.
+* Added native Java interoperability with object construction, method calls, classpaths, reflected overload selection, and callbacks. Declared JARs travel with the project, and Java exceptions retain their class and cause information in RunMat errors.
+* Added C shared-library interfaces through `loadlibrary`/`calllib` and `clib.*`, including header-based interface preparation, typed pointers and structures, and supported callbacks. Added source-compatible MEX extensions built with RunMat for C, C++, Fortran, and supported GPU gateways. Prepared manifests bind extensions to their exact libraries and target ABI. Declared wheels, JARs, interfaces, and extension artifacts can be packaged for standalone programs and remote jobs; execution requires the corresponding host capabilities.
+
+#### Changed
+
+* Expanded canonical builtin entries with calling forms, argument/output reference documentation, type/shape inference, and editor help. Static analysis uses these contracts to infer result classes and dimensions for supported calls; catalog-backed reference pages and contextual signature help draw from the same catalog descriptions.
+* Expanded deep-learning execution with network planning for supported convolutional and recurrent layers, dimension-label handling, forward execution, and `trainNetwork`/`trainnet` supervised training. Automatic differentiation tracks executed network operations and supported GPU-resident values; gradient calculation, parameter-tree updates, and Adam updates can retain device storage where the provider supports the required operations. Supervised training publishes complete parameter updates to a new network object, and unsupported layer or device routes return explicit errors.
+* Extended cooperative execution and resource admission across numerical routines, foreign calls, native execution, and parallel work. Cancellation, suspended callbacks, output capture, and artifact publication retain the originating invocation's ownership and error cause. Managed-memory limits cover admitted RunMat allocations; graphics drivers, compiler internals, and documented plot-property temporaries remain outside that limit.
+* Expanded numerical compatibility across sparse and dense linear algebra, ODE integration, optimization, strings, and array operations. Typed ODE options and continuous Runge–Kutta output support evaluating a solution between accepted steps. Optimization and shared numerical routines can yield to the host and respond to cancellation without restarting completed effects. Sparse factorization, solve, and reduction paths retain explicit input classes and output shapes across host and provider execution.
+
+#### Fixed
+
+* Fixed matrix parsing around signed imaginary values and dot operators adjacent to numeric literals, and preserved typed syntax errors inside nested constructs.
+* Fixed empty triangular solves, GPU covariance edge cases, string addition, and missing-string handling.
+* Fixed native continuation and statement-output handling so resumed execution preserves the selected program, requested outputs, and completed side effects. Fixed GPU shutdown ordering so device resources retire before process finalizers.
+
+### GPU Acceleration
+
+#### Added
+
+* Added portable binary64 shader math for eligible native Vulkan devices, including logarithmic, exponential, power, trigonometric, and hyperbolic operations. The shader path uses shared numerical helpers and controlled SPIR-V generation so supported double-precision operations can execute on the device. Admission requires native F64, INT64, SPIR-V support, and the required Vulkan floating-point controls on supported Linux or Windows hosts. This path is unavailable on WebGPU and does not add double-precision support to every GPU backend.
+
+#### Changed
+
+* Refined GPU execution and fallback around exact value representation, allocation ownership, and invocation settings. Disabling new GPU computation still permits explicit reads of existing device values through their original owner; forbidding automatic CPU fallback now preserves the provider's unsupported-operation error.
+
+### Desktop, SDK, and Editor
+
+#### Added
+
+* Added a dedicated Settings window with grouped application, project, runtime, and organization controls. Runtime settings expose effective values and their sources, support individual override resets, and keep user defaults separate from project policy. Execution, memory, acceleration, language, simulation storage, and foreign-runtime controls use the same typed configuration authority as the CLI and SDK; unsupported host options return capability errors.
+* Added SDK APIs for runtime-setting resolution and editing, structured source checking, named script/function/study entrypoints, and cluster-program preparation. Hosts can inspect a named target's local and cluster availability before running it. Node hosts can initialize the packaged WASM runtime with supplied bytes and isolated in-memory application settings; reset preserves those session preferences until disposal.
+
+#### Fixed
+
+* Improved contextual signature help and compact builtin hovers, and bounded semantic tokens to UTF-16 physical lines. Fixed browser filesystem and artifact operations to retain their captured owners across asynchronous work and project changes.
+
+### Server and Remote Execution
+
+#### Added
+
+* Added script submission with `runmat analysis.m --cluster engineering` and machine registration with `runmat cluster join engineering`, using an authorized login or API key. The CLI resolves the cluster name, verifies its signed execution identity, encrypts the workload, and returns captured console output when the run completes.
+
+#### Changed
+
+* Remote programs now carry authenticated project runtime policy without inheriting the submitter's or worker's personal settings, collector credentials, or ambient environment. Worker capabilities and scheduler assignments constrain execution; project preferences cannot enlarge resource allocations.
+* Improved recovery and terminal reporting to preserve cancellation causes, original execution authority, output evidence, and process-retirement status across driver or worker replacement.
+
+### Settings and Observability
+
+#### Added
+
+* Added opt-in OpenTelemetry trace and log export to user-owned collectors, with bounded queues, correlated records, and collector-acknowledged connection tests. Native hosts support HTTP/protobuf and gRPC; browser hosts support HTTP/protobuf. Collector export and product-telemetry consent are separate controls. Collector failures do not fail numerical runs.
+
+### Finite-Element Analysis (Alpha)
+
+#### Added
+
+* Added native whole-study planning, local and cluster execution, recovery, and content-addressed result publication. Structural procedures include static, modal, transient, harmonic, spectrum, random-response, and buckling workflows. Each structural, electromagnetic, fluid, and coupled formulation has documented execution and validation limits.
+* Added typed result, step, field, and mesh access with selective history reads and field rendering, connecting study execution to published outputs and their evidence.
+
+#### Changed
+
+* Replaced YAML `.fea` studies with a typed study language supporting physical units, modules, imported `.m` functions, reusable geometry and model declarations, load cases, sweeps, observations, and reductions. Use `runmat fea check`, `plan`, and `run` to inspect and execute a study, with explicit study or sweep selection when needed.
+* FEA remains alpha with breaking APIs and formulation-specific validation limits. Browser SDK hosts can check studies and execute supported local study forms through exact-geometry and numerical workers. Browser preparation of FEA cluster jobs remains unavailable; use the native OCCT-enabled CLI for that route. Unsupported execution requests fail closed.
+
+### Licensing and Simulation Usage
+
+#### Changed
+
+* Changed RunMat's license to Business Source License 1.1 with the versioned free-use grant in `FREE-USE.md` and conversion to Apache 2.0 three years after each version's first public distribution. The grant covers specified individual, academic, open-source, and size-limited organizational production use, subject to its conditions and competing-offering exclusion.
+* Added authenticated simulation admission and exact reference-operation accounting for new FEA meshing and solving, including local execution. Allowances use quantities of work displayed in GFLOP or TFLOP. Viewing and reusing computed outputs are unmetered; the accounting specification states numerical-library and OCCT exclusions. Ordinary local `.m` scripts and compiled programs remain offline and unmetered unless they execute FEA.
+* Eligible academic institutions may receive a simulation-usage charge waiver after RunMat verifies and approves eligibility. The free-use grant links to the eligibility-verification request; approval is required.
+
 ## v0.6.3 - September 2026
 
 _September 4, 2026_

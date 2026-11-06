@@ -16,7 +16,7 @@ runmat compile simulation.m -o simulation.exe
 
 The executable contains native program code and a matching compiler-free RunMat runtime. It runs without the RunMat CLI, project source, or a separately installed RunMat SDK.
 
-Plain compiled programs run offline without sign-in, including programs whose FEA branch is not taken. Executing object-based meshing or solving uses the same local Server lease adapter as the CLI and needs sign-in, a connection and core-hours. Configure the account with `runmat login` before deployment, or use the supported API-key and organization configuration on the execution host. Credentials are resolved when FEA executes, not embedded by compilation. The runtime archive must also provide the numerical and geometry capabilities used by the program.
+Plain compiled programs run offline without sign-in, including programs whose FEA branch is not taken. Executing object-based meshing or solving uses the same local Server lease adapter as the CLI and needs sign-in, a connection and an available simulation allowance. Configure the account with `runmat login` before deployment, or use the supported API-key and organization configuration on the execution host. Credentials are resolved when FEA executes, not embedded by compilation. The runtime archive must also provide the numerical and geometry capabilities used by the program.
 
 Calling `fea.run("study.fea")` from a standalone image remains unsupported because the image has no document study runner. Build the study through the supported object-based `.m` APIs instead; this does not add a dynamic `.fea` compiler to the image.
 

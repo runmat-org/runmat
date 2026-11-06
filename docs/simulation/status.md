@@ -23,7 +23,7 @@ This page separates language support, executable native whole-study support, and
 | Typed structural whole-study planning, local/remote execution, recovery, publication, field paging, and rendering context | Available |
 | Generated time histories, response spectra, and random spectra from frozen `.m` imports | Available as portable materialization tasks |
 | Browser `.fea` checking | Available |
-| Browser geometry/meshing/solver execution | Unavailable; browser capability reporting is check-only |
+| Browser geometry/meshing/solver execution | Supported local named-study forms execute through configured geometry and numerical worker hosts, with simulation admission. Browser FEA cluster preparation is unavailable. |
 
 ## Whole-Study Physics Boundary
 
