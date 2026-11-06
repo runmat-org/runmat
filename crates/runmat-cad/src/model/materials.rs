@@ -32,6 +32,17 @@ const DENSITIES: &[(&[&str], f64)] = &[
     ),
     (&["fiberglass", "fibreglass", "gfrp", "composite"], 1850.0),
     (&["fr4", "fr_4", "board"], 1850.0),
+    // Glass-filled polyamide (PA6/PA66 with 30 % glass) before plain glass and nylon.
+    (
+        &[
+            "glass_filled_nylon",
+            "pa6_gf30",
+            "pa66_gf30",
+            "nylon_gf",
+            "glass_filled",
+        ],
+        1360.0,
+    ),
     (&["glass", "glazing"], 2500.0),
     (&["acrylic", "pmma"], 1180.0),
     (&["polycarbonate"], 1200.0),
@@ -126,6 +137,9 @@ mod tests {
         assert_eq!(material_density("material.aluminum"), Some(2700.0));
         assert_eq!(material_density("steel_300m"), Some(7850.0));
         assert_eq!(material_density("material.prepreg_carbon"), Some(1600.0));
+        assert_eq!(material_density("glass_filled_nylon"), Some(1360.0));
+        assert_eq!(material_density("glass"), Some(2500.0));
+        assert_eq!(material_density("S235"), Some(7850.0));
         assert_eq!(material_density("material.unobtainium"), None);
     }
 }
