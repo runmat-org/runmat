@@ -14,7 +14,7 @@ const K_UPPER: f64 = 10.0;
 pub(super) const HOT: f64 = 400.0;
 pub(super) const COLD: f64 = 300.0;
 
-fn boundary(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
+pub(super) fn boundary(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
     let mut target = RegionTarget::boundary(
         runmat_meshing_core::fixtures::fixture_boundary_selection(&(name)),
     );

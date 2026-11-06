@@ -69,7 +69,7 @@ pub(super) fn integrate(
                     evidence.add_projected(node, nodal, 0.0);
                 }
             })
-            .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+            .map_err(ThermalAssemblyError::from)?;
     }
     Ok(())
 }

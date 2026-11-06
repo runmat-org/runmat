@@ -333,6 +333,7 @@ fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
                 &history,
                 &model,
                 &fitting,
+                0,
             )
             .unwrap()
             .path(),
@@ -344,9 +345,9 @@ fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
         small.accuracy.resources.set_resident_byte_budget(total - 1);
         assert!(matches!(
             super::super::thermal_preassembly::select_thermal_solve_path(
-                facts.clone(), &history, &model, &small,
+                facts.clone(), &history, &model, &small, 0,
             ),
-            Err(ResourcePlanningError::ThermalSolveCeiling { multigrid_resident_bytes: Some(_), .. })
+            Err(ResourcePlanningError::ThermalSolveCeiling { .. })
         ));
         ratios.push(factor as f64 / multigrid_bytes as f64);
     }

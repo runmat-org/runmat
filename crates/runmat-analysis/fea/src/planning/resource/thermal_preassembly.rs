@@ -128,12 +128,7 @@ impl ThermalPreassemblyResourceFacts {
             before_projection,
             step.accuracy.resources.resident_byte_budget(),
         )?;
-        let operators = select_thermal_solve_path(
-            ThermalOperatorResourceFacts::derive(mesh, &model.interfaces)?,
-            &history,
-            model,
-            step,
-        )?;
+        let operators = ThermalOperatorResourceFacts::derive(mesh, &model.interfaces)?;
         let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
         let observations = match observations {
             crate::pipeline::thermal::ThermalObservationExecution::Inline => {
@@ -170,9 +165,9 @@ impl ThermalPreassemblyResourceFacts {
             history.interface_nodes,
         )?;
         let retained_bytes = manifest_retained.reservation_bytes()?.0;
-        let base = component_bytes(
-            &history,
-            &operators,
+        // Every preassembly component except the numerical operator reservation and the
+        // compiled properties.
+        let components = component_bytes_besides_operators(
             &sources,
             &observations,
             &realization,
@@ -187,16 +182,32 @@ impl ThermalPreassemblyResourceFacts {
             "thermal field construction reservation",
         ))?;
         let maximum = step.accuracy.resources.resident_byte_budget();
-        require_ceiling(base, maximum)?;
+        // The least numerical reservation any admitted path needs is admitted with the other
+        // components before property compilation validates the mesh or profiles metadata.
+        let factor_numerical = operators.numerical_reservation_bytes(&history)?.0;
+        let least_numerical = if multigrid_admitted(model, step) {
+            operators
+                .clone()
+                .on_path(super::ThermalSolvePath::ConductionMultigrid)
+                .numerical_reservation_bytes(&history)?
+                .0
+                .min(factor_numerical)
+        } else {
+            factor_numerical
+        };
+        let before_properties = components
+            .checked_add(least_numerical)
+            .ok_or(ResourcePlanningError::Overflow("thermal property compilation"))?;
+        require_ceiling(before_properties, maximum)?;
         // Admit actual selected metadata before owned constitutive/section/audit cloning.
         // The compiler owns selection for both the profile and materialization passes.
         let prepared =
-            crate::properties::PreparedProperties::prepare(model, Some(mesh), maximum - base)
+            crate::properties::PreparedProperties::prepare(model, Some(mesh), maximum - before_properties)
                 .map_err(|error| match error {
                     crate::properties::PropertyCompilationError::ResourceCeiling {
                         required,
                         ..
-                    } => match base.checked_add(required) {
+                    } => match before_properties.checked_add(required) {
                         Some(required) => ResourcePlanningError::AccuracyCeiling {
                             resource: "thermal preassembly components",
                             required,
@@ -206,6 +217,21 @@ impl ThermalPreassemblyResourceFacts {
                     },
                     error => ResourcePlanningError::Invalid(error.to_string()),
                 })?;
+        // The solve path is selected against the budget left after every other component, so
+        // the selected path's whole preassembly reservation fits the budget.
+        let alongside = components
+            .checked_add(prepared.estimated_resident_bytes)
+            .ok_or(ResourcePlanningError::Overflow("thermal property compilation"))?;
+        require_ceiling(alongside, maximum)?;
+        let operators = select_thermal_solve_path(operators, &history, model, step, alongside)?;
+        let base = operators
+            .numerical_reservation_bytes(&history)?
+            .0
+            .checked_add(alongside)
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal field construction reservation",
+            ))?;
+        require_ceiling(base, maximum)?;
         let property_compilation_bytes = ByteCount(prepared.estimated_resident_bytes);
         let properties = prepared
             .materialize()
@@ -259,47 +285,65 @@ impl ThermalPreassemblyResourceFacts {
     }
 }
 
-/// The proving factorization when its reservation fits the run's resident budget; otherwise the
-/// conduction multigrid path for steady linear conduction (no radiation), whose reservation must
-/// fit the same budget. The budget is the step's resident ceiling, which a study run sets to
+/// The proving factorization when its preassembly total (numerical reservation plus `alongside`,
+/// the bytes of every other preassembly component) fits the run's resident budget; otherwise the
+/// conduction multigrid path for steady linear conduction (no radiation), whose total must fit the
+/// same budget. The budget is the step's resident ceiling, which a study run sets to
 /// min(authored, the memory the run is admitted to use), so the plan and every re-derivation
-/// select the same path.
+/// select the same path. A refusal names both totals when the multigrid path needs less than the
+/// factor and still exceeds the budget.
 pub(crate) fn select_thermal_solve_path(
     operators: ThermalOperatorResourceFacts,
     history: &ThermalHistoryResourceFacts,
     model: &AnalysisModel,
     step: &ProcedureStep,
+    alongside: u64,
 ) -> Result<ThermalOperatorResourceFacts, ResourcePlanningError> {
     let maximum = step.accuracy.resources.resident_byte_budget();
-    let factorization = operators.numerical_reservation_bytes(history)?.0;
+    let total = |bytes: u64| {
+        bytes
+            .checked_add(alongside)
+            .ok_or(ResourcePlanningError::Overflow("thermal solve path selection"))
+    };
+    let factorization = total(operators.numerical_reservation_bytes(history)?.0)?;
     if factorization <= maximum {
         return Ok(operators);
     }
-    // A steady thermal step is static; transient conduction keeps the factor its time steps reuse.
-    let multigrid_admitted = step.procedure == runmat_analysis_core::AnalysisProcedure::Static
+    // Without an admitted multigrid path, or when it needs no less than the factor, the refusal
+    // is the preassembly ceiling at the factor's total.
+    let ceiling = ResourcePlanningError::AccuracyCeiling {
+        resource: "thermal preassembly components",
+        required: factorization,
+        maximum,
+    };
+    if !multigrid_admitted(model, step) {
+        return Err(ceiling);
+    }
+    let multigrid = operators.on_path(super::ThermalSolvePath::ConductionMultigrid);
+    let multigrid_bytes = total(multigrid.numerical_reservation_bytes(history)?.0)?;
+    if multigrid_bytes > maximum && multigrid_bytes >= factorization {
+        return Err(ceiling);
+    }
+    if multigrid_bytes > maximum {
+        return Err(ResourcePlanningError::ThermalSolveCeiling {
+            factorization_resident_bytes: factorization,
+            multigrid_resident_bytes: multigrid_bytes,
+            maximum,
+        });
+    }
+    Ok(multigrid)
+}
+
+/// A steady thermal step is static; transient conduction keeps the factor its time steps reuse,
+/// and radiation needs the nonlinear solver.
+fn multigrid_admitted(model: &AnalysisModel, step: &ProcedureStep) -> bool {
+    step.procedure == runmat_analysis_core::AnalysisProcedure::Static
         && !model.boundaries.iter().any(|boundary| {
             matches!(
                 boundary.operator,
                 runmat_analysis_core::BoundaryOperator::ThermalRadiation { .. }
             )
-        });
-    if !multigrid_admitted {
-        return Err(ResourcePlanningError::ThermalSolveCeiling {
-            factorization_resident_bytes: factorization,
-            multigrid_resident_bytes: None,
-            maximum,
-        });
-    }
-    let multigrid = operators.on_path(super::ThermalSolvePath::ConductionMultigrid);
-    let multigrid_bytes = multigrid.numerical_reservation_bytes(history)?.0;
-    if multigrid_bytes > maximum {
-        return Err(ResourcePlanningError::ThermalSolveCeiling {
-            factorization_resident_bytes: factorization,
-            multigrid_resident_bytes: Some(multigrid_bytes),
-            maximum,
-        });
-    }
-    Ok(multigrid)
+        })
 }
 
 fn component_bytes(
@@ -311,14 +355,35 @@ fn component_bytes(
     model: ByteCount,
     metadata: &ThermalMetadataResourceFacts,
 ) -> Result<u64, ResourcePlanningError> {
-    let observations = observations.reservation_bytes()?.0;
-    let realization = realization.reservation_bytes()?.0;
-    let metadata = metadata.reservation_bytes()?.0;
     operators
         .numerical_reservation_bytes(history)?
         .0
-        .checked_add(sources.reservation_bytes()?.0)
-        .and_then(|bytes| bytes.checked_add(model.0))
+        .checked_add(component_bytes_besides_operators(
+            sources,
+            observations,
+            realization,
+            model,
+            metadata,
+        )?)
+        .ok_or(ResourcePlanningError::Overflow(
+            "thermal preassembly components",
+        ))
+}
+
+fn component_bytes_besides_operators(
+    sources: &ThermalSourceEvidenceResourceFacts,
+    observations: &ThermalObservationResourceFacts,
+    realization: &ThermalRealizationResourceFacts,
+    model: ByteCount,
+    metadata: &ThermalMetadataResourceFacts,
+) -> Result<u64, ResourcePlanningError> {
+    let observations = observations.reservation_bytes()?.0;
+    let realization = realization.reservation_bytes()?.0;
+    let metadata = metadata.reservation_bytes()?.0;
+    sources
+        .reservation_bytes()?
+        .0
+        .checked_add(model.0)
         .and_then(|bytes| bytes.checked_add(observations))
         .and_then(|bytes| bytes.checked_add(realization))
         .and_then(|bytes| bytes.checked_add(metadata))

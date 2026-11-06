@@ -424,9 +424,7 @@ pub(crate) fn assemble(
                                 evidence.add_projected(node, nodal, 0.0);
                             }
                         })
-                        .map_err(|error| {
-                            ThermalAssemblyError::InvalidProjection(error.to_string())
-                        })?;
+                        .map_err(ThermalAssemblyError::from)?;
                 }
             }
             _ => unreachable!(),
@@ -609,9 +607,7 @@ pub(crate) fn assemble(
                                 applied_source[node] += power * shape;
                             }
                         })
-                        .map_err(|error| {
-                            ThermalAssemblyError::InvalidProjection(error.to_string())
-                        })?;
+                        .map_err(ThermalAssemblyError::from)?;
                 }
             }
             BoundaryOperator::ThermalConvection {
@@ -654,9 +650,7 @@ pub(crate) fn assemble(
                                 }
                             }
                         })
-                        .map_err(|error| {
-                            ThermalAssemblyError::InvalidProjection(error.to_string())
-                        })?;
+                        .map_err(ThermalAssemblyError::from)?;
                 }
             }
             _ => {}
