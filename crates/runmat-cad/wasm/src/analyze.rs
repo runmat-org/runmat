@@ -366,7 +366,7 @@ pub fn analyze(
             let gap = request.values.get("gap").and_then(Value::as_f64).map(|mm| mm / 1000.0);
             let found = crate::study_checks::study_checks(path, text, files, configuration, gap)?;
             let errors = found.checks.iter().filter(|c| c.severity == "error").count();
-            let warnings = found.checks.len() - errors;
+            let warnings = found.checks.iter().filter(|c| c.severity == "warning").count();
             let plural = |n: usize| if n == 1 { "" } else { "s" };
             let mut summary = format!("{} · {} part{}", g(found.mass.total.mass), found.mass.parts.len(), plural(found.mass.parts.len()));
             summary += &if found.ready() {

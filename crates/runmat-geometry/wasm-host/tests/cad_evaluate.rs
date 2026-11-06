@@ -134,4 +134,8 @@ fn study_checks_stop_on_overlaps_and_missing_densities_and_warn_on_open_contacts
     assert!(overlapping["summary"].as_str().unwrap().contains("to fix before the study meshes"), "{overlapping}");
     let bare = run(&assembly(false), &BLOCK.replace(", material = \"material.aluminum_6061\"", ""));
     assert_eq!(checks(&bare).iter().filter(|c| c.0 == "mass").count(), 2, "{bare}");
+    // Blocks that touch (a 0 mm gap) are a contact, for information; no warning.
+    let touching = run(&assembly(false).replace("20.05 mm", "20 mm"), BLOCK);
+    assert_eq!(checks(&touching), [("fit".to_owned(), "info".to_owned())], "{touching}");
+    assert!(touching["summary"].as_str().unwrap().contains("ready to mesh · 0 warnings"), "{touching}");
 }
