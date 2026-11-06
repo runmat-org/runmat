@@ -13,7 +13,9 @@
 //! Every item has a UUID and a name; lookups accept either. [`footprint`] generates packages
 //! for standard families from IPC-7351 parameters.
 
+pub mod catalog;
 pub mod footprint;
+pub mod preview;
 
 use crate::geom::poly::Ring;
 use crate::geom::{Coord, Point};

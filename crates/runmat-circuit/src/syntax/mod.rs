@@ -41,6 +41,7 @@ pub mod board;
 pub mod board_edit;
 pub mod circuit_edit;
 pub mod layout;
+pub mod part_decl;
 pub mod simulation;
 pub mod simulation_print;
 pub mod simulation_spans;
@@ -89,11 +90,13 @@ pub mod words {
     pub const PROBE: &str = "probe";
     pub const MEASURE: &str = "measure";
     pub const OPTION: &str = "option";
+    /// A catalog part embedded in the circuit (`part "<mpn>" = { … }`).
+    pub const PART: &str = "part";
     /// Every statement word, for completion and the highlighter.
     pub const ALL: &[&str] = &[
         CIRCUIT, SHEET, ROOT, PARAM, NET_CLASS, INTERFACE, VARIANT, PORT, COMPONENT, NET, BUS,
         HARNESS, INSTANCE, CONNECT, NO_ERC, DIFF_PAIR, SIMULATION, SOURCE, MODEL, TOLERANCE,
-        ANALYSIS, PROBE, MEASURE, OPTION,
+        ANALYSIS, PROBE, MEASURE, OPTION, PART,
     ];
 }
 
@@ -424,6 +427,13 @@ fn read_circuit(reader: &mut Reader<'_>, declaration: &ast::Declaration) -> Desi
                             design.variants.insert(name, variant);
                         }
                     }
+                    words::PART => {
+                        if design.parts.contains_key(&name) {
+                            reader.diagnostics.push(diagnostic(span, format!("part `{name}` is declared twice")));
+                        } else if let Some(part) = reader.note(part_decl::read(name.clone(), value.value(), span)) {
+                            design.parts.insert(name, part);
+                        }
+                    }
                     other => reader.diagnostics.push(diagnostic(
                         span,
                         format!("`{other}` does not start a circuit statement"),
@@ -432,7 +442,7 @@ fn read_circuit(reader: &mut Reader<'_>, declaration: &ast::Declaration) -> Desi
             }
             _ => reader.diagnostics.push(diagnostic(
                 span,
-                "expected a sheet, a simulation, `root`, `param`, `net_class`, `interface` or `variant`",
+                "expected a sheet, a simulation, `root`, `param`, `net_class`, `interface`, `variant` or `part`",
             )),
         }
     }

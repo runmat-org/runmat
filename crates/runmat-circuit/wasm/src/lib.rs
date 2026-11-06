@@ -139,6 +139,20 @@ pub fn edit(path: &str, text: &str, files: &str, request: &str) -> String {
     }
 }
 
+/// A catalog part's previews for the library panel: its schematic symbol, footprint and body
+/// box (`runmat_circuit::library::preview`), from a part search hit's `part` record.
+#[wasm_bindgen]
+pub fn library_preview(part: &str) -> String {
+    let part: runmat_circuit::library::catalog::CatalogPart = match serde_json::from_str(part) {
+        Ok(p) => p,
+        Err(e) => return error_json(&format!("the part record isn't valid: {e}")),
+    };
+    match runmat_circuit::library::preview::preview(&part) {
+        Ok(p) => json(&serde_json::json!({ "ok": true, "preview": p })),
+        Err(m) => error_json(&m),
+    }
+}
+
 /// The last compiled board in 3D, as a part display (`runmat_circuit::board3d`), or `null`
 /// when the last compile had no board.
 #[wasm_bindgen]

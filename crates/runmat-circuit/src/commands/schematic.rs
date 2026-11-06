@@ -305,11 +305,12 @@ pub(super) fn add(c: &mut Catalog) {
             "library.place",
             "Place from pool",
             "library",
-            "Search the part pool and place a part.",
+            "Search the library and manufacturer parts, and place one on the sheet.",
         )
         .inputs(vec![
-            text("query", "Search", Some("10k 0603 1%")),
+            text("query", "Search", Some("buck regulator 36 V")),
             flag("in_stock", "In stock only", true),
+            text("designator", "Designator", Some("U?")).optional(),
         ])
         .edit(place("component", Section::Components)),
         sch(

@@ -44,6 +44,7 @@ mod autoroute;
 pub mod delta;
 mod edit;
 mod kicad;
+mod library_edit;
 mod rules;
 mod session;
 mod sim_edit;
@@ -281,10 +282,11 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
  * Loading a circuit and its board
  * --------------------------------------------------------------------------------------------- */
 
-/// The part pool the runtime elaborates against: the built-in library. Pools from
+/// The part pool the runtime elaborates against: the built-in library plus the design's own
+/// `part` declarations (a declared part replaces the built-in one of its MPN). Pools from
 /// `use library` lines are resolved by the package system, which does not exist yet.
-fn pool() -> Pool {
-    crate::fixture::standard_pool()
+fn pool(design: &Design) -> Result<Pool, String> {
+    crate::library::catalog::pool_with(crate::fixture::standard_pool(), &design.parts)
 }
 
 struct Layout {
@@ -532,7 +534,8 @@ fn load_with(
             .map_err(|m| vec![Diagnostic::error(&lock_path, Some(t), 0, 0, m)])?,
         None => LockSection::default(),
     };
-    let pool = pool();
+    let pool = pool(&design)
+        .map_err(|m| vec![Diagnostic::error(&circuit_path, Some(&circuit_text), 0, 0, m)])?;
     let netlist = elaborate(
         &design,
         &pool,

@@ -377,7 +377,8 @@ pub struct Design {
     pub variants: BTreeMap<String, VariantDef>,
     pub params: BTreeMap<String, Param>,
     /// `simulation` sections, by name.
-    pub simulations: BTreeMap<String, crate::simulation::SimulationDef>,
+    pub simulations: BTreeMap<String, crate::simulation::SimulationDef>,    /// The file's `part` declarations, by MPN: catalog parts embedded where they are used.
+    pub parts: BTreeMap<String, crate::library::catalog::CatalogPart>,
 }
 
 impl Design {

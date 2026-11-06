@@ -267,6 +267,12 @@ pub fn print_circuit(design: &Design) -> Print {
         }
         body.push(format!("variant {} = {}", name(k), record(&entries)));
     }
+    for (k, part) in &design.parts {
+        if &part.mpn != k {
+            return Err(PrintError(format!("part `{k}` is keyed by another MPN")));
+        }
+        body.push(super::part_decl::statement(part)?);
+    }
     for (k, sheet) in &design.sheets {
         if &sheet.name != k {
             return Err(PrintError(format!("sheet `{k}` is keyed by another name")));
