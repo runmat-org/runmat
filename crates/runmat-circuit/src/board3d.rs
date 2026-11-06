@@ -5,7 +5,11 @@
 //!
 //! The model is written as the part display the 3D canvas already draws (bodies of faces with
 //! positions and triangles), one body per material with its colour, so the renderer needs no
-//! board-specific path. Millimetres; z = 0 is the board's bottom surface.
+//! board-specific path. Within a material, each component's pads, body, terminals and leads are
+//! their own face referenced `component:<designator>`, the ID the schematic and board tabs
+//! select it by, so a selection highlights the part in 3D and a pick in 3D selects it; the rest
+//! of a material is one face referenced by the material's name. Millimetres; z = 0 is the
+//! board's bottom surface.
 
 use crate::geom::shape::Prim;
 use crate::geom::{to_mm, Point};
@@ -206,12 +210,17 @@ fn rect(c: (f64, f64), w: f64, l: f64, deg: f64) -> Vec<(f64, f64)> {
 }
 
 struct Model {
-    meshes: BTreeMap<&'static str, (Mesh, [f64; 4])>,
+    /// By material: its meshes by owner (a component's designator; empty for the board's own
+    /// geometry) and its colour.
+    meshes: BTreeMap<&'static str, (BTreeMap<String, Mesh>, [f64; 4])>,
+    /// The component whose geometry is being written, or empty.
+    owner: String,
 }
 
 impl Model {
     fn mesh(&mut self, name: &'static str, color: [f64; 4]) -> &mut Mesh {
-        &mut self.meshes.entry(name).or_insert_with(|| (Mesh::default(), color)).0
+        let owner = self.owner.clone();
+        self.meshes.entry(name).or_insert_with(|| (BTreeMap::new(), color)).0.entry(owner).or_default()
     }
 }
 
@@ -236,6 +245,7 @@ pub fn board_model(board: &Board) -> BoardModel {
     let n = board.copper_count();
     let mut m = Model {
         meshes: BTreeMap::new(),
+        owner: String::new(),
     };
     // Substrate: the outline extruded, mask on both faces.
     let outline = ring_mm(&board.outline.outer);
@@ -275,6 +285,7 @@ pub fn board_model(board: &Board) -> BoardModel {
     }
     // Pads in the finish; through holes on both sides with their drill.
     for f in board.footprints.values() {
+        m.owner = f.reference.clone();
         for p in f.pads(n) {
             let both = p.layers.len() > 1;
             let sides: Vec<bool> = if both {
@@ -295,6 +306,7 @@ pub fn board_model(board: &Board) -> BoardModel {
             }
         }
     }
+    m.owner.clear();
     // Silkscreen: package art and the placed designators.
     let silk_z = |side: Side| lift(side == Side::Top, MASK_T + SILK_T);
     let designators = crate::designators::designators(board);
@@ -311,7 +323,9 @@ pub fn board_model(board: &Board) -> BoardModel {
                 stroke(m.mesh("Silkscreen", colors::SILK), &pts, width, silk_z(f.side), !up);
             }
         }
+        m.owner = f.reference.clone();
         component(&mut m, f, n, top);
+        m.owner.clear();
     }
     for t in board.texts.values() {
         let up = !matches!(t.layer, crate::layout::Layer::Silk(Side::Bottom));
@@ -334,19 +348,23 @@ pub fn board_model(board: &Board) -> BoardModel {
         .meshes
         .into_iter()
         .enumerate()
-        .map(|(index, (name, (mesh, color)))| {
-            let triangle_count = mesh.triangles.len() / 3;
+        .map(|(index, (name, (meshes, color)))| {
+            let triangle_count = meshes.values().map(|mesh| mesh.triangles.len() / 3).sum();
             Body3d {
                 index,
                 reference: name.to_owned(),
                 color,
-                faces: vec![Face3d {
-                    index: 0,
-                    reference: Some(name.to_owned()),
-                    features: Vec::new(),
-                    positions: mesh.positions.iter().map(|v| (v * 1e4).round() / 1e4).collect(),
-                    triangles: mesh.triangles,
-                }],
+                faces: meshes
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (owner, mesh))| Face3d {
+                        index: i,
+                        reference: Some(if owner.is_empty() { name.to_owned() } else { format!("component:{owner}") }),
+                        features: Vec::new(),
+                        positions: mesh.positions.iter().map(|v| (v * 1e4).round() / 1e4).collect(),
+                        triangles: mesh.triangles,
+                    })
+                    .collect(),
                 edges: Vec::new(),
                 vertices: Vec::new(),
                 triangle_count,

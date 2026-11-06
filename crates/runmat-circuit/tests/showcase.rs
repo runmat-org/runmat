@@ -297,3 +297,32 @@ fn the_eco_variant_stages_value_changes_that_keep_the_board_clean() {
     );
     assert_eq!(index.eco.total, 0, "the board is in sync after the update");
 }
+
+/// The 3D board keeps each component as its own face referenced `component:<designator>`, the
+/// ID the schematic and board tabs select it by, so selections cross-probe into 3D.
+#[test]
+fn the_3d_board_references_each_component_by_its_selection_id() {
+    let files = files();
+    let layout = "/p/daq.circuit.layout";
+    let board = runmat_circuit::syntax::board::parse_board(layout, &files[layout]).board.expect("reads");
+    let model = runmat_circuit::board3d::board_model(&board);
+    let refs = |material: &str| -> Vec<String> {
+        model
+            .bodies
+            .iter()
+            .filter(|b| b.reference == material)
+            .flat_map(|b| b.faces.iter().filter_map(|f| f.reference.clone()))
+            .collect()
+    };
+    let packages = refs("Packages");
+    assert!(!packages.is_empty() && packages.iter().all(|r| r.starts_with("component:")), "{packages:?}");
+    for f in board.footprints.values().filter(|f| f.package.body.is_some()) {
+        let id = format!("component:{}", f.reference);
+        assert!(model.bodies.iter().any(|b| b.faces.iter().any(|x| x.reference.as_deref() == Some(id.as_str()))), "{id} has no face in 3D");
+    }
+    // Shared geometry stays one face named by its material, and faces number from 0 per body.
+    assert_eq!(refs("Board edge"), ["Board edge"]);
+    assert_eq!(refs("Silkscreen"), ["Silkscreen"]);
+    assert!(model.bodies.iter().all(|b| b.faces.iter().enumerate().all(|(i, f)| f.index == i)));
+    assert!(refs("Pads").iter().filter(|r| r.starts_with("component:")).count() >= board.footprints.len() / 2);
+}
