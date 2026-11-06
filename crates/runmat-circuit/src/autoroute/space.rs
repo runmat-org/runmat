@@ -22,8 +22,12 @@ pub struct Space {
     holes: Grid<u32>,
     hole_list: Vec<(Point, Coord)>,
     edge: EdgeIndex,
-    /// Copper to copper of other nets.
+    /// Copper to copper of other nets: the largest any pair needs, and the search radius.
     pub clearance: Coord,
+    /// Each net's class clearance (by net id; 0 for a net with none).
+    net_clearance: Vec<Coord>,
+    /// What every pair keeps: the board's minimum, or a written rule's larger value.
+    floor: Coord,
     /// Hole edge to hole edge.
     pub hole_to_hole: Coord,
     /// Copper to the board edge.
@@ -36,9 +40,13 @@ pub struct Space {
 }
 
 impl Space {
-    /// The board's copper, with `clearance` between nets (the largest clearance the board's
-    /// rules ask for, so every route the router places passes DRC).
+    /// The board's copper, with at most `clearance` between nets (the largest clearance the
+    /// board's rules ask for). Two nets keep the larger of their net classes' clearances, or
+    /// the board's minimum, so every route the router places passes DRC without spacing a
+    /// signal from a signal at a power class's value. A written clearance rule holds for every
+    /// pair.
     pub fn new(board: &Board, clearance: Coord) -> Space {
+        let (net_clearance, floor) = pair_clearances(board);
         let mut rings = vec![board.outline.outer.clone()];
         rings.extend(board.outline.holes.iter().cloned());
         let mut s = Space {
@@ -48,6 +56,8 @@ impl Space {
             hole_list: Vec::new(),
             edge: EdgeIndex::new(rings.iter(), crate::geom::mm(2.0)),
             clearance,
+            net_clearance,
+            floor,
             hole_to_hole: board.limits.min_hole_to_hole,
             edge_clearance: board.limits.min_copper_to_edge,
             keepouts: Vec::new(),
@@ -119,7 +129,11 @@ impl Space {
     /// Whether `prim` of net `net` on the layers of `mask` keeps `clearance + extra` from all
     /// other copper and the edge clearance from the board edge, inside the outline.
     pub fn free(&self, net: Option<NetId>, mask: u64, prim: &Prim, extra: Coord) -> bool {
-        let need = (self.clearance + extra) as f64;
+        let class = |n: Option<NetId>| {
+            n.and_then(|n| self.net_clearance.get(n.0 as usize).copied())
+                .unwrap_or(0)
+        };
+        let own = class(net).max(self.floor);
         let bb = prim.bbox();
         let anchor = prim.anchor();
         if self.edge.contains(anchor) != Some(true) {
@@ -140,6 +154,7 @@ impl Space {
                 if o.mask & mask == 0 || (net.is_some() && o.net == net) {
                     return;
                 }
+                let need = (own.max(class(o.net)).min(self.clearance) + extra) as f64;
                 if prim.gap(&o.prim) < need {
                     ok = false;
                 }
@@ -184,4 +199,29 @@ impl Space {
         });
         hit
     }
+}
+
+/// Each net's class clearance, and the clearance every pair keeps (the board's minimum, or the
+/// largest written clearance rule), each with 5 µm of rounding margin.
+fn pair_clearances(board: &Board) -> (Vec<Coord>, Coord) {
+    use crate::board_rules::{props, BoardRules};
+    let margin = 5_000;
+    let class_value = |class: &str| {
+        board.net_class_rules.get(class).and_then(|c| {
+            c.decls.iter().find(|(k, _)| k == props::CLEARANCE).and_then(|(_, v)| v.as_len())
+        })
+    };
+    let by_net = board
+        .nets
+        .iter()
+        .map(|n| n.class.as_deref().and_then(class_value).map_or(0, |c| c + margin))
+        .collect();
+    let written = if board.net_class_rules.is_empty() {
+        BoardRules::for_board(board).0.max_clearance()
+    } else {
+        let mut only_written = board.clone();
+        only_written.net_class_rules.clear();
+        BoardRules::for_board(&only_written).0.max_clearance()
+    };
+    (by_net, board.limits.min_clearance.max(written) + margin)
 }

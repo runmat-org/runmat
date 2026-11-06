@@ -23,49 +23,49 @@ entry 08bfa164-66e8-891e-8650-16db9845d34e net /VBAT_SENSE
 entry 2d83ce59-631b-8a92-826f-4091fc2e4a07 net /VTX_RX
 entry a470a52f-d6e0-830b-a26e-b0f3547db122 net /VTX_TX
 entry 6bd9e6cc-ca75-8b1d-b60a-2492a8bd5f66 sheet /conn
-entry 3a8fc463-9a68-82f5-9d8e-c9327a482ef2 net /conn/CC1
-entry 87982d4b-aed5-8af2-af3d-1a9200dc76a9 net /conn/CC2
-entry 3199c79e-bbab-8aa5-aa70-b8ef315d9c0e component /conn/D3 designator=D3
-entry c6dc18d1-0063-87d6-8550-cfb55d940cec component /conn/H1 designator=H1
-entry 4bf1db97-eec9-8a60-92fb-5b1d683f035b component /conn/H2 designator=H2
-entry d3d5a4fd-d69f-8319-9842-459acfd773bd component /conn/H3 designator=H3
-entry 278ff900-8727-83f5-ba82-2a3b88d76869 component /conn/H4 designator=H4
-entry 6f29a9a9-5c84-851a-b313-1ed1c179f953 component /conn/J1 designator=J1
-entry 97192a52-695b-8739-a43d-4d8c1b7f4d6c component /conn/J2 designator=J2
-entry cc868d7e-9f66-8008-90e6-12391c02553f component /conn/J3 designator=J3
-entry c19957a4-dd9b-81f2-ac9f-9708e0d58321 component /conn/J4 designator=J4
-entry 653acf73-5194-8fba-b9f5-8fe504d073ef component /conn/R2 designator=R2
-entry de46c645-a444-8453-9887-473d32f4ab5d component /conn/R3 designator=R3
-entry 2596c5b1-f030-8c9c-8f7f-ad087a062872 net /conn/VBUS
+entry b470430a-b0be-80df-a9c4-ee91bf0b48d6 net /conn/CC1
+entry 144ef042-10b4-8e01-9e72-02c00308b875 net /conn/CC2
+entry fc7b7f09-5510-8b11-b262-7e7d429aec0b component /conn/D3 designator=D3
+entry 44f319b3-cc0c-8b7f-b1e3-227e18df66df component /conn/H1 designator=H1
+entry db9a33ac-82e5-83cd-9cb5-9a7aedaab3b6 component /conn/H2 designator=H2
+entry 84df3e25-dce4-8675-ba4e-41bbfd3a9c14 component /conn/H3 designator=H3
+entry 27ac09ed-fb8e-84fe-becd-34fb302cc1b8 component /conn/H4 designator=H4
+entry f4249c8f-9455-8e54-8328-5dad1c59cc64 component /conn/J1 designator=J1
+entry 524868a8-45da-8d55-9a53-a24a23ed46bb component /conn/J2 designator=J2
+entry 4545051e-ee85-877d-b4b1-3971225bbc65 component /conn/J3 designator=J3
+entry c2045e61-2112-8bc0-9e82-6cf4545f84e0 component /conn/J4 designator=J4
+entry 6dbbc19b-1c95-8ffa-b2ce-b8a41c6fd631 component /conn/R2 designator=R2
+entry 2b695442-d674-801b-af90-afeef09f844e component /conn/R3 designator=R3
+entry 8544a78c-cc4d-8dee-a894-f5903221e379 net /conn/VBUS
 entry 7fd66c01-04c4-81aa-b3e8-c528cf6a96b6 sheet /mcu
-entry 6afafe6a-ece8-8633-919c-2f84a5f34592 net /mcu/BOOT0
-entry 962a746a-98f5-8974-8793-f75dc57407a8 component /mcu/C1 designator=C1
-entry 196c76ae-63d2-8a70-8ea7-73633585d135 component /mcu/C10 designator=C10
-entry d13ea049-bf3a-8fa3-be13-76405bf43d0d component /mcu/C11 designator=C11
-entry f11ede40-d827-89c9-9db2-515969d0b0ea component /mcu/C2 designator=C2
-entry e4e7025f-e6ec-8788-a210-0d845c39a32d component /mcu/C3 designator=C3
-entry 7cd5a341-7ccf-8c34-840c-ad102d146d3c component /mcu/C4 designator=C4
-entry 7ee1f994-9140-8947-9e66-5de0c9e65954 component /mcu/C5 designator=C5
-entry d6a9886a-11f3-8b3f-9a6f-06ba2fb02240 component /mcu/C6 designator=C6
-entry ca71ac89-20b8-88fb-81d1-280a315812df component /mcu/C7 designator=C7
-entry a6f4e358-f2c6-8b04-8d4f-c3aa6997c4c1 component /mcu/C8 designator=C8
-entry e07af32b-51b3-8e0d-9b6a-d62e7a4ba39a component /mcu/C9 designator=C9
-entry 0b2f4665-2229-8a8e-bf44-c19277253230 component /mcu/D1 designator=D1
-entry 2561ebbd-ca70-8864-b5f3-8fd716bd9c09 component /mcu/D2 designator=D2
-entry c9c77f85-2b7e-8f1d-9a39-e02a29b69315 net /mcu/LED1
-entry 2c8bb11e-f27f-8cb0-bdd0-e6638abe5027 net /mcu/LED1_K
-entry 73bf8833-b065-8c93-8f92-917cc965469b net /mcu/LED2
-entry 0bb9a811-6e4c-81b1-b6bb-edeb1f484da7 net /mcu/LED2_K
-entry 93ca1a61-dac5-8397-9f04-dd16bbd17316 net /mcu/NRST
-entry 24a34075-abf2-81b9-b29a-5876f3c8328b net /mcu/OSC_IN
-entry 863e6586-b3b5-8ca4-99a8-a4e94b3411cd net /mcu/OSC_OUT
-entry fc95cff5-57fd-8fba-8fb2-a5a4648c475a component /mcu/R1 designator=R1
-entry f156e200-a6dd-8c52-9c9a-6dd987ca8c29 component /mcu/R13 designator=R13
-entry 9c73774c-2778-84f6-bae8-b39812c12204 component /mcu/R4 designator=R4
-entry 4e84df4b-68ac-8442-b84c-a1d8f1c2a578 component /mcu/R5 designator=R5
-entry e08cd49c-5432-8a0d-a2f1-912e98e6de9c component /mcu/U1 designator=U1
-entry 961f517b-1933-825c-9c92-520c1e10131c net /mcu/VCAP
-entry f393be6b-e069-874f-961c-de68c28cb102 component /mcu/Y1 designator=Y1
+entry af97cdde-6540-8f39-a765-aecfdcdf7535 net /mcu/BOOT0
+entry 0aba2668-af47-8ef4-9801-127278123861 component /mcu/C1 designator=C1
+entry 4162d714-9661-8f90-b1f9-6c6d57f3dfe5 component /mcu/C10 designator=C10
+entry 3895cc8f-cc0c-89e6-8ae3-d1454541f212 component /mcu/C11 designator=C11
+entry 66d2c5f6-289a-8bca-b984-80f7e8be8761 component /mcu/C2 designator=C2
+entry 21f9efd6-cdec-8a25-bbf2-7aa53b9ffa6a component /mcu/C3 designator=C3
+entry 780b108b-40c5-8cdf-b618-00a19d699ce9 component /mcu/C4 designator=C4
+entry c68d48eb-8f0c-8238-b53b-b5098c1e4798 component /mcu/C5 designator=C5
+entry 7760316d-bb36-8d07-b239-a3a87fed6e0a component /mcu/C6 designator=C6
+entry 10f5bb20-ff8e-884e-b1fd-83bbe485c44b component /mcu/C7 designator=C7
+entry cbd1ad37-c2ea-8bc9-9136-19405a201636 component /mcu/C8 designator=C8
+entry 947a3f7b-d404-8b92-800f-a55a65e0ac61 component /mcu/C9 designator=C9
+entry 81038467-d340-864f-adaa-acc877dd88ea component /mcu/D1 designator=D1
+entry 641bb398-fe32-8027-acbe-b0f0da4e5fff component /mcu/D2 designator=D2
+entry 1dcbbec2-8e64-84ca-acee-b6ceaa3e960c net /mcu/LED1
+entry c88fe6dd-a05c-8516-8ce6-ee28898f8b1f net /mcu/LED1_K
+entry e486c096-a40f-8291-8cc6-d90af3d61e50 net /mcu/LED2
+entry bc183a47-f5f4-85fb-81e2-993f054544e9 net /mcu/LED2_K
+entry e4a32fdd-509c-8279-a552-f3b82abb2d2b net /mcu/NRST
+entry f66579e8-0ef6-86a2-9f00-9a5240c19c63 net /mcu/OSC_IN
+entry a5130e84-b267-8bac-aba3-c09b2217794e net /mcu/OSC_OUT
+entry b3b643dc-dbd8-8d2a-9829-07af73b74254 component /mcu/R1 designator=R1
+entry 63aae9b9-1256-854f-895c-91b29c656fcf component /mcu/R13 designator=R13
+entry 929febcc-5f61-8ed3-be8e-6ebc28e24387 component /mcu/R4 designator=R4
+entry 8649098f-43c7-84b6-b4fa-50ea5a8bd682 component /mcu/R5 designator=R5
+entry 5005c5f4-d7b0-8517-8e38-6cfc13e5a5a3 component /mcu/U1 designator=U1
+entry 84f93fa7-dc5a-87f1-8299-eae53d3fbdb3 net /mcu/VCAP
+entry 7e28bd85-6a3b-83ef-ad73-fb083d4891cb component /mcu/Y1 designator=Y1
 entry a968abfa-cbf9-8f6f-bb15-cc4abf8e5f57 sheet /pwr
 entry ca6c9b16-a151-89bf-ac52-787bb6a9b106 net /pwr/BST
 entry 744dfdda-312d-8ec3-9b5f-d3f285ce8510 component /pwr/C12 designator=C12
@@ -194,3 +194,61 @@ fp /sens/R11 16272300-3f5a-830a-aaa6-785c25d2a4f8|+3V3,I2C_SCL
 fp /sens/R12 16272300-3f5a-830a-aaa6-785c25d2a4f8|+3V3,I2C_SDA
 fp /sens/U4 c9fe0507-9bfe-8c53-862d-98a56732af8a|+3V3,GND,IMU_CS,IMU_INT,SPI_MISO,SPI_MOSI,SPI_SCK
 fp /sens/U5 1feca7e2-e662-8ad7-a8ab-f5bbda13cee1|+3V3,GND,I2C_SCL,I2C_SDA
+place connectors/D3 139.7 83.82 0
+place connectors/H1 104.14 133.35 0
+place connectors/H2 113.03 133.35 0
+place connectors/H3 121.92 133.35 0
+place connectors/H4 130.81 133.35 0
+place connectors/J1 104.14 83.82 0 mirror
+place connectors/J2 226.06 74.93 0
+place connectors/J3 181.61 77.47 0
+place connectors/J4 67.31 135.89 0
+place connectors/R2 52.07 85.09 270
+place connectors/R3 64.77 87.63 270
+place main/conn 106.68 52.07 0
+place main/mcu 167.64 52.07 0
+place main/pwr 106.68 102.87 0
+place main/sens 106.68 133.35 0
+place mcu/C1 185.42 80.01 270
+place mcu/C10 44.45 72.39 270
+place mcu/C11 57.15 74.93 270
+place mcu/C2 172.72 71.12 270
+place mcu/C3 81.28 139.7 270
+place mcu/C4 96.52 139.7 270
+place mcu/C5 111.76 139.7 270
+place mcu/C6 127 139.7 270
+place mcu/C7 142.24 139.7 270
+place mcu/C8 81.28 161.29 270
+place mcu/C9 96.52 161.29 270
+place mcu/D1 236.22 99.06 270
+place mcu/D2 248.92 115.57 270
+place mcu/R1 69.85 77.47 270
+place mcu/R13 57.15 57.15 90
+place mcu/R4 207.01 90.17 0
+place mcu/R5 207.01 106.68 0
+place mcu/U1 111.76 86.36 0
+place mcu/Y1 207.01 71.12 0
+place power/C12 86.36 130.81 270
+place power/C13 101.6 130.81 270
+place power/C14 93.98 76.2 0
+place power/C15 133.35 114.3 270
+place power/C16 148.59 114.3 270
+place power/C17 57.15 93.98 270
+place power/C18 181.61 129.54 270
+place power/C19 196.85 129.54 270
+place power/C20 237.49 99.06 270
+place power/L1 129.54 102.87 0
+place power/R10 222.25 99.06 270
+place power/R6 69.85 93.98 270
+place power/R7 69.85 111.76 270
+place power/R8 44.45 96.52 270
+place power/R9 222.25 81.28 270
+place power/U2 93.98 102.87 0
+place power/U3 189.23 102.87 0
+place sensors/C21 195.58 129.54 270
+place sensors/C22 105.41 124.46 270
+place sensors/C23 210.82 129.54 270
+place sensors/R11 67.31 86.36 270
+place sensors/R12 149.86 86.36 270
+place sensors/U4 203.2 97.79 0
+place sensors/U5 105.41 95.25 0
