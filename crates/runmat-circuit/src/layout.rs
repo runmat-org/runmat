@@ -735,7 +735,7 @@ pub struct BoardNet {
 }
 
 /// Board-wide fabrication minimums; they are the defaults under every rule.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct FabLimits {
     pub min_clearance: Coord,
     pub min_track: Coord,
@@ -746,6 +746,24 @@ pub struct FabLimits {
     pub min_copper_to_edge: Coord,
     pub min_silk_to_pad: Coord,
     pub min_microvia_drill: Coord,
+    /// Where each value written in the layout's `limits` is (`clearance` → its text). A key
+    /// missing here keeps RunMat's default; DRC findings name either as the rule.
+    pub sources: BTreeMap<String, runmat_rules::SourceKey>,
+}
+
+/// Limits are equal by value: moving the `limits` line in its file changes no check.
+impl PartialEq for FabLimits {
+    fn eq(&self, o: &Self) -> bool {
+        self.min_clearance == o.min_clearance
+            && self.min_track == o.min_track
+            && self.min_via_diameter == o.min_via_diameter
+            && self.min_drill == o.min_drill
+            && self.min_annular == o.min_annular
+            && self.min_hole_to_hole == o.min_hole_to_hole
+            && self.min_copper_to_edge == o.min_copper_to_edge
+            && self.min_silk_to_pad == o.min_silk_to_pad
+            && self.min_microvia_drill == o.min_microvia_drill
+    }
 }
 
 impl Default for FabLimits {
@@ -760,6 +778,7 @@ impl Default for FabLimits {
             min_copper_to_edge: mm(0.3),
             min_silk_to_pad: mm(0.1),
             min_microvia_drill: mm(0.1),
+            sources: BTreeMap::new(),
         }
     }
 }

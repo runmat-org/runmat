@@ -143,6 +143,30 @@ fn owner_prims(board: &Board, it: BItem) -> Vec<(Option<NetId>, u64, Prim)> {
     }
 }
 
+/// The two ends of a clearance finding's gap between copper items (not pours), on its
+/// layer: the view dimensions the gap between them.
+pub fn gap_ends(board: &Board, f: &DrcFinding) -> Option<(Point, Point)> {
+    let [a, b] = f.items.as_slice() else { return None };
+    if f.code != "clearance" || matches!(a, BItem::Zone(_)) || matches!(b, BItem::Zone(_)) {
+        return None;
+    }
+    let on = |m: u64| f.layer.is_none_or(|l| m & (1u64 << l) != 0);
+    let (pa, pb) = (owner_prims(board, *a), owner_prims(board, *b));
+    let mut best: Option<(f64, (Point, Point))> = None;
+    for (_, ma, x) in pa.iter().filter(|p| on(p.1)) {
+        for (_, mb, y) in pb.iter().filter(|p| on(p.1)) {
+            if ma & mb == 0 {
+                continue;
+            }
+            let g = x.gap(y);
+            if best.is_none_or(|(bg, _)| g < bg) {
+                best = Some((g, x.closest(y)));
+            }
+        }
+    }
+    best.map(|b| b.1)
+}
+
 fn copper_owners(board: &Board) -> Vec<BItem> {
     let mut v = Vec::new();
     for f in board.footprints.values() {

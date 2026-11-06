@@ -406,6 +406,9 @@ pub fn chip(kind: &str, code: &str, density: Density) -> Option<Package> {
     ))
 }
 
+/// Least copper gap between a terminal land and the exposed pad of its package, mm.
+pub const EP_GAP: f64 = 0.2;
+
 /// Parameters of a dual- or quad-row gull-wing, J-lead or no-lead package.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LeadedSpec {
@@ -455,14 +458,29 @@ pub fn leaded(spec: &LeadedSpec, density: Density) -> Package {
     );
     let mut pads = Vec::new();
     let per_row = pins / rows;
+    // The terminals' inner (heel) ends stop `EP_GAP` short of the exposed pad, so a land
+    // pattern never joins a pin to the thermal pad; the toe ends stay where IPC puts them.
+    let (ep_x, ep_y) = spec.exposed_pad.unwrap_or((0.0, 0.0));
+    let heel_trim = |center: f64, length: f64, ep_half: f64| -> (f64, f64) {
+        let (inner, outer) = (center - length / 2.0, center + length / 2.0);
+        let min_inner = if spec.exposed_pad.is_some() {
+            round_up(ep_half + EP_GAP)
+        } else {
+            inner
+        };
+        let inner = inner.max(min_inner).min(outer - 0.1);
+        ((inner + outer) / 2.0, outer - inner)
+    };
+    let (x_center, x_length) = heel_trim(land_x.pad_center(), land_x.pad_length(), ep_x / 2.0);
+    let (y_center, y_length) = heel_trim(land_y.pad_center(), land_y.pad_length(), ep_y / 2.0);
     let x_pad = PadShape::RoundRect {
-        w: mm(land_x.pad_length()),
+        w: mm(x_length),
         h: mm(land_x.x),
         ratio: 0.25,
     };
     let y_pad = PadShape::RoundRect {
         w: mm(land_y.x),
-        h: mm(land_y.pad_length()),
+        h: mm(y_length),
         ratio: 0.25,
     };
     let row_pos = |i: u32| (i as f64 - (per_row as f64 - 1.0) / 2.0) * pitch;
@@ -478,7 +496,7 @@ pub fn leaded(spec: &LeadedSpec, density: Density) -> Package {
             push(
                 &mut pads,
                 &mut n,
-                Point::mm(-land_x.pad_center(), -row_pos(i)),
+                Point::mm(-x_center, -row_pos(i)),
                 &x_pad,
             );
         }
@@ -486,7 +504,7 @@ pub fn leaded(spec: &LeadedSpec, density: Density) -> Package {
             push(
                 &mut pads,
                 &mut n,
-                Point::mm(land_x.pad_center(), row_pos(i)),
+                Point::mm(x_center, row_pos(i)),
                 &x_pad,
             );
         }
@@ -496,7 +514,7 @@ pub fn leaded(spec: &LeadedSpec, density: Density) -> Package {
             push(
                 &mut pads,
                 &mut n,
-                Point::mm(-land_x.pad_center(), -row_pos(i)),
+                Point::mm(-x_center, -row_pos(i)),
                 &x_pad,
             );
         }
@@ -504,7 +522,7 @@ pub fn leaded(spec: &LeadedSpec, density: Density) -> Package {
             push(
                 &mut pads,
                 &mut n,
-                Point::mm(row_pos(i), -land_y.pad_center()),
+                Point::mm(row_pos(i), -y_center),
                 &y_pad,
             );
         }
@@ -512,7 +530,7 @@ pub fn leaded(spec: &LeadedSpec, density: Density) -> Package {
             push(
                 &mut pads,
                 &mut n,
-                Point::mm(land_x.pad_center(), row_pos(i)),
+                Point::mm(x_center, row_pos(i)),
                 &x_pad,
             );
         }
@@ -520,7 +538,7 @@ pub fn leaded(spec: &LeadedSpec, density: Density) -> Package {
             push(
                 &mut pads,
                 &mut n,
-                Point::mm(-row_pos(i), land_y.pad_center()),
+                Point::mm(-row_pos(i), y_center),
                 &y_pad,
             );
         }
@@ -716,6 +734,26 @@ pub fn qfn(pins: u32, body: f64, pitch: f64, ep: Option<f64>, density: Density) 
         density,
     )
 }
+
+/// A power package's tab pins: the named terminals of a two-row package run inward until they
+/// overlap its exposed pad by `TAB_OVERLAP`, so they and the tab are one copper (a power
+/// MOSFET's drain pins and its drain tab). The other terminals keep [`EP_GAP`] to the tab.
+pub fn join_to_tab(pkg: &mut Package, pins: &[&str]) {
+    let Some(ep) = pkg.pads.iter().find(|p| p.thermal_pad).map(|p| p.shape.size()) else {
+        return;
+    };
+    let reach = ep.0 / 2 - mm(TAB_OVERLAP);
+    for pad in pkg.pads.iter_mut().filter(|p| pins.contains(&p.name.as_str())) {
+        let PadShape::RoundRect { w, .. } = &mut pad.shape else { continue };
+        let side = pad.at.x.signum();
+        let outer = pad.at.x.abs() + *w / 2;
+        *w = outer - reach;
+        pad.at.x = side * (outer + reach) / 2;
+    }
+}
+
+/// How far tab pins reach onto the exposed pad, mm.
+pub const TAB_OVERLAP: f64 = 0.1;
 
 /// DFN/SON two-row no-lead package.
 pub fn dfn(

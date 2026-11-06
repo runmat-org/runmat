@@ -272,7 +272,9 @@ pub(super) fn add(p: &mut Pool) {
 
     // 40 V N-channel power MOSFET, 3.3 x 3.3 mm 8-pin power package (S 1-3, G 4, D 5-8 and tab).
     let fet = make::simple_entity(p, "nmos", "Q", &[("D", Passive), ("G", Input), ("S", Passive)]);
-    let dfn8 = p.add_package(footprint::dfn(8, (3.3, 3.3), 0.65, Some((2.4, 1.8)), Density::B));
+    let mut drain_tab = footprint::dfn(8, (3.3, 3.3), 0.65, Some((2.4, 1.8)), Density::B);
+    footprint::join_to_tab(&mut drain_tab, &["5", "6", "7", "8"]);
+    let dfn8 = p.add_package(drain_tab);
     let q = make::part(p, "NMOS-40V-DFN8", "Generic", fet, dfn8, &[("S", &["1", "2", "3"]), ("G", &["4"]), ("D", &["5", "6", "7", "8", "9"])]);
     describe(p, q, "40 V N-channel MOSFET, 1.6 mOhm at 10 V, 3.3 x 3.3 mm power package");
     quantity(p, q, "rds_on", 1.6e-3, Dim::RESISTANCE, 15.0);

@@ -574,6 +574,57 @@ pub struct BoardRules {
     pub single: Cascade<RuleValue, BItem>,
     pub pair: PairCascade<RuleValue, BItem>,
     pub specs: Vec<RuleSpec>,
+    /// The rule a property falls back to when no rule sets it: the layout's `limits` value
+    /// (`limits.clearance` at its text) or, when the layout doesn't write it, RunMat's default
+    /// rule set (`default.clearance`, no source).
+    pub defaults: BTreeMap<&'static str, (String, SourceKey)>,
+}
+
+/// The `limits` key behind each property's default, if a limit sets it.
+pub const LIMIT_OF: [(&str, &str); 7] = [
+    (props::CLEARANCE, "clearance"),
+    (props::TRACK_WIDTH_MIN, "track"),
+    (props::HOLE_MIN, "drill"),
+    (props::ANNULAR_MIN, "annular"),
+    (props::HOLE_TO_HOLE, "hole_to_hole"),
+    (props::EDGE_CLEARANCE, "copper_to_edge"),
+    (props::SILK_CLEARANCE, "silk_to_pad"),
+];
+
+/// The name of RunMat's default rule set, the origin of every value a layout doesn't write.
+pub const DEFAULT_RULE_SET: &str = "RunMat default limits";
+
+fn default_origins(limits: &FabLimits) -> BTreeMap<&'static str, (String, SourceKey)> {
+    let defaults = [
+        props::CLEARANCE,
+        props::TRACK_WIDTH_MIN,
+        props::TRACK_WIDTH,
+        props::TRACK_WIDTH_MAX,
+        props::VIA_DIAMETER,
+        props::VIA_DRILL,
+        props::ANNULAR_MIN,
+        props::HOLE_MIN,
+        props::VIA_TYPES,
+        props::SPOKE_MIN,
+        props::HOLE_TO_HOLE,
+        props::SILK_CLEARANCE,
+        props::COURTYARD_CLEARANCE,
+        props::EDGE_CLEARANCE,
+    ];
+    defaults
+        .into_iter()
+        .map(|prop| {
+            let written = LIMIT_OF
+                .iter()
+                .find(|(p, _)| *p == prop)
+                .and_then(|(_, key)| Some((*key, limits.sources.get(*key)?)));
+            let origin = match written {
+                Some((key, src)) => (format!("limits.{key}"), src.clone()),
+                None => (format!("default.{prop}"), SourceKey::default()),
+            };
+            (prop, origin)
+        })
+        .collect()
 }
 
 impl BoardRules {
@@ -689,6 +740,7 @@ impl BoardRules {
                 single,
                 pair,
                 specs: specs.to_vec(),
+                defaults: default_origins(limits),
             },
             errs,
         )
@@ -740,7 +792,7 @@ impl BoardRules {
     pub fn pair_origin(&self, a: BItem, b: BItem, prop: &str) -> (String, SourceKey) {
         match self.pair.resolve(a, b, prop).and_then(|r| r.rule) {
             Some(w) => (w.rule_id, w.source),
-            None => ("default".into(), SourceKey::default()),
+            None => self.default_origin(prop),
         }
     }
     pub fn single_origin(&self, g: &BoardGraph, it: BItem, prop: &str) -> (String, SourceKey) {
@@ -752,10 +804,21 @@ impl BoardRules {
                 runmat_rules::Origin::Rule {
                     rule_id, source, ..
                 } => (rule_id, source),
-                _ => ("default".into(), SourceKey::default()),
+                _ => self.default_origin(prop),
             },
-            _ => ("default".into(), SourceKey::default()),
+            _ => self.default_origin(prop),
         }
+    }
+    /// The origin of `prop`'s value when no rule sets it (see [`BoardRules::defaults`]).
+    pub fn default_origin(&self, prop: &str) -> (String, SourceKey) {
+        self.defaults
+            .get(prop)
+            .cloned()
+            .unwrap_or_else(|| (format!("default.{prop}"), SourceKey::default()))
+    }
+    /// Whether `rule` is a fallback value (a `limits` entry or RunMat's default), not a rule.
+    pub fn is_fallback(rule: &str) -> bool {
+        rule.starts_with("limits.") || rule.starts_with("default.")
     }
 }
 

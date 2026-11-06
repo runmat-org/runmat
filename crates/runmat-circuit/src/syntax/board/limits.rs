@@ -45,15 +45,24 @@ pub(super) fn limit_fields(l: &mut FabLimits) -> [&mut Coord; 9] {
     ]
 }
 
-pub(super) fn read_limits(v: &Val) -> Read<FabLimits> {
+/// The `limits` record of the layout at `path`; each value written keeps where it is, so a
+/// finding against it can name that line.
+pub(super) fn read_limits(v: &Val, path: &str) -> Read<FabLimits> {
     let mut f = Fields::of(v, "limits")?;
     let mut l = FabLimits::default();
+    let mut sources = BTreeMap::new();
     for (key, field) in LIMIT_KEYS.iter().zip(limit_fields(&mut l)) {
-        if let Some(v) = f.opt(key, len)? {
-            *field = v;
+        if let Some(val) = f.get(key) {
+            *field = len(val)?;
+            let s = val.span;
+            sources.insert(
+                (*key).to_owned(),
+                runmat_rules::SourceKey::new(path, s.start as u32, s.end as u32),
+            );
         }
     }
     f.finish()?;
+    l.sources = sources;
     Ok(l)
 }
 

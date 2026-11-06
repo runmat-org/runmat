@@ -595,3 +595,99 @@ fn interactive_router_plans_drc_clean_tracks() {
         }
     }
 }
+
+/// A land pattern spaces its own pads: the board's clearance applies between them only
+/// through a rule written for them, and only pads that touch are a finding. A generated
+/// DFN keeps its pins clear of the exposed pad. Each clearance finding names where its limit
+/// came from: the layout's `limits` value, or RunMat's default rule set.
+#[test]
+fn a_footprints_own_pads_are_spaced_by_its_land_pattern() {
+    use runmat_circuit::library::footprint::{dfn, join_to_tab, qfn, Density, EP_GAP};
+    // The ESC's power FET: 3.3 mm DFN-8, 0.65 mm pitch, 2.4 x 1.8 mm exposed pad; the drain
+    // pins 5 to 8 are one copper with the drain tab.
+    let mut fet = dfn(8, (3.3, 3.3), 0.65, Some((2.4, 1.8)), Density::B);
+    join_to_tab(&mut fet, &["5", "6", "7", "8"]);
+    let mut b = small_board();
+    let (gnd, vcc) = (b.net("GND").unwrap(), b.net("VCC").unwrap());
+    let q = b.place("Q1", fet, Point::mm(10.0, 10.0), 0.0, Side::Top);
+    let fp = b.footprints.get_mut(&q).unwrap();
+    for pin in ["1", "2", "3", "4"] {
+        fp.pad_nets.insert(pin.into(), gnd);
+    }
+    for pin in ["5", "6", "7", "8", "9"] {
+        fp.pad_nets.insert(pin.into(), vcc);
+    }
+    let pads = b.footprints[&q].pads(4);
+    let ep = pads.iter().find(|p| p.thermal_pad).expect("an exposed pad");
+    for p in pads.iter().filter(|p| !p.thermal_pad) {
+        let gap = p.prim.gap(&ep.prim);
+        if ["5", "6", "7", "8"].contains(&p.name.as_str()) {
+            assert!(gap < 0.0, "drain pin {} doesn't join the tab", p.name);
+        } else {
+            assert!(gap >= mm(EP_GAP) as f64 - 1.0, "pin {} is {:.3} mm from the exposed pad", p.name, gap * 1e-6);
+        }
+    }
+    // The drain pins on the tab's net are no finding; the source and gate pins clear it.
+    let drc = Drc::run(&b, &rules(&b, &[]), &[], &[]);
+    assert!(!drc.findings().iter().any(|f| f.code == "clearance" && f.items.iter().any(|i| matches!(i, BItem::Pad(id, _) if *id == q))), "{}", drc.digest());
+    // A 0.4 mm pitch QFN with unconnected pins: its pads are closer than a 0.3 mm board
+    // clearance, and no finding.
+    b.limits.min_clearance = mm(0.3);
+    let u = b.place("U1", qfn(24, 4.0, 0.4, None, Density::C), Point::mm(25.0, 15.0), 0.0, Side::Top);
+    let pad_findings = |drc: &Drc| -> Vec<String> {
+        drc.findings()
+            .into_iter()
+            .filter(|f| f.code == "clearance" && f.items.iter().all(|i| matches!(i, BItem::Pad(..))))
+            .map(|f| format!("{:?} {}", f.items, f.message))
+            .collect()
+    };
+    let drc = Drc::run(&b, &rules(&b, &[]), &[], &[]);
+    assert!(pad_findings(&drc).is_empty(), "{:?}", pad_findings(&drc));
+    // A rule written for the QFN's pads holds them to it, and names itself.
+    let (s, o) = src(90);
+    let spec = RuleSpec::pair("fine-pads", "pad", "pad")
+        .at(s, o)
+        .set(props::CLEARANCE, RuleValue::Len(mm(0.35)));
+    let drc = Drc::run(&b, &rules(&b, &[spec]), &[], &[]);
+    let fine: Vec<_> = drc
+        .findings()
+        .into_iter()
+        .filter(|f| f.code == "clearance" && f.items.iter().all(|i| matches!(i, BItem::Pad(id, _) if *id == u)))
+        .collect();
+    assert!(!fine.is_empty(), "{}", drc.digest());
+    assert!(fine.iter().all(|f| f.rule == "fine-pads" && f.source.start == 90));
+    // Pads of one footprint that touch on different nets are a finding (a shorted pattern).
+    let mut shorted = dfn(8, (3.3, 3.3), 0.65, None, Density::B);
+    shorted.pads[0].at = shorted.pads[1].at;
+    let s1 = b.place("Q2", shorted, Point::mm(10.0, 22.0), 0.0, Side::Top);
+    let fp = b.footprints.get_mut(&s1).unwrap();
+    fp.pad_nets.insert("1".into(), gnd);
+    fp.pad_nets.insert("2".into(), vcc);
+    let drc = Drc::run(&b, &rules(&b, &[]), &[], &[]);
+    let touching: Vec<_> = drc
+        .findings()
+        .into_iter()
+        .filter(|f| f.code == "clearance" && f.items == vec![BItem::Pad(s1, 0), BItem::Pad(s1, 1)])
+        .collect();
+    assert_eq!(touching.len(), 1, "{}", drc.digest());
+    assert!(touching[0].message.contains("touch"), "{:?}", touching[0]);
+    // Provenance: with no `limits` written the limit is RunMat's default rule set; with one,
+    // the finding points at its text.
+    let sig = b.net("SIG");
+    b.add_track(sig, 0, mm(0.2), Point::mm(2.0, 2.0), Point::mm(8.0, 2.0));
+    let t = b.add_track(b.net("GND"), 0, mm(0.2), Point::mm(2.0, 2.3), Point::mm(8.0, 2.3));
+    let track_finding = |b: &Board| {
+        let drc = Drc::run(b, &rules(b, &[]), &[], &[]);
+        drc.findings()
+            .into_iter()
+            .find(|f| f.code == "clearance" && f.items.contains(&BItem::Track(t)))
+            .cloned()
+            .expect("the tracks are too close")
+    };
+    let f = track_finding(&b);
+    assert_eq!((f.rule.as_str(), f.source.file.as_str()), ("default.clearance", ""));
+    b.limits.sources.insert("clearance".into(), SourceKey::new("/p/t.circuit.layout", 300, 304));
+    let f = track_finding(&b);
+    assert_eq!(f.rule, "limits.clearance");
+    assert_eq!((f.source.start, f.source.end), (300, 304));
+}

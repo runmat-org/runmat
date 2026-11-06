@@ -417,7 +417,7 @@ impl Reader<'_> {
                             .push(diagnostic(at, "`limits` is given twice"));
                     }
                     limits_seen = true;
-                    if let Some(l) = self.note(need_value(&h).and_then(read_limits)) {
+                    if let Some(l) = self.note(need_value(&h).and_then(|v| read_limits(v, self.path))) {
                         board.limits = l;
                     }
                 }

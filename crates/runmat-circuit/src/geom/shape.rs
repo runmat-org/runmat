@@ -154,6 +154,20 @@ impl Prim {
         core_distance(&self.core, &o.core) - self.radius as f64 - o.radius as f64
     }
 
+    /// The nearest points of the two shapes' edges, `(on self, on o)`: the ends of the gap a
+    /// clearance finding measures. Shapes that touch or overlap give one point twice.
+    pub fn closest(&self, o: &Prim) -> (Point, Point) {
+        let (p, q) = core_closest(&self.core, &o.core);
+        let d = p.dist(q);
+        let gap = d - self.radius as f64 - o.radius as f64;
+        if d == 0.0 || gap <= 0.0 {
+            return (p, p);
+        }
+        let (ux, uy) = ((q.x - p.x) as f64 / d, (q.y - p.y) as f64 / d);
+        let at = |c: Point, r: f64| Point::new(c.x + (ux * r).round() as Coord, c.y + (uy * r).round() as Coord);
+        (at(p, self.radius as f64), at(q, -(o.radius as f64)))
+    }
+
     /// Whether `p` lies inside (or on) the shape.
     pub fn contains(&self, p: Point) -> bool {
         let c = Prim::circle(p, 0);
@@ -299,6 +313,55 @@ pub fn core_distance(x: &Core, y: &Core) -> f64 {
             best
         }
     }
+}
+
+fn closest_on_segment(p: Point, a: Point, b: Point) -> Point {
+    let (px, py) = p.to_f();
+    let (ax, ay) = a.to_f();
+    let (dx, dy) = ((b.x - a.x) as f64, (b.y - a.y) as f64);
+    let l2 = dx * dx + dy * dy;
+    if l2 == 0.0 {
+        return a;
+    }
+    let t = (((px - ax) * dx + (py - ay) * dy) / l2).clamp(0.0, 1.0);
+    Point::new(a.x + (t * dx).round() as Coord, a.y + (t * dy).round() as Coord)
+}
+
+/// The nearest pair of points between two segments (from the four end projections; crossing
+/// segments are at distance zero and take the nearer projection).
+fn segments_closest(a: Point, b: Point, c: Point, d: Point) -> (Point, Point) {
+    [
+        (a, closest_on_segment(a, c, d)),
+        (b, closest_on_segment(b, c, d)),
+        (closest_on_segment(c, a, b), c),
+        (closest_on_segment(d, a, b), d),
+    ]
+    .into_iter()
+    .min_by(|x, y| x.0.dist(x.1).total_cmp(&y.0.dist(y.1)))
+    .unwrap()
+}
+
+fn core_edges(c: &Core) -> Vec<(Point, Point)> {
+    match c {
+        Core::Point(p) => vec![(*p, *p)],
+        Core::Segment(a, b) => vec![(*a, *b)],
+        Core::Poly(rs) => poly_edges(rs).collect(),
+    }
+}
+
+/// The nearest points of two cores' edges (a point or segment is its own edge).
+fn core_closest(x: &Core, y: &Core) -> (Point, Point) {
+    let mut best: Option<(f64, (Point, Point))> = None;
+    for (a, b) in core_edges(x) {
+        for (c, d) in core_edges(y) {
+            let pq = segments_closest(a, b, c, d);
+            let dd = pq.0.dist(pq.1);
+            if best.is_none_or(|(bd, _)| dd < bd) {
+                best = Some((dd, pq));
+            }
+        }
+    }
+    best.map(|b| b.1).unwrap_or((Point::new(0, 0), Point::new(0, 0)))
 }
 
 /// Points along a circular arc from `start` sweeping `sweep_deg` (CCW positive) about

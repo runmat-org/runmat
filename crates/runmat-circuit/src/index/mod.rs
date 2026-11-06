@@ -144,6 +144,9 @@ pub struct CheckRow {
     /// Where a board finding is, mm: the DRC view zooms there and draws its marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<Xy>,
+    /// The two ends of a clearance finding's gap, mm: the view dimensions it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap: Option<[Xy; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layer: Option<String>,
     /// The scene regions of the objects involved (`track:17`, `pad:R1.2`, `component:R1`,
@@ -412,6 +415,7 @@ pub fn build_index(
                 fix: None,
                 source: Some(d.source.to_string()).filter(|s| !s.starts_with(':')),
                 at: None,
+                gap: None,
                 layer: None,
                 rule: None,
                 span: SourceSpan::of(&d.source),
@@ -431,6 +435,7 @@ pub fn build_index(
             fix: f.fix.as_ref().map(fix_label),
             source: None,
             at: None,
+            gap: None,
             layer: None,
             regions: Vec::new(),
             rule: None,

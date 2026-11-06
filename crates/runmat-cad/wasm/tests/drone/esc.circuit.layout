@@ -2370,14 +2370,14 @@ layout esc {
         uuid = "41964930-1b6a-8d07-8fc6-fddf4de36828"
         description = "DFN 8 pins, pitch 0.65 mm, IPC-7351B density B"
         smd = true
-        pad "1" = { shape = roundrect, size = [0.865, 0.27], ratio = 0.25, at = [-1.5525, 0.975] }
-        pad "2" = { shape = roundrect, size = [0.865, 0.27], ratio = 0.25, at = [-1.5525, 0.325] }
-        pad "3" = { shape = roundrect, size = [0.865, 0.27], ratio = 0.25, at = [-1.5525, -0.325] }
-        pad "4" = { shape = roundrect, size = [0.865, 0.27], ratio = 0.25, at = [-1.5525, -0.975] }
-        pad "5" = { shape = roundrect, size = [0.865, 0.27], ratio = 0.25, at = [1.5525, -0.975] }
-        pad "6" = { shape = roundrect, size = [0.865, 0.27], ratio = 0.25, at = [1.5525, -0.325] }
-        pad "7" = { shape = roundrect, size = [0.865, 0.27], ratio = 0.25, at = [1.5525, 0.325] }
-        pad "8" = { shape = roundrect, size = [0.865, 0.27], ratio = 0.25, at = [1.5525, 0.975] }
+        pad "1" = { shape = roundrect, size = [0.585, 0.27], ratio = 0.25, at = [-1.6925, 0.975] }
+        pad "2" = { shape = roundrect, size = [0.585, 0.27], ratio = 0.25, at = [-1.6925, 0.325] }
+        pad "3" = { shape = roundrect, size = [0.585, 0.27], ratio = 0.25, at = [-1.6925, -0.325] }
+        pad "4" = { shape = roundrect, size = [0.585, 0.27], ratio = 0.25, at = [-1.6925, -0.975] }
+        pad "5" = { shape = roundrect, size = [0.885, 0.27], ratio = 0.25, at = [1.5425, -0.975] }
+        pad "6" = { shape = roundrect, size = [0.885, 0.27], ratio = 0.25, at = [1.5425, -0.325] }
+        pad "7" = { shape = roundrect, size = [0.885, 0.27], ratio = 0.25, at = [1.5425, 0.325] }
+        pad "8" = { shape = roundrect, size = [0.885, 0.27], ratio = 0.25, at = [1.5425, 0.975] }
         pad "9" = { shape = roundrect, size = [2.4, 1.8], ratio = 0.05, paste_margin = -0.18, thermal = true }
         courtyard = [[-2.24, -1.9], [2.24, -1.9], [2.24, 1.9], [-2.24, 1.9]]
         silk line = { points = [[-1.76, -1.76], [1.76, -1.76]], width = 0.12 }

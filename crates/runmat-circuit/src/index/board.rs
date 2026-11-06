@@ -256,11 +256,7 @@ pub fn add_board_reusing(
     let explain = |it: BItem, prop: &str, label: &str, value: Option<f64>| -> Option<String> {
         let (rule, source) = rules.single_origin(&graph, it, prop);
         let value = value.map(|v| format!("{v:.2} mm ")).unwrap_or_default();
-        Some(if rule == "default" {
-            format!("{label} {value}from the board defaults")
-        } else {
-            format!("{label} {value}from rule {rule} at {source}")
-        })
+        Some(format!("{label} {value}{}", origin_text(&rule, &source)))
     };
     let layer_name = |l: u8| crate::layout::copper_name(l, copper);
     let tracks = board
@@ -363,11 +359,7 @@ pub fn add_board_reusing(
             let mut explain_map = BTreeMap::new();
             explain_map.insert(
                 "clearance".to_owned(),
-                if rule == "default" {
-                    "clearance from the board defaults".to_owned()
-                } else {
-                    format!("clearance from rule {rule} at {source}")
-                },
+                format!("clearance {}", origin_text(&rule, &source)),
             );
             CopperRow {
                 id: z.id.0,
@@ -411,11 +403,7 @@ pub fn add_board_reusing(
                     let mut explain_map = BTreeMap::new();
                     explain_map.insert(
                         "clearance".to_owned(),
-                        if rule == "default" {
-                            "clearance from the board defaults".to_owned()
-                        } else {
-                            format!("clearance from rule {rule} at {source}")
-                        },
+                        format!("clearance {}", origin_text(&rule, &source)),
                     );
                     let shape = match f.package.pads.get(p.index).map(|d| &d.shape) {
                         Some(PadShape::Circle { .. }) => "circle",
@@ -454,10 +442,8 @@ pub fn add_board_reusing(
                 .collect::<Vec<_>>()
         })
         .collect();
-    let rule_rows = rules
-        .specs
-        .iter()
-        .map(|r| RuleRow {
+    let mut rule_rows: Vec<RuleRow> = vec![limits_row(&board.limits)];
+    rule_rows.extend(rules.specs.iter().map(|r| RuleRow {
             id: r.id.clone(),
             selector: r.selector.clone(),
             other: r.other.clone(),
@@ -468,8 +454,7 @@ pub fn add_board_reusing(
                 .map(|(k, v)| (k.clone(), rule_value_display(v)))
                 .collect(),
             source: r.source.to_string(),
-        })
-        .collect();
+        }));
     // Designators for parts whose package doesn't name them, placed once for the whole board
     // (the KiCad export writes the same).
     let designators = crate::designators::designators(board);
@@ -519,11 +504,20 @@ pub fn add_board_reusing(
             message: f.message.clone(),
             items: f.items.iter().map(item_label).collect(),
             fix: None,
-            source: Some(format!("rule {} at {}", f.rule, f.source)),
+            source: Some(if f.source.file.is_empty() {
+                if f.rule.starts_with("default.") {
+                    crate::board_rules::DEFAULT_RULE_SET.to_owned()
+                } else {
+                    format!("rule {}", f.rule)
+                }
+            } else {
+                format!("rule {} at {}", f.rule, f.source)
+            }),
             at: Some(xy(f.at)),
+            gap: crate::drc::gap_ends(board, f).map(|(a, b)| [xy(a), xy(b)]),
             layer: f.layer.map(|l| crate::layout::copper_name(l, board.copper_count())),
             regions: f.items.iter().filter_map(|it| item_region(board, it)).collect(),
-            rule: Some(f.rule.clone()).filter(|r| !r.is_empty() && r != "default"),
+            rule: Some(f.rule.clone()).filter(|r| !r.is_empty()),
             span: SourceSpan::of(&f.source),
         })
         .collect();
@@ -600,6 +594,56 @@ pub fn add_board_reusing(
             _ => crate::display::unrouted(board),
         },
     });
+}
+
+/// The board's `limits` as the first rule: the values every other rule falls back to, at
+/// their text in the layout, or RunMat's default rule set when the layout writes none.
+fn limits_row(l: &crate::layout::FabLimits) -> RuleRow {
+    let values = [
+        ("clearance", l.min_clearance),
+        ("track", l.min_track),
+        ("via_diameter", l.min_via_diameter),
+        ("drill", l.min_drill),
+        ("annular", l.min_annular),
+        ("hole_to_hole", l.min_hole_to_hole),
+        ("copper_to_edge", l.min_copper_to_edge),
+        ("silk_to_pad", l.min_silk_to_pad),
+        ("microvia_drill", l.min_microvia_drill),
+    ];
+    let start = l.sources.values().map(|s| s.start).min();
+    let end = l.sources.values().map(|s| s.end).max();
+    let source = match (l.sources.values().next(), start, end) {
+        (Some(s), Some(a), Some(b)) => runmat_rules::SourceKey::new(s.file.clone(), a, b).to_string(),
+        _ => crate::board_rules::DEFAULT_RULE_SET.to_owned(),
+    };
+    RuleRow {
+        id: "limits".into(),
+        selector: "*".into(),
+        other: None,
+        priority: i32::MIN,
+        values: values
+            .into_iter()
+            .map(|(k, v)| {
+                let written = if l.sources.contains_key(k) { "" } else { " (default)" };
+                (k.to_owned(), format!("{:.2} mm{written}", mm(v)))
+            })
+            .collect(),
+        source,
+    }
+}
+
+/// Where a value came from, for explanations: `from rule limits.clearance at <file>:<span>`,
+/// or RunMat's default rule set when the layout writes no value.
+fn origin_text(rule: &str, source: &runmat_rules::SourceKey) -> String {
+    if source.file.is_empty() {
+        if rule.starts_with("default.") {
+            format!("from {}", crate::board_rules::DEFAULT_RULE_SET)
+        } else {
+            format!("from rule {rule}")
+        }
+    } else {
+        format!("from rule {rule} at {source}")
+    }
 }
 
 /// A rule value as written: lengths in mm, the rest as they are.

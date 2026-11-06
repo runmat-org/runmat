@@ -29,13 +29,36 @@ impl Drc {
                 if shared == 0 || (p.net.is_some() && p.net == np.net) {
                     return;
                 }
-                let req = rules.pair_len_id(o, np.owner, pid);
+                let mut req = rules.pair_len_id(o, np.owner, pid);
+                // Pads of one footprint are spaced by its land pattern: the board's clearance
+                // applies to them only through a rule written for them; otherwise only pads
+                // that touch are a finding (a land pattern that shorts its pins).
+                let same_footprint = matches!((o, np.owner), (BItem::Pad(a, _), BItem::Pad(b, _)) if a == b);
+                if same_footprint
+                    && BoardRules::is_fallback(&rules.pair_origin(o, np.owner, props::CLEARANCE).0)
+                {
+                    req = 1;
+                }
                 if !pb.inflate(req).intersects(nb) {
                     return;
                 }
                 let gap = p.prim.gap(&np.prim);
                 if gap < req as f64 {
                     let (rule, source) = rules.pair_origin(o, np.owner, props::CLEARANCE);
+                    if same_footprint && req == 1 {
+                        let mut f = clearance_finding(
+                            vec![o, np.owner],
+                            lowest(shared),
+                            p.prim.anchor(),
+                            gap,
+                            0,
+                            rule,
+                            source,
+                        );
+                        f.message = "pads of one footprint on different nets touch".into();
+                        found.push(f);
+                        return;
+                    }
                     let at = if (p.owner, p.sub) < (np.owner, np.sub) {
                         p.prim.anchor()
                     } else {
