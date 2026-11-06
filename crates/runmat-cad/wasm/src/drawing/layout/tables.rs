@@ -251,6 +251,7 @@ pub fn place(ctx: &mut Ctx<'_>) {
                 spot
             }
         };
+        ctx.out.placed.insert(id.clone(), if top_right { [top_left[0] + w, top_left[1]] } else { top_left });
         let prims = grid.draw(&id, top_left);
         ctx.occ.add(BoxR::new(top_left[0], top_left[1] - h, top_left[0] + w, top_left[1]), &id, Class::Table);
         ctx.push(prims);

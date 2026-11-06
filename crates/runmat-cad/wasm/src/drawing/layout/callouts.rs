@@ -106,6 +106,7 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                 let tip = on_rim(anchor, radius)(spot.elbow);
                 let mut prims = st.control_frame(&id, [spot.label.x0, spot.label.y0], &cells);
                 prims.extend(leader_line(&st, &id, tip, spot.elbow));
+                ctx.out.placed.insert(id.clone(), [spot.label.x0, spot.label.y0]);
                 register(ctx, &id, &prims, spot.label);
                 ctx.push(prims);
                 frames.push(Frame { view: v.name.clone(), anchor, frame: spot.label });
@@ -158,7 +159,12 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                 let Some(anchor) = anchor else { continue };
                 let label = |e: Xy, _right: bool| st.finish_box(e, &t);
                 let tip_of = on_rim(anchor, radius);
-                let Some(spot) = solve(ctx, v, &id, anchor, &label, &tip_of) else { continue };
+                let spot = match manual {
+                    Some(at) => Some(Spot { elbow: at, right: true, label: label(at, true) }),
+                    None => solve(ctx, v, &id, anchor, &label, &tip_of),
+                };
+                let Some(spot) = spot else { continue };
+                ctx.out.placed.insert(id.clone(), spot.elbow);
                 let prims = st.surface_finish(&id, tip_of(spot.elbow), spot.elbow, &t);
                 register(ctx, &id, &prims, spot.label);
                 ctx.push(prims);
@@ -207,6 +213,7 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                 };
                 if what == "note" {
                     if let Some(at) = manual {
+                        ctx.out.placed.insert(id.clone(), at);
                         let prims = notes_block(&st, &id, at, &t);
                         register(ctx, &id, &prims, notes_box(&st, at, &t));
                         ctx.push(prims);
@@ -230,6 +237,7 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                             None => solve(ctx, v, &id, c, &label, &tip_of),
                         };
                         let Some(spot) = spot else { continue };
+                        ctx.out.placed.insert(id.clone(), spot.elbow);
                         let prims = st.leader(&id, tip_of(spot.elbow), spot.elbow, spot.right, &label_text);
                         register(ctx, &id, &prims, spot.label);
                         ctx.push(prims);
@@ -279,6 +287,7 @@ fn free_note(ctx: &mut Ctx<'_>, v: &ViewPlan, id: &str, t: &str) {
     let g = v.geom_box();
     let preferred = [g.x0 + probe.w() / 2.0, g.y0 - probe.h()];
     let b = nearest_free(&ctx.occ, id, probe.w(), probe.h(), preferred, 2.0, 1.0, &|_| true).unwrap_or(BoxR::new(g.x1 + 6.0, g.y0, g.x1 + 6.0 + probe.w(), g.y0 + probe.h()));
+    ctx.out.placed.insert(id.to_owned(), [b.x0, b.y1]);
     let prims = notes_block(&st, id, [b.x0, b.y1], t);
     register(ctx, id, &prims, b);
     ctx.push(prims);

@@ -174,6 +174,10 @@ pub struct SheetLayout {
     pub findings: Vec<Finding>,
     /// Facts about missing data (a view whose model isn't open).
     pub notes: Vec<String>,
+    /// Where each item sits, as its `at` would place it (a view's centre, a callout's elbow, a
+    /// note's or frame's corner, a table's corner, a dimension's line): moving an item the
+    /// layout placed starts from here.
+    pub placed: std::collections::BTreeMap<String, Xy>,
 }
 
 /// Every sheet of a compiled drawing projection, laid out: `{ <sheet>: SheetLayout }`.

@@ -306,6 +306,7 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan], plans: Plans) {
         let (prims, text_at) = st.linear_dimension(&id, a, b, d.axis, at, &d.text);
         ctx.occ.add_prims(&prims, &id);
         ctx.push(prims);
+        ctx.out.placed.entry(id.clone()).or_insert(if d.axis == 0 { [a[0], at] } else { [at, a[1]] });
         ctx.out.dimensions.push(PlacedDimension {
             id: d.id.clone(),
             from: a,

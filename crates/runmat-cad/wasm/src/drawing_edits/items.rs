@@ -115,6 +115,28 @@ pub fn edit(path: &str, text_: &str, files: &Files, command: &str, values: &Valu
             "drawing.delete" => delete(&mut d, &selected)?,
             "drawing.move" => {
                 let to = points(values, "to")?.into_iter().next();
+                // An item the sheet placed itself (`at` unset) moves from where the layout put it.
+                let unplaced = selected.iter().any(|i| at_mut(&mut d, *i).is_ok_and(|a| *a == [0.0, 0.0]));
+                let laid: Value = if unplaced { serde_json::from_str(&crate::drawing::compile_json(path, text_, files)).unwrap_or(Value::Null) } else { Value::Null };
+                let laid_at = |item: Item<'_>| -> Option<[f64; 2]> {
+                    let key = match item {
+                        Item::View(n) => format!("view:{n}"),
+                        Item::Annotation(n) => format!("annotation:{n}"),
+                        Item::Table(n) => format!("table:{n}"),
+                    };
+                    laid["projection"]["data"]["layouts"].as_object()?.values().find_map(|l| {
+                        let p = l["placed"][&key].as_array()?;
+                        Some([p.first()?.as_f64()?, p.get(1)?.as_f64()?])
+                    })
+                };
+                for item in &selected {
+                    let at = *at_mut(&mut d, *item)?;
+                    if at == [0.0, 0.0] {
+                        if let Some(p) = laid_at(*item) {
+                            *at_mut(&mut d, *item)? = p;
+                        }
+                    }
+                }
                 let delta = match to {
                     Some(to) => {
                         let first = *at_mut(&mut d, selected[0])?;
@@ -127,8 +149,7 @@ pub fn edit(path: &str, text_: &str, files: &Files, command: &str, values: &Valu
                 }
                 for item in &selected {
                     let at = at_mut(&mut d, *item)?;
-                    // An annotation the sheet places itself has no place yet; it takes the
-                    // place it is moved to.
+                    // An annotation with no place in the layout either takes the place it is moved to.
                     let base = if *at == [0.0, 0.0] && matches!(item, Item::Annotation(_)) && to.is_some() { [0.0, 0.0] } else { *at };
                     let moved = [base[0] + delta[0], base[1] + delta[1]];
                     *at = moved.map(|v| (v * 10.0).round() / 10.0);

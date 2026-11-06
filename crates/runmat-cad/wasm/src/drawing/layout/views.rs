@@ -316,6 +316,7 @@ pub fn place(ctx: &mut Ctx<'_>, plans: &mut [ViewPlan], rooms: &std::collections
             }
         }
         plans[i].origin = o;
+        ctx.out.placed.insert(id.clone(), o);
         let reserved = plans[i].reserved().grow(gap / 2.0);
         ctx.occ.add(reserved, &id, Class::View);
         placed.push(i);

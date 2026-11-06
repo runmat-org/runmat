@@ -189,7 +189,9 @@ fn items_move_align_relabel_and_delete_with_what_is_drawn_from_them() {
     b.run("drawing.move", json!({ "dx": 10, "dy": -5 }), &["annotation:note", "table:revisions"]);
     let d = b.document();
     assert_eq!(d.annotations.iter().find(|a| a.id == "note").unwrap().at, [60.0, 45.0]);
-    assert_eq!(d.tables[0].at, [10.0, -5.0]);
+    // A table the sheet placed moves from where the layout put it: the revision table's
+    // top-right corner at the frame's (A3: 410, 287).
+    assert_eq!(d.tables[0].at, [420.0, 282.0]);
     // An annotation the sheet placed takes the point it is moved to.
     b.run("drawing.move", json!({ "to": ["point:120,210"] }), &["annotation:dim"]);
     assert_eq!(b.document().annotations.iter().find(|a| a.id == "dim").unwrap().at, [120.0, 210.0]);
