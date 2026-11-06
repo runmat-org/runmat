@@ -73,6 +73,36 @@ pub fn part_appearance(material: Option<&str>, color: Option<&str>) -> [f32; 4] 
         .unwrap_or_else(|| material_appearance(material).1)
 }
 
+/// Gives each output's body its own color (the output's `color`, else its material's
+/// appearance) when the part has more than one output, so a study part's solid, fluid and air
+/// bodies read apart. A body that already carries a color keeps it; a one-output part draws in
+/// the part's appearance as before.
+pub fn color_output_bodies(
+    doc: &crate::model::PartDocument,
+    result: &crate::regen::engine::RegenResult,
+    display: &mut crate::display::PartDisplay,
+) {
+    if doc.parts.len() < 2 {
+        return;
+    }
+    for p in &doc.parts {
+        if p.color.is_none() && p.material.is_none() {
+            continue;
+        }
+        let Some(b) = result
+            .parts
+            .get(&p.name)
+            .and_then(|o| crate::regen::slots::resolved_body(result, o))
+        else {
+            continue;
+        };
+        let rgba = part_appearance(p.material.as_ref().map(|m| m.0.as_str()), p.color.as_deref());
+        if let Some(body) = display.bodies.iter_mut().find(|d| d.index as usize == b) {
+            body.color.get_or_insert(rgba);
+        }
+    }
+}
+
 /// `#RRGGBBAA` of a display color, as 3MF's `displaycolor` takes it.
 pub fn srgb_hex(c: [f32; 4]) -> String {
     let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;

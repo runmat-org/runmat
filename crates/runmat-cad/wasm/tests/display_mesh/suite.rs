@@ -612,3 +612,39 @@ fn spline_profiles_extrude_and_loft_into_watertight_smooth_solids() {
     let v = volume(b);
     assert!(v > 0.0 && v < 100.0 * MM * 100.0 * MM * 12.0 * MM, "volume {v}");
 }
+
+/// Two blocks side by side, each its own output: a solid with a material and an air body with
+/// a translucent color.
+const TWO_OUTPUTS: &str = r##"runmat 0.7
+std 1
+
+part pair {
+    sketch a_s on origin.xy {
+        s1 = line(start = [0 mm, 0 mm], end = [10 mm, 0 mm])
+        s2 = line(start = [10 mm, 0 mm], end = [10 mm, 10 mm])
+        s3 = line(start = [10 mm, 10 mm], end = [0 mm, 10 mm])
+        s4 = line(start = [0 mm, 10 mm], end = [0 mm, 0 mm])
+    }
+    feature a = extrude(profile = sketch.a_s, distance = 10 mm)
+    sketch b_s on origin.xy {
+        s1 = line(start = [20 mm, 0 mm], end = [30 mm, 0 mm])
+        s2 = line(start = [30 mm, 0 mm], end = [30 mm, 10 mm])
+        s3 = line(start = [30 mm, 10 mm], end = [20 mm, 10 mm])
+        s4 = line(start = [20 mm, 10 mm], end = [20 mm, 0 mm])
+    }
+    feature b = extrude(profile = sketch.b_s, distance = 10 mm)
+    output solid = { body = feature.a.body, label = "Solid", material = "copper_c11000" }
+    output air = { body = feature.b.body, label = "Air", color = "#CFE3F540" }
+}
+"##;
+
+#[test]
+fn each_output_body_draws_in_its_own_color() {
+    let d = compile("/p/pair.part", TWO_OUTPUTS);
+    assert_eq!(d.bodies.len(), 2);
+    let colors: Vec<[f32; 4]> = d.bodies.iter().map(|b| b.color.expect("body color")).collect();
+    let copper = runmat_cad::appearance::material_appearance(Some("copper_c11000")).1;
+    let air = runmat_cad::appearance::parse_srgb_hex("#CFE3F540").unwrap();
+    assert!(colors.contains(&copper), "{colors:?}");
+    assert!(colors.contains(&air), "{colors:?}");
+}

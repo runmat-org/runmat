@@ -266,6 +266,7 @@ pub fn regenerate_part_in(
         material.map(|m| m.0.as_str()),
         output.and_then(|p| p.color.as_deref()),
     ));
+    runmat_cad::appearance::color_output_bodies(&document, &result, &mut display);
     Ok(RegeneratedPart {
         document,
         spans: parsed.spans,

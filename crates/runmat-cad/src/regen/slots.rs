@@ -110,7 +110,8 @@ pub struct SlotRow {
 }
 
 /// The live body an item resolved to: the body whose own names include every name resolved.
-fn resolved_body(result: &RegenResult, o: &ItemOutcome) -> Option<usize> {
+/// The body an item (an output or a material assignment) resolved to, when it names exactly one.
+pub fn resolved_body(result: &RegenResult, o: &ItemOutcome) -> Option<usize> {
     if !o.ok || o.entities.len() != 1 {
         return None;
     }
