@@ -16,6 +16,7 @@ use super::{
 
 use crate::cdt::insertion::topology_access::TetrahedralTopology;
 
+mod delaunay;
 mod topology;
 mod witness;
 use topology::triangulate_with_existing_topology_edges;
@@ -183,6 +184,18 @@ fn triangulate_boundary(
     if let Some(triangles) = triangulate_with_existing_topology_edges(
         recovery,
         &boundary,
+        projection,
+        polygon_sign,
+        source_edge_membership,
+        constraint_index,
+        work,
+    )? {
+        return Ok(triangles);
+    }
+    if let Some(triangles) = delaunay::triangulate_delaunay(
+        recovery,
+        &boundary,
+        source,
         projection,
         polygon_sign,
         source_edge_membership,
