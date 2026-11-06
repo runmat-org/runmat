@@ -1,20 +1,35 @@
-use runmat_geometry_core::{
-    ExactBRepTopology, ExactEdge, ExactPcurveEvaluator, GeometryEvaluationControl, ParameterRange,
-};
+use runmat_geometry_core::{ExactEdge, ParameterRange};
 
 use crate::shared::{SharedCurveError, SharedCurveErrorKind, SharedCurveFaceUse};
 
-use super::error::{edge_error, geometry_error};
+use super::{
+    error::{edge_error, geometry_error},
+    types::{SharedCurveDiscretizationOptions, SharedCurveEvaluationContext},
+    vertex_uv::VertexUvContext,
+};
 
-pub(super) fn face_uses_for_parameters(
-    topology: &ExactBRepTopology,
+/// Face-local node coordinates of `edge` on each of its coedges. On a non-periodic face each
+/// endpoint takes its vertex's canonical coordinate, admitted against the vertex tolerance.
+pub(crate) fn face_uses_for_parameters(
+    context: SharedCurveEvaluationContext<'_>,
     edge: &ExactEdge,
-    pcurves: &dyn ExactPcurveEvaluator,
-    control: &dyn GeometryEvaluationControl,
     parameter_range: ParameterRange,
     parameters: &[f64],
-    pcurve_absolute_error: f64,
+    options: SharedCurveDiscretizationOptions,
 ) -> Result<Vec<SharedCurveFaceUse>, SharedCurveError> {
+    let SharedCurveEvaluationContext {
+        topology,
+        pcurves,
+        control,
+        ..
+    } = context;
+    let vertex_uv = VertexUvContext {
+        topology,
+        pcurves,
+        surfaces: context.surfaces,
+        control,
+        geometry_absolute_error_m: options.geometry_absolute_error_m.canonical_value(),
+    };
     let mut coedges = topology
         .coedges
         .iter()
@@ -64,17 +79,11 @@ pub(super) fn face_uses_for_parameters(
         {
             let first = node_uv[0];
             let last = *node_uv.last().expect("node UV inventory is non-empty");
-            if ((first[0] - last[0]).powi(2) + (first[1] - last[1]).powi(2)).sqrt()
-                > pcurve_absolute_error
-            {
-                return Err(edge_error(
-                    edge,
-                    SharedCurveErrorKind::GeometricMismatch,
-                    "closed pcurve endpoint",
-                    "closed edge endpoints differ on a non-periodic face",
-                ));
+            // With a vertex, the canonical vertex coordinate below admits and joins both ends.
+            if edge.start_vertex_id.is_none() {
+                vertex_uv.require_within_edge_tolerance(edge, &coedge.face_id, first, last)?;
+                *node_uv.last_mut().expect("node UV inventory is non-empty") = first;
             }
-            *node_uv.last_mut().expect("node UV inventory is non-empty") = first;
         }
         if !face.periodic_u && !face.periodic_v && node_uv.len() > 1 {
             for (index, vertex) in [
@@ -82,18 +91,8 @@ pub(super) fn face_uses_for_parameters(
                 (node_uv.len() - 1, edge.end_vertex_id.as_ref()),
             ] {
                 if let Some(vertex) = vertex {
-                    node_uv[index] = super::vertex_uv::VertexUvContext {
-                        topology,
-                        pcurves,
-                        control,
-                        maximum_error: pcurve_absolute_error,
-                    }
-                    .canonical_coordinate(
-                        edge,
-                        coedge,
-                        vertex,
-                        node_uv[index],
-                    )?;
+                    node_uv[index] =
+                        vertex_uv.canonical_coordinate(edge, coedge, vertex, node_uv[index])?;
                 }
             }
         }

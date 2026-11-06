@@ -1,6 +1,6 @@
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, GeometryEvaluationControl,
-    PersistentEntityId,
+    ExactBRepTopology, ExactCurveEvaluator, ExactPcurveEvaluator, ExactSurfaceEvaluator,
+    GeometryEvaluationControl, PersistentEntityId,
 };
 use runmat_meshing_core::{MetricSourceKind, MetricTensor3};
 
@@ -40,11 +40,19 @@ pub trait CurveMetricField: Send + Sync {
     ) -> Result<CurveMetricEvaluation, SharedCurveError>;
 }
 
+/// Pcurves together with the surfaces they lie on. Curve meshing maps a coedge's endpoint UV
+/// onto its face to compare it with the vertex in 3D, against the vertex's own tolerance.
+pub trait ExactFacePcurveEvaluator: ExactPcurveEvaluator + ExactSurfaceEvaluator {}
+
+impl<T> ExactFacePcurveEvaluator for T where T: ExactPcurveEvaluator + ExactSurfaceEvaluator + ?Sized
+{}
+
 #[derive(Clone, Copy)]
 pub struct SharedCurveEvaluationContext<'a> {
     pub topology: &'a ExactBRepTopology,
     pub curves: &'a dyn ExactCurveEvaluator,
     pub pcurves: &'a dyn ExactPcurveEvaluator,
+    pub surfaces: &'a dyn ExactSurfaceEvaluator,
     pub metric_field: &'a dyn CurveMetricField,
     pub control: &'a dyn GeometryEvaluationControl,
 }
@@ -53,7 +61,7 @@ impl<'a> SharedCurveEvaluationContext<'a> {
     pub fn new(
         topology: &'a ExactBRepTopology,
         curves: &'a dyn ExactCurveEvaluator,
-        pcurves: &'a dyn ExactPcurveEvaluator,
+        pcurves: &'a dyn ExactFacePcurveEvaluator,
         metric_field: &'a dyn CurveMetricField,
         control: &'a dyn GeometryEvaluationControl,
     ) -> Self {
@@ -61,6 +69,7 @@ impl<'a> SharedCurveEvaluationContext<'a> {
             topology,
             curves,
             pcurves,
+            surfaces: pcurves,
             metric_field,
             control,
         }

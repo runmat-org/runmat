@@ -1,18 +1,26 @@
 //! One nonperiodic face-local coordinate per authoritative source vertex.
 //! The smallest incident coedge supplies the representative; independent edge
 //! partitions derive it identically. Distinct vertices and periodic images never merge.
+//!
+//! Incident pcurves meet a vertex within that vertex's 3D tolerance, which a CAD kernel
+//! records with the vertex (OCCT widens it after booleans). Their endpoint UVs may therefore
+//! differ by that tolerance mapped through the face's parametric scale at the vertex. Each
+//! endpoint is admitted when its image on the face lies within the vertex tolerance of the
+//! vertex point, plus the numerical geometry error the request admits.
 use super::error::{edge_error, geometry_error};
 use crate::shared::{SharedCurveError, SharedCurveErrorKind};
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactCoedge, ExactEdge, ExactPcurveEvaluator, GeometryEvaluationControl,
-    PersistentEntityId,
+    ExactBRepTopology, ExactCoedge, ExactEdge, ExactPcurveEvaluator, ExactSurfaceEvaluator,
+    GeometryEvaluationControl, PersistentEntityId,
 };
 
 pub(super) struct VertexUvContext<'a> {
     pub topology: &'a ExactBRepTopology,
     pub pcurves: &'a dyn ExactPcurveEvaluator,
+    pub surfaces: &'a dyn ExactSurfaceEvaluator,
     pub control: &'a dyn GeometryEvaluationControl,
-    pub maximum_error: f64,
+    /// Numerical geometry error the request admits, in meters, added to the vertex tolerance.
+    pub geometry_absolute_error_m: f64,
 }
 
 impl VertexUvContext<'_> {
@@ -27,7 +35,7 @@ impl VertexUvContext<'_> {
             topology,
             pcurves,
             control,
-            maximum_error,
+            ..
         } = *self;
         let mut representative = None;
         for candidate in &topology.coedges {
@@ -83,17 +91,110 @@ impl VertexUvContext<'_> {
             )
             .map(|uv| uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value)))
             .map_err(|error| geometry_error(edge, error))?;
-        let difference = (uv[0] - original[0]).hypot(uv[1] - original[1]);
-        if !difference.is_finite() || difference > maximum_error {
+        for endpoint in [original, uv] {
+            self.require_within_vertex_tolerance(edge, &coedge.face_id, vertex, endpoint)?;
+        }
+        Ok(uv)
+    }
+
+    /// Admits a face-local coordinate at `vertex` when its image on the face lies within the
+    /// vertex's 3D tolerance of the vertex point.
+    pub fn require_within_vertex_tolerance(
+        &self,
+        edge: &ExactEdge,
+        face_id: &PersistentEntityId,
+        vertex_id: &PersistentEntityId,
+        uv: [f64; 2],
+    ) -> Result<(), SharedCurveError> {
+        let vertex = self
+            .topology
+            .vertices
+            .binary_search_by(|item| item.id.cmp(vertex_id))
+            .ok()
+            .map(|index| &self.topology.vertices[index])
+            .ok_or_else(|| {
+                edge_error(
+                    edge,
+                    SharedCurveErrorKind::InvalidContract,
+                    "vertex pcurve incidence",
+                    "coedge endpoint vertex is absent from admitted topology",
+                )
+            })?;
+        let image = self.face_image(edge, face_id, uv)?;
+        let point = vertex.point_m.canonical_value();
+        let distance_m = distance(image, point);
+        let admitted_m = vertex.tolerance_m.canonical_value() + self.geometry_absolute_error_m;
+        if !distance_m.is_finite() || distance_m > admitted_m {
             return Err(edge_error(
                 edge,
                 SharedCurveErrorKind::GeometricMismatch,
                 "vertex pcurve coordinate",
-                "incident pcurves disagree beyond the admitted UV error",
+                format!(
+                    "incident pcurve endpoint lies {distance_m:.3e} m from its vertex on the face, \
+                     beyond the vertex tolerance {admitted_m:.3e} m"
+                ),
             ));
         }
-        Ok(uv)
+        Ok(())
     }
+
+    /// Admits two face-local coordinates of one closed vertex-free edge when their images on
+    /// the face lie within the edge's 3D tolerance of each other.
+    pub fn require_within_edge_tolerance(
+        &self,
+        edge: &ExactEdge,
+        face_id: &PersistentEntityId,
+        first: [f64; 2],
+        last: [f64; 2],
+    ) -> Result<(), SharedCurveError> {
+        let distance_m = distance(
+            self.face_image(edge, face_id, first)?,
+            self.face_image(edge, face_id, last)?,
+        );
+        let admitted_m = edge.tolerance_m.canonical_value() + self.geometry_absolute_error_m;
+        if !distance_m.is_finite() || distance_m > admitted_m {
+            return Err(edge_error(
+                edge,
+                SharedCurveErrorKind::GeometricMismatch,
+                "closed pcurve endpoint",
+                format!(
+                    "closed edge endpoints lie {distance_m:.3e} m apart on a non-periodic face, \
+                     beyond the edge tolerance {admitted_m:.3e} m"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    fn face_image(
+        &self,
+        edge: &ExactEdge,
+        face_id: &PersistentEntityId,
+        uv: [f64; 2],
+    ) -> Result<[f64; 3], SharedCurveError> {
+        let face = self
+            .topology
+            .faces
+            .iter()
+            .find(|face| &face.id == face_id)
+            .ok_or_else(|| {
+                edge_error(
+                    edge,
+                    SharedCurveErrorKind::InvalidContract,
+                    "coedge face",
+                    "coedge references an absent exact face",
+                )
+            })?;
+        self.surfaces
+            .point(&face.surface_evaluator_id, uv, self.control)
+            .map(|point| point.canonical_value())
+            .map_err(|error| geometry_error(edge, error))
+    }
+}
+
+fn distance(left: [f64; 3], right: [f64; 3]) -> f64 {
+    ((left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2) + (left[2] - right[2]).powi(2))
+        .sqrt()
 }
 
 #[cfg(test)]
