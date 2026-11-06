@@ -124,22 +124,21 @@ r = 1 / (2 * pi * fc * c);
 end
 ```
 
-```circuit file=lowpass.circuit
+```circuit m file=lowpass.circuit
 runmat 0.7
 std 1
 
 circuit lowpass {
     root = main
     sheet main {
+        port IN : in
+        port OUT : out
         component R1 = { part = "R0402-10K", value = rcResistor(fc = 160 Hz, c = 100 nF) as ohm }
         component C1 = { part = "C0402-1U", value = 100 nF }
-        component P1 = { part = "PAD-WIRE-20AWG" }
-        component P2 = { part = "PAD-WIRE-20AWG" }
-        component P3 = { part = "PAD-WIRE-20AWG" }
         net GND = { global = true, power_flag = true }
-        connect = [net.IN, "P1.1", "R1.1"]
-        connect = [net.OUT, "R1.2", "C1.1", "P3.1"]
-        connect = [net.GND, "C1.2", "P2.1"]
+        connect = [port.IN, net.IN, "R1.1"]
+        connect = [port.OUT, net.OUT, "R1.2", "C1.1"]
+        connect = [net.GND, "C1.2"]
     }
 }
 ```

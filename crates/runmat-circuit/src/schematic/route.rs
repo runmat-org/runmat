@@ -276,10 +276,13 @@ pub(super) fn connect(terms: &[Term], nets: &[NetInfo], walls: &Walls, bbox: [Co
                     }
                 }
                 // A net that also leaves the sheet gets its port's label at its first pin; a node
-                // whose pins all leave up or down (a divider) gets it on a stub off the node's
-                // right end instead, so the label never sits on a part's lead.
+                // whose pins all leave up or down (a divider), or a net on the sheet's own port
+                // (a filter's OUT, wired on from the pin to the next part), gets it on a stub off
+                // the node's right end instead, so the label never sits on a part's lead or on
+                // the wire.
                 let upright = ks.iter().all(|k| !terms[*k].side.horizontal());
-                if nets[n].external && !(upright && tail_label(&mut g, &mut out, &paths, n, nets)) {
+                let tail = upright || nets[n].own_port;
+                if nets[n].external && !(tail && tail_label(&mut g, &mut out, &paths, n, nets)) {
                     label(&mut g, &mut out, &terms[ks[0]], n, nets, walls);
                 }
             }

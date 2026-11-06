@@ -379,6 +379,8 @@ pub(super) struct NetInfo {
     pub global: bool,
     /// The net leaves this page's subtree through a port.
     pub external: bool,
+    /// The net is on one of the root sheet's own ports (its IN and OUT).
+    pub own_port: bool,
     /// Expected to get labels rather than a wire.
     pub labelled: bool,
     pub short: String,
@@ -532,6 +534,11 @@ fn page(
     let children: Vec<usize> = (0..sheets.len())
         .filter(|k| sheets[*k].0.parent().as_ref() == Some(path))
         .collect();
+    let ports: Vec<String> = nl
+        .sheet_ports
+        .get(sheet_name)
+        .map(|ps| ps.iter().map(|p| crate::elab::port_net_name(path, p)).collect())
+        .unwrap_or_default();
     // Net facts for this page.
     let infos: Vec<NetInfo> = nl
         .nets
@@ -549,12 +556,18 @@ fn page(
             } else {
                 is_rail(&n.name, n.class.as_deref()) && n.global
             };
-            let external = !n.global && net_sheets[k].iter().any(|s| !s.starts_with(path));
+            // A net leaving this page is labelled as a port, and so is a net on one of the root
+            // sheet's own ports (a one-sheet filter's IN and OUT), which leaves the design. A
+            // child sheet's port nets already leave its page.
+            let on_port = path.depth() == 0 && ports.iter().any(|p| n.name == *p || n.aliases.contains(p));
+            let external =
+                !n.global && (on_port || net_sheets[k].iter().any(|s| !s.starts_with(path)));
             NetInfo {
                 rail,
                 ground: route::text_is_ground(short(&n.name)),
                 global: n.global && !rail,
                 external,
+                own_port: on_port,
                 labelled: !rail && (n.global || external),
                 short: local_name(n, path),
             }

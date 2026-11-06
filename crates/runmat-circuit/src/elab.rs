@@ -151,6 +151,8 @@ pub struct Netlist {
     pub sch_wires: BTreeMap<crate::ids::WireKey, crate::ids::SchWire>,
     /// Each sheet definition's notes (`text` statements): name and words, in source order.
     pub sheet_texts: BTreeMap<String, Vec<(String, String)>>,
+    /// Each sheet definition's declared port names, in source order.
+    pub sheet_ports: BTreeMap<String, Vec<String>>,
 }
 
 impl Netlist {
@@ -1134,7 +1136,7 @@ pub fn elaborate(
                     ))
                 }
                 NodeKind::Port { name, inst } => {
-                    let full = format!("{inst}/{name}");
+                    let full = port_net_name(inst, name);
                     cands.push((
                         (3, inst.depth(), full.clone()),
                         full,
@@ -1311,7 +1313,19 @@ pub fn elaborate(
             .filter(|(_, s)| !s.texts.is_empty())
             .map(|(n, s)| (n.clone(), s.texts.iter().map(|t| (t.name.clone(), t.text.clone())).collect()))
             .collect(),
+        sheet_ports: design
+            .sheets
+            .iter()
+            .filter(|(_, s)| !s.ports.is_empty())
+            .map(|(n, s)| (n.clone(), s.ports.iter().map(|p| p.name.clone()).collect()))
+            .collect(),
     }
+}
+
+/// The name a sheet instance's port carries on its net (one of the net's aliases, or its
+/// name when nothing else names it).
+pub fn port_net_name(inst: &NamePath, port: &str) -> String {
+    format!("{inst}/{port}")
 }
 
 /// Net-name candidate: (priority key, full name, path, class, global, renamed-from).
