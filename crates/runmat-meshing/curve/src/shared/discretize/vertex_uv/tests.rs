@@ -5,11 +5,13 @@ use runmat_geometry_core::{
 };
 
 /// Two pcurves on a plane that maps UV (1, 2) onto the vertex and scales UV by
-/// `meters_per_uv`. The non-representative pcurve ends `offset` away in U.
+/// `meters_per_uv`. The non-representative pcurve ends `offset` away in U. With `period_u` the
+/// plane wraps in U, so UV images a whole period apart map onto one point.
 struct Pcurves {
     representative: PcurveEvaluatorId,
     offset: f64,
     meters_per_uv: f64,
+    period_u: Option<f64>,
 }
 
 const VERTEX_UV: [f64; 2] = [1.0, 2.0];
@@ -36,7 +38,15 @@ impl ExactSurfaceEvaluator for Pcurves {
     ) -> Result<runmat_types::physical::Position, GeometryEvaluationError> {
         control.checkpoint()?;
         Ok(runmat_types::physical::Position::new([
-            VERTEX_POINT_M[0] + self.meters_per_uv * (uv[0] - VERTEX_UV[0]),
+            VERTEX_POINT_M[0]
+                + self.meters_per_uv
+                    * match self.period_u {
+                        Some(period) => {
+                            let du = uv[0] - VERTEX_UV[0];
+                            du - (du / period).round() * period
+                        }
+                        None => uv[0] - VERTEX_UV[0],
+                    },
             VERTEX_POINT_M[1] + self.meters_per_uv * (uv[1] - VERTEX_UV[1]),
             VERTEX_POINT_M[2],
         ]))
@@ -190,12 +200,13 @@ fn incident_pcurves_share_one_coordinate_independently_of_partition_or_traversal
         representative: topology.coedges[0].pcurve_evaluator_id.clone(),
         offset: 7.0e-15,
         meters_per_uv: 1.0,
+        period_u: None,
     };
     let original = endpoint(&pcurves, &coedge);
     assert_ne!(original, VERTEX_UV);
     for _ in 0..2 {
         let uv = context(&topology, &pcurves)
-            .canonical_coordinate(&edge, &coedge, vertex, original)
+            .canonical_coordinate(&edge, &coedge, vertex, original, [None, None])
             .unwrap();
         assert_eq!(uv, VERTEX_UV);
         topology.coedges.reverse();
@@ -215,10 +226,11 @@ fn pcurves_within_the_vertex_tolerance_join_whatever_their_uv_disagreement() {
         representative: topology.coedges[0].pcurve_evaluator_id.clone(),
         offset: 5.0e-5,
         meters_per_uv: 1.0e-3,
+        period_u: None,
     };
     let original = endpoint(&pcurves, coedge);
     let uv = context(&topology, &pcurves)
-        .canonical_coordinate(&edge, coedge, vertex, original)
+        .canonical_coordinate(&edge, coedge, vertex, original, [None, None])
         .unwrap();
     assert_eq!(uv, VERTEX_UV);
 }
@@ -236,11 +248,12 @@ fn the_admitted_uv_disagreement_follows_the_face_parametric_scale() {
         representative: topology.coedges[0].pcurve_evaluator_id.clone(),
         offset: 0.01,
         meters_per_uv: 1.0e-6,
+        period_u: None,
     };
     let original = endpoint(&fine, coedge);
     assert_eq!(
         context(&topology, &fine)
-            .canonical_coordinate(&edge, coedge, vertex, original)
+            .canonical_coordinate(&edge, coedge, vertex, original, [None, None])
             .unwrap(),
         VERTEX_UV
     );
@@ -249,7 +262,7 @@ fn the_admitted_uv_disagreement_follows_the_face_parametric_scale() {
         ..fine
     };
     let error = context(&topology, &coarse)
-        .canonical_coordinate(&edge, coedge, vertex, original)
+        .canonical_coordinate(&edge, coedge, vertex, original, [None, None])
         .unwrap_err();
     assert_eq!(error.kind, SharedCurveErrorKind::GeometricMismatch);
     assert_eq!(error.field, "vertex pcurve coordinate");
@@ -262,6 +275,7 @@ fn endpoint_authority_preserves_distinct_vertices() {
         representative: topology.coedges[0].pcurve_evaluator_id.clone(),
         offset: 1.0e-5,
         meters_per_uv: 1.0e-3,
+        period_u: None,
     };
     let mut edge = topology.edges[1].clone();
     let original = endpoint(&pcurves, &topology.coedges[1]);
@@ -275,7 +289,36 @@ fn endpoint_authority_preserves_distinct_vertices() {
         .vertices
         .sort_by(|left, right| left.id.cmp(&right.id));
     let uv = context(&topology, &pcurves)
-        .canonical_coordinate(&edge, &topology.coedges[1], &distinct.id, original)
+        .canonical_coordinate(
+            &edge,
+            &topology.coedges[1],
+            &distinct.id,
+            original,
+            [None, None],
+        )
         .unwrap();
     assert_eq!(uv, original);
+}
+
+/// On a periodic face the coedge on the far seam image ends a whole period from the
+/// representative. Its canonical coordinate is the representative's image on that side, so the
+/// face chart sees one node coordinate up to whole periods.
+#[test]
+fn a_periodic_face_joins_endpoints_at_the_representative_image_on_their_side() {
+    let topology = topology(1.0e-7);
+    let edge = topology.edges[1].clone();
+    let coedge = &topology.coedges[1];
+    let vertex = edge.start_vertex_id.as_ref().unwrap();
+    let period = 1.0;
+    let pcurves = Pcurves {
+        representative: topology.coedges[0].pcurve_evaluator_id.clone(),
+        offset: period + 5.0e-5,
+        meters_per_uv: 1.0e-3,
+        period_u: Some(period),
+    };
+    let original = endpoint(&pcurves, coedge);
+    let uv = context(&topology, &pcurves)
+        .canonical_coordinate(&edge, coedge, vertex, original, [Some(period), None])
+        .unwrap();
+    assert_eq!(uv, [VERTEX_UV[0] + period, VERTEX_UV[1]]);
 }

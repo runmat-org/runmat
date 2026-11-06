@@ -15,7 +15,7 @@
 //!   bosses joined to it, and the ESC board touching it.
 
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
-use runmat_execution_artifact::cache::FilesystemObjectStore;
+use runmat_execution_artifact::cache::{CacheExport, FilesystemObjectStore};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ArtifactAccess;
 use runmat_execution_runner_native::native_meshing_kernel_dispatcher;

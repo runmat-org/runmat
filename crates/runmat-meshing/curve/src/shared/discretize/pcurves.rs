@@ -1,4 +1,6 @@
-use runmat_geometry_core::{ExactEdge, ExactPcurveEvaluator, ParameterRange};
+use runmat_geometry_core::{
+    ExactEdge, ExactPcurveEvaluator, ExactSurfaceEvaluator, ParameterRange,
+};
 
 use crate::shared::{SharedCurveError, SharedCurveErrorKind, SharedCurveFaceUse};
 
@@ -88,14 +90,29 @@ pub(crate) fn face_uses_for_parameters(
                 *node_uv.last_mut().expect("node UV inventory is non-empty") = first;
             }
         }
-        if !face.periodic_u && !face.periodic_v && node_uv.len() > 1 {
+        // Every coedge on the face carries one image of each vertex, so the face chart sees one
+        // node coordinate. On a periodic face the images differ by whole periods; at a surface
+        // singularity the parameter along the pole is free, and each coedge keeps its own.
+        let periods = if face.periodic_u || face.periodic_v {
+            ExactSurfaceEvaluator::periodicity(pcurves, &face.surface_evaluator_id)
+                .map_err(|error| geometry_error(edge, error))?
+        } else {
+            [None, None]
+        };
+        let periodic = periods.iter().any(Option::is_some);
+        if !(periodic && face.has_singularity) && node_uv.len() > 1 {
             for (index, vertex) in [
                 (0, edge.start_vertex_id.as_ref()),
                 (node_uv.len() - 1, edge.end_vertex_id.as_ref()),
             ] {
                 if let Some(vertex) = vertex {
-                    node_uv[index] =
-                        vertex_uv.canonical_coordinate(edge, coedge, vertex, node_uv[index])?;
+                    node_uv[index] = vertex_uv.canonical_coordinate(
+                        edge,
+                        coedge,
+                        vertex,
+                        node_uv[index],
+                        periods,
+                    )?;
                 }
             }
         }

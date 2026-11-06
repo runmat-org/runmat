@@ -30,6 +30,7 @@ impl VertexUvContext<'_> {
         coedge: &ExactCoedge,
         vertex: &PersistentEntityId,
         original: [f64; 2],
+        periods: [Option<f64>; 2],
     ) -> Result<[f64; 2], SharedCurveError> {
         let Self {
             topology,
@@ -91,6 +92,11 @@ impl VertexUvContext<'_> {
         )
         .map(|uv| uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value)))
         .map_err(|error| geometry_error(edge, error))?;
+        // The representative's image nearest this coedge's own coordinate, by whole periods.
+        let uv = std::array::from_fn(|axis| match periods[axis] {
+            Some(period) => uv[axis] + ((original[axis] - uv[axis]) / period).round() * period,
+            None => uv[axis],
+        });
         for endpoint in [original, uv] {
             self.require_within_vertex_tolerance(edge, &coedge.face_id, vertex, endpoint)?;
         }
