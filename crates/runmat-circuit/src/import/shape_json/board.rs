@@ -136,6 +136,24 @@ fn arc_of(frame: &Frame, d: &str) -> Option<(Point, Point, Point)> {
     Some((frame.point(*x, *y), frame.point(m.0, m.1), frame.point(to.0, to.1)))
 }
 
+/// A `DIMENSION~layer~path~id` item as a board dimension: the path draws the dimension line
+/// first (one move and one line between the measured points), then its arrows and its text.
+/// Answers whether it was carried.
+fn dimension(f: &Fields, frame: &Frame, board: &mut Board, report: &mut Report) -> bool {
+    let first = path(f.str(2)).and_then(|steps| match steps.as_slice() {
+        [PathStep::Move(x0, y0), PathStep::Line(x1, y1), ..] => Some((frame.point(*x0, *y0), frame.point(*x1, *y1))),
+        _ => None,
+    });
+    let Some((a, b)) = first.filter(|(a, b)| a != b) else {
+        report.not_carried("dimensions whose path doesn't start with their line");
+        return false;
+    };
+    let id = board.alloc();
+    board.dimensions.insert(id, Dimension { id, layer: Layer::User(0), a, b, offset: 0, precision: 2 });
+    report.approximated("dimensions are carried as their measured line on the drawing layer; RunMat draws their arrows and text");
+    true
+}
+
 /// From board coordinates to a footprint's own (the inverse of its placement).
 struct Local {
     at: Point,
@@ -303,6 +321,12 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
                             }
                         }
                         "TEXT" => {}
+                        // A dimension drawn with a part measures the board: it is a board dimension.
+                        "DIMENSION" => {
+                            if dimension(sub, &frame, &mut board, report) {
+                                dimensions += 1;
+                            }
+                        }
                         "SVGNODE" => report.not_carried("3D model outlines of placed parts"),
                         other => report.not_carried(format!("{other} items in a placed part")),
                     }
@@ -451,20 +475,9 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
                 report.approximated("solid copper regions are carried as zones of their net");
             }
             "DIMENSION" => {
-                // `DIMENSION~layer~path~id`: the path draws the dimension line first (one move
-                // and one line between the measured points), then its arrows and its text.
-                let first = path(f.str(2)).and_then(|steps| match steps.as_slice() {
-                    [PathStep::Move(x0, y0), PathStep::Line(x1, y1), ..] => Some((frame.point(*x0, *y0), frame.point(*x1, *y1))),
-                    _ => None,
-                });
-                let Some((a, b)) = first.filter(|(a, b)| a != b) else {
-                    report.not_carried("dimensions whose path doesn't start with their line");
-                    continue;
-                };
-                let id = board.alloc();
-                board.dimensions.insert(id, Dimension { id, layer: Layer::User(0), a, b, offset: 0, precision: 2 });
-                dimensions += 1;
-                report.approximated("dimensions are carried as their measured line on the drawing layer; RunMat draws their arrows and text");
+                if dimension(&f, &frame, &mut board, report) {
+                    dimensions += 1;
+                }
             }
             "" => {}
             other => report.not_carried(format!("{other} items")),

@@ -3,7 +3,7 @@
 
 use runmat_circuit::import::shape_json;
 use runmat_circuit::runtime::{compile, CompileOptions, Files};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 mod import_check;
 
@@ -43,7 +43,9 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
     assert_eq!(r.carried["zones"], 2);
     assert_eq!(r.carried["board texts"], 1);
     assert_eq!(r.carried["board holes"], 1);
-    assert_eq!(r.carried["dimensions"], 1, "{:?}", r.lines());
+    // The board's dimension and one drawn with R1, carried as a board dimension.
+    assert_eq!(r.carried["dimensions"], 2, "{:?}", r.lines());
+    assert!(!r.not_carried.keys().any(|k| k.contains("DIMENSION")), "{:?}", r.lines());
     assert_eq!(r.approximated["solid copper regions are carried as zones of their net"], 1);
     assert_eq!(r.not_carried["solid regions of kind solid on layer 3"], 1, "{:?}", r.lines());
 
@@ -66,7 +68,9 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
     let hole = parsed.footprints.values().find(|f| f.reference == "H901").expect("the board hole is a footprint");
     assert_eq!(hole.package.pads[0].kind, runmat_circuit::library::PadKind::Npth);
     // The dimension measures its line: 40 canvas units along the bottom edge.
-    let dim = parsed.dimensions.values().next().expect("the dimension is carried");
+    let lengths: BTreeSet<i64> = parsed.dimensions.values().map(|d| (d.b.x - d.a.x).abs()).collect();
+    assert_eq!(lengths, [5_080_000, 10_160_000].into(), "R1's dimension measures 20 canvas units");
+    let dim = parsed.dimensions.values().find(|d| (d.b.x - d.a.x).abs() == 10_160_000).expect("the dimension is carried");
     assert_eq!(((dim.b.x - dim.a.x).abs(), dim.b.y - dim.a.y), (10_160_000, 0));
     // 80 × 40 canvas units of 10 mil.
     assert_eq!(parsed.outline.bbox().width(), 20_320_000);
