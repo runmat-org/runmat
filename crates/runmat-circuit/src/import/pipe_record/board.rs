@@ -301,6 +301,13 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
     // Rules.
     for r in records.iter().filter(|r| r.kind() == "Rule") {
         let kind = r.str("RULEKIND").trim().to_owned();
+        if kind == "PolygonConnect" {
+            if let Some(specs) = super::connect::rules(r, report) {
+                report.count("pour connect rules", specs.len());
+                board.rules.extend(specs);
+            }
+            continue;
+        }
         let scope = r.str("SCOPE1EXPRESSION").trim().to_owned();
         let value = match kind.as_str() {
             "Clearance" => Some(("clearance", r.len("GAP"))),

@@ -134,7 +134,7 @@ pub fn import_kicad(
         out.insert(lock_path_for(&circuit_path), imp.lock.to_text());
     }
     if out.is_empty() {
-        return Err("the KiCad project has no .kicad_sch or .kicad_pcb file".into());
+        return Err("give a .kicad_sch or .kicad_pcb file".into());
     }
     for w in &warnings {
         report.not_carried(w.clone());

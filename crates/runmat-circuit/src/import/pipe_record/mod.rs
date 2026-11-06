@@ -16,6 +16,7 @@
 
 pub mod binary;
 pub mod board;
+mod connect;
 pub mod primitives;
 pub mod schematic;
 

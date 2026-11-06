@@ -73,6 +73,21 @@ fn an_ascii_schematic_and_board_import_to_a_circuit_that_compiles() {
     assert_eq!(board.outline.bbox().width(), 25_400_000);
     assert_eq!(board.outline.bbox().min.x, 0);
     assert_eq!(board.limits.min_clearance, runmat_circuit::geom::mm(0.2032));
+    // Pour connect rules: GND joins solid; through-hole and SMD pads elsewhere by thermal
+    // relief with their spoke width and gap; vias solid. The rule on a footprint is reported.
+    use runmat_circuit::board_rules::{props, RuleValue};
+    let rule = |id: &str| board.rules.iter().find(|r| r.id == id).unwrap_or_else(|| panic!("{id}: {:?}", board.rules.iter().map(|r| &r.id).collect::<Vec<_>>()));
+    let gnd = rule("PolygonConnect_1");
+    assert_eq!(gnd.selector, "*:where(*:net(\"GND\"))");
+    assert!(gnd.decls.contains(&(props::ZONE_CONNECT.to_string(), RuleValue::Text("solid".into()))), "{gnd:?}");
+    let tht = rule("PolygonConnect thpad");
+    assert_eq!(tht.selector, "*:where(pad.tht)");
+    assert!(tht.decls.contains(&(props::SPOKE_WIDTH.to_string(), RuleValue::Len(runmat_circuit::geom::mm(0.3048)))), "{tht:?}");
+    assert!(tht.decls.contains(&(props::THERMAL_GAP.to_string(), RuleValue::Len(runmat_circuit::geom::mm(0.254)))), "{tht:?}");
+    assert!(gnd.priority > tht.priority);
+    assert_eq!(rule("PolygonConnect via").selector, "*:where(via)");
+    assert_eq!(out.report.carried["pour connect rules"], 4, "{:?}", out.report.lines());
+    assert_eq!(out.report.not_carried["pour connect rules scoped to HasFootprint('J1') and All"], 1, "{:?}", out.report.lines());
     assert_eq!(board.nets.iter().find(|n| n.name == "GND").and_then(|n| n.class.as_deref()), Some("Power"));
 }
 
