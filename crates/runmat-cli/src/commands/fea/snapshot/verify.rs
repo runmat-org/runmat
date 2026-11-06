@@ -114,7 +114,17 @@ fn verify_run(snapshot: &SavedRun) -> Result<(String, Vec<FieldReplay>, serde_js
                     && page.total_count == descriptor.value_count
                     && page.run_id == snapshot.run_id
                     && page.field_id == descriptor.field_id,
-                "cold field page differs from original descriptor scope"
+                "cold field page differs from original descriptor scope: field {} offset {}/{} count {}/{} total {}/{} run {}/{} field {}",
+                descriptor.field_id,
+                page.offset,
+                offset,
+                page.count,
+                count,
+                page.total_count,
+                descriptor.value_count,
+                page.run_id,
+                snapshot.run_id,
+                page.field_id
             );
             let (values, components) = match page.values {
                 AnalysisFieldPageValues::Real(values) => (values, 1),

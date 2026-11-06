@@ -229,7 +229,10 @@ where
     let host =
         AnalysisHostWorkload::from_program_request_admitted(request, store, admission.as_ref())?;
     let output_policy = host.output_policy;
-    output_policy.require_within(AnalysisOutputPolicy::new(chunk_bytes, limits)?)?;
+    // Inputs were admitted under the invocation's policy by their producers; outputs this
+    // worker creates are bounded by its own reservation as well.
+    let worker_policy =
+        output_policy.bounded_by(AnalysisOutputPolicy::new(chunk_bytes, limits)?)?;
     let limits = output_policy.inventory_limits();
     let roots = input_roots(request)?;
     let inputs = host
@@ -348,8 +351,8 @@ where
             ));
         }
         let prepared = output.into_prepared(
-            output_policy.chunk_bytes(),
-            output_policy.inventory_limits(),
+            worker_policy.chunk_bytes(),
+            worker_policy.inventory_limits(),
         )?;
         if let Some(admitted) = admitted_output {
             crate::object::validate_prepared_output_resource_facts(&prepared, admitted)?;
