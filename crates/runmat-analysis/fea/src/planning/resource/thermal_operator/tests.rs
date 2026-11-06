@@ -1,4 +1,5 @@
 use super::*;
+use crate::planning::resource::Count;
 use crate::{
     algebra::{MatrixProperties, OperatorRole, RealSparseAssembler},
     execution::ThermalWorkload,
