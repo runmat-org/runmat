@@ -131,3 +131,26 @@ fn runmat_design_check_runs_a_circuits_m_values() {
     assert!(ran.iter().any(|r| r == "erc"), "the checks past the compile ran: {ran:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The RC filter fixture (tests/fixtures/rc_filter): R1's value comes from rcResistor.m, and
+/// the simulated corner lands where the function sized it.
+#[test]
+fn the_rc_filter_corner_lands_where_its_m_function_sized_the_resistor() {
+    let files: Files = [
+        ("lowpass.circuit", include_str!("fixtures/rc_filter/lowpass.circuit")),
+        ("rcResistor.m", include_str!("fixtures/rc_filter/rcResistor.m")),
+        ("runmat.toml", include_str!("fixtures/rc_filter/runmat.toml")),
+    ]
+    .into_iter()
+    .map(|(p, t)| (format!("/rc/{p}"), t.to_string()))
+    .collect();
+    let check = call_with_m_values("design.check", json!({ "path": "/rc/lowpass.circuit" }), &files).expect("check");
+    assert_eq!(check["errors"], json!(0), "{check}");
+    let out = call_with_m_values("design.simulate", json!({ "path": "/rc/lowpass.circuit", "simulation": "corner" }), &files).expect("simulate");
+    let f3db = out["measures"].as_array().and_then(|m| m.iter().find(|m| m["name"] == "f3db")).cloned().unwrap_or_default();
+    // 1/(2π·R·C) with R from rcResistor.m is the 160 Hz it was sized for; the part's own
+    // 10 kΩ would put the corner at 159.15 Hz.
+    let corner = f3db["value"].as_f64().unwrap_or_else(|| panic!("{out}"));
+    assert!((corner - 160.0).abs() < 0.2, "corner {corner} Hz");
+    assert_eq!(f3db["pass"], json!(true));
+}

@@ -147,6 +147,8 @@ pub struct Netlist {
     pub diagnostics: Vec<Diagnostic>,
     /// Schematic places recorded in the lock (see [`crate::ids::SchPlace`]).
     pub sch_places: BTreeMap<String, crate::ids::SchPlace>,
+    /// Hand-drawn schematic wires recorded in the lock (see [`crate::ids::SchWire`]).
+    pub sch_wires: BTreeMap<crate::ids::WireKey, crate::ids::SchWire>,
 }
 
 impl Netlist {
@@ -725,6 +727,7 @@ impl<'a> Ctx<'a> {
                 }
             };
             let (part, entity, package, pins) = self.resolve_part(&part_ref, &path, &decl.source);
+            primary_value(&mut params);
             if let Some(p) = part.and_then(|u| self.pool.parts.get(&u)) {
                 for (k, v) in &self.pool.effective_part(p).params {
                     params.entry(k.clone()).or_insert_with(|| v.clone());
@@ -1299,6 +1302,7 @@ pub fn elaborate(
         sheet_renames: cx.sheet_renames,
         diagnostics: diags,
         sch_places: lock.map(|l| l.places.clone()).unwrap_or_default(),
+        sch_wires: lock.map(|l| l.wires.clone()).unwrap_or_default(),
     }
 }
 
@@ -1378,4 +1382,21 @@ fn annotate(cx: &mut Ctx) -> Vec<String> {
         }
     }
     out
+}
+
+/// A component's written `value` (`value = 9.95 kohm`, or one an `.m` function computed) is its
+/// primary parameter: a resistance, capacitance or inductance by its dimension. It goes in under
+/// that name ahead of the part's own, so the simulation, the BOM and the checks read the
+/// component's value, not the part's nominal one.
+fn primary_value(params: &mut BTreeMap<String, Param>) {
+    use runmat_rules::Dim;
+    let Some(value) = params.get("value").cloned() else { return };
+    let Some(q) = value.as_quantity() else { return };
+    let key = match q.dim {
+        d if d == Dim::RESISTANCE => "resistance",
+        d if d == Dim::CAPACITANCE => "capacitance",
+        d if d == Dim::INDUCTANCE => "inductance",
+        _ => return,
+    };
+    params.insert(key.to_owned(), value);
 }
