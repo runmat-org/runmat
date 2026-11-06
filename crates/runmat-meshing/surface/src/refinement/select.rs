@@ -77,10 +77,11 @@ pub(crate) fn select_exact_face_refinement_candidates(
                 ExactFaceRefinementErrorKind::UnsatisfiedQuality,
                 &geometry.source_face_id,
                 format!(
-                    "surface topology contains unprotected edge {edge:?} at {:?} -> {:?} with metric length {length}, below the {} minimum",
+                    "surface topology contains unprotected edge {edge:?} at {:?} -> {:?} with metric length {length}, below the {} minimum; incident segments {}",
                     pslg.vertices[edge[0] as usize].uv,
                     pslg.vertices[edge[1] as usize].uv,
                     quality.minimum_metric_edge_length,
+                    incident_segments(pslg, edge),
                 ),
             ));
         }
@@ -234,6 +235,37 @@ fn shape_candidate_crowds_a_shared_curve(
         distance_squared.is_finite()
             && distance_squared < minimum_metric_edge_length * minimum_metric_edge_length
     })
+}
+
+/// The PSLG segments at each end of a short unprotected edge, with their trim edge and far end.
+fn incident_segments(pslg: &ExactFacePslg, edge: [u32; 2]) -> String {
+    edge.iter()
+        .map(|vertex| {
+            let segments = pslg
+                .segments
+                .iter()
+                .filter(|segment| segment.vertex_indices.contains(vertex))
+                .map(|segment| {
+                    let other =
+                        segment.vertex_indices[usize::from(segment.vertex_indices[0] == *vertex)];
+                    let source = match &segment.source {
+                        crate::ExactFacePslgSegmentSource::ExactTrim { source_edge_id, .. } => {
+                            source_edge_id.source_topology_id.clone()
+                        }
+                        crate::ExactFacePslgSegmentSource::ChartCut { .. } => {
+                            "chart cut".to_owned()
+                        }
+                    };
+                    format!(
+                        "{source} to {other} at {:?}",
+                        pslg.vertices[other as usize].uv
+                    )
+                })
+                .collect::<Vec<_>>();
+            format!("{vertex}: [{}]", segments.join("; "))
+        })
+        .collect::<Vec<_>>()
+        .join(" / ")
 }
 
 fn short_unprotected_edge(
