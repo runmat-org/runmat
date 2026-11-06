@@ -911,3 +911,50 @@ fn removing_or_suppressing_an_occurrence_with_a_body_changes_only_that_occurrenc
         change.source
     );
 }
+
+#[test]
+fn names_made_from_other_names_spell_them_out_and_read_back() {
+    use runmat_cad::refs::{EntityName, Reference};
+    use runmat_cad::syntax::refs::print_reference;
+    let text = r#"part p {
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        l2 = line(start = l1.end, end = [80 mm, 50 mm])
+        l3 = line(start = l2.end, end = [0 mm, 50 mm])
+        l4 = line(start = l3.end, end = l1.start)
+    }
+    feature body = extrude(profile = sketch.s1, distance = 25 mm)
+    feature hollow = shell(body = feature.body.body, open_faces = [feature.body.face.start], thickness = 2 mm)
+    feature round = fillet(edges = [edges_between(feature.hollow.face.inner(feature.body.face.side(s1.l1)), feature.hollow.face.rim(feature.body.face.side(s1.l1)))], radius = 1 mm)
+    feature ch = chamfer(edges = [edges_between(feature.round.face.blend(between = [feature.body.face.end, feature.body.face.side(s1.l2)]), feature.body.face.end)], distance = 1 mm, angle = 45 deg)
+}
+"#;
+    let parsed = parse_part("p.part", text);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let document = parsed.document.unwrap();
+    // The model holds tokens; printing spells each token as the name it stands for.
+    let printed = print_part(&document, &[]).unwrap();
+    assert!(printed.contains("feature.hollow.face.inner(feature.body.face.side(s1.l1))"), "{printed}");
+    assert!(printed.contains("feature.round.face.blend(between = ["), "{printed}");
+    assert_eq!(parse_part("p.part", &printed).document.unwrap(), document);
+    let inner = Reference::Name {
+        kind: runmat_cad::refs::TopoKind::Face,
+        name: EntityName::Generated(runmat_cad::refs::GenerationName {
+            feature: runmat_cad::ids::FeatureId::new("hollow"),
+            role: runmat_cad::refs::Role::ShellInner,
+            tag: runmat_cad::refs::SourceTag::face_of(&EntityName::Generated(runmat_cad::refs::GenerationName {
+                feature: runmat_cad::ids::FeatureId::new("body"),
+                role: runmat_cad::refs::Role::EndCap,
+                tag: runmat_cad::refs::SourceTag::None,
+                ordinal: None,
+                step: None,
+            })),
+            ordinal: None,
+            step: None,
+        }),
+    };
+    assert_eq!(print_reference(&inner).as_deref(), Some("feature.hollow.face.inner(feature.body.face.end)"));
+    // A tag names faces only.
+    let bad = text.replace("inner(feature.body.face.side(s1.l1))", "inner(feature.body.body)");
+    assert!(!parse_part("p.part", &bad).diagnostics.is_empty());
+}

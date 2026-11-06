@@ -19,19 +19,7 @@ part bracket {
 
     region ff : face = {
         select = [
-            {
-                ref = name,
-                kind = face,
-                name = {
-                    form = generated,
-                    feature = ff,
-                    role = blend,
-                    tag = {
-                        tag = edge,
-                        between = [bb1dbc41661d166474d814c9e702af6c, c55c5ecf60a179aeef0cbb978e849ba6]
-                    }
-                }
-            }
+            feature.ff.face.blend(between = [feature.body.face.side(s1.l1), feature.body.face.end])
         ],
         expect = exactly_one
     }

@@ -9,6 +9,8 @@
 //! | `feature.body.face.side(s1.l1, ordinal = 2)` | one piece of a split face |
 //! | `feature.fold.face.bend(l1, ordinal = 0, step = b1)` | a face one step of a compound feature made |
 //! | `feature.step.face("Top")` | a face named in an imported CAD file |
+//! | `feature.hollow.face.inner(feature.body.face.side(s1.l1))` | a face made from another face (a shell wall) |
+//! | `feature.round.face.blend(between = [a, b])`, `feature.round.face.blend(faces = [a, b, c])` | a face made in place of an edge or a vertex |
 //! | `edges_between(a, b)`, `vertex_of(a, b, c)`, `piece(a, bounded_by = [b])` | relational references |
 //! | `origin.xy`, `origin.yz`, `origin.zx`, `plane.mid` | a plane |
 //! | `origin.x`, `origin.y`, `origin.z`, `axis.hinge` | an axis |
@@ -17,13 +19,13 @@
 //! | `sketch.s1` | a sketch's closed loops (a profile) |
 //!
 //! Every form reads back as the value it was printed from. A value with no form here (a name
-//! held by token, a geometric fallback) is written in the generic record form, which also
+//! made from a name this process never saw, a geometric fallback) is written in the generic record form, which also
 //! reads back exactly. Hashes are never written.
 
 use crate::ids::{FeatureId, SketchEntityId};
 use crate::model::datum::{AxisRef, DatumRef, OriginAxis, OriginPlane, PlaneRef, PointRef};
 use crate::model::sketch::PointRole;
-use crate::refs::name::{EntityName, GenerationName, PlaneSide, Role, SourceTag, TopoKind};
+use crate::refs::name::{recipe_of, EntityName, GenerationName, NameToken, PlaneSide, Role, SourceTag, TopoKind};
 use crate::refs::Reference;
 use runmat_design_syntax::ast::{Argument, Expr};
 use runmat_design_syntax::json::{is_identifier, quote, Json, LowerError};
@@ -195,6 +197,11 @@ pub fn print_reference(reference: &Reference) -> Option<String> {
     })
 }
 
+/// The face name a token stands for, as text (`feature.body.face.side(s1.l1)`).
+fn nested(token: &NameToken) -> Option<String> {
+    print_name(TopoKind::Face, &recipe_of(token)?)
+}
+
 fn print_name(kind: TopoKind, name: &EntityName) -> Option<String> {
     match name {
         EntityName::Generated(GenerationName {
@@ -230,8 +237,18 @@ fn print_name(kind: TopoKind, name: &EntityName) -> Option<String> {
                         PlaneSide::Positive => "positive",
                     }
                 )),
-                // Names held by token have no text form.
-                _ => return None,
+                // A name made from other names spells each one out (their recipes, from the
+                // tag constructors that made the tokens).
+                SourceTag::Face { face } => arguments.push(nested(face)?),
+                SourceTag::Edge { between } => arguments.push(format!(
+                    "between = [{}, {}]",
+                    nested(&between[0])?,
+                    nested(&between[1])?
+                )),
+                SourceTag::Vertex { faces } => {
+                    let items: Option<Vec<String>> = faces.iter().map(nested).collect();
+                    arguments.push(format!("faces = [{}]", items?.join(", ")));
+                }
             }
             if let Some(ordinal) = ordinal {
                 arguments.push(format!("ordinal = {ordinal}"));
@@ -475,6 +492,24 @@ fn piece(expr: &Expr, arguments: &[Argument]) -> Result<Reference, LowerError> {
     })
 }
 
+/// A face's own name, written as its reference (a nested name in a tag).
+fn face_name(expr: &Expr) -> Result<EntityName, LowerError> {
+    match required(expr)? {
+        Reference::Name {
+            kind: TopoKind::Face,
+            name,
+        } => Ok(name),
+        _ => Err(error(expr, "expected a face name here")),
+    }
+}
+
+fn face_names(expr: &Expr) -> Result<Vec<EntityName>, LowerError> {
+    match expr {
+        Expr::List(list) => list.items().iter().map(face_name).collect(),
+        other => Err(error(other, "expected a list of faces")),
+    }
+}
+
 fn generated(
     expr: &Expr,
     feature: &str,
@@ -491,6 +526,11 @@ fn generated(
             Argument::Positional(value) if tag == SourceTag::None => {
                 tag = match &value {
                     Expr::String(text) => SourceTag::Key { key: text.value() },
+                    // The face a shell wall or rim offsets, by its own name.
+                    Expr::Call(_) => SourceTag::face_of(&face_name(&value)?),
+                    Expr::Reference(reference) if reference.segments().len() > 2 => {
+                        SourceTag::face_of(&face_name(&value)?)
+                    }
                     Expr::Reference(reference) => match reference.segments().as_slice() {
                         [key] => SourceTag::Key { key: key.clone() },
                         [sketch, entity] => SourceTag::Curve {
@@ -520,6 +560,19 @@ fn generated(
                                 .parse::<u32>()
                                 .map_err(|_| error(&value, "an ordinal is a whole number"))?,
                         )
+                    }
+                    ("between", _) if tag == SourceTag::None => {
+                        tag = match face_names(&value)?.as_slice() {
+                            [a, b] => SourceTag::edge_between(a, b),
+                            _ => return Err(error(&value, "`between` takes two faces")),
+                        }
+                    }
+                    ("faces", _) if tag == SourceTag::None => {
+                        let faces = face_names(&value)?;
+                        if faces.is_empty() {
+                            return Err(error(&value, "`faces` takes one or more faces"));
+                        }
+                        tag = SourceTag::vertex_of(&faces);
                     }
                     ("side", Expr::Reference(side)) if tag == SourceTag::None => {
                         tag = SourceTag::Side {

@@ -50,7 +50,7 @@ part features {
             {
                 sketch = layout,
                 segments = [bottom, right, top, left],
-                profile = rect_tube(width = 0.02, height = 0.02, wall = 0.002),
+                profile = rect_tube(width = 20 mm, height = 20 mm, wall = 2 mm),
                 material = S235
             }
         ]
@@ -85,23 +85,7 @@ part features {
     feature lp1 = plane.offset(base = origin.xy, distance = 20 mm + input.lz)
     feature ch = chamfer(
         edges = [
-            {
-                ref = edges_between,
-                a = {
-                    ref = name,
-                    kind = face,
-                    name = {
-                        form = generated,
-                        feature = r1,
-                        role = blend,
-                        tag = {
-                            tag = edge,
-                            between = [bb1dbc41661d166474d814c9e702af6c, c55c5ecf60a179aeef0cbb978e849ba6]
-                        }
-                    }
-                },
-                b = feature.body.face.end
-            }
+            edges_between(feature.r1.face.blend(between = [feature.body.face.side(s1.l1), feature.body.face.end]), feature.body.face.end)
         ],
         distance = 0.5 mm
     )

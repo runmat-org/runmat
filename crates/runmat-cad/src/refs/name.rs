@@ -18,6 +18,11 @@
 //! Tokens are a pure function of the recipe: the same design gives the same tokens on every
 //! platform, release and kernel, so they can be compared without the table.
 //!
+//! The text form spells a nested name out in full (`feature.hollow.face.inner(
+//! feature.body.face.side(s1.l1))`): the tag constructors ([`SourceTag::face_of`],
+//! [`SourceTag::edge_between`], [`SourceTag::vertex_of`]) record each name they turn into a
+//! token ([`recipe_of`]), so the printer can spell the token as its name again.
+//!
 //! The `Display` forms (`extrude1.side(l1)`) are for people, messages and agents only; nested
 //! names show as `~` plus the token's first eight hex digits unless a table expands them
 //! ([`NameTable::describe`]).
@@ -27,7 +32,29 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::{Mutex, OnceLock};
 use thiserror::Error;
+
+/// Every name a tag constructor turned into a token. A token is a pure function of its name,
+/// so a recorded recipe is never stale; a token no constructor made here has none.
+fn recipes() -> &'static Mutex<BTreeMap<NameToken, EntityName>> {
+    static RECIPES: OnceLock<Mutex<BTreeMap<NameToken, EntityName>>> = OnceLock::new();
+    RECIPES.get_or_init(Default::default)
+}
+
+/// The token of `name`, recorded so [`recipe_of`] can give the name back.
+fn remembered(name: &EntityName) -> NameToken {
+    let token = name.token();
+    if let Ok(mut map) = recipes().lock() {
+        map.entry(token).or_insert_with(|| name.clone());
+    }
+    token
+}
+
+/// The name a tag constructor made `token` from, if one did in this process.
+pub fn recipe_of(token: &NameToken) -> Option<EntityName> {
+    recipes().lock().ok()?.get(token).cloned()
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TopoKind {
@@ -130,19 +157,19 @@ pub enum SourceTag {
 impl SourceTag {
     /// The tag of the edge between two faces (order does not matter).
     pub fn edge_between(a: &EntityName, b: &EntityName) -> SourceTag {
-        let (x, y) = (a.token(), b.token());
+        let (x, y) = (remembered(a), remembered(b));
         SourceTag::Edge {
             between: if x <= y { [x, y] } else { [y, x] },
         }
     }
 
     pub fn face_of(face: &EntityName) -> SourceTag {
-        SourceTag::Face { face: face.token() }
+        SourceTag::Face { face: remembered(face) }
     }
 
     /// The tag of the vertex where these faces meet (order and repeats do not matter).
     pub fn vertex_of(faces: &[EntityName]) -> SourceTag {
-        let mut t: Vec<NameToken> = faces.iter().map(|f| f.token()).collect();
+        let mut t: Vec<NameToken> = faces.iter().map(remembered).collect();
         t.sort();
         t.dedup();
         SourceTag::Vertex { faces: t }
