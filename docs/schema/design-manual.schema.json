@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "route": {
+            "type": "string",
+            "pattern": "^/docs/(design-language|mcad|ecad)(/[a-z0-9-]+)*$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "group": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "narrative": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^docs/design/[a-z0-9/_-]+\\.md$"
+          },
+          "examples": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "related_topics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "href": {
+                  "type": "string",
+                  "pattern": "^/docs/"
+                }
+              },
+              "required": [
+                "title",
+                "href"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "route",
+          "title",
+          "summary",
+          "keywords",
+          "group",
+          "order",
+          "narrative",
+          "related_topics"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "topics"
+  ]
+}

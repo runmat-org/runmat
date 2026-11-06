@@ -1,0 +1,955 @@
+{
+  "schema_version": 1,
+  "topics": [
+    {
+      "id": "language-overview",
+      "route": "/docs/design-language",
+      "title": "The design language",
+      "summary": "The RunMat design language describes parts, assemblies, drawings, circuits and boards as text files. Learn the file kinds, the shared statement forms, and how the files connect to each other and to simulation.",
+      "keywords": [
+        "design language",
+        "RunMat MCAD",
+        "RunMat ECAD",
+        ".part",
+        ".assembly",
+        ".drawing",
+        ".circuit",
+        ".circuit.layout",
+        ".fea",
+        "text CAD",
+        "code CAD",
+        "parametric CAD"
+      ],
+      "group": "Design language",
+      "order": 0,
+      "narrative": "docs/design/language/overview.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        }
+      ]
+    },
+    {
+      "id": "language-values",
+      "route": "/docs/design-language/values-and-units",
+      "title": "Values, units and expressions",
+      "summary": "Values in RunMat design files are quantities with units, numbers, strings, lists, records, references and expressions. Learn inputs, let values, tolerances and the units each file kind reads.",
+      "keywords": [
+        "design values",
+        "units",
+        "quantities",
+        "inputs",
+        "parameters",
+        "let",
+        "tolerance",
+        "expressions",
+        "mm",
+        "deg",
+        "kohm",
+        "design parameters"
+      ],
+      "group": "Design language",
+      "order": 1,
+      "narrative": "docs/design/language/values-and-units.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        }
+      ]
+    },
+    {
+      "id": "language-names",
+      "route": "/docs/design-language/names-and-selectors",
+      "title": "Names and selectors",
+      "summary": "How RunMat design files name faces, edges, bodies, occurrences, pins and nets so references survive edits. Generation names, relational selectors, regions, published names and canonical IDs.",
+      "keywords": [
+        "topological naming",
+        "face selection",
+        "edge selection",
+        "canonical names",
+        "regions",
+        "published names",
+        "occurrence paths",
+        "designators",
+        "pin references",
+        "net names"
+      ],
+      "group": "Design language",
+      "order": 2,
+      "narrative": "docs/design/language/names-and-selectors.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        }
+      ]
+    },
+    {
+      "id": "language-modules",
+      "route": "/docs/design-language/modules",
+      "title": "Folders, modules and use",
+      "summary": "In RunMat, a folder is a module. Designs in one folder name each other with no import; `use` brings in designs from other folders and +package folders. Resolution rules, aliases, pins and errors.",
+      "keywords": [
+        "modules",
+        "folders",
+        "use",
+        "packages",
+        "+package",
+        "imports",
+        "name resolution",
+        "design reuse",
+        "libraries",
+        "monorepo CAD"
+      ],
+      "group": "Design language",
+      "order": 3,
+      "narrative": "docs/design/language/modules.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        }
+      ]
+    },
+    {
+      "id": "language-matlab",
+      "route": "/docs/design-language/matlab-functions",
+      "title": "MATLAB functions in design values",
+      "summary": "A RunMat design value can call a MATLAB function in the same folder. Resolution, arguments and units across the boundary, determinism, volatile values and caching, with a disc cam whose profile comes from its motion law.",
+      "keywords": [
+        "MATLAB",
+        ".m functions",
+        "design values",
+        "parametric CAD",
+        "cam profile",
+        "motion law",
+        "code-driven design",
+        "volatile",
+        "cache",
+        "determinism"
+      ],
+      "group": "Design language",
+      "order": 4,
+      "narrative": "docs/design/language/matlab-functions.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        }
+      ]
+    },
+    {
+      "id": "language-checks",
+      "route": "/docs/design-language/checks-and-diagnostics",
+      "title": "Checks and diagnostics",
+      "summary": "How RunMat checks design files and reports problems. Root causes and cascades, diagnostic codes, typed repairs, and the circuit checks that gate continuous integration.",
+      "keywords": [
+        "diagnostics",
+        "design check",
+        "root cause",
+        "regeneration errors",
+        "ERC",
+        "DRC",
+        "CI",
+        "continuous integration",
+        "error codes",
+        "repairs"
+      ],
+      "group": "Design language",
+      "order": 5,
+      "narrative": "docs/design/language/checks-and-diagnostics.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        }
+      ]
+    },
+    {
+      "id": "language-tools",
+      "route": "/docs/design-language/agent-and-cli",
+      "title": "Agent tools and the command line",
+      "summary": "The design tools the RunMat agent, MCP clients and scripts call over parts, assemblies, drawings, circuits and boards, and the runmat-design command line for checks and exports.",
+      "keywords": [
+        "agent tools",
+        "MCP",
+        "design.check",
+        "design.inspect",
+        "design.export",
+        "design.propose_edit",
+        "command line",
+        "CLI",
+        "automation",
+        "CI"
+      ],
+      "group": "Design language",
+      "order": 6,
+      "narrative": "docs/design/language/agent-and-cli.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        }
+      ]
+    },
+    {
+      "id": "language-status",
+      "route": "/docs/design-language/status",
+      "title": "Feature status",
+      "summary": "Design features that the RunMat design docs describe and the current release does not include yet, with what each needs to ship. Generated from the design feature ledger.",
+      "keywords": [
+        "feature status",
+        "roadmap",
+        "not yet released",
+        "RunMat MCAD",
+        "RunMat ECAD"
+      ],
+      "group": "Design language",
+      "order": 7,
+      "narrative": "docs/design/language/status.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        }
+      ]
+    },
+    {
+      "id": "mcad-start",
+      "route": "/docs/mcad",
+      "title": "Get started with MCAD",
+      "summary": "Start designing mechanical parts in RunMat. Create a part file, set its inputs, check it, place it in an assembly, and export STEP, in the Desktop, with the agent or from the command line.",
+      "keywords": [
+        "get started",
+        "RunMat MCAD",
+        "first part",
+        "CAD tutorial",
+        "parametric part",
+        "text CAD",
+        "export STEP"
+      ],
+      "group": "MCAD",
+      "order": 0,
+      "narrative": "docs/design/mcad/get-started.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-files",
+      "route": "/docs/mcad/files",
+      "title": "MCAD file reference",
+      "summary": "Reference for RunMat MCAD files. Every statement a .part, .assembly and .drawing file can hold, what it does, and where its full reference lives, with examples that check.",
+      "keywords": [
+        ".part file",
+        ".assembly file",
+        ".drawing file",
+        "MCAD file format",
+        "text CAD format",
+        "parametric part file",
+        "assembly file format",
+        "drawing file format"
+      ],
+      "group": "MCAD",
+      "order": 1,
+      "narrative": "docs/design/mcad/files.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-sketches",
+      "route": "/docs/mcad/part/sketches",
+      "title": "Sketches and constraints",
+      "summary": "Reference for RunMat sketches. Sketch planes, lines, arcs, circles, splines, points and construction geometry, shared points, geometric and dimensional constraints, limits and the solved cache.",
+      "keywords": [
+        "sketch",
+        "2D sketch",
+        "constraints",
+        "parametric sketch",
+        "coincident",
+        "tangent",
+        "horizontal",
+        "vertical",
+        "dimension",
+        "construction geometry",
+        "spline",
+        "sketch solver"
+      ],
+      "group": "MCAD reference",
+      "order": 0,
+      "narrative": "docs/design/mcad/part/sketches.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-features",
+      "route": "/docs/mcad/part/features",
+      "title": "Features",
+      "summary": "Reference for every feature a RunMat part can hold, with its parameters and examples. Extrude, revolve, sweep, loft, holes and threads, fillets and chamfers, shell, draft, patterns, mirrors, booleans, surfaces, sheet metal, weldments, mold tools, direct edits, imports and datums.",
+      "keywords": [
+        "CAD features",
+        "extrude",
+        "revolve",
+        "sweep",
+        "loft",
+        "hole",
+        "thread",
+        "fillet",
+        "chamfer",
+        "shell",
+        "draft",
+        "pattern",
+        "mirror",
+        "boolean",
+        "surface modeling",
+        "sheet metal",
+        "weldment",
+        "mold design",
+        "direct editing",
+        "datum planes"
+      ],
+      "group": "MCAD reference",
+      "order": 1,
+      "narrative": "docs/design/mcad/part/features.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-regions",
+      "route": "/docs/mcad/part/regions-and-publish",
+      "title": "Outputs, regions and published values",
+      "summary": "Reference for what a RunMat part file exposes to other files and to manufacturing. Outputs and part numbers, materials, regions, published values, semantic PMI (datums, GD&T, size and location tolerances, surface finish), properties and links.",
+      "keywords": [
+        "part output",
+        "part number",
+        "material",
+        "regions",
+        "publish",
+        "PMI",
+        "GD&T",
+        "datum",
+        "flatness",
+        "parallelism",
+        "tolerance",
+        "surface finish",
+        "traceability",
+        "links"
+      ],
+      "group": "MCAD reference",
+      "order": 2,
+      "narrative": "docs/design/mcad/part/regions-and-publish.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-configurations",
+      "route": "/docs/mcad/part/configurations",
+      "title": "Configurations",
+      "summary": "Reference for RunMat part configurations. Override inputs, suppress features, set a feature's own parameters, and give each configuration its own part number and description, for product families and left- and right-hand parts.",
+      "keywords": [
+        "configurations",
+        "product family",
+        "design table",
+        "part number",
+        "suppress feature",
+        "variants",
+        "left hand",
+        "right hand",
+        "dash numbers",
+        "family of parts"
+      ],
+      "group": "MCAD reference",
+      "order": 3,
+      "narrative": "docs/design/mcad/part/configurations.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-mates",
+      "route": "/docs/mcad/assembly/mates",
+      "title": "Occurrences and mates",
+      "summary": "Reference for RunMat assemblies. Place parts and sub-assemblies as occurrences, set their configurations and placements, and join them with connectors and mates, including revolute, slider, gear, rack-and-pinion, screw, pin-slot and cam mates.",
+      "keywords": [
+        "assembly",
+        "occurrences",
+        "mates",
+        "mate connectors",
+        "revolute",
+        "slider",
+        "cylindrical",
+        "planar",
+        "ball",
+        "gear mate",
+        "rack and pinion",
+        "screw mate",
+        "pin slot",
+        "cam mate",
+        "kinematics",
+        "degrees of freedom"
+      ],
+      "group": "MCAD reference",
+      "order": 4,
+      "narrative": "docs/design/mcad/assembly/mates.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-patterns",
+      "route": "/docs/mcad/assembly/patterns-and-mirrors",
+      "title": "Patterns, mirrors and fasteners",
+      "summary": "Reference for repeating and mirroring occurrences in a RunMat assembly, and for fastener sets laid out along paths. Linear, grid, circular, table and follow-pattern layouts, mirrors of patterns, keyed copies, and fastener rules.",
+      "keywords": [
+        "assembly pattern",
+        "circular pattern",
+        "linear pattern",
+        "mirror",
+        "keyed instances",
+        "fasteners",
+        "rivets",
+        "bolt patterns",
+        "follow pattern",
+        "skip instances"
+      ],
+      "group": "MCAD reference",
+      "order": 5,
+      "narrative": "docs/design/mcad/assembly/patterns-and-mirrors.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-drawings",
+      "route": "/docs/mcad/drawing/views-and-annotations",
+      "title": "Drawing views and annotations",
+      "summary": "Reference for RunMat drawing files. Sheet formats and title blocks, standard, projected, section, detail, auxiliary and broken-out views, dimensions, hole callouts, GD&T frames from the part's PMI, surface finish and weld symbols, notes, balloons, and BOM, hole, revision, bend, weld and cut-list tables.",
+      "keywords": [
+        "engineering drawing",
+        "2D drawing",
+        "title block",
+        "section view",
+        "detail view",
+        "dimensions",
+        "GD&T",
+        "feature control frame",
+        "surface finish symbol",
+        "BOM table",
+        "hole table",
+        "revision table",
+        "cut list",
+        "third angle projection"
+      ],
+      "group": "MCAD reference",
+      "order": 6,
+      "narrative": "docs/design/mcad/drawing/views-and-annotations.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-evaluate",
+      "route": "/docs/mcad/evaluate",
+      "title": "Evaluate",
+      "summary": "Evaluate a RunMat part or assembly. Mass, center of gravity and inertia from materials, interference and clearance between parts, weldment cut lists, and design-for-manufacture checks for machining, sheet metal, molding and additive.",
+      "keywords": [
+        "mass properties",
+        "center of gravity",
+        "moment of inertia",
+        "interference detection",
+        "clearance check",
+        "cut list",
+        "weldment",
+        "DFM",
+        "design for manufacturing",
+        "wall thickness",
+        "draft analysis"
+      ],
+      "group": "MCAD reference",
+      "order": 7,
+      "narrative": "docs/design/mcad/evaluate.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-exchange",
+      "route": "/docs/mcad/import-export",
+      "title": "Import and export",
+      "summary": "Exchange RunMat designs with other tools. STEP AP242 with PMI and part numbers in and out, DXF and DWG drawings and flat patterns, PDF sheets, 3MF, STL and glTF meshes, and BOMs.",
+      "keywords": [
+        "STEP",
+        "AP242",
+        "PMI",
+        "import STEP",
+        "export STEP",
+        "DXF",
+        "DWG",
+        "PDF drawing",
+        "3MF",
+        "STL",
+        "glTF",
+        "BOM export",
+        "CAD interoperability"
+      ],
+      "group": "MCAD reference",
+      "order": 8,
+      "narrative": "docs/design/mcad/import-export.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "ecad-start",
+      "route": "/docs/ecad",
+      "title": "Get started with ECAD",
+      "summary": "Start designing electronics in RunMat. Write a schematic as a .circuit file, check it, start its board, simulate a filter and write fabrication outputs, in the Desktop, with the agent or from the command line.",
+      "keywords": [
+        "get started",
+        "RunMat ECAD",
+        "first schematic",
+        "PCB tutorial",
+        "code-first schematic",
+        "circuit simulation",
+        "fabrication outputs"
+      ],
+      "group": "ECAD",
+      "order": 0,
+      "narrative": "docs/design/ecad/get-started.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-files",
+      "route": "/docs/ecad/files",
+      "title": "ECAD file reference",
+      "summary": "Reference for RunMat ECAD files. Every statement a .circuit schematic and a .circuit.layout board can hold, sheets and hierarchy, repeated channels, components and library parts, nets, buses and net classes, variants, electrical rules and design-review suites, with examples that check.",
+      "keywords": [
+        ".circuit file",
+        ".circuit.layout file",
+        "schematic file format",
+        "PCB file format",
+        "text schematic",
+        "hierarchical schematic",
+        "net classes",
+        "variants",
+        "ERC",
+        "design review",
+        "code-first PCB"
+      ],
+      "group": "ECAD",
+      "order": 1,
+      "narrative": "docs/design/ecad/files.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-simulation",
+      "route": "/docs/ecad/circuit/simulation",
+      "title": "Simulation sections and measures",
+      "summary": "Reference for simulation sections in a RunMat circuit. Sources, models, tolerances, operating point, DC, AC, transient, noise, temperature and Monte Carlo analyses, probes, and measures with limits that a check enforces.",
+      "keywords": [
+        "circuit simulation",
+        "SPICE",
+        "transient analysis",
+        "AC analysis",
+        "Monte Carlo",
+        "tolerance analysis",
+        "measures",
+        "bandwidth",
+        "rise time",
+        "settling time",
+        "noise analysis",
+        "simulation in CI"
+      ],
+      "group": "ECAD reference",
+      "order": 0,
+      "narrative": "docs/design/ecad/circuit/simulation.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-layout",
+      "route": "/docs/ecad/layout",
+      "title": "Board layout",
+      "summary": "Reference for RunMat board files (.circuit.layout). Stackups and rigid-flex regions, outline and cutouts, limits, net classes and rules, rooms, footprints and packages, tracks, arcs, vias, pours, keepouts, text and dimensions, the sync section, and the design-rule checks.",
+      "keywords": [
+        "PCB layout",
+        "board file",
+        "stackup",
+        "rigid flex",
+        "footprints",
+        "tracks",
+        "vias",
+        "copper pour",
+        "keepout",
+        "design rules",
+        "DRC",
+        "clearance",
+        "differential pairs",
+        "length matching"
+      ],
+      "group": "ECAD reference",
+      "order": 1,
+      "narrative": "docs/design/ecad/layout.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-fabrication",
+      "route": "/docs/ecad/fabrication",
+      "title": "Fabrication outputs and netlists",
+      "summary": "Fabrication outputs and netlists from a RunMat board. Gerber X2 with a job file, Excellon drill files and drill map, the fabrication drawing, BOM and pick-and-place per variant, IPC-2581, ODB++, and KiCad, SPICE, EDIF and IPC-D-356A netlists.",
+      "keywords": [
+        "Gerber",
+        "Gerber X2",
+        "Excellon",
+        "drill files",
+        "pick and place",
+        "BOM",
+        "IPC-2581",
+        "ODB++",
+        "IPC-D-356",
+        "netlist",
+        "fabrication outputs",
+        "PCB manufacturing files"
+      ],
+      "group": "ECAD reference",
+      "order": 2,
+      "narrative": "docs/design/ecad/fabrication.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-import",
+      "route": "/docs/ecad/import",
+      "title": "Import",
+      "summary": "Bring existing electronics designs into RunMat. KiCad projects, symbol and footprint libraries with their SPICE fields, SPICE model libraries, and the formats still to come.",
+      "keywords": [
+        "KiCad import",
+        "import schematic",
+        "import PCB",
+        "symbol library",
+        "footprint library",
+        "SPICE models",
+        "migrate PCB design"
+      ],
+      "group": "ECAD reference",
+      "order": 3,
+      "narrative": "docs/design/ecad/import.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-library",
+      "route": "/docs/ecad/parts-library",
+      "title": "The parts library",
+      "summary": "The RunMat parts library. Find orderable parts with their pins, packages, parameters, datasheets and SPICE models, embed them in a circuit as part declarations, and preview their symbols and footprints.",
+      "keywords": [
+        "parts library",
+        "component library",
+        "MPN",
+        "part search",
+        "footprints",
+        "symbols",
+        "SPICE models",
+        "datasheets",
+        "embedded part definitions"
+      ],
+      "group": "ECAD reference",
+      "order": 4,
+      "narrative": "docs/design/ecad/parts-library.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    }
+  ]
+}
