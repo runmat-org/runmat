@@ -28,6 +28,10 @@ fn a_root_sheets_ports_are_drawn_as_port_labels_and_the_filter_reads_left_to_rig
     let files: Files = [(PATH.to_owned(), CIRCUIT.to_owned())].into_iter().collect();
     let out = runtime::compile(PATH, CIRCUIT, &files, &CompileOptions::default());
     let index = out.index.expect("compiles");
+    // IN's one pin reaches outside through the root port, GND's through its power flag: neither
+    // is a lone pin.
+    let lone: Vec<_> = index.erc.iter().filter(|d| d.code == "single-pin-net").collect();
+    assert!(lone.is_empty(), "{lone:?}");
     assert_eq!(index.schematic.sheets.len(), 1);
     let page = &index.schematic.sheets[0];
     let label = |text: &str| {

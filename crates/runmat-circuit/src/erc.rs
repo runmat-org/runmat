@@ -9,7 +9,7 @@
 //! | `power-not-driven` | error | power inputs on a net with no power output and no power flag |
 //! | `input-not-driven` | warning | inputs on a net with nothing that can drive it |
 //! | `pin-unconnected` | warning | a pin on no net, not no-connect and not marked no-ERC |
-//! | `single-pin-net` | warning | a net with exactly one pin |
+//! | `single-pin-net` | warning | a net with exactly one pin, not on a root-sheet port or a power flag (both reach outside the design) |
 //! | `no-connect-connected` | error | a no-connect pin that is on a net with other pins |
 //! | `no-erc-on-connected` | info | a no-ERC marker on a pin that is connected anyway |
 //!
@@ -153,6 +153,15 @@ fn is_driver(t: PinType) -> bool {
 
 pub fn run(nl: &Netlist, opts: &ErcOptions) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    // The root sheet's ports are the design's own terminals: a net on one connects outside it.
+    let root_ports: BTreeSet<String> = nl
+        .sheets
+        .iter()
+        .filter(|(path, _)| path.depth() == 0)
+        .flat_map(|(path, sheet)| {
+            nl.sheet_ports.get(sheet).into_iter().flatten().map(|p| crate::elab::port_net_name(path, p))
+        })
+        .collect();
     for net in &nl.nets {
         let pins: Vec<(usize, usize, PinType)> = net
             .pins
@@ -258,7 +267,8 @@ pub fn run(nl: &Netlist, opts: &ErcOptions) -> Vec<Diagnostic> {
             }
             out.push(d);
         }
-        if pins.len() == 1 && !opts.allow_single.contains(&net.name) {
+        let outside = flagged || root_ports.contains(&net.name) || net.aliases.iter().any(|a| root_ports.contains(a));
+        if pins.len() == 1 && !outside && !opts.allow_single.contains(&net.name) {
             let (ci, pi, t) = pins[0];
             if t != PinType::NotConnected && !nl.no_erc.contains(&(ci, pi)) {
                 out.push(
