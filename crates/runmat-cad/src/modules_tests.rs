@@ -157,8 +157,6 @@ fn dependencies_list_the_folders_a_file_can_name() {
     for f in ["/p/cabin/", "/p/", "/p/+hardware/", "/p/cabin/+hardware/", "/p/+hardware/+fasteners/"] {
         assert!(deps.contains(&f.to_string()), "{f} in {deps:?}");
     }
-    let old = "runmat 0.7\nstd 1\n\nassembly a {\n    use part b from \"parts/b.part\" as b\n}\n";
-    assert_eq!(dependencies("/p/a.assembly", old), ["/p/parts/b.part"]);
 }
 
 #[test]
@@ -169,22 +167,6 @@ fn module_text_is_relative_or_a_package() {
     assert_eq!(module_text("/p/wing/a.assembly", "/p/b.part").as_deref(), Some(".."));
     assert_eq!(module_text("/p/wing/a.assembly", "/p/+hw/b.part").as_deref(), Some("hw"));
     assert_eq!(module_text("a.assembly", "+hw/+x/b.part").as_deref(), Some("hw.x"));
-}
-
-#[test]
-fn file_form_paths_take_their_workspace_path_and_print_back() {
-    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate from \"plate.part\" as plate\n    use part block from \"block.part\" as block {\n        placement = { placement = offset, offset = { translation = [30 mm, 10 mm, 40 mm] } }\n    }\n}\n";
-    let scope = ModuleScope::from_files([
-        ("/p/rig.assembly", rig),
-        ("/p/plate.part", "part plate {\n}\n"),
-        ("/p/block.part", "part block {\n}\n"),
-    ]);
-    let doc = parse_assembly_in("/p/rig.assembly", rig, &scope).document.unwrap();
-    assert_eq!(doc.occurrences[0].source.definition.file.as_str(), "/p/plate.part");
-    let text = print_assembly(&doc, &[]).unwrap();
-    let back = parse_assembly_in("/p/rig.assembly", &text, &scope);
-    assert!(back.diagnostics.is_empty(), "{:?}\n{text}", back.diagnostics);
-    assert_eq!(back.document.unwrap(), doc, "{text}");
 }
 
 /// A package is searched for in the referring folder, then each folder above it, as MATLAB's
@@ -251,4 +233,29 @@ fn a_project_at_the_workspace_root_resolves_and_lists_absolute_folders() {
     assert_eq!(dependencies("/top.assembly", top), ["/", "/cabin/"]);
     assert_eq!(module_text("/top.assembly", "/+hardware/rivet.part").as_deref(), Some("hardware"));
     assert_eq!(module_text("/top.assembly", "/cabin/galley.part").as_deref(), Some("./cabin"));
+}
+
+/// The file form is refused (report 12 §3.5): an occurrence, an interface frame or a drawing
+/// model that names a design by its file path is an error that says how to name the design.
+/// A STEP file keeps its path.
+#[test]
+fn a_design_named_by_its_file_path_is_an_error_that_says_to_name_the_design() {
+    let bracket = part("bracket");
+    let text = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket from \"parts/bracket.part\" as b\n}\n";
+    let scope = scope_with(&[("/p/rig.assembly", text), ("/p/parts/bracket.part", &bracket)]);
+    let parsed = parse_assembly_in("/p/rig.assembly", text, &scope);
+    let m = &parsed.diagnostics[0].message;
+    assert_eq!(m, "name the design: write `use part bracket as …` with `from \"./parts\"`, not the file \"parts/bracket.part\"");
+    assert!(parsed.diagnostics[0].span.start > 0, "the error sits on the occurrence");
+
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing d {\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n    view front = standard(orientation = front, sheet = \"1\", model = { file = \"bracket.part\" }, at = [150, 165], display = hidden_lines)\n}\n";
+    let scope = scope_with(&[("/p/d.drawing", drawing), ("/p/bracket.part", &bracket)]);
+    let parsed = parse_drawing_in("/p/d.drawing", drawing, &scope);
+    let messages: Vec<&str> = parsed.diagnostics.iter().map(|d| d.message.as_str()).collect();
+    assert!(messages.contains(&"name the design: write `model = { part = bracket }`, not the file \"bracket.part\""), "{messages:?}");
+
+    // The symbol form of the same assembly binds.
+    let text = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket from \"./parts\" as b\n}\n";
+    let scope = scope_with(&[("/p/rig.assembly", text), ("/p/parts/bracket.part", &bracket)]);
+    assert!(parse_assembly_in("/p/rig.assembly", text, &scope).diagnostics.is_empty());
 }

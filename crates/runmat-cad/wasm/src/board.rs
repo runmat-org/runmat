@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn an_assembly_places_a_circuit_board_as_a_drawn_prototype() {
         let mut files = daq_files();
-        let text = "runmat 0.7\nstd 1\n\nassembly box {\n    use circuit daq from \"daq.circuit\" as board {\n        placement = { placement = offset, offset = { translation = [15 mm, 10 mm, 10.5 mm] } }\n    }\n}\n";
+        let text = "runmat 0.7\nstd 1\n\nassembly box {\n    use circuit daq as board {\n        placement = { placement = offset, offset = { translation = [15 mm, 10 mm, 10.5 mm] } }\n    }\n}\n";
         files.insert("/p/box.assembly".into(), text.into());
         let deps = crate::runtime::dependencies("/p/daq.circuit", &files["/p/daq.circuit"]);
         assert!(deps.contains(&"/p/daq.circuit.layout".to_owned()), "{deps:?}");

@@ -733,20 +733,6 @@ mod tests {
             let occ = out["display"]["data"]["occurrences"].as_array().unwrap();
             assert_eq!(occ.len(), want, "{path}: {}", out["diagnostics"]);
         }
-        // The same project in the file form (`from "unit.assembly"`) resolves the same way.
-        let mut flat = files.clone();
-        flat.insert(
-            "/p/sub/station.assembly".into(),
-            station.replace("use assembly unit as u", "use assembly unit from \"unit.assembly\" as u"),
-        );
-        let out: Value =
-            serde_json::from_str(&compile_json("/p/sub/station.assembly", &flat["/p/sub/station.assembly"], &flat)).unwrap();
-        assert_eq!(
-            out["display"]["data"]["occurrences"].as_array().map(|o| o.len()),
-            Some(2),
-            "{}",
-            out["diagnostics"]
-        );
     }
 
     #[test]

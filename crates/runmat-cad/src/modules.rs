@@ -11,8 +11,8 @@
 //!   reaches `+pkg/fn.m` as `pkg.fn`.
 //! - **Pins:** `use part wing_skeleton from "//wing/skeleton" @ "R3" as skeleton`; `//` is the
 //!   project root (the outermost folder holding `runmat.toml`).
-//! - A file path ending in a design extension (`from "seat_frame.part"`) and non-design sources
-//!   (STEP) stay valid (report 12 §3.5).
+//! - A design named by its file path (`from "seat_frame.part"`, `file = "arm.part"`) is an
+//!   error that says which symbol to write. Non-design sources (STEP) keep their paths.
 //!
 //! The model keeps one identity for a definition: its resolved file ([`DefinitionRef`]). Text
 //! holds the symbol. [`bind`] turns the symbols a parse lowered into files through a
@@ -522,37 +522,57 @@ pub fn references(json: &Json) -> Vec<SymbolRef> {
     out
 }
 
-/// A file-form path (`from "plate.part"`, `file = "arm.part"`) as the workspace path the scope
-/// knows it by, so a definition has one identity whichever form named it.
-fn canonical_files(json: &mut Json, key: &str, folder: &str, scope: &ModuleScope) {
+/// Design references written as file paths (`from "plate.part"`, `file = "arm.part"`): the file
+/// form is refused (report 12 §3.5). Each is `(json path, message)` with the symbol form to
+/// write. STEP and other non-design sources keep their paths.
+fn file_form_errors(json: &Json, key: &str, at: &str, errors: &mut Vec<(String, String)>) {
     match json {
         Json::Object(obj) => {
-            let named = is_definition_key(key)
-                || key == "model"
-                || obj.iter().any(|(k, v)| k == "frame" && v.as_str() == Some("interface"));
-            if named {
-                if let Some((_, Json::String(file))) = obj.iter_mut().find(|(k, _)| k == "file") {
-                    let joined = join(folder, file);
-                    if kind_of_file(file).is_some() && *file != joined && scope.declared.contains_key(&joined) {
-                        *file = joined;
+            let interface = obj.iter().any(|(k, v)| k == "frame" && v.as_str() == Some("interface"));
+            if is_definition_key(key) || key == "model" || interface {
+                if let Some(file) = obj.iter().find(|(k, _)| k == "file").and_then(|(_, v)| v.as_str()) {
+                    if let Some(kind) = kind_of_file(file) {
+                        let name = stem_name(file);
+                        let folder = folder_of(file);
+                        let from = if folder.is_empty() { String::new() } else { format!(", from = \"./{folder}\"") };
+                        let written = if is_definition_key(key) {
+                            format!("`use {kind} {name} as …`{}", if folder.is_empty() { String::new() } else { format!(" with `from \"./{folder}\"`") })
+                        } else if interface {
+                            format!("`part = {name}{from}`")
+                        } else {
+                            format!("`model = {{ {kind} = {name}{from} }}`")
+                        };
+                        errors.push((
+                            at.to_string(),
+                            format!("name the design: write {written}, not the file \"{file}\""),
+                        ));
+                        return;
                     }
                 }
             }
-            for (k, v) in obj.iter_mut() {
-                canonical_files(v, k, folder, scope);
+            for (k, v) in obj.iter() {
+                let path = if at.is_empty() { k.clone() } else { format!("{at}.{k}") };
+                file_form_errors(v, k, &path, errors);
             }
         }
-        Json::Array(items) => items.iter_mut().for_each(|v| canonical_files(v, key, folder, scope)),
+        Json::Array(items) => {
+            for (i, v) in items.iter().enumerate() {
+                file_form_errors(v, key, &format!("{at}[{i}]"), errors);
+            }
+        }
         _ => {}
     }
 }
 
-/// Resolves every symbol in the lowered document `json` of the file `doc` to its file, and
-/// writes file-form paths as the workspace paths of `scope`. Each failure is
+/// Resolves every symbol in the lowered document `json` of the file `doc` to its file; a
+/// design named by its file path is an error. Each failure is
 /// `(json path, message)`; a failed symbol stays as written.
 pub fn bind(json: &mut Json, doc: &str, scope: &ModuleScope) -> Vec<(String, String)> {
-    canonical_files(json, "", folder_of(doc), scope);
     let mut errors = Vec::new();
+    file_form_errors(json, "", "", &mut errors);
+    if !errors.is_empty() {
+        return errors;
+    }
     walk(json, "", "", &mut |obj, site, kind, name, at| {
         let from = obj
             .iter()

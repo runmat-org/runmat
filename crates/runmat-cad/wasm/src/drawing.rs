@@ -555,7 +555,7 @@ mod tests {
     use super::*;
 
     const BRACKET: &str = include_str!("../../tests/corpus/documents/bracket.part");
-    pub(crate) const DRAWING: &str = "runmat 0.7\nstd 1\n\ndrawing bracket {\n    format a3 = {\n        size = { size = iso, name = A3 },\n        title_block = [\n            { label = \"Part number\", source = { source = property, name = part_number } }\n        ]\n    }\n\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n\n    view front = standard(\n        orientation = front,\n        sheet = \"1\",\n        model = { file = \"bracket.part\" },\n        at = [100, 100],\n        display = hidden_lines\n    )\n    view top = projected(\n        from = front,\n        direction = up,\n        sheet = \"1\",\n        model = { file = \"bracket.part\" },\n        at = [100, 200],\n        display = hidden_lines\n    )\n}\n";
+    pub(crate) const DRAWING: &str = "runmat 0.7\nstd 1\n\ndrawing bracket {\n    format a3 = {\n        size = { size = iso, name = A3 },\n        title_block = [\n            { label = \"Part number\", source = { source = property, name = part_number } }\n        ]\n    }\n\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n\n    view front = standard(\n        orientation = front,\n        sheet = \"1\",\n        model = { part = bracket },\n        at = [100, 100],\n        display = hidden_lines\n    )\n    view top = projected(\n        from = front,\n        direction = up,\n        sheet = \"1\",\n        model = { part = bracket },\n        at = [100, 200],\n        display = hidden_lines\n    )\n}\n";
 
     /// The Desktop's sheet tests read what the worker gets for its fixtures. Set
     /// `RUNMAT_DESKTOP_FIXTURES` to the Desktop's fixtures folder to write it, as runmat-cad's
@@ -585,11 +585,10 @@ mod tests {
     #[test]
     fn a_drawing_compiles_from_its_text_with_the_displays_of_its_models() {
         let deps = dependencies("/p/bracket.drawing", DRAWING);
-        assert_eq!(deps, vec!["/p/bracket.part".to_owned()]);
-        let files: Files = deps
-            .iter()
-            .map(|d| (d.clone(), BRACKET.to_owned()))
-            .collect();
+        // The model is named by symbol, so the host lists the drawing's folder.
+        assert_eq!(deps, vec!["/p/".to_owned()]);
+        // The host reads the folder's designs.
+        let files: Files = [("/p/bracket.part".to_owned(), BRACKET.to_owned())].into();
         let out: Value =
             serde_json::from_str(&compile_json("/p/bracket.drawing", DRAWING, &files)).unwrap();
         assert_eq!(out["projection"]["kind"], "drawing", "{out}");
@@ -688,16 +687,23 @@ mod tests {
         assert!(u.abs() < 1.6 && (v - 10.0).abs() < 1.6, "{c}");
     }
 
+    /// A model no file of the folder declares is an error on the view that names it.
     #[test]
-    fn a_missing_model_is_a_warning_and_the_drawing_still_compiles() {
+    fn a_model_no_file_declares_is_an_error_that_names_it() {
         let out: Value =
             serde_json::from_str(&compile_json("/p/bracket.drawing", DRAWING, &Files::new()))
                 .unwrap();
-        assert_eq!(out["projection"]["kind"], "drawing");
-        assert!(out["models"].as_object().is_some_and(|m| m.is_empty()));
-        assert!(out["diagnostics"]
+        let messages: Vec<&str> = out["diagnostics"]
             .as_array()
-            .is_some_and(|d| d.iter().any(|d| d["severity"] == "warning")));
+            .into_iter()
+            .flatten()
+            .filter(|d| d["severity"] == "error")
+            .filter_map(|d| d["message"].as_str())
+            .collect();
+        assert!(
+            messages.iter().any(|m| m.contains("part bracket")),
+            "{out}"
+        );
     }
 
     #[test]
