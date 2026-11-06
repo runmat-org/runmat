@@ -41,7 +41,7 @@ A field reference has four parts, `analysis.<step>.field.<location>.<quantity>`:
 | Thermal | `temperature`, `temperature_gradient`, `heat_flux`, `heat_rate`, `thermal_energy_storage_rate_density` |
 | Electric | `electric_potential`, `electric_field`, `electric_displacement`, `electric_energy_density`, `electric_current`, `electric_current_density`, `electric_charge`, `joule_power_density`, `electric_edge_circulation` |
 | Magnetic | `magnetic_vector_potential`, `magnetic_flux_density`, `magnetic_field_intensity`, `magnetic_edge_circulation` |
-| Acoustic | `acoustic_pressure`, `acoustic_particle_velocity`, `acoustic_intensity`, `sound_pressure_level` |
+| Acoustic | `acoustic_pressure`, `acoustic_particle_velocity`, `acoustic_intensity`, `acoustic_port_intensity` (plane-wave power density through an incident or radiation port face), `sound_pressure_level` |
 | Fluid | `fluid_pressure`, `fluid_velocity`, `vorticity`, `wall_shear_stress`, `mass_flow_rate`, `volume_flow_rate` |
 | Modal | `modal_frequency`, `modal_participation`, `eigenvalue` |
 | Solver checks | `residual`, `balance`, `constraint_violation` |
