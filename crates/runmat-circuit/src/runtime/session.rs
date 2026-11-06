@@ -42,6 +42,8 @@ struct SchematicState {
     /// The schematic's inputs: every file but the layout, and the variant.
     inputs: Files,
     variant: Option<String>,
+    /// The `.m` value results it was built with.
+    values: super::values::Values,
     project: Project,
     index: CircuitIndex,
 }
@@ -163,7 +165,10 @@ impl Session {
             inputs.insert(path.to_owned(), text.to_owned());
         }
         if let Some(s) = &self.schematic {
-            if s.circuit_path == circuit_path && s.inputs == inputs && s.variant == options.variant
+            if s.circuit_path == circuit_path
+                && s.inputs == inputs
+                && s.variant == options.variant
+                && s.values == options.values
             {
                 return Ok(false);
             }
@@ -196,6 +201,7 @@ impl Session {
             circuit_path: circuit_path.to_owned(),
             inputs,
             variant: options.variant.clone(),
+            values: options.values.clone(),
             project,
             index,
         });
@@ -616,13 +622,18 @@ impl Session {
             #[serde(skip_serializing_if = "Option::is_none")]
             index: Option<&'a CircuitIndex>,
             diagnostics: Vec<Diagnostic>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pending_values: Option<serde_json::Value>,
         }
         let diagnostics = match self.sync(path, text, files, options) {
             Err(d) => {
                 self.board = None;
+                let pending = super::values::pending_json(&d, path, text, files, &options.values)
+                    .and_then(|j| serde_json::from_str(&j).ok());
                 return serde_json::to_string(&Out {
                     index: None,
                     diagnostics: d,
+                    pending_values: pending,
                 })
                 .unwrap_or_default();
             }
@@ -635,6 +646,7 @@ impl Session {
         serde_json::to_string(&Out {
             index: self.index(),
             diagnostics,
+            pending_values: None,
         })
         .unwrap_or_default()
     }

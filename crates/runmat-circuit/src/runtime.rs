@@ -47,6 +47,7 @@ mod fabrication;
 mod kicad;
 mod library_edit;
 pub mod modules;
+pub mod values;
 mod rules;
 mod session;
 mod sim_edit;
@@ -284,6 +285,10 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         out.push(layout_path_for(path));
         // The footprint files its `part` declarations open in place.
         if let Some(design) = parse_circuit(path, text).design {
+            // The folders its computed values call functions from.
+            if values::has_calls(&design) {
+                out.extend(values::value_folders(path, &design));
+            }
             for part in design.parts.values().filter(|p| crate::library::catalog::is_footprint_file(&p.package)) {
                 out.push(resolve_path(path, &part.package));
             }
@@ -365,6 +370,10 @@ pub struct CompileOptions {
     /// The comparator settings of a running Update board, over the board's saved ones.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eco: Option<EcoSettings>,
+    /// Results of the `.m` calls computed values make, by call key, as the host ran them
+    /// ([`values`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub values: values::Values,
 }
 
 /// A run's comparator settings: the difference types it ignores and the parameters it never
@@ -519,13 +528,29 @@ fn load_with(
         })?
     };
     let parsed = parse_circuit(&circuit_path, &circuit_text);
-    let Some(own) = parsed.design else {
+    let Some(mut own) = parsed.design else {
         return Err(parsed
             .diagnostics
             .iter()
             .map(|d| Diagnostic::syntax(&circuit_path, &circuit_text, d))
             .collect());
     };
+    // Values computed by `.m` functions: filled from the host's results, or waiting for them.
+    let filled = values::fill_values(&mut own, &circuit_path, files, &options.values);
+    if !filled.pending.is_empty() || !filled.errors.is_empty() {
+        let at = |k: &runmat_rules::SourceKey| (k.start as usize, k.end as usize);
+        let mut out: Vec<Diagnostic> = filled
+            .errors
+            .iter()
+            .map(|(k, m)| Diagnostic::error(&circuit_path, Some(&circuit_text), at(k).0, at(k).1, m.clone()))
+            .collect();
+        if !filled.pending.is_empty() {
+            let mut d = Diagnostic::error(&circuit_path, None, 0, 0, values::PENDING_VALUES.into());
+            d.severity = "info".into();
+            out.push(d);
+        }
+        return Err(out);
+    }
     let mut design = own.clone();
     let mut used_errors: Vec<Diagnostic> = Vec::new();
     let loader = |u: &crate::ir::CircuitUse| -> Result<Design, String> {

@@ -79,6 +79,23 @@ impl Tolerance {
 pub struct Param {
     pub value: ParamValue,
     pub source: SourceKey,
+    /// Set when the value is computed by a `.m` function
+    /// (`value = feedbackResistor(vout = 3.3 V, r1 = 10 kohm) as ohm`). `value` holds the result
+    /// once the runtime has evaluated it, and the printer writes the call back.
+    pub call: Option<ValueCall>,
+}
+
+/// A param value computed by a `.m` function (report 12 §2.3–2.6).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ValueCall {
+    /// The call as written, which the printer writes back.
+    pub text: String,
+    /// `feedbackResistor`, or `pkg.fn` for a `+pkg` function.
+    pub function: String,
+    /// Named arguments (`""` for a positional one), as SI quantities.
+    pub arguments: Vec<(String, Quantity)>,
+    /// The unit after `as` (`ohm`); the result is a number in it. `None` for a plain number.
+    pub unit: Option<String>,
 }
 
 impl Param {
@@ -86,12 +103,14 @@ impl Param {
         Param {
             value: ParamValue::Quantity { nominal: q, tol },
             source: SourceKey::default(),
+            call: None,
         }
     }
     pub fn text(s: impl Into<String>) -> Self {
         Param {
             value: ParamValue::Text(s.into()),
             source: SourceKey::default(),
+            call: None,
         }
     }
     pub fn as_quantity(&self) -> Option<Quantity> {

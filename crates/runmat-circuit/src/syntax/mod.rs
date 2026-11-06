@@ -54,7 +54,7 @@ pub(crate) mod values;
 use crate::ir::{
     Binding, BusDecl, ComponentDecl, Connection, Design, DiffPairDecl, Endpoint, Fitting,
     HarnessDecl, InterfaceDef, NetClass, NetDecl, Param, ParamValue, PartRef, PortDecl, PortDir,
-    PortKind, SheetDef, SheetInstance, Tolerance, VariantDef,
+    PortKind, SheetDef, SheetInstance, Tolerance, ValueCall, VariantDef,
 };
 use runmat_design_syntax::ast::{self, Expr, Headed, Item, Statement};
 use runmat_design_syntax::json::{format_f64, is_bare_key, is_bare_word, quote, INDENT};

@@ -71,6 +71,14 @@ pub(super) fn percent(fraction: f64) -> Print {
     )))
 }
 
+/// A param as written: the `.m` call that computes it, else its value.
+pub(super) fn param_written(param: &crate::ir::Param) -> Print {
+    match &param.call {
+        Some(call) => Ok(call.text.clone()),
+        None => param_text(&param.value),
+    }
+}
+
 pub(super) fn param_text(value: &ParamValue) -> Print {
     Ok(match value {
         ParamValue::Text(text) => quote(text),
@@ -170,7 +178,7 @@ pub(super) fn params_entries(
                     "a param named `{k}` collides with a field"
                 )));
             }
-            Ok((k.clone(), param_text(&p.value)?))
+            Ok((k.clone(), param_written(p)?))
         })
         .collect()
 }
@@ -231,7 +239,7 @@ pub fn print_circuit(design: &Design) -> Print {
         body.push(format!("root = {}", name(&design.root)));
     }
     for (k, param) in &design.params {
-        body.push(format!("param {} = {}", name(k), param_text(&param.value)?));
+        body.push(format!("param {} = {}", name(k), param_written(param)?));
     }
     for (k, class) in &design.net_classes {
         if &class.name != k {
@@ -350,7 +358,7 @@ pub(crate) fn connection_statement(connection: &Connection) -> Print {
 pub(super) fn print_sheet(sheet: &SheetDef) -> Print {
     let mut lines = Vec::new();
     for (k, param) in &sheet.params {
-        lines.push(format!("param {} = {}", name(k), param_text(&param.value)?));
+        lines.push(format!("param {} = {}", name(k), param_written(param)?));
     }
     for port in &sheet.ports {
         let dir = DIRECTIONS

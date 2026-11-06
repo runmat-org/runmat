@@ -194,10 +194,54 @@ pub(super) fn param_value(expr: &Expr) -> Read<ParamValue> {
 
 pub(super) fn read_param(expr: Option<Expr>, span: Span, source: SourceKey) -> Read<Param> {
     let expr = expr.ok_or_else(|| diagnostic(span, "a param needs `= <value>`"))?;
-    Ok(Param {
-        value: param_value(&expr)?,
-        source,
-    })
+    param_of(&expr, source)
+}
+
+/// A param from its value: a literal, or a call of a `.m` function whose result the runtime
+/// fills in (`feedbackResistor(vout = 3.3 V, r1 = 10 kohm) as ohm`).
+pub(super) fn param_of(expr: &Expr, source: SourceKey) -> Read<Param> {
+    if let Some((call, unit)) = value_call(expr) {
+        let function = match call.callee() {
+            Some(Expr::Reference(r)) => r.segments().join("."),
+            _ => return Err(diagnostic(expr.span(), "a computed value calls a function by name")),
+        };
+        let mut arguments = Vec::new();
+        for argument in call.arguments() {
+            match argument {
+                ast::Argument::Named(named) => {
+                    let name = named.name().map(|n| n.text()).unwrap_or_default();
+                    let value = named.value().ok_or_else(|| diagnostic(expr.span(), format!("`{name}` needs a value")))?;
+                    arguments.push((name, si_of(&value)?));
+                }
+                ast::Argument::Positional(value) => arguments.push((String::new(), si_of(&value)?)),
+            }
+        }
+        // The dimension the result takes; the number waits for the runtime.
+        let dim = match &unit {
+            Some(u) => parse_quantity(&format!("1 {u}"), &BuiltinUnits)
+                .map_err(|m| diagnostic(expr.span(), m))?
+                .dim,
+            None => Quantity::scalar(0.0).dim,
+        };
+        return Ok(Param {
+            value: ParamValue::Quantity { nominal: Quantity::new(f64::NAN, dim), tol: Tolerance::Exact },
+            source,
+            call: Some(ValueCall { text: expr.syntax().text().trim().to_string(), function, arguments, unit }),
+        });
+    }
+    Ok(Param { value: param_value(expr)?, source, call: None })
+}
+
+/// `f(…) as unit` or `f(…)`: the call and its unit.
+fn value_call(expr: &Expr) -> Option<(ast::Call, Option<String>)> {
+    match expr {
+        Expr::Coerce(c) => match c.expr()? {
+            Expr::Call(call) => Some((call, Some(c.unit()))),
+            _ => None,
+        },
+        Expr::Call(call) => Some((call.clone(), None)),
+        _ => None,
+    }
 }
 
 pub(super) fn read_params(
@@ -209,10 +253,7 @@ pub(super) fn read_params(
     for (name, value) in record_of(expr, span)? {
         params.insert(
             name,
-            Param {
-                value: param_value(&value)?,
-                source: source.clone(),
-            },
+            param_of(&value, source.clone())?,
         );
     }
     Ok(params)
@@ -286,10 +327,7 @@ pub(super) fn fitting_of(expr: &Expr, span: Span, source: &SourceKey) -> Read<Fi
                 if !part_field(&mut part, &field, &value, span)? {
                     params.insert(
                         field,
-                        Param {
-                            value: param_value(&value)?,
-                            source: source.clone(),
-                        },
+                        param_of(&value, source.clone())?,
                     );
                 }
             }
@@ -405,10 +443,7 @@ pub(super) fn read_component(
             _ => {
                 component.params.insert(
                     field,
-                    Param {
-                        value: param_value(&value)?,
-                        source: source.clone(),
-                    },
+                    param_of(&value, source.clone())?,
                 );
             }
         }
@@ -436,10 +471,7 @@ pub(super) fn read_net(name: String, expr: Option<Expr>, span: Span, source: Sou
             _ => {
                 net.params.insert(
                     field,
-                    Param {
-                        value: param_value(&value)?,
-                        source: source.clone(),
-                    },
+                    param_of(&value, source.clone())?,
                 );
             }
         }

@@ -47,9 +47,13 @@ impl Session {
         options: &CompileOptions,
         since: Option<u64>,
     ) -> String {
+        let mut pending = String::new();
         let diagnostics = match self.sync(path, text, files, options) {
             Err(d) => {
                 self.board = None;
+                if let Some(j) = super::super::values::pending_json(&d, path, text, files, &options.values) {
+                    pending = format!(",\"pending_values\":{j}");
+                }
                 d
             }
             Ok(()) => self.board.as_ref().map(|b| b.rule_errors.clone()).unwrap_or_default(),
@@ -63,6 +67,6 @@ impl Session {
             (Some(_), Some(Since::Delta(d))) => format!(",\"delta\":{d}"),
             (Some(index), _) => format!(",\"index\":{}", serde_json::to_string(index).unwrap_or_else(|_| "null".into())),
         };
-        format!("{{\"seq\":{seq},\"diagnostics\":{diagnostics}{body}}}")
+        format!("{{\"seq\":{seq},\"diagnostics\":{diagnostics}{body}{pending}}}")
     }
 }
