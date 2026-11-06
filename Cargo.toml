@@ -39,6 +39,7 @@ members = [
     "crates/runmat-types",
     "crates/runmat-design-syntax",
     "crates/runmat-design-tools",
+    "crates/runmat-design-tools/wasm",
     "crates/runmat-fea-source",
     "crates/runmat-runtime",
     "crates/runmat-clarabel",
