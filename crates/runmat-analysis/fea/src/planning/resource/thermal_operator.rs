@@ -5,12 +5,12 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
-    algebra::{CoercivityWorkEnvelope, RealSparseMatrix, SparsePattern},
+    algebra::{RealSparseMatrix, SparsePattern},
     topology::AnalysisProjection,
 };
 
 use super::{
-    symbolic::pattern_from_rows, ByteCount, Count, ResourcePlanningError,
+    symbolic::pattern_from_rows, ByteCount, ResourcePlanningError,
     SolverAdmissionResourcePolicy, ThermalHistoryResourceFacts, ThermalWorkspaceResourceFacts,
 };
 
@@ -64,14 +64,10 @@ impl ThermalOperatorResourceFacts {
         }
         dofs.extend_support(&projection, &plans, &mut rows);
         let support = pattern_from_rows(rows, projection.nodes.len())?;
-        let envelope = CoercivityWorkEnvelope::derive(&support)
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        let admission = SolverAdmissionResourcePolicy {
-            dimension: Count(envelope.dimension()),
-            factor_nonzero_upper_bound: Count(envelope.factor_nonzero_limit()),
-            update_count_upper_bound: Count(envelope.update_limit()),
-            resident_bytes_upper_bound: ByteCount(envelope.resident_bytes_limit()),
-        };
+        // Thermal assembly captures no local-energy source, so coercivity is always proved by the
+        // sparse Cholesky factor that then serves the solve. The admission is the factor law that
+        // structural statics uses; the graph-count local-energy budget is not reserved.
+        let admission = super::preflight::factor_admission(&support)?;
         let rows = u64::try_from(support.rows())
             .map_err(|_| ResourcePlanningError::Overflow("thermal rows"))?;
         let entries = u64::try_from(support.column_indices().len())
@@ -132,6 +128,18 @@ impl ThermalOperatorResourceFacts {
             .0
             .checked_add(self.admission.resident_bytes_upper_bound.0)
             .and_then(|bytes| bytes.checked_add(workspace));
+        tracing::info!(
+            dimension = self.admission.dimension.0,
+            support_entries = self.support.column_indices().len(),
+            csr_payload_bytes = self.csr_payload_bytes.0,
+            factor_nonzeros = self.admission.factor_nonzero_upper_bound.0,
+            factor_resident_bytes = self.admission.resident_bytes_upper_bound.0,
+            workspace_bytes = workspace,
+            planning_resident_bytes = self.planning_resident_bytes.0,
+            support_payload_bytes = self.support_payload_bytes.0,
+            history_bytes,
+            "thermal numerical reservation terms"
+        );
         numerical
             .map(|bytes| bytes.max(self.planning_resident_bytes.0))
             .and_then(|bytes| bytes.checked_add(self.support_payload_bytes.0))

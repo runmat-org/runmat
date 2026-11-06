@@ -266,3 +266,22 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
     assert!(csr_bytes(u64::MAX, 1).is_err());
     assert!(csr_bytes(1, u64::MAX).is_err());
 }
+
+#[test]
+fn thermal_admission_reserves_the_proving_factor_and_no_energy_budget() {
+    // Thermal assembly captures no local-energy source: the Cholesky proof always runs, and its
+    // factor serves the solve. The admission is the structural factor law; the graph-count
+    // local-energy storage (192 B per stored entry) is never reserved.
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
+        let envelope = crate::algebra::CoercivityWorkEnvelope::derive(facts.support()).unwrap();
+        let admission = facts.solver_admission();
+        assert_eq!(
+            *admission,
+            crate::planning::resource::preflight::factor_admission(facts.support()).unwrap()
+        );
+        assert_eq!(admission.update_count_upper_bound.0, envelope.factor_flop_limit());
+        assert!(admission.resident_bytes_upper_bound.0 >= envelope.factor_resident_limit());
+    }
+}
