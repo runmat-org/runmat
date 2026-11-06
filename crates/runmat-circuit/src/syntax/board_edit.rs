@@ -696,6 +696,9 @@ pub enum BoardEdit {
     },
     /// `board.rules`: adds a rule, or replaces the rule with the same id.
     Rule(crate::board_rules::RuleSpec),
+    /// `board.capability`: the layout's limits become the board-house set, by name; values
+    /// written beside an earlier set are replaced.
+    Capability(crate::capability::Capability),
     /// `board.layer-stack`: a standard stackup of `layers` copper layers and `thickness`, its
     /// dielectric layers in `dielectric` when given (else FR-4 cores and prepreg).
     LayerStack { layers: u8, thickness: Coord, dielectric: Option<Material> },
@@ -725,6 +728,7 @@ impl BoardEdit {
             BoardEdit::Keepout { .. } => "board.keepout",
             BoardEdit::Dimension { .. } => "board.dimension",
             BoardEdit::Rule(_) => "board.rules",
+            BoardEdit::Capability(_) => "board.capability",
             BoardEdit::LayerStack { .. } => "board.layer-stack",
             BoardEdit::Outline { .. } => "board.outline",
             BoardEdit::TestPoint { .. } => "board.test-points",
@@ -986,6 +990,7 @@ pub fn apply_board_edit(
             Some(r) => *r = spec.clone(),
             None => board.rules.push(spec.clone()),
         },
+        BoardEdit::Capability(c) => board.limits = c.limits(),
         BoardEdit::LayerStack { layers, thickness, dielectric } => {
             if *layers < 2 || layers % 2 != 0 {
                 return Err(

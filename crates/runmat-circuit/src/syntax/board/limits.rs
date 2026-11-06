@@ -19,6 +19,9 @@ pub(super) fn read_bend(v: &Val) -> Read<Bend> {
     Ok(b)
 }
 
+/// The `limits` key that names a board-house capability set.
+pub(super) const CAPABILITY: &str = "capability";
+
 pub(super) const LIMIT_KEYS: [&str; 9] = [
     "clearance",
     "track",
@@ -47,10 +50,25 @@ pub(super) fn limit_fields(l: &mut FabLimits) -> [&mut Coord; 9] {
 
 /// The `limits` record of the layout at `path`; each value written keeps where it is, so a
 /// finding against it can name that line.
+/// `capability = standard|advanced|hdi` loads that board-house set first (its line is the
+/// source of every key it sets); the keys written beside it override the set.
 pub(super) fn read_limits(v: &Val, path: &str) -> Read<FabLimits> {
+    use crate::capability::Capability;
     let mut f = Fields::of(v, "limits")?;
     let mut l = FabLimits::default();
     let mut sources = BTreeMap::new();
+    if let Some(c) = f.get("capability") {
+        let t = text(c)?;
+        let set = Capability::from_word(&t).ok_or_else(|| {
+            diagnostic(c.span, format!("`{t}` is not a board-house capability; expected standard, advanced or hdi"))
+        })?;
+        l = set.limits();
+        let at = runmat_rules::SourceKey::new(path, c.span.start as u32, c.span.end as u32);
+        sources.insert(CAPABILITY.to_owned(), at.clone());
+        for key in LIMIT_KEYS {
+            sources.insert(key.to_owned(), at.clone());
+        }
+    }
     for (key, field) in LIMIT_KEYS.iter().zip(limit_fields(&mut l)) {
         if let Some(val) = f.get(key) {
             *field = len(val)?;

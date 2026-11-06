@@ -27,6 +27,13 @@ const RULES: &[(&str, &str)] = &[
     ("silk", "Silkscreen"),
 ];
 
+/// The board-house capability sets (`crate::capability::Capability`), word and label.
+const CAPABILITIES: &[(&str, &str)] = &[
+    ("standard", "Standard (0.15 mm track and space, 0.3 mm drill)"),
+    ("advanced", "Advanced (0.1 mm track and space, 0.2 mm drill)"),
+    ("hdi", "HDI (0.075 mm track and space, laser microvias)"),
+];
+
 /// Points clicked in the board view (`point:x,y` picks), in click order.
 fn points(label: &str, help: &str) -> Field {
     picks("points", label, &[K::Point])
@@ -149,6 +156,10 @@ pub(super) fn add(c: &mut Catalog) {
         brd("board.rules", "Rules", "rules", "Add or edit a design rule: clearance, width, via, pair, length, impedance, plane, mask or silk.")
             .inputs(vec![choice("kind", "Rule", RULES), text("applies", "Applies to", Some("InNetClass('power')")), text("value", "Value", Some("0.2 mm")), count("priority", "Priority", 1, 1)])
             .edit(add_to("rule", Section::Rules)),
+        brd("board.capability", "Board house", "rules", "Load a board-house capability set: the fabrication limits every design rule falls back to.")
+            .kw(&["capability", "fab house", "fabrication limits", "manufacturing limits", "hdi"])
+            .inputs(vec![choice("capability", "Capability", CAPABILITIES)])
+            .edit(edit(EditOp::Set, Section::Rules).item("limits")),
         brd("board.layer-stack", "Layer stack", "layers", "Edit the stackup, with the impedance calculator and thermal properties.")
             .kw(&["stackup", "impedance", "dielectric"])
             .inputs(vec![count("layers", "Copper layers", 4, 1), text("material", "Dielectric", Some("FR-4")), qty("thickness", "Board thickness", "length", Some(1.6)), qty("target_z", "Target impedance", "resistance", Some(50.0)).optional()])
@@ -332,6 +343,7 @@ pub(super) fn tab() -> DomainTab {
                         "kind",
                         RULES,
                     ),
+                    c("board.capability"),
                     c("board.layer-stack"),
                 ],
             ),

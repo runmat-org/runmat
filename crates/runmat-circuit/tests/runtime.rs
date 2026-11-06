@@ -537,6 +537,51 @@ fn drawn_board_commands_take_canvas_points() {
     assert!(err.message.contains("three points"), "{}", err.message);
 }
 
+/// `board.capability` loads a board-house set by name (`limits = { capability = hdi }`); a
+/// value written beside it overrides the set, the rules table says which values came from it,
+/// a set's minimum applies in DRC, and an unknown name is refused.
+#[test]
+fn a_board_house_capability_set_loads_its_limits_and_written_values_override_it() {
+    use runmat_circuit::capability::Capability;
+    let mut files = files();
+    let out = runtime::edit(LAYOUT, &files[LAYOUT], &files, &request("board.capability", json!({ "capability": "hdi" })))
+        .unwrap_or_else(|e| panic!("{}", e.message));
+    let text = changed(&out, LAYOUT).text;
+    let limits_line = |t: &str| t.lines().find(|l| l.trim_start().starts_with("limits =")).unwrap_or("").trim().to_owned();
+    assert_eq!(limits_line(&text), "limits = { capability = hdi }");
+    let board = parse_board(LAYOUT, &text).board.unwrap();
+    assert_eq!(board.limits, Capability::Hdi.limits());
+    // A written track width overrides the set; the rest come from it.
+    let written = text.replace("limits = { capability = hdi }", "limits = { capability = hdi, track = 0.2 mm }");
+    let board = parse_board(LAYOUT, &written).board.unwrap();
+    assert_eq!(board.limits.min_track, runmat_circuit::geom::mm(0.2));
+    assert_eq!(board.limits.min_clearance, Capability::Hdi.limits().min_clearance);
+    // It prints back as written: the set by name and the one value that differs.
+    let reprinted = print_board(&board, &[]);
+    assert_eq!(limits_line(&reprinted), "limits = { capability = hdi, track = 0.2 }");
+    files.insert(LAYOUT.into(), written);
+    let index = compile(LAYOUT, &files, &CompileOptions::default());
+    let limits = &index.board.as_ref().unwrap().rules[0];
+    assert_eq!(limits.values["via_diameter"], "0.30 mm (hdi capability)", "{limits:?}");
+    assert_eq!(limits.values["track"], "0.20 mm", "{limits:?}");
+    // The standard set's larger minimums find more on the same board than the HDI set's.
+    let standard = files[LAYOUT].replace("capability = hdi, track = 0.2 mm", "capability = standard");
+    files.insert(LAYOUT.into(), standard);
+    let index = compile(LAYOUT, &files, &CompileOptions::default());
+    let drc = &index.board.as_ref().unwrap().drc;
+    let hdi_drc = {
+        let mut f = files.clone();
+        f.insert(LAYOUT.into(), f[LAYOUT].replace("capability = standard", "capability = hdi"));
+        compile(LAYOUT, &f, &CompileOptions::default()).board.unwrap().drc
+    };
+    assert!(drc.len() > hdi_drc.len(), "standard {} findings, hdi {}", drc.len(), hdi_drc.len());
+    let refused = runtime::edit(LAYOUT, &files[LAYOUT], &files, &request("board.capability", json!({ "capability": "prototype" })));
+    assert!(refused.is_err_and(|e| e.message.contains("prototype")));
+    let bad = files[LAYOUT].replace("capability = standard", "capability = prototype");
+    let parsed = parse_board(LAYOUT, &bad);
+    assert!(parsed.diagnostics.iter().any(|d| d.message.contains("not a board-house capability")), "{:?}", parsed.diagnostics);
+}
+
 /// `board.layer-stack` writes its dielectric and reports the width that meets its target
 /// impedance on each copper layer, from the stackup it writes; an unknown dielectric is refused.
 #[test]

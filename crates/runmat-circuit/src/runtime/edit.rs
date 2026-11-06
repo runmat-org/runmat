@@ -521,6 +521,12 @@ pub(super) fn board_edit(
         "board.delete" | "edit.delete" => Ok(BoardEdit::Delete {
             items: items("items")?,
         }),
+        "board.capability" => {
+            let word = values.get("capability").and_then(Value::as_str).unwrap_or("standard");
+            crate::capability::Capability::from_word(word)
+                .map(BoardEdit::Capability)
+                .ok_or_else(|| EditError::new(format!("`{word}` is not a board-house capability; expected standard, advanced or hdi")))
+        }
         "board.layer-stack" => Ok(BoardEdit::LayerStack {
             layers: number(values, "layers").map_or(board.copper_count(), |n| n as u8),
             thickness: mm_value(values, "thickness").unwrap_or_else(|| board.stackup.thickness()),

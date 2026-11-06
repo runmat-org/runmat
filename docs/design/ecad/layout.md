@@ -126,6 +126,22 @@ package R0402 {
 | `fiducial`, `text`, `graphic`, `dimension` | fiducials, silkscreen and fabrication-layer text, lines and dimensions |
 | `sync { … }` | the link from footprints to schematic components and the schematic changes the board has taken |
 
+## Board-house capability sets
+
+`limits = { capability = <set> }` loads a named set of fabricator minimums. A value written beside `capability` overrides the set's value for that key, and every other key takes the set's value:
+
+```circuit.layout fragment
+limits = { capability = advanced, copper_to_edge = 0.4 }
+```
+
+| Set | Track and space | Via diameter | Drill | Annular ring | Hole to hole | Copper to edge | Silk to pad | Microvia drill |
+|---|---|---|---|---|---|---|---|---|
+| `standard` | 0.15 mm | 0.6 mm | 0.3 mm | 0.15 mm | 0.5 mm | 0.3 mm | 0.15 mm | 0.1 mm |
+| `advanced` | 0.1 mm | 0.45 mm | 0.2 mm | 0.1 mm | 0.25 mm | 0.25 mm | 0.1 mm | 0.1 mm |
+| `hdi` | 0.075 mm | 0.3 mm | 0.15 mm | 0.075 mm | 0.2 mm | 0.2 mm | 0.075 mm | 0.075 mm |
+
+Compare the set with your fabricator's published capabilities before you order, and write any value that differs beside `capability`. The Board tab's **Board house** command (Rules group) sets `capability` and replaces any values written beside an earlier set. In the rules table, a value that comes from the set reads, for example, `0.30 mm (hdi capability)`. A DRC finding against such a value points at the `capability` line.
+
 ## Sync with the schematic
 
 The `sync` section links each footprint to its component and records the schematic version the board last took. When the circuit changes (a component added, a net renamed, a part swapped), the check lists the changes the board has not taken, and taking them updates footprints and nets in one edit. `renamed_from` in the circuit keeps a renamed component's placement.

@@ -243,10 +243,21 @@ pub fn statements_where(board: &Board, want: &dyn Fn(ItemId) -> bool) -> Vec<Pri
         );
     }
     {
+        // A capability set is written by name, with only the keys that differ from it.
         let mut l = board.limits.clone();
+        let mut set = l.capability.map(|c| c.limits());
         let mut r = Rec::new();
-        for (key, field) in LIMIT_KEYS.iter().zip(limit_fields(&mut l)) {
-            r.len(key, *field);
+        if let Some(c) = l.capability {
+            r.put(CAPABILITY, c.word());
+        }
+        let base: Vec<Option<crate::geom::Coord>> = match set.as_mut() {
+            Some(set) => limit_fields(set).into_iter().map(|v| Some(*v)).collect(),
+            None => vec![None; LIMIT_KEYS.len()],
+        };
+        for ((key, field), base) in LIMIT_KEYS.iter().zip(limit_fields(&mut l)).zip(base) {
+            if base != Some(*field) {
+                r.len(key, *field);
+            }
         }
         push(
             Group::Limits,

@@ -53,6 +53,7 @@
 pub mod autoroute;
 pub mod board3d;
 pub mod board_rules;
+pub mod capability;
 pub mod commands;
 pub mod connectivity;
 pub mod designators;

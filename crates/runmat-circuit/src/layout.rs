@@ -746,6 +746,9 @@ pub struct FabLimits {
     pub min_copper_to_edge: Coord,
     pub min_silk_to_pad: Coord,
     pub min_microvia_drill: Coord,
+    /// The board-house capability set the values start from (`capability = advanced`); a key
+    /// written beside it overrides the set's value. `None` starts from RunMat's defaults.
+    pub capability: Option<crate::capability::Capability>,
     /// Where each value written in the layout's `limits` is (`clearance` → its text). A key
     /// missing here keeps RunMat's default; DRC findings name either as the rule.
     pub sources: BTreeMap<String, runmat_rules::SourceKey>,
@@ -763,6 +766,7 @@ impl PartialEq for FabLimits {
             && self.min_copper_to_edge == o.min_copper_to_edge
             && self.min_silk_to_pad == o.min_silk_to_pad
             && self.min_microvia_drill == o.min_microvia_drill
+            && self.capability == o.capability
     }
 }
 
@@ -778,6 +782,7 @@ impl Default for FabLimits {
             min_copper_to_edge: mm(0.3),
             min_silk_to_pad: mm(0.1),
             min_microvia_drill: mm(0.1),
+            capability: None,
             sources: BTreeMap::new(),
         }
     }

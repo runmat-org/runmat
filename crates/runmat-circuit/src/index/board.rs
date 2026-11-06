@@ -632,7 +632,13 @@ fn limits_row(l: &crate::layout::FabLimits) -> RuleRow {
         values: values
             .into_iter()
             .map(|(k, v)| {
-                let written = if l.sources.contains_key(k) { "" } else { " (default)" };
+                // A key the capability set gives points at the `capability` line.
+                let from_set = l.capability.filter(|_| l.sources.get(k) == l.sources.get("capability"));
+                let written = match (l.sources.contains_key(k), from_set) {
+                    (true, Some(c)) => format!(" ({} capability)", c.word()),
+                    (true, None) => String::new(),
+                    (false, _) => " (default)".to_owned(),
+                };
                 (k.to_owned(), format!("{:.2} mm{written}", mm(v)))
             })
             .collect(),
