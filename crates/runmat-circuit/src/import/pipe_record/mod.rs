@@ -16,6 +16,7 @@
 
 pub mod binary;
 pub mod board;
+pub mod primitives;
 pub mod schematic;
 
 use super::{Imported, Report};

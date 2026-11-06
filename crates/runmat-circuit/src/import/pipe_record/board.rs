@@ -14,7 +14,7 @@ use super::Record;
 use crate::geom::poly::{Polygon, Ring};
 use crate::geom::{Coord, Point, Transform};
 use crate::import::{file_safe, Report};
-use crate::layout::{Board, BoardGraphic, BoardText, Footprint, Layer, NetClassRules, NetId, Side, Stackup, Track, TrackGeom, Via, Zone};
+use crate::layout::{Board, BoardGraphic, BoardText, Footprint, IslandPolicy, Layer, NetClassRules, NetId, PadConnect, Side, Stackup, Track, TrackGeom, Via, Zone};
 use crate::library::{CopperSpan, Drill, Graphic, PadDef, PadShape, Package};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -74,7 +74,15 @@ fn mid(l: &str) -> Option<u32> {
 }
 
 /// The copper layers the board uses, top to bottom, as the file names them.
+///
+/// The Board record chains its layer stack (`LAYER1NEXT=39`, `LAYER39NEXT=40` …, by layer
+/// number) from the top copper to the bottom; its signal (`MIDn`) and plane (`PLANEn`) layers
+/// are the inner copper, in that order. Without a chain the inner layers are the `MIDn` the
+/// items use, in number order.
 fn copper_layers(records: &[Record]) -> Vec<String> {
+    if let Some(chain) = records.iter().find(|r| r.kind().eq_ignore_ascii_case("Board")).and_then(layer_chain) {
+        return chain;
+    }
     let mut inner = BTreeSet::new();
     for r in records {
         for key in ["LAYER", "STARTLAYER", "ENDLAYER"] {
@@ -92,6 +100,29 @@ fn copper_layers(records: &[Record]) -> Vec<String> {
     out.extend(inner.iter().map(|n| format!("MID{n}")));
     out.push("BOTTOM".into());
     out
+}
+
+/// The Board record's copper stack from `LAYER1NEXT`, when the chain reaches the bottom.
+fn layer_chain(board: &Record) -> Option<Vec<String>> {
+    let mut out = vec!["TOP".to_owned()];
+    let mut at = 1u8;
+    for _ in 0..80 {
+        let next = board.str(&format!("LAYER{at}NEXT")).trim().parse::<u8>().ok()?;
+        if next == 32 {
+            out.push("BOTTOM".into());
+            return Some(out);
+        }
+        if matches!(next, 2..=31 | 39..=54) {
+            out.push(super::primitives::layer_name(next));
+        }
+        at = next;
+    }
+    None
+}
+
+/// Plane layer number (`PLANE2` → 2).
+fn plane(l: &str) -> Option<u32> {
+    l.strip_prefix("PLANE").and_then(|n| n.parse().ok())
 }
 
 /// A point at `angle` degrees on the circle about `c` of radius `r` (board units).
@@ -141,6 +172,8 @@ fn pad_shape(r: &Record, w: Coord, h: Coord, report: &mut Report) -> PadShape {
     match r.str("SHAPE").trim().to_ascii_uppercase().as_str() {
         "ROUND" | "CIRCLE" if w == h => PadShape::Circle { d: w },
         "ROUND" | "CIRCLE" => PadShape::Oval { w, h },
+        // The corner radius is in percent of half the smaller side.
+        "ROUNDEDRECTANGLE" if r.has("CORNERRADIUS") => PadShape::RoundRect { w, h, ratio: (r.num("CORNERRADIUS") / 200.0).clamp(0.0, 0.5) },
         "ROUNDEDRECTANGLE" => PadShape::RoundRect { w, h, ratio: 0.25 },
         "OCTAGONAL" => {
             let (x, y, c) = (w / 2, h / 2, w.min(h) / 4);
@@ -156,9 +189,23 @@ fn pad_shape(r: &Record, w: Coord, h: Coord, report: &mut Report) -> PadShape {
 }
 
 /// A `Pad` record of a placed component, in the component's frame.
+///
+/// A slot (`SLOTSIZE`, its length, at `SLOTROTATION` in the pad's frame) runs along the
+/// pad's x axis; a slot across it turns the pad a quarter turn with its sides swapped.
 fn pad(r: &Record, frame: &Frame, local: &Local, side: Side, report: &mut Report) -> PadDef {
-    let w = if r.has("XSIZE") { r.len("XSIZE") } else { r.len("TOPXSIZE") };
-    let h = if r.has("YSIZE") { r.len("YSIZE") } else { r.len("TOPYSIZE") };
+    let mut w = if r.has("XSIZE") { r.len("XSIZE") } else { r.len("TOPXSIZE") };
+    let mut h = if r.has("YSIZE") { r.len("YSIZE") } else { r.len("TOPYSIZE") };
+    let mut turn = 0.0;
+    let slot = Some(r.len("SLOTSIZE")).filter(|s| *s > r.len("HOLESIZE"));
+    if slot.is_some() {
+        match r.num("SLOTROTATION").rem_euclid(180.0) {
+            a if a == 0.0 => {}
+            a if a == 90.0 => {
+                (w, h, turn) = (h, w, 90.0);
+            }
+            _ => report.approximated("slots at an angle to their pad are carried along the pad's x axis"),
+        }
+    }
     let shape = pad_shape(r, w, h, report);
     let center = local.point(frame.point(r, "X", "Y"));
     let number = r.str("NAME").trim();
@@ -171,7 +218,7 @@ fn pad(r: &Record, frame: &Frame, local: &Local, side: Side, report: &mut Report
         } else {
             let mut p = PadDef::tht(number, center, shape, hole);
             if let Some(d) = p.drill.as_mut() {
-                *d = Drill { diameter: hole, slot: None, plated };
+                *d = Drill { diameter: hole, slot, plated };
             }
             p
         }
@@ -184,7 +231,7 @@ fn pad(r: &Record, frame: &Frame, local: &Local, side: Side, report: &mut Report
         }
         p
     };
-    p.rotation = local.angle(r.num("ROTATION"));
+    p.rotation = local.angle(r.num("ROTATION") + turn);
     p
 }
 
@@ -308,6 +355,7 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
         _ => None,
     };
     let (mut segments, mut tracks, mut vias, mut zones, mut texts) = (Vec::new(), 0, 0, 0, 0);
+    let mut cutouts: Vec<Ring> = Vec::new();
     if !outline_pts.is_empty() {
         let pts: Vec<Point> = outline_pts.iter().map(|p| frame.at(p.0, p.1)).collect();
         segments.extend(pts.windows(2).map(|w| (w[0], w[1])));
@@ -360,6 +408,8 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
                             None => segments.push((start, end)),
                         },
                     }
+                } else if plane(&l).is_some() {
+                    report.approximated("plane split lines are left out: each plane is one pour of its net over the board");
                 } else if let Some(li) = index(&l) {
                     let n = net(&mut board, r);
                     let id = board.alloc();
@@ -421,7 +471,37 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
                 texts += 1;
                 report.approximated("board texts are drawn in RunMat's stroke font from their start point");
             }
-            "Region" => report.not_carried("solid regions"),
+            "Region" => {
+                let ring: Vec<Point> = vertices(r).into_iter().map(|p| frame.at(p.0, p.1)).collect();
+                if r.index("POLYGON").is_some() || ring.len() < 3 {
+                    // A pour's own fill: the pour is carried and filled again.
+                } else if r.flag("ISBOARDCUTOUT") {
+                    cutouts.push(Ring::from(ring));
+                } else if owner.is_some() {
+                    report.not_carried(format!("component regions on layer {l}"));
+                } else if let (Some(li), 0) = (index(&l), r.num("KIND") as i64) {
+                    let Some(n) = net(&mut board, r) else {
+                        report.not_carried("copper regions without a net");
+                        continue;
+                    };
+                    if r.num("HOLES") > 0.0 {
+                        report.approximated("holes in copper regions are left out");
+                    }
+                    let id = board.alloc();
+                    let zone_name = board.nets.get(n.0 as usize).map(|n| n.name.clone()).unwrap_or_default();
+                    // Solid copper: joined to its pads whole, kept whatever its size, and
+                    // filled before the layer's pours.
+                    let mut z = Zone::new(id, &zone_name, Some(n), vec![li], Polygon::from_ring(Ring::from(ring)));
+                    (z.connect, z.islands, z.priority) = (PadConnect::Solid, IslandPolicy::Keep, 1);
+                    board.zones.insert(id, z);
+                    zones += 1;
+                    report.approximated("solid copper regions are carried as pours of their net");
+                } else if index(&l).is_some() {
+                    report.not_carried("pour cutouts");
+                } else {
+                    report.not_carried(format!("regions on layer {l}"));
+                }
+            }
             "Dimension" => report.not_carried("dimensions"),
             "ComponentBody" => report.not_carried("3D bodies of components"),
             "Board" | "Net" | "Class" | "Rule" | "Component" | "" => {}
@@ -447,14 +527,37 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
         let id = board.alloc();
         board.footprints.insert(id, Footprint { id, reference: pl.reference, component: None, value: pl.value, package: pkg, at: pl.at, rotation: pl.rotation, side: pl.side, locked: pl.locked, pad_nets: pl.pad_nets, fitted: true, properties: Default::default() });
     }
-    match crate::kicad::pcb::outline_from(&segments, vec![]) {
+    if !cutouts.is_empty() {
+        report.count("board cutouts", cutouts.len());
+    }
+    match crate::kicad::pcb::outline_from(&segments, cutouts) {
         Some(o) => board.outline = o,
         None => report.not_carried("the outline: the board has no closed outline"),
+    }
+    // Each plane layer is a pour of its net (`PLANE1NETNAME=GND`) over the board, below the
+    // layer's other pours.
+    let mut planes = 0;
+    for (li, l) in copper.iter().enumerate() {
+        let Some(k) = plane(l) else { continue };
+        let net_name = board_rec.map(|b| b.str(&format!("PLANE{k}NETNAME")).trim().to_owned()).unwrap_or_default();
+        let Some(i) = net_names.iter().position(|n| *n == net_name).filter(|_| !net_name.is_empty()) else {
+            report.not_carried(format!("plane {l} without a net"));
+            continue;
+        };
+        let n = net(&mut board, &Record([("NET".to_owned(), i.to_string())].into_iter().collect()));
+        let id = board.alloc();
+        let mut z = Zone::new(id, &net_name, n, vec![li as u8], board.outline.clone());
+        z.priority = -1;
+        board.zones.insert(id, z);
+        planes += 1;
     }
     report.count("footprints placed", board.footprints.len());
     report.count("tracks", tracks);
     report.count("vias", vias);
     report.count("zones", zones);
+    if planes > 0 {
+        report.count("planes", planes);
+    }
     report.count("board texts", texts);
     report.count("copper layers", copper.len());
     report.count("net classes", board.net_class_rules.len());

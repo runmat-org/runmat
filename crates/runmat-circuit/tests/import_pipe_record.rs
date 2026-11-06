@@ -1,9 +1,11 @@
 //! Pipe-record import on hand-written fixtures (tests/import/pipe_record): a header, a
-//! resistor and an LED, the LED rotated and on the bottom; a via, a polygon pour, a board
-//! text, a net class with its width rule. The binary test packs the same records into a
-//! compound file, the way the binary files hold them.
+//! resistor and an LED, the LED rotated and on the bottom; a via, a polygon pour, a solid
+//! copper region, a board text, a net class with its width rule. The binary test packs the
+//! same records into a compound file the way the binary files hold them (text records in
+//! their storages, pads, tracks, vias, texts and regions as binary structures) and checks
+//! that it prints the same layout as the ASCII files.
 
-use runmat_circuit::import::pipe_record::{self, binary};
+use runmat_circuit::import::pipe_record::{self, binary, primitives, Record};
 use runmat_circuit::import::Imported;
 use runmat_circuit::runtime::{compile, CompileOptions, Files};
 use std::collections::BTreeMap;
@@ -54,10 +56,11 @@ fn an_ascii_schematic_and_board_import_to_a_circuit_that_compiles() {
     assert_eq!(r.carried["footprints placed"], 3);
     assert_eq!(r.carried["tracks"], 7, "{:?}", r.lines());
     assert_eq!(r.carried["vias"], 1);
-    assert_eq!(r.carried["zones"], 1);
+    // The polygon pour, and the solid copper region over J1's GND pad.
+    assert_eq!(r.carried["zones"], 2);
     assert_eq!(r.carried["board texts"], 1);
     assert_eq!(r.carried["net classes"], 1);
-    assert_eq!(r.not_carried["solid regions"], 1, "{:?}", r.lines());
+    assert_eq!(r.approximated["solid copper regions are carried as pours of their net"], 1, "{:?}", r.lines());
     assert_eq!(r.not_carried["dimensions"], 1);
     assert_eq!(r.not_carried["ShortCircuit rules"], 1);
     assert_eq!(r.not_carried["no-ERC markers"], 1);
@@ -73,9 +76,59 @@ fn an_ascii_schematic_and_board_import_to_a_circuit_that_compiles() {
     assert_eq!(board.nets.iter().find(|n| n.name == "GND").and_then(|n| n.class.as_deref()), Some("Power"));
 }
 
+/// A length field of `r` in 1/10000 mil, as the binary records hold it.
+fn mil(r: &Record, key: &str) -> [u8; 4] {
+    primitives::le_mil(r.len(key) as f64 / 25_400.0)
+}
+
+fn layer_of(r: &Record, key: &str) -> u8 {
+    primitives::layer_number(r.str(key)).unwrap_or_else(|| panic!("layer {}", r.str(key)))
+}
+
+/// One ASCII board record in its binary form: kind byte and blocks.
+fn encode(r: &Record) -> (u8, Vec<Vec<u8>>) {
+    // A via without a layer spans them all.
+    let layer = if r.has("LAYER") { layer_of(r, "LAYER") } else { 74 };
+    let head = |rest: &[u8]| primitives::head(layer, r.index("NET").map(|n| n as u16), r.index("COMPONENT").map(|n| n as u16), rest);
+    let cat = |parts: &[&[u8]]| parts.concat();
+    let pad_to = |mut b: Vec<u8>, n: usize| {
+        b.resize(n, 0);
+        b
+    };
+    match r.kind() {
+        "Pad" => {
+            let shape = if r.str("SHAPE") == "ROUND" { 1 } else { 2 };
+            let size = cat(&[&mil(r, "XSIZE"), &mil(r, "YSIZE")]);
+            let rest = cat(&[&mil(r, "X"), &mil(r, "Y"), &size, &size, &size, &mil(r, "HOLESIZE"), &[shape; 3], &r.num("ROTATION").to_le_bytes(), &[r.flag("PLATED") as u8]]);
+            let name = cat(&[&[r.str("NAME").len() as u8], r.str("NAME").as_bytes()]);
+            (2, vec![name, vec![0], b"\x04|&|0".to_vec(), vec![0], pad_to(head(&rest), 185), vec![]])
+        }
+        "Track" => (4, vec![pad_to(head(&cat(&[&mil(r, "X1"), &mil(r, "Y1"), &mil(r, "X2"), &mil(r, "Y2"), &mil(r, "WIDTH")])), 49)]),
+        "Via" => (3, vec![pad_to(head(&cat(&[&mil(r, "X"), &mil(r, "Y"), &mil(r, "DIAMETER"), &mil(r, "HOLESIZE"), &[layer_of(r, "STARTLAYER"), layer_of(r, "ENDLAYER")]])), 321)]),
+        "Text" => {
+            let rest = cat(&[&mil(r, "X"), &mil(r, "Y"), &mil(r, "HEIGHT"), &[0, 0], &r.num("ROTATION").to_le_bytes(), &[r.flag("MIRROR") as u8], &mil(r, "WIDTH")]);
+            (5, vec![pad_to(head(&rest), 252), cat(&[&[r.str("TEXT").len() as u8], r.str("TEXT").as_bytes()])])
+        }
+        "Region" => {
+            let params = format!("|KIND={}|\0", r.str("KIND"));
+            let mut ring: Vec<u8> = Vec::new();
+            let n = (0..).take_while(|i| r.has(&format!("VX{i}"))).count();
+            ring.extend((n as u32).to_le_bytes());
+            for i in 0..n {
+                for k in ["VX", "VY"] {
+                    ring.extend((r.len(&format!("{k}{i}")) as f64 / 25_400.0 * 10_000.0).to_le_bytes());
+                }
+            }
+            (11, vec![cat(&[&head(&[0; 5]), &(params.len() as u32).to_le_bytes(), params.as_bytes(), &ring])])
+        }
+        other => panic!("no binary form for {other}"),
+    }
+}
+
 #[test]
-fn the_binary_files_import_their_text_records_and_report_the_binary_ones() {
-    // The schematic's records in a FileHeader stream; the board's by kind, in their storages.
+fn the_binary_files_import_the_same_board_as_the_ascii_ones() {
+    // The schematic's records in a FileHeader stream; the board's text records by kind, in
+    // their storages, and its primitives as binary structures.
     let sch_text = fixture("blinky.SchDoc");
     let sch_lines: Vec<&str> = sch_text.lines().collect();
     let sch = binary::write_compound(&[("FileHeader", &binary::write_records(&sch_lines))]);
@@ -84,18 +137,47 @@ fn the_binary_files_import_their_text_records_and_report_the_binary_ones() {
         let lines: Vec<String> = pcb_text.lines().filter(|l| l.starts_with(&format!("|RECORD={kind}|"))).map(|l| l.replacen(&format!("|RECORD={kind}"), "", 1)).collect();
         binary::write_records(&lines.iter().map(String::as_str).collect::<Vec<_>>())
     };
-    let (board, nets, classes, rules, comps) = (of("Board"), of("Net"), of("Class"), of("Rule"), of("Component"));
-    let pads = vec![1u8; 700];
-    let pcb = binary::write_compound(&[("Board6/Data", &board), ("Nets6/Data", &nets), ("Classes6/Data", &classes), ("Rules6/Data", &rules), ("Components6/Data", &comps), ("Pads6/Data", &pads)]);
+    let prims = |kind: &str| -> Vec<u8> {
+        let recs: Vec<_> = pipe_record::records(&pcb_text).into_iter().filter(|r| r.kind() == kind).map(|r| encode(&r)).collect();
+        primitives::write(&recs)
+    };
+    let (board, nets, classes, rules, comps, polygons) = (of("Board"), of("Net"), of("Class"), of("Rule"), of("Component"), of("Polygon"));
+    let (pads, tracks, vias, texts, regions) = (prims("Pad"), prims("Track"), prims("Via"), prims("Text"), prims("Region"));
+    // A board keeps its version text in a FileHeader stream too.
+    let header = binary::write_records(&["|KIND=PCB board|"]);
+    let pcb = binary::write_compound(&[
+        ("FileHeader", &header),
+        ("Board6/Data", &board),
+        ("Nets6/Data", &nets),
+        ("Classes6/Data", &classes),
+        ("Rules6/Data", &rules),
+        ("Components6/Data", &comps),
+        ("Polygons6/Data", &polygons),
+        ("Pads6/Data", &pads),
+        ("Tracks6/Data", &tracks),
+        ("Vias6/Data", &vias),
+        ("Texts6/Data", &texts),
+        ("Regions6/Data", &regions),
+        ("ComponentBodies6/Data", &[1, 2, 3]),
+    ]);
     let files: BTreeMap<String, Vec<u8>> = [("blinky.SchDoc".to_owned(), sch), ("blinky.PcbDoc".to_owned(), pcb)].into_iter().collect();
     let out = binary::import(&files, "boards/blinky").unwrap();
     let r = &out.report;
     assert_eq!(r.format, "pipe-record binary");
-    assert_eq!(r.carried["components"], 3, "{:?}", r.lines());
-    assert_eq!(r.carried["nets"], 3);
-    assert_eq!(r.carried["footprints placed"], 3);
-    assert_eq!(r.not_carried["pads (binary structures)"], 1, "{:?}", r.lines());
-    assert!(out.files["boards/blinky.circuit.layout"].contains("D1"));
+    for (kind, n) in [("components", 3), ("nets", 3), ("footprints placed", 3), ("tracks", 7), ("vias", 1), ("zones", 2), ("board texts", 1), ("net classes", 1)] {
+        assert_eq!(r.carried.get(kind), Some(&n), "{kind}: {:?}", r.lines());
+    }
+    assert_eq!(r.not_carried["3D bodies of components (binary structures)"], 1, "{:?}", r.lines());
+    let board = compiles(&out);
+    let led = board.footprints.values().find(|f| f.reference == "D1").unwrap();
+    assert_eq!((led.side, led.rotation), (runmat_circuit::layout::Side::Bottom, 90.0));
+    let j1 = board.footprints.values().find(|f| f.reference == "J1").unwrap();
+    assert_eq!(j1.package.pads.len(), 2);
+    assert_eq!(j1.package.pads[0].drill.as_ref().map(|d| d.diameter), Some(runmat_circuit::geom::mm(1.016)));
+    // The ASCII board and the binary one print the same layout.
+    let ascii: BTreeMap<String, String> = [("blinky.SchDoc", sch_text.clone()), ("blinky.PcbDoc", pcb_text.clone())].into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+    let from_ascii = pipe_record::import(&ascii, "boards/blinky").unwrap();
+    assert_eq!(out.files["boards/blinky.circuit.layout"], from_ascii.files["boards/blinky.circuit.layout"]);
 
     let err = binary::import(&[("x.PcbDoc".to_owned(), b"|RECORD=Board|".to_vec())].into_iter().collect(), "x").unwrap_err();
     assert!(err.contains("not a compound file"), "{err}");

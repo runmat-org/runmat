@@ -9,8 +9,9 @@
 //! - A board keeps each record kind in its own storage's `Data` stream. The text-record
 //!   streams read here are `Board6` (the outline and settings), `Nets6`, `Classes6`, `Rules6`,
 //!   `Components6` and `Polygons6`; a stream's records get their `RECORD` from the storage.
-//!   The copper primitives (pads, tracks, arcs, vias, fills, texts) are binary structures,
-//!   which the import reports as not carried.
+//! - The copper primitives (pads, tracks, arcs, vias, fills, texts) are binary structures,
+//!   which [`super::primitives`] reads into the same records, with the regions. 3D bodies
+//!   are reported as not carried.
 
 use super::{import_records, Record, FORMAT_BINARY};
 use crate::import::Imported;
@@ -166,14 +167,15 @@ pub fn stream_records(data: &[u8]) -> (Vec<Record>, usize) {
 
 /// The board storages whose streams hold text records, with the record kind they hold.
 const BOARD_TEXT: &[(&str, &str)] = &[("Board6", "Board"), ("Nets6", "Net"), ("Classes6", "Class"), ("Rules6", "Rule"), ("Components6", "Component"), ("Polygons6", "Polygon")];
-/// The board storages of binary primitives, as the report names them.
-const BOARD_BINARY: &[(&str, &str)] = &[("Pads6", "pads"), ("Tracks6", "tracks"), ("Arcs6", "arcs"), ("Vias6", "vias"), ("Fills6", "fills"), ("Texts6", "texts"), ("Regions6", "solid regions"), ("ComponentBodies6", "3D bodies of components")];
+/// The board storages of binary structures the import doesn't read, as the report names them.
+const BOARD_BINARY: &[(&str, &str)] = &[("ComponentBodies6", "3D bodies of components")];
 
 /// A binary file's records: a schematic's `FileHeader` stream, or a board's text streams.
 /// Returns the records and what the binary primitives left out (by kind, count).
 pub fn file_records(bytes: &[u8]) -> Result<(Vec<Record>, Vec<(String, usize)>), String> {
     let c = Compound::read(bytes)?;
-    if let Some(data) = c.streams.get("FileHeader") {
+    // A board has a `FileHeader` stream too (its version text), so the board storages decide.
+    if let Some(data) = c.streams.get("FileHeader").filter(|_| !c.streams.contains_key("Board6/Data")) {
         let (records, binary) = stream_records(data);
         let skipped = if binary > 0 { vec![("binary-encoded schematic records (pins written in binary form)".to_owned(), binary)] } else { vec![] };
         return Ok((records, skipped));
@@ -188,6 +190,11 @@ pub fn file_records(bytes: &[u8]) -> Result<(Vec<Record>, Vec<(String, usize)>),
     }
     if records.is_empty() {
         return Err("the compound file has no FileHeader stream and no board record streams".into());
+    }
+    for (storage, _) in super::primitives::STORAGES {
+        if let Some(data) = c.streams.get(&format!("{storage}/Data")) {
+            records.extend(super::primitives::read(storage, data)?);
+        }
     }
     let mut skipped = Vec::new();
     for (storage, what) in BOARD_BINARY {
