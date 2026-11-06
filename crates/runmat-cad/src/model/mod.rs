@@ -14,6 +14,7 @@ pub mod feature;
 pub mod feature_params;
 pub mod hole_tables;
 pub mod items;
+pub mod materials;
 pub mod mold;
 pub mod sheet_metal;
 pub mod sketch;

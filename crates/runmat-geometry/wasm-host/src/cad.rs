@@ -3,12 +3,12 @@
 //! [`OcctKernel`], the kernel the K1 corpus checks.
 //!
 //! The browser and Desktop worker call [`runmat_cad_call`] with one JSON request,
-//! `{ "fn": "dependencies" | "compile" | "edit", "args": [..strings] }`, whose arguments are
+//! `{ "fn": "dependencies" | "compile" | "edit" | "analyze", "args": [..strings] }`, whose arguments are
 //! the ones `runmat-cad-wasm`'s wasm-bindgen entry points take, and get back the same JSON text
 //! those entry points return. Native callers use [`call`] (the same function, for host-parity
 //! tests).
 
-use runmat_cad_wasm::{edit, kernel, runtime};
+use runmat_cad_wasm::{analyze, edit, kernel, runtime};
 use runmat_geometry_io::ImportSource;
 use runmat_geometry_io::OcctKernel;
 use std::collections::BTreeMap;
@@ -82,7 +82,8 @@ pub fn call(request: &str) -> String {
             match runtime::parse_files(arg(a, 2)) {
                 Ok(files) => {
                     set_imports(&files);
-                    runtime::compile_json(path, text, &files)
+                    let configuration = runtime::compile_options(arg(a, 3));
+                    runtime::compile_json_in(path, text, &files, configuration.as_deref())
                 }
                 Err(message) => runtime::error_json(path, &message),
             }
@@ -98,6 +99,16 @@ pub fn call(request: &str) -> String {
                     serde_json::json!({ "ok": false, "message": message, "diagnostics": [] })
                         .to_string()
                 }
+            }
+        }
+        "analyze" => {
+            let (path, text, request) = (arg(a, 0), arg(a, 1), arg(a, 3));
+            match runtime::parse_files(arg(a, 2)) {
+                Ok(files) => {
+                    set_imports(&files);
+                    analyze::analyze_json(path, text, &files, request)
+                }
+                Err(message) => serde_json::json!({ "ok": false, "message": message }).to_string(),
             }
         }
         other => error(&format!("unknown CAD function {other:?}")),

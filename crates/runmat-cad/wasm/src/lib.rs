@@ -14,6 +14,8 @@
 //!   A `.drawing` compiles to `{ kind: "drawing", data: <drawing index> }` with `models`: the
 //!   display of each part or assembly its views show, by the file name the view wrote
 //!   ([`drawing`]).
+//! - `analyze(path, text, files, request)` → an Evaluate command's results table
+//!   ([`analyze`]).
 //! - `edit(path, text, files, request)` → `{ ok: true, files, summary }` or
 //!   `{ ok: false, message, diagnostics }`: a catalog command run from the canvas, written as
 //!   the smallest text change ([`edit`]).
@@ -24,6 +26,7 @@
 //! double. Every compile result names its kernel (`kernel`). Malformed input is reported as a
 //! diagnostic, never a panic.
 
+pub mod analyze;
 pub mod board;
 mod configured;
 pub mod drawing;
@@ -33,6 +36,7 @@ pub mod exchange;
 pub mod features;
 pub mod hlr;
 pub mod kernel;
+pub mod mass;
 pub mod picks;
 pub mod runtime;
 
@@ -56,6 +60,16 @@ pub fn compile(path: &str, text: &str, files: &str, options: &str) -> String {
     };
     let configuration = runtime::compile_options(options);
     runtime::compile_json_in(path, text, &files, configuration.as_deref())
+}
+
+/// Runs an Evaluate command (mass properties, interference) on the part or assembly `path`.
+#[cfg(feature = "bindings")]
+#[wasm_bindgen]
+pub fn analyze(path: &str, text: &str, files: &str, request: &str) -> String {
+    match runtime::parse_files(files) {
+        Ok(files) => analyze::analyze_json(path, text, &files, request),
+        Err(message) => serde_json::json!({ "ok": false, "message": message }).to_string(),
+    }
 }
 
 /// Runs a catalog command on the part or assembly `path`.

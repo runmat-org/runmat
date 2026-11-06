@@ -1,4 +1,4 @@
-//! Interference between an assembly's placed parts, on their exact bodies.
+//! Interference and clearance between an assembly's placed parts, on their exact bodies.
 //!
 //! Every part occurrence is regenerated in its own configuration (once per file and
 //! configuration) and placed at its world transform. Pairs whose world boxes overlap go to the
@@ -23,7 +23,16 @@ pub struct Overlap {
     pub volume: f64,
 }
 
-/// The result of [`assembly_interference`].
+/// Two occurrences closer than the asked clearance without sharing material.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Near {
+    pub a: String,
+    pub b: String,
+    /// The gap between their exact bodies (m).
+    pub distance: f64,
+}
+
+/// The result of [`assembly_interference`] and [`assembly_clearance`].
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Interference {
     /// Part occurrences checked.
@@ -31,6 +40,11 @@ pub struct Interference {
     /// Pairs whose boxes overlapped and went to the exact query.
     pub candidates: usize,
     pub overlaps: Vec<Overlap>,
+    /// Pairs closer than the clearance asked for (none for an interference check).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub near: Vec<Near>,
+    /// The clearance checked (m); zero for an interference check.
+    pub clearance: f64,
     /// Pairs the kernel could not answer, with its message.
     pub errors: Vec<String>,
 }
@@ -53,6 +67,19 @@ pub fn assembly_interference(
     files: &Files,
     configuration: Option<&str>,
 ) -> Result<Interference, String> {
+    assembly_clearance(path, text, files, configuration, 0.0)
+}
+
+/// [`assembly_interference`], and also the pairs whose exact bodies come closer than
+/// `clearance` (m) without overlapping: boxes within the clearance go to the kernel's
+/// proximity query.
+pub fn assembly_clearance(
+    path: &str,
+    text: &str,
+    files: &Files,
+    configuration: Option<&str>,
+    clearance: f64,
+) -> Result<Interference, String> {
     let resolution = resolve_assembly_in(path, text, files, configuration)
         .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
     let resolved = &resolution.resolved;
@@ -73,7 +100,8 @@ pub fn assembly_interference(
         if !parts.contains_key(&key) {
             let entry = resolution.documents.get(&file).and_then(|document| {
                 let (result, kernel) = regenerate_configured(document, &node.configuration);
-                let display = part_display(&result, kernel.as_ref(), &TessellationOptions::default());
+                let display =
+                    part_display(&result, kernel.as_ref(), &TessellationOptions::default());
                 let index = display.bodies.first()?.index as usize;
                 let body = result.state.bodies.get(index)?.handle.clone();
                 let bounds = display.bounds.as_ref()?;
@@ -97,6 +125,7 @@ pub fn assembly_interference(
     }
     let mut out = Interference {
         parts: placements.len(),
+        clearance,
         ..Default::default()
     };
     let Some(kernel) = kernels.first() else {
@@ -104,7 +133,7 @@ pub fn assembly_interference(
     };
     for (i, a) in placements.iter().enumerate() {
         for b in &placements[i + 1..] {
-            if a.bbox.intersection(&b.bbox).is_empty() {
+            if grown(&a.bbox, clearance).intersection(&b.bbox).is_empty() {
                 continue;
             }
             out.candidates += 1;
@@ -124,10 +153,23 @@ pub fn assembly_interference(
                     b: b.path.clone(),
                     volume: p.common_volume,
                 }),
+                Ok(p) if clearance > 0.0 && p.distance < clearance => out.near.push(Near {
+                    a: a.path.clone(),
+                    b: b.path.clone(),
+                    distance: p.distance,
+                }),
                 Ok(_) => {}
                 Err(e) => out.errors.push(format!("{} / {}: {e:?}", a.path, b.path)),
             }
         }
     }
     Ok(out)
+}
+
+/// A box grown by `by` on every side.
+fn grown(b: &Aabb, by: f64) -> Aabb {
+    Aabb {
+        min: b.min.map(|v| v - by),
+        max: b.max.map(|v| v + by),
+    }
 }
