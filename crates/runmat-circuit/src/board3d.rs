@@ -241,8 +241,7 @@ fn body_material(f: &Footprint) -> (&'static str, [f64; 4]) {
 
 /// The board model.
 pub fn board_model(board: &Board) -> BoardModel {
-    let thickness = to_mm(board.stackup.thickness()).max(0.2);
-    let top = thickness;
+    let top = thickness_mm(board);
     let n = board.copper_count();
     let mut m = Model {
         meshes: BTreeMap::new(),
@@ -405,6 +404,54 @@ fn stroke(mesh: &mut Mesh, pts: &[[f64; 2]], width: f64, z: f64, down: bool) {
     }
 }
 
+/// A two-terminal chip part's body: centred between its pads, along the line through them.
+struct Chip {
+    mid: (f64, f64),
+    along: f64,
+    across: f64,
+    deg: f64,
+}
+
+fn chip(pads: &[crate::layout::PlacedPad], bw: f64, bl: f64) -> Option<Chip> {
+    if !(pads.len() == 2 && pads.iter().all(|p| p.kind == PadKind::Smd)) {
+        return None;
+    }
+    let (a, b) = (mm2(pads[0].center), mm2(pads[1].center));
+    let len = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+    Some(Chip {
+        mid: ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0),
+        along: len.max(bl.max(bw)),
+        across: bl.min(bw),
+        deg: (b.1 - a.1).atan2(b.0 - a.0).to_degrees(),
+    })
+}
+
+/// A component body's extent as the 3D view draws it: its outline on the board (mm) and the
+/// heights it spans (`z0 < z1`, mm, z = 0 at the board's bottom face). A chip part's end caps
+/// are inside the outline. `None` for a package with no body.
+pub fn body_extent(f: &Footprint, n: u8, thickness: f64) -> Option<(Vec<(f64, f64)>, f64, f64)> {
+    let body = f.package.body.as_ref()?;
+    let (bw, bl, h) = (to_mm(body.width), to_mm(body.length), to_mm(body.height));
+    if h <= 0.0 {
+        return None;
+    }
+    let (z0, z1) = if f.side == Side::Top {
+        (thickness + MASK_T, thickness + MASK_T + h)
+    } else {
+        (-MASK_T - h, -MASK_T)
+    };
+    let ring = match chip(&f.pads(n), bw, bl) {
+        Some(c) => rect(c.mid, c.along, c.across, c.deg),
+        None => rect(mm2(f.at), bw, bl, f.rotation),
+    };
+    Some((ring, z0, z1))
+}
+
+/// The board's thickness as the 3D view draws it (mm).
+pub fn thickness_mm(board: &Board) -> f64 {
+    to_mm(board.stackup.thickness()).max(0.2)
+}
+
 /// A component's body, with metal terminals for chip parts and leads for leaded ICs.
 fn component(m: &mut Model, f: &Footprint, n: u8, top: f64) {
     let Some(body) = &f.package.body else { return };
@@ -421,16 +468,9 @@ fn component(m: &mut Model, f: &Footprint, n: u8, top: f64) {
     let c = mm2(f.at);
     let (name, color) = body_material(f);
     let pads = f.pads(n);
-    let chip = pads.len() == 2 && pads.iter().all(|p| p.kind == PadKind::Smd);
-    if chip {
+    if let Some(Chip { mid, along, across, deg }) = chip(&pads, bw, bl) {
         // Ceramic body between two metal end caps over the pads.
-        let (a, b) = (mm2(pads[0].center), mm2(pads[1].center));
-        let len = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
-        let deg = (b.1 - a.1).atan2(b.0 - a.0).to_degrees();
-        let along = len.max(bl.max(bw));
-        let across = bl.min(bw);
         let cap = (along * 0.22).max(0.15);
-        let mid = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
         m.mesh(name, color)
             .prism(&rect(mid, along - 2.0 * cap, across, deg), z0, z1);
         let (s, k) = deg.to_radians().sin_cos();
@@ -474,4 +514,42 @@ fn component(m: &mut Model, f: &Footprint, n: u8, top: f64) {
                 .prism(&rect(pc, 0.64, 0.64, f.rotation), pz0, pz1);
         }
     }
+}
+
+/// A component body of [`BoardSolid`]: its outline on the board and the heights it spans (mm).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SolidBody {
+    /// `component:<designator>`.
+    pub reference: String,
+    pub ring: Vec<(f64, f64)>,
+    pub z0: f64,
+    pub z1: f64,
+}
+
+/// The board as an exact solid's input, in the 3D view's frame (mm, z = 0 at the bottom face):
+/// the outline (outer ring, then its cut-outs) extruded to the board's thickness, and each fitted
+/// component's body as a prism. Interference and clearance checks in an assembly read the
+/// board as this solid.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoardSolid {
+    pub outline: Vec<Vec<(f64, f64)>>,
+    pub thickness: f64,
+    pub bodies: Vec<SolidBody>,
+}
+
+pub fn board_solid(board: &Board) -> BoardSolid {
+    let thickness = thickness_mm(board);
+    let n = board.copper_count();
+    let mut outline = vec![ring_mm(&board.outline.outer)];
+    outline.extend(board.outline.holes.iter().map(|r| ring_mm(r)));
+    let bodies = board
+        .footprints
+        .values()
+        .filter(|f| f.fitted)
+        .filter_map(|f| {
+            let (ring, z0, z1) = body_extent(f, n, thickness)?;
+            Some(SolidBody { reference: format!("component:{}", f.reference), ring, z0, z1 })
+        })
+        .collect();
+    BoardSolid { outline, thickness, bodies }
 }

@@ -666,6 +666,12 @@ impl Session {
         state.parsed.board.as_ref().map(crate::board3d::board_model)
     }
 
+    /// The last compiled board as an exact solid's input ([`crate::board3d::board_solid`]).
+    pub fn board_solid(&self) -> Option<crate::board3d::BoardSolid> {
+        let state = self.board.as_ref()?;
+        state.parsed.board.as_ref().map(crate::board3d::board_solid)
+    }
+
     /// The board's mass properties ([`crate::mass::board_mass`]), with the library parts' masses
     /// when the schematic compiled.
     pub fn board_mass(&self) -> Option<crate::mass::BoardMass> {

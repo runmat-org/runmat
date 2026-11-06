@@ -2,8 +2,9 @@
 //!
 //! Every part occurrence is regenerated in its own configuration (once per file and
 //! configuration) and placed at its world transform. Pairs whose world boxes overlap go to the
-//! kernel's proximity query, which reports the volume of their common material. Boards and
-//! other non-part occurrences have no exact body and are left out.
+//! kernel's proximity query, which reports the volume of their common material. A circuit
+//! board occurrence is checked as its exact solid ([`crate::board_solid`]): the outline at the
+//! board's thickness with its component bodies.
 
 use crate::configured::regenerate_configured;
 use crate::runtime::{resolve_assembly_in, Files};
@@ -39,7 +40,7 @@ pub struct Near {
 /// The result of [`assembly_interference`] and [`assembly_clearance`].
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Interference {
-    /// Part occurrences checked.
+    /// Part and board occurrences checked.
     pub parts: usize,
     /// Pairs whose boxes overlapped and went to the exact query.
     pub candidates: usize,
@@ -93,14 +94,42 @@ pub fn assembly_clearance(
     let mut kernels = Vec::new();
     let mut parts: BTreeMap<(String, String), Option<(BodyHandle, Aabb)>> = BTreeMap::new();
     let mut placements = Vec::new();
+    let mut errors = Vec::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
         if node.parent.is_none() || node.failed || node.represented_by_ancestor {
+            continue;
+        }
+        let file = node.definition.file.0.clone();
+        if node.definition.kind == DefinitionKind::Circuit {
+            let key = (file.clone(), String::new());
+            if !parts.contains_key(&key) {
+                let entry = match crate::board_solid::board_body(&file, files) {
+                    Ok(board) => {
+                        errors.extend(board.problems.iter().map(|p| format!("{file}: {p}")));
+                        kernels.push(board.kernel);
+                        Some((board.body, board.bbox))
+                    }
+                    Err(e) => {
+                        errors.push(format!("{}: {e}", resolved.path(id as u32)));
+                        None
+                    }
+                };
+                parts.insert(key.clone(), entry);
+            }
+            if let Some(Some((body, bbox))) = parts.get(&key) {
+                placements.push(Placement {
+                    path: resolved.path(id as u32),
+                    item: format!("occurrence:{}", node.uuid),
+                    body: body.clone(),
+                    world: node.world,
+                    bbox: bbox.transformed(&node.world),
+                });
+            }
             continue;
         }
         if node.definition.kind != DefinitionKind::Part {
             continue;
         }
-        let file = node.definition.file.0.clone();
         let key = (file.clone(), node.configuration.digest());
         if !parts.contains_key(&key) {
             let entry = resolution.documents.get(&file).and_then(|document| {
@@ -132,6 +161,7 @@ pub fn assembly_clearance(
     let mut out = Interference {
         parts: placements.len(),
         clearance,
+        errors,
         ..Default::default()
     };
     let Some(kernel) = kernels.first() else {

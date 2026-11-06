@@ -31,6 +31,7 @@
 pub mod analyze;
 pub mod board;
 mod board_solid;
+mod board_solid;
 mod direct_edits;
 mod drawing_views;
 pub mod draft_analysis;

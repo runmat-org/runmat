@@ -116,6 +116,43 @@ fn interference_and_clearance_between_placed_blocks() {
     }
 }
 
+/// A board is an exact solid in interference and clearance checks: the daq board (90 x 60 mm,
+/// 1.6 mm thick, components on top) placed through a block shares the block's 100 x 20 mm
+/// footprint over its thickness and the bodies inside it; placed 0.5 mm off the block's side,
+/// it comes within the asked clearance without sharing material.
+#[test]
+fn a_board_interferes_and_clears_as_its_outline_and_component_bodies() {
+    let daq = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runmat-circuit/tests/projects/daq");
+    let mut all = BTreeMap::new();
+    all.insert("/p/block.part".to_owned(), BLOCK.to_owned());
+    for name in ["daq.circuit", "daq.circuit.layout", "daq.circuit.lock"] {
+        all.insert(format!("/p/{name}"), std::fs::read_to_string(daq.join(name)).unwrap());
+    }
+    let files = serde_json::to_string(&all).unwrap();
+    let run = |offset: &str, command: &str| {
+        let assembly = format!("runmat 0.7\nstd 1\n\nassembly enclosure {{\n    use part block as wall\n    use circuit daq as board {{\n        placement = {{ placement = offset, offset = {{ translation = {offset} }} }}\n    }}\n}}\n");
+        let request = json!({ "command": command, "values": { "minimum": 1.0 } }).to_string();
+        let out = call("analyze", &["/p/enclosure.assembly", &assembly, &files, &request]);
+        assert_eq!(out["ok"], true, "{out}");
+        assert!(out["data"]["errors"].as_array().is_none_or(|e| e.is_empty()), "{out}");
+        assert_eq!(out["data"]["parts"], 2, "{out}");
+        out
+    };
+    // Through the block's mid-height: the laminate alone shares 90 x 20 x 1.6 mm (2.88 cm^3).
+    let through = run("[0 mm, 0 mm, 4 mm]", "evaluate.interference");
+    let overlaps = through["data"]["overlaps"].as_array().unwrap();
+    assert_eq!(overlaps.len(), 1, "{through}");
+    let volume = overlaps[0]["volume"].as_f64().unwrap();
+    assert!(volume > 2.8e-6 && volume < 1.2e-5, "{volume} m^3");
+    // Beside it: the board's edge 0.5 mm from the block's side.
+    let beside = run("[0 mm, 20.5 mm, 0 mm]", "evaluate.clearance");
+    assert!(beside["data"]["overlaps"].as_array().unwrap().is_empty(), "{beside}");
+    let near = beside["data"]["near"].as_array().unwrap();
+    assert_eq!(near.len(), 1, "{beside}");
+    let gap = near[0]["distance"].as_f64().unwrap();
+    assert!(gap > 0.0 && gap <= 0.0005 + 1e-7, "{gap} m");
+}
+
 #[test]
 fn study_checks_stop_on_overlaps_and_missing_densities_and_warn_on_open_contacts() {
     // `near` stands 0.05 mm off `a`, inside the 0.1 mm contact gap; `into` overlaps `a`.
