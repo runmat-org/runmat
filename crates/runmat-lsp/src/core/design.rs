@@ -490,6 +490,24 @@ impl DesignDocumentAnalysis {
                             }
                         }
                     }
+                    "let" => {
+                        if let Some(row) = named("lets", "name") {
+                            let kind = dimension_kind(&row["dimension"]);
+                            match (row["si"].as_f64(), row["error"].as_str()) {
+                                (Some(si), _) => out.push(format!("**Value:** {}", si_text(si, kind))),
+                                (None, Some(error)) if row["function"].is_null() => {
+                                    out.push(format!("**Value:** doesn't evaluate: {error}"))
+                                }
+                                _ => {}
+                            }
+                            if let Some(function) = row["function"].as_str() {
+                                let file = row["file"].as_str().map(|f| format!(" in `{}`", f.trim_start_matches('/'))).unwrap_or_default();
+                                out.push(format!(
+                                    "**Computed by** `{function}`{file}. The Desktop runs it in the RunMat runtime when the design compiles; Properties shows the result."
+                                ));
+                            }
+                        }
+                    }
                     "feature" => {
                         if let Some(row) = named("features", "id") {
                             let status = row["status"]["status"].as_str().unwrap_or("unknown");
@@ -995,6 +1013,19 @@ fn is_identifier(text: &str) -> bool {
         .next()
         .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// The `si_text` kind of a dimension (`{ base, angle }`): length, angle or mass, else none.
+fn dimension_kind(dimension: &Value) -> &'static str {
+    let base: Vec<i64> = dimension["base"].as_array().into_iter().flatten().filter_map(Value::as_i64).collect();
+    let angle = dimension["angle"].as_i64().unwrap_or(0);
+    let only = |at: usize| base.len() == 8 && base.iter().enumerate().all(|(i, e)| *e == i64::from(i == at));
+    match angle {
+        0 if only(0) => "length",
+        0 if only(1) => "mass",
+        1 if base.iter().all(|e| *e == 0) => "angle",
+        _ => "",
+    }
 }
 
 fn si_text(si: f64, kind: &str) -> String {

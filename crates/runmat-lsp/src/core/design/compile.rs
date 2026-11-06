@@ -14,7 +14,7 @@ pub(super) fn compile(
     table: &SymbolTable,
 ) -> (Vec<Problem>, Option<Value>) {
     match dialect {
-        Dialect::Part => compile_part(path, text, table),
+        Dialect::Part => compile_part(path, text, files, table),
         Dialect::Assembly => {
             let (mut problems, projection) = cad_front_end(
                 runmat_cad::syntax::parse_assembly_in(path, text, &module_scope(path, text, files)),
@@ -106,19 +106,29 @@ pub(super) fn byte_offset(text: &str, utf16: usize) -> usize {
 
 /// A part regenerated on the design kernel (OCCT in the native server, as Desktop regenerates);
 /// regeneration diagnostics at their sites.
-fn compile_part(path: &str, text: &str, table: &SymbolTable) -> (Vec<Problem>, Option<Value>) {
+/// A part regenerated for the editor. Values that call `.m` functions resolve through the folder
+/// scope but don't run here (the editor has no runtime): their calls stay pending, and neither
+/// they nor what depends on them is reported as a problem. The Desktop's compile runs them.
+fn compile_part(path: &str, text: &str, files: &DesignFiles, table: &SymbolTable) -> (Vec<Problem>, Option<Value>) {
     use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest};
+    use runmat_cad::value::m_functions::MFunctions;
+    use runmat_cad::value::m_table::{TableRunner, PENDING};
     let parsed = runmat_cad::syntax::parse_part(path, text);
     let mut problems = model_problems(&parsed.diagnostics);
     let Some(document) = parsed.document else {
         return (problems, None);
     };
     let kernel = runmat_design_tools::kernel::make();
+    let scope = module_scope(path, text, files);
+    let mut all = files.clone();
+    all.insert(path.to_owned(), text.to_owned());
+    let (runner, pending) = TableRunner::new(Default::default(), "editor");
+    let values = MFunctions::new(&scope, &all, path, &runner);
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
         solver: &runmat_cad::sketch_solver::ConstraintSketchSolver,
         units: &runmat_cad::units::StubUnits,
-        dynamic: &runmat_cad::value::NoDynamicValues,
+        dynamic: &values,
         lock: None,
         catalog: None,
         policy: Default::default(),
@@ -132,7 +142,12 @@ fn compile_part(path: &str, text: &str, table: &SymbolTable) -> (Vec<Problem>, O
     );
     let mut report = result.diagnostics.clone();
     report.attach_spans(&parsed.spans);
+    let waiting = !pending.borrow().is_empty();
     for d in &report.diagnostics {
+        let cascade = matches!(d.cause, runmat_cad::diagnostics::Cause::Cascade { .. });
+        if d.message.contains(PENDING) || (waiting && cascade) {
+            continue;
+        }
         let span = d
             .span
             .as_ref()
@@ -142,7 +157,6 @@ fn compile_part(path: &str, text: &str, table: &SymbolTable) -> (Vec<Problem>, O
             })
             .or_else(|| site_span(&d.site, table))
             .unwrap_or_default();
-        let cascade = matches!(d.cause, runmat_cad::diagnostics::Cause::Cascade { .. });
         problems.push(Problem {
             span,
             severity: match d.severity {
@@ -157,7 +171,12 @@ fn compile_part(path: &str, text: &str, table: &SymbolTable) -> (Vec<Problem>, O
             message: d.message.clone(),
         });
     }
-    let index = runmat_cad::index::build_index(&document, &result, None);
+    let mut index = runmat_cad::index::build_index(&document, &result, None);
+    for row in &mut index.lets {
+        if let Some(function) = &row.function {
+            row.file = values.resolve(function).ok().map(|f| f.file);
+        }
+    }
     let projection = serde_json::json!({ "document": &document, "index": &index });
     (problems, Some(projection))
 }

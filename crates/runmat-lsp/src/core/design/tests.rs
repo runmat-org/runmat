@@ -361,3 +361,21 @@ fn use_lines_complete_designs_and_folders() {
     let labels: Vec<String> = analysis.completion_items(&at(text, "from \"", 0, 6)).into_iter().map(|c| c.label).collect();
     assert_eq!(labels, ["../wing"]);
 }
+
+/// A value computed by an `.m` function: the editor resolves the function through the folder
+/// scope and names it in the hover. The call doesn't run in the editor, so it reports no
+/// problem for it or for what depends on it.
+#[test]
+fn a_value_from_an_m_function_names_its_function_in_the_hover_and_reports_no_problem() {
+    let part = "runmat 0.7\nstd 1\n\npart boss {\n    input lift : length = 8 mm\n    let base = baseRadius(lift = input.lift) as m\n    let half = input.lift / 2\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = base)\n    }\n    feature disc = extrude(profile = sketch.s, distance = 5 mm)\n}\n";
+    let files = DesignFiles::from([(
+        "/p/baseRadius.m".to_string(),
+        "function rb = baseRadius(lift)\nrb = 2 * lift;\nend\n".to_string(),
+    )]);
+    let analysis = analyze("/p/boss.part", part, &files);
+    assert!(analysis.problems.is_empty(), "{:?}", analysis.problems.iter().map(|p| &p.message).collect::<Vec<_>>());
+    let hover = hover_text(&analysis, at(part, "let base", 0, 5));
+    assert!(hover.contains("**Computed by** `baseRadius` in `p/baseRadius.m`"), "{hover}");
+    let hover = hover_text(&analysis, at(part, "let half", 0, 5));
+    assert!(hover.contains("**Value:** 4 mm"), "{hover}");
+}
