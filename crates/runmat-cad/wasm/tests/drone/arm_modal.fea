@@ -1,23 +1,25 @@
 // The folding arm's natural frequencies against the propeller's excitation.
 //
-// Geometry: ./geometry/arm_study.step, exported from arm_study.assembly (the front arm and the
-// motor pod on its pad). The arm turns on the hinge pin, and the latch holds it unfolded; fixing
+// Geometry: ./geometry/arm_study.step, exported from arm_study.assembly (the arm at its 88.2 mm
+// default and the motor pod on its pad; the drone's rear arms are 90.6 mm, so the check below
+// takes the rear arm). The arm turns on the hinge pin, and the latch holds it unfolded; fixing
 // the knuckle's pin bore is stiffer than the pin, lugs and latch, so these frequencies are an
 // upper bound on the installed arm's.
 //
-// Material: a 0/90 carbon prepreg laminate, E = 65 GPa along the arm and 1550 kg/m^3, modelled
-// as isotropic (the flap and lag modes bend the arm along its fibres). The first design was
-// compression-moulded chopped fibre (45 GPa): its first flap mode, about 354 Hz by the check
-// below, sat under the 400 Hz target, so the arm moved to the laminate.
+// Material: a 0-dominated carbon prepreg laminate ([0/0/90/0]s, three quarters of the plies
+// along the arm), E = 90 GPa along the arm and 1550 kg/m^3, modelled as isotropic (the flap and
+// lag modes bend the arm along its fibres). The 0/90 laminate (65 GPa) put the rear arm's first
+// flap mode at about 433 Hz, under the 476 Hz target below.
 // The pod carries the motor, folding propeller, and cowl as one lumped mass: 40 g over the
 // cowl's 6.26 cm^3 (pocketed over the arm's pad) is 6390 kg/m^3.
 //
-// Excitation: the motors turn about 6,500 rpm at hover and 10,000 rpm at full throttle, so the
-// once-per-revolution imbalance runs 108-167 Hz and the two-blade pass 217-333 Hz. The first
-// flap mode should sit above 1.2 x 333 = 400 Hz.
-// Check: as a tapered cantilever of 88 mm, I is 1,980 mm^4 at the root and 620 mm^4 at the tip
-// (about 1,110 mm^4 effective), k = 3EI/L^3 = 315 N/mm at 65 GPa; with the 40 g pod and a quarter
-// of the arm's 18 g, f1 = sqrt(k/m)/(2 pi) = 425 Hz, 1.28 x the 333 Hz blade pass.
+// Excitation: the 166 mm two-blade prop (C_T about 0.10) holds the drone's 746 g all-up weight
+// at about 8,400 rpm, and full throttle (11,900 rpm) gives a 2:1 thrust-to-weight ratio, so the
+// once-per-revolution imbalance runs 140-198 Hz and the two-blade pass 280-397 Hz. The first
+// flap mode should sit above 1.2 x 397 = 476 Hz.
+// Check: the lofted elliptic beam (root 16 x 13 mm, tip 11 x 7 mm) under a tip load, integrated
+// station by station, gives k = 448 N/mm at 90 GPa; with the 40 g pod and the arm's effective
+// 3.8 g, f1 = sqrt(k/m)/(2 pi) = 509 Hz, 1.28 x the 397 Hz blade pass.
 
 geometry arm {
     file = "./geometry/arm_study.step"
@@ -39,7 +41,7 @@ mesh arm on geometry.arm {
 material prepreg_carbon {
     mass_density = 1550 kg/m^3
     elastic {
-        youngs_modulus = 65 GPa
+        youngs_modulus = 90 GPa
         poisson_ratio = 0.3
     }
 }

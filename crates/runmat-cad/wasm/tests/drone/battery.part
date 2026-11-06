@@ -1,11 +1,13 @@
 runmat 0.7
 std 1
 
-// The intelligent flight battery: a 4S pack in a moulded case that slides into the rear bay.
+// The intelligent flight battery: a 6S 2,000 mAh LiPo pack (22.2 V, the flight controller's and
+// ESC's supply) in a moulded case that slides into the rear bay.
 // Its case is the body's own loft clipped to the bay less a 0.5 mm clearance, so its lid
 // carries the shell's curvature from the tail to the split line at x = -60 mm and closes the
 // body flush; its rear cap is lofted through the body's last sections. Its origin is the body
-// origin, so it places at identity.
+// origin, so it places at identity. For mass it is one lumped body: cells, case and electronics
+// at 2,050 kg/m^3 over the case's 145 cm^3, about 297 g (a 6S 2,000 mAh pack's weight).
 part battery {
     feature case_st0 = plane.offset(base = origin.yz, distance = -94 mm)
     sketch case_s0 on plane.case_st0 {
@@ -112,5 +114,5 @@ part battery {
         n4 = line(start = [-20.55 mm, 8.05 mm], end = [-20.55 mm, -8.05 mm])
     }
     feature rear_right_notch = extrude(profile = sketch.rear_right_notch_s, distance = 21.2 mm, mode = cut)
-    output battery = { body = feature.case.body, part_number = "CD-PW-4S3500", material = "polycarbonate", color = "#BCC1C8" }
+    output battery = { body = feature.case.body, part_number = "CD-PW-6S2000", material = "polycarbonate", color = "#BCC1C8", properties = [{ name = density, value = { type = quantity, value = 2050 kg/m^3 } }] }
 }
