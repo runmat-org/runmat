@@ -1,5 +1,7 @@
-//! Clean-room KiCad interchange, written only from the published file-format documentation
-//! (dev-docs.kicad.org, "File Formats"). No KiCad source is used.
+//! KiCad interchange, written independently from KiCad's documented behavior: the published
+//! file-format documentation (dev-docs.kicad.org, "File Formats"), the user manuals, and the
+//! outputs KiCad writes for sample files (netlists and boards). No KiCad source code is
+//! included.
 //!
 //! - [`sexpr`]: lossless S-expressions (atoms keep their source text).
 //! - [`pcb`]: `.kicad_pcb` ⇄ [`crate::layout::Board`], with edit-in-place writing: unchanged

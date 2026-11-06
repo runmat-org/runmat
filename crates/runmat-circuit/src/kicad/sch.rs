@@ -11,9 +11,9 @@
 //!   becomes the package of a [`PartRef::Entity`]. Power symbols are not components: their
 //!   power-input pin joins a global net named by their value, and a power flag (a power
 //!   symbol whose pin is an output) marks its net as driven (`power_flag`) without naming it.
-//! - Connectivity follows KiCad's rules ([`super::sch_connect`]): wires join at coinciding
-//!   ends, pins and sheet pins; junctions split the wires through them; labels attach anywhere
-//!   along a wire; collinear overlapping wires merge. Each group becomes one connection;
+//! - Connectivity follows KiCad's documented rules ([`super::sch_connect`]): wires join at
+//!   coinciding ends, pins and sheet pins; junctions split the wires through them; labels
+//!   attach anywhere along a wire. Each group becomes one connection;
 //!   local labels name it (same name, same net within a sheet — which also realises bus
 //!   members), global labels and power symbols make it global, hierarchical labels make it a
 //!   port of the sheet, sheet pins bind it to the child instance's port. Bus labels such as
@@ -341,14 +341,8 @@ fn read_sheet(
             }
             Some(head @ ("wire" | "bus")) => {
                 let p = super::pts_of(node.child("pts"));
-                let stroke = node.child("stroke").map(sexpr::write_compact).unwrap_or_default();
                 for w in p.windows(2) {
-                    segments.push(Seg {
-                        a: w[0],
-                        b: w[1],
-                        bus: head == "bus",
-                        stroke: stroke.clone(),
-                    });
+                    segments.push(Seg { a: w[0], b: w[1], bus: head == "bus" });
                 }
             }
             Some("junction") => junctions.push(at_of(node.child("at")).0),

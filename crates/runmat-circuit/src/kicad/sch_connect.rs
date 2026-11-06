@@ -1,37 +1,37 @@
-//! Schematic connectivity of one `.kicad_sch` sheet, by KiCad's rules.
+//! Schematic connectivity of one `.kicad_sch` sheet.
 //!
-//! KiCad's documented rules ("Electrical Connections" in the schematic editor manual):
+//! Written independently from KiCad's documented behavior: the schematic editor manual
+//! ("Electrical Connections", "Wire Junctions", "Labels", "Buses", "Power Symbols") and the
+//! netlists KiCad itself writes for sample files. No KiCad source code is included.
 //!
-//! - Wires connect to other wires or to pins only where their ends coincide exactly. A wire
-//!   end, pin or sheet pin lying on the middle of another wire does not connect to it, and
-//!   wires that cross are not connected.
-//! - A junction joins every wire passing through or ending at its point: the editor splits the
-//!   wires there, so the junction becomes an end of each.
-//! - A label connects to a wire anywhere along it, and to every wire under its anchor (two
-//!   crossing wires under one label are joined, which ERC reports as a warning).
-//! - A pin cannot connect directly to a bus.
+//! The rules, each checked by `tests/kicad_connectivity.rs` against KiCad's own netlist of
+//! `tests/kicad/connectivity.kicad_sch` (written by `kicad-cli sch export netlist`, stored as
+//! `tests/kicad/connectivity.net`):
 //!
-//! When it opens a schematic, KiCad's editor also tidies the wires, which decides how
-//! collinear wires connect:
-//!
-//! - Collinear wires (or buses) with the same stroke that overlap become one wire spanning
-//!   both. Only the two outer ends remain ends, so an item ending inside the overlap no longer
-//!   touches a wire end.
-//! - Collinear wires that only touch end to end become one wire too, unless the touch point is
-//!   a junction (three or more wire directions or pins meet there).
+//! - Wires connect to other wires or to pins only where their ends coincide exactly (manual).
+//!   A wire end, pin or sheet pin lying on the middle of another wire does not connect to it,
+//!   and wires that cross are not connected. Collinear wires that overlap are no exception:
+//!   each connects only at its own ends (observed in KiCad's netlist).
+//! - A junction joins every wire passing through or ending at its point (manual).
+//! - Pins stacked on the same point connect (manual).
+//! - A label connects to a wire anywhere along it (observed), and to every wire under its
+//!   anchor: two crossing wires under one label are joined, which KiCad's ERC reports as a
+//!   label connecting more than one wire (observed).
+//! - A pin cannot connect directly to a bus (manual). KiCad 10's netlist export does join two
+//!   pins drawn on the ends of one bus with no bus label; we follow the manual there, and the
+//!   test checks that case on its own.
 //!
 //! [`groups`] applies these rules and returns a group number for each attachment point.
 
 use crate::geom::{orient, Point};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-/// A wire or bus segment, with its stroke text (only identical strokes merge).
+/// A wire or bus segment.
 #[derive(Clone, Debug)]
 pub(super) struct Seg {
     pub a: Point,
     pub b: Point,
     pub bus: bool,
-    pub stroke: String,
 }
 
 /// How an attached item connects.
@@ -71,94 +71,6 @@ fn break_at_junctions(segs: &mut Vec<Seg>, junctions: &[Point]) {
     }
 }
 
-/// The direction from `p` along a segment, reduced so equal directions compare equal.
-fn direction(p: Point, q: Point) -> (i64, i64) {
-    let (dx, dy) = (q.x - p.x, q.y - p.y);
-    let g = gcd(dx.unsigned_abs(), dy.unsigned_abs()).max(1) as i64;
-    (dx / g, dy / g)
-}
-
-fn gcd(a: u64, b: u64) -> u64 {
-    if b == 0 {
-        a
-    } else {
-        gcd(b, a % b)
-    }
-}
-
-/// True where three or more wire (or bus) directions, pins and sheet pins meet: the point
-/// is a junction, so collinear wires touching there stay separate.
-fn is_junction(segs: &[Seg], pins: &BTreeSet<Point>, pin_count: &BTreeMap<Point, usize>, p: Point) -> bool {
-    for bus in [false, true] {
-        let mut exits: BTreeSet<(i64, i64)> = BTreeSet::new();
-        let mut ended = false;
-        let mut middles = Vec::new();
-        for s in segs.iter().filter(|s| s.bus == bus) {
-            if s.a == p {
-                ended = true;
-                exits.insert(direction(p, s.b));
-            } else if s.b == p {
-                ended = true;
-                exits.insert(direction(p, s.a));
-            } else if on_inside(s, p) {
-                middles.push(s);
-            }
-        }
-        let mut count = 0;
-        if !bus && pins.contains(&p) {
-            ended = true;
-            count = pin_count.get(&p).copied().unwrap_or(0);
-        }
-        if ended {
-            for s in middles {
-                exits.insert(direction(p, s.a));
-                exits.insert(direction(p, s.b));
-            }
-        }
-        if exits.len() + count >= 3 {
-            return true;
-        }
-    }
-    false
-}
-
-/// Joins collinear segments of the same kind and stroke that overlap, or that touch end to
-/// end where the touch point is not a junction.
-fn merge_collinear(segs: &mut Vec<Seg>, pins: &BTreeSet<Point>, pin_count: &BTreeMap<Point, usize>) {
-    loop {
-        let mut merged = None;
-        'pairs: for i in 0..segs.len() {
-            for j in i + 1..segs.len() {
-                let (s, t) = (&segs[i], &segs[j]);
-                if s.bus != t.bus || s.stroke != t.stroke {
-                    continue;
-                }
-                if orient(s.a, s.b, t.a) != 0 || orient(s.a, s.b, t.b) != 0 {
-                    continue;
-                }
-                let (mut s0, mut s1) = (s.a.min(s.b), s.a.max(s.b));
-                let (mut t0, mut t1) = (t.a.min(t.b), t.a.max(t.b));
-                if t0 < s0 {
-                    std::mem::swap(&mut s0, &mut t0);
-                    std::mem::swap(&mut s1, &mut t1);
-                }
-                if s1 < t0 {
-                    continue;
-                }
-                if s1 == t0 && is_junction(segs, pins, pin_count, s1) {
-                    continue;
-                }
-                merged = Some((i, j, s0, s1.max(t1)));
-                break 'pairs;
-            }
-        }
-        let Some((i, j, a, b)) = merged else { return };
-        segs[i].a = a;
-        segs[i].b = b;
-        segs.remove(j);
-    }
-}
-
 struct Union(Vec<usize>);
 
 impl Union {
@@ -190,14 +102,6 @@ enum Item {
 pub(super) fn groups(mut segments: Vec<Seg>, junctions: &[Point], attach: &[(Point, Kind)]) -> Vec<usize> {
     segments.retain(|s| s.a != s.b);
     break_at_junctions(&mut segments, junctions);
-    let mut pin_count: BTreeMap<Point, usize> = BTreeMap::new();
-    for (p, k) in attach {
-        if matches!(k, Kind::Pin | Kind::SheetPin) {
-            *pin_count.entry(*p).or_default() += 1;
-        }
-    }
-    let pins: BTreeSet<Point> = pin_count.keys().copied().collect();
-    merge_collinear(&mut segments, &pins, &pin_count);
 
     let (ns, na) = (segments.len(), attach.len());
     let node = |it: Item| match it {
