@@ -14,7 +14,7 @@ use super::{
 };
 
 const SCOPE_PREFIX: &[u8] = b"runmat-structural-random-response-scope\0";
-const SCOPE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 2_000_000, 65_536, 32);
+const SCOPE_LIMITS: CanonicalLimits = crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 32));
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "StructuralRandomResponseScopeWire")]

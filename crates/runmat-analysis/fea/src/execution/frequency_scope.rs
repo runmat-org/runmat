@@ -15,7 +15,7 @@ use super::{
 
 const FREQUENCY_SCOPE_PREFIX: &[u8] = b"runmat-structural-frequency-scope/v1\0";
 const FREQUENCY_SCOPE_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(16 * 1024 * 1024, 200_000, 65_536, 32);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 32));
 
 /// Meaning of authored complex amplitudes at the structural frequency boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 const REQUEST_PREFIX: &[u8] = b"runmat-acoustic-frequency-assembly-request/v1\0";
 const REQUEST_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// Per-entry authored observation manifests, in exact frequency-plan order. Entries without
 /// authored outputs carry `None`. The assembly publishes them beside each sample's fields.

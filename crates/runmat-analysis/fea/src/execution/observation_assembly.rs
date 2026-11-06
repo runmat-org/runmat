@@ -12,7 +12,7 @@ use super::{
 
 const ASSEMBLY_PREFIX: &[u8] = b"runmat-analysis-observation-assembly/v1\0";
 const ASSEMBLY_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(16 * 1024 * 1024, 1_000_000, 65_536, 32);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 32));
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "ObservationAssemblyRequestWire")]

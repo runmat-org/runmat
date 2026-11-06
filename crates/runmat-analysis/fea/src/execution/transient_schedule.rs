@@ -5,7 +5,7 @@ use super::{AnalysisExecutionError, AnalysisExecutionResult, StructuralTransient
 
 const TRANSIENT_SCHEDULE_PREFIX: &[u8] = b"runmat-structural-transient-schedule/v1\0";
 const TRANSIENT_SCHEDULE_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 65_536, 32);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 32));
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

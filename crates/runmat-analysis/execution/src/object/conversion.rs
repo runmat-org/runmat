@@ -112,13 +112,22 @@ pub(crate) fn prepare_chunked_analysis_objects(
         ));
     }
     let count = chunked.chunks.len().checked_add(1).ok_or_else(overflow)?;
+    // A run-data payload is admitted against the run's inventory budget before its objects are
+    // built: the refusal names the requirement and the admitted allowance.
+    let manifest_bytes = chunked.manifest.canonical_bytes()?;
+    let (mut total, mut largest) = (manifest_bytes.len() as u64, manifest_bytes.len() as u64);
+    for chunk in &chunked.chunks {
+        total = total.checked_add(chunk.len() as u64).ok_or_else(overflow)?;
+        largest = largest.max(chunk.len() as u64);
+    }
+    limits.require_projection("analysis payload", count as u64, largest, total)?;
     let mut objects = Vec::new();
     objects.try_reserve_exact(count).map_err(|_| overflow())?;
     let manifest_object = logical_object(
         namespace,
         ROOT_PREFIX,
         ANALYSIS_MANIFEST_MEDIA_TYPE,
-        chunked.manifest.canonical_bytes()?,
+        manifest_bytes,
     )?;
     let descriptor = &manifest_object.descriptor;
     let root = ObjectDescriptor {
@@ -253,6 +262,44 @@ mod tests {
                 ObjectInventoryLimits::default()
             )
             .is_err());
+        }
+    }
+
+    #[test]
+    fn payload_beyond_the_admitted_inventory_is_refused_with_requirement_and_budget() {
+        let payload = vec![7_u8; 4096];
+        let chunked = chunk_numerical_payload(
+            AnalysisNumericalObjectKind::ObservationEvaluationRequest,
+            Digest::sha256(b"request"),
+            &payload,
+            1024,
+        )
+        .unwrap();
+        let fits = prepare_chunked_analysis_objects(
+            chunked.clone(),
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::admitted(1 << 20),
+        )
+        .unwrap();
+        let required: u64 = fits.objects.iter().map(|o| o.descriptor.encoded_length).sum();
+        prepare_chunked_analysis_objects(
+            chunked.clone(),
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::admitted(required),
+        )
+        .unwrap();
+        let error = prepare_chunked_analysis_objects(
+            chunked,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::admitted(required - 1),
+        )
+        .unwrap_err();
+        match error {
+            AnalysisBridgeError::InventoryCapacity(capacity) => {
+                assert_eq!((capacity.required, capacity.maximum), (required, required - 1));
+                assert!(capacity.to_string().contains(&required.to_string()));
+            }
+            other => panic!("expected an inventory capacity refusal, got {other:?}"),
         }
     }
 }

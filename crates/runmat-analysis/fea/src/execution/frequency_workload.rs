@@ -17,7 +17,7 @@ use super::{
 
 const FREQUENCY_WORKLOAD_PREFIX: &[u8] = b"runmat-structural-frequency-workload/v1\0";
 const FREQUENCY_WORKLOAD_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+    crate::contracts::canonical_digest::wire_bounded(CanonicalLimits::new(0, 0, 65_536, 64));
 
 /// Numerical method and typed upstream state for a structural harmonic response.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
