@@ -30,6 +30,10 @@ struct CapturedRun {
 #[derive(Serialize)]
 struct Snapshot<'a> {
     schema_version: u16,
+    /// The unit each of the study's assessments writes its bound in, by assessment id: legends
+    /// of an assessed quantity are written in it. A render of this snapshot reuses them.
+    #[serde(skip_serializing_if = "no_units")]
+    display_units: &'a std::collections::BTreeMap<String, String>,
     /// The primary run (the first captured case), at the top level.
     #[serde(flatten)]
     primary: &'a CapturedRun,
@@ -37,6 +41,10 @@ struct Snapshot<'a> {
     /// The other captured runs; each view names its run.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     runs: &'a [CapturedRun],
+}
+
+fn no_units(units: &&std::collections::BTreeMap<String, String>) -> bool {
+    units.is_empty()
 }
 
 fn step_list<'a>(ids: impl Iterator<Item = &'a str>) -> String {
@@ -89,6 +97,7 @@ async fn write_snapshot(
     selected: &[String],
     output: &Path,
     presentation: &views::Presentation,
+    display_units: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     let (primary, others) = runs
         .split_first()
@@ -113,12 +122,20 @@ async fn write_snapshot(
                 .and_then(|run| run.publication.solver_mesh_artifact_path.clone())
         },
         presentation,
+        &views::LegendTerms {
+            display_units: display_units.clone(),
+            assessments: runs
+                .iter()
+                .map(|run| (run.run_id.clone(), run.publication.assessments.clone()))
+                .collect(),
+        },
     )
     .await?;
     std::fs::write(
         output,
         serde_json::to_vec_pretty(&Snapshot {
             schema_version: 1,
+            display_units,
             primary,
             views,
             runs: others,
@@ -229,17 +246,22 @@ pub(super) async fn capture(
     // Preserve the original accepted numerical checkpoint before expensive scene
     // export. The coordinator keeps failed projects diagnostic-only; this file
     // cannot make an incomplete figure capture publishable.
+    let display_units = views::authored_bound_units(
+        &source.session_source.checked().program,
+        &primary.publication.study_id,
+    );
     let accepted_checkpoint = parent.join("accepted-solve.json");
     std::fs::write(
         &accepted_checkpoint,
         serde_json::to_vec_pretty(&Snapshot {
             schema_version: 1,
+            display_units: &display_units,
             primary,
             views: Vec::new(),
             runs: others,
         })?,
     )?;
-    write_snapshot(&runs, selected_views, output, &presentation).await?;
+    write_snapshot(&runs, selected_views, output, &presentation, &display_units).await?;
     std::fs::remove_file(accepted_checkpoint)?;
     Ok(())
 }

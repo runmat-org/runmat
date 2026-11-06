@@ -57,6 +57,10 @@ pub struct SnapshotPresentationArgs {
     /// shown small, such as a website hero on a phone, uses about 2
     #[arg(long, default_value_t = 1.0, value_name = "FACTOR")]
     pub text_scale: f32,
+    /// Poster theme: `dark` or `light`, the app's dark or light plot theme for the background,
+    /// grid, text, legend and triad. Scenes are the same in both; only the posters differ.
+    #[arg(long, default_value = "dark", value_name = "dark|light")]
+    pub theme: String,
     /// Largest scene file a view may write, in bytes (default 16 MiB, the app's scene file
     /// limit). A larger view is drawn lighter until it fits: corner triangles for a quadratic
     /// surface, a coarser section cap. Each view records what that leaves out.

@@ -245,6 +245,8 @@ fn result_overlay() -> GeometrySceneOverlay {
             unit: "K".into(),
             minimum: 301.0,
             maximum: 304.0,
+            limit: None,
+            note: None,
         }),
         region_count: 0,
         mapped_region_count: 0,

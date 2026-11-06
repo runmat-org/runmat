@@ -214,6 +214,8 @@ pub(super) fn scene_from_topology_with_stats(
             unit: field.unit.clone(),
             minimum,
             maximum,
+            limit: None,
+            note: None,
         }),
         region_count: 0,
         mapped_region_count: 0,

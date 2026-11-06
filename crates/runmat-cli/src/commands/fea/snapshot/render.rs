@@ -13,6 +13,9 @@ struct SavedSnapshot {
     runs: Vec<super::CapturedRun>,
     /// The saved views; a render redraws the same ones.
     views: Vec<SavedView>,
+    /// The units the study's assessments state their bounds in, by assessment id.
+    #[serde(default)]
+    display_units: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -104,5 +107,5 @@ pub(in crate::commands::fea) async fn render_saved(
         selected.to_vec()
     };
     let presentation = super::views::Presentation::from_args(presentation)?;
-    super::write_snapshot(&runs, &views, output, &presentation).await
+    super::write_snapshot(&runs, &views, output, &presentation, &saved.display_units).await
 }
