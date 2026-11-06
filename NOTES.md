@@ -453,3 +453,19 @@ qmf15-est.py (surface growth estimate), qmf15-dbgpatch.py (FACEGAP prints to $QM
    If thermal steady can use an iterative (CG/AMG) solve, its reservation should be a few GB.
 2. Or cut the mesh: the plates sized to one layer (2 mm lid, 3 mm pad, 3 mm under the channel) dominate.
 3. Stage-2 frames, verify-snapshot, 1-D check (reference in m01-module-thermal.fea header: 303.86 K peak).
+
+## q-hero-stage2-2 (2026-11-06, hero stage 2 resumed after the main-Mac reboot)
+- fbbd85e085's test did not compile: the change dropped `Count` from thermal_operator.rs's imports and
+  tests.rs used it via `super::*`. Fixed in 4f0688c12f; `runmat-analysis-fea --lib planning::resource`:
+  190 passed, 0 failed, 2 ignored.
+- mod6 (CLI b5b6447a10): meshing artifact rejected, "successful evidence exceeds a resolved hard
+  budget", after 3785 s real / 3269 s user on a loaded host. 1a9da4ec17 makes the check name each
+  exceeded budget with usage and limit. The wall-time ceiling is a fixed 1 h
+  (MeshingExecutionCeilings::PORTABLE_DEFAULT) and the memory ceiling is 3/4 of the available-memory
+  snapshot; both depend on host load.
+- mod7 (CLI 1a9da4ec17, GATE_NEED_GB=24): meshing passed; the solve task still asks
+  68,641,907,958 B, byte-identical to mod5. The factor term already dominated, so fbbd85e085 does not
+  lower this study's reservation.
+- Cause: `cells_across_gap = 1` also sizes facing faces across the empty 2 mm voids between cells to
+  2 mm, so all 8 cells fill with fine elements. mod8 replaces it with `refine` controls on the pad
+  (3 mm), lid (2 mm) and base (3 mm); the old study is kept as m01-module-thermal.fea.bak-qmf17.
