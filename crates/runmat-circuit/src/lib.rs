@@ -76,6 +76,7 @@ pub mod kicad;
 pub mod netlists;
 pub mod layout;
 pub mod library;
+pub mod mass;
 pub mod review;
 pub mod room_formats;
 pub mod runtime;

@@ -666,6 +666,14 @@ impl Session {
         state.parsed.board.as_ref().map(crate::board3d::board_model)
     }
 
+    /// The board's mass properties ([`crate::mass::board_mass`]), with the library parts' masses
+    /// when the schematic compiled.
+    pub fn board_mass(&self) -> Option<crate::mass::BoardMass> {
+        let board = self.board.as_ref()?.parsed.board.as_ref()?;
+        let project = self.schematic.as_ref().map(|s| &s.project);
+        Some(crate::mass::board_mass(board, project.map(|p| &p.netlist), project.map(|p| &p.pool)))
+    }
+
     /// [`edit`](super::edit): a board catalog command edits the session's reading of the
     /// layout; ECO and room commands run through the stateless runtime.
     pub fn edit(
