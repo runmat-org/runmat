@@ -69,8 +69,8 @@ and their original measured evidence are conserved.
 R1059 changes three AOT linker files to reserve the Windows standalone execution
 stack and bind that reserve into selected-plan identity. FEA does not depend on
 the AOT orchestration crate. Its tree, dependencies, features and lint-bearing
-files retain the measured identities above. Windows product qualification is
-recorded separately; this conservation does not certify its pending build.
+files retain the measured identities above. The Windows product receipt records
+its independent build, execution and physical-hardware results.
 
 ## CI policy and closure
 

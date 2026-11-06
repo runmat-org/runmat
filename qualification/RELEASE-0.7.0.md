@@ -1,14 +1,16 @@
 # RunMat 0.7.0 qualification index
 
-Status: Windows qualification is pending. This index does not certify a
-release-ready candidate. No push, tag, publication or deployment is included.
+Status: required 0.7.0 qualification is complete within the scopes and approved
+dispositions below. The candidate is ready for the separately authorized release
+steps. No push, tag, publication or deployment has been performed.
 
 ## Source and distribution
 
 Branch: `0-7-0-rc`. Conserved product Rust/SDK source is anchored at
 `c7a12b7b9f050f6789dda56a1024636243b7a63e`. Three AOT linker files have a
 Windows-only execution-stack successor at
-`0b36a6a1da1e3de2d6f8bb95ddac86d2922e6cdf`; its product qualification is pending.
+`0b36a6a1da1e3de2d6f8bb95ddac86d2922e6cdf`; its independent Windows build,
+product and physical-hardware results are in the [Windows receipt](products/windows-r1059.json).
 Release-routing source is
 `0d09250a4c9a8394de9ed906953e72dc22c8fb12`; its two validation-only Python
 changes and CI changes do not alter product code. Private Server/Desktop
@@ -27,7 +29,7 @@ uses the owner-approved Rosetta route on Apple Silicon.
 | macOS ARM64 CLI/native | Corrected optimized CLI builds; real remote controls pass. Retained 31-case Metal product cohort and native pure/callback application/test pairs pass, including seven semantic controls, installation/loader/notices admission and separate-process reopening. | [Native pairs](products/macos-native-r1055.json), [remote CLI](products/remote-cli-r1057.json) |
 | macOS x86_64/Rosetta | Corrected optimized CLI: 31 passed, 0 failed, 0 omitted; eight assessment commands pass. Three 25,871-file guards and 15 collected receipt hashes match. Physical Intel hardware was not tested. | [Intel receipt](products/macos-intel-r1057.json) |
 | Linux x86_64/Vulkan | Corrected optimized CLI: 31 passed, 0 failed, 0 omitted. Six 25,871-file guards and 20 collected receipt hashes match. Actual GPU workers, callbacks, cancellation and public native compile/link execute. | [Linux receipt](products/linux-r1057.json) |
-| Windows x86_64 | R1057 optimized build passes; product cohort: 30 passed, one native-image stack overflow. Eight assessments and three focused private Win32 publication tests pass. The preserved failing image reserves 1 MiB; a diagnostic copy with 64 MiB prints `NATIVE_OK` and exits 0. Source-level linker repair is building. Successor product acceptance, final package and seven physical Victus checks remain pending. | Final product receipt pending; [stack diagnosis and scientific scope](scientific/evidence/windows-stack-r1059.json) |
+| Windows x86_64 | Repaired optimized CLI: 31 passed, 0 failed, 0 omitted. Four 25,871-file guards pass. Eight earlier assessment commands and three focused Win32 tests retain their passing evidence. Seven unique physical Victus controls pass against unchanged candidate bytes: six first-run passes plus a console-probe successor that explicitly enables Ctrl-C inheritance, retaining the original assertions and timeout. DXC loading, RTX 3050/D3D12, offline CPU execution, cancellation and all three native images execute. | [Windows receipt](products/windows-r1059.json); initial failures and their dispositions are preserved there |
 | Optimized WASM/public SDK | Two Node execution/reset checks, 10 Chrome product cases, 12 boundary checks, five input checks and 32 exact-CAD assertions pass. Supported local named FEA uses real OCCT and supervised numerical workers. | External browser receipt below |
 | Desktop caller | Conserved native caller/settings/provider acceptance: 18 passed, 0 failed; one GUI Keychain pass is user-attested. Remote frontend upload/cluster/cipher tests: 23 passed, 0 failed; focused ESLint passes. This scope does not include a fresh signed Desktop installer. | External Desktop conservation below |
 | Real remote CLI/Server | Positive and failing jobs pass through production HTTP routes and a registered node, preserving encrypted terminal output, original errors, pre-error console and JSON reattachment. Server domain tests: 21 passed, 0 failed; affected HTTP test-target checks pass. Synthetic auth/in-memory stores do not establish production identity-provider, durability or deployment qualification. | [Remote receipt](products/remote-cli-r1057.json) |
@@ -59,13 +61,19 @@ relabel historical executions as fresh product tests.
 | Corrected ARM64 macOS CLI | `e0252f6fcc8fcd93364079352acfe43c84ad13d9c0b03c1bc64448d6d3594268` |
 | Corrected x86_64 macOS CLI | `2acf88b9139b9e51b8afb4321900265eb5e07f3fe6c9e597c622c80252ce5cc6` |
 | Corrected Linux CLI | `b45cf823f46b98f7b3c15f3084c878de2f801f53885d4cb232bde8022838e2e5` |
-| Final Windows CLI/package | Pending |
+| Windows CLI | `c47fdf64fd10d43ec202486cf170f02eceebed7bf7485372b3a3944a71482696` |
+| Windows package/native-image transfer archive | `e105e59a49f6fa601e6e0240aa1cbbea7478f4aa78b1dfcb3c725f62ae0a8dab` |
 | Runtime WASM | `ea55c974dd17ced111157c2c97279afce79fb9ad7c0775bcc8158faa71845fa8` |
 | SDK package inventory | `5973f23d2dc9fc55df72c7fab00fea7922c1fda772232fcb210332d514caed24` |
 | OCCT WASM | `c4fbd1c5f9c7e0b180486694897b530b60b0109d15efdfc8a08d76e75ae8965b` |
 | LSP WASM | `ce3871e33e7bf78f0f242476916a0a356f11915b0c05062817865615d0d78cdb` |
 
 Native receipts preserve runtime archive/payload/manifest/notices identities.
+The Windows archive contains 76 files, all rehashed on Main and Victus. Its
+1,007-file physical candidate includes the separately pinned execution tools.
+The source repair reserves a 64 MiB Windows execution stack; the preserved
+runtime archive is unchanged. The modified-header diagnostic copy is excluded
+from the shipped package.
 The approved LICENSE.md and FREE-USE.md retain SHA-256 values
 `f923b86930cc30ee506959d2e026ae4cef0b29f74c00947540dd80f28e4eae51`
 and `0ce48a3efdb6408518cafb1749bcf7a04ff8b07439c254ec7f04aa46768012f6`.
@@ -105,3 +113,10 @@ exclusions; existing-plot temporary property-allocation budgeting; FEA architect
 style debt; embedded AOT/support-pack/selective-linking continuation; dependency
 compiler/driver/browser memory outside the managed cap. Those limitations remain
 separate from the passing numerical and product assertions above.
+
+## Build-machine disposition
+
+The Linux and Windows qualification VMs are verified `TERMINATED`. Their
+persistent disks, warm caches and T4 configurations remain intact. Main holds
+the qualified CLI artifacts and collected receipts; the Victus holds its tested
+package. Publication remains a separate authorized step.
