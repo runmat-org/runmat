@@ -29,6 +29,7 @@
 pub mod analyze;
 pub mod board;
 mod direct_edits;
+pub mod draft_analysis;
 mod configured;
 pub mod drawing;
 pub mod edit;

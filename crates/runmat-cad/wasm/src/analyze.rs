@@ -10,6 +10,8 @@
 //!   ([`crate::evaluate::assembly_clearance`]).
 //!
 //! - `weldment.cut-list`: a weldment part's members grouped by profile, length and end angles.
+//! - `evaluate.draft`: each face's draft against a pull direction (`values.direction`, a pick;
+//!   `values.angle`, degrees), banded ([`crate::draft_analysis`]).
 //! - `simulate.check`: the fit and mass checks a study runs before it meshes
 //!   ([`crate::study_checks`]; `values.gap`, mm, for open contacts).
 //!
@@ -261,6 +263,57 @@ pub fn analyze(
                 data: Value::Null,
             })
         }
+        "evaluate.draft" if !assembly => {
+            use crate::draft_analysis::{draft_faces, pull_direction, DraftBand};
+            let part = crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
+                .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
+            let pick = crate::features::picks_of(&request.values, "direction")
+                .into_iter()
+                .next()
+                .ok_or("pick the pull direction: an origin plane or axis, or a face")?;
+            let pull = pull_direction(&part.display, &pick)?;
+            let angle = request.values.get("angle").and_then(Value::as_f64).unwrap_or(1.0);
+            let faces = draft_faces(&part.display, pull, angle);
+            let count = |b: DraftBand| faces.iter().filter(|f| f.band == b).count();
+            let (needs, straddle) = (count(DraftBand::NeedsDraft), count(DraftBand::Straddle));
+            let summary = format!(
+                "{} faces at {angle}° · {} positive · {} negative · {needs} need draft · {straddle} straddle the parting line",
+                faces.len(),
+                count(DraftBand::Positive),
+                count(DraftBand::Negative),
+            );
+            let rows = faces
+                .iter()
+                .map(|f| Row {
+                    cells: vec![
+                        f.face.clone(),
+                        format!("{:.1}°", f.min),
+                        format!("{:.1}°", f.max),
+                        match f.band {
+                            DraftBand::Positive => "Positive",
+                            DraftBand::Negative => "Negative",
+                            DraftBand::NeedsDraft => "Needs draft",
+                            DraftBand::Straddle => "Straddles",
+                        }
+                        .into(),
+                    ],
+                    items: vec![f.face.clone()],
+                    severity: match f.band {
+                        DraftBand::NeedsDraft => Some("warning"),
+                        DraftBand::Straddle => Some("info"),
+                        _ => None,
+                    },
+                })
+                .collect();
+            Ok(Analysis {
+                title: "Draft analysis".into(),
+                summary,
+                columns: ["Face", "Least draft", "Greatest draft", "Band"].map(String::from).to_vec(),
+                rows,
+                problems: Vec::new(),
+                data: serde_json::json!({ "pull": pull, "angle": angle, "faces": faces }),
+            })
+        }
         "simulate.check" => {
             // values.gap: the open-contact gap in mm.
             let gap = request.values.get("gap").and_then(Value::as_f64).map(|mm| mm / 1000.0);
@@ -387,6 +440,35 @@ pub(crate) mod tests {
             }),
         ));
         runmat_cad::syntax::print_part(&d, &[]).unwrap()
+    }
+
+    #[test]
+    fn draft_analysis_bands_a_blocks_faces_against_the_pull() {
+        // A 100 x 10 x 10 mm block pulled along +Z: the top releases, the bottom from the
+        // other half, the four walls need draft.
+        let text = "runmat 0.7\nstd 1\n\npart block {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [100 mm, 0 mm])\n        l2 = line(start = [100 mm, 0 mm], end = [100 mm, 10 mm])\n        l3 = line(start = [100 mm, 10 mm], end = [0 mm, 10 mm])\n        l4 = line(start = [0 mm, 10 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 10 mm)\n    output block = { body = feature.body.body }\n}\n";
+        let out: Value = serde_json::from_str(&analyze_json(
+            "/p/block.part",
+            text,
+            &Files::new(),
+            &json!({ "command": "evaluate.draft", "values": { "direction": ["origin:top"], "angle": 2 } }).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(out["ok"], true, "{out}");
+        assert_eq!(out["summary"], "6 faces at 2° · 1 positive · 1 negative · 4 need draft · 0 straddle the parting line", "{out}");
+        let top = out["rows"].as_array().unwrap().iter().find(|r| r["cells"][0] == "feature.body.face.end").expect("the top face by name");
+        assert_eq!(top["cells"][1], "90.0°");
+        let wall = out["rows"].as_array().unwrap().iter().find(|r| r["cells"][3] == "Needs draft").unwrap();
+        assert_eq!(wall["severity"], "warning");
+        // A face picks the pull too: the top's normal is +Z.
+        let by_face: Value = serde_json::from_str(&analyze_json(
+            "/p/block.part",
+            text,
+            &Files::new(),
+            &json!({ "command": "evaluate.draft", "values": { "direction": ["feature.body.face.end"], "angle": 2 } }).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(by_face["summary"], out["summary"], "{by_face}");
     }
 
     #[test]
