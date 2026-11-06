@@ -85,6 +85,10 @@ feature m6_thread = thread(face = feature.tap.face.wall(m6), spec = { designatio
 | `shell` | hollows a body | `body`, `thickness`, `open_faces`, `outward` |
 | `draft` | tilts faces for molding | `faces`, `neutral`, `angle` |
 
+In the Desktop, Fillet takes the edges you pick on the model and previews the rounds. Type the radius in the box on the model or in the form, then confirm:
+
+<!-- design:clip:mcad/fillet -->
+
 This tray drafts its walls 2° and shells itself open at the top, then adds a post and mirrors it about a datum plane:
 
 ```part

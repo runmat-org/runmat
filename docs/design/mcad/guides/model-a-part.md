@@ -47,7 +47,7 @@ part plate_sketch {
 
 The sketch's status shows in the Outline: fully constrained, or the number of free directions left. An over-constrained sketch is an error on the constraint that conflicts. See [Sketches and constraints](/docs/mcad/part/sketches).
 
-In the Desktop, Sketch on a face opens the sketch on that face. Rectangle draws a profile that already carries its horizontal and vertical relations, and Smart dimension sets each side; the status line under the view counts the free directions that are left:
+In the Desktop, Sketch on a face opens the sketch on that face. Rectangle draws a profile that already carries its horizontal and vertical relations, and Smart dimension sets each side. Fix holds a corner in place. The status line under the view counts the free directions that are left, down to 0 when the sketch is fully defined:
 
 <!-- design:clip:mcad/sketch -->
 

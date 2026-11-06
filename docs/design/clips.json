@@ -2,10 +2,10 @@
   "clips": [
     {
       "id": "mcad/sketch",
-      "alt": "A rectangle drawn on the hinge mount's top face arrives with horizontal and vertical relations, and two dimensions set it to 8 by 5 mm while the status line counts the free directions down from 4 to 2.",
-      "width": 1280,
-      "height": 1180,
-      "seconds": 13.4,
+      "alt": "A rectangle drawn on the hinge mount's top face arrives with horizontal and vertical relations, two dimensions set it to 8 by 5 mm, and Fix on a corner leaves the sketch fully defined at 0 degrees of freedom.",
+      "width": 1008,
+      "height": 1104,
+      "seconds": 14.9,
       "base": "/design-assets/flow-clips/mcad/sketch/sketch"
     },
     {
@@ -15,6 +15,14 @@
       "height": 1180,
       "seconds": 7.4,
       "base": "/design-assets/flow-clips/mcad/extrude/extrude"
+    },
+    {
+      "id": "mcad/fillet",
+      "alt": "On the hinge mount, Fillet picks three edges at the back block's top front corner, the preview rounds them at 2 mm, the radius on the model is set to 3 mm, and the rounded edges join the part.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.8,
+      "base": "/design-assets/flow-clips/mcad/fillet/fillet"
     }
   ]
 }
