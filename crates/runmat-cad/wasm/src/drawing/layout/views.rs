@@ -334,13 +334,14 @@ pub fn draw(ctx: &mut Ctx<'_>, plans: &[ViewPlan]) {
     for v in plans {
         let mut out: Vec<Prim> = Vec::new();
         let place = |e: &[f64]| -> Vec<f64> { e.chunks_exact(2).flat_map(|p| v.to_sheet([p[0], p[1]])).collect() };
-        for e in &v.edges {
-            out.push(prim(&v.id, "view", "Views", "visible", line(place(e))));
-        }
+        // Hidden lines first, so a visible edge over a hidden one draws solid (ISO 128-20).
         if v.show_hidden {
             for e in &v.hidden {
                 out.push(prim(&v.id, "view", "Views", "hidden", line(place(e))));
             }
+        }
+        for e in &v.edges {
+            out.push(prim(&v.id, "view", "Views", "visible", line(place(e))));
         }
         let detail = xy(&v.seam["detail"]["center"]).zip(v.seam["detail"]["radius"].as_f64());
         for pick in v.seam["picks"].as_array().into_iter().flatten() {
