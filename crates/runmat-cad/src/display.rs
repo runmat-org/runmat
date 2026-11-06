@@ -18,7 +18,7 @@ use crate::assembly::resolve::ResolvedAssembly;
 use crate::assembly::source::DesignSource;
 use crate::model::sketch::SketchGeometry;
 use crate::model::{FeatureKind, PartDocument};
-use crate::refs::name::{EntityName, TopoKind};
+use crate::refs::name::{EntityName, NameTable, TopoKind};
 use crate::refs::Reference;
 use crate::regen::engine::RegenResult;
 use crate::regen::kernel::{BodyMesh, KernelError, TessellationOptions, Tessellator};
@@ -45,6 +45,11 @@ pub struct FaceDisplay {
     /// Outline's Regions folder and a simulation's named regions call it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub regions: Vec<String>,
+    /// The face's name for people, from how it was made (`Body side 2`, `Hollow inner wall ·
+    /// body side 1`): [`NameTable::label`] of the name its reference shows. Forms, Evaluate
+    /// tables and the agent's picks all read faces by this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     /// The features that made it.
     pub features: Vec<String>,
     pub positions: Vec<f32>,
@@ -268,6 +273,7 @@ fn body_display(
     face_names: &[BTreeSet<EntityName>],
     topology: &crate::refs::history::Topology,
     regions: &BTreeMap<&EntityName, Vec<String>>,
+    table: &NameTable,
 ) -> BodyDisplay {
     let face_ref: Vec<Option<String>> = (0..mesh.faces.len())
         .map(|i| {
@@ -282,9 +288,15 @@ fn body_display(
         .enumerate()
         .map(|(i, f)| {
             let names = face_names.get(i);
+            let shown = names.and_then(|set| {
+                set.iter()
+                    .find(|n| face_ref[i].is_some() && reference_text(TopoKind::Face, n) == face_ref[i])
+                    .or_else(|| set.iter().next())
+            });
             FaceDisplay {
                 index: i as u32,
                 reference: face_ref[i].clone(),
+                label: shown.map(|n| table.label(n)),
                 regions: names
                     .map(|set| {
                         set.iter()
@@ -437,6 +449,7 @@ pub fn part_display(
                     &body.names.faces,
                     &body.topology,
                     &regions,
+                    &result.state.names,
                 );
                 display.flat_pattern = flat_pattern;
                 out.bodies.push(display);

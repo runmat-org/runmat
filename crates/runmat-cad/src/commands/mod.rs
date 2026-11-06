@@ -53,6 +53,8 @@ pub const UNBUILT: &[&str] = &[
     "part.wrap",
     "part.body-promote",
     "part.where-used",
+    // Direct: relations kept while a face moves.
+    "direct.live-relations",
     // Manage.
     "manage.equations",
     "manage.find-references",

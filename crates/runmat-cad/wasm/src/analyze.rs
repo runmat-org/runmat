@@ -398,7 +398,7 @@ pub fn analyze(
                 .ok_or("pick the pull direction: an origin plane or axis, or a face")?;
             let pull = pull_direction(&part.display, &pick)?;
             let angle = request.values.get("angle").and_then(Value::as_f64).unwrap_or(1.0);
-            let label = crate::face_labels::labeller(&part);
+            let label = crate::face_labels::label;
             let faces = draft_faces(&part.display, pull, angle, &label);
             let picked = part.display.bodies.iter().find_map(|b| b.faces.iter().find(|f| f.reference.as_deref() == Some(pick.as_str())).map(|f| label(b.index, f)));
             let pull_text = pull_label(&pick, pull, picked);
@@ -458,7 +458,7 @@ pub fn analyze(
                 .next()
                 .ok_or("pick the pull direction: an origin plane or axis, or a face")?;
             let pull = pull_direction(&part.display, &pick)?;
-            let label = crate::face_labels::labeller(&part);
+            let label = crate::face_labels::label;
             let faces = undercut_faces(&part.display, pull, &label);
             let picked = part.display.bodies.iter().find_map(|b| b.faces.iter().find(|f| f.reference.as_deref() == Some(pick.as_str())).map(|f| label(b.index, f)));
             let bands = [

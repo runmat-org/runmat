@@ -221,7 +221,7 @@ pub(super) fn drawing_sheet(
                 .map(|c| (pt(&c["at"]), c["radius"].as_f64().unwrap_or(0.0) * s))
                 .collect();
             let anchor = |id: &str| data["anchors"][id][0].as_array().map(|_| project(&floats(&data["anchors"][id][0])));
-            annotations(&mut out, name, box_, &marks, &anchor, s, doc, data, [w, h]);
+            annotations(&mut out, name, box_, &marks, &anchor, s, doc, data, [w, h], &Style::of(data, &sheet_name));
         }
         // Linear dimensions between the drawing's resolved anchors, stacked above the view.
         let mut row = 0;
@@ -290,39 +290,50 @@ pub(super) fn drawing_sheet(
     Ok((sheet_name, out, notes))
 }
 
-/// Callout proportions, as the Desktop's sheet draws them: 3.5 mm text, 3 x 1 mm arrowheads.
-const TEXT: f64 = 3.5;
-const ARROW: f64 = 3.0;
+/// Callout proportions from the sheet's drafting standard (the drawing compile's `styles`):
+/// text height and arrowhead length, in sheet millimetres.
+struct Style {
+    text: f64,
+    arrow: f64,
+}
+
+impl Style {
+    /// The style the compile gives sheet `sheet`, else ISO 129-1's 3.5 mm text and 3 mm arrows.
+    fn of(data: &Value, sheet: &str) -> Style {
+        let style = &data["styles"][sheet];
+        Style { text: style["text_height"].as_f64().unwrap_or(3.5), arrow: style["arrow_length"].as_f64().unwrap_or(3.0) }
+    }
+}
 
 fn text_width(text: &str, size: f64) -> f64 {
     text.chars().count() as f64 * size * 0.6
 }
 
 /// A filled arrowhead with its tip at `tip`, pointing along `dir` (unit).
-fn arrowhead(out: &mut Sheet, tip: [f64; 2], dir: [f64; 2]) {
-    let (n, back) = ([-dir[1], dir[0]], [tip[0] - dir[0] * ARROW, tip[1] - dir[1] * ARROW]);
+fn arrowhead(out: &mut Sheet, st: &Style, tip: [f64; 2], dir: [f64; 2]) {
+    let (n, back) = ([-dir[1], dir[0]], [tip[0] - dir[0] * st.arrow, tip[1] - dir[1] * st.arrow]);
     let loop_ = vec![tip, [back[0] + n[0] * 0.5, back[1] + n[1] * 0.5], [back[0] - n[0] * 0.5, back[1] - n[1] * 0.5]];
     out.add("NOTES", Shape::Hatch { loops: vec![loop_], pattern: "SOLID".into(), angle: 0.0, scale: 1.0 });
 }
 
 /// A feature control frame's cells from `at` (lower left): the symbol cell square, the others
 /// as wide as their text. Returns its width.
-fn control_frame(out: &mut Sheet, at: [f64; 2], cells: &[&str]) -> f64 {
-    let h = 2.0 * TEXT;
+fn control_frame(out: &mut Sheet, st: &Style, at: [f64; 2], cells: &[&str]) -> f64 {
+    let h = 2.0 * st.text;
     let mut x = at[0];
     for (i, cell) in cells.iter().enumerate() {
-        let w = if i == 0 { h } else { h.max(cell.chars().count() as f64 * TEXT * 0.62 + 3.0) };
+        let w = if i == 0 { h } else { h.max(cell.chars().count() as f64 * st.text * 0.62 + 3.0) };
         out.rect("NOTES", x, at[1], w, h);
-        let tw = text_width(cell, TEXT);
-        out.text("NOTES", [x + (w - tw) / 2.0, at[1] + (h - TEXT) / 2.0 + 0.4], TEXT, cell);
+        let tw = text_width(cell, st.text);
+        out.text("NOTES", [x + (w - tw) / 2.0, at[1] + (h - st.text) / 2.0 + 0.4], st.text, cell);
         x += w;
     }
     x - at[0]
 }
 
 /// A datum feature symbol: the filled triangle on `on`, a stem along `away`, the boxed letter.
-fn datum_symbol(out: &mut Sheet, on: [f64; 2], away: [f64; 2], letter: &str) {
-    let (b, tri) = (2.0 * TEXT, 1.8);
+fn datum_symbol(out: &mut Sheet, st: &Style, on: [f64; 2], away: [f64; 2], letter: &str) {
+    let (b, tri) = (2.0 * st.text, 1.8);
     let n = [-away[1], away[0]];
     let apex = [on[0] + away[0] * tri * 1.6, on[1] + away[1] * tri * 1.6];
     out.add("NOTES", Shape::Hatch { loops: vec![vec![[on[0] + n[0] * tri, on[1] + n[1] * tri], [on[0] - n[0] * tri, on[1] - n[1] * tri], apex]], pattern: "SOLID".into(), angle: 0.0, scale: 1.0 });
@@ -330,32 +341,32 @@ fn datum_symbol(out: &mut Sheet, on: [f64; 2], away: [f64; 2], letter: &str) {
     out.line("NOTES", apex, stem);
     let c = [stem[0] + away[0] * b / 2.0, stem[1] + away[1] * b / 2.0];
     out.rect("NOTES", c[0] - b / 2.0, c[1] - b / 2.0, b, b);
-    out.text("NOTES", [c[0] - text_width(letter, TEXT) / 2.0, c[1] - TEXT / 2.0 + 0.3], TEXT, letter);
+    out.text("NOTES", [c[0] - text_width(letter, st.text) / 2.0, c[1] - st.text / 2.0 + 0.3], st.text, letter);
 }
 
 /// An ISO 1302 surface texture symbol standing on a leader's end `elbow`, the arrow on `to`.
-fn surface_finish(out: &mut Sheet, to: [f64; 2], elbow: [f64; 2], text: &str) {
-    let h = 1.4 * TEXT;
+fn surface_finish(out: &mut Sheet, st: &Style, to: [f64; 2], elbow: [f64; 2], text: &str) {
+    let h = 1.4 * st.text;
     let t = (std::f64::consts::PI / 6.0).tan();
     let len = ((to[0] - elbow[0]).powi(2) + (to[1] - elbow[1]).powi(2)).sqrt().max(1e-9);
     out.line("NOTES", elbow, to);
-    arrowhead(out, to, [(to[0] - elbow[0]) / len, (to[1] - elbow[1]) / len]);
+    arrowhead(out, st, to, [(to[0] - elbow[0]) / len, (to[1] - elbow[1]) / len]);
     let [x, y] = elbow;
-    let bar = text_width(text, TEXT) + 2.0;
+    let bar = text_width(text, st.text) + 2.0;
     out.add("NOTES", Shape::Polyline { points: vec![[x - h * t, y + h], [x, y], [x + 2.0 * h * t, y + 2.0 * h], [x + 2.0 * h * t + bar, y + 2.0 * h]], closed: false });
-    out.text("NOTES", [x + 2.0 * h * t + 1.0, y + h + 0.6], TEXT, text);
+    out.text("NOTES", [x + 2.0 * h * t + 1.0, y + h + 0.6], st.text, text);
 }
 
 /// A leader from `tip` (with its arrow) to `elbow`, a shoulder and the text on it.
-fn leader(out: &mut Sheet, tip: [f64; 2], elbow: [f64; 2], text: &str) {
+fn leader(out: &mut Sheet, st: &Style, tip: [f64; 2], elbow: [f64; 2], text: &str) {
     let len = ((tip[0] - elbow[0]).powi(2) + (tip[1] - elbow[1]).powi(2)).sqrt().max(1e-9);
-    arrowhead(out, tip, [(tip[0] - elbow[0]) / len, (tip[1] - elbow[1]) / len]);
+    arrowhead(out, st, tip, [(tip[0] - elbow[0]) / len, (tip[1] - elbow[1]) / len]);
     let right = elbow[0] >= tip[0];
-    let run = 6.0 + text_width(text, TEXT);
+    let run = 6.0 + text_width(text, st.text);
     let end = [elbow[0] + if right { run } else { -run }, elbow[1]];
     out.add("NOTES", Shape::Polyline { points: vec![tip, elbow, end], closed: false });
     let x = if right { elbow[0] + 3.0 } else { end[0] + 3.0 };
-    out.text("NOTES", [x, elbow[1] + 0.8], TEXT, text);
+    out.text("NOTES", [x, elbow[1] + 0.8], st.text, text);
 }
 
 /// The leadered callouts of one view, placed as the Desktop's sheet places them: feature control
@@ -374,6 +385,7 @@ fn annotations(
     doc: &Value,
     data: &Value,
     paper: [f64; 2],
+    st: &Style,
 ) {
     let (lo, hi) = box_;
     let texts = &data["text"];
@@ -387,22 +399,22 @@ fn annotations(
         let Some(p) = anchor(id) else { continue };
         let text = texts[id].as_str().unwrap_or(id).to_owned();
         let cells: Vec<&str> = text.split('|').collect();
-        let h = 2.0 * TEXT;
+        let h = 2.0 * st.text;
         let below = p[1] - lo[1] < hi[1] - p[1];
         let row = &mut rows[below as usize];
         let y = if below { lo[1] - 6.0 - h - *row as f64 * (h + 3.0) } else { hi[1] + 6.0 + *row as f64 * (h + 3.0) };
         *row += 1;
         let mut probe = Sheet::default();
-        let width = control_frame(&mut probe, [0.0, 0.0], &cells);
+        let width = control_frame(&mut probe, st, [0.0, 0.0], &cells);
         let inward = if p[0] > (lo[0] + hi[0]) / 2.0 { -1.0 } else { 1.0 };
         let x = (if inward > 0.0 { p[0] + 4.0 } else { p[0] - 4.0 - width }).min(hi[0] - width).max(lo[0]);
-        control_frame(out, [x, y], &cells);
+        control_frame(out, st, [x, y], &cells);
         let from = [if inward > 0.0 { x } else { x + width }, y + h / 2.0];
         let toward = if below { 1.0 } else { -1.0 };
         let r = radius(id).unwrap_or(0.0);
         let tip = if r > 0.0 { [p[0] + inward * r * std::f64::consts::FRAC_1_SQRT_2, p[1] - toward * r * std::f64::consts::FRAC_1_SQRT_2] } else { p };
-        out.add("NOTES", Shape::Polyline { points: vec![from, [tip[0], from[1]], [tip[0], tip[1] - toward * ARROW]], closed: false });
-        arrowhead(out, tip, [0.0, toward]);
+        out.add("NOTES", Shape::Polyline { points: vec![from, [tip[0], from[1]], [tip[0], tip[1] - toward * st.arrow]], closed: false });
+        arrowhead(out, st, tip, [0.0, toward]);
         frames.push((p, [x, y, x + width, y + h], below));
     }
     for a in &mine {
@@ -414,7 +426,7 @@ fn annotations(
                 let letter = kind["label"].as_str().unwrap_or("A");
                 let Some(p) = anchor(id) else { continue };
                 if let Some((_, f, below)) = frames.iter().find(|(q, _, _)| (q[0] - p[0]).hypot(q[1] - p[1]) < 0.05) {
-                    datum_symbol(out, [f[0] + TEXT, if *below { f[1] } else { f[3] }], [0.0, if *below { -1.0 } else { 1.0 }], letter);
+                    datum_symbol(out, st, [f[0] + st.text, if *below { f[1] } else { f[3] }], [0.0, if *below { -1.0 } else { 1.0 }], letter);
                 } else {
                     // On the outline's side nearest the anchor, the stem leaving the view.
                     let room = [(hi[1] - p[1], 0), (p[1] - lo[1], 1), (p[0] - lo[0], 2), (hi[0] - p[0], 3)];
@@ -425,7 +437,7 @@ fn annotations(
                         2 => ([lo[0], p[1]], [-1.0, 0.0]),
                         _ => ([hi[0], p[1]], [1.0, 0.0]),
                     };
-                    datum_symbol(out, on, away, letter);
+                    datum_symbol(out, st, on, away, letter);
                 }
             }
             Some("surface_finish") => {
@@ -434,14 +446,14 @@ fn annotations(
                 let tip = if r > 0.0 { [p[0] + r * std::f64::consts::FRAC_1_SQRT_2, p[1] + r * std::f64::consts::FRAC_1_SQRT_2] } else { p };
                 let up = p[1] - lo[1] >= hi[1] - p[1] || r > 0.0;
                 let elbow = [tip[0] - 9.0, if up { tip[1].max(hi[1]) + 9.0 } else { tip[1].min(lo[1]) - 14.0 }];
-                surface_finish(out, tip, elbow, &text);
+                surface_finish(out, st, tip, elbow, &text);
             }
             Some("note") => {
                 let at = floats(&a["at"]);
                 let at = if at.len() == 2 && (at[0] != 0.0 || at[1] != 0.0) { [at[0], at[1]] } else { [hi[0] + 6.0, hi[1]] };
                 for (i, line) in text.split('\n').enumerate() {
-                    let size = if i == 0 { TEXT } else { TEXT * 0.8 };
-                    out.text("NOTES", [at[0], at[1] - (i + 1) as f64 * TEXT * 1.7], size, line);
+                    let size = if i == 0 { st.text } else { st.text * 0.8 };
+                    out.text("NOTES", [at[0], at[1] - (i + 1) as f64 * st.text * 1.7], size, line);
                 }
             }
             Some("hole_callout") | Some("dimension") if kind["annotation"] == "hole_callout" || matches!(kind["style"].as_str(), Some("diameter" | "radius")) => {
@@ -458,16 +470,16 @@ fn annotations(
                 let sx = if hi[0] - c[0] <= c[0] - lo[0] { 1.0 } else { -1.0 };
                 let sy = if c[1] - lo[1] <= hi[1] - c[1] { -1.0 } else { 1.0 };
                 let tip = [c[0] + sx * r * std::f64::consts::FRAC_1_SQRT_2, c[1] + sy * r * std::f64::consts::FRAC_1_SQRT_2];
-                let y = if sy < 0.0 { lo[1] - TEXT - 4.0 } else { hi[1] + TEXT + 4.0 };
+                let y = if sy < 0.0 { lo[1] - st.text - 4.0 } else { hi[1] + st.text + 4.0 };
                 let mut elbow = [tip[0] + sx * (y - tip[1]).abs(), y];
                 let mut tip = tip;
                 // A shoulder that would run past the frame turns to the hole's other side.
-                let run = 6.0 + text_width(&text, TEXT);
+                let run = 6.0 + text_width(&text, st.text);
                 if (sx > 0.0 && elbow[0] + run > paper[0] - 10.0) || (sx < 0.0 && elbow[0] - run < 10.0) {
                     tip[0] = 2.0 * c[0] - tip[0];
                     elbow[0] = 2.0 * c[0] - elbow[0];
                 }
-                leader(out, tip, elbow, &text);
+                leader(out, st, tip, elbow, &text);
             }
             _ => {}
         }

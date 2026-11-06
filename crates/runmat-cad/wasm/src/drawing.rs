@@ -49,6 +49,8 @@ pub struct CompiledModels {
     occurrences: BTreeMap<String, BTreeSet<String>>,
     /// File → (tolerances, sizes, datums) the part's PMI declares.
     pmi: BTreeMap<String, PmiNames>,
+    /// File → each PMI tolerance's geometric characteristic, by name.
+    characteristics: BTreeMap<String, BTreeMap<String, runmat_cad::pmi::Characteristic>>,
     /// File → the assembly's flat BOM (its index's), for BOM tables and balloons.
     boms: BTreeMap<String, Bom>,
     /// Assembly file → BOM item definition file → its properties (parts lists' description).
@@ -118,6 +120,9 @@ impl ModelReferences for CompiledModels {
             .get(model.file.as_str())
             .cloned()
             .unwrap_or_default()
+    }
+    fn tolerance_characteristic(&self, model: &ModelRef, name: &str) -> Option<runmat_cad::pmi::Characteristic> {
+        self.characteristics.get(model.file.as_str())?.get(name).copied()
     }
     fn bom(&self, model: &ModelRef) -> Option<Bom> {
         self.boms.get(model.file.as_str()).cloned()
@@ -283,6 +288,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                         pmi.datums.iter().map(|d| d.label.clone()).collect(),
                     ),
                 );
+                models.characteristics.insert(file.clone(), pmi.tolerances.iter().map(|t| (t.name.clone(), t.characteristic)).collect());
                 let flats = part
                     .document
                     .features
@@ -452,8 +458,20 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         }
     }
     let titles = title::title_layouts(path, &document, &index.title_blocks, files, &mut problems);
+    // Each sheet's drafting style from its format's standard: text height, arrows, extension
+    // lines, dimension offsets, figure orientation and line weights. Exports and the Desktop
+    // sheet draw annotations by it.
+    let styles: serde_json::Map<String, Value> = document
+        .sheets
+        .iter()
+        .filter_map(|sheet| {
+            let format = document.formats.iter().find(|f| f.name == sheet.format)?;
+            Some((sheet.name.clone(), serde_json::to_value(format.standard.style()).ok()?))
+        })
+        .collect();
     if let Value::Object(o) = &mut data {
         o.insert("title_layouts".into(), titles);
+        o.insert("styles".into(), Value::Object(styles));
         o.insert("hlr".into(), Value::Object(hlr));
         o.insert("anchors".into(), Value::Object(anchors));
         o.insert("extents".into(), Value::Object(extents));
@@ -604,6 +622,16 @@ mod tests {
             path.display(),
             dir.display()
         );
+    }
+
+    #[test]
+    fn each_sheet_carries_its_standards_drafting_style() {
+        let files: Files = [("/p/bracket.part".to_owned(), BRACKET.to_owned())].into();
+        let out: Value = serde_json::from_str(&compile_json("/p/bracket.drawing", DRAWING, &files)).unwrap();
+        let style = &out["projection"]["data"]["styles"]["1"];
+        assert_eq!(style["standard"], "iso", "{style}");
+        assert!(style["text_height"].as_f64().unwrap() > 0.0, "{style}");
+        assert!(style["lines"]["visible"].as_f64().unwrap() > style["lines"]["dimension"].as_f64().unwrap(), "{style}");
     }
 
     #[test]

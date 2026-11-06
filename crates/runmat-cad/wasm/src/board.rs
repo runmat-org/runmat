@@ -133,6 +133,7 @@ pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
                     reference: face.reference.clone(),
                     names: Vec::new(),
                     regions: Vec::new(),
+                    label: None,
                     features: face.features.clone(),
                     positions: face.positions.iter().map(|&v| mm(v)).collect(),
                     triangles: face.triangles.clone(),
