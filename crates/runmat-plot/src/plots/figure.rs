@@ -624,6 +624,55 @@ impl Figure {
         self.axes_metadata.get(axes_index)
     }
 
+    /// A 2D axes' automatic limits from its data extent, by its limit method, as MATLAB's
+    /// `XLimitMethod`/`YLimitMethod` set them (`tickaligned` by default): an axes that holds only
+    /// line-family series (lines, markers, stairs, stems, error bars) widens each linear axis out
+    /// to its enclosing ticks, so a trace that runs flat at the top of the data sits under a
+    /// labelled tick, clear of the border. Explicit limits, log axes, a fixed aspect and
+    /// axes holding images, bars, areas, patches or fields keep the data extent.
+    pub fn auto_axes_bounds_2d(
+        &self,
+        axes_index: usize,
+        x: (f64, f64),
+        y: (f64, f64),
+    ) -> ((f64, f64), (f64, f64)) {
+        let Some(meta) = self.axes_metadata(axes_index) else {
+            return (x, y);
+        };
+        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
+            return (x, y);
+        }
+        let mut lines_only = false;
+        for (plot, idx) in self.plots().zip(self.plot_axes_indices().iter().copied()) {
+            if idx != axes_index {
+                continue;
+            }
+            match plot {
+                PlotElement::Line(_)
+                | PlotElement::Scatter(_)
+                | PlotElement::Stairs(_)
+                | PlotElement::Stem(_)
+                | PlotElement::ErrorBar(_) => lines_only = true,
+                PlotElement::ReferenceLine(_) => {}
+                _ => return (x, y),
+            }
+        }
+        if !lines_only {
+            return (x, y);
+        }
+        let axis = |(lo, hi): (f64, f64), explicit: Option<(f64, f64)>, log: bool, method| {
+            if explicit.is_some() || log || !(lo.is_finite() && hi.is_finite() && lo < hi) {
+                (lo, hi)
+            } else {
+                resolve_axis_bounds(lo, hi, None, method)
+            }
+        };
+        (
+            axis(x, meta.x_limits, meta.x_log, meta.x_limit_method),
+            axis(y, meta.y_limits, meta.y_log, meta.y_limit_method),
+        )
+    }
+
     pub fn axes_grid_cell(&self, axes_index: usize) -> Option<AxesGridCell> {
         self.axes_grid_cells.get(axes_index).copied().flatten()
     }
@@ -3013,6 +3062,31 @@ mod tests {
 
         figure.set_axes_title(0, "Panel");
         assert!(figure.has_any_titles());
+    }
+
+    #[test]
+    fn line_axes_autoscale_to_enclosing_ticks_so_a_flat_top_trace_clears_the_border() {
+        // A Bode magnitude: a source flat at -66 dB over a filter that falls to -123 dB.
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::new(vec![1.0, 2.0], vec![-66.0, -66.0]).unwrap());
+        figure.add_line_plot(LinePlot::new(vec![1.0, 2.0], vec![-67.0, -123.0]).unwrap());
+        let (x, y) = figure.auto_axes_bounds_2d(0, (1.0, 2.0), (-123.0, -66.0));
+        assert_eq!(x, (1.0, 2.0));
+        assert_eq!(y, (-140.0, -60.0));
+
+        // Explicit limits and a fixed aspect keep the data extent.
+        let mut limited = figure.clone();
+        limited.set_axes_limits(0, None, Some((-130.0, -66.0)));
+        assert_eq!(
+            limited.auto_axes_bounds_2d(0, (1.0, 2.0), (-123.0, -66.0)).1,
+            (-123.0, -66.0)
+        );
+        let mut equal = figure.clone();
+        equal.set_axis_equal(true);
+        assert_eq!(
+            equal.auto_axes_bounds_2d(0, (1.0, 2.0), (-123.0, -66.0)).1,
+            (-123.0, -66.0)
+        );
     }
 
     #[test]

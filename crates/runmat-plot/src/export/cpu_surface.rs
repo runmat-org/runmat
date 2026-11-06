@@ -598,6 +598,13 @@ fn choose_axes_bounds(
         max_x = 1.0;
         min_y = -1.0;
         max_y = 1.0;
+    } else {
+        let ((x0, x1), (y0, y1)) = figure.auto_axes_bounds_2d(
+            axes_index,
+            (f64::from(min_x), f64::from(max_x)),
+            (f64::from(min_y), f64::from(max_y)),
+        );
+        (min_x, max_x, min_y, max_y) = (x0 as f32, x1 as f32, y0 as f32, y1 as f32);
     }
 
     if let Some(meta) = figure.axes_metadata(axes_index) {

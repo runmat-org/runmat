@@ -528,6 +528,8 @@ impl PlotRenderer {
         let mut y_max = base.max.y as f64;
 
         if let Some(fig) = self.last_figure.as_ref() {
+            ((x_min, x_max), (y_min, y_max)) =
+                fig.auto_axes_bounds_2d(axes_index, (x_min, x_max), (y_min, y_max));
             if let Some(meta) = fig.axes_metadata(axes_index) {
                 if let Some((xl, xr)) = meta.x_limits {
                     x_min = xl;
