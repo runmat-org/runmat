@@ -233,7 +233,8 @@ not solve again. Borrowed profiles interleave the already completed pressure/vel
 without constructing recovered buffers or a semantic state. The result's exact persisted
 single-frequency declaration is the authority; an ambiguous low-level sweep has an empty
 publication inventory rather than an invented single-frequency state. Multi-frequency authored
-dispatch and durable sweep continuation remain separate gates.
+dispatch runs through the governed frequency sweep and publishes one sample per authored
+frequency; durable sweep continuation remains a separate gate.
 
 The assembly-free planner counts canonical local operator supports, full real-block Krylov
 workspace, shared property/projection metadata, source evidence, input materialization and
