@@ -1,5 +1,7 @@
 //! The CAD document runtime behind the wasm entry points, in plain Rust so it tests natively.
 
+pub mod values_host;
+
 use runmat_cad::assembly::index::build_assembly_index;
 use runmat_cad::assembly::model::{AssemblyDocument, DefinitionKind, DefinitionRef};
 use runmat_cad::assembly::resolve::{resolve, ResolveContext, ResolveRequest};
@@ -222,20 +224,23 @@ pub fn regenerate_part_in(
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
     };
     let kernel = crate::kernel::make();
-    let ctx = RegenContext {
-        kernel: kernel.as_ref(),
-        solver: &ConstraintSketchSolver,
-        units: &StubUnits,
-        dynamic: &NoDynamicValues,
-        lock: None,
-        catalog: None,
-        policy: Default::default(),
-        slots: None,
-    };
     let request = RegenRequest {
         configuration: configuration.map(runmat_cad::ids::ConfigurationName::new),
     };
-    let mut result = regenerate(&document, &ctx, &request, &mut RegenCache::default());
+    // Values that call `.m` functions run through the host's runner (values_host).
+    let mut result = values_host::with_evaluator(path, |dynamic| {
+        let ctx = RegenContext {
+            kernel: kernel.as_ref(),
+            solver: &ConstraintSketchSolver,
+            units: &StubUnits,
+            dynamic,
+            lock: None,
+            catalog: None,
+            policy: Default::default(),
+            slots: None,
+        };
+        regenerate(&document, &ctx, &request, &mut RegenCache::default())
+    });
     result.diagnostics.attach_spans(&parsed.spans);
     // The part as the configuration makes it: its feature parameters, part number and
     // properties, for every reader of the regenerated part (title blocks, exports).

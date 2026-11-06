@@ -31,6 +31,9 @@ pollster = { version = "0.3", optional = true }
 glam = { version = "0.24", optional = true }
 # OCCT as the design kernel (native callers: the MCP and HTTP servers, the native LSP).
 runmat-geometry-io = { workspace = true, optional = true, features = ["occt-native", "occt-kernel"] }
+runmat-core = { path = "../runmat-core", version = "=0.6.2", optional = true }
+runmat-value = { workspace = true, optional = true }
+futures = { version = "0.3", optional = true }
 
 [features]
 default = []
@@ -40,6 +43,8 @@ render = ["dep:runmat-plot", "runmat-plot/egui-overlay", "dep:pollster", "dep:gl
 # Regenerate on OCCT (the kernel Desktop and the browser use), so check, inspect, render and
 # export answer as the Desktop does; STEP export writes exact AP242.
 occt = ["dep:runmat-geometry-io"]
+# Design values computed by `.m` functions, run in a native RunMat session (m_values).
+m-values = ["dep:runmat-core", "dep:runmat-value", "dep:futures"]
 
 [lints.rust]
 unsafe_code = "forbid"

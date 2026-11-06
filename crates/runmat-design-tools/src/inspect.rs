@@ -12,6 +12,9 @@ use std::collections::BTreeMap;
 /// A run's input values (`set`), shared with the other tools that regenerate a design.
 #[path = "run_set.rs"]
 pub mod run_set;
+// Nested here while lib.rs holds another lane's work in progress.
+#[cfg(feature = "m-values")]
+pub mod m_values;
 
 /// What to read. Parts: `faces`, `regions`, `published`, `inputs`, `features`, `bodies`,
 /// `mass`. Assemblies: `occurrences`, `mates`, `bom`, `mass`. Circuits: `components`, `nets`,
