@@ -256,7 +256,11 @@ impl ConfigKey {
 
 /// `v` to `digits` significant digits, without trailing zeros.
 fn significant(v: f64, digits: i32) -> String {
-    if v == 0.0 || !v.is_finite() {
+    // -0 reads as 0.
+    if v == 0.0 {
+        return "0".into();
+    }
+    if !v.is_finite() {
         return format!("{v}");
     }
     let decimals = (digits - 1 - v.abs().log10().floor() as i32).max(0) as usize;
@@ -616,5 +620,17 @@ impl DesignSource for MemorySource {
 
     fn latest_release(&self, file: &FilePath) -> Option<RevisionId> {
         self.releases.get(file).and_then(|r| r.last().cloned())
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::significant;
+
+    #[test]
+    fn a_configuration_value_reads_without_a_sign_on_zero_or_trailing_zeros() {
+        assert_eq!(significant(-0.0, 6), "0");
+        assert_eq!(significant(0.088, 6), "0.088");
+        assert_eq!(significant(-12.5, 6), "-12.5");
     }
 }
