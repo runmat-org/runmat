@@ -1,6 +1,4 @@
 //! Preassembly scalar thermal support and shared exact-solver work reservation.
-use std::collections::BTreeSet;
-
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -10,11 +8,12 @@ use crate::{
 };
 
 use super::{
-    symbolic::pattern_from_rows, ByteCount, ResourcePlanningError, SolverAdmissionResourcePolicy,
+    ByteCount, ResourcePlanningError, SolverAdmissionResourcePolicy,
     ThermalHistoryResourceFacts, ThermalWorkspaceResourceFacts,
 };
 
 mod preparation;
+mod support;
 
 /// How a thermal solve proves its operator coercive and solves it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -54,34 +53,42 @@ impl ThermalOperatorResourceFacts {
         mesh: &SolverMeshArtifact,
         interfaces: &[runmat_analysis_core::AnalysisInterface],
     ) -> Result<Self, ResourcePlanningError> {
-        let planning_resident_bytes = Self::derivation_resident_bytes_estimate(mesh)?;
         let projection = AnalysisProjection::derive(mesh)
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         let (plans, dofs) =
             crate::physics::thermal_interface::solid_conduction(&projection, interfaces)
                 .map_err(ResourcePlanningError::Invalid)?;
-        let projection = dofs.split_projection(&projection, &plans);
-        let workspace = ThermalWorkspaceResourceFacts::derive(&projection)?;
-        let mut rows = (0..projection.nodes.len())
-            .map(|index| BTreeSet::from([index]))
-            .collect::<Vec<_>>();
-        for nodes in projection
-            .elements
-            .iter()
-            .map(|element| element.node_indices.as_slice())
-            .chain(
-                projection
-                    .boundary_faces
-                    .iter()
-                    .map(|face| face.node_indices.as_slice()),
-            )
-        {
-            for &row in nodes {
-                rows[row].extend(nodes.iter().copied());
-            }
-        }
-        dofs.extend_support(&projection, &plans, &mut rows);
-        let support = pattern_from_rows(rows, projection.nodes.len())?;
+        // A nodal interface inventory leaves the projection unchanged; only a finite
+        // conductance splits it into a second copy.
+        let split;
+        let projection = if dofs.is_nodal() {
+            &projection
+        } else {
+            split = dofs.split_projection(&projection, &plans);
+            &split
+        };
+        let workspace = ThermalWorkspaceResourceFacts::derive(projection)?;
+        let extra = dofs.support_cliques(projection, &plans);
+        let elements = projection.elements.len();
+        let faces = projection.boundary_faces.len();
+        let support = support::build(
+            projection.nodes.len(),
+            elements + faces + extra.len(),
+            |clique| {
+                if clique < elements {
+                    projection.elements[clique].node_indices.as_slice()
+                } else if clique < elements + faces {
+                    projection.boundary_faces[clique - elements]
+                        .node_indices
+                        .as_slice()
+                } else {
+                    extra[clique - elements - faces].as_slice()
+                }
+            },
+        )?;
+        drop(extra);
+        let planning_resident_bytes =
+            Self::derivation_resident_bytes(mesh, Some(support.column_indices().len() as u64))?;
         // Thermal assembly captures no local-energy source, so coercivity is always proved by the
         // sparse Cholesky factor that then serves the solve. The admission is the factor law that
         // structural statics uses; the graph-count local-energy budget is not reserved.
@@ -115,6 +122,10 @@ impl ThermalOperatorResourceFacts {
         })
     }
 
+    /// Requested-heap bound of the support derivation at the support's exact entry count.
+    pub fn planning_resident_bytes(&self) -> ByteCount {
+        self.planning_resident_bytes
+    }
     pub fn topology_digest(&self) -> Digest {
         self.topology_digest
     }
@@ -261,4 +272,4 @@ fn pattern_bytes(rows: u64, entries: u64) -> Result<u64, ResourcePlanningError> 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

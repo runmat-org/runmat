@@ -164,6 +164,8 @@ mod thermal_observations;
 pub use thermal_observations::ThermalObservationResourceFacts;
 mod thermal_operator;
 pub use thermal_operator::{ThermalOperatorResourceFacts, ThermalSolvePath};
+#[cfg(test)]
+pub(crate) use thermal_operator::tests as thermal_operator_tests;
 mod thermal_preassembly;
 mod thermal_realization;
 pub use thermal_realization::ThermalRealizationResourceFacts;

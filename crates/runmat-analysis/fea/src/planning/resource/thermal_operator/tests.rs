@@ -352,3 +352,73 @@ fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
     }
     assert!(ratios[1] > ratios[0], "{ratios:?}");
 }
+
+/// Measured requested-heap peak of `derive` on `mesh` with `interfaces`, checked against the
+/// count-only estimate and the exact-entry bound the facts retain.
+pub(crate) fn derivation_peak_fits_the_planning_law(
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    interfaces: &[runmat_analysis_core::AnalysisInterface],
+) {
+    let estimate = ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(mesh)
+        .unwrap()
+        .0;
+    let (facts, _, peak) = crate::topology::measure_test_allocations(|| {
+        ThermalOperatorResourceFacts::derive(mesh, interfaces)
+    });
+    let facts = facts.unwrap();
+    let exact = facts.planning_resident_bytes().0;
+    let rows = facts.support().rows() as u64;
+    println!(
+        "thermal derivation nodes={} rows={rows} entries={} peak={peak} ({} B/row) exact={exact} ({} B/row) estimate={estimate} ({} B/row) workspace={} ({} B/row)",
+        mesh.topology.nodes.len(),
+        facts.support().column_indices().len(),
+        peak as u64 / rows,
+        exact / rows,
+        estimate / rows,
+        facts.workspace().reservation_bytes().unwrap().0,
+        facts.workspace().reservation_bytes().unwrap().0 / rows,
+    );
+    let projection_estimate =
+        crate::topology::AnalysisProjection::derivation_resident_bytes_estimate(mesh).unwrap();
+    let (_, _, projection_peak) =
+        crate::topology::measure_test_allocations(|| crate::topology::AnalysisProjection::derive(mesh));
+    let (_, _, symbolic_peak) = crate::topology::measure_test_allocations(|| {
+        super::super::preflight::factor_admission(facts.support())
+    });
+    println!(
+        "  projection estimate={projection_estimate} ({} B/row) peak={projection_peak} ({} B/row); symbolic peak={symbolic_peak} ({} B/row, {} B/entry)",
+        projection_estimate / rows,
+        projection_peak as u64 / rows,
+        symbolic_peak as u64 / rows,
+        symbolic_peak as u64 / facts.support().column_indices().len() as u64,
+    );
+    assert!(peak as u64 <= exact, "derivation peak {peak} exceeds {exact}");
+    assert!(exact <= estimate, "exact bound {exact} exceeds the estimate {estimate}");
+}
+
+// witness: FEA-THERMAL-SOLVER-001/support_derivation_memory @ thermal_steady/tet4/numerical_kernel;
+//   coverage: partial;
+//   boundary: The thermal support derivation (projection, clique support, symbolic factor
+//   analysis) never requests more heap than the planning law at the exact support size, and the
+//   count-only estimate is at or above that bound, on Tet4 and Tet10 meshes up to 15,625 nodes.
+#[test]
+fn thermal_support_derivation_peak_fits_the_planning_law() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        derivation_peak_fits_the_planning_law(&canonical_tetrahedron_solver_mesh(order), &[]);
+    }
+    derivation_peak_fits_the_planning_law(&three_region_tetrahedron_solver_mesh(), &[]);
+    derivation_peak_fits_the_planning_law(
+        &runmat_meshing_core::fixtures::quadratic_slab_mesh(3),
+        &[],
+    );
+    for cells in [8, 16, 24] {
+        derivation_peak_fits_the_planning_law(
+            &runmat_meshing_core::fixtures::layered_box_mesh(
+                [cells, cells, cells],
+                [1.0, 1.0, 1.0],
+                &[(2.0, "body")],
+            ),
+            &[],
+        );
+    }
+}

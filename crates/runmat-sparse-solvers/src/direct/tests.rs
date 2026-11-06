@@ -488,3 +488,35 @@ fn norm_estimates_match_dense_references() {
     let at = a.as_ref().transpose(false);
     assert!(relative_residual(&at, &x, &b) < 1e-13);
 }
+
+#[test]
+fn count_only_estimate_equals_the_simplicial_analysis() {
+    for (nx, ny, nz) in [(3, 3, 3), (6, 5, 4), (12, 12, 12)] {
+        let matrix = poisson3d::<f64>(nx, ny, nz);
+        for kind in [FactorKind::Cholesky, FactorKind::Ldlt] {
+            let options = DirectOptions {
+                workspace: DirectWorkspacePolicy::CallerOwned,
+                ..DirectOptions::new(kind)
+            };
+            let n = matrix.nrows();
+            let full = SymbolicFactorization::analyze_pattern::<f64>(
+                n,
+                matrix.row_ptr(),
+                matrix.col_idx(),
+                &options,
+                SolveControl::NONE,
+            )
+            .unwrap()
+            .estimate();
+            let counted = SymbolicFactorization::estimate_pattern::<f64>(
+                n,
+                matrix.row_ptr(),
+                matrix.col_idx(),
+                &options,
+                SolveControl::NONE,
+            )
+            .unwrap();
+            assert_eq!(counted, full, "{nx}x{ny}x{nz} {kind:?}");
+        }
+    }
+}

@@ -165,17 +165,19 @@ pub(super) fn flop_count(estimate: &FactorEstimate) -> u64 {
 
 /// Symbolic Cholesky analysis of a pattern (values are not needed).
 pub(super) fn analyze(pattern: &SparsePattern) -> Result<FactorEstimate, CoercivityError> {
-    let offsets = pattern
-        .row_offsets()
-        .iter()
-        .map(|&value| usize::try_from(value).map_err(|_| CoercivityError::WorkOverflow))
-        .collect::<Result<Vec<_>, _>>()?;
-    let columns = pattern
-        .column_indices()
-        .iter()
-        .map(|&value| usize::try_from(value).map_err(|_| CoercivityError::WorkOverflow))
-        .collect::<Result<Vec<_>, _>>()?;
-    let symbolic = SymbolicFactorization::analyze_pattern::<f64>(
+    // Exact-length copies: a fallible collect cannot size its vector up front.
+    let words = |values: &[u64]| {
+        let mut words = Vec::with_capacity(values.len());
+        for &value in values {
+            words.push(usize::try_from(value).map_err(|_| CoercivityError::WorkOverflow)?);
+        }
+        Ok::<_, CoercivityError>(words)
+    };
+    let offsets = words(pattern.row_offsets())?;
+    let columns = words(pattern.column_indices())?;
+    // The counts-only analysis reports the same estimate without building the factor's
+    // structure, so admitting a factor that may never run costs O(n + nnz).
+    SymbolicFactorization::estimate_pattern::<f64>(
         pattern.rows(),
         &offsets,
         &columns,
@@ -185,8 +187,7 @@ pub(super) fn analyze(pattern: &SparsePattern) -> Result<FactorEstimate, Coerciv
         },
         SolveControl::NONE,
     )
-    .map_err(|_| CoercivityError::SymbolicOrdering)?;
-    Ok(symbolic.estimate())
+    .map_err(|_| CoercivityError::SymbolicOrdering)
 }
 
 #[cfg(test)]
