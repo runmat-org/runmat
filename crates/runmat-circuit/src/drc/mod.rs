@@ -41,6 +41,26 @@ use crate::zone::FillReport;
 use runmat_rules::SourceKey;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Whether a measured gap (nm, measured in floating point) is short of the rule `req`. The gap is
+/// taken at the board's 1 nm resolution first, so a gap equal to its rule passes and one 1 nm
+/// under it fails. Every DRC distance check compares through this.
+pub(crate) fn short_of(gap: f64, req: Coord) -> bool {
+    (gap.round() as Coord) < req
+}
+
+/// A measured length and its limit in mm for a message: four decimals, or nanometre precision
+/// when four would read the same, so a failing value never reads equal to its limit.
+pub(crate) fn mm_pair(value: f64, limit: Coord) -> (String, String) {
+    let v = value.round().max(0.0) * 1e-6;
+    let l = limit as f64 * 1e-6;
+    let (a, b) = (format!("{v:.4}"), format!("{l:.4}"));
+    if a == b {
+        (format!("{v:.6}"), format!("{l:.6}"))
+    } else {
+        (a, b)
+    }
+}
+
 mod copper;
 mod nets;
 mod parts;

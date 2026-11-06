@@ -46,7 +46,7 @@ impl Drc {
                 let gap = p.gap(&cy[&other]);
                 // With no required clearance, touching is fine; only a real overlap counts.
                 let violates = if req > 0 {
-                    gap < req as f64
+                    super::short_of(gap, req)
                 } else {
                     gap <= 0.0 && courtyard_overlap(p, &cy[&other])
                 };
@@ -132,7 +132,7 @@ impl Drc {
                 }
                 let req = rules.pair_len(*owner, cp.owner, props::SILK_CLEARANCE);
                 let gap = sp.gap(&cp.prim);
-                if gap < req as f64 {
+                if super::short_of(gap, req) {
                     let (rule, source) = rules.pair_origin(*owner, cp.owner, props::SILK_CLEARANCE);
                     found.push(DrcFinding {
                         code: "silk-to-pad".into(),

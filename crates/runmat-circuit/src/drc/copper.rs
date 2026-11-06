@@ -43,7 +43,7 @@ impl Drc {
                     return;
                 }
                 let gap = p.prim.gap(&np.prim);
-                if gap < req as f64 {
+                if super::short_of(gap, req) {
                     let (rule, source) = rules.pair_origin(o, np.owner, props::CLEARANCE);
                     if same_footprint && req == 1 {
                         let mut f = clearance_finding(
@@ -100,7 +100,7 @@ impl Drc {
         }
         let pr = z.edges.probe(&p.prim, req);
         let origin = || rules.pair_origin(p.owner, z.zone, props::CLEARANCE);
-        if pr.gap < req as f64 {
+        if super::short_of(pr.gap, req) {
             let (rule, source) = origin();
             found.push(clearance_finding(
                 vec![p.owner, z.zone],
@@ -168,7 +168,7 @@ impl Drc {
                 a.edges.visit_near(&b.edges.bbox().inflate(req), |p, q| {
                     let e = Prim::segment(p, q, 0);
                     let g = b.edges.probe(&e, req).gap;
-                    if g < req as f64 && worst.is_none_or(|w| g < w.0) {
+                    if super::short_of(g, req) && worst.is_none_or(|w| g < w.0) {
                         worst = Some((g, p));
                     }
                 });
@@ -221,7 +221,7 @@ impl Drc {
                 } else {
                     pr.gap
                 };
-                if gap < req as f64 && worst.is_none_or(|w| gap < w.0) {
+                if super::short_of(gap, req) && worst.is_none_or(|w| gap < w.0) {
                     worst = Some((gap, p.anchor()));
                 }
             }
@@ -479,7 +479,7 @@ impl Drc {
         for reg in &board.regions {
             for b in &reg.bends {
                 let d = point_segment_distance(at, b.a, b.b);
-                if d < (b.keepout + r) as f64 {
+                if super::short_of(d, b.keepout + r) {
                     self.put(DrcFinding {
                         code: "via-in-bend".into(),
                         severity: Severity::Error,
@@ -530,7 +530,7 @@ impl Drc {
                 // Pads of one footprint (connectors) still need hole spacing.
                 let gap = h.1.dist(o.1) - (h.2 + o.2) as f64;
                 let req = rules.pair_len(h.0, o.0, props::HOLE_TO_HOLE);
-                if gap < req as f64 {
+                if super::short_of(gap, req) {
                     let (rule, source) = rules.pair_origin(h.0, o.0, props::HOLE_TO_HOLE);
                     self.put(DrcFinding {
                         code: "hole-to-hole".into(),
@@ -569,10 +569,9 @@ pub(super) fn clearance_finding(
         required: Some(req as f64),
         rule,
         source,
-        message: format!(
-            "clearance {:.4} mm < {:.4} mm",
-            gap.max(0.0) * 1e-6,
-            req as f64 * 1e-6
-        ),
+        message: {
+            let (g, r) = super::mm_pair(gap, req);
+            format!("clearance {g} mm < {r} mm")
+        },
     }
 }

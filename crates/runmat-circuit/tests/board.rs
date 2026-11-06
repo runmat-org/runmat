@@ -739,3 +739,25 @@ fn a_net_class_clearance_reaches_drc_and_names_its_line() {
     assert_eq!(gaps.len(), 1, "{gaps:#?}");
     assert!(BoardRules::is_fallback(&gaps[0].rule));
 }
+
+#[test]
+fn a_gap_equal_to_its_rule_passes_and_one_nanometre_under_fails() {
+    // A 7 mil rule (177.8 µm) and two pairs of 0.3 mm tracks: one exactly 7 mil apart, one 1 nm
+    // closer.
+    let mut b = small_board();
+    b.limits.min_clearance = 177_800;
+    let (vcc, sig) = (b.net("VCC"), b.net("SIG"));
+    let w = mm(0.3);
+    for (x0, gap) in [(2_000_000i64, 177_800i64), (20_000_000, 177_799)] {
+        let y0 = 5_000_000;
+        b.add_track(vcc, 0, w, Point::new(x0, y0), Point::new(x0 + 10_000_000, y0));
+        let y1 = y0 + w + gap;
+        b.add_track(sig, 0, w, Point::new(x0, y1), Point::new(x0 + 10_000_000, y1));
+    }
+    let drc = Drc::run(&b, &rules(&b, &[]), &[], &[]);
+    let gaps: Vec<_> = drc.findings().into_iter().filter(|f| f.code == "clearance").collect();
+    assert_eq!(gaps.len(), 1, "{gaps:#?}");
+    assert!(gaps[0].at.x >= 20_000_000, "the 1 nm short pair: {:?}", gaps[0].at);
+    // The message never reads the gap equal to its limit.
+    assert_eq!(gaps[0].message, "clearance 0.177799 mm < 0.177800 mm");
+}
