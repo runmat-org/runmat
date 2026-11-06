@@ -96,6 +96,10 @@ Moving a view on the canvas writes its new `at`. Views of an assembly add `exclu
 
 A dimension names the faces it measures, and its value is measured from the model. `pmi = bore` makes the bore's diameter show the tolerance written in the part. The hole callout reads the M3 clearance size from the hole feature, and the flatness frame reads `seat_flat`. Change the tolerance in the part and every drawing that shows it changes.
 
+In the Desktop, Projected view takes a view picked on the sheet and places the new view where you click; it stays aligned with its parent. Smart dimension takes the edges you pick in a view and places the dimension where you click. Here a side view joins the hinge mount's front view, and the clevis height is dimensioned:
+
+<!-- design:clip:mcad/drawing -->
+
 A reference that stops resolving after an edit, such as a dimension to a face that was removed, is an error on that annotation, with the face it lost.
 
 ## 5. Let RunMat lay it out

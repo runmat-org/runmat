@@ -55,6 +55,14 @@
       "height": 1180,
       "seconds": 8.8,
       "base": "/design-assets/flow-clips/mcad/mate/mate"
+    },
+    {
+      "id": "mcad/drawing",
+      "alt": "On the hinge mount's drawing, Projected view takes the front view and places the right-side view beside it, then Smart dimension picks the back block's top and bottom edges and places the 20.2 mm clevis height.",
+      "width": 1344,
+      "height": 800,
+      "seconds": 10.8,
+      "base": "/design-assets/flow-clips/mcad/drawing/drawing"
     }
   ]
 }
