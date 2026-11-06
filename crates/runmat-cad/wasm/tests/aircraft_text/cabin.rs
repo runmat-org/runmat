@@ -4,7 +4,7 @@
 //! blocks either side of the overwing exits).
 //!
 //! Cabin layout along x, in mm aft of the nose tip: cockpit to 3600; forward galley and
-//! lavatory 3700 to 4560; forward doors 4700 to 5520; business rows from 6000; economy from
+//! lavatory 3700 to 4560; forward doors 5250 to 6070, on the barrel just aft of the nose; business rows from 6000; economy from
 //! 8900; overwing exits at 16300; aft lavatories, aft doors at 28100 and the aft galley behind
 //! them.
 
@@ -30,12 +30,18 @@ pub const ECONOMY_FORWARD: (f64, usize) = (8_900.0, 9);
 pub const ECONOMY_AFT: (f64, usize) = (17_200.0, 13);
 /// Doors: (part, x of the forward edge, width, sill z, height, both sides).
 const DOORS: [(&str, f64, f64, f64, f64, bool); 5] = [
-    ("passenger_door", 4_700.0, 820.0, -390.0, 1_850.0, true),
+    ("passenger_door", 5_250.0, 820.0, -390.0, 1_850.0, true),
     ("overwing_exit", 16_300.0, 510.0, 0.0, 920.0, true),
     ("passenger_door_aft", 28_100.0, 820.0, -390.0, 1_850.0, true),
     ("cargo_door", 9_400.0, 1_800.0, -1_620.0, 1_150.0, false),
     ("cargo_door_aft", 23_000.0, 1_800.0, -1_620.0, 1_150.0, false),
 ];
+
+/// The passenger doors' spans along x, `(forward edge, aft edge)`: the cabin windows they
+/// cover are left out.
+pub fn passenger_door_spans() -> Vec<(f64, f64)> {
+    DOORS.iter().filter(|d| d.0.starts_with("passenger_door")).map(|d| (d.1, d.1 + d.2)).collect()
+}
 
 fn half_chord(r: f64, z: f64) -> f64 {
     (r * r - z * z).max(0.0).sqrt()
@@ -259,6 +265,12 @@ pub fn parts() -> Vec<(String, String)> {
 /// The cabin parts one barrel section carries, for `fuselage_section.assembly`: a floor beam at
 /// every frame, the floor panels and four seat tracks, a sidewall lining each side in every bay,
 /// the ceiling and five bin modules each side.
+/// The overhead bins in a barrel section: (the first bin's centre aft of the section's start,
+/// pitch, count, half length).
+pub fn bin_layout() -> (f64, f64, usize, f64) {
+    (BIN_LENGTH / 2.0 + 5.0, BIN_LENGTH + 10.0, (SECTION / (BIN_LENGTH + 10.0)) as usize, BIN_LENGTH / 2.0)
+}
+
 pub fn section_uses(frames: usize, bays: usize) -> (String, String) {
     let (centre, sweep) = lining_sector();
     let mut s = String::new();
@@ -272,12 +284,18 @@ pub fn section_uses(frames: usize, bays: usize) -> (String, String) {
     s += &use_("part", "sidewall_lining", "lining_starboard", &[offset_rot(FRAME_PITCH / 2.0, 0.0, 0.0, [1.0, 0.0, 0.0], start)]);
     s += &use_("part", "sidewall_lining", "lining_port", &[offset_rot(FRAME_PITCH / 2.0, 0.0, 0.0, [1.0, 0.0, 0.0], 180.0 - start - sweep)]);
     s += &use_("part", "ceiling_panel", "ceiling", &[offset_rot(0.0, 0.0, 0.0, [1.0, 0.0, 0.0], CEILING.0)]);
-    s += &use_("part", "overhead_bin", "bin_starboard", &[offset(BIN_LENGTH / 2.0 + 5.0, 0.0, 0.0)]);
-    s += &use_("part", "overhead_bin", "bin_port", &[offset_rot(BIN_LENGTH / 2.0 + 5.0, 0.0, 0.0, [0.0, 0.0, 1.0], 180.0)]);
-    let bins = (SECTION / (BIN_LENGTH + 10.0)) as usize;
+    // Bin rows from the middle of the section, aft and forward, like the windows.
+    let (first, pitch, bins, _) = bin_layout();
+    let mid = bins / 2;
+    for (suffix, k) in [("", mid), ("_fwd", mid - 1)] {
+        let x = first + k as f64 * pitch;
+        s += &use_("part", "overhead_bin", &format!("bin_starboard{suffix}"), &[offset(x, 0.0, 0.0)]);
+        s += &use_("part", "overhead_bin", &format!("bin_port{suffix}"), &[offset_rot(x, 0.0, 0.0, [0.0, 0.0, 1.0], 180.0)]);
+    }
     let patterns = format!(
-        "    pattern floor_beams = linear(seeds = [floor_beam], direction = [1, 0, 0], spacing = input.frame_pitch, count = {frames})\n    pattern linings = linear(seeds = [lining_starboard, lining_port], direction = [1, 0, 0], spacing = input.frame_pitch, count = {bays})\n    pattern bins = linear(seeds = [bin_starboard, bin_port], direction = [1, 0, 0], spacing = {}, count = {bins})\n",
-        mm(BIN_LENGTH + 10.0)
+        "    pattern floor_beams = linear(seeds = [floor_beam], direction = [1, 0, 0], spacing = input.frame_pitch, count = {frames})\n    pattern linings = linear(seeds = [lining_starboard, lining_port], direction = [1, 0, 0], spacing = input.frame_pitch, count = {bays})\n    pattern bins = linear(seeds = [bin_starboard, bin_port], direction = [1, 0, 0], spacing = {pitch}, count = {})\n    pattern bins_fwd = linear(seeds = [bin_starboard_fwd, bin_port_fwd], direction = [-1, 0, 0], spacing = {pitch}, count = {mid})\n",
+        bins - mid,
+        pitch = mm(pitch)
     );
     (s, patterns)
 }

@@ -49,10 +49,13 @@ fn skin_panel() -> String {
     )
 }
 
+/// Half a cabin window's length along the fuselage.
+const WINDOW_HALF_LENGTH: f64 = 115.0;
+
 /// A cabin window: a rounded pane 230 mm along the fuselage and 250 mm round it, its outer
 /// face 4 mm proud of the skin at the centre (the skin's curve buries its upper and lower edges).
 fn cabin_window() -> String {
-    let (w, h, r) = (115.0, 125.0, 80.0);
+    let (w, h, r) = (WINDOW_HALF_LENGTH, 125.0, 80.0);
     // On the zx plane: u = z (round the barrel), v = x (along it); extruded radially along y.
     let body = format!(
         "    sketch s on origin.zx {{\n        l1 = line(start = {}, end = {})\n        a1 = arc(center = {}, start = l1.end, end = {})\n        l2 = line(start = a1.end, end = {})\n        a2 = arc(center = {}, start = l2.end, end = {})\n        l3 = line(start = a2.end, end = {})\n        a3 = arc(center = {}, start = l3.end, end = {})\n        l4 = line(start = a3.end, end = {})\n        a4 = arc(center = {}, start = l4.end, end = l1.start)\n    }}\n    feature pane = extrude(profile = sketch.s, distance = 12 mm)\n",
@@ -174,25 +177,70 @@ pub fn fuselage_section() -> String {
     s += &use_("part", "skin_panel", "panel", &[offset_rot(0.0, 0.0, 0.0, [1.0, 0.0, 0.0], half_panel)]);
     s += &use_("assembly", "rivet_ring", "rivets", &[]);
     // The pane faces +y; turned about x it faces the belt's normal on each side.
-    s += &use_("part", "cabin_window", "window_starboard", &[offset_rot(FRAME_PITCH / 2.0, yc, zw, [1.0, 0.0, 0.0], tilt)]);
-    s += &use_("part", "cabin_window", "window_port", &[offset_rot(FRAME_PITCH / 2.0, -yc, zw, [1.0, 0.0, 0.0], 180.0 - tilt)]);
+    // Two window rows from the middle of the section, one running aft and one forward, so no
+    // pattern seed sits at a door (a door's windows are suppressed instances).
+    let mid = windows / 2;
+    for (suffix, bay) in [("", mid), ("_fwd", mid - 1)] {
+        let x = FRAME_PITCH / 2.0 + bay as f64 * FRAME_PITCH;
+        s += &use_("part", "cabin_window", &format!("window_starboard{suffix}"), &[offset_rot(x, yc, zw, [1.0, 0.0, 0.0], tilt)]);
+        s += &use_("part", "cabin_window", &format!("window_port{suffix}"), &[offset_rot(x, -yc, zw, [1.0, 0.0, 0.0], 180.0 - tilt)]);
+    }
     let (cabin_uses, cabin_patterns) = super::cabin::section_uses(frames, windows);
     s += &cabin_uses;
     s += &format!("\n    pattern frames = linear(seeds = [frame], direction = [1, 0, 0], spacing = input.frame_pitch, count = {frames})\n");
     s += &format!("    pattern stringers = circular(seeds = [stringer], axis_point = [0 mm, 0 mm, 0 mm], axis = [1, 0, 0], count = {STRINGERS}, angle = 360 deg)\n");
     s += &format!("    pattern panels = circular(seeds = [panel], axis_point = [0 mm, 0 mm, 0 mm], axis = [1, 0, 0], count = {SKIN_PANELS}, angle = 360 deg)\n");
     s += &format!("    pattern rivet_rings = linear(seeds = [rivets], direction = [1, 0, 0], spacing = input.frame_pitch, count = {frames})\n");
-    s += &format!("    pattern windows = linear(seeds = [window_starboard, window_port], direction = [1, 0, 0], spacing = input.frame_pitch, count = {windows})\n");
+    s += &format!("    pattern windows = linear(seeds = [window_starboard, window_port], direction = [1, 0, 0], spacing = input.frame_pitch, count = {})\n", windows - mid);
+    s += &format!("    pattern windows_fwd = linear(seeds = [window_starboard_fwd, window_port_fwd], direction = [-1, 0, 0], spacing = input.frame_pitch, count = {mid})\n");
     s += &cabin_patterns;
     s += "}\n";
     s
+}
+
+/// The steps of a pattern in the barrel section starting at `x0` (`count` items `pitch` apart,
+/// the first centred `first` aft of `x0`, each `half` long either side) that a passenger door
+/// spans.
+fn at_doors(x0: f64, first: f64, pitch: f64, count: usize, half: f64) -> Vec<usize> {
+    let doors = super::cabin::passenger_door_spans();
+    (0..count)
+        .filter(|j| {
+            let c = x0 + first + *j as f64 * pitch;
+            doors.iter().any(|(a, b)| c + half > *a && c - half < *b)
+        })
+        .collect()
+}
+
+/// Overrides that leave out the cabin windows and overhead bins at the passenger doors, in the
+/// barrel section starting at `x0`.
+fn door_overrides(x0: f64) -> Vec<String> {
+    let windows = at_doors(x0, FRAME_PITCH / 2.0, FRAME_PITCH, (SECTION / FRAME_PITCH) as usize, WINDOW_HALF_LENGTH);
+    let (bin_first, bin_pitch, bin_count, bin_half) = super::cabin::bin_layout();
+    let bins = at_doors(x0, bin_first, bin_pitch, bin_count, bin_half);
+    let mut out = Vec::new();
+    let rows = [("windows", ["window_starboard", "window_port"], windows, (SECTION / FRAME_PITCH) as usize), ("bins", ["bin_starboard", "bin_port"], bins, bin_count)];
+    for (pattern, seeds, steps, count) in rows {
+        // Each row runs aft from item count/2 and forward from the item ahead of it.
+        let mid = count / 2;
+        for j in steps {
+            let (suffix, step) = if j >= mid { ("", j - mid) } else { ("_fwd", mid - 1 - j) };
+            assert!(step > 0, "a door covers the seed of `{pattern}{suffix}`");
+            for seed in seeds {
+                out.push(format!("override \"{seed}{suffix}@{pattern}{suffix}[{step}]\" {{\n            suppressed = true\n        }}"));
+            }
+        }
+    }
+    out
 }
 
 pub fn fuselage() -> String {
     let mut s = format!("{HEADER}// The fuselage: the nose and its cockpit glazing, three barrel sections, the tail cone and the\n// wing-to-body fairing, along x.\nassembly fuselage {{\n");
     s += &super::nose::uses();
     for (k, name) in ["forward", "center", "aft"].iter().enumerate() {
-        s += &use_("assembly", "fuselage_section", name, &[offset(NOSE + k as f64 * SECTION, 0.0, 0.0)]);
+        let x0 = NOSE + k as f64 * SECTION;
+        let mut lines = vec![offset(x0, 0.0, 0.0)];
+        lines.extend(door_overrides(x0));
+        s += &use_("assembly", "fuselage_section", name, &lines);
     }
     s += &use_("assembly", "cockpit", "cockpit", &[]);
     s += &use_("assembly", "cabin", "cabin", &[]);
