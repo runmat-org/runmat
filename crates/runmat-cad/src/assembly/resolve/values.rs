@@ -110,7 +110,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 self.check_config_name(name, summary)?;
                 Ok(ConfigKey {
                     name: Some(name.clone()),
-                    inputs: BTreeMap::new(),
+                    ..ConfigKey::default()
                 })
             }
             ConfigurationSelection::Inputs { base, values } => {
@@ -118,13 +118,18 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     self.check_config_name(b, summary)?;
                 }
                 let mut inputs = BTreeMap::new();
+                let mut kinds = BTreeMap::new();
                 for (name, expr) in values {
                     let si = self.typed_input(name, expr, env, summary)?;
                     inputs.insert(name.clone(), si);
+                    if let Some((_, kind)) = summary.inputs.iter().find(|(n, _)| n == name) {
+                        kinds.insert(name.clone(), kind.clone());
+                    }
                 }
                 Ok(ConfigKey {
                     name: base.clone(),
                     inputs,
+                    kinds,
                 })
             }
             ConfigurationSelection::Switch { cases, otherwise } => {

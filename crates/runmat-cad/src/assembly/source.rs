@@ -209,12 +209,23 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 
 /// A resolved configuration of a definition: a named configuration, input values in SI, or
 /// both. Its [`ConfigKey::digest`] is canonical (bit-exact SI values in name order).
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+///
+/// `kinds` carries each input's quantity kind so labels read in display units (`length 88 mm`);
+/// it does not take part in equality or the digest.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ConfigKey {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<ConfigurationName>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<InputName, f64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub kinds: BTreeMap<InputName, QuantityKindId>,
+}
+
+impl PartialEq for ConfigKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.inputs == other.inputs
+    }
 }
 
 impl ConfigKey {
@@ -222,6 +233,7 @@ impl ConfigKey {
         Self {
             name: Some(ConfigurationName::new(name)),
             inputs: BTreeMap::new(),
+            kinds: BTreeMap::new(),
         }
     }
 
@@ -236,14 +248,14 @@ impl ConfigKey {
         s
     }
 
-    /// A short label for people: `light`, `default`, `light (thickness 0.005)`, or for input
-    /// values alone `chord 5.97206, thickness 0.14147`. Input values are SI, to six
-    /// significant digits.
+    /// A short label for people: `light`, `default`, `light (thickness 5 mm)`, or for input
+    /// values alone `length 88 mm, rise 11 mm`. Values read in their kind's display unit (see
+    /// [`display_quantity`]) to six significant digits; an input of unknown kind reads in SI.
     pub fn label(&self) -> String {
         let inputs: Vec<String> = self
             .inputs
             .iter()
-            .map(|(k, v)| format!("{k} {}", significant(*v, 6)))
+            .map(|(k, v)| format!("{k} {}", display_quantity(self.kinds.get(k), *v)))
             .collect();
         match (&self.name, inputs.is_empty()) {
             (Some(n), true) => n.0.clone(),
@@ -252,6 +264,19 @@ impl ConfigKey {
             (None, false) => inputs.join(", "),
         }
     }
+}
+
+/// An SI value in its kind's display unit: lengths in mm, areas in mm², angles in degrees,
+/// masses in g, anything else as the SI number.
+pub fn display_quantity(kind: Option<&QuantityKindId>, si: f64) -> String {
+    let (scale, unit) = match kind.map(|k| k.0.as_str()) {
+        Some("length" | "distance") => (1e3, " mm"),
+        Some("area") => (1e6, " mm²"),
+        Some("angle") => (180.0 / std::f64::consts::PI, "°"),
+        Some("mass") => (1e3, " g"),
+        _ => (1.0, ""),
+    };
+    format!("{}{unit}", significant(si * scale, 6))
 }
 
 /// `v` to `digits` significant digits, without trailing zeros.
@@ -632,5 +657,21 @@ mod label_tests {
         assert_eq!(significant(-0.0, 6), "0");
         assert_eq!(significant(0.088, 6), "0.088");
         assert_eq!(significant(-12.5, 6), "-12.5");
+    }
+
+    #[test]
+    fn a_configured_input_reads_in_its_display_unit() {
+        use super::{ConfigKey, QuantityKindId};
+        use crate::ids::InputName;
+        let mut key = ConfigKey::default();
+        for (n, v, k) in [("length", 0.088, "length"), ("roll", std::f64::consts::FRAC_PI_6, "angle"), ("count", 3.0, "count")] {
+            key.inputs.insert(InputName::new(n), v);
+            key.kinds.insert(InputName::new(n), QuantityKindId::new(k));
+        }
+        assert_eq!(key.label(), "count 3, length 88 mm, roll 30°");
+        let mut bare = key.clone();
+        bare.kinds.clear();
+        assert_eq!(bare, key, "kinds do not take part in equality");
+        assert_eq!(bare.digest(), key.digest());
     }
 }
