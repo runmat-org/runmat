@@ -43,12 +43,15 @@ pub struct FluidSteadyResourceProjection {
     pub property_audit_digest: Digest,
     pub numerical: CanonicalFluidReservation,
     pub source_preparation_resident_bytes: ByteCount,
+    /// Finite-volume derivation scratch, released before numerical storage exists.
+    pub source_preparation_scratch_bytes: ByteCount,
     pub canonical_input_bytes: ByteCount,
     pub actual_decode_resident_bytes: ByteCount,
     pub result_payload_bytes_upper_bound: ByteCount,
     pub result_materialization_resident_bytes: ByteCount,
-    /// Source preparation, original numerical reserve, profile/decode and encode
-    /// lifetimes summed conservatively; scheduler fixed/transport costs are separate.
+    /// Retained source preparation and decoded inputs, plus the largest of the sequential
+    /// derivation scratch, numerical solve and result encoding lifetimes (see
+    /// `admission::phase_resident_bytes`); scheduler fixed/transport costs are separate.
     pub phase_resident_bytes_upper_bound: ByteCount,
     /// The same lifetimes with the numerical verification bound in place of the solve
     /// reserve: re-preparing and verifying a retained result runs no linear solve.
@@ -102,6 +105,7 @@ fn derive_projection(
     let properties = source.property_identity.clone();
     let property_audit_digest = source.property_audit_digest;
     let source_preparation_resident_bytes = source.preparation_resident_bytes;
+    let source_preparation_scratch_bytes = source.preparation_scratch_bytes;
     // The execution-owned result profile reads the support prepared here.
     let result = workload
         .result_encoding_profile_prepared(mesh, &source, problem)
@@ -120,14 +124,18 @@ fn derive_projection(
     let decoded_inputs = admission::add(input_profiles, input_buffers)?;
     let phase_resident = admission::phase_resident_bytes(
         numerical.resident_bytes_upper_bound,
+        numerical.verification_resident_bytes_upper_bound,
         source_preparation_resident_bytes,
+        source_preparation_scratch_bytes,
         decoded_inputs,
         result.encoded_bytes_upper_bound,
         result.materialization_resident_bytes_estimate,
     )?;
     let verification_phase_resident = admission::phase_resident_bytes(
         numerical.verification_resident_bytes_upper_bound,
+        numerical.verification_resident_bytes_upper_bound,
         source_preparation_resident_bytes,
+        source_preparation_scratch_bytes,
         decoded_inputs,
         result.encoded_bytes_upper_bound,
         result.materialization_resident_bytes_estimate,
@@ -138,6 +146,7 @@ fn derive_projection(
         numerical = numerical.resident_bytes_upper_bound,
         verification = numerical.verification_resident_bytes_upper_bound,
         preparation = source_preparation_resident_bytes,
+        preparation_scratch = source_preparation_scratch_bytes,
         decoded_inputs,
         result_encoded = result.encoded_bytes_upper_bound,
         result_materialization = result.materialization_resident_bytes_estimate,
@@ -175,6 +184,7 @@ fn derive_projection(
         property_audit_digest,
         numerical,
         source_preparation_resident_bytes: ByteCount(source_preparation_resident_bytes),
+        source_preparation_scratch_bytes: ByteCount(source_preparation_scratch_bytes),
         canonical_input_bytes: ByteCount(canonical_input_bytes),
         actual_decode_resident_bytes: ByteCount(actual_decode_resident_bytes),
         result_payload_bytes_upper_bound: ByteCount(result.encoded_bytes_upper_bound),

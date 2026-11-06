@@ -417,11 +417,12 @@ impl FluidSteadySolverResult {
         let problem = source.problem(&workload)?;
         let decode_bytes =
             canonical_payload_materialization_resident_bytes_estimate(bytes).map_err(invalid)?;
-        let coexisting = source
-            .preparation_resident_bytes
-            .checked_add(problem.reservation().resident_bytes_upper_bound)
-            .and_then(|v| v.checked_add(decode_bytes))
-            .ok_or_else(|| invalid("steady fluid cold materialization byte estimate overflow"))?;
+        let coexisting = problem
+            .reservation()
+            .resident_bytes_upper_bound
+            .checked_add(decode_bytes)
+            .ok_or_else(|| invalid("steady fluid cold materialization byte estimate overflow"))
+            .and_then(|later| source.resident_with(later))?;
         if coexisting > workload.resident_ceiling()? || coexisting > isize::MAX as u64 {
             return Err(AnalysisExecutionError::Limit(
                 "steady fluid result residency",

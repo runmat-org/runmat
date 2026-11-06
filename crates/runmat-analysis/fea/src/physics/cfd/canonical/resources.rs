@@ -302,8 +302,8 @@ impl CanonicalFluidReservation {
         let ilu = super::linear::PreconditionerEnvelope::for_counts(n, nnz)
             .ok_or(Error::Resource("shared preconditioner envelope"))?;
         // Three coexisting CSR operators/pattern clones plus assembly/output temporaries,
-        // immutable boundary/bodyforce, all cell vectors/gradients/3x3 LS stencils, and
-        // shared GMRES peak. Includes doubled Vec payload/header growth allowances.
+        // immutable boundary/bodyforce and all cell vectors/gradients/3x3 LS stencils.
+        // Includes doubled Vec payload/header growth allowances.
         // Per cell: velocity (24 B), pressure triple (24), two gradient fields (96), retained
         // residual and vorticity (100), momentum right-hand sides and diagonal (32) and the
         // 3x3 least-squares stencil (72): 348 B, one evaluation's coexisting copy of each,
@@ -312,40 +312,43 @@ impl CanonicalFluidReservation {
         let baseline_bytes = add(
             add(
                 add(mul(nnz, 192)?, mul(n, CELL_STATE_BYTES)?)?,
-                add(mul(f, 1024)?, gmres.resident_bytes_upper_bound)?,
+                mul(f, 1024)?,
             )?,
             // Finite-volume derivation scratch belongs to source preparation, which the
             // caller admits separately; it is released before any numerical storage exists.
             128 * 1024 * 1024,
         )?;
         // Current component/reference, original action, defect and correction
-        // coexist with the existing shared Krylov peak in a correction solve.
+        // coexist with the solver's Krylov workspace in a correction solve.
         // Original governing fluctuation coexists with its absolute-Pa output projection.
         // Charge the extra retained vector with the same doubled payload allowance.
         let mut bytes = add(add(baseline_bytes, mul(n, 4 * 8)?)?, add(mul(n, 32)?, 96)?)?;
-        // Solver-only workspace, which verification of a retained result never allocates:
-        // the shared ILU envelope, then the coupled momentum block: the two-ring pattern (at
-        // most 41 cells per row for tetrahedra), its 3 × 3-block values and the linear
-        // reconstruction terms, plus one AMG hierarchy per velocity component (each within
-        // the per-system envelope).
-        // The coupled velocity-pressure step runs flexible GMRES on 4n unknowns: the Arnoldi
-        // basis keeps r + 1 vectors and the preconditioned basis r more, each 4n values.
+        // Solver-only workspace, which verification of a retained result never allocates.
+        // The two pressure-velocity couplings are alternatives and never coexist:
+        // - segregated: one scalar GMRES solve at a time with one preconditioner (ILU(0) for a
+        //   momentum component, AMG for the pressure correction), each within the envelope;
+        // - coupled: the coupled momentum block (the two-ring pattern, at most 41 cells per row
+        //   for tetrahedra, its 3 × 3-block values and the linear reconstruction terms), one
+        //   AMG hierarchy per velocity component and one for pressure (each within the
+        //   per-system envelope), and flexible GMRES on 4n unknowns: the Arnoldi basis keeps
+        //   r + 1 vectors and the preconditioned basis r more, each 4n values.
         let restart = p.gmres_restart as u64;
         let coupled_basis = mul(mul(n, 4 * 8)?, add(mul(restart, 2)?, 1)?)?;
         let block_columns = match momentum_block_columns {
             Some(columns) => columns,
             None => mul(n, 41)?,
         };
-        let solve_workspace = add(
-            add(
-                ilu.resident_bytes_upper_bound,
-                add(mul(block_columns, 9 * (8 + 8 + 8) + 8)?, mul(n, 5 * 216)?)?,
-            )?,
-            add(mul(ilu.resident_bytes_upper_bound, 3)?, coupled_basis)?,
+        let coupled_workspace = add(
+            add(mul(block_columns, 9 * (8 + 8 + 8) + 8)?, mul(n, 5 * 216)?)?,
+            add(mul(ilu.resident_bytes_upper_bound, 4)?, coupled_basis)?,
         )?;
+        let segregated_workspace = add(
+            ilu.resident_bytes_upper_bound,
+            gmres.resident_bytes_upper_bound,
+        )?;
+        let solve_workspace = coupled_workspace.max(segregated_workspace);
         bytes = add(bytes, solve_workspace)?;
-        // The shared GMRES peak is part of the baseline above.
-        let mut solver_bytes = add(solve_workspace, gmres.resident_bytes_upper_bound)?;
+        let mut solver_bytes = solve_workspace;
         // Frozen velocity reconstruction: four source/weight records per cell,
         // doubled payload growth plus the owning Vec header. No field is retained.
         bytes = add(

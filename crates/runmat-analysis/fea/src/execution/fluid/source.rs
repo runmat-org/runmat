@@ -29,7 +29,12 @@ pub(crate) struct PreparedFluidSource {
     pub constraints: Vec<FluidConstraint>,
     pub boundaries: Vec<AnalysisBoundary>,
     pub excitations: Vec<ExcitationAction>,
+    /// Bytes this source retains: the projection, the authored metadata profiles and both
+    /// compiled property maps.
     pub preparation_resident_bytes: u64,
+    /// Finite-volume derivation scratch of the selected cells. It is released when the
+    /// topology exists, before any numerical storage: see [`Self::resident_with`].
+    pub preparation_scratch_bytes: u64,
     /// Canonical plans derived from this source; every recovery, accuracy and publication
     /// consumer of the source shares them instead of re-deriving stencils and patterns.
     plans: crate::physics::cfd::canonical::CanonicalFluidPlanCache,
@@ -147,11 +152,12 @@ impl PreparedFluidSource {
         // shared identity serialization and validation scratch coexisting with derived records.
         let metadata = serialized_materialization_resident_bytes_estimate(authority, LIMITS)
             .map_err(invalid)?;
-        let base = add_bytes(
-            add_bytes(projection, geometry.scratch_bytes as u64)?,
-            add_bytes(metadata, metadata)?,
+        let base = add_bytes(projection, add_bytes(metadata, metadata)?)?;
+        let preliminary = resident_with(
+            base,
+            geometry.scratch_bytes as u64,
+            numerical.resident_bytes_upper_bound,
         )?;
-        let preliminary = add_bytes(base, numerical.resident_bytes_upper_bound)?;
         require_bytes(preliminary, ceiling).map_err(|error| {
             invalid(format!(
                 "{error} (projection {projection}, geometry scratch {}, metadata 2x{metadata}, \
@@ -170,8 +176,9 @@ impl PreparedFluidSource {
             )?,
         )?;
         require_bytes(
-            add_bytes(
+            resident_with(
                 preparation_resident_bytes,
+                geometry.scratch_bytes as u64,
                 numerical.resident_bytes_upper_bound,
             )?,
             ceiling,
@@ -206,10 +213,6 @@ impl PreparedFluidSource {
             cells = geometry.cell_count,
             "steady fluid source preparation terms"
         );
-        let preparation_resident_bytes = preparation_resident_bytes
-            .checked_sub(geometry.scratch_bytes as u64)
-            .and_then(|bytes| bytes.checked_add(selected_scratch))
-            .ok_or_else(|| invalid("fluid preparation residency"))?;
         let topology =
             FiniteVolumeTopology::derive_selected(&source, geometry_policy, cells.selection)
                 .map_err(invalid)?;
@@ -268,6 +271,7 @@ impl PreparedFluidSource {
             boundaries,
             excitations,
             preparation_resident_bytes,
+            preparation_scratch_bytes: selected_scratch,
             plans: Default::default(),
         })
     }
@@ -321,13 +325,32 @@ impl PreparedFluidSource {
         )
         .map_err(invalid)?;
         require_bytes(
-            add_bytes(
-                self.preparation_resident_bytes,
-                problem.reservation().resident_bytes_upper_bound,
-            )?,
+            self.resident_with(problem.reservation().resident_bytes_upper_bound)?,
             workload.resident_ceiling()?,
         )?;
         Ok(problem)
+    }
+}
+
+/// Residency of a prepared source while `later` bytes exist: the retained preparation plus
+/// the larger of the derivation scratch and `later`, because the scratch is released before
+/// numerical, encoding or recovery storage is allocated.
+pub(crate) fn resident_with(
+    retained: u64,
+    scratch: u64,
+    later: u64,
+) -> AnalysisExecutionResult<u64> {
+    add_bytes(retained, scratch.max(later))
+}
+
+impl PreparedFluidSource {
+    /// [`resident_with`] for this source.
+    pub fn resident_with(&self, later: u64) -> AnalysisExecutionResult<u64> {
+        resident_with(
+            self.preparation_resident_bytes,
+            self.preparation_scratch_bytes,
+            later,
+        )
     }
 }
 
