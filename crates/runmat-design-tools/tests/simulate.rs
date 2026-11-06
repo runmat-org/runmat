@@ -134,3 +134,39 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
         std::fs::write(path, serde_json::to_string(&out).unwrap() + "\n").unwrap();
     }
 }
+
+/// The Desktop's simulation scene on the camera drone: the ESC's current sense
+/// (tests/fixtures/esc_current_sense.simulation, which the capture script pastes too) added to
+/// the drone's esc.circuit. Every measurement carries a spec, so each row reads pass or fail.
+/// With RUNMAT_SIMULATION_SCENE_ESC_OUT set, the report is written there for the Desktop.
+#[test]
+fn the_desktop_simulation_scene_reads_the_esc_current_sense() {
+    const ESC: &str = include_str!("../../runmat-cad/wasm/tests/drone/esc.circuit");
+    const SENSE: &str = include_str!("fixtures/esc_current_sense.simulation");
+    let end = ESC.rfind('}').unwrap();
+    let text = format!("{}\n{SENSE}}}\n", ESC[..end].trim_end());
+    let files: Files = [("/p/esc.circuit".to_owned(), text)].into();
+    let out = call("design.simulate", json!({ "path": "/p/esc.circuit", "simulation": "current_sense", "maxPoints": 160 }), &files).unwrap();
+    assert_eq!(out["probes"], json!(["ISENSE", "SRC"]));
+    let m = |name: &str| out["measures"].as_array().unwrap().iter().find(|m| m["name"] == name).unwrap().clone();
+    for name in ["f3db", "sense", "rise", "settle"] {
+        assert_eq!(m(name)["pass"], json!(true), "{name}: {}", m(name));
+    }
+    // Closed form: the corner is 1 / (2 pi R C) = 1 / (2 pi x 1 k x 10 nF) = 15.92 kHz; 20 A
+    // through 0.5 mOhm reads 10 mV; the 10-90 % rise of one RC is tau ln 9 = 21.97 us.
+    let f = m("f3db")["value"].as_f64().unwrap();
+    assert!((f / 15_915.5 - 1.0).abs() < 0.01, "f3db {f}");
+    let v = m("sense")["value"].as_f64().unwrap();
+    assert!((v / 10e-3 - 1.0).abs() < 0.01, "sense {v}");
+    let r = m("rise")["value"].as_f64().unwrap();
+    assert!((r / (10e-6 * 9f64.ln()) - 1.0).abs() < 0.03, "rise {r}");
+    // Settling to 1 % takes tau ln 100 = 46.05 us from the step (at 20 us, the window start).
+    let t = m("settle")["value"].as_f64().unwrap();
+    assert!(t > 44e-6 && t < 50e-6, "settle {t}");
+    let spread = m("f3db_spread");
+    let y = spread["yieldPercent"].as_f64().unwrap();
+    assert!(y > 95.0 && y <= 100.0, "yield {y}");
+    if let Ok(path) = std::env::var("RUNMAT_SIMULATION_SCENE_ESC_OUT") {
+        std::fs::write(path, serde_json::to_string(&out).unwrap() + "\n").unwrap();
+    }
+}

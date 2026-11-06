@@ -1,0 +1,18 @@
+    // The phase current read through a channel's low-side shunt: 0.5 mOhm into the 1 k / 10 nF
+    // filter ahead of the channel MCU's ADC (ISENSE). The corner sits near a third of the 48 kHz
+    // PWM, so the commutation ripple reads 10 dB down while a 20 A step settles to 1 % inside 60 us.
+    simulation current_sense {
+        sheet = channel
+        source IPH = { p = net.GND, n = net.SRC, current = true, ac = 1 A, pulse = { from = 0 A, to = 20 A, delay = 20 us, rise = 1 us, fall = 1 us, width = 200 us, period = 400 us } }
+        tolerance resistors = { match = "R*", value = 1 % }
+        tolerance capacitors = { match = "C*", value = 10 % }
+        analysis step = tran { stop = 120 us, step = 100 ns }
+        analysis response = ac { from = 100 Hz, to = 10 MHz, points = 100 }
+        analysis spread = monte_carlo { of = response, runs = 1000, seed = 7 }
+        probe = [net.ISENSE, net.SRC]
+        measure f3db = { of = response, bandwidth = net.ISENSE, spec = { min = 14 kHz, max = 18 kHz } }
+        measure sense = { of = step, average = net.ISENSE, from = 100 us, to = 120 us, spec = { min = 9.5 mV, max = 10.5 mV } }
+        measure rise = { of = step, rise_time = net.ISENSE, from = 10 us, to = 120 us, spec = { max = 30 us } }
+        measure settle = { of = step, settling = net.ISENSE, band = 0.01, from = 20 us, to = 120 us, spec = { max = 60 us } }
+        measure f3db_spread = { of = spread, bandwidth = net.ISENSE, spec = { min = 14 kHz, max = 18 kHz } }
+    }
