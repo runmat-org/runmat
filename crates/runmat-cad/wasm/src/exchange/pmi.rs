@@ -125,8 +125,12 @@ pub fn step_pmi(doc: &PartDocument, result: &RegenResult, display: &PartDisplay)
     // region's name).
     let exported = |faces: &mut Vec<String>| {
         for name in faces.iter_mut() {
-            let face = display.bodies.iter().flat_map(|b| &b.faces).find(|f| f.reference.as_deref() == Some(name.as_str()));
-            if let Some(e) = face.and_then(super::exported_face_name) {
+            let face = display
+                .bodies
+                .iter()
+                .flat_map(|b| b.faces.iter().map(move |f| (b, f)))
+                .find(|(_, f)| f.reference.as_deref() == Some(name.as_str()));
+            if let Some(e) = face.and_then(|(b, f)| super::exported_face_name(doc, b, f)) {
                 *name = e;
             }
         }

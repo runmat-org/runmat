@@ -293,6 +293,7 @@ fn g06_dependency_analysis_by_input_and_configuration() {
         material: None,
         color: None,
         properties: Vec::new(),
+        label: None,
     });
     d.regions.push(region(
         "lug_top",

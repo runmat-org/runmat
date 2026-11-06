@@ -1,0 +1,117 @@
+runmat 0.7
+std 1
+
+// A crossover manifold block in 6061-T6 aluminium, 90 x 80 x 50 mm, with its oil. Two drilled
+// lines cross the block:
+// - P to A: the supply gallery is drilled 12 mm from the left face (port P) to a flat bottom
+//   60 mm in; the 10 mm work port A drops into it from the top face.
+// - B to T: the 10 mm work port B drops from the top face into the return gallery, drilled
+//   12 mm from the right face (port T), also flat-bottomed.
+// The oil is the fluid that fills both lines. The block is cut by the same bodies, so each
+// passage wall is one face shared by the block and the oil. Four M8 counterbored bolt holes
+// hold the block down.
+//
+// Laminar sizing at 20 L/min of ISO VG 46 oil at 40 degC (870 kg/m^3, 46 cSt, 0.040 Pa s):
+// - 10 mm work ports: U = Q / A = 3.333e-4 / 7.854e-5 = 4.24 m/s, Re = U d / nu = 922.
+// - 12 mm galleries: U = 2.95 m/s, Re = 768.
+// Change `bore`, `gallery` or the gallery positions below and re-run the study.
+part manifold {
+    input length : length = 90 mm
+    input width : length = 80 mm
+    input height : length = 50 mm
+    // Work ports A and B, and the galleries from P and T.
+    input bore : length = 10 mm
+    input gallery : length = 12 mm
+    // P to A: the supply gallery's axis (y, z), its drilled depth, and port A's position on it.
+    input p_y : length = 25 mm
+    input p_z : length = 20 mm
+    input p_depth : length = 60 mm
+    input a_x : length = 50 mm
+    // B to T: the return gallery's axis (y, z), its drilled depth, and port B's position on it.
+    input t_y : length = 55 mm
+    input t_z : length = 30 mm
+    input t_depth : length = 60 mm
+    input b_x : length = 40 mm
+    input edge_chamfer : length = 1 mm
+
+    // P to A: the supply gallery from the left face, and port A down into it from the top.
+    sketch p_s on origin.yz {
+        bore = circle(center = [input.p_y, input.p_z], radius = input.gallery / 2)
+    }
+    feature p_line = extrude(profile = sketch.p_s, distance = input.p_depth)
+    feature a_plane = plane.offset(base = origin.xy, distance = input.p_z)
+    sketch a_s on plane.a_plane {
+        bore = circle(center = [input.a_x, input.p_y], radius = input.bore / 2)
+    }
+    feature a_port = extrude(profile = sketch.a_s, distance = input.height - input.p_z, mode = add(targets = [feature.p_line.body]))
+
+    // B to T: port B down from the top into the return gallery, drilled from the right face.
+    feature t_plane = plane.offset(base = origin.yz, distance = input.length - input.t_depth)
+    sketch t_s on plane.t_plane {
+        bore = circle(center = [input.t_y, input.t_z], radius = input.gallery / 2)
+    }
+    feature t_line = extrude(profile = sketch.t_s, distance = input.t_depth)
+    feature b_plane = plane.offset(base = origin.xy, distance = input.t_z)
+    sketch b_s on plane.b_plane {
+        bore = circle(center = [input.b_x, input.t_y], radius = input.bore / 2)
+    }
+    feature b_port = extrude(profile = sketch.b_s, distance = input.height - input.t_z, mode = add(targets = [feature.t_line.body]))
+
+    // The block, its edge breaks and its bolt holes.
+    sketch block_s on origin.xy {
+        front = line(start = [0 mm, 0 mm], end = [input.length, 0 mm])
+        right = line(start = [input.length, 0 mm], end = [input.length, input.width])
+        back = line(start = [input.length, input.width], end = [0 mm, input.width])
+        left = line(start = [0 mm, input.width], end = [0 mm, 0 mm])
+    }
+    feature block = extrude(profile = sketch.block_s, distance = input.height)
+    feature edges = chamfer(
+        edges = [
+            edges_between(feature.block.face.side(block_s.front), feature.block.face.side(block_s.right)),
+            edges_between(feature.block.face.side(block_s.right), feature.block.face.side(block_s.back)),
+            edges_between(feature.block.face.side(block_s.back), feature.block.face.side(block_s.left)),
+            edges_between(feature.block.face.side(block_s.left), feature.block.face.side(block_s.front))
+        ],
+        distance = input.edge_chamfer
+    )
+    feature bolts = hole(
+        face = feature.block.face.end,
+        at = {
+            b1 = point(10 mm, 10 mm, input.height),
+            b2 = point(input.length - 10 mm, 10 mm, input.height),
+            b3 = point(input.length - 10 mm, input.width - 10 mm, input.height),
+            b4 = point(10 mm, input.width - 10 mm, input.height)
+        },
+        through_all,
+        form = counterbore,
+        spec = { standard = iso, size = M8 }
+    )
+    // Drill the passages: the block less the oil, which stays as its own bodies.
+    feature passages = boolean.subtract(
+        target = feature.block.body,
+        tools = [feature.p_line.body, feature.t_line.body],
+        keep_tools = true
+    )
+
+    region port_p : face = { select = [feature.p_line.face.start], expect = exactly_one, body = feature.p_line.body, label = "Port P" }
+    region port_a : face = { select = [feature.a_port.face.end], expect = exactly_one, body = feature.p_line.body, label = "Port A" }
+    region port_b : face = { select = [feature.b_port.face.end], expect = exactly_one, body = feature.t_line.body, label = "Port B" }
+    region port_t : face = { select = [feature.t_line.face.end], expect = exactly_one, body = feature.t_line.body, label = "Port T" }
+    // The oil's side of each passage wall (the block's side is the same surface).
+    region supply_wall : face = {
+        select = [feature.p_line.face.side(p_s.bore), feature.p_line.face.end, feature.a_port.face.side(a_s.bore)],
+        expect = at_least_one,
+        body = feature.p_line.body,
+        label = "Passage wall"
+    }
+    region return_wall : face = {
+        select = [feature.t_line.face.side(t_s.bore), feature.t_line.face.start, feature.b_port.face.side(b_s.bore)],
+        expect = at_least_one,
+        body = feature.t_line.body,
+        label = "Passage wall"
+    }
+
+    output block = { body = feature.block.body, label = "Block", part_number = "HM-0101", material = "aluminum_6061", color = "#B9BFC7" }
+    output supply_oil = { body = feature.p_line.body, label = "Oil", color = "#D08A1E" }
+    output return_oil = { body = feature.t_line.body, label = "Oil", color = "#D08A1E" }
+}

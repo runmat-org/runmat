@@ -1294,6 +1294,7 @@ fn c34_imported_cad_names_survive_source_edit() {
         material: None,
         color: None,
         properties: Vec::new(),
+        label: None,
     });
     let r1 = env.regen(&d);
     assert_clean(&r1);

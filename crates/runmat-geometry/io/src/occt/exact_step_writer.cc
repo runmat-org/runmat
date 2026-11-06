@@ -16,6 +16,7 @@
 #include "runmat-geometry-io/src/occt/kernel_ffi.rs.h"
 #include "exact_kernel.hxx"
 
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRep_Builder.hxx>
 #include <Interface_Static.hxx>
 #include <Quantity_Color.hxx>
@@ -81,6 +82,10 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
     struct Part {
       TDF_Label label;
       std::vector<std::shared_ptr<const Body>> bodies;
+      // The part's own copy of its shape. Bodies made by one boolean (a block and the fluid
+      // kept from its cut) share their common faces; written as they are, XCAF would store one
+      // face for both parts, so it would carry one part's name and drop the other's solid.
+      std::shared_ptr<BRepBuilderAPI_Copy> copy;
     };
     std::vector<Part> parts;
     std::vector<TDF_Label> occurrences;
@@ -113,7 +118,8 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
             }
             shape = c;
           }
-          p.label = st->AddShape(shape, Standard_False);
+          p.copy = std::make_shared<BRepBuilderAPI_Copy>(shape, Standard_True, Standard_False);
+          p.label = st->AddShape(p.copy->Shape(), Standard_False);
           set_name(p.label, in.strs.empty() ? "part" : std::string(in.strs[0]));
           if (in.reals.size() >= 4 && in.reals[0] != 0.0)
             ct->SetColor(p.label, Quantity_Color(in.reals[1], in.reals[2], in.reals[3], Quantity_TOC_RGB), XCAFDoc_ColorSurf);
@@ -130,7 +136,7 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
         case 4: {
           const Part& p = parts.at(static_cast<std::size_t>(in.ints[0]));
           const Body& b = *p.bodies.at(static_cast<std::size_t>(in.ints[1]));
-          const TopoDS_Face& f = b.faces.at(static_cast<std::size_t>(in.ints[2]));
+          const TopoDS_Shape f = p.copy->ModifiedShape(b.faces.at(static_cast<std::size_t>(in.ints[2])));
           TDF_Label sub = st->AddSubShape(p.label, f);
           if (sub.IsNull()) fail("a named face is not part of its body");
           if (in.op == 3) set_name(sub, std::string(in.strs.at(0)));

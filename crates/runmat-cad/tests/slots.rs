@@ -68,6 +68,7 @@ fn two_bodies() -> PartDocument {
         material: None,
         color: None,
         properties: Vec::new(),
+        label: None,
     });
     d
 }

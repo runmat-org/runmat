@@ -371,6 +371,7 @@ fn sheet_references_survive_a_segment_added_to_the_chain() {
         material: None,
         color: None,
         properties: Vec::new(),
+        label: None,
     });
     let before = env.regen(&d);
     assert!(resolves(&before, "sm"));

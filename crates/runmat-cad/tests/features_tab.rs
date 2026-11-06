@@ -508,6 +508,8 @@ fn slots_and_hole_series() {
                 }
             }))],
             expect: Cardinality::ExactlyOne,
+            label: None,
+            body: None,
         });
     }
     let r = env.regen(&d);

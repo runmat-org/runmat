@@ -17,6 +17,7 @@ use crate::runtime::{resolve_assembly_in, Diagnostic, Files};
 use runmat_cad::assembly::model::DefinitionKind;
 use runmat_cad::assembly::source::ConfigKey;
 use runmat_cad::display::{part_display, PartDisplay};
+use runmat_cad::model::PartDocument;
 use runmat_cad::regen::kernel::{
     BodyHandle, ExchangeDocument, ExchangeFaceName, ExchangeFormat, ExchangeOccurrence,
     ExchangePart, TessellationOptions,
@@ -33,53 +34,130 @@ fn stem(path: &str) -> String {
     name.split('.').next().unwrap_or(name).to_string()
 }
 
-/// The name a face travels under in STEP, which carries one name per face: the first of its
-/// face regions (the name the file authored for it), else its reference text.
-pub fn exported_face_name(face: &runmat_cad::display::FaceDisplay) -> Option<String> {
-    face.regions.first().cloned().or_else(|| face.reference.clone())
+/// The name a face of `body` travels under in STEP, which carries one name per face: the first
+/// of its face regions that takes faces of that body (a region with `body = …` takes only that
+/// body's copy of a shared face), under the region's `label` when it has one; else the face's
+/// reference text.
+pub fn exported_face_name(
+    doc: &PartDocument,
+    body: &runmat_cad::display::BodyDisplay,
+    face: &runmat_cad::display::FaceDisplay,
+) -> Option<String> {
+    let region = face.regions.iter().find_map(|name| {
+        match doc.regions.iter().find(|r| r.name.as_str() == name) {
+            Some(r) => match &r.body {
+                Some(scope) if body.reference.as_deref() != Some(scope.to_string().as_str()) => None,
+                _ => Some(r.label.clone().unwrap_or_else(|| name.clone())),
+            },
+            None => Some(name.clone()),
+        }
+    });
+    region.or_else(|| face.reference.clone())
 }
 
-/// Every face the display names, under its exported name.
-pub fn face_names(display: &PartDisplay) -> Vec<ExchangeFaceName> {
+/// Every face the display names, under its exported name, for the bodies `bodies` (by their
+/// index in the regeneration), each renumbered to its position in that list.
+fn face_names_of(doc: &PartDocument, display: &PartDisplay, bodies: &[u32]) -> Vec<ExchangeFaceName> {
     display
         .bodies
         .iter()
-        .flat_map(|b| {
+        .filter_map(|b| bodies.iter().position(|i| *i == b.index).map(|at| (at as u32, b)))
+        .flat_map(|(at, b)| {
             b.faces.iter().filter_map(move |f| {
-                exported_face_name(f).map(|name| ExchangeFaceName {
-                    body: b.index,
-                    face: f.index,
-                    name,
-                })
+                exported_face_name(doc, b, f).map(|name| ExchangeFaceName { body: at, face: f.index, name })
             })
         })
         .collect()
 }
 
-struct Product {
+/// One exported product: a name, its material and the bodies (by index) it holds.
+struct Group {
     name: String,
     material: Option<String>,
+    bodies: Vec<u32>,
+}
+
+/// The products a regenerated part exports as. A part with one output (or none) is one product
+/// named `name` (or its output's `label`). A part with several outputs (a block and the fluid
+/// that fills its passages) is one product per output, named by its `label` or identifier and
+/// holding the output's body; bodies no output claims stay under `name`.
+fn groups(doc: &PartDocument, display: &PartDisplay, name: &str) -> Vec<Group> {
+    let all: Vec<u32> = display.bodies.iter().map(|b| b.index).collect();
+    let material = |o: Option<&runmat_cad::model::PartOutput>| {
+        o.and_then(|o| o.material.as_ref())
+            .or_else(|| doc.parts.first().and_then(|o| o.material.as_ref()))
+            .map(|m| m.0.clone())
+    };
+    if doc.parts.len() < 2 {
+        let output = doc.parts.first();
+        return vec![Group {
+            name: output.and_then(|o| o.label.clone()).unwrap_or_else(|| name.to_owned()),
+            material: material(output),
+            bodies: all,
+        }];
+    }
+    let mut out = Vec::new();
+    let mut claimed = Vec::new();
+    for o in &doc.parts {
+        let text = o.body.to_string();
+        let bodies: Vec<u32> = display
+            .bodies
+            .iter()
+            .filter(|b| b.reference.as_deref() == Some(text.as_str()) && !claimed.contains(&b.index))
+            .map(|b| b.index)
+            .collect();
+        claimed.extend(bodies.iter().copied());
+        out.push(Group {
+            name: o.label.clone().unwrap_or_else(|| o.name.to_string()),
+            material: material(Some(o)),
+            bodies,
+        });
+    }
+    let rest: Vec<u32> = all.into_iter().filter(|i| !claimed.contains(i)).collect();
+    if !rest.is_empty() {
+        out.push(Group { name: name.to_owned(), material: material(None), bodies: rest });
+    }
+    out.retain(|g| !g.bodies.is_empty());
+    out
+}
+
+struct Product {
+    groups: Vec<Group>,
+    document: PartDocument,
     result: RegenResult,
     display: PartDisplay,
     kernel: Box<dyn crate::kernel::DesignKernel>,
 }
 
 impl Product {
-    fn part(&self) -> ExchangePart<'_> {
-        ExchangePart {
-            name: self.name.clone(),
-            bodies: self
-                .result
-                .state
-                .bodies
-                .iter()
-                .map(|b| &b.handle as &BodyHandle)
-                .collect(),
-            color: None,
-            material: self.material.clone(),
-            face_names: face_names(&self.display),
-            face_colors: Vec::new(),
-        }
+    fn new(
+        name: &str,
+        document: PartDocument,
+        result: RegenResult,
+        display: PartDisplay,
+        kernel: Box<dyn crate::kernel::DesignKernel>,
+    ) -> Self {
+        let groups = groups(&document, &display, name);
+        Product { groups, document, result, display, kernel }
+    }
+
+    fn parts(&self) -> Vec<ExchangePart<'_>> {
+        self.groups
+            .iter()
+            .map(|g| ExchangePart {
+                name: g.name.clone(),
+                bodies: g
+                    .bodies
+                    .iter()
+                    .filter_map(|i| self.result.state.bodies.get(*i as usize))
+                    .map(|b| &b.handle as &BodyHandle)
+                    .collect(),
+                color: None,
+                material: g.material.clone(),
+                face_names: face_names_of(&self.document, &self.display, &g.bodies),
+                face_colors: Vec::new(),
+            })
+            .collect()
     }
 }
 
@@ -96,21 +174,10 @@ pub fn part_step(path: &str, text: &str) -> Result<Option<Vec<u8>>, String> {
 pub fn part_step_in(path: &str, text: &str, configuration: Option<&str>) -> Result<Option<Vec<u8>>, String> {
     let part = crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
         .map_err(|d| first_message(&d))?;
-    let product = Product {
-        name: stem(path),
-        material: part
-            .document
-            .parts
-            .first()
-            .and_then(|o| o.material.as_ref())
-            .map(|m| m.0.clone()),
-        result: part.result,
-        display: part.display,
-        kernel: part.kernel,
-    };
+    let product = Product::new(&stem(path), part.document.clone(), part.result, part.display, part.kernel);
     let doc = ExchangeDocument {
         name: stem(path),
-        parts: vec![product.part()],
+        parts: product.parts(),
         occurrences: Vec::new(),
     };
     let Ok(step) = product.kernel.export(&doc, ExchangeFormat::Ap242) else {
@@ -148,7 +215,9 @@ pub fn assembly_step_in(
         resolve_assembly_in(path, text, files, configuration).map_err(|d| first_message(&d))?;
     let resolved = &resolution.resolved;
     let mut products: Vec<Product> = Vec::new();
-    let mut by_key: BTreeMap<(String, String), u32> = BTreeMap::new();
+    // (file, configuration) → the product and its first exported part's position.
+    let mut by_key: BTreeMap<(String, String), (u32, u32)> = BTreeMap::new();
+    let mut first_part: Vec<u32> = Vec::new();
     // Node id → its occurrence's position in the export (the root has none).
     let mut placed: BTreeMap<u32, u32> = BTreeMap::new();
     // A sub-assembly (file, configuration) → the occurrence that defines its product.
@@ -180,18 +249,12 @@ pub fn assembly_step_in(
                         } else {
                             format!("{} ({})", stem(&file), node.configuration.label())
                         };
-                        products.push(Product {
-                            name,
-                            material: document
-                                .parts
-                                .first()
-                                .and_then(|o| o.material.as_ref())
-                                .map(|m| m.0.clone()),
-                            result,
-                            display,
-                            kernel,
-                        });
-                        let i = products.len() as u32 - 1;
+                        let product = Product::new(&name, document.clone(), result, display, kernel);
+                        let at = first_part.last().copied().unwrap_or(0)
+                            + products.last().map(|p| p.groups.len() as u32).unwrap_or(0);
+                        first_part.push(at);
+                        products.push(product);
+                        let i = (products.len() as u32 - 1, at);
                         by_key.insert(key, i);
                         i
                     }
@@ -227,19 +290,32 @@ pub fn assembly_step_in(
         }
         occurrences.push(ExchangeOccurrence {
             name: node.segment.to_string(),
-            part,
+            part: part.map(|(_, at)| at),
             definition,
             same_as,
             parent,
             transform: node.local,
         });
+        // A part with several outputs places each of its other products beside the first.
+        if let Some((p, at)) = part {
+            for (k, g) in products[p as usize].groups.iter().enumerate().skip(1) {
+                occurrences.push(ExchangeOccurrence {
+                    name: format!("{} {}", node.segment, g.name),
+                    part: Some(at + k as u32),
+                    definition: None,
+                    same_as: None,
+                    parent,
+                    transform: node.local,
+                });
+            }
+        }
     }
     let Some(first) = products.first() else {
         return Ok(None);
     };
     let doc = ExchangeDocument {
         name: stem(path),
-        parts: products.iter().map(Product::part).collect(),
+        parts: products.iter().flat_map(Product::parts).collect(),
         occurrences,
     };
     // OCCT keeps bodies in one process-wide store, so one product's kernel writes them all.

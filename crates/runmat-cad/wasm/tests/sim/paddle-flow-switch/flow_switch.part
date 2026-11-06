@@ -1,0 +1,99 @@
+runmat 0.7
+std 1
+
+// A paddle flow switch in a 2-inch tee: a schedule 40 steel run (52.5 mm bore, 60.3 mm outside,
+// 240 mm long) with a 1-inch switch boss on top (27 mm bore, 42 mm outside, 70 mm tall), the
+// oil in the tee, and a 0.5 mm stainless spring-steel paddle (EN 1.4310, spring hard), 24 mm
+// wide, that hangs 82 mm from its clamp at the top of the boss across the flow. Flow along +x
+// bends the paddle downstream; the switch trips at 1 mm of tip travel.
+//
+// Sizing, ISO VG 46 oil at 40 degC (861 kg/m^3, 46 cSt) at 1 m/s in the run:
+// Re = U D / nu = 1 x 0.0525 / 46e-6 = 1140, laminar. By hand the paddle takes about
+// F = Cd 0.5 rho U^2 A = 2 x 0.5 x 861 x 1 x 864e-6 = 0.74 N on its 864 mm^2 in the run, about
+// 64 mm below the clamp. Change `paddle`, `paddle_width` or `paddle_length` and re-run.
+// The run's axis is x; the boss's axis is z; the origin is where they cross.
+part flow_switch {
+    input run_bore : length = 52.5 mm
+    input run_outside : length = 60.3 mm
+    input run_length : length = 240 mm
+    input boss_bore : length = 27 mm
+    input boss_outside : length = 42 mm
+    input boss_height : length = 70 mm
+    input paddle : length = 0.5 mm
+    input paddle_width : length = 24 mm
+    input paddle_length : length = 82 mm
+
+    let half = input.run_length / 2
+    let tip = input.boss_height - input.paddle_length
+
+    // The oil: the run's bore and the boss's bore.
+    feature inlet_plane = plane.offset(base = origin.yz, distance = -let.half)
+    sketch run_s on plane.inlet_plane {
+        bore = circle(center = [0 mm, 0 mm], radius = input.run_bore / 2)
+    }
+    feature oil = extrude(profile = sketch.run_s, distance = input.run_length)
+    sketch boss_s on origin.xy {
+        bore = circle(center = [0 mm, 0 mm], radius = input.boss_bore / 2)
+    }
+    feature boss_oil = extrude(profile = sketch.boss_s, distance = input.boss_height, mode = add(targets = [feature.oil.body]))
+
+    // The tee: the run's and the boss's outsides, less the oil.
+    sketch tee_s on plane.inlet_plane {
+        outside = circle(center = [0 mm, 0 mm], radius = input.run_outside / 2)
+    }
+    feature tee = extrude(profile = sketch.tee_s, distance = input.run_length)
+    sketch boss_out_s on origin.xy {
+        outside = circle(center = [0 mm, 0 mm], radius = input.boss_outside / 2)
+    }
+    feature boss = extrude(profile = sketch.boss_out_s, distance = input.boss_height, mode = add(targets = [feature.tee.body]))
+    feature bored = boolean.subtract(target = feature.tee.body, tools = [feature.oil.body], keep_tools = true)
+
+    // The paddle, clamped at the top of the boss, and the oil round it.
+    feature paddle_plane = plane.offset(base = origin.yz, distance = -input.paddle / 2)
+    sketch paddle_s on plane.paddle_plane {
+        tip = line(start = [-input.paddle_width / 2, let.tip], end = [input.paddle_width / 2, let.tip])
+        right = line(start = [input.paddle_width / 2, let.tip], end = [input.paddle_width / 2, input.boss_height])
+        root = line(start = [input.paddle_width / 2, input.boss_height], end = [-input.paddle_width / 2, input.boss_height])
+        left = line(start = [-input.paddle_width / 2, input.boss_height], end = [-input.paddle_width / 2, let.tip])
+    }
+    feature paddle = extrude(profile = sketch.paddle_s, distance = input.paddle)
+    feature wetted = boolean.subtract(target = feature.oil.body, tools = [feature.paddle.body], keep_tools = true)
+
+    region inlet : face = { select = [feature.oil.face.start], expect = exactly_one, body = feature.oil.body, label = "Inlet" }
+    region outlet : face = { select = [feature.oil.face.end], expect = exactly_one, body = feature.oil.body, label = "Outlet" }
+    region pipe_wall : face = {
+        select = [feature.oil.face.side(run_s.bore), feature.boss_oil.face.side(boss_s.bore), feature.boss_oil.face.end],
+        expect = at_least_one,
+        body = feature.oil.body,
+        label = "Pipe wall"
+    }
+    region paddle_wetted : face = {
+        select = [
+            feature.paddle.face.start,
+            feature.paddle.face.end,
+            feature.paddle.face.side(paddle_s.tip),
+            feature.paddle.face.side(paddle_s.right),
+            feature.paddle.face.side(paddle_s.left)
+        ],
+        expect = at_least_one,
+        body = feature.oil.body,
+        label = "Paddle wetted"
+    }
+    region paddle_surface : face = {
+        select = [
+            feature.paddle.face.start,
+            feature.paddle.face.end,
+            feature.paddle.face.side(paddle_s.tip),
+            feature.paddle.face.side(paddle_s.right),
+            feature.paddle.face.side(paddle_s.left)
+        ],
+        expect = at_least_one,
+        body = feature.paddle.body,
+        label = "Paddle surface"
+    }
+    region paddle_root : face = { select = [feature.paddle.face.side(paddle_s.root)], expect = exactly_one, body = feature.paddle.body, label = "Paddle root" }
+
+    output tee = { body = feature.tee.body, label = "Tee", part_number = "FS-50-T", material = "steel_a106b", color = "#7C8288" }
+    output oil = { body = feature.oil.body, label = "Oil", color = "#D08A1E" }
+    output paddle = { body = feature.paddle.body, label = "Paddle", part_number = "FS-50-P", material = "stainless_1_4310", color = "#D9DDE1" }
+}

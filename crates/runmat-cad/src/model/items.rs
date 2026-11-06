@@ -26,6 +26,14 @@ pub struct Region {
     pub kind: TopoKind,
     pub select: Vec<Reference>,
     pub expect: Cardinality,
+    /// The name the region's faces travel under in STEP, when it differs from the region's
+    /// identifier: a simulation selects `select name "Port P"` by it (`label = "Port P"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Only the faces of this body (`body = feature.oil.body`): where two bodies share a face, as
+    /// a fluid and the part it fills do, each body's copy of that face takes its own region.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<Reference>,
 }
 
 /// What a `publish` entry exposes.
@@ -142,6 +150,10 @@ pub struct PartOutput {
     pub color: Option<String>,
     #[serde(default)]
     pub properties: Vec<Property>,
+    /// The product name the output travels under in STEP, when it differs from the output's
+    /// identifier (`label = "Cold plate"`): what a simulation's `select name` reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
