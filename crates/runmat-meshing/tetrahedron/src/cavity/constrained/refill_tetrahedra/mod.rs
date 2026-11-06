@@ -282,7 +282,10 @@ mod orientation_tests {
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 1.0],
         ];
-        let budget = OperationCount::from_operations(359 + 24);
+        // Each kernel reserves its full bound before it runs, so the ledger needs room for the
+        // second kernel's 359-operation reservation; settlement keeps only its 24-operation prefix.
+        let budget = OperationCount::from_operations(359 + 359);
+        let settled = OperationCount::from_operations(359 + 24);
         let ledger = Arc::new(UsageLedger::new(budget, budget).unwrap());
         let context = UsageContext::new(Arc::clone(&ledger));
         context.run_sync(|| {
@@ -310,7 +313,7 @@ mod orientation_tests {
             ));
         });
         let snapshot = ledger.snapshot().unwrap();
-        assert_eq!(snapshot.completed.meshing, budget);
+        assert_eq!(snapshot.completed.meshing, settled);
         assert_eq!(snapshot.reserved, OperationCount::ZERO);
     }
 
