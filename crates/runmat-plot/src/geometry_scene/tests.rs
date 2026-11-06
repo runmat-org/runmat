@@ -58,6 +58,46 @@ fn pick_index_returns_region_for_triangle() {
 }
 
 #[test]
+fn a_face_pick_takes_the_face_nearest_the_eye_in_every_depth_mode() {
+    // Two faces under the cursor, 1 unit apart along the view: the pick is the front one.
+    let face = |id: &str, z: f32| {
+        GeometrySceneChunk::indexed_triangles(
+            id,
+            [[-1.0, -1.0, z], [1.0, -1.0, z], [0.0, 1.0, z]]
+                .map(|p| vertex(p, [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]))
+                .to_vec(),
+            vec![0, 1, 2],
+            cad_default_material(),
+        )
+        .with_regions(vec![GeometrySceneRegion::new(
+            id,
+            None,
+            Some("cad-face".to_string()),
+            vec![GeometrySceneTriangleRange::new(0, 1)],
+        )])
+    };
+    let scene = GeometryScene::new("scene", 1, vec![face("back", -1.0), face("front", 0.0)]);
+    let index = GeometryScenePickIndex::build(&scene);
+    for depth_mode in [crate::core::DepthMode::Standard, crate::core::DepthMode::ReversedZ] {
+        for parallel in [false, true] {
+            let mut camera = Camera::new();
+            camera.depth_mode = depth_mode;
+            camera.parallel = parallel;
+            camera.position = Vec3::new(0.0, 0.0, 5.0);
+            camera.target = Vec3::ZERO;
+            camera.up = Vec3::Y;
+            camera.aspect_ratio = 1.0;
+            camera.projection = ProjectionType::Perspective { fov: 45.0_f32.to_radians(), near: 0.1, far: 100.0 };
+            camera.mark_dirty();
+            let hit = index
+                .pick(GeometryScenePickRequest { camera, surface_size: [800.0, 800.0], position: [400.0, 400.0], mode: GeometryScenePickMode::Face })
+                .expect("the ray hits both faces");
+            assert_eq!(hit.region_id.as_deref(), Some("front"), "{depth_mode:?}, parallel {parallel}");
+        }
+    }
+}
+
+#[test]
 fn edge_pick_ignores_face_diagonals_and_prefers_visible_front_edge() {
     fn square(chunk_id: &str, z: f32) -> GeometrySceneChunk {
         GeometrySceneChunk::indexed_triangles(

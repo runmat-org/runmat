@@ -588,7 +588,9 @@ impl Camera {
         self.screen_to_render(screen_pos, screen_size, depth) / self.axis_scale
     }
 
-    /// Unproject to the axis-scaled coordinates used by camera positions and targets.
+    /// Unproject to the axis-scaled coordinates used by camera positions and targets. `depth`
+    /// runs from the near plane (0) to the far plane (1) in either depth mode, so a ray from
+    /// depth 0 to depth 1 points away from the eye.
     pub fn screen_to_render(&mut self, screen_pos: Vec2, screen_size: Vec2, depth: f32) -> Vec3 {
         if self.view_proj_dirty {
             self.update_matrices();
@@ -596,7 +598,12 @@ impl Camera {
         // Convert screen coordinates to normalized device coordinates
         let ndc_x = (2.0 * screen_pos.x) / screen_size.x - 1.0;
         let ndc_y = 1.0 - (2.0 * screen_pos.y) / screen_size.y;
-        let ndc = Vec3::new(ndc_x, ndc_y, depth * 2.0 - 1.0);
+        // The projections map depth to 0..1 (near to far, or far to near under reversed-Z).
+        let ndc_z = match self.depth_mode {
+            DepthMode::Standard => depth,
+            DepthMode::ReversedZ => 1.0 - depth,
+        };
+        let ndc = Vec3::new(ndc_x, ndc_y, ndc_z);
 
         // Unproject to world coordinates
         let view_proj_inv = (self.projection_matrix * self.view_matrix).inverse();
