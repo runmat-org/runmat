@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "cli_source_anchor": "c7a12b7b9f050f6789dda56a1024636243b7a63e",
+  "server_source_anchor": "82e070c074c583a7cc477bc1adc85da66de7a357",
+  "target": "aarch64-apple-darwin",
+  "cli": {
+    "sha256": "e0252f6fcc8fcd93364079352acfe43c84ad13d9c0b03c1bc64448d6d3594268",
+    "location": "Main:.tmp-rm1064/settings-main-cli-suite-r1057.artifact/runmat"
+  },
+  "fixture": {
+    "path": "/Users/nallana/Source/runmat-acc-2/.tmp-rm1064/settings-remote-flow-r1057-r7.fixture",
+    "sha256": "91b2d46abb904985d02c4b2b35e9d6cdb67420bf227dbfaa559fe2d7055a0e3c"
+  },
+  "domain": {
+    "passed": 21,
+    "failed": 0,
+    "ignored": 0,
+    "command": [
+      "cargo",
+      "+1.93.0",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "server-execution",
+      "--test",
+      "domain",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 0
+  },
+  "controls": {
+    "passed": 2,
+    "failed": 0,
+    "successful_job": {
+      "state": "succeeded",
+      "assert42": true,
+      "encrypted_result": true,
+      "decrypted_console": true,
+      "no_independent_pin": true
+    },
+    "failed_job": {
+      "state": "failed",
+      "cli_exit_code": 1,
+      "original_runtime_failure_decrypted": true,
+      "console_prefix_preserved": true,
+      "json_reattach": true
+    }
+  },
+  "http_test_targets": {
+    "command": [
+      "cargo",
+      "+1.93.0",
+      "check",
+      "--locked",
+      "--offline",
+      "--keep-going",
+      "-p",
+      "server-http",
+      "--tests",
+      "-j",
+      "1"
+    ],
+    "exit_code": 0
+  },
+  "source_guards": {
+    "count": 3,
+    "files_each": 27284,
+    "digest": "236201ecacdbfc4346579bcc787c79956383dcc0a297aa556af55b6e5c02732f",
+    "differences": 0
+  },
+  "evidence": [
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.domain.log",
+      "sha256": "a505c73443d924725ca1f3258fc85a5b64f14731897484bbef9417e1836c3b20"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.domain.stderr",
+      "sha256": "e82ea8628ddfd0e1dd47f289d4478f8fb437730a70f7070d58e4df281bbba9cb"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.presource.json",
+      "sha256": "e79d90b5506619947bff5f85c86bef2f003ae1af8e8b39e618a047ef686532a1"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.postbuild.json",
+      "sha256": "c4245230a665139c42edeedf2b4d406b530998fc3e588fc7c3dabef04be1de77"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.postsource.json",
+      "sha256": "c4245230a665139c42edeedf2b4d406b530998fc3e588fc7c3dabef04be1de77"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.build.log",
+      "sha256": "b4d5a447435852f8752f9a8b3d020effc240f282276ae6c0e1d451e61b378ce9"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.build.stderr",
+      "sha256": "5fa4824d2e5c06db585d122b9f5716fc8ab6013514b7847b9563d897de22304c"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.accept.log",
+      "sha256": "7332e60642e51115d29445e88f57a7db2899e1ed5637fb58dd56b2a10a888599"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.accept.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.evidence/receipt.json",
+      "sha256": "e4d3750c5e84c491bee90f41571cec51a2572f22aa98d2b20a23b55de51e347c"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.testcheck.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "location": "Main:.tmp-rm1064/settings-remote-flow-r1057-r7.testcheck.stderr",
+      "sha256": "e7b79d917cd8d2d8b6fd537e782ab853a1608d73207673b3507501431b6274e2"
+    }
+  ],
+  "scope": "Existing production-router/registered-node success and failure witness using synthetic auth, in-memory state and real loopback HTTP ciphertext transfers. No production deployment/durability claim. No raw node/run state or credentials are included in this receipt. The Server terminal-output repair leaves runtime/CLI/SDK artifacts unchanged; earlier failed attempts remain preserved separately."
+}

@@ -283,7 +283,7 @@ jobs:
           # See qualification/quality/fea-style-debt-0.7.md.
           fea_tree=$(git rev-parse HEAD:crates/runmat-analysis/fea)
           compiler_inputs=$(git ls-tree -r HEAD -- Cargo.toml Cargo.lock rust-toolchain.toml .cargo crates scripts docs bindings verification | git hash-object --stdin)
-          if [[ "$fea_tree" == 55c7f312626e67dd08e22ba9583531661139baa7 && "$compiler_inputs" == 92831739f2bcba6615808447dd3bcc206c6ee11b ]] && rustc --version | grep -Eq '^rustc 1\.90\.0 ' ; then
+          if [[ "$fea_tree" == 55c7f312626e67dd08e22ba9583531661139baa7 && "$compiler_inputs" == 28bfe700e440acb45a5c7a9e0c85855e5837a98b ]] && rustc --version | grep -Eq '^rustc 1\.90\.0 ' ; then
             cargo clippy --workspace --exclude runmat-clarabel --exclude runmat-analysis-fea --all-targets --all-features --keep-going --no-deps -- -D warnings
           else
             cargo clippy --workspace --exclude runmat-clarabel --all-targets --all-features --keep-going -- -D warnings

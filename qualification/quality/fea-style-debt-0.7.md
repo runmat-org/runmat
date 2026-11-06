@@ -17,9 +17,9 @@ adds 93 findings. Repeated emissions count once.
 
 ## Source and toolchain
 
-- Code anchor: `df7032c639a59ed795c2edb1b60c2fa5cdc4f39e`.
+- Code anchor: `2ec4c54b7b3e85b8bf51ed5011bf49f4208ef00e`.
 - FEA Git tree: `55c7f312626e67dd08e22ba9583531661139baa7`.
-- Compiler-input Git inventory: `92831739f2bcba6615808447dd3bcc206c6ee11b`.
+- Compiler-input Git inventory: `28bfe700e440acb45a5c7a9e0c85855e5837a98b`.
 - Rust/Clippy: 1.90.0.
 
 CI computes the inventory with
@@ -47,6 +47,17 @@ by `cfg(windows)`; the Linux/macOS FEA lint inputs are unchanged. The Windows
 private-filesystem tests pass 3/0, and the repaired Windows products retain
 their separate qualification requirement. The broader CI pin includes these
 source and documentation changes.
+
+The R1057 inventory adds only the CLI remote-upload suite correction to the
+previous compiler inputs. It replaces a duplicated spelling with an existing
+constant; FEA source, its dependencies, features and lint-bearing files are
+unchanged. The corrected CLI builds on ARM macOS, Intel macOS and Linux.
+Intel and Linux each pass their31-case product cohort; Intel also passes eight
+assessment commands. The real Server/registered-node witness passes successful
+and failed jobs with encrypted terminal output. Server's corresponding repair
+and21 passing domain tests are private-product evidence, outside this public
+Clippy exception. The approved183 findings and strict policy for every other
+first-party crate are unchanged; Windows retains its separate qualification.
 
 ## CI policy and closure
 
