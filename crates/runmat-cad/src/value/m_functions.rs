@@ -32,6 +32,9 @@ use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use runmat_design_syntax::m_calls::{effect_of, parameters_of};
+use runmat_design_syntax::m_calls::strip_comment_and_strings;
+
 /// Runs one `.m` function on SI double arguments.
 pub trait MRunner {
     /// Calls `function`, defined in `sources[0]`. The rest of `sources` are the `.m` files it
@@ -280,106 +283,6 @@ fn words_of(text: &str) -> BTreeSet<String> {
                 .collect::<Vec<_>>()
         })
         .collect()
-}
-
-/// The parameter names of `name`'s `function` line.
-pub fn parameters_of(text: &str, name: &str) -> Option<Vec<String>> {
-    text.lines().find_map(|line| {
-        let rest = line.trim().strip_prefix("function")?;
-        let rest = rest.trim_start();
-        let after = rest.split_once('=').map_or(rest, |(_, r)| r).trim_start();
-        let after = after.strip_prefix(name)?;
-        let after = after.trim_start();
-        if after.is_empty() || after.starts_with('%') {
-            return Some(Vec::new());
-        }
-        let inner = after.strip_prefix('(')?.split_once(')')?.0;
-        Some(
-            inner
-                .split(',')
-                .map(|p| p.trim().to_string())
-                .filter(|p| !p.is_empty() && p != "~")
-                .collect(),
-        )
-    })
-}
-
-/// Builtins whose use makes a value function effectful (report 12 §2.6).
-const EFFECTFUL: &[(&str, &str)] = &[
-    ("rand", "unseeded randomness"),
-    ("randn", "unseeded randomness"),
-    ("randi", "unseeded randomness"),
-    ("randperm", "unseeded randomness"),
-    ("tic", "the clock"),
-    ("toc", "the clock"),
-    ("clock", "the clock"),
-    ("now", "the clock"),
-    ("datetime", "the clock"),
-    ("fopen", "file access"),
-    ("fwrite", "file access"),
-    ("fprintf", "file access"),
-    ("save", "file access"),
-    ("load", "file access"),
-    ("readtable", "file access"),
-    ("readmatrix", "file access"),
-    ("webread", "the network"),
-    ("websave", "the network"),
-    ("input", "user input"),
-    ("system", "a shell command"),
-    ("getenv", "the environment"),
-];
-
-/// The first effect a function's text uses, ignoring comments and strings.
-pub fn effect_of(text: &str) -> Option<String> {
-    for line in text.lines() {
-        let code = strip_comment_and_strings(line);
-        let mut word = String::new();
-        let flush = |w: &mut String, next: Option<char>| -> Option<String> {
-            let found = (!w.is_empty() && next != Some('.'))
-                .then(|| EFFECTFUL.iter().find(|(b, _)| *b == w.as_str()))
-                .flatten()
-                .map(|(b, why)| format!("`{b}` ({why})"));
-            w.clear();
-            found
-        };
-        let mut prev = ' ';
-        let chars: Vec<char> = code.chars().collect();
-        for (i, &c) in chars.iter().enumerate() {
-            if c.is_alphanumeric() || c == '_' {
-                if word.is_empty() && prev == '.' {
-                    word.push('.'); // a field or method, never a builtin
-                }
-                word.push(c);
-            } else if let Some(e) = flush(&mut word, chars.get(i).copied()) {
-                return Some(e);
-            }
-            prev = c;
-        }
-        if let Some(e) = flush(&mut word, None) {
-            return Some(e);
-        }
-    }
-    None
-}
-
-fn strip_comment_and_strings(line: &str) -> String {
-    let mut out = String::new();
-    let mut quote: Option<char> = None;
-    let mut prev = ' ';
-    for c in line.chars() {
-        match quote {
-            Some(q) if c == q => quote = None,
-            Some(_) => {}
-            None if c == '%' => break,
-            // A transpose follows a name, a bracket or another transpose; a quote opens a string.
-            None if c == '"' || (c == '\'' && !(prev.is_alphanumeric() || ")]}'_.".contains(prev))) => {
-                quote = Some(c)
-            }
-            None => out.push(c),
-        }
-        prev = c;
-    }
-    out
 }
 
 fn digest(path: &str, text: &str) -> String {

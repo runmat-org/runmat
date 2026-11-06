@@ -4,6 +4,7 @@ pub mod document;
 pub mod edit;
 pub mod json;
 pub mod lexical;
+pub mod m_calls;
 pub mod projection;
 pub mod tree;
 

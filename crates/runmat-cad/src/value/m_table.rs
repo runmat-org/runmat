@@ -10,55 +10,11 @@
 //!    needs one more round, so the host repeats until nothing is pending.
 
 use super::m_functions::MRunner;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-/// The error a call fails with while its result is still to be evaluated.
-pub const PENDING: &str = "waiting for the RunMat runtime to evaluate this value";
-
-/// One call the table couldn't answer: what the host runs.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PendingCall {
-    /// The [`call_key`] the result is stored under.
-    pub key: String,
-    /// The function, defined in `sources[0]`.
-    pub function: String,
-    /// `(path, text)` of the function's file, then the `.m` files it can call without a `use`.
-    pub sources: Vec<(String, String)>,
-    /// SI doubles, in the order the `function` line declares them.
-    pub arguments: Vec<f64>,
-}
-
-/// A result the host evaluated: the result's elements, or the error the function raised.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum TableResult {
-    Values(Vec<f64>),
-    Error { error: String },
-}
-
-/// The key of one call: the sources' paths and texts, the function and the arguments bit for
-/// bit. Editing any reached `.m` file, or changing an argument, gives a new key.
-pub fn call_key(sources: &[(String, String)], function: &str, arguments: &[f64]) -> String {
-    let mut h = Sha256::new();
-    let mut part = |b: &[u8]| {
-        h.update((b.len() as u64).to_be_bytes());
-        h.update(b);
-    };
-    part(b"runmat-cad/m-call/v1");
-    part(function.as_bytes());
-    for (path, text) in sources {
-        part(path.as_bytes());
-        part(text.as_bytes());
-    }
-    for a in arguments {
-        part(&a.to_bits().to_be_bytes());
-    }
-    hex::encode(h.finalize())
-}
+pub use runmat_design_syntax::m_calls::{call_key, PendingCall, TableResult, PENDING};
 
 /// Answers `.m` calls from evaluated results and records the calls it can't answer.
 pub struct TableRunner {
