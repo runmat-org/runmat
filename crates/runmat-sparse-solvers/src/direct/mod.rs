@@ -245,7 +245,11 @@ impl PatternFingerprint {
 
 pub(crate) enum SymbolicInner {
     Cholesky(faer::sparse::linalg::cholesky::SymbolicCholesky<usize>),
-    Lu(faer::sparse::linalg::lu::SymbolicLu<usize>),
+    Lu {
+        symbolic: faer::sparse::linalg::lu::SymbolicLu<usize>,
+        /// Reference schedule fixed at analysis from the symmetrized pattern.
+        reference: Result<DirectReferenceWork, ReferenceWorkError>,
+    },
 }
 
 /// Ordering plus symbolic factor for one sparsity pattern; shareable across numeric
@@ -459,7 +463,11 @@ impl<T: FactorScalar> DirectSolver<T> {
                 reference_work::DirectPhase::Factorization,
                 || cholesky::factorize::<T>(&symbolic, matrix, &options, None),
             )?,
-            FactorKind::Lu => (lu::factorize::<T>(&symbolic, matrix, None)?, 0),
+            FactorKind::Lu => reference_work::with_direct_usage(
+                &symbolic,
+                reference_work::DirectPhase::Factorization,
+                || Ok((lu::factorize::<T>(&symbolic, matrix, None)?, 0)),
+            )?,
             _ => cholesky::factorize::<T>(&symbolic, matrix, &options, None)?,
         };
         control.check()?;
@@ -485,7 +493,10 @@ impl<T: FactorScalar> DirectSolver<T> {
             residual: 0.0,
             converged: 0,
         });
-        if matches!(self.symbolic.kind, FactorKind::Cholesky | FactorKind::Ldlt) {
+        if matches!(
+            self.symbolic.kind,
+            FactorKind::Cholesky | FactorKind::Ldlt | FactorKind::Lu
+        ) {
             let symbolic = Arc::clone(&self.symbolic);
             return reference_work::with_direct_usage(
                 &symbolic,
@@ -561,10 +572,14 @@ impl<T: FactorScalar> DirectSolver<T> {
                     },
                 )?
             }
-            NumericInner::Lu(numeric) => {
-                initialize(rhs);
-                lu::solve(&self.symbolic, numeric, rhs, k)?;
-            }
+            NumericInner::Lu(numeric) => reference_work::with_direct_usage(
+                &self.symbolic,
+                reference_work::DirectPhase::Solve { rhs_columns: k },
+                || {
+                    initialize(rhs);
+                    lu::solve(&self.symbolic, numeric, rhs, k)
+                },
+            )?,
             numeric => {
                 initialize(rhs);
                 cholesky::solve(&self.symbolic, numeric, rhs, k);
@@ -599,7 +614,11 @@ impl<T: FactorScalar> DirectSolver<T> {
                     },
                 )
             }
-            NumericInner::Lu(numeric) => lu::solve_transpose(&self.symbolic, numeric, rhs, k),
+            NumericInner::Lu(numeric) => reference_work::with_direct_usage(
+                &self.symbolic,
+                reference_work::DirectPhase::Solve { rhs_columns: k },
+                || lu::solve_transpose(&self.symbolic, numeric, rhs, k),
+            ),
             _ => {
                 // Hermitian A: Aᵀ = conj(A), so Aᵀ x = b  ⇔  A conj(x) = conj(b).
                 for value in rhs.iter_mut() {

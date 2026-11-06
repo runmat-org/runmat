@@ -189,7 +189,8 @@ impl access::FilesystemAccess<'_> {
             .map(|run| persisted_field_inventory(&run)))
     }
 
-    /// The render tiles a run saved: a standard run's, or a structural frequency sweep's.
+    /// The render tiles a run saved: a standard run's, or a structural or acoustic frequency
+    /// sweep's.
     pub(in crate::analysis::storage) fn load_render_tile_index(
         &self,
         run_id: &str,
@@ -197,8 +198,11 @@ impl access::FilesystemAccess<'_> {
         if let Some(run) = self.read_standard(run_id)? {
             return Ok(run.render_tiles.clone());
         }
+        if let Some(artifact) = self.load_structural_frequency_artifact(run_id)? {
+            return Ok(artifact.render_tiles);
+        }
         Ok(self
-            .load_structural_frequency_artifact(run_id)?
+            .load_acoustic_frequency_artifact(run_id)?
             .and_then(|artifact| artifact.render_tiles))
     }
 

@@ -25,8 +25,9 @@ use serde::Serialize;
 /// The poster camera looks from this direction (snapshot `camera.rs`); a section removes the
 /// half of the part on this side so the cut faces the viewer.
 const VIEW_DIRECTION: [f64; 3] = [0.35, -1.0, 0.45];
-/// Triangles a section cap may hold before its refinement is reduced.
-const CAP_TRIANGLE_BUDGET: usize = 600_000;
+/// Triangles a section cap may hold before its refinement is reduced, when the consumer's
+/// payload budget does not ask for fewer.
+pub const DEFAULT_CAP_TRIANGLE_BUDGET: usize = 600_000;
 /// Opacity of the boundary drawn around streamlines and glyphs.
 const CONTEXT_ALPHA: f32 = 0.18;
 
@@ -53,6 +54,9 @@ pub struct VolumeViewRequest {
     pub unit: String,
     /// The section or glyph plane; the default plane when absent.
     pub plane: Option<SectionPlaneChoice>,
+    /// Triangles the section cap may hold; its refinement is reduced until it fits (down to one
+    /// polygon per cut element). A consumer with a payload budget passes a smaller number.
+    pub cap_triangle_budget: usize,
 }
 
 /// An axis-aligned section plane: normal to `axis` (0 = x, 1 = y, 2 = z), at `fraction` of the
@@ -78,6 +82,12 @@ pub struct VolumeViewError {
     pub integration_error_m: Option<f64>,
     /// Elements cut, lines traced or arrows drawn.
     pub count: usize,
+    /// Triangles drawn for the section cap, and the n of the n x n evaluation grid on each
+    /// triangle of a cut polygon (1 colors each cut polygon linearly between its corners).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cap_triangles: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cap_subdivisions: Option<usize>,
     /// The plane of a section or glyph view: origin and the normal pointing to the kept side.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plane: Option<[[f64; 3]; 2]>,
@@ -104,8 +114,17 @@ pub fn build_volume_scene(
     let mut drawn = Vec::new();
     match request.kind {
         VolumeViewKind::Section => {
-            let cap = refined_cap(&mesh, &field, request.reduction, origin, normal);
+            let (cap, subdivisions) = refined_cap(
+                &mesh,
+                &field,
+                request.reduction,
+                origin,
+                normal,
+                request.cap_triangle_budget,
+            );
             error.display_error = Some(cap.display_error);
+            error.cap_triangles = Some(cap.triangles.triangle_count());
+            error.cap_subdivisions = Some(subdivisions);
             error.geometric_error_m = cap.geometric_error_m;
             error.count = cap.cut_elements;
             error.plane = Some([origin, normal]);
@@ -374,7 +393,8 @@ fn refined_cap(
     reduction: Reduction,
     origin: [f64; 3],
     normal: [f64; 3],
-) -> runmat_plot::field_volume::SectionCap {
+    triangle_budget: usize,
+) -> (runmat_plot::field_volume::SectionCap, usize) {
     let mut subdivisions = match (field.support, mesh.order()) {
         (FieldSupport::Element, _) => 1,
         (FieldSupport::Node, TetOrder::Quadratic) => 4,
@@ -391,8 +411,8 @@ fn refined_cap(
                 subdivisions,
             },
         );
-        if cap.triangles.triangle_count() <= CAP_TRIANGLE_BUDGET || subdivisions == 1 {
-            return cap;
+        if cap.triangles.triangle_count() <= triangle_budget || subdivisions == 1 {
+            return (cap, subdivisions);
         }
         subdivisions /= 2;
     }

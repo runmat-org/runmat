@@ -1,10 +1,16 @@
 # Authored canonical acoustic execution envelope
 
 This is a bounded execution envelope, not Stage 8 qualification.
-The authored local CLI path admits one fresh, direct harmonic acoustic step at one frequency,
-with its complete `AcousticComplex` output state. It uses the canonical mesh Helmholtz worker,
-not the legacy graph acoustic solver. Unsupported observations, multi-frequency semantic states,
-restart inputs, coupled sequences, authored remote submission and accelerators stay closed.
+The authored local CLI path admits a fresh, direct harmonic acoustic step over an authored
+frequency list (one or more frequencies, solved and published in authored order through the
+shared frequency publication contract in [frequency-publication.md](./frequency-publication.md)).
+A one-frequency step also publishes its complete `AcousticComplex` output state. It uses the
+canonical mesh Helmholtz worker, not the legacy graph acoustic solver. Multi-frequency semantic
+states (a retained state per frequency), unsupported observations, restart inputs, coupled
+sequences, authored remote submission and accelerators stay closed. Witnesses: the
+`acoustic-cavity-harmonic.fea` example run in `crates/runmat-cli/tests/check_cli.rs` (three
+frequencies) and the harmonic snapshot capture and verification in
+`crates/runmat-cli/tests/fea_snapshot_cli.rs`.
 
 The chain is checked source/materials → existing exact geometry and meshing → canonical study
 planning → shared task pool → accepted numerical result/receipt → shared accuracy evaluation →

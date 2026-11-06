@@ -127,7 +127,6 @@ impl PlannedFamilyStudy {
     pub fn local_resources(
         &self,
         local_execution: LocalExecutionPlan,
-        inventory: ObjectInventoryLimits,
         machine_memory_bytes: Option<u64>,
     ) -> Result<ResourceRequest, String> {
         let machine = match machine_memory_bytes {
@@ -142,7 +141,7 @@ impl PlannedFamilyStudy {
             memory_bytes: memory,
             scratch_bytes: memory,
             max_wall_millis: self.maximum_wall_millis,
-            max_artifact_bytes: inventory.max_total_bytes,
+            max_artifact_bytes: ObjectInventoryLimits::admitted(memory).max_total_bytes,
             max_egress_bytes: 0,
             max_relay_bytes: 0,
             accelerators: Vec::new(),
@@ -169,11 +168,7 @@ pub(crate) fn plan_family_study(
             kind.label()
         ));
     }
-    let output_policy = AnalysisOutputPolicy::new(
-        runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES,
-        ObjectInventoryLimits::default(),
-    )
-    .map_err(|error| error.to_string())?;
+    let output_policy = admitted_output_policy(context.study)?;
     let capabilities = BTreeSet::from([AnalysisCapabilityRequirement::ProcessIsolation]);
     let mesh = context.mesh.clone();
     let access = context.artifact_access.clone();
@@ -445,6 +440,27 @@ fn electrothermal_heat_study(
         ));
     }
     Ok(thermal)
+}
+
+/// Output inventory admitted by the study's memory budget: min(authored step resident ceiling,
+/// machine memory), within the platform ceilings. The output reservation then checks each
+/// task's exact requirement against the same budget.
+fn admitted_output_policy(
+    study: &runmat_analysis_core::RealizedStudy,
+) -> Result<AnalysisOutputPolicy, String> {
+    let machine = crate::machine_capacity::memory_bytes().map_err(|error| error.to_string())?;
+    let authored = study
+        .sequence
+        .steps
+        .iter()
+        .map(|step| step.accuracy.resources.resident_byte_budget())
+        .min()
+        .unwrap_or(u64::MAX);
+    AnalysisOutputPolicy::new(
+        runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES,
+        ObjectInventoryLimits::admitted(authored.min(machine)),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn single_step(model: &AnalysisModel, kind: StudyFamilyKind) -> Result<(u64, u64), String> {

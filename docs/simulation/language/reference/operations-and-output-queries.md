@@ -25,6 +25,20 @@ Named argument `over` selects the typed reduction domain. Moment operations requ
 reference point. Vector and tensor extrema are rejected until reduced to an ordered scalar
 representation.
 
+Two port operations read a pair of face regions on one step. `pressure_drop(step, from =
+inlet, to = outlet)` returns the area-weighted mean fluid pressure on `from` minus the mean on
+`to`, in Pa; it requires a fluid step. `transmission_loss(step, incident = inlet, transmitted =
+outlet)` returns $10\log_{10}(W_\mathrm{inc}/W_\mathrm{tr})$ in dB at each frequency of an
+acoustic harmonic step, where $W_\mathrm{inc}$ is the incident power at the `incident` port and
+$W_\mathrm{tr}$ the power leaving through the `transmitted` port. The `incident` region must carry
+an incident wave and the `transmitted` region a radiation (anechoic) boundary; a run with no
+positive power at either port fails with that reason. Both operations refuse a region that is not
+a face region.
+
+```fea source=fluid-plane-poiseuille.fea
+    output pressure_drop = pressure_drop(analysis.flow, from = geometry.channel.region.inlet, to = geometry.channel.region.outlet)
+```
+
 ## Sampling and series
 
 `sample` selects explicit positions on a field's independent domain. Interpolation requires one

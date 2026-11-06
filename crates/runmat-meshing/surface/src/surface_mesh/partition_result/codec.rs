@@ -12,7 +12,7 @@ use runmat_meshing_curve::SharedCurveMesh;
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-face-partition-result-canonical-cbor/v1\0";
 const CONTRACT_DOMAIN: &str = "exact-face-partition-result/v1";
 const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(256 * 1024 * 1024, 10_000_000, 1024 * 1024, 64);
+    CanonicalLimits::platform_content(1024 * 1024, 64);
 
 mod face;
 pub use face::decode_exact_face_reuse_record_with_cancellation;
@@ -62,7 +62,7 @@ pub(crate) fn decode_exact_face_partition_result_with_byte_limit(
         bytes,
         topology,
         curves,
-        CanonicalLimits::new(maximum_encoded_bytes, 10_000_000, 1024 * 1024, 64),
+        CanonicalLimits::content_bounded(maximum_encoded_bytes, 1024 * 1024, 64),
     )
 }
 

@@ -51,4 +51,5 @@ study plane_poiseuille {
     output pressure = analysis.flow.field.cell.fluid_pressure
     output peak_speed = max(magnitude(output.velocity), over = geometry.channel.region.fluid)
     output inlet_pressure = max(output.pressure, over = geometry.channel.region.fluid)
+    output pressure_drop = pressure_drop(analysis.flow, from = geometry.channel.region.inlet, to = geometry.channel.region.outlet)
 }

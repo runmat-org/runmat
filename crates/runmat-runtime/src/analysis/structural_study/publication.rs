@@ -365,9 +365,11 @@ pub(in crate::analysis) fn complete_study_run_prepared(
         &entry_scoped_state_steps,
         &staging,
     )?;
-    // A frequency sweep saves the render tiles of the mesh it was solved on, as every
-    // standard run does, so its figures replay from the saved record alone.
-    let frequency_render_topology = if frequency_runs_to_persist.is_empty() {
+    // A structural or acoustic frequency sweep saves the render tiles of the mesh it was
+    // solved on, as every standard run does, so its figures replay from the saved record alone.
+    let frequency_render_topology = if frequency_runs_to_persist.is_empty()
+        && acoustic_frequency_runs_to_persist.is_empty()
+    {
         None
     } else {
         solver_mesh_artifact_path
@@ -399,6 +401,7 @@ pub(in crate::analysis) fn complete_study_run_prepared(
                 step,
                 &persistence.publication_catalog,
                 &persistence.publication_roots,
+                frequency_render_topology.as_ref(),
                 &persistence.source,
             )
             .map_err(|error| {

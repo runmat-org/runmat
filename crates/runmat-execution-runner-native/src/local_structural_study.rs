@@ -4,7 +4,6 @@ use runmat_analysis_fea::study::{
     compile_analysis_study, plan_structural_study_with_fields, AnalysisStudyCompilationInput,
 };
 use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
-use runmat_execution_artifact::object::ObjectInventoryLimits;
 
 use crate::{
     execute_structural_workloads_locally, NativeExecutionConfig, NativeExecutionError,
@@ -87,14 +86,17 @@ pub async fn execute_prepared_study_locally_with_observers(
         None,
     );
     let request = prepared.request().clone();
-    let inventory = ObjectInventoryLimits::default();
+    // The composition store holds this process's own prepared study objects, which the study
+    // preparation already admitted; only the platform's single-object ceiling applies here.
     let composition_root = config
         .store_root
         .join("whole-studies")
         .join(uuid::Uuid::new_v4().simple().to_string());
-    let mut composition_store =
-        crate::FilesystemObjectStore::open(composition_root, inventory.max_object_bytes)
-            .map_err(protocol)?;
+    let mut composition_store = crate::FilesystemObjectStore::open(
+        composition_root,
+        runmat_execution_artifact::object::PLATFORM_MAXIMUM_OBJECT_BYTES,
+    )
+    .map_err(protocol)?;
     prepared.write_to(&mut composition_store)?;
     drop(prepared);
 
@@ -302,11 +304,9 @@ async fn execute_family_locally(
         Some(1),
         Some(1),
     );
-    let inventory = ObjectInventoryLimits::default();
     let resources = planned
         .local_resources(
             decoded.local_execution,
-            inventory,
             analysis_config.local_memory_capacity_bytes,
         )
         .map_err(NativeExecutionError::Protocol)?;

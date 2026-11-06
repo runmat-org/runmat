@@ -37,8 +37,8 @@ const PROFILE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 const PLAN_DOMAIN: &str = "structural-constraint-plan";
 const SOURCE_DOMAIN: &str = "structural-constraint-source";
-pub(super) const PLAN_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+/// Constraint plans grow with the model; the run's admitted budget governs their size.
+pub(super) const PLAN_LIMITS: CanonicalLimits = CanonicalLimits::platform_content(65_536, 64);
 
 impl CanonicalStructuralConstraintPlan {
     pub fn compile_for_model(

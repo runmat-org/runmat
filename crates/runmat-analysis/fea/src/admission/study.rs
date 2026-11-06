@@ -196,6 +196,9 @@ fn admit_constraints(
                 match &constraint.kind {
                     AuthoredConstraintKind::MagneticVectorPotentialGround { .. }
                     | AuthoredConstraintKind::ElectricPerfectConductor { .. } => far_field = true,
+                    // A prescribed potential on a conductor face is a drive terminal
+                    // (physics/maxwell/drive.rs), not a field constraint.
+                    AuthoredConstraintKind::ElectricalPotential { .. } => {}
                     AuthoredConstraintKind::MagneticVectorPotential { .. }
                     | AuthoredConstraintKind::MagneticCoulombGauge { .. }
                     | AuthoredConstraintKind::MagneticPeriodic(_)

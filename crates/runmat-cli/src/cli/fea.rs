@@ -62,4 +62,9 @@ pub struct SnapshotPresentationArgs {
     /// the result's thinnest axis
     #[arg(long, value_name = "x|y|z[@FRACTION]")]
     pub section: Option<String>,
+    /// Largest scene file a view may write, in bytes (default 16 MiB, the app's scene file
+    /// limit). A larger view is drawn lighter until it fits: corner triangles for a quadratic
+    /// surface, a coarser section cap. Each view records what that leaves out.
+    #[arg(long, default_value_t = 16 * 1024 * 1024, value_name = "BYTES")]
+    pub max_scene_bytes: usize,
 }
