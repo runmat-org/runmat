@@ -307,6 +307,61 @@ fn the_io_schematic_is_drawn_to_the_bar() {
     }
 }
 
+/// The quadcopter's flight controller (`runmat-cad/wasm/tests/drone`) as the automatic layout
+/// draws it, with the lock's recorded places dropped.
+fn flight_controller() -> SchematicIndex {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone");
+    let files: Files = ["circuit", "circuit.lock"]
+        .iter()
+        .map(|ext| {
+            let f = format!("flight_controller.{ext}");
+            let text = std::fs::read_to_string(dir.join(&f)).unwrap();
+            let text = if *ext == "circuit.lock" {
+                text.lines().filter(|l| !l.starts_with("place ")).map(|l| format!("{l}\n")).collect()
+            } else {
+                text
+            };
+            (format!("/p/{f}"), text)
+        })
+        .collect();
+    drawn(&files, "/p/flight_controller.circuit")
+}
+
+#[test]
+fn the_flight_controller_power_sheet_reads_as_drawn_by_hand() {
+    let index = flight_controller();
+    dump("fc", &index);
+    for page in &index.sheets {
+        check_page(page);
+    }
+    let pwr = index.sheets.iter().find(|s| s.path == "/pwr").expect("the power page");
+    let at = |d: &str| {
+        let s = pwr.symbols.iter().find(|s| s.designator == d).unwrap_or_else(|| panic!("{d} drawn"));
+        (s.x_mm, s.y_mm)
+    };
+    // Power flows left to right: the buck, its inductor, the LDO.
+    let (u2, l1, u3) = (at("U2"), at("L1"), at("U3"));
+    assert!(u2.0 < l1.0 && l1.0 < u3.0, "U2 {u2:?} → L1 {l1:?} → U3 {u3:?}");
+    // The switch node is a wire from SW through L1 (a local power net is no rail).
+    assert!(pwr.wires.iter().any(|w| w.net.ends_with("/SW")), "SW is wired");
+    assert!(!pwr.labels.iter().any(|l| l.text == "SW"), "SW gets no port");
+    // The feedback divider stands in one column beside U2, R6 above R7.
+    let (r6, r7) = (at("R6"), at("R7"));
+    assert!((r6.0 - r7.0).abs() < EPS && r6.1 > r7.1, "R6 {r6:?} over R7 {r7:?}");
+    assert!(r6.0 < u2.0 && u2.0 - r6.0 < 40.0, "the divider sits by U2's FB pin: {r6:?} {u2:?}");
+    // The input caps by the buck, the output caps by the inductor, the LDO's caps by the LDO.
+    for (cap, host) in [("C12", u2), ("C13", u2), ("C15", l1), ("C16", l1), ("C18", u3), ("C19", u3)] {
+        let c = at(cap);
+        assert!((c.0 - host.0).abs() < 25.0 && c.1 < host.1, "{cap} {c:?} under its stage {host:?}");
+    }
+    // The page's content stays clear of its title block (bottom right, y up).
+    let title = [pwr.width_mm - 10.0 - 130.0, 10.0 + 6.0 * 6.0];
+    for s in &pwr.symbols {
+        let b = body_box(s);
+        assert!(b[2] < title[0] || b[1] > title[1], "{} reaches the title block", s.designator);
+    }
+}
+
 /// Annotating records the places; an added part goes to free space and nothing else moves.
 #[test]
 fn recorded_places_stick_through_an_edit() {

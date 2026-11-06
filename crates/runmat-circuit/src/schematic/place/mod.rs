@@ -112,9 +112,13 @@ pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
             }
             (true, false) | (false, true) if signal(a) || signal(b) => {
                 let (pin, r) = if rail(a) { (1, a) } else { (0, b) };
-                Role::Shunt {
-                    pin,
-                    up: !nets[r.unwrap()].ground,
+                let ground = nets[r.unwrap()].ground;
+                if !ground && matches!(c.lay.art, Art::Inductor | Art::Diode) {
+                    // A series inductor or diode onto a supply rail (a buck's output inductor,
+                    // an OR-ing diode) carries the power on: it sits in the chain.
+                    Role::Chain
+                } else {
+                    Role::Shunt { pin, up: !ground }
                 }
             }
             (true, false) | (false, true) => Role::Loose,
@@ -218,6 +222,38 @@ pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
         }
     }
     let chain: Vec<usize> = (0..n).filter(|&i| roles[i] == Role::Chain).collect();
+    // Power flow: each supply rail's sources (a box's power output, a series part onto the
+    // rail) feed the boxes that take the rail as a supply input, so a regulator chain reads
+    // left to right (battery, buck, inductor, LDO). Only a rail with a source on this page and
+    // a few such inputs counts, so a logic rail feeding a whole page doesn't pull it into one
+    // column chain.
+    let sources = rail_sources(cells, nets, &roles);
+    let mut feeds: BTreeMap<usize, usize> = BTreeMap::new();
+    for (&k, from) in &sources {
+        let sinks: Vec<usize> = chain
+            .iter()
+            .copied()
+            .filter(|&i| !small(&cells[i]) && !from.contains(&i))
+            .filter(|&i| {
+                cells[i]
+                    .nets
+                    .iter()
+                    .zip(&cells[i].lay.pins)
+                    .any(|(x, p)| *x == Some(k) && p.kind == PinType::PowerIn)
+            })
+            .collect();
+        if sinks.is_empty() || sinks.len() > 3 {
+            continue;
+        }
+        for &t in &sinks {
+            for &f in from {
+                edges.insert((std::cmp::Reverse(1), f, t));
+                joined[f].insert(t);
+                joined[t].insert(f);
+            }
+            feeds.entry(t).or_insert(from[0]);
+        }
+    }
     let rank = ranks(n, &edges);
     // Decoupling hosts: boxes on the cap's positive rail. A box whose attached parts are
     // numbered within three of the cap takes it (a regulator's input and output caps); else a
@@ -265,11 +301,23 @@ pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
                 .zip(&cells[h].lay.pins)
                 .any(|(x, p)| *x == net && p.kind == PinType::PowerIn)
         };
+        // On a rail made on this page, a cap belongs to the source or the supply input declared
+        // just before it: a regulator's output caps by its inductor, the next stage's input
+        // caps by that stage.
+        let driven = || {
+            let from = net.and_then(|k| sources.get(&k))?;
+            from.iter()
+                .copied()
+                .chain(on_rail.iter().copied().filter(|&h| supply(h)))
+                .filter(|&h| h < i)
+                .max()
+        };
         let host = on_rail
             .iter()
             .copied()
             .filter(|&h| near(h) <= 3)
             .min_by_key(|&h| (near(h), decaps[h], h))
+            .or_else(driven)
             .or_else(|| {
                 on_rail
                     .iter()
@@ -376,11 +424,22 @@ pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
     }
     // Shunt anchors: the chain pin each shunt hangs next to, and the gap it sits in.
     let mut anchor: BTreeMap<usize, (usize, usize, usize)> = BTreeMap::new();
+    // Shunts on a net no chain item is on (a divider into a port): they stand together about
+    // their node, one cluster per net.
+    let mut nodes: BTreeSet<usize> = BTreeSet::new();
+    let mut node_of: BTreeMap<usize, usize> = BTreeMap::new();
     for i in 0..n {
         match roles[i] {
             Role::Shunt { pin, .. } => {
                 let Some(ts) = cells[i].nets[pin].and_then(|k| terms.get(&k)) else {
-                    roles[i] = Role::Loose;
+                    match cells[i].nets[pin] {
+                        Some(k) => {
+                            nodes.insert(i);
+                            let first = *node_of.entry(k).or_insert(i);
+                            unite(&mut group, i, first);
+                        }
+                        None => roles[i] = Role::Loose,
+                    }
                     continue;
                 };
                 let side = |t: &Term| places[t.cell].side(cells[t.cell].lay.pins[t.pin].side);
@@ -438,12 +497,15 @@ pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
         terms: &terms,
         joined: &joined,
         anchor: &anchor,
+        feeds: &feeds,
     };
     let mut boxes_out: Vec<[Coord; 4]> = Vec::new();
     let mut origins: Vec<Vec<(usize, Point)>> = Vec::new();
     for members in &order {
         let (placed, bbox) = if members.iter().all(|i| loose.contains(i)) {
             ctx.row(members, &mut places)
+        } else if members.iter().all(|i| nodes.contains(i)) {
+            ctx.node(members, &mut places)
         } else {
             ctx.cluster(members, &mut places)
         };
@@ -514,6 +576,29 @@ fn pack(boxes: &[[Coord; 4]], width: Coord) -> (Vec<(Coord, Coord)>, Coord) {
         .map(|(b, (row, x))| (snap(x - b[0]), snap(tops[*row] - b[3])))
         .collect();
     (out, -y - CLUSTER_GAP.min(-y))
+}
+
+/// Each supply rail's sources on the page: chain items with a power output on it, and series
+/// parts onto it (a buck's inductor). Ground has none.
+fn rail_sources(cells: &[Cell], nets: &[NetInfo], roles: &[Role]) -> BTreeMap<usize, Vec<usize>> {
+    let mut out: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (i, c) in cells.iter().enumerate() {
+        if roles[i] != Role::Chain {
+            continue;
+        }
+        for (p, net) in c.nets.iter().enumerate() {
+            let Some(k) = net.filter(|k| nets[*k].rail && !nets[*k].ground) else {
+                continue;
+            };
+            if small(c) || c.lay.pins[p].kind == PinType::PowerOut {
+                let from = out.entry(k).or_default();
+                if !from.contains(&i) {
+                    from.push(i);
+                }
+            }
+        }
+    }
+    out
 }
 
 pub(super) fn snap(v: Coord) -> Coord {

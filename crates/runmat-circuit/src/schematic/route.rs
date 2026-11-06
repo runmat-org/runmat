@@ -237,8 +237,11 @@ pub(super) fn connect(terms: &[Term], nets: &[NetInfo], walls: &Walls, bbox: [Co
                         out.junctions.push(g.point(cell));
                     }
                 }
-                // A net that also leaves the sheet gets its port's label at its first pin.
-                if nets[n].external {
+                // A net that also leaves the sheet gets its port's label at its first pin; a node
+                // whose pins all leave up or down (a divider) gets it on a stub off the node's
+                // right end instead, so the label never sits on a part's lead.
+                let upright = ks.iter().all(|k| !terms[*k].side.horizontal());
+                if nets[n].external && !(upright && tail_label(&mut g, &mut out, &paths, n, nets)) {
                     label(&mut g, &mut out, &terms[ks[0]], n, nets, walls);
                 }
             }
@@ -481,6 +484,61 @@ fn label(g: &mut Grid, out: &mut Drawn, t: &Term, n: usize, nets: &[NetInfo], _w
     };
     g.block(label_extent(&l, &nets[n].short), GRID / 2);
     out.labels.push(l);
+}
+
+/// A port's label on a stub run right from the rightmost point of a wired net (the highest of
+/// equals), when the stub and the label's box are clear. Returns whether it was placed.
+fn tail_label(g: &mut Grid, out: &mut Drawn, paths: &[Vec<usize>], n: usize, nets: &[NetInfo]) -> bool {
+    let Some(&from) = paths
+        .iter()
+        .flatten()
+        .max_by_key(|&&c| (g.point(c).x, g.point(c).y))
+    else {
+        return false;
+    };
+    let p = g.point(from);
+    let steps = 2 * STUB_STEPS;
+    let end = offset(p, PinSide::Right, steps);
+    let l = Label {
+        net: n,
+        at: end,
+        kind: "hier",
+        side: PinSide::Right,
+    };
+    let stub: Vec<usize> = (1..=steps).filter_map(|k| g.at(offset(p, PinSide::Right, k))).collect();
+    let free = |g: &Grid, c: usize| !g.c[c].block && g.c[c].net == NONE;
+    if stub.len() != steps as usize || !stub.iter().all(|&c| free(g, c)) {
+        return false;
+    }
+    let r = label_extent(&l, &nets[n].short);
+    let grow = GRID / 2;
+    let mut y = r[1] - grow;
+    while y <= r[3] + grow {
+        let mut x = r[0] + GRID;
+        while x <= r[2] + grow {
+            if g.at(Point::new(x, y)).is_none_or(|c| !free(g, c)) {
+                return false;
+            }
+            x += GRID;
+        }
+        y += GRID;
+    }
+    // A point the wire passes or turns at becomes a T: it gets a junction dot.
+    let through = paths
+        .iter()
+        .flat_map(|path| path.windows(2))
+        .filter(|w| w[0] == from || w[1] == from)
+        .count();
+    let mut cells = vec![from];
+    cells.extend(&stub);
+    mark_wire(g, &cells, n);
+    out.wires.push((n, vec![p, end]));
+    if through >= 2 {
+        out.junctions.push(p);
+    }
+    g.block(r, grow);
+    out.labels.push(l);
+    true
 }
 
 /// Power ports for one rail: top and bottom pins point their ports up and down; side pins

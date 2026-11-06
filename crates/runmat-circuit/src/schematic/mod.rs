@@ -373,20 +373,26 @@ pub(super) struct Cell {
     pub sheet_out: Vec<bool>,
 }
 
+/// A sheet symbol's least half width and half height: 20 mm by 15 mm.
+const SHEET_HALF_W: Coord = 8 * GRID;
+const SHEET_HALF_H: Coord = 6 * GRID;
+
 /// Orders a sheet symbol's pins by side, top down, and sizes its box.
 pub(super) fn restack_sheet(lay: &mut UnitLayout) {
     let mut rows = [0 as Coord; 2];
     let count = |s: PinSide| lay.pins.iter().filter(|p| p.side == s).count() as Coord;
     let (l, r) = (count(PinSide::Left), count(PinSide::Right));
     let most = l.max(r).max(1);
+    // A sheet symbol reads as a block of the design: at least 15 mm tall, with a pitch of
+    // room above and below its pins. Both sides' pins start from the top row, as a sheet's
+    // entries are drawn.
+    lay.half_h = (most * PIN_PITCH / 2 + 2 * GRID).max(SHEET_HALF_H);
+    let first = lay.half_h - 2 * GRID - PIN_PITCH / 2;
     for p in lay.pins.iter_mut() {
         let k = usize::from(p.side == PinSide::Right);
-        let n = if k == 0 { l } else { r };
-        let first = (n - 1) * PIN_PITCH / 2;
         p.at = (first - rows[k] * PIN_PITCH).div_euclid(GRID) * GRID;
         rows[k] += 1;
     }
-    lay.half_h = most * PIN_PITCH / 2 + 2 * GRID;
     let widest = |s: PinSide| {
         lay.pins
             .iter()
@@ -490,7 +496,14 @@ fn page(
         .enumerate()
         .map(|(k, n)| {
             let on_page_only = net_sheets[k].iter().all(|s| s.starts_with(path));
-            let rail = is_rail(&n.name, n.class.as_deref()) && (n.global || on_page_only);
+            // A rail by name (GND, +5V, VBAT) is drawn with ports on its own page too; the
+            // power net class alone makes a rail only of a global net, so a local power node
+            // (a regulator's switch node) is drawn as the wire it is.
+            let rail = if is_rail(&n.name, None) {
+                n.global || on_page_only
+            } else {
+                is_rail(&n.name, n.class.as_deref()) && n.global
+            };
             let external = !n.global && net_sheets[k].iter().any(|s| !s.starts_with(path));
             NetInfo {
                 rail,
@@ -582,7 +595,7 @@ fn page(
                     at: 0,
                 })
                 .collect(),
-            half_w: up_to_grid((text_width(&name, DESIGNATOR_TEXT) + 4 * GRID) / 2).max(8 * GRID),
+            half_w: up_to_grid((text_width(&name, DESIGNATOR_TEXT) + 4 * GRID) / 2).max(SHEET_HALF_W),
             half_h: 4 * GRID,
             pin_len: 0,
             art: Art::Box,

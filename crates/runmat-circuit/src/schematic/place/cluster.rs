@@ -11,6 +11,8 @@ pub(super) struct Ctx<'a> {
     pub(super) terms: &'a BTreeMap<usize, Vec<Term>>,
     pub(super) joined: &'a [BTreeSet<usize>],
     pub(super) anchor: &'a BTreeMap<usize, (usize, usize, usize)>,
+    /// A box fed through a supply rail, and the rail's source (power flow).
+    pub(super) feeds: &'a BTreeMap<usize, usize>,
 }
 
 impl Ctx<'_> {
@@ -29,7 +31,9 @@ impl Ctx<'_> {
             let tip = p0.apply(lay.tip(pin.side, pin.at));
             let room = match c.nets[k] {
                 Some(net) if self.nets[net].rail => PORT_ROOM,
-                Some(net) if self.nets[net].labelled => {
+                // A sheet symbol's entries keep room for a label too: a net it shares with
+                // several sheets may fall back to labels when its wire can't be drawn.
+                Some(net) if self.nets[net].labelled || matches!(c.kind, CellKind::Sheet { .. }) => {
                     2 * GRID + crate::schematic::text_width(&self.nets[net].short, crate::schematic::LABEL_TEXT)
                         + 3 * GRID
                 }
@@ -161,9 +165,10 @@ impl Ctx<'_> {
                 let de = up_ext(ds[0], places);
                 let per = ds.len().min(DECAP_ROW) as Coord;
                 let rows = ds.len().div_ceil(DECAP_ROW) as Coord;
-                let w = per * self.decap_pitch(ds, places);
-                e[0] = e[0].min(-w / 2);
-                e[2] = e[2].max(w / 2 + (de[2] - de[0]) / 2);
+                let pitch = self.decap_pitch(ds, places);
+                let x0 = self.decap_x0(i, base, per, pitch);
+                e[0] = e[0].min(x0 + de[0]);
+                e[2] = e[2].max(x0 + (per - 1) * pitch + de[2]);
                 e[1] = base[1] + decap_lift(&places[i]) - rows * (GRID + de[3] - de[1]);
             }
             slot.insert(i, e);
@@ -181,10 +186,11 @@ impl Ctx<'_> {
         let gap_w: Vec<Coord> = gaps
             .iter()
             .map(|g| {
-                if g.is_empty() {
+                let slots: usize = self.stacks(g).iter().map(|s| s.1.len().max(s.2.len())).sum();
+                if slots == 0 {
                     COLUMN_GAP
                 } else {
-                    COLUMN_GAP + 4 * GRID + g.len() as Coord * UPRIGHT_PITCH
+                    COLUMN_GAP + 4 * GRID + slots as Coord * UPRIGHT_PITCH
                 }
             })
             .collect();
@@ -204,7 +210,7 @@ impl Ctx<'_> {
             let mut wants: Vec<(Coord, usize)> = Vec::new();
             for (k, &i) in cols[c].iter().enumerate() {
                 let want = (c > 0)
-                    .then(|| self.lineup(i, places, &origin))
+                    .then(|| self.lineup(i, places, &origin).or_else(|| self.level(i, &origin)))
                     .flatten()
                     .unwrap_or(-(k as Coord) * PIN_PITCH);
                 wants.push((want, i));
@@ -241,7 +247,7 @@ impl Ctx<'_> {
             let de = up_ext(ds[0], places);
             let per = ds.len().min(DECAP_ROW) as Coord;
             let pitch = self.decap_pitch(ds, places);
-            let x0 = o.x - (per - 1) * pitch / 2;
+            let x0 = o.x + self.decap_x0(h, up_ext(h, places), per, pitch);
             for (k, &d) in ds.iter().enumerate() {
                 let (row, col) = ((k / DECAP_ROW) as Coord, (k % DECAP_ROW) as Coord);
                 places[d].origin = Point::new(
@@ -250,35 +256,41 @@ impl Ctx<'_> {
                 );
             }
         }
-        // Shunts in their gaps: lower nets nearer the right column, upright below (or above)
-        // the anchor pin.
+        // Shunts in their gaps, stacked per anchor pin: each slot holds one shunt above the
+        // pin's net and one below, so a divider's two resistors stand in one line through its
+        // node. Anchors with shunts below come first, the lowest net nearest the right column;
+        // then those with shunts above only, the highest nearest; so one net's leads cross
+        // another's wire as little as they can.
         let mut gap_x = 0;
         for (g, list) in gaps.iter().enumerate() {
             let left = if g == 0 { 0 } else { gap_x };
-            let mut keyed: Vec<(Coord, usize)> = list
-                .iter()
-                .map(|&i| {
-                    let (cell, pin, _) = self.anchor[&i];
-                    let y = tip(cell, pin, places).y;
-                    let up = matches!(self.roles[i], Role::Shunt { up: true, .. });
-                    (if up { -y } else { y }, i)
-                })
-                .collect();
-            keyed.sort();
+            let mut stacks = self.stacks(list);
+            stacks.sort_by_key(|((cell, pin), _, downs)| {
+                let y = tip(*cell, *pin, places).y;
+                let key = if downs.is_empty() { (1, -y) } else { (0, y) };
+                (key, *cell, *pin)
+            });
             let right_edge = if g < ncols {
                 col_x[g] - cols[g].iter().map(|i| -slot[i][0]).max().unwrap_or(0)
             } else {
                 left + gap_w[g]
             };
-            for (k, (_, i)) in keyed.iter().enumerate() {
-                let (cell, pin, _) = self.anchor[i];
-                let y = tip(cell, pin, places).y;
-                let up = matches!(self.roles[*i], Role::Shunt { up: true, .. });
-                let lay = &self.cells[*i].lay;
-                let reach = lay.half_w + lay.pin_len;
-                let sx = snap(right_edge - COLUMN_GAP - k as Coord * UPRIGHT_PITCH);
-                let sy = if up { y + DROP + reach } else { y - DROP - reach };
-                places[*i].origin = Point::new(sx, snap(sy));
+            let mut k: Coord = 0;
+            for ((cell, pin), ups, downs) in &stacks {
+                let y = tip(*cell, *pin, places).y;
+                for j in 0..ups.len().max(downs.len()) {
+                    let sx = snap(right_edge - COLUMN_GAP - k * UPRIGHT_PITCH);
+                    for (members, up) in [(ups, true), (downs, false)] {
+                        let Some(&i) = members.get(j) else {
+                            continue;
+                        };
+                        let lay = &self.cells[i].lay;
+                        let reach = lay.half_w + lay.pin_len;
+                        let sy = if up { y + DROP + reach } else { y - DROP - reach };
+                        places[i].origin = Point::new(sx, snap(sy));
+                    }
+                    k += 1;
+                }
             }
             if g < ncols {
                 gap_x = col_x[g] + cols[g].iter().map(|i| slot[i][2]).max().unwrap_or(0);
@@ -339,6 +351,78 @@ impl Ctx<'_> {
             }
         }
         None
+    }
+
+    /// Where a decoupling row's first cap sits, from its host's origin: centred under a box;
+    /// from the output end on of a series part (a buck's inductor), so the part keeps close to
+    /// what feeds it.
+    fn decap_x0(&self, host: usize, ext: [Coord; 4], per: Coord, pitch: Coord) -> Coord {
+        if small(&self.cells[host]) {
+            snap((ext[2] - PORT_ROOM).max(0))
+        } else {
+            -(per - 1) * pitch / 2
+        }
+    }
+
+    /// A gap's shunts grouped by the chain pin they hang from: (anchor, above, below), in the
+    /// netlist order.
+    #[allow(clippy::type_complexity)]
+    fn stacks(&self, list: &[usize]) -> Vec<((usize, usize), Vec<usize>, Vec<usize>)> {
+        let mut out: Vec<((usize, usize), Vec<usize>, Vec<usize>)> = Vec::new();
+        for &i in list {
+            let (cell, pin, _) = self.anchor[&i];
+            let k = match out.iter().position(|s| s.0 == (cell, pin)) {
+                Some(k) => k,
+                None => {
+                    out.push(((cell, pin), Vec::new(), Vec::new()));
+                    out.len() - 1
+                }
+            };
+            if matches!(self.roles[i], Role::Shunt { up: true, .. }) {
+                out[k].1.push(i);
+            } else {
+                out[k].2.push(i);
+            }
+        }
+        out
+    }
+
+    /// The origin y that puts a box fed through a rail level with the rail's source, so a
+    /// regulator chain runs along one line.
+    fn level(&self, i: usize, origin: &BTreeMap<usize, Point>) -> Option<Coord> {
+        self.feeds.get(&i).and_then(|f| origin.get(f)).map(|o| o.y)
+    }
+
+    /// Shunts about one node with no chain item on it: each slot holds one shunt above the node
+    /// and one below, so a divider stands in one line through its node, its filter cap beside.
+    pub(super) fn node(&self, members: &[usize], places: &mut [Place]) -> (Vec<(usize, Point)>, [Coord; 4]) {
+        let (ups, downs): (Vec<usize>, Vec<usize>) = members
+            .iter()
+            .partition(|&&i| matches!(self.roles[i], Role::Shunt { up: true, .. }));
+        let pitch = self.decap_pitch(members, places);
+        let mut out = Vec::new();
+        let mut bbox = [Coord::MAX, Coord::MAX, Coord::MIN, Coord::MIN];
+        for j in 0..ups.len().max(downs.len()) {
+            for (list, up) in [(&ups, true), (&downs, false)] {
+                let Some(&i) = list.get(j) else {
+                    continue;
+                };
+                let lay = &self.cells[i].lay;
+                let reach = lay.half_w + lay.pin_len;
+                let y = if up { DROP + reach } else { -DROP - reach };
+                let o = Point::new(j as Coord * pitch, snap(y));
+                places[i].origin = o;
+                let e = self.extent(i, &places[i]);
+                bbox = [
+                    bbox[0].min(o.x + e[0]),
+                    bbox[1].min(o.y + e[1]),
+                    bbox[2].max(o.x + e[2]),
+                    bbox[3].max(o.y + e[3]),
+                ];
+                out.push((i, o));
+            }
+        }
+        (out, bbox)
     }
 
     /// Loose parts in one row.
