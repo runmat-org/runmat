@@ -160,6 +160,14 @@ impl access::FilesystemAccess<'_> {
         &self,
         run_id: &str,
     ) -> Result<Option<AnalysisStudyStepRunData>, AnalysisPublicationError> {
+        Ok(self
+            .load_acoustic_frequency_artifact(run_id)?
+            .map(|artifact| artifact.step))
+    }
+    pub(in crate::analysis::storage) fn load_acoustic_frequency_artifact(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<PersistedAcousticFrequencyArtifact>, AnalysisPublicationError> {
         let Some((path, _)) = self.publication_record_path(run_id)? else {
             return Ok(None);
         };
@@ -193,6 +201,6 @@ impl access::FilesystemAccess<'_> {
         else {
             return Ok(None);
         };
-        Ok(Some(artifact.step))
+        Ok(Some(*artifact))
     }
 }

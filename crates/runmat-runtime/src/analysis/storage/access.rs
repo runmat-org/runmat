@@ -411,16 +411,18 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         step: &AnalysisStudyStepRunData,
         object_catalog: &runmat_execution::value::PublishedObjectCatalog,
         artifact_roots: &crate::analysis::FrequencySampleArtifactRootInventory,
+        render_topology: Option<&crate::analysis::AnalysisRenderTopology>,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, String> {
         let operation = || -> Result<_, AnalysisPublicationError> {
-            let prepared = frequency_sample::prepare_artifact(
+            let (prepared, tile_objects) = frequency_sample::prepare_artifact(
                 step,
                 object_catalog,
                 artifact_roots,
+                render_topology,
                 Utc::now().to_rfc3339(),
             )?;
-            let objects = frequency_sample::ingest_objects(&prepared, source)?;
+            let objects = frequency_sample::ingest_objects(&prepared, tile_objects, source)?;
             self.access(true)?
                 .persist_acoustic_frequency_record(prepared, objects)
         };

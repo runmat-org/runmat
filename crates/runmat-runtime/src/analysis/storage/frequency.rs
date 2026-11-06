@@ -143,6 +143,15 @@ pub(super) fn ingest_objects(
         }
     }
     validate_closure(artifact, |digest| objects.get(&digest).cloned())?;
+    merge_render_tile_objects(&mut objects, tile_objects)?;
+    Ok(objects)
+}
+
+/// Adds a frequency record's render tile objects to the objects it saves.
+pub(super) fn merge_render_tile_objects(
+    objects: &mut BTreeMap<Digest, Vec<u8>>,
+    tile_objects: RenderTileObjects,
+) -> Result<(), String> {
     for (digest, bytes) in tile_objects {
         match objects.get(&digest) {
             Some(existing) if existing != &bytes => {
@@ -154,7 +163,7 @@ pub(super) fn ingest_objects(
             }
         }
     }
-    Ok(objects)
+    Ok(())
 }
 
 pub(super) fn validate_closure(
