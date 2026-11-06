@@ -127,7 +127,7 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
         );
         assert_eq!(
             facts.workspace().projection_estimated_bytes.0,
-            2 * crate::planning::resource::TopologyResourceFacts::from_projection(&projection)
+            crate::planning::resource::TopologyResourceFacts::from_projection(&projection)
                 .unwrap()
                 .estimated_resident_bytes
                 .0
@@ -318,7 +318,10 @@ fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
         let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
         let factor = facts.solver_resident_bytes().unwrap().0;
         let multigrid = facts.clone().on_path(ThermalSolvePath::ConductionMultigrid);
-        assert_eq!(multigrid.solver_admission().factor_nonzero_upper_bound, Count(0));
+        assert_eq!(
+            multigrid.solver_admission().factor_nonzero_upper_bound,
+            Count(0)
+        );
         let multigrid_bytes = multigrid.solver_resident_bytes().unwrap().0;
         assert!(multigrid_bytes < factor, "{multigrid_bytes} vs {factor}");
         // Within the budget the factor needs, the plan keeps the factor.
@@ -345,7 +348,11 @@ fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
         small.accuracy.resources.set_resident_byte_budget(total - 1);
         assert!(matches!(
             super::super::thermal_preassembly::select_thermal_solve_path(
-                facts.clone(), &history, &model, &small, 0,
+                facts.clone(),
+                &history,
+                &model,
+                &small,
+                0,
             ),
             Err(ResourcePlanningError::ThermalSolveCeiling { .. })
         ));
@@ -381,8 +388,9 @@ pub(crate) fn derivation_peak_fits_the_planning_law(
     );
     let projection_estimate =
         crate::topology::AnalysisProjection::derivation_resident_bytes_estimate(mesh).unwrap();
-    let (_, _, projection_peak) =
-        crate::topology::measure_test_allocations(|| crate::topology::AnalysisProjection::derive(mesh));
+    let (_, _, projection_peak) = crate::topology::measure_test_allocations(|| {
+        crate::topology::AnalysisProjection::derive(mesh)
+    });
     let (_, _, symbolic_peak) = crate::topology::measure_test_allocations(|| {
         super::super::preflight::factor_admission(facts.support())
     });
@@ -393,8 +401,14 @@ pub(crate) fn derivation_peak_fits_the_planning_law(
         symbolic_peak as u64 / rows,
         symbolic_peak as u64 / facts.support().column_indices().len() as u64,
     );
-    assert!(peak as u64 <= exact, "derivation peak {peak} exceeds {exact}");
-    assert!(exact <= estimate, "exact bound {exact} exceeds the estimate {estimate}");
+    assert!(
+        peak as u64 <= exact,
+        "derivation peak {peak} exceeds {exact}"
+    );
+    assert!(
+        exact <= estimate,
+        "exact bound {exact} exceeds the estimate {estimate}"
+    );
 }
 
 // witness: FEA-THERMAL-SOLVER-001/support_derivation_memory @ thermal_steady/tet4/numerical_kernel;

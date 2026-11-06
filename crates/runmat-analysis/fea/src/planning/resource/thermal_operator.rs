@@ -8,8 +8,8 @@ use crate::{
 };
 
 use super::{
-    ByteCount, ResourcePlanningError, SolverAdmissionResourcePolicy,
-    ThermalHistoryResourceFacts, ThermalWorkspaceResourceFacts,
+    ByteCount, ResourcePlanningError, SolverAdmissionResourcePolicy, ThermalHistoryResourceFacts,
+    ThermalWorkspaceResourceFacts,
 };
 
 mod preparation;
@@ -41,6 +41,9 @@ pub struct ThermalOperatorResourceFacts {
     factor_admission: SolverAdmissionResourcePolicy,
     admission: SolverAdmissionResourcePolicy,
     csr_payload_bytes: ByteCount,
+    /// One operator-shaped CSR payload on the support, and the diagonal zero damping matrix.
+    csr_copy_bytes: ByteCount,
+    diagonal_bytes: ByteCount,
     support_payload_bytes: ByteCount,
     workspace: ThermalWorkspaceResourceFacts,
     planning_resident_bytes: ByteCount,
@@ -58,15 +61,8 @@ impl ThermalOperatorResourceFacts {
         let (plans, dofs) =
             crate::physics::thermal_interface::solid_conduction(&projection, interfaces)
                 .map_err(ResourcePlanningError::Invalid)?;
-        // A nodal interface inventory leaves the projection unchanged; only a finite
-        // conductance splits it into a second copy.
-        let split;
-        let projection = if dofs.is_nodal() {
-            &projection
-        } else {
-            split = dofs.split_projection(&projection, &plans);
-            &split
-        };
+        // A finite conductance splits the projection in place; a nodal inventory leaves it.
+        let projection = &dofs.split_projection(projection, &plans);
         let workspace = ThermalWorkspaceResourceFacts::derive(projection)?;
         let extra = dofs.support_cliques(projection, &plans);
         let elements = projection.elements.len();
@@ -97,18 +93,13 @@ impl ThermalOperatorResourceFacts {
             .map_err(|_| ResourcePlanningError::Overflow("thermal rows"))?;
         let entries = u64::try_from(support.column_indices().len())
             .map_err(|_| ResourcePlanningError::Overflow("thermal sparse entries"))?;
-        // Two live assemblies (K,C each), derived effective K and cloned C, prepared K,
-        // plus a possible accelerator prepared-system clone and the explicitly stored diagonal
-        // zero damping matrix. This excludes provider-owned buffers. Steady/CPU use fewer copies.
+        let csr_copy_bytes = csr_bytes(rows, entries)?;
         let diagonal_bytes = csr_bytes(rows, rows)?;
-        // Nonlinear radiation also constructs the shared-support tangent assembler and
-        // finalized Jacobian while the conductivity/capacity assemblies remain live.
-        let csr_payload_bytes = csr_bytes(rows, entries)?
-            .checked_mul(10)
-            .and_then(|bytes| bytes.checked_add(diagonal_bytes))
-            .ok_or(ResourcePlanningError::Overflow(
-                "thermal simultaneous CSR payloads",
-            ))?;
+        let csr_payload_bytes = simultaneous_csr_bytes(
+            csr_copy_bytes,
+            diagonal_bytes,
+            TRANSIENT_OR_NONLINEAR_CSR_COPIES,
+        )?;
         Ok(Self {
             topology_digest: Digest::from_bytes(*mesh.canonical_digest.bytes()),
             support,
@@ -116,6 +107,8 @@ impl ThermalOperatorResourceFacts {
             factor_admission: admission.clone(),
             admission,
             csr_payload_bytes: ByteCount(csr_payload_bytes),
+            csr_copy_bytes: ByteCount(csr_copy_bytes),
+            diagonal_bytes: ByteCount(diagonal_bytes),
             support_payload_bytes: ByteCount(pattern_bytes(rows, entries)?),
             workspace,
             planning_resident_bytes,
@@ -139,6 +132,17 @@ impl ThermalOperatorResourceFacts {
 
     /// The same facts on `path`. The conduction multigrid path admits the structural proof's
     /// inventory in place of the factor.
+    /// The same facts for a linear steady procedure (static, no radiation), which holds
+    /// fewer simultaneous operator payloads than a transient or radiation procedure.
+    pub fn for_steady_linear(mut self) -> Result<Self, ResourcePlanningError> {
+        self.csr_payload_bytes = ByteCount(simultaneous_csr_bytes(
+            self.csr_copy_bytes.0,
+            self.diagonal_bytes.0,
+            STEADY_LINEAR_CSR_COPIES,
+        )?);
+        Ok(self)
+    }
+
     pub fn on_path(mut self, path: ThermalSolvePath) -> Self {
         self.admission = match path {
             ThermalSolvePath::ProvingFactorization => self.factor_admission.clone(),
@@ -165,7 +169,9 @@ impl ThermalOperatorResourceFacts {
                             .checked_mul(CONDUCTION_MULTIGRID_VECTOR_COUNT * 8)
                             .ok_or(ResourcePlanningError::Overflow("thermal PCG vectors"))?,
                     )
-                    .and_then(|bytes| bytes.checked_add(self.admission.resident_bytes_upper_bound.0))
+                    .and_then(|bytes| {
+                        bytes.checked_add(self.admission.resident_bytes_upper_bound.0)
+                    })
                     .map(ByteCount)
                     .ok_or(ResourcePlanningError::Overflow(
                         "thermal conduction multigrid storage",
@@ -249,6 +255,28 @@ impl ThermalOperatorResourceFacts {
 /// iterate; the preconditioned residual and operator output of the spectral estimate; the
 /// backward-error residual; and the initial guess.
 const CONDUCTION_MULTIGRID_VECTOR_COUNT: u64 = 10;
+
+/// Transient: two live assemblies (K and C each), the derived effective K and cloned C, the
+/// prepared K and a possible accelerator prepared-system clone. Nonlinear radiation adds the
+/// shared-support tangent assembler and the finalized Jacobian while both assemblies stay live.
+/// Provider-owned buffers are excluded.
+const TRANSIENT_OR_NONLINEAR_CSR_COPIES: u64 = 10;
+/// Linear steady (`steady_increment_operator`): the assembly's K and C, their clones in the
+/// canonical operators, the prepared K and a possible accelerator prepared-system clone.
+const STEADY_LINEAR_CSR_COPIES: u64 = 6;
+
+/// `copies` operator-shaped payloads plus the explicitly stored diagonal zero damping matrix.
+fn simultaneous_csr_bytes(
+    copy: u64,
+    diagonal: u64,
+    copies: u64,
+) -> Result<u64, ResourcePlanningError> {
+    copy.checked_mul(copies)
+        .and_then(|bytes| bytes.checked_add(diagonal))
+        .ok_or(ResourcePlanningError::Overflow(
+            "thermal simultaneous CSR payloads",
+        ))
+}
 
 fn csr_bytes(rows: u64, entries: u64) -> Result<u64, ResourcePlanningError> {
     pattern_bytes(rows, entries)?

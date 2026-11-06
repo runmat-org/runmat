@@ -181,11 +181,11 @@ pub(crate) fn assemble(
     // their own side-owned nodes, joined to the first side by the interface conductance.
     let (interfaces, dofs) = thermal_interface::solid_conduction(&projection, &model.interfaces)
         .map_err(ThermalAssemblyError::InvalidProjection)?;
-    // A nodal inventory keeps the projection itself; only a split needs a second copy.
+    // A finite-conductance split rewrites the projection in place; one copy stays live.
     let projection = if dofs.is_nodal() {
         projection
     } else {
-        dofs.split_projection(&projection, &interfaces)
+        dofs.split_projection(projection, &interfaces)
     };
     if properties.identity.mesh_digest != Some(mesh.canonical_digest)
         || properties.identity.geometry_id != model.geometry_id

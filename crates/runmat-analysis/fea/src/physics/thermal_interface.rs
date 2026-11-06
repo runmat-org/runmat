@@ -292,7 +292,11 @@ impl InterfaceDofs {
         projection: &AnalysisProjection,
         plans: &[InterfacePlan],
     ) -> Vec<Vec<usize>> {
-        let coupled = || plans.iter().filter(|plan| plan.law != InterfaceLaw::Perfect);
+        let coupled = || {
+            plans
+                .iter()
+                .filter(|plan| plan.law != InterfaceLaw::Perfect)
+        };
         let mut cliques = Vec::with_capacity(coupled().map(|plan| plan.faces.len()).sum());
         for plan in coupled() {
             for &(face, first, second) in &plan.faces {
@@ -336,26 +340,62 @@ impl InterfaceDofs {
     /// this projection unchanged; the conformal interface faces keep their first-side nodes.
     pub(crate) fn split_projection(
         &self,
-        projection: &AnalysisProjection,
+        mut split: AnalysisProjection,
         plans: &[InterfacePlan],
     ) -> AnalysisProjection {
-        let mut split = projection.clone();
         if self.is_nodal() {
             return split;
         }
+        // The projection is rewritten in place, so only one copy is live; the adjacency is
+        // rebuilt below, so the old one is released first.
+        split.node_neighbors = Vec::new();
         use sha2::{Digest as _, Sha256};
+        split.nodes.reserve_exact(self.second.len());
         for &(node, _) in &self.second {
-            let original = &projection.nodes[node];
+            let original = &split.nodes[node];
             let mut hasher = Sha256::new();
             hasher.update(b"runmat.thermal.interface.second_side_node.v1");
             hasher.update(original.stable_identity.bytes());
-            split.nodes.push(crate::topology::ProjectedNode {
+            let node = crate::topology::ProjectedNode {
                 node_id: original.node_id,
                 stable_identity: runmat_meshing_core::StableDigest::from_bytes(
                     hasher.finalize().into(),
                 ),
                 coordinates_m: original.coordinates_m,
-            });
+            };
+            split.nodes.push(node);
+        }
+        // Conductance couplings read the interface faces' original first-side nodes, so they
+        // are collected before the exterior faces are renumbered. The pair list is reserved at
+        // its exact length (the planning law charges it at that length).
+        let coupled_pairs: usize = plans
+            .iter()
+            .filter(|plan| plan.law != InterfaceLaw::Perfect)
+            .flat_map(|plan| plan.faces.iter())
+            .map(|&(face, _, _)| 2 * split.boundary_faces[face].node_indices.len().pow(2))
+            .sum();
+        let element_pairs: usize = split
+            .elements
+            .iter()
+            .map(|element| element.node_indices.len())
+            .map(|width| width * width.saturating_sub(1))
+            .sum();
+        let mut pairs = Vec::with_capacity(coupled_pairs + element_pairs);
+        for plan in plans {
+            if plan.law == InterfaceLaw::Perfect {
+                continue;
+            }
+            for &(face, first, second) in &plan.faces {
+                let face = &split.boundary_faces[face];
+                let a = self.face_dofs(face, first);
+                let b = self.face_dofs(face, second);
+                for &x in &a {
+                    for &y in &b {
+                        pairs.push((x, y));
+                        pairs.push((y, x));
+                    }
+                }
+            }
         }
         for (index, element) in split.elements.iter_mut().enumerate() {
             if self.second_side[index] {
@@ -371,28 +411,11 @@ impl InterfaceDofs {
                 }
             }
         }
-        let mut pairs = Vec::new();
         for element in &split.elements {
             for &a in &element.node_indices {
                 for &b in &element.node_indices {
                     if a != b {
                         pairs.push((a, b));
-                    }
-                }
-            }
-        }
-        for plan in plans {
-            if plan.law == InterfaceLaw::Perfect {
-                continue;
-            }
-            for &(face, first, second) in &plan.faces {
-                let face = &projection.boundary_faces[face];
-                let a = self.face_dofs(face, first);
-                let b = self.face_dofs(face, second);
-                for &x in &a {
-                    for &y in &b {
-                        pairs.push((x, y));
-                        pairs.push((y, x));
                     }
                 }
             }

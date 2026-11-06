@@ -2,12 +2,7 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisModel, MaterialModel};
-use runmat_canonical_codec::CanonicalLimits;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
-use serde::{
-    ser::{SerializeSeq, SerializeTuple},
-    Serialize, Serializer,
-};
 
 use super::{
     compile::{material_inventory, validate_mesh, visit, Assignment},
@@ -84,8 +79,16 @@ impl<'a> PreparedProperties<'a> {
         let materials = material_inventory(model)?;
         let mut typed_bytes = std::mem::size_of::<CompiledPropertyMap>() as u64;
         let mut entry_count = 0_usize;
-        // This pass preserves typed ownership errors before the serializer invokes the same
-        // visitor. No owned constitutive, section, or audit metadata has been cloned.
+        // Identity and audit encodings run one element at a time (identity.rs `sequence_digest`)
+        // and drop each buffer before the next, so their workspace is the largest single
+        // element's direct-encoder profile, never the sum over the mesh. Beam, shell and laminate
+        // owners clone their section, material and ply metadata per element; that owned heap is
+        // bounded by the same per-element profile and summed. Solid and cell owners share their
+        // material and assignment-id owners, charged once below.
+        let mut element_workspace = 0_u64;
+        let mut owned_occurrences = 0_u64;
+        // This pass preserves typed ownership errors and allocates nothing: no owned
+        // constitutive, section, or audit metadata has been cloned.
         visit(
             model,
             mesh,
@@ -93,19 +96,41 @@ impl<'a> PreparedProperties<'a> {
             explicit.as_ref(),
             &mut |selected| {
                 entry_count = entry_count.checked_add(1).ok_or_else(overflow)?;
+                let element = runmat_canonical_codec::profile_canonical_encoding(
+                    &selected,
+                    // The selected record is a superset of each identity element's contents.
+                    runmat_canonical_codec::CanonicalLimits::new(
+                        usize::MAX,
+                        usize::MAX,
+                        usize::MAX,
+                        64,
+                    ),
+                )
+                .map_err(|error| PropertyCompilationError::Resource(error.to_string()))?
+                .resident_workspace_bytes_estimate;
+                element_workspace = element_workspace.max(element);
                 let entry_bytes = match selected {
                     SelectedProperty::Solid { .. } | SelectedProperty::Cell { .. } => {
                         map_entry_bytes::<CompiledElementMaterial>()?
                     }
-                    SelectedProperty::Beam { .. } => map_entry_bytes::<CompiledBeamProperty>()?,
-                    SelectedProperty::Shell { .. } => map_entry_bytes::<CompiledShellProperty>()?,
-                    SelectedProperty::Laminate { section, .. } => add(
-                        map_entry_bytes::<CompiledShellProperty>()?,
-                        scale(
-                            section.plies.len(),
-                            std::mem::size_of::<CompiledLaminatePly>() as u64,
-                        )?,
-                    )?,
+                    SelectedProperty::Beam { .. } => {
+                        owned_occurrences = add(owned_occurrences, element)?;
+                        map_entry_bytes::<CompiledBeamProperty>()?
+                    }
+                    SelectedProperty::Shell { .. } => {
+                        owned_occurrences = add(owned_occurrences, element)?;
+                        map_entry_bytes::<CompiledShellProperty>()?
+                    }
+                    SelectedProperty::Laminate { section, .. } => {
+                        owned_occurrences = add(owned_occurrences, element)?;
+                        add(
+                            map_entry_bytes::<CompiledShellProperty>()?,
+                            scale(
+                                section.plies.len(),
+                                std::mem::size_of::<CompiledLaminatePly>() as u64,
+                            )?,
+                        )?
+                    }
                 };
                 typed_bytes = add(
                     typed_bytes,
@@ -119,22 +144,33 @@ impl<'a> PreparedProperties<'a> {
                 Ok(())
             },
         )?;
-        // The metadata profile below allocates nothing, so the complete compilation phase is
-        // admitted once and a rejection reports that phase, not a partial sum.
-        // Identity and audit encodings write the selected metadata directly into reserved
-        // output, one encoding at a time; their workspace is the direct encoder's profile.
-        let metadata = runmat_canonical_codec::profile_canonical_encoding(
-            &Metadata {
-                model,
-                mesh,
-                materials: &materials,
-                explicit: explicit.as_ref(),
-            },
-            // Expanded selected occurrences are not bounded by the authored workload byte cap.
-            CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
-        )
-        .map_err(|error| PropertyCompilationError::Resource(error.to_string()))?
-        .resident_workspace_bytes_estimate;
+        // The header contracts are refused above their limit; their encoder holds at most the
+        // limit plus its copy slack.
+        let header_workspace = scale(
+            2,
+            super::identity::HEADER_LIMITS.maximum_encoded_bytes as u64,
+        )?;
+        // One shared pair of id owners per assignment, plus its lookup slot.
+        let assignment_ids =
+            model
+                .material_assignments
+                .iter()
+                .try_fold(0_u64, |total, assignment| {
+                    add(
+                        total,
+                        (assignment.expected_material_id.len()
+                            + assignment.assigned_material_id.len()
+                            + 4 * std::mem::size_of::<usize>()
+                            + 2 * (std::mem::size_of::<(
+                                usize,
+                                (std::sync::Arc<str>, std::sync::Arc<str>),
+                            )>() + std::mem::size_of::<usize>())) as u64,
+                    )
+                })?;
+        let metadata = add(
+            add(element_workspace, header_workspace)?,
+            add(owned_occurrences, assignment_ids)?,
+        )?;
         // Elements share one owner per material; the table is charged once, not per element.
         let shared_materials = materials.values().try_fold(0_u64, |total, material| {
             add(
@@ -195,41 +231,6 @@ impl<'a> PreparedProperties<'a> {
             output.audit,
         )
         .map_err(PropertyCompilationError::Identity)
-    }
-}
-
-struct Metadata<'a> {
-    model: &'a AnalysisModel,
-    mesh: Option<&'a SolverMeshArtifact>,
-    materials: &'a BTreeMap<&'a str, &'a MaterialModel>,
-    explicit: Option<&'a PreparedExplicitTopology<'a>>,
-}
-impl Serialize for Metadata<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut tuple = serializer.serialize_tuple(2)?;
-        tuple.serialize_element(&self.model.geometry_id)?;
-        tuple.serialize_element(&SelectedMetadata(self))?;
-        tuple.end()
-    }
-}
-struct SelectedMetadata<'a>(&'a Metadata<'a>);
-impl Serialize for SelectedMetadata<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::Error;
-        let mut sequence = serializer.serialize_seq(None)?;
-        visit(
-            self.0.model,
-            self.0.mesh,
-            self.0.materials,
-            self.0.explicit,
-            &mut |selected| {
-                sequence
-                    .serialize_element(&selected)
-                    .map_err(|error| PropertyCompilationError::Resource(error.to_string()))
-            },
-        )
-        .map_err(S::Error::custom)?;
-        sequence.end()
     }
 }
 

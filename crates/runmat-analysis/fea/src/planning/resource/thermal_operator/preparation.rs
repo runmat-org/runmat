@@ -14,8 +14,8 @@ impl ThermalOperatorResourceFacts {
         Self::derivation_resident_bytes(mesh, None)
     }
 
-    /// The support-derivation law: the projection (twice when a conformal interface may split it),
-    /// then the larger of the support builder (with its finished pattern) and the finished pattern
+    /// The support-derivation law: the projection (with the split's added nodes when a conformal
+    /// interface may split it), then the largest of the split's pair list, the support builder (with its finished pattern) and the finished pattern
     /// plus the symbolic factor analysis that sizes the proving factor. `entries` is the support's
     /// distinct entry count when known; otherwise the repeated clique couplings bound it.
     pub(crate) fn derivation_resident_bytes(
@@ -36,10 +36,35 @@ impl ThermalOperatorResourceFacts {
         let interface_nodes = interface_widths
             .clone()
             .try_fold(0, |total, width| add(total, count(width)?))?;
-        let projection = if interface_nodes > 0 {
-            mul(projection, 2)?
+        // The split rewrites the projection in place (`InterfaceDofs::split_projection`): it adds
+        // each second-side node and its neighbor list header, at most one neighbor entry per
+        // conductance pair, and holds its exact-length (row, column) pair list until the new
+        // adjacency is built. The pair list is freed before the support builder runs.
+        let (projection, split_pairs) = if interface_nodes > 0 {
+            let coupled = interface_widths.clone().try_fold(0, |total, width| {
+                add(total, mul(2, mul(count(width)?, count(width)?)?)?)
+            })?;
+            let element = mesh
+                .topology
+                .volume_elements
+                .iter()
+                .map(|e| count(e.node_ids.len()))
+                .try_fold(0, |total, width| {
+                    let width = width?;
+                    add(total, mul(width, width.saturating_sub(1))?)
+                })?;
+            let pair = std::mem::size_of::<(usize, usize)>() as u64;
+            let node = (std::mem::size_of::<crate::topology::ProjectedNode>()
+                + std::mem::size_of::<Vec<usize>>()) as u64;
+            (
+                add(
+                    projection,
+                    add(mul(interface_nodes, node)?, mul(coupled, 8)?)?,
+                )?,
+                mul(add(coupled, element)?, pair)?,
+            )
         } else {
-            projection
+            (projection, 0)
         };
         let nodes = add(count(mesh.topology.nodes.len())?, interface_nodes)?;
         let widths = || {
@@ -47,7 +72,12 @@ impl ThermalOperatorResourceFacts {
                 .volume_elements
                 .iter()
                 .map(|e| e.node_ids.len())
-                .chain(mesh.topology.boundary_faces.iter().map(|f| f.node_ids.len()))
+                .chain(
+                    mesh.topology
+                        .boundary_faces
+                        .iter()
+                        .map(|f| f.node_ids.len()),
+                )
         };
         let extra_incidences = mul(interface_nodes, 2)?;
         let incidences = add(
@@ -77,10 +107,14 @@ impl ThermalOperatorResourceFacts {
         )?;
         let pattern = add(mul(add(nodes, 1)?, 8)?, mul(entries, 8)?)?;
         let symbolic = add(pattern, symbolic_analysis_bytes(nodes, entries)?)?;
-        [projection, builder.max(symbolic), 64 * 1024]
-            .into_iter()
-            .try_fold(0, add)
-            .map(ByteCount)
+        [
+            projection,
+            builder.max(symbolic).max(split_pairs),
+            64 * 1024,
+        ]
+        .into_iter()
+        .try_fold(0, add)
+        .map(ByteCount)
     }
 }
 

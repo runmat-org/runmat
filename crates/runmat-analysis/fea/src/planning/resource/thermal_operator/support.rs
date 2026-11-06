@@ -126,11 +126,15 @@ pub(super) fn build<'a>(
 
 fn add(left: u64, right: u64) -> Result<u64, ResourcePlanningError> {
     left.checked_add(right)
-        .ok_or(ResourcePlanningError::Overflow("thermal support construction"))
+        .ok_or(ResourcePlanningError::Overflow(
+            "thermal support construction",
+        ))
 }
 fn mul(left: u64, right: u64) -> Result<u64, ResourcePlanningError> {
     left.checked_mul(right)
-        .ok_or(ResourcePlanningError::Overflow("thermal support construction"))
+        .ok_or(ResourcePlanningError::Overflow(
+            "thermal support construction",
+        ))
 }
 
 #[cfg(test)]

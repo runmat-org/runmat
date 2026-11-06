@@ -91,6 +91,7 @@ impl CompiledPropertyMap {
                 .checked_mul(std::mem::size_of::<CompiledPropertyAudit>() as u64)
                 .ok_or("audit storage overflow")?,
         )?;
+        let mut ids = std::collections::BTreeSet::new();
         for CompiledPropertyAudit {
             element_identity: _,
             owner,
@@ -103,8 +104,15 @@ impl CompiledPropertyMap {
                     assigned_material_id,
                     confidence: _,
                 } => {
-                    add(&mut total, expected_material_id.capacity() as u64)?;
-                    add(&mut total, assigned_material_id.capacity() as u64)?;
+                    // Elements of one assignment share its id owners: charge each once.
+                    for id in [expected_material_id, assigned_material_id] {
+                        if ids.insert(Arc::as_ptr(id) as *const u8 as usize) {
+                            add(
+                                &mut total,
+                                (id.len() + 2 * std::mem::size_of::<usize>()) as u64,
+                            )?;
+                        }
+                    }
                 }
                 CompiledPropertyAuditOwner::Laminate {
                     section_id,
@@ -123,6 +131,7 @@ impl CompiledPropertyMap {
                 }
             }
         }
+        add(&mut total, map_slots::<usize, ()>(ids.len())?)?;
         if total > limits.maximum_encoded_bytes as u64 {
             return Err("property storage exceeds budget".into());
         }

@@ -129,6 +129,11 @@ impl ThermalPreassemblyResourceFacts {
             step.accuracy.resources.resident_byte_budget(),
         )?;
         let operators = ThermalOperatorResourceFacts::derive(mesh, &model.interfaces)?;
+        let operators = if multigrid_admitted(model, step) {
+            operators.for_steady_linear()?
+        } else {
+            operators
+        };
         let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
         let observations = match observations {
             crate::pipeline::thermal::ThermalObservationExecution::Inline => {
@@ -195,33 +200,40 @@ impl ThermalPreassemblyResourceFacts {
         } else {
             factor_numerical
         };
-        let before_properties = components
-            .checked_add(least_numerical)
-            .ok_or(ResourcePlanningError::Overflow("thermal property compilation"))?;
+        let before_properties =
+            components
+                .checked_add(least_numerical)
+                .ok_or(ResourcePlanningError::Overflow(
+                    "thermal property compilation",
+                ))?;
         require_ceiling(before_properties, maximum)?;
         // Admit actual selected metadata before owned constitutive/section/audit cloning.
         // The compiler owns selection for both the profile and materialization passes.
-        let prepared =
-            crate::properties::PreparedProperties::prepare(model, Some(mesh), maximum - before_properties)
-                .map_err(|error| match error {
-                    crate::properties::PropertyCompilationError::ResourceCeiling {
+        let prepared = crate::properties::PreparedProperties::prepare(
+            model,
+            Some(mesh),
+            maximum - before_properties,
+        )
+        .map_err(|error| match error {
+            crate::properties::PropertyCompilationError::ResourceCeiling { required, .. } => {
+                match before_properties.checked_add(required) {
+                    Some(required) => ResourcePlanningError::AccuracyCeiling {
+                        resource: "thermal preassembly components",
                         required,
-                        ..
-                    } => match before_properties.checked_add(required) {
-                        Some(required) => ResourcePlanningError::AccuracyCeiling {
-                            resource: "thermal preassembly components",
-                            required,
-                            maximum,
-                        },
-                        None => ResourcePlanningError::Overflow("thermal property compilation"),
+                        maximum,
                     },
-                    error => ResourcePlanningError::Invalid(error.to_string()),
-                })?;
+                    None => ResourcePlanningError::Overflow("thermal property compilation"),
+                }
+            }
+            error => ResourcePlanningError::Invalid(error.to_string()),
+        })?;
         // The solve path is selected against the budget left after every other component, so
         // the selected path's whole preassembly reservation fits the budget.
         let alongside = components
             .checked_add(prepared.estimated_resident_bytes)
-            .ok_or(ResourcePlanningError::Overflow("thermal property compilation"))?;
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal property compilation",
+            ))?;
         require_ceiling(alongside, maximum)?;
         let operators = select_thermal_solve_path(operators, &history, model, step, alongside)?;
         let base = operators
@@ -303,7 +315,9 @@ pub(crate) fn select_thermal_solve_path(
     let total = |bytes: u64| {
         bytes
             .checked_add(alongside)
-            .ok_or(ResourcePlanningError::Overflow("thermal solve path selection"))
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal solve path selection",
+            ))
     };
     let factorization = total(operators.numerical_reservation_bytes(history)?.0)?;
     if factorization <= maximum {
