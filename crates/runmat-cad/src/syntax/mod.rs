@@ -47,6 +47,7 @@ use crate::diagnostics::{SourceSpan, SpanMap};
 use crate::drawing::DrawingDocument;
 use crate::ids::FilePath;
 use crate::model::PartDocument;
+use crate::modules::ModuleScope;
 use crate::scope::UseDecl;
 use runmat_design_syntax::document::{
     parse_document, print_document, Collection, DocumentGrammar, DocumentModel, DocumentSyntax,
@@ -287,8 +288,28 @@ pub fn grammar_parse<T: DeserializeOwned>(
     path: &str,
     source: &str,
 ) -> Parsed<T> {
-    let syntax = parse_document(grammar, path, source, &CadValues);
+    grammar_parse_in(grammar, path, source, &ModuleScope::from_files([(path, source)]))
+}
+
+/// [`grammar_parse`] with the designs it names by symbol resolved through `scope` (the folders
+/// of the workspace it was read from).
+pub fn grammar_parse_in<T: DeserializeOwned>(
+    grammar: &DocumentGrammar,
+    path: &str,
+    source: &str,
+    scope: &ModuleScope,
+) -> Parsed<T> {
+    let mut syntax = parse_document(grammar, path, source, &CadValues);
     let mut diagnostics = syntax.diagnostics.clone();
+    if diagnostics.is_empty() {
+        for (at, message) in crate::modules::bind(&mut syntax.json, path, scope) {
+            diagnostics.push(FeaSyntaxDiagnostic {
+                kind: runmat_design_syntax::FeaSyntaxDiagnosticKind::InvalidExpression,
+                span: syntax.span_of_json_path(&at),
+                message,
+            });
+        }
+    }
     let document = if diagnostics.is_empty() {
         match syntax.json.decode::<T>() {
             Ok(document) => Some(document),
@@ -340,6 +361,7 @@ pub fn print_with<T: Serialize + DeserializeOwned>(
         .and_then(Json::as_str)
         .unwrap_or_default()
         .to_string();
+
     let uses: Vec<UseItem> = uses.iter().map(use_item).collect();
     print_document(
         grammar,
@@ -347,7 +369,8 @@ pub fn print_with<T: Serialize + DeserializeOwned>(
         &json,
         &uses,
         &grammar.dialect.stem(&path),
-        &CadValues,
+        // Designs print by symbol, relative to this file's folder.
+        &value::DocumentValues { path: &path },
     )
 }
 
@@ -363,12 +386,22 @@ pub fn parse_assembly(path: &str, source: &str) -> Parsed<AssemblyDocument> {
     grammar_parse(&ASSEMBLY, path, source)
 }
 
+/// [`parse_assembly`] in the folders of `scope`.
+pub fn parse_assembly_in(path: &str, source: &str, scope: &ModuleScope) -> Parsed<AssemblyDocument> {
+    grammar_parse_in(&ASSEMBLY, path, source, scope)
+}
+
 pub fn print_assembly(document: &AssemblyDocument, uses: &[UseDecl]) -> Result<String, PrintError> {
     print_with(&ASSEMBLY, document, uses)
 }
 
 pub fn parse_drawing(path: &str, source: &str) -> Parsed<DrawingDocument> {
     grammar_parse(&DRAWING, path, source)
+}
+
+/// [`parse_drawing`] in the folders of `scope`.
+pub fn parse_drawing_in(path: &str, source: &str, scope: &ModuleScope) -> Parsed<DrawingDocument> {
+    grammar_parse_in(&DRAWING, path, source, scope)
 }
 
 pub fn print_drawing(document: &DrawingDocument, uses: &[UseDecl]) -> Result<String, PrintError> {

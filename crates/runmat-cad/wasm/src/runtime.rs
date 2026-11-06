@@ -10,7 +10,7 @@ use runmat_cad::model::PartDocument;
 use runmat_cad::regen::kernel::TessellationOptions;
 use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest, RegenResult};
 use runmat_cad::sketch_solver::ConstraintSketchSolver;
-use runmat_cad::syntax::{parse_assembly, parse_part};
+use runmat_cad::syntax::{parse_assembly_in, parse_part};
 use runmat_cad::units::StubUnits;
 use runmat_cad::value::NoDynamicValues;
 use serde::Serialize;
@@ -109,6 +109,18 @@ pub fn resolve_path(from: &str, reference: &str, files: &Files) -> String {
         .unwrap_or(local)
 }
 
+/// The folder scope of `files` with `path` (at `text`) among them: what designs named by
+/// symbol resolve through ([`runmat_cad::modules`]).
+pub fn module_scope(path: &str, text: &str, files: &Files) -> runmat_cad::modules::ModuleScope {
+    runmat_cad::modules::ModuleScope::from_files(
+        files
+            .iter()
+            .filter(|(p, _)| p.as_str() != path)
+            .map(|(p, t)| (p.as_str(), t.as_str()))
+            .chain(std::iter::once((path, text))),
+    )
+}
+
 fn is_assembly(path: &str) -> bool {
     path.ends_with(".assembly")
 }
@@ -146,14 +158,8 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
             })
             .collect();
     }
-    let parsed = parse_assembly(path, text);
-    let Some(doc) = parsed.document else {
-        return Vec::new();
-    };
-    definitions(&doc)
-        .iter()
-        .map(|d| resolve_path(path, d.file.as_str(), &Files::new()))
-        .collect()
+    // The folders it can name designs in, and the design files it names by path.
+    runmat_cad::modules::dependencies(path, text)
 }
 
 /// A part regenerated on the installed kernel: its projection and display.
@@ -356,7 +362,8 @@ pub fn resolve_assembly_in(
     files: &Files,
     configuration: Option<&str>,
 ) -> Result<AssemblyResolution, Vec<Diagnostic>> {
-    let parsed = parse_assembly(path, text);
+    let scope = module_scope(path, text, files);
+    let parsed = parse_assembly_in(path, text, &scope);
     let Some(top) = parsed.document else {
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
     };
@@ -419,7 +426,7 @@ pub fn resolve_assembly_in(
                         message: format!("{key}: {message}, so it draws as its box"),
                     }),
                 },
-                DefinitionKind::Assembly => match parse_assembly(&key, text).document {
+                DefinitionKind::Assembly => match parse_assembly_in(&file, text, &scope).document {
                     Some(sub) => {
                         queue.push((file.clone(), sub.clone()));
                         source.add_assembly(sub);
@@ -485,7 +492,17 @@ pub fn resolve_assembly_in(
             }
         }
     }
-    let top_doc = parse_assembly(path, text).document.expect("parsed above");
+    let top_doc = parse_assembly_in(path, text, &scope).document.expect("parsed above");
+    // Two designs of one kind and name in a folder, and folders that use each other.
+    for problem in scope.problems() {
+        problems.push(Diagnostic {
+            path: path.to_owned(),
+            start: 0,
+            end: 0,
+            severity: "error".into(),
+            message: runmat_cad::modules::problem_text(&problem),
+        });
+    }
     source.add_assembly(top_doc);
     let ctx = ResolveContext {
         source: &source,
@@ -615,12 +632,10 @@ mod tests {
 
     #[test]
     fn an_assembly_draws_its_parts_from_their_text() {
-        let assembly = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket from \"bracket.part\" as a\n    use part bracket from \"bracket.part\" as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
-        let deps = dependencies("/p/rig.assembly", assembly);
-        let files: Files = deps
-            .iter()
-            .map(|d| (d.clone(), BRACKET.to_owned()))
-            .collect();
+        let assembly = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket as a\n    use part bracket as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
+        // The parts are named in the assembly's folder: the host lists `/p/` and reads them.
+        assert_eq!(dependencies("/p/rig.assembly", assembly), ["/p/"]);
+        let files: Files = [("/p/bracket.part".to_owned(), BRACKET.to_owned())].into();
         let out: Value =
             serde_json::from_str(&compile_json("/p/rig.assembly", assembly, &files)).unwrap();
         if out.get("projection").is_none() {

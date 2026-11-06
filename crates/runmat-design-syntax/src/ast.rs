@@ -137,16 +137,39 @@ impl UseDeclaration {
         self.0.children().filter_map(Name::cast).collect()
     }
 
-    /// The symbol form's kind and name (`use part bracket from …`).
+    /// The symbol form's kind and name: `use part bracket from …`, or `use part bracket as left`
+    /// for a design in the same folder.
     pub fn symbol(&self) -> Option<(Name, Name)> {
         let names = self.names();
         if self.0.child(NodeKind::Path).is_some() && names.len() < 2 {
             return None;
         }
-        let has_from = direct_tokens(&self.0)
+        let tokens = direct_tokens(&self.0);
+        let has_from = tokens
             .iter()
             .any(|token| token.kind() == FeaTokenKind::Keyword(crate::lexical::FeaKeyword::From));
-        (has_from && names.len() >= 2).then(|| (names[0].clone(), names[1].clone()))
+        if has_from {
+            return (names.len() >= 2).then(|| (names[0].clone(), names[1].clone()));
+        }
+        if self.0.child(NodeKind::Path).is_some() || self.0.child(NodeKind::StringLiteral).is_some()
+        {
+            return None;
+        }
+        // No source: the kind and name are the two names before `as`.
+        let alias_at = tokens
+            .iter()
+            .find(|token| token.text() == "as")
+            .map_or(usize::MAX, |token| token.span().start);
+        let before: Vec<Name> = names
+            .into_iter()
+            .filter(|name| name.span().start < alias_at)
+            .collect();
+        (before.len() == 2).then(|| (before[0].clone(), before[1].clone()))
+    }
+
+    /// Whether the `use` names a design with no source: one in the same folder.
+    pub fn is_same_folder(&self) -> bool {
+        self.symbol().is_some() && self.source().is_none()
     }
 
     pub fn source(&self) -> Option<UseSource> {

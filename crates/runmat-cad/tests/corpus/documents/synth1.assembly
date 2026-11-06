@@ -2,7 +2,7 @@ runmat 0.7
 std 1
 
 assembly frame {
-    use part frame_std from "library/frame-std.part" as web {
+    use part frame_std from "../library" as web {
         configuration = {
             select = switch,
             cases = [
@@ -14,7 +14,7 @@ assembly frame {
             otherwise = { select = named, name = std }
         }
     }
-    use part clip from "library/clip.part" as clip {
+    use part clip from "../library" as clip {
         placement = { placement = offset, offset = { translation = [20 mm, -1500 mm, 1900 mm] } }
     }
 

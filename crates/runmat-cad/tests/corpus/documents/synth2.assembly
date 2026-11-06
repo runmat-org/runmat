@@ -4,11 +4,11 @@ std 1
 assembly section {
     input frame_pitch : length = 500 mm
 
-    use assembly frame from "fuselage/frame.assembly" as frame {
+    use assembly frame as frame {
         placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 0 mm] } }
     }
-    use part skin from "fuselage/skin.part" as skin
-    use part stringer from "library/stringer.part" as stringer
+    use part skin as skin
+    use part stringer from "../library" as stringer
 
     pattern frames = linear(seeds = [frame], direction = [1, 0, 0], spacing = input.frame_pitch, count = 6)
     pattern stringers = circular(

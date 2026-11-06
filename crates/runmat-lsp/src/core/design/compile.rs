@@ -17,7 +17,7 @@ pub(super) fn compile(
         Dialect::Part => compile_part(path, text, table),
         Dialect::Assembly => {
             let (mut problems, projection) = cad_front_end(
-                runmat_cad::syntax::parse_assembly(path, text),
+                runmat_cad::syntax::parse_assembly_in(path, text, &module_scope(path, text, files)),
                 path,
                 files,
                 text,
@@ -26,7 +26,7 @@ pub(super) fn compile(
             (problems, projection)
         }
         Dialect::Drawing => cad_front_end(
-            runmat_cad::syntax::parse_drawing(path, text),
+            runmat_cad::syntax::parse_drawing_in(path, text, &module_scope(path, text, files)),
             path,
             files,
             text,
@@ -64,6 +64,21 @@ pub(super) fn compile(
         }
         Dialect::Fea => (Vec::new(), None),
     }
+}
+
+/// The folder scope of `files` with this document among them.
+pub(super) fn module_scope(
+    path: &str,
+    text: &str,
+    files: &DesignFiles,
+) -> runmat_cad::modules::ModuleScope {
+    runmat_cad::modules::ModuleScope::from_files(
+        files
+            .iter()
+            .filter(|(p, _)| p.as_str() != path)
+            .map(|(p, t)| (p.as_str(), t.as_str()))
+            .chain(std::iter::once((path, text))),
+    )
 }
 
 pub(super) fn severity(text: &str) -> DiagnosticSeverity {

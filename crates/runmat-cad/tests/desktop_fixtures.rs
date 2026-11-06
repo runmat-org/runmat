@@ -525,7 +525,14 @@ fn drawing() -> DrawingDocument {
 fn the_drawing_fixture_round_trips_through_text() {
     let document = drawing();
     let text = runmat_cad::syntax::print_drawing(&document, &[]).unwrap();
-    let parsed = runmat_cad::syntax::parse_drawing(&document.path.0, &text);
+    // The drawing names its model by symbol: `model = { assembly = rig }` in its folder.
+    assert!(text.contains("model = { assembly = rig }"), "{text}");
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n}\n";
+    let scope = runmat_cad::modules::ModuleScope::from_files([
+        (document.path.0.as_str(), text.as_str()),
+        ("rig.assembly", rig),
+    ]);
+    let parsed = runmat_cad::syntax::parse_drawing_in(&document.path.0, &text, &scope);
     assert!(
         parsed.diagnostics.is_empty(),
         "{text}\n{:#?}",

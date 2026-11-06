@@ -536,6 +536,20 @@ impl FeaParser {
                     }
                 }
             }
+            // `use part seat_frame as left`: a design in the same folder, in scope with no path.
+            Some(_)
+                if significant.len() >= 3
+                    && is_name_token_at(self, significant[1])
+                    && is_name_token_at(self, significant[2])
+                    && self.lexeme(significant[2]) != "as"
+                    && significant.get(3).is_none_or(|index| {
+                        self.lexeme(*index) == "as" || self.at(*index, FeaTokenKind::At)
+                    }) =>
+            {
+                self.required_name(&significant, 1, "`use` requires a kind");
+                self.required_name(&significant, 2, "`use` requires a name");
+                cursor = 3;
+            }
             Some(_) => {
                 let path_end = significant
                     .iter()

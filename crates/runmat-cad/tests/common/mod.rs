@@ -136,6 +136,8 @@ pub fn region(name: &str, kind: TopoKind, select: Vec<Reference>, expect: Cardin
         kind,
         select,
         expect,
+        label: None,
+        body: None,
     }
 }
 
@@ -169,6 +171,7 @@ pub fn block() -> PartDocument {
         material: Some("material.aluminum".into()),
         color: None,
         properties: Vec::new(),
+        label: None,
     });
     d
 }
@@ -345,4 +348,73 @@ pub fn fid(s: &str) -> FeatureId {
 
 pub fn total_faces(r: &RegenResult) -> usize {
     r.state.bodies.iter().map(|b| b.topology.faces.len()).sum()
+}
+
+/// A folder scope for reading back text that names designs by symbol: a stub file declaring
+/// each design the model `json` names by file (occurrence definitions, interface frames,
+/// drawing models), plus the document `doc` itself.
+#[allow(dead_code)]
+pub fn stub_scope(doc: &str, text: &str, json: &serde_json::Value) -> runmat_cad::modules::ModuleScope {
+    use runmat_cad::modules::{kind_of_file, stem_name, ModuleScope};
+    use std::collections::{BTreeMap, BTreeSet};
+    fn walk(v: &serde_json::Value, out: &mut BTreeMap<String, BTreeSet<String>>) {
+        match v {
+            serde_json::Value::Object(o) => {
+                if let Some(file) = o.get("file").and_then(|f| f.as_str()) {
+                    if kind_of_file(file).is_some() {
+                        let names = out.entry(file.to_string()).or_default();
+                        if let Some(p) = o.get("part").and_then(|p| p.as_str()) {
+                            names.insert(p.to_string());
+                        }
+                    }
+                }
+                o.values().for_each(|x| walk(x, out));
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    let mut named = BTreeMap::new();
+    walk(json, &mut named);
+    let mut files: Vec<(String, String)> = vec![(doc.to_string(), text.to_string())];
+    for (file, names) in named {
+        let kind = kind_of_file(&file).unwrap();
+        let stem = stem_name(&file);
+        let stub = if kind == "part" {
+            let outputs: String = names
+                .iter()
+                .map(|n| format!("    output {n} = {{ body = feature.b.body }}\n"))
+                .collect();
+            format!("part {stem} {{\n{outputs}}}\n")
+        } else {
+            let name = names.iter().next().cloned().unwrap_or(stem);
+            format!("{kind} {name} {{\n}}\n")
+        };
+        if file != doc {
+            files.push((file, stub));
+        }
+    }
+    ModuleScope::from_files(files.iter().map(|(p, t)| (p.as_str(), t.as_str())))
+}
+
+/// Reads assembly text back in a [`stub_scope`] of the designs `model` names.
+#[allow(dead_code)]
+pub fn reparse_assembly(
+    path: &str,
+    text: &str,
+    model: &impl serde::Serialize,
+) -> runmat_cad::syntax::Parsed<runmat_cad::assembly::AssemblyDocument> {
+    let scope = stub_scope(path, text, &serde_json::to_value(model).unwrap());
+    runmat_cad::syntax::parse_assembly_in(path, text, &scope)
+}
+
+/// Reads drawing text back in a [`stub_scope`] of the designs `model` names.
+#[allow(dead_code)]
+pub fn reparse_drawing(
+    path: &str,
+    text: &str,
+    model: &impl serde::Serialize,
+) -> runmat_cad::syntax::Parsed<runmat_cad::drawing::DrawingDocument> {
+    let scope = stub_scope(path, text, &serde_json::to_value(model).unwrap());
+    runmat_cad::syntax::parse_drawing_in(path, text, &scope)
 }

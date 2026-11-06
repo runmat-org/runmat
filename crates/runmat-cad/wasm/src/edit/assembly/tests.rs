@@ -11,7 +11,7 @@ const BLOCK: &str = "runmat 0.7\nstd 1\n\npart block {\n    sketch s1 on origin.
 
 const PIN: &str = "runmat 0.7\nstd 1\n\npart pin {\n    sketch s1 on origin.xy {\n        c1 = circle(center = [0 mm, 0 mm], radius = 5 mm)\n    }\n    feature body = extrude(profile = sketch.s1, distance = 30 mm)\n    output pin = { body = feature.body.body }\n}\n";
 
-const RIG: &str = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate from \"plate.part\" as plate\n    use part block from \"block.part\" as block {\n        placement = { placement = offset, offset = { translation = [30 mm, 10 mm, 40 mm] } }\n    }\n    use part pin from \"pin.part\" as pin {\n        placement = { placement = offset, offset = { translation = [60 mm, 30 mm, 25 mm] } }\n    }\n    use part pin from \"pin.part\" as pin2 {\n        placement = { placement = offset, offset = { translation = [10 mm, 70 mm, 0 mm] } }\n    }\n}\n";
+const RIG: &str = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate as plate\n    use part block as block {\n        placement = { placement = offset, offset = { translation = [30 mm, 10 mm, 40 mm] } }\n    }\n    use part pin as pin {\n        placement = { placement = offset, offset = { translation = [60 mm, 30 mm, 25 mm] } }\n    }\n    use part pin as pin2 {\n        placement = { placement = offset, offset = { translation = [10 mm, 70 mm, 0 mm] } }\n    }\n}\n";
 
 fn files() -> Files {
     [
@@ -217,7 +217,7 @@ fn insert_adds_a_floating_component_beside_the_click() {
         RIG,
         json!({ "command": "assembly.insert", "values": { "source": "part", "file": "block.part", "quantity": 2, "x": 100 } }),
     );
-    assert!(text.contains("use part block from \"block.part\" as block2"), "{text}");
+    assert!(text.contains("use part block as block2"), "{text}");
     assert!(text.contains("as block3"), "{text}");
     let c = compile(&text);
     let (t2, t3) = (c.transform("block2"), c.transform("block3"));

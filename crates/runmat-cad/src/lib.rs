@@ -39,6 +39,7 @@ pub mod index;
 pub mod kernel_seams;
 pub mod metering;
 pub mod model;
+pub mod modules;
 pub mod pmi;
 pub mod props;
 pub mod refs;

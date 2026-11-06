@@ -290,3 +290,25 @@ fn circuit_simulation_words_and_units_color_and_complete() {
         assert!(v.units.contains(unit), "{unit}");
     }
 }
+
+/// A design named by symbol opens its declaration in whichever file of its folder holds it,
+/// and hover says where it resolved from (report 12 §3.8).
+#[test]
+fn designs_named_by_symbol_go_to_their_declaration_across_folders() {
+    let text = "runmat 0.7\nstd 1\n\nassembly cabin {\n    use part seat_frame as seat\n    use part rivet from hardware as rivet\n}\n";
+    let files = DesignFiles::from([
+        ("/p/cabin/seats.part".to_string(), "runmat 0.7\nstd 1\n\npart seats {\n    output seat_frame = { body = feature.b.body }\n}\n".to_string()),
+        ("/p/+hardware/rivet.part".to_string(), "runmat 0.7\nstd 1\n\npart rivet {\n}\n".to_string()),
+    ]);
+    let analysis = analyze("/p/cabin/cabin.assembly", text, &files);
+    let seat = analysis.definition(&at(text, "seat_frame", 0, 2)).expect("a definition");
+    assert_eq!(seat.uri.path(), "/p/cabin/seats.part");
+    assert_eq!(seat.range.start, Position::new(4, 11), "the output's name");
+    let rivet = analysis.definition(&at(text, "rivet from", 0, 1)).expect("a definition");
+    assert_eq!(rivet.uri.path(), "/p/+hardware/rivet.part");
+    let Some(HoverContents::Markup(hover)) = analysis.hover(&at(text, "as rivet", 0, 4)).map(|h| h.contents) else {
+        panic!("a hover")
+    };
+    assert!(hover.value.contains("resolved from `hardware`"), "{}", hover.value);
+    assert!(hover.value.contains("/p/+hardware/rivet.part"), "{}", hover.value);
+}

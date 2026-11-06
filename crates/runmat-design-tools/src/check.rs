@@ -346,7 +346,8 @@ fn check_assembly(path: &str, text: &str, files: &Files, out: &mut CheckOutput) 
                 .collect();
         }
         Ok((index, _display, problems)) => {
-            let parsed = runmat_cad::syntax::parse_assembly(path, text);
+            let scope = runmat_cad_wasm::runtime::module_scope(path, text, files);
+            let parsed = runmat_cad::syntax::parse_assembly_in(path, text, &scope);
             let mut report = runmat_cad::diagnostics::DiagnosticReport {
                 diagnostics: serde_json::from_value(index["diagnostics"].clone())
                     .unwrap_or_default(),

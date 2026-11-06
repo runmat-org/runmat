@@ -95,10 +95,58 @@ pub fn print(name: &str, fields: &[(String, Json)], hook: &dyn ValueSyntax) -> O
     let source = fields.iter().find(|(k, _)| k == "source")?.1.clone();
     let definition = source.get("definition")?;
     let kind = definition.get("kind")?.as_str()?;
-    let file = definition.get("file")?.as_str()?;
     if !KINDS.contains(&kind) || !is_identifier(name) {
         return None;
     }
+    let pin = match source.get("context") {
+        None => String::new(),
+        Some(context) => match context.decode::<XrefContext>().ok()? {
+            XrefContext::Live => String::new(),
+            XrefContext::Pinned { revision } => format!(" @ {}", quote(&revision.0)),
+        },
+    };
+    // In a known document, a design prints by symbol (`crate::modules::unbound`).
+    let definition = &hook
+        .document_path()
+        .and_then(|doc| crate::modules::unbound("definition", definition, doc))
+        .unwrap_or_else(|| definition.clone());
+    let head = match definition.get("file") {
+        Some(file) => file_form(kind, file.as_str()?, definition, &pin, name)?,
+        // The module form (`crate::modules::unbound` wrote the symbol).
+        None => {
+            let symbol = definition.get("name")?.as_str()?;
+            if !is_identifier(symbol) {
+                return None;
+            }
+            let from = match definition.get("from").map(|f| f.as_str()) {
+                None => String::new(),
+                Some(Some(f)) if f.starts_with('.') || f.starts_with('/') => {
+                    format!(" from {}", quote(f))
+                }
+                Some(Some(package)) => format!(" from {package}"),
+                Some(None) => return None,
+            };
+            format!("use {kind} {symbol}{from}{pin} as {name}")
+        }
+    };
+    match hook.document_path() {
+        // Interface frames in the occurrence's fields print by symbol too.
+        Some(doc) => {
+            let fields: Vec<(String, Json)> = fields
+                .iter()
+                // `replace = part("<file>", …)` overrides keep the file form (`print_replace`).
+                .map(|(k, v)| match k.as_str() {
+                    "overrides" => (k.clone(), v.clone()),
+                    _ => (k.clone(), crate::modules::unbound_tree(k, v, doc)),
+                })
+                .collect();
+            print_rest(head, &fields, hook)
+        }
+        None => print_rest(head, fields, hook),
+    }
+}
+
+fn file_form(kind: &str, file: &str, definition: &Json, pin: &str, name: &str) -> Option<String> {
     let symbol = match definition.get("part") {
         Some(Json::String(part)) if *part != stem_name(file) && is_identifier(part) => part.clone(),
         Some(_) => return None,
@@ -113,14 +161,10 @@ pub fn print(name: &str, fields: &[(String, Json)], hook: &dyn ValueSyntax) -> O
             return None;
         }
     }
-    let pin = match source.get("context") {
-        None => String::new(),
-        Some(context) => match context.decode::<XrefContext>().ok()? {
-            XrefContext::Live => String::new(),
-            XrefContext::Pinned { revision } => format!(" @ {}", quote(&revision.0)),
-        },
-    };
-    let mut out = format!("use {kind} {symbol} from {}{pin} as {name}", quote(file));
+    Some(format!("use {kind} {symbol} from {}{pin} as {name}", quote(file)))
+}
+
+fn print_rest(mut out: String, fields: &[(String, Json)], hook: &dyn ValueSyntax) -> Option<String> {
     let rest: Vec<&(String, Json)> = fields.iter().filter(|(k, _)| k != "source").collect();
     if !rest.is_empty() {
         out.push_str(" {\n");
@@ -613,34 +657,60 @@ pub fn lower(
     hook: &dyn ValueSyntax,
 ) -> Result<BlockEntry, LowerError> {
     let span = declaration.span();
-    let (kind, symbol) = declaration.symbol().ok_or_else(|| {
-        error(
-            span,
-            "an occurrence is `use <kind> <name> from \"<file>\" as <name>`",
-        )
-    })?;
-    let kind = kind.text();
+    let form = "an occurrence is `use <kind> <name> as <name>` (this folder), \
+                `use <kind> <name> from \"<folder>\" as <name>`, or `use <alias>.<kind>.<name> as <name>`";
+    // (kind, name, the module it is in), or the file form's file.
+    let (kind, symbol, module, file) = match (declaration.symbol(), declaration.source()) {
+        (Some((kind, symbol)), Some(UseSource::Path(path)))
+            if crate::modules::is_file_path(&path) =>
+        {
+            (kind.text(), symbol.text(), None, Some(path))
+        }
+        (Some((kind, symbol)), Some(UseSource::Path(folder))) => {
+            let folder = if folder.starts_with('.') || folder.starts_with('/') {
+                folder
+            } else {
+                format!("./{folder}")
+            };
+            (kind.text(), symbol.text(), Some(folder), None)
+        }
+        (Some((kind, symbol)), Some(UseSource::Package(segments))) => {
+            (kind.text(), symbol.text(), Some(segments.join(".")), None)
+        }
+        (Some((kind, symbol)), None) => (kind.text(), symbol.text(), None, None),
+        (None, Some(UseSource::Package(segments))) if segments.len() == 3 => (
+            segments[1].clone(),
+            segments[2].clone(),
+            Some(segments[0].clone()),
+            None,
+        ),
+        _ => return Err(error(span, form)),
+    };
     if !KINDS.contains(&kind.as_str()) {
         return Err(error(
             span,
             format!("`{kind}` is not part, assembly or circuit"),
         ));
     }
-    let file = match declaration.source() {
-        Some(UseSource::Path(path)) => path,
-        _ => return Err(error(span, "an occurrence reads a quoted file path")),
-    };
     let alias = declaration
         .alias()
         .ok_or_else(|| error(span, "an occurrence needs `as <name>`"))?
         .text();
-    let symbol = symbol.text();
-    let mut definition = vec![
-        ("kind".to_string(), Json::String(kind)),
-        ("file".to_string(), Json::String(file.clone())),
-    ];
-    if symbol != stem_name(&file) {
-        definition.push(("part".into(), Json::String(symbol)));
+    let mut definition = vec![("kind".to_string(), Json::String(kind))];
+    match file {
+        Some(file) => {
+            definition.push(("file".into(), Json::String(file.clone())));
+            if symbol != stem_name(&file) {
+                definition.push(("part".into(), Json::String(symbol)));
+            }
+        }
+        None => {
+            // A symbol: `crate::modules::bind` resolves it to its file through the folder scope.
+            definition.push(("name".into(), Json::String(symbol)));
+            if let Some(module) = module {
+                definition.push(("from".into(), Json::String(module)));
+            }
+        }
     }
     let mut source = vec![("definition".to_string(), Json::Object(definition))];
     if let Some(revision) = declaration.pin() {

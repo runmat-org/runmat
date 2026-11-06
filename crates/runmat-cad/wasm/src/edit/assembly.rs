@@ -22,8 +22,8 @@ mod tests;
 use super::{model, text_value, EditRequest};
 use crate::runtime::{compile_assembly, Files};
 use runmat_cad::assembly::model::AssemblyDocument;
-use runmat_cad::syntax::edit::{diff_source, EditFailure, SourceChange};
-use runmat_cad::syntax::{parse_assembly, print_assembly, ASSEMBLY};
+use runmat_cad::syntax::edit::{diff_source_in, EditFailure, SourceChange};
+use runmat_cad::syntax::{parse_assembly_in, print_assembly, ASSEMBLY};
 use runmat_design_syntax::edit::TextEdit;
 use runmat_types::Span;
 use serde_json::Value;
@@ -157,7 +157,8 @@ pub(super) fn edit(
     files: &Files,
     request: &EditRequest,
 ) -> Result<(SourceChange, String), EditFailure> {
-    let parsed = parse_assembly(path, text);
+    let scope = crate::runtime::module_scope(path, text, files);
+    let parsed = parse_assembly_in(path, text, &scope);
     let (Some(mut document), true) = (parsed.document, parsed.diagnostics.is_empty()) else {
         return Err(EditFailure::Invalid(parsed.diagnostics));
     };
@@ -210,7 +211,7 @@ pub(super) fn edit(
     };
     // The minimal diff can't yet place every occurrence statement (one with a body block):
     // then the file is reprinted whole and the change says so.
-    let change = match diff_source(&ASSEMBLY, path, text, &document, &parsed.uses, &[]) {
+    let change = match diff_source_in(&ASSEMBLY, path, text, &document, &parsed.uses, &[], &scope) {
         Ok(change) => change,
         Err(EditFailure::Model(_)) => {
             let printed = print_assembly(&document, &parsed.uses).map_err(EditFailure::Print)?;

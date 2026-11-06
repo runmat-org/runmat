@@ -14,7 +14,7 @@ use runmat_cad::scope::UseDecl;
 use runmat_cad::syntax::edit::{self, ConfigurationScope, ValueEdit};
 use runmat_cad::syntax::projection::model_projection;
 use runmat_cad::syntax::{
-    parse_assembly, parse_drawing, parse_part, print_assembly, print_drawing, print_part,
+    parse_part, print_assembly, print_drawing, print_part,
 };
 use runmat_cad::value::{value_expr_examples, InputDecl, LetDecl, ValueExpr};
 use runmat_design_syntax::Dialect;
@@ -538,7 +538,7 @@ fn assemblies_round_trip_through_text() {
     let mut count = 0;
     for document in project.source.assemblies.values() {
         let text = print_assembly(document, &[]).unwrap();
-        let parsed = parse_assembly(&document.path.0, &text);
+        let parsed = reparse_assembly(&document.path.0, &text, document.as_ref());
         assert!(
             parsed.diagnostics.is_empty(),
             "{text}\n{:#?}",
@@ -554,7 +554,7 @@ fn assemblies_round_trip_through_text() {
 fn drawings_round_trip_through_text() {
     let document = drawing();
     let text = print_drawing(&document, &[]).unwrap();
-    let parsed = parse_drawing("rig.drawing", &text);
+    let parsed = reparse_drawing("rig.drawing", &text, &document);
     assert!(
         parsed.diagnostics.is_empty(),
         "{text}\n{:#?}",

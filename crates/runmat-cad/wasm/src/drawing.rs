@@ -30,7 +30,7 @@ use runmat_cad::model::sheet_metal::FlatLayout;
 use runmat_cad::model::PartDocument;
 use runmat_cad::refs::name::EntityName;
 use runmat_cad::refs::reference::Reference;
-use runmat_cad::syntax::parse_drawing;
+use runmat_cad::syntax::parse_drawing_in;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -136,8 +136,9 @@ impl ModelReferences for CompiledModels {
     }
 }
 
-fn model_files(path: &str, text: &str) -> Vec<String> {
-    let Some(doc) = parse_drawing(path, text).document else {
+fn model_files(path: &str, text: &str, files: &Files) -> Vec<String> {
+    let scope = crate::runtime::module_scope(path, text, files);
+    let Some(doc) = parse_drawing_in(path, text, &scope).document else {
         return Vec::new();
     };
     let mut seen = BTreeSet::new();
@@ -148,12 +149,9 @@ fn model_files(path: &str, text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The model files a drawing's views show, resolved against the drawing's folder.
+/// The folders and model files a drawing's views can name (`runmat_cad::modules::dependencies`).
 pub fn dependencies(path: &str, text: &str) -> Vec<String> {
-    model_files(path, text)
-        .iter()
-        .map(|f| resolve_path(path, f, &Files::new()))
-        .collect()
+    runmat_cad::modules::dependencies(path, text)
 }
 
 /// `compile` for a `.drawing`, as JSON.
@@ -164,7 +162,7 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
 /// [`compile_json`] with every part the drawing shows regenerated in the named configuration
 /// `configuration` (a product family's sheet per configuration).
 pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Option<&str>) -> String {
-    let parsed = parse_drawing(path, text);
+    let parsed = parse_drawing_in(path, text, &crate::runtime::module_scope(path, text, files));
     // A new, empty file is an empty drawing named after the file: the editor shows its empty
     // prompt (Auto-drawing, add a view), not a syntax error.
     let empty = text.trim().is_empty().then(|| DrawingDocument {
@@ -197,7 +195,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         severity: "warning".into(),
         message,
     };
-    for file in model_files(path, text) {
+    for file in model_files(path, text, files) {
         let at = resolve_path(path, &file, files);
         let Some(source) = files.get(&at) else {
             problems.push(warn(format!(
@@ -578,7 +576,8 @@ mod tests {
         assert_eq!(out["projection"]["kind"], "drawing", "{out}");
         let data = &out["projection"]["data"];
         assert_eq!(data["document"]["views"].as_array().map(Vec::len), Some(2));
-        let model = &out["models"]["bracket.part"];
+        // Models are keyed by their workspace path.
+        let model = &out["models"]["/p/bracket.part"];
         assert_eq!(model["kind"], "part", "{out}");
         assert!(model["data"]["bodies"]
             .as_array()

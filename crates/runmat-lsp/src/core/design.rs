@@ -29,6 +29,7 @@ use super::fea::highlight::{self, class, TokenClass, FUNCTION, KEYWORD, NAMESPAC
 use super::position::{offset_to_position, position_to_offset};
 
 mod compile;
+mod modules;
 pub mod symbols;
 use compile::compile;
 #[cfg(test)]
@@ -60,40 +61,11 @@ pub fn design_dependencies(dialect: Dialect, path: &str, text: &str) -> Vec<Stri
         Dialect::Circuit | Dialect::CircuitLayout => {
             runmat_circuit::runtime::dependencies(path, text)
         }
-        Dialect::Assembly | Dialect::Drawing => {
-            let syntax = parse_source(dialect, text);
-            let table = SymbolTable::build(&syntax);
-            let mut out: Vec<String> = table
-                .symbols
-                .iter()
-                .filter_map(|s| s.path.as_deref())
-                .chain(string_paths(&syntax).iter().map(String::as_str))
-                .filter(|p| p.ends_with(".part") || p.ends_with(".assembly"))
-                .map(|p| runmat_circuit::runtime::resolve_path(path, p))
-                .collect();
-            out.sort();
-            out.dedup();
-            out
-        }
+        // The folders it names designs through (`<folder>/`, listed by the host) and the
+        // design files it names by path.
+        Dialect::Assembly | Dialect::Drawing => runmat_cad::modules::dependencies(path, text),
         _ => Vec::new(),
     }
-}
-
-/// Every quoted string that names a design file (`file = "./clip.part"`).
-fn string_paths(syntax: &SourceSyntax) -> Vec<String> {
-    let source = syntax.source();
-    syntax
-        .syntax()
-        .descendants()
-        .into_iter()
-        .filter(|node| node.kind() == runmat_design_syntax::tree::NodeKind::StringLiteral)
-        .filter_map(|node| {
-            let span = node.trimmed_span();
-            let text = source.get(span.start..span.end)?;
-            let inner = text.strip_prefix('"')?.strip_suffix('"')?;
-            Dialect::for_path(inner).map(|_| inner.to_string())
-        })
-        .collect()
 }
 
 /// A compiler problem at a byte range of this file.
@@ -114,6 +86,8 @@ pub struct DesignDocumentAnalysis {
     problems: Vec<Problem>,
     /// The compiler's projection (`runmat_cad::index` or `runmat_circuit::index`), for hover.
     projection: Option<Value>,
+    /// `use` lines naming designs by symbol, by symbol index, with where each resolved.
+    uses: std::collections::BTreeMap<usize, modules::Resolved>,
 }
 
 impl DesignDocumentAnalysis {
@@ -134,6 +108,7 @@ impl DesignDocumentAnalysis {
             })
             .collect();
         let mut projection = None;
+        let uses = modules::resolve_uses(&syntax, &symbols, &path, text, files);
         if syntax.diagnostics.is_empty() {
             let (more, compiled) = compile(dialect, &path, text, files, &symbols);
             problems.extend(more);
@@ -146,6 +121,7 @@ impl DesignDocumentAnalysis {
             symbols,
             problems,
             projection,
+            uses,
         }
     }
 
@@ -289,6 +265,17 @@ impl DesignDocumentAnalysis {
         if let Some(location) = self.use_target(offset) {
             return Some(location);
         }
+        // A design named by symbol (anywhere on its `use` line): its declaration, in whichever
+        // file of its folder holds it.
+        let on_use = self.uses.iter().find(|(i, _)| {
+            let span = self.symbols.symbols[**i].span;
+            span.start <= offset && offset <= span.end
+        });
+        if let Some((_, r)) = on_use {
+            let mut uri = self.uri.clone();
+            uri.set_path(&if r.file.starts_with('/') { r.file.clone() } else { format!("/{}", r.file) });
+            return Some(Location::new(uri, r.at.unwrap_or_default()));
+        }
         let (symbol, _) = self.symbols.at(offset)?;
         let s = &self.symbols.symbols[symbol];
         if let Some(path) = s.path.as_deref() {
@@ -409,7 +396,10 @@ impl DesignDocumentAnalysis {
             head.to_string()
         };
         let mut text = format!("```{}\n{}\n```", fence(self.dialect), head);
-        let facts = self.facts(symbol);
+        let mut facts = self.facts(symbol);
+        if let Some(r) = self.uses.get(&symbol) {
+            facts.insert(0, r.origin());
+        }
         if !facts.is_empty() {
             text.push_str("\n\n");
             text.push_str(&facts.join("\n\n"));

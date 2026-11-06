@@ -94,6 +94,8 @@ pub(super) fn insert(
     if file.is_empty() {
         return Err(model("name the file to insert"));
     }
+    // The definition's identity is its workspace path; the text names it by symbol.
+    let file = resolve_path(&document.path.0, &file, files);
     let definition = match text(values, "source", "part") {
         _ if file.ends_with(".assembly") => DefinitionRef::assembly(&file),
         _ if file.ends_with(".circuit") => DefinitionRef::circuit(&file),

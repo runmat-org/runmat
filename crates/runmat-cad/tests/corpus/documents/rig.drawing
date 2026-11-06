@@ -17,7 +17,7 @@ drawing rig {
     view front = standard(
         orientation = front,
         sheet = "1",
-        model = { file = "rig.assembly" },
+        model = { assembly = rig },
         at = [100, 100],
         display = hidden_lines
     )
@@ -25,7 +25,7 @@ drawing rig {
         from = front,
         direction = up,
         sheet = "1",
-        model = { file = "rig.assembly" },
+        model = { assembly = rig },
         at = [100, 100],
         display = hidden_lines
     )
@@ -34,7 +34,7 @@ drawing rig {
         plane = feature.body.face.start,
         label = A,
         sheet = "1",
-        model = { file = "rig.assembly" },
+        model = { assembly = rig },
         at = [100, 100],
         display = hidden_lines
     )
@@ -44,7 +44,7 @@ drawing rig {
         radius = 20 mm,
         label = B,
         sheet = "1",
-        model = { file = "rig.assembly" },
+        model = { assembly = rig },
         at = [100, 100],
         scale = [2, 1],
         display = hidden_lines

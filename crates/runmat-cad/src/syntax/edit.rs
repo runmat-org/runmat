@@ -17,7 +17,8 @@
 //! [`reorder_feature`], [`rename_feature`], [`set_value`], [`add_publish`], …) are model edits
 //! run through [`diff_source`].
 
-use super::{grammar_parse, print_with};
+use super::{grammar_parse_in, print_with};
+use crate::modules::ModuleScope;
 use crate::ids::{ConfigurationName, FeatureId, FilePath, InputName};
 use crate::model::{Feature, PartDocument, PublishEntry};
 use crate::refs::lock::{ItemPath, LockError, LockSection, UuidMinter};
@@ -162,12 +163,26 @@ pub fn diff_source<T: Serialize + DeserializeOwned + PartialEq>(
     uses: &[UseDecl],
     renames: &[Rename],
 ) -> Result<SourceChange, EditFailure> {
-    let old = grammar_parse::<T>(grammar, path, source);
+    let scope = ModuleScope::from_files([(path, source)]);
+    diff_source_in(grammar, path, source, new, uses, renames, &scope)
+}
+
+/// [`diff_source`] for a file whose designs resolve through the folders of `scope`.
+pub fn diff_source_in<T: Serialize + DeserializeOwned + PartialEq>(
+    grammar: &DocumentGrammar,
+    path: &str,
+    source: &str,
+    new: &T,
+    uses: &[UseDecl],
+    renames: &[Rename],
+    scope: &ModuleScope,
+) -> Result<SourceChange, EditFailure> {
+    let old = grammar_parse_in::<T>(grammar, path, source, scope);
     if !old.is_valid() {
         return Err(EditFailure::Invalid(old.diagnostics));
     }
     let printed = print_with(grammar, new, uses).map_err(EditFailure::Print)?;
-    let fresh = grammar_parse::<T>(grammar, path, &printed);
+    let fresh = grammar_parse_in::<T>(grammar, path, &printed, scope);
     if fresh.document.as_ref() != Some(new) {
         return Err(EditFailure::Print(PrintError(
             "the new model does not read back from its own text".into(),
@@ -346,7 +361,7 @@ pub fn diff_source<T: Serialize + DeserializeOwned + PartialEq>(
                 continue;
             }
         };
-        let check = grammar_parse::<T>(grammar, path, &edited);
+        let check = grammar_parse_in::<T>(grammar, path, &edited, scope);
         if check.document.as_ref() == Some(new) && check.diagnostics.is_empty() {
             return Ok(SourceChange {
                 edits,
@@ -438,7 +453,12 @@ fn entry_edits(
         (Some(a), Some(b), _, _)
             if a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0 == y.0) =>
         {
+            let head_changed = old.head != new.head && old.value_span.is_some();
             for (x, y) in a.iter().zip(b) {
+                // A value written in the head (an occurrence's source) is in the head's edit.
+                if head_changed && x.2.start < old.head_span.end {
+                    continue;
+                }
                 if x.1.to_value() != y.1.to_value() {
                     edits.push(TextEdit::replace(x.2, take(y.2)));
                 }

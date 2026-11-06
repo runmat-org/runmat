@@ -2,37 +2,38 @@ runmat 0.7
 std 1
 
 assembly aircraft {
-    use assembly section from "fuselage/section.assembly" as section1 {
-        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 0 mm] } }
+    use assembly section from "./fuselage" as section1 {
+        placement = { placement = offset, offset = {} }
         required = true
     }
-    use assembly section from "fuselage/section.assembly" as section2 {
+    use assembly section from "./fuselage" as section2 {
         placement = { placement = offset, offset = { translation = [3000 mm, 0 mm, 0 mm] } }
         required = true
     }
-    use part wing from "wing/wing.part" as wing_left {
+    use part wing from "./wing" as wing_left {
         placement = {
             placement = attach,
             own = { anchor = published, name = root },
             to = {
                 frame = interface,
-                file = "interfaces/fuselage-wing.part",
+                part = fuselage_wing,
+                from = "./interfaces",
                 name = wing_ref,
                 context = { context = pinned, revision = A }
             }
         }
     }
-    use part engine_a from "propulsion/engine-a.part" as engine_left {
+    use part engine_a from "./propulsion" as engine_left {
         when = { when = is, axis = engine, value = a }
         placement = { placement = offset, offset = { translation = [1050 mm, 6000 mm, -1500 mm] } }
         required = true
     }
-    use part engine_b from "propulsion/engine-b.part" as engine_left {
+    use part engine_b from "./propulsion" as engine_left {
         when = { when = is, axis = engine, value = b }
         placement = { placement = offset, offset = { translation = [1050 mm, 6000 mm, -1500 mm] } }
         required = true
     }
-    use part cargo_door from "fuselage/cargo-door.part" as cargo_door {
+    use part cargo_door from "./fuselage" as cargo_door {
         when = { when = is, axis = freighter, value = true }
         placement = { placement = offset, offset = { translation = [600 mm, 0 mm, 0 mm] } }
     }

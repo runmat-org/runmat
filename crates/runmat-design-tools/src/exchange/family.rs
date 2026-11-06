@@ -34,7 +34,8 @@ fn family(names: Vec<String>) -> Vec<Option<String>> {
 /// parse).
 pub fn assembly_configurations(path: &str, files: &Files) -> Vec<String> {
     let Ok(text) = text_of(files, path) else { return Vec::new() };
-    runmat_cad::syntax::parse_assembly(path, text)
+    let scope = runmat_cad_wasm::runtime::module_scope(path, text, files);
+    runmat_cad::syntax::parse_assembly_in(path, text, &scope)
         .document
         .map(|d| d.configurations.iter().map(|c| c.name.to_string()).collect())
         .unwrap_or_default()

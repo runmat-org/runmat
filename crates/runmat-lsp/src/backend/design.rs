@@ -84,22 +84,52 @@ fn gather(
         vec![(dialect, path.to_string(), text.to_string())];
     let mut seen = std::collections::BTreeSet::from([path.to_string()]);
     while let Some((dialect, at, text)) = queue.pop() {
-        for dependency in design_dependencies(dialect, &at, &text) {
-            if !seen.insert(dependency.clone()) {
+        for named in design_dependencies(dialect, &at, &text) {
+            if !seen.insert(named.clone()) {
                 continue;
             }
-            let content = open
-                .get(&dependency)
-                .cloned()
-                .or_else(|| std::fs::read_to_string(&dependency).ok());
-            let Some(content) = content else { continue };
-            if let Some(next) = runmat_design_syntax::Dialect::for_path(&dependency) {
-                if next != runmat_design_syntax::Dialect::Fea {
-                    queue.push((next, dependency.clone(), content.clone()));
+            for dependency in folder_files(&named, open) {
+                if dependency != named && !seen.insert(dependency.clone()) {
+                    continue;
                 }
+                let content = open
+                    .get(&dependency)
+                    .cloned()
+                    .or_else(|| std::fs::read_to_string(&dependency).ok());
+                let Some(content) = content else { continue };
+                if let Some(next) = runmat_design_syntax::Dialect::for_path(&dependency) {
+                    if next != runmat_design_syntax::Dialect::Fea {
+                        queue.push((next, dependency.clone(), content.clone()));
+                    }
+                }
+                files.insert(dependency, content);
             }
-            files.insert(dependency, content);
         }
     }
     files
+}
+
+/// The files a dependency stands for: itself, or for a folder (`/p/cabin/`) its design and
+/// `.m` files on disk and among the open documents.
+fn folder_files(dependency: &str, open: &DesignFiles) -> Vec<String> {
+    let Some(folder) = dependency.strip_suffix('/') else {
+        return vec![dependency.to_string()];
+    };
+    let wanted = |p: &str| {
+        runmat_cad::modules::kind_of_file(p).is_some() || p.ends_with(".m") || p.ends_with("/runmat.toml")
+    };
+    let mut out: std::collections::BTreeSet<String> = open
+        .keys()
+        .filter(|p| runmat_cad::modules::folder_of(p) == folder && wanted(p))
+        .cloned()
+        .collect();
+    if let Ok(entries) = std::fs::read_dir(if folder.is_empty() { "/" } else { folder }) {
+        for entry in entries.flatten() {
+            let p = entry.path().to_string_lossy().to_string();
+            if entry.path().is_file() && wanted(&p) {
+                out.insert(p);
+            }
+        }
+    }
+    out.into_iter().collect()
 }

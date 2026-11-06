@@ -18,7 +18,7 @@ use super::values::{cylinder, face};
 use crate::edit::model;
 use crate::runtime::{compile_part, resolve_path, Files};
 use runmat_cad::syntax::edit::{EditFailure, SourceChange};
-use runmat_cad::syntax::parse_drawing;
+use runmat_cad::syntax::parse_drawing_in;
 use runmat_design_syntax::edit::TextEdit;
 use runmat_types::Span;
 use serde_json::{Map, Value};
@@ -137,8 +137,16 @@ pub fn auto(
     let top = [front[0], front[1] + z / 2.0 + gap + y / 2.0];
     let right = [front[0] + x / 2.0 + gap + y / 2.0, front[1]];
     let section = [right[0] + x / 2.0 - y / 2.0, top[1]];
-    let file = format!("model = {{ file = \"{model_file}\" }}");
-    let parsed = parse_drawing(path, text);
+    // The view names the part by symbol, in the drawing's folder or through `from`.
+    let file = match runmat_cad::modules::module_text(path, &at) {
+        None => format!("model = {{ part = {} }}", runmat_cad::modules::stem_name(&at)),
+        Some(from) => format!(
+            "model = {{ part = {}, from = \"{from}\" }}",
+            runmat_cad::modules::stem_name(&at)
+        ),
+    };
+    let scope = crate::runtime::module_scope(path, text, files);
+    let parsed = parse_drawing_in(path, text, &scope);
     let document = parsed.document.as_ref();
     let taken: Vec<String> = document
         .map(|d| {
@@ -235,7 +243,10 @@ pub fn auto(
         }
         None => return Err(EditFailure::Invalid(parsed.diagnostics.clone())),
     };
-    if parse_drawing(path, &new).document.is_none() {
+    if parse_drawing_in(path, &new, &crate::runtime::module_scope(path, &new, files))
+        .document
+        .is_none()
+    {
         return Err(model(
             "the auto-drawing didn't read back; this is a bug in the layout",
         ));

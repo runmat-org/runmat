@@ -8,9 +8,28 @@ use common::*;
 use runmat_cad::assembly::AssemblyDocument;
 use runmat_cad::drawing::DrawingDocument;
 use runmat_cad::model::*;
-use runmat_cad::syntax::{self, parse_assembly, parse_drawing, parse_part, print_part};
+use runmat_cad::syntax::{self, parse_part, print_part};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+
+/// The rig's folder: the designs the occurrence tests name, by symbol.
+const RIG_FOLDER: &[(&str, &str)] = &[
+    ("plate.part", "part plate {\n}\n"),
+    ("gearbox.assembly", "assembly gearbox {\n}\n"),
+    ("wing.assembly", "assembly wing {\n}\n"),
+    ("parts/bracket.part", "part bracket {\n    output plate = { body = feature.b.body }\n}\n"),
+    ("parts/clip.part", "part clip {\n}\n"),
+];
+
+fn rig_scope(text: &str) -> runmat_cad::modules::ModuleScope {
+    runmat_cad::modules::ModuleScope::from_files(
+        std::iter::once(("rig.assembly", text)).chain(RIG_FOLDER.iter().copied()),
+    )
+}
+
+fn parse_rig(text: &str) -> syntax::Parsed<AssemblyDocument> {
+    syntax::parse_assembly_in("rig.assembly", text, &rig_scope(text))
+}
 
 fn corpus() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/corpus")
@@ -276,16 +295,16 @@ fn conflicting_short_forms_are_diagnosed() {
 #[test]
 fn occurrences_are_use_statements_with_overrides() {
     let text = r#"assembly rig {
-    use part bracket from "parts/bracket.part" as left {
+    use part bracket from "./parts" as left {
         configuration = { select = named, name = light }
         fixed = false
         suppressed = true
     }
-    use part plate from "parts/bracket.part" @ "R3" as right
-    use assembly gearbox from "gearbox.assembly" as gb
+    use part plate from "./parts" @ "R3" as right
+    use assembly gearbox as gb
 }
 "#;
-    let parsed = parse_assembly("rig.assembly", text);
+    let parsed = parse_rig(text);
     assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
     let d: AssemblyDocument = parsed.document.unwrap();
     assert_eq!(d.occurrences.len(), 3);
@@ -297,14 +316,14 @@ fn occurrences_are_use_statements_with_overrides() {
     assert!(d.occurrences[0].source.definition.part.is_none());
     let printed = runmat_cad::syntax::print_assembly(&d, &[]).unwrap();
     assert!(
-        printed.contains("    use part bracket from \"parts/bracket.part\" as left {\n"),
+        printed.contains("    use part bracket from \"./parts\" as left {\n"),
         "{printed}"
     );
     assert!(
-        printed.contains("    use part plate from \"parts/bracket.part\" @ \"R3\" as right\n"),
+        printed.contains("    use part plate from \"./parts\" @ \"R3\" as right\n"),
         "{printed}"
     );
-    let back = parse_assembly("rig.assembly", &printed);
+    let back = parse_rig(&printed);
     assert_eq!(back.document.as_ref(), Some(&d), "{printed}");
     assert!(back.spans.spans.contains_key("occurrence.left"));
 }
@@ -340,7 +359,7 @@ fn the_document_corpus_reads_as_its_models_and_prints_back() {
                 print_part(&d, &p.uses).unwrap(),
             )
         } else if name.ends_with(".assembly") {
-            let p = parse_assembly(&file, &source);
+            let p = reparse_assembly(&file, &source, &model);
             assert!(p.is_valid(), "{name}: {:#?}", p.diagnostics);
             let d = p.document.unwrap();
             (
@@ -348,7 +367,7 @@ fn the_document_corpus_reads_as_its_models_and_prints_back() {
                 syntax::print_assembly(&d, &p.uses).unwrap(),
             )
         } else {
-            let p = parse_drawing(&file, &source);
+            let p = reparse_drawing(&file, &source, &model);
             assert!(p.is_valid(), "{name}: {:#?}", p.diagnostics);
             let d: DrawingDocument = p.document.unwrap();
             (
@@ -357,6 +376,9 @@ fn the_document_corpus_reads_as_its_models_and_prints_back() {
             )
         };
         assert_eq!(read, model, "{name}: the file reads as its model");
+        if std::env::var_os("RUNMAT_CAD_CORPUS_WRITE").is_some() {
+            std::fs::write(&path, &printed).unwrap();
+        }
         assert_eq!(printed, source, "{name}: the file is in the printed form");
         count += 1;
     }
@@ -398,7 +420,7 @@ fn record_forms_of_call_form_entries_are_refused() {
         let diagnostics = if path.ends_with(".part") {
             parse_part(path, text).diagnostics
         } else {
-            parse_assembly(path, text).diagnostics
+            syntax::parse_assembly(path, text).diagnostics
         };
         assert!(!diagnostics.is_empty(), "{text}");
     }
@@ -556,13 +578,13 @@ fn the_version_header_is_rewritten_whole() {
 #[test]
 fn occurrence_patterns_read_and_print_in_their_call_form() {
     let text = r#"assembly rig {
-    use part clip from "parts/clip.part" as clip
+    use part clip from "./parts" as clip
     pattern clips = linear(seeds = [clip], direction = [0, 1, 0], spacing = 750 mm, count = 4)
     pattern ring = circular(seeds = [clip], axis_point = [0 mm, 0 mm, 0 mm], axis = [0, 0, 1], count = 6, angle = 360 deg, skip = [{ instance = circular, step = 2 }])
     pattern old = linear(count = 2, spacing = 10 mm, direction = [1, 0, 0], seeds = [clip])
 }
 "#;
-    let parsed = parse_assembly("rig.assembly", text);
+    let parsed = parse_rig(text);
     assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
     let d: AssemblyDocument = parsed.document.unwrap();
     assert_eq!(d.patterns.len(), 3);
@@ -584,12 +606,12 @@ fn occurrence_patterns_read_and_print_in_their_call_form() {
         "{printed}"
     );
     assert!(!printed.contains("layout ="), "{printed}");
-    let back = parse_assembly("rig.assembly", &printed);
+    let back = parse_rig(&printed);
     assert_eq!(back.document.as_ref(), Some(&d), "{printed}");
 }
 
 const OVERRIDES: &str = r#"assembly rig {
-    use assembly wing from "wing.assembly" @ "R3" as port {
+    use assembly wing @ "R3" as port {
         fixed = false
         // The heavy clip on the third rib.
         override "rib@ribs[3]/clip" {
@@ -613,7 +635,7 @@ const OVERRIDES: &str = r#"assembly rig {
 #[test]
 fn occurrence_overrides_read_and_print_as_override_blocks() {
     use runmat_cad::assembly::{OverrideKind, RelPath};
-    let parsed = parse_assembly("rig.assembly", OVERRIDES);
+    let parsed = parse_rig(OVERRIDES);
     assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
     let d: AssemblyDocument = parsed.document.unwrap();
     let o = &d.occurrences[0];
@@ -648,7 +670,7 @@ fn occurrence_overrides_read_and_print_as_override_blocks() {
         assert!(printed.contains(line), "{line}\n---\n{printed}");
     }
     assert!(!printed.contains("overrides ="), "{printed}");
-    let back = parse_assembly("rig.assembly", &printed);
+    let back = parse_rig(&printed);
     assert_eq!(back.document.as_ref(), Some(&d), "{printed}");
     for bad in [
         "override \"rib@ribs[x]\" {\n            suppressed = true\n        }",
@@ -661,7 +683,7 @@ fn occurrence_overrides_read_and_print_as_override_blocks() {
             bad,
         );
         assert!(
-            !parse_assembly("rig.assembly", &text).diagnostics.is_empty(),
+            !parse_rig(&text).diagnostics.is_empty(),
             "{bad}"
         );
     }
@@ -670,16 +692,17 @@ fn occurrence_overrides_read_and_print_as_override_blocks() {
 #[test]
 fn an_override_edit_keeps_the_comments_of_the_occurrence() {
     use runmat_cad::assembly::OverrideKind;
-    let parsed = parse_assembly("rig.assembly", OVERRIDES);
+    let parsed = parse_rig(OVERRIDES);
     let mut d: AssemblyDocument = parsed.document.clone().unwrap();
     d.occurrences[0].overrides[3].set = OverrideKind::Suppress { suppressed: false };
-    let change = syntax::edit::diff_source(
+    let change = syntax::edit::diff_source_in(
         &syntax::ASSEMBLY,
         "rig.assembly",
         OVERRIDES,
         &d,
         &parsed.uses,
         &[],
+        &rig_scope(""),
     )
     .unwrap();
     assert!(!change.reprinted, "{}", change.source);
@@ -808,28 +831,29 @@ fn a_version_header_below_leading_comments_is_edited_in_place() {
     );
 }
 
-const TWO_PLATES: &str = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate from \"plate.part\" as a\n    use part plate from \"plate.part\" as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
+const TWO_PLATES: &str = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate as a\n    use part plate as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
 
 #[test]
 fn removing_or_suppressing_an_occurrence_with_a_body_changes_only_that_occurrence() {
-    let parsed = parse_assembly("rig.assembly", TWO_PLATES);
+    let parsed = parse_rig(TWO_PLATES);
     let original: AssemblyDocument = parsed.document.clone().expect("reads");
     // Remove `b`: its statement and block go, nothing else changes.
     let mut d = original.clone();
     d.occurrences.retain(|o| o.name.as_str() != "b");
-    let change = syntax::edit::diff_source(
+    let change = syntax::edit::diff_source_in(
         &syntax::ASSEMBLY,
         "rig.assembly",
         TWO_PLATES,
         &d,
         &parsed.uses,
         &[],
+        &rig_scope(""),
     )
     .expect("an edit");
     assert!(!change.reprinted, "{}", change.source);
     assert_eq!(
         change.source,
-        "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate from \"plate.part\" as a\n}\n"
+        "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate as a\n}\n"
     );
     // Suppress `b`: only its block changes.
     let mut d = original.clone();
@@ -839,18 +863,19 @@ fn removing_or_suppressing_an_occurrence_with_a_body_changes_only_that_occurrenc
         .find(|o| o.name.as_str() == "b")
         .expect("b");
     b.suppressed = true;
-    let change = syntax::edit::diff_source(
+    let change = syntax::edit::diff_source_in(
         &syntax::ASSEMBLY,
         "rig.assembly",
         TWO_PLATES,
         &d,
         &parsed.uses,
         &[],
+        &rig_scope(""),
     )
     .expect("an edit");
     assert!(!change.reprinted, "{}", change.source);
     assert!(change.source.starts_with(
-        "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate from \"plate.part\" as a\n    use part plate from \"plate.part\" as b {\n"
+        "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate as a\n    use part plate as b {\n"
     ));
     assert!(
         change.source.contains("suppressed = true"),

@@ -120,6 +120,39 @@ impl ValueSyntax for CadValues {
     }
 }
 
+/// [`CadValues`] printing one document: designs it names print by symbol relative to its
+/// folder (`crate::modules::unbound`).
+pub struct DocumentValues<'a> {
+    pub path: &'a str,
+}
+
+impl ValueSyntax for DocumentValues<'_> {
+    fn lower(&self, expr: &Expr) -> Option<Result<Json, LowerError>> {
+        CadValues.lower(expr)
+    }
+    fn print(&self, value: &Json) -> Option<String> {
+        CadValues.print(value)
+    }
+    fn tag_field(&self, scope: Option<&str>, key: &str) -> Option<&'static str> {
+        CadValues.tag_field(scope, key)
+    }
+    fn lower_keyed(&self, key: &str, expr: &Expr) -> Option<Result<Json, LowerError>> {
+        CadValues.lower_keyed(key, expr)
+    }
+    fn print_keyed(&self, key: &str, value: &Json) -> Option<String> {
+        if let Some(symbolic) = crate::modules::unbound(key, value, self.path) {
+            return Some(runmat_design_syntax::json::print_json(&symbolic, self, 1));
+        }
+        CadValues.print_keyed(key, value)
+    }
+    fn entry_forms(&self) -> Option<&dyn EntryForms> {
+        CadValues.entry_forms()
+    }
+    fn document_path(&self) -> Option<&str> {
+        Some(self.path)
+    }
+}
+
 /// Fields that hold only planes, so a face reference there is the plane of that face
 /// (`neutral = feature.body.face.end`).
 pub const PLANE_FIELDS: &[&str] = &["neutral", "tool", "parting"];

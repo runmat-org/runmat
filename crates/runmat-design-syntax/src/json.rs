@@ -238,6 +238,12 @@ pub trait ValueSyntax {
     fn entry_forms(&self) -> Option<&dyn crate::document::EntryForms> {
         None
     }
+
+    /// The workspace path of the document being printed, when the printer knows it: values
+    /// that name other files print relative to it.
+    fn document_path(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// No value forms beyond plain data.

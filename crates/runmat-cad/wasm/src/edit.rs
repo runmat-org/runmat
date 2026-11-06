@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn assembly_components_delete_and_suppress_by_their_outline_ids() {
-        let assembly = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate from \"plate.part\" as a\n    use part plate from \"plate.part\" as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
+        let assembly = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate as a\n    use part plate as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
         let files: Files = [("/p/plate.part".to_owned(), PLATE.to_owned())].into();
         let (index, _, _) = compile_assembly("/p/rig.assembly", assembly, &files).unwrap();
         let b = index["occurrences"]
