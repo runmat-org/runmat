@@ -58,6 +58,8 @@ pub(in crate::commands::fea) struct Presentation {
     pub show_triad: bool,
     /// Text and overlay size relative to the standard poster.
     pub text_scale: f32,
+    /// Section-view plane; the default plane when absent.
+    pub section: Option<runmat_runtime::analysis::field_scene::volume::SectionPlaneChoice>,
 }
 
 impl Default for Presentation {
@@ -73,6 +75,7 @@ impl Default for Presentation {
             show_grid: true,
             show_triad: true,
             text_scale: 1.0,
+            section: None,
         }
     }
 }
@@ -102,6 +105,7 @@ impl Presentation {
             show_grid: !args.no_grid,
             show_triad: !args.no_triad,
             text_scale: parse_text_scale(args.text_scale)?,
+            section: args.section.as_deref().map(parse_section).transpose()?,
         })
     }
 
@@ -285,6 +289,27 @@ fn parse_angle(text: &str) -> Result<(f32, f32)> {
         "view elevation must be -90 to 90 degrees, got '{text}'"
     );
     Ok((azimuth, elevation))
+}
+
+fn parse_section(
+    text: &str,
+) -> Result<runmat_runtime::analysis::field_scene::volume::SectionPlaneChoice> {
+    let (axis, fraction) = text.split_once('@').unwrap_or((text, "0.5"));
+    let axis = match axis.trim().to_ascii_lowercase().as_str() {
+        "x" => 0,
+        "y" => 1,
+        "z" => 2,
+        other => bail!("section axis must be x, y or z, got '{other}'"),
+    };
+    let fraction: f64 = fraction
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("section fraction must be a number, got '{fraction}'"))?;
+    ensure!(
+        (0.0..=1.0).contains(&fraction),
+        "section fraction must be 0 to 1, got {fraction}"
+    );
+    Ok(runmat_runtime::analysis::field_scene::volume::SectionPlaneChoice { axis, fraction })
 }
 
 fn parse_frame(text: &str) -> Result<Frame> {

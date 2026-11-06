@@ -57,4 +57,9 @@ pub struct SnapshotPresentationArgs {
     /// shown small, such as a website hero on a phone, uses about 2
     #[arg(long, default_value_t = 1.0, value_name = "FACTOR")]
     pub text_scale: f32,
+    /// Cut section views normal to this axis at this fraction of the result's extent along it
+    /// (0 at its minimum, 1 at its maximum; default 0.5). Default: through the center, across
+    /// the result's thinnest axis
+    #[arg(long, value_name = "x|y|z[@FRACTION]")]
+    pub section: Option<String>,
 }

@@ -281,7 +281,10 @@ fn thermal_admission_reserves_the_proving_factor_and_no_energy_budget() {
             *admission,
             crate::planning::resource::preflight::factor_admission(facts.support()).unwrap()
         );
-        assert_eq!(admission.update_count_upper_bound.0, envelope.factor_flop_limit());
+        assert_eq!(
+            admission.update_count_upper_bound.0,
+            envelope.factor_flop_limit()
+        );
         assert!(admission.resident_bytes_upper_bound.0 >= envelope.factor_resident_limit());
     }
 }

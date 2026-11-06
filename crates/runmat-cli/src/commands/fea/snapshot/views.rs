@@ -154,6 +154,7 @@ pub(super) async fn capture(
                                 .map(|extrema| (extrema.minimum.value, extrema.maximum.value)),
                             legend: spec.legend.clone(),
                             unit: spec.unit.clone(),
+                            plane: presentation.section,
                         };
                     let (scene, error) =
                         runmat_runtime::analysis::field_scene::volume::build_volume_scene(

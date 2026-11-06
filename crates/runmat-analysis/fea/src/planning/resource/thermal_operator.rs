@@ -10,8 +10,8 @@ use crate::{
 };
 
 use super::{
-    symbolic::pattern_from_rows, ByteCount, ResourcePlanningError,
-    SolverAdmissionResourcePolicy, ThermalHistoryResourceFacts, ThermalWorkspaceResourceFacts,
+    symbolic::pattern_from_rows, ByteCount, ResourcePlanningError, SolverAdmissionResourcePolicy,
+    ThermalHistoryResourceFacts, ThermalWorkspaceResourceFacts,
 };
 
 mod preparation;
