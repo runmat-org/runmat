@@ -2,7 +2,7 @@
 //! fillet by design) and the I/O board project.
 
 use base64::Engine;
-use runmat_design_tools::{call, dependency_closure, Files};
+use runmat_design_tools::{call, dependencies, dependency_closure, dependency_files, Files};
 use serde_json::{json, Value};
 
 const BRACKET: &str = include_str!("../../runmat-cad/tests/corpus/documents/bracket.part");
@@ -21,7 +21,7 @@ fn io_files(start: &str) -> Files {
         ("/b/io.circuit.lock".to_owned(), IO_LOCK.to_owned()),
     ]
     .into();
-    dependency_closure(start, &all[start], |p| all.get(p).cloned(), 64)
+    dependency_closure(start, &all[start], &all.keys().cloned().collect::<Vec<_>>(), |p| all.get(p).cloned(), 64)
 }
 
 fn ok(name: &str, input: Value, files: &Files) -> Value {
@@ -437,4 +437,51 @@ fn render_draws_a_part_view_to_a_png() {
             }
         }
     }
+}
+
+/// A design named by symbol needs the file that declares it, whatever that file is called:
+/// `dependencies` lists the folder for a host to read, and `dependency_files` names the file.
+#[test]
+fn a_folder_dependency_resolves_to_the_file_declaring_the_symbol() {
+    let part = |name: &str| BRACKET.replace("bracket", name);
+    let drawing = r#"runmat 0.7
+std 1
+
+drawing sheet {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [{ label = Sheet, source = { source = sheet_number } }]
+    }
+
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+
+    view front = standard(
+        orientation = front,
+        sheet = "1",
+        model = { part = bracket },
+        at = [130, 120],
+        display = hidden_lines
+    )
+}
+"#;
+    assert!(BRACKET.contains("part bracket"), "the corpus part declares `part bracket`");
+    let all: Files = [
+        ("/p/d/sheet.drawing".to_owned(), drawing.to_owned()),
+        ("/p/d/bracket_v2.part".to_owned(), part("bracket")),
+        ("/p/d/other.part".to_owned(), part("other")),
+        // The layout's circuit, in a file not named for it.
+        ("/b/main.circuit".to_owned(), IO_CIRCUIT.to_owned()),
+        ("/b/io.circuit.layout".to_owned(), IO_LAYOUT.to_owned()),
+    ]
+    .into();
+    let project: Vec<String> = all.keys().cloned().collect();
+    assert!(dependencies("/p/d/sheet.drawing", drawing).contains(&"/p/d/".to_owned()));
+    let files = dependency_closure("/p/d/sheet.drawing", drawing, &project, |p| all.get(p).cloned(), 64);
+    assert!(files.contains_key("/p/d/bracket_v2.part") && files.contains_key("/p/d/other.part"), "the closure reads the folder: {:?}", files.keys());
+    let check = call("design.check", json!({ "path": "/p/d/sheet.drawing" }), &files).expect("check");
+    assert_eq!(check["errors"], json!(0), "the drawing compiles: {check}");
+    assert_eq!(dependency_files("/p/d/sheet.drawing", drawing, &files), ["/p/d/bracket_v2.part"]);
+    let board = dependency_files("/b/io.circuit.layout", IO_LAYOUT, &all);
+    assert!(board.contains(&"/b/main.circuit".to_owned()), "{board:?}");
+    assert!(board.iter().all(|p| !p.ends_with('/')), "{board:?}");
 }

@@ -170,6 +170,19 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
     out
 }
 
+/// [`dependencies`] resolved among `files`: the model files the views show in place of the
+/// folders they're named in, and the title-block images.
+pub fn dependency_files(path: &str, text: &str, files: &Files) -> Vec<String> {
+    let mut out: Vec<String> = dependencies(path, text).into_iter().filter(|d| !d.ends_with('/')).collect();
+    for file in model_files(path, text, files) {
+        let at = resolve_path(path, &file, files);
+        if !out.contains(&at) {
+            out.push(at);
+        }
+    }
+    out
+}
+
 /// `compile` for a `.drawing`, as JSON.
 pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
     compile_json_in(path, text, files, None)

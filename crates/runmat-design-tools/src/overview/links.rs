@@ -3,7 +3,7 @@
 use super::facts::problems;
 use super::{plural, Level, Link, Ran, Relation};
 use crate::check::{check, CheckInput};
-use crate::{dependencies, DesignKind, Files};
+use crate::{dependency_files, DesignKind, Files};
 use runmat_design_syntax::{
     FeaDeclarationKind, FeaExpressionKind, FeaModuleItem, FeaStatementKind,
 };
@@ -114,11 +114,11 @@ fn user_relation(other: &str) -> Option<Relation> {
 }
 
 /// Whether `other` (with `text`) uses `path`.
-fn uses(other: &str, text: &str, path: &str) -> bool {
+fn uses(other: &str, text: &str, path: &str, files: &Files) -> bool {
     if is_study(other) {
         study_geometry_files(other, text).iter().any(|p| p == path)
     } else {
-        dependencies(other, text).iter().any(|p| p == path)
+        dependency_files(other, text, files).iter().any(|p| p == path)
     }
 }
 
@@ -169,7 +169,7 @@ fn users(
     ran: &mut Ran,
 ) {
     for (other, text) in files {
-        if other == path || is_lock(other) || seen.contains(other) || !uses(other, text, path) {
+        if other == path || is_lock(other) || seen.contains(other) || !uses(other, text, path, files) {
             continue;
         }
         let Some(relation) = user_relation(other) else {
@@ -193,7 +193,7 @@ pub(super) fn links(kind: DesignKind, path: &str, files: &Files, ran: &mut Ran) 
     let mut seen = vec![path.to_owned()];
     // What the file uses: a board's schematic, an assembly's parts, a drawing's models.
     let text = files.get(path).map(String::as_str).unwrap_or("");
-    for dep in dependencies(path, text) {
+    for dep in dependency_files(path, text, files) {
         if is_lock(&dep) || !files.contains_key(&dep) || seen.contains(&dep) {
             continue;
         }

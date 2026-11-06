@@ -129,7 +129,7 @@ fn the_io_schematic_leaves_its_rails_open_and_its_board_its_placement_and_change
     ]
     .into();
     let c = catalog();
-    let files = dependency_closure("/b/io.circuit", IO_CIRCUIT, |p| all.get(p).cloned(), 64);
+    let files = dependency_closure("/b/io.circuit", IO_CIRCUIT, &all.keys().cloned().collect::<Vec<_>>(), |p| all.get(p).cloned(), 64);
     let s = status(
         c.guide("schematic_capture").unwrap(),
         "/b/io.circuit",
@@ -141,6 +141,7 @@ fn the_io_schematic_leaves_its_rails_open_and_its_board_its_placement_and_change
     let files = dependency_closure(
         "/b/io.circuit.layout",
         IO_LAYOUT,
+        &all.keys().cloned().collect::<Vec<_>>(),
         |p| all.get(p).cloned(),
         64,
     );

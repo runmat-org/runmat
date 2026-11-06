@@ -18,7 +18,7 @@ pub fn part_configurations(path: &str, files: &Files) -> Vec<String> {
 
 /// The part a drawing's views show first, resolved against the drawing's folder.
 fn drawn_part(path: &str, text: &str, files: &Files) -> Option<String> {
-    runmat_cad_wasm::drawing::dependencies(path, text).into_iter().find(|p| p.ends_with(".part") && files.contains_key(p))
+    runmat_cad_wasm::drawing::dependency_files(path, text, files).into_iter().find(|p| p.ends_with(".part") && files.contains_key(p))
 }
 
 fn suffix(c: &Option<String>) -> String {

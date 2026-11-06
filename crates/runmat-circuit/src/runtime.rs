@@ -305,6 +305,28 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
     out
 }
 
+/// [`dependencies`] resolved among `files`, which hold the listed folders' files: each design a
+/// `use` line names becomes the `.circuit` file declaring it (a layout's circuit, a circuit's
+/// sheets and sub-circuits), and the folder listings drop out. A name that doesn't resolve
+/// adds nothing; the compile reports it.
+pub fn dependency_files(path: &str, text: &str, files: &Files) -> Vec<String> {
+    let mut out: Vec<String> = dependencies(path, text).into_iter().filter(|d| !d.ends_with('/')).collect();
+    let dialect = if is_layout(path) { Dialect::CircuitLayout } else { Dialect::Circuit };
+    for u in head_uses(dialect, text) {
+        let Some((kind, name)) = &u.symbol else { continue };
+        if kind == "library" || (is_layout(path) && kind != "circuit") {
+            continue;
+        }
+        if let Ok(file) = modules::locate(path, kind, name, &u.from, files) {
+            out.push(file);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out.retain(|p| p != path);
+    out
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Loading a circuit and its board
  * --------------------------------------------------------------------------------------------- */

@@ -108,19 +108,52 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
     }
 }
 
+/// The files `path` needs, resolved among `files` (which hold the folders [`dependencies`]
+/// lists): a design named by symbol is the file that declares it, so an assembly's parts, a
+/// drawing's models and a layout's circuit come back as file paths, and folder listings drop
+/// out. The overview's links and every other consumer that compares paths read this.
+pub fn dependency_files(path: &str, text: &str, files: &Files) -> Vec<String> {
+    match DesignKind::of(path) {
+        Some(DesignKind::Part) | None => Vec::new(),
+        Some(DesignKind::Assembly) => runmat_cad_wasm::runtime::dependency_files(path, text, files),
+        Some(DesignKind::Drawing) => runmat_cad_wasm::drawing::dependency_files(path, text, files),
+        Some(DesignKind::Circuit | DesignKind::Layout) => {
+            runmat_circuit::runtime::dependency_files(path, text, files)
+        }
+    }
+}
+
 /// Reads `path` and everything it needs through `read` (`None` for a file that doesn't exist),
-/// breadth-first, each file once. A file that doesn't exist is left out; the tools report it
-/// where it matters (an assembly draws a missing part as its box and says so).
+/// breadth-first, each file once. A folder [`dependencies`] lists (`/p/esc/`) is each file of
+/// `project` directly in it, as a host lists one. A file that doesn't exist is left out; the
+/// tools report it where it matters (an assembly draws a missing part as its box and says so).
 pub fn dependency_closure(
     path: &str,
     text: &str,
+    project: &[String],
     mut read: impl FnMut(&str) -> Option<String>,
     max_files: usize,
 ) -> Files {
     let mut files = Files::new();
     files.insert(path.to_owned(), text.to_owned());
+    let parent = |p: &str| match p.rsplit_once('/') {
+        Some(("", _)) => "/".to_owned(),
+        Some((d, _)) => d.to_owned(),
+        None => String::new(),
+    };
+    let in_folder = |listing: &str| -> Vec<String> {
+        let folder = match listing.trim_end_matches('/') {
+            "" => "/",
+            f => f,
+        };
+        project.iter().filter(|p| parent(p) == folder).cloned().collect()
+    };
     let mut queue: Vec<String> = dependencies(path, text);
     while let Some(next) = queue.pop() {
+        if next.ends_with('/') {
+            queue.extend(in_folder(&next).into_iter().filter(|p| !files.contains_key(p)));
+            continue;
+        }
         if files.contains_key(&next) || files.len() >= max_files {
             continue;
         }
@@ -232,7 +265,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         definition::<exchange::ImportInput, exchange::ImportChange>(
             "design.import",
             "Import into design",
-            "Use this to bring a KiCad project (.kicad_sch, .kicad_pcb), an EAGLE XML schematic or board (.sch, .brd; format `eagle`), a shape-string JSON schematic or board (standard edition; format `shape_json`) or a STEP file into the project as RunMat sources. Returns a staged change: the new files, their diagnostics, the project calls that keep it and, for EAGLE and shape-string JSON, a report of what was carried over, approximated or left out.",
+            "Use this to bring a KiCad project (.kicad_sch, .kicad_pcb), an EAGLE XML schematic or board (.sch, .brd; format `eagle`), a shape-string JSON schematic or board (standard edition; format `shape_json`), a pipe-record schematic or board, ASCII or binary (.SchDoc, .PcbDoc; format `pipe_record`, binary files as `base64`) or a STEP file into the project as RunMat sources. Returns a staged change: the new files, their diagnostics, the project calls that keep it and, for every PCB format, a report of what was carried over, approximated or left out.",
         ),
         definition::<simulate::SimulateInput, simulate::SimulateOutput>(
             "design.simulate",

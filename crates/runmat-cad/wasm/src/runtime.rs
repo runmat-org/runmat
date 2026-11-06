@@ -167,6 +167,29 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
     runmat_cad::modules::dependencies(path, text)
 }
 
+/// [`dependencies`] resolved among `files`, which hold the listed folders' files: each folder
+/// listing becomes the design files declaring what `path` names there (an assembly's parts and
+/// sub-assemblies, a drawing's models, a layout's circuit). Folders listed only for `.m`
+/// functions drop out. A name that doesn't resolve adds nothing; the compile reports it.
+pub fn dependency_files(path: &str, text: &str, files: &Files) -> Vec<String> {
+    if path.ends_with(".drawing") {
+        return crate::drawing::dependency_files(path, text, files);
+    }
+    if path.ends_with(".circuit") || path.ends_with(".circuit.layout") {
+        return runmat_circuit::runtime::dependency_files(path, text, files);
+    }
+    let mut out: Vec<String> = dependencies(path, text).into_iter().filter(|d| !d.ends_with('/')).collect();
+    if is_assembly(path) {
+        let scope = module_scope(path, text, files);
+        if let Some(doc) = parse_assembly_in(path, text, &scope).document {
+            out.extend(definitions(&doc).iter().map(|d| resolve_path(path, &d.file.0, files)));
+        }
+    }
+    let mut seen = BTreeSet::new();
+    out.retain(|p| p != path && seen.insert(p.clone()));
+    out
+}
+
 /// A part regenerated on the installed kernel: its projection and display.
 pub struct CompiledPart {
     /// The regeneration's diagnostics (kernel and feature errors among them) at their spans.
