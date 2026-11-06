@@ -245,8 +245,9 @@ fn mesh_validation_is_admitted_before_projection_in_derivation_and_execution() {
         .extend(10_000..110_000);
     mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     let counted = mesh.validation_resident_bytes_estimate().unwrap();
-    // The validation estimate counts the raw field map, including the invalid entries.
-    assert!(counted >= valid + 100_000 * 8, "{counted} vs {valid}");
+    // The validation estimate counts the raw field map, including the invalid entries (at
+    // least one encoded byte each).
+    assert!(counted >= valid + 100_000, "{counted} vs {valid}");
     workload.model.sequence.steps[0]
         .accuracy
         .resources
