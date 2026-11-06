@@ -7,7 +7,7 @@
 
 use crate::diagnostics::Diagnostic;
 use crate::ids::{
-    FeatureId, FilePath, InputName, ItemUuid, MaterialRef, PartName, PublishName, RegionName,
+    FeatureId, FilePath, InputName, ItemUuid, LetName, MaterialRef, PartName, PublishName, RegionName,
 };
 use crate::model::items::{Link, Property};
 use crate::model::{PartDocument, VersionHeader};
@@ -33,6 +33,9 @@ pub struct PartIndex {
     pub configuration: Option<String>,
     pub final_key: CacheKey,
     pub inputs: Vec<InputRow>,
+    /// The part's `let` values as evaluated, each with the `.m` function it calls, if any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lets: Vec<LetRow>,
     pub features: Vec<FeatureRow>,
     pub bodies: Vec<BodyRow>,
     pub parts: Vec<PartRow>,
@@ -70,6 +73,28 @@ pub struct InputRow {
     pub dimension: Option<Dimension>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// A `let` value as evaluated (report 12 §2.7): its value, or the error, and the function that
+/// computed it when the value calls an `.m` function.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LetRow {
+    pub name: LetName,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub si: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dimension: Option<Dimension>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The `.m` function the value calls (`camRadius`, `cams.lift`), the outermost when it calls several.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function: Option<String>,
+    /// The workspace path of that function's file, when the host resolved it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// `volatile` was written at the call.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub volatile: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -205,6 +230,23 @@ pub fn build_index(
             }
         })
         .collect();
+    let lets = doc
+        .lets
+        .iter()
+        .map(|l| {
+            let q = result.values.lets.get(&l.name);
+            let call = first_call(&l.value);
+            LetRow {
+                name: l.name.clone(),
+                si: q.map(|q| q.si),
+                dimension: q.map(|q| q.dimension),
+                error: result.values.failed.get(&format!("let.{}", l.name)).map(|e| e.to_string()),
+                function: call.map(|c| c.function.clone()),
+                file: None,
+                volatile: call.is_some_and(|c| c.volatile),
+            }
+        })
+        .collect();
     let features = result
         .features
         .iter()
@@ -287,6 +329,7 @@ pub fn build_index(
         configuration: result.configuration.as_ref().map(|c| c.0.clone()),
         final_key: result.final_key.clone(),
         inputs,
+        lets,
         features,
         bodies,
         parts,
@@ -305,4 +348,17 @@ pub fn build_index(
 
 pub fn to_json(index: &PartIndex) -> String {
     serde_json::to_string_pretty(index).expect("index serializes")
+}
+
+/// The outermost `.m` call in `expr`, if any.
+fn first_call(expr: &crate::value::ValueExpr) -> Option<&crate::value::DynamicCall> {
+    use crate::value::ValueExpr as V;
+    match expr {
+        V::Dynamic { call } => Some(call),
+        V::Neg { operand } => first_call(operand),
+        V::Binary { lhs, rhs, .. } => first_call(lhs).or_else(|| first_call(rhs)),
+        V::Toleranced { nominal, .. } => first_call(nominal),
+        V::Coerce { expr, .. } => first_call(expr),
+        _ => None,
+    }
 }

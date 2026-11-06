@@ -251,7 +251,9 @@ pub fn regenerate_part_in(
         Some(name) => document.in_configuration(Some(name)),
         None => document,
     };
-    let index = build_index(&document, &result, None);
+    let mut index = build_index(&document, &result, None);
+    // The file behind each value's `.m` function, for the Properties panel and hover.
+    values_host::resolve_let_files(path, &mut index.lets);
     let mut display = part_display(&result, kernel.as_ref(), tessellation);
     display.sketches = sketch_display(&document, &result);
     // The part draws in its first output's color, else that output's material appearance, the

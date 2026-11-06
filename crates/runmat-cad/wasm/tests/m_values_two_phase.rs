@@ -51,6 +51,12 @@ fn a_part_whose_values_call_m_functions_compiles_in_rounds_until_nothing_is_pend
     assert!(out["projection"].is_object(), "{}", out["diagnostics"]);
     let errors: Vec<&Value> = out["diagnostics"].as_array().unwrap().iter().filter(|d| d["severity"] == "error").collect();
     assert!(errors.is_empty(), "{errors:?}");
+    // Each value names the function that computed it and its file (Properties, hover).
+    let lets = &out["projection"]["data"]["index"]["lets"];
+    assert_eq!(lets[0]["name"], "base");
+    assert!((lets[0]["si"].as_f64().unwrap() - 0.016).abs() < 1e-12, "{lets}");
+    assert_eq!(lets[1]["function"], "withLift");
+    assert_eq!(lets[1]["file"], "/p/withLift.m");
     // 2 × 8 mm + 8 mm = 24 mm: the disc spans 48 mm (display bounds are in metres).
     let bounds = &out["display"]["data"]["bounds"];
     let span = bounds["max"][0].as_f64().unwrap() - bounds["min"][0].as_f64().unwrap();

@@ -49,6 +49,22 @@ pub(crate) fn with_evaluator<R>(path: &str, f: impl FnOnce(&dyn DynamicValueEval
     }
 }
 
+/// Fills each value's `file`: the `.m` file its function resolves to from `path`, through the
+/// thread's host. Without a host the files stay unknown.
+pub fn resolve_let_files(path: &str, lets: &mut [runmat_cad::index::LetRow]) {
+    let Some(host) = HOST.with(|h| h.borrow().clone()) else { return };
+    if lets.iter().all(|l| l.function.is_none()) {
+        return;
+    }
+    let scope = ModuleScope::from_files(host.files.iter().map(|(p, t)| (p.as_str(), t.as_str())));
+    let values = MFunctions::new(&scope, &host.files, path, host.runner.as_ref());
+    for row in lets.iter_mut() {
+        if let Some(function) = &row.function {
+            row.file = values.resolve(function).ok().map(|f| f.file);
+        }
+    }
+}
+
 /// The Desktop's and the browser's compile entry (`options`: `{ configuration?, values? }`):
 /// the first phase of the two-phase `.m` compile ([`runmat_cad::value::m_table`]).
 /// `values` holds the results evaluated so far by call key. The output is the compile JSON
