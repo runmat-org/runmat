@@ -115,8 +115,20 @@ pub(super) fn add(catalog: &mut Catalog) {
                 vec![c("circuit.cross-probe"), c("circuit.locate")],
                 vec![c("library.open-part"), change, footprint, c("circuit.edit-value")],
                 vec![c("circuit.swap-pins"), c("board.lock"), fitted],
-                vec![c("design.show-source"), c("design.copy-reference")],
+                vec![c("schematic.copy"), c("design.show-source"), c("design.copy-reference")],
                 vec![c("circuit.delete")],
+            ],
+        ),
+        // A pin: wire from it, take it off its net, name or close it.
+        context_menu(
+            K::Pin,
+            CIRCUIT,
+            &["schematic.place-wire", "schematic.disconnect", "schematic.net-label", "schematic.power-port"],
+            vec![
+                vec![c("schematic.place-wire"), c("schematic.disconnect")],
+                vec![c("schematic.net-label"), c("schematic.power-port"), c("schematic.no-erc")],
+                vec![c("simulate.probe-pin")],
+                vec![c("design.copy-reference")],
             ],
         ),
         context_menu(
