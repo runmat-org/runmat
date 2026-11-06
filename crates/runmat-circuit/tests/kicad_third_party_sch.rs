@@ -256,29 +256,14 @@ fn third_party_schematics_export_and_read_back_with_the_same_connectivity() {
             .iter()
             .map(|(k, v)| (format!("/p/{k}"), v.clone()))
             .collect();
-        // The written schematic names a footprint only for parts with a board package, so a
-        // part the board leaves off (and the split part's other sheets) has none; the import
-        // reports those footprints as not carried, and they are the only errors.
-        let unplaced = imported
-            .report
-            .not_carried
-            .keys()
-            .filter(|k| k.starts_with("footprint "))
-            .count();
+        // The written schematic keeps every part's footprint name, including parts the board
+        // leaves off, so the round trip passes the design check as the first import does.
         let errors = import_check::design_errors(
             &fs,
             &format!("/p/boards/{stem}.circuit"),
             Some(&format!("/p/boards/{stem}.circuit.layout")),
         );
-        let (packageless, others): (Vec<_>, Vec<_>) =
-            errors.iter().partition(|e| e.ends_with("needs its `package`"));
-        assert!(others.is_empty(), "{}: {others:#?}", p.name);
-        assert!(
-            packageless.is_empty() || unplaced > 0,
-            "{}: {packageless:#?} without a not-carried footprint in {:?}",
-            p.name,
-            imported.report.lines()
-        );
+        assert!(errors.is_empty(), "{}: {errors:#?}\n{:?}", p.name, imported.report.lines());
     }
 }
 

@@ -371,6 +371,7 @@ pub fn export(nl: &Netlist, pool: &Pool, opts: &SchExportOptions) -> BTreeMap<St
                 .package
                 .and_then(|k| pool.packages.get(&k))
                 .map(|pk| format!("RunMat:{}", pk.name))
+                .or_else(|| c.unresolved_package.clone())
                 .unwrap_or_default();
             let value = c
                 .properties

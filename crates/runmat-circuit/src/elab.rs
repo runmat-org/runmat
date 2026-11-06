@@ -90,6 +90,9 @@ pub struct CompInst {
     pub part: Option<Uuid>,
     pub entity: Option<Uuid>,
     pub package: Option<Uuid>,
+    /// The package the design names when the pool has none by that name (a footprint an
+    /// imported schematic names but the board leaves out), so an export can write it back.
+    pub unresolved_package: Option<String>,
     pub params: BTreeMap<String, Param>,
     pub properties: BTreeMap<String, String>,
     pub classes: Vec<String>,
@@ -731,6 +734,10 @@ impl<'a> Ctx<'a> {
                 }
             };
             let (part, entity, package, pins) = self.resolve_part(&part_ref, &path, &decl.source);
+            let unresolved_package = match &part_ref {
+                PartRef::Entity { package: Some(name), .. } if package.is_none() => Some(name.clone()),
+                _ => None,
+            };
             primary_value(&mut params);
             if let Some(p) = part.and_then(|u| self.pool.parts.get(&u)) {
                 for (k, v) in &self.pool.effective_part(p).params {
@@ -746,6 +753,7 @@ impl<'a> Ctx<'a> {
                 part,
                 entity,
                 package,
+                unresolved_package,
                 params,
                 properties: decl.properties.clone(),
                 classes: decl.classes.clone(),
