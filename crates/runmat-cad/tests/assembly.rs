@@ -348,6 +348,13 @@ fn a03_typed_configurations_are_checked() {
     assert!(errors(&r).is_empty(), "{:?}", errors(&r));
     let n = r.node(r.find_display("bracket").unwrap());
     assert!((n.configuration.inputs[&InputName::new("thickness")] - 0.003).abs() < 1e-12);
+    // The index row carries the input as a value, beside the label, for views that compare
+    // occurrences of one design.
+    let index = build_assembly_index(&r, Some(&src));
+    let row = index.occurrences.iter().find(|o| o.name == "bracket").unwrap();
+    assert_eq!(row.inputs.len(), 1);
+    assert_eq!((row.inputs[0].name.as_str(), row.inputs[0].text.as_str()), ("thickness", "3 mm"));
+    assert!((row.inputs[0].si - 0.003).abs() < 1e-12);
     // Wrong dimension.
     let br = top
         .occurrences

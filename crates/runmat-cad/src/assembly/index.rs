@@ -79,6 +79,10 @@ pub struct OccurrenceRow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<RevisionId>,
     pub configuration: String,
+    /// The configured input values, in name order, so a view can compare occurrences of one
+    /// design (the Outline groups thirty ribs and shows what differs between them).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<InputValueRow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_number: Option<String>,
     pub origin: NodeOrigin,
@@ -91,6 +95,17 @@ pub struct OccurrenceRow {
     pub material: Option<MaterialRef>,
     pub locked: bool,
     pub prototype: u32,
+}
+
+/// One configured input of an occurrence: its SI value, its quantity kind when known, and the
+/// value as the label reads it (`88 mm`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InputValueRow {
+    pub name: String,
+    pub si: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -236,6 +251,20 @@ pub fn build_assembly_index(
             definition: n.definition.clone(),
             revision: n.revision.clone(),
             configuration: n.configuration.label(),
+            inputs: n
+                .configuration
+                .inputs
+                .iter()
+                .map(|(k, v)| {
+                    let kind = n.configuration.kinds.get(k);
+                    InputValueRow {
+                        name: k.to_string(),
+                        si: *v,
+                        kind: kind.map(|q| q.0.clone()),
+                        text: crate::assembly::source::display_quantity(kind, *v),
+                    }
+                })
+                .collect(),
             part_number: n.part_number.clone(),
             origin: n.origin.clone(),
             world: n.world,
