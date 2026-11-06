@@ -26,10 +26,10 @@ std 1
 
 // A ventilated front brake disc in grey cast iron EN-GJL-250, 300 x 28 mm: an inboard and an
 // outboard friction plate, 9 mm each, joined by 36 straight radial vanes, 5 mm thick and 10 mm
-// tall, and a 45 mm deep hat that carries the outboard plate to the wheel hub (five 14 mm holes
-// on a 114.3 mm pitch circle, a 66 mm centre bore). Air enters the vane channels at the inboard
-// plate's 184 mm eye and leaves at the rim. "Vanes" names the channel walls: the vanes and the
-// plates' inner faces between them.
+// tall, and a hat that carries the outboard plate to the wheel hub, 32 mm from the outboard
+// friction face to the hub face (five 14 mm holes on a 114.3 mm pitch circle, a 66 mm centre
+// bore). Air enters the vane channels at the inboard plate's 184 mm eye and leaves at the rim.
+// "Vanes" names the channel walls: the vanes and the plates' inner faces between them.
 //
 // The disc's axis is z; the inboard friction face lies on z = 0 and the hub face on z = 60 mm.
 // The plate, hat and bore sizes are inputs; the vane count and thickness come from the generator

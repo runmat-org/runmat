@@ -20,6 +20,9 @@ struct Hero {
     products: &'static [(&'static str, usize)],
     solids: usize,
     faces: &'static [(&'static str, usize)],
+    /// The configuration the study reads, which leaves out the solid the fluid fills (a rigid
+    /// wall needs no mesh), and the products that configuration must not carry.
+    study: Option<(&'static str, &'static [&'static str])>,
 }
 
 const HEROES: &[Hero] = &[Hero {
@@ -28,6 +31,7 @@ const HEROES: &[Hero] = &[Hero {
     products: &[("Block", 1), ("Oil", 2)],
     solids: 3,
     faces: &[("Port P", 1), ("Port T", 1), ("Port A", 1), ("Port B", 1), ("Passage wall", 4)],
+    study: Some(("oil_only", &["Block"])),
 }, Hero {
     id: "battery-cold-plate",
     file: "m01_cold_plate.part",
@@ -41,6 +45,7 @@ const HEROES: &[Hero] = &[Hero {
         ("Coolant inlet", 1), ("Coolant outlet", 1), ("Channel wall", 16),
         ("Plate channel wall", 16), ("M01 cell bottom", 8),
     ],
+    study: None,
 }, Hero {
     id: "paddle-flow-switch",
     file: "flow_switch.part",
@@ -50,18 +55,21 @@ const HEROES: &[Hero] = &[Hero {
         ("Inlet", 1), ("Outlet", 1), ("Pipe wall", 3), ("Paddle wetted", 5),
         ("Paddle surface", 5), ("Paddle root", 1),
     ],
+    study: None,
 }, Hero {
     id: "exhaust-muffler",
     file: "muffler.part",
     products: &[("Shell", 1), ("Air", 1)],
     solids: 2,
     faces: &[("Inlet", 1), ("Outlet", 1), ("Walls", 9)],
+    study: Some(("air_only", &["Shell"])),
 }, Hero {
     id: "hall-current-sensor",
     file: "sensor.part",
     products: &[("Core", 1), ("Primary", 1), ("Air", 1)],
     solids: 3,
     faces: &[("Primary in", 1), ("Primary out", 1), ("Gap", 2), ("Outer boundary", 6)],
+    study: None,
 }, Hero {
     id: "six-bolt-busbar",
     file: "busbar.part",
@@ -71,6 +79,7 @@ const HEROES: &[Hero] = &[Hero {
         ("Cell bolt 1", 1), ("Cell bolt 2", 1), ("Cell bolt 3", 1), ("Cell bolt 4", 1),
         ("Cell bolt 5", 1), ("Cell bolt 6", 1), ("Output bolt", 1), ("Exterior", 10),
     ],
+    study: None,
 }, Hero {
     id: "brake-disc",
     file: "disc.part",
@@ -80,6 +89,7 @@ const HEROES: &[Hero] = &[Hero {
         ("Friction face inboard", 1), ("Friction face outboard", 1), ("Vanes", 144),
         ("Bolt holes", 5), ("Exterior", 8),
     ],
+    study: None,
 }];
 
 fn root() -> PathBuf {
@@ -193,6 +203,32 @@ fn the_hero_parts_compile_and_export_their_study_names() {
         for (name, n) in hero.faces {
             if faces.get(*name).copied().unwrap_or(0) < *n {
                 failures.push(format!("{}: face {name} x{:?}, want at least {n}", hero.id, faces.get(*name)));
+            }
+        }
+        // The study's configuration: the fluid alone, with every face name the study selects.
+        if let Some((configuration, absent)) = hero.study {
+            let step = match runmat_cad_wasm::exchange::part_step_in(&path, &text, Some(configuration)) {
+                Ok(Some(step)) => String::from_utf8(step).expect("STEP is text"),
+                Ok(None) => panic!("OCCT writes STEP"),
+                Err(e) => {
+                    failures.push(format!("{} ({configuration}): export: {e}", hero.id));
+                    continue;
+                }
+            };
+            if let Ok(dir) = std::env::var("RUNMAT_SIM_STEP_DIR") {
+                std::fs::write(format!("{dir}/{}.{configuration}.step", hero.id), &step).unwrap();
+            }
+            let (products, _, study_faces) = step_names(&step);
+            eprintln!("  {configuration}: products {products:?}");
+            for name in absent {
+                if products.contains_key(*name) {
+                    failures.push(format!("{} ({configuration}): carries {name}", hero.id));
+                }
+            }
+            for (name, n) in hero.faces {
+                if study_faces.get(*name).copied().unwrap_or(0) < *n {
+                    failures.push(format!("{} ({configuration}): face {name} x{:?}", hero.id, study_faces.get(*name)));
+                }
             }
         }
     }

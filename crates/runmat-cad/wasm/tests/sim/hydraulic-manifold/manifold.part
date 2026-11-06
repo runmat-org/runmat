@@ -111,6 +111,10 @@ part manifold {
         label = "Passage wall"
     }
 
+    // The flow study's geometry: the oil alone. The block is a rigid wall to the oil, so the
+    // study needs no mesh of it.
+    configuration oil_only = { suppress = [feature.block, feature.edges, feature.bolts, feature.passages] }
+
     output block = { body = feature.block.body, label = "Block", part_number = "HM-0101", material = "aluminum_6061", color = "#B9BFC7" }
     output supply_oil = { body = feature.p_line.body, label = "Oil", color = "#D08A1E" }
     output return_oil = { body = feature.t_line.body, label = "Oil", color = "#D08A1E" }

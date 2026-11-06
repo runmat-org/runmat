@@ -88,6 +88,10 @@ part muffler {
         label = "Walls"
     }
 
+    // The acoustic study's geometry: the gas alone. The shell is a rigid wall to the gas, so the
+    // study needs no mesh of it.
+    configuration air_only = { suppress = [feature.inlet_pipe, feature.shell, feature.tail_pipe, feature.hollow] }
+
     output shell = { body = feature.inlet_pipe.body, label = "Shell", part_number = "EX-1802", material = "aluminized_steel", color = "#8D9196" }
     output air = { body = feature.inlet_bore.body, label = "Air", color = "#CFE3F5" }
 }
