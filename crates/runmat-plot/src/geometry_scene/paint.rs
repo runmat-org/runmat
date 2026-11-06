@@ -44,12 +44,15 @@ impl RegionPaint {
         match self {
             Self::Fill(color) => color,
             Self::Face(color) => [color[0], color[1], color[2], base[3].min(color[3])],
-            Self::Tint { face, amount, .. } => [
-                base[0] + (face[0] - base[0]) * amount,
-                base[1] + (face[1] - base[1]) * amount,
-                base[2] + (face[2] - base[2]) * amount,
-                base[3],
-            ],
+            Self::Tint { face, amount, .. } => {
+                let amount = tint_on(base, amount);
+                [
+                    base[0] + (face[0] - base[0]) * amount,
+                    base[1] + (face[1] - base[1]) * amount,
+                    base[2] + (face[2] - base[2]) * amount,
+                    base[3],
+                ]
+            }
         }
     }
 
@@ -73,6 +76,21 @@ impl RegionPaint {
             Self::Tint { .. } => HOVER_EDGE_WEIGHT,
         }
     }
+}
+
+/// Below this luminance a material counts as dark: a tint toward the selection color, then
+/// lit, would read as black on carbon or black nylon.
+pub(crate) const DARK_LUMINANCE: f32 = 0.25;
+/// How much stronger a tint gets on a fully dark material (selection 0.4 → 0.76, hover 0.3 →
+/// 0.57), so a selected black part reads orange and hover stays lighter than selection.
+pub(crate) const DARK_TINT_BOOST: f32 = 0.9;
+
+/// The tint amount on a face of color `base`: `amount` on light materials, raised on dark ones
+/// so the highlight shows. The instanced triangle shader computes the same.
+pub(crate) fn tint_on(base: [f32; 4], amount: f32) -> f32 {
+    let luminance = 0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2];
+    let darkness = (1.0 - luminance / DARK_LUMINANCE).clamp(0.0, 1.0);
+    (amount * (1.0 + DARK_TINT_BOOST * darkness)).min(1.0)
 }
 
 /// Selected edges draw at twice the scene's edge width (1.25 px edges select at 2.5 px).

@@ -870,6 +870,15 @@ fn selection_tints_the_face_and_draws_its_boundary_edges_in_the_selection_color(
     assert_eq!(&widths[12..], &[1.25; 6], "the third segment keeps the edge width");
     let hover_stroke = super::edge_stroke::widen(hovered, Some(1.25));
     assert_eq!(hover_stroke.vertices[0].tex_coords[1], 2.0);
+
+    // On a near-black material (carbon, black nylon) the tint strengthens so the selection reads
+    // orange, and hover stays lighter than selection.
+    let carbon = [0.05, 0.05, 0.06, 1.0];
+    let on_carbon = SELECTED_PAINT.face(carbon);
+    assert!(on_carbon[0] > 0.65 && on_carbon[0] > on_carbon[2] * 2.0, "{on_carbon:?}");
+    assert!(HOVER_PAINT.face(carbon)[0] < on_carbon[0]);
+    // Light materials keep the plain 40 % tint.
+    assert!((super::paint::tint_on(grey, 0.4) - 0.4).abs() < 1e-6);
 }
 
 #[test]

@@ -116,7 +116,12 @@ pub fn instanced() -> String {
             "let world_position = uniforms.model * vec4<f32>(input.position, 1.0);",
             "let local = vec4<f32>(input.position, 1.0);\n    let placed = vec3<f32>(dot(inst.row0, local), dot(inst.row1, local), dot(inst.row2, local));\n    let placed_normal = vec3<f32>(dot(inst.row0.xyz, input.normal), dot(inst.row1.xyz, input.normal), dot(inst.row2.xyz, input.normal));\n    let world_position = uniforms.model * vec4<f32>(placed, 1.0);",
         )
-        .replace("out.color = input.color;", "out.color = vec4<f32>(mix(input.color.rgb, inst.tint.rgb, inst.tint.a), input.color.a);")
+        // A selection or hover tint (amount under 1) strengthens on dark materials, as
+        // `geometry_scene::paint::tint_on` does for unplaced meshes; fills (amount 1) don't change.
+        .replace(
+            "out.color = input.color;",
+            "let luminance = dot(input.color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));\n    let darkness = clamp(1.0 - luminance / 0.25, 0.0, 1.0);\n    let amount = select(inst.tint.a, min(inst.tint.a * (1.0 + 0.9 * darkness), 1.0), inst.tint.a < 1.0);\n    out.color = vec4<f32>(mix(input.color.rgb, inst.tint.rgb, amount), input.color.a);",
+        )
         .replace("(uniforms.normal_matrix * input.normal).xyz", "(uniforms.normal_matrix * placed_normal).xyz")
 }
 
@@ -125,7 +130,7 @@ mod tests {
     #[test]
     fn the_instanced_variant_places_points_normals_and_paint() {
         let s = super::instanced();
-        for needle in ["inst: InstanceInput", "dot(inst.row0, local)", "placed_normal).xyz", "inst.tint.a"] {
+        for needle in ["inst: InstanceInput", "dot(inst.row0, local)", "placed_normal).xyz", "inst.tint.a", "luminance / 0.25", "1.0 + 0.9 * darkness"] {
             assert!(s.contains(needle), "missing {needle}");
         }
     }
