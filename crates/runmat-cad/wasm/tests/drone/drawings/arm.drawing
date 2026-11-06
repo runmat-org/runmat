@@ -24,9 +24,9 @@ drawing arm {
 
     sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
 
-    view front = standard(orientation = front, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [150, 165], display = hidden_lines)
-    view top = projected(from = front, direction = up, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [150, 235], display = hidden_lines)
-    view right = projected(from = front, direction = right, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [290, 165], display = hidden_lines)
+    view front = standard(orientation = front, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [157, 164], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [157, 216], display = hidden_lines)
+    view right = projected(from = front, direction = right, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [299, 166], display = hidden_lines)
     view a_a = section(
         from = top,
         plane = feature.pad.face.side(pad_s.c),
@@ -43,7 +43,7 @@ drawing arm {
         label = B,
         sheet = "1",
         model = { part = arm, from = "../mechanical/arm" },
-        at = [360, 190],
+        at = [367, 210],
         scale = [4, 1],
         display = hidden_lines
     )
@@ -69,7 +69,7 @@ drawing arm {
     annotation notes = note(
         text = "NOTES:\n1. MATERIAL: {material}, [0/0/90/0]S PREPREG LAYUP, 2.0 MM MIN WALL.\n2. FINISH: MATTE CLEAR COAT, SEAT AND BORE MASKED.\n3. BREAK SHARP EDGES 0.2 MAX.\n4. DIMENSIONS IN MM. UNTOLERANCED: ISO 2768-m.\n5. PART MARK {part_number} NEAR THE KNUCKLE.",
         view = a_a,
-        at = [16, 50]
+        at = [25, 50]
     )
 
     table revisions = revision(
