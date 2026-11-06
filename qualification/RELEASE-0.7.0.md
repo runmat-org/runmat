@@ -1,8 +1,9 @@
 # RunMat 0.7.0 qualification index
 
-Status: required 0.7.0 qualification is complete within the scopes and approved
-dispositions below. The candidate is ready for the separately authorized release
-steps. No push, tag, publication or deployment has been performed.
+Status: product qualification below is complete. Full per-crate workspace test
+qualification on macOS, Linux and Windows is in progress under reopened RM-1293.
+Release readiness requires that additional test census and repair pass. No push,
+tag, publication or deployment has been performed.
 
 ## Source and distribution
 

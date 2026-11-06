@@ -36,6 +36,7 @@ GROUPS = {
         "runmat-aot-runtime",
         "runmat-core",
         "runmat-cpu-execution",
+        "runmat-simulation-usage",
         "runmat-clarabel",
         "runmat-filesystem",
         "runmat-gc",
