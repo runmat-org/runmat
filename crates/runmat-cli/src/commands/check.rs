@@ -20,6 +20,8 @@ pub struct CheckRequest {
     pub verbose: bool,
     pub deny: Vec<String>,
     pub search_paths: Vec<PathBuf>,
+    /// Circuits: leave out the simulation sections.
+    pub no_simulate: bool,
 }
 
 pub async fn execute_check(
@@ -34,8 +36,27 @@ pub async fn execute_check(
         verbose,
         deny,
         search_paths,
+        no_simulate,
     } = request;
     let deny_warnings = parse_denied_levels(&deny)?;
+    if crate::commands::circuit_checks::is_circuit(&file) {
+        if !root.is_empty() || !search_paths.is_empty() {
+            anyhow::bail!(
+                "--study, --sweep and --path apply to .fea and .m sources; {} is a circuit",
+                file.display()
+            );
+        }
+        let report = crate::commands::circuit_checks::check_file(&file, !no_simulate)?;
+        let mut passed = crate::commands::circuit_checks::print_reports(std::slice::from_ref(&report), json)?;
+        if deny_warnings && report.0.warnings > 0 {
+            passed = false;
+        }
+        return if passed {
+            Ok(())
+        } else {
+            Err(AlreadyReportedCliError.into())
+        };
+    }
     let file = resolve_script_input(file)?;
     if crate::commands::fea::source::is_fea_source_path(&file) {
         if !search_paths.is_empty() {
@@ -67,7 +88,7 @@ pub async fn execute_check(
     }
 
     anyhow::bail!(
-        "runmat check supports .m scripts and .fea documents; got {}",
+        "runmat check supports .m scripts, .fea documents and .circuit or .circuit.layout files; got {}",
         file.display()
     )
 }

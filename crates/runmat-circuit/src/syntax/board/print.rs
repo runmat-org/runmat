@@ -255,6 +255,14 @@ pub fn statements_where(board: &Board, want: &dyn Fn(ItemId) -> bool) -> Vec<Pri
             None,
         );
     }
+    if let Some(settings) = &board.fabrication {
+        push(
+            Group::Limits,
+            words::FABRICATION.into(),
+            format!("{} = {}", words::FABRICATION, fabrication_text(settings)),
+            None,
+        );
+    }
     for (class, decls) in &board.net_class_rules {
         let mut r = Rec::new();
         for (k, v) in decls {

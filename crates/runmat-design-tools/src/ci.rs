@@ -198,3 +198,47 @@ fn circuit_path(path: &str, files: &Files) -> String {
         _ => path.to_owned(),
     }
 }
+
+/// The report as text lines, paths shown relative to `base`: each finding, each measurement and
+/// a closing verdict line. Command-line callers print it.
+pub fn report_lines(report: &CircuitCheck, base: &str) -> Vec<String> {
+    let shown = report
+        .path
+        .strip_prefix(&format!("{}/", base.trim_end_matches('/')))
+        .unwrap_or(&report.path);
+    let mut lines = Vec::new();
+    for f in &report.findings {
+        let items = if f.items.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", f.items.join(", "))
+        };
+        lines.push(format!(
+            "{shown}: {} {} {}: {}{items}",
+            f.severity, f.check, f.code, f.message
+        ));
+    }
+    for m in &report.measurements {
+        let verdict = match m.pass {
+            Some(true) => "pass",
+            Some(false) => "FAIL",
+            None => "no limits",
+        };
+        let value = m
+            .value
+            .map(|v| format!("{v:.6} {}", m.unit))
+            .unwrap_or_else(|| "-".into());
+        lines.push(format!(
+            "{shown}: measure {}.{} = {value} ({verdict})",
+            m.simulation, m.name
+        ));
+    }
+    lines.push(format!(
+        "{shown}: {} ({} errors, {} warnings; ran {})",
+        if report.passed { "passed" } else { "FAILED" },
+        report.errors,
+        report.warnings,
+        report.ran.join(", ")
+    ));
+    lines
+}

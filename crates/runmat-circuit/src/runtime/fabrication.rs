@@ -12,6 +12,8 @@ pub struct FabricationExport {
     pub files: BTreeMap<String, String>,
     /// The variants the assembly files were made for (`None` is the default).
     pub variants: Vec<Option<String>>,
+    /// Every variant the design declares, by name.
+    pub design_variants: Vec<String>,
     /// The board's layers, top to bottom, as the output dialog lists them.
     pub layers: Vec<FabLayer>,
     /// The board the set was made from, zones filled.
@@ -110,6 +112,7 @@ pub fn export_fabrication(
         board: board.name.clone(),
         files: fabrication(&board, &sets, &parts, request),
         variants: names,
+        design_variants: project.design.variants.keys().cloned().collect(),
         layers,
         filled: board,
     })

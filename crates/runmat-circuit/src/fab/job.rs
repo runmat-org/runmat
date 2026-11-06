@@ -2,15 +2,15 @@
 //! attributes of every Gerber and drill file of the set, and the material stackup, as the
 //! published job-file format describes them (JSON, millimetres).
 
-use super::{file_function, gerber_layers};
+use super::file_function;
 use crate::geom::to_mm;
 use crate::layout::{Board, StackKind};
 use serde_json::{json, Value};
 
-/// The job file for the board's Gerber set (`gerber_layers` names) and the drill files named
+/// The job file for the Gerbers in `layers` (file name and layer) and the drill files named
 /// in `drill_files` (file name → X2 file function). `date` is the ISO 8601 creation date;
 /// without it the header carries none, so the output stays deterministic.
-pub fn gerber_job(board: &Board, drill_files: &[(String, String)], date: Option<&str>) -> String {
+pub fn gerber_job(board: &Board, layers: &[(String, super::GerberLayer)], drill_files: &[(String, String)], date: Option<&str>) -> String {
     let n = board.copper_count();
     let bb = board.outline.bbox();
     let thickness: crate::geom::Coord = board.stackup.layers.iter().map(|l| l.thickness).sum();
@@ -45,10 +45,10 @@ pub fn gerber_job(board: &Board, drill_files: &[(String, String)], date: Option<
         "TrackToTrack": to_mm(l.min_clearance),
         "MinLineWidth": to_mm(l.min_track),
     }]);
-    let mut files: Vec<Value> = gerber_layers(board)
-        .into_iter()
+    let mut files: Vec<Value> = layers
+        .iter()
         .map(|(path, layer)| {
-            let (function, polarity) = file_function(board, layer);
+            let (function, polarity) = file_function(board, *layer);
             json!({ "Path": path, "FileFunction": function, "FilePolarity": polarity })
         })
         .collect();

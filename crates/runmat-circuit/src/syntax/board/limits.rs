@@ -4,6 +4,7 @@
 use super::*;
 use crate::board_rules::{RuleSpec, RuleValue};
 use crate::geom::Coord;
+use runmat_design_syntax::json::quote;
 
 pub(super) fn read_bend(v: &Val) -> Read<Bend> {
     let mut f = Fields::of(v, "bend")?;
@@ -138,4 +139,78 @@ pub(super) fn read_rule(id: &str, v: &Val) -> Read<RuleSpec> {
         spec.decls.push((k.to_owned(), rule_value(v)?));
     }
     Ok(spec)
+}
+
+/// `fabrication = { preset = fab_house, outputs = [gerber, drill], layers = ["F.Cu"], variants = [""], folder = "fab/x", zip = true, through_hole = false }`.
+pub(super) fn read_fabrication(v: &Val) -> Read<crate::fab::settings::FabSettings> {
+    use crate::fab::settings::{FabOutput, FabPreset, FabSettings};
+    let mut f = Fields::of(v, "fabrication settings")?;
+    let mut out = FabSettings::default();
+    if let Some(p) = f.get("preset") {
+        let t = text(p)?;
+        out.preset = FabPreset::from_word(&t).ok_or_else(|| diagnostic(p.span, format!("`{t}` is not a preset; expected fab_house, assembly, full or custom")))?;
+        out.outputs = out.preset.outputs();
+    }
+    if let Some(o) = f.get("outputs") {
+        out.outputs = list(o)?
+            .iter()
+            .map(|i| {
+                let t = text(i)?;
+                FabOutput::from_word(&t).ok_or_else(|| diagnostic(i.span, format!("`{t}` is not a fabrication output")))
+            })
+            .collect::<Read<_>>()?;
+    }
+    if let Some(l) = f.get("layers") {
+        out.layers = Some(list(l)?.iter().map(text).collect::<Read<_>>()?);
+    }
+    if let Some(l) = f.get("variants") {
+        out.variants = list(l)?.iter().map(text).collect::<Read<_>>()?;
+    }
+    out.folder = f.opt("folder", text)?;
+    out.zip = f.or("zip", false, boolean)?;
+    out.include_through_hole = f.or("through_hole", false, boolean)?;
+    f.finish()?;
+    Ok(out)
+}
+
+/// The settings as the layout writes them; [`read_fabrication`] reads them back.
+pub(super) fn fabrication_text(s: &crate::fab::settings::FabSettings) -> String {
+    use crate::fab::settings::FabPreset;
+    let mut r = Rec::new();
+    r.put("preset", s.preset.word());
+    if s.preset == FabPreset::Custom || s.outputs != s.preset.outputs() {
+        let words: Vec<&str> = s.outputs.iter().map(|o| o.word()).collect();
+        r.put("outputs", format!("[{}]", words.join(", ")));
+    }
+    let names = |items: &mut dyn Iterator<Item = &String>| format!("[{}]", items.map(|t| quote(t)).collect::<Vec<_>>().join(", "));
+    if let Some(l) = &s.layers {
+        r.put("layers", names(&mut l.iter()));
+    }
+    if !s.variants.is_empty() {
+        r.put("variants", names(&mut s.variants.iter()));
+    }
+    if let Some(folder) = &s.folder {
+        r.put("folder", quote(folder));
+    }
+    r.flag("zip", s.zip);
+    r.flag("through_hole", s.include_through_hole);
+    r.text()
+}
+
+/// `source` (a `.circuit.layout`) with its `fabrication = { … }` statement set to `settings`:
+/// the statement is replaced in place, or added after `limits` (else at the block's start).
+/// The rest of the file is left as written.
+pub fn with_fabrication_settings(source: &str, settings: &crate::fab::settings::FabSettings) -> Result<String, String> {
+    let parsed = super::parse_board("layout", source);
+    let line = format!("{} = {}", words::FABRICATION, fabrication_text(settings));
+    if let Some(span) = parsed.spans.get(words::FABRICATION) {
+        return Ok(format!("{}{line}{}", &source[..span.start], &source[span.end..]));
+    }
+    let at = match (parsed.spans.get(words::LIMITS), parsed.block) {
+        (Some(limits), _) => limits.end,
+        (None, Some(block)) => block.start + 1,
+        (None, None) => return Err("the layout has no `layout { … }` block".into()),
+    };
+    let indent = source[..at].rsplit('\n').next().map(|l| l.len() - l.trim_start().len()).filter(|n| *n > 0).unwrap_or(4);
+    Ok(format!("{}\n{}{line}{}", &source[..at], " ".repeat(indent), &source[at..]))
 }

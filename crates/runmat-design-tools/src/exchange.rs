@@ -65,10 +65,14 @@ pub enum ExportFormat {
     Ipc356,
 }
 
-/// Which fabrication outputs to make (each defaults to on, through-hole placement to off).
+/// A fabrication export's settings. Each field given overrides the board's saved settings
+/// (its layout's `fabrication = { … }`), which start from the fab-house preset when the board
+/// has none.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FabricationOptions {
+    /// `fab_house`, `assembly`, `full` or `custom`: sets the outputs before the flags below.
+    pub preset: Option<String>,
     /// Gerber X2 per layer and the job file with the stackup.
     pub gerber: Option<bool>,
     /// Excellon drill files, plated per span and non-plated.
@@ -81,6 +85,8 @@ pub struct FabricationOptions {
     pub pick_place: Option<bool>,
     /// Bill of materials CSV per variant.
     pub bom: Option<bool>,
+    /// The assembly drawing of each side (Gerber and PDF).
+    pub assembly_drawing: Option<bool>,
     /// IPC-2581C XML.
     pub ipc2581: Option<bool>,
     /// ODB++ job as a .tgz.
@@ -89,26 +95,81 @@ pub struct FabricationOptions {
     pub ipc356: Option<bool>,
     /// Pick-and-place lists through-hole parts too.
     pub include_through_hole: Option<bool>,
-    /// The variants to make assembly files for (`""` is the default); all when absent.
+    /// The variants to make assembly files for (`""` is the default); all when absent or empty.
     pub variants: Option<Vec<String>>,
+    /// The Gerber layers to write, by name (`F.Cu`, `F.Courtyard`); the default layers when absent.
+    pub layers: Option<Vec<String>>,
+    /// The output folder, relative to the board's folder (`fab/<board>` when absent).
+    pub folder: Option<String>,
+    /// Also pack every file into `<board>-fab.zip`.
+    pub zip: Option<bool>,
+    /// Report the pre-flight checks (DRC, ERC, unrouted connections, pending schematic changes).
+    #[serde(default)]
+    pub preflight: bool,
+    /// Answer the board's layout with these settings saved into it, for the caller to write.
+    #[serde(default)]
+    pub remember: bool,
 }
 
 impl FabricationOptions {
-    fn request(&self) -> runmat_circuit::fab::set::FabRequest {
-        let d = runmat_circuit::fab::set::FabRequest::default();
-        runmat_circuit::fab::set::FabRequest {
-            gerber: self.gerber.unwrap_or(d.gerber),
-            drill: self.drill.unwrap_or(d.drill),
-            drill_map: self.drill_map.unwrap_or(d.drill_map),
-            drawing: self.drawing.unwrap_or(d.drawing),
-            pick_place: self.pick_place.unwrap_or(d.pick_place),
-            bom: self.bom.unwrap_or(d.bom),
-            ipc2581: self.ipc2581.unwrap_or(d.ipc2581),
-            odb: self.odb.unwrap_or(d.odb),
-            ipc356: self.ipc356.unwrap_or(d.ipc356),
-            include_through_hole: self.include_through_hole.unwrap_or(d.include_through_hole),
-            date: None,
+    /// Every output off: the answer is only the board's layers, variants and settings.
+    pub fn plan_only(&self) -> bool {
+        [self.gerber, self.drill, self.drill_map, self.drawing, self.pick_place, self.bom, self.assembly_drawing, self.ipc2581, self.odb, self.ipc356]
+            .iter()
+            .all(|f| *f == Some(false))
+    }
+
+    /// The settings: `saved` (or the defaults) with every given field over it.
+    pub fn settings(&self, saved: Option<&runmat_circuit::fab::settings::FabSettings>) -> Result<runmat_circuit::fab::settings::FabSettings, ToolError> {
+        use runmat_circuit::fab::settings::{FabOutput, FabPreset};
+        let mut s = saved.cloned().unwrap_or_default();
+        if let Some(p) = &self.preset {
+            let preset = FabPreset::from_word(p).ok_or_else(|| ToolError::invalid(format!("`{p}` is not a preset; expected fab_house, assembly, full or custom")))?;
+            s.preset = preset;
+            if preset != FabPreset::Custom {
+                s.outputs = preset.outputs();
+                s.zip = preset == FabPreset::FabHouse;
+            }
         }
+        let flags = [
+            (self.gerber, FabOutput::Gerber),
+            (self.drill, FabOutput::Drill),
+            (self.drill_map, FabOutput::DrillMap),
+            (self.drawing, FabOutput::Drawing),
+            (self.pick_place, FabOutput::PickPlace),
+            (self.bom, FabOutput::Bom),
+            (self.assembly_drawing, FabOutput::AssemblyDrawing),
+            (self.ipc2581, FabOutput::Ipc2581),
+            (self.odb, FabOutput::Odb),
+            (self.ipc356, FabOutput::Ipc356),
+        ];
+        let mut changed = false;
+        for (flag, output) in flags {
+            match flag {
+                Some(true) => changed |= s.outputs.insert(output),
+                Some(false) => changed |= s.outputs.remove(&output),
+                None => {}
+            }
+        }
+        if changed && !self.plan_only() {
+            s.preset = FabPreset::of(&s.outputs);
+        }
+        if let Some(v) = self.include_through_hole {
+            s.include_through_hole = v;
+        }
+        if let Some(v) = &self.variants {
+            s.variants = v.clone();
+        }
+        if let Some(l) = &self.layers {
+            s.layers = Some(l.iter().cloned().collect());
+        }
+        if let Some(f) = &self.folder {
+            s.folder = Some(f.clone()).filter(|f| !f.trim().is_empty());
+        }
+        if let Some(z) = self.zip {
+            s.zip = z;
+        }
+        Ok(s)
     }
 }
 
@@ -326,8 +387,7 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
                 ));
             }
             let opts = input.fabrication.clone().unwrap_or_default();
-            let (made, summary) =
-                fabrication::fabrication(&input.path, text, files, &opts.request(), opts.variants.as_deref(), &mut notes)?;
+            let (made, summary) = fabrication::fabrication(&input.path, text, files, &opts, &mut notes)?;
             fab_summary = Some(summary);
             made
         }

@@ -72,50 +72,91 @@ pub fn drawing_sheet(d: &Drawing) -> Sheet {
     sheet
 }
 
-/// What a fabrication export covered: the board, its layers top to bottom and the variants.
+/// What a fabrication export covered: the board, its layer table, the variants, the
+/// settings it ran with and, when asked, the pre-flight checks and the layout with the
+/// settings saved.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FabricationSummary {
     pub board: String,
+    /// The layer table, top to bottom: paste, legend and mask, the stackup, then the bottom's.
     pub layers: Vec<FabricationLayer>,
-    /// The variants the assembly files were made for; `null` is the default.
+    /// The board's variants; `null` is the default.
     pub variants: Vec<Option<String>>,
+    /// The settings the export ran with (the board's saved ones with the call's over them).
+    pub settings: serde_json::Value,
+    /// The output folder the settings name, relative to the board's folder.
+    pub folder: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preflight: Option<Preflight>,
+    /// The board's layout with the settings saved into it (`remember`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<LayoutUpdate>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FabricationLayer {
     pub name: String,
-    /// `copper`, `core`, `prepreg`, `solder mask`, `legend` or `paste`.
+    /// `copper`, `core`, `prepreg`, `mask`, `paste`, `silk`, `courtyard` or `outline`.
     pub kind: String,
     pub material: String,
-    pub thickness_mm: f64,
+    pub thickness_mm: Option<f64>,
+    pub copper_oz: Option<f64>,
+    /// The Gerber the layer makes, under `gerber/`; none for a dielectric.
+    pub file: Option<String>,
+    /// Whether the settings include it.
+    pub included: bool,
 }
 
-/// The board's fabrication set as exported files.
+/// The checks a board house cares about before it takes the files.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Preflight {
+    pub drc_errors: usize,
+    pub erc_errors: usize,
+    pub unrouted: usize,
+    /// Schematic changes the board hasn't taken.
+    pub pending_changes: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LayoutUpdate {
+    pub path: String,
+    pub text: String,
+}
+
+/// The board's layout path for a `.circuit` or `.circuit.layout` path.
+fn layout_path(path: &str) -> String {
+    if path.ends_with(".circuit.layout") {
+        path.to_owned()
+    } else {
+        format!("{path}.layout")
+    }
+}
+
+/// The board's fabrication set as exported files, with what it covered.
 pub fn fabrication(
     path: &str,
     text: &str,
     files: &Files,
-    request: &FabRequest,
-    variants: Option<&[String]>,
+    opts: &super::FabricationOptions,
     notes: &mut Vec<String>,
 ) -> Result<(Vec<ExportedFile>, FabricationSummary), ToolError> {
-    let out = runmat_circuit::runtime::export_fabrication(
-        path,
-        text,
-        files,
-        &Default::default(),
-        request,
-        variants,
-    )
-    .map_err(|d| {
+    let layout = layout_path(path);
+    let layout_text = if layout == path { Some(text) } else { files.get(&layout).map(String::as_str) };
+    let saved = layout_text.and_then(|t| runmat_circuit::syntax::board::parse_board(&layout, t).board).and_then(|b| b.fabrication);
+    let settings = opts.settings(saved.as_ref())?;
+    let mut request: FabRequest = settings.request();
+    if opts.plan_only() {
+        request = FabRequest { gerber: false, drill: false, drill_map: false, drawing: false, pick_place: false, bom: false, assembly_drawing: false, ipc2581: false, odb: false, ipc356: false, ..request };
+    }
+    let variants = (!settings.variants.is_empty()).then_some(settings.variants.as_slice());
+    let out = runmat_circuit::runtime::export_fabrication(path, text, files, &Default::default(), &request, variants).map_err(|d| {
         ToolError::new(
             "not_compiled",
-            format!(
-                "{path} doesn't make fabrication outputs: {}",
-                d.first().map(|d| d.message.as_str()).unwrap_or("")
-            ),
+            format!("{path} doesn't make fabrication outputs: {}", d.first().map(|d| d.message.as_str()).unwrap_or("")),
         )
     })?;
     let mut result = Vec::new();
@@ -136,52 +177,76 @@ pub fn fabrication(
         }
     }
     if !odb.is_empty() {
-        result.push(binary_file(
-            format!("odb/{}-odb.tgz", out.board),
-            "application/gzip",
-            &crate::formats::tgz::tgz(&odb),
-        ));
+        result.push(binary_file(format!("odb/{}-odb.tgz", out.board), "application/gzip", &crate::formats::tgz::tgz(&odb)));
     }
     let board = &out.filled;
-    {
-        if request.drill_map {
-            let sheet = drawing_sheet(&drill_map(board));
-            result.push(binary_file(
-                format!("drill/{}-drill-map.pdf", out.board),
-                "application/pdf",
-                &crate::formats::pdf::write(&sheet),
-            ));
-        }
-        if request.drawing {
-            let sheet = drawing_sheet(&fabrication_drawing(board));
-            result.push(binary_file(
-                format!("drawing/{}-fab-drawing.pdf", out.board),
-                "application/pdf",
-                &crate::formats::pdf::write(&sheet),
-            ));
+    if request.drill_map {
+        let sheet = drawing_sheet(&drill_map(board));
+        result.push(binary_file(format!("drill/{}-drill-map.pdf", out.board), "application/pdf", &crate::formats::pdf::write(&sheet)));
+    }
+    if request.drawing {
+        let sheet = drawing_sheet(&fabrication_drawing(board));
+        result.push(binary_file(format!("drawing/{}-fab-drawing.pdf", out.board), "application/pdf", &crate::formats::pdf::write(&sheet)));
+    }
+    if request.assembly_drawing {
+        for (side, d) in runmat_circuit::fab::assembly_drawing::assembly_drawings(board) {
+            let sheet = drawing_sheet(&d);
+            result.push(binary_file(format!("assembly/{}-assembly-{side}.pdf", out.board), "application/pdf", &crate::formats::pdf::write(&sheet)));
         }
     }
     result.sort_by(|a, b| a.name.cmp(&b.name));
-    let named: Vec<String> = out.variants.iter().flatten().cloned().collect();
-    if !named.is_empty() {
-        notes.push(format!(
-            "assembly files for the default variant and {}",
-            named.join(", ")
-        ));
+    if settings.zip && !result.is_empty() {
+        let entries: Vec<(&str, Vec<u8>)> = result.iter().map(|f| (f.name.as_str(), file_bytes(f))).collect();
+        let zip = crate::formats::opc::zip_stored(&entries);
+        result.push(binary_file(format!("{}-fab.zip", out.board), "application/zip", &zip));
     }
+    let named: Vec<String> = out.variants.iter().flatten().cloned().collect();
+    if !named.is_empty() && (request.bom || request.pick_place) {
+        notes.push(format!("assembly files for the default variant and {}", named.join(", ")));
+    }
+    let rows = runmat_circuit::fab::plan::layer_rows(board);
+    let chosen: Vec<String> = runmat_circuit::fab::plan::included(&rows, settings.layers.as_ref()).into_iter().map(|(f, _)| f).collect();
+    let preflight = opts.preflight.then(|| preflight(path, files)).transpose()?;
+    let layout_update = match (opts.remember, layout_text) {
+        (true, Some(t)) => Some(LayoutUpdate { path: layout.clone(), text: runmat_circuit::syntax::board::with_fabrication_settings(t, &settings).map_err(ToolError::invalid)? }),
+        _ => None,
+    };
+    let all_variants: Vec<Option<String>> = std::iter::once(None).chain(out.design_variants.iter().cloned().map(Some)).collect();
     let summary = FabricationSummary {
         board: out.board.clone(),
-        layers: out
-            .layers
+        layers: rows
             .iter()
-            .map(|l| FabricationLayer {
-                name: l.name.clone(),
-                kind: l.kind.clone(),
-                material: l.material.clone(),
-                thickness_mm: l.thickness_mm,
+            .map(|r| FabricationLayer {
+                name: r.name.clone(),
+                kind: r.kind.clone(),
+                material: r.material.clone(),
+                thickness_mm: r.thickness_mm,
+                copper_oz: r.copper_oz,
+                included: r.file.as_ref().is_some_and(|f| chosen.contains(f)),
+                file: r.file.clone(),
             })
             .collect(),
-        variants: out.variants.clone(),
+        variants: all_variants,
+        folder: settings.folder_or_default(&out.board),
+        settings: serde_json::to_value(&settings).unwrap_or_default(),
+        preflight,
+        layout: layout_update,
     };
     Ok((result, summary))
+}
+
+fn file_bytes(f: &ExportedFile) -> Vec<u8> {
+    use base64::Engine as _;
+    if f.encoding == "base64" {
+        base64::engine::general_purpose::STANDARD.decode(f.content.as_bytes()).unwrap_or_default()
+    } else {
+        f.content.as_bytes().to_vec()
+    }
+}
+
+/// The pre-flight counts from the CI circuit checks (without simulations).
+fn preflight(path: &str, files: &Files) -> Result<Preflight, ToolError> {
+    let report = crate::ci::check_circuit(path, files, false)?;
+    let count = |check: &str| report.findings.iter().filter(|f| f.check == check && f.severity == "error").count();
+    Ok(Preflight { drc_errors: count("drc"), erc_errors: count("erc"), unrouted: count("unrouted"), pending_changes: count("eco") })
 }

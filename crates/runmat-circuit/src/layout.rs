@@ -792,6 +792,8 @@ pub struct Board {
     pub next_id: u64,
     /// What the board last took from the schematic: the ECO's base for three-way compares.
     pub sync: crate::eco::BoardSync,
+    /// The fabrication settings last used (`fabrication = { … }`).
+    pub fabrication: Option<crate::fab::settings::FabSettings>,
 }
 
 impl Board {
@@ -818,6 +820,7 @@ impl Board {
             net_class_rules: BTreeMap::new(),
             next_id: 1,
             sync: Default::default(),
+            fabrication: None,
         }
     }
     pub fn alloc(&mut self) -> ItemId {

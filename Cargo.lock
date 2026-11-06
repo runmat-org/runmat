@@ -7668,6 +7668,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-config",
  "runmat-core",
+ "runmat-design-tools",
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner-native",

@@ -392,6 +392,12 @@ impl Reader<'_> {
                         board.outline.holes.push(r);
                     }
                 }
+                words::FABRICATION => {
+                    self.record(Group::Limits, words::FABRICATION.into(), at, None);
+                    if let Some(s) = self.note(need_value(&h).and_then(read_fabrication)) {
+                        board.fabrication = Some(s);
+                    }
+                }
                 words::LIMITS => {
                     self.record(Group::Limits, "limits".into(), at, None);
                     if limits_seen {

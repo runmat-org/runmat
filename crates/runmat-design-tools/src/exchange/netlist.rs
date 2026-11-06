@@ -35,6 +35,7 @@ pub fn netlist(
             ipc2581: false,
             odb: false,
             ipc356: true,
+            assembly_drawing: false,
             ..Default::default()
         };
         let out = runmat_circuit::runtime::export_fabrication(

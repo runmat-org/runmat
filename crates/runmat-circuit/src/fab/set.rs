@@ -8,6 +8,7 @@
 //! | Fabrication drawing | `drawing/<board>-fab-drawing.gbr` |
 //! | Pick-and-place | `assembly/<board>[-<variant>]-pos.csv` |
 //! | BOM | `assembly/<board>[-<variant>]-bom.csv` |
+//! | Assembly drawing | `assembly/<board>-assembly-top.gbr`, `-bottom.gbr` |
 //! | IPC-2581C | `ipc2581/<board>.xml` |
 //! | ODB++ | `odb/<job>/…` (the job tree; archive it as `<board>-odb.tgz`) |
 //! | IPC-D-356A | `netlist/<board>.ipc` |
@@ -32,8 +33,13 @@ pub struct FabRequest {
     pub ipc2581: bool,
     pub odb: bool,
     pub ipc356: bool,
+    /// The assembly drawing (outlines and designators, top and bottom).
+    pub assembly_drawing: bool,
     /// Pick-and-place lists through-hole parts too.
     pub include_through_hole: bool,
+    /// The Gerber layers to write, by layer name (`F.Cu`, `F.Paste`, `Edge.Cuts`); the
+    /// default rows of [`super::plan::layer_rows`] when `None`.
+    pub layers: Option<BTreeSet<String>>,
     /// ISO 8601 date for the Gerber job file's header; none keeps the set deterministic.
     pub date: Option<String>,
 }
@@ -50,7 +56,9 @@ impl Default for FabRequest {
             ipc2581: true,
             odb: true,
             ipc356: true,
+            assembly_drawing: true,
             include_through_hole: false,
+            layers: None,
             date: None,
         }
     }
@@ -82,8 +90,9 @@ pub fn fabrication(
     let name = &board.name;
     let drills = drill::excellon(board);
     if req.gerber {
-        for (file, text) in super::gerber_set(board) {
-            out.insert(format!("gerber/{file}"), text);
+        let layers = super::plan::included(&super::plan::layer_rows(board), req.layers.as_ref());
+        for (file, layer) in &layers {
+            out.insert(format!("gerber/{file}"), super::gerber(board, *layer));
         }
         let drill_functions: Vec<(String, String)> = if req.drill {
             drills
@@ -102,7 +111,7 @@ pub fn fabrication(
         };
         out.insert(
             format!("gerber/{name}.gbrjob"),
-            job::gerber_job(board, &drill_functions, req.date.as_deref()),
+            job::gerber_job(board, &layers, &drill_functions, req.date.as_deref()),
         );
     }
     if req.drill {
@@ -121,6 +130,14 @@ pub fn fabrication(
             format!("drawing/{name}-fab-drawing.gbr"),
             drawing::fabrication_drawing(board).gerber(board, "FabricationDrawing"),
         );
+    }
+    if req.assembly_drawing {
+        for (side, drawing) in super::assembly_drawing::assembly_drawings(board) {
+            out.insert(
+                format!("assembly/{name}-assembly-{side}.gbr"),
+                drawing.gerber(board, &format!("AssemblyDrawing,{}", if side == "top" { "Top" } else { "Bot" })),
+            );
+        }
     }
     for v in variants {
         let suffix = v.name.as_ref().map(|n| format!("-{n}")).unwrap_or_default();

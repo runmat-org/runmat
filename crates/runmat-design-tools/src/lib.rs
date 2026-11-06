@@ -26,6 +26,8 @@ use std::collections::BTreeMap;
 
 pub mod check;
 pub mod ci;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod workspace;
 pub mod edit;
 pub mod exchange;
 pub mod formats;

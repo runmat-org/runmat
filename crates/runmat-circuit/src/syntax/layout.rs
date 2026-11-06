@@ -69,6 +69,7 @@ pub mod words {
     pub const OUTLINE: &str = "outline";
     pub const CUTOUT: &str = "cutout";
     pub const LIMITS: &str = "limits";
+    pub const FABRICATION: &str = "fabrication";
     pub const RULE: &str = "rule";
     pub const NET: &str = "net";
     pub const ROOM: &str = "room";
@@ -110,6 +111,7 @@ pub mod words {
         OUTLINE,
         CUTOUT,
         LIMITS,
+        FABRICATION,
         RULE,
         NET,
         ROOM,

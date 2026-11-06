@@ -85,8 +85,9 @@ fn every_gerber_parses_with_an_independent_reader() {
         .iter()
         .filter(|(p, _)| p.ends_with(".gbr"))
         .collect();
-    // 4 copper, mask, paste and legend per side, profile; drill map; fabrication drawing.
-    assert_eq!(gerbers.len(), 4 + 6 + 1 + 2, "{:?}", gerbers.keys());
+    // 4 copper, mask, paste and legend per side, profile; drill map; fabrication drawing; the
+    // assembly drawing of the top (every part of this board is on top).
+    assert_eq!(gerbers.len(), 4 + 6 + 1 + 2 + 1, "{:?}", gerbers.keys());
     let mut by_name = BTreeMap::new();
     for (p, t) in &gerbers {
         let ops = parse_gerber(p, t);
@@ -283,4 +284,60 @@ fn bom_and_placement_per_variant() {
 #[test]
 fn the_set_is_deterministic() {
     assert_eq!(flight_controller().files, flight_controller().files);
+}
+
+#[test]
+fn the_layer_table_follows_the_stackup_and_settings_pick_the_gerbers() {
+    use runmat_circuit::fab::plan::layer_rows;
+    use runmat_circuit::fab::settings::{FabPreset, FabSettings};
+    let out = flight_controller();
+    let rows = layer_rows(&out.filled);
+    let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(&names[..4], ["F.Paste", "F.Silkscreen", "F.Mask", "F.Cu"]);
+    assert_eq!(names.last(), Some(&"Edge.Cuts"));
+    let copper: Vec<&runmat_circuit::fab::plan::LayerRow> = rows.iter().filter(|r| r.kind == "copper").collect();
+    assert_eq!(copper.len(), 4);
+    assert!(copper.iter().all(|r| r.copper_oz.is_some() && r.thickness_mm.is_some() && r.file.is_some()));
+    assert!(rows.iter().filter(|r| r.kind == "core" || r.kind == "prepreg").all(|r| r.file.is_none() && r.thickness_mm.is_some()));
+    assert!(rows.iter().filter(|r| r.kind == "courtyard").all(|r| !r.default_on));
+    // A fab-house set with the paste layers left out and the top courtyard added.
+    let mut settings = FabSettings { preset: FabPreset::FabHouse, ..Default::default() };
+    let mut layers: std::collections::BTreeSet<String> = rows.iter().filter(|r| r.default_on && r.kind != "paste").map(|r| r.name.clone()).collect();
+    layers.insert("F.Courtyard".into());
+    settings.layers = Some(layers);
+    let files = runmat_circuit::fab::set::fabrication(&out.filled, &[], &Default::default(), &settings.request());
+    assert!(files.keys().any(|k| k.ends_with("-F_Courtyard.gbr")));
+    assert!(!files.keys().any(|k| k.ends_with("_Paste.gbr")));
+    assert!(!files.keys().any(|k| k.starts_with("assembly/")));
+    let job = &files["gerber/flight_controller.gbrjob"];
+    assert!(job.contains("F_Courtyard") && !job.contains("F_Paste"));
+}
+
+#[test]
+fn the_layout_keeps_its_fabrication_settings() {
+    use runmat_circuit::fab::settings::{FabOutput, FabPreset};
+    use runmat_circuit::syntax::board::{parse_board, print_board};
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/projects/daq");
+    let text = std::fs::read_to_string(dir.join("daq.circuit.layout")).unwrap();
+    let parsed = parse_board("/p/daq.circuit.layout", &text);
+    let mut board = parsed.board.unwrap_or_else(|| panic!("{:?}", parsed.diagnostics));
+    let mut settings = runmat_circuit::fab::settings::FabSettings { preset: FabPreset::Custom, ..Default::default() };
+    settings.outputs.insert(FabOutput::Odb);
+    settings.layers = Some(["F.Cu".to_string(), "Edge.Cuts".into()].into());
+    settings.variants = vec!["".into(), "lite".into()];
+    settings.folder = Some("fab/fc-A".into());
+    settings.include_through_hole = true;
+    board.fabrication = Some(settings.clone());
+    let printed = print_board(&board, &[]);
+    assert!(printed.contains("fabrication = { preset = custom, outputs = [gerber, drill, drill_map, drawing, ipc356, odb]"), "{}", printed.lines().find(|l| l.contains("fabrication")).unwrap_or(""));
+    let again = parse_board("/p/daq.circuit.layout", &printed);
+    assert!(again.diagnostics.is_empty(), "{:?}", again.diagnostics);
+    assert_eq!(again.board.unwrap().fabrication, Some(settings));
+    // Written into the file in place: once added, then replaced, the rest kept.
+    let added = runmat_circuit::syntax::board::with_fabrication_settings(&text, &settings).unwrap();
+    let replaced = runmat_circuit::syntax::board::with_fabrication_settings(&added, &Default::default()).unwrap();
+    assert_eq!(replaced.matches("fabrication = ").count(), 1);
+    assert_eq!(replaced.len() - text.len(), replaced.lines().find(|l| l.contains("fabrication = ")).unwrap().len() + 1);
+    let back = parse_board("/p/daq.circuit.layout", &added).board.unwrap();
+    assert_eq!(back.fabrication, Some(settings));
 }

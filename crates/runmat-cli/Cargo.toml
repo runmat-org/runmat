@@ -97,6 +97,7 @@ runmat-test-runner = { workspace = true }
 runmat-test-runner-execution = { workspace = true }
 runmat-test-runner-native = { workspace = true }
 runmat-python = { workspace = true }
+runmat-design-tools = { path = "../runmat-design-tools", version = "=0.6.2" }
 sha2 = { workspace = true }
 hex = { workspace = true }
 

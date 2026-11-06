@@ -61,7 +61,7 @@ fn bytes(out: &Value, name: &str) -> Vec<u8> {
 
 #[test]
 fn the_whole_set_in_its_folders() {
-    let out = export(json!({}));
+    let out = export(json!({ "fabrication": { "preset": "full", "zip": false } }));
     let n = names(&out);
     for folder in [
         "gerber/",
@@ -110,7 +110,7 @@ fn the_whole_set_in_its_folders() {
 #[test]
 fn the_odb_archive_lists_with_the_system_tar() {
     let out = export(
-        json!({ "fabrication": { "gerber": false, "drill": false, "drillMap": false, "drawing": false, "pickPlace": false, "bom": false, "ipc2581": false, "ipc356": false } }),
+        json!({ "fabrication": { "gerber": false, "drill": false, "drillMap": false, "drawing": false, "ipc356": false, "odb": true, "zip": false } }),
     );
     assert_eq!(names(&out), vec!["odb/flight_controller-odb.tgz"]);
     let dir = std::env::temp_dir().join(format!("runmat-odb-{}", std::process::id()));
@@ -229,4 +229,68 @@ fn circuit_checks_report_the_board_and_fail_on_an_unrouted_one() {
         "{:#?}",
         r.findings
     );
+}
+
+/// The layout with `settings` saved into it, beside the circuit, as the Desktop leaves it.
+fn files_with_saved(options: Value) -> Files {
+    let mut f = files();
+    let out = call(
+        "design.export",
+        json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication", "fabrication": options }),
+        &f,
+    )
+    .unwrap();
+    let layout = &out["fabrication"]["layout"];
+    f.insert(layout["path"].as_str().unwrap().to_owned(), layout["text"].as_str().unwrap().to_owned());
+    f
+}
+
+#[test]
+fn a_board_without_settings_makes_the_fab_house_set_zipped() {
+    let out = export(json!({}));
+    let n = names(&out);
+    assert!(n.iter().any(|x| x.starts_with("gerber/")) && n.iter().any(|x| x.starts_with("netlist/")));
+    assert!(!n.iter().any(|x| x.starts_with("assembly/") || x.starts_with("odb/")), "{n:?}");
+    let zip = bytes(&out, "flight_controller-fab.zip");
+    assert!(zip.starts_with(b"PK\x03\x04"));
+    let summary = &out["fabrication"];
+    assert_eq!(summary["settings"]["preset"], "fab_house");
+    assert_eq!(summary["folder"], "fab/flight_controller");
+    let layers = summary["layers"].as_array().unwrap();
+    let row = |name: &str| layers.iter().find(|l| l["name"] == name).unwrap_or_else(|| panic!("no {name}"));
+    assert_eq!(row("F.Cu")["included"], true);
+    assert_eq!(row("F.Courtyard")["included"], false);
+    assert!(row("F.Cu")["copperOz"].as_f64().is_some());
+}
+
+#[test]
+fn a_plan_writes_nothing_and_reports_the_preflight() {
+    let off = json!({ "gerber": false, "drill": false, "drillMap": false, "drawing": false, "pickPlace": false, "bom": false, "assemblyDrawing": false, "ipc2581": false, "odb": false, "ipc356": false, "preflight": true });
+    let out = export(json!({ "fabrication": off }));
+    assert!(names(&out).is_empty(), "{:?}", names(&out));
+    let summary = &out["fabrication"];
+    assert_eq!(summary["settings"]["preset"], "fab_house", "a plan leaves the saved preset alone");
+    assert!(summary["layers"].as_array().unwrap().len() > 10);
+    let pre = &summary["preflight"];
+    for k in ["drcErrors", "ercErrors", "unrouted", "pendingChanges"] {
+        assert!(pre[k].as_u64().is_some(), "{k}: {pre}");
+    }
+}
+
+#[test]
+fn saved_settings_make_the_same_set_as_the_call_that_saved_them() {
+    let options = json!({ "preset": "assembly", "zip": false, "layers": ["F.Cu", "Edge.Cuts"], "remember": true });
+    let explicit = call(
+        "design.export",
+        json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication", "fabrication": options }),
+        &files(),
+    )
+    .unwrap();
+    let saved = files_with_saved(options.clone());
+    assert!(saved["/p/flight_controller.circuit.layout"].contains("fabrication = { preset = assembly"));
+    // A later export with no options (the CLI's re-export, an agent's design.export) reads them.
+    let again = call("design.export", json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication" }), &saved).unwrap();
+    assert_eq!(names(&again), names(&explicit));
+    assert!(names(&again).iter().any(|n| n.ends_with("-assembly-top.pdf")), "{:?}", names(&again));
+    assert_eq!(again["files"], explicit["files"]);
 }

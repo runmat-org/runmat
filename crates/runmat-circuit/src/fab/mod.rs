@@ -26,7 +26,10 @@ pub mod drawing;
 pub mod drill;
 pub mod job;
 pub mod odb;
+pub mod plan;
 pub mod set;
+pub mod settings;
+pub mod assembly_drawing;
 
 pub use assembly::{bom, bom_csv, ipc356, natural_key, pick_place, BomLine};
 pub use drill::excellon;
@@ -187,6 +190,8 @@ pub enum GerberLayer {
     Mask(Side),
     Paste(Side),
     Legend(Side),
+    /// Footprint courtyards, for review (not part of the default set).
+    Courtyard(Side),
     Profile,
 }
 
@@ -243,6 +248,7 @@ pub(crate) fn file_function(board: &Board, layer: GerberLayer) -> (String, &'sta
         }
         GerberLayer::Paste(s) => format!("Paste,{}", if s == Side::Top { "Top" } else { "Bot" }),
         GerberLayer::Legend(s) => format!("Legend,{}", if s == Side::Top { "Top" } else { "Bot" }),
+        GerberLayer::Courtyard(s) => format!("Other,Courtyard,{}", if s == Side::Top { "Top" } else { "Bot" }),
         GerberLayer::Profile => "Profile,NP".into(),
     };
     let polarity = if matches!(layer, GerberLayer::Mask(_)) {
@@ -410,6 +416,17 @@ pub(crate) fn image<S: Sink>(board: &Board, layer: GerberLayer, w: &mut S) {
             {
                 w.object(&[]);
                 text_strokes(w, t, "Other,Legend");
+            }
+        }
+        GerberLayer::Courtyard(side) => {
+            let ap = w.aperture(Aperture::Circle(crate::geom::mm(0.05)), "Other,Courtyard");
+            for f in board.footprints.values().filter(|f| f.side == side) {
+                w.object(&[("C", f.reference.clone())]);
+                for r in f.courtyard() {
+                    let mut pts = r.clone();
+                    pts.push(r[0]);
+                    w.draw(ap, &pts);
+                }
             }
         }
         GerberLayer::Profile => {

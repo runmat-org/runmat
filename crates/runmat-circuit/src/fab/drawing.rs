@@ -50,17 +50,17 @@ pub fn text_width(text: &str, size: Coord) -> Coord {
 }
 
 impl Drawing {
-    fn line(&mut self, points: Vec<Point>, width: Coord) {
+    pub(crate) fn line(&mut self, points: Vec<Point>, width: Coord) {
         self.marks.push(Mark::Line { points, width });
     }
-    fn rect(&mut self, r: Rect, width: Coord) {
+    pub(crate) fn rect(&mut self, r: Rect, width: Coord) {
         let (a, b) = (r.min, r.max);
         self.line(
             vec![a, Point::new(b.x, a.y), b, Point::new(a.x, b.y), a],
             width,
         );
     }
-    fn text(&mut self, at: Point, size: Coord, text: impl Into<String>) {
+    pub(crate) fn text(&mut self, at: Point, size: Coord, text: impl Into<String>) {
         self.marks.push(Mark::Text {
             at,
             size,

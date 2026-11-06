@@ -21,9 +21,11 @@ use runmat_design_tools::{call, DesignKind, Files};
 use serde_json::{json, Value};
 use wasm_bindgen::prelude::*;
 
-/// The tools this host runs: the read-only ones on ECAD files. `design.render` draws through
-/// the server, and `design.propose_edit`, import and export stay with the project.
-const TOOLS: &[&str] = &["design.overview", "design.check", "design.inspect", "design.erc", "design.drc", "design.simulate"];
+/// The tools this host runs on ECAD files: the read-only ones, and `design.export`, which
+/// answers the exported files for the page to write (the Desktop's Fabrication outputs).
+/// `design.render` draws through the server, and `design.propose_edit` and import stay with the
+/// project.
+const TOOLS: &[&str] = &["design.overview", "design.check", "design.inspect", "design.erc", "design.drc", "design.simulate", "design.export"];
 
 #[wasm_bindgen]
 pub fn design_tool(name: &str, input: &str, files: &str) -> String {
@@ -109,5 +111,14 @@ mod tests {
         assert_eq!(render["error"]["code"], "unsupported");
         let bad = answer("design.check", "{", "{}");
         assert_eq!(bad["error"]["code"], "invalid_arguments");
+    }
+
+    #[test]
+    fn a_board_exports_its_fabrication_set_for_the_page_to_write() {
+        let input = r#"{"path":"/p/daq.circuit.layout","format":"fabrication","fabrication":{"gerber":false,"drill":false,"drillMap":false,"drawing":false,"pickPlace":false,"bom":false,"ipc2581":false,"odb":false,"ipc356":false}}"#;
+        let out = answer("design.export", input, &daq_files().to_string());
+        let summary = &out["data"]["fabrication"];
+        assert!(summary["layers"].as_array().map(|l| !l.is_empty()).unwrap_or(false), "{out}");
+        assert_eq!(summary["variants"][0], Value::Null);
     }
 }
