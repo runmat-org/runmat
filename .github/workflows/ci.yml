@@ -229,7 +229,17 @@ jobs:
       - name: Validate crate architecture boundaries
         if: matrix.task == 'quality' && runner.os != 'Windows'
         shell: bash
-        run: scripts/development/check-architecture-boundaries.sh
+        run: |
+          set -euo pipefail
+          scripts/development/check-architecture-boundaries.sh 2>&1 | tee architecture-boundaries.log
+
+      - name: Retain architecture boundary diagnostics
+        if: always() && matrix.task == 'quality' && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-boundaries-${{ matrix.name }}
+          path: architecture-boundaries.log
+          if-no-files-found: warn
 
       - name: Validate public FEA field ids
         if: matrix.task == 'quality' && runner.os != 'Windows'
@@ -273,7 +283,7 @@ jobs:
           # See qualification/quality/fea-style-debt-0.7.md.
           fea_tree=$(git rev-parse HEAD:crates/runmat-analysis/fea)
           compiler_inputs=$(git ls-tree -r HEAD -- Cargo.toml Cargo.lock rust-toolchain.toml .cargo crates scripts docs bindings verification | git hash-object --stdin)
-          if [[ "$fea_tree" == 48fac1e81490d61f470796a6fc8ad507d5da4823 && "$compiler_inputs" == fb9f1ac2a39c2c6e898c356ef1f318ea8b285433 ]] && rustc --version | grep -Eq '^rustc 1\.90\.0 ' ; then
+          if [[ "$fea_tree" == 55c7f312626e67dd08e22ba9583531661139baa7 && "$compiler_inputs" == 92831739f2bcba6615808447dd3bcc206c6ee11b ]] && rustc --version | grep -Eq '^rustc 1\.90\.0 ' ; then
             cargo clippy --workspace --exclude runmat-clarabel --exclude runmat-analysis-fea --all-targets --all-features --keep-going --no-deps -- -D warnings
           else
             cargo clippy --workspace --exclude runmat-clarabel --all-targets --all-features --keep-going -- -D warnings
