@@ -380,3 +380,22 @@ fn a_value_from_an_m_function_names_its_function_in_the_hover_and_reports_no_pro
     let hover = hover_text(&analysis, at(part, "let half", 0, 5));
     assert!(hover.contains("**Value:** 4 mm"), "{hover}");
 }
+
+/// A circuit component value computed by an `.m` function (PCB-38): the hover names the
+/// param, the function and its file, read from the source while the value waits for the
+/// runtime.
+#[test]
+fn a_circuit_value_from_an_m_function_names_its_function_in_the_hover() {
+    let circuit = CIRCUIT.replacen(
+        "component RS = { part = \"R0402-10K\" }",
+        "component RS = { part = \"R0402-10K\", value = rcResistor(fc = 160 Hz, c = 100 nF) as ohm }",
+        1,
+    );
+    assert!(circuit.contains("rcResistor"), "the fixture has component RS");
+    let mut files = circuit_files();
+    files.insert("/p/io.circuit".into(), circuit.clone());
+    files.insert("/p/rcResistor.m".into(), "function r = rcResistor(fc, c)\n    r = 1 / (2 * pi * fc * c);\nend\n".into());
+    let analysis = analyze("/p/io.circuit", &circuit, &files);
+    let hover = hover_text(&analysis, at(&circuit, "component RS", 0, 11));
+    assert!(hover.contains("**value**") && hover.contains("computed by `rcResistor` in `p/rcResistor.m`"), "{hover}");
+}

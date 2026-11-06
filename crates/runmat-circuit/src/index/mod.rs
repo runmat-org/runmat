@@ -102,6 +102,32 @@ pub struct ComponentRow {
     pub pins: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub renamed_from: Option<String>,
+    /// Parameter name → how a `.m` function computed it (PCB-38), for the params written as a
+    /// call (`value = rcResistor(fc = 160 Hz, c = 100 nF) as ohm`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub computed: BTreeMap<String, ComputedRow>,
+}
+
+/// A param computed by a `.m` function: the function, the call as written and where, and the
+/// `.m` file the function resolves to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComputedRow {
+    /// `rcResistor`, or `pkg.fn` for a `+pkg` function.
+    pub function: String,
+    /// The call as written: `rcResistor(fc = 160 Hz, c = 100 nF) as ohm`.
+    pub call: String,
+    /// The `.m` file the function resolves to (filled by the compile, which has the files).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// The circuit file and byte range of the param that makes the call.
+    pub source: ComputedSource,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComputedSource {
+    pub path: String,
+    pub start: u32,
+    pub end: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -338,6 +364,22 @@ pub fn build_index(
                 power_w: c.power.map(|q| q.value),
                 pins: c.pins.len() as u32,
                 renamed_from: c.renamed_from.as_ref().map(|p| p.to_string()),
+                computed: c
+                    .params
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        let call = v.call.as_ref()?;
+                        Some((
+                            k.clone(),
+                            ComputedRow {
+                                function: call.function.clone(),
+                                call: call.text.clone(),
+                                file: None,
+                                source: ComputedSource { path: v.source.file.clone(), start: v.source.start, end: v.source.end },
+                            },
+                        ))
+                    })
+                    .collect(),
             }
         })
         .collect();

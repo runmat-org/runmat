@@ -190,13 +190,14 @@ impl Session {
             &ErcOptions::for_design(&project.design, &project.netlist),
         ));
         let findings = review::run_all(&project.netlist, &project.pool, &ReviewOptions::default());
-        let index = build_index(
+        let mut index = build_index(
             &project.design,
             &project.netlist,
             &project.pool,
             &erc,
             &findings,
         );
+        super::values::note_files(&mut index, &inputs);
         self.schematic = Some(SchematicState {
             circuit_path: circuit_path.to_owned(),
             inputs,
@@ -360,7 +361,7 @@ impl Session {
         let t = now();
         let (rules, rule_errors) = {
             let board = parsed.board.as_ref().expect("a layout without errors has a board");
-            let (mut rules, errors) = BoardRules::new(&board.limits, &board.rules);
+            let (mut rules, errors) = BoardRules::for_board(board);
             let rule_errors: Vec<Diagnostic> = errors
                 .into_iter()
                 .map(|e| Diagnostic::error(&path, Some(text), 0, 0, format!("{e:?}")))

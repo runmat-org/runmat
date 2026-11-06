@@ -63,6 +63,16 @@ fn a_component_value_from_a_function_waits_for_the_runtime_then_takes_its_result
     assert!(out.get("index").is_some(), "{}", out["diagnostics"]);
     assert!(out.get("pending_values").is_none());
     assert!(out["diagnostics"].as_array().unwrap().iter().all(|d| d["severity"] != "error"), "{}", out["diagnostics"]);
+    // The index says how the value was computed: the function, the call, its file, and where
+    // the call is written (Properties and hover show them).
+    let rs = out["index"]["components"].as_array().unwrap().iter().find(|c| c["designator"] == "RS" || c["path"].as_str().is_some_and(|p| p.ends_with("RS"))).expect("RS");
+    let computed = &rs["computed"]["value"];
+    assert_eq!(computed["function"], "rcResistor", "{rs}");
+    assert_eq!(computed["call"], CALL);
+    assert_eq!(computed["file"], "/p/rcResistor.m");
+    assert_eq!(computed["source"]["path"], CIRCUIT);
+    let (start, end) = (computed["source"]["start"].as_u64().unwrap() as usize, computed["source"]["end"].as_u64().unwrap() as usize);
+    assert!(files[CIRCUIT][start..end].contains("rcResistor"), "{}", &files[CIRCUIT][start..end]);
 
     // The value reads the result in ohms, and the file prints the call back, not the number.
     let mut design = parse_circuit(CIRCUIT, &files[CIRCUIT]).design.unwrap();

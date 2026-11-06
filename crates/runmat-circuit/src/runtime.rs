@@ -656,6 +656,7 @@ pub fn compile(path: &str, text: &str, files: &Files, options: &CompileOptions) 
         &erc,
         &findings,
     );
+    values::note_files(&mut index, files);
     let mut diagnostics = Vec::new();
     if let Some(layout) = &project.layout {
         let mut board = layout
@@ -663,7 +664,7 @@ pub fn compile(path: &str, text: &str, files: &Files, options: &CompileOptions) 
             .board
             .clone()
             .expect("a layout without errors has a board");
-        let (mut rules, errors) = BoardRules::new(&board.limits, &board.rules);
+        let (mut rules, errors) = BoardRules::for_board(&board);
         for e in errors {
             diagnostics.push(Diagnostic::error(
                 &layout.path,
@@ -707,13 +708,14 @@ pub fn check(path: &str, text: &str, files: &Files, options: &CompileOptions) ->
             &ErcOptions::for_design(&project.design, &project.netlist),
         ));
     let findings = review::run_all(&project.netlist, &project.pool, &ReviewOptions::default());
-    let index = build_index(
+    let mut index = build_index(
         &project.design,
         &project.netlist,
         &project.pool,
         &erc,
         &findings,
     );
+    values::note_files(&mut index, files);
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     for finding in &erc {
         if finding.source.file != path {
@@ -734,7 +736,7 @@ pub fn check(path: &str, text: &str, files: &Files, options: &CompileOptions) ->
     }
     if let Some(layout) = project.layout.as_ref().filter(|l| l.path == path) {
         if let Some(board) = &layout.parsed.board {
-            let (_, errors) = BoardRules::new(&board.limits, &board.rules);
+            let (_, errors) = BoardRules::for_board(board);
             for e in errors {
                 diagnostics.push(Diagnostic::error(path, Some(text), 0, 0, format!("{e:?}")));
             }

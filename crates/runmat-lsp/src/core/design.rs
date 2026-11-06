@@ -28,6 +28,7 @@ use serde_json::Value;
 use super::fea::highlight::{self, class, TokenClass, FUNCTION, KEYWORD, NAMESPACE, VARIABLE};
 use super::position::{offset_to_position, position_to_offset};
 
+mod circuit_values;
 mod compile;
 mod modules;
 pub mod symbols;
@@ -445,6 +446,9 @@ impl DesignDocumentAnalysis {
         };
         let mut text = format!("```{}\n{}\n```", fence(self.dialect), head);
         let mut facts = self.facts(symbol);
+        if self.dialect == Dialect::Circuit && s.kind == "component" {
+            facts.extend(self.computed_facts(symbol));
+        }
         if let Some(r) = self.uses.get(&symbol) {
             facts.insert(0, r.origin());
         }
@@ -459,6 +463,17 @@ impl DesignDocumentAnalysis {
             }),
             range: Some(self.range(span)),
         })
+    }
+
+    /// A circuit component's params computed by `.m` functions (circuit_values.rs).
+    fn computed_facts(&self, symbol: usize) -> Vec<String> {
+        let s = &self.symbols.symbols[symbol];
+        let row = self.projection.as_ref().and_then(|p| {
+            p["components"].as_array().and_then(|rows| {
+                rows.iter().find(|row| row["path"].as_str().and_then(|p| p.rsplit('/').next()) == Some(s.name.as_str()))
+            })
+        });
+        circuit_values::computed_lines(self.uri.path(), self.source(), &self.files, &s.name, row)
     }
 
     /// The compiler's resolved values for a symbol, as Markdown lines.

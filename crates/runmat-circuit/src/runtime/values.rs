@@ -210,6 +210,21 @@ pub fn value_folders(doc: &str, design: &Design) -> Vec<String> {
     out
 }
 
+/// The `.m` file `function` resolves to from the circuit `doc`, if the workspace has it.
+pub fn function_file(doc: &str, function: &str, files: &Files) -> Option<String> {
+    resolve(doc, function, files).ok()
+}
+
+/// Fills each computed param's `file` in `index`: the `.m` file its function resolves to from
+/// the circuit that makes the call.
+pub fn note_files(index: &mut crate::index::CircuitIndex, files: &Files) {
+    for component in &mut index.components {
+        for row in component.computed.values_mut() {
+            row.file = resolve(&row.source.path, &row.function, files).ok();
+        }
+    }
+}
+
 /// The calls the circuit `path` belongs to (a layout's circuit, or the circuit itself) still
 /// waits for, given the results in `values`.
 pub fn pending_values(path: &str, text: &str, files: &Files, values: &Values) -> Vec<PendingCall> {
