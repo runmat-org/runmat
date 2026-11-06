@@ -649,6 +649,57 @@ mod tests {
         assert_eq!(protos[0]["shape"], "mesh");
     }
 
+    /// Assemblies inside assemblies, through the files map (the Desktop's and the OCCT host's
+    /// entry): a sub-assembly configured by input, two levels deep, in this folder and another.
+    #[test]
+    fn nested_assemblies_resolve_through_the_files_map() {
+        let block = "runmat 0.7\nstd 1\n\npart block {\n    sketch s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [20 mm, 0 mm])\n        l2 = line(start = l1.end, end = [20 mm, 10 mm])\n        l3 = line(start = l2.end, end = [0 mm, 10 mm])\n        l4 = line(start = l3.end, end = l1.start)\n    }\n    feature box = extrude(profile = sketch.s, distance = 5 mm)\n    output block = { body = feature.box.body }\n}\n";
+        let unit = "runmat 0.7\nstd 1\n\nassembly unit {\n    input gap : length = 10 mm\n    use part block from \"../lib\" as a\n    use part block from \"../lib\" as b {\n        placement = { placement = offset, offset = { translation = [input.gap, 0 mm, 0 mm] } }\n    }\n}\n";
+        let station = "runmat 0.7\nstd 1\n\nassembly station {\n    use assembly unit as u {\n        configuration = { select = inputs, values = { gap = 50 mm } }\n    }\n}\n";
+        let top = "runmat 0.7\nstd 1\n\nassembly rig {\n    use assembly station from \"./sub\" as left\n    use assembly station from \"./sub\" as right {\n        placement = { placement = offset, offset = { translation = [0 mm, 200 mm, 0 mm] } }\n    }\n    use assembly unit from \"./sub\" as loose\n}\n";
+        let files: Files = [
+            ("/p/lib/block.part".to_owned(), block.to_owned()),
+            ("/p/sub/unit.assembly".to_owned(), unit.to_owned()),
+            ("/p/sub/station.assembly".to_owned(), station.to_owned()),
+            ("/p/rig.assembly".to_owned(), top.to_owned()),
+        ]
+        .into();
+        for (path, text) in &files {
+            if !path.ends_with(".assembly") {
+                continue;
+            }
+            let out: Value = serde_json::from_str(&compile_json(path, text, &files)).unwrap();
+            let errors: Vec<&Value> = out["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|d| d["severity"] == "error")
+                .collect();
+            assert!(errors.is_empty(), "{path}: {errors:?}");
+            let want = match path.as_str() {
+                "/p/rig.assembly" => 6,
+                "/p/sub/station.assembly" | "/p/sub/unit.assembly" => 2,
+                _ => unreachable!(),
+            };
+            let occ = out["display"]["data"]["occurrences"].as_array().unwrap();
+            assert_eq!(occ.len(), want, "{path}: {}", out["diagnostics"]);
+        }
+        // The same project in the file form (`from "unit.assembly"`) resolves the same way.
+        let mut flat = files.clone();
+        flat.insert(
+            "/p/sub/station.assembly".into(),
+            station.replace("use assembly unit as u", "use assembly unit from \"unit.assembly\" as u"),
+        );
+        let out: Value =
+            serde_json::from_str(&compile_json("/p/sub/station.assembly", &flat["/p/sub/station.assembly"], &flat)).unwrap();
+        assert_eq!(
+            out["display"]["data"]["occurrences"].as_array().map(|o| o.len()),
+            Some(2),
+            "{}",
+            out["diagnostics"]
+        );
+    }
+
     #[test]
     fn paths_resolve_against_the_referencing_file() {
         let files: Files = [("/p/library/clip.part".to_owned(), String::new())].into();
