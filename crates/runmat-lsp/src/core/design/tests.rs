@@ -15,7 +15,7 @@ fn uri(path: &str) -> Url {
 fn analyze(path: &str, text: &str, files: &DesignFiles) -> DesignDocumentAnalysis {
     let uri = uri(path);
     let dialect = design_dialect(&uri).expect("a design file");
-    DesignDocumentAnalysis::analyze(&uri, dialect, text, files)
+    DesignDocumentAnalysis::analyze(&uri, dialect, text, files, &DesignValues::new())
 }
 
 fn circuit_files() -> DesignFiles {
@@ -379,6 +379,34 @@ fn a_value_from_an_m_function_names_its_function_in_the_hover_and_reports_no_pro
     assert!(hover.contains("**Computed by** `baseRadius` in `p/baseRadius.m`"), "{hover}");
     let hover = hover_text(&analysis, at(part, "let half", 0, 5));
     assert!(hover.contains("**Value:** 4 mm"), "{hover}");
+}
+
+/// Once the host has run a part's `.m` calls and supplied their results, the hover shows the
+/// computed value with the function and its file, as Properties does; a value that depends on
+/// it evaluates too.
+#[test]
+fn a_value_the_host_ran_shows_in_the_hover_with_its_function() {
+    let part = "runmat 0.7\nstd 1\n\npart boss {\n    input lift : length = 8 mm\n    let base = baseRadius(lift = input.lift) as m\n    let wide = base * 2\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = base)\n    }\n    feature disc = extrude(profile = sketch.s, distance = 5 mm)\n}\n";
+    let files = DesignFiles::from([(
+        "/p/baseRadius.m".to_string(),
+        "function rb = baseRadius(lift)\nrb = 2 * lift;\nend\n".to_string(),
+    )]);
+    let uri = uri("/p/boss.part");
+    let first = DesignDocumentAnalysis::analyze(&uri, Dialect::Part, part, &files, &DesignValues::new());
+    let pending = first.projection.as_ref().expect("a projection")["pending_values"].clone();
+    let calls = pending.as_array().expect("pending calls");
+    assert_eq!(calls.len(), 1, "{pending}");
+    assert_eq!(calls[0]["function"], "baseRadius");
+    assert_eq!(calls[0]["arguments"][0].as_f64(), Some(0.008));
+    let key = calls[0]["key"].as_str().expect("a key").to_string();
+    let values = DesignValues::from([(key, runmat_cad::value::m_table::TableResult::Values(vec![0.016]))]);
+    let analysis = DesignDocumentAnalysis::analyze(&uri, Dialect::Part, part, &files, &values);
+    assert!(analysis.problems.is_empty(), "{:?}", analysis.problems.iter().map(|p| &p.message).collect::<Vec<_>>());
+    let hover = hover_text(&analysis, at(part, "let base", 0, 5));
+    assert!(hover.contains("**Value:** 16 mm"), "{hover}");
+    assert!(hover.contains("**Computed by** `baseRadius` in `p/baseRadius.m`"), "{hover}");
+    let hover = hover_text(&analysis, at(part, "let wide", 0, 5));
+    assert!(hover.contains("**Value:** 32 mm"), "{hover}");
 }
 
 /// A circuit component value computed by an `.m` function (PCB-38): the hover names the

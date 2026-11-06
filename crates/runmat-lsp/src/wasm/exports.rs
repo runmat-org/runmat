@@ -19,7 +19,7 @@ use crate::core::analysis::{
     semantic_tokens_full, semantic_tokens_lexical, signature_help_at, CompatMode, DocumentAnalysis,
 };
 use crate::core::design::{
-    design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles,
+    design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles, DesignValues,
 };
 use crate::core::fea::{is_fea_uri, resolve_project_facts, FeaDocumentAnalysis};
 use crate::core::workspace::workspace_symbols_with_project_async;
@@ -59,6 +59,16 @@ runmat_thread_local! {
     /// as the host supplied them with `setDesignFiles`.
     static DESIGN_FILES: RefCell<DesignFiles> = RefCell::new(DesignFiles::new());
 }
+
+runmat_thread_local! {
+    /// `.m` call results by call key, as the host ran them in the RunMat runtime and supplied
+    /// them with `setDesignValues`.
+    static DESIGN_VALUES: RefCell<DesignValues> = RefCell::new(DesignValues::new());
+}
+
+/// The most call results the server keeps. Keys carry the sources' text, so edits leave old
+/// results behind; past this many, the oldest-keyed go first.
+const DESIGN_VALUES_LIMIT: usize = 4096;
 
 runmat_thread_local! {
     static WORKSPACE_REVISION: Cell<u64> = Cell::new(0);
@@ -261,11 +271,13 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
     let is_fea = parsed_uri.as_ref().is_some_and(is_fea_uri);
     if let Some(dialect) = parsed_uri.as_ref().and_then(design_dialect) {
         let files = design_files();
+        let values = DESIGN_VALUES.with(|v| v.borrow().clone());
         let analysis = DesignDocumentAnalysis::analyze(
             parsed_uri.as_ref().expect("a parsed design uri"),
             dialect,
             &entry.text,
             &files,
+            &values,
         );
         let tokens = analysis.semantic_tokens();
         let committed = DOCS.with(|d| {
@@ -355,6 +367,24 @@ pub fn design_dependencies_of(uri: String, text: String) -> Result<JsValue, JsVa
         return to_js(&Vec::<String>::new());
     };
     to_js(&design_dependencies(dialect, parsed.path(), &text))
+}
+
+/// Supplies `.m` call results the host ran (`{ "<call key>": [6.58e-3] }`, or
+/// `{ "<call key>": { "error": "…" } }`), over the ones supplied before. A design document's
+/// next analysis reads them: the hover shows a value computed by an `.m` function.
+#[wasm_bindgen(js_name = "setDesignValues")]
+pub fn set_design_values(values: JsValue) -> Result<JsValue, JsValue> {
+    let values: DesignValues = serde_wasm_bindgen::from_value(values)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    DESIGN_VALUES.with(|stored| {
+        let mut stored = stored.borrow_mut();
+        stored.extend(values);
+        while stored.len() > DESIGN_VALUES_LIMIT {
+            stored.pop_first();
+        }
+    });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    Ok(JsValue::NULL)
 }
 
 /// Supplies the texts of files design documents read (`{ "/p/io.circuit": "…" }`); a `null`

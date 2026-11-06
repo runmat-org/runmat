@@ -41,6 +41,11 @@ use symbols::SymbolTable;
 /// Workspace path → text: the files a design source reads (its circuit, lock, parts).
 pub type DesignFiles = BTreeMap<String, String>;
 
+/// `.m` call results by call key (`runmat_cad::value::m_table::call_key`), as the host ran them
+/// in the RunMat runtime. The editor runs no `.m` code: a value appears in the hover once the
+/// host has run its call and supplied the result.
+pub type DesignValues = BTreeMap<String, runmat_cad::value::m_table::TableResult>;
+
 /// Semantic-token modifier bit 0 (`declaration`, `semantic_tokens::legend`).
 const DECLARATION: u32 = 1;
 
@@ -95,8 +100,9 @@ pub struct DesignDocumentAnalysis {
 
 impl DesignDocumentAnalysis {
     /// Reads, compiles and indexes one design document. `files` holds the texts of the files
-    /// [`design_dependencies`] named (open editors first, then the workspace).
-    pub fn analyze(uri: &Url, dialect: Dialect, text: &str, files: &DesignFiles) -> Self {
+    /// [`design_dependencies`] named (open editors first, then the workspace); `values` the
+    /// `.m` call results the host has run.
+    pub fn analyze(uri: &Url, dialect: Dialect, text: &str, files: &DesignFiles, values: &DesignValues) -> Self {
         let syntax = parse_source(dialect, text);
         let symbols = SymbolTable::build(&syntax);
         let path = uri.path().to_string();
@@ -113,7 +119,7 @@ impl DesignDocumentAnalysis {
         let mut projection = None;
         let uses = modules::resolve_uses(&syntax, &symbols, &path, text, files);
         if syntax.diagnostics.is_empty() {
-            let (more, compiled) = compile(dialect, &path, text, files, &symbols);
+            let (more, compiled) = compile(dialect, &path, text, files, values, &symbols);
             problems.extend(more);
             projection = compiled;
         }

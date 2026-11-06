@@ -11,10 +11,11 @@ pub(super) fn compile(
     path: &str,
     text: &str,
     files: &DesignFiles,
+    values: &DesignValues,
     table: &SymbolTable,
 ) -> (Vec<Problem>, Option<Value>) {
     match dialect {
-        Dialect::Part => compile_part(path, text, files, table),
+        Dialect::Part => compile_part(path, text, files, values, table),
         Dialect::Assembly => {
             let (mut problems, projection) = cad_front_end(
                 runmat_cad::syntax::parse_assembly_in(path, text, &module_scope(path, text, files)),
@@ -32,7 +33,11 @@ pub(super) fn compile(
             text,
         ),
         Dialect::Circuit | Dialect::CircuitLayout => {
-            let out = runmat_circuit::runtime::check(path, text, files, &Default::default());
+            let options = runmat_circuit::runtime::CompileOptions {
+                values: values.clone(),
+                ..Default::default()
+            };
+            let out = runmat_circuit::runtime::check(path, text, files, &options);
             let problems = out
                 .diagnostics
                 .iter()
@@ -106,10 +111,11 @@ pub(super) fn byte_offset(text: &str, utf16: usize) -> usize {
 
 /// A part regenerated on the design kernel (OCCT in the native server, as Desktop regenerates);
 /// regeneration diagnostics at their sites.
-/// A part regenerated for the editor. Values that call `.m` functions resolve through the folder
-/// scope but don't run here (the editor has no runtime): their calls stay pending, and neither
-/// they nor what depends on them is reported as a problem. The Desktop's compile runs them.
-fn compile_part(path: &str, text: &str, files: &DesignFiles, table: &SymbolTable) -> (Vec<Problem>, Option<Value>) {
+///
+/// Values that call `.m` functions resolve through the folder scope and read their results from
+/// `values`, the calls the host has run (the editor has no runtime). A call the host hasn't run
+/// yet stays pending, and neither it nor what depends on it is reported as a problem.
+fn compile_part(path: &str, text: &str, files: &DesignFiles, values: &DesignValues, table: &SymbolTable) -> (Vec<Problem>, Option<Value>) {
     use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest};
     use runmat_cad::value::m_functions::MFunctions;
     use runmat_cad::value::m_table::{TableRunner, PENDING};
@@ -122,7 +128,7 @@ fn compile_part(path: &str, text: &str, files: &DesignFiles, table: &SymbolTable
     let scope = module_scope(path, text, files);
     let mut all = files.clone();
     all.insert(path.to_owned(), text.to_owned());
-    let (runner, pending) = TableRunner::new(Default::default(), "editor");
+    let (runner, pending) = TableRunner::new(values.clone(), "editor");
     let values = MFunctions::new(&scope, &all, path, &runner);
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
@@ -177,7 +183,8 @@ fn compile_part(path: &str, text: &str, files: &DesignFiles, table: &SymbolTable
             row.file = values.resolve(function).ok().map(|f| f.file);
         }
     }
-    let projection = serde_json::json!({ "document": &document, "index": &index });
+    // The calls still to run, as the CAD host's compile lists them.
+    let projection = serde_json::json!({ "document": &document, "index": &index, "pending_values": &*pending.borrow() });
     (problems, Some(projection))
 }
 

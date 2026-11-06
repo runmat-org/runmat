@@ -64,6 +64,8 @@ struct AnalyzerState {
     compat_mode: CompatMode,
     workspace_roots: Vec<PathBuf>,
     project_cache: Option<ProjectCache>,
+    /// `.m` call results the host ran, by call key (`runmat/designValues`).
+    design_values: crate::core::design::DesignValues,
 }
 
 #[derive(Clone)]
@@ -104,6 +106,7 @@ impl RunMatLanguageServer {
                 compat_mode: CompatMode::RunMat,
                 workspace_roots: Vec::new(),
                 project_cache: None,
+                design_values: Default::default(),
             })),
         }
     }

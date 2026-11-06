@@ -11,5 +11,6 @@ pub fn service() -> (RunMatLspService, ClientSocket) {
             RunMatLanguageServer::quick_information,
         )
         .custom_method("runmat/semanticFacts", RunMatLanguageServer::semantic_facts)
+        .custom_method("runmat/designValues", RunMatLanguageServer::design_values)
         .finish()
 }

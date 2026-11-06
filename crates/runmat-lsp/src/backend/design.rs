@@ -6,10 +6,35 @@
 use tower_lsp::lsp_types::Url;
 
 use crate::core::design::{
-    design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles,
+    design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles, DesignValues,
 };
 
 use super::{RunMatLanguageServer, RunmatStatusNotification};
+
+/// The most call results the server keeps; past this many, the oldest-keyed go first.
+const DESIGN_VALUES_LIMIT: usize = 4096;
+
+/// `runmat/designValues`: `.m` call results the host ran, by call key.
+#[derive(Debug, serde::Deserialize)]
+pub struct DesignValuesParams {
+    pub values: DesignValues,
+}
+
+impl RunMatLanguageServer {
+    /// Takes `.m` call results the host ran in the RunMat runtime (the editor runs no `.m`
+    /// code) and recompiles the open design documents, so the hover shows computed values.
+    pub async fn design_values(&self, params: DesignValuesParams) -> tower_lsp::jsonrpc::Result<()> {
+        {
+            let mut state = self.state.write().await;
+            state.design_values.extend(params.values);
+            while state.design_values.len() > DESIGN_VALUES_LIMIT {
+                state.design_values.pop_first();
+            }
+        }
+        reanalyze_open_documents(self).await;
+        Ok(())
+    }
+}
 
 /// Recompiles every open design document when `uri` is one; false otherwise.
 pub(super) async fn reanalyze(server: &RunMatLanguageServer, uri: &Url) -> bool {
@@ -21,7 +46,7 @@ pub(super) async fn reanalyze(server: &RunMatLanguageServer, uri: &Url) -> bool 
 }
 
 pub(super) async fn reanalyze_open_documents(server: &RunMatLanguageServer) {
-    let (documents, open) = {
+    let (documents, open, values) = {
         let state = server.state.read().await;
         let documents: Vec<(Url, String)> = state
             .documents
@@ -37,7 +62,7 @@ pub(super) async fn reanalyze_open_documents(server: &RunMatLanguageServer) {
                 Some((path.to_string_lossy().into_owned(), d.text.clone()))
             })
             .collect();
-        (documents, open)
+        (documents, open, state.design_values.clone())
     };
     for (uri, text) in documents {
         let Some(dialect) = design_dialect(&uri) else {
@@ -48,7 +73,7 @@ pub(super) async fn reanalyze_open_documents(server: &RunMatLanguageServer) {
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| uri.path().to_string());
         let files = gather(dialect, &path, &text, &open);
-        let analysis = DesignDocumentAnalysis::analyze(&uri, dialect, &text, &files);
+        let analysis = DesignDocumentAnalysis::analyze(&uri, dialect, &text, &files, &values);
         let diagnostics = analysis.diagnostics();
         let status = analysis.status_message();
         {
