@@ -10,6 +10,10 @@
 //! mass-weighted centroid, and the inertia tensor about it (world axes) sums each part's
 //! rotated tensor and its parallel-axis term. A part with no density is listed, carries no
 //! mass, and makes the result incomplete.
+//!
+//! A circuit board occurrence weighs what its layout holds ([`runmat_circuit::mass`]): the
+//! stackup's laminate, copper and mask, and its placed components (each at the mass its part
+//! gives, else its package's default), in the board's 3D frame.
 
 use crate::configured::regenerate_configured;
 use crate::runtime::{regenerate_part_in, resolve_assembly_in, Files};
@@ -251,6 +255,19 @@ pub fn part_mass(
     Ok(report)
 }
 
+/// What a board's row names as its material: its mass is the layout's, item by item.
+pub const BOARD_MATERIAL: &str = "board stackup and components";
+
+/// A board's mass properties in its 3D frame (metres), from its compiled layout.
+fn board_mass(file: &str, files: &Files) -> Result<Mass, String> {
+    let session = crate::board::compiled_board(file, files)?;
+    let m = session.board_mass().ok_or("no board")?;
+    if m.mass <= 0.0 {
+        return Err("the board has no mass (no outline or stackup)".into());
+    }
+    Ok(Mass { volume: 0.0, mass: m.mass, center: m.center, inertia: m.inertia })
+}
+
 /// The mass properties of the assembly `path` in its named configuration, over every placed
 /// part occurrence.
 pub fn assembly_mass(
@@ -267,6 +284,30 @@ pub fn assembly_mass(
     let mut placed_masses = Vec::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
         if node.parent.is_none() || node.failed || node.represented_by_ancestor {
+            continue;
+        }
+        if node.definition.kind == DefinitionKind::Circuit {
+            let file = node.definition.file.0.clone();
+            let occurrence = resolved.path(id as u32);
+            match board_mass(&file, files) {
+                Err(e) => report.problems.push(format!("{occurrence}: {e}")),
+                Ok(m) => {
+                    let placed_mass = placed(&m, &node.world);
+                    report.parts.push(PartMass {
+                        path: occurrence,
+                        item: Some(format!("occurrence:{}", node.uuid)),
+                        file,
+                        configuration: "default".into(),
+                        material: Some(BOARD_MATERIAL.into()),
+                        density: None,
+                        density_source: None,
+                        mass: Some(m.mass),
+                        volume: m.volume,
+                        center: placed_mass.center,
+                    });
+                    placed_masses.push(placed_mass);
+                }
+            }
             continue;
         }
         if node.definition.kind != DefinitionKind::Part {
@@ -387,5 +428,29 @@ mod tests {
             "{:?}",
             report.problems
         );
+    }
+
+    #[test]
+    fn a_board_occurrence_weighs_its_stackup_and_components() {
+        // The daq board, 90 x 60 mm, placed 10 mm up: its laminate alone is about 90 x 60 x 1.6 mm
+        // of FR-4 (about 16 g), and its components add to that.
+        let mut files = Files::new();
+        let daq = format!("{}/../../runmat-circuit/tests/projects/daq", env!("CARGO_MANIFEST_DIR"));
+        for name in ["daq.circuit", "daq.circuit.layout", "daq.circuit.lock"] {
+            files.insert(format!("/p/{name}"), std::fs::read_to_string(format!("{daq}/{name}")).unwrap());
+        }
+        let text = "runmat 0.7\nstd 1\n\nassembly box {\n    use circuit daq as board {\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 10 mm] } }\n    }\n}\n";
+        files.insert("/p/box.assembly".into(), text.into());
+        let report = assembly_mass("/p/box.assembly", text, &files, None).unwrap();
+        assert!(report.complete(), "{:?}", report.problems);
+        let board = &report.parts[0];
+        assert_eq!(board.material.as_deref(), Some(BOARD_MATERIAL));
+        let m = board.mass.unwrap();
+        assert!((0.016..0.08).contains(&m), "{m} kg");
+        assert!((report.total.mass - m).abs() < 1e-12);
+        // The centre sits over the board and above its 10 mm placement, components on top.
+        let c = report.total.center;
+        assert!((0.0..0.09).contains(&c[0]) && (0.0..0.06).contains(&c[1]), "{c:?}");
+        assert!(c[2] > 0.010 && c[2] < 0.015, "{c:?}");
     }
 }
