@@ -407,6 +407,27 @@ fn copy_room_formats_and_board_commands_run_on_the_text() {
         layout.edits[0].text
     );
 
+    // Flip puts the part on the bottom where it stands; flipping again brings it back.
+    let mut flip = request("board.flip", json!({}));
+    flip.selection = vec![format!("component:{fp}")];
+    let out = runtime::edit(LAYOUT, &files[LAYOUT], &files, &flip)
+        .unwrap_or_else(|e| panic!("{}", e.message));
+    let flipped = changed(&out, LAYOUT);
+    assert_eq!(flipped.edits.len(), 1, "one statement changes");
+    assert!(flipped.edits[0].text.contains("side = bottom"), "{}", flipped.edits[0].text);
+    let mut once = files.clone();
+    once.insert(LAYOUT.into(), out.files[0].text.clone());
+    let at = |files: &runtime::Files| {
+        let b = parse_board(LAYOUT, &files[LAYOUT]).board.unwrap();
+        let f = b.footprint_by_ref(&fp).unwrap();
+        (f.at, f.rotation, f.side)
+    };
+    assert_eq!((at(&once).0, at(&once).1), (at(&files).0, at(&files).1), "flips in place");
+    let back = runtime::edit(LAYOUT, &once[LAYOUT], &once, &flip).unwrap();
+    let mut twice = once.clone();
+    twice.insert(LAYOUT.into(), back.files[0].text.clone());
+    assert_eq!(at(&twice), at(&files));
+
     let mut locked = request("board.lock", json!({}));
     locked.selection = vec![format!("component:{fp}")];
     let out = runtime::edit(LAYOUT, &files[LAYOUT], &files, &locked).unwrap();

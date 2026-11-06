@@ -43,6 +43,12 @@ pub(super) fn add(c: &mut Catalog) {
             .when(selected(&[K::Component, K::Track, K::Via, K::Zone]))
             .preview()
             .edit(edit(EditOp::Set, Section::Placement).item("position")),
+        brd("board.flip", "Flip", "flip", "Move components to the other side of the board, mirrored where they stand.")
+            .kw(&["bottom side", "top side", "mirror"])
+            .inputs(vec![picks("components", "Components", &[K::Component])])
+            .when(selected(&[K::Component]))
+            .preview()
+            .edit(edit(EditOp::Set, Section::Placement).item("side")),
         brd("board.place", "Place", "component", "Place components from the schematic, all at once or one at a time.")
             .inputs(vec![radio("mode", "Place", &[("from_schematic", "From schematic"), ("single", "Single component")]), picks("components", "Components", &[K::Component]).shown("mode", &["single"]), choice("side", "Side", &[("top", "Top"), ("bottom", "Bottom")])])
             .preview()
@@ -216,7 +222,7 @@ pub(super) fn tab() -> DomainTab {
         "board",
         "Board",
         vec![
-            group("select", "Select", vec![c("board.select"), c("board.move")]),
+            group("select", "Select", vec![c("board.select"), c("board.move"), c("board.flip")]),
             group(
                 "place",
                 "Place",

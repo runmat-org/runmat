@@ -714,7 +714,7 @@ impl BoardEdit {
     pub fn command(&self) -> &'static str {
         match self {
             BoardEdit::Move { .. } => "board.move",
-            BoardEdit::Flip { .. } => "board.move",
+            BoardEdit::Flip { .. } => "board.flip",
             BoardEdit::Lock { .. } => "board.move",
             BoardEdit::Delete { .. } => "board.select",
             BoardEdit::Room { .. } => "board.room",

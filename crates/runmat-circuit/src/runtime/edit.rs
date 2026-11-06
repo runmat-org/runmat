@@ -451,6 +451,9 @@ pub(super) fn board_edit(
             dy: mm_value(values, "dy").unwrap_or(0),
             rotation: number(values, "rotation").unwrap_or(0.0),
         }),
+        "board.flip" => Ok(BoardEdit::Flip {
+            items: items("components")?,
+        }),
         "board.lock" => {
             let items = items("items")?;
             // Lock toggles: all locked unlocks, otherwise everything locks.
