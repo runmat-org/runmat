@@ -217,8 +217,53 @@ pub(super) fn page(
             .to_owned(),
         });
     }
+    blankets(&mut page, nl, path);
     frame(&mut page, nl, centre);
     page
+}
+
+/// The page's blankets, each boxed round the wires, labels and pins of its nets on this page
+/// (a blanket whose nets the page doesn't draw is left off it).
+fn blankets(page: &mut SchematicSheet, nl: &Netlist, path: &NamePath) {
+    for b in nl.blankets.iter().filter(|b| &b.sheet == path) {
+        let names: BTreeSet<&str> = b.nets.iter().map(|&n| nl.nets[n].name.as_str()).collect();
+        let mut r = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+        let mut grow_by = |x0: f64, y0: f64, x1: f64, y1: f64| r = [r[0].min(x0), r[1].min(y0), r[2].max(x1), r[3].max(y1)];
+        for w in page.wires.iter().filter(|w| names.contains(w.net.as_str())) {
+            for p in &w.points {
+                grow_by(p[0], p[1], p[0], p[1]);
+            }
+        }
+        for l in page.labels.iter().filter(|l| names.contains(l.net.as_str())) {
+            let e = l.extent();
+            grow_by(e[0], e[1], e[2], e[3]);
+        }
+        for p in page.symbols.iter().flat_map(|s| &s.pins).filter(|p| p.net.as_deref().is_some_and(|n| names.contains(n))) {
+            grow_by(p.x_mm, p.y_mm, p.x_mm, p.y_mm);
+        }
+        if r[0] > r[2] {
+            continue;
+        }
+        let pad = mm(GRID);
+        let rect = [r[0] - pad, r[1] - pad, r[2] + pad, r[3] + pad];
+        let mut caption = format!("blanket {}", short(&b.name));
+        if let Some(c) = &b.class {
+            caption.push_str(&format!(" · class {c}"));
+        }
+        for (k, v) in &b.params {
+            if let Ok(text) = crate::syntax::param_written(v) {
+                caption.push_str(&format!(" · {k} = {text}"));
+            }
+        }
+        page.blankets.push(SheetBlanket {
+            name: b.name.clone(),
+            caption,
+            caption_at: [rect[0], rect[3] + 0.6],
+            caption_mm: mm(BLANKET_TEXT),
+            rect,
+            nets: names.iter().map(|n| n.to_string()).collect(),
+        });
+    }
 }
 
 fn symbol(
@@ -389,6 +434,12 @@ pub fn page_boxes(page: &SchematicSheet) -> Vec<[f64; 4]> {
     for w in &page.wires {
         out.push(span(&w.points));
     }
+    for b in &page.blankets {
+        let n = mm_to_nm;
+        let t = text_box(&b.caption, n(b.caption_mm), n(b.caption_at[0]), n(b.caption_at[1]), "start");
+        out.push(b.rect);
+        out.push([mm(t[0]), mm(t[1]), mm(t[2]), mm(t[3])]);
+    }
     out
 }
 
@@ -502,5 +553,9 @@ pub(super) fn shift(page: &mut SchematicSheet, dx: f64, dy: f64) {
     for l in &mut page.labels {
         l.x_mm = r(l.x_mm + dx);
         l.y_mm = r(l.y_mm + dy);
+    }
+    for b in &mut page.blankets {
+        m(&mut b.caption_at);
+        b.rect = [r(b.rect[0] + dx), r(b.rect[1] + dy), r(b.rect[2] + dx), r(b.rect[3] + dy)];
     }
 }

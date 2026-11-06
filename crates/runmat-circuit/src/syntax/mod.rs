@@ -52,7 +52,7 @@ pub use printer::*;
 pub(crate) mod values;
 
 use crate::ir::{
-    Binding, BusDecl, ComponentDecl, Connection, Design, DiffPairDecl, Endpoint, Fitting,
+    Binding, BlanketDecl, BusDecl, ComponentDecl, Connection, Design, DiffPairDecl, Endpoint, Fitting,
     HarnessDecl, InterfaceDef, NetClass, NetDecl, Param, ParamValue, PartRef, PortDecl, PortDir,
     PortKind, SheetDef, SheetInstance, Tolerance, ValueCall, VariantDef,
 };
@@ -81,6 +81,8 @@ pub mod words {
     pub const CONNECT: &str = "connect";
     pub const NO_ERC: &str = "no_erc";
     pub const DIFF_PAIR: &str = "diff_pair";
+    /// One directive over several nets (`blanket rails = { nets = [VIN, GND], class = power }`).
+    pub const BLANKET: &str = "blanket";
     /// A note on a sheet (`text note1 = "5 V in from J1"`); its place is in the lock.
     pub const TEXT: &str = "text";
     pub const SIMULATION: &str = "simulation";
@@ -97,7 +99,7 @@ pub mod words {
     /// Every statement word, for completion and the highlighter.
     pub const ALL: &[&str] = &[
         CIRCUIT, SHEET, ROOT, PARAM, NET_CLASS, INTERFACE, VARIANT, PORT, COMPONENT, NET, BUS,
-        HARNESS, INSTANCE, CONNECT, NO_ERC, DIFF_PAIR, TEXT, SIMULATION, SOURCE, MODEL, TOLERANCE,
+        HARNESS, INSTANCE, CONNECT, NO_ERC, DIFF_PAIR, BLANKET, TEXT, SIMULATION, SOURCE, MODEL, TOLERANCE,
         ANALYSIS, PROBE, MEASURE, OPTION, PART,
     ];
 }
@@ -541,6 +543,7 @@ fn read_sheet_statement(reader: &mut Reader<'_>, sheet: &mut SheetDef, statement
                         }
                         sheet.diff_pairs.push(pair);
                     }
+                    words::BLANKET => sheet.blankets.push(read_blanket(name, value.value(), span, key)?),
                     other => {
                         return Err(diagnostic(
                             span,

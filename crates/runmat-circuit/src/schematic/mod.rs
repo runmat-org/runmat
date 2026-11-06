@@ -151,7 +151,27 @@ pub struct SchematicSheet {
     /// column above the drawing's top-left corner.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub texts: Vec<SheetText>,
+    /// The sheet's blankets: a dashed box round the wires, labels and pins of the nets each
+    /// covers, its caption above the box's top-left corner.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blankets: Vec<SheetBlanket>,
 }
+
+/// A blanket drawn on a page: the box `[x0, y0, x1, y1]` (mm) round what it covers, and its
+/// caption (`blanket rails · class power · max_length = 50 mm`) at `caption_at`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetBlanket {
+    pub name: String,
+    pub caption: String,
+    pub caption_at: Xy,
+    pub caption_mm: f64,
+    pub rect: [f64; 4],
+    /// The nets it covers, as the page's wires name them.
+    pub nets: Vec<String>,
+}
+
+/// A blanket caption's text height (mm): 50 mil.
+pub const BLANKET_TEXT: Coord = 1_270_000;
 
 /// A note drawn on a sheet: its baseline's start (mm) and text height.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

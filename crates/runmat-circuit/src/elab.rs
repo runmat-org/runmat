@@ -135,6 +135,19 @@ pub struct DiffPairInst {
     pub class: Option<String>,
 }
 
+/// A blanket over nets ([`crate::ir::BlanketDecl`]), elaborated: the nets it reached and what
+/// it sets on them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlanketInst {
+    /// `rails`, or `ch[0]/rails` inside a channel.
+    pub name: String,
+    /// The sheet instance it is declared on.
+    pub sheet: NamePath,
+    pub nets: Vec<usize>,
+    pub class: Option<String>,
+    pub params: BTreeMap<String, Param>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Netlist {
     pub design: String,
@@ -142,6 +155,7 @@ pub struct Netlist {
     pub components: Vec<CompInst>,
     pub nets: Vec<NetInst>,
     pub diff_pairs: Vec<DiffPairInst>,
+    pub blankets: Vec<BlanketInst>,
     /// Sheet-instance paths (for the hierarchy tree), sorted.
     pub sheets: Vec<(NamePath, String)>,
     pub no_erc: BTreeSet<(usize, usize)>,
@@ -288,6 +302,7 @@ struct Ctx<'a> {
     diags: Vec<Diagnostic>,
     sheets: Vec<(NamePath, String)>,
     diff: Vec<(NamePath, DiffPairDecl)>,
+    blankets: Vec<(NamePath, crate::ir::BlanketDecl)>,
     no_erc: Vec<(usize, usize)>,
     explicit_designator: BTreeMap<usize, String>,
     sheet_renames: BTreeMap<NamePath, NamePath>,
@@ -917,6 +932,9 @@ impl<'a> Ctx<'a> {
         for dp in &sheet.diff_pairs {
             self.diff.push((inst.clone(), dp.clone()));
         }
+        for b in &sheet.blankets {
+            self.blankets.push((inst.clone(), b.clone()));
+        }
         for ep in &sheet.no_erc {
             if let Endpoint::Pin { component, pin } = ep {
                 if let Some(&ci) = self.comp_index.get(&inst.child(component.clone())) {
@@ -1063,6 +1081,7 @@ pub fn elaborate(
         diags: Vec::new(),
         sheets: Vec::new(),
         diff: Vec::new(),
+        blankets: Vec::new(),
         no_erc: Vec::new(),
         explicit_designator: BTreeMap::new(),
         sheet_renames: BTreeMap::new(),
@@ -1297,6 +1316,35 @@ pub fn elaborate(
         }
     }
     diff_pairs.sort_by(|a, b| a.name.cmp(&b.name));
+    // Blankets: each listed net takes the class a statement of its own doesn't give it.
+    let mut blankets = Vec::new();
+    for (inst, b) in &cx.blankets {
+        let name = local_name(inst, &b.name);
+        if let Some(c) = &b.class {
+            if !design.net_classes.contains_key(c) && c != "default" {
+                cx.diags.push(Diagnostic::new(Severity::Warning, "unknown-net-class", name.clone(), format!("net class `{c}` is not defined")).at(&b.source));
+            }
+        }
+        let mut reached = Vec::new();
+        for net in &b.nets {
+            match by_alias.get(&local_name(inst, net)) {
+                Some(&i) => reached.push(i),
+                None => cx.diags.push(
+                    Diagnostic::new(Severity::Error, "blanket-net", name.clone(), format!("blanket {} names net `{net}`, which isn't on sheet {}", b.name, inst))
+                        .at(&b.source),
+                ),
+            }
+        }
+        reached.sort();
+        reached.dedup();
+        for &i in &reached {
+            if nets[i].class.is_none() {
+                nets[i].class = b.class.clone();
+            }
+        }
+        blankets.push(BlanketInst { name, sheet: inst.clone(), nets: reached, class: b.class.clone(), params: b.params.clone() });
+    }
+    blankets.sort_by(|a, b| a.name.cmp(&b.name));
     let mut no_erc: BTreeSet<(usize, usize)> = cx.no_erc.iter().copied().collect();
     no_erc.retain(|(c, p)| *c < cx.comps.len() && *p < cx.comps[*c].pins.len());
     let mut diags = cx.diags;
@@ -1309,6 +1357,7 @@ pub fn elaborate(
         components: cx.comps,
         nets,
         diff_pairs,
+        blankets,
         sheets,
         no_erc,
         sheet_renames: cx.sheet_renames,

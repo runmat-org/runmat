@@ -72,10 +72,11 @@ pub(super) fn percent(fraction: f64) -> Print {
 }
 
 /// A param as written: the `.m` call that computes it, else its value.
-pub(super) fn param_written(param: &crate::ir::Param) -> Print {
-    match &param.call {
-        Some(call) => Ok(call.text.clone()),
-        None => param_text(&param.value),
+pub(crate) fn param_written(param: &crate::ir::Param) -> Print {
+    match (&param.call, &param.written) {
+        (Some(call), _) => Ok(call.text.clone()),
+        (None, Some(written)) => Ok(written.clone()),
+        (None, None) => param_text(&param.value),
     }
 }
 
@@ -472,6 +473,16 @@ pub(crate) fn diff_pair_statement(pair: &DiffPairDecl) -> Print {
     ))
 }
 
+/// One `blanket` statement.
+pub(crate) fn blanket_statement(blanket: &BlanketDecl) -> Print {
+    let mut entries = vec![("nets".to_string(), names(&blanket.nets))];
+    if let Some(class) = &blanket.class {
+        entries.push(("class".into(), name(class)));
+    }
+    entries.extend(params_entries(&blanket.params, &["nets", "class", "global", "renamed_from"])?);
+    Ok(format!("blanket {} = {}", name(&blanket.name), record(&entries)))
+}
+
 pub(super) fn print_sheet(sheet: &SheetDef) -> Print {
     let mut lines = Vec::new();
     for (k, param) in &sheet.params {
@@ -503,6 +514,9 @@ pub(super) fn print_sheet(sheet: &SheetDef) -> Print {
     }
     for pair in &sheet.diff_pairs {
         lines.push(diff_pair_statement(pair)?);
+    }
+    for blanket in &sheet.blankets {
+        lines.push(blanket_statement(blanket)?);
     }
     for t in &sheet.texts {
         lines.push(text_statement(t));

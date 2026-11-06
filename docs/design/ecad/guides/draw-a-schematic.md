@@ -37,7 +37,9 @@ Settings go on a `net` statement:
 - `global = true` joins nets of the same name on every sheet, as ground and supply rails do.
 - `power_flag = true` marks a net driven from outside the schematic, such as the 5 V on the connector, so the electrical rules don't report its power inputs as undriven.
 - `class = power` puts the net in a net class, whose track width and clearance the board uses.
-- Other entries are the net's parameters, such as `max_length = 50 mm`. The Directive tool's Parameter set writes them onto the picked nets.
+- Other entries are the net's parameters, such as `max_length = 50 mm`. The Directive tool's Parameter set writes them onto the picked nets, in the units you type.
+
+To give several nets the same class and parameters, pick them with the Directive tool's Blanket and write a class (`power`) or entries (`class = power, max_length = 50 mm`). The tool writes `blanket blanket1 = { nets = [VIN, GND], class = power, max_length = 50 mm }` on the sheet, and the canvas draws a dashed box round the nets it covers.
 
 ## 3. Split the design into sheets
 

@@ -5,9 +5,9 @@ use super::super::edit::EditError;
 use super::wire::{declare_port, endpoint_of, place, written_name};
 use super::{Editor, End};
 use crate::ids::NamePath;
-use crate::ir::{Binding, BusDecl, DiffPairDecl, HarnessDecl, NetDecl, PortDir, SheetDef, SheetInstance};
+use crate::ir::{Binding, BlanketDecl, BusDecl, DiffPairDecl, HarnessDecl, NetDecl, PortDir, SheetDef, SheetInstance};
 use crate::syntax::{
-    bus_statement, diff_pair_statement, harness_statement, instance_statement, net_statement, no_erc_statement,
+    blanket_statement, bus_statement, diff_pair_statement, harness_statement, instance_statement, net_statement, no_erc_statement,
 };
 
 /// A sheet instance path from a pick (`sheet:/pwr`, `sheet:/ch[0]`, `sheet:/ch[0]#2`).
@@ -207,7 +207,8 @@ fn picked_nets<'a>(e: &Editor<'a>) -> Result<Vec<(&'a SheetDef, String)>, EditEr
         .collect()
 }
 
-/// `schematic.directive`: a net class on the picked nets, or a differential pair of two.
+/// `schematic.directive`: a net class or parameters on the picked nets, a differential pair of
+/// two, or a blanket over them all.
 pub(super) fn directive(e: &mut Editor) -> Result<String, EditError> {
     let kind = e.value_str("type").unwrap_or_else(|| "net_class".into());
     let nets = picked_nets(e)?;
@@ -246,10 +247,52 @@ pub(super) fn directive(e: &mut Editor) -> Result<String, EditError> {
             e.insert(&block, &["diff_pair", "no_erc", "connect", "net"], &text);
             Ok(format!("Paired {p} and {n} as {name}"))
         }
-        other => Err(EditError::new(format!(
-            "the `{other}` directive has no statement in a .circuit file yet; use net class, parameters or differential pair"
-        ))),
+        "blanket" => {
+            let value = e.value_str("value").ok_or_else(|| EditError::new("write the class (`power`) or entries such as `class = power, max_length = 50 mm`"))?;
+            let Some((sheet, _)) = nets.first() else { return Err(EditError::new("pick the nets the blanket covers")) };
+            if let Some((other, _)) = nets.iter().find(|(s, _)| s.name != sheet.name) {
+                return Err(EditError::new(format!("a blanket's nets are on one sheet (`{}` and `{}`)", sheet.name, other.name)));
+            }
+            let (class, params) = blanket_entries(&value)?;
+            if let Some(class) = &class {
+                if !e.project.design.net_classes.contains_key(class) {
+                    let known: Vec<&str> = e.project.design.net_classes.keys().map(String::as_str).collect();
+                    return Err(EditError::new(format!("the circuit has no net class `{class}` (it has {})", if known.is_empty() { "none".to_owned() } else { known.join(", ") })));
+                }
+            }
+            let name = (1..).map(|i| format!("blanket{i}")).find(|n| !sheet.blankets.iter().any(|b| &b.name == n)).unwrap_or_default();
+            let mut covered: Vec<String> = nets.iter().map(|(_, n)| n.clone()).collect();
+            covered.dedup();
+            let count = covered.len();
+            let blanket = BlanketDecl { name: name.clone(), nets: covered, class, params, source: Default::default() };
+            let text = blanket_statement(&blanket).map_err(|e| EditError::new(e.0))?;
+            let block = e.block(&sheet.name)?;
+            e.insert(&block, &["blanket", "diff_pair", "no_erc", "connect", "net"], &text);
+            Ok(format!("Blanket {name} over {count} net(s)"))
+        }
+        other => Err(EditError::new(format!("the `{other}` directive isn't one of net class, parameters, differential pair or blanket"))),
     }
+}
+
+/// A blanket's value: a class name alone (`power`), or entries (`class = power, max_length =
+/// 50 mm`) read by the `.circuit` parser itself.
+fn blanket_entries(value: &str) -> Result<(Option<String>, std::collections::BTreeMap<String, crate::ir::Param>), EditError> {
+    let value = value.trim();
+    if !value.contains('=') {
+        return Ok((Some(value.to_owned()), Default::default()));
+    }
+    let probe = format!("runmat 0.7\nstd 1\n\ncircuit probe {{\n    root = s\n\n    sheet s {{\n        blanket b = {{ nets = [N], {value} }}\n    }}\n}}\n");
+    let read = crate::syntax::parse_circuit("blanket", &probe);
+    let bad = || EditError::new(format!("`{value}` isn't a blanket's entries; write `class = power, max_length = 50 mm`"));
+    if !read.diagnostics.is_empty() {
+        return Err(bad());
+    }
+    let design = read.design.ok_or_else(bad)?;
+    let b = design.sheets.get("s").and_then(|s| s.blankets.first()).ok_or_else(bad)?;
+    if b.nets != ["N"] {
+        return Err(EditError::new("pick the nets on the canvas; the value holds the class and parameters"));
+    }
+    Ok((b.class.clone(), b.params.clone()))
 }
 
 /// Rewrites net `name`'s declaration on `sheet` (or adds one) after `change`.

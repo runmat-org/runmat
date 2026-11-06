@@ -178,11 +178,53 @@ fn a_parameter_set_directive_writes_the_nets_parameters() {
     let (t, summary) = run(&t, "schematic.directive", json!({ "type": "parameters", "nets": ["net:VIN"], "value": "max_length = 50 mm, current = 1.5 A" })).unwrap();
     assert_eq!(summary, "current, max_length on 1 net(s)");
     let line = t.lines().find(|l| l.trim_start().starts_with("net VIN =")).unwrap_or_else(|| panic!("{t}"));
-    assert!(line.contains("max_length = 0.05 m") && line.contains("current = 1.5 A") && line.contains("global = true"), "{line}");
+    assert!(line.contains("max_length = 50 mm") && line.contains("current = 1.5 A") && line.contains("global = true"), "{line}");
     index(&t);
     for bad in ["50 mm", "class = power", "max_length ="] {
         assert!(run(&t, "schematic.directive", json!({ "type": "parameters", "nets": ["net:VIN"], "value": bad })).is_err(), "{bad}");
     }
+}
+
+#[test]
+fn a_blanket_sets_a_class_over_several_nets_and_is_drawn_round_them() {
+    let t = wired_regulator();
+    let (t, summary) = run(&t, "schematic.directive", json!({ "type": "blanket", "nets": ["net:VIN", "net:GND"], "value": "class = power, max_length = 50 mm" })).unwrap();
+    assert_eq!(summary, "Blanket blanket1 over 2 net(s)");
+    assert!(t.contains("        blanket blanket1 = { nets = [VIN, GND], class = power, max_length = 50 mm }\n"), "{t}");
+    let drawn = index(&t);
+    for net in ["VIN", "GND"] {
+        let row = drawn.nets.iter().find(|n| n.name == net).unwrap_or_else(|| panic!("{net}"));
+        assert_eq!(row.class.as_deref(), Some("power"), "{net} takes the blanket's class");
+    }
+    assert_eq!(drawn.nets.iter().find(|n| n.name == "+3V3").and_then(|n| n.class.clone()), None);
+    assert!(drawn.erc.is_empty(), "{:#?}", drawn.erc);
+    // The page draws one box round both nets' wires, labels and pins, captioned.
+    let page = &drawn.schematic.sheets[0];
+    let [b] = page.blankets.as_slice() else { panic!("{:?}", page.blankets) };
+    assert_eq!(b.caption, "blanket blanket1 · class power · max_length = 50 mm");
+    assert_eq!(b.nets, ["GND", "VIN"]);
+    for p in page.symbols.iter().flat_map(|s| &s.pins).filter(|p| matches!(p.net.as_deref(), Some("VIN" | "GND"))) {
+        assert!(b.rect[0] < p.x_mm && p.x_mm < b.rect[2] && b.rect[1] < p.y_mm && p.y_mm < b.rect[3], "{} at {:?} outside {:?}", p.name, (p.x_mm, p.y_mm), b.rect);
+    }
+
+    // A net's own class wins, and ERC says the blanket's doesn't apply there.
+    let t2 = t.replace("net_class power = { track_width = \"0.50 mm\" }", "net_class power = { track_width = \"0.50 mm\" }\n    net_class signal = { track_width = \"0.20 mm\" }");
+    let t2 = step(&t2, "schematic.directive", json!({ "type": "net_class", "nets": ["net:GND"], "value": "signal" }));
+    let drawn = index(&t2);
+    assert_eq!(drawn.nets.iter().find(|n| n.name == "GND").and_then(|n| n.class.clone()).as_deref(), Some("signal"));
+    let kept = drawn.erc.iter().find(|r| r.code == "blanket-class-kept").unwrap_or_else(|| panic!("{:#?}", drawn.erc));
+    assert_eq!(kept.message, "net GND keeps its class `signal`; blanket blanket1 sets `power`");
+
+    // A class alone; an unknown class, nets on two sheets and an unknown net are refused or reported.
+    let (t3, _) = run(&wired_regulator(), "schematic.directive", json!({ "type": "blanket", "nets": ["net:+3V3"], "value": "power" })).unwrap();
+    assert!(t3.contains("blanket blanket1 = { nets = [\"+3V3\"], class = power }"), "{t3}");
+    let err = run(&t, "schematic.directive", json!({ "type": "blanket", "nets": ["net:VIN"], "value": "nope" })).unwrap_err();
+    assert!(err.contains("no net class `nope`"), "{err}");
+    let bad = t.replace("nets = [VIN, GND]", "nets = [VIN, VBAT]");
+    let out = runtime::compile(PATH, &bad, &files(&bad), &CompileOptions::default());
+    let named = |m: &str| m.contains("blanket blanket1 names net `VBAT`");
+    let erc = out.index.as_ref().map(|i| i.erc.clone()).unwrap_or_default();
+    assert!(out.diagnostics.iter().any(|d| named(&d.message)) || erc.iter().any(|r| named(&r.message)), "{:?}\n{erc:?}", out.diagnostics);
 }
 
 #[test]

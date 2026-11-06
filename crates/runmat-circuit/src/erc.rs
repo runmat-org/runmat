@@ -12,6 +12,8 @@
 //! | `single-pin-net` | warning | a net with exactly one pin, not on a root-sheet port or a power flag (both reach outside the design) |
 //! | `no-connect-connected` | error | a no-connect pin that is on a net with other pins |
 //! | `no-erc-on-connected` | info | a no-ERC marker on a pin that is connected anyway |
+//! | `blanket-class-kept` | info | a net a blanket covers keeps the other class its own statement gives it |
+//! | `blanket-net-empty` | warning | a net a blanket covers has no pins, so its class and parameters reach nothing |
 //!
 //! Not-fitted components (in the elaborated variant) are left out, so ERC is variant-aware.
 //! Every finding names its item (`R1.2` or a net name) and the other items involved.
@@ -331,6 +333,30 @@ pub fn run(nl: &Netlist, opts: &ErcOptions) -> Vec<Diagnostic> {
                         ),
                     )
                     .at(&c.source),
+                );
+            }
+        }
+    }
+    for b in &nl.blankets {
+        for &ni in &b.nets {
+            let net = &nl.nets[ni];
+            if let (Some(own), Some(set)) = (&net.class, &b.class) {
+                if own != set {
+                    out.push(
+                        Diagnostic::new(
+                            Severity::Info,
+                            "blanket-class-kept",
+                            net.name.clone(),
+                            format!("net {} keeps its class `{own}`; blanket {} sets `{set}`", net.name, b.name),
+                        )
+                        .with(b.name.clone()),
+                    );
+                }
+            }
+            if net.pins.is_empty() {
+                out.push(
+                    Diagnostic::new(Severity::Warning, "blanket-net-empty", net.name.clone(), format!("blanket {} covers net {}, which has no pins", b.name, net.name))
+                        .with(b.name.clone()),
                 );
             }
         }

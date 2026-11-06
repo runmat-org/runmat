@@ -227,9 +227,13 @@ pub(super) fn param_of(expr: &Expr, source: SourceKey) -> Read<Param> {
             value: ParamValue::Quantity { nominal: Quantity::new(f64::NAN, dim), tol: Tolerance::Exact },
             source,
             call: Some(ValueCall { text: expr.syntax().text().trim().to_string(), function, arguments, unit }),
+            written: None,
         });
     }
-    Ok(Param { value: param_value(expr)?, source, call: None })
+    let value = param_value(expr)?;
+    // A quantity keeps its written text, so the printer writes it back in the file's units.
+    let written = matches!(value, ParamValue::Quantity { .. }).then(|| expr.syntax().text().trim().to_string());
+    Ok(Param { value, source, call: None, written })
 }
 
 /// `f(…) as unit` or `f(…)`: the call and its unit.
@@ -477,6 +481,25 @@ pub(super) fn read_net(name: String, expr: Option<Expr>, span: Span, source: Sou
         }
     }
     Ok(net)
+}
+
+/// `blanket <name> = { nets = [A, B], class = power, <params> }`: the nets are required.
+pub(super) fn read_blanket(name: String, expr: Option<Expr>, span: Span, source: SourceKey) -> Read<BlanketDecl> {
+    let mut blanket = BlanketDecl { name, nets: Vec::new(), class: None, params: BTreeMap::new(), source: source.clone() };
+    for (field, value) in record_of(expr, span)? {
+        match field.as_str() {
+            "nets" => blanket.nets = words_of(Some(value), span)?,
+            "class" => blanket.class = Some(word_of(Some(value), span)?),
+            "global" | "renamed_from" => return Err(diagnostic(span, format!("a blanket can't set `{field}`; write it on the net"))),
+            _ => {
+                blanket.params.insert(field, param_of(&value, source.clone())?);
+            }
+        }
+    }
+    if blanket.nets.is_empty() {
+        return Err(diagnostic(span, "a blanket names its nets: `nets = [A, B]`"));
+    }
+    Ok(blanket)
 }
 
 pub(super) fn read_instance(

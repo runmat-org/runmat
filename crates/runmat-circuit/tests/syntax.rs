@@ -273,6 +273,7 @@ fn parameters_tolerances_and_variants_read_back_exactly() {
             value: ParamValue::Bool(true),
             source: SourceKey::default(),
             call: None,
+            written: None,
         },
     );
     r.power = Some(Quantity::new(0.0625, runmat_rules::Dim::POWER));

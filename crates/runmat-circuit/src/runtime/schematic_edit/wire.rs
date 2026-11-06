@@ -308,7 +308,7 @@ pub(super) fn power_port(e: &mut Editor) -> Result<String, EditError> {
         if flag {
             d.params.insert(
                 "power_flag".into(),
-                Param { value: ParamValue::Bool(true), source: Default::default(), call: None },
+                Param { value: ParamValue::Bool(true), source: Default::default(), call: None, written: None },
             );
         }
         d

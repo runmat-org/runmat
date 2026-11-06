@@ -13,7 +13,7 @@
 //! A [`Design`] holds sheet definitions ([`SheetDef`], the reusable modules), the root sheet,
 //! design-wide net classes, interface (harness) types and variants. A sheet declares ports,
 //! components, nets, buses, harnesses, sub-sheet instances (optionally repeated as channels),
-//! connections, differential pairs, no-ERC markers and parameters. [`crate::elab`] flattens it.
+//! connections, differential pairs, blankets, no-ERC markers and parameters. [`crate::elab`] flattens it.
 
 use crate::ids::NamePath;
 use runmat_rules::{Quantity, SourceKey};
@@ -75,7 +75,7 @@ impl Tolerance {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Param {
     pub value: ParamValue,
     pub source: SourceKey,
@@ -83,6 +83,18 @@ pub struct Param {
     /// (`value = feedbackResistor(vout = 3.3 V, r1 = 10 kohm) as ohm`). `value` holds the result
     /// once the runtime has evaluated it, and the printer writes the call back.
     pub call: Option<ValueCall>,
+    /// A quantity as the file writes it (`50 mm`, `4.7 kohm ± 1 %`), which the printer writes
+    /// back, so a statement rewritten by a tool keeps the engineer's units. `None` for a value
+    /// built by code, printed in SI. Code that changes `value` sets this to `None`.
+    pub written: Option<String>,
+}
+
+/// Two params are equal when their values, sources and calls are: how a value is written
+/// (`50 mm` or `0.05 m`) doesn't make it another value.
+impl PartialEq for Param {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value && self.source == other.source && self.call == other.call
+    }
 }
 
 /// A param value computed by a `.m` function (report 12 §2.3–2.6).
@@ -104,6 +116,7 @@ impl Param {
             value: ParamValue::Quantity { nominal: q, tol },
             source: SourceKey::default(),
             call: None,
+            written: None,
         }
     }
     pub fn text(s: impl Into<String>) -> Self {
@@ -111,6 +124,7 @@ impl Param {
             value: ParamValue::Text(s.into()),
             source: SourceKey::default(),
             call: None,
+            written: None,
         }
     }
     pub fn as_quantity(&self) -> Option<Quantity> {
@@ -321,6 +335,18 @@ pub struct DiffPairDecl {
     pub source: SourceKey,
 }
 
+/// A blanket: one directive over several nets of a sheet (`blanket power_rails = { nets = [VIN,
+/// GND], class = power, max_length = 50 mm }`). Each listed net takes the class and parameters;
+/// what a net's own statement says wins.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlanketDecl {
+    pub name: String,
+    pub nets: Vec<String>,
+    pub class: Option<String>,
+    pub params: BTreeMap<String, Param>,
+    pub source: SourceKey,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SheetDef {
     pub name: String,
@@ -332,6 +358,7 @@ pub struct SheetDef {
     pub instances: Vec<SheetInstance>,
     pub connections: Vec<Connection>,
     pub diff_pairs: Vec<DiffPairDecl>,
+    pub blankets: Vec<BlanketDecl>,
     /// Pins marked "no connect" / no-ERC.
     pub no_erc: Vec<Endpoint>,
     /// Notes drawn on the sheet (`text note1 = "…"`).
