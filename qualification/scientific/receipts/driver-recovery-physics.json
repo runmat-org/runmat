@@ -54,14 +54,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "51d1c9812c4397e06f28fa087fd7c5b227a4365a62c2105d44b57270a76519c6",
+      "sha256": "1562f0b930b85e846d22a9e3036463afcf28bad750f201f4c7229121089d0ebd",
       "files": 24826,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Three Windows-only private-filesystem inputs are excluded from the measured Linux target. The fourth input changes only the CLI remote-upload metadata producer, outside both measured scientific routes. Exact inverse edits reconstruct the original measured inventory. Preserve original measured counts, commands, artifacts and logs. This conservation does not qualify the corrected remote flow or final platform products.",
+    "reason": "The exact six-file inverse restores the measured source inventory: three cfg(windows) private filesystem files, one remote CLI upload-metadata producer and two Python release-workflow validation files. Neither measured Linux scientific cohort uses those changed routes. Numerical code, runtime/worker/admission/publication mechanisms, fixtures, dependencies, commands and scientific assertions are unchanged. Original measurements and approved dispositions are preserved; product and CI-routing evidence remain separately scoped.",
     "review": {
-      "path": "qualification/scientific/reviews/windows-path-and-cli-suite-r1057.json",
-      "sha256": "1b4d046016c01290d9f5b5d34986388b1ff4edcbd57056b13bc74ec00b78464c"
+      "path": "qualification/scientific/reviews/release-routing-r1058.json",
+      "sha256": "edc62592d3f4c60c74c33bea5259da24e268b26c0c0cc12d756b09f0c6dd2eed"
     }
   }
 }

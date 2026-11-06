@@ -17,9 +17,9 @@ adds 93 findings. Repeated emissions count once.
 
 ## Source and toolchain
 
-- Code anchor: `2ec4c54b7b3e85b8bf51ed5011bf49f4208ef00e`.
+- Code anchor: `0d09250a4c9a8394de9ed906953e72dc22c8fb12`.
 - FEA Git tree: `55c7f312626e67dd08e22ba9583531661139baa7`.
-- Compiler-input Git inventory: `28bfe700e440acb45a5c7a9e0c85855e5837a98b`.
+- Compiler-input Git inventory: `57b0b40817affb13c296324db3d1491b1a0177a2`.
 - Rust/Clippy: 1.90.0.
 
 CI computes the inventory with
@@ -58,6 +58,13 @@ and failed jobs with encrypted terminal output. Server's corresponding repair
 and21 passing domain tests are private-product evidence, outside this public
 Clippy exception. The approved183 findings and strict policy for every other
 first-party crate are unchanged; Windows retains its separate qualification.
+
+The current inventory also includes the release-workflow validator and its
+Python regression. The release gate verifies all required scientific receipts
+under the existing approved dispositions. All34 meshing-tooling unit tests
+and five catalog/workflow validators pass. These two Python files change no
+Rust source, dependency, feature or lint-bearing file; the183 FEA identities
+and their original measured evidence are conserved.
 
 ## CI policy and closure
 
