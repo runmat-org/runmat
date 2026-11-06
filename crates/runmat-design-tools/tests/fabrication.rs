@@ -186,21 +186,16 @@ fn circuit_checks_report_the_board_and_fail_on_an_unrouted_one() {
     let f = files();
     let r = runmat_design_tools::ci::check_circuit("/p/flight_controller.circuit.layout", &f, true)
         .unwrap();
-    // The board is clean on ERC, DRC, routing and sync, and its simulations run; the one error
-    // is the reset-strap review finding on the MCU (NRST without a pull-up).
+    // The board is clean on ERC, the review suites, DRC, routing and sync, and its simulations
+    // run.
     let errors: Vec<String> = r
         .findings
         .iter()
         .filter(|x| x.severity == "error")
         .map(|x| format!("{} {}", x.check, x.code))
         .collect();
-    assert_eq!(
-        errors,
-        vec!["review straps.reset-pull-up"],
-        "{:#?}",
-        r.findings
-    );
-    assert!(!r.passed);
+    assert!(errors.is_empty(), "{errors:?}\n{:#?}", r.findings);
+    assert!(r.passed);
     for c in [
         "erc",
         "review",

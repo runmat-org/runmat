@@ -90,6 +90,9 @@ circuit flight_controller {
         component C10 = { part = "C0603-4U7" }
         component C11 = { part = "C0402-100N" }
         component R1 = { part = "R0402-10K" }
+        // NRST: 10 kOhm pull-up to 3V3 with the 100 nF filter cap (C11), per the MCU's
+        // reference design, so reset holds high against noise and releases cleanly at power-up.
+        component R13 = { part = "R0402-10K" }
         component R2 = { part = "R0402-5K1" }
         component R3 = { part = "R0402-5K1" }
         component R4 = { part = "R0402-1K" }
@@ -119,10 +122,10 @@ circuit flight_controller {
         connect = [net.I2C_SCL, U1.PB8]
         connect = [net.I2C_SDA, U1.PB9]
         connect = [net.VBAT_SENSE, U1.PA0]
-        connect = ["net.+3V3", U1.VDD, U1.VDDA, "C3.1", "C4.1", "C5.1", "C6.1", "C7.1", "C8.1", "C9.1"]
+        connect = ["net.+3V3", U1.VDD, U1.VDDA, "R13.2", "C3.1", "C4.1", "C5.1", "C6.1", "C7.1", "C8.1", "C9.1"]
         connect = [net.GND, U1.VSS, U1.VSSA, "C3.2", "C4.2", "C5.2", "C6.2", "C7.2", "C8.2", "C9.2", "C10.2", "C11.2", "C1.2", "C2.2", "R1.2"]
         connect = [net.VCAP, U1.VCAP, "C10.1"]
-        connect = [net.NRST, U1.NRST, "C11.1"]
+        connect = [net.NRST, U1.NRST, "C11.1", "R13.1"]
         connect = [net.BOOT0, U1.BOOT0, "R1.1"]
         connect = [net.OSC_IN, U1.OSC_IN, "Y1.1", "C1.1"]
         connect = [net.OSC_OUT, U1.OSC_OUT, "Y1.2", "C2.1"]

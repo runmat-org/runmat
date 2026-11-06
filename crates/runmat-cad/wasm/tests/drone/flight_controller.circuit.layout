@@ -108,6 +108,7 @@ layout flight_controller {
     footprint R10 = { package = R_0402_1005Metric_IPCN, at = [-11.4, 3.6], rotation = 90, value = "10 kΩ ±1%", pads = { "1" = VBAT_SENSE, "2" = GND }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
     footprint R11 = { package = R_0402_1005Metric_IPCN, at = [8.6, -5.6], value = "4.7 kΩ ±1%", pads = { "1" = "+3V3", "2" = I2C_SCL }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "4.7 kΩ ±1%" } }
     footprint R12 = { package = R_0402_1005Metric_IPCN, at = [10.4, -5.6], value = "4.7 kΩ ±1%", pads = { "1" = "+3V3", "2" = I2C_SDA }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "4.7 kΩ ±1%" } }
+    footprint R13 = { package = R_0402_1005Metric_IPCN, at = [-6.2, -1.8], rotation = 90, value = "10 kΩ ±1%", pads = { "1" = NRST, "2" = "+3V3" }, properties = { "param:power_rating" = "62.5 mW", "param:resistance" = "10 kΩ ±1%" } }
     footprint U1 = { package = "LQFP-48_7x7mm_P0.5mm_IPCN", at = [1, 2], pads = { "1" = "+3V3", "10" = VBAT_SENSE, "11" = IMU_INT, "12" = RC_TX, "13" = RC_RX, "14" = IMU_CS, "15" = SPI_SCK, "16" = SPI_MISO, "17" = SPI_MOSI, "19" = CURR, "2" = LED1, "21" = TLM, "22" = VCAP, "23" = GND, "24" = "+3V3", "3" = LED2, "30" = VTX_TX, "31" = VTX_RX, "32" = USB_DN, "33" = USB_DP, "35" = GND, "36" = "+3V3", "40" = M3, "41" = M4, "42" = M1, "43" = M2, "44" = BOOT0, "45" = I2C_SCL, "46" = I2C_SDA, "47" = GND, "48" = "+3V3", "5" = OSC_IN, "6" = OSC_OUT, "7" = NRST, "8" = GND, "9" = "+3V3" } }
     footprint U2 = { package = "SOT-23-6_IPCN", at = [-8, -8.4], pads = { "1" = "/pwr/BST", "2" = GND, "3" = "/pwr/FB", "4" = "/pwr/EN", "5" = VBAT, "6" = "/pwr/SW" } }
     footprint U3 = { package = "SOT-23-5_IPCN", at = [-8, 1], pads = { "1" = "+5V", "2" = GND, "3" = "+5V", "5" = "+3V3" } }
@@ -184,6 +185,7 @@ layout flight_controller {
     track GND = { layer = F.Cu, width = 0.25, from = [-11.4, 3.9775], to = [-11.4, 4.56] }
     track "+3V3" = { layer = F.Cu, width = 0.25, from = [8.2225, -5.6], to = [7.64, -5.6] }
     track "+3V3" = { layer = F.Cu, width = 0.25, from = [10.0225, -5.6], to = [10.0225, -4.99] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [-6.2, -1.4225], to = [-6.2, -0.84] }
     track "+3V3" = { layer = F.Cu, width = 0.25, from = [-3.125, 4.75], to = [-4.28, 4.75] }
     track "+3V3" = { layer = F.Cu, width = 0.25, from = [3.75, -2.125], to = [3.75, -3.28] }
     track "+3V3" = { layer = F.Cu, width = 0.25, from = [5.125, 4.75], to = [6.28, 4.75] }
@@ -210,6 +212,7 @@ layout flight_controller {
     track "+5V" = { layer = B.Cu, width = 0.4, from = [-8.96, 3.4], to = [-8.86, 2.55] }
     track "+5V" = { layer = B.Cu, width = 0.4, from = [-8.86, 2.55], to = [-8.885, 2.56] }
     track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-6.4, -4.8225], to = [-5.2, -4.8225] }
+    track NRST = { layer = F.Cu, width = 0.2, from = [-4.9, -2.1775], to = [-6.2, -2.1775] }
     track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-5.2, -4.8225], to = [-4, -5.5725] }
     track "/pwr/FB" = { layer = F.Cu, width = 0.2, from = [-4, -5.5725], to = [-4, -5.5775] }
     track VBAT_SENSE = { layer = F.Cu, width = 0.2, from = [-11.4, 1.7775], to = [-11.4, 3.2225] }
@@ -486,9 +489,9 @@ layout flight_controller {
     track RC_TX = { layer = F.Cu, width = 0.2, from = [-16.325, 4.7], to = [-16.325, 4.6] }
     track RC_TX = { layer = F.Cu, width = 0.2, from = [-16.325, 4.6], to = [-11.875, 0.15] }
     track RC_TX = { layer = F.Cu, width = 0.2, from = [-11.875, 0.15], to = [-11.525, 0.15] }
-    track RC_TX = { layer = B.Cu, width = 0.2, from = [-11.525, 0.15], to = [-7.825, 0.15] }
-    track RC_TX = { layer = B.Cu, width = 0.2, from = [-7.825, 0.15], to = [-6.225, -1.45] }
-    track RC_TX = { layer = B.Cu, width = 0.2, from = [-6.225, -1.45], to = [-4.275, -1.45] }
+    track RC_TX = { layer = B.Cu, width = 0.2, from = [-11.525, 0.15], to = [-7.875, 0.15] }
+    track RC_TX = { layer = B.Cu, width = 0.2, from = [-7.875, 0.15], to = [-6.275, -1.45] }
+    track RC_TX = { layer = B.Cu, width = 0.2, from = [-6.275, -1.45], to = [-4.275, -1.45] }
     track RC_TX = { layer = F.Cu, width = 0.2, from = [-4.275, -1.45], to = [-3.675, -0.85] }
     track RC_TX = { layer = F.Cu, width = 0.2, from = [-3.675, -0.85], to = [-3.125, -0.75] }
     track IMU_CS = { layer = F.Cu, width = 0.2, from = [-1.25, -2.125], to = [-1.35, -1.325] }
@@ -527,15 +530,14 @@ layout flight_controller {
     track "+5V" = { layer = F.Cu, width = 0.4, from = [8.8, -12.075], to = [11.9, -12.075] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [11.9, -12.075], to = [13.45, -10.525] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [13.45, -10.525], to = [13.6, -10.38] }
-    track RC_RX = { layer = F.Cu, width = 0.2, from = [-16.925, 6], to = [-16.175, 5.8] }
-    track RC_RX = { layer = F.Cu, width = 0.2, from = [-16.175, 5.8], to = [-15.675, 5.8] }
-    track RC_RX = { layer = F.Cu, width = 0.2, from = [-15.675, 5.8], to = [-14.475, 4.6] }
-    track RC_RX = { layer = B.Cu, width = 0.2, from = [-14.475, 4.6], to = [-10.375, 0.5] }
-    track RC_RX = { layer = B.Cu, width = 0.2, from = [-10.375, 0.5], to = [-7.525, 0.5] }
-    track RC_RX = { layer = B.Cu, width = 0.2, from = [-7.525, 0.5], to = [-6.425, -0.6] }
-    track RC_RX = { layer = F.Cu, width = 0.2, from = [-6.425, -0.6], to = [-6.425, -1.5] }
-    track RC_RX = { layer = F.Cu, width = 0.2, from = [-6.425, -1.5], to = [-5.225, -2.7] }
-    track RC_RX = { layer = F.Cu, width = 0.2, from = [-5.225, -2.7], to = [-2.325, -2.7] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-16.925, 6], to = [-16.225, 5.75] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-16.225, 5.75], to = [-14.975, 4.5] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-14.975, 4.5], to = [-14.975, 3.9] }
+    track RC_RX = { layer = B.Cu, width = 0.2, from = [-14.975, 3.9], to = [-14.975, 2.25] }
+    track RC_RX = { layer = B.Cu, width = 0.2, from = [-14.975, 2.25], to = [-11.475, -1.25] }
+    track RC_RX = { layer = B.Cu, width = 0.2, from = [-11.475, -1.25], to = [-9.775, -1.25] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-9.775, -1.25], to = [-8.325, -2.7] }
+    track RC_RX = { layer = F.Cu, width = 0.2, from = [-8.325, -2.7], to = [-2.325, -2.7] }
     track RC_RX = { layer = F.Cu, width = 0.2, from = [-2.325, -2.7], to = [-1.75, -2.125] }
     track CURR = { layer = F.Cu, width = 0.2, from = [1.5, 16.925], to = [1.75, 16.225] }
     track CURR = { layer = F.Cu, width = 0.2, from = [1.75, 16.225], to = [2.55, 15.425] }
@@ -578,11 +580,10 @@ layout flight_controller {
     track VBAT = { layer = F.Cu, width = 0.4, from = [3.5, 16.925], to = [3.2, 16.525] }
     track VBAT = { layer = B.Cu, width = 0.4, from = [3.2, 16.525], to = [0.8, 16.525] }
     track VBAT = { layer = B.Cu, width = 0.4, from = [0.8, 16.525], to = [-6.3, 9.425] }
-    track VBAT = { layer = B.Cu, width = 0.4, from = [-6.3, 9.425], to = [-6.3, 8.825] }
-    track VBAT = { layer = B.Cu, width = 0.4, from = [-6.3, 8.825], to = [-12.05, 3.075] }
-    track VBAT = { layer = F.Cu, width = 0.4, from = [-12.05, 3.075], to = [-12.05, 1.475] }
-    track VBAT = { layer = F.Cu, width = 0.4, from = [-12.05, 1.475], to = [-11.65, 1.075] }
-    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.65, 1.075], to = [-11.4, 1.0225] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [-6.3, 9.425], to = [-6.3, 7.175] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [-6.3, 7.175], to = [-11.5, 1.975] }
+    track VBAT = { layer = B.Cu, width = 0.4, from = [-11.5, 1.975], to = [-11.5, 1.175] }
+    track VBAT = { layer = F.Cu, width = 0.4, from = [-11.5, 1.175], to = [-11.4, 1.0225] }
     via USB_DP = { at = [2.75, -15.6], size = 0.45, drill = 0.2 }
     via USB_DP = { at = [3.75, -14.6], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [-4.6, 0.75], size = 0.45, drill = 0.2 }
@@ -635,6 +636,7 @@ layout flight_controller {
     via GND = { at = [-11.4, 4.56], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [7.64, -5.6], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [10.0225, -4.99], size = 0.45, drill = 0.2 }
+    via "+3V3" = { at = [-6.2, -0.84], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [-4.28, 4.75], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [3.75, -3.28], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [6.28, 4.75], size = 0.45, drill = 0.2 }
@@ -708,8 +710,8 @@ layout flight_controller {
     via LED2 = { at = [-3.3775, 3.75], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [0.45, -12.075], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [8.8, -12.075], size = 0.45, drill = 0.2 }
-    via RC_RX = { at = [-14.475, 4.6], size = 0.45, drill = 0.2 }
-    via RC_RX = { at = [-6.425, -0.6], size = 0.45, drill = 0.2 }
+    via RC_RX = { at = [-14.975, 3.9], size = 0.45, drill = 0.2 }
+    via RC_RX = { at = [-9.775, -1.25], size = 0.45, drill = 0.2 }
     via CURR = { at = [7, 13.175], size = 0.45, drill = 0.2 }
     via CURR = { at = [9.05, 11.975], size = 0.45, drill = 0.2 }
     via CURR = { at = [10.5, -2.775], size = 0.45, drill = 0.2 }
@@ -719,7 +721,7 @@ layout flight_controller {
     via TLM = { at = [12.1, -1.375], size = 0.45, drill = 0.2 }
     via TLM = { at = [2.7, -3.325], size = 0.45, drill = 0.2 }
     via VBAT = { at = [3.2, 16.525], size = 0.45, drill = 0.2 }
-    via VBAT = { at = [-12.05, 3.075], size = 0.45, drill = 0.2 }
+    via VBAT = { at = [-11.5, 1.175], size = 0.45, drill = 0.2 }
     pour GND = { layers = [In1.Cu], outline = [[-17.6, -16.6], [-16.6, -17.6], [16.6, -17.6], [17.6, -16.6], [17.6, 16.6], [16.6, 17.6], [-16.6, 17.6], [-17.6, 16.6]] }
     pour "+3V3" = { layers = [In2.Cu], outline = [[-17.6, -16.6], [-16.6, -17.6], [16.6, -17.6], [17.6, -16.6], [17.6, 16.6], [16.6, 17.6], [-16.6, 17.6], [-17.6, 16.6]] }
     pour GND = { layers = [B.Cu], outline = [[-17.6, -16.6], [-16.6, -17.6], [16.6, -17.6], [17.6, -16.6], [17.6, 16.6], [16.6, 17.6], [-16.6, 17.6], [-17.6, 16.6]], connect = thermal_tht }
@@ -1129,6 +1131,7 @@ layout flight_controller {
         footprint R10 = "/pwr/R10"
         footprint R11 = "/sens/R11"
         footprint R12 = "/sens/R12"
+        footprint R13 = "/R13"
         footprint R2 = "/R2"
         footprint R3 = "/R3"
         footprint R4 = "/R4"
@@ -1263,6 +1266,11 @@ layout flight_controller {
             designator = R1,
             package = R_0402_1005Metric_IPCN,
             pads = { "1" = BOOT0, "2" = GND }
+        }
+        component "/R13" = {
+            designator = R13,
+            package = R_0402_1005Metric_IPCN,
+            pads = { "1" = NRST, "2" = "+3V3" }
         }
         component "/R2" = {
             designator = R2,

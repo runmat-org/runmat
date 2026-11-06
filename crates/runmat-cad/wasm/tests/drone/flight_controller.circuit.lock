@@ -43,6 +43,7 @@ entry 93ca1a61-dac5-8397-9f04-dd16bbd17316 net /NRST
 entry 24a34075-abf2-81b9-b29a-5876f3c8328b net /OSC_IN
 entry 863e6586-b3b5-8ca4-99a8-a4e94b3411cd net /OSC_OUT
 entry fc95cff5-57fd-8fba-8fb2-a5a4648c475a component /R1 designator=R1
+entry f156e200-a6dd-8c52-9c9a-6dd987ca8c29 component /R13 designator=R13
 entry 653acf73-5194-8fba-b9f5-8fe504d073ef component /R2 designator=R2
 entry de46c645-a444-8453-9887-473d32f4ab5d component /R3 designator=R3
 entry 9c73774c-2778-84f6-bae8-b39812c12204 component /R4 designator=R4
@@ -93,7 +94,7 @@ entry 13c59ece-4d5d-8bf8-9e24-a1786aabde20 component /sens/R11 designator=R11
 entry 608cfa70-beea-84c7-b943-a7fd70d526fc component /sens/R12 designator=R12
 entry 42a591ea-d78d-8e7a-8e88-4cec8bcca0ec component /sens/U4 designator=U4
 entry a5349962-ccd7-8b87-a132-e221e460a364 component /sens/U5 designator=U5
-fp /+3V3 /C3.1,/C4.1,/C5.1,/C6.1,/C7.1,/C8.1,/C9.1,/U1.VDD,/U1.VDDA,/pwr/C19.1,/pwr/U3.VOUT,/sens/C21.1,/sens/C22.1,/sens/C23.1,/sens/R11.1,/sens/R12.1,/sens/U4.VDD,/sens/U4.VDDIO,/sens/U5.CSB,/sens/U5.VDD,/sens/U5.VDDIO
+fp /+3V3 /C3.1,/C4.1,/C5.1,/C6.1,/C7.1,/C8.1,/C9.1,/R13.2,/U1.VDD,/U1.VDDA,/pwr/C19.1,/pwr/U3.VOUT,/sens/C21.1,/sens/C22.1,/sens/C23.1,/sens/R11.1,/sens/R12.1,/sens/U4.VDD,/sens/U4.VDDIO,/sens/U5.CSB,/sens/U5.VDD,/sens/U5.VDDIO
 fp /+5V /D3.K,/J2.1,/J4.1,/pwr/C15.1,/pwr/C16.1,/pwr/C17.1,/pwr/C18.1,/pwr/L1.2,/pwr/R6.1,/pwr/U3.EN,/pwr/U3.VIN
 fp /BOOT0 /R1.1,/U1.BOOT0
 fp /C1 487c9fa2-8806-85e9-a8e7-c76ab2c775f2|GND,OSC_IN
@@ -134,10 +135,11 @@ fp /M1 /J3.5,/U1.PB6
 fp /M2 /J3.6,/U1.PB7
 fp /M3 /J3.7,/U1.PB4
 fp /M4 /J3.8,/U1.PB5
-fp /NRST /C11.1,/U1.NRST
+fp /NRST /C11.1,/R13.1,/U1.NRST
 fp /OSC_IN /C1.1,/U1.OSC_IN,/Y1.1
 fp /OSC_OUT /C2.1,/U1.OSC_OUT,/Y1.2
 fp /R1 f0b7343f-4c49-88f7-8a3b-7c46bf087762|BOOT0,GND
+fp /R13 f0b7343f-4c49-88f7-8a3b-7c46bf087762|+3V3,NRST
 fp /R2 f9f3252b-5119-8001-9d17-ab24998ffbb4|CC1,GND
 fp /R3 f9f3252b-5119-8001-9d17-ab24998ffbb4|CC2,GND
 fp /R4 5cad3456-7f51-8bcd-9bf4-5cf482812887|LED1,LED1_K
@@ -188,57 +190,58 @@ fp /sens/R11 16272300-3f5a-830a-aaa6-785c25d2a4f8|+3V3,I2C_SCL
 fp /sens/R12 16272300-3f5a-830a-aaa6-785c25d2a4f8|+3V3,I2C_SDA
 fp /sens/U4 c9fe0507-9bfe-8c53-862d-98a56732af8a|+3V3,GND,IMU_CS,IMU_INT,SPI_MISO,SPI_MOSI,SPI_SCK
 fp /sens/U5 1feca7e2-e662-8ad7-a8ab-f5bbda13cee1|+3V3,GND,I2C_SCL,I2C_SDA
-place main/C1 331.47 224.79 270
+place main/C1 344.17 224.79 270
 place main/C10 195.58 217.17 270
 place main/C11 208.28 219.71 270
-place main/C2 318.77 215.9 270
-place main/C3 237.49 284.48 270
-place main/C4 250.19 284.48 270
-place main/C5 262.89 284.48 270
-place main/C6 275.59 284.48 270
-place main/C7 288.29 284.48 270
-place main/C8 237.49 306.07 270
-place main/C9 250.19 306.07 270
-place main/D1 382.27 243.84 270
-place main/D2 394.97 260.35 270
-place main/D3 100.33 115.57 90
-place main/H1 463.55 110.49 0
-place main/H2 472.44 110.49 0
-place main/H3 481.33 110.49 0
-place main/H4 490.22 110.49 0
-place main/J1 129.54 124.46 0
-place main/J2 129.54 171.45 0
-place main/J3 129.54 196.85 0
-place main/J4 129.54 222.25 0
+place main/C2 331.47 215.9 270
+place main/C3 238.76 284.48 270
+place main/C4 254 284.48 270
+place main/C5 269.24 284.48 270
+place main/C6 284.48 284.48 270
+place main/C7 299.72 284.48 270
+place main/C8 238.76 306.07 270
+place main/C9 254 306.07 270
+place main/D1 394.97 243.84 270
+place main/D2 407.67 260.35 270
+place main/D3 87.63 115.57 90
+place main/H1 476.25 110.49 0
+place main/H2 485.14 110.49 0
+place main/H3 494.03 110.49 0
+place main/H4 502.92 110.49 0
+place main/J1 116.84 124.46 0
+place main/J2 116.84 171.45 0
+place main/J3 116.84 196.85 0
+place main/J4 116.84 222.25 0
 place main/R1 220.98 222.25 270
+place main/R13 157.48 201.93 90
 place main/R2 170.18 125.73 270
 place main/R3 182.88 128.27 270
-place main/R4 353.06 234.95 0
-place main/R5 353.06 251.46 0
-place main/U1 262.89 231.14 0
-place main/Y1 353.06 215.9 0
-place main/pwr 426.72 109.22 0
-place main/sens 119.38 241.3 0
-place power/C12 144.78 104.14 270
+place main/R4 365.76 234.95 0
+place main/R5 365.76 251.46 0
+place main/U1 269.24 231.14 0
+place main/Y1 365.76 215.9 0
+place main/pwr 439.42 109.22 0
+place main/sens 106.68 241.3 0
+place power/C12 142.24 104.14 270
 place power/C13 157.48 104.14 270
-place power/C14 115.57 64.77 90
+place power/C14 109.22 64.77 90
 place power/C15 184.15 101.6 270
-place power/C16 196.85 101.6 270
-place power/C17 77.47 67.31 270
-place power/C18 209.55 101.6 270
-place power/C19 222.25 101.6 270
-place power/C20 95.25 147.32 270
-place power/L1 132.08 104.14 270
-place power/R10 80.01 147.32 270
-place power/R6 102.87 67.31 270
-place power/R7 90.17 85.09 270
-place power/R8 64.77 69.85 270
-place power/R9 64.77 147.32 270
-place power/U2 144.78 76.2 0
-place power/U3 203.2 74.93 0
-place sensors/C21 196.85 129.54 270
+place power/C16 199.39 101.6 270
+place power/C17 71.12 67.31 270
+place power/C18 214.63 101.6 270
+place power/C19 229.87 101.6 270
+place power/C20 88.9 147.32 270
+place power/L1 127 104.14 270
+place power/R10 73.66 147.32 270
+place power/R6 96.52 67.31 270
+place power/R7 83.82 85.09 270
+place power/R8 58.42 69.85 270
+place power/R9 58.42 147.32 270
+place power/U2 142.24 76.2 0
+place power/U3 207.01 74.93 0
+place sensors/C21 195.58 129.54 270
 place sensors/C22 105.41 124.46 270
-place sensors/C23 209.55 129.54 270
+place sensors/C23 210.82 129.54 270
 place sensors/R11 67.31 86.36 270
 place sensors/R12 149.86 86.36 270
 place sensors/U4 203.2 97.79 0
