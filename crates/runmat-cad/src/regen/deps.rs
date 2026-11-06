@@ -395,7 +395,13 @@ impl DependencyGraph {
         let c = doc.configuration(name)?;
         let inputs: Vec<InputName> = c.overrides.keys().cloned().collect();
         let mut a = self.affected_by_inputs(&inputs);
-        let extra = self.downstream(&c.suppress);
+        let touched: BTreeSet<FeatureId> = c
+            .suppress
+            .iter()
+            .chain(c.features.keys())
+            .cloned()
+            .collect();
+        let extra = self.downstream(&touched);
         a.features.extend(extra);
         let features = a.features.clone();
         Some(self.items(features))

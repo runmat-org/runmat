@@ -2284,7 +2284,7 @@ fn run_family(f: &Family) -> Vec<Outcome> {
                 .iter()
                 .map(|(k, v)| (InputName::new(*k), value_for(&d0, k, *v)))
                 .collect(),
-            suppress: Default::default(),
+            ..Default::default()
         });
         let rc = env.regen_config(&dc, "alt");
         out.push(Outcome {
@@ -2318,6 +2318,7 @@ fn run_family(f: &Family) -> Vec<Outcome> {
         name: "lite".into(),
         overrides: Default::default(),
         suppress: [fid(f.feature)].into_iter().collect(),
+        ..Default::default()
     });
     let rcs = env.regen_config(&dcs, "lite");
     let mut errs = check_all(&dcs, &rcs, &probes0, &waiting);

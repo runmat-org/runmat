@@ -17,7 +17,7 @@
 //!   as a warning and the sheet draws its frame without geometry.
 
 pub mod auto;
-mod props;
+pub(crate) mod props;
 mod values;
 
 use crate::runtime::{compile_assembly, regenerate_part_in, resolve_path, Diagnostic, Files, RegeneratedPart};
@@ -128,9 +128,11 @@ impl ModelReferences for CompiledModels {
         item: &runmat_cad::assembly::bom::BomItem,
         name: &PropertyName,
     ) -> Option<String> {
-        self.item_properties
-            .get(model.file.as_str())?
-            .get(item.definition.file.as_str())?
+        let items = self.item_properties.get(model.file.as_str())?;
+        let file = item.definition.file.as_str();
+        items
+            .get(&props::item_key(file, &item.configuration))
+            .or_else(|| items.get(file))?
             .get(name.as_str())
             .cloned()
     }

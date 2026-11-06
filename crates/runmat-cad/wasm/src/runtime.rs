@@ -237,6 +237,12 @@ pub fn regenerate_part_in(
     };
     let mut result = regenerate(&document, &ctx, &request, &mut RegenCache::default());
     result.diagnostics.attach_spans(&parsed.spans);
+    // The part as the configuration makes it: its feature parameters, part number and
+    // properties, for every reader of the regenerated part (title blocks, exports).
+    let document = match &request.configuration {
+        Some(name) => document.in_configuration(Some(name)),
+        None => document,
+    };
     let index = build_index(&document, &result, None);
     let mut display = part_display(&result, kernel.as_ref(), tessellation);
     display.sketches = sketch_display(&document, &result);
@@ -261,7 +267,17 @@ pub fn regenerate_part_in(
 }
 
 pub fn compile_part(path: &str, text: &str) -> Result<CompiledPart, Vec<Diagnostic>> {
-    let part = regenerate_part(path, text)?;
+    compile_part_in(path, text, None)
+}
+
+/// [`compile_part`] in the named configuration `configuration`: the projection's document is
+/// the part as that configuration makes it, and its index names the configuration.
+pub fn compile_part_in(
+    path: &str,
+    text: &str,
+    configuration: Option<&str>,
+) -> Result<CompiledPart, Vec<Diagnostic>> {
+    let part = regenerate_part_in(path, text, configuration, &TessellationOptions::default())?;
     let projection = json!({ "document": &part.document, "index": &part.index });
     Ok(CompiledPart {
         diagnostics: regen_diagnostics(path, &part),
@@ -461,6 +477,12 @@ pub fn resolve_assembly_in(
                             .iter()
                             .map(|c| c.name.clone())
                             .collect();
+                        summary.configuration_part_numbers = part
+                            .document
+                            .all_configurations()
+                            .into_iter()
+                            .filter_map(|c| c.part_number.map(|pn| (c.name, pn)))
+                            .collect();
                         summary.inputs = part
                             .document
                             .inputs
@@ -568,6 +590,23 @@ pub fn compile_assembly(
 
 /// `compile` as JSON.
 pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
+    compile_json_in(path, text, files, None)
+}
+
+/// The `options` the compile entry takes: `{ "configuration": "<name>" }` compiles a part in
+/// that configuration (the Desktop's active configuration); empty or `"default"` is the part
+/// as written.
+pub fn compile_options(options: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(options).ok()?;
+    value
+        .get("configuration")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty() && *c != "default")
+        .map(str::to_owned)
+}
+
+/// [`compile_json`] with a part's active configuration.
+pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Option<&str>) -> String {
     if path.ends_with(".drawing") {
         return crate::drawing::compile_json(path, text, files);
     }
@@ -582,7 +621,7 @@ pub fn compile_json(path: &str, text: &str, files: &Files) -> String {
             Err(diagnostics) => json!({ "diagnostics": diagnostics }),
         }
     } else {
-        match compile_part(path, text) {
+        match compile_part_in(path, text, configuration) {
             Ok(part) => json!({
                 "projection": { "kind": "part", "data": part.projection },
                 "display": { "kind": "part", "data": part.display },

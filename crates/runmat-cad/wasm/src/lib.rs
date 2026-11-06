@@ -6,7 +6,8 @@
 //! file text: the files [`dependencies`] listed, as the caller read them.
 //!
 //! - `dependencies(path, text)` → `["/p/library/clip.part", …]`
-//! - `compile(path, text, files, options)` → `{ projection?, display?, diagnostics }`, where
+//! - `compile(path, text, files, options)` (`options`: `{ configuration? }`, a part's active
+//!   configuration) → `{ projection?, display?, diagnostics }`, where
 //!   `projection` is `{ kind: "part", data: { document, index } }` or
 //!   `{ kind: "assembly", data: <assembly index> }` and `display` is `{ kind, data }` with the
 //!   part display (`part_display` with `sketch_display`) or the assembly display.
@@ -53,8 +54,8 @@ pub fn compile(path: &str, text: &str, files: &str, options: &str) -> String {
         Ok(f) => f,
         Err(message) => return runtime::error_json(path, &message),
     };
-    let _ = options;
-    runtime::compile_json(path, text, &files)
+    let configuration = runtime::compile_options(options);
+    runtime::compile_json_in(path, text, &files, configuration.as_deref())
 }
 
 /// Runs a catalog command on the part or assembly `path`.

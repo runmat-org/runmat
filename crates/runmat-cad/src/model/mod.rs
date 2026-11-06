@@ -5,6 +5,7 @@
 //! materials, links, configurations and semantic PMI. The syntax layer (M1) builds it from the lossless tree;
 //! nothing here parses text.
 
+pub mod configuration;
 pub mod curves;
 pub mod datum;
 pub mod detail;
@@ -145,6 +146,36 @@ impl PartDocument {
         self.all_configurations()
             .into_iter()
             .find(|c| &c.name == name)
+    }
+
+    /// The part as configuration `name` makes it: its feature parameters written into the
+    /// history, and its part number and properties on the part's first output (the part the
+    /// file defines; extra outputs such as a fluid volume keep theirs). `None` is the default.
+    /// A configuration the part lacks, or a feature override that cannot apply, leaves that
+    /// piece as written; regeneration reports it.
+    pub fn in_configuration(&self, name: Option<&ConfigurationName>) -> PartDocument {
+        let Some(c) = name.and_then(|n| self.configuration(n)) else {
+            return self.clone();
+        };
+        let mut out = self.clone();
+        if !c.features.is_empty() {
+            out.features = c.apply_features(&self.features).0;
+        }
+        if let Some(output) = out.parts.first_mut() {
+            if let Some(pn) = &c.part_number {
+                output.part_number = Some(pn.clone());
+            }
+            for (key, value) in &c.properties {
+                let name = crate::ids::PropertyName::new(key.clone());
+                output.properties.retain(|p| p.name != name);
+                output.properties.push(Property {
+                    name,
+                    value: value.clone(),
+                    scope: PropertyScope::Configuration,
+                });
+            }
+        }
+        out
     }
 
     /// Replace every library instance by its definition's features (pure: the same document

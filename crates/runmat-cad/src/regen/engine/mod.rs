@@ -366,6 +366,55 @@ fn regenerate_unexpanded(
         }
         None => None,
     };
+    // The configuration's feature parameters, written into a copy of the history: everything
+    // below reads one form. A feature it cannot set keeps its own definition, with an error.
+    let patched;
+    let doc = match config.as_ref().filter(|c| !c.features.is_empty()) {
+        Some(c) => {
+            let (features, problems) = c.apply_features(&doc.features);
+            for problem in problems {
+                diags.push(
+                    DiagCode::RegenInvalid,
+                    Severity::Error,
+                    Site {
+                        subject: Subject::Configuration {
+                            name: c.name.0.clone(),
+                        },
+                        param: Some(format!("features.{}", problem.feature)),
+                    },
+                    problem.message,
+                    Cause::Root,
+                    Vec::new(),
+                );
+            }
+            patched = PartDocument {
+                features,
+                ..doc.clone()
+            };
+            &patched
+        }
+        None => doc,
+    };
+    if let Some(c) = &config {
+        for id in c.suppress.iter().filter(|id| doc.feature(id).is_none()) {
+            diags.push(
+                DiagCode::RegenInvalid,
+                Severity::Error,
+                Site {
+                    subject: Subject::Configuration {
+                        name: c.name.0.clone(),
+                    },
+                    param: Some("suppress".into()),
+                },
+                format!(
+                    "configuration `{}` suppresses `{id}`, which the part does not have",
+                    c.name
+                ),
+                Cause::Root,
+                Vec::new(),
+            );
+        }
+    }
     let overrides = config
         .as_ref()
         .map(|c| c.overrides.clone())

@@ -244,12 +244,21 @@ pub fn assembly_step_in(
                         let (result, kernel) = regenerate_configured(document, &node.configuration);
                         let display =
                             part_display(&result, kernel.as_ref(), &TessellationOptions::default());
-                        let name = if node.configuration == ConfigKey::default() {
-                            stem(&file)
-                        } else {
-                            format!("{} ({})", stem(&file), node.configuration.label())
+                        // A configuration with its own part number (the other hand) is
+                        // its own product under that number.
+                        let configured = document.in_configuration(node.configuration.name.as_ref());
+                        let own_number = node
+                            .configuration
+                            .name
+                            .as_ref()
+                            .and_then(|n| document.configuration(n))
+                            .and_then(|c| c.part_number);
+                        let name = match own_number {
+                            _ if node.configuration == ConfigKey::default() => stem(&file),
+                            Some(pn) if node.configuration.inputs.is_empty() => pn,
+                            _ => format!("{} ({})", stem(&file), node.configuration.label()),
                         };
-                        let product = Product::new(&name, document.clone(), result, display, kernel);
+                        let product = Product::new(&name, configured, result, display, kernel);
                         let at = first_part.last().copied().unwrap_or(0)
                             + products.last().map(|p| p.groups.len() as u32).unwrap_or(0);
                         first_part.push(at);

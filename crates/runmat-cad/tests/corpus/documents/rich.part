@@ -73,7 +73,7 @@ part bracket {
 
     material = { body = feature.body.body, material = "material.steel" }
 
-    configuration long = { overrides = { width = 120 mm }, suppress = [round_missing] }
+    configuration long = { width = 120 mm, suppress = [feature.round_missing] }
 
     link verifies feature.body to "checks/mass.fea#check.mass_budget"
 

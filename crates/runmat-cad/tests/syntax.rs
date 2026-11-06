@@ -689,7 +689,7 @@ fn a_value_edit_sets_the_default_or_a_configuration_override() {
     assert!(
         change
             .source
-            .contains("configuration long = { overrides = { width = 90 mm } }"),
+            .contains("configuration long = { width = 90 mm }"),
         "{}",
         change.source
     );

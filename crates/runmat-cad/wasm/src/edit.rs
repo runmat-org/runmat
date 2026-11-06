@@ -9,13 +9,16 @@
 //!
 //! Parts: `part.extrude` (blind, mid-plane and through-all ends in one or two directions, add,
 //! cut, intersect or a new body, sketch-plane or offset start, draft and thin walls),
-//! `part.delete`, `part.suppress`, `part.unsuppress`, `part.move-up` and `part.move-down`.
+//! `part.delete`, `part.suppress`, `part.unsuppress` (in the active configuration when
+//! `values.configuration` names one), `part.move-up` and `part.move-down`; Properties and
+//! configuration commands ([`configuration`]).
 //! Sketches: `part.sketch` and the sketch tools ([`sketch`]).
 //! Assemblies: delete, suppress, fix, insert, move, pattern and mate ([`assembly`]). Every
 //! other part command that adds a feature is built by [`crate::features`] from
 //! its values and picks ([`crate::picks`]); a command or option the model lacks says so.
 
 mod assembly;
+mod configuration;
 mod sketch;
 
 use crate::runtime::Files;
@@ -114,6 +117,9 @@ fn part_edit(
     text: &str,
     request: &EditRequest,
 ) -> Result<(SourceChange, String), EditFailure> {
+    if let Some(result) = configuration::edit(path, text, request) {
+        return result;
+    }
     let selected = selected_features(request);
     let need_one = || -> Result<(), EditFailure> {
         if selected.is_empty() {
@@ -141,15 +147,18 @@ fn part_edit(
         "part.suppress" | "part.unsuppress" => {
             need_one()?;
             let on = request.command == "part.suppress";
-            let change = edit_part(text, path, |document| {
-                for id in &selected {
-                    document
-                        .feature_mut(id)
-                        .ok_or_else(|| model(format!("the part has no feature `{id}`")))?
-                        .suppressed = on;
-                }
-                Ok(())
-            })?;
+            // In the active configuration only, when one is active.
+            let configuration = request
+                .values
+                .get("configuration")
+                .and_then(Value::as_str);
+            let change = runmat_cad::syntax::configuration_edit::suppress_features(
+                text,
+                path,
+                &selected,
+                configuration,
+                on,
+            )?;
             let verb = if on { "Suppressed" } else { "Unsuppressed" };
             Ok((change, format!("{verb} {}", selected.join(", "))))
         }

@@ -18,8 +18,8 @@ part plate {
     }
     feature body = extrude(profile = sketch.s, distance = 10 mm)
     output plate = { body = feature.body.body, part_number = "PL-80" }
-    configuration wide = { overrides = { width = 120 mm } }
-    configuration narrow = { overrides = { width = 40 mm } }
+    configuration wide = { width = 120 mm }
+    configuration narrow = { width = 40 mm }
 }
 "#;
 

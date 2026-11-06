@@ -278,6 +278,10 @@ pub struct DefinitionSummary {
     pub description: Option<String>,
     #[serde(default)]
     pub configurations: Vec<ConfigurationName>,
+    /// The part numbers configurations set for themselves (the other hand, a dash number),
+    /// in place of `part_number`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub configuration_part_numbers: BTreeMap<ConfigurationName, String>,
     /// Typed inputs a configuration may set.
     #[serde(default)]
     pub inputs: Vec<(InputName, QuantityKindId)>,
@@ -300,6 +304,7 @@ impl DefinitionSummary {
             part_number: None,
             description: None,
             configurations: Vec::new(),
+            configuration_part_numbers: BTreeMap::new(),
             inputs: Vec::new(),
             representations: BTreeSet::new(),
             material: None,
@@ -311,6 +316,16 @@ impl DefinitionSummary {
     /// Whether the definition can supply `r`: `full` and `display` always; `envelope` is
     /// derived from the box when not declared; `interface` from the publish table; the
     /// idealisations must be declared.
+    /// The part number of the definition in configuration `key`: the configuration's own
+    /// number when it sets one, else the definition's.
+    pub fn part_number_in(&self, key: &ConfigKey) -> Option<String> {
+        key.name
+            .as_ref()
+            .and_then(|n| self.configuration_part_numbers.get(n))
+            .cloned()
+            .or_else(|| self.part_number.clone())
+    }
+
     pub fn provides(&self, r: Representation) -> bool {
         match r {
             Representation::Full | Representation::Display | Representation::Envelope => true,

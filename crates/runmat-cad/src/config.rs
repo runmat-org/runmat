@@ -255,6 +255,11 @@ pub fn affected_configurations(old: &PartDocument, new: &PartDocument) -> Impact
         .into_iter()
         .map(|c| (c.name.clone(), c))
         .collect();
+    let new_cfg_features: BTreeMap<ConfigurationName, crate::model::configuration::FeaturePatches> =
+        new.all_configurations()
+            .into_iter()
+            .map(|c| (c.name, c.features))
+            .collect();
     let mut impact = Impact::default();
     let mut judge = |name: Option<ConfigurationName>,
                      overrides: &BTreeMap<InputName, ValueExpr>,
@@ -280,6 +285,19 @@ pub fn affected_configurations(old: &PartDocument, new: &PartDocument) -> Impact
                 }
                 if &p.suppress != suppress {
                     why.insert(Because::Suppression);
+                }
+                let current = new_cfg_features.get(&p.name);
+                let ids: BTreeSet<&FeatureId> = p
+                    .features
+                    .keys()
+                    .chain(current.into_iter().flat_map(|f| f.keys()))
+                    .collect();
+                for id in ids {
+                    if p.features.get(id) != current.and_then(|f| f.get(id)) {
+                        why.insert(Because::Feature {
+                            feature: id.clone(),
+                        });
+                    }
                 }
             }
             None => {}

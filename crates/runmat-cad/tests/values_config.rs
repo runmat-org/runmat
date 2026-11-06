@@ -265,14 +265,14 @@ fn c02_impact_and_verify_touch_only_affected_configurations() {
     old.configurations.push(Configuration {
         name: ConfigurationName::new("narrow"),
         overrides: [(InputName::new("width"), mm(40.0))].into_iter().collect(),
-        suppress: Default::default(),
+        ..Default::default()
     });
     old.configurations.push(Configuration {
         name: ConfigurationName::new("thin"),
         overrides: [(InputName::new("thickness"), mm(4.0))]
             .into_iter()
             .collect(),
-        suppress: Default::default(),
+        ..Default::default()
     });
     // Change the default width: `narrow` overrides it, so it cannot change.
     let mut new = old.clone();

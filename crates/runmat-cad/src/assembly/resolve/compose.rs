@@ -362,7 +362,8 @@ impl<'a, 'b> Resolver<'a, 'b> {
                         ConfigKey::default()
                     }
                 };
-                (key, s.part_number.clone(), false, s.material.clone())
+                let part_number = s.part_number_in(&key);
+                (key, part_number, false, s.material.clone())
             }
             Err(e) => {
                 self.diag(

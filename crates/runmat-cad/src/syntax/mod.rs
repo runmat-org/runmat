@@ -34,6 +34,7 @@
 //!
 //! [`Site`]: crate::diagnostics::Site
 
+pub mod configuration_edit;
 pub mod edit;
 pub mod forms;
 pub mod occurrence;

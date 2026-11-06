@@ -8,7 +8,7 @@ use crate::model::datum::DatumRef;
 use crate::refs::{Reference, TopoKind};
 use crate::value::ValueExpr;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+
 
 /// How many entities a reference site accepts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -156,15 +156,7 @@ pub struct PartOutput {
     pub label: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Configuration {
-    pub name: ConfigurationName,
-    #[serde(default)]
-    pub overrides: BTreeMap<InputName, ValueExpr>,
-    /// Features suppressed in this configuration only.
-    #[serde(default)]
-    pub suppress: BTreeSet<FeatureId>,
-}
+pub use crate::model::configuration::Configuration;
 
 /// `configurations from table`: one configuration per row, named `<table>.<row key>`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -192,7 +184,7 @@ impl ConfigurationTable {
                     .cloned()
                     .zip(row.values.iter().cloned())
                     .collect(),
-                suppress: BTreeSet::new(),
+                ..Configuration::default()
             })
             .collect()
     }

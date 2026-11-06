@@ -5,6 +5,7 @@
 use crate::runtime::{resolve_path, Files};
 use runmat_cad::assembly::bom::Bom;
 use runmat_cad::drawing::bom_table::material_name;
+use runmat_cad::ids::ConfigurationName;
 use runmat_cad::model::PartDocument;
 use runmat_cad::syntax::parse_part;
 use serde_json::Value;
@@ -41,13 +42,31 @@ pub fn output_properties(document: &PartDocument) -> BTreeMap<String, String> {
     props
 }
 
-/// Each BOM item's definition properties, by the definition's file as the BOM names it. Part
-/// files are parsed (not regenerated): properties are declared text.
+/// The key [`item_properties`] files an item's properties under: its definition's file, and
+/// for a named configuration other than the default `<file>|<configuration>`.
+pub fn item_key(file: &str, configuration: &str) -> String {
+    if configuration == "default" {
+        file.to_owned()
+    } else {
+        format!("{file}|{configuration}")
+    }
+}
+
+/// The named configuration a BOM configuration label starts with (`port`, `port (side -1)`).
+fn label_configuration(label: &str) -> Option<ConfigurationName> {
+    let name = label.split(" (").next().unwrap_or(label);
+    (name != "default" && !name.contains(' ')).then(|| ConfigurationName::new(name))
+}
+
+/// Each BOM item's definition properties, by [`item_key`]: a configuration that sets its own
+/// description or properties has them. Part files are parsed (not regenerated): properties are
+/// declared text.
 pub fn item_properties(assembly: &str, bom: &Bom, files: &Files) -> BTreeMap<String, BTreeMap<String, String>> {
     let mut out = BTreeMap::new();
     for row in &bom.rows {
         let file = row.item.definition.file.as_str().to_owned();
-        if out.contains_key(&file) {
+        let key = item_key(&file, &row.item.configuration);
+        if out.contains_key(&key) {
             continue;
         }
         let at = resolve_path(assembly, &file, files);
@@ -65,7 +84,9 @@ pub fn item_properties(assembly: &str, bom: &Bom, files: &Files) -> BTreeMap<Str
             continue;
         };
         if let Some(document) = parse_part(&at, source).document {
-            out.insert(file, output_properties(&document));
+            let configuration = label_configuration(&row.item.configuration)
+                .filter(|name| document.configuration(name).is_some());
+            out.insert(key, output_properties(&document.in_configuration(configuration.as_ref())));
         }
     }
     out
