@@ -19,6 +19,7 @@ const RIG_FOLDER: &[(&str, &str)] = &[
     ("wing.assembly", "assembly wing {\n}\n"),
     ("parts/bracket.part", "part bracket {\n    output plate = { body = feature.b.body }\n}\n"),
     ("parts/clip.part", "part clip {\n}\n"),
+    ("parts/spar_b.part", "part spar_b {\n    output spar = { body = feature.b.body }\n}\n"),
 ];
 
 fn rig_scope(text: &str) -> runmat_cad::modules::ModuleScope {
@@ -619,7 +620,7 @@ const OVERRIDES: &str = r#"assembly rig {
             input.thickness = 2 mm
         }
         override spar {
-            replace = part("parts/spar_b.part", part = spar, revision = "B")
+            replace = part(spar, from = "./parts", revision = "B")
         }
         override "rib@ribs[7]" {
             suppressed = true
@@ -664,7 +665,7 @@ fn occurrence_overrides_read_and_print_as_override_blocks() {
     for line in [
         "        override \"rib@ribs[3]/clip\" {\n",
         "            input.thickness = 2 mm\n",
-        "        override spar {\n            replace = part(\"parts/spar_b.part\", part = spar, revision = \"B\")\n        }\n",
+        "        override spar {\n            replace = part(spar, from = \"./parts\", revision = \"B\")\n        }\n",
         "        override \"rib@ribs[7]\" {\n            suppressed = true\n        }\n",
     ] {
         assert!(printed.contains(line), "{line}\n---\n{printed}");

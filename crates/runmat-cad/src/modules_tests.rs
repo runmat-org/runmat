@@ -186,3 +186,48 @@ fn file_form_paths_take_their_workspace_path_and_print_back() {
     assert!(back.diagnostics.is_empty(), "{:?}\n{text}", back.diagnostics);
     assert_eq!(back.document.unwrap(), doc, "{text}");
 }
+
+/// A package is searched for in the referring folder, then each folder above it, as MATLAB's
+/// path is searched in order (report 12 §3.2: the first on the path wins). A `+hardware` in
+/// `cabin/` shadows the project's for designs in `cabin/`; other folders still reach the
+/// project's.
+#[test]
+fn a_nearer_package_shadows_an_outer_one() {
+    let scope = scope_with(&[("/p/cabin/+hardware/rivet.part", &part("rivet")), ("/p/wing/rib.part", &part("rib"))]);
+    assert_eq!(
+        scope.locate("/p/cabin/cabin.assembly", "part", "rivet", Some("hardware")),
+        Ok("/p/cabin/+hardware/rivet.part".to_string())
+    );
+    assert_eq!(
+        scope.locate("/p/wing/wing.assembly", "part", "rivet", Some("hardware")),
+        Ok("/p/+hardware/rivet.part".to_string())
+    );
+    // The two `rivet`s are in different folders: no duplicate.
+    assert!(scope.problems().is_empty(), "{:?}", scope.problems());
+}
+
+/// An override's replacement names its design the same way an occurrence does: by name in this
+/// folder, or `from` a folder or package. It binds to the file and prints back by name.
+#[test]
+fn a_replacement_names_its_design_by_symbol() {
+    let text = "runmat 0.7\nstd 1\n\nassembly cabin {\n    use assembly row as row {\n        override seat {\n            replace = part(galley)\n        }\n        override bolt {\n            replace = part(rivet, from = hardware, revision = \"B\")\n        }\n    }\n}\n";
+    let row = "runmat 0.7\nstd 1\n\nassembly row {\n    use part seat_frame as seat\n    use part seat_frame as bolt\n}\n";
+    let scope = scope_with(&[("/p/cabin/cabin.assembly", text), ("/p/cabin/row.assembly", row)]);
+    let parsed = parse_assembly_in("/p/cabin/cabin.assembly", text, &scope);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let doc = parsed.document.unwrap();
+    let replaced: Vec<String> = doc.occurrences[0]
+        .overrides
+        .iter()
+        .filter_map(|o| match &o.set {
+            crate::assembly::OverrideKind::Replace { source } => Some(source.definition.file.0.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(replaced, ["/p/cabin/galley.part", "/p/+hardware/rivet.part"]);
+    let printed = print_assembly(&doc, &[]).unwrap();
+    assert!(printed.contains("replace = part(galley)\n"), "{printed}");
+    assert!(printed.contains("replace = part(rivet, from = hardware, revision = \"B\")\n"), "{printed}");
+    let again = parse_assembly_in("/p/cabin/cabin.assembly", &printed, &scope);
+    assert_eq!(again.document.unwrap().occurrences, doc.occurrences, "{printed}");
+}

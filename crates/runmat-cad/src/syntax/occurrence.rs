@@ -361,19 +361,33 @@ fn target_head(path: &str) -> String {
     }
 }
 
-/// `replace = part("<file>", part = <name>, revision = "<rev>")`.
-fn print_replace(source: &Json) -> Option<String> {
+/// `replace = part(<name>[, from = "<folder>"][, revision = "<rev>"])`: in a known document
+/// the design prints by symbol (`crate::modules::unbound`), else as
+/// `part("<file>", part = <name>, revision = "<rev>")`.
+fn print_replace(source: &Json, hook: &dyn ValueSyntax) -> Option<String> {
     let definition = source.get("definition")?;
     let kind = definition.get("kind")?.as_str()?;
-    let file = definition.get("file")?.as_str()?;
     if !KINDS.contains(&kind) {
         return None;
     }
-    let mut arguments = vec![quote(file)];
+    let definition = &hook
+        .document_path()
+        .and_then(|doc| crate::modules::unbound("definition", definition, doc))
+        .unwrap_or_else(|| definition.clone());
+    let mut arguments = Vec::new();
+    match (definition.get("file"), definition.get("name")) {
+        (Some(file), _) => arguments.push(quote(file.as_str()?)),
+        (None, Some(name)) if is_identifier(name.as_str()?) => arguments.push(name.as_str()?.to_string()),
+        _ => return None,
+    }
     if let Json::Object(entries) = definition {
         for (key, value) in entries {
             match (key.as_str(), value) {
-                ("kind" | "file", _) => {}
+                ("kind" | "file" | "name", _) => {}
+                ("from", Json::String(f)) if f.starts_with('.') || f.starts_with('/') => {
+                    arguments.push(format!("from = {}", quote(f)))
+                }
+                ("from", Json::String(package)) => arguments.push(format!("from = {package}")),
                 ("part", Json::String(part)) if is_identifier(part) => {
                     arguments.push(format!("part = {part}"))
                 }
@@ -423,7 +437,7 @@ fn override_line(set: &Json, hook: &dyn ValueSyntax) -> Option<String> {
         if fields.len() != 1 {
             return None;
         }
-        return print_replace(set.get("source")?);
+        return print_replace(set.get("source")?, hook);
     }
     let (key, _, field) = PLAIN_OVERRIDES.iter().find(|(_, t, _)| *t == tag)?;
     let [(name, value)] = fields.as_slice() else {
@@ -481,7 +495,7 @@ fn print_overrides(overrides: &Json, hook: &dyn ValueSyntax) -> Option<String> {
 
 fn lower_replace(expr: &Expr) -> Result<Json, LowerError> {
     let span = expr.span();
-    let usage = "`replace = <kind>(\"<file>\"[, part = <name>][, revision = \"<rev>\"])`";
+    let usage = "`replace = <kind>(<name>[, from = \"<folder>\"][, revision = \"<rev>\"])`";
     let Expr::Call(call) = expr else {
         return Err(error(span, format!("expected {usage}")));
     };
@@ -493,12 +507,20 @@ fn lower_replace(expr: &Expr) -> Result<Json, LowerError> {
         _ => return Err(error(span, format!("expected {usage}"))),
     };
     let mut file = None;
+    let mut symbol = None;
+    let mut from = None;
     let mut part = None;
     let mut revision = None;
     for argument in call.arguments() {
         match argument {
-            ast::Argument::Positional(Expr::String(text)) if file.is_none() => {
+            ast::Argument::Positional(Expr::String(text)) if file.is_none() && symbol.is_none() => {
                 file = Some(text.value())
+            }
+            // The module form: the design by name, resolved through the folder scope.
+            ast::Argument::Positional(Expr::Reference(r))
+                if file.is_none() && symbol.is_none() && r.segments().len() == 1 =>
+            {
+                symbol = Some(r.segments().remove(0))
             }
             ast::Argument::Named(named) => {
                 let key = named.name().map(|n| n.text()).unwrap_or_default();
@@ -507,6 +529,8 @@ fn lower_replace(expr: &Expr) -> Result<Json, LowerError> {
                         part = Some(r.segments().remove(0))
                     }
                     ("revision", Some(Expr::String(text))) => revision = Some(text.value()),
+                    ("from", Some(Expr::String(text))) => from = Some(text.value()),
+                    ("from", Some(Expr::Reference(r))) => from = Some(r.segments().join(".")),
                     _ => {
                         return Err(error(
                             named.span(),
@@ -524,13 +548,22 @@ fn lower_replace(expr: &Expr) -> Result<Json, LowerError> {
             }
         }
     }
-    let file = file.ok_or_else(|| error(span, format!("expected {usage}")))?;
-    let mut definition = vec![
-        ("kind".to_string(), Json::String(kind)),
-        ("file".to_string(), Json::String(file)),
-    ];
-    if let Some(part) = part {
-        definition.push(("part".into(), Json::String(part)));
+    let mut definition = vec![("kind".to_string(), Json::String(kind))];
+    match (file, symbol) {
+        (Some(file), None) if from.is_none() => {
+            definition.push(("file".into(), Json::String(file)));
+            if let Some(part) = part {
+                definition.push(("part".into(), Json::String(part)));
+            }
+        }
+        (None, Some(name)) if part.is_none() => {
+            definition.push(("name".into(), Json::String(name)));
+            if let Some(from) = from {
+                let from = if from.starts_with('.') || from.starts_with('/') || !from.contains('/') { from } else { format!("./{from}") };
+                definition.push(("from".into(), Json::String(from)));
+            }
+        }
+        _ => return Err(error(span, format!("expected {usage}"))),
     }
     let mut source = vec![("definition".to_string(), Json::Object(definition))];
     if let Some(revision) = revision {
