@@ -98,6 +98,35 @@ pub struct SheetFormat {
     pub standard: standard::DrawingStandard,
 }
 
+impl SheetFormat {
+    /// The title block's fields: the format's own, else the standard set every sheet carries
+    /// (ISO 7200's identification fields): title (the drawing's file name), part number,
+    /// material, scale, sheet and sheet count, revision and the drafting standard.
+    pub fn title_fields(&self, title: &str) -> Vec<TitleField> {
+        if !self.title_block.is_empty() {
+            return self.title_block.clone();
+        }
+        let field = |label: &str, source: FieldSource| TitleField { label: label.into(), source };
+        let property = |name: &str| FieldSource::Property { name: PropertyName::new(name) };
+        vec![
+            field("TITLE", FieldSource::Literal { text: title.to_uppercase() }),
+            field("PART NUMBER", property("part_number")),
+            field("MATERIAL", property("material")),
+            field("STANDARD", FieldSource::Literal { text: self.standard.style().name.into() }),
+            field("SCALE", FieldSource::Scale),
+            field("SHEET", FieldSource::SheetNumber),
+            field("OF", FieldSource::SheetCount),
+            field("REV", FieldSource::Revision),
+        ]
+    }
+}
+
+/// A drawing's title as its title block states it: its file name without the folder or `.drawing`.
+pub fn drawing_title(path: &str) -> String {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    name.strip_suffix(".drawing").unwrap_or(name).replace(['_', '-'], " ")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Projection {
@@ -1043,7 +1072,9 @@ pub fn check_drawing_with(
             .find(|v| v.sheet == sh.name)
             .map(|v| &v.model);
         let mut rows = Vec::new();
-        for field in &f.title_block {
+        // The standard fields read what the model has and leave the rest blank.
+        let standard_fields = f.title_block.is_empty();
+        for field in &f.title_fields(&drawing_title(doc.path.as_str())) {
             let text = match &field.source {
                 FieldSource::Literal { text } => text.clone(),
                 FieldSource::SheetNumber => (i + 1).to_string(),
@@ -1057,6 +1088,7 @@ pub fn check_drawing_with(
                 FieldSource::Property { name } => {
                     match model_of.and_then(|m| model.property(m, name)) {
                         Some(t) => t,
+                        None if standard_fields => "—".into(),
                         None => {
                             rep.diagnostics.push(DiagCode::DrawingReference, Severity::Warning, dsite(&format!("sheet.{}", sh.name), &field.label), format!("title block `{}` reads `{}`, which the drawn model does not have", field.label, name), Cause::Root, Vec::new());
                             "—".into()

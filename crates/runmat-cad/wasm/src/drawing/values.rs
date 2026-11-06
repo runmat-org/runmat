@@ -415,6 +415,8 @@ pub fn leader_target(
             .find(|d| &d.label == label)
             .map(|d| d.on.clone()),
         K::SurfaceFinish { on } | K::CenterMark { on } | K::Weld { on, .. } => Some(on.clone()),
+        // A hole callout points at the hole: its axis, which a view along it shows as the centre.
+        K::HoleCallout { hole } => Some(hole.clone()),
         K::DatumTarget { label } => {
             let split = label.find(|c: char| c.is_ascii_digit())?;
             let (datum, index) = label.split_at(split);

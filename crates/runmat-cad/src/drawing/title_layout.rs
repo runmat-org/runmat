@@ -140,8 +140,8 @@ pub fn sheet_layouts<'a>(
             SheetSize::Custom { .. } => sheet_size(""),
         };
         let texts = rows.get(&sheet.name);
-        let fields: Vec<(&str, TitleValue<'_>)> = format
-            .title_block
+        let named = format.title_fields(&super::drawing_title(document.path.as_str()));
+        let fields: Vec<(&str, TitleValue<'_>)> = named
             .iter()
             .enumerate()
             .map(|(i, field)| {

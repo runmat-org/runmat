@@ -246,3 +246,37 @@ drawing frame {
     let corner = sheet.entities.iter().any(|e| matches!(&e.shape, Shape::Polyline { points, closed: true } if points.iter().any(|p| (p[0] - 20.0).abs() < 1e-6 && (p[1] - 100.0).abs() < 1e-6)));
     assert!(corner, "the cut list's frame at its top-left corner");
 }
+
+/// The hand-built drawing (every view and annotation kind on one sheet) exports what the
+/// Desktop's sheet draws, from the same layout: angular, ordinate, baseline and chain
+/// dimensions, center marks and centerlines, the weld symbol, the datum target, the leadered
+/// note, and the hole table, in DXF and PDF alike.
+#[test]
+fn the_hand_built_drawing_exports_every_annotation_kind_from_the_one_layout() {
+    let files: Files = [
+        ("/p/bracket.part", include_str!("../../runmat-cad/tests/fixtures/hand-built/bracket.part")),
+        ("/p/bracket.drawing", include_str!("../../runmat-cad/tests/fixtures/hand-built/hand.drawing")),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+    let out = call("design.export", json!({ "path": "/p/bracket.drawing", "format": "dxf" }), &files).unwrap_or_else(|e| panic!("{e}"));
+    let sheet = dxf::read(out["files"][0]["content"].as_str().unwrap()).unwrap();
+    // Dimension figures are in their dimension's block.
+    let texts: Vec<&str> = sheet.entities.iter().chain(sheet.blocks.iter().flat_map(|b| &b.entities)).filter_map(|e| if let Shape::Text { text, .. } = &e.shape { Some(text.as_str()) } else { None }).collect();
+    for want in ["90°", "0", "60", "10", "50", "20", "FILLET 3", "A1", "DEBURR", "R2", "⌀4 H7", "⌀4 THRU", "Ra 0.8", "HOLE TABLE", "⌀4.00 THRU", "SECTION A-A", "VIEW C", "BROKEN-OUT SECTION"] {
+        assert!(texts.contains(&want), "no {want:?} in {texts:?}");
+    }
+    // Center marks and the centerline on the center layer; the linear dimension as an entity.
+    assert!(sheet.entities.iter().filter(|e| e.layer == "CENTER").count() >= 4);
+    assert!(sheet.entities.iter().any(|e| matches!(&e.shape, Shape::Dimension(d) if d.text.as_deref() == Some("80 ±0.2"))));
+    // The title block, filled from the part with the standard fields.
+    let block = sheet.blocks.iter().find(|b| b.name == "TITLE_BLOCK").expect("the title block");
+    assert!(block.entities.iter().any(|e| matches!(&e.shape, Shape::Text { text, .. } if text == "BR-100")));
+    let pdf = call("design.export", json!({ "path": "/p/bracket.drawing", "format": "pdf" }), &files).unwrap();
+    let body = base64::engine::general_purpose::STANDARD.decode(pdf["files"][0]["content"].as_str().unwrap()).unwrap();
+    let body = String::from_utf8_lossy(&body);
+    for want in ["(FILLET 3) Tj", "(DEBURR) Tj", "(HOLE TABLE) Tj", "(VIEW C) Tj"] {
+        assert!(body.contains(want), "no {want} in the PDF");
+    }
+}

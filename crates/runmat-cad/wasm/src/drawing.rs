@@ -17,6 +17,8 @@
 //!   as a warning and the sheet draws its frame without geometry.
 
 pub mod auto;
+mod holes;
+pub mod layout;
 pub(crate) mod props;
 pub mod title;
 pub(crate) mod values;
@@ -520,6 +522,12 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         o.insert("anchors".into(), Value::Object(anchors));
         o.insert("extents".into(), Value::Object(extents));
         o.insert("radii".into(), Value::Object(radii));
+        o.insert("hole_tables".into(), holes::hole_tables(&document, &exact, &displays));
+    }
+    // The sheets laid out once, here: the Desktop's sheet and every export draw this layout.
+    let layouts = layout::layouts(&data, &displays);
+    if let Value::Object(o) = &mut data {
+        o.insert("layouts".into(), layouts);
     }
     json!({
         "projection": { "kind": "drawing", "data": data },
