@@ -12,6 +12,7 @@
 //! - [`values`]: published plain values read across files through the catalog.
 
 pub mod history;
+pub mod label;
 pub mod lock;
 pub mod merge;
 pub mod name;

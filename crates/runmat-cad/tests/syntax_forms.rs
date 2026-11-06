@@ -958,3 +958,41 @@ fn names_made_from_other_names_spell_them_out_and_read_back() {
     let bad = text.replace("inner(feature.body.face.side(s1.l1))", "inner(feature.body.body)");
     assert!(!parse_part("p.part", &bad).diagnostics.is_empty());
 }
+
+#[test]
+fn pattern_and_mirror_images_of_made_names_have_a_text_form() {
+    let text = r#"part p {
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        l2 = line(start = l1.end, end = [80 mm, 50 mm])
+        l3 = line(start = l2.end, end = [0 mm, 50 mm])
+        l4 = line(start = l3.end, end = l1.start)
+    }
+    feature body = extrude(profile = sketch.s1, distance = 25 mm)
+    feature hollow = shell(body = feature.body.body, open_faces = [feature.body.face.start], thickness = 2 mm)
+    feature round = fillet(edges = [edges_between(feature.row.face.copy(feature.hollow.face.inner(feature.body.face.side(s1.l1)), linear = 2), feature.m.face.mirror(feature.body.face.end))], radius = 1 mm)
+    feature edge = fillet(edges = [edges_between(feature.fill.face.copy(feature.round.face.blend(between = [feature.body.face.end, feature.body.face.side(s1.l2)]), lattice = [-1, 2]), feature.grid.face.copy(feature.body.face.end, grid = [1, 3]))], radius = 1 mm)
+    feature last = fillet(edges = [edges_between(feature.table.face.copy(feature.body.face.end, row = "B-2"), feature.ring.face.copy(feature.body.face.end, ring = [1, 4]))], radius = 1 mm)
+}
+"#;
+    let parsed = parse_part("p.part", text);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let document = parsed.document.unwrap();
+    let printed = print_part(&document, &[]).unwrap();
+    for form in [
+        "feature.row.face.copy(feature.hollow.face.inner(feature.body.face.side(s1.l1)), linear = 2)",
+        "feature.m.face.mirror(feature.body.face.end)",
+        "lattice = [-1, 2]",
+        "grid = [1, 3]",
+        "row = \"B-2\"",
+        "ring = [1, 4]",
+    ] {
+        assert!(printed.contains(form), "{form} in\n{printed}");
+    }
+    assert_eq!(parse_part("p.part", &printed).document.unwrap(), document);
+    // A copy names one instance, of a base of its own kind.
+    for bad in ["linear = 2, circular = 3)", "linear = x)"] {
+        let wrong = text.replace("linear = 2)", bad);
+        assert!(!parse_part("p.part", &wrong).diagnostics.is_empty(), "{bad}");
+    }
+}

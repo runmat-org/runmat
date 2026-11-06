@@ -134,10 +134,17 @@ impl ModelReferences for Model {
     }
     fn pmi(&self, _: &ModelRef) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>) {
         (
-            ["top_parallel".to_string()].into(),
+            ["top_parallel".to_string(), "web_symmetry".to_string()].into(),
             ["thickness".to_string()].into(),
             ["A".to_string()].into(),
         )
+    }
+    fn tolerance_characteristic(&self, _: &ModelRef, name: &str) -> Option<runmat_cad::pmi::Characteristic> {
+        match name {
+            "top_parallel" => Some(runmat_cad::pmi::Characteristic::Parallelism),
+            "web_symmetry" => Some(runmat_cad::pmi::Characteristic::Symmetry),
+            _ => None,
+        }
     }
     fn bom(&self, _: &ModelRef) -> Option<Bom> {
         let item = |pn: &str| BomItem {
@@ -189,6 +196,7 @@ fn drawing() -> DrawingDocument {
         path: FilePath::new("rig.drawing"),
         header: Default::default(),
         formats: vec![SheetFormat {
+            standard: Default::default(),
             name: "a3".into(),
             size: SheetSize::Iso { name: "A3".into() },
             title_block: vec![
@@ -339,6 +347,28 @@ fn d01_drawings_check_views_annotations_tables_and_title_blocks() {
         ],
         "the BOM table's description column and `drawn_by` are missing (warnings)"
     );
+}
+
+#[test]
+fn d03_an_asme_sheet_refuses_the_frames_y14_5_2018_withdrew() {
+    use runmat_cad::drawing::standard::DrawingStandard;
+    let mut d = drawing();
+    let frame = d.annotations.iter_mut().find(|a| a.id == "g1").unwrap();
+    frame.kind = AnnotationKind::Gdt { tolerance: "web_symmetry".into() };
+    // ISO 1101 keeps symmetry.
+    assert!(check_drawing(&d, &Model).diagnostics.errors().next().is_none());
+    d.formats[0].standard = DrawingStandard::Asme;
+    let rep = check_drawing(&d, &Model);
+    let errors: Vec<&str> = rep.diagnostics.errors().map(|d| d.message.as_str()).collect();
+    assert_eq!(
+        errors,
+        vec!["GD&T frame `g1` shows `web_symmetry`: ASME Y14.5-2018 withdrew the symmetry tolerance; use position or profile of a surface"]
+    );
+    // The text form carries the standard and reads back.
+    let printed = runmat_cad::syntax::print_drawing(&d, &[]).expect("prints");
+    assert!(printed.contains("standard = asme"), "{printed}");
+    let back: runmat_cad::drawing::SheetFormat = serde_json::from_value(serde_json::to_value(&d.formats[0]).unwrap()).unwrap();
+    assert_eq!(back.standard, DrawingStandard::Asme);
 }
 
 #[test]

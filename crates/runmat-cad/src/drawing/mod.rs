@@ -27,6 +27,7 @@ pub mod index;
 pub mod logo;
 pub mod merge;
 pub mod revision_table;
+pub mod standard;
 pub mod title_layout;
 
 use crate::assembly::bom::{Bom, BomItem, BomKind, IndentedRow};
@@ -90,6 +91,11 @@ pub struct SheetFormat {
     pub name: String,
     pub size: SheetSize,
     pub title_block: Vec<TitleField>,
+    /// The drafting standard its sheets follow (`standard = asme`; ISO when absent): line
+    /// weights, figure heights, dimension style and the frames GD&T may show
+    /// ([`standard::DrawingStandard::style`]).
+    #[serde(default, skip_serializing_if = "standard::DrawingStandard::is_iso")]
+    pub standard: standard::DrawingStandard,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -488,6 +494,11 @@ pub trait ModelReferences {
     fn occurrence(&self, model: &ModelRef, path: &RelPath) -> bool;
     /// PMI names the model declares: (tolerances, sizes, datums).
     fn pmi(&self, model: &ModelRef) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
+    /// The geometric characteristic of the model's PMI tolerance `name`, where the model
+    /// knows it (for the drawing standard's check of the frames a sheet may show).
+    fn tolerance_characteristic(&self, _model: &ModelRef, _name: &str) -> Option<crate::pmi::Characteristic> {
+        None
+    }
     /// The configuration-aware BOM of the model.
     fn bom(&self, model: &ModelRef) -> Option<Bom>;
     /// The exploded views the model declares (an assembly's; a part has none).
@@ -890,6 +901,17 @@ pub fn check_drawing_with(
             }
             AnnotationKind::HoleCallout { hole } => refs.push(("hole", hole)),
             AnnotationKind::Gdt { tolerance } => {
+                // The frame's sheet follows its format's standard.
+                let standard = doc
+                    .sheets
+                    .iter()
+                    .find(|sheet| sheet.name == v.sheet)
+                    .and_then(|sheet| doc.formats.iter().find(|f| f.name == sheet.format))
+                    .map(|f| f.standard)
+                    .unwrap_or_default();
+                if let Some(refusal) = model.tolerance_characteristic(&v.model, tolerance).and_then(|c| standard.refusal(c)) {
+                    err(&mut rep, DiagCode::DrawingInvalid, s("tolerance"), format!("GD&T frame `{}` shows `{tolerance}`: {refusal}", a.id));
+                }
                 if !tols.contains(tolerance) {
                     err(
                         &mut rep,

@@ -214,6 +214,7 @@ fn drawing() -> DrawingDocument {
         path: FilePath::new("rig.drawing"),
         header: Default::default(),
         formats: vec![SheetFormat {
+            standard: Default::default(),
             name: "a3".into(),
             size: SheetSize::Iso { name: "A3".into() },
             title_block: vec![

@@ -276,8 +276,8 @@ impl EntityName {
     /// The image of `base` made by `pattern` at `instance`.
     pub fn copy(base: &EntityName, pattern: &FeatureId, instance: InstanceKey) -> Self {
         EntityName::Copy {
-            base: base.token(),
-            whole: base.whole().token(),
+            base: remembered(base),
+            whole: remembered(&base.whole()),
             pattern: pattern.clone(),
             instance,
         }
@@ -587,7 +587,9 @@ impl NameTable {
     /// Record a name (and its whole form); a token already held by a different recipe is a
     /// collision, reported rather than overwritten.
     pub fn intern(&mut self, name: &EntityName) -> Result<NameToken, TokenCollision> {
-        let t = name.token();
+        // Every name a regeneration holds can be spelled out where another name nests it (a
+        // rename's mapped tokens, a pattern's images of a shell or blend face).
+        let t = remembered(name);
         match self.recipes.get(&t) {
             Some(existing) if existing != name => Err(TokenCollision {
                 token: t,

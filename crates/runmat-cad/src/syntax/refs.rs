@@ -11,6 +11,7 @@
 //! | `feature.step.face("Top")` | a face named in an imported CAD file |
 //! | `feature.hollow.face.inner(feature.body.face.side(s1.l1))` | a face made from another face (a shell wall) |
 //! | `feature.round.face.blend(between = [a, b])`, `feature.round.face.blend(faces = [a, b, c])` | a face made in place of an edge or a vertex |
+//! | `feature.row.face.copy(feature.hollow.face.inner(…), linear = 2)`, `feature.m.face.mirror(…)` | a pattern's or mirror's image of a face or body |
 //! | `edges_between(a, b)`, `vertex_of(a, b, c)`, `piece(a, bounded_by = [b])` | relational references |
 //! | `origin.xy`, `origin.yz`, `origin.zx`, `plane.mid` | a plane |
 //! | `origin.x`, `origin.y`, `origin.z`, `axis.hinge` | an axis |
@@ -25,7 +26,7 @@
 use crate::ids::{FeatureId, SketchEntityId};
 use crate::model::datum::{AxisRef, DatumRef, OriginAxis, OriginPlane, PlaneRef, PointRef};
 use crate::model::sketch::PointRole;
-use crate::refs::name::{recipe_of, EntityName, GenerationName, NameToken, PlaneSide, Role, SourceTag, TopoKind};
+use crate::refs::name::{recipe_of, EntityName, GenerationName, InstanceKey, NameToken, PlaneSide, Role, SourceTag, TopoKind};
 use crate::refs::Reference;
 use runmat_design_syntax::ast::{Argument, Expr};
 use runmat_design_syntax::json::{is_identifier, quote, Json, LowerError};
@@ -274,8 +275,44 @@ fn print_name(kind: TopoKind, name: &EntityName) -> Option<String> {
             word(&import.0)?,
             quote(name)
         )),
-        EntityName::Copy { .. } => None,
+        EntityName::Copy {
+            base,
+            pattern,
+            instance,
+            ..
+        } => {
+            let base = print_name(kind, &recipe_of(base)?)?;
+            let pattern = word(&pattern.0)?;
+            match instance {
+                InstanceKey::Mirror => Some(format!("feature.{pattern}.{kind}.mirror({base})")),
+                other => Some(format!(
+                    "feature.{pattern}.{kind}.copy({base}, {})",
+                    instance_text(other)?
+                )),
+            }
+        }
     }
+}
+
+/// A pattern instance's key as the copy form's named argument (`linear = 2`, `grid = [1, 2]`).
+fn instance_text(instance: &InstanceKey) -> Option<String> {
+    Some(match instance {
+        InstanceKey::Linear { step } => format!("linear = {step}"),
+        InstanceKey::Circular { step } => format!("circular = {step}"),
+        InstanceKey::Curve { step } => format!("curve = {step}"),
+        InstanceKey::Grid { first, second } => format!("grid = [{first}, {second}]"),
+        InstanceKey::Lattice { i, j } => format!("lattice = [{i}, {j}]"),
+        InstanceKey::Ring { ring, step } => format!("ring = [{ring}, {step}]"),
+        InstanceKey::Row { key } => format!("row = {}", quote(key)),
+        InstanceKey::Point { point } => format!(
+            "point = {}",
+            match word(point) {
+                Some(point) => point,
+                None => quote(point),
+            }
+        ),
+        InstanceKey::Mirror => return None,
+    })
 }
 
 fn origin_plane(plane: OriginPlane) -> &'static str {
@@ -398,6 +435,10 @@ pub fn lower_reference(expr: &Expr) -> Option<Result<Reference, LowerError>> {
             let callee = segments(&call.callee()?)?;
             let arguments = call.arguments();
             match callee.as_slice() {
+                [head, feature, kind, role] if head == "feature" && (role == "copy" || role == "mirror") => {
+                    let kind = topo_named(kind)?;
+                    Some(copy(expr, feature, kind, role == "mirror", &arguments))
+                }
                 [head, feature, kind, role] if head == "feature" => {
                     let kind = topo_named(kind)?;
                     Some(generated(expr, feature, kind, role, arguments))
@@ -489,6 +530,89 @@ fn piece(expr: &Expr, arguments: &[Argument]) -> Result<Reference, LowerError> {
         base: Box::new(base),
         bounded_by,
         not_bounded_by,
+    })
+}
+
+/// A whole number, signed.
+fn integer(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::Number(n) => n.text().parse().ok(),
+        Expr::Unary(unary) if unary.is_negative() => match unary.operand()? {
+            Expr::Number(n) => n.text().parse::<i64>().ok().map(|v| -v),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `[a, b]` of whole numbers.
+fn integer_pair(expr: &Expr) -> Option<(i64, i64)> {
+    match expr {
+        Expr::List(list) => match list.items().as_slice() {
+            [a, b] => Some((integer(a)?, integer(b)?)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `feature.<pattern>.<kind>.copy(<base>, <instance>)` and `….mirror(<base>)`: an image the
+/// pattern or mirror `feature` made of the named face or body.
+fn copy(expr: &Expr, feature: &str, kind: TopoKind, mirror: bool, arguments: &[Argument]) -> Result<Reference, LowerError> {
+    let mut base = None;
+    let mut instance = mirror.then_some(InstanceKey::Mirror);
+    let count = |value: &Expr| -> Result<u32, LowerError> {
+        integer(value).and_then(|v| u32::try_from(v).ok()).ok_or_else(|| error(value, "a copy's step is a whole number"))
+    };
+    let pair = |value: &Expr| integer_pair(value).ok_or_else(|| error(value, "expected `[a, b]` of whole numbers"));
+    for argument in arguments {
+        match argument {
+            Argument::Positional(value) if base.is_none() => match required(value)? {
+                Reference::Name { kind: k, name } if k == kind => base = Some(name),
+                _ => return Err(error(value, format!("a copy's base is a {kind} name"))),
+            },
+            Argument::Named(named) if !mirror && instance.is_none() => {
+                let name = named.name().map(|n| n.text()).unwrap_or_default();
+                let value = named.value().ok_or_else(|| error(expr, format!("`{name}` needs a value")))?;
+                instance = Some(match name.as_str() {
+                    "linear" => InstanceKey::Linear { step: count(&value)? },
+                    "circular" => InstanceKey::Circular { step: count(&value)? },
+                    "curve" => InstanceKey::Curve { step: count(&value)? },
+                    "grid" | "ring" => {
+                        let (a, b) = pair(&value)?;
+                        let (a, b) = (u32::try_from(a), u32::try_from(b));
+                        let (Ok(a), Ok(b)) = (a, b) else { return Err(error(&value, "grid and ring steps are whole numbers")) };
+                        if name == "grid" {
+                            InstanceKey::Grid { first: a, second: b }
+                        } else {
+                            InstanceKey::Ring { ring: a, step: b }
+                        }
+                    }
+                    "lattice" => {
+                        let (i, j) = pair(&value)?;
+                        let (Ok(i), Ok(j)) = (i32::try_from(i), i32::try_from(j)) else { return Err(error(&value, "a lattice step is too large")) };
+                        InstanceKey::Lattice { i, j }
+                    }
+                    "row" => match &value {
+                        Expr::String(text) => InstanceKey::Row { key: text.value() },
+                        _ => return Err(error(&value, "a row key is a string")),
+                    },
+                    "point" => match &value {
+                        Expr::String(text) => InstanceKey::Point { point: text.value() },
+                        Expr::Reference(r) if r.segments().len() == 1 => InstanceKey::Point { point: r.segments()[0].clone() },
+                        _ => return Err(error(&value, "a point instance is a sketch point's name")),
+                    },
+                    other => return Err(error(&value, format!("`{other}` is not a pattern instance"))),
+                });
+            }
+            _ => return Err(error(expr, if mirror { "`mirror` takes one base name" } else { "`copy` takes a base name and one instance" })),
+        }
+    }
+    let base = base.ok_or_else(|| error(expr, "a copy needs its base name"))?;
+    let instance = instance.ok_or_else(|| error(expr, "a copy needs its instance (`linear = 2`, `grid = [1, 2]`, …)"))?;
+    Ok(Reference::Name {
+        kind,
+        name: EntityName::copy(&base, &FeatureId::new(feature), instance),
     })
 }
 
