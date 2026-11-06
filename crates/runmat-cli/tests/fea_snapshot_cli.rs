@@ -531,14 +531,14 @@ fn acoustic_harmonic_snapshot_saves_render_tiles_and_verifies() {
 #[test]
 fn thermomechanical_preload_publishes_stress_from_the_solved_temperature() {
     let solved = project(SOLVED_THERMAL_STRESS);
-    let snapshot = snapshot(&solved, &["--step", "preload"]);
-    assert_eq!(snapshot["step"], "preload");
-    let stress = view(&snapshot, "stress");
-    let displacement = view(&snapshot, "displacement");
+    let preload = snapshot(&solved, &["--step", "preload"]);
+    assert_eq!(preload["step"], "preload");
+    let stress = view(&preload, "stress");
+    let displacement = view(&preload, "displacement");
     let peak = stress["maximum"].as_f64().unwrap();
     assert!(peak > 0.0, "{stress}");
     assert!(displacement["maximum"].as_f64().unwrap() > 0.0, "{displacement}");
-    check_scenes(&solved, &snapshot);
+    check_scenes(&solved, &preload);
     verify(&solved, "out/snapshot.json");
 
     let prescribed = project(PRESCRIBED_THERMAL_STRESS);

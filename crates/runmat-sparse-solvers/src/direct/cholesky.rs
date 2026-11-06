@@ -137,7 +137,7 @@ fn estimate<T: FactorScalar>(
 fn symbolic_of(symbolic: &SymbolicFactorization) -> &SymbolicCholesky<usize> {
     match &symbolic.inner {
         SymbolicInner::Cholesky(inner) => inner,
-        SymbolicInner::Lu(_) => unreachable!("symmetric factorization on an LU analysis"),
+        SymbolicInner::Lu { .. } => unreachable!("symmetric factorization on an LU analysis"),
     }
 }
 

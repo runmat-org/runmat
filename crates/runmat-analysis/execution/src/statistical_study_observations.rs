@@ -264,15 +264,7 @@ impl StatisticalStudyObservations {
             .state
             .import_reduction(source, response, self.output_policy()?)?;
         self.state.reduced.push(reduced);
-        let count = self
-            .state
-            .fanout
-            .as_ref()
-            .expect("fanout")
-            .source_request
-            .plan
-            .observations
-            .len();
+        let count = self.state.reduction_count();
         self.phase = if self.state.reduced.len() == count {
             Phase::ReadyForAssembly
         } else {
