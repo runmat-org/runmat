@@ -206,7 +206,7 @@ part filter {
         label = "Wall"
     }
 
-    output oil = { body = feature.bowl.body, label = "Fluid", color = "#D08A1E" }
-    output core_oil = { body = feature.core.body, label = "Fluid", color = "#D08A1E" }
+    output oil = { body = feature.bowl.body, label = "Fluid", color = "#D08A1E40" }
+    output core_oil = { body = feature.core.body, label = "Fluid", color = "#D08A1E40" }
     output media = { body = feature.media.body, label = "Media", material = "glass_fiber_media", color = "#E8E2CF" }
 }

@@ -101,7 +101,7 @@ part mixer {{
         label = "Wall"
     }}
 
-    output fluid = {{ body = feature.tube.body, label = "Fluid", color = "#7FB7E6" }}
+    output fluid = {{ body = feature.tube.body, label = "Fluid", color = "#7FB7E640" }}
     output mixer = {{ body = feature.element_1.body, label = "Mixer", part_number = "SM-20-6", material = "stainless_316l", color = "#9AA3AD" }}
 }}
 '''
