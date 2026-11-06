@@ -120,7 +120,7 @@ fn symbol(c: Characteristic) -> &'static str {
 
 /// The distance a linear dimension between two faces measures: between two parallel axes, or
 /// along a plane's normal (to a hole's axis).
-fn linear((a, sa): &(Vec<P3>, &Value), (b, sb): &(Vec<P3>, &Value)) -> Option<f64> {
+pub(crate) fn linear((a, sa): &(Vec<P3>, &Value), (b, sb): &(Vec<P3>, &Value)) -> Option<f64> {
     // Two holes with parallel axes: the distance between the axes.
     if let (Some((pa, da, _)), Some((pb, _, _))) = (cylinder(sa), cylinder(sb)) {
         let v = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
@@ -134,6 +134,18 @@ fn linear((a, sa): &(Vec<P3>, &Value), (b, sb): &(Vec<P3>, &Value)) -> Option<f6
     let anchor = |points: &[P3], surface: &Value| cylinder(surface).map_or_else(|| centroid(points), |(p, _, _)| p);
     let (ca, cb) = (anchor(a, sa), anchor(b, sb));
     Some((0..3).map(|i| (cb[i] - ca[i]) * n[i]).sum::<f64>().abs())
+}
+
+/// The acute angle (degrees, 0 to 90) between two planes, as an angular dimension between their
+/// edges reads it, or none when either isn't a plane.
+pub(crate) fn angle((_, sa): &(Vec<P3>, &Value), (_, sb): &(Vec<P3>, &Value)) -> Option<f64> {
+    if sa["surface"] != "plane" || sb["surface"] != "plane" {
+        return None;
+    }
+    let (na, nb) = (vec3(&sa["normal"])?, vec3(&sb["normal"])?);
+    let c = dot(na, nb).clamp(-1.0, 1.0);
+    let a = c.acos().to_degrees();
+    Some(a.min(180.0 - a))
 }
 
 /// A linear dimension's anchors moved from its cylinders' axes to the near (`min`) or far
@@ -204,7 +216,7 @@ impl AnnotationValues for Values<'_> {
     fn dimension(
         &self,
         model: &ModelRef,
-        _style: DimensionStyle,
+        style: DimensionStyle,
         entities: &[Vec<EntityName>],
     ) -> Option<String> {
         let display = self.displays.get(model.file.as_str())?;
@@ -214,9 +226,21 @@ impl AnnotationValues for Values<'_> {
             .filter_map(text_of)
             .filter_map(|t| face(display, &t))
             .collect();
-        match faces.as_slice() {
-            [(_, surface)] => cylinder(surface).map(|(_, _, r)| format!("⌀{}", number(2.0 * r))),
-            [a, b] => linear(a, b).map(number),
+        match (style, faces.as_slice()) {
+            (DimensionStyle::Radius, [(_, surface)]) => cylinder(surface).map(|(_, _, r)| format!("R{}", number(r))),
+            (_, [(_, surface)]) => cylinder(surface).map(|(_, _, r)| format!("⌀{}", number(2.0 * r))),
+            (DimensionStyle::Angular, [a, b]) => angle(a, b).map(|deg| format!("{}°", number(deg))),
+            // Baseline: each feature from the first; chain: each from the one before. One value
+            // per pair, in order, joined by ` · ` (the sheet draws one dimension line each).
+            (DimensionStyle::Baseline, [first, rest @ ..]) if !rest.is_empty() => {
+                let v: Option<Vec<String>> = rest.iter().map(|f| linear(first, f).map(number)).collect();
+                v.map(|v| v.join(" · "))
+            }
+            (DimensionStyle::Chain, all) if all.len() >= 2 => {
+                let v: Option<Vec<String>> = all.windows(2).map(|w| linear(&w[0], &w[1]).map(number)).collect();
+                v.map(|v| v.join(" · "))
+            }
+            (_, [a, b]) => linear(a, b).map(number),
             _ => None,
         }
     }
@@ -390,7 +414,13 @@ pub fn leader_target(
             .iter()
             .find(|d| &d.label == label)
             .map(|d| d.on.clone()),
-        K::SurfaceFinish { on } => Some(on.clone()),
+        K::SurfaceFinish { on } | K::CenterMark { on } | K::Weld { on, .. } => Some(on.clone()),
+        K::DatumTarget { label } => {
+            let split = label.find(|c: char| c.is_ascii_digit())?;
+            let (datum, index) = label.split_at(split);
+            let index: u32 = index.parse().ok()?;
+            document?.pmi.targets.iter().find(|t| t.datum == datum && t.index == index).map(|t| t.on.clone())
+        }
         K::Note { leader, .. } => leader.clone(),
         _ => None,
     }

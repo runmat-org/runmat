@@ -55,7 +55,7 @@ fn outermost(display: &Value, axis: usize, sign: f64) -> Option<String> {
 }
 
 /// Every hole: a cylindrical face, named, turning all the way round.
-fn holes(display: &Value) -> Vec<String> {
+pub(crate) fn holes(display: &Value) -> Vec<String> {
     let mut out = Vec::new();
     for body in display["data"]["bodies"].as_array().into_iter().flatten() {
         for f in body["faces"].as_array().into_iter().flatten() {

@@ -137,6 +137,34 @@ pub(super) fn add(catalog: &mut Catalog) {
             )])
             .when(selected(&[K::View]))
             .edit(edit(EditOp::Set, Section::Views).item("display")),
+        cmd("drawing.view-label", "Label", "label", D)
+            .desc("Relabel a section, detail or auxiliary view.")
+            .inputs(vec![text("label", "Label", Some("A"))])
+            .when(selected(&[K::View]))
+            .edit(edit(EditOp::Set, Section::Views).item("label")),
+        cmd("drawing.move", "Move", "move", D)
+            .desc("Move views, annotations or tables to a picked point, or by a distance.")
+            .inputs(vec![
+                pick("to", "To", &[K::Point]).optional(),
+                offset("dx", "Across", 0.0).optional(),
+                offset("dy", "Up", 0.0).optional(),
+            ])
+            .when(selected(&[K::View, K::Annotation, K::Table]))
+            .edit(edit(EditOp::Set, Section::Annotations).item("at")),
+        cmd("drawing.align", "Align", "align", D)
+            .desc("Line items up on the first one selected.")
+            .inputs(vec![radio(
+                "align",
+                "Align",
+                &[("horizontal", "Horizontally"), ("vertical", "Vertically")],
+            )])
+            .when(Predicate::Selection {
+                kinds: vec![K::View, K::Annotation, K::Table],
+                min: 2,
+                max: None,
+                reason: "Select two or more items".into(),
+            })
+            .edit(edit(EditOp::Set, Section::Annotations).item("align")),
         cmd("drawing.hide-view", "Hide", "hide", D)
             .desc("Hide the view on the sheet; its dimensions stay with it.")
             .when(selected(&[K::View]))
@@ -365,7 +393,8 @@ pub(super) fn add(catalog: &mut Catalog) {
                     c("drawing.section"),
                     c("drawing.detail"),
                 ],
-                vec![scale, display],
+                vec![scale, display, c("drawing.view-label")],
+                vec![c("drawing.move"), c("drawing.align")],
                 vec![c("drawing.model-items"), c("drawing.show-in-model")],
                 vec![c("drawing.hide-view"), c("design.copy-reference")],
                 vec![c("drawing.delete")],
@@ -384,6 +413,7 @@ pub(super) fn add(catalog: &mut Catalog) {
             ],
             vec![
                 vec![c("drawing.edit-annotation"), c("drawing.reattach")],
+                vec![c("drawing.move"), c("drawing.align")],
                 vec![c("drawing.show-in-model"), c("design.show-source"), c("design.copy-reference")],
                 vec![c("drawing.delete")],
             ],

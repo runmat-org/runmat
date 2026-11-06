@@ -247,11 +247,21 @@ pub fn edit(
             "drawing.auto" => crate::drawing::auto::auto(path, text, files, &request.values)?,
             other => match crate::drawing_views::view_edit(path, text, files, other, &request.values, &request.selection) {
                 Some(result) => result?,
-                None => {
-                    return Err(model(format!(
-                        "`{other}` edits drawings through the source editor in this build"
-                    )))
-                }
+                None => match crate::drawing_edits::drawing_edit(path, text, files, other, &request.values, &request.selection) {
+                    // Views, annotations and tables; tolerances and datums also change the part.
+                    Some(result) => {
+                        let (changes, summary) = result?;
+                        return Ok(EditOutput {
+                            files: changes.into_iter().map(|(p, old, change)| file_change(&p, &old, change)).collect(),
+                            summary,
+                        });
+                    }
+                    None => {
+                        return Err(model(format!(
+                            "`{other}` edits drawings through the source editor in this build"
+                        )))
+                    }
+                },
             },
         }
     } else if path.ends_with(".assembly") {

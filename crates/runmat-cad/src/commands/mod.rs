@@ -66,7 +66,24 @@ pub const UNBUILT: &[&str] = &[
     "manage.heal",
     "manage.split-to-files",
     "manage.pack-and-share",
-    // Drawing.
+    // Drawing: views the model doesn't draw yet (break, crop, alternate position), annotation
+    // tools with no model (hatch, revision cloud, sheet sketch, stacked balloons), and settings
+    // with no applier.
+    "drawing.break",
+    "drawing.crop",
+    "drawing.alternate-position",
+    "drawing.model-items",
+    "drawing.auto-balloon",
+    "drawing.stacked-balloon",
+    "drawing.area-hatch",
+    "drawing.revision-cloud",
+    "drawing.sketch",
+    "table.weld",
+    "table.general",
+    "sheet.layers",
+    "sheet.line-styles",
+    "sheet.format",
+    "drawing.document-settings",
     "drawing.hide-view",
     "drawing.edit-annotation",
     "drawing.reattach",

@@ -14,6 +14,11 @@ fn scale() -> Field {
     text("scale", "Scale", Some("1:2"))
 }
 
+/// Where the item lands on the sheet; the sheet's own place for it when left empty.
+fn place() -> Field {
+    pick("at", "Place at", &[K::Point]).optional()
+}
+
 fn views() -> Predicate {
     has(Facet::Views)
 }
@@ -47,8 +52,9 @@ pub(super) fn add(catalog: &mut Catalog) {
             radio(
                 "projection",
                 "Projection",
-                &[("first", "First angle"), ("third", "Third angle")],
+                &[("third", "Third angle"), ("first", "First angle")],
             ),
+            place(),
         ])
         .edit(view_edit("standard")),
         drw(
@@ -70,7 +76,6 @@ pub(super) fn add(catalog: &mut Catalog) {
                     ("left", "Left"),
                     ("right", "Right"),
                     ("isometric", "Isometric"),
-                    ("annotation", "Annotation view"),
                 ],
             ),
             scale(),
@@ -78,13 +83,12 @@ pub(super) fn add(catalog: &mut Catalog) {
                 "display",
                 "Display",
                 &[
-                    ("hidden_removed", "Hidden lines removed"),
                     ("hidden_visible", "Hidden lines visible"),
-                    ("wireframe", "Wireframe"),
+                    ("hidden_removed", "Hidden lines removed"),
                     ("shaded", "Shaded"),
-                    ("shaded_edges", "Shaded with edges"),
                 ],
             ),
+            place(),
         ])
         .preview()
         .edit(view_edit("model")),
@@ -104,9 +108,9 @@ pub(super) fn add(catalog: &mut Catalog) {
                     ("down", "Down"),
                     ("left", "Left"),
                     ("right", "Right"),
-                    ("iso", "Isometric corner"),
                 ],
             ),
+            place(),
         ])
         .when(views())
         .preview()
@@ -115,23 +119,14 @@ pub(super) fn add(catalog: &mut Catalog) {
             "drawing.section",
             "Section view",
             "section",
-            "Cut a full, half, offset or aligned section through a view.",
+            "Cut a section through a view, along a cutting line through a picked edge or hole.",
         )
         .inputs(vec![
             parent(),
-            choice(
-                "type",
-                "Type",
-                &[
-                    ("full", "Full"),
-                    ("half", "Half"),
-                    ("offset", "Offset"),
-                    ("aligned", "Aligned"),
-                ],
-            ),
+            pick("through", "Cut through", &[K::Edge]),
             text("label", "Label", Some("A")),
-            flag("flip", "Flip direction", false),
-            flag("hatch", "Hatch from material", true),
+            flag("aligned", "Aligned", false),
+            place(),
         ])
         .when(views())
         .preview()
@@ -144,13 +139,11 @@ pub(super) fn add(catalog: &mut Catalog) {
         )
         .inputs(vec![
             parent(),
+            pick("center", "Center", &[K::Edge]),
+            length("radius", "Radius", 5.0),
             text("label", "Label", Some("B")),
             text("scale", "Scale", Some("2:1")),
-            choice(
-                "profile",
-                "Profile",
-                &[("circle", "Circle"), ("profile", "Sketched profile")],
-            ),
+            place(),
         ])
         .when(views())
         .preview()
@@ -165,6 +158,7 @@ pub(super) fn add(catalog: &mut Catalog) {
             parent(),
             pick("edge", "Edge", &[K::Edge]),
             text("label", "Label", Some("C")),
+            place(),
         ])
         .when(views())
         .preview()
@@ -175,7 +169,12 @@ pub(super) fn add(catalog: &mut Catalog) {
             "broken-out",
             "Cut away part of a view to show the inside.",
         )
-        .inputs(vec![parent(), length("depth", "Depth", 10.0)])
+        .inputs(vec![
+            parent(),
+            picks("boundary", "Boundary", &[K::Point]),
+            length("depth", "Depth", 10.0),
+            place(),
+        ])
         .when(views())
         .edit(view_edit("broken_out")),
         drw(
@@ -226,10 +225,11 @@ pub(super) fn add(catalog: &mut Catalog) {
                 "display",
                 "Display",
                 &[
-                    ("shaded_edges", "Shaded with edges"),
                     ("hidden_removed", "Hidden lines removed"),
+                    ("shaded", "Shaded"),
                 ],
             ),
+            place(),
         ])
         .edit(view_edit("isometric")),
         drw(
@@ -276,7 +276,18 @@ pub(super) fn add(catalog: &mut Catalog) {
             "Dimension edges, points or circles.",
         )
         .inputs(vec![
-            picks("items", "Items", &[K::Edge, K::Vertex, K::View]),
+            picks("items", "Items", &[K::Edge]),
+            choice(
+                "measure",
+                "Measure",
+                &[
+                    ("auto", "From the picks"),
+                    ("linear", "Linear"),
+                    ("angular", "Angular"),
+                    ("radius", "Radius"),
+                    ("diameter", "Diameter"),
+                ],
+            ),
             choice(
                 "tolerance",
                 "Tolerance",
@@ -284,10 +295,13 @@ pub(super) fn add(catalog: &mut Catalog) {
                     ("none", "None"),
                     ("symmetric", "Symmetric"),
                     ("bilateral", "Bilateral"),
-                    ("limit", "Limit"),
                     ("fit", "Fit"),
                 ],
             ),
+            length("plus", "Upper deviation", 0.1).optional(),
+            length("minus", "Lower deviation", 0.1).optional(),
+            text("fit", "Fit", Some("H7")).optional(),
+            place(),
         ])
         .when(views())
         .edit(annotation("dimension")),
@@ -298,8 +312,9 @@ pub(super) fn add(catalog: &mut Catalog) {
             "Dimension features from a zero line.",
         )
         .inputs(vec![
-            pick("origin", "Zero", &[K::Edge, K::Vertex]),
-            picks("items", "Items", &[K::Edge, K::Vertex]),
+            pick("origin", "Zero", &[K::Edge]),
+            picks("items", "Items", &[K::Edge]),
+            place(),
         ])
         .when(views())
         .edit(annotation("ordinate")),
@@ -310,8 +325,9 @@ pub(super) fn add(catalog: &mut Catalog) {
             "Dimension features from one baseline.",
         )
         .inputs(vec![
-            pick("base", "Baseline", &[K::Edge, K::Vertex]),
-            picks("items", "Items", &[K::Edge, K::Vertex]),
+            pick("base", "Baseline", &[K::Edge]),
+            picks("items", "Items", &[K::Edge]),
+            place(),
         ])
         .when(views())
         .edit(annotation("baseline")),
@@ -321,7 +337,7 @@ pub(super) fn add(catalog: &mut Catalog) {
             "chain",
             "Dimension features end to end.",
         )
-        .inputs(vec![picks("items", "Items", &[K::Edge, K::Vertex])])
+        .inputs(vec![picks("items", "Items", &[K::Edge]), place()])
         .when(views())
         .edit(annotation("chain")),
         drw(
@@ -330,7 +346,7 @@ pub(super) fn add(catalog: &mut Catalog) {
             "hole",
             "Label a hole with its size, depth and thread from the model.",
         )
-        .inputs(vec![pick("hole", "Hole", &[K::Edge])])
+        .inputs(vec![pick("hole", "Hole", &[K::Edge]), place()])
         .when(views())
         .edit(annotation("hole_callout")),
         drw(
@@ -356,12 +372,9 @@ pub(super) fn add(catalog: &mut Catalog) {
             "Add a feature control frame.",
         )
         .inputs(vec![
-            text("frame", "Frame", Some("position|0.1|A|B|C")),
-            pick(
-                "attach",
-                "Attached to",
-                &[K::Edge, K::DrawingDimension, K::Annotation],
-            ),
+            text("frame", "Frame", Some("position|⌀0.1|A|B")),
+            pick("attach", "Attached to", &[K::Edge, K::Annotation]),
+            place(),
         ])
         .when(views())
         .edit(annotation("gdt")),
@@ -373,7 +386,8 @@ pub(super) fn add(catalog: &mut Catalog) {
         )
         .inputs(vec![
             text("label", "Label", Some("A")),
-            pick("attach", "Attached to", &[K::Edge, K::DrawingDimension]),
+            pick("attach", "Attached to", &[K::Edge, K::Annotation]),
+            place(),
         ])
         .when(views())
         .edit(annotation("datum")),
@@ -395,7 +409,9 @@ pub(super) fn add(catalog: &mut Catalog) {
                     ("rectangle", "Rectangle"),
                 ],
             ),
-            pick("attach", "Attached to", &[K::Edge, K::Vertex]),
+            length("size", "Size", 5.0).optional(),
+            pick("attach", "Attached to", &[K::Edge]),
+            place(),
         ])
         .when(views())
         .edit(annotation("datum_target")),
@@ -406,8 +422,9 @@ pub(super) fn add(catalog: &mut Catalog) {
             "Add a surface finish symbol.",
         )
         .inputs(vec![
-            text("ra", "Ra", Some("1.6")),
+            text("ra", "Ra (µm)", Some("1.6")),
             pick("attach", "Attached to", &[K::Edge]),
+            place(),
         ])
         .when(views())
         .edit(annotation("surface_finish")),
@@ -429,7 +446,10 @@ pub(super) fn add(catalog: &mut Catalog) {
                 ],
             ),
             length("size", "Size", 4.0),
+            flag("all_around", "All around", false),
+            flag("field", "Field weld", false),
             pick("attach", "Attached to", &[K::Edge]),
+            place(),
         ])
         .when(views())
         .edit(annotation("weld")),
@@ -442,7 +462,8 @@ pub(super) fn add(catalog: &mut Catalog) {
         )
         .inputs(vec![
             text("text", "Text", None),
-            pick("attach", "Leader to", &[K::Edge, K::Vertex, K::View]).optional(),
+            pick("attach", "Leader to", &[K::Edge, K::View]).optional(),
+            place(),
         ])
         .edit(annotation("note")),
         drw(
@@ -452,17 +473,8 @@ pub(super) fn add(catalog: &mut Catalog) {
             "Label a component with its BOM item number.",
         )
         .inputs(vec![
-            pick("attach", "Component", &[K::Edge, K::Face]),
-            choice(
-                "style",
-                "Style",
-                &[
-                    ("circle", "Circle"),
-                    ("split", "Split circle"),
-                    ("triangle", "Triangle"),
-                    ("hexagon", "Hexagon"),
-                ],
-            ),
+            pick("attach", "Component", &[K::Edge]),
+            place(),
         ])
         .when(views())
         .edit(annotation("balloon")),
@@ -585,7 +597,8 @@ pub(super) fn add(catalog: &mut Catalog) {
                         ("indented", "Indented"),
                     ],
                 ),
-                text("template", "Template", Some("company/bom")).optional(),
+                flag("fasteners", "Include fasteners", true),
+                place(),
             ])
             .when(views())
             .edit(table("bom")),
@@ -596,9 +609,10 @@ pub(super) fn add(catalog: &mut Catalog) {
             "List holes with positions from an origin.",
         )
         .inputs(vec![
-            pick("origin", "Origin", &[K::Vertex, K::Edge]),
-            picks("faces", "Faces", &[K::Face, K::Edge]),
+            pick("origin", "Origin", &[K::Edge]),
+            picks("faces", "Holes", &[K::Edge]).optional(),
             flag("combine", "Combine same sizes", true),
+            place(),
         ])
         .when(views())
         .edit(table("hole")),
@@ -606,8 +620,15 @@ pub(super) fn add(catalog: &mut Catalog) {
             "table.revision",
             "Revision table",
             "revision-table",
-            "Add the revision history table.",
+            "Add the revision table, or a revision to it.",
         )
+        .inputs(vec![
+            text("rev", "Revision", Some("A")),
+            text("description", "Description", Some("Initial release")),
+            text("date", "Date", Some("2026-11-06")).optional(),
+            text("by", "Approved by", None).optional(),
+            place(),
+        ])
         .edit(table("revision")),
         drw(
             "table.bend",
@@ -628,7 +649,7 @@ pub(super) fn add(catalog: &mut Catalog) {
             "cut-list",
             "List weldment members by profile and length.",
         )
-        .inputs(vec![pick("view", "From view", &[K::View])])
+        .inputs(vec![pick("view", "From view", &[K::View]), place()])
         .when(views())
         .edit(table("cut_list")),
         drw(
@@ -795,12 +816,7 @@ pub(super) fn add(catalog: &mut Catalog) {
         .inputs(vec![choice(
             "standard",
             "Standard",
-            &[
-                ("iso", "ISO"),
-                ("ansi", "ANSI"),
-                ("din", "DIN"),
-                ("jis", "JIS"),
-            ],
+            &[("iso", "ISO 128 / 129-1 / 1101"), ("asme", "ASME Y14.3 / Y14.5")],
         )])
         .edit(edit(EditOp::Set, Section::Settings).item("standard")),
         drw(
@@ -881,12 +897,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                 "standard",
                 "drawing.standard",
                 "standard",
-                &[
-                    ("iso", "ISO"),
-                    ("ansi", "ANSI"),
-                    ("din", "DIN"),
-                    ("jis", "JIS"),
-                ],
+                &[("iso", "ISO"), ("asme", "ASME")],
             ),
             c("drawing.layer"),
         ],
@@ -931,19 +942,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                             c("drawing.standard-3"),
                             c("drawing.model-view"),
                             c("drawing.projected"),
-                            variants(
-                                "drawing.section.menu",
-                                "Section",
-                                "section",
-                                "drawing.section",
-                                "type",
-                                &[
-                                    ("full", "Full section"),
-                                    ("half", "Half section"),
-                                    ("offset", "Offset section"),
-                                    ("aligned", "Aligned section"),
-                                ],
-                            ),
+                            c("drawing.section"),
                             c("drawing.detail"),
                             c("drawing.auxiliary"),
                             c("drawing.broken-out"),

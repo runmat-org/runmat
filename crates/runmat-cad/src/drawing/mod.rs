@@ -288,7 +288,7 @@ pub enum DimensionStyle {
     Angular,
     Radius,
     Diameter,
-    /// From the annotation group's origin.
+    /// From a zero edge: `references = [zero, feature]`.
     Ordinate,
     /// From the group's base.
     Baseline,
@@ -303,7 +303,8 @@ impl DimensionStyle {
             DimensionStyle::Radius | DimensionStyle::Diameter => (1, 1),
             DimensionStyle::Linear | DimensionStyle::Aligned => (1, 2),
             DimensionStyle::Angular => (2, 2),
-            DimensionStyle::Ordinate => (1, 1),
+            // The zero, then the feature.
+            DimensionStyle::Ordinate => (2, 2),
             DimensionStyle::Baseline | DimensionStyle::Chain => (2, usize::MAX),
         }
     }
