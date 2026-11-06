@@ -469,3 +469,11 @@ qmf15-est.py (surface growth estimate), qmf15-dbgpatch.py (FACEGAP prints to $QM
 - Cause: `cells_across_gap = 1` also sizes facing faces across the empty 2 mm voids between cells to
   2 mm, so all 8 cells fill with fine elements. mod8 replaces it with `refine` controls on the pad
   (3 mm), lid (2 mm) and base (3 mm); the old study is kept as m01-module-thermal.fea.bak-qmf17.
+- mod8 (refine controls, no gap control): facet recovery UnsatisfiableConstraint on a cell wall at
+  x = -0.859 m across a void (Delaunay InvalidTopology during conforming facet insertion), 1557 s.
+- mod9 (cells_across_gap = 1, maximum_grading_ratio 3.0): facet recovery UnsatisfiableConstraint on a
+  cell wall at x = -0.893 m, facets about 15 mm, 997 s.
+- The study is restored to the mod7 configuration (meshes; solve asks 68.6 GB against a 23.2 GB pool;
+  the main Mac has 48 GB). Variants: m01-module-thermal-refine.fea.mod8, m01-module-thermal-grading3.fea.mod9.
+- Open: a thermal path without the full Cholesky proof factor, or a facet-recovery fix for the coarser
+  meshes (mod8/mod9 locations), or added geometry (the 7 barriers) that removes the voids.
