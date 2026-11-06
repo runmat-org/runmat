@@ -385,6 +385,8 @@ pub struct LegendEntry {
     pub marker: Option<LegendMarker>,
     /// False for a marker-only line (`'o'` with no line style): the swatch has no segment.
     pub line_visible: bool,
+    /// The segment's dash pattern, as the series draws it (`'--'`, `':'`, `'-.'`).
+    pub line_style: crate::plots::line::LineStyle,
 }
 
 #[derive(Debug, Clone)]
@@ -2214,6 +2216,7 @@ impl Figure {
                     plot_type: plot.plot_type(),
                     marker: plot.legend_marker(),
                     line_visible: plot.legend_line_visible(),
+                    line_style: plot.legend_line_style(),
                 });
             }
         }
@@ -2241,6 +2244,7 @@ impl Figure {
                             plot_type: plot.plot_type(),
                             marker: None,
                             line_visible: true,
+                            line_style: crate::plots::line::LineStyle::Solid,
                         });
                     }
                 }
@@ -2255,6 +2259,7 @@ impl Figure {
                             plot_type: plot.plot_type(),
                             marker: plot.legend_marker(),
                             line_visible: plot.legend_line_visible(),
+                            line_style: plot.legend_line_style(),
                         });
                     }
                 }
@@ -2370,13 +2375,18 @@ impl Figure {
 
     /// Every visible reference line on an axes, labelled or not: where `best` legend placement
     /// keeps clear of them.
-    pub fn reference_lines_for_axes(&self, axes_index: usize) -> Vec<(ReferenceLineOrientation, f64)> {
+    pub fn reference_lines_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Vec<(ReferenceLineOrientation, f64)> {
         self.plots
             .iter()
             .enumerate()
             .filter(|(i, _)| *self.plot_axes_indices.get(*i).unwrap_or(&0) == axes_index)
             .filter_map(|(_, plot)| match plot {
-                PlotElement::ReferenceLine(line) if line.visible => Some((line.orientation, line.value)),
+                PlotElement::ReferenceLine(line) if line.visible => {
+                    Some((line.orientation, line.value))
+                }
                 _ => None,
             })
             .collect()
@@ -2684,6 +2694,16 @@ impl PlotElement {
                 filled: m.filled,
             }),
             _ => None,
+        }
+    }
+
+    /// The dash pattern a line-like series' legend swatch repeats.
+    fn legend_line_style(&self) -> crate::plots::line::LineStyle {
+        match self {
+            PlotElement::Line(plot) => plot.line_style,
+            PlotElement::Line3(plot) => plot.line_style,
+            PlotElement::ReferenceLine(plot) => plot.line_style,
+            _ => crate::plots::line::LineStyle::Solid,
         }
     }
 

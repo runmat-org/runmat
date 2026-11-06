@@ -1695,23 +1695,31 @@ fn draw_legend_for_axes(canvas: &mut Canvas, figure: &Figure, axes: &AxesView) {
         let swatch_x0 = x + 10;
         let swatch_x1 = swatch_x0 + 18;
         let swatch_color = to_u8_rgba(entry.color.to_array());
-        canvas.draw_line(
-            ScreenVertex {
-                x: swatch_x0 as f32,
-                y: yy as f32,
-                z: 0.0,
-                color: swatch_color,
-            },
-            ScreenVertex {
-                x: swatch_x1 as f32,
-                y: yy as f32,
-                z: 0.0,
-                color: swatch_color,
-            },
-            2.0,
-            0,
-            false,
-        );
+        // The swatch repeats the series' dash pattern, as the interactive legend draws it.
+        for (a, b) in crate::plots::legend_swatch::legend_dashes(
+            entry.line_style,
+            swatch_x0 as f32,
+            swatch_x1 as f32,
+            1.0,
+        ) {
+            canvas.draw_line(
+                ScreenVertex {
+                    x: a,
+                    y: yy as f32,
+                    z: 0.0,
+                    color: swatch_color,
+                },
+                ScreenVertex {
+                    x: b,
+                    y: yy as f32,
+                    z: 0.0,
+                    color: swatch_color,
+                },
+                2.0,
+                0,
+                false,
+            );
+        }
 
         let label = if entry.label.is_empty() {
             "Series".to_string()
