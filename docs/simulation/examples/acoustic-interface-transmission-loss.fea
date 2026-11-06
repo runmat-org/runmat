@@ -40,7 +40,7 @@ material dense_gas {
     }
 }
 
-model interface {
+model two_fluid {
     assign material.air to geometry.stack.region.air
     assign material.dense_gas to geometry.stack.region.dense_gas
     load incoming { incident_pressure on geometry.stack.region.inlet = 1 Pa }
@@ -50,7 +50,7 @@ model interface {
 study interface_transmission_loss {
     geometry = geometry.stack
     mesh = mesh.stack
-    model = model.interface
+    model = model.two_fluid
     analysis sweep { acoustic harmonic { frequencies = [500, 1000, 2000] Hz } }
     output tl = transmission_loss(analysis.sweep, incident = geometry.stack.region.inlet, transmitted = geometry.stack.region.outlet)
 }
