@@ -4,8 +4,9 @@
 //! The circuit is linearized at its operating point as for AC. Each device reports its noise
 //! generators there ([`crate::devices::Device::noise`]): thermal noise `4kT/R` of resistors and
 //! of the series resistances of diodes, BJTs and MOSFETs, shot noise `2q|I|` of diode and BJT
-//! junction currents, and MOSFET channel noise `(8/3)·kT·gm`. Flicker noise (`kf`, `af`) is not
-//! modelled. Each generator is a current between two nodes; its transfer to the output comes
+//! junction currents, MOSFET channel noise `(8/3)·kT·gm`, and flicker noise `kf·|I|^af / f` as
+//! ngspice models it: on a diode's junction current, a BJT's base current, and a MOSFET's drain
+//! current divided by `W·Leff·Cox²`. Each generator is a current between two nodes; its transfer to the output comes
 //! from one solve of the factored AC matrix, and the output density is
 //! `Sout(f) = Σ |H_k(f)|²·S_k`. The input-referred density divides by the gain from the input
 //! source, a unit AC voltage on its branch.
@@ -30,11 +31,41 @@ pub const Q_E: f64 = 1.602_176_634e-19;
 #[derive(Clone, Debug, PartialEq)]
 pub struct NoiseSource {
     pub device: String,
-    /// `thermal`, `shot` or `channel`.
+    /// `thermal`, `shot`, `channel` or `flicker`.
     pub kind: &'static str,
     pub a: usize,
     pub b: usize,
+    /// The density (A²/Hz); for a flicker source, its density at 1 Hz.
     pub psd: f64,
+    /// A flicker source: the density falls as `1/f`.
+    pub per_f: bool,
+}
+
+impl NoiseSource {
+    /// The density at `f` (A²/Hz).
+    pub fn psd_at(&self, f: f64) -> f64 {
+        if self.per_f {
+            self.psd / f
+        } else {
+            self.psd
+        }
+    }
+}
+
+/// A model's flicker-noise coefficients, `kf` and `af` (SPICE's defaults: no flicker noise, and
+/// `af = 1`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Flicker {
+    pub kf: f64,
+    pub af: f64,
+}
+
+impl Flicker {
+    /// The card's `kf` and `af`; none without a positive `kf`.
+    pub fn of(p: &crate::devices::junction::Params) -> Option<Flicker> {
+        let kf = p.get("kf", 0.0);
+        (kf > 0.0).then(|| Flicker { kf, af: p.get("af", 1.0) })
+    }
 }
 
 /// Collects a device's generators.
@@ -58,8 +89,16 @@ impl NoiseSink<'_> {
             self.push("shot", a, b, 2.0 * Q_E * current.abs());
         }
     }
+    /// Flicker noise of `current` between `a` and `b`: `scale·kf·|I|^af / f`.
+    pub fn flicker(&mut self, a: usize, b: usize, current: f64, flicker: Option<Flicker>, scale: f64) {
+        let Some(Flicker { kf, af }) = flicker else { return };
+        let psd = scale * kf * current.abs().powf(af);
+        if psd > 0.0 && psd.is_finite() && a != b {
+            self.out.push(NoiseSource { device: self.device.clone(), kind: "flicker", a, b, psd, per_f: true });
+        }
+    }
     pub fn push(&mut self, kind: &'static str, a: usize, b: usize, psd: f64) {
-        self.out.push(NoiseSource { device: self.device.clone(), kind, a, b, psd });
+        self.out.push(NoiseSource { device: self.device.clone(), kind, a, b, psd, per_f: false });
     }
 }
 
@@ -176,7 +215,7 @@ pub fn run(e: &mut Engine, spec: &NoiseSpec) -> Result<NoiseWave, SimError> {
                 break 'freqs;
             }
             let h = out_of(&b).abs();
-            let p = h * h * s.psd;
+            let p = h * h * s.psd_at(f);
             total += p;
             *shares.entry(&s.device).or_default() += p;
         }

@@ -10,9 +10,9 @@ use crate::num::Dual;
 use crate::sparse::GND;
 
 pub const KNOWN: &[&str] = &[
-    "is", "n", "rs", "cjo", "cj0", "cj", "vj", "m", "fc", "tt", "bv", "ibv", "eg", "xti", "tnom", "level",
+    "is", "n", "rs", "cjo", "cj0", "cj", "vj", "m", "fc", "tt", "bv", "ibv", "eg", "xti", "tnom", "level", "kf", "af",
 ];
-pub const IGNORED: &[&str] = &["kf", "af", "iave", "vpk", "mfg", "type", "isr", "nr", "nbv", "ibvl", "nbvl", "tbv1", "trs1", "trs", "tikf", "ikf"];
+pub const IGNORED: &[&str] = &["iave", "vpk", "mfg", "type", "isr", "nr", "nbv", "ibvl", "nbvl", "tbv1", "trs1", "trs", "tikf", "ikf"];
 
 pub struct Diode {
     pub name: String,
@@ -32,6 +32,8 @@ pub struct Diode {
     pub ibv: f64,
     pub vcrit: f64,
     pub off: bool,
+    /// Flicker coefficients (`kf`, `af`), on the junction current.
+    pub flicker: Option<crate::analysis::noise::Flicker>,
     pub state: usize,
     pub mem: usize,
 }
@@ -63,6 +65,7 @@ impl Diode {
             ibv: p.get("ibv", 1e-3) * area,
             vcrit: vcrit(nvt, is),
             off,
+            flicker: crate::analysis::noise::Flicker::of(p),
             state: s.state(false),
             mem: s.mem(0.0),
         }
@@ -116,12 +119,13 @@ impl Device for Diode {
             ld.charge_at(self.state, self.ai, self.k, q, ctrl, [vd]);
         }
     }
-    /// Shot noise of the junction current, thermal noise of the series resistance.
+    /// Shot and flicker noise of the junction current, thermal noise of the series resistance.
     fn noise(&self, sink: &mut crate::analysis::noise::NoiseSink) {
         let x = sink.x;
         let vd = node_v(x, self.ai) - node_v(x, self.k);
         let id = self.id(Dual::<1>::constant(vd), 0.0).v;
         sink.shot(self.ai, self.k, id);
+        sink.flicker(self.ai, self.k, id, self.flicker, 1.0);
         sink.thermal(self.a, self.ai, self.gs);
     }
     fn probe_current(&self, x: &[f64], s: &States) -> Option<f64> {

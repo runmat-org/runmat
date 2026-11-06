@@ -16,10 +16,10 @@ use crate::num::Dual;
 
 pub const KNOWN: &[&str] = &[
     "level", "vto", "vt0", "kp", "gamma", "phi", "lambda", "rd", "rs", "cgso", "cgdo", "cgbo", "cbd", "cbs", "tox", "ld", "uo", "u0", "l", "w",
-    "nsub", "delta", "ucrit", "uexp", "utra", "theta", "eta", "vmax", "kappa", "xj",
+    "nsub", "delta", "ucrit", "uexp", "utra", "theta", "eta", "vmax", "kappa", "xj", "kf", "af",
 ];
 pub const IGNORED: &[&str] = &[
-    "is", "js", "pb", "cj", "mj", "cjsw", "mjsw", "fc", "kf", "af", "nss", "tpg", "rsh", "tnom", "mfg", "nfs", "neff",
+    "is", "js", "pb", "cj", "mj", "cjsw", "mjsw", "fc", "nss", "tpg", "rsh", "tnom", "mfg", "nfs", "neff",
 ];
 
 /// The drain-current law of the model's level.
@@ -51,6 +51,8 @@ pub struct Mosfet {
     pub mem: usize,
     pub off: bool,
     pub law: Law,
+    /// Flicker coefficients and the drain current's scale `1/(W·Leff·Cox²)`.
+    pub flicker: Option<(crate::analysis::noise::Flicker, f64)>,
 }
 
 impl Mosfet {
@@ -82,6 +84,10 @@ impl Mosfet {
         let vto = p.get("vto", p.get("vt0", 0.0));
         let beta = kp * w / leff;
         let geo = Geometry::new(p, leff, w, cox);
+        // ngspice's MOS1–3 flicker density: kf·|Id|^af / (f·W·Leff·Cox²), with Cox from tox
+        // (1e-7 m when the card leaves it out).
+        let cox_noise = if cox > 0.0 { cox } else { 3.9 * 8.854_187_8e-12 / 1e-7 };
+        let flicker = crate::analysis::noise::Flicker::of(p).map(|f| (f, 1.0 / (w * leff * cox_noise * cox_noise)));
         let law = match level as i32 {
             2 => Law::Two(Level2::new(p, &geo, vto, beta, gamma, phi)),
             3 => Law::Three(Level3::new(p, &geo, vto, beta, gamma, phi)),
@@ -125,6 +131,7 @@ impl Mosfet {
             mem,
             off,
             law,
+            flicker,
         })
     }
 
@@ -212,7 +219,8 @@ impl Device for Mosfet {
             }
         }
     }
-    /// Channel noise `(8/3)·kT·gm` and thermal noise of rd and rs.
+    /// Channel noise `(8/3)·kT·gm`, flicker noise of the drain current, and thermal noise of
+    /// rd and rs.
     fn noise(&self, sink: &mut crate::analysis::noise::NoiseSink) {
         let x = sink.x;
         let tp = self.tp;
@@ -225,6 +233,11 @@ impl Device for Mosfet {
         };
         if gm > 0.0 {
             sink.push("channel", self.di, self.si, 8.0 / 3.0 * sink.kt * gm);
+        }
+        if let Some((flicker, scale)) = self.flicker {
+            let c = |a: f64| Dual::<3>::constant(a);
+            let id = if vds >= 0.0 { self.ids(c(vgs), c(vds), c(vbs)).v } else { self.ids(c(vgs - vds), c(-vds), c(vbs - vds)).v };
+            sink.flicker(self.di, self.si, id, Some(flicker), scale);
         }
         sink.thermal(self.d, self.di, self.gd);
         sink.thermal(self.s, self.si, self.gs);

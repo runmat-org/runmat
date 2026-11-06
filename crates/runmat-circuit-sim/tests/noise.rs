@@ -1,5 +1,5 @@
-//! Noise analysis against closed forms: resistor thermal noise, kT/C, diode shot noise and
-//! MOSFET channel noise.
+//! Noise analysis against closed forms: resistor thermal noise, kT/C, diode shot noise, MOSFET
+//! channel noise and flicker noise.
 
 use runmat_circuit_sim::analysis::noise::{NoiseSpec, NoiseWave, K_B, Q_E};
 use runmat_circuit_sim::{simulate, simulate_noise, AcSweep, Analysis, Design};
@@ -62,4 +62,42 @@ fn a_common_source_stage_shows_channel_noise_of_its_transconductance() {
     let want = ((8.0 / 3.0 * K_B * T * gm + 4.0 * K_B * T / rd) * rd * rd).sqrt();
     close(w.onoise[0], want, 1e-3, "channel + load");
     close(w.gain[0], gm * rd, 1e-3, "gain gm·RD");
+}
+
+#[test]
+fn a_diode_with_kf_adds_flicker_noise_falling_as_one_over_f() {
+    let (kf, af) = (1e-16, 1.2);
+    let card = |extra: &str| format!("d\nV1 in 0 DC 5 AC 1\nR1 in a 100k\nD1 a 0 DX\n.model DX D(IS=1e-14 N=1{extra})\n");
+    let freqs = vec![1.0, 10.0, 100.0, 1e6];
+    let white = noise(&card(""), "a", "v1", freqs.clone());
+    let pink = noise(&card(&format!(" KF={kf} AF={af}")), "a", "v1", freqs.clone());
+    let op = simulate(&Design::from_netlist(&card(""), &|_| None).unwrap(), &Analysis::Op).unwrap().result;
+    let id = -op.op().unwrap()["i(v1)"];
+    // The flicker generator sits where the shot generator does, so it reaches the output through
+    // the same transfer: |H|² = white² / (shot + thermal density).
+    let vt = K_B * T / Q_E;
+    let r = 1.0 / (1.0 / 100e3 + id / vt + 1e-12);
+    for (k, f) in freqs.iter().enumerate() {
+        let added = pink.onoise[k].powi(2) - white.onoise[k].powi(2);
+        close(added, kf * id.powf(af) / f * r * r, 2e-3, &format!("flicker at {f} Hz"));
+    }
+    // Far above the corner the flicker share is gone.
+    close(pink.onoise[3], white.onoise[3], 1e-3, "white above the corner");
+}
+
+#[test]
+fn a_mosfet_with_kf_adds_drain_flicker_over_w_l_cox_squared() {
+    let (kf, af, tox) = (1e-25, 1.0, 1e-8);
+    let card = |extra: &str| {
+        format!("cs\nVDD dd 0 5\nVG g 0 DC 1.0 AC 1\nRD dd d 10k\nM1 d g 0 0 MX L=1u W=10u\n.model MX NMOS(vto=0.7 kp=1e-4 tox={tox}{extra})\n")
+    };
+    let white = noise(&card(""), "d", "vg", vec![10.0]);
+    let pink = noise(&card(&format!(" KF={kf} AF={af}")), "d", "vg", vec![10.0]);
+    let op = simulate(&Design::from_netlist(&card(""), &|_| None).unwrap(), &Analysis::Op).unwrap().result;
+    let id = -op.op().unwrap()["i(vdd)"];
+    let cox = 3.9 * 8.854_187_8e-12 / tox;
+    // The drain current's generator reaches the drain through RD in parallel with the output
+    // resistance (λ = 0: RD alone).
+    let want = kf * id.powf(af) / (10.0 * 10e-6 * 1e-6 * cox * cox) * 10e3 * 10e3;
+    close(pink.onoise[0].powi(2) - white.onoise[0].powi(2), want, 2e-3, "MOSFET flicker");
 }

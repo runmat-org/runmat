@@ -12,10 +12,10 @@ use crate::num::Dual;
 
 pub const KNOWN: &[&str] = &[
     "is", "bf", "nf", "vaf", "va", "ikf", "ik", "ise", "ne", "br", "nr", "var", "vb", "ikr", "isc", "nc", "rb", "re", "rc",
-    "cje", "vje", "pe", "mje", "me", "tf", "cjc", "vjc", "pc", "mjc", "mc", "tr", "fc", "eg", "xti", "tnom", "level",
+    "cje", "vje", "pe", "mje", "me", "tf", "cjc", "vjc", "pc", "mjc", "mc", "tr", "fc", "eg", "xti", "tnom", "level", "kf", "af",
 ];
 pub const IGNORED: &[&str] = &[
-    "irb", "rbm", "xtf", "vtf", "itf", "ptf", "xcjc", "cjs", "ccs", "vjs", "ps", "mjs", "ms", "xtb", "kf", "af", "iss", "ns",
+    "irb", "rbm", "xtf", "vtf", "itf", "ptf", "xcjc", "cjs", "ccs", "vjs", "ps", "mjs", "ms", "xtb", "iss", "ns",
     "nk", "qco", "rco", "vo", "gamma", "mfg", "vceo", "icrating", "type", "bvcbo", "bvebo", "bvceo", "nkf", "trb1", "tre1", "trc1", "quasimod", "iave", "vpk",
 ];
 
@@ -56,6 +56,8 @@ pub struct Bjt {
     pub fc: f64,
     pub vcrit: f64,
     pub off: bool,
+    /// Flicker coefficients (`kf`, `af`), on the base current.
+    pub flicker: Option<crate::analysis::noise::Flicker>,
     pub q_be: usize,
     pub q_bc: usize,
     pub mem: usize,
@@ -112,6 +114,7 @@ impl Bjt {
             fc: p.get("fc", 0.5),
             vcrit: vcrit(nf * vt, is),
             off,
+            flicker: crate::analysis::noise::Flicker::of(p),
             q_be: s.state(false),
             q_bc: s.state(false),
             mem: {
@@ -218,7 +221,8 @@ impl Device for Bjt {
         }
     }
     /// Collector current (into the collector terminal).
-    /// Collector and base shot noise, thermal noise of rb, rc and re.
+    /// Collector and base shot noise, flicker noise of the base current, thermal noise of rb,
+    /// rc and re.
     fn noise(&self, sink: &mut crate::analysis::noise::NoiseSink) {
         let x = sink.x;
         let vbe = self.tp * (node_v(x, self.bi) - node_v(x, self.ei));
@@ -226,6 +230,7 @@ impl Device for Bjt {
         let [ibe, ibc, ice, _, _] = self.eval(vbe, vbc, 0.0, false);
         sink.shot(self.ci, self.ei, ice.v - ibc.v);
         sink.shot(self.bi, self.ei, ibe.v + ibc.v);
+        sink.flicker(self.bi, self.ei, ibe.v + ibc.v, self.flicker, 1.0);
         sink.thermal(self.b, self.bi, self.gb);
         sink.thermal(self.c, self.ci, self.gc);
         sink.thermal(self.e, self.ei, self.ge);
