@@ -212,6 +212,12 @@ pub(crate) enum MateOp {
     DistancePlane { d: f64 },
     AngleAboutZ { theta: f64 },
     AngleBetweenZ { theta: f64 },
+    PinSlot,
+    Screw { lead: f64 },
+    /// `x0`/`z0`: each connector's world X and Z where the solve starts.
+    Gear { ratio: f64, xa0: [f64; 3], za0: [f64; 3], xb0: [f64; 3], zb0: [f64; 3] },
+    /// `ob0`/`xb0`: the rack connector's world origin and X where the solve starts.
+    RackPinion { travel: f64, xa0: [f64; 3], za0: [f64; 3], ob0: [f64; 3], xb0: [f64; 3] },
 }
 
 impl Op {
@@ -234,8 +240,8 @@ impl Op {
             Op::FixBody { .. } => 6,
             Op::Mate { kind, .. } => match kind {
                 MateOp::Fasten => 6,
-                MateOp::Revolute | MateOp::Slider => 5,
-                MateOp::Cylindrical => 4,
+                MateOp::Revolute | MateOp::Slider | MateOp::Screw { .. } => 5,
+                MateOp::Cylindrical | MateOp::PinSlot => 4,
                 MateOp::Planar | MateOp::Ball => 3,
                 MateOp::Parallel | MateOp::TangentCylinder { .. } => 2,
                 _ => 1,
@@ -1160,7 +1166,37 @@ fn eval_mate<S: Real>(kind: MateOp, la: &Frame, lb: &Frame, x: &[S], out: &mut [
             let cr = cross3(za, zb);
             out[0] = dot3(cr, cr).sqrt().atan2(dot3(za, zb)) - theta;
         }
+        MateOp::PinSlot => {
+            out[0] = dot3(d, yb);
+            out[1] = dot3(d, zb);
+            out[2] = dot3(za, xb);
+            out[3] = dot3(za, yb);
+        }
+        MateOp::Screw { lead } => {
+            out[0] = dot3(xa, zb);
+            out[1] = dot3(ya, zb);
+            out[2] = dot3(d, xa);
+            out[3] = dot3(d, ya);
+            let theta = dot3(cross3(xa, xb), za).atan2(dot3(xa, xb));
+            out[4] = dot3(d, za) - theta * (lead / std::f64::consts::TAU);
+        }
+        MateOp::Gear { ratio, xa0, za0, xb0, zb0 } => {
+            let ta = turned(xa0, za0, xa);
+            let tb = turned(xb0, zb0, xb);
+            out[0] = ta + tb * ratio;
+        }
+        MateOp::RackPinion { travel, xa0, za0, ob0, xb0 } => {
+            let ta = turned(xa0, za0, xa);
+            let moved = dot3(sub3(ob, ob0.map(S::cst)), xb0.map(S::cst));
+            out[0] = moved - ta * (travel / std::f64::consts::TAU);
+        }
     }
+}
+
+/// How far `x` has turned about the fixed axis `z0` from the fixed direction `x0` (radians).
+fn turned<S: Real>(x0: [f64; 3], z0: [f64; 3], x: [S; 3]) -> S {
+    let (x0, z0) = (x0.map(S::cst), z0.map(S::cst));
+    dot3(cross3(x0, x), z0).atan2(dot3(x0, x))
 }
 
 // ------------------------------------------------------------------ lowering
@@ -1424,6 +1460,10 @@ fn row_units(op: &Op, vars: &[VarId], sys: &System) -> Vec<Unit> {
             | MateOp::DistancePlane { .. } => vec![L],
             MateOp::TangentCylinder { .. } => vec![A, L],
             MateOp::AngleAboutZ { .. } | MateOp::AngleBetweenZ { .. } => vec![A],
+            MateOp::PinSlot => vec![L, L, A, A],
+            MateOp::Screw { .. } => vec![A, A, L, L, L],
+            MateOp::Gear { .. } => vec![A],
+            MateOp::RackPinion { .. } => vec![L],
         },
         other => vec![L; other.rows()],
     }
@@ -1905,6 +1945,18 @@ fn lower_user(
                     target: t,
                     ..
                 } => MateOp::AngleBetweenZ { theta: target(t) },
+                Mate::PinSlot { .. } => MateOp::PinSlot,
+                Mate::Screw { lead, .. } => MateOp::Screw { lead: *lead },
+                Mate::Gear { ratio, .. } | Mate::RackPinion { travel: ratio, .. } => {
+                    // The couplings measure turns from where this solve starts.
+                    let x: Vec<f64> = l.vars.iter().map(|v| l.v(*v)).collect();
+                    let (_, _, [xa0, _, za0]) = connector_world(&x[0..7], &la);
+                    let (ob0, _, [xb0, _, zb0]) = connector_world(&x[7..14], &lb);
+                    match m {
+                        Mate::Gear { .. } => MateOp::Gear { ratio: *ratio, xa0, za0, xb0, zb0 },
+                        _ => MateOp::RackPinion { travel: *ratio, xa0, za0, ob0, xb0 },
+                    }
+                }
             };
             Op::Mate { kind, la, lb }
         }
@@ -1978,6 +2030,22 @@ mod tests {
             MateOp::DistancePlane { d: 1.0 },
             MateOp::AngleAboutZ { theta: 0.3 },
             MateOp::AngleBetweenZ { theta: 0.3 },
+            MateOp::PinSlot,
+            MateOp::Screw { lead: 0.25 },
+            MateOp::Gear {
+                ratio: 2.0,
+                xa0: [1.0, 0.0, 0.0],
+                za0: [0.0, 0.0, 1.0],
+                xb0: [0.0, 1.0, 0.0],
+                zb0: [0.0, 0.0, 1.0],
+            },
+            MateOp::RackPinion {
+                travel: 0.3,
+                xa0: [1.0, 0.0, 0.0],
+                za0: [0.0, 0.0, 1.0],
+                ob0: [0.1, 0.2, 0.3],
+                xb0: [0.0, 1.0, 0.0],
+            },
         ];
         let knots = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
         let mut cases: Vec<(Op, usize)> = vec![

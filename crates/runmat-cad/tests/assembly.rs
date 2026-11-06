@@ -814,6 +814,108 @@ fn a08_revolute_mates_solve_report_dof_and_limits() {
     assert!(codes(&r).contains(&DiagCode::AsmLimitActive));
 }
 
+/// A mechanism: `base` fixed, the other parts floating at the origin, each part publishing
+/// the named frames, connectors named `<occurrence>.<frame>`.
+fn mechanism(parts: &[(&str, Vec<(&str, Frame)>)], mates: Vec<(&str, MateKind, &str, &str)>) -> MemorySource {
+    let mut src = MemorySource::default();
+    let mut top = AssemblyDocument::new("m.assembly", "m");
+    for (name, frames) in parts {
+        let published = frames
+            .iter()
+            .map(|(n, f)| (*n, PublishedGeometry::Frame { frame: *f }))
+            .collect();
+        add_part(&mut src, &format!("{name}.part"), name, unit_box(), published);
+        let mut o = Occurrence::new(name, DefinitionRef::part(&format!("{name}.part"), None));
+        o.fixed = *name == "base";
+        top.occurrences.push(o);
+        for (f, _) in frames {
+            top.connectors.push(MateConnector {
+                name: format!("{name}.{f}"),
+                occurrence: RelPath::new(&[name]),
+                anchor: AnchorRef::Published { name: (*f).into() },
+                offset: None,
+                flip: false,
+            });
+        }
+    }
+    for (name, kind, a, b) in mates {
+        top.mates.push(MateDef { name: name.into(), kind, a: a.into(), b: b.into(), when: None, suppressed: false });
+    }
+    src.add_assembly(top);
+    src
+}
+
+fn axes(origin: [f64; 3], x: [f64; 3], z: [f64; 3]) -> Frame {
+    let y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
+    Frame { origin, x, y, z }
+}
+
+fn driven(deg: f64) -> MateKind {
+    MateKind::Revolute { angle: Some(TargetExpr::Exact { value: ValueExpr::deg(deg) }) }
+}
+
+#[test]
+fn a08b_gear_rack_screw_and_pin_slot_mates_couple_their_motions() {
+    let up = |x: f64, y: f64| axes([x, y, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+    // Gears: A driven 30° on its pin, B (twice A's teeth) turns -15° on its own.
+    let src = mechanism(
+        &[("base", vec![("pa", up(0.0, 0.0)), ("pb", up(0.1, 0.0))]), ("ga", vec![("eye", up(0.0, 0.0))]), ("gb", vec![("eye", up(0.0, 0.0))])],
+        vec![
+            ("ra", driven(30.0), "base.pa", "ga.eye"),
+            ("rb", MateKind::Revolute { angle: None }, "base.pb", "gb.eye"),
+            ("mesh", MateKind::Gear { ratio: ValueExpr::number(2.0) }, "ga.eye", "gb.eye"),
+        ],
+    );
+    let r = run(&src, "m.assembly", &ResolveRequest::default());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let gb = r.node(r.find_display("gb").unwrap());
+    let x = gb.world.apply_vector([1.0, 0.0, 0.0]);
+    let t = (-15f64).to_radians();
+    assert!(close(x, [t.cos(), t.sin(), 0.0]), "{x:?}");
+    assert!(close(gb.world.translation, [0.1, 0.0, 0.0]), "{:?}", gb.world.translation);
+    assert_eq!(gb.dof, Some(0), "the gear takes B's one rotation");
+
+    // Rack and pinion: the pinion turns 90°; the rack, on a slider along x, moves a quarter of
+    // its 100 mm travel per turn.
+    let along_x = axes([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let src = mechanism(
+        &[("base", vec![("pin", up(0.0, 0.0)), ("guide", along_x)]), ("pinion", vec![("eye", up(0.0, 0.0))]), ("rack", vec![("rail", along_x), ("teeth", up(0.0, 0.0))])],
+        vec![
+            ("turn", driven(90.0), "base.pin", "pinion.eye"),
+            ("slide", MateKind::Slider { distance: None }, "base.guide", "rack.rail"),
+            ("drive", MateKind::RackPinion { travel: mm(100.0) }, "pinion.eye", "rack.teeth"),
+        ],
+    );
+    let r = run(&src, "m.assembly", &ResolveRequest::default());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let rack = r.node(r.find_display("rack").unwrap());
+    assert!(close(rack.world.translation, [0.025, 0.0, 0.0]), "{:?}", rack.world.translation);
+    assert_eq!(rack.dof, Some(0));
+
+    // Screw: a nut turned 90° on a 2 mm lead advances 0.5 mm.
+    let src = mechanism(
+        &[("base", vec![("axis", up(0.0, 0.0))]), ("nut", vec![("eye", up(0.0, 0.0))])],
+        vec![
+            ("thread", MateKind::Screw { lead: mm(2.0) }, "base.axis", "nut.eye"),
+            ("turn", MateKind::Angle { measure: AngleMeasure::AboutZ, target: TargetExpr::Exact { value: ValueExpr::deg(90.0) } }, "base.axis", "nut.eye"),
+        ],
+    );
+    let r = run(&src, "m.assembly", &ResolveRequest::default());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let nut = r.node(r.find_display("nut").unwrap());
+    assert!(close(nut.world.translation, [0.0, 0.0, 0.0005]), "{:?}", nut.world.translation);
+    assert_eq!(nut.dof, Some(0));
+
+    // Pin in a slot: the pin slides along the slot and turns in it.
+    let src = mechanism(
+        &[("base", vec![("slot", up(0.0, 0.0))]), ("link", vec![("pin", up(0.0, 0.0))])],
+        vec![("guide", MateKind::PinSlot, "link.pin", "base.slot")],
+    );
+    let r = run(&src, "m.assembly", &ResolveRequest::default());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    assert_eq!(r.node(r.find_display("link").unwrap()).dof, Some(2));
+}
+
 #[test]
 fn a09_conflicting_and_redundant_mates_are_named() {
     let mut src = hinge_project(None, Some(90.0));

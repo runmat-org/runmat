@@ -43,6 +43,26 @@ pub(super) fn field(values: &Values, id: &str, unit: &str) -> Result<ValueExpr, 
         .map_err(|e| model(format!("`{id}` isn't a value: {e}")))
 }
 
+/// The `ratio` field as a plain number (a gear's teeth ratio), 1 when absent.
+fn ratio(values: &Values) -> Result<ValueExpr, EditFailure> {
+    let v = match values.get("ratio") {
+        None | Some(Value::Null) => 1.0,
+        Some(Value::Number(n)) => n.as_f64().unwrap_or(1.0),
+        Some(Value::String(s)) => s
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| model(format!("`ratio` isn't a number: {s}")))?,
+        Some(other) => {
+            return serde_json::from_value(value(values, "ratio", "")?)
+                .map_err(|e| model(format!("`ratio` isn't a value: {e} ({other})")))
+        }
+    };
+    if v == 0.0 {
+        return Err(model("a gear ratio must be non-zero"));
+    }
+    Ok(ValueExpr::Number { value: v })
+}
+
 /// Micrometre rounding keeps written coordinates short (`12.5 mm`, not `12.500000000001 mm`).
 fn mm(metres: f64) -> f64 {
     let v = (metres * 1e6).round() / 1e3;
@@ -244,13 +264,25 @@ pub(super) fn mate(
         },
         "planar" => MateKind::Planar,
         "ball" => MateKind::Ball,
+        // The pin's connector first, then the slot's (the slot runs along its X).
+        "pin_slot" => MateKind::PinSlot,
+        "screw" => MateKind::Screw {
+            lead: field(values, "pitch", "mm")?,
+        },
+        "gear" => MateKind::Gear {
+            ratio: ratio(values)?,
+        },
+        // `pitch` is the rack's travel per turn of the pinion.
+        "rack_pinion" => MateKind::RackPinion {
+            travel: field(values, "pitch", "mm")?,
+        },
         other => {
             return Err(model(format!(
                 "the `{other}` mate is written in the source editor in this build"
             )))
         }
     };
-    // Turn the moving component into the mated orientation first, as SolidWorks moves a part
+    // Turn the moving component into the mated orientation first, as feature-based CAD tools move a part
     // when a mate is added: the solve then only finishes the position, and starts where the
     // angle residual has a slope (parallel faces under a perpendicular mate have none).
     let (moving_frame, other_frame) = if moving == a.occurrence { (a.world, b.world) } else { (b.world, a.world) };

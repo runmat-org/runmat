@@ -529,6 +529,17 @@ pub enum MateKind {
         measure: AngleMeasure,
         target: TargetExpr,
     },
+    /// A pin (`a`, its Z the pin axis) in a slot (`b`, the slot along its X): the pin slides
+    /// along the slot and turns in it.
+    PinSlot,
+    /// A screw: `b` turns about `a`'s Z and advances `lead` along it per turn.
+    Screw { lead: ValueExpr },
+    /// Gears on their own axes (each connector's Z): `b` turns `-1/ratio` of `a`'s turn
+    /// (`ratio` is `b`'s teeth over `a`'s).
+    Gear { ratio: ValueExpr },
+    /// A pinion (`a`, turning about its Z) and a rack (`b`, moving along its X) that moves
+    /// `travel` per turn of the pinion (π × the pitch diameter).
+    RackPinion { travel: ValueExpr },
 }
 
 impl MateKind {
@@ -544,6 +555,10 @@ impl MateKind {
             MateKind::Tangent { .. } => "tangent",
             MateKind::Distance { .. } => "distance",
             MateKind::Angle { .. } => "angle",
+            MateKind::PinSlot => "pin_slot",
+            MateKind::Screw { .. } => "screw",
+            MateKind::Gear { .. } => "gear",
+            MateKind::RackPinion { .. } => "rack_pinion",
         }
     }
 }

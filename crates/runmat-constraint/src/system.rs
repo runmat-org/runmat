@@ -250,6 +250,18 @@ pub enum Mate {
         mode: AngleMode,
         target: Target,
     },
+    /// A pin in a slot: A's origin on B's X axis (the slot's centre line) and the Z axes
+    /// parallel (2 DOF: along the slot, and turning about the pin).
+    PinSlot { a: EntityId, b: EntityId },
+    /// A screw: cylindrical, and B advances `lead` along A's Z for each turn of B's X about A's
+    /// Z from A's X (1 DOF).
+    Screw { a: EntityId, b: EntityId, lead: f64 },
+    /// Gears: B turns about its Z by `-1/ratio` of A's turn about its Z, both measured in the
+    /// assembly from where the solve starts (`ratio` is B's teeth over A's).
+    Gear { a: EntityId, b: EntityId, ratio: f64 },
+    /// Rack and pinion: rack B moves along its X by `travel` for each turn of pinion A about its
+    /// Z, measured in the assembly from where the solve starts.
+    RackPinion { a: EntityId, b: EntityId, travel: f64 },
 }
 
 /// An ellipse dimension.
@@ -1389,6 +1401,13 @@ impl System {
                     return Err(BuildError::BadValue("radius must be non-negative"));
                 }
             }
+            Mate::Screw { lead: v, .. } | Mate::RackPinion { travel: v, .. } => finite(*v)?,
+            Mate::Gear { ratio, .. } => {
+                finite(*ratio)?;
+                if *ratio == 0.0 {
+                    return Err(BuildError::BadValue("a gear ratio must be non-zero"));
+                }
+            }
             Mate::Distance { target, .. } | Mate::Angle { target, .. } => match target {
                 Target::Exact(v) => finite(*v)?,
                 Target::Range { min, max } => {
@@ -1416,7 +1435,11 @@ pub(crate) fn mate_connectors(m: &Mate) -> (EntityId, EntityId) {
         | Mate::Parallel { a, b }
         | Mate::Tangent { a, b, .. }
         | Mate::Distance { a, b, .. }
-        | Mate::Angle { a, b, .. } => (a, b),
+        | Mate::Angle { a, b, .. }
+        | Mate::PinSlot { a, b }
+        | Mate::Screw { a, b, .. }
+        | Mate::Gear { a, b, .. }
+        | Mate::RackPinion { a, b, .. } => (a, b),
     }
 }
 

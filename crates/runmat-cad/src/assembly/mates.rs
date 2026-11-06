@@ -667,6 +667,22 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 },
                 target: target(t, false)?,
             })],
+            MateKind::PinSlot => vec![m(rc::Mate::PinSlot { a, b })],
+            MateKind::Screw { lead } => vec![m(rc::Mate::Screw {
+                a,
+                b,
+                lead: self.length(lead, env)?,
+            })],
+            MateKind::Gear { ratio } => vec![m(rc::Mate::Gear {
+                a,
+                b,
+                ratio: self.ratio(ratio, env)?,
+            })],
+            MateKind::RackPinion { travel } => vec![m(rc::Mate::RackPinion {
+                a,
+                b,
+                travel: self.length(travel, env)?,
+            })],
             MateKind::Angle { measure, target: t } => vec![m(rc::Mate::Angle {
                 a,
                 b,

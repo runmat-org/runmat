@@ -16,6 +16,13 @@ impl<'a, 'b> Resolver<'a, 'b> {
             .map_err(|e| e.to_string())
     }
 
+    /// A dimensionless value (a ratio).
+    pub(in crate::assembly) fn ratio(&self, e: &ValueExpr, env: &ValueEnv) -> Result<f64, String> {
+        self.ev()
+            .eval_as(e, env, Dimension::DIMENSIONLESS)
+            .map_err(|e| e.to_string())
+    }
+
     pub(in crate::assembly) fn count(&self, e: &ValueExpr, env: &ValueEnv) -> Result<u32, String> {
         let q = self.ev().eval(e, env).map_err(|e| e.to_string())?;
         if !q.dimension.is_dimensionless() || q.si < 1.0 || q.si.fract().abs() > 1e-9 {

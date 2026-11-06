@@ -203,6 +203,22 @@ fn tangent_lays_the_pin_on_the_plate() {
 }
 
 #[test]
+fn gear_screw_rack_and_pin_slot_mates_write_their_values() {
+    let c = compile(RIG);
+    let (pin, pin2) = (c.face("pin", round), c.face("pin2", round));
+    let text = mate(RIG, "gear", pin.clone(), pin2.clone(), json!({ "ratio": 2 }));
+    assert!(text.contains("kind = { mate = gear, ratio = 2 }"), "{text}");
+    let text = mate(RIG, "screw", pin.clone(), pin2.clone(), json!({ "pitch": 1.5 }));
+    assert!(text.contains("kind = { mate = screw, lead = 1.5 mm }"), "{text}");
+    let text = mate(RIG, "rack_pinion", pin.clone(), pin2.clone(), json!({ "pitch": 60 }));
+    assert!(text.contains("kind = { mate = rack_pinion, travel = 60 mm }"), "{text}");
+    let text = mate(RIG, "pin_slot", pin, pin2, json!({}));
+    assert!(text.contains("kind = { mate = pin_slot }"), "{text}");
+    // Each one still compiles.
+    compile(&text);
+}
+
+#[test]
 fn mates_refuse_picks_that_dont_fit() {
     let c = compile(RIG);
     let request = json!({ "command": "assembly.mate", "values": { "type": "concentric", "first": [c.face("plate", top)], "second": [c.face("pin", round)] } });
