@@ -34,14 +34,40 @@ part arm {
     feature knuckle_cut = plane.offset(base = origin.xy, distance = -7 mm)
     sketch bores_s on plane.knuckle_cut {
         pin = circle(center = [0 mm, 0 mm], radius = 2.05 mm)
-        m1 = circle(center = [input.length + 5 mm, 0 mm], radius = 1.1 mm)
-        m2 = circle(center = [input.length - 5 mm, 0 mm], radius = 1.1 mm)
     }
     feature bores = extrude(profile = sketch.bores_s, through_all, mode = cut)
+    // The motor's four M2 screws pass up through the pad and the pod's floor into the
+    // stator, on a 12 mm bolt circle (close-fit clearance).
+    feature motor_holes = hole(
+        face = feature.pad.face.end,
+        at = {
+            a = point(input.length + 6 mm, 0 mm, input.rise + 4 mm),
+            b = point(input.length, 6 mm, input.rise + 4 mm),
+            c = point(input.length - 6 mm, 0 mm, input.rise + 4 mm),
+            d = point(input.length, -6 mm, input.rise + 4 mm)
+        },
+        spec = { standard = iso, size = "M2", fit = close },
+        through_all
+    )
 
     // The knuckle's bore, where the hinge pin carries the arm, and the pad's top face, where the
     // motor pod's thrust comes in.
     region root : face = { select = [feature.bores.face.side(bores_s.pin)], expect = at_least_one }
     region motor_seat : face = { select = [feature.pad.face.end], expect = at_least_one }
     output arm = { body = feature.knuckle.body, part_number = "CD-AR-210", material = "carbon_fiber", color = "#3C4048" }
+
+    // Datums: A the motor seat, B the hinge bore's axis, C the knuckle's underside.
+    datum A = { on = feature.pad.face.end }
+    datum B = { on = feature.bores.face.side(bores_s.pin) }
+    datum C = { on = feature.knuckle.face.start }
+    // The hinge bore runs on a 4 mm ground pin (H8-class clearance), square to the motor seat
+    // so the four props stay in one plane; the seat is flat and parallel to the knuckle face.
+    size pin_bore = { on = [feature.bores.face.side(bores_s.pin)], size = 4.1 mm ± [0.018 mm, 0 mm] }
+    location pin_to_motor = { from = feature.bores.face.side(bores_s.pin), to = feature.pad.face.side(pad_s.c), distance = input.length ± 0.1 mm }
+    location motor_bolt_circle = { from = feature.motor_holes.face.wall(a), to = feature.motor_holes.face.wall(c), distance = 12 mm ± 0.05 mm }
+    tolerance bore_square = { characteristic = perpendicularity, on = [feature.bores.face.side(bores_s.pin)], tolerance = 0.02 mm, diametral = true, datums = [{ label = "A" }] }
+    tolerance seat_parallel = { characteristic = parallelism, on = [feature.pad.face.end], tolerance = 0.03 mm, datums = [{ label = "C" }] }
+    tolerance motor_position = { characteristic = position, on = [feature.motor_holes.face.wall(a)], tolerance = 0.1 mm, diametral = true, modifier = mmc, datums = [{ label = "A" }, { label = "B" }, { label = "C" }] }
+    finish seat = { on = [feature.pad.face.end], ra = 0.8 um }
+    finish bore = { on = [feature.bores.face.side(bores_s.pin)], ra = 0.8 um, process = "reamed" }
 }

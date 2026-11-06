@@ -11,7 +11,8 @@
 //! - [`bom_table`]: BOM-table rendering data (columns, sort, groups, kept item numbers);
 //! - [`flat_pattern`]: sheet metal flat patterns as 2D sheets, bend tables and DXF;
 //! - [`hole_table`]: hole-table rows through the [`hole_table::HoleGeometry`] seam;
-//! - [`merge`]: three-way drawing merges by stable id, with reference re-resolution.
+//! - [`merge`]: three-way drawing merges by stable id, with reference re-resolution;
+//! - [`revision_table`]: the revision table's rows, which the title block's revision reads.
 //!
 //! Annotations carry stable ids, so drawings merge like any other design file. A dimension
 //! names model entities (never projected 2D positions), so it follows the model; when its
@@ -23,6 +24,7 @@ pub mod flat_pattern;
 pub mod hole_table;
 pub mod index;
 pub mod merge;
+pub mod revision_table;
 
 use crate::assembly::bom::{Bom, BomItem, BomKind, IndentedRow};
 use crate::assembly::model::RelPath;
@@ -379,7 +381,10 @@ pub enum TableKind {
         #[serde(default)]
         spec: HoleTableSpec,
     },
-    Revision,
+    Revision {
+        #[serde(default)]
+        rows: Vec<revision_table::RevisionRow>,
+    },
     Bend {
         view: String,
     },
@@ -684,7 +689,7 @@ pub fn check_drawing_with(
             | TableKind::Bend { view }
             | TableKind::Weld { view }
             | TableKind::CutList { view } => Some(view),
-            TableKind::Revision => None,
+            TableKind::Revision { .. } => None,
         };
         let Some(vn) = view_of else { continue };
         let Some(v) = doc.view(vn) else {
@@ -956,6 +961,7 @@ pub fn check_drawing_with(
                 FieldSource::Scale => format!("{}:{}", sh.scale.0, sh.scale.1),
                 FieldSource::Revision => model_of
                     .and_then(|m| model.property(m, &PropertyName::new("revision")))
+                    .or_else(|| revision_table::latest(&doc.tables).map(str::to_owned))
                     .unwrap_or_else(|| "—".into()),
                 FieldSource::Property { name } => {
                     match model_of.and_then(|m| model.property(m, name)) {

@@ -423,16 +423,7 @@ impl<'a, 'b> Run<'a, 'b> {
     }
 
     pub(super) fn hole(&mut self, i: usize, id: &FeatureId, h: &Hole) -> Result<Compiled, Halt> {
-        let face = self.face_entity(i, id, "face", &h.face)?;
-        let frame = self.face_frame(&face).ok_or_else(|| {
-            self.error(
-                id,
-                Some("face"),
-                DiagCode::RefKindMismatch,
-                "hole face is not planar".into(),
-                Vec::new(),
-            )
-        })?;
+        let (bodies, frame) = self.hole_faces(i, id, &h.face)?;
         let mut positions = Vec::new();
         for (k, p) in h.positions.iter().enumerate() {
             let w = self.point(i, id, &format!("positions[{}]", k), &p.at)?;
@@ -572,7 +563,7 @@ impl<'a, 'b> Run<'a, 'b> {
             }
         };
         let mut ops = Operands {
-            combine: vec![face.body as usize],
+            combine: bodies,
             refs: Vec::new(),
         };
         let mut stages = Vec::new();

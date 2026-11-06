@@ -35,6 +35,15 @@ pub trait AnnotationValues {
     fn hole_callout(&self, _model: &ModelRef, _hole: &Reference) -> Option<String> {
         None
     }
+    /// A size or location tolerance in the part's PMI by name, as a dimension prints it after
+    /// its value (`+0.012/0`, `±0.1`) or in place of it (`H7`).
+    fn pmi_tolerance(&self, _model: &ModelRef, _name: &str) -> Option<String> {
+        None
+    }
+    /// The finish the part's PMI gives the surface (`Ra 0.8`, with its process when set).
+    fn surface_finish(&self, _model: &ModelRef, _on: &Reference) -> Option<String> {
+        None
+    }
 }
 
 /// No measurements: dimensions and frames fall back to their PMI names.
@@ -81,10 +90,12 @@ pub fn build_drawing_index(
                     reference,
                     ..
                 } => {
-                    let value = values
-                        .dimension(at, *style, entities)
-                        .or_else(|| pmi.clone())
-                        .unwrap_or_else(|| "Dimension".into());
+                    let tolerance = pmi.as_ref().and_then(|name| values.pmi_tolerance(at, name));
+                    let value = match (values.dimension(at, *style, entities), tolerance) {
+                        (Some(v), Some(t)) => format!("{v} {t}"),
+                        (Some(v), None) => v,
+                        (None, _) => pmi.clone().unwrap_or_else(|| "Dimension".into()),
+                    };
                     if *reference {
                         format!("({value})")
                     } else {
@@ -99,7 +110,9 @@ pub fn build_drawing_index(
                     .unwrap_or_else(|| tolerance.clone()),
                 AnnotationKind::DatumSymbol { label } => format!("Datum {label}"),
                 AnnotationKind::DatumTarget { label } => format!("Datum target {label}"),
-                AnnotationKind::SurfaceFinish { .. } => "Surface finish".into(),
+                AnnotationKind::SurfaceFinish { on } => values
+                    .surface_finish(at, on)
+                    .unwrap_or_else(|| "Surface finish".into()),
                 AnnotationKind::Weld { symbol, .. } => format!("Weld {symbol}"),
                 AnnotationKind::Note { text, .. } => {
                     fill_fields(text, |field| model.property(at, &PropertyName::new(field)))

@@ -65,6 +65,7 @@ fn m01_pmi_resolves_by_reference_and_checks_semantics() {
             fit: None,
         }],
         finishes: vec![SurfaceFinish {
+            name: "top".into(),
             on: vec![Reference::end_cap("body")],
             ra: ValueExpr::qty(0.0016, "mm"),
             process: Some("milled".into()),

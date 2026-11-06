@@ -691,7 +691,7 @@ fn t06_drawing_merges_field_by_field_by_stable_id() {
     ours.tables.push(DrawingTable {
         name: "revisions".into(),
         sheet: "1".into(),
-        kind: TableKind::Revision,
+        kind: TableKind::Revision { rows: Vec::new() },
         at: [5.0, 5.0],
     });
     let m = merge_drawings(&base, &ours, &theirs, None);

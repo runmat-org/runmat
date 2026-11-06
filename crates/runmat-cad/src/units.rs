@@ -180,6 +180,8 @@ impl UnitAuthority for StubUnits {
         let (dimension, scale) = match expression {
             "m" => (Dimension::LENGTH, 1.0),
             "mm" => (Dimension::LENGTH, 1e-3),
+            // Surface roughness (Ra) and fine tolerances read in micrometres.
+            "um" | "µm" => (Dimension::LENGTH, 1e-6),
             "cm" => (Dimension::LENGTH, 1e-2),
             "in" => (Dimension::LENGTH, 0.0254),
             "m^2" => (Dimension::AREA, 1.0),
@@ -199,6 +201,6 @@ impl UnitAuthority for StubUnits {
     }
 
     fn fingerprint(&self) -> String {
-        "runmat-cad/stub-units/1".to_owned()
+        "runmat-cad/stub-units/2".to_owned()
     }
 }

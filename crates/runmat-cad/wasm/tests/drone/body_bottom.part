@@ -99,14 +99,17 @@ part body_bottom {
         k3 = circle(center = [25.25 mm, -15.25 mm], radius = 3.4 mm)
     }
     feature bosses = extrude(profile = sketch.boss_s, distance = 6.1 mm, mode = add)
-    feature tap_base = plane.offset(base = origin.xy, distance = 5 mm)
-    sketch tap_s on plane.tap_base {
-        t0 = circle(center = [25.25 mm, 15.25 mm], radius = 1.25 mm)
-        t1 = circle(center = [-5.25 mm, 15.25 mm], radius = 1.25 mm)
-        t2 = circle(center = [-5.25 mm, -15.25 mm], radius = 1.25 mm)
-        t3 = circle(center = [25.25 mm, -15.25 mm], radius = 1.25 mm)
-    }
-    feature taps = extrude(profile = sketch.tap_s, distance = 6 mm, mode = cut)
+    feature taps = hole(
+        face = feature.bosses.face.end,
+        at = {
+            t0 = point(25.25 mm, 15.25 mm, 10 mm),
+            t1 = point(-5.25 mm, 15.25 mm, 10 mm),
+            t2 = point(-5.25 mm, -15.25 mm, 10 mm),
+            t3 = point(25.25 mm, -15.25 mm, 10 mm)
+        },
+        diameter = 2.5 mm,
+        depth = 5 mm
+    )
     region boss_tops : face = { select = [feature.bosses.face.end], expect = at_least_one }
     region skin : face = { select = [feature.outer.face.side(outer_s0.c)], expect = at_least_one }
     output body_bottom = { body = feature.outer.body, part_number = "CD-BD-120", material = "polycarbonate", color = "#3A3E44" }

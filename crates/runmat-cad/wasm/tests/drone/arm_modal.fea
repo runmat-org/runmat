@@ -5,7 +5,10 @@
 // the knuckle's pin bore is stiffer than the pin, lugs and latch, so these frequencies are an
 // upper bound on the installed arm's.
 //
-// Material: compression-moulded chopped carbon fibre (E = 45 GPa quasi-isotropic, 1500 kg/m^3).
+// Material: a 0/90 carbon prepreg laminate, E = 65 GPa along the arm and 1550 kg/m^3, modelled
+// as isotropic (the flap and lag modes bend the arm along its fibres). The first design was
+// compression-moulded chopped fibre (45 GPa): its first flap mode, about 354 Hz by the check
+// below, sat under the 400 Hz target, so the arm moved to the laminate.
 // The pod carries the motor, folding propeller, cowl and leg as one lumped mass: 40 g over the
 // cowl's 6.26 cm^3 (pocketed over the arm's pad) is 6390 kg/m^3.
 //
@@ -13,8 +16,8 @@
 // once-per-revolution imbalance runs 108-167 Hz and the two-blade pass 217-333 Hz. The first
 // flap mode should sit above 1.2 x 333 = 400 Hz.
 // Check: as a tapered cantilever of 88 mm, I is 1,980 mm^4 at the root and 620 mm^4 at the tip
-// (about 1,110 mm^4 effective), k = 3EI/L^3 = 218 N/mm; with the 40 g pod and a quarter of the
-// arm's 17 g, f1 = sqrt(k/m)/(2 pi) = 354 Hz.
+// (about 1,110 mm^4 effective), k = 3EI/L^3 = 315 N/mm at 65 GPa; with the 40 g pod and a quarter
+// of the arm's 18 g, f1 = sqrt(k/m)/(2 pi) = 425 Hz, 1.28 x the 333 Hz blade pass.
 
 geometry arm {
     file = "./geometry/arm_study.step"
@@ -33,10 +36,10 @@ mesh arm on geometry.arm {
     }
 }
 
-material moulded_carbon {
-    mass_density = 1500 kg/m^3
+material prepreg_carbon {
+    mass_density = 1550 kg/m^3
     elastic {
-        youngs_modulus = 45 GPa
+        youngs_modulus = 65 GPa
         poisson_ratio = 0.3
     }
 }
@@ -50,7 +53,7 @@ material pod_lumped {
 }
 
 model pinned_arm {
-    assign material.moulded_carbon to geometry.arm.region.arm
+    assign material.prepreg_carbon to geometry.arm.region.arm
     assign material.pod_lumped to geometry.arm.region.pod
     constraint hinge {
         structural.fixed { target = geometry.arm.region.root }

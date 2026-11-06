@@ -137,7 +137,8 @@ pub const PART: DocumentGrammar = DocumentGrammar {
         ),
         named("feature_def", "feature_defs", "feature_def"),
         // Semantic PMI: `datum A = { on = feature.body.face.start }`,
-        // `tolerance top_flat = { characteristic = flatness, on = [ … ], tolerance = 0.05 mm }`.
+        // `tolerance top_flat = { characteristic = flatness, on = [ … ], tolerance = 0.05 mm }`,
+        // `finish seat = { on = [ … ], ra = 0.8 um }`.
         Collection {
             id: Some("label"),
             ..named("datum", "datums", "datum")
@@ -145,6 +146,7 @@ pub const PART: DocumentGrammar = DocumentGrammar {
         named("tolerance", "tolerances", "tolerance"),
         named("size", "sizes", "size"),
         named("location", "locations", "location"),
+        named("finish", "finishes", "finish"),
     ],
     links: Some(LINKS),
 };

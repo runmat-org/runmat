@@ -159,8 +159,12 @@ pub struct LocationTolerance {
     pub distance: ValueExpr,
 }
 
+/// A surface finish requirement:
+/// `finish seat = { on = [feature.pad.face.end], ra = 0.8 um, process = "lapped" }`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SurfaceFinish {
+    #[serde(default)]
+    pub name: String,
     pub on: Vec<Reference>,
     /// Roughness average (a length).
     pub ra: ValueExpr,

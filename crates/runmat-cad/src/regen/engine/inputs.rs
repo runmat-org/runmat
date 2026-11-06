@@ -54,6 +54,38 @@ impl<'a, 'b> Run<'a, 'b> {
 
     // ------------------------------------------------------------- geometry from references
 
+    /// The planar faces a hole starts on: one face, or several coplanar faces (a boss
+    /// pattern's end caps, `feature.bosses.face.end`), with the bodies they belong to and the
+    /// plane's frame. Faces off the first one's plane are an error.
+    pub(super) fn hole_faces(
+        &mut self,
+        i: usize,
+        id: &FeatureId,
+        r: &Reference,
+    ) -> Result<(Vec<usize>, Frame), Halt> {
+        let faces = self.list(i, id, "face", std::slice::from_ref(r), Some(TopoKind::Face))?;
+        let mut frame: Option<Frame> = None;
+        let mut bodies = Vec::new();
+        for h in &faces {
+            let Some(f) = self.face_frame(h) else {
+                return Err(self.error(id, Some("face"), DiagCode::RefKindMismatch, "hole face is not planar".into(), Vec::new()));
+            };
+            if let Some(first) = &frame {
+                let off = sub(f.origin, first.origin);
+                if dot(f.z, first.z) < 1.0 - 1e-9 || dot(off, off).sqrt() > 1e-9 {
+                    return Err(self.error(id, Some("face"), DiagCode::RefKindMismatch, "a hole's faces must lie in one plane".into(), Vec::new()));
+                }
+            } else {
+                frame = Some(f);
+            }
+            if !bodies.contains(&(h.body as usize)) {
+                bodies.push(h.body as usize);
+            }
+        }
+        let frame = frame.ok_or_else(|| self.error(id, Some("face"), DiagCode::RefKindMismatch, "a hole needs a face to start on".into(), Vec::new()))?;
+        Ok((bodies, frame))
+    }
+
     pub(super) fn face_frame(&self, h: &EntityHandle) -> Option<Frame> {
         let g = &self.st.bodies[h.body as usize].topology.faces[h.index as usize].geom;
         let SurfaceKind::Plane { normal } = g.surface else {

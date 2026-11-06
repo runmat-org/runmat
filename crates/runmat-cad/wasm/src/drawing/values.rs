@@ -1,6 +1,8 @@
 //! What a drawing's annotations read from the drawn parts: dimensions measured on the model's
 //! faces (the distance between two parallel planar faces, a cylinder's diameter), hole callouts
-//! from the hole's surface (`⌀4 THRU`), and GD&T feature control frames from the part's PMI
+//! from the hole feature (`4× ⌀2.2 THRU`) or else the hole's surface (`⌀4 THRU`), size and
+//! location tolerances from the PMI after the value (`⌀4.1 +0.012/0`), surface finishes
+//! (`Ra 0.8`), and GD&T feature control frames from the part's PMI
 //! (`∥|0.05|A`: the characteristic's symbol, the zone and the datums, one cell each, as ASME
 //! Y14.5 and ISO 1101 write them).
 //!
@@ -198,6 +200,9 @@ impl AnnotationValues for Values<'_> {
     }
 
     fn hole_callout(&self, model: &ModelRef, hole: &Reference) -> Option<String> {
+        if let Some(text) = self.documents.get(model.file.as_str()).and_then(|d| hole_feature_callout(d, hole)) {
+            return Some(text);
+        }
         let display = self.displays.get(model.file.as_str())?;
         let (points, surface) = face(display, &print_reference(hole)?)?;
         let (p, d, r) = cylinder(surface)?;
@@ -217,5 +222,110 @@ impl AnnotationValues for Values<'_> {
             format!("↧{}", number(depth))
         };
         Some(format!("⌀{} {end}", number(2.0 * r)))
+    }
+
+    fn pmi_tolerance(&self, model: &ModelRef, name: &str) -> Option<String> {
+        let pmi = &self.documents.get(model.file.as_str())?.pmi;
+        if let Some(size) = pmi.sizes.iter().find(|t| t.name == name) {
+            return size.fit.clone().or_else(|| tolerance_text(&size.size));
+        }
+        let location = pmi.locations.iter().find(|t| t.name == name)?;
+        tolerance_text(&location.distance)
+    }
+
+    fn surface_finish(&self, model: &ModelRef, on: &Reference) -> Option<String> {
+        let pmi = &self.documents.get(model.file.as_str())?.pmi;
+        let finish = pmi.finishes.iter().find(|f| f.on.contains(on))?;
+        // Roughness reads in micrometres (`Ra 0.8`).
+        let ra = length_mm(&finish.ra)? * 1000.0;
+        let mut text = format!("Ra {}", number(ra));
+        if let Some(process) = &finish.process {
+            text.push_str(&format!(" {process}"));
+        }
+        Some(text)
+    }
+}
+
+/// A tolerance as a drawing writes it after the nominal: `±0.1` when symmetric, else
+/// `+0.012/0` (upper over lower, a zero deviation without a sign).
+fn tolerance_text(value: &ValueExpr) -> Option<String> {
+    let ValueExpr::Toleranced { minus, plus, .. } = value else {
+        return None;
+    };
+    let (p, m) = (length_mm(plus)?, length_mm(minus)?);
+    if (p - m).abs() < 1e-9 {
+        return Some(format!("±{}", number(p)));
+    }
+    let signed = |v: f64, sign: char| if v.abs() < 1e-9 { "0".to_owned() } else { format!("{sign}{}", number_fine(v)) };
+    Some(format!("{}/{}", signed(p, '+'), signed(m, '-')))
+}
+
+/// Three decimals at most, for deviations (`0.012`).
+fn number_fine(v: f64) -> String {
+    let s = format!("{:.3}", (v * 1000.0).round() / 1000.0);
+    s.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// A hole feature's callout as ASME Y14.5 writes it: the count, the size and the end
+/// (`4× ⌀2.2 THRU`, `2× M3x0.5-6H ↧6`), read from the feature the reference names.
+fn hole_feature_callout(document: &PartDocument, hole: &Reference) -> Option<String> {
+    use runmat_cad::model::feature::{FeatureKind, HoleEnd, HoleForm};
+    let Reference::Name { name: runmat_cad::refs::name::EntityName::Generated(g), .. } = hole else {
+        return None;
+    };
+    let feature = document.features.iter().find(|f| f.id == g.feature)?;
+    let FeatureKind::Hole(h) = &feature.kind else {
+        return None;
+    };
+    let count = h.positions.len();
+    let mut size = match (&h.diameter, &h.spec) {
+        (Some(d), _) => format!("⌀{}", number(length_mm(d)?)),
+        (None, Some(spec)) => {
+            let tapped = matches!(h.form, HoleForm::Tapped { .. });
+            if tapped {
+                let t = runmat_cad::model::hole_tables::thread(spec).ok()?;
+                format!("{}-{}", t.designation, t.class)
+            } else {
+                let holes = runmat_cad::model::hole_tables::fastener(spec).ok()?;
+                format!("⌀{}", number(holes.clearance(spec.fit) * 1000.0))
+            }
+        }
+        (None, None) => return None,
+    };
+    let end = match &h.end {
+        HoleEnd::Blind { depth } => format!("↧{}", number(length_mm(depth)?)),
+        HoleEnd::ThroughAll | HoleEnd::UpToNext | HoleEnd::UpToFace { .. } => "THRU".to_owned(),
+    };
+    size.push(' ');
+    size.push_str(&end);
+    Some(if count > 1 { format!("{count}× {size}") } else { size })
+}
+
+/// The model entity a leadered annotation points at: a GD&T frame's toleranced feature and a
+/// datum symbol's datum feature (both from the part's PMI), a finish mark's face and a note's
+/// leader.
+pub fn leader_target(
+    kind: &runmat_cad::drawing::AnnotationKind,
+    document: Option<&PartDocument>,
+) -> Option<runmat_cad::refs::reference::Reference> {
+    use runmat_cad::drawing::AnnotationKind as K;
+    match kind {
+        K::Gdt { tolerance } => document?
+            .pmi
+            .tolerances
+            .iter()
+            .find(|t| &t.name == tolerance)?
+            .on
+            .first()
+            .cloned(),
+        K::DatumSymbol { label } => document?
+            .pmi
+            .datums
+            .iter()
+            .find(|d| &d.label == label)
+            .map(|d| d.on.clone()),
+        K::SurfaceFinish { on } => Some(on.clone()),
+        K::Note { leader, .. } => leader.clone(),
+        _ => None,
     }
 }

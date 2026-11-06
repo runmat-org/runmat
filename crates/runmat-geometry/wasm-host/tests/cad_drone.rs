@@ -114,9 +114,9 @@ fn the_drone_compiles_part_by_part_and_as_one_assembly() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// The arm drawing's dimensions read the part: a plane to a hole measures to the hole's axis,
-/// and two holes measure between their axes (the stack bolt is 21.567 mm out, the motor 110 mm,
-/// on a 16 mm bolt square).
+/// The arm's production drawing reads the part: dimensions between planes and between hole
+/// axes, tolerances from the PMI after the values, the hole callout from the hole feature, the
+/// feature control frames and finish marks, and the revision from the revision table.
 #[test]
 fn the_arm_drawing_dimensions_read_the_part() {
     let all = project();
@@ -127,13 +127,29 @@ fn the_arm_drawing_dimensions_read_the_part() {
     let text = &v["projection"]["data"]["text"];
     for (name, want) in [
         // The arm at its defaults (the front arm, 88.2 mm long): the knuckle and pad heights,
-        // the hinge-pin bore to the pod's inner screw (88.2 - 5 mm), and the pod's screw pitch.
+        // the hinge bore to the motor axis and the motor's bolt circle with their location
+        // tolerances, the bore's diameter with its size tolerance, the motor holes' callout
+        // from the hole feature, the frames from the PMI and the finish marks.
         ("knuckle_height", "13"),
         ("pad_thickness", "8"),
-        ("pin_to_screw", "83.2"),
-        ("screw_pitch", "10"),
+        ("pin_to_motor", "88.2 ±0.1"),
+        ("bolt_circle", "12 ±0.05"),
+        ("pin_bore", "⌀4.1 +0.018/0"),
+        ("motor_holes", "4× ⌀2.2 THRU"),
+        ("bore_square", "⊥|⌀0.02|A"),
+        ("motor_position", "⌖|⌀0.1 Ⓜ|A|B|C"),
+        ("seat_parallel", "∥|0.03|C"),
+        ("seat_finish", "Ra 0.8"),
+        ("bore_finish", "Ra 0.8 reamed"),
     ] {
         assert_eq!(text[name], want, "{name}: {text}");
+    }
+    // The title block's revision is the revision table's newest row.
+    let block = &v["projection"]["data"]["title_blocks"]["1"];
+    assert!(block.as_array().unwrap().iter().any(|r| r[0] == "Rev" && r[1] == "B"), "{block}");
+    // GD&T frames, datum symbols and finish marks carry the model point they point at.
+    for name in ["bore_square", "motor_position", "datum_a", "datum_b", "datum_c", "seat_finish"] {
+        assert!(v["projection"]["data"]["anchors"][name].is_array(), "{name} has no leader anchor");
     }
 }
 

@@ -456,7 +456,7 @@ fn structural(d: &DrawingDocument, rep: &mut DiagnosticReport) {
             | TableKind::Bend { view }
             | TableKind::Weld { view }
             | TableKind::CutList { view } => Some(view),
-            TableKind::Revision => None,
+            TableKind::Revision { .. } => None,
         };
         if let Some(v) = view {
             if !views.contains(v.as_str()) {

@@ -381,13 +381,21 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
     // lines leave the anchor (a hole's centre line).
     let mut extents = serde_json::Map::new();
     for a in &document.annotations {
-        let runmat_cad::drawing::AnnotationKind::Dimension { references, .. } = &a.kind else {
-            continue;
-        };
         let Some(view) = document.views.iter().find(|v| v.name == a.view) else {
             continue;
         };
         let Some(display) = displays.get(view.model.file.as_str()) else {
+            continue;
+        };
+        // Frames, datum symbols, finish marks and note leaders point at what they annotate.
+        if let Some(target) = values::leader_target(&a.kind, documents.get(view.model.file.as_str())) {
+            if let Some(p) = point_of(display, &target) {
+                anchors.insert(a.id.clone(), json!([p]));
+                extents.insert(a.id.clone(), json!([extent_of(display, &target)]));
+            }
+            continue;
+        }
+        let runmat_cad::drawing::AnnotationKind::Dimension { references, .. } = &a.kind else {
             continue;
         };
         let points: Option<Vec<[f64; 3]>> =
