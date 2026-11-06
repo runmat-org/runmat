@@ -43,14 +43,12 @@ mod annotate;
 mod autoroute;
 pub mod delta;
 mod edit;
-mod fabrication;
 mod kicad;
 mod library_edit;
 mod rules;
 mod session;
 mod sim_edit;
 pub use edit::*;
-pub use fabrication::*;
 use edit::{board_edit, failure};
 pub use kicad::*;
 pub use rules::*;
@@ -269,6 +267,12 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         }
         out.push(lock_path_for(path));
         out.push(layout_path_for(path));
+        // The footprint files its `part` declarations open in place.
+        if let Some(design) = parse_circuit(path, text).design {
+            for part in design.parts.values().filter(|p| crate::library::catalog::is_footprint_file(&p.package)) {
+                out.push(resolve_path(path, &part.package));
+            }
+        }
         // The SPICE model libraries its simulation sections name, so a run has them.
         for lib in crate::syntax::simulation_spans::model_libraries(text) {
             out.push(resolve_path(path, &lib));
@@ -286,9 +290,11 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
 
 /// The part pool the runtime elaborates against: the built-in library plus the design's own
 /// `part` declarations (a declared part replaces the built-in one of its MPN). Pools from
-/// `use library` lines are resolved by the package system, which does not exist yet.
-fn pool(design: &Design) -> Result<Pool, String> {
-    crate::library::catalog::pool_with(crate::fixture::standard_pool(), &design.parts)
+/// `use library` lines are resolved by the package system, which does not exist yet. A
+/// declared part's footprint file is read from `files`, relative to the circuit.
+fn pool(design: &Design, circuit_path: &str, files: &Files) -> Result<Pool, String> {
+    let file = |p: &str| files.get(&resolve_path(circuit_path, p)).cloned();
+    crate::library::catalog::pool_with(crate::fixture::standard_pool(), &design.parts, &file)
 }
 
 struct Layout {
@@ -536,7 +542,7 @@ fn load_with(
             .map_err(|m| vec![Diagnostic::error(&lock_path, Some(t), 0, 0, m)])?,
         None => LockSection::default(),
     };
-    let pool = pool(&design)
+    let pool = pool(&design, &circuit_path, files)
         .map_err(|m| vec![Diagnostic::error(&circuit_path, Some(&circuit_text), 0, 0, m)])?;
     let netlist = elaborate(
         &design,

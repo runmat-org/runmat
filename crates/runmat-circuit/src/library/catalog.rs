@@ -9,7 +9,7 @@
 //! each [`CatalogHit`].
 
 use super::footprint;
-use super::{make, Entity, Gate, Lifecycle, PadMapEntry, Part, PinType, Pool, SpiceModel, SupplyRecord, Unit, UnitPin};
+use super::{make, Entity, Gate, Lifecycle, Package, PadMapEntry, Part, PinType, Pool, SpiceModel, SupplyRecord, Unit, UnitPin};
 use crate::ids::Uuid;
 use crate::ir::{Param, Tolerance};
 use runmat_rules::{parse_quantity, BuiltinUnits};
@@ -128,12 +128,25 @@ pub fn lifecycle_of(word: &str) -> Lifecycle {
 
 impl CatalogPart {
     /// What is wrong with the record, if anything: the package, the pin types, the pads.
+    /// Footprint files are not read; [`CatalogPart::check_on`] checks the pads against one.
     pub fn check(&self) -> Result<(), String> {
         if self.mpn.trim().is_empty() {
             return Err("a part needs its `mpn`".into());
         }
+        if is_footprint_file(&self.package) {
+            return self.check_pins(None);
+        }
         let package = footprint::from_string(&self.package)
-            .ok_or_else(|| format!("part `{}`: `{}` is not a package the footprint generator makes", self.mpn, self.package))?;
+            .ok_or_else(|| format!("part `{}`: `{}` is not a package the footprint generator makes, nor a footprint file", self.mpn, self.package))?;
+        self.check_pins(Some(&package))
+    }
+
+    /// [`CatalogPart::check`] with the pads checked against `package`.
+    pub fn check_on(&self, package: &Package) -> Result<(), String> {
+        self.check_pins(Some(package))
+    }
+
+    fn check_pins(&self, package: Option<&Package>) -> Result<(), String> {
         if self.pins.is_empty() {
             return Err(format!("part `{}` has no pins", self.mpn));
         }
@@ -145,6 +158,7 @@ impl CatalogPart {
             if !seen.insert(pin.name.as_str()) {
                 return Err(format!("part `{}` lists pin `{}` twice", self.mpn, pin.name));
             }
+            let Some(package) = package else { continue };
             for pad in &pin.pads {
                 if package.pad(pad).is_none() {
                     return Err(format!("part `{}`: pin `{}` lands on pad `{pad}`, which {} has no pad of", self.mpn, pin.name, self.package));
@@ -159,10 +173,37 @@ impl CatalogPart {
     }
 }
 
+/// Whether a part's `package` names a footprint file (`libs/Power.pretty/SOT-23-6.kicad_mod`)
+/// rather than a footprint-generator string.
+pub fn is_footprint_file(package: &str) -> bool {
+    package.to_ascii_lowercase().ends_with(".kicad_mod")
+}
+
+/// A part's package: generated from its string, or read from its footprint file through `file`
+/// (the file's text by the path as written).
+pub fn package_of(part: &CatalogPart, file: &dyn Fn(&str) -> Option<String>) -> Result<Package, String> {
+    if !is_footprint_file(&part.package) {
+        return footprint::from_string(&part.package)
+            .ok_or_else(|| format!("part `{}`: `{}` is not a package the footprint generator makes, nor a footprint file", part.mpn, part.package));
+    }
+    let text = file(&part.package).ok_or_else(|| format!("part `{}`: the footprint file \"{}\" cannot be read", part.mpn, part.package))?;
+    let mut package = crate::kicad::footprint::read_mod(&text).map_err(|e| format!("part `{}`: \"{}\": {e}", part.mpn, part.package))?;
+    package.uuid = make::uuid("package", &part.package);
+    Ok(package)
+}
+
 /// Adds `part` to `pool` as a unit, an entity, a package and a part keyed by its MPN, replacing
-/// a part of the same MPN. Returns the part's UUID.
+/// a part of the same MPN. Returns the part's UUID. A footprint-file package fails here; use
+/// [`add_to_pool_with`].
 pub fn add_to_pool(pool: &mut Pool, part: &CatalogPart) -> Result<Uuid, String> {
+    add_to_pool_with(pool, part, &|_| None)
+}
+
+/// [`add_to_pool`], reading footprint files through `file`.
+pub fn add_to_pool_with(pool: &mut Pool, part: &CatalogPart, file: &dyn Fn(&str) -> Option<String>) -> Result<Uuid, String> {
     part.check()?;
+    let package = package_of(part, file)?;
+    part.check_on(&package)?;
     let entity_name = part.entity_name();
     let unit = pool.add_unit(Unit {
         uuid: make::uuid("unit", &entity_name),
@@ -186,10 +227,7 @@ pub fn add_to_pool(pool: &mut Pool, part: &CatalogPart) -> Result<Uuid, String> 
         gates: vec![Gate { name: "A".into(), unit, swap_group: 0 }],
         tags: if part.category.is_empty() { vec![] } else { vec![part.category.clone()] },
     });
-    let package = match pool.package(&part.package).map(|p| p.uuid) {
-        Some(uuid) => uuid,
-        None => pool.add_package(footprint::from_string(&part.package).expect("checked")),
-    };
+    let package = pool.add_package(package);
     let mut params = BTreeMap::new();
     for (k, v) in &part.params {
         let param = match parse_quantity(v, &BuiltinUnits) {
@@ -242,12 +280,12 @@ pub fn supply_of(hit: &CatalogHit) -> Vec<SupplyRecord> {
 
 /// The built-in pool plus a design's declared parts (a declared part replaces a built-in one of
 /// the same MPN).
-pub fn pool_with(mut pool: Pool, parts: &BTreeMap<String, CatalogPart>) -> Result<Pool, String> {
+pub fn pool_with(mut pool: Pool, parts: &BTreeMap<String, CatalogPart>, file: &dyn Fn(&str) -> Option<String>) -> Result<Pool, String> {
     for part in parts.values() {
         if let Some(old) = pool.part(&part.mpn).map(|p| p.uuid) {
             pool.parts.remove(&old);
         }
-        add_to_pool(&mut pool, part)?;
+        add_to_pool_with(&mut pool, part, file)?;
     }
     Ok(pool)
 }
@@ -315,7 +353,7 @@ mod tests {
         let mut part = buck();
         part.mpn = "BUCK-36V-2A".into();
         part.description = "replaced".into();
-        let pool = pool_with(crate::fixture::standard_pool(), &[(part.mpn.clone(), part)].into()).unwrap();
+        let pool = pool_with(crate::fixture::standard_pool(), &[(part.mpn.clone(), part)].into(), &|_| None).unwrap();
         let found: Vec<_> = pool.parts.values().filter(|p| p.mpn == "BUCK-36V-2A").collect();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].description, "replaced");

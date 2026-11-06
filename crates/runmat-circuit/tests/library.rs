@@ -96,3 +96,27 @@ fn a_declaration_with_an_unknown_field_or_package_is_a_diagnostic() {
     let read = parse_circuit("b.circuit", &with("manufacturer = \"M\", package = \"SOT23-5\", pins = [{ name = A, pad = \"1\" }]"));
     assert!(read.diagnostics.is_empty(), "{:?}", read.diagnostics);
 }
+
+#[test]
+fn a_part_on_a_footprint_file_opened_in_place_compiles_and_previews() {
+    use runmat_circuit::library::{catalog::CatalogPart, footprint, preview::preview_with};
+    let kicad_mod = runmat_circuit::kicad::footprint::write_mod(&footprint::from_string("SOT23-5").unwrap());
+    let ldo = json!({ "mpn": "LDO_3V3", "manufacturer": "", "prefix": "U", "package": "libs/Power.pretty/SOT-23-5.kicad_mod",
+        "pins": [{ "name": "VIN", "pads": ["1"], "type": "power_in" }, { "name": "GND", "pads": ["2"], "type": "power_in" },
+                 { "name": "EN", "pads": ["3"], "type": "input" }, { "name": "NC", "pads": ["4"], "type": "no_connect" },
+                 { "name": "VOUT", "pads": ["5"], "type": "power_out" }] });
+    let text = place(CIRCUIT, json!({ "part": ldo.clone() }), &[]).unwrap();
+    assert!(text.contains("package = \"libs/Power.pretty/SOT-23-5.kicad_mod\""), "{text}");
+    let deps = runtime::dependencies("/p/board.circuit", &text);
+    assert!(deps.contains(&"/p/libs/Power.pretty/SOT-23-5.kicad_mod".to_string()), "{deps:?}");
+    let mut files: Files = [("/p/board.circuit".to_string(), text.clone())].into();
+    let missing = runtime::compile("/p/board.circuit", &text, &files, &CompileOptions::default());
+    assert!(missing.diagnostics.iter().any(|d| d.message.contains("cannot be read")), "{:?}", missing.diagnostics);
+    files.insert("/p/libs/Power.pretty/SOT-23-5.kicad_mod".into(), kicad_mod.clone());
+    let out = runtime::compile("/p/board.circuit", &text, &files, &CompileOptions::default());
+    assert!(out.index.is_some(), "{:?}", out.diagnostics);
+    let part: CatalogPart = serde_json::from_value(ldo).unwrap();
+    let preview = preview_with(&part, &|p| (p == "libs/Power.pretty/SOT-23-5.kicad_mod").then(|| kicad_mod.clone())).unwrap();
+    assert_eq!(preview.footprint.pads.len(), 5);
+    assert_eq!(preview.symbol.pins.len(), 5);
+}

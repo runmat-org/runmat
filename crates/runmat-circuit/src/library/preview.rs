@@ -4,7 +4,7 @@
 //! The symbol comes from the same placer the schematic uses (a one-component design laid out
 //! on its own), so the preview matches what placing the part draws.
 
-use super::catalog::{add_to_pool, CatalogPart};
+use super::catalog::{add_to_pool_with, CatalogPart};
 use super::{Graphic, PadKind, PadShape, Pool};
 use crate::elab::{elaborate, ElabOptions};
 use crate::geom::{to_mm, Point};
@@ -101,8 +101,13 @@ fn lines(graphics: &[Graphic], dots: &mut Vec<[f64; 3]>) -> Vec<Vec<Xy>> {
 
 /// The previews of `part`, or why the record cannot be drawn.
 pub fn preview(part: &CatalogPart) -> Result<PartPreview, String> {
+    preview_with(part, &|_| None)
+}
+
+/// [`preview`], reading a footprint-file package through `file` (by the path as written).
+pub fn preview_with(part: &CatalogPart, file: &dyn Fn(&str) -> Option<String>) -> Result<PartPreview, String> {
     let mut pool = Pool::new();
-    let id = add_to_pool(&mut pool, part)?;
+    let id = add_to_pool_with(&mut pool, part, file)?;
     let stored = pool.parts[&id].clone();
     let prefix = pool.entities[&stored.entity].prefix.clone();
     let mut design = Design::new("preview");

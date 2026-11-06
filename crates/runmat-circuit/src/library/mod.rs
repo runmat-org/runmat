@@ -15,6 +15,7 @@
 
 pub mod catalog;
 pub mod footprint;
+pub mod kicad_lib;
 pub mod preview;
 
 use crate::geom::poly::Ring;

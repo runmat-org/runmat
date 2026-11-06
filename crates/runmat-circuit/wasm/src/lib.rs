@@ -140,15 +140,36 @@ pub fn edit(path: &str, text: &str, files: &str, request: &str) -> String {
 }
 
 /// A catalog part's previews for the library panel: its schematic symbol, footprint and body
-/// box (`runmat_circuit::library::preview`), from a part search hit's `part` record.
+/// box (`runmat_circuit::library::preview`), from a part search hit's `part` record. `files`
+/// holds a footprint-file package's text by the path the record writes.
 #[wasm_bindgen]
-pub fn library_preview(part: &str) -> String {
+pub fn library_preview(part: &str, files: &str) -> String {
     let part: runmat_circuit::library::catalog::CatalogPart = match serde_json::from_str(part) {
         Ok(p) => p,
         Err(e) => return error_json(&format!("the part record isn't valid: {e}")),
     };
-    match runmat_circuit::library::preview::preview(&part) {
+    let files: std::collections::BTreeMap<String, String> = match parse(files, "files") {
+        Ok(f) => f,
+        Err(m) => return error_json(&m),
+    };
+    match runmat_circuit::library::preview::preview_with(&part, &|p| files.get(p).cloned()) {
         Ok(p) => json(&serde_json::json!({ "ok": true, "preview": p })),
+        Err(m) => error_json(&m),
+    }
+}
+
+/// A KiCad symbol library opened in place (`runmat_circuit::library::kicad_lib`): its parts,
+/// each on the footprint file its symbol names, rebased from the library's folder `lib_dir` to
+/// the circuit's folder `base`, and the symbols left out (power symbols, symbols without a
+/// footprint).
+#[wasm_bindgen]
+pub fn kicad_library(text: &str, lib_dir: &str, base: &str) -> String {
+    use runmat_circuit::library::kicad_lib;
+    match kicad_lib::read(text) {
+        Ok((parts, skipped)) => {
+            let parts: Vec<_> = parts.iter().map(|p| kicad_lib::rebase(p, lib_dir, base)).collect();
+            json(&serde_json::json!({ "ok": true, "parts": parts, "skipped": skipped }))
+        }
         Err(m) => error_json(&m),
     }
 }
