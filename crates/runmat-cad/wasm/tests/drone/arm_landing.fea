@@ -1,0 +1,68 @@
+// The folding arm and its hinge on a hard landing: the leg under the motor pod meets the ground
+// first and pushes the pod up while the body's inertia pulls the hinge down.
+//
+// Geometry: ./geometry/arm_study.step, exported from arm_study.assembly (the front arm and the
+// motor pod on its pad). The hinge pin carries the arm at the knuckle's bore (fixed here).
+//
+// Load: a 900 g drone landing at 5 g on its four legs puts 0.9 kg x 9.81 m/s^2 x 5 / 4 = 11 N up
+// on each pod. Check: the moment at the knuckle is 11 N x 88 mm = 968 N mm; the root's section
+// modulus (16 x 13 mm superellipse) is about 300 mm^3, so the bending stress there is about
+// 3.2 MPa, two orders below the moulded carbon's 250 MPa strength. The lugs, 16.8 mm apart,
+// carry the moment as a 58 N couple on the 4 mm pin.
+
+geometry arm {
+    file = "./geometry/arm_study.step"
+    units = mm
+    interfaces = shared
+    region arm : solid { select name "arm"; expect exactly_one }
+    region pod : solid { select name "motor_pod"; expect exactly_one }
+    region root : face { select name "root"; expect one_or_more }
+    region motor_seat : face { select name "motor_seat"; expect one_or_more }
+}
+
+mesh arm on geometry.arm {
+    tetrahedra {
+        order = quadratic
+        target_size = 3 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+
+material moulded_carbon {
+    mass_density = 1500 kg/m^3
+    elastic {
+        youngs_modulus = 45 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+material pod_lumped {
+    mass_density = 6390 kg/m^3
+    elastic {
+        youngs_modulus = 9 GPa
+        poisson_ratio = 0.35
+    }
+}
+
+model landing {
+    assign material.moulded_carbon to geometry.arm.region.arm
+    assign material.pod_lumped to geometry.arm.region.pod
+    constraint hinge {
+        structural.fixed { target = geometry.arm.region.root }
+    }
+    load leg_reaction {
+        force on geometry.arm.region.motor_seat = [0, 0, 11] N
+    }
+    load_case hard_landing { include load.leg_reaction }
+}
+
+study arm_landing {
+    geometry = geometry.arm
+    mesh = mesh.arm
+    model = model.landing
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+    output von_mises = analysis.static.field.element.von_mises_stress
+    output peak_stress = max(analysis.static.field.element.von_mises_stress, over = geometry.arm.region.arm)
+    output tip_deflection = max(magnitude(analysis.static.field.node.displacement), over = geometry.arm.region.pod)
+}

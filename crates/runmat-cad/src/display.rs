@@ -221,6 +221,9 @@ pub struct SketchDisplay {
     pub id: String,
     pub frame: FrameDisplay,
     pub status: String,
+    /// Degrees of freedom the solver left (0 when fully defined); none for explicit sketches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dof: Option<u32>,
     pub entities: Vec<SketchEntityDisplay>,
     pub constraints: Vec<serde_json::Value>,
     /// Constraint indices the solver reported redundant or conflicting.
@@ -734,6 +737,7 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
                     .ok()
                     .and_then(|v| v.as_str().map(str::to_string))
                     .unwrap_or_default(),
+                dof: solved.dof,
                 entities,
                 constraints: sketch
                     .constraints

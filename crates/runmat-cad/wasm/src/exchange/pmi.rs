@@ -121,6 +121,23 @@ pub fn step_pmi(doc: &PartDocument, result: &RegenResult, display: &PartDisplay)
         let [from, to] = resolved.locations.get(&l.name).cloned().unwrap_or_default();
         out.locations.push(StepLocation { name: l.name.clone(), from: face_names(&from), to: face_names(&to), limits });
     }
+    // The faces by the names the STEP writer gives them (a face in a region travels under the
+    // region's name).
+    let exported = |faces: &mut Vec<String>| {
+        for name in faces.iter_mut() {
+            let face = display.bodies.iter().flat_map(|b| &b.faces).find(|f| f.reference.as_deref() == Some(name.as_str()));
+            if let Some(e) = face.and_then(super::exported_face_name) {
+                *name = e;
+            }
+        }
+    };
+    out.datums.iter_mut().for_each(|d| exported(&mut d.faces));
+    out.tolerances.iter_mut().for_each(|t| exported(&mut t.faces));
+    out.sizes.iter_mut().for_each(|z| exported(&mut z.faces));
+    out.locations.iter_mut().for_each(|l| {
+        exported(&mut l.from);
+        exported(&mut l.to);
+    });
     (out, notes)
 }
 

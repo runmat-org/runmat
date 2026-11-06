@@ -584,6 +584,7 @@ Profile offset_profile(const Profile& p, const KInstr& in) {
   if (!p.closed) unsupported("thin walls of open profiles");
   const std::int64_t n = in.ints[1];
   const double d = in.reals[0];
+  if (p.tracked.shape.ShapeType() != TopAbs_FACE) unsupported("thin walls of a profile with separate regions");
   BRepOffsetAPI_MakeOffset mk(TopoDS::Face(p.tracked.shape), GeomAbs_Intersection, Standard_False);
   mk.Perform(d);
   if (!mk.IsDone()) fail("the profile cannot be offset by the wall thickness");
@@ -633,7 +634,7 @@ Tracked build_planar_sheet(const Profile& p, std::uint32_t face_label) {
   BRep_Builder b;
   TopoDS_Shell sh;
   b.MakeShell(sh);
-  b.Add(sh, p.tracked.shape);
+  for (TopExp_Explorer ex(p.tracked.shape, TopAbs_FACE); ex.More(); ex.Next()) b.Add(sh, ex.Current());
   t.shape = sh;
   t.sheet = true;
   label_face(t, p.tracked.shape, face_label);

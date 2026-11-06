@@ -1,0 +1,24 @@
+runmat 0.7
+std 1
+
+// The gimbal's yaw arm: a die-cast bracket from the yaw motor under the nose down to the roll
+// motor behind the camera. Its origin is the yaw axis at the yaw motor's underside.
+part gimbal_yaw_arm {
+    feature top_base = plane.offset(base = origin.xy, distance = -3 mm)
+    sketch plate_s on plane.top_base {
+        p1 = line(start = [-9 mm, -7 mm], end = [3 mm, -7 mm])
+        p2 = line(start = [3 mm, -7 mm], end = [3 mm, 7 mm])
+        p3 = line(start = [3 mm, 7 mm], end = [-9 mm, 7 mm])
+        p4 = line(start = [-9 mm, 7 mm], end = [-9 mm, -7 mm])
+    }
+    feature plate = extrude(profile = sketch.plate_s, distance = 3 mm)
+    feature drop_base = plane.offset(base = origin.yz, distance = -9 mm)
+    sketch drop_s on plane.drop_base {
+        d1 = line(start = [-7 mm, -21 mm], end = [7 mm, -21 mm])
+        d2 = line(start = [7 mm, -21 mm], end = [7 mm, 0 mm])
+        d3 = line(start = [7 mm, 0 mm], end = [-7 mm, 0 mm])
+        d4 = line(start = [-7 mm, 0 mm], end = [-7 mm, -21 mm])
+    }
+    feature drop = extrude(profile = sketch.drop_s, distance = 3.5 mm)
+    output gimbal_yaw_arm = { body = feature.plate.body, part_number = "CD-GB-520", material = "aluminum_6061", color = "#2A2D32" }
+}

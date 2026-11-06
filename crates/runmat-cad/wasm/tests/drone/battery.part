@@ -1,0 +1,30 @@
+runmat 0.7
+std 1
+
+// The intelligent flight battery: a 4S pack in a moulded case that slides into the rear bay; its
+// rear cap is lofted through the body's last sections, so it closes the body flush. Its origin
+// is the body origin, so it places at identity.
+part battery {
+    feature pack_plane = plane.offset(base = origin.yz, distance = -94 mm)
+    sketch pack_s on plane.pack_plane {
+        p1 = line(start = [-31 mm, 14 mm], end = [31 mm, 14 mm])
+        p2 = line(start = [31 mm, 14 mm], end = [31 mm, 49 mm])
+        p3 = line(start = [31 mm, 49 mm], end = [-31 mm, 49 mm])
+        p4 = line(start = [-31 mm, 49 mm], end = [-31 mm, 14 mm])
+    }
+    feature pack = extrude(profile = sketch.pack_s, distance = 59 mm)
+    feature cap_st0 = plane.offset(base = origin.yz, distance = -100 mm)
+    sketch cap_s0 on plane.cap_st0 {
+        c = spline(points = [[0 mm, 44.5 mm], [12.567 mm, 44.121 mm], [20.114 mm, 42.987 mm], [25.763 mm, 41.101 mm], [29.778 mm, 38.447 mm], [32.193 mm, 34.903 mm], [33 mm, 29 mm], [32.193 mm, 23.097 mm], [29.778 mm, 19.553 mm], [25.763 mm, 16.899 mm], [20.114 mm, 15.013 mm], [12.567 mm, 13.879 mm], [0 mm, 13.5 mm], [-12.567 mm, 13.879 mm], [-20.114 mm, 15.013 mm], [-25.763 mm, 16.899 mm], [-29.778 mm, 19.553 mm], [-32.193 mm, 23.097 mm], [-33 mm, 29 mm], [-32.193 mm, 34.903 mm], [-29.778 mm, 38.447 mm], [-25.763 mm, 41.101 mm], [-20.114 mm, 42.987 mm], [-12.567 mm, 44.121 mm]], closed)
+    }
+    feature cap_st1 = plane.offset(base = origin.yz, distance = -97 mm)
+    sketch cap_s1 on plane.cap_st1 {
+        c = spline(points = [[0 mm, 46.4 mm], [13.481 mm, 45.974 mm], [21.577 mm, 44.701 mm], [27.637 mm, 42.584 mm], [31.943 mm, 39.605 mm], [34.534 mm, 35.626 mm], [35.4 mm, 29 mm], [34.534 mm, 22.374 mm], [31.943 mm, 18.395 mm], [27.637 mm, 15.416 mm], [21.577 mm, 13.299 mm], [13.481 mm, 12.026 mm], [0 mm, 11.6 mm], [-13.481 mm, 12.026 mm], [-21.577 mm, 13.299 mm], [-27.637 mm, 15.416 mm], [-31.943 mm, 18.395 mm], [-34.534 mm, 22.374 mm], [-35.4 mm, 29 mm], [-34.534 mm, 35.626 mm], [-31.943 mm, 39.605 mm], [-27.637 mm, 42.584 mm], [-21.577 mm, 44.701 mm], [-13.481 mm, 45.974 mm]], closed)
+    }
+    feature cap_st2 = plane.offset(base = origin.yz, distance = -94 mm)
+    sketch cap_s2 on plane.cap_st2 {
+        c = spline(points = [[0 mm, 48 mm], [14.09 mm, 47.535 mm], [22.552 mm, 46.145 mm], [28.886 mm, 43.833 mm], [33.387 mm, 40.581 mm], [36.095 mm, 36.235 mm], [37 mm, 29 mm], [36.095 mm, 21.765 mm], [33.387 mm, 17.419 mm], [28.886 mm, 14.167 mm], [22.552 mm, 11.855 mm], [14.09 mm, 10.465 mm], [0 mm, 10 mm], [-14.09 mm, 10.465 mm], [-22.552 mm, 11.855 mm], [-28.886 mm, 14.167 mm], [-33.387 mm, 17.419 mm], [-36.095 mm, 21.765 mm], [-37 mm, 29 mm], [-36.095 mm, 36.235 mm], [-33.387 mm, 40.581 mm], [-28.886 mm, 43.833 mm], [-22.552 mm, 46.145 mm], [-14.09 mm, 47.535 mm]], closed)
+    }
+    feature cap = loft(profiles = [sketch.cap_s0, sketch.cap_s1, sketch.cap_s2])
+    output battery = { body = feature.pack.body, part_number = "CD-PW-4S3500", material = "polycarbonate", color = "#2C3036" }
+}

@@ -146,12 +146,18 @@ pub enum RotationExpr {
     },
 }
 
-/// A rigid offset: translation and rotation (applied rotation first).
+/// A rigid offset: translation and rotation (applied rotation first). Either may be left out:
+/// no translation is the origin, no rotation the identity.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OffsetExpr {
+    #[serde(default = "no_translation")]
     pub translation: [ValueExpr; 3],
     #[serde(default)]
     pub rotation: RotationExpr,
+}
+
+fn no_translation() -> [ValueExpr; 3] {
+    std::array::from_fn(|_| ValueExpr::mm(0.0))
 }
 
 impl OffsetExpr {

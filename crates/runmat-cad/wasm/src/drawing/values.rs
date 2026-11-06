@@ -157,10 +157,17 @@ impl AnnotationValues for Values<'_> {
         match faces.as_slice() {
             [(_, surface)] => cylinder(surface).map(|(_, _, r)| format!("⌀{}", number(2.0 * r))),
             [(a, sa), (b, sb)] => {
-                // Two parallel planes, or a plane and a hole: the distance along the first one's
+                // Two holes with parallel axes: the distance between the axes.
+                if let (Some((pa, da, _)), Some((pb, _, _))) = (cylinder(sa), cylinder(sb)) {
+                    let v = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+                    let along = dot(v, da);
+                    let off = (0..3).map(|i| (v[i] - along * da[i]).powi(2)).sum::<f64>().sqrt();
+                    return Some(number(off));
+                }
+                // Two parallel planes, or a plane and a hole: the distance along the plane's
                 // normal, to the hole's axis (a mesh's points are not spread evenly round a
                 // cylinder, so their centroid is off the axis).
-                let n = vec3(&sa["normal"]).unwrap_or([0.0, 0.0, 1.0]);
+                let n = vec3(&sa["normal"]).or_else(|| vec3(&sb["normal"])).unwrap_or([0.0, 0.0, 1.0]);
                 let anchor = |points: &[P3], surface: &Value| {
                     cylinder(surface).map_or_else(|| centroid(points), |(p, _, _)| p)
                 };

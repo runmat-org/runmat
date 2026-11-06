@@ -1,0 +1,92 @@
+runmat 0.7
+std 1
+
+// A generic foldable camera drone, 249 g class to 900 g class by its battery: one lofted upper and
+// lower shell split along the body's waist, four folding arms on hinge pins (the front arms fold
+// flat along the sides, the rear arms fold forward and down under the body on tilted hinges),
+// cowled motor pods with folding two-blade props, a 3-axis gimbal under the nose, a flush rear
+// battery, downward and forward vision sensors, and the 4-in-1 ESC and flight controller inside
+// on the lower shell's bosses. The fold inputs stow it: drone_folded.assembly sets them.
+assembly drone {
+    input fold_front : angle = 0 deg
+    input fold_rear : angle = 0 deg
+    input blade_a : angle = 0 deg
+    input blade_b : angle = 180 deg
+    input pitch : angle = -12 deg
+
+    // Body: the two shells, the battery in its bay and the status window.
+    use part body_bottom from "body_bottom.part" as body_bottom
+    use part body_top from "body_top.part" as body_top
+    use part battery from "battery.part" as battery
+    use part light_pipe from "light_pipe.part" as light_pipe
+
+    // The arms on their hinges, each solved so its motor sits on the 300 mm diagonal with the
+    // props 55 mm above the belly.
+    use assembly arm_station from "arm_station.assembly" as arm_front_left {
+        configuration = { select = inputs, values = { fold = input.fold_front, length = 88.204 mm, rise = 5.2 mm, pod_tilt = 0 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
+        placement = { placement = offset, offset = { translation = [52 mm, 44 mm, 24 mm], rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = 57.031 deg } } }
+    }
+    use assembly arm_station from "arm_station.assembly" as arm_front_right {
+        configuration = { select = inputs, values = { fold = -input.fold_front, length = 88.204 mm, rise = 5.2 mm, pod_tilt = 0 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
+        placement = { placement = offset, offset = { translation = [52 mm, -44 mm, 24 mm], rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = -57.031 deg } } }
+    }
+    use assembly arm_station from "arm_station.assembly" as arm_rear_left {
+        configuration = { select = inputs, values = { fold = -input.fold_rear, length = 90.607 mm, rise = 18.878 mm, pod_tilt = -28 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
+        placement = { placement = offset, offset = { translation = [-58 mm, 44 mm, 13 mm], rotation = { rotation = euler, yaw = 124.168 deg, pitch = 0 deg, roll = 28 deg } } }
+    }
+    use assembly arm_station from "arm_station.assembly" as arm_rear_right {
+        configuration = { select = inputs, values = { fold = input.fold_rear, length = 90.607 mm, rise = 18.878 mm, pod_tilt = 28 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
+        placement = { placement = offset, offset = { translation = [-58 mm, -44 mm, 13 mm], rotation = { rotation = euler, yaw = -124.168 deg, pitch = 0 deg, roll = -28 deg } } }
+    }
+
+    // The 3-axis gimbal and camera under the nose.
+    use assembly gimbal from "gimbal.assembly" as gimbal {
+        configuration = { select = inputs, values = { pitch = input.pitch } }
+        placement = { placement = offset, offset = { translation = [74 mm, 0 mm, 11 mm] } }
+    }
+
+    // Vision sensors: a forward stereo pair in the nose and a downward pair under the belly.
+    use part vision_sensor from "vision_sensor.part" as vision_front_left {
+        placement = { placement = offset, offset = { translation = [97 mm, 6 mm, 31 mm], rotation = { rotation = axis_angle, axis = [0, 1, 0], angle = 90 deg } } }
+    }
+    use part vision_sensor from "vision_sensor.part" as vision_front_right {
+        placement = { placement = offset, offset = { translation = [97 mm, -6 mm, 31 mm], rotation = { rotation = axis_angle, axis = [0, 1, 0], angle = 90 deg } } }
+    }
+    use part vision_sensor from "vision_sensor.part" as vision_down_left {
+        placement = { placement = offset, offset = { translation = [-4 mm, 11 mm, 2.6 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg } } }
+    }
+    use part vision_sensor from "vision_sensor.part" as vision_down_right {
+        placement = { placement = offset, offset = { translation = [-4 mm, -11 mm, 2.6 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg } } }
+    }
+
+    // The boards on the lower shell's bosses: the 4-in-1 ESC on the bosses' tops, the flight
+    // controller 10 mm above it on nylon spacers, both held by four M3 screws into the bosses.
+    use circuit esc from "esc.circuit" as esc {
+        placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 10 mm] } }
+    }
+    use circuit flight_controller from "flight_controller.circuit" as flight_controller {
+        placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 21.6 mm] } }
+    }
+    use part spacer from "spacer.part" as spacer {
+        configuration = { select = inputs, values = { height = 10 mm } }
+        placement = { placement = offset, offset = { translation = [-5.25 mm, -15.25 mm, 11.6 mm] } }
+    }
+    use part screw from "screw.part" as stack_screw {
+        configuration = { select = inputs, values = { length = 16 mm } }
+        placement = { placement = offset, offset = { translation = [-5.25 mm, -15.25 mm, 23.2 mm] } }
+    }
+    pattern stack = grid(seeds = [spacer, stack_screw], first = [1, 0, 0], first_spacing = 30.5 mm, first_count = 2, second = [0, 1, 0], second_spacing = 30.5 mm, second_count = 2)
+
+    exploded service = {
+        steps = [
+            { id = battery_out, occurrences = [[{ name = battery }]], motion = { motion = "translate", direction = { direction = "vector", vector = [-1, 0, 0] }, distance = 90 mm } },
+            { id = lift_top, occurrences = [[{ name = body_top }], [{ name = light_pipe }]], motion = { motion = "translate", direction = { direction = "vector", vector = [0, 0, 1] }, distance = 70 mm } },
+            { id = lift_fc, occurrences = [[{ name = flight_controller }], [{ name = stack_screw }]], motion = { motion = "translate", direction = { direction = "vector", vector = [0, 0, 1] }, distance = 40 mm } },
+            { id = lift_esc, occurrences = [[{ name = esc }], [{ name = spacer }]], motion = { motion = "translate", direction = { direction = "vector", vector = [0, 0, 1] }, distance = 22 mm } },
+            { id = gimbal_down, occurrences = [[{ name = gimbal }]], motion = { motion = "translate", direction = { direction = "vector", vector = [0, 0, -1] }, distance = 30 mm } }
+        ]
+    }
+
+    // Opens three-quarters from the front left, above, so the nose, gimbal and all four props read.
+    view hero = { from = [0.78, 0.62, 0.42], up = [0, 0, 1], default = true }
+}

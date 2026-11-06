@@ -35,6 +35,31 @@ fn fail(message: impl Into<String>) -> SketchSolveFailure {
     }
 }
 
+/// The ends at which two open curves (lines, arcs) start out meeting, when they do.
+fn shared_end(
+    a: &SketchTarget,
+    b: &SketchTarget,
+    start: &BTreeMap<(SketchEntityId, PointRole), [f64; 2]>,
+) -> Option<(runmat_constraint::CurveEnd, runmat_constraint::CurveEnd)> {
+    use runmat_constraint::CurveEnd;
+    let (SketchTarget::Entity { entity: ea }, SketchTarget::Entity { entity: eb }) = (a, b) else {
+        return None;
+    };
+    let ends = [(PointRole::Start, CurveEnd::Start), (PointRole::End, CurveEnd::End)];
+    for (ra, ca) in ends {
+        for (rb, cb) in ends {
+            let (Some(p), Some(q)) = (start.get(&(ea.clone(), ra)), start.get(&(eb.clone(), rb))) else {
+                continue;
+            };
+            let scale = p[0].abs().max(p[1].abs()).max(q[0].abs()).max(q[1].abs()).max(1e-3);
+            if (p[0] - q[0]).hypot(p[1] - q[1]) <= 1e-9 * scale {
+                return Some((ca, cb));
+            }
+        }
+    }
+    None
+}
+
 type StartingGeometry = (
     BTreeMap<(SketchEntityId, PointRole), [f64; 2]>,
     BTreeMap<SketchEntityId, f64>,
@@ -300,7 +325,14 @@ impl SketchSolver for ConstraintSketchSolver {
                 K::Vertical { line } => C::Vertical(t(line)?),
                 K::Parallel { a, b } => C::Parallel(t(a)?, t(b)?),
                 K::Perpendicular { a, b } => C::Perpendicular(t(a)?, t(b)?),
-                K::Tangent { a, b } => C::Tangent(t(a)?, t(b)?),
+                // Curves that meet at an end are tangent there (a line running into an arc,
+                // as a slot is drawn): tangency of their directions at that end. Tangency by
+                // distance alone is degenerate at a point already on both curves, and the
+                // solver would read it as redundant and leave the ends free to slide.
+                K::Tangent { a, b } => match shared_end(a, b, &start) {
+                    Some((a_end, b_end)) => C::TangentAtEnd { a: t(a)?, a_end, b: t(b)?, b_end },
+                    None => C::Tangent(t(a)?, t(b)?),
+                },
                 K::Equal { a, b } => {
                     if round(a) {
                         C::EqualRadius(t(a)?, t(b)?)

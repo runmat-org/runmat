@@ -1,0 +1,66 @@
+// The folding arm's natural frequencies against the propeller's excitation.
+//
+// Geometry: ./geometry/arm_study.step, exported from arm_study.assembly (the front arm and the
+// motor pod on its pad). The arm turns on the hinge pin, and the latch holds it unfolded; fixing
+// the knuckle's pin bore is stiffer than the pin, lugs and latch, so these frequencies are an
+// upper bound on the installed arm's.
+//
+// Material: compression-moulded chopped carbon fibre (E = 45 GPa quasi-isotropic, 1500 kg/m^3).
+// The pod carries the motor, folding propeller, cowl and leg as one lumped mass: 40 g over the
+// cowl's 6.26 cm^3 (pocketed over the arm's pad) is 6390 kg/m^3.
+//
+// Excitation: the motors turn about 6,500 rpm at hover and 10,000 rpm at full throttle, so the
+// once-per-revolution imbalance runs 108-167 Hz and the two-blade pass 217-333 Hz. The first
+// flap mode should sit above 1.2 x 333 = 400 Hz.
+// Check: as a tapered cantilever of 88 mm, I is 1,980 mm^4 at the root and 620 mm^4 at the tip
+// (about 1,110 mm^4 effective), k = 3EI/L^3 = 218 N/mm; with the 40 g pod and a quarter of the
+// arm's 17 g, f1 = sqrt(k/m)/(2 pi) = 354 Hz.
+
+geometry arm {
+    file = "./geometry/arm_study.step"
+    units = mm
+    interfaces = shared
+    region arm : solid { select name "arm"; expect exactly_one }
+    region pod : solid { select name "motor_pod"; expect exactly_one }
+    region root : face { select name "root"; expect one_or_more }
+}
+
+mesh arm on geometry.arm {
+    tetrahedra {
+        order = quadratic
+        target_size = 3 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+
+material moulded_carbon {
+    mass_density = 1500 kg/m^3
+    elastic {
+        youngs_modulus = 45 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+material pod_lumped {
+    mass_density = 6390 kg/m^3
+    elastic {
+        youngs_modulus = 9 GPa
+        poisson_ratio = 0.35
+    }
+}
+
+model pinned_arm {
+    assign material.moulded_carbon to geometry.arm.region.arm
+    assign material.pod_lumped to geometry.arm.region.pod
+    constraint hinge {
+        structural.fixed { target = geometry.arm.region.root }
+    }
+}
+
+study arm_modes {
+    geometry = geometry.arm
+    mesh = mesh.arm
+    model = model.pinned_arm
+    analysis modes { structural modal { modes = 4 } retain basis }
+    output shapes = analysis.modes.field.node.displacement
+}

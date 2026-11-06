@@ -1,0 +1,12 @@
+runmat 0.7
+std 1
+
+// The front arm as the arm studies see it: the arm at its defaults (the front station's 88.2 mm
+// length and 5.2 mm rise), and the motor pod seated on its pad, which carries the motor,
+// propeller and leg as a lumped mass in the studies. Exported to geometry/arm_study.step for arm_modal.fea and arm_landing.fea.
+assembly arm_study {
+    use part arm from "arm.part" as arm
+    use part motor_pod from "motor_pod.part" as motor_pod {
+        placement = { placement = offset, offset = { translation = [88.2 mm, 0 mm, 9.2 mm] } }
+    }
+}

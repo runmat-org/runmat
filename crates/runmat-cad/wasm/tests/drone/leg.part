@@ -1,0 +1,40 @@
+runmat 0.7
+std 1
+
+// A landing leg under the motor pod: a hollow, tapered fin with a rubber foot, lofted down from
+// the pod's underside. The 2.4 GHz / 5.8 GHz antenna strip sits inside it. Its origin is the
+// pod's origin and it hangs along -z.
+part leg {
+    feature fin_st0 = plane.offset(base = origin.xy, distance = -7 mm)
+    sketch fin_s0 on plane.fin_st0 {
+        c = spline(points = [[0 mm, 3.2 mm], [1.61 mm, 3.101 mm], [2.929 mm, 2.808 mm], [4.014 mm, 2.335 mm], [4.826 mm, 1.704 mm], [5.329 mm, 0.937 mm], [5.5 mm, 0 mm], [5.329 mm, -0.937 mm], [4.826 mm, -1.704 mm], [4.014 mm, -2.335 mm], [2.929 mm, -2.808 mm], [1.61 mm, -3.101 mm], [0 mm, -3.2 mm], [-1.61 mm, -3.101 mm], [-2.929 mm, -2.808 mm], [-4.014 mm, -2.335 mm], [-4.826 mm, -1.704 mm], [-5.329 mm, -0.937 mm], [-5.5 mm, 0 mm], [-5.329 mm, 0.937 mm], [-4.826 mm, 1.704 mm], [-4.014 mm, 2.335 mm], [-2.929 mm, 2.808 mm], [-1.61 mm, 3.101 mm]], closed)
+    }
+    feature fin_st1 = plane.offset(base = origin.xy, distance = -27 mm)
+    sketch fin_s1 on plane.fin_st1 {
+        c = spline(points = [[0 mm, 2.8 mm], [1.346 mm, 2.713 mm], [2.45 mm, 2.457 mm], [3.357 mm, 2.043 mm], [4.036 mm, 1.491 mm], [4.457 mm, 0.819 mm], [4.6 mm, 0 mm], [4.457 mm, -0.819 mm], [4.036 mm, -1.491 mm], [3.357 mm, -2.043 mm], [2.45 mm, -2.457 mm], [1.346 mm, -2.713 mm], [0 mm, -2.8 mm], [-1.346 mm, -2.713 mm], [-2.45 mm, -2.457 mm], [-3.357 mm, -2.043 mm], [-4.036 mm, -1.491 mm], [-4.457 mm, -0.819 mm], [-4.6 mm, 0 mm], [-4.457 mm, 0.819 mm], [-4.036 mm, 1.491 mm], [-3.357 mm, 2.043 mm], [-2.45 mm, 2.457 mm], [-1.346 mm, 2.713 mm]], closed)
+    }
+    feature fin_st2 = plane.offset(base = origin.xy, distance = -48 mm)
+    sketch fin_s2 on plane.fin_st2 {
+        c = spline(points = [[0 mm, 2.4 mm], [1.054 mm, 2.326 mm], [1.917 mm, 2.106 mm], [2.627 mm, 1.751 mm], [3.159 mm, 1.278 mm], [3.488 mm, 0.702 mm], [3.6 mm, 0 mm], [3.488 mm, -0.702 mm], [3.159 mm, -1.278 mm], [2.627 mm, -1.751 mm], [1.917 mm, -2.106 mm], [1.054 mm, -2.326 mm], [0 mm, -2.4 mm], [-1.054 mm, -2.326 mm], [-1.917 mm, -2.106 mm], [-2.627 mm, -1.751 mm], [-3.159 mm, -1.278 mm], [-3.488 mm, -0.702 mm], [-3.6 mm, 0 mm], [-3.488 mm, 0.702 mm], [-3.159 mm, 1.278 mm], [-2.627 mm, 1.751 mm], [-1.917 mm, 2.106 mm], [-1.054 mm, 2.326 mm]], closed)
+    }
+    feature fin = loft(profiles = [sketch.fin_s0, sketch.fin_s1, sketch.fin_s2])
+    feature hollow_st0 = plane.offset(base = origin.xy, distance = -9 mm)
+    sketch hollow_s0 on plane.hollow_st0 {
+        c = spline(points = [[0 mm, 2 mm], [1.258 mm, 1.938 mm], [2.29 mm, 1.755 mm], [3.138 mm, 1.459 mm], [3.773 mm, 1.065 mm], [4.167 mm, 0.585 mm], [4.3 mm, 0 mm], [4.167 mm, -0.585 mm], [3.773 mm, -1.065 mm], [3.138 mm, -1.459 mm], [2.29 mm, -1.755 mm], [1.258 mm, -1.938 mm], [0 mm, -2 mm], [-1.258 mm, -1.938 mm], [-2.29 mm, -1.755 mm], [-3.138 mm, -1.459 mm], [-3.773 mm, -1.065 mm], [-4.167 mm, -0.585 mm], [-4.3 mm, 0 mm], [-4.167 mm, 0.585 mm], [-3.773 mm, 1.065 mm], [-3.138 mm, 1.459 mm], [-2.29 mm, 1.755 mm], [-1.258 mm, 1.938 mm]], closed)
+    }
+    feature hollow_st1 = plane.offset(base = origin.xy, distance = -27 mm)
+    sketch hollow_s1 on plane.hollow_st1 {
+        c = spline(points = [[0 mm, 1.6 mm], [0.995 mm, 1.55 mm], [1.811 mm, 1.404 mm], [2.481 mm, 1.168 mm], [2.983 mm, 0.852 mm], [3.295 mm, 0.468 mm], [3.4 mm, 0 mm], [3.295 mm, -0.468 mm], [2.983 mm, -0.852 mm], [2.481 mm, -1.168 mm], [1.811 mm, -1.404 mm], [0.995 mm, -1.55 mm], [0 mm, -1.6 mm], [-0.995 mm, -1.55 mm], [-1.811 mm, -1.404 mm], [-2.481 mm, -1.168 mm], [-2.983 mm, -0.852 mm], [-3.295 mm, -0.468 mm], [-3.4 mm, 0 mm], [-3.295 mm, 0.468 mm], [-2.983 mm, 0.852 mm], [-2.481 mm, 1.168 mm], [-1.811 mm, 1.404 mm], [-0.995 mm, 1.55 mm]], closed)
+    }
+    feature hollow_st2 = plane.offset(base = origin.xy, distance = -46 mm)
+    sketch hollow_s2 on plane.hollow_st2 {
+        c = spline(points = [[0 mm, 1.2 mm], [0.702 mm, 1.163 mm], [1.278 mm, 1.053 mm], [1.751 mm, 0.876 mm], [2.106 mm, 0.639 mm], [2.326 mm, 0.351 mm], [2.4 mm, 0 mm], [2.326 mm, -0.351 mm], [2.106 mm, -0.639 mm], [1.751 mm, -0.876 mm], [1.278 mm, -1.053 mm], [0.702 mm, -1.163 mm], [0 mm, -1.2 mm], [-0.702 mm, -1.163 mm], [-1.278 mm, -1.053 mm], [-1.751 mm, -0.876 mm], [-2.106 mm, -0.639 mm], [-2.326 mm, -0.351 mm], [-2.4 mm, 0 mm], [-2.326 mm, 0.351 mm], [-2.106 mm, 0.639 mm], [-1.751 mm, 0.876 mm], [-1.278 mm, 1.053 mm], [-0.702 mm, 1.163 mm]], closed)
+    }
+    feature hollow = loft(profiles = [sketch.hollow_s0, sketch.hollow_s1, sketch.hollow_s2], mode = cut)
+    feature foot_base = plane.offset(base = origin.xy, distance = -52 mm)
+    sketch foot_s on plane.foot_base {
+        c = circle(center = [0 mm, 0 mm], radius = 3.6 mm)
+    }
+    feature foot = extrude(profile = sketch.foot_s, distance = 4.5 mm)
+    output leg = { body = feature.fin.body, part_number = "CD-AR-250", material = "glass_filled_nylon", color = "#4A4F57" }
+}

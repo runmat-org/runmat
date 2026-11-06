@@ -1,0 +1,15 @@
+runmat 0.7
+std 1
+
+// The antenna inside each landing leg: a printed dipole strip on a 0.4 mm laminate.
+part antenna {
+    feature base = plane.offset(base = origin.xy, distance = -40 mm)
+    sketch s on plane.base {
+        a1 = line(start = [-2.6 mm, -0.2 mm], end = [2.6 mm, -0.2 mm])
+        a2 = line(start = [2.6 mm, -0.2 mm], end = [2.6 mm, 0.2 mm])
+        a3 = line(start = [2.6 mm, 0.2 mm], end = [-2.6 mm, 0.2 mm])
+        a4 = line(start = [-2.6 mm, 0.2 mm], end = [-2.6 mm, -0.2 mm])
+    }
+    feature strip = extrude(profile = sketch.s, distance = 30 mm)
+    output antenna = { body = feature.strip.body, part_number = "CD-RF-410", material = "composite", color = "#C8A951" }
+}

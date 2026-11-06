@@ -1,0 +1,28 @@
+runmat 0.7
+std 1
+
+// The motor pod's cowl: a turned, filleted nacelle at the arm's tip that houses the motor's
+// stator and the arm's wiring; the bell turns above its rim. Its underside is pocketed
+// (R9.2, 7 mm deep) to fit over the arm's R9 pad, and the pocket's ceiling seats on the pad's
+// top face. Its origin is the motor axis (z) at the arm pad's top face.
+part motor_pod {
+    sketch prof on origin.zx {
+        c = spline(points = [[-7 mm, 12.5 mm], [-5.8 mm, 14.6 mm], [-3 mm, 15.3 mm], [2 mm, 15 mm], [4.4 mm, 13.8 mm], [5 mm, 12 mm]])
+        l1 = line(start = [5 mm, 12 mm], end = [5 mm, 1.2 mm])
+        l2 = line(start = [5 mm, 1.2 mm], end = [0 mm, 1.2 mm])
+        l3 = line(start = [0 mm, 1.2 mm], end = [0 mm, 9.2 mm])
+        l4 = line(start = [0 mm, 9.2 mm], end = [-7 mm, 9.2 mm])
+        l5 = line(start = [-7 mm, 9.2 mm], end = [-7 mm, 12.5 mm])
+    }
+    feature cowl = revolve(profile = sketch.prof, axis = origin.z, angle = 360 deg)
+    // The skirt's slot, where the arm runs in under the pocket (0.8 mm clear each side).
+    feature slot_base = plane.offset(base = origin.xy, distance = -7.5 mm)
+    sketch slot_s on plane.slot_base {
+        s1 = line(start = [-20 mm, -6.5 mm], end = [-8 mm, -6.5 mm])
+        s2 = line(start = [-8 mm, -6.5 mm], end = [-8 mm, 6.5 mm])
+        s3 = line(start = [-8 mm, 6.5 mm], end = [-20 mm, 6.5 mm])
+        s4 = line(start = [-20 mm, 6.5 mm], end = [-20 mm, -6.5 mm])
+    }
+    feature slot = extrude(profile = sketch.slot_s, distance = 7.5 mm, mode = cut)
+    output motor_pod = { body = feature.cowl.body, part_number = "CD-AR-240", material = "glass_filled_nylon", color = "#4A4F57" }
+}

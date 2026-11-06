@@ -1,0 +1,29 @@
+runmat 0.7
+std 1
+
+// An M3 button-head cap screw. Its length (under the head) is an input; the head is z = 0..1.65
+// and the shank runs down -z.
+part screw {
+    input length : length = 8 mm
+
+    sketch head_s on origin.xy {
+        c = circle(center = [0 mm, 0 mm], radius = 2.85 mm)
+    }
+    feature head = extrude(profile = sketch.head_s, distance = 1.65 mm)
+    sketch shank_s on origin.xy {
+        c = circle(center = [0 mm, 0 mm], radius = 1.5 mm)
+    }
+    feature shank = extrude(profile = sketch.shank_s, distance = input.length, reverse)
+    feature top = plane.offset(base = origin.xy, distance = 1.65 mm)
+    sketch hex_s on plane.top {
+        l1 = line(start = [1.155 mm, 0 mm], end = [0.577 mm, 1 mm])
+        l2 = line(start = [0.577 mm, 1 mm], end = [-0.577 mm, 1 mm])
+        l3 = line(start = [-0.577 mm, 1 mm], end = [-1.155 mm, 0 mm])
+        l4 = line(start = [-1.155 mm, 0 mm], end = [-0.577 mm, -1 mm])
+        l5 = line(start = [-0.577 mm, -1 mm], end = [0.577 mm, -1 mm])
+        l6 = line(start = [0.577 mm, -1 mm], end = [1.155 mm, 0 mm])
+    }
+    feature socket = extrude(profile = sketch.hex_s, distance = 1.2 mm, mode = cut, reverse)
+
+    output screw = { body = feature.head.body, part_number = "QX-HW-M3-BH", material = "steel", color = "#3A3A3C" }
+}

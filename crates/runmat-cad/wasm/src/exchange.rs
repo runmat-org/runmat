@@ -1,7 +1,9 @@
 //! Exact STEP AP242 of parts and assemblies on the installed kernel.
 //!
 //! - **Parts.** One product: the regenerated bodies' exact B-rep, the part's material, every
-//!   named face under its reference text (`feature.body.face.side(s1.l1)`), and the part's
+//!   named face under its name (the first face region that holds it, `region root : face = …`,
+//!   which is what a simulation's `select name "root"` reads; else its reference text,
+//!   `feature.body.face.side(s1.l1)`), and the part's
 //!   semantic PMI (datums, geometric tolerances, sizes and locations on those faces; [`pmi`]).
 //! - **Assemblies.** The resolved tree as written: each sub-assembly is its own assembly
 //!   product holding its occurrences, each at its placement in its parent, so the hierarchy
@@ -31,14 +33,20 @@ fn stem(path: &str) -> String {
     name.split('.').next().unwrap_or(name).to_string()
 }
 
-/// Every face the display names, under its reference text.
+/// The name a face travels under in STEP, which carries one name per face: the first of its
+/// face regions (the name the file authored for it), else its reference text.
+pub fn exported_face_name(face: &runmat_cad::display::FaceDisplay) -> Option<String> {
+    face.regions.first().cloned().or_else(|| face.reference.clone())
+}
+
+/// Every face the display names, under its exported name.
 pub fn face_names(display: &PartDisplay) -> Vec<ExchangeFaceName> {
     display
         .bodies
         .iter()
         .flat_map(|b| {
             b.faces.iter().filter_map(move |f| {
-                f.reference.clone().map(|name| ExchangeFaceName {
+                exported_face_name(f).map(|name| ExchangeFaceName {
                     body: b.index,
                     face: f.index,
                     name,

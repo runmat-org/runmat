@@ -1,0 +1,30 @@
+runmat 0.7
+std 1
+
+// The folding arm's detail drawing at 1:1 on A3, third-angle projection: the plan view with the
+// hinge-pin bore (the arm's datum) to the motor pod's screw holes, the elevation with the
+// knuckle's height and the pad's thickness, and an isometric.
+drawing arm {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [
+            { label = "Title", source = { source = literal, text = "Folding arm, moulded carbon fibre" } },
+            { label = "Part number", source = { source = property, name = part_number } },
+            { label = "Material", source = { source = property, name = material } },
+            { label = "Scale", source = { source = scale } },
+            { label = "Sheet", source = { source = sheet_number } },
+            { label = "Rev", source = { source = revision } }
+        ]
+    }
+
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+
+    view front = standard(orientation = front, sheet = "1", model = { file = "arm.part" }, at = [150, 200], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { file = "arm.part" }, at = [150, 120], display = hidden_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { file = "arm.part" }, at = [330, 120], display = visible_lines)
+
+    annotation knuckle_height = dimension(style = linear, references = [feature.knuckle.face.start, feature.knuckle.face.end], view = front)
+    annotation pad_thickness = dimension(style = linear, references = [feature.pad.face.start, feature.pad.face.end], view = front)
+    annotation pin_to_screw = dimension(style = linear, references = [feature.bores.face.side(bores_s.pin), feature.bores.face.side(bores_s.m2)], view = top)
+    annotation screw_pitch = dimension(style = linear, references = [feature.bores.face.side(bores_s.m2), feature.bores.face.side(bores_s.m1)], view = top)
+}

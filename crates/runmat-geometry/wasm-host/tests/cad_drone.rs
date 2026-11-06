@@ -1,0 +1,185 @@
+//! The camera drone showcase (`runmat-cad/wasm/tests/drone/`) on OCCT, through `runmat_cad_call`
+//! (the Desktop and browser worker's entry): every part, assembly and drawing compiles with no
+//! error, every part has a body and every feature regenerates, and the top assembly places every
+//! occurrence. `RUNMAT_DRONE_SRC=<folder>` compiles another copy of the project instead.
+
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+fn entry(path: &str, text: &str, files: &str) -> Value {
+    let request = serde_json::json!({ "fn": "compile", "args": [path, text, files, "{}"] });
+    serde_json::from_str(&runmat_geometry_wasm_host::cad::call(&request.to_string())).expect("json")
+}
+
+fn project() -> BTreeMap<String, String> {
+    let dir = std::env::var("RUNMAT_DRONE_SRC").map(PathBuf::from).unwrap_or_else(|_| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runmat-cad/wasm/tests/drone")
+    });
+    let mut all = BTreeMap::new();
+    for e in std::fs::read_dir(&dir).expect("the drone project is checked in").flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') || e.path().is_dir() {
+            continue;
+        }
+        if let Ok(text) = std::fs::read_to_string(e.path()) {
+            all.insert(format!("/p/drone/{name}"), text);
+        }
+    }
+    all
+}
+
+fn errors(v: &Value) -> Vec<String> {
+    v["diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter(|d| d["severity"] == "error")
+        .map(|d| d["message"].as_str().unwrap_or("").to_string())
+        .collect()
+}
+
+#[test]
+fn the_drone_compiles_part_by_part_and_as_one_assembly() {
+    let all = project();
+    let files_json = serde_json::to_string(&all).unwrap();
+    let only = std::env::var("RUNMAT_DRONE_ONLY").ok();
+    let mut failures = Vec::new();
+    for path in all.keys() {
+        let cad = [".part", ".assembly", ".drawing"].iter().any(|x| path.ends_with(x));
+        if !cad || only.as_ref().is_some_and(|o| !path.contains(o.as_str())) {
+            continue;
+        }
+        let started = std::time::Instant::now();
+        let v = entry(path, &all[path], &files_json);
+        let errs = errors(&v);
+        let warnings: Vec<String> = v["diagnostics"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter(|d| d["severity"] != "error")
+            .map(|d| d["message"].as_str().unwrap_or("").to_string())
+            .collect();
+        eprintln!("{path}: {:.2?}, {} errors, warnings {warnings:?}", started.elapsed(), errs.len());
+        if !errs.is_empty() {
+            failures.push(format!("{path}: {errs:?}"));
+            continue;
+        }
+        if path.ends_with(".part") {
+            let data = &v["display"]["data"];
+            let problems = data["problems"].as_array().map(|p| p.len()).unwrap_or(0);
+            let bodies = data["bodies"].as_array().map(|b| b.len()).unwrap_or(0);
+            let failed: Vec<String> = v["projection"]["data"]["index"]["features"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter(|f| f["status"].as_str().is_some_and(|s| s != "ok" && s != "regenerated"))
+                .map(|f| format!("{} {}", f["id"], f["status"]))
+                .collect();
+            let skeleton = path.ends_with("skeleton.part");
+            if problems > 0 || (bodies == 0 && !skeleton) || !failed.is_empty() {
+                failures.push(format!("{path}: {bodies} bodies, problems {:?}, features {failed:?}", data["problems"]));
+            }
+        }
+        if path.ends_with(".assembly") {
+            let failed: Vec<String> = v["projection"]["data"]["occurrences"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter(|o| o["state"] == "failed")
+                .map(|o| o["path"].as_str().unwrap_or("").to_string())
+                .collect();
+            let d = &v["display"]["data"];
+            eprintln!(
+                "  {} occurrences, bounds {}",
+                d["occurrences"].as_array().map(|o| o.len()).unwrap_or(0),
+                d["bounds"]
+            );
+            if !failed.is_empty() {
+                failures.push(format!("{path}: unplaced {failed:?}"));
+            }
+        }
+        if let Ok(dump) = std::env::var("RUNMAT_DRONE_DUMP") {
+            let name = path.rsplit('/').next().unwrap();
+            std::fs::create_dir_all(&dump).ok();
+            std::fs::write(format!("{dump}/{name}.json"), serde_json::to_string_pretty(&v["projection"]).unwrap()).ok();
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The arm drawing's dimensions read the part: a plane to a hole measures to the hole's axis,
+/// and two holes measure between their axes (the stack bolt is 21.567 mm out, the motor 110 mm,
+/// on a 16 mm bolt square).
+#[test]
+fn the_arm_drawing_dimensions_read_the_part() {
+    let all = project();
+    let files_json = serde_json::to_string(&all).unwrap();
+    let path = "/p/drone/arm.drawing";
+    let v = entry(path, &all[path], &files_json);
+    assert!(errors(&v).is_empty(), "{:?}", errors(&v));
+    let text = &v["projection"]["data"]["text"];
+    for (name, want) in [
+        // The arm at its defaults (the front arm, 88.2 mm long): the knuckle and pad heights,
+        // the hinge-pin bore to the pod's inner screw (88.2 - 5 mm), and the pod's screw pitch.
+        ("knuckle_height", "13"),
+        ("pad_thickness", "8"),
+        ("pin_to_screw", "83.2"),
+        ("screw_pitch", "10"),
+    ] {
+        assert_eq!(text[name], want, "{name}: {text}");
+    }
+}
+
+/// The hinge mount's lug profiles are fully defined before they extrude (the Desktop's sketch
+/// readout shows 0 degrees of freedom): two horizontal lines tangent to the R7.5 end arc, a
+/// vertical back edge 14 mm from the pin axis, and the R2 pin bore concentric with the arc.
+#[test]
+fn the_hinge_lug_sketches_are_fully_defined() {
+    let all = project();
+    let files_json = serde_json::to_string(&all).unwrap();
+    let path = "/p/drone/hinge_mount.part";
+    let v = entry(path, &all[path], &files_json);
+    assert!(errors(&v).is_empty(), "{:?}", errors(&v));
+    let sketches = v["display"]["data"]["sketches"].as_array().cloned().unwrap_or_default();
+    for id in ["upper_s", "lower_s"] {
+        let s = sketches.iter().find(|s| s["id"] == id).unwrap_or_else(|| panic!("{id} in {sketches:?}"));
+        assert_eq!(s["status"], "well_defined", "{id}: dof {}, redundant {}, conflicting {}", s["dof"], s["redundant"], s["conflicting"]);
+        assert_eq!(s["dof"], 0, "{id}: {}", s["dof"]);
+        assert!(s["redundant"].as_array().is_none_or(|r| r.is_empty()), "{id}: redundant {}", s["redundant"]);
+    }
+}
+
+/// The study geometry as exact AP242: the arm with its motor pod, and the lower shell with the
+/// ESC board on its bosses. Each solid is its product, and each face in a region travels under
+/// the region's name, which is what the studies' `select name` reads (`root`, `motor_seat`,
+/// `skin`). `RUNMAT_DRONE_STEP_DIR=<folder>` writes the files there (the example's geometry/).
+#[test]
+fn the_study_assemblies_export_with_their_region_names() {
+    runmat_geometry_wasm_host::cad::install_occt();
+    let all = project();
+    for (file, products, faces) in [
+        ("arm_study", &["'arm'", "'motor_pod'"][..], &["ADVANCED_FACE('root'", "ADVANCED_FACE('motor_seat'"][..]),
+        ("esc_thermal", &["'body_bottom'", "'esc_board_thermal'"][..], &["ADVANCED_FACE('skin'", "ADVANCED_FACE('boss_tops'"][..]),
+    ] {
+        let path = format!("/p/drone/{file}.assembly");
+        let step = runmat_cad_wasm::exchange::assembly_step(&path, &all[&path], &all)
+            .unwrap_or_else(|e| panic!("{file}: {e}"))
+            .expect("OCCT writes STEP");
+        let text = String::from_utf8(step).expect("STEP is text");
+        if let Ok(dir) = std::env::var("RUNMAT_DRONE_STEP_DIR") {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(format!("{dir}/{file}.step"), &text).unwrap();
+        }
+        for p in products {
+            assert!(text.contains(&format!("PRODUCT({p}")), "{file}: no product {p}");
+        }
+        for f in faces {
+            assert!(text.contains(f), "{file}: no {f}");
+        }
+    }
+}

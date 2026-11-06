@@ -1,0 +1,12 @@
+runmat 0.7
+std 1
+
+// The hinge pin: a 4 mm ground steel pin through the clevis and the arm's knuckle.
+part hinge_pin {
+    feature base = plane.offset(base = origin.xy, distance = -10.1 mm)
+    sketch s on plane.base {
+        c = circle(center = [0 mm, 0 mm], radius = 2 mm)
+    }
+    feature pin = extrude(profile = sketch.s, distance = 20.2 mm)
+    output hinge_pin = { body = feature.pin.body, part_number = "CD-AR-230", material = "steel", color = "#C9CDD2" }
+}

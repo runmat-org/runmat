@@ -1,0 +1,17 @@
+runmat 0.7
+std 1
+
+// The folding propeller's hub: a domed spinner that carries the two blade pivots at 9 mm
+// radius. Its origin is the motor axis at the pod's origin.
+part prop_hub {
+    sketch prof on origin.zx {
+        l0 = line(start = [17.5 mm, 1.2 mm], end = [17.5 mm, 7.5 mm])
+        l1 = line(start = [17.5 mm, 7.5 mm], end = [19 mm, 7.5 mm])
+        l2 = line(start = [19 mm, 7.5 mm], end = [20.5 mm, 6 mm])
+        l3 = line(start = [20.5 mm, 6 mm], end = [21.5 mm, 3.2 mm])
+        l4 = line(start = [21.5 mm, 3.2 mm], end = [21.8 mm, 1.2 mm])
+        l5 = line(start = [21.8 mm, 1.2 mm], end = [17.5 mm, 1.2 mm])
+    }
+    feature spinner = revolve(profile = sketch.prof, axis = origin.z, angle = 360 deg)
+    output prop_hub = { body = feature.spinner.body, part_number = "CD-PR-310", material = "glass_filled_nylon", color = "#202226" }
+}

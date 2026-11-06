@@ -1,0 +1,13 @@
+runmat 0.7
+std 1
+
+// The status light's window: a clear light pipe that fills the slot at the front of the upper
+// shell, lit from the flight controller's status LED below.
+part light_pipe {
+    feature base = plane.offset(base = origin.xy, distance = 46.5 mm)
+    sketch s on plane.base {
+        w = spline(points = [[80.5 mm, -1.3 mm], [81.064 mm, -1.171 mm], [81.516 mm, -0.811 mm], [81.767 mm, -0.289 mm], [81.767 mm, 0.289 mm], [81.516 mm, 0.811 mm], [81.064 mm, 1.171 mm], [80.5 mm, 1.3 mm], [67.5 mm, 1.3 mm], [66.936 mm, 1.171 mm], [66.484 mm, 0.811 mm], [66.233 mm, 0.289 mm], [66.233 mm, -0.289 mm], [66.484 mm, -0.811 mm], [66.936 mm, -1.171 mm], [67.5 mm, -1.3 mm]], closed)
+    }
+    feature pipe = extrude(profile = sketch.s, distance = 3.4 mm)
+    output light_pipe = { body = feature.pipe.body, part_number = "CD-BD-130", material = "polycarbonate", color = "#8FD3FF" }
+}

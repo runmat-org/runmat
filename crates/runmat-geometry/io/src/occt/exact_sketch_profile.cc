@@ -2,7 +2,9 @@
 //
 // Encoding of a PROFILE instruction (op 2):
 //   reals: frame (origin, x, y, z: 12), then each segment's parameters in order;
-//   ints:  closed (1: one planar face of closed loops, first outer; 0: open or closed chains as
+//   ints:  closed (1: planar faces of closed loops, nested by containment: a loop inside an
+//          even number of others bounds a face, and the loops directly inside it are its holes;
+//          one face, or a compound of faces for separate regions; 0: open or closed chains as
 //          wires), loop count, then per loop: segment count, start-vertex label, end-vertex
 //          label (chain ends, for sheet boundaries; -1 none), then per segment: kind, side label,
 //          start-cap boundary label, end-cap boundary label.
@@ -27,8 +29,12 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepLib.hxx>
 #include <BRep_Builder.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepClass_FaceClassifier.hxx>
+#include <BRepGProp.hxx>
 #include <BRep_Tool.hxx>
 #include <ElCLib.hxx>
+#include <GProp_GProps.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <GC_MakeArcOfEllipse.hxx>
 #include <Geom_BSplineCurve.hxx>
@@ -51,7 +57,9 @@
 #include <gp_Elips.hxx>
 #include <gp_Pln.hxx>
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
 
 namespace runmat_geometry_io {
 namespace occt_kernel {
@@ -263,17 +271,67 @@ Profile build_profile(const KInstr& in) {
   }
   if (wires.empty()) fail("a profile has no loops");
   if (p.closed) {
-    BRepBuilderAPI_MakeFace mf(gp_Pln(p.frame), wires.front(), Standard_True);
-    for (std::size_t i = 1; i < wires.size(); ++i) mf.Add(wires[i]);
-    if (!mf.IsDone()) fail("the profile loops do not make a face");
-    TopoDS_Face face = mf.Face();
+    const gp_Pln plane(p.frame);
     // Orient loops: outer counter-clockwise about the frame's z, holes clockwise. Wire
     // orientation only; the edges (and their labels) are unchanged.
-    Handle(ShapeFix_Face) fix = new ShapeFix_Face(face);
-    fix->FixOrientation();
-    face = fix->Face();
-    BRepLib::BuildCurves3d(face);
-    p.tracked.shape = face;
+    auto make_face = [&](const TopoDS_Wire& outer, const std::vector<TopoDS_Wire>& holes) {
+      BRepBuilderAPI_MakeFace mf(plane, outer, Standard_True);
+      for (const TopoDS_Wire& h : holes) mf.Add(h);
+      if (!mf.IsDone()) fail("the profile loops do not make a face");
+      Handle(ShapeFix_Face) fix = new ShapeFix_Face(mf.Face());
+      fix->FixOrientation();
+      TopoDS_Face face = fix->Face();
+      BRepLib::BuildCurves3d(face);
+      return face;
+    };
+    // Each loop alone as a face, for its area and to test which loops lie inside it. Loops
+    // don't cross (the sketch's regions are separate or nested), so one point of a loop tells.
+    const std::size_t n = wires.size();
+    std::vector<TopoDS_Face> alone;
+    std::vector<double> area(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i) {
+      alone.push_back(make_face(wires[i], {}));
+      GProp_GProps g;
+      BRepGProp::SurfaceProperties(alone[i], g);
+      area[i] = std::abs(g.Mass());
+    }
+    auto inside = [&](std::size_t a, std::size_t b) {  // loop a inside loop b's face
+      if (area[a] >= area[b]) return false;
+      TopExp_Explorer ex(wires[a], TopAbs_EDGE);
+      if (!ex.More()) return false;
+      BRepAdaptor_Curve c(TopoDS::Edge(ex.Current()));
+      const gp_Pnt q = c.Value(0.5 * (c.FirstParameter() + c.LastParameter()));
+      BRepClass_FaceClassifier k(alone[b], q, 1e-7);
+      return k.State() == TopAbs_IN;
+    };
+    // Each loop's depth (how many loops hold it) and its parent (the smallest that does).
+    std::vector<int> depth(n, 0);
+    std::vector<std::ptrdiff_t> parent(n, -1);
+    for (std::size_t a = 0; a < n; ++a)
+      for (std::size_t b = 0; b < n; ++b)
+        if (a != b && inside(a, b)) {
+          ++depth[a];
+          if (parent[a] < 0 || area[b] < area[static_cast<std::size_t>(parent[a])]) parent[a] = static_cast<std::ptrdiff_t>(b);
+        }
+    std::vector<std::size_t> outers;
+    for (std::size_t i = 0; i < n; ++i)
+      if (depth[i] % 2 == 0) outers.push_back(i);
+    std::stable_sort(outers.begin(), outers.end(), [&](std::size_t a, std::size_t b) { return area[a] > area[b]; });
+    std::vector<TopoDS_Face> faces;
+    for (std::size_t o : outers) {
+      std::vector<TopoDS_Wire> holes;
+      for (std::size_t i = 0; i < n; ++i)
+        if (depth[i] % 2 == 1 && parent[i] == static_cast<std::ptrdiff_t>(o)) holes.push_back(wires[i]);
+      faces.push_back(make_face(wires[o], holes));
+    }
+    if (faces.size() == 1) {
+      p.tracked.shape = faces.front();
+    } else {
+      TopoDS_Compound c;
+      bb.MakeCompound(c);
+      for (const TopoDS_Face& f : faces) bb.Add(c, f);
+      p.tracked.shape = c;
+    }
   } else {
     TopoDS_Compound c;
     bb.MakeCompound(c);

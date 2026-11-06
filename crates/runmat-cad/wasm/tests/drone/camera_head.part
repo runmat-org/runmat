@@ -1,0 +1,35 @@
+runmat 0.7
+std 1
+
+// The camera head: a soft, lofted housing on the gimbal's pitch axis (its origin, y the pitch
+// axis) with the lens barrel and its glass on the front. It holds a 1-inch-class sensor.
+part camera_head {
+    feature housing_st0 = plane.offset(base = origin.yz, distance = -12 mm)
+    sketch housing_s0 on plane.housing_st0 {
+        c = spline(points = [[0 mm, 9.5 mm], [5.586 mm, 9.296 mm], [8.429 mm, 8.683 mm], [10.468 mm, 7.65 mm], [11.882 mm, 6.16 mm], [12.721 mm, 4.082 mm], [13 mm, 0 mm], [12.721 mm, -4.082 mm], [11.882 mm, -6.16 mm], [10.468 mm, -7.65 mm], [8.429 mm, -8.683 mm], [5.586 mm, -9.296 mm], [0 mm, -9.5 mm], [-5.586 mm, -9.296 mm], [-8.429 mm, -8.683 mm], [-10.468 mm, -7.65 mm], [-11.882 mm, -6.16 mm], [-12.721 mm, -4.082 mm], [-13 mm, 0 mm], [-12.721 mm, 4.082 mm], [-11.882 mm, 6.16 mm], [-10.468 mm, 7.65 mm], [-8.429 mm, 8.683 mm], [-5.586 mm, 9.296 mm]], closed)
+    }
+    feature housing_st1 = plane.offset(base = origin.yz, distance = 0 mm)
+    sketch housing_s1 on plane.housing_st1 {
+        c = spline(points = [[0 mm, 11.5 mm], [5.889 mm, 11.237 mm], [9.134 mm, 10.448 mm], [11.509 mm, 9.128 mm], [13.174 mm, 7.245 mm], [14.169 mm, 4.67 mm], [14.5 mm, 0 mm], [14.169 mm, -4.67 mm], [13.174 mm, -7.245 mm], [11.509 mm, -9.128 mm], [9.134 mm, -10.448 mm], [5.889 mm, -11.237 mm], [0 mm, -11.5 mm], [-5.889 mm, -11.237 mm], [-9.134 mm, -10.448 mm], [-11.509 mm, -9.128 mm], [-13.174 mm, -7.245 mm], [-14.169 mm, -4.67 mm], [-14.5 mm, 0 mm], [-14.169 mm, 4.67 mm], [-13.174 mm, 7.245 mm], [-11.509 mm, 9.128 mm], [-9.134 mm, 10.448 mm], [-5.889 mm, 11.237 mm]], closed)
+    }
+    feature housing_st2 = plane.offset(base = origin.yz, distance = 11 mm)
+    sketch housing_s2 on plane.housing_st2 {
+        c = spline(points = [[0 mm, 10.5 mm], [5.483 mm, 10.26 mm], [8.504 mm, 9.54 mm], [10.715 mm, 8.334 mm], [12.266 mm, 6.615 mm], [13.192 mm, 4.264 mm], [13.5 mm, 0 mm], [13.192 mm, -4.264 mm], [12.266 mm, -6.615 mm], [10.715 mm, -8.334 mm], [8.504 mm, -9.54 mm], [5.483 mm, -10.26 mm], [0 mm, -10.5 mm], [-5.483 mm, -10.26 mm], [-8.504 mm, -9.54 mm], [-10.715 mm, -8.334 mm], [-12.266 mm, -6.615 mm], [-13.192 mm, -4.264 mm], [-13.5 mm, 0 mm], [-13.192 mm, 4.264 mm], [-12.266 mm, 6.615 mm], [-10.715 mm, 8.334 mm], [-8.504 mm, 9.54 mm], [-5.483 mm, 10.26 mm]], closed)
+    }
+    feature housing_st3 = plane.offset(base = origin.yz, distance = 14 mm)
+    sketch housing_s3 on plane.housing_st3 {
+        c = spline(points = [[0 mm, 9 mm], [4.379 mm, 8.78 mm], [7.009 mm, 8.121 mm], [8.978 mm, 7.026 mm], [10.377 mm, 5.486 mm], [11.219 mm, 3.427 mm], [11.5 mm, 0 mm], [11.219 mm, -3.427 mm], [10.377 mm, -5.486 mm], [8.978 mm, -7.026 mm], [7.009 mm, -8.121 mm], [4.379 mm, -8.78 mm], [0 mm, -9 mm], [-4.379 mm, -8.78 mm], [-7.009 mm, -8.121 mm], [-8.978 mm, -7.026 mm], [-10.377 mm, -5.486 mm], [-11.219 mm, -3.427 mm], [-11.5 mm, 0 mm], [-11.219 mm, 3.427 mm], [-10.377 mm, 5.486 mm], [-8.978 mm, 7.026 mm], [-7.009 mm, 8.121 mm], [-4.379 mm, 8.78 mm]], closed)
+    }
+    feature housing = loft(profiles = [sketch.housing_s0, sketch.housing_s1, sketch.housing_s2, sketch.housing_s3])
+    feature lens_base = plane.offset(base = origin.yz, distance = 13.5 mm)
+    sketch barrel_s on plane.lens_base {
+        c = circle(center = [0 mm, 0.5 mm], radius = 8.5 mm)
+    }
+    feature barrel = extrude(profile = sketch.barrel_s, distance = 4.5 mm)
+    feature bezel_base = plane.offset(base = origin.yz, distance = 17.4 mm)
+    sketch bezel_s on plane.bezel_base {
+        c = circle(center = [0 mm, 0.5 mm], radius = 6.4 mm)
+    }
+    feature bezel = extrude(profile = sketch.bezel_s, distance = 0.6 mm, mode = cut)
+    output camera_head = { body = feature.housing.body, part_number = "CD-GB-560", material = "aluminum_6061", color = "#1C1E22" }
+}

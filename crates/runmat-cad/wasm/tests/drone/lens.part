@@ -1,0 +1,12 @@
+runmat 0.7
+std 1
+
+// The camera's front lens element and its cover glass, seated in the barrel's bezel.
+part lens {
+    feature base = plane.offset(base = origin.yz, distance = 17.4 mm)
+    sketch s on plane.base {
+        c = circle(center = [0 mm, 0.5 mm], radius = 6.3 mm)
+    }
+    feature glass = extrude(profile = sketch.s, distance = 0.5 mm)
+    output lens = { body = feature.glass.body, part_number = "CD-GB-570", material = "glass", color = "#1B3B5A" }
+}

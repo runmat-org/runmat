@@ -1,0 +1,35 @@
+runmat 0.7
+std 1
+
+// The 3-axis gimbal under the nose: the yaw motor in the belly, the yaw arm down to the roll
+// motor behind the camera, the roll yoke around the camera head, and the pitch motor on the
+// yoke's left side. `pitch` tilts the camera head (negative looks down). Its origin is the
+// yaw axis at the belly.
+assembly gimbal {
+    input pitch : angle = -12 deg
+
+    use part gimbal_motor from "gimbal_motor.part" as yaw_motor {
+        configuration = { select = inputs, values = { radius = 10 mm, height = 6 mm } }
+        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, -1 mm] } }
+    }
+    use part gimbal_yaw_arm from "gimbal_yaw_arm.part" as yaw_arm {
+        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, -4 mm] } }
+    }
+    use part gimbal_motor from "gimbal_motor.part" as roll_motor {
+        configuration = { select = inputs, values = { radius = 8.5 mm, height = 5 mm } }
+        placement = { placement = offset, offset = { translation = [-3 mm, 0 mm, -16 mm], rotation = { rotation = axis_angle, axis = [0, 1, 0], angle = 90 deg } } }
+    }
+    use part gimbal_yoke from "gimbal_yoke.part" as yoke {
+        placement = { placement = offset, offset = { translation = [-0.5 mm, 0 mm, -16 mm] } }
+    }
+    use part gimbal_motor from "gimbal_motor.part" as pitch_motor {
+        configuration = { select = inputs, values = { radius = 7.5 mm, height = 4.5 mm } }
+        placement = { placement = offset, offset = { translation = [15.5 mm, 21.2 mm, -16 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 90 deg } } }
+    }
+    use part camera_head from "camera_head.part" as camera {
+        placement = { placement = offset, offset = { translation = [15.5 mm, 0 mm, -16 mm], rotation = { rotation = axis_angle, axis = [0, 1, 0], angle = -input.pitch } } }
+    }
+    use part lens from "lens.part" as lens {
+        placement = { placement = offset, offset = { translation = [15.5 mm, 0 mm, -16 mm], rotation = { rotation = axis_angle, axis = [0, 1, 0], angle = -input.pitch } } }
+    }
+}
