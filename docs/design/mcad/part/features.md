@@ -54,6 +54,10 @@ feature post = extrude(profile = sketch.s2, extent = offset_from_face(face = fea
 feature logo = emboss(profile = sketch.s_logo, face = feature.body.face.end, height = 1 mm)
 ```
 
+In the Desktop, Revolve takes the sketch as its profile, and the axis can be a straight edge picked on the model. The preview turns the profile through the angle, here a full turn that makes two hinge knuckles on a leaf's edge:
+
+<!-- design:clip:mcad/revolve -->
+
 ## Holes and threads
 
 `hole` drills one hole at each key of `at`, on a planar face. Each hole's faces are keyed: `feature.mount.face.wall(a)`.
@@ -89,7 +93,7 @@ In the Desktop, Fillet takes the edges you pick on the model and previews the ro
 
 <!-- design:clip:mcad/fillet -->
 
-Chamfer works the same way: pick the edges, then set the distance on the model:
+Chamfer works the same way: pick the edges, then set the distance on the model. A fillet or chamfer carries on along the edges tangent to the picked one, so the bevel below follows the lug around its rounded end:
 
 <!-- design:clip:mcad/chamfer -->
 

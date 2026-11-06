@@ -94,6 +94,10 @@ A connector is a frame on an occurrence; its Z axis is the joint axis. A mate jo
 
 The mate's `angle` drives that rotation from the assembly's `angle` input. Set the input in Properties, or in a run, and the turntable turns. A range in place of an exact value (`{ target = range, min = 0 deg, max = 270 deg }`) limits the motion, and the solve reports `cad.asm.limit_active` when the turntable rests on a limit.
 
+In the Desktop, Mate takes two faces picked on the model and a mate type. The preview shows where the floating occurrence goes, and confirming moves it there. Here a concentric mate puts a hinge pin in its bore:
+
+<!-- design:clip:mcad/mate -->
+
 The solve reports an occurrence that still moves freely (`cad.asm.under_defined`) and mates that contradict each other (`cad.asm.mate_conflict`). See [Occurrences and mates](/docs/mcad/assembly/mates) for every mate kind, including gear, rack-and-pinion, screw and pin-in-slot mates.
 
 ## 4. Repeat parts

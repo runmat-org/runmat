@@ -10,11 +10,19 @@
     },
     {
       "id": "mcad/extrude",
-      "alt": "The 8 by 5 mm sketch centered between the hinge mount's screw bores and pin bore is extruded: the preview shows a 10 mm boss, the depth on the model is set to 4 mm, and the boss joins the part.",
+      "alt": "A 5 by 8 mm sketch on the hinge mount's lug, between the screw bores and the pin bore, is extruded: the preview shows a 10 mm boss, the depth on the model is set to 4 mm, and the boss joins the part, clear of every bore.",
       "width": 1664,
       "height": 1180,
       "seconds": 7.4,
       "base": "/design-assets/flow-clips/mcad/extrude/extrude"
+    },
+    {
+      "id": "mcad/revolve",
+      "alt": "A hinge leaf's knuckle sketch is revolved about the leaf's front top edge, picked on the model as the axis: the full-turn preview shows two knuckles, and they join the leaf.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.2,
+      "base": "/design-assets/flow-clips/mcad/revolve/revolve"
     },
     {
       "id": "mcad/fillet",
@@ -26,10 +34,10 @@
     },
     {
       "id": "mcad/chamfer",
-      "alt": "On the hinge mount, Chamfer picks the back block's front corner between the two lugs, the preview shows the 1 mm bevel, the distance on the model is set to 2 mm, and the bevel joins the part.",
+      "alt": "On the hinge mount, Chamfer picks the upper lug's front top edge, the preview bevels it at 1 mm and carries the bevel around the lug's rounded end, the distance on the model is set to 1.5 mm, and the bevel joins the part.",
       "width": 1664,
       "height": 1180,
-      "seconds": 8.1,
+      "seconds": 8.2,
       "base": "/design-assets/flow-clips/mcad/chamfer/chamfer"
     },
     {
@@ -39,6 +47,14 @@
       "height": 1180,
       "seconds": 9.6,
       "base": "/design-assets/flow-clips/mcad/pattern/pattern"
+    },
+    {
+      "id": "mcad/mate",
+      "alt": "In an assembly, Mate set to Concentric takes the floating hinge pin's side and the hinge mount's pin bore; the preview ghosts the pin in the bore, and the pin moves there, flush with both lugs.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.8,
+      "base": "/design-assets/flow-clips/mcad/mate/mate"
     }
   ]
 }
