@@ -168,7 +168,12 @@ fn a_drawing_exports_as_dwg_with_the_content_of_its_dxf() {
     let kinds = |k: fn(&Shape) -> bool| sheet.entities.iter().filter(|e| k(&e.shape)).count();
     assert!(kinds(|s| matches!(s, Shape::Polyline { .. } | Shape::Line { .. })) > 10, "frame and view edges");
     assert_eq!(kinds(|s| matches!(s, Shape::Insert { .. })), 1, "the title block");
-    assert!(sheet.blocks.iter().any(|b| b.name == "TITLE_BLOCK" && b.entities.iter().any(|e| e.shape == Shape::Text { at: [-80.0, 2.2], height: 2.6, rotation: 0.0, text: "Bracket".into() })));
+    // The title block as the compile lays it out (ISO 7200): 180 mm wide in the frame's bottom
+    // right corner (A3: x 230 to 410 mm, rows up from y 10 mm), values in 3.5 mm text.
+    let block = sheet.blocks.iter().find(|b| b.name == "TITLE_BLOCK").expect("the title block");
+    let value = block.entities.iter().find_map(|e| match &e.shape { Shape::Text { at, height, text, .. } if text == "Bracket" => Some((*at, *height)), _ => None });
+    let (at, height) = value.unwrap_or_else(|| panic!("no title text in {:?}", block.entities));
+    assert!((230.0..410.0).contains(&at[0]) && (10.0..40.0).contains(&at[1]) && (height - 3.5).abs() < 1e-9, "{at:?} {height}");
     let dims: Vec<&Dimension> = sheet.entities.iter().filter_map(|e| if let Shape::Dimension(d) = &e.shape { Some(d) } else { None }).collect();
     assert_eq!(dims.len(), 1, "{:?}", sheet.entities.iter().map(|e| &e.layer).collect::<Vec<_>>());
     assert_eq!(dims[0].text.as_deref(), Some("80"));
