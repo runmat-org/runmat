@@ -71,8 +71,8 @@ const PAIR: &str = r#"runmat 0.7
 std 1
 
 assembly pair {
-    use part plate from "plate.part" as lower
-    use part plate from "plate.part" as upper {
+    use part plate as lower
+    use part plate as upper {
         placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 10 mm] } }
     }
 }
@@ -82,8 +82,8 @@ const STACK: &str = r#"runmat 0.7
 std 1
 
 assembly stack {
-    use assembly pair from "pair.assembly" as base
-    use assembly pair from "pair.assembly" as top {
+    use assembly pair as base
+    use assembly pair as top {
         placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 20 mm] } }
     }
 }

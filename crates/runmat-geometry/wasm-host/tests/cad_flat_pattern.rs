@@ -138,7 +138,7 @@ drawing plate_flat {
         title_block = []
     }
     sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
-    view flat = flat_pattern(feature = flat, sheet = "1", model = { file = "plate_sm.part" }, at = [150, 150], display = visible_lines)
+    view flat = flat_pattern(feature = flat, sheet = "1", model = { part = plate_sm }, at = [150, 150], display = visible_lines)
 }
 "#;
 

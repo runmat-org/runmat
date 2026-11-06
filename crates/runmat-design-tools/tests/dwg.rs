@@ -122,8 +122,8 @@ std 1
 drawing production {
     format a3 = { size = { size = iso, name = A3 }, title_block = [{ label = "Title", source = { source = literal, text = "Bracket" } }] }
     sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
-    view front = standard(orientation = front, sheet = "1", model = { file = "bracket.part" }, at = [115, 85], display = hidden_lines)
-    view top = projected(from = front, direction = up, sheet = "1", model = { file = "bracket.part" }, at = [115, 185], display = hidden_lines)
+    view front = standard(orientation = front, sheet = "1", model = { part = bracket }, at = [115, 85], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = bracket }, at = [115, 185], display = hidden_lines)
     annotation hole = hole_callout(hole = feature.h.face.wall(a), view = top)
     annotation hole_size = dimension(style = diameter, references = [feature.h.face.wall(a)], view = top)
     annotation flat = gdt(tolerance = top_flat, view = front)
@@ -147,8 +147,8 @@ drawing standard {
         ]
     }
     sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
-    view front = standard(orientation = front, sheet = "1", model = { file = "bracket.part" }, at = [115, 85], display = hidden_lines)
-    view top = projected(from = front, direction = up, sheet = "1", model = { file = "bracket.part" }, at = [115, 185], display = hidden_lines)
+    view front = standard(orientation = front, sheet = "1", model = { part = bracket }, at = [115, 85], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = bracket }, at = [115, 185], display = hidden_lines)
     annotation width = dimension(style = linear, references = [feature.body.face.side(s1.l4), feature.body.face.side(s1.l2)], view = front)
     annotation hole = hole_callout(hole = feature.h.face.wall(a), view = top)
 }
@@ -227,7 +227,7 @@ std 1
 drawing frame {
     format a3 = { size = { size = iso, name = A3 }, title_block = [] }
     sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
-    view top = standard(orientation = top, sheet = "1", model = { file = "frame.part" }, at = [150, 180], display = visible_lines)
+    view top = standard(orientation = top, sheet = "1", model = { part = frame }, at = [150, 180], display = visible_lines)
     table cuts = cut_list(view = top, sheet = "1", at = [20, 100])
 }
 "#;

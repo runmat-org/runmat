@@ -164,7 +164,7 @@ drawing plate {
     view front = standard(
         orientation = front,
         sheet = "1",
-        model = { file = "plate.part" },
+        model = { part = plate },
         at = [130, 120],
         display = hidden_lines
     )
@@ -172,7 +172,7 @@ drawing plate {
         from = front,
         direction = up,
         sheet = "1",
-        model = { file = "plate.part" },
+        model = { part = plate },
         at = [130, 215],
         display = hidden_lines
     )
@@ -180,7 +180,7 @@ drawing plate {
         from = front,
         direction = right,
         sheet = "1",
-        model = { file = "plate.part" },
+        model = { part = plate },
         at = [290, 120],
         display = hidden_lines
     )

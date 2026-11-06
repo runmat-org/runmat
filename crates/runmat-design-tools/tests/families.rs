@@ -27,8 +27,8 @@ const PAIR: &str = r#"runmat 0.7
 std 1
 
 assembly pair {
-    use part plate from "plate.part" as lower
-    use part plate from "plate.part" as upper {
+    use part plate as lower
+    use part plate as upper {
         placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 10 mm] } }
     }
 }
@@ -41,8 +41,8 @@ std 1
 
 assembly stack {
     input gap : length = 10 mm
-    use part plate from "plate.part" as lower
-    use part plate from "plate.part" as upper {
+    use part plate as lower
+    use part plate as upper {
         placement = { placement = offset, offset = { translation = [0 mm, 0 mm, input.gap] } }
         configuration = { select = named, name = wide }
     }
