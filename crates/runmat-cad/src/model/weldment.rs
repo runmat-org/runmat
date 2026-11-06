@@ -12,52 +12,95 @@ use crate::value::ValueExpr;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
-/// A profile from the library: a family plus its sizes (SI).
+/// A profile from the library: a family plus its sizes, as written (`ValueExpr`, so `20 mm`
+/// and `input.wall` work) or evaluated to SI ([`ProfileSizes`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "profile")]
-pub enum MemberProfile {
+pub enum MemberProfile<T = ValueExpr> {
     /// Square or rectangular tube.
     RectTube {
-        width: f64,
-        height: f64,
-        wall: f64,
+        width: T,
+        height: T,
+        wall: T,
     },
     Pipe {
-        diameter: f64,
-        wall: f64,
+        diameter: T,
+        wall: T,
     },
     /// Equal or unequal angle.
     Angle {
-        a: f64,
-        b: f64,
-        thickness: f64,
+        a: T,
+        b: T,
+        thickness: T,
     },
     Channel {
-        depth: f64,
-        flange: f64,
-        web: f64,
-        flange_thickness: f64,
+        depth: T,
+        flange: T,
+        web: T,
+        flange_thickness: T,
     },
     IBeam {
-        depth: f64,
-        flange: f64,
-        web: f64,
-        flange_thickness: f64,
+        depth: T,
+        flange: T,
+        web: T,
+        flange_thickness: T,
     },
     FlatBar {
-        width: f64,
-        thickness: f64,
+        width: T,
+        thickness: T,
     },
     RoundBar {
-        diameter: f64,
+        diameter: T,
     },
+}
+
+/// A profile's sizes evaluated to SI lengths.
+pub type ProfileSizes = MemberProfile<f64>;
+
+impl<T> MemberProfile<T> {
+    /// Each size with its parameter name, mapped by `f` (evaluation, in regeneration).
+    pub fn try_map<U, E>(&self, mut f: impl FnMut(&'static str, &T) -> Result<U, E>) -> Result<MemberProfile<U>, E> {
+        use MemberProfile as P;
+        Ok(match self {
+            P::RectTube { width, height, wall } => P::RectTube { width: f("width", width)?, height: f("height", height)?, wall: f("wall", wall)? },
+            P::Pipe { diameter, wall } => P::Pipe { diameter: f("diameter", diameter)?, wall: f("wall", wall)? },
+            P::Angle { a, b, thickness } => P::Angle { a: f("a", a)?, b: f("b", b)?, thickness: f("thickness", thickness)? },
+            P::Channel { depth, flange, web, flange_thickness } => P::Channel {
+                depth: f("depth", depth)?,
+                flange: f("flange", flange)?,
+                web: f("web", web)?,
+                flange_thickness: f("flange_thickness", flange_thickness)?,
+            },
+            P::IBeam { depth, flange, web, flange_thickness } => P::IBeam {
+                depth: f("depth", depth)?,
+                flange: f("flange", flange)?,
+                web: f("web", web)?,
+                flange_thickness: f("flange_thickness", flange_thickness)?,
+            },
+            P::FlatBar { width, thickness } => P::FlatBar { width: f("width", width)?, thickness: f("thickness", thickness)? },
+            P::RoundBar { diameter } => P::RoundBar { diameter: f("diameter", diameter)? },
+        })
+    }
+
+    /// The sizes, in declaration order.
+    pub fn sizes(&self) -> Vec<&T> {
+        use MemberProfile as P;
+        match self {
+            P::RectTube { width, height, wall } => vec![width, height, wall],
+            P::Pipe { diameter, wall } => vec![diameter, wall],
+            P::Angle { a, b, thickness } => vec![a, b, thickness],
+            P::Channel { depth, flange, web, flange_thickness } | P::IBeam { depth, flange, web, flange_thickness } => vec![depth, flange, web, flange_thickness],
+            P::FlatBar { width, thickness } => vec![width, thickness],
+            P::RoundBar { diameter } => vec![diameter],
+        }
+    }
 }
 
 /// One closed polygon (outer loop first, holes after) per profile, in the member frame
 /// (x across, y up), each edge with a stable curve id.
 pub type ProfileOutline = Vec<Vec<(SketchEntityId, [f64; 2])>>;
 
-impl MemberProfile {
+impl ProfileSizes {
     /// The cross-section area (for mass and the cut list).
     pub fn area(&self) -> f64 {
         match *self {
@@ -310,6 +353,9 @@ impl Params for WeldmentFeature {
                 for g in groups {
                     v.feature(&g.sketch);
                     v.value(&g.rotation);
+                    for size in g.profile.sizes() {
+                        v.value(size);
+                    }
                 }
             }
             WeldmentFeature::TrimExtend { members, to } => {

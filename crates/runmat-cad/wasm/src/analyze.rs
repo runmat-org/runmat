@@ -108,7 +108,7 @@ fn mm(m: f64) -> String {
     format!("{:.2}", m * 1000.0)
 }
 
-fn mass_analysis(report: &MassReport, assembly: bool) -> Analysis {
+fn mass_analysis(report: &MassReport) -> Analysis {
     let t = &report.total;
     let c = t.center;
     // kg·mm², the unit drawings and data sheets quote.
@@ -144,11 +144,7 @@ fn mass_analysis(report: &MassReport, assembly: bool) -> Analysis {
                 format!("{:.2} cm³", p.volume * 1e6),
                 p.mass.map(g).unwrap_or_else(|| "—".into()),
             ],
-            items: if assembly {
-                vec![format!("occurrence:{}", p.path)]
-            } else {
-                Vec::new()
-            },
+            items: p.item.iter().cloned().collect(),
             severity: p.mass.is_none().then_some("warning"),
         })
         .collect();
@@ -192,7 +188,7 @@ pub fn analyze(
             } else {
                 part_mass(path, text, configuration)?
             };
-            Ok(mass_analysis(&report, assembly))
+            Ok(mass_analysis(&report))
         }
         "evaluate.interference" | "evaluate.clearance" | "assembly.interference" | "assembly.clearance" if assembly => {
             let clearance = if request.command.ends_with(".clearance") {
@@ -217,7 +213,7 @@ pub fn analyze(
                         o.b.clone(),
                         format!("overlap {:.3} cm³", o.volume * 1e6),
                     ],
-                    items: vec![format!("occurrence:{}", o.a), format!("occurrence:{}", o.b)],
+                    items: o.items.to_vec(),
                     severity: Some("error"),
                 })
                 .collect();
@@ -227,7 +223,7 @@ pub fn analyze(
                     n.b.clone(),
                     format!("gap {} mm", mm(n.distance)),
                 ],
-                items: vec![format!("occurrence:{}", n.a), format!("occurrence:{}", n.b)],
+                items: n.items.to_vec(),
                 severity: Some("warning"),
             }));
             let plural = |n: usize| if n == 1 { "" } else { "s" };
@@ -480,7 +476,7 @@ pub(crate) mod tests {
                 groups: vec![MemberGroup {
                     sketch: FeatureId::new("layout"),
                     segments: names.iter().map(|n| SketchEntityId::new(*n)).collect(),
-                    profile: MemberProfile::RectTube { width: 0.02, height: 0.02, wall: 0.002 },
+                    profile: MemberProfile::RectTube { width: ValueExpr::mm(20.0), height: ValueExpr::mm(20.0), wall: ValueExpr::mm(2.0) },
                     material: Some("material.steel".into()),
                     corner: CornerTreatment::Miter,
                     rotation: ValueExpr::deg(0.0),

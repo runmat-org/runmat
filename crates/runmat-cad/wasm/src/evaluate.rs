@@ -19,6 +19,8 @@ use std::collections::BTreeMap;
 pub struct Overlap {
     pub a: String,
     pub b: String,
+    /// What selecting each selects (`occurrence:<uuid>`, as the Outline and canvas name them).
+    pub items: [String; 2],
     /// The common volume (m^3).
     pub volume: f64,
 }
@@ -28,6 +30,8 @@ pub struct Overlap {
 pub struct Near {
     pub a: String,
     pub b: String,
+    /// What selecting each selects (`occurrence:<uuid>`).
+    pub items: [String; 2],
     /// The gap between their exact bodies (m).
     pub distance: f64,
 }
@@ -51,6 +55,7 @@ pub struct Interference {
 
 struct Placement {
     path: String,
+    item: String,
     body: BodyHandle,
     world: Transform,
     bbox: Aabb,
@@ -117,6 +122,7 @@ pub fn assembly_clearance(
         if let Some(Some((body, bbox))) = parts.get(&key) {
             placements.push(Placement {
                 path: resolved.path(id as u32),
+                item: format!("occurrence:{}", node.uuid),
                 body: body.clone(),
                 world: node.world,
                 bbox: bbox.transformed(&node.world),
@@ -151,11 +157,13 @@ pub fn assembly_clearance(
                 Ok(p) if p.common_volume > CONTACT_VOLUME => out.overlaps.push(Overlap {
                     a: a.path.clone(),
                     b: b.path.clone(),
+                    items: [a.item.clone(), b.item.clone()],
                     volume: p.common_volume,
                 }),
                 Ok(p) if clearance > 0.0 && p.distance < clearance => out.near.push(Near {
                     a: a.path.clone(),
                     b: b.path.clone(),
+                    items: [a.item.clone(), b.item.clone()],
                     distance: p.distance,
                 }),
                 Ok(_) => {}

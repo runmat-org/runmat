@@ -13,7 +13,7 @@ part frame {
             {
                 sketch = layout,
                 segments = [bottom, right, top, left],
-                profile = rect_tube(width = 0.02, height = 0.02, wall = 0.002),
+                profile = rect_tube(width = 20 mm, height = 20 mm, wall = 2 mm),
                 material = S235
             }
         ]

@@ -39,6 +39,10 @@ pub struct Mass {
 pub struct PartMass {
     /// The occurrence path (the part file for a part on its own).
     pub path: String,
+    /// What selecting the occurrence selects (`occurrence:<uuid>`, as the Outline and canvas
+    /// name it); none for a part on its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<String>,
     pub file: String,
     pub configuration: String,
     pub material: Option<String>,
@@ -190,9 +194,10 @@ pub fn combine(parts: &[Mass]) -> Mass {
     }
 }
 
-fn share(path: String, file: String, configuration: String, part: &Integrated, center: [f64; 3]) -> PartMass {
+fn share(path: String, item: Option<String>, file: String, configuration: String, part: &Integrated, center: [f64; 3]) -> PartMass {
     PartMass {
         path,
+        item,
         file,
         configuration,
         material: part.material.clone(),
@@ -237,6 +242,7 @@ pub fn part_mass(
     }
     report.parts.push(share(
         path.to_owned(),
+        None,
         path.to_owned(),
         configuration,
         &integrated,
@@ -282,6 +288,7 @@ pub fn assembly_mass(
             Ok(part) => {
                 report.parts.push(share(
                     occurrence.clone(),
+                    Some(format!("occurrence:{}", node.uuid)),
                     file.clone(),
                     if node.configuration == ConfigKey::default() {
                         "default".into()

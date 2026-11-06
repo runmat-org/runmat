@@ -1335,9 +1335,9 @@ fn frame_doc(corner: CornerTreatment) -> PartDocument {
                 sketch: fid("layout"),
                 segments: ids(&names),
                 profile: MemberProfile::RectTube {
-                    width: 0.02,
-                    height: 0.02,
-                    wall: 0.002,
+                    width: mm(20.0),
+                    height: mm(20.0),
+                    wall: mm(2.0),
                 },
                 material: Some("S235".into()),
                 corner,
@@ -1405,6 +1405,20 @@ fn a_mitred_frame_makes_four_members_and_a_two_row_cut_list() {
     assert!(cut_list
         .iter()
         .all(|c| c.start_angle == 0.0 && c.end_angle == 0.0));
+}
+
+#[test]
+fn a_profile_size_without_a_unit_is_diagnosed_on_its_parameter() {
+    let env = Env::new();
+    let mut d = frame_doc(CornerTreatment::Miter);
+    let FeatureKind::Weldment(WeldmentFeature::StructuralMember { groups }) = &mut d.features[1].kind else {
+        unreachable!()
+    };
+    groups[0].profile = MemberProfile::RectTube { width: mm(20.0), height: mm(20.0), wall: ValueExpr::Number { value: 0.002 } };
+    let r = env.regen(&d);
+    assert!(!r.status("members").unwrap().ran());
+    let diag = r.diagnostics.diagnostics.iter().find(|x| format!("{:?}", x.site).contains("groups.profile.wall"));
+    assert!(diag.is_some(), "{:?}", r.diagnostics);
 }
 
 // ================================================================== direct edits

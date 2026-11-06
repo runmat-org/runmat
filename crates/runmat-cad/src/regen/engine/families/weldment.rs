@@ -43,7 +43,10 @@ impl<'a, 'b> Run<'a, 'b> {
                         };
                         segs.push((s.clone(), frame.to_world(a), frame.to_world(b)));
                     }
-                    let outline = g.profile.outline(24);
+                    let profile = g.profile.try_map(|name, size| {
+                        self.value(id, &format!("groups.profile.{name}"), size, Dimension::LENGTH)
+                    })?;
+                    let outline = profile.outline(24);
                     let depth = outline[0]
                         .iter()
                         .map(|(_, p)| p[1])
@@ -151,9 +154,9 @@ impl<'a, 'b> Run<'a, 'b> {
                         .material
                         .as_deref()
                         .and_then(crate::model::materials::material_density)
-                        .map(|density| density * g.profile.area());
+                        .map(|density| density * profile.area());
                     rows_in.push((
-                        g.profile.description(),
+                        profile.description(),
                         g.material.clone(),
                         per_metre,
                         cuts.clone(),

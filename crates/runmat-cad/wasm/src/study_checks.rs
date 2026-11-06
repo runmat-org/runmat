@@ -51,10 +51,6 @@ impl StudyChecks {
     }
 }
 
-fn occurrence(path: &str) -> String {
-    format!("occurrence:{path}")
-}
-
 /// Runs the fit and mass checks on the part or assembly `path` in `configuration`, with open
 /// contacts reported below `gap` (m; [`CONTACT_GAP`] when `None`).
 pub fn study_checks(
@@ -79,7 +75,7 @@ pub fn study_checks(
                 "{} has no density: give it a material or a `density` property so the study can assign its material",
                 part.path
             ),
-            items: if assembly { vec![occurrence(&part.path)] } else { Vec::new() },
+            items: part.item.iter().cloned().collect(),
         });
     }
     if mass.parts.iter().any(|p| p.mass.is_some()) && mass.total.mass <= 0.0 {
@@ -102,7 +98,7 @@ pub fn study_checks(
                     o.b,
                     o.volume * 1e9
                 ),
-                items: vec![occurrence(&o.a), occurrence(&o.b)],
+                items: o.items.to_vec(),
             });
         }
         checks.extend(found.near.iter().map(near_finding));
@@ -123,7 +119,7 @@ pub fn study_checks(
 
 /// A pair closer than the contact gap: a touching contact (`info`), else an open gap (`warning`).
 fn near_finding(n: &Near) -> StudyCheck {
-    let items = vec![occurrence(&n.a), occurrence(&n.b)];
+    let items = n.items.to_vec();
     if n.distance <= TOUCHING {
         return StudyCheck {
             check: "fit",
@@ -155,7 +151,7 @@ mod tests {
 
     #[test]
     fn a_touching_pair_is_a_contact_and_a_small_gap_is_open() {
-        let near = |distance| Near { a: "frame/arm".into(), b: "frame/plate".into(), distance };
+        let near = |distance| Near { a: "frame/arm".into(), b: "frame/plate".into(), items: ["occurrence:1".into(), "occurrence:2".into()], distance };
         let touching = near_finding(&near(0.0));
         assert_eq!(touching.severity, "info");
         assert!(touching.message.contains("touch"), "{}", touching.message);
