@@ -19,7 +19,7 @@
 // inside the shell is left out (still air carries little).
 //
 // Hand check (esc_heatsink.part): 19,260 mm^2 of fins and plate below the belly at 99 % fin
-// efficiency is 2.1 K/W, the pad 0.13 K/W and the pedestal 0.03 K/W, so the pad's seat runs about
+// efficiency is 2.1 K/W, the pad 0.15 K/W and the pedestal 0.03 K/W, so the pad's seat runs about
 // 14 K over ambient, 49 degC, and the board's corners a few kelvin more, since the board spreads
 // its heat 8 mm or more to the pad's edge. The study must land within about 5 K of that.
 

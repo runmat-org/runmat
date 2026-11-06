@@ -14,8 +14,8 @@ std 1
 // - fin efficiency: m = sqrt(2 h / (k t)) = sqrt(2 x 25 / (167 x 0.8e-3)) = 19.3 /m, m L = 0.19,
 //   eta = tanh(m L) / (m L) = 0.99;
 // - convection: R = 1 / (h eta A) = 1 / (25 x 0.99 x 0.01926) = 2.1 K/W, so 13 K;
-// - gap pad: 0.5 mm at 3 W/m/K over 36 x 36 mm, R = 0.13 K/W, 0.8 K; pedestal: 6 mm of
-//   aluminium over the same area, R = 0.028 K/W, 0.2 K.
+// - gap pad: 0.5 mm at 3 W/m/K over 36 x 36 mm less its four standoff reliefs (1,120 mm^2),
+//   R = 0.15 K/W, 0.9 K; pedestal: 6 mm of aluminium over 36 x 36 mm, R = 0.028 K/W, 0.2 K.
 // The board's pad sits about 14 K over ambient, about 49 degC. The four polycarbonate bosses
 // gave 258 K/W (1,600 K) on the same losses. Mass: 21,300 mm^3 of aluminium, 57 g.
 part esc_heatsink {
