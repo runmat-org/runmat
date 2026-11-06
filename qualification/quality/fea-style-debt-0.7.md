@@ -17,9 +17,9 @@ adds 93 findings. Repeated emissions count once.
 
 ## Source and toolchain
 
-- Code anchor: `0d09250a4c9a8394de9ed906953e72dc22c8fb12`.
+- Code anchor: `0b36a6a1da1e3de2d6f8bb95ddac86d2922e6cdf`.
 - FEA Git tree: `55c7f312626e67dd08e22ba9583531661139baa7`.
-- Compiler-input Git inventory: `57b0b40817affb13c296324db3d1491b1a0177a2`.
+- Compiler-input Git inventory: `e0741de497f040a32725421ae6a5ea700136ecc7`.
 - Rust/Clippy: 1.90.0.
 
 CI computes the inventory with
@@ -65,6 +65,12 @@ under the existing approved dispositions. All34 meshing-tooling unit tests
 and five catalog/workflow validators pass. These two Python files change no
 Rust source, dependency, feature or lint-bearing file; the183 FEA identities
 and their original measured evidence are conserved.
+
+R1059 changes three AOT linker files to reserve the Windows standalone execution
+stack and bind that reserve into selected-plan identity. FEA does not depend on
+the AOT orchestration crate. Its tree, dependencies, features and lint-bearing
+files retain the measured identities above. Windows product qualification is
+recorded separately; this conservation does not certify its pending build.
 
 ## CI policy and closure
 

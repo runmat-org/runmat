@@ -54,14 +54,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "1562f0b930b85e846d22a9e3036463afcf28bad750f201f4c7229121089d0ebd",
+      "sha256": "894d2db9e595ce451a6c90ca10f08ab5fb644f5dc71388838bab770ce790eb1d",
       "files": 24826,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The exact six-file inverse restores the measured source inventory: three cfg(windows) private filesystem files, one remote CLI upload-metadata producer and two Python release-workflow validation files. Neither measured Linux scientific cohort uses those changed routes. Numerical code, runtime/worker/admission/publication mechanisms, fixtures, dependencies, commands and scientific assertions are unchanged. Original measurements and approved dispositions are preserved; product and CI-routing evidence remain separately scoped.",
+    "reason": "The exact nine-file inverse restores the measured source inventory: the six previously reviewed Windows-filesystem, remote-upload and CI-validation files, plus three AOT Windows linker-policy files. Neither measured Linux scientific cohort uses the changed MSVC native-link paths. Scientific algorithms, runtime/worker/admission/publication mechanisms, fixtures, dependencies, commands and assertions retain their original identities. Original measurements and approved dispositions are preserved; Windows product acceptance is a separate pending requirement.",
     "review": {
-      "path": "qualification/scientific/reviews/release-routing-r1058.json",
-      "sha256": "edc62592d3f4c60c74c33bea5259da24e268b26c0c0cc12d756b09f0c6dd2eed"
+      "path": "qualification/scientific/reviews/windows-stack-r1059.json",
+      "sha256": "d7066b6549c36b55216362c33cb427b70a1a90da2b1751cd3fe4ea0b4c55bc95"
     }
   }
 }

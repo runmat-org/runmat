@@ -5,8 +5,11 @@ release-ready candidate. No push, tag, publication or deployment is included.
 
 ## Source and distribution
 
-Branch: `0-7-0-rc`. Product Rust/SDK source is anchored at
-`c7a12b7b9f050f6789dda56a1024636243b7a63e`. Release-routing source is
+Branch: `0-7-0-rc`. Conserved product Rust/SDK source is anchored at
+`c7a12b7b9f050f6789dda56a1024636243b7a63e`. Three AOT linker files have a
+Windows-only execution-stack successor at
+`0b36a6a1da1e3de2d6f8bb95ddac86d2922e6cdf`; its product qualification is pending.
+Release-routing source is
 `0d09250a4c9a8394de9ed906953e72dc22c8fb12`; its two validation-only Python
 changes and CI changes do not alter product code. Private Server/Desktop
 checkpoint: `82e070c074c583a7cc477bc1adc85da66de7a357`.
@@ -24,7 +27,7 @@ uses the owner-approved Rosetta route on Apple Silicon.
 | macOS ARM64 CLI/native | Corrected optimized CLI builds; real remote controls pass. Retained 31-case Metal product cohort and native pure/callback application/test pairs pass, including seven semantic controls, installation/loader/notices admission and separate-process reopening. | [Native pairs](products/macos-native-r1055.json), [remote CLI](products/remote-cli-r1057.json) |
 | macOS x86_64/Rosetta | Corrected optimized CLI: 31 passed, 0 failed, 0 omitted; eight assessment commands pass. Three 25,871-file guards and 15 collected receipt hashes match. Physical Intel hardware was not tested. | [Intel receipt](products/macos-intel-r1057.json) |
 | Linux x86_64/Vulkan | Corrected optimized CLI: 31 passed, 0 failed, 0 omitted. Six 25,871-file guards and 20 collected receipt hashes match. Actual GPU workers, callbacks, cancellation and public native compile/link execute. | [Linux receipt](products/linux-r1057.json) |
-| Windows x86_64 | Current optimized build, 31-product/eight-assessment cohort, final package and seven physical Victus checks are pending. Three focused private Win32 publication tests already pass. | Final product receipt pending |
+| Windows x86_64 | R1057 optimized build passes; product cohort: 30 passed, one native-image stack overflow. Eight assessments and three focused private Win32 publication tests pass. The preserved failing image reserves 1 MiB; a diagnostic copy with 64 MiB prints `NATIVE_OK` and exits 0. Source-level linker repair is building. Successor product acceptance, final package and seven physical Victus checks remain pending. | Final product receipt pending; [stack diagnosis and scientific scope](scientific/evidence/windows-stack-r1059.json) |
 | Optimized WASM/public SDK | Two Node execution/reset checks, 10 Chrome product cases, 12 boundary checks, five input checks and 32 exact-CAD assertions pass. Supported local named FEA uses real OCCT and supervised numerical workers. | External browser receipt below |
 | Desktop caller | Conserved native caller/settings/provider acceptance: 18 passed, 0 failed; one GUI Keychain pass is user-attested. Remote frontend upload/cluster/cipher tests: 23 passed, 0 failed; focused ESLint passes. This scope does not include a fresh signed Desktop installer. | External Desktop conservation below |
 | Real remote CLI/Server | Positive and failing jobs pass through production HTTP routes and a registered node, preserving encrypted terminal output, original errors, pre-error console and JSON reattachment. Server domain tests: 21 passed, 0 failed; affected HTTP test-target checks pass. Synthetic auth/in-memory stores do not establish production identity-provider, durability or deployment qualification. | [Remote receipt](products/remote-cli-r1057.json) |
@@ -45,7 +48,7 @@ Each count belongs to its named cohort; some cohorts overlap.
 | Server accounting | Eight copy/seed cases and one actual PostgreSQL initializer pass. Migration 0205 conserves 18 usage rows and three professional plans. Server terminal-output changes have separate 21-case domain and real CLI successor evidence. |
 
 The scientific verifier reconstructs the measured source from the exact
-[conservation review](scientific/reviews/release-routing-r1058.json), checks its
+[conservation review](scientific/reviews/windows-stack-r1059.json), checks its
 supporting evidence hashes and retains the original measurements. It does not
 relabel historical executions as fresh product tests.
 

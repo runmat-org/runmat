@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "issue": "RM-1287",
-  "reviewed_commit": "0d09250a4c9a8394de9ed906953e72dc22c8fb12",
-  "architecture_inputs": "57b0b40817affb13c296324db3d1491b1a0177a2",
+  "reviewed_commit": "0b36a6a1da1e3de2d6f8bb95ddac86d2922e6cdf",
+  "architecture_inputs": "e0741de497f040a32725421ae6a5ea700136ecc7",
   "rustc_version": "rustc 1.90.0 (1159e78c4 2025-09-14)",
   "diagnostics": [
     "architecture boundary check failed: crates/runmat-analysis/language/src/operations/output.rs exceeds the 600-line FEA module concentration limit",
