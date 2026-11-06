@@ -439,3 +439,7 @@ qmf15-est.py (surface growth estimate), qmf15-dbgpatch.py (FACEGAP prints to $QM
   thermal solve preparation: "invalid FEA resource fact: thermal host demand requires numerical storage,
   samples and valid inputs without accelerators" (planning/resource/estimate/thermal.rs, 6 conditions in
   one message). 188302a06e splits the check so the error names the condition and its byte counts.
+- mod4 (188302a06e): fails after 3520 s, peak RSS 19.9 GB: "input transport closure 851239200 B is below the
+  encoded payload 863798052 B". The closure counts content-addressed chunks once; the big mesh repeats
+  region/provenance runs, so it is smaller. 946e1be80d applies acoustic's existing rule (closure nonzero)
+  to thermal, result publication, state publication, fluid recovery and fluid admission; tests updated.
