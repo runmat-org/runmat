@@ -20,6 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub mod m_functions;
+pub mod m_table;
 
 /// The bookmarked value-model decisions (report 12 §6), with the defaults in force.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

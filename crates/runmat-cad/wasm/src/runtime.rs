@@ -151,7 +151,7 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         let Some(doc) = parse_part(path, text).document else {
             return Vec::new();
         };
-        return doc
+        let mut out: Vec<String> = doc
             .features
             .iter()
             .filter_map(|f| match &f.kind {
@@ -159,6 +159,9 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
                 _ => None,
             })
             .collect();
+        // Values that call `.m` functions: the folders those functions can be in.
+        out.extend(values_host::call_folders(path, text, &doc));
+        return out;
     }
     // The folders it can name designs in, and the design files it names by path.
     runmat_cad::modules::dependencies(path, text)

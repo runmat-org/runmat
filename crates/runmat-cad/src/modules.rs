@@ -106,7 +106,7 @@ pub fn stem_name(file: &str) -> String {
 }
 
 /// The ancestors of `folder`, nearest first, ending at the workspace root (`""` or `/`).
-fn ancestors(folder: &str) -> Vec<String> {
+pub fn ancestors(folder: &str) -> Vec<String> {
     let mut out = vec![folder.to_string()];
     let mut at = folder.to_string();
     while !at.is_empty() && at != "/" {
