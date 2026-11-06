@@ -38,6 +38,7 @@ test("the export writes design/manual.json, design/ledger.json and every page", 
         assert.deepEqual(manual, loadDesign(source).manual);
         for (const topic of manual.topics) assert.equal(readFileSync(join(output, "documents", topic.narrative), "utf8"), readFileSync(join(source, topic.narrative), "utf8"));
         assert.deepEqual(JSON.parse(readFileSync(join(output, "design/ledger.json"))), loadDesign(source).ledger);
+        assert.deepEqual(JSON.parse(readFileSync(join(output, "design/clips.json"))), loadDesign(source).clips);
     }
     finally { rmSync(output, { recursive: true, force: true }); }
 });
@@ -76,4 +77,20 @@ test("ledger prose renders as MDX-safe text on the status page", async () => {
     const page = designStatusPage(loadDesign(resolve(import.meta.dirname, "../..")).ledger).split("\n").filter(line => !line.startsWith("---") && !/^(description|keywords):/.test(line)).join("\n");
     const outsideCode = page.replace(/`[^`]*`/g, "");
     assert.doesNotMatch(outsideCode, /[<{}]/);
+});
+
+test("a clip marker names a clip in clips.json, and each clip has its alt text, size, length and files", () => {
+    const root = fixture();
+    try {
+        const page = join(root, "docs/design/language/overview.md");
+        writeFileSync(page, readFileSync(page, "utf8") + "\n<!-- design:clip:mcad/no-such-clip -->\n");
+        const clipsPath = join(root, "docs/design/clips.json");
+        const clips = JSON.parse(readFileSync(clipsPath));
+        clips.clips.push({ id: "mcad/half", alt: "" });
+        writeFileSync(clipsPath, JSON.stringify(clips));
+        const rules = designDocsProblems(root).map(problem => problem.rule);
+        assert.ok(rules.includes("clip-unknown"), rules.join(" "));
+        assert.ok(rules.includes("clip-field"), rules.join(" "));
+    }
+    finally { rmSync(root, { recursive: true, force: true }); }
 });

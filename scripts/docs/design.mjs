@@ -10,6 +10,11 @@
 // - The examples are checked by crates/runmat-design-tools/tests/docs_snippets.rs, through the
 //   same compilers the editor uses.
 //
+// - docs/design/clips.json lists the short flow videos the pages show. A page places one on its
+//   own line as <!-- design:clip:<family>/<flow> --> (the site renders the video there, as it
+//   renders the simulation pages' <!-- fea:example:... --> figures). Each clip has its alt text,
+//   size, length and the base of its light and dark files: <base>-{light,dark}.{mp4,webm,webp}.
+//
 // `designDocsProblems` is the lint; `collectDesign` writes the export's design/ files.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -28,8 +33,17 @@ const FENCE_ATTRIBUTES = ["file", "fragment", "pending", "fails", "m", "occt"];
 export const hasDesignDocs = source => existsSync(join(source, DESIGN_ROOT, "manual.json"));
 
 export function loadDesign(source) {
-    return { manual: readJson(join(source, DESIGN_ROOT, "manual.json")), ledger: readJson(join(source, DESIGN_ROOT, "ledger.json")) };
+    const clipsPath = join(source, DESIGN_ROOT, "clips.json");
+    return {
+        manual: readJson(join(source, DESIGN_ROOT, "manual.json")),
+        ledger: readJson(join(source, DESIGN_ROOT, "ledger.json")),
+        clips: existsSync(clipsPath) ? readJson(clipsPath) : { clips: [] },
+    };
 }
+
+/** A clip marker on its own line: <!-- design:clip:mcad/sketch -->. */
+export const CLIP_MARKER = /^<!-- design:clip:([a-z0-9-]+\/[a-z0-9-]+) -->$/gm;
+const CLIP_FIELDS = ["id", "alt", "width", "height", "seconds", "base"];
 
 export const STATUS_PAGE = "docs/design/language/status.md";
 const AREA_TITLES = { language: "Design language", mcad: "MCAD", ecad: "ECAD", tooling: "Tools" };
@@ -89,6 +103,12 @@ export function designDocsProblems(source) {
     const narratives = new Set(manual.topics.map(topic => topic.narrative));
     const pending = new Map(ledger.capabilities.map(row => [row.id, row]));
     const flagged = new Set();
+    const clips = new Map();
+    for (const clip of loadDesign(source).clips.clips) {
+        for (const field of CLIP_FIELDS) if (clip[field] === undefined || clip[field] === "") problem("docs/design/clips.json", 0, "clip-field", `clip \`${clip.id ?? "?"}\` needs \`${field}\``);
+        if (clips.has(clip.id)) problem("docs/design/clips.json", 0, "duplicate-clip", `clip \`${clip.id}\` appears twice`);
+        clips.set(clip.id, clip);
+    }
     for (const file of markdownFiles(root, { skip: [] })) {
         const path = `${DESIGN_ROOT}/${file}`;
         if (!narratives.has(path)) problem(path, 1, "page-unlisted", "the page is in no manual topic");
@@ -123,6 +143,8 @@ export function designDocsProblems(source) {
             if (anchor && existsSync(join(source, topic.narrative)) && !headings(readText(join(source, topic.narrative))).some(heading => heading.anchor === anchor))
                 problem(path, link.line, "link-anchor", `\`${link.target}\`: ${topic.narrative} has no heading #${anchor}`);
         }
+        for (const match of text.matchAll(CLIP_MARKER))
+            if (!clips.has(match[1])) problem(path, text.slice(0, match.index).split("\n").length, "clip-unknown", `\`${match[1]}\` is no clip in docs/design/clips.json`);
         for (const { line, text: prose } of proseLines(text))
             if (/\bnot yet in the current release\b/.test(prose) && !/\]\(pending:/.test(prose))
                 problem(path, line, "pending-form", "write the flag as a link: [not yet in the current release](pending:<id>)");
@@ -137,7 +159,7 @@ export function designDocsProblems(source) {
     return problems;
 }
 
-/** Writes design/manual.json and design/ledger.json and copies each page to documents/. */
+/** Writes design/manual.json, design/ledger.json and design/clips.json and copies each page to documents/. */
 export function collectDesign(source, output, validate) {
     if (!hasDesignDocs(source)) return;
     const { manual, ledger } = loadDesign(source);
@@ -150,6 +172,7 @@ export function collectDesign(source, output, validate) {
     mkdirSync(join(output, "design"), { recursive: true });
     writeFileSync(join(output, "design/manual.json"), JSON.stringify(manual, null, 2) + "\n");
     writeFileSync(join(output, "design/ledger.json"), JSON.stringify(ledger, null, 2) + "\n");
+    writeFileSync(join(output, "design/clips.json"), JSON.stringify(loadDesign(source).clips, null, 2) + "\n");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
