@@ -355,9 +355,8 @@ fn published(segments: &[String]) -> Option<ValueXref> {
 
 fn dynamic_call(expr: &Expr, call: &ast::Call, volatile: bool) -> Result<DynamicCall, LowerError> {
     let function = match call.callee() {
-        Some(Expr::Reference(reference)) if reference.segments().len() == 1 => {
-            reference.segments().remove(0)
-        }
+        // `camLift(…)`, a package function `cams.lift(…)` or a folder alias's `lib.lift(…)`.
+        Some(Expr::Reference(reference)) => reference.segments().join("."),
         _ => return Err(error(expr, "a value calls a function by its name")),
     };
     let mut arguments = Vec::new();
