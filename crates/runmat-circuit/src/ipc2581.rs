@@ -200,22 +200,39 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
     for (name, pkg) in &packages {
         let _ = writeln!(
             step,
-            "{ind}<Package name=\"{}\" type=\"OTHER\" pinOne=\"{}\" height=\"{}\">",
+            "{ind}<Package name=\"{}\" type=\"OTHER\" pinOne=\"{}\" pinOneOrientation=\"OTHER\" height=\"{}\">",
             esc(name),
             esc(pkg.pads.first().map(|p| p.name.as_str()).unwrap_or("1")),
             n(pkg.body.map(|b| b.height).unwrap_or(0))
         );
-        if let Some(cy) = pkg.courtyard.first() {
+        // The outline: the courtyard, else the box around the pads.
+        let pad_box = || {
+            let b = pkg
+                .pads
+                .iter()
+                .map(|p| crate::layout::pad_prim(p, &crate::geom::Transform::IDENTITY).bbox())
+                .reduce(|a, b| a.union(b))
+                .unwrap_or(crate::geom::Rect::new(Point::ORIGIN, Point::ORIGIN))
+                .inflate(crate::geom::mm(0.05));
+            vec![
+                b.min,
+                Point::new(b.max.x, b.min.y),
+                b.max,
+                Point::new(b.min.x, b.max.y),
+            ]
+        };
+        let outline = pkg.courtyard.first().cloned().unwrap_or_else(pad_box);
+        {
             let _ = writeln!(step, "{ind}  <Outline>");
-            polygon(&mut step, "Polygon", cy, &format!("{ind}    "));
+            polygon(&mut step, "Polygon", &outline, &format!("{ind}    "));
             let lid = dict.line(crate::geom::mm(0.05));
             let _ = writeln!(step, "{ind}    <LineDescRef id=\"{lid}\"/>");
             let _ = writeln!(step, "{ind}  </Outline>");
         }
         for p in &pkg.pads {
             let (kind, mount) = match p.kind {
-                PadKind::Tht => ("THRU", "THROUGH_HOLE"),
-                PadKind::Npth => ("NONPLATED", "OTHER"),
+                PadKind::Tht => ("THRU", "THROUGH_HOLE_PIN"),
+                PadKind::Npth => ("NONPLATED", "HOLE"),
                 _ => ("SURFACE", "SURFACE_MOUNT_PAD"),
             };
             let prim = dict.pad(&p.shape);
@@ -322,7 +339,7 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
             for w in pts.windows(2) {
                 let _ = writeln!(
                     s,
-                    "{fi}<Line startX=\"{}\" startY=\"{}\" endX=\"{}\" endY=\"{}\"><LineDescRef id=\"{lid}\"/></Line>",
+                    "{fi}<Features><Line startX=\"{}\" startY=\"{}\" endX=\"{}\" endY=\"{}\"><LineDescRef id=\"{lid}\"/></Line></Features>",
                     n(w[0].x), n(w[0].y), n(w[1].x), n(w[1].y)
                 );
             }
@@ -332,8 +349,9 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
             let s = sets.entry(net_of(v.net)).or_default();
             let _ = writeln!(
                 s,
-                "{fi}<Pad padstackDefRef=\"VIA\"><Location x=\"{}\" y=\"{}\"/><StandardPrimitiveRef id=\"{prim}\"/></Pad>",
-                n(v.at.x), n(v.at.y)
+                "{fi}<Pad><Location x=\"{}\" y=\"{}\"/><StandardPrimitiveRef id=\"{prim}\"/></Pad>",
+                n(v.at.x),
+                n(v.at.y)
             );
         }
         for f in board.footprints.values() {
@@ -360,7 +378,9 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
             if let Some(fill) = z.fill.get(&l) {
                 let s = sets.entry(net_of(z.net)).or_default();
                 for p in &fill.polys {
-                    contour(s, p, &fi);
+                    let _ = writeln!(s, "{fi}<Features>");
+                    contour(s, p, &format!("{fi}  "));
+                    let _ = writeln!(s, "{fi}</Features>");
                 }
             }
         }
@@ -450,6 +470,17 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
         let _ = writeln!(x, "    <LayerRef name=\"{}\"/>", drill_name(*k));
     }
     x.push_str("    <BomRef name=\"BOM\"/>\n");
+    x.push_str("    <DictionaryLineDesc units=\"MILLIMETER\">\n");
+    let mut lines: Vec<(&String, &Coord)> = dict.lines.iter().map(|(w, id)| (id, w)).collect();
+    lines.sort();
+    for (id, w) in lines {
+        let _ = writeln!(
+            x,
+            "      <EntryLineDesc id=\"{id}\"><LineDesc lineEnd=\"ROUND\" lineWidth=\"{}\"/></EntryLineDesc>",
+            n(*w)
+        );
+    }
+    x.push_str("    </DictionaryLineDesc>\n");
     x.push_str("    <DictionaryStandard units=\"MILLIMETER\">\n");
     let mut shapes: Vec<(&String, &String)> = dict.shapes.iter().map(|(b, id)| (id, b)).collect();
     shapes.sort();
@@ -465,17 +496,7 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
             let _ = writeln!(x, "      <EntryUser id=\"{id}\"><UserSpecial>\n{body}      </UserSpecial></EntryUser>");
         }
     }
-    x.push_str("    </DictionaryUser>\n    <DictionaryLineDesc units=\"MILLIMETER\">\n");
-    let mut lines: Vec<(&String, &Coord)> = dict.lines.iter().map(|(w, id)| (id, w)).collect();
-    lines.sort();
-    for (id, w) in lines {
-        let _ = writeln!(
-            x,
-            "      <EntryLineDesc id=\"{id}\"><LineDesc lineEnd=\"ROUND\" lineWidth=\"{}\"/></EntryLineDesc>",
-            n(*w)
-        );
-    }
-    x.push_str("    </DictionaryLineDesc>\n  </Content>\n");
+    x.push_str("    </DictionaryUser>\n  </Content>\n");
     x.push_str("  <LogisticHeader>\n    <Role id=\"Owner\" roleFunction=\"SENDER\"/>\n    <Enterprise id=\"RunMat\" code=\"NONE\"/>\n    <Person name=\"RunMat\" enterpriseRef=\"RunMat\" roleRef=\"Owner\"/>\n  </LogisticHeader>\n");
     let _ = writeln!(
         x,
@@ -532,6 +553,16 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
             esc(l)
         );
     }
+    for (k, sl) in board.stackup.layers.iter().enumerate() {
+        if let crate::layout::StackKind::Dielectric { core } = sl.kind {
+            let _ = writeln!(
+                x,
+                "      <Layer name=\"{}\" layerFunction=\"{}\" side=\"INTERNAL\" polarity=\"POSITIVE\"/>",
+                stack_layer_name(board, k),
+                if core { "DIELCORE" } else { "DIELPREG" }
+            );
+        }
+    }
     for k in spans.keys() {
         let _ = writeln!(
             x,
@@ -545,7 +576,7 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
     let total = board.stackup.thickness();
     let _ = writeln!(
         x,
-        "      <Stackup name=\"PRIMARY\" overallThickness=\"{}\" tolPlus=\"0\" tolMinus=\"0\" whereMeasured=\"METAL\">\n        <StackupGroup name=\"PRIMARY\" thickness=\"{}\" tolPlus=\"0\" tolMinus=\"0\">",
+        "      <Stackup name=\"PRIMARY\" overallThickness=\"{}\" tolPlus=\"0\" tolMinus=\"0\" whereMeasured=\"METAL\" stackupStatus=\"PROPOSED\">\n        <StackupGroup name=\"PRIMARY\" thickness=\"{}\" tolPlus=\"0\" tolMinus=\"0\">",
         n(total),
         n(total)
     );
@@ -561,7 +592,7 @@ pub fn export(board: &Board, bom_parts: &BTreeMap<String, String>) -> String {
                 .count() as u8;
             copper_name(ci, c)
         } else {
-            format!("DIELECTRIC_{k}")
+            stack_layer_name(board, k)
         };
         let _ = writeln!(
             x,
@@ -589,14 +620,14 @@ fn write_layer(out: &mut String, layer: &str, sets: &BTreeMap<Option<String>, St
         }
         match net {
             Some(nm) => {
-                let _ = writeln!(out, "{ind}  <Set net=\"{}\">\n{ind}    <Features>", esc(nm));
+                let _ = writeln!(out, "{ind}  <Set net=\"{}\">", esc(nm));
             }
             None => {
-                let _ = writeln!(out, "{ind}  <Set>\n{ind}    <Features>");
+                let _ = writeln!(out, "{ind}  <Set>");
             }
         }
         out.push_str(body);
-        let _ = writeln!(out, "{ind}    </Features>\n{ind}  </Set>");
+        let _ = writeln!(out, "{ind}  </Set>");
     }
     let _ = writeln!(out, "{ind}</LayerFeature>");
 }
@@ -613,7 +644,7 @@ fn polyline(out: &mut String, dict: &mut Dict, pts: &[Point], w: Coord, ind: &st
         );
         return;
     }
-    let _ = writeln!(out, "{ind}<Polyline>");
+    let _ = writeln!(out, "{ind}<Features><Polyline>");
     let _ = writeln!(
         out,
         "{ind}  <PolyBegin x=\"{}\" y=\"{}\"/>",
@@ -628,7 +659,10 @@ fn polyline(out: &mut String, dict: &mut Dict, pts: &[Point], w: Coord, ind: &st
             n(p.y)
         );
     }
-    let _ = writeln!(out, "{ind}  <LineDescRef id=\"{lid}\"/>\n{ind}</Polyline>");
+    let _ = writeln!(
+        out,
+        "{ind}  <LineDescRef id=\"{lid}\"/>\n{ind}</Polyline></Features>"
+    );
 }
 
 fn text_lines(out: &mut String, dict: &mut Dict, t: &crate::layout::BoardText, ind: &str) {
@@ -698,5 +732,24 @@ fn graphic_lines(
                 polyline(out, dict, &pl, crate::font::default_thickness(*size), ind);
             }
         }
+    }
+}
+
+/// The name of non-copper stackup layer `k`: the mask, paste and legend layers by side (above
+/// the first copper layer is the top), dielectrics as `DIELECTRIC_<k>`.
+fn stack_layer_name(board: &Board, k: usize) -> String {
+    use crate::layout::StackKind;
+    let first_cu = board
+        .stackup
+        .layers
+        .iter()
+        .position(|l| matches!(l.kind, StackKind::Copper { .. }))
+        .unwrap_or(0);
+    let side = if k < first_cu { "TOP" } else { "BOTTOM" };
+    match board.stackup.layers[k].kind {
+        StackKind::SolderMask => format!("MASK_{side}"),
+        StackKind::Paste => format!("PASTE_{side}"),
+        StackKind::Silkscreen => format!("SILK_{side}"),
+        _ => format!("DIELECTRIC_{k}"),
     }
 }

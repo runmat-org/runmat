@@ -1,0 +1,286 @@
+//! The fabrication set of the quadcopter's flight-controller board, checked with readers that
+//! did not write it: every Gerber file parses with an independent Gerber parser, the Excellon
+//! files and the IPC-D-356A netlist parse line by line against their formats, and the
+//! IPC-2581 file validates against the IPC-2581C schema when `RUNMAT_IPC2581_XSD` names it
+//! (with `xmllint`). `RUNMAT_FAB_OUT=<dir>` also writes the set there.
+
+use gerber_parser::gerber_types::{Command, DCode, FunctionCode, Operation};
+use runmat_circuit::fab::set::FabRequest;
+use runmat_circuit::runtime::{export_fabrication, CompileOptions, FabricationExport, Files};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+fn drone() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone")
+}
+
+fn flight_controller() -> FabricationExport {
+    let dir = drone();
+    let files: Files = [".circuit", ".circuit.layout", ".circuit.lock"]
+        .iter()
+        .filter_map(|x| {
+            let name = format!("flight_controller{x}");
+            Some((
+                format!("/p/{name}"),
+                std::fs::read_to_string(dir.join(&name)).ok()?,
+            ))
+        })
+        .collect();
+    let path = "/p/flight_controller.circuit.layout";
+    let out = export_fabrication(
+        path,
+        &files[path],
+        &files,
+        &CompileOptions::default(),
+        &FabRequest::default(),
+        None,
+    )
+    .unwrap_or_else(|d| panic!("{:?}", d.iter().map(|d| &d.message).collect::<Vec<_>>()));
+    if let Ok(dir) = std::env::var("RUNMAT_FAB_OUT") {
+        for (p, t) in &out.files {
+            let f = PathBuf::from(&dir).join(p);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, t).unwrap();
+        }
+    }
+    out
+}
+
+#[derive(Default, Debug)]
+struct Ops {
+    flashes: usize,
+    draws: usize,
+    moves: usize,
+}
+
+fn parse_gerber(name: &str, text: &str) -> Ops {
+    let doc = match gerber_parser::parse(std::io::BufReader::new(text.as_bytes())) {
+        Ok(d) => d,
+        Err((_, e)) => panic!("{name}: {e:?}"),
+    };
+    let errors: Vec<String> = doc.errors().iter().map(|e| format!("{e:?}")).collect();
+    assert!(errors.is_empty(), "{name}: {errors:#?}");
+    assert!(
+        doc.units.is_some() && doc.format_specification.is_some(),
+        "{name}: no units or format"
+    );
+    let mut ops = Ops::default();
+    for c in doc.commands() {
+        if let Command::FunctionCode(FunctionCode::DCode(DCode::Operation(op))) = c {
+            match op {
+                Operation::Flash(..) => ops.flashes += 1,
+                Operation::Interpolate(..) => ops.draws += 1,
+                Operation::Move(..) => ops.moves += 1,
+            }
+        }
+    }
+    ops
+}
+
+#[test]
+fn every_gerber_parses_with_an_independent_reader() {
+    let out = flight_controller();
+    let gerbers: BTreeMap<&String, &String> = out
+        .files
+        .iter()
+        .filter(|(p, _)| p.ends_with(".gbr"))
+        .collect();
+    // 4 copper, mask, paste and legend per side, profile; drill map; fabrication drawing.
+    assert_eq!(gerbers.len(), 4 + 6 + 1 + 2, "{:?}", gerbers.keys());
+    let mut by_name = BTreeMap::new();
+    for (p, t) in &gerbers {
+        let ops = parse_gerber(p, t);
+        // Every part sits on the top, so the bottom paste and legend are empty.
+        if !p.ends_with("B_Paste.gbr") && !p.ends_with("B_Silkscreen.gbr") {
+            assert!(ops.flashes + ops.draws > 0, "{p}: empty image");
+        }
+        by_name.insert(p.rsplit('/').next().unwrap().to_owned(), ops);
+    }
+    let top = &by_name["flight_controller-F_Cu.gbr"];
+    assert!(top.flashes > 100, "top copper: {top:?}");
+    // The drill map strokes its symbols: it draws more than the outline and text.
+    assert!(by_name["flight_controller-drill-map.gbr"].draws > 300);
+    // X2 attributes: every copper pad carries its net, pin and component.
+    let cu = &out.files["gerber/flight_controller-F_Cu.gbr"];
+    assert!(cu.contains("%TF.FileFunction,Copper,L1,Top*%"));
+    assert!(cu.contains("%TO.P,U1,"), "pin attributes on the MCU");
+    assert!(cu.contains("%TO.N,GND*%"));
+    let job: serde_json::Value =
+        serde_json::from_str(&out.files["gerber/flight_controller.gbrjob"]).unwrap();
+    assert_eq!(job["GeneralSpecs"]["LayerNumber"], 4);
+    let listed = job["FilesAttributes"].as_array().unwrap().len();
+    let drills = out.files.keys().filter(|p| p.ends_with(".drl")).count();
+    assert_eq!(listed, 4 + 6 + 1 + drills);
+}
+
+/// Excellon: a header (`M48` … `%`), tool definitions `T<n>C<d>`, then hits under each tool,
+/// `M30` at the end. Returns tool → hits.
+fn parse_excellon(name: &str, text: &str) -> BTreeMap<u32, usize> {
+    let mut lines = text.lines();
+    assert_eq!(lines.next(), Some("M48"), "{name}");
+    let mut tools = BTreeMap::new();
+    let mut header = true;
+    let mut current = None;
+    let mut ended = false;
+    for l in lines {
+        if l.starts_with(';') || l.is_empty() {
+            continue;
+        }
+        assert!(!ended, "{name}: data after M30");
+        if header {
+            match l {
+                "%" => header = false,
+                "FMAT,2" | "METRIC" | "G90" => {}
+                t if t.starts_with('T') => {
+                    let (n, d) = t[1..]
+                        .split_once('C')
+                        .unwrap_or_else(|| panic!("{name}: {t}"));
+                    let d: f64 = d.parse().unwrap();
+                    assert!(d > 0.0);
+                    tools.insert(n.parse::<u32>().unwrap(), 0usize);
+                }
+                other => panic!("{name}: header line {other}"),
+            }
+            continue;
+        }
+        match l {
+            "G05" => {}
+            "M30" => ended = true,
+            t if t.starts_with('T') => current = Some(t[1..].parse::<u32>().unwrap()),
+            hit if hit.starts_with('X') => {
+                let t = current.unwrap_or_else(|| panic!("{name}: hit before a tool"));
+                let coords: Vec<&str> = hit.split("G85").collect();
+                for c in coords {
+                    let (x, y) = c[1..]
+                        .split_once('Y')
+                        .unwrap_or_else(|| panic!("{name}: {c}"));
+                    x.parse::<f64>().unwrap();
+                    y.parse::<f64>().unwrap();
+                }
+                *tools
+                    .get_mut(&t)
+                    .unwrap_or_else(|| panic!("{name}: undefined tool T{t}")) += 1;
+            }
+            other => panic!("{name}: body line {other}"),
+        }
+    }
+    assert!(ended, "{name}: no M30");
+    tools
+}
+
+#[test]
+fn drill_files_and_the_drill_table_agree() {
+    let out = flight_controller();
+    let mut hits = 0;
+    for (p, t) in out.files.iter().filter(|(p, _)| p.ends_with(".drl")) {
+        let tools = parse_excellon(p, t);
+        assert!(tools.values().all(|&n| n > 0), "{p}: an unused tool");
+        hits += tools.values().sum::<usize>();
+    }
+    assert!(hits > 0);
+    let map = &out.files["drill/flight_controller-drill-map.gbr"];
+    assert!(map.contains("%TF.FileFunction,Drillmap*%"));
+}
+
+#[test]
+fn ipc356_records_are_fixed_column() {
+    let out = flight_controller();
+    let t = &out.files["netlist/flight_controller.ipc"];
+    let mut records = 0;
+    for l in t.lines() {
+        match &l[..1] {
+            "C" | "P" => {}
+            "9" => assert_eq!(l, "999"),
+            "3" => {
+                records += 1;
+                assert!(l.starts_with("317") || l.starts_with("327"), "{l}");
+                // Net name in columns 4-17, then reference at 21, X at 42 and Y at 50 (1-based).
+                assert_eq!(&l[41..42], "X", "{l}");
+                assert_eq!(&l[49..50], "Y", "{l}");
+            }
+            other => panic!("unexpected record {other}: {l}"),
+        }
+    }
+    assert!(records > 100);
+}
+
+#[test]
+fn ipc2581_validates_against_the_schema() {
+    let out = flight_controller();
+    let xml = &out.files["ipc2581/flight_controller.xml"];
+    assert!(xml.contains("<IPC-2581 revision=\"C\""));
+    let Ok(xsd) = std::env::var("RUNMAT_IPC2581_XSD") else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("runmat-ipc2581-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("board.xml");
+    std::fs::write(&f, xml).unwrap();
+    let r = std::process::Command::new("xmllint")
+        .args(["--noout", "--schema", &xsd])
+        .arg(&f)
+        .output()
+        .expect("xmllint");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+}
+
+#[test]
+fn odb_tree_is_consistent() {
+    let out = flight_controller();
+    let odb: BTreeMap<&str, &String> = out
+        .files
+        .iter()
+        .filter_map(|(p, t)| Some((p.strip_prefix("odb/")?, t)))
+        .collect();
+    let matrix = odb["flight_controller/matrix/matrix"];
+    let names: Vec<String> = matrix
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("NAME="))
+        .filter(|n| *n != "PCB")
+        .map(|n| n.to_lowercase())
+        .collect();
+    assert!(names.len() >= 4 + 6 + 2 + 1, "{names:?}");
+    for n in &names {
+        let f = format!("flight_controller/steps/pcb/layers/{n}/features");
+        let t = odb.get(f.as_str()).unwrap_or_else(|| panic!("no {f}"));
+        assert!(t.starts_with("UNITS=MM"));
+        // Every symbol a feature uses is defined.
+        let defined: usize = t.lines().filter(|l| l.starts_with('$')).count();
+        for l in t
+            .lines()
+            .filter(|l| l.starts_with("P ") || l.starts_with("L "))
+        {
+            let f: Vec<&str> = l.split(' ').collect();
+            let sym: usize = f[if l.starts_with('P') { 3 } else { 5 }].parse().unwrap();
+            assert!(sym < defined, "{n}: {l}");
+        }
+    }
+    let eda = odb["flight_controller/steps/pcb/eda/data"];
+    assert!(eda.lines().filter(|l| l.starts_with("NET ")).count() > 20);
+    assert!(eda.contains("FID C "));
+    let comps = odb["flight_controller/steps/pcb/layers/comp_+_top/components"];
+    assert!(comps
+        .lines()
+        .any(|l| l.starts_with("CMP ") && l.contains(" U1 ")));
+}
+
+#[test]
+fn bom_and_placement_per_variant() {
+    let out = flight_controller();
+    let bom = &out.files["assembly/flight_controller-bom.csv"];
+    assert!(bom.starts_with("Designators,Quantity,Value,Package,MPN,Manufacturer\n"));
+    let pos = &out.files["assembly/flight_controller-pos.csv"];
+    assert!(pos.lines().count() > 20);
+    for v in out.variants.iter().flatten() {
+        assert!(out
+            .files
+            .contains_key(&format!("assembly/flight_controller-{v}-bom.csv")));
+    }
+    assert_eq!(out.layers.iter().filter(|l| l.kind == "copper").count(), 4);
+}
+
+#[test]
+fn the_set_is_deterministic() {
+    assert_eq!(flight_controller().files, flight_controller().files);
+}

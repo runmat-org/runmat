@@ -27,18 +27,6 @@ const RULES: &[(&str, &str)] = &[
     ("silk", "Silkscreen"),
 ];
 
-const FAB: &[(&str, &str)] = &[
-    ("gerber_x2", "Gerber X2"),
-    ("odb", "ODB++"),
-    ("ipc2581", "IPC-2581"),
-    ("nc_drill", "NC drill"),
-    ("pick_place", "Pick and place"),
-    ("bom", "BOM"),
-    ("assembly_drawing", "Assembly drawing"),
-    ("fab_drawing", "Fabrication drawing"),
-    ("step", "STEP"),
-];
-
 /// Points clicked in the board view (`point:x,y` picks), in click order.
 fn points(label: &str, help: &str) -> Field {
     picks("points", label, &[K::Point])
@@ -171,10 +159,22 @@ pub(super) fn add(c: &mut Catalog) {
         brd("board.test-points", "Test points", "test-point", "Add test points on nets.")
             .inputs(vec![picks("nets", "Nets", &[K::Net]), choice("side", "Side", &[("bottom", "Bottom"), ("top", "Top")]), qty("diameter", "Pad diameter", "length", Some(1.0))])
             .edit(add_to("test_point", Section::Components)),
-        brd("board.fab-outputs", "Fab outputs", "export", "Write fabrication and assembly outputs.")
+        brd("board.fab-outputs", "Fabrication outputs", "export", "Write the fabrication and assembly outputs into a folder.")
             .kw(&["gerber", "odb++", "ipc-2581", "drill", "pick and place", "manufacturing"])
-            .inputs(vec![choice("format", "Output", FAB), text("folder", "Folder", Some("fab"))])
-            .edit(export("selected")),
+            .inputs(vec![
+                flag("gerber", "Gerber X2 and job file", true),
+                flag("drill", "Excellon drill", true),
+                flag("drill_map", "Drill map", true),
+                flag("drawing", "Fabrication drawing", true),
+                flag("pick_place", "Pick and place", true),
+                flag("bom", "BOM per variant", true),
+                flag("ipc2581", "IPC-2581", true),
+                flag("odb", "ODB++", true),
+                flag("ipc356", "IPC-D-356A netlist", true),
+                flag("include_through_hole", "Through-hole parts in pick and place", false),
+                text("folder", "Folder", Some("fab")),
+            ])
+            .edit(export("fabrication")),
         brd("board.to-enclosure", "To enclosure", "to-enclosure", "Place the board in an assembly and check its clearance.")
             .inputs(vec![text("assembly", "Assembly", Some("enclosure.assembly")), qty("clearance", "Minimum clearance", "length", Some(1.0))])
             .edit(edit(EditOp::CreateFile, Section::None).item("assembly_occurrence")),
@@ -354,18 +354,7 @@ pub(super) fn tab() -> DomainTab {
                     c("board.test-points"),
                 ],
             ),
-            group(
-                "outputs",
-                "Outputs",
-                vec![variants(
-                    "board.fab-outputs.menu",
-                    "Fab outputs",
-                    "export",
-                    "board.fab-outputs",
-                    "format",
-                    FAB,
-                )],
-            ),
+            group("outputs", "Outputs", vec![c("board.fab-outputs")]),
             group("mechanical", "Mechanical", vec![c("board.to-enclosure")]),
             group(
                 "analysis",

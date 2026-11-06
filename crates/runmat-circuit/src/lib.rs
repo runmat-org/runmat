@@ -33,11 +33,11 @@
 //! Interchange and outputs:
 //! - [`kicad`]: clean-room, lossless KiCad 8/9/10 board, footprint, schematic, symbol and
 //!   rules files.
-//! - [`fab`]: Gerber X2, Excellon, IPC-D-356, BOM, pick-and-place; [`font`]: the stroke
-//!   font text is drawn with; [`ipc2581`]: IPC-2581 revision C. ODB++ is not written yet:
-//!   its directory format (matrix, per-layer feature files, EDA data, netlists) needs the
-//!   ODB++ specification, which Siemens distributes on registration and which this
-//!   clean-room implementation has not used; IPC-2581 carries the same data set.
+//! - [`fab`]: Gerber X2 and its job file, Excellon, the drill map and fabrication drawing,
+//!   ODB++, IPC-D-356A, BOM and pick-and-place per variant, and the whole set a request
+//!   names ([`fab::set`]); [`font`]: the stroke font text is drawn with; [`ipc2581`]:
+//!   IPC-2581 revision C (valid against the published schema).
+//! - [`netlists`]: KiCad and EDIF 2.0.0 netlists.
 //! - [`review`]: design-review suites with typed fixes.
 //! - [`fea`]: the board → FEA `pcb` source contract.
 //! - [`display`]: board display geometry (pads, tracks, pours, outline, keepouts, text,
@@ -72,6 +72,7 @@ pub mod index;
 pub mod ipc2581;
 pub mod ir;
 pub mod kicad;
+pub mod netlists;
 pub mod layout;
 pub mod library;
 pub mod review;

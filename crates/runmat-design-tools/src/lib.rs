@@ -10,7 +10,7 @@
 //! | `design.inspect` | Named faces, regions, published values, inputs, features, mates, the BOM, mass properties, components, nets and rooms, filtered by name or path. |
 //! | `design.drc`, `design.erc` | Structured violations: rule, objects, location and source range. |
 //! | `design.import` | KiCad projects and STEP files in, as staged RunMat sources. |
-//! | `design.export` | STEP, STL, 3MF, glTF, DXF and DWG (drawing sheets and flat patterns), PDF (drawing sheets) and KiCad out. |
+//! | `design.export` | STEP, STL, 3MF, glTF, DXF and DWG (drawing sheets and flat patterns), PDF (drawing sheets), KiCad out, a board's fabrication set, and KiCad, SPICE, EDIF and IPC-D-356A netlists. |
 //! | `design.overview` | What a file is, its state from the checks above, the files linked to it and their status, the decisions its guides still need, and two or three next steps. |
 //! | `design.propose_edit` | Source text or a catalog command with its values, as a staged change with its diff and the diagnostics after it. |
 //!
@@ -25,6 +25,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 pub mod check;
+pub mod ci;
 pub mod edit;
 pub mod exchange;
 pub mod formats;
@@ -221,7 +222,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         definition::<exchange::ExportInput, exchange::ExportOutput>(
             "design.export",
             "Export design",
-            "Use this to hand a design to another tool: parts and assemblies as STEP, STL, 3MF or glTF; drawing sheets and sheet-metal flat patterns as DXF or DWG, drawing sheets as PDF; circuits and boards as a KiCad project. Returns the files' bytes (base64 for binary formats).",
+            "Use this to hand a design to another tool: parts and assemblies as STEP, STL, 3MF or glTF; drawing sheets and sheet-metal flat patterns as DXF or DWG, drawing sheets as PDF; circuits and boards as a KiCad project; a board's fabrication set (format `fabrication`: Gerber X2, Excellon drill and drill map, fabrication drawing, pick-and-place and BOM per variant, IPC-2581, ODB++, IPC-D-356A); a circuit's netlist as `kicad_netlist`, `spice`, `edif` or `ipc356`. Returns the files' bytes (base64 for binary formats).",
         ),
         definition::<exchange::ImportInput, edit::StagedChange>(
             "design.import",

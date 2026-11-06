@@ -19,3 +19,8 @@ runmat-rules = { path = "../runmat-rules", version = "=0.6.2" }
 runmat-design-commands = { path = "../runmat-design-commands", version = "=0.6.2" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+# An independent Gerber reader (MIT OR Apache-2.0): the fabrication tests parse every Gerber
+# file the writer makes with it.
+gerber_parser = "0.5"

@@ -5,5 +5,6 @@ pub mod dwg;
 pub mod opc;
 pub mod pdf;
 pub mod sheet;
+pub mod tgz;
 pub mod xml;
 pub mod three_mf;

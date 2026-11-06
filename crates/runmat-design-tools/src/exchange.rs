@@ -4,7 +4,10 @@
 //! with the part's semantic PMI;
 //! a faceted AP214 B-rep in millimetres only on the grid test kernel), STL (binary, millimetres), 3MF (millimetres) and glTF (binary `.glb`, metres,
 //! Y up as glTF defines); drawing sheets and sheet-metal flat patterns as DXF and DWG (R2018; millimetres), drawing sheets as vector PDF;
-//! assemblies' bills of materials as CSV; circuits and boards as a KiCad project. A product
+//! assemblies' bills of materials as CSV; circuits and boards as a KiCad project; boards as a
+//! fabrication set ([`fabrication`]: Gerber X2, Excellon, drill map, fabrication drawing,
+//! pick-and-place and BOM per variant, IPC-2581C, ODB++, IPC-D-356A); circuits as KiCad,
+//! SPICE and EDIF 2.0.0 netlists ([`netlist`]). A product
 //! family exports every configuration at once (`allConfigurations`). Imports: KiCad projects to `.circuit`,
 //! `.circuit.layout` and `.circuit.lock` sources; STEP files to a `.part` whose `import` feature
 //! names the file (the names inside the STEP file become the part's face names, and its AP242
@@ -20,7 +23,9 @@ use std::collections::BTreeMap;
 
 pub mod dxf;
 mod exact_step;
+pub mod fabrication;
 pub mod family;
+pub mod netlist;
 mod mesh;
 pub mod sheet;
 mod step;
@@ -48,6 +53,63 @@ pub enum ExportFormat {
     /// An assembly's flat bill of materials as CSV.
     Bom,
     Kicad,
+    /// A board's fabrication and assembly outputs, as one folder of files.
+    Fabrication,
+    /// A circuit's KiCad netlist (`.net`).
+    KicadNetlist,
+    /// A circuit's SPICE deck (`.cir`); parts without a model are left out and listed.
+    Spice,
+    /// A circuit's EDIF 2.0.0 netlist (`.edn`).
+    Edif,
+    /// A board's IPC-D-356A test netlist (`.ipc`).
+    Ipc356,
+}
+
+/// Which fabrication outputs to make (each defaults to on, through-hole placement to off).
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FabricationOptions {
+    /// Gerber X2 per layer and the job file with the stackup.
+    pub gerber: Option<bool>,
+    /// Excellon drill files, plated per span and non-plated.
+    pub drill: Option<bool>,
+    /// The drill map (Gerber and PDF).
+    pub drill_map: Option<bool>,
+    /// The fabrication drawing with the layer and stackup table (Gerber and PDF).
+    pub drawing: Option<bool>,
+    /// Pick-and-place (centroid) CSV per variant.
+    pub pick_place: Option<bool>,
+    /// Bill of materials CSV per variant.
+    pub bom: Option<bool>,
+    /// IPC-2581C XML.
+    pub ipc2581: Option<bool>,
+    /// ODB++ job as a .tgz.
+    pub odb: Option<bool>,
+    /// IPC-D-356A netlist.
+    pub ipc356: Option<bool>,
+    /// Pick-and-place lists through-hole parts too.
+    pub include_through_hole: Option<bool>,
+    /// The variants to make assembly files for (`""` is the default); all when absent.
+    pub variants: Option<Vec<String>>,
+}
+
+impl FabricationOptions {
+    fn request(&self) -> runmat_circuit::fab::set::FabRequest {
+        let d = runmat_circuit::fab::set::FabRequest::default();
+        runmat_circuit::fab::set::FabRequest {
+            gerber: self.gerber.unwrap_or(d.gerber),
+            drill: self.drill.unwrap_or(d.drill),
+            drill_map: self.drill_map.unwrap_or(d.drill_map),
+            drawing: self.drawing.unwrap_or(d.drawing),
+            pick_place: self.pick_place.unwrap_or(d.pick_place),
+            bom: self.bom.unwrap_or(d.bom),
+            ipc2581: self.ipc2581.unwrap_or(d.ipc2581),
+            odb: self.odb.unwrap_or(d.odb),
+            ipc356: self.ipc356.unwrap_or(d.ipc356),
+            include_through_hole: self.include_through_hole.unwrap_or(d.include_through_hole),
+            date: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -71,6 +133,9 @@ pub struct ExportInput {
     /// drawing's part).
     #[serde(default)]
     pub configuration: Option<String>,
+    /// Fabrication: which outputs to make (all by default).
+    #[serde(default)]
+    pub fabrication: Option<FabricationOptions>,
 }
 
 /// One exported file.
@@ -93,6 +158,9 @@ pub struct ExportOutput {
     pub files: Vec<ExportedFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// Fabrication: the board, its layers and the variants the assembly files cover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fabrication: Option<fabrication::FabricationSummary>,
 }
 
 fn stem(path: &str) -> String {
@@ -111,7 +179,7 @@ fn stem(path: &str) -> String {
     name.to_owned()
 }
 
-fn text_file(name: String, mime: &str, content: String) -> ExportedFile {
+pub(crate) fn text_file(name: String, mime: &str, content: String) -> ExportedFile {
     ExportedFile {
         bytes: content.len(),
         name,
@@ -121,7 +189,7 @@ fn text_file(name: String, mime: &str, content: String) -> ExportedFile {
     }
 }
 
-fn binary_file(name: String, mime: &str, bytes: &[u8]) -> ExportedFile {
+pub(crate) fn binary_file(name: String, mime: &str, bytes: &[u8]) -> ExportedFile {
     ExportedFile {
         bytes: bytes.len(),
         name,
@@ -178,6 +246,7 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
     let text = text_of(files, &input.path)?;
     let name = stem(&input.path);
     let mut notes = Vec::new();
+    let mut fab_summary = None;
     let config = input.configuration.as_deref();
     let files_out = match input.format {
         ExportFormat::Step | ExportFormat::Stl | ExportFormat::ThreeMf | ExportFormat::Gltf
@@ -249,6 +318,25 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
                 ))
             }
         },
+        ExportFormat::Fabrication => {
+            if !kind.is_circuit() {
+                return Err(ToolError::new(
+                    "unsupported",
+                    format!("fabrication outputs come from a board; {} is a {kind:?} file", input.path),
+                ));
+            }
+            let opts = input.fabrication.clone().unwrap_or_default();
+            let (made, summary) =
+                fabrication::fabrication(&input.path, text, files, &opts.request(), opts.variants.as_deref(), &mut notes)?;
+            fab_summary = Some(summary);
+            made
+        }
+        ExportFormat::KicadNetlist | ExportFormat::Spice | ExportFormat::Edif | ExportFormat::Ipc356 => {
+            if !kind.is_circuit() {
+                return Err(ToolError::new("unsupported", format!("netlists come from circuits; {} is a {kind:?} file", input.path)));
+            }
+            netlist::netlist(&input.path, text, files, input.format, &name, &mut notes)?
+        }
         ExportFormat::Kicad => {
             if !kind.is_circuit() {
                 return Err(ToolError::new(
@@ -287,6 +375,7 @@ pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolEr
         format: input.format,
         files: files_out,
         notes,
+        fabrication: fab_summary,
     })
 }
 
