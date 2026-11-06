@@ -75,7 +75,8 @@ drawing arm {
     table revisions = revision(
         rows = [
             { rev = "A", description = "Initial release", date = "2026-10-28", by = "RunMat Design" },
-            { rev = "B", description = "Motor seat to 4x M2 on 12 BC; bore H8", date = "2026-11-05", by = "RunMat Design" }
+            { rev = "B", description = "Motor seat to 4x M2 on 12 BC; bore H8", date = "2026-11-05", by = "RunMat Design" },
+            { rev = "C", description = "Layup to [0/0/90/0]s for rear-arm flap mode", date = "2026-11-06", by = "RunMat Design" }
         ],
         sheet = "1",
         at = [410, 287]

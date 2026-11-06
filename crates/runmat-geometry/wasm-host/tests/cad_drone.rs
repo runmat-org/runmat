@@ -149,7 +149,7 @@ fn the_arm_drawing_dimensions_read_the_part() {
     }
     // The title block's revision is the revision table's newest row.
     let block = &v["projection"]["data"]["title_blocks"]["1"];
-    assert!(block.as_array().unwrap().iter().any(|r| r[0] == "Rev" && r[1] == "B"), "{block}");
+    assert!(block.as_array().unwrap().iter().any(|r| r[0] == "Rev" && r[1] == "C"), "{block}");
     // GD&T frames, datum symbols and finish marks carry the model point they point at.
     for name in ["bore_square", "motor_position", "datum_a", "datum_b", "datum_c", "seat_finish"] {
         assert!(v["projection"]["data"]["anchors"][name].is_array(), "{name} has no leader anchor");
@@ -257,4 +257,42 @@ fn the_drone_has_no_interference_in_flight_or_folded() {
         }
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The drone hovers level on equal thrust: its centre of gravity sits within 3 mm of the four
+/// props' thrust centre (the motor axes' centroid in plan), so no motor runs a large differential
+/// to hold it. Prints each part's mass and CG for the balance notes.
+#[test]
+fn the_cg_sits_over_the_thrust_centre() {
+    runmat_geometry_wasm_host::cad::install_occt();
+    let all = project();
+    let path = "/p/drone/drone.assembly";
+    let r = runmat_cad_wasm::mass::assembly_mass(path, &all[path], &all, None).expect("mass properties");
+    let mm = |v: f64| v * 1000.0;
+    for p in &r.parts {
+        eprintln!(
+            "{:<44} {:>7.1} g  ({:>7.1}, {:>6.1}, {:>5.1}) mm",
+            p.path,
+            p.mass.unwrap_or(0.0) * 1000.0,
+            mm(p.center[0]),
+            mm(p.center[1]),
+            mm(p.center[2])
+        );
+    }
+    let motors: Vec<[f64; 3]> = r.parts.iter().filter(|p| p.path.ends_with("/motor/motor")).map(|p| p.center).collect();
+    assert_eq!(motors.len(), 4, "four motors");
+    let thrust = [0, 1].map(|k| motors.iter().map(|c| c[k]).sum::<f64>() / 4.0);
+    let cg = r.total.center;
+    eprintln!(
+        "total {:.1} g, CG ({:.1}, {:.1}, {:.1}) mm, thrust centre ({:.1}, {:.1}) mm",
+        r.total.mass * 1000.0,
+        mm(cg[0]),
+        mm(cg[1]),
+        mm(cg[2]),
+        mm(thrust[0]),
+        mm(thrust[1])
+    );
+    assert!(r.problems.is_empty(), "{:?}", r.problems);
+    let off = (mm(cg[0] - thrust[0]), mm(cg[1] - thrust[1]));
+    assert!(off.0.abs() < 3.0 && off.1.abs() < 1.0, "CG off the thrust centre by ({:.1}, {:.1}) mm", off.0, off.1);
 }
