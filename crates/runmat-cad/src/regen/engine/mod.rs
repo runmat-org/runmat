@@ -306,6 +306,18 @@ pub fn regenerate_metered(
     cache: &mut RegenCache,
     meter: &dyn UsageMeter,
 ) -> RegenResult {
+    let mut result = regenerate_reported(doc, ctx, req, cache, meter);
+    result.diagnostics.offer_suppress();
+    result
+}
+
+fn regenerate_reported(
+    doc: &PartDocument,
+    ctx: &RegenContext<'_>,
+    req: &RegenRequest,
+    cache: &mut RegenCache,
+    meter: &dyn UsageMeter,
+) -> RegenResult {
     if doc
         .features
         .iter()

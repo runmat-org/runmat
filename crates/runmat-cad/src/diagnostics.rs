@@ -403,6 +403,11 @@ pub enum Repair {
     Unsuppress {
         feature: FeatureId,
     },
+    /// Suppress the failing feature so the features after it can rebuild (the fix of last
+    /// resort, offered when nothing more specific applies).
+    SuppressFeature {
+        feature: FeatureId,
+    },
     /// Move `feature` so it runs after `after`.
     Reorder {
         feature: FeatureId,
@@ -573,6 +578,19 @@ impl DiagnosticReport {
         self.diagnostics
             .iter()
             .filter(|d| d.severity == Severity::Error)
+    }
+
+    /// Every root-cause error on a feature that offers no repair gets one: suppress the
+    /// feature. Cascades follow their root, whose repair fixes them.
+    pub fn offer_suppress(&mut self) {
+        for d in &mut self.diagnostics {
+            if d.severity != Severity::Error || !d.repairs.is_empty() || matches!(d.cause, Cause::Cascade { .. }) {
+                continue;
+            }
+            if let Subject::Feature { feature } = &d.site.subject {
+                d.repairs.push(Repair::SuppressFeature { feature: feature.clone() });
+            }
+        }
     }
 
     /// Fill spans from the syntax layer's map.
