@@ -265,7 +265,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         definition::<exchange::ImportInput, exchange::ImportChange>(
             "design.import",
             "Import into design",
-            "Use this to bring a KiCad project (.kicad_sch, .kicad_pcb), an EAGLE XML schematic or board (.sch, .brd; format `eagle`), a shape-string JSON schematic or board (standard edition; format `shape_json`), a pipe-record schematic or board, ASCII or binary (.SchDoc, .PcbDoc; format `pipe_record`, binary files as `base64`) or a STEP file into the project as RunMat sources. Returns a staged change: the new files, their diagnostics, the project calls that keep it and, for every PCB format, a report of what was carried over, approximated or left out.",
+            "Use this to bring a KiCad project (.kicad_sch, .kicad_pcb, with its .kicad_pro net classes and .kicad_dru rules), an XML project schematic or board, version 6 and later (.sch, .brd; format `xml_project`), a shape-string JSON schematic or board (standard edition; format `shape_json`), a pipe-record schematic or board, ASCII or binary (.SchDoc, .PcbDoc; format `pipe_record`, binary files as `base64`) or a STEP file into the project as RunMat sources. Returns a staged change: the new files, their diagnostics, the project calls that keep it and, for every PCB format, a report of what was carried over, approximated or left out.",
         ),
         definition::<simulate::SimulateInput, simulate::SimulateOutput>(
             "design.simulate",

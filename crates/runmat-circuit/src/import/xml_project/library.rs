@@ -1,4 +1,4 @@
-//! EAGLE libraries as the schematic and board embed them: packages become footprints
+//! XML project libraries as the schematic and board embed them: packages become footprints
 //! ([`Package`]) and device sets become catalog parts, one per device and technology.
 
 use super::super::Report;
@@ -8,7 +8,7 @@ use crate::library::catalog::{CatalogPart, CatalogPin};
 use crate::library::{make, CopperSpan, Graphic, PadDef, PadKind, PadShape, Package};
 use std::collections::BTreeMap;
 
-/// An EAGLE rotation (`R90`, `MR180`, `SR45`): degrees counter-clockwise and whether it mirrors.
+/// An XML project rotation (`R90`, `MR180`, `SR45`): degrees counter-clockwise and whether it mirrors.
 pub fn rotation(rot: Option<&str>) -> (f64, bool) {
     let r = rot.unwrap_or("R0");
     let mirror = r.contains('M');
@@ -49,7 +49,7 @@ pub fn wire_graphic(w: &Element) -> Graphic {
     }
 }
 
-/// EAGLE layers: 1 Top … 16 Bottom; 21/22 placement (silk), 51/52 documentation, 20 dimension.
+/// XML project layers: 1 Top … 16 Bottom; 21/22 placement (silk), 51/52 documentation, 20 dimension.
 pub const TOP: u32 = 1;
 pub const BOTTOM: u32 = 16;
 pub const DIMENSION: u32 = 20;
@@ -203,7 +203,7 @@ pub fn graphic(item: &Element) -> Option<Graphic> {
     })
 }
 
-/// A pin name the part can carry: EAGLE's `@n` suffix (several pads of one signal shown as
+/// A pin name the part can carry: The format's `@n` suffix (several pads of one signal shown as
 /// one pin name) is kept, so each pin stays its own.
 fn pin_type(direction: Option<&str>) -> &'static str {
     match direction.unwrap_or("io") {
@@ -306,7 +306,7 @@ pub fn param_key(k: &str) -> String {
     out
 }
 
-/// The first line of a description, with the rich-text markup EAGLE stores removed.
+/// The first line of a description, with the rich-text markup the format stores removed.
 pub fn first_line(html: &str) -> String {
     let mut out = String::new();
     let mut tag = false;

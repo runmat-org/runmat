@@ -1,4 +1,4 @@
-//! EAGLE XML schematics (`.sch`), from the format's public DTD:
+//! XML project schematics (`.sch`), from the format's public DTD:
 //!
 //! - each placed part with a package becomes a component, its device a `part` declaration
 //!   (one per part number) and its package a footprint file;
@@ -49,7 +49,7 @@ fn by_name<'a>(parent: &'a Element, outer: &str, inner: &'a str, name: &str) -> 
     parent.list(outer, inner).find(|e| e.attr("name").unwrap_or("") == name)
 }
 
-/// EAGLE replaces `*` in a device set's name with the technology and `?` with the device.
+/// The format replaces `*` in a device set's name with the technology and `?` with the device.
 fn device_name(deviceset: &str, device: &str, technology: &str) -> String {
     let mut s = deviceset.replace('*', technology);
     if s.contains('?') {

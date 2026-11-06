@@ -204,6 +204,11 @@ fn third_party_projects_import_to_sources_that_compile_with_the_same_connectivit
         };
         assert_eq!(designators(&back), designators(&original), "{}: parts", p.name);
         assert_eq!(partition(&back), partition(&original), "{}: nets", p.name);
+        // The circuit alone compiles too: a differential pair is inferred only from labels of
+        // nets (the flight controller's `usb_esd+` label touches nothing, so it pairs with nothing).
+        let circuit = compile(&path, text, &fs, &CompileOptions::default());
+        let errors: Vec<_> = circuit.diagnostics.iter().filter(|d| d.severity == "error").map(|d| &d.message).collect();
+        assert!(errors.is_empty(), "{}: {errors:#?}", p.name);
         let layout = format!("/p/boards/{stem}.circuit.layout");
         let compiled = compile(&layout, &fs[&layout], &fs, &CompileOptions::default());
         let errors: Vec<_> = compiled

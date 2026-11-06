@@ -881,3 +881,62 @@ fn board_text_graphics_dimensions_and_fiducials_map_both_ways() {
     doc.board.texts.retain(|_, t| t.text != "BOTTOM");
     assert!(!doc.write().contains("BOTTOM"));
 }
+
+/// PCB-03: an imported project keeps its net classes and rules. The project file's classes
+/// become circuit net classes and layout `net_class` parameters, each net takes its class by
+/// the file's assignments and patterns, the Default class sets the board's limits, and the
+/// custom rules file's rules become layout rules (its one rule on an area condition is
+/// reported as not carried).
+#[test]
+fn an_imported_project_keeps_its_net_classes_and_rules() {
+    use runmat_circuit::runtime::import_kicad;
+    let files: BTreeMap<String, String> = [
+        ("root.kicad_sch", ROOT),
+        ("power.kicad_sch", CHILD),
+        ("root.kicad_pcb", BOARD),
+        ("root.kicad_pro", include_str!("kicad/root.kicad_pro")),
+        ("root.kicad_dru", RULES),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let out = import_kicad(&files, Some("root.kicad_sch"), "boards/io").unwrap();
+    let r = &out.report;
+    assert_eq!(r.carried["net classes"], 3, "{:?}", r.lines());
+    assert_eq!(r.carried["design rules"], 4, "{:?}", r.lines());
+    assert_eq!(r.carried["nets with a class"], 4, "{:?}", r.lines());
+    assert!(r.not_carried.keys().any(|k| k.starts_with("design rule exotic")), "{:?}", r.lines());
+    assert!(r.not_carried.keys().any(|k| k == "net class Default: its diff_gap"), "{:?}", r.lines());
+
+    let layout_text = &out.files["boards/io.circuit.layout"];
+    let board = runmat_circuit::syntax::board::parse_board("io.circuit.layout", layout_text).board.unwrap();
+    assert_eq!(board.limits.min_clearance, mm(0.2));
+    assert_eq!(board.limits.min_track, mm(0.25));
+    assert_eq!(board.limits.min_via_diameter, mm(0.8));
+    let class_of = |n: &str| board.net(n).and_then(|id| board.nets[id.0 as usize].class.clone());
+    assert_eq!(class_of("SIG").as_deref(), Some("HV"));
+    assert_eq!(class_of("VCC").as_deref(), Some("power"));
+    assert_eq!(class_of("USB_P").as_deref(), Some("usb"));
+    assert_eq!(class_of("GND"), None);
+    let hv = &board.net_class_rules["HV"].decls;
+    assert!(hv.contains(&(props::CLEARANCE.to_string(), RuleValue::Len(mm(1.5)))), "{hv:?}");
+    let usb = &board.net_class_rules["usb"].decls;
+    assert!(usb.contains(&(props::DIFF_GAP.to_string(), RuleValue::Len(mm(0.15)))), "{usb:?}");
+    let ids: Vec<&str> = board.rules.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, ["HV clearance", "power width", "usb pairs", "via ring"]);
+
+    // The circuit declares the classes and puts its nets in them.
+    let circuit = &out.files["boards/io.circuit"];
+    for class in ["HV", "power", "usb"] {
+        assert!(circuit.contains(&format!("net_class {class}")), "{circuit}");
+    }
+    for line in ["net VCC = { class = power, global = true }", "net SIG = { class = HV }", "net USB_P = { class = usb }", "net USB_N = { class = usb }"] {
+        assert!(circuit.contains(line), "{line}\n{circuit}");
+    }
+    assert!(circuit.contains("net_class HV = { clearance = 0.0015 m, track_width = 0.0005 m }"), "{circuit}");
+    // It reads back: nothing but the two parts the fixture's board leaves off (reported above
+    // as footprints not carried, so they have no package) is in error.
+    let parsed = runmat_circuit::syntax::parse_circuit("io.circuit", circuit);
+    let errors: Vec<_> = parsed.diagnostics.iter().map(|d| d.message.as_str()).filter(|m| !m.ends_with("needs its `package`")).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+}

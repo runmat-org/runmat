@@ -25,7 +25,7 @@ use wasm_bindgen::prelude::*;
 
 /// The tools this host runs on ECAD files: the read-only ones, and `design.export`, which
 /// answers the exported files for the page to write (the Desktop's Fabrication outputs).
-/// `design.import` reads KiCad and EAGLE projects into staged circuit sources here (the Desktop's
+/// `design.import` reads KiCad, XML project, shape-string JSON and pipe-record files into staged circuit sources here (the Desktop's
 /// Import dialog); STEP import stays with the project. `design.render` draws through the
 /// server, and `design.propose_edit` stays with the project.
 const TOOLS: &[&str] = &["design.overview", "design.check", "design.inspect", "design.erc", "design.drc", "design.simulate", "design.export", "design.import"];
@@ -131,14 +131,14 @@ mod tests {
     }
 
     #[test]
-    fn an_eagle_project_imports_here_with_its_report_and_step_waits_for_a_project() {
-        let dir = format!("{}/../../runmat-circuit/tests/import/eagle", env!("CARGO_MANIFEST_DIR"));
+    fn an_xml_project_imports_here_with_its_report_and_step_waits_for_a_project() {
+        let dir = format!("{}/../../runmat-circuit/tests/import/xml_project", env!("CARGO_MANIFEST_DIR"));
         let file = |n: &str| json!({ "name": n, "content": std::fs::read_to_string(format!("{dir}/{n}")).unwrap() });
-        let input = json!({ "format": "eagle", "target": "/p/blinky", "files": [file("blinky.sch"), file("blinky.brd")] });
+        let input = json!({ "format": "xml_project", "target": "/p/blinky", "files": [file("blinky.sch"), file("blinky.brd")] });
         let out = answer("design.import", &input.to_string(), "{}");
         let data = out.get("data").unwrap_or_else(|| panic!("a staged change, not {out}"));
         assert!(data["files"].as_array().unwrap().iter().any(|f| f["path"] == "/p/blinky.circuit.layout"));
-        assert_eq!(data["report"]["format"], "EAGLE XML");
+        assert_eq!(data["report"]["format"], ".sch / .brd");
         assert_eq!(data["report"]["carried"]["components"], 3);
         let step = answer("design.import", r#"{"format":"step","target":"/p/a.part","files":[]}"#, "{}");
         assert_eq!(step["error"]["code"], "kernel_unavailable");

@@ -1,18 +1,18 @@
-//! EAGLE XML import on a hand-written fixture (tests/import/eagle: a header, a resistor and
+//! XML project import on a hand-written fixture (tests/import/xml_project: a header, a resistor and
 //! an LED on a two-layer board, the LED mirrored to the bottom and turned 90°, a fiducial, and a copper polygon extending the header's pad 2).
 
-use runmat_circuit::import::eagle;
+use runmat_circuit::import::xml_project;
 use runmat_circuit::runtime::{compile, CompileOptions, Files};
 use std::collections::BTreeMap;
 
 fn fixture(names: &[&str]) -> BTreeMap<String, String> {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/import/eagle");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/import/xml_project");
     names.iter().map(|n| (n.to_string(), std::fs::read_to_string(format!("{dir}/{n}")).unwrap())).collect()
 }
 
 #[test]
 fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
-    let out = eagle::import(&fixture(&["blinky.sch", "blinky.brd"]), "boards/blinky").unwrap();
+    let out = xml_project::import(&fixture(&["blinky.sch", "blinky.brd"]), "boards/blinky").unwrap();
     let names: Vec<&str> = out.files.keys().map(String::as_str).collect();
     assert_eq!(
         names,
@@ -70,19 +70,19 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
 }
 
 #[test]
-fn a_file_that_isnt_eagle_xml_is_refused_with_the_reason() {
+fn a_file_that_isnt_an_xml_project_is_refused_with_the_reason() {
     let mut files = BTreeMap::new();
     files.insert("old.brd".to_string(), "\u{10}\u{0}binary".to_string());
-    let err = eagle::import(&files, "old").unwrap_err();
+    let err = xml_project::import(&files, "old").unwrap_err();
     assert!(err.contains("before version 6"), "{err}");
 }
 
-/// `RUNMAT_EAGLE_CORPUS=<dir>`: every schematic and board pair under it (same stem, same
+/// `RUNMAT_XML_PROJECT_CORPUS=<dir>`: every schematic and board pair under it (same stem, same
 /// folder) imports, compiles without errors and leaves nothing unrouted. The corpus stays
 /// outside the repository; without the variable the test checks nothing.
 #[test]
 fn a_local_corpus_imports_and_compiles_when_named() {
-    let Ok(root) = std::env::var("RUNMAT_EAGLE_CORPUS") else { return };
+    let Ok(root) = std::env::var("RUNMAT_XML_PROJECT_CORPUS") else { return };
     let mut pairs = Vec::new();
     let mut stack = vec![std::path::PathBuf::from(root)];
     while let Some(d) = stack.pop() {
@@ -104,7 +104,7 @@ fn a_local_corpus_imports_and_compiles_when_named() {
         for p in [&sch, brd] {
             files.insert(p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(p).unwrap());
         }
-        let out = match eagle::import(&files, &stem) {
+        let out = match xml_project::import(&files, &stem) {
             Ok(o) => o,
             Err(e) => { failures.push(format!("{}: {e}", brd.display())); continue; }
         };

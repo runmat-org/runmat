@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn reads_elements_attributes_and_entities() {
-        let doc = parse("<?xml version=\"1.0\"?>\n<!DOCTYPE eagle SYSTEM \"eagle.dtd\">\n<a x='1' y=\"&lt;2&gt;\"><!-- c --><b n=\"&#65;&amp;\"/>t&amp;u<b/></a>").unwrap();
+        let doc = parse("<?xml version=\"1.0\"?>\n<!DOCTYPE doc SYSTEM \"doc.dtd\">\n<a x='1' y=\"&lt;2&gt;\"><!-- c --><b n=\"&#65;&amp;\"/>t&amp;u<b/></a>").unwrap();
         assert_eq!(doc.name, "a");
         assert_eq!(doc.attr("y"), Some("<2>"));
         assert_eq!(doc.all("b").count(), 2);

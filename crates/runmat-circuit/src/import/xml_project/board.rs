@@ -1,4 +1,4 @@
-//! EAGLE XML boards (`.brd`), from the format's public DTD:
+//! XML project boards (`.brd`), from the format's public DTD:
 //!
 //! - the outline from the dimension layer (20): its wires chained into rings, the largest the
 //!   board and the rest cutouts;
@@ -33,7 +33,7 @@ fn rule_length(v: &str) -> Option<Coord> {
     Some(mm(n * to_mm))
 }
 
-/// The copper layers the board uses, top to bottom (EAGLE numbers 1 … 16).
+/// The copper layers the board uses, top to bottom (numbered 1 … 16).
 fn copper_layers(board: &Element) -> Vec<u32> {
     let mut used: BTreeSet<u32> = [1, 16].into_iter().collect();
     let mut walk = |e: &Element| {
@@ -123,7 +123,7 @@ fn limits(rules: Option<&Element>) -> FabLimits {
 pub fn read(drawing: &Element, name: &str, report: &mut Report) -> Result<Board, String> {
     let brd = drawing.child("board").ok_or("the file has no <board>")?;
     let copper = copper_layers(brd);
-    let index = |eagle: u32| copper.iter().position(|l| *l == eagle).map(|i| i as u8);
+    let index = |number: u32| copper.iter().position(|l| *l == number).map(|i| i as u8);
     let stackup = Stackup::standard(copper.len() as u8, mm(1.6), 1.0, 0.5);
     let mut board = Board::new(name, Polygon::default(), stackup);
     match outline(brd.child("plain"), report) {

@@ -49,7 +49,7 @@ fn an_ascii_schematic_and_board_import_to_a_circuit_that_compiles() {
     assert!(circuit.contains(r#"part "Res-1k""#), "{circuit}");
     assert!(circuit.contains("blinky-footprints/LED0603.kicad_mod"), "{circuit}");
     let r = &out.report;
-    assert_eq!(r.format, "pipe-record ASCII");
+    assert_eq!(r.format, ".SchDoc / .PcbDoc (ASCII)");
     assert_eq!(r.carried["components"], 3, "{:?}", r.lines());
     // VCC and LED_A by their labels, GND by its power port on the middle of a wire.
     assert_eq!(r.carried["nets"], 3, "{:?}", r.lines());
@@ -163,7 +163,7 @@ fn the_binary_files_import_the_same_board_as_the_ascii_ones() {
     let files: BTreeMap<String, Vec<u8>> = [("blinky.SchDoc".to_owned(), sch), ("blinky.PcbDoc".to_owned(), pcb)].into_iter().collect();
     let out = binary::import(&files, "boards/blinky").unwrap();
     let r = &out.report;
-    assert_eq!(r.format, "pipe-record binary");
+    assert_eq!(r.format, ".SchDoc / .PcbDoc (binary)");
     for (kind, n) in [("components", 3), ("nets", 3), ("footprints placed", 3), ("tracks", 7), ("vias", 1), ("zones", 2), ("board texts", 1), ("net classes", 1)] {
         assert_eq!(r.carried.get(kind), Some(&n), "{kind}: {:?}", r.lines());
     }
@@ -187,5 +187,5 @@ fn the_binary_files_import_the_same_board_as_the_ascii_ones() {
 fn a_document_without_records_is_refused_by_the_import() {
     let files: BTreeMap<String, String> = [("notes.txt".to_owned(), "hello".to_owned())].into_iter().collect();
     let err = pipe_record::import(&files, "x").unwrap_err();
-    assert!(err.contains("isn't a pipe-record document"), "{err}");
+    assert!(err.contains("isn't an ASCII .SchDoc or .PcbDoc document"), "{err}");
 }

@@ -24,9 +24,9 @@ use crate::geom::{mm, Coord};
 use crate::runtime::{CIRCUIT_SUFFIX, LAYOUT_SUFFIX};
 use std::collections::BTreeMap;
 
-/// The format's names in reports.
-pub const FORMAT_ASCII: &str = "pipe-record ASCII";
-pub const FORMAT_BINARY: &str = "pipe-record binary";
+/// The format's names in reports: its file extensions, ASCII or binary.
+pub const FORMAT_ASCII: &str = ".SchDoc / .PcbDoc (ASCII)";
+pub const FORMAT_BINARY: &str = ".SchDoc / .PcbDoc (binary)";
 
 /// One record: its fields by upper-case key.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -123,7 +123,7 @@ pub fn import_records(files: &BTreeMap<String, Vec<Record>>, target_stem: &str, 
             Some(Kind::Schematic) => sheets.push((name.clone(), recs)),
             Some(Kind::Board) if brd.is_none() => brd = Some(recs),
             Some(Kind::Board) => return Err(format!("{name}: give one board")),
-            None => return Err(format!("{name} has no `|RECORD=…|` lines, so it isn't a pipe-record document")),
+            None => return Err(format!("{name} has no `|RECORD=…|` lines, so it isn't an ASCII .SchDoc or .PcbDoc document")),
         }
     }
     if sheets.is_empty() && brd.is_none() {

@@ -3,6 +3,7 @@
 use super::*;
 
 mod parts;
+mod rules;
 
 /// The circuit `path` belongs to as a KiCad project: one `.kicad_sch` per sheet instance (the
 /// root named `<project>.kicad_sch`) and, with a board, `<project>.kicad_pcb`. File name → text.
@@ -61,7 +62,7 @@ pub fn import_kicad(
 ) -> Result<KicadImport, String> {
     let mut out = BTreeMap::new();
     let mut warnings = Vec::new();
-    let mut report = crate::import::Report::new("KiCad");
+    let mut report = crate::import::Report::new(".kicad_sch / .kicad_pcb");
     let circuit_path = format!("{target_stem}{CIRCUIT_SUFFIX}");
     let circuit_name = target_stem
         .rsplit('/')
@@ -83,7 +84,9 @@ pub fn import_kicad(
             })
             .map(|k| (*k).clone())
     });
+    let project_rules = rules::read(files, &mut report)?;
     let mut packages = BTreeMap::new();
+    let mut board_read = None;
     if let Some((name, pcb)) = files.iter().find(|(k, _)| k.ends_with(".kicad_pcb")) {
         let read = crate::kicad::pcb::read(pcb).map_err(|e| format!("{name}: {e}"))?;
         warnings.extend(read.warnings.iter().map(|w| format!("{name}: {w}")));
@@ -104,17 +107,20 @@ pub fn import_kicad(
         // The layout takes the circuit's name, as its file does.
         let mut board = read.board.clone();
         board.name = circuit_name.clone();
+        rules::apply_to_board(&project_rules, &mut board, &mut report);
         out.insert(
             format!("{target_stem}{LAYOUT_SUFFIX}"),
             crate::syntax::board::print_board(&board, &uses),
         );
         packages = parts::board_packages(&read.board);
+        board_read = Some(board);
     }
     if let Some(root) = root {
         let imp = crate::kicad::sch::read_hierarchy(files, &root)?;
         warnings.extend(imp.warnings.iter().cloned());
         let mut design = imp.design.clone();
         design.name = circuit_name.clone();
+        rules::apply_to_design(&project_rules, &mut design, board_read.as_ref(), &mut report);
         let footprint_dir = format!("{circuit_name}-footprints");
         let folder = target_stem.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
         for (path, text) in parts::declare_parts(&mut design, &imp.pool, &packages, &footprint_dir, &mut report) {

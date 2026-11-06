@@ -524,8 +524,8 @@ fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, Tool
 #[serde(rename_all = "snake_case")]
 pub enum ImportFormat {
     Kicad,
-    /// An EAGLE XML schematic (`.sch`) and/or board (`.brd`), version 6 or later.
-    Eagle,
+    /// An XML project schematic (`.sch`) and/or board (`.brd`), version 6 or later.
+    XmlProject,
     /// A shape-string JSON schematic and/or board (standard edition, `.json`).
     ShapeJson,
     /// Pipe-record schematics and/or a board (`.SchDoc`, `.PcbDoc`): `|RECORD=…|` text, or
@@ -551,8 +551,8 @@ pub struct ImportFile {
 pub struct ImportInput {
     pub format: ImportFormat,
     pub files: Vec<ImportFile>,
-    /// KiCad, EAGLE and shape-string JSON: the target stem (`boards/io` writes `boards/io.circuit`, `.circuit.layout` and,
-    /// from KiCad, `.circuit.lock`; EAGLE packages go in `boards/io-footprints/`). STEP: the `.part` to write (`parts/housing.part`); the STEP file goes
+    /// KiCad, XML project, shape-string JSON and pipe-record: the target stem (`boards/io` writes `boards/io.circuit`, `.circuit.layout` and,
+    /// from KiCad, `.circuit.lock`; the other formats' packages go in `boards/io-footprints/`). STEP: the `.part` to write (`parts/housing.part`); the STEP file goes
     /// beside it.
     pub target: String,
     /// KiCad: the root schematic's file name (default: the schematic no other sheet names).
@@ -583,7 +583,7 @@ fn import_pipe_record(input: &ImportInput, stem: &str) -> Result<runmat_circuit:
         }
     }
     match (text.is_empty(), binary.is_empty()) {
-        (false, false) => Err("give ASCII or binary pipe-record files, not both".into()),
+        (false, false) => Err("give ASCII or binary .SchDoc / .PcbDoc files, not both".into()),
         (_, false) => runmat_circuit::import::pipe_record::binary::import(&binary, stem),
         _ => runmat_circuit::import::pipe_record::import(&text, stem),
     }
@@ -644,30 +644,31 @@ pub fn import(input: &ImportInput, files: &Files) -> Result<ImportChange, ToolEr
                 .cloned()
                 .unwrap_or_default();
             let summary = format!(
-                "Import KiCad project as {}",
+                "Import {} project as {}",
+                read.report.format,
                 read.files.keys().cloned().collect::<Vec<_>>().join(", ")
             );
             let mut change = stage(summary, read.files.into_iter().collect(), files, &primary);
             change.notes.extend(read.warnings);
             Ok(ImportChange { change, report: Some(read.report) })
         }
-        ImportFormat::Eagle | ImportFormat::ShapeJson | ImportFormat::PipeRecord => {
+        ImportFormat::XmlProject | ImportFormat::ShapeJson | ImportFormat::PipeRecord => {
             let stem = target.strip_suffix(".circuit.layout").or_else(|| target.strip_suffix(".circuit")).unwrap_or(&target).to_owned();
-            let (read, label) = if input.format == ImportFormat::PipeRecord {
-                (import_pipe_record(input, &stem), "pipe-record project")
+            let read = if input.format == ImportFormat::PipeRecord {
+                import_pipe_record(input, &stem)
             } else {
                 let mut given = BTreeMap::new();
                 for f in &input.files {
                     given.insert(f.name.clone(), decode(f)?);
                 }
                 match input.format {
-                    ImportFormat::Eagle => (runmat_circuit::import::eagle::import(&given, &stem), "EAGLE project"),
-                    _ => (runmat_circuit::import::shape_json::import(&given, &stem), "shape-string JSON project"),
+                    ImportFormat::XmlProject => runmat_circuit::import::xml_project::import(&given, &stem),
+                    _ => runmat_circuit::import::shape_json::import(&given, &stem),
                 }
             };
             let read = read.map_err(ToolError::invalid)?;
             let primary = read.files.keys().find(|k| k.ends_with(".circuit")).or_else(|| read.files.keys().find(|k| k.ends_with(".circuit.layout"))).cloned().unwrap_or_default();
-            let summary = format!("Import {label} as {}", read.files.keys().filter(|k| !k.ends_with(".kicad_mod")).cloned().collect::<Vec<_>>().join(", "));
+            let summary = format!("Import {} project as {}", read.report.format, read.files.keys().filter(|k| !k.ends_with(".kicad_mod")).cloned().collect::<Vec<_>>().join(", "));
             let mut change = stage(summary, read.files.into_iter().collect(), files, &primary);
             change.notes.extend(read.report.lines());
             Ok(ImportChange { change, report: Some(read.report) })

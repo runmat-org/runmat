@@ -1,4 +1,4 @@
-//! EAGLE XML projects (version 6 and later): a schematic (`.sch`), a board (`.brd`) or both.
+//! XML projects (version 6 and later): a schematic (`.sch`), a board (`.brd`) or both.
 //!
 //! The import writes `<stem>.circuit` (with a `part` declaration per part number), each
 //! package as `<name>-footprints/<library>_<package>.kicad_mod` beside it, and with a board
@@ -12,15 +12,17 @@ use super::{xml, Imported, Report};
 use crate::runtime::{CIRCUIT_SUFFIX, LAYOUT_SUFFIX};
 use std::collections::BTreeMap;
 
+/// The format's name in reports: its file extensions.
+pub const FORMAT: &str = ".sch / .brd";
+
 fn drawing_of(name: &str, text: &str) -> Result<xml::Element, String> {
     if !text.trim_start().starts_with('<') {
-        return Err(format!("{name} isn't EAGLE XML (files from before version 6 are binary and aren't read)"));
+        return Err(format!("{name} isn't an XML .sch or .brd file (files from before version 6 are binary and aren't read)"));
     }
     let root = xml::parse(text).map_err(|e| format!("{name}: {e}"))?;
-    if root.name != "eagle" {
-        return Err(format!("{name} isn't an EAGLE file (its root is <{}>)", root.name));
-    }
-    root.child("drawing").cloned().ok_or_else(|| format!("{name} has no <drawing>"))
+    // The format is told by its structure: a <drawing> holding a <schematic> or <board>.
+    let drawing = root.child("drawing").filter(|d| d.child("schematic").is_some() || d.child("board").is_some());
+    drawing.cloned().ok_or_else(|| format!("{name} isn't an XML .sch or .brd file (its <{}> has no <drawing> with a schematic or board)", root.name))
 }
 
 /// Imports the `.sch` and `.brd` of `files` (file name → text) to `<target_stem>.circuit` and
@@ -30,12 +32,12 @@ pub fn import(files: &BTreeMap<String, String>, target_stem: &str) -> Result<Imp
     let sch = files.iter().find(|(k, _)| lower(k, ".sch"));
     let brd = files.iter().find(|(k, _)| lower(k, ".brd"));
     if sch.is_none() && brd.is_none() {
-        return Err("give an EAGLE schematic (.sch) or board (.brd)".into());
+        return Err("give an XML schematic (.sch) or board (.brd)".into());
     }
     let name = target_stem.rsplit('/').next().unwrap_or(target_stem).to_owned();
     let folder = target_stem.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
     let footprint_dir = format!("{name}-footprints");
-    let mut report = Report::new("EAGLE XML");
+    let mut report = Report::new(FORMAT);
     let mut out = BTreeMap::new();
     let mut packages = BTreeMap::new();
     if let Some((file, text)) = sch {

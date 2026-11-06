@@ -30,7 +30,7 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
     assert!(circuit.contains(r#"part "LED0603-red""#), "{circuit}");
     assert!(circuit.contains("blinky-footprints/LED0603.kicad_mod"), "{circuit}");
     let r = &out.report;
-    assert_eq!(r.format, "shape-string JSON");
+    assert_eq!(r.format, ".json");
     assert_eq!(r.carried["components"], 3, "{:?}", r.lines());
     // VCC and LED_A by their labels, GND by its flag on the middle of a wire.
     assert_eq!(r.carried["nets"], 3, "{:?}", r.lines());
@@ -75,6 +75,21 @@ fn a_document_that_isnt_a_schematic_or_board_is_refused_with_the_reason() {
     files.insert("lib.json".to_string(), r#"{"head":{"docType":"4"},"shape":[]}"#.to_string());
     let err = shape_json::import(&files, "x").unwrap_err();
     assert!(err.contains("type 4"), "{err}");
-    files.insert("lib.json".to_string(), "<eagle/>".to_string());
+    files.insert("lib.json".to_string(), "<project/>".to_string());
     assert!(shape_json::import(&files, "x").unwrap_err().contains("isn't JSON"));
+}
+
+/// A board alone imports with an empty circuit stub, so its layout compiles; the missing
+/// schematic is reported.
+#[test]
+fn a_board_alone_imports_to_a_layout_that_compiles() {
+    let out = shape_json::import(&fixture(&["blinky_pcb.json"]), "boards/blinky").unwrap();
+    assert!(out.files.contains_key("boards/blinky.circuit"), "{:?}", out.files.keys());
+    assert!(out.report.not_carried.keys().any(|k| k.starts_with("the schematic")), "{:?}", out.report.lines());
+    let files: Files = out.files.iter().map(|(k, v)| (format!("/p/{k}"), v.clone())).collect();
+    let layout = "/p/boards/blinky.circuit.layout";
+    let compiled = compile(layout, &files[layout], &files, &CompileOptions::default());
+    let errors: Vec<_> = compiled.diagnostics.iter().filter(|d| d.severity == "error").map(|d| &d.message).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert!(compiled.index.and_then(|i| i.board).is_some(), "the layout compiles to a board");
 }

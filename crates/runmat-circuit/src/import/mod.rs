@@ -4,14 +4,14 @@
 //! `.kicad_mod` files beside them. Each import returns a [`Report`] of what it carried, what
 //! it approximated and what it left out.
 //!
-//! - [`eagle`]: EAGLE XML schematics (`.sch`) and boards (`.brd`).
-//! - [`shape_json`]: shape-string JSON schematics and boards (standard edition).
-//! - [`pipe_record`]: pipe-record schematics and boards, ASCII and binary.
+//! - [`xml_project`]: XML project schematics (`.sch`) and boards (`.brd`), version 6 and later.
+//! - [`shape_json`]: shape-string JSON schematics and boards (`.json`, standard edition).
+//! - [`pipe_record`]: pipe-record schematics and boards (`.SchDoc`, `.PcbDoc`), ASCII and binary.
 
-pub mod eagle;
 pub mod pipe_record;
 pub mod shape_json;
 pub mod xml;
+pub mod xml_project;
 
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
-    /// The format read (`EAGLE XML`).
+    /// The format read, named by its file extensions as users know them (`.sch / .brd`).
     pub format: String,
     /// Items carried over, by kind (`components`, `nets`, `tracks` …).
     pub carried: BTreeMap<String, usize>,

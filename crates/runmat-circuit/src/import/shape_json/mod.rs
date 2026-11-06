@@ -19,8 +19,8 @@ use crate::runtime::{CIRCUIT_SUFFIX, LAYOUT_SUFFIX};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-/// The format's name in reports.
-pub const FORMAT: &str = "shape-string JSON";
+/// The format's name in reports: its file extension.
+pub const FORMAT: &str = ".json";
 
 /// One canvas unit (10 mil) in millimetres.
 pub const UNIT_MM: f64 = 0.254;
@@ -184,7 +184,7 @@ pub fn document(name: &str, text: &str) -> Result<Document, String> {
     let doc_type = match &json["head"]["docType"] {
         Value::String(s) => s.clone(),
         Value::Number(n) => n.to_string(),
-        _ => return Err(format!("{name} has no head.docType, so it isn't a shape-string document")),
+        _ => return Err(format!("{name} has no head.docType, so it isn't a schematic or board .json document")),
     };
     let shapes = json["shape"]
         .as_array()
@@ -225,6 +225,11 @@ pub fn import(files: &BTreeMap<String, String>, target_stem: &str) -> Result<Imp
         let design = schematic::read(doc, &name, &footprint_dir, &packages, &footprints, &mut report)?;
         out.insert(format!("{target_stem}{CIRCUIT_SUFFIX}"), crate::syntax::print_circuit(&design).map_err(|e| format!("{e:?}"))?);
     } else {
+        // A board alone: an empty circuit stub, so the layout's `use circuit` resolves and the
+        // board compiles as written; its parts stay board-only until a schematic is given.
+        let mut stub = crate::ir::Design::new(&name);
+        stub.sheet_mut("main");
+        out.insert(format!("{target_stem}{CIRCUIT_SUFFIX}"), crate::syntax::print_circuit(&stub).map_err(|e| format!("{e:?}"))?);
         report.not_carried("the schematic: only the board was given, so the circuit has no parts");
     }
     if let Some(b) = board {

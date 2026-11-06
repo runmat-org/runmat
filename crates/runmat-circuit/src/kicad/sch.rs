@@ -467,6 +467,8 @@ fn read_sheet(
         groups.entry(r).or_default().push(k);
     }
     let mut globals: BTreeSet<String> = BTreeSet::new();
+    // Labels on a wire or pin: a label touching nothing names no net, so it pairs with nothing.
+    let mut connected_labels: BTreeSet<String> = BTreeSet::new();
     for (g, (_, members)) in groups.iter().enumerate() {
         let mut ends = Vec::new();
         let mut name: Option<String> = None;
@@ -514,6 +516,11 @@ fn read_sheet(
         if ends.len() < 2 {
             continue;
         }
+        for &k in members {
+            if let Attach::Label(n) | Attach::Global(n) = &attach[k].1 {
+                connected_labels.insert(n.clone());
+            }
+        }
         if name.is_none() && pin_count == ends.len() {
             // An unnamed group of pins only: a local net with an automatic name.
             ends.insert(0, Endpoint::Net(format!("N${g}")));
@@ -534,14 +541,14 @@ fn read_sheet(
         });
     }
     sheet.components = comps.into_values().collect();
-    // Differential pairs by KiCad's naming convention: `X_P`/`X_N` or `X+`/`X-`.
-    let labels: BTreeSet<String> = attach
-        .iter()
-        .filter_map(|(_, a)| match a {
-            Attach::Label(n) | Attach::Global(n) => Some(n.clone()),
-            _ => None,
-        })
-        .collect();
+    // Differential pairs by KiCad's naming convention: `X_P`/`X_N` or `X+`/`X-`, both sides
+    // labels of nets: a global label reaches its namesakes on other sheets, a local label
+    // touching no wire or pin names no net (KiCad's netlist has none for it).
+    let mut labels = connected_labels;
+    labels.extend(attach.iter().filter_map(|(_, a)| match a {
+        Attach::Global(n) => Some(n.clone()),
+        _ => None,
+    }));
     for l in &labels {
         for (p, n) in [("_P", "_N"), ("+", "-")] {
             if let Some(base) = l.strip_suffix(p) {
