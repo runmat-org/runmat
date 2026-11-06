@@ -3,7 +3,8 @@ std 1
 
 // The gimbal's roll yoke: a U-frame from the roll motor that wraps the camera head and carries
 // the pitch motor on its left side and the pitch bearing on its right. Its origin is the roll
-// axis (x) at the roll motor's front face; the pitch axis (y) is 16 mm ahead of it.
+// axis (x) at the roll motor's front face. The pitch axis (y) is 19.5 mm ahead of it, so the
+// camera's back (15.3 mm from the pitch axis) clears the yoke over the whole pitch travel.
 part gimbal_yoke {
     feature back_base = plane.offset(base = origin.yz, distance = 0 mm)
     sketch back_s on plane.back_base {
@@ -15,13 +16,13 @@ part gimbal_yoke {
     feature back = extrude(profile = sketch.back_s, distance = 3 mm)
     feature left_base = plane.offset(base = origin.xy, distance = -6 mm)
     sketch side_s on plane.left_base {
-        l1 = line(start = [0 mm, 16.5 mm], end = [24 mm, 16.5 mm])
-        l2 = line(start = [24 mm, 16.5 mm], end = [24 mm, 19 mm])
-        l3 = line(start = [24 mm, 19 mm], end = [0 mm, 19 mm])
+        l1 = line(start = [0 mm, 16.5 mm], end = [28 mm, 16.5 mm])
+        l2 = line(start = [28 mm, 16.5 mm], end = [28 mm, 19 mm])
+        l3 = line(start = [28 mm, 19 mm], end = [0 mm, 19 mm])
         l4 = line(start = [0 mm, 19 mm], end = [0 mm, 16.5 mm])
-        r1 = line(start = [0 mm, -19 mm], end = [24 mm, -19 mm])
-        r2 = line(start = [24 mm, -19 mm], end = [24 mm, -16.5 mm])
-        r3 = line(start = [24 mm, -16.5 mm], end = [0 mm, -16.5 mm])
+        r1 = line(start = [0 mm, -19 mm], end = [28 mm, -19 mm])
+        r2 = line(start = [28 mm, -19 mm], end = [28 mm, -16.5 mm])
+        r3 = line(start = [28 mm, -16.5 mm], end = [0 mm, -16.5 mm])
         r4 = line(start = [0 mm, -16.5 mm], end = [0 mm, -19 mm])
     }
     feature sides = extrude(profile = sketch.side_s, distance = 12 mm, mode = add)

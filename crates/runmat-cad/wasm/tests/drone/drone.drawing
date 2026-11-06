@@ -17,9 +17,9 @@ drawing drone {
 
     sheet "1" = { format = a3, scale = [1, 2], projection = third_angle }
 
-    view front = standard(orientation = front, sheet = "1", model = { file = "drone.assembly" }, at = [115, 240], display = visible_lines)
-    view top = projected(from = front, direction = down, sheet = "1", model = { file = "drone.assembly" }, at = [115, 135], display = visible_lines)
-    view iso = standard(orientation = isometric, sheet = "1", model = { file = "drone.assembly" }, at = [305, 225], display = visible_lines)
+    view front = standard(orientation = front, sheet = "1", model = { assembly = drone }, at = [115, 240], display = visible_lines)
+    view top = projected(from = front, direction = down, sheet = "1", model = { assembly = drone }, at = [115, 135], display = visible_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { assembly = drone }, at = [305, 225], display = visible_lines)
 
     annotation b1 = balloon(occurrence = [{ name = body_top }], table = parts, view = iso)
     annotation b2 = balloon(occurrence = [{ name = body_bottom }], table = parts, view = front)

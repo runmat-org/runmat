@@ -92,5 +92,25 @@ part battery {
         c = spline(points = [[0 mm, 48 mm], [14.09 mm, 47.535 mm], [22.552 mm, 46.145 mm], [28.886 mm, 43.833 mm], [33.387 mm, 40.581 mm], [36.095 mm, 36.235 mm], [37 mm, 29 mm], [36.095 mm, 21.765 mm], [33.387 mm, 17.419 mm], [28.886 mm, 14.167 mm], [22.552 mm, 11.855 mm], [14.09 mm, 10.465 mm], [0 mm, 10 mm], [-14.09 mm, 10.465 mm], [-22.552 mm, 11.855 mm], [-28.886 mm, 14.167 mm], [-33.387 mm, 17.419 mm], [-36.095 mm, 21.765 mm], [-37 mm, 29 mm], [-36.095 mm, 36.235 mm], [-33.387 mm, 40.581 mm], [-28.886 mm, 43.833 mm], [-22.552 mm, 46.145 mm], [-14.09 mm, 47.535 mm]], closed)
     }
     feature cap = loft(profiles = [sketch.cap_s0, sketch.cap_s1, sketch.cap_s2], mode = add)
+    // The case's front corners are notched round the rear hinge mounts' back blocks, which
+    // reach into the bay: each notch is the mount's envelope in its own frame, 0.5 mm clear.
+    feature rear_left_notch_seat = plane.three_point(a = point(-61.923 mm, 41.337 mm, 4.082 mm), b = point(-67.539 mm, 49.611 mm, 4.082 mm), c = point(-69.229 mm, 36.378 mm, 8.777 mm))
+    feature rear_left_notch_plane = plane.offset(base = plane.rear_left_notch_seat, distance = -0.5 mm)
+    sketch rear_left_notch_s on plane.rear_left_notch_plane {
+        n1 = line(start = [-20.55 mm, -8.05 mm], end = [8.5 mm, -8.05 mm])
+        n2 = line(start = [8.5 mm, -8.05 mm], end = [8.5 mm, 8.05 mm])
+        n3 = line(start = [8.5 mm, 8.05 mm], end = [-20.55 mm, 8.05 mm])
+        n4 = line(start = [-20.55 mm, 8.05 mm], end = [-20.55 mm, -8.05 mm])
+    }
+    feature rear_left_notch = extrude(profile = sketch.rear_left_notch_s, distance = 21.2 mm, mode = cut)
+    feature rear_right_notch_seat = plane.three_point(a = point(-61.923 mm, -41.337 mm, 4.082 mm), b = point(-67.539 mm, -49.611 mm, 4.082 mm), c = point(-54.618 mm, -46.296 mm, -0.612 mm))
+    feature rear_right_notch_plane = plane.offset(base = plane.rear_right_notch_seat, distance = -0.5 mm)
+    sketch rear_right_notch_s on plane.rear_right_notch_plane {
+        n1 = line(start = [-20.55 mm, -8.05 mm], end = [8.5 mm, -8.05 mm])
+        n2 = line(start = [8.5 mm, -8.05 mm], end = [8.5 mm, 8.05 mm])
+        n3 = line(start = [8.5 mm, 8.05 mm], end = [-20.55 mm, 8.05 mm])
+        n4 = line(start = [-20.55 mm, 8.05 mm], end = [-20.55 mm, -8.05 mm])
+    }
+    feature rear_right_notch = extrude(profile = sketch.rear_right_notch_s, distance = 21.2 mm, mode = cut)
     output battery = { body = feature.case.body, part_number = "CD-PW-4S3500", material = "polycarbonate", color = "#BCC1C8" }
 }

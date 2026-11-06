@@ -109,6 +109,7 @@ fn the_drone_compiles_part_by_part_and_as_one_assembly() {
             let name = path.rsplit('/').next().unwrap();
             std::fs::create_dir_all(&dump).ok();
             std::fs::write(format!("{dump}/{name}.json"), serde_json::to_string_pretty(&v["projection"]).unwrap()).ok();
+            std::fs::write(format!("{dump}/{name}.display.json"), serde_json::to_string(&v["display"]).unwrap()).ok();
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -231,3 +232,29 @@ fn the_study_assemblies_export_with_their_region_names() {
     }
 }
 
+/// No two parts share material, in flight or stowed: the hinges sit in their shell seats, the
+/// battery's notched case in its bay, the skids on the belly, the sensors and the gimbal's yaw
+/// motor in their openings, each pod on its arm's pad; folded, the front arms ride over the rear
+/// arms and every blade lies clear along its arm. Screws in their tapped holes overlap the
+/// thread's depth by design and are left out.
+#[test]
+fn the_drone_has_no_interference_in_flight_or_folded() {
+    runmat_geometry_wasm_host::cad::install_occt();
+    let all = project();
+    let mut problems = Vec::new();
+    for file in ["drone", "drone_folded"] {
+        let path = format!("/p/drone/{file}.assembly");
+        let started = std::time::Instant::now();
+        let r = runmat_cad_wasm::evaluate::assembly_interference(&path, &all[&path], &all, None)
+            .unwrap_or_else(|e| panic!("{file}: {e}"));
+        eprintln!("{file}: {} parts, {} candidate pairs, {:.2?}", r.parts, r.candidates, started.elapsed());
+        assert!(r.errors.is_empty(), "{file}: {:?}", r.errors);
+        for o in &r.overlaps {
+            eprintln!("  {} / {}: {:.3} mm^3", o.a, o.b, o.volume * 1e9);
+            if !(o.a.contains("screw") || o.b.contains("screw")) {
+                problems.push(format!("{file}: {} / {} share {:.3} mm^3", o.a, o.b, o.volume * 1e9));
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}

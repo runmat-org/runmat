@@ -11,9 +11,9 @@ assembly arm_station {
     input blade_a : angle = 0 deg
     input blade_b : angle = 180 deg
 
-    use part hinge_mount from "hinge_mount.part" as hinge
-    use part hinge_pin from "hinge_pin.part" as pin
-    use assembly arm_unit from "arm_unit.assembly" as unit {
+    use part hinge_mount as hinge
+    use part hinge_pin as pin
+    use assembly arm_unit as unit {
         configuration = { select = inputs, values = { length = input.length, rise = input.rise, pod_tilt = input.pod_tilt, blade_a = input.blade_a, blade_b = input.blade_b } }
         placement = { placement = offset, offset = { rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = input.fold } } }
     }

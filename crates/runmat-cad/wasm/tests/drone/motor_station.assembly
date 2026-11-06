@@ -8,14 +8,17 @@ std 1
 assembly motor_station {
     input blade_a : angle = 0 deg
     input blade_b : angle = 180 deg
+    input arm_roll : angle = 0 deg
 
-    use part motor_pod from "motor_pod.part" as pod
-    use part motor from "motor.part" as motor
-    use part prop_hub from "prop_hub.part" as hub
-    use part prop_blade from "prop_blade.part" as blade_a {
-        placement = { placement = offset, offset = { translation = [9 mm, 0 mm, 18.6 mm], rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = input.blade_a } } }
+    use part motor_pod as pod {
+        configuration = { select = inputs, values = { arm_roll = input.arm_roll } }
     }
-    use part prop_blade from "prop_blade.part" as blade_b {
-        placement = { placement = offset, offset = { translation = [-9 mm, 0 mm, 18.6 mm], rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = input.blade_b } } }
+    use part motor as motor
+    use part prop_hub as hub
+    use part prop_blade as blade_a {
+        placement = { placement = offset, offset = { translation = [0 mm, 9 mm, 18.6 mm], rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = input.blade_a + 90 deg } } }
+    }
+    use part prop_blade as blade_b {
+        placement = { placement = offset, offset = { translation = [0 mm, -9 mm, 18.6 mm], rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = input.blade_b + 90 deg } } }
     }
 }

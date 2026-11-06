@@ -1,17 +1,31 @@
 runmat 0.7
 std 1
 
-// The folding propeller's hub: a domed spinner that carries the two blade pivots at 9 mm
-// radius. Its origin is the motor axis at the pod's origin.
+// The folding propeller's hub: two plates on the motor's shaft that clamp the blades' root
+// tabs (0.1 mm clear above and below) on 2 mm pivot pins at 9 mm radius, under a domed cap.
+// The plates' 12.6 mm radius covers the tabs' rounded ends, and each blade's airfoil starts
+// outside it, so the blades fold back along the arm clear of the hub. Its origin is the motor
+// axis at the pod's origin.
 part prop_hub {
     sketch prof on origin.zx {
-        l0 = line(start = [17.5 mm, 1.2 mm], end = [17.5 mm, 7.5 mm])
-        l1 = line(start = [17.5 mm, 7.5 mm], end = [19 mm, 7.5 mm])
-        l2 = line(start = [19 mm, 7.5 mm], end = [20.5 mm, 6 mm])
-        l3 = line(start = [20.5 mm, 6 mm], end = [21.5 mm, 3.2 mm])
-        l4 = line(start = [21.5 mm, 3.2 mm], end = [21.8 mm, 1.2 mm])
-        l5 = line(start = [21.8 mm, 1.2 mm], end = [17.5 mm, 1.2 mm])
+        l0 = line(start = [17.5 mm, 1.2 mm], end = [17.5 mm, 12.6 mm])
+        l1 = line(start = [17.5 mm, 12.6 mm], end = [18.5 mm, 12.6 mm])
+        l2 = line(start = [18.5 mm, 12.6 mm], end = [18.5 mm, 5 mm])
+        l3 = line(start = [18.5 mm, 5 mm], end = [20.9 mm, 5 mm])
+        l4 = line(start = [20.9 mm, 5 mm], end = [20.9 mm, 12.6 mm])
+        l5 = line(start = [20.9 mm, 12.6 mm], end = [22 mm, 12.6 mm])
+        l6 = line(start = [22 mm, 12.6 mm], end = [22 mm, 8 mm])
+        l7 = line(start = [22 mm, 8 mm], end = [23.3 mm, 6 mm])
+        l8 = line(start = [23.3 mm, 6 mm], end = [24.2 mm, 3.2 mm])
+        l9 = line(start = [24.2 mm, 3.2 mm], end = [24.5 mm, 1.2 mm])
+        l10 = line(start = [24.5 mm, 1.2 mm], end = [17.5 mm, 1.2 mm])
     }
     feature spinner = revolve(profile = sketch.prof, axis = origin.z, angle = 360 deg)
+    feature pin_base = plane.offset(base = origin.xy, distance = 18.5 mm)
+    sketch pins_s on plane.pin_base {
+        pin_a = circle(center = [0 mm, 9 mm], radius = 1 mm)
+        pin_b = circle(center = [0 mm, -9 mm], radius = 1 mm)
+    }
+    feature pins = extrude(profile = sketch.pins_s, distance = 2.4 mm, mode = add)
     output prop_hub = { body = feature.spinner.body, part_number = "CD-PR-310", material = "glass_filled_nylon", color = "#202226" }
 }

@@ -6,6 +6,7 @@ std 1
 // (R9.2, 7 mm deep) to fit over the arm's R9 pad, and the pocket's ceiling seats on the pad's
 // top face. Its origin is the motor axis (z) at the arm pad's top face.
 part motor_pod {
+    input arm_roll : angle = 0 deg
     sketch prof on origin.zx {
         c = spline(points = [[-7 mm, 12.5 mm], [-5.8 mm, 14.6 mm], [-3 mm, 15.3 mm], [2 mm, 15 mm], [4.4 mm, 13.8 mm], [5 mm, 12 mm]])
         l1 = line(start = [5 mm, 12 mm], end = [5 mm, 1.2 mm])
@@ -15,15 +16,17 @@ part motor_pod {
         l5 = line(start = [-7 mm, 9.2 mm], end = [-7 mm, 12.5 mm])
     }
     feature cowl = revolve(profile = sketch.prof, axis = origin.z, angle = 360 deg)
-    // The skirt's slot, where the arm runs in under the pocket (0.8 mm clear each side).
-    feature slot_base = plane.offset(base = origin.xy, distance = -7.5 mm)
+    // The skirt's slot, where the arm runs in under the pocket (0.5 mm clear each side). On a
+    // tilted hinge the arm meets the level pod rolled by `arm_roll`, and the slot rolls with it.
+    feature slot_level = plane.offset(base = origin.xy, distance = -12 mm)
+    feature slot_base = plane.angle(base = plane.slot_level, axis = origin.x, angle = input.arm_roll)
     sketch slot_s on plane.slot_base {
         s1 = line(start = [-20 mm, -6.5 mm], end = [-5 mm, -6.5 mm])
         s2 = line(start = [-5 mm, -6.5 mm], end = [-5 mm, 6.5 mm])
         s3 = line(start = [-5 mm, 6.5 mm], end = [-20 mm, 6.5 mm])
         s4 = line(start = [-20 mm, 6.5 mm], end = [-20 mm, -6.5 mm])
     }
-    feature slot = extrude(profile = sketch.slot_s, distance = 7.5 mm, mode = cut)
+    feature slot = extrude(profile = sketch.slot_s, distance = 12 mm, mode = cut)
     // The motor's mount through the pod's floor: the stator's four M2 screws on a 12 mm bolt
     // circle (in line with the arm pad's holes), a 5 mm bore for the shaft's circlip, and a
     // slot for the three phase leads, between two screws on the arm's side. Fully defined.

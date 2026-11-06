@@ -11,11 +11,11 @@ assembly arm_unit {
     input blade_a : angle = 0 deg
     input blade_b : angle = 180 deg
 
-    use part arm from "arm.part" as arm {
-        configuration = { select = inputs, values = { length = input.length, rise = input.rise } }
+    use part arm as arm {
+        configuration = { select = inputs, values = { length = input.length, rise = input.rise, pad_tilt = input.pod_tilt } }
     }
-    use assembly motor_station from "motor_station.assembly" as motor {
-        configuration = { select = inputs, values = { blade_a = input.blade_a, blade_b = input.blade_b } }
+    use assembly motor_station as motor {
+        configuration = { select = inputs, values = { blade_a = input.blade_a, blade_b = input.blade_b, arm_roll = -input.pod_tilt } }
         placement = { placement = offset, offset = { translation = [input.length, 0 mm, input.rise + 4 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = input.pod_tilt } } }
     }
 }

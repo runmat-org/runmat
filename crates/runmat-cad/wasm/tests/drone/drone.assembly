@@ -1,100 +1,106 @@
 runmat 0.7
 std 1
 
-// A generic foldable camera drone, 249 g class to 900 g class by its battery: one lofted upper and
-// lower shell split along the body's waist, four folding arms on hinge pins (the front arms fold
-// flat along the sides, the rear arms fold forward and down under the body on tilted hinges),
-// cowled motor pods with folding two-blade props, a 3-axis gimbal under the nose, two landing
-// skids under the belly, a flush rear battery whose lid is part of the shell, downward and forward vision sensors, and the 4-in-1 ESC and flight controller inside
-// on the ESC heatsink's standoffs. The fold inputs stow it: drone_folded.assembly sets them.
+// A generic foldable camera drone, 249 g class to 900 g class by its battery: one lofted upper
+// and lower shell split along the body's waist; four folding arms on tilted hinge pins (the rear
+// arms fold forward and down under the body, the front arms back and up over them); cowled motor
+// pods with folding two-blade props; a 3-axis gimbal under the nose; two landing skids under the
+// belly; a flush rear battery whose lid is part of the shell; downward and forward vision
+// sensors; and the 4-in-1 ESC and flight controller inside on the ESC heatsink's standoffs. The
+// fold inputs stow it: drone_folded.assembly sets them.
 assembly drone {
     input fold_front : angle = 0 deg
     input fold_rear : angle = 0 deg
     input blade_a : angle = 0 deg
     input blade_b : angle = 180 deg
+    input rear_blade_a : angle = 0 deg
+    input rear_blade_b : angle = 180 deg
     input pitch : angle = -12 deg
 
     // Body: the two shells, the battery in its bay and the status window.
-    use part body_bottom from "body_bottom.part" as body_bottom
-    use part body_top from "body_top.part" as body_top
-    use part battery from "battery.part" as battery
-    use part light_pipe from "light_pipe.part" as light_pipe
+    use part body_bottom as body_bottom
+    use part body_top as body_top
+    use part battery as battery
+    use part light_pipe as light_pipe
 
     // Landing gear: a skid under each side of the belly, either side of the heatsink's fins.
-    use part landing_skid from "landing_skid.part" as skid_left {
+    use part landing_skid as skid_left {
         configuration = { select = inputs, values = { side = 34 mm } }
     }
-    use part landing_skid from "landing_skid.part" as skid_right {
+    use part landing_skid as skid_right {
         configuration = { select = inputs, values = { side = -34 mm } }
     }
 
     // The radio's two antennas, upright inside the side walls behind the board stack.
-    use part antenna from "antenna.part" as antenna_left {
+    use part antenna as antenna_left {
         placement = { placement = offset, offset = { translation = [-25 mm, 38 mm, 14 mm] } }
     }
-    use part antenna from "antenna.part" as antenna_right {
+    use part antenna as antenna_right {
         placement = { placement = offset, offset = { translation = [-25 mm, -38 mm, 14 mm] } }
     }
 
     // The arms on their hinges, each solved so its motor sits on the 300 mm diagonal with the
-    // props 55 mm above the belly.
-    use assembly arm_station from "arm_station.assembly" as arm_front_left {
-        configuration = { select = inputs, values = { fold = input.fold_front, length = 88.204 mm, rise = 5.2 mm, pod_tilt = 0 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
-        placement = { placement = offset, offset = { translation = [52 mm, 44 mm, 24 mm], rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = 57.031 deg } } }
+    // props 55 mm above the belly. Both hinges are tilted: the front pins lean 20 deg so the
+    // front arms rise as they swing back over the rear ones, and the rear pins lean 28 deg so the
+    // rear arms drop as they swing forward under them. The right arms are the left ones'
+    // mirror images, so their blade inputs are mirrored too.
+    use assembly arm_station as arm_front_left {
+        configuration = { select = inputs, values = { fold = input.fold_front, length = 81.54 mm, rise = 5.79 mm, pod_tilt = -20 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
+        placement = { placement = offset, offset = { translation = [52 mm, 52 mm, 24 mm], rotation = { rotation = euler, yaw = 56.324 deg, pitch = 0 deg, roll = 20 deg } } }
     }
-    use assembly arm_station from "arm_station.assembly" as arm_front_right {
-        configuration = { select = inputs, values = { fold = -input.fold_front, length = 88.204 mm, rise = 5.2 mm, pod_tilt = 0 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
-        placement = { placement = offset, offset = { translation = [52 mm, -44 mm, 24 mm], rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = -57.031 deg } } }
+    use assembly arm_station as arm_front_right {
+        configuration = { select = inputs, values = { fold = -input.fold_front, length = 81.54 mm, rise = 5.79 mm, pod_tilt = 20 deg, blade_a = -input.blade_b - 180 deg, blade_b = -input.blade_a - 180 deg } }
+        placement = { placement = offset, offset = { translation = [52 mm, -52 mm, 24 mm], rotation = { rotation = euler, yaw = -56.324 deg, pitch = 0 deg, roll = -20 deg } } }
     }
-    use assembly arm_station from "arm_station.assembly" as arm_rear_left {
-        configuration = { select = inputs, values = { fold = -input.fold_rear, length = 90.607 mm, rise = 18.878 mm, pod_tilt = -28 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
+    use assembly arm_station as arm_rear_left {
+        configuration = { select = inputs, values = { fold = -input.fold_rear, length = 90.607 mm, rise = 18.878 mm, pod_tilt = -28 deg, blade_a = input.rear_blade_a, blade_b = input.rear_blade_b } }
         placement = { placement = offset, offset = { translation = [-58 mm, 44 mm, 13 mm], rotation = { rotation = euler, yaw = 124.168 deg, pitch = 0 deg, roll = 28 deg } } }
     }
-    use assembly arm_station from "arm_station.assembly" as arm_rear_right {
-        configuration = { select = inputs, values = { fold = input.fold_rear, length = 90.607 mm, rise = 18.878 mm, pod_tilt = 28 deg, blade_a = input.blade_a, blade_b = input.blade_b } }
+    use assembly arm_station as arm_rear_right {
+        configuration = { select = inputs, values = { fold = input.fold_rear, length = 90.607 mm, rise = 18.878 mm, pod_tilt = 28 deg, blade_a = -input.rear_blade_b - 180 deg, blade_b = -input.rear_blade_a - 180 deg } }
         placement = { placement = offset, offset = { translation = [-58 mm, -44 mm, 13 mm], rotation = { rotation = euler, yaw = -124.168 deg, pitch = 0 deg, roll = -28 deg } } }
     }
 
     // The 3-axis gimbal and camera under the nose.
-    use assembly gimbal from "gimbal.assembly" as gimbal {
+    use assembly gimbal as gimbal {
         configuration = { select = inputs, values = { pitch = input.pitch } }
         placement = { placement = offset, offset = { translation = [74 mm, 0 mm, 11 mm] } }
     }
 
     // Vision sensors: a forward stereo pair in the nose and a downward pair under the belly.
-    use part vision_sensor from "vision_sensor.part" as vision_front_left {
+    use part vision_sensor as vision_front_left {
         placement = { placement = offset, offset = { translation = [97 mm, 6 mm, 31 mm], rotation = { rotation = axis_angle, axis = [0, 1, 0], angle = 90 deg } } }
     }
-    use part vision_sensor from "vision_sensor.part" as vision_front_right {
+    use part vision_sensor as vision_front_right {
         placement = { placement = offset, offset = { translation = [97 mm, -6 mm, 31 mm], rotation = { rotation = axis_angle, axis = [0, 1, 0], angle = 90 deg } } }
     }
-    use part vision_sensor from "vision_sensor.part" as vision_down_left {
+    use part vision_sensor as vision_down_left {
         placement = { placement = offset, offset = { translation = [-28 mm, 11 mm, 2.6 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg } } }
     }
-    use part vision_sensor from "vision_sensor.part" as vision_down_right {
+    use part vision_sensor as vision_down_right {
         placement = { placement = offset, offset = { translation = [-28 mm, -11 mm, 2.6 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg } } }
     }
 
     // The ESC's heatsink in the belly window (its fins in the downwash) and the gap pad on its
     // pedestal. The boards stand on the heatsink's standoffs: the 4-in-1 ESC on their tops, the
     // flight controller 10 mm above it on nylon spacers, both held by four M3 screws into them.
-    use part esc_heatsink from "esc_heatsink.part" as esc_heatsink {
+    use part esc_heatsink as esc_heatsink {
         placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 0 mm] } }
     }
-    use part thermal_pad from "thermal_pad.part" as thermal_pad {
+    use part thermal_pad as thermal_pad {
         placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 9.5 mm] } }
     }
-    use circuit esc from "esc.circuit" as esc {
+    use circuit esc as esc {
         placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 10 mm] } }
     }
-    use circuit flight_controller from "flight_controller.circuit" as flight_controller {
+    use circuit flight_controller as flight_controller {
         placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 21.6 mm] } }
     }
-    use part spacer from "spacer.part" as spacer {
+    use part spacer as spacer {
         configuration = { select = inputs, values = { height = 10 mm } }
         placement = { placement = offset, offset = { translation = [-5.25 mm, -15.25 mm, 11.6 mm] } }
     }
-    use part screw from "screw.part" as stack_screw {
+    use part screw as stack_screw {
         configuration = { select = inputs, values = { length = 16 mm } }
         placement = { placement = offset, offset = { translation = [-5.25 mm, -15.25 mm, 23.2 mm] } }
     }

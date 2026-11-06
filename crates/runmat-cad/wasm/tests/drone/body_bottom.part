@@ -77,7 +77,7 @@ part body_bottom {
     feature hollow = loft(profiles = [sketch.hollow_s0, sketch.hollow_s1, sketch.hollow_s2, sketch.hollow_s3, sketch.hollow_s4, sketch.hollow_s5, sketch.hollow_s6, sketch.hollow_s7], mode = cut)
     // The hinges' recesses: each hinge mount's envelope in its own frame (pin axis z), so the
     // clevis seats in the wall 0.05 mm clear all round.
-    feature front_left_seat_plane = plane.three_point(a = point(52 mm, 44 mm, 13.9 mm), b = point(57.442 mm, 52.39 mm, 13.9 mm), c = point(43.61 mm, 49.442 mm, 13.9 mm))
+    feature front_left_seat_plane = plane.three_point(a = point(49.125 mm, 53.915 mm, 14.509 mm), b = point(54.67 mm, 62.237 mm, 14.509 mm), c = point(41.305 mm, 59.126 mm, 17.929 mm))
     sketch front_left_seat_s on plane.front_left_seat_plane {
         s1 = line(start = [-20.05 mm, -7.55 mm], end = [8 mm, -7.55 mm])
         s2 = line(start = [8 mm, -7.55 mm], end = [8 mm, 7.55 mm])
@@ -85,7 +85,7 @@ part body_bottom {
         s4 = line(start = [-20.05 mm, 7.55 mm], end = [-20.05 mm, -7.55 mm])
     }
     feature front_left_seat = extrude(profile = sketch.front_left_seat_s, distance = 20.2 mm, mode = cut)
-    feature front_right_seat_plane = plane.three_point(a = point(52 mm, -44 mm, 13.9 mm), b = point(57.442 mm, -52.39 mm, 13.9 mm), c = point(60.39 mm, -38.558 mm, 13.9 mm))
+    feature front_right_seat_plane = plane.three_point(a = point(49.125 mm, -53.915 mm, 14.509 mm), b = point(54.67 mm, -62.237 mm, 14.509 mm), c = point(56.945 mm, -48.705 mm, 11.089 mm))
     sketch front_right_seat_s on plane.front_right_seat_plane {
         s1 = line(start = [-20.05 mm, -7.55 mm], end = [8 mm, -7.55 mm])
         s2 = line(start = [8 mm, -7.55 mm], end = [8 mm, 7.55 mm])
@@ -109,6 +109,22 @@ part body_bottom {
         s4 = line(start = [-20.05 mm, 7.55 mm], end = [-20.05 mm, -7.55 mm])
     }
     feature rear_right_seat = extrude(profile = sketch.rear_right_seat_s, distance = 20.2 mm, mode = cut)
+    // Fold reliefs beside the rear hinges: the rear arm's root swings through here as it folds
+    // forward under the body.
+    sketch rear_left_relief_s on plane.rear_left_seat_plane {
+        r1 = line(start = [-16 mm, -14 mm], end = [0 mm, -14 mm])
+        r2 = line(start = [0 mm, -14 mm], end = [0 mm, -7.55 mm])
+        r3 = line(start = [0 mm, -7.55 mm], end = [-16 mm, -7.55 mm])
+        r4 = line(start = [-16 mm, -7.55 mm], end = [-16 mm, -14 mm])
+    }
+    feature rear_left_relief = extrude(profile = sketch.rear_left_relief_s, distance = 20.2 mm, mode = cut)
+    sketch rear_right_relief_s on plane.rear_right_seat_plane {
+        r1 = line(start = [-16 mm, 7.55 mm], end = [0 mm, 7.55 mm])
+        r2 = line(start = [0 mm, 7.55 mm], end = [0 mm, 14 mm])
+        r3 = line(start = [0 mm, 14 mm], end = [-16 mm, 14 mm])
+        r4 = line(start = [-16 mm, 14 mm], end = [-16 mm, 7.55 mm])
+    }
+    feature rear_right_relief = extrude(profile = sketch.rear_right_relief_s, distance = 20.2 mm, mode = cut)
     feature split_plane = plane.offset(base = origin.xy, distance = 27 mm)
     sketch above_s on plane.split_plane {
         b1 = line(start = [-120 mm, -70 mm], end = [120 mm, -70 mm])
@@ -140,6 +156,16 @@ part body_bottom {
         q4 = line(start = [-9.3 mm, 19.3 mm], end = [-9.3 mm, -19.3 mm])
     }
     feature pocket = extrude(profile = sketch.pocket_s, distance = 10 mm, mode = cut)
+    // The downward vision pair's windows behind the heatsink (R4.1 bores for the R4 bezels) and
+    // the gimbal's opening under the nose, where the yaw motor (R10) stands through the belly
+    // 0.5 mm clear all round and screws to the shell from inside.
+    feature belly_cut_plane = plane.offset(base = origin.xy, distance = -1 mm)
+    sketch belly_cut_s on plane.belly_cut_plane {
+        down_left = circle(center = [-28 mm, 11 mm], radius = 4.1 mm)
+        down_right = circle(center = [-28 mm, -11 mm], radius = 4.1 mm)
+        yaw = circle(center = [74 mm, 0 mm], radius = 10.5 mm)
+    }
+    feature belly_openings = extrude(profile = sketch.belly_cut_s, distance = 15 mm, mode = cut)
     region skin : face = { select = [feature.outer.face.side(outer_s0.c)], expect = at_least_one }
     output body_bottom = { body = feature.outer.body, part_number = "CD-BD-120", material = "polycarbonate", color = "#3A3E44" }
 }

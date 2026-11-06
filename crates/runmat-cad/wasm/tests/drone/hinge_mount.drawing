@@ -19,9 +19,9 @@ drawing hinge_mount {
 
     sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
 
-    view front = standard(orientation = front, sheet = "1", model = { file = "hinge_mount.part" }, at = [150, 200], display = hidden_lines)
-    view top = projected(from = front, direction = up, sheet = "1", model = { file = "hinge_mount.part" }, at = [150, 105], display = hidden_lines)
-    view iso = standard(orientation = isometric, sheet = "1", model = { file = "hinge_mount.part" }, at = [330, 115], display = visible_lines)
+    view front = standard(orientation = front, sheet = "1", model = { part = hinge_mount }, at = [150, 200], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = hinge_mount }, at = [150, 105], display = hidden_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { part = hinge_mount }, at = [330, 115], display = visible_lines)
 
     annotation clevis_height = dimension(style = linear, references = [feature.back.face.start, feature.back.face.end], view = front)
     annotation lug_thickness = dimension(style = linear, references = [feature.upper.face.start, feature.upper.face.end], view = front)

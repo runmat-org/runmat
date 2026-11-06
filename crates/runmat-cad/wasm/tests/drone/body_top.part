@@ -78,7 +78,7 @@ part body_top {
     }
     feature hollow = loft(profiles = [sketch.hollow_s0, sketch.hollow_s1, sketch.hollow_s2, sketch.hollow_s3, sketch.hollow_s4, sketch.hollow_s5, sketch.hollow_s6, sketch.hollow_s7], mode = cut)
     // The front hinges' recesses: each hinge mount's envelope in its own frame (pin axis z).
-    feature front_left_seat_plane = plane.three_point(a = point(52 mm, 44 mm, 13.9 mm), b = point(57.442 mm, 52.39 mm, 13.9 mm), c = point(43.61 mm, 49.442 mm, 13.9 mm))
+    feature front_left_seat_plane = plane.three_point(a = point(49.125 mm, 53.915 mm, 14.509 mm), b = point(54.67 mm, 62.237 mm, 14.509 mm), c = point(41.305 mm, 59.126 mm, 17.929 mm))
     sketch front_left_seat_s on plane.front_left_seat_plane {
         s1 = line(start = [-20.05 mm, -7.55 mm], end = [8 mm, -7.55 mm])
         s2 = line(start = [8 mm, -7.55 mm], end = [8 mm, 7.55 mm])
@@ -86,7 +86,7 @@ part body_top {
         s4 = line(start = [-20.05 mm, 7.55 mm], end = [-20.05 mm, -7.55 mm])
     }
     feature front_left_seat = extrude(profile = sketch.front_left_seat_s, distance = 20.2 mm, mode = cut)
-    feature front_right_seat_plane = plane.three_point(a = point(52 mm, -44 mm, 13.9 mm), b = point(57.442 mm, -52.39 mm, 13.9 mm), c = point(60.39 mm, -38.558 mm, 13.9 mm))
+    feature front_right_seat_plane = plane.three_point(a = point(49.125 mm, -53.915 mm, 14.509 mm), b = point(54.67 mm, -62.237 mm, 14.509 mm), c = point(56.945 mm, -48.705 mm, 11.089 mm))
     sketch front_right_seat_s on plane.front_right_seat_plane {
         s1 = line(start = [-20.05 mm, -7.55 mm], end = [8 mm, -7.55 mm])
         s2 = line(start = [8 mm, -7.55 mm], end = [8 mm, 7.55 mm])
@@ -129,5 +129,13 @@ part body_top {
         w = spline(points = [[80.5 mm, -1.5 mm], [81.151 mm, -1.351 mm], [81.673 mm, -0.935 mm], [81.962 mm, -0.334 mm], [81.962 mm, 0.334 mm], [81.673 mm, 0.935 mm], [81.151 mm, 1.351 mm], [80.5 mm, 1.5 mm], [67.5 mm, 1.5 mm], [66.849 mm, 1.351 mm], [66.327 mm, 0.935 mm], [66.038 mm, 0.334 mm], [66.038 mm, -0.334 mm], [66.327 mm, -0.935 mm], [66.849 mm, -1.351 mm], [67.5 mm, -1.5 mm]], closed)
     }
     feature window = extrude(profile = sketch.window_s, through_all, mode = cut)
+    // The forward vision pair's windows in the nose: each sensor's bezel (R4) sits in an R4.1
+    // bore through the nose cap, its glass looking straight ahead.
+    feature sensor_plane = plane.offset(base = origin.yz, distance = 92 mm)
+    sketch sensor_s on plane.sensor_plane {
+        left = circle(center = [6 mm, 31 mm], radius = 4.1 mm)
+        right = circle(center = [-6 mm, 31 mm], radius = 4.1 mm)
+    }
+    feature sensor_windows = extrude(profile = sketch.sensor_s, distance = 10 mm, mode = cut)
     output body_top = { body = feature.outer.body, part_number = "CD-BD-110", material = "polycarbonate", color = "#D9DCE0" }
 }

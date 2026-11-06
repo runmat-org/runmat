@@ -4,10 +4,11 @@ std 1
 // A folding arm: a moulded carbon-fibre beam lofted from the hinge knuckle to the motor pod's pad.
 // Its origin is the hinge axis (z) at the knuckle's mid-height and it runs along +x; the pad at
 // the tip rises by `rise` so the props clear the body. The knuckle turns on the hinge pin, and
-// two screws hold the motor pod to the pad.
+// four M2 screws hold the motor and its pod to the pad.
 part arm {
     input length : length = 88.2 mm
     input rise : length = 5.2 mm
+    input pad_tilt : angle = 0 deg
     feature knuckle_base = plane.offset(base = origin.xy, distance = -6.5 mm)
     sketch knuckle_b on plane.knuckle_base {
         c = circle(center = [0 mm, 0 mm], radius = 7 mm)
@@ -17,16 +18,26 @@ part arm {
     sketch beam_s0 on plane.beam_st0 {
         c = spline(points = [[0 mm, 6.5 mm], [2.594 mm, 6.315 mm], [4.49 mm, 5.766 mm], [5.993 mm, 4.869 mm], [7.096 mm, 3.648 mm], [7.772 mm, 2.107 mm], [8 mm, 0 mm], [7.772 mm, -2.107 mm], [7.096 mm, -3.648 mm], [5.993 mm, -4.869 mm], [4.49 mm, -5.766 mm], [2.594 mm, -6.315 mm], [0 mm, -6.5 mm], [-2.594 mm, -6.315 mm], [-4.49 mm, -5.766 mm], [-5.993 mm, -4.869 mm], [-7.096 mm, -3.648 mm], [-7.772 mm, -2.107 mm], [-8 mm, 0 mm], [-7.772 mm, 2.107 mm], [-7.096 mm, 3.648 mm], [-5.993 mm, 4.869 mm], [-4.49 mm, 5.766 mm], [-2.594 mm, 6.315 mm]], closed)
     }
+    // The beam keeps the knuckle's section out past the clevis lugs (R7.5) before it rises, so
+    // the lugs clear it at every fold angle.
+    feature beam_sta = plane.offset(base = origin.yz, distance = 9 mm)
+    sketch beam_sa on plane.beam_sta {
+        c = spline(points = [[0 mm, 6.38 mm], [2.542 mm, 6.198 mm], [4.4 mm, 5.66 mm], [5.873 mm, 4.779 mm], [6.954 mm, 3.581 mm], [7.617 mm, 2.068 mm], [7.84 mm, 0 mm], [7.617 mm, -2.068 mm], [6.954 mm, -3.581 mm], [5.873 mm, -4.779 mm], [4.4 mm, -5.66 mm], [2.542 mm, -6.198 mm], [0 mm, -6.38 mm], [-2.542 mm, -6.198 mm], [-4.4 mm, -5.66 mm], [-5.873 mm, -4.779 mm], [-6.954 mm, -3.581 mm], [-7.617 mm, -2.068 mm], [-7.84 mm, 0 mm], [-7.617 mm, 2.068 mm], [-6.954 mm, 3.581 mm], [-5.873 mm, 4.779 mm], [-4.4 mm, 5.66 mm], [-2.542 mm, 6.198 mm]], closed)
+    }
     feature beam_st1 = plane.offset(base = origin.yz, distance = input.length * 0.45)
     sketch beam_s1 on plane.beam_st1 {
         c = spline(points = [[0 mm, 5.6 mm + input.rise * 0.45], [2.205 mm, 5.441 mm + input.rise * 0.45], [3.816 mm, 4.967 mm + input.rise * 0.45], [5.094 mm, 4.195 mm + input.rise * 0.45], [6.032 mm, 3.143 mm + input.rise * 0.45], [6.606 mm, 1.816 mm + input.rise * 0.45], [6.8 mm, 0 mm + input.rise * 0.45], [6.606 mm, -1.816 mm + input.rise * 0.45], [6.032 mm, -3.143 mm + input.rise * 0.45], [5.094 mm, -4.195 mm + input.rise * 0.45], [3.816 mm, -4.967 mm + input.rise * 0.45], [2.205 mm, -5.441 mm + input.rise * 0.45], [0 mm, -5.6 mm + input.rise * 0.45], [-2.205 mm, -5.441 mm + input.rise * 0.45], [-3.816 mm, -4.967 mm + input.rise * 0.45], [-5.094 mm, -4.195 mm + input.rise * 0.45], [-6.032 mm, -3.143 mm + input.rise * 0.45], [-6.606 mm, -1.816 mm + input.rise * 0.45], [-6.8 mm, 0 mm + input.rise * 0.45], [-6.606 mm, 1.816 mm + input.rise * 0.45], [-6.032 mm, 3.143 mm + input.rise * 0.45], [-5.094 mm, 4.195 mm + input.rise * 0.45], [-3.816 mm, 4.967 mm + input.rise * 0.45], [-2.205 mm, 5.441 mm + input.rise * 0.45]], closed)
     }
     feature beam_st2 = plane.offset(base = origin.yz, distance = input.length - 6 mm)
     sketch beam_s2 on plane.beam_st2 {
-        c = spline(points = [[0 mm, 4 mm + input.rise], [1.783 mm, 3.858 mm + input.rise], [3.087 mm, 3.435 mm + input.rise], [4.12 mm, 2.746 mm + input.rise], [4.879 mm, 1.806 mm + input.rise], [5.343 mm, 0.621 mm + input.rise], [5.5 mm, -1 mm + input.rise], [5.343 mm, -2.621 mm + input.rise], [4.879 mm, -3.806 mm + input.rise], [4.12 mm, -4.746 mm + input.rise], [3.087 mm, -5.435 mm + input.rise], [1.783 mm, -5.858 mm + input.rise], [0 mm, -6 mm + input.rise], [-1.783 mm, -5.858 mm + input.rise], [-3.087 mm, -5.435 mm + input.rise], [-4.12 mm, -4.746 mm + input.rise], [-4.879 mm, -3.806 mm + input.rise], [-5.343 mm, -2.621 mm + input.rise], [-5.5 mm, -1 mm + input.rise], [-5.343 mm, 0.621 mm + input.rise], [-4.879 mm, 1.806 mm + input.rise], [-4.12 mm, 2.746 mm + input.rise], [-3.087 mm, 3.435 mm + input.rise], [-1.783 mm, 3.858 mm + input.rise]], closed)
+        c = spline(points = [[0 mm, 1 mm + input.rise], [1.783 mm, 0.901 mm + input.rise], [3.087 mm, 0.605 mm + input.rise], [4.12 mm, 0.122 mm + input.rise], [4.879 mm, -0.536 mm + input.rise], [5.343 mm, -1.365 mm + input.rise], [5.5 mm, -2.5 mm + input.rise], [5.343 mm, -3.635 mm + input.rise], [4.879 mm, -4.464 mm + input.rise], [4.12 mm, -5.122 mm + input.rise], [3.087 mm, -5.604 mm + input.rise], [1.783 mm, -5.901 mm + input.rise], [0 mm, -6 mm + input.rise], [-1.783 mm, -5.901 mm + input.rise], [-3.087 mm, -5.604 mm + input.rise], [-4.12 mm, -5.122 mm + input.rise], [-4.879 mm, -4.464 mm + input.rise], [-5.343 mm, -3.635 mm + input.rise], [-5.5 mm, -2.5 mm + input.rise], [-5.343 mm, -1.365 mm + input.rise], [-4.879 mm, -0.536 mm + input.rise], [-4.12 mm, 0.122 mm + input.rise], [-3.087 mm, 0.605 mm + input.rise], [-1.783 mm, 0.901 mm + input.rise]], closed)
     }
-    feature beam = loft(profiles = [sketch.beam_s0, sketch.beam_s1, sketch.beam_s2], mode = add)
-    feature pad_base = plane.offset(base = origin.xy, distance = input.rise - 4 mm)
+    feature beam = loft(profiles = [sketch.beam_s0, sketch.beam_sa, sketch.beam_s1, sketch.beam_s2], mode = add)
+    // The pad is square to the motor axis: on a tilted hinge it turns by `pad_tilt` about the
+    // arm's axis through its top face's centre, as the motor pod does.
+    feature pad_axis = axis.through(a = point(0 mm, 0 mm, input.rise + 4 mm), b = point(10 mm, 0 mm, input.rise + 4 mm))
+    feature pad_level = plane.offset(base = origin.xy, distance = input.rise - 4 mm)
+    feature pad_base = plane.angle(base = plane.pad_level, axis = axis.pad_axis, angle = input.pad_tilt)
     sketch pad_s on plane.pad_base {
         c = circle(center = [input.length, 0 mm], radius = 9 mm)
     }
@@ -38,14 +49,17 @@ part arm {
     feature bores = extrude(profile = sketch.bores_s, through_all, mode = cut)
     // The motor's four M2 screws pass up through the pad and the pod's floor into the
     // stator, on a 12 mm bolt circle (close-fit clearance).
+    feature pad_top_level = plane.offset(base = origin.xy, distance = input.rise + 4 mm)
+    feature pad_top = plane.angle(base = plane.pad_top_level, axis = axis.pad_axis, angle = input.pad_tilt)
+    sketch bolt_s on plane.pad_top {
+        a = point(at = [input.length + 6 mm, 0 mm])
+        b = point(at = [input.length, 6 mm])
+        c = point(at = [input.length - 6 mm, 0 mm])
+        d = point(at = [input.length, -6 mm])
+    }
     feature motor_holes = hole(
         face = feature.pad.face.end,
-        at = {
-            a = point(input.length + 6 mm, 0 mm, input.rise + 4 mm),
-            b = point(input.length, 6 mm, input.rise + 4 mm),
-            c = point(input.length - 6 mm, 0 mm, input.rise + 4 mm),
-            d = point(input.length, -6 mm, input.rise + 4 mm)
-        },
+        at = { a = sketch.bolt_s.a.at, b = sketch.bolt_s.b.at, c = sketch.bolt_s.c.at, d = sketch.bolt_s.d.at },
         spec = { standard = iso, size = "M2", fit = close },
         through_all
     )
