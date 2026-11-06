@@ -2,11 +2,12 @@ runmat 0.7
 std 1
 
 // The ESC's heatsink and stack mount, machined from 6061-T6: a 56 x 56 x 2 mm belly plate that
-// closes a window in the lower shell, a 36 x 36 mm pedestal that rises to the ESC's underside
-// through a 0.5 mm gap pad, four standoffs that carry the stack on the 30.5 mm pattern (M3 tap
-// drills, 5 mm deep), and fourteen 0.8 mm fins, 10 mm deep, below the belly in the propellers'
-// downwash. The fins run fore and aft, so forward flight blows along them too. Its origin is the
-// stack's centre on the shell's base plane (z = 0), where drone.assembly places it.
+// closes a window in the lower shell, a 38 x 38 mm pedestal (wide enough to hold the standoffs
+// whole) that rises to the ESC's underside through a 0.5 mm gap pad, four standoffs that carry
+// the stack on the 30.5 mm pattern (M3 tap drills, 5 mm deep), and fourteen 0.8 mm fins, 10 mm
+// deep, below the belly in the propellers' downwash. The fins run fore and aft, so forward flight
+// blows along them too. Its origin is the stack's centre on the shell's base plane (z = 0),
+// where drone.assembly places it.
 //
 // Hand check at full throttle (6.2 W from the ESC's losses, 25 W/m^2/K downwash at 35 degC):
 // - wetted area below the belly: fins 14 x 2 x 56 x 10 = 15,680 mm^2, fin tips 627 mm^2, the
@@ -15,9 +16,9 @@ std 1
 //   eta = tanh(m L) / (m L) = 0.99;
 // - convection: R = 1 / (h eta A) = 1 / (25 x 0.99 x 0.01926) = 2.1 K/W, so 13 K;
 // - gap pad: 0.5 mm at 3 W/m/K over 36 x 36 mm less its four standoff reliefs (1,120 mm^2),
-//   R = 0.15 K/W, 0.9 K; pedestal: 6 mm of aluminium over 36 x 36 mm, R = 0.028 K/W, 0.2 K.
+//   R = 0.15 K/W, 0.9 K; pedestal: 6 mm of aluminium over 38 x 38 mm, R = 0.025 K/W, 0.2 K.
 // The board's pad sits about 14 K over ambient, about 49 degC. The four polycarbonate bosses
-// gave 258 K/W (1,600 K) on the same losses. Mass: 21,300 mm^3 of aluminium, 57 g.
+// gave 258 K/W (1,600 K) on the same losses. Mass: 22,200 mm^3 of aluminium, 60 g.
 part esc_heatsink {
     feature base_plane = plane.offset(base = origin.xy, distance = 1.5 mm)
     sketch base_s on plane.base_plane {
@@ -29,10 +30,10 @@ part esc_heatsink {
     feature base = extrude(profile = sketch.base_s, distance = 2 mm)
     feature pedestal_plane = plane.offset(base = origin.xy, distance = 3.5 mm)
     sketch pedestal_s on plane.pedestal_plane {
-        p_l1 = line(start = [-18 mm, -18 mm], end = [18 mm, -18 mm])
-        p_l2 = line(start = [18 mm, -18 mm], end = [18 mm, 18 mm])
-        p_l3 = line(start = [18 mm, 18 mm], end = [-18 mm, 18 mm])
-        p_l4 = line(start = [-18 mm, 18 mm], end = [-18 mm, -18 mm])
+        p_l1 = line(start = [-19 mm, -19 mm], end = [19 mm, -19 mm])
+        p_l2 = line(start = [19 mm, -19 mm], end = [19 mm, 19 mm])
+        p_l3 = line(start = [19 mm, 19 mm], end = [-19 mm, 19 mm])
+        p_l4 = line(start = [-19 mm, 19 mm], end = [-19 mm, -19 mm])
     }
     feature pedestal = extrude(profile = sketch.pedestal_s, distance = 6 mm, mode = add)
     sketch standoff_s on plane.pedestal_plane {

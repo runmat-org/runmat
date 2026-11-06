@@ -182,6 +182,22 @@ fn the_hinge_lug_sketches_are_fully_defined() {
     }
 }
 
+/// The motor pod's mount pattern is fully defined: the 5 mm bore fixed at the motor axis, the
+/// four 2.2 mm screw holes on the 12 mm bolt circle along the axes, and the phase-lead slot at
+/// 225 degrees between two of them, dimensioned by diameters and its R1.2 ends.
+#[test]
+fn the_motor_mount_sketch_is_fully_defined() {
+    let all = project();
+    let files_json = serde_json::to_string(&all).unwrap();
+    let path = "/p/drone/motor_pod.part";
+    let v = entry(path, &all[path], &files_json);
+    assert!(errors(&v).is_empty(), "{:?}", errors(&v));
+    let sketches = v["display"]["data"]["sketches"].as_array().cloned().unwrap_or_default();
+    let s = sketches.iter().find(|s| s["id"] == "mount_s").unwrap_or_else(|| panic!("mount_s in {sketches:?}"));
+    assert_eq!(s["status"], "well_defined", "dof {}, redundant {}, conflicting {}", s["dof"], s["redundant"], s["conflicting"]);
+    assert_eq!(s["dof"], 0);
+}
+
 /// The study geometry as exact AP242: the arm with its motor pod, and the ESC heatsink with the
 /// gap pad and the ESC board on it. Each product is one solid, and each face in a region travels
 /// under the region's name, which is what the studies' `select name` reads (`root`,
@@ -214,3 +230,4 @@ fn the_study_assemblies_export_with_their_region_names() {
         assert_eq!(solids, products.len(), "{file}: {solids} solids for {} products", products.len());
     }
 }
+

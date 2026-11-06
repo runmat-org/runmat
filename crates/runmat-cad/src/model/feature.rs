@@ -988,6 +988,7 @@ impl FeatureKind {
                         K::Distance { value, .. }
                         | K::Length { value, .. }
                         | K::Radius { value, .. }
+                        | K::Diameter { value, .. }
                         | K::Angle { value, .. } => ptrs.push(value),
                         K::Limit { min, max, .. } => {
                             ptrs.push(min);

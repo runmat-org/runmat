@@ -1,14 +1,15 @@
-// The folding arm and its hinge on a hard landing: the leg under the motor pod meets the ground
-// first and pushes the pod up while the body's inertia pulls the hinge down.
+// The folding arm and its hinge on a hard landing: the skids stop the body, and the motor pod at
+// the arm's tip keeps moving down until the arm stops it.
 //
 // Geometry: ./geometry/arm_study.step, exported from arm_study.assembly (the front arm and the
 // motor pod on its pad). The hinge pin carries the arm at the knuckle's bore (fixed here).
 //
-// Load: a 900 g drone landing at 5 g on its four legs puts 0.9 kg x 9.81 m/s^2 x 5 / 4 = 11 N up
-// on each pod. Check: the moment at the knuckle is 11 N x 88 mm = 968 N mm; the root's section
-// modulus (16 x 13 mm superellipse) is about 300 mm^3, so the bending stress there is about
-// 3.2 MPa, two orders below the laminate's 600 MPa strength. The lugs, 16.8 mm apart,
-// carry the moment as a 58 N couple on the 4 mm pin.
+// Load: a 1 m/s touchdown (the descent limit) stopped over the skids' 2 mm of compliance is
+// 1^2 / (2 x 0.002) = 250 m/s^2, about 25 g; on the pod's 40 g (motor, propeller and cowl) that
+// is 0.04 kg x 250 m/s^2 = 10 N down. Check: the moment at the knuckle is 10 N x 88 mm =
+// 880 N mm; the root's section modulus (16 x 13 mm superellipse) is about 300 mm^3, so the
+// bending stress there is about 2.9 MPa, two orders below the laminate's 600 MPa strength. The
+// lugs, 16.8 mm apart, carry the moment as a 52 N couple on the 4 mm pin.
 
 geometry arm {
     file = "./geometry/arm_study.step"
@@ -50,10 +51,10 @@ model landing {
     constraint hinge {
         structural.fixed { target = geometry.arm.region.root }
     }
-    load leg_reaction {
-        force on geometry.arm.region.motor_seat = [0, 0, 11] N
+    load pod_inertia {
+        force on geometry.arm.region.motor_seat = [0, 0, -10] N
     }
-    load_case hard_landing { include load.leg_reaction }
+    load_case hard_landing { include load.pod_inertia }
 }
 
 study arm_landing {

@@ -524,13 +524,19 @@ fn dimension(
         SketchTarget::Point { .. } => false,
     };
     let line = |g: &G| matches!(g, G::Line { .. });
-    let round = |g: &G| matches!(g, G::Circle { .. } | G::Arc { .. });
+    let circle = |g: &G| matches!(g, G::Circle { .. });
+    let arc = |g: &G| matches!(g, G::Arc { .. });
     Ok(constraint(match targets.as_slice() {
         [t] if is(t, line) => K::Length {
             line: t.clone(),
             value: mm(value),
         },
-        [t] if is(t, round) => K::Radius {
+        // Full circles take a diameter and arcs a radius, as drawings dimension them.
+        [t] if is(t, circle) => K::Diameter {
+            curve: t.clone(),
+            value: mm(value),
+        },
+        [t] if is(t, arc) => K::Radius {
             curve: t.clone(),
             value: mm(value),
         },

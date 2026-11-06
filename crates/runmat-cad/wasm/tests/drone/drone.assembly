@@ -4,8 +4,8 @@ std 1
 // A generic foldable camera drone, 249 g class to 900 g class by its battery: one lofted upper and
 // lower shell split along the body's waist, four folding arms on hinge pins (the front arms fold
 // flat along the sides, the rear arms fold forward and down under the body on tilted hinges),
-// cowled motor pods with folding two-blade props, a 3-axis gimbal under the nose, a flush rear
-// battery, downward and forward vision sensors, and the 4-in-1 ESC and flight controller inside
+// cowled motor pods with folding two-blade props, a 3-axis gimbal under the nose, two landing
+// skids under the belly, a flush rear battery whose lid is part of the shell, downward and forward vision sensors, and the 4-in-1 ESC and flight controller inside
 // on the ESC heatsink's standoffs. The fold inputs stow it: drone_folded.assembly sets them.
 assembly drone {
     input fold_front : angle = 0 deg
@@ -19,6 +19,22 @@ assembly drone {
     use part body_top from "body_top.part" as body_top
     use part battery from "battery.part" as battery
     use part light_pipe from "light_pipe.part" as light_pipe
+
+    // Landing gear: a skid under each side of the belly, either side of the heatsink's fins.
+    use part landing_skid from "landing_skid.part" as skid_left {
+        configuration = { select = inputs, values = { side = 34 mm } }
+    }
+    use part landing_skid from "landing_skid.part" as skid_right {
+        configuration = { select = inputs, values = { side = -34 mm } }
+    }
+
+    // The radio's two antennas, upright inside the side walls behind the board stack.
+    use part antenna from "antenna.part" as antenna_left {
+        placement = { placement = offset, offset = { translation = [-25 mm, 38 mm, 14 mm] } }
+    }
+    use part antenna from "antenna.part" as antenna_right {
+        placement = { placement = offset, offset = { translation = [-25 mm, -38 mm, 14 mm] } }
+    }
 
     // The arms on their hinges, each solved so its motor sits on the 300 mm diagonal with the
     // props 55 mm above the belly.

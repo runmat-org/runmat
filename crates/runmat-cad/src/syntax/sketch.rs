@@ -132,6 +132,7 @@ fn print_kind(kind: &K, extra: Option<String>) -> Option<(String, Option<String>
         K::Angle { a, b, value } => ("angle", vec![target(a)?, target(b)?], Some(value)),
         K::Length { line, value } => ("length", vec![target(line)?], Some(value)),
         K::Radius { curve, value } => ("radius", vec![target(curve)?], Some(value)),
+        K::Diameter { curve, value } => ("diameter", vec![target(curve)?], Some(value)),
         K::Limit {
             dimension,
             min,
@@ -556,6 +557,10 @@ fn lower_kind(expr: &Expr, value: Option<&Expr>) -> Result<(K, Option<Constraint
             value: need_value(value)?,
         },
         "radius" => K::Radius {
+            curve: targets(1)?.remove(0),
+            value: need_value(value)?,
+        },
+        "diameter" => K::Diameter {
             curve: targets(1)?.remove(0),
             value: need_value(value)?,
         },

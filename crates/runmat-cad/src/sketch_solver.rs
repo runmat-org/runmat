@@ -320,7 +320,12 @@ impl SketchSolver for ConstraintSketchSolver {
             let t = |x: &SketchTarget| target(x, &point_ids);
             let round = |x: &SketchTarget| matches!(x, SketchTarget::Entity { entity } if is_round.get(entity).copied().unwrap_or(false));
             let cc = match &c.kind {
-                K::Coincident { a, b } => C::Coincident(t(a)?, t(b)?),
+                // A point coincident with a curve lies on it; two points coincide.
+                K::Coincident { a, b } => match (a, b) {
+                    (SketchTarget::Point { .. }, SketchTarget::Entity { .. }) => C::PointOnCurve { point: t(a)?, curve: t(b)? },
+                    (SketchTarget::Entity { .. }, SketchTarget::Point { .. }) => C::PointOnCurve { point: t(b)?, curve: t(a)? },
+                    _ => C::Coincident(t(a)?, t(b)?),
+                },
                 K::Horizontal { line } => C::Horizontal(t(line)?),
                 K::Vertical { line } => C::Vertical(t(line)?),
                 K::Parallel { a, b } => C::Parallel(t(a)?, t(b)?),
@@ -353,6 +358,10 @@ impl SketchSolver for ConstraintSketchSolver {
                 K::Radius { curve, value } => C::Radius {
                     curve: t(curve)?,
                     value: len(value)?,
+                },
+                K::Diameter { curve, value } => C::Radius {
+                    curve: t(curve)?,
+                    value: len(value)? / 2.0,
                 },
                 K::Angle { a, b, value } => C::Angle {
                     a: t(a)?,

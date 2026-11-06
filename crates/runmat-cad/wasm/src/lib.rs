@@ -27,6 +27,7 @@ pub mod board;
 mod configured;
 pub mod drawing;
 pub mod edit;
+pub mod evaluate;
 pub mod exchange;
 pub mod features;
 pub mod hlr;

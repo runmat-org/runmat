@@ -4,7 +4,8 @@ std 1
 // The body's upper shell: one smooth loft through nine sections from the battery bay to the nose
 // (a soft teardrop in plan with a raised spine), hollowed to a 1.8 mm wall and trimmed at the
 // split line 27 mm above the belly. Cooling vents run across it over the boards, the status
-// window sits at the front, and the battery bay opens at the rear.
+// window sits at the front, and the battery bay opens at the rear. The front hinge mounts seat
+// in recesses moulded where they pass through the wall (0.05 mm clear all round).
 part body_top {
     feature outer_st0 = plane.offset(base = origin.yz, distance = -94 mm)
     sketch outer_s0 on plane.outer_st0 {
@@ -76,6 +77,23 @@ part body_top {
         c = spline(points = [[0 mm, 38.2 mm], [5.408 mm, 37.999 mm], [8.655 mm, 37.399 mm], [11.086 mm, 36.402 mm], [12.813 mm, 34.998 mm], [13.853 mm, 33.123 mm], [14.2 mm, 30 mm], [13.853 mm, 26.877 mm], [12.813 mm, 25.002 mm], [11.086 mm, 23.598 mm], [8.655 mm, 22.601 mm], [5.408 mm, 22.001 mm], [0 mm, 21.8 mm], [-5.408 mm, 22.001 mm], [-8.655 mm, 22.601 mm], [-11.086 mm, 23.598 mm], [-12.813 mm, 25.002 mm], [-13.853 mm, 26.877 mm], [-14.2 mm, 30 mm], [-13.853 mm, 33.123 mm], [-12.813 mm, 34.998 mm], [-11.086 mm, 36.402 mm], [-8.655 mm, 37.399 mm], [-5.408 mm, 37.999 mm]], closed)
     }
     feature hollow = loft(profiles = [sketch.hollow_s0, sketch.hollow_s1, sketch.hollow_s2, sketch.hollow_s3, sketch.hollow_s4, sketch.hollow_s5, sketch.hollow_s6, sketch.hollow_s7], mode = cut)
+    // The front hinges' recesses: each hinge mount's envelope in its own frame (pin axis z).
+    feature front_left_seat_plane = plane.three_point(a = point(52 mm, 44 mm, 13.9 mm), b = point(57.442 mm, 52.39 mm, 13.9 mm), c = point(43.61 mm, 49.442 mm, 13.9 mm))
+    sketch front_left_seat_s on plane.front_left_seat_plane {
+        s1 = line(start = [-20.05 mm, -7.55 mm], end = [8 mm, -7.55 mm])
+        s2 = line(start = [8 mm, -7.55 mm], end = [8 mm, 7.55 mm])
+        s3 = line(start = [8 mm, 7.55 mm], end = [-20.05 mm, 7.55 mm])
+        s4 = line(start = [-20.05 mm, 7.55 mm], end = [-20.05 mm, -7.55 mm])
+    }
+    feature front_left_seat = extrude(profile = sketch.front_left_seat_s, distance = 20.2 mm, mode = cut)
+    feature front_right_seat_plane = plane.three_point(a = point(52 mm, -44 mm, 13.9 mm), b = point(57.442 mm, -52.39 mm, 13.9 mm), c = point(60.39 mm, -38.558 mm, 13.9 mm))
+    sketch front_right_seat_s on plane.front_right_seat_plane {
+        s1 = line(start = [-20.05 mm, -7.55 mm], end = [8 mm, -7.55 mm])
+        s2 = line(start = [8 mm, -7.55 mm], end = [8 mm, 7.55 mm])
+        s3 = line(start = [8 mm, 7.55 mm], end = [-20.05 mm, 7.55 mm])
+        s4 = line(start = [-20.05 mm, 7.55 mm], end = [-20.05 mm, -7.55 mm])
+    }
+    feature front_right_seat = extrude(profile = sketch.front_right_seat_s, distance = 20.2 mm, mode = cut)
     sketch below_s on origin.xy {
         b1 = line(start = [-120 mm, -70 mm], end = [120 mm, -70 mm])
         b2 = line(start = [120 mm, -70 mm], end = [120 mm, 70 mm])
@@ -91,6 +109,13 @@ part body_top {
         e4 = line(start = [-31.5 mm, 49.5 mm], end = [-31.5 mm, 13.5 mm])
     }
     feature bay = extrude(profile = sketch.bay_s, distance = 62 mm, mode = cut)
+    sketch lid_s on plane.bay_plane {
+        l1 = line(start = [-31.5 mm, 49.5 mm], end = [31.5 mm, 49.5 mm])
+        l2 = line(start = [31.5 mm, 49.5 mm], end = [31.5 mm, 80 mm])
+        l3 = line(start = [31.5 mm, 80 mm], end = [-31.5 mm, 80 mm])
+        l4 = line(start = [-31.5 mm, 80 mm], end = [-31.5 mm, 49.5 mm])
+    }
+    feature lid_opening = extrude(profile = sketch.lid_s, distance = 37 mm, mode = cut)
     sketch vent_s on origin.xy {
         v0 = spline(points = [[-20.4 mm, 15.4 mm], [-20.558 mm, 16.094 mm], [-21.002 mm, 16.651 mm], [-21.644 mm, 16.96 mm], [-22.356 mm, 16.96 mm], [-22.998 mm, 16.651 mm], [-23.442 mm, 16.094 mm], [-23.6 mm, 15.4 mm], [-23.6 mm, -15.4 mm], [-23.442 mm, -16.094 mm], [-22.998 mm, -16.651 mm], [-22.356 mm, -16.96 mm], [-21.644 mm, -16.96 mm], [-21.002 mm, -16.651 mm], [-20.558 mm, -16.094 mm], [-20.4 mm, -15.4 mm]], closed)
         v1 = spline(points = [[-13.9 mm, 15.4 mm], [-14.058 mm, 16.094 mm], [-14.502 mm, 16.651 mm], [-15.144 mm, 16.96 mm], [-15.856 mm, 16.96 mm], [-16.498 mm, 16.651 mm], [-16.942 mm, 16.094 mm], [-17.1 mm, 15.4 mm], [-17.1 mm, -15.4 mm], [-16.942 mm, -16.094 mm], [-16.498 mm, -16.651 mm], [-15.856 mm, -16.96 mm], [-15.144 mm, -16.96 mm], [-14.502 mm, -16.651 mm], [-14.058 mm, -16.094 mm], [-13.9 mm, -15.4 mm]], closed)

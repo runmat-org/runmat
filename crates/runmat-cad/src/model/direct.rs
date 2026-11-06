@@ -270,6 +270,7 @@ pub fn apply_dimension_edit(
                     K::Distance { value, .. }
                     | K::Length { value, .. }
                     | K::Radius { value, .. }
+                    | K::Diameter { value, .. }
                     | K::Angle { value, .. },
                 ) => value,
                 _ => return Err(not_dim()),

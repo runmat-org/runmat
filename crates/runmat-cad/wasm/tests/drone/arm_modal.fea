@@ -9,7 +9,7 @@
 // as isotropic (the flap and lag modes bend the arm along its fibres). The first design was
 // compression-moulded chopped fibre (45 GPa): its first flap mode, about 354 Hz by the check
 // below, sat under the 400 Hz target, so the arm moved to the laminate.
-// The pod carries the motor, folding propeller, cowl and leg as one lumped mass: 40 g over the
+// The pod carries the motor, folding propeller, and cowl as one lumped mass: 40 g over the
 // cowl's 6.26 cm^3 (pocketed over the arm's pad) is 6390 kg/m^3.
 //
 // Excitation: the motors turn about 6,500 rpm at hover and 10,000 rpm at full throttle, so the

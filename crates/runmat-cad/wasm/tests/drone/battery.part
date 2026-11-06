@@ -1,18 +1,84 @@
 runmat 0.7
 std 1
 
-// The intelligent flight battery: a 4S pack in a moulded case that slides into the rear bay; its
-// rear cap is lofted through the body's last sections, so it closes the body flush. Its origin
-// is the body origin, so it places at identity.
+// The intelligent flight battery: a 4S pack in a moulded case that slides into the rear bay.
+// Its case is the body's own loft clipped to the bay less a 0.5 mm clearance, so its lid
+// carries the shell's curvature from the tail to the split line at x = -60 mm and closes the
+// body flush; its rear cap is lofted through the body's last sections. Its origin is the body
+// origin, so it places at identity.
 part battery {
-    feature pack_plane = plane.offset(base = origin.yz, distance = -94 mm)
-    sketch pack_s on plane.pack_plane {
-        p1 = line(start = [-31 mm, 14 mm], end = [31 mm, 14 mm])
-        p2 = line(start = [31 mm, 14 mm], end = [31 mm, 49 mm])
-        p3 = line(start = [31 mm, 49 mm], end = [-31 mm, 49 mm])
-        p4 = line(start = [-31 mm, 49 mm], end = [-31 mm, 14 mm])
+    feature case_st0 = plane.offset(base = origin.yz, distance = -94 mm)
+    sketch case_s0 on plane.case_st0 {
+        c = spline(points = [[0 mm, 48 mm], [14.09 mm, 47.535 mm], [22.552 mm, 46.145 mm], [28.886 mm, 43.833 mm], [33.387 mm, 40.581 mm], [36.095 mm, 36.235 mm], [37 mm, 29 mm], [36.095 mm, 21.765 mm], [33.387 mm, 17.419 mm], [28.886 mm, 14.167 mm], [22.552 mm, 11.855 mm], [14.09 mm, 10.465 mm], [0 mm, 10 mm], [-14.09 mm, 10.465 mm], [-22.552 mm, 11.855 mm], [-28.886 mm, 14.167 mm], [-33.387 mm, 17.419 mm], [-36.095 mm, 21.765 mm], [-37 mm, 29 mm], [-36.095 mm, 36.235 mm], [-33.387 mm, 40.581 mm], [-28.886 mm, 43.833 mm], [-22.552 mm, 46.145 mm], [-14.09 mm, 47.535 mm]], closed)
     }
-    feature pack = extrude(profile = sketch.pack_s, distance = 59 mm)
+    feature case_st1 = plane.offset(base = origin.yz, distance = -80 mm)
+    sketch case_s1 on plane.case_st1 {
+        c = spline(points = [[0 mm, 53 mm], [15.613 mm, 52.425 mm], [24.99 mm, 50.705 mm], [32.009 mm, 47.847 mm], [36.997 mm, 43.823 mm], [39.997 mm, 38.449 mm], [41 mm, 29.5 mm], [39.997 mm, 20.551 mm], [36.997 mm, 15.177 mm], [32.009 mm, 11.153 mm], [24.99 mm, 8.295 mm], [15.613 mm, 6.575 mm], [0 mm, 6 mm], [-15.613 mm, 6.575 mm], [-24.99 mm, 8.295 mm], [-32.009 mm, 11.153 mm], [-36.997 mm, 15.177 mm], [-39.997 mm, 20.551 mm], [-41 mm, 29.5 mm], [-39.997 mm, 38.449 mm], [-36.997 mm, 43.823 mm], [-32.009 mm, 47.847 mm], [-24.99 mm, 50.705 mm], [-15.613 mm, 52.425 mm]], closed)
+    }
+    feature case_st2 = plane.offset(base = origin.yz, distance = -50 mm)
+    sketch case_s2 on plane.case_st2 {
+        c = spline(points = [[0 mm, 57 mm], [17.137 mm, 56.34 mm], [27.428 mm, 54.364 mm], [35.132 mm, 51.079 mm], [40.606 mm, 46.457 mm], [43.899 mm, 40.282 mm], [45 mm, 30 mm], [43.899 mm, 19.718 mm], [40.606 mm, 13.543 mm], [35.132 mm, 8.921 mm], [27.428 mm, 5.636 mm], [17.137 mm, 3.66 mm], [0 mm, 3 mm], [-17.137 mm, 3.66 mm], [-27.428 mm, 5.636 mm], [-35.132 mm, 8.921 mm], [-40.606 mm, 13.543 mm], [-43.899 mm, 19.718 mm], [-45 mm, 30 mm], [-43.899 mm, 40.282 mm], [-40.606 mm, 46.457 mm], [-35.132 mm, 51.079 mm], [-27.428 mm, 54.364 mm], [-17.137 mm, 56.34 mm]], closed)
+    }
+    feature case_st3 = plane.offset(base = origin.yz, distance = -10 mm)
+    sketch case_s3 on plane.case_st3 {
+        c = spline(points = [[0 mm, 58 mm], [17.517 mm, 57.315 mm], [28.037 mm, 55.266 mm], [35.913 mm, 51.86 mm], [41.508 mm, 47.066 mm], [44.875 mm, 40.663 mm], [46 mm, 30 mm], [44.875 mm, 19.337 mm], [41.508 mm, 12.934 mm], [35.913 mm, 8.14 mm], [28.037 mm, 4.734 mm], [17.517 mm, 2.685 mm], [0 mm, 2 mm], [-17.517 mm, 2.685 mm], [-28.037 mm, 4.734 mm], [-35.913 mm, 8.14 mm], [-41.508 mm, 12.934 mm], [-44.875 mm, 19.337 mm], [-46 mm, 30 mm], [-44.875 mm, 40.663 mm], [-41.508 mm, 47.066 mm], [-35.913 mm, 51.86 mm], [-28.037 mm, 55.266 mm], [-17.517 mm, 57.315 mm]], closed)
+    }
+    feature case_st4 = plane.offset(base = origin.yz, distance = 30 mm)
+    sketch case_s4 on plane.case_st4 {
+        c = spline(points = [[0 mm, 57 mm], [16.756 mm, 56.34 mm], [26.818 mm, 54.364 mm], [34.351 mm, 51.079 mm], [39.704 mm, 46.457 mm], [42.924 mm, 40.282 mm], [44 mm, 30 mm], [42.924 mm, 19.718 mm], [39.704 mm, 13.543 mm], [34.351 mm, 8.921 mm], [26.818 mm, 5.636 mm], [16.756 mm, 3.66 mm], [0 mm, 3 mm], [-16.756 mm, 3.66 mm], [-26.818 mm, 5.636 mm], [-34.351 mm, 8.921 mm], [-39.704 mm, 13.543 mm], [-42.924 mm, 19.718 mm], [-44 mm, 30 mm], [-42.924 mm, 40.282 mm], [-39.704 mm, 46.457 mm], [-34.351 mm, 51.079 mm], [-26.818 mm, 54.364 mm], [-16.756 mm, 56.34 mm]], closed)
+    }
+    feature case_st5 = plane.offset(base = origin.yz, distance = 60 mm)
+    sketch case_s5 on plane.case_st5 {
+        c = spline(points = [[0 mm, 53 mm], [14.471 mm, 52.437 mm], [23.161 mm, 50.754 mm], [29.667 mm, 47.956 mm], [34.29 mm, 44.019 mm], [37.071 mm, 38.759 mm], [38 mm, 30 mm], [37.071 mm, 21.241 mm], [34.29 mm, 15.981 mm], [29.667 mm, 12.044 mm], [23.161 mm, 9.246 mm], [14.471 mm, 7.563 mm], [0 mm, 7 mm], [-14.471 mm, 7.563 mm], [-23.161 mm, 9.246 mm], [-29.667 mm, 12.044 mm], [-34.29 mm, 15.981 mm], [-37.071 mm, 21.241 mm], [-38 mm, 30 mm], [-37.071 mm, 38.759 mm], [-34.29 mm, 44.019 mm], [-29.667 mm, 47.956 mm], [-23.161 mm, 50.754 mm], [-14.471 mm, 52.437 mm]], closed)
+    }
+    feature case_st6 = plane.offset(base = origin.yz, distance = 82 mm)
+    sketch case_s6 on plane.case_st6 {
+        c = spline(points = [[0 mm, 47 mm], [10.663 mm, 46.584 mm], [17.066 mm, 45.34 mm], [21.86 mm, 43.272 mm], [25.266 mm, 40.362 mm], [27.315 mm, 36.474 mm], [28 mm, 30 mm], [27.315 mm, 23.526 mm], [25.266 mm, 19.638 mm], [21.86 mm, 16.728 mm], [17.066 mm, 14.66 mm], [10.663 mm, 13.416 mm], [0 mm, 13 mm], [-10.663 mm, 13.416 mm], [-17.066 mm, 14.66 mm], [-21.86 mm, 16.728 mm], [-25.266 mm, 19.638 mm], [-27.315 mm, 23.526 mm], [-28 mm, 30 mm], [-27.315 mm, 36.474 mm], [-25.266 mm, 40.362 mm], [-21.86 mm, 43.272 mm], [-17.066 mm, 45.34 mm], [-10.663 mm, 46.584 mm]], closed)
+    }
+    feature case_st7 = plane.offset(base = origin.yz, distance = 95 mm)
+    sketch case_s7 on plane.case_st7 {
+        c = spline(points = [[0 mm, 40 mm], [6.093 mm, 39.755 mm], [9.752 mm, 39.024 mm], [12.491 mm, 37.807 mm], [14.438 mm, 36.095 mm], [15.609 mm, 33.808 mm], [16 mm, 30 mm], [15.609 mm, 26.192 mm], [14.438 mm, 23.905 mm], [12.491 mm, 22.193 mm], [9.752 mm, 20.976 mm], [6.093 mm, 20.245 mm], [0 mm, 20 mm], [-6.093 mm, 20.245 mm], [-9.752 mm, 20.976 mm], [-12.491 mm, 22.193 mm], [-14.438 mm, 23.905 mm], [-15.609 mm, 26.192 mm], [-16 mm, 30 mm], [-15.609 mm, 33.808 mm], [-14.438 mm, 36.095 mm], [-12.491 mm, 37.807 mm], [-9.752 mm, 39.024 mm], [-6.093 mm, 39.755 mm]], closed)
+    }
+    feature case_st8 = plane.offset(base = origin.yz, distance = 99 mm)
+    sketch case_s8 on plane.case_st8 {
+        c = spline(points = [[0 mm, 35 mm], [3.047 mm, 34.878 mm], [4.876 mm, 34.512 mm], [6.246 mm, 33.904 mm], [7.219 mm, 33.048 mm], [7.804 mm, 31.904 mm], [8 mm, 30 mm], [7.804 mm, 28.096 mm], [7.219 mm, 26.952 mm], [6.246 mm, 26.096 mm], [4.876 mm, 25.488 mm], [3.047 mm, 25.122 mm], [0 mm, 25 mm], [-3.047 mm, 25.122 mm], [-4.876 mm, 25.488 mm], [-6.246 mm, 26.096 mm], [-7.219 mm, 26.952 mm], [-7.804 mm, 28.096 mm], [-8 mm, 30 mm], [-7.804 mm, 31.904 mm], [-7.219 mm, 33.048 mm], [-6.246 mm, 33.904 mm], [-4.876 mm, 34.512 mm], [-3.047 mm, 34.878 mm]], closed)
+    }
+    feature case = loft(profiles = [sketch.case_s0, sketch.case_s1, sketch.case_s2, sketch.case_s3, sketch.case_s4, sketch.case_s5, sketch.case_s6, sketch.case_s7, sketch.case_s8])
+    feature front_plane = plane.offset(base = origin.yz, distance = -35.5 mm)
+    sketch front_s on plane.front_plane {
+        f1 = line(start = [-80 mm, -40 mm], end = [80 mm, -40 mm])
+        f2 = line(start = [80 mm, -40 mm], end = [80 mm, 100 mm])
+        f3 = line(start = [80 mm, 100 mm], end = [-80 mm, 100 mm])
+        f4 = line(start = [-80 mm, 100 mm], end = [-80 mm, -40 mm])
+    }
+    feature front = extrude(profile = sketch.front_s, distance = 220 mm, mode = cut)
+    feature floor_plane = plane.offset(base = origin.xy, distance = -40 mm)
+    sketch clip_s on plane.floor_plane {
+        b1 = line(start = [-94 mm, -80 mm], end = [-35.5 mm, -80 mm])
+        b2 = line(start = [-35.5 mm, -80 mm], end = [-35.5 mm, 80 mm])
+        b3 = line(start = [-35.5 mm, 80 mm], end = [-94 mm, 80 mm])
+        b4 = line(start = [-94 mm, 80 mm], end = [-94 mm, -80 mm])
+    }
+    feature floor = extrude(profile = sketch.clip_s, distance = 54 mm, mode = cut)
+    sketch sides_s on plane.floor_plane {
+        l1 = line(start = [-94 mm, 31 mm], end = [-35.5 mm, 31 mm])
+        l2 = line(start = [-35.5 mm, 31 mm], end = [-35.5 mm, 80 mm])
+        l3 = line(start = [-35.5 mm, 80 mm], end = [-94 mm, 80 mm])
+        l4 = line(start = [-94 mm, 80 mm], end = [-94 mm, 31 mm])
+        r1 = line(start = [-94 mm, -80 mm], end = [-35.5 mm, -80 mm])
+        r2 = line(start = [-35.5 mm, -80 mm], end = [-35.5 mm, -31 mm])
+        r3 = line(start = [-35.5 mm, -31 mm], end = [-94 mm, -31 mm])
+        r4 = line(start = [-94 mm, -31 mm], end = [-94 mm, -80 mm])
+    }
+    feature sides = extrude(profile = sketch.sides_s, distance = 140 mm, mode = cut)
+    feature roof_plane = plane.offset(base = origin.xy, distance = 49 mm)
+    sketch roof_s on plane.roof_plane {
+        t1 = line(start = [-60.5 mm, -80 mm], end = [-35.5 mm, -80 mm])
+        t2 = line(start = [-35.5 mm, -80 mm], end = [-35.5 mm, 80 mm])
+        t3 = line(start = [-35.5 mm, 80 mm], end = [-60.5 mm, 80 mm])
+        t4 = line(start = [-60.5 mm, 80 mm], end = [-60.5 mm, -80 mm])
+    }
+    feature roof = extrude(profile = sketch.roof_s, distance = 60 mm, mode = cut)
     feature cap_st0 = plane.offset(base = origin.yz, distance = -100 mm)
     sketch cap_s0 on plane.cap_st0 {
         c = spline(points = [[0 mm, 44.5 mm], [12.567 mm, 44.121 mm], [20.114 mm, 42.987 mm], [25.763 mm, 41.101 mm], [29.778 mm, 38.447 mm], [32.193 mm, 34.903 mm], [33 mm, 29 mm], [32.193 mm, 23.097 mm], [29.778 mm, 19.553 mm], [25.763 mm, 16.899 mm], [20.114 mm, 15.013 mm], [12.567 mm, 13.879 mm], [0 mm, 13.5 mm], [-12.567 mm, 13.879 mm], [-20.114 mm, 15.013 mm], [-25.763 mm, 16.899 mm], [-29.778 mm, 19.553 mm], [-32.193 mm, 23.097 mm], [-33 mm, 29 mm], [-32.193 mm, 34.903 mm], [-29.778 mm, 38.447 mm], [-25.763 mm, 41.101 mm], [-20.114 mm, 42.987 mm], [-12.567 mm, 44.121 mm]], closed)
@@ -26,5 +92,5 @@ part battery {
         c = spline(points = [[0 mm, 48 mm], [14.09 mm, 47.535 mm], [22.552 mm, 46.145 mm], [28.886 mm, 43.833 mm], [33.387 mm, 40.581 mm], [36.095 mm, 36.235 mm], [37 mm, 29 mm], [36.095 mm, 21.765 mm], [33.387 mm, 17.419 mm], [28.886 mm, 14.167 mm], [22.552 mm, 11.855 mm], [14.09 mm, 10.465 mm], [0 mm, 10 mm], [-14.09 mm, 10.465 mm], [-22.552 mm, 11.855 mm], [-28.886 mm, 14.167 mm], [-33.387 mm, 17.419 mm], [-36.095 mm, 21.765 mm], [-37 mm, 29 mm], [-36.095 mm, 36.235 mm], [-33.387 mm, 40.581 mm], [-28.886 mm, 43.833 mm], [-22.552 mm, 46.145 mm], [-14.09 mm, 47.535 mm]], closed)
     }
     feature cap = loft(profiles = [sketch.cap_s0, sketch.cap_s1, sketch.cap_s2], mode = add)
-    output battery = { body = feature.pack.body, part_number = "CD-PW-4S3500", material = "polycarbonate", color = "#2C3036" }
+    output battery = { body = feature.case.body, part_number = "CD-PW-4S3500", material = "polycarbonate", color = "#BCC1C8" }
 }

@@ -486,6 +486,7 @@ pub mod words {
         "distance",
         "length",
         "radius",
+        "diameter",
         "angle",
         "limit",
         "edges_between",

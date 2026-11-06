@@ -263,6 +263,11 @@ pub enum SketchConstraintKind {
         curve: SketchTarget,
         value: ValueExpr,
     },
+    /// A circle's diameter: drafting dimensions full circles by diameter (⌀) and arcs by radius.
+    Diameter {
+        curve: SketchTarget,
+        value: ValueExpr,
+    },
     Angle {
         a: SketchTarget,
         b: SketchTarget,

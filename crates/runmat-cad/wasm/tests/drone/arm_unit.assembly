@@ -3,8 +3,7 @@ std 1
 
 // One folding arm as it swings on its hinge: the arm, the motor pod at its tip (turned by
 // `pod_tilt` about the arm's axis so the motor stays vertical when the hinge is tilted), the
-// motor, the folding propeller and the landing leg with its antenna. Its origin is the hinge
-// axis (z), and the arm runs along +x.
+// motor and the folding propeller. Its origin is the hinge axis (z), and the arm runs along +x.
 assembly arm_unit {
     input length : length = 88 mm
     input rise : length = 11 mm
