@@ -90,8 +90,12 @@ impl ResolvedCurveMetricField {
             let resolved = resolver
                 .resolve_constant(&incident)
                 .map_err(intersection_error)?;
+            // The edge, its vertices (a gap closing at an endpoint is sized from the vertex)
+            // and the edges meeting it.
             let mut local_entities = adjacency.get(&edge.id).cloned().unwrap_or_default();
             local_entities.insert(edge.id.clone());
+            local_entities.extend(edge.start_vertex_id.iter().cloned());
+            local_entities.extend(edge.end_vertex_id.iter().cloned());
             let local = resolver
                 .local_sources(&local_entities)
                 .map_err(intersection_error)?;

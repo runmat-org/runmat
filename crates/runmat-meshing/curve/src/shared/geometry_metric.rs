@@ -217,6 +217,7 @@ pub fn derive_curve_geometry_metric(
                 .chain(&edge.end_vertex_id)
                 .cloned()
                 .collect(),
+            endpoint_vertices: [edge.start_vertex_id.clone(), edge.end_vertex_id.clone()],
             face_ids: relations
                 .edge_coedges(&edge.id)
                 .map(|coedge| coedge.face_id.clone())
@@ -241,13 +242,27 @@ pub fn derive_curve_geometry_metric(
         * f64::from(request.resolved_cells_across_gap());
     // Exact edge samples locate edge-local sizing; consumers grade it by distance from the
     // edge instead of applying it across each face the edge bounds.
-    let supports = edge_witnesses
+    let mut supports = edge_witnesses
         .iter()
         .map(|witness| runmat_meshing_size::metric::MetricEntitySupport {
             entity_id: witness.edge_id.clone(),
             points_m: witness.points_m.clone(),
         })
         .collect::<Vec<_>>();
+    // A gap that closes at an edge's endpoint is sized from that vertex (see
+    // `closing_endpoint`); the vertex's exact point is its support.
+    let vertex_points = edge_witnesses
+        .iter()
+        .flat_map(|witness| {
+            let first = witness.points_m.first().copied();
+            let last = witness.points_m.last().copied();
+            [
+                witness.endpoint_vertices[0].clone().zip(first),
+                witness.endpoint_vertices[1].clone().zip(last),
+            ]
+        })
+        .flatten()
+        .collect::<BTreeMap<_, _>>();
     if measure_face_gaps {
         for edge in &topology.edges {
             for coedge in relations.edge_coedges(&edge.id) {
@@ -276,14 +291,26 @@ pub fn derive_curve_geometry_metric(
             control,
         )?);
     }
-    contributions.extend(derive_proximity_contributions(
+    let proximity = derive_proximity_contributions(
         edge_witnesses,
         &contact_pairs,
         request.global_metric,
         search_radius_m,
         request.resolved_cells_across_gap(),
+        request.maximum_grading_ratio,
         control,
-    )?);
+    )?;
+    for contribution in &proximity {
+        if let MetricContributionScope::Entity { entity_id } = &contribution.scope {
+            if let Some(point) = vertex_points.get(entity_id) {
+                supports.push(runmat_meshing_size::metric::MetricEntitySupport {
+                    entity_id: entity_id.clone(),
+                    points_m: vec![*point],
+                });
+            }
+        }
+    }
+    contributions.extend(proximity);
     let mut resolved = request
         .intersect_contributions(contributions)
         .map_err(|error| {
