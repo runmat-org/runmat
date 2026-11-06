@@ -109,6 +109,11 @@ fn interference_and_clearance_between_placed_blocks() {
         (near[0]["distance"].as_f64().unwrap() - 0.0005).abs() < 1e-7,
         "{clearance}"
     );
+    // A row selects its occurrences by the ids the Outline and canvas use.
+    for item in clearance["rows"][0]["items"].as_array().expect("row items") {
+        let id = item.as_str().unwrap().strip_prefix("occurrence:").expect("an occurrence");
+        assert!(id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit()), "{clearance}");
+    }
 }
 
 #[test]
@@ -138,4 +143,17 @@ fn study_checks_stop_on_overlaps_and_missing_densities_and_warn_on_open_contacts
     let touching = run(&assembly(false).replace("20.05 mm", "20 mm"), BLOCK);
     assert_eq!(checks(&touching), [("fit".to_owned(), "info".to_owned())], "{touching}");
     assert!(touching["summary"].as_str().unwrap().contains("ready to mesh · 0 warnings"), "{touching}");
+}
+#[test]
+fn a_shelled_drafted_cover_names_every_face_in_the_draft_analysis() {
+    let cover = "runmat 0.7\nstd 1\n\npart cover {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 50 mm])\n        l3 = line(start = [80 mm, 50 mm], end = [0 mm, 50 mm])\n        l4 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 25 mm)\n    feature dr = draft(\n        faces = [feature.body.face.side(s1.l1), feature.body.face.side(s1.l3)],\n        neutral = origin.xy,\n        angle = 3 deg\n    )\n    feature hollow = shell(body = feature.body.body, open_faces = [feature.body.face.start], thickness = 2 mm)\n    output cover = { body = feature.body.body, material = \"material.aluminum\" }\n}\n";
+    let request = json!({ "command": "evaluate.draft", "values": { "direction": ["origin:top"], "angle": 1 } }).to_string();
+    let out = call("analyze", &["/p/cover.part", cover, "{}", &request]);
+    assert_eq!(out["ok"], true, "{out}");
+    let faces = out["data"]["faces"].as_array().unwrap();
+    // 5 outer faces, 5 inner walls and the rim the open bottom leaves.
+    assert_eq!(faces.len(), 11, "{out}");
+    let unnamed: Vec<&str> = faces.iter().filter_map(|f| f["face"].as_str()).filter(|n| n.starts_with("face ")).collect();
+    assert!(unnamed.is_empty(), "unnamed faces {unnamed:?} in {out}");
+    assert!(faces.iter().any(|f| f["face"].as_str().unwrap().contains("hollow")), "{out}");
 }
