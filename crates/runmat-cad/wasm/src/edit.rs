@@ -207,7 +207,10 @@ fn part_edit(
                 Some(kind) => Some(kind),
                 None => match crate::surface_edits::surface_kind(command, &request.values, &picks)? {
                     Some(kind) => Some(kind),
-                    None => crate::features::feature_kind(command, &request.values, &picks)?,
+                    None => match crate::weldment_edits::weldment_kind(command, &request.values, &picks)? {
+                        Some(kind) => Some(kind),
+                        None => crate::features::feature_kind(command, &request.values, &picks)?,
+                    },
                 },
             };
             let Some((stem, kind)) = lowered else {
@@ -242,14 +245,27 @@ pub fn edit(
     let (change, summary) = if path.ends_with(".drawing") {
         match request.command.as_str() {
             "drawing.auto" => crate::drawing::auto::auto(path, text, files, &request.values)?,
-            other => {
-                return Err(model(format!(
-                    "`{other}` edits drawings through the source editor in this build"
-                )))
-            }
+            other => match crate::drawing_views::view_edit(path, text, files, other, &request.values, &request.selection) {
+                Some(result) => result?,
+                None => {
+                    return Err(model(format!(
+                        "`{other}` edits drawings through the source editor in this build"
+                    )))
+                }
+            },
         }
     } else if path.ends_with(".assembly") {
-        assembly::edit(path, text, files, request)?
+        let (change, summary, others) = assembly::edit(path, text, files, request)?;
+        let mut out = vec![file_change(path, text, change)];
+        out.extend(others.into_iter().map(|(p, old, change)| file_change(&p, &old, change)));
+        return Ok(EditOutput { files: out, summary });
+    } else if request.command == "repair.repair" {
+        // Pins and publishes can change other files.
+        let (changes, summary) = crate::repairs::repair_part_files(path, text, files, &request.values)?;
+        return Ok(EditOutput {
+            files: changes.into_iter().map(|(p, old, change)| file_change(&p, &old, change)).collect(),
+            summary,
+        });
     } else {
         part_edit(path, text, request)?
     };

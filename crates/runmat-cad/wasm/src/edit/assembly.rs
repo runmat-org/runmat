@@ -171,14 +171,15 @@ fn override_owner<'a>(document: &'a mut AssemblyDocument, occurrence: &str, inde
 
 /// Applies repair `values.repair` (an index, 0 when absent; `values.candidate` picks a
 /// retarget's target) of the assembly's diagnostic
-/// `values.diagnostic` (its id). This file's own repairs apply here; a repair that edits
-/// another file says which.
+/// `values.diagnostic` (its id). This file's own repairs change `document`; pins and publishes
+/// of other files come back as their changes ([`crate::xref_repairs`]).
 fn repair(
     path: &str,
     text: &str,
     files: &Files,
     document: &mut AssemblyDocument,
     values: &serde_json::Map<String, serde_json::Value>,
+    others: &mut Vec<crate::xref_repairs::FileEdit>,
 ) -> Result<String, EditFailure> {
     use runmat_cad::diagnostics::Repair;
     let number = |id: &str| values.get(id).and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok())).map(|v| v as usize);
@@ -219,10 +220,25 @@ fn repair(
             o.overrides[index].target = target.clone();
             Ok(format!("Pointed override {index} of {occurrence} at {target}"))
         }
+        Repair::PinOccurrence { assembly, occurrence, revision } if assembly.0 == path => {
+            let o = document
+                .occurrences
+                .iter_mut()
+                .find(|o| o.name == occurrence)
+                .ok_or_else(|| model(format!("the assembly has no component `{occurrence}`")))?;
+            o.source.context = runmat_cad::refs::XrefContext::Pinned { revision: revision.clone() };
+            Ok(format!("Pinned {occurrence} to revision {revision}"))
+        }
         Repair::SuppressMate { assembly, .. } | Repair::RemoveOverride { assembly, .. } | Repair::RetargetOverride { assembly, .. } => {
             Err(model(format!("this repair edits {}; open it to apply", assembly.0)))
         }
-        other => Err(model(format!("`{other:?}` applies from the source editor in this build"))),
+        other => match crate::xref_repairs::apply(path, text, files, &other)? {
+            Some((changes, summary)) => {
+                others.extend(changes);
+                Ok(summary)
+            }
+            None => Err(model(format!("`{other:?}` applies from the source editor in this build"))),
+        },
     }
 }
 
@@ -231,8 +247,9 @@ pub(super) fn edit(
     text: &str,
     files: &Files,
     request: &EditRequest,
-) -> Result<(SourceChange, String), EditFailure> {
+) -> Result<(SourceChange, String, Vec<crate::xref_repairs::FileEdit>), EditFailure> {
     let scope = crate::runtime::module_scope(path, text, files);
+    let mut others = Vec::new();
     let parsed = parse_assembly_in(path, text, &scope);
     let (Some(mut document), true) = (parsed.document, parsed.diagnostics.is_empty()) else {
         return Err(EditFailure::Invalid(parsed.diagnostics));
@@ -278,7 +295,7 @@ pub(super) fn edit(
             place::pattern(&mut document, &compiled, &names, &request.values)?
         }
         "assembly.mate" => mate::mate(&mut document, &compiled, &request.values)?,
-        "repair.repair" => repair(path, text, files, &mut document, &request.values)?,
+        "repair.repair" => repair(path, text, files, &mut document, &request.values, &mut others)?,
         "explode.new" => explode::new_view(&mut document, &request.values)?,
         "explode.step" | "explode.radial" => {
             let names = selected_names(&compiled, request)?;
@@ -312,5 +329,5 @@ pub(super) fn edit(
         }
         Err(other) => return Err(other),
     };
-    Ok((change, summary))
+    Ok((change, summary, others))
 }

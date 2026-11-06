@@ -1,7 +1,8 @@
 //! Draft analysis (CAD-36): each face's draft angle against a pull direction, sorted into bands
 //! a mould maker reads: positive (releases toward the pull), negative (releases from the other
-//! half), and faces that need draft (steeper than the angle asked for either way, or both
-//! signs on one face).
+//! half), faces that need draft (some part of the face is steeper than the angle asked for),
+//! and faces that straddle the parting line (draft beyond the angle both ways on one face, so
+//! the face has to be split where the draft changes sign).
 //!
 //! The draft of a facet is 90° less its normal's angle to the pull: a face square to the pull
 //! has 90°, a wall parallel to it 0°. A face's range comes from its tessellation, so a curved
@@ -18,9 +19,12 @@ pub enum DraftBand {
     Positive,
     /// Every facet at or below minus the angle: it releases from the other half.
     Negative,
-    /// Some facet between minus the angle and the angle: the face needs draft.
+    /// Some facet between minus the angle and the angle, and none beyond it both ways: the
+    /// face needs draft.
     NeedsDraft,
-    /// Facets on both sides beyond the angle: the face straddles the parting line.
+    /// Facets beyond the angle toward the pull and away from it (a side bore, a round at the
+    /// parting line): the face straddles the parting line. A face that passes through zero draft
+    /// between them is still a straddle; splitting it at the parting line is its fix.
     Straddle,
 }
 
@@ -28,6 +32,8 @@ pub enum DraftBand {
 pub struct FaceDraft {
     /// The face's canonical name, or `face <index>` when it has none.
     pub face: String,
+    /// The face as an engineer reads it (from the name table), for tables and tooltips.
+    pub label: String,
     /// Degrees.
     pub min: f64,
     pub max: f64,
@@ -81,10 +87,11 @@ pub fn pull_direction(display: &PartDisplay, pick: &str) -> Result<[f64; 3], Str
         .ok_or_else(|| format!("`{pick}` isn't an origin plane, an origin axis or a face of the part"))
 }
 
-/// Every face's draft against `pull` (unit), banded at `angle` degrees.
-pub fn draft_faces(display: &PartDisplay, pull: [f64; 3], angle: f64) -> Vec<FaceDraft> {
+/// Every face's draft against `pull` (unit), banded at `angle` degrees. `label` names a face
+/// of a body for people (see [`crate::face_labels`]).
+pub fn draft_faces(display: &PartDisplay, pull: [f64; 3], angle: f64, label: &dyn Fn(u32, &FaceDisplay) -> String) -> Vec<FaceDraft> {
     let mut out = Vec::new();
-    for face in display.bodies.iter().flat_map(|b| &b.faces) {
+    for (body, face) in display.bodies.iter().flat_map(|b| b.faces.iter().map(move |f| (b.index, f))) {
         let drafts: Vec<f64> = facets(face)
             .into_iter()
             .filter_map(unit)
@@ -101,17 +108,64 @@ pub fn draft_faces(display: &PartDisplay, pull: [f64; 3], angle: f64) -> Vec<Fac
             DraftBand::Positive
         } else if max <= -angle + eps {
             DraftBand::Negative
-        } else if drafts.iter().any(|d| d.abs() < angle - eps) {
-            DraftBand::NeedsDraft
-        } else {
+        } else if min <= -angle + eps && max >= angle - eps {
             DraftBand::Straddle
+        } else {
+            DraftBand::NeedsDraft
         };
         out.push(FaceDraft {
             face: face.reference.clone().unwrap_or_else(|| format!("face {}", face.index)),
+            label: label(body, face),
             min,
             max,
             band,
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_cad::display::BodyDisplay;
+
+    /// A face of flat facets, one per normal given (each a small triangle facing it).
+    fn face(index: u32, normals: &[[f32; 3]]) -> FaceDisplay {
+        let mut positions = Vec::new();
+        let mut triangles = Vec::new();
+        for (k, n) in normals.iter().enumerate() {
+            // Two vectors square to n, wound so their cross product points along n.
+            let a = if n[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+            let u = [a[1] * n[2] - a[2] * n[1], a[2] * n[0] - a[0] * n[2], a[0] * n[1] - a[1] * n[0]];
+            let v = [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];
+            let o = k as f32 * 10.0;
+            positions.extend([o, 0.0, 0.0, o + u[0], u[1], u[2], o + v[0], v[1], v[2]]);
+            let b = (k * 3) as u32;
+            triangles.extend([b, b + 1, b + 2]);
+        }
+        FaceDisplay { index, positions, triangles, ..Default::default() }
+    }
+
+    #[test]
+    fn faces_band_by_their_least_and_greatest_draft() {
+        let s = (5f32).to_radians();
+        let (c, n) = (s.cos(), s.sin());
+        let display = PartDisplay {
+            bodies: vec![BodyDisplay {
+                faces: vec![
+                    // A wall drafted 5° toward the pull, and one 5° away from it.
+                    face(0, &[[c, 0.0, n]]),
+                    face(1, &[[c, 0.0, -n]]),
+                    // A vertical rib wall.
+                    face(2, &[[1.0, 0.0, 0.0]]),
+                    // A side bore: facets all round, through zero draft.
+                    face(3, &[[0.0, 0.0, 1.0], [0.0, 0.7071, 0.7071], [0.0, 1.0, 0.0], [0.0, 0.7071, -0.7071], [0.0, 0.0, -1.0]]),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let bands: Vec<DraftBand> = draft_faces(&display, [0.0, 0.0, 1.0], 2.0, &|_, f| format!("Face {}", f.index + 1)).iter().map(|f| f.band).collect();
+        assert_eq!(bands, [DraftBand::Positive, DraftBand::Negative, DraftBand::NeedsDraft, DraftBand::Straddle]);
+    }
 }

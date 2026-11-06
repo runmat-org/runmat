@@ -30,8 +30,11 @@
 
 pub mod analyze;
 pub mod board;
+mod board_solid;
 mod direct_edits;
+mod drawing_views;
 pub mod draft_analysis;
+pub mod face_labels;
 mod configured;
 pub mod drawing;
 pub mod edit;
@@ -44,9 +47,12 @@ pub mod kernel;
 pub mod mass;
 pub mod picks;
 mod repairs;
+mod xref_repairs;
 pub mod runtime;
 pub mod study_checks;
 mod surface_edits;
+mod weldment_edits;
+pub mod undercut;
 
 #[cfg(feature = "bindings")]
 use wasm_bindgen::prelude::*;

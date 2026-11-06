@@ -9,8 +9,8 @@
 //! - unsuppress, reorder and move-before move or re-enable the feature;
 //! - suppress-feature suppresses the failing feature, so what follows it can rebuild.
 //!
-//! Repairs that edit another file (pins, publishes, releases) or an assembly are applied by the
-//! assembly and file commands; here they say so.
+//! Pins and publishes are applied by [`crate::xref_repairs`], which can change other files too
+//! ([`repair_part_files`]); repairs of an assembly are applied from the assembly.
 
 use crate::edit::model;
 use runmat_cad::diagnostics::{Diagnostic, Repair, Site, Subject};
@@ -185,8 +185,20 @@ pub fn label_candidates(diagnostics: &mut Value) {
     }
 }
 
-/// `repair.repair` on a part: regenerates it and applies the repair the values name.
-pub fn repair_part(path: &str, text: &str, values: &Values) -> Result<(SourceChange, String), EditFailure> {
+/// `repair.repair` on a part, with the project's files: pins and publishes change the files
+/// they name (this one or another); every other repair changes this part.
+pub fn repair_part_files(path: &str, text: &str, files: &crate::runtime::Files, values: &Values) -> Result<(Vec<crate::xref_repairs::FileEdit>, String), EditFailure> {
+    let (part_diagnostic, at, candidate) = found(path, text, values)?;
+    let repair = part_diagnostic.repairs.get(at).ok_or_else(|| model(format!("the problem has no repair {at}")))?;
+    if let Some(out) = crate::xref_repairs::apply(path, text, files, repair)? {
+        return Ok(out);
+    }
+    let (change, summary) = apply(text, path, &part_diagnostic, at, candidate)?;
+    Ok((vec![(path.to_owned(), text.to_owned(), change)], summary))
+}
+
+/// The diagnostic `values.diagnostic` names, with the repair and candidate indices.
+fn found(path: &str, text: &str, values: &Values) -> Result<(Diagnostic, usize, usize), EditFailure> {
     let id = index(values, "diagnostic").ok_or_else(|| model("name the problem to repair"))?;
     let at = index(values, "repair").unwrap_or(0);
     let candidate = index(values, "candidate").unwrap_or(0);
@@ -195,10 +207,16 @@ pub fn repair_part(path: &str, text: &str, values: &Values) -> Result<(SourceCha
         .result
         .diagnostics
         .diagnostics
-        .iter()
+        .into_iter()
         .find(|d| d.id as usize == id)
         .ok_or_else(|| model("that problem is gone; the part changed since it was reported"))?;
-    apply(text, path, diagnostic, at, candidate)
+    Ok((diagnostic, at, candidate))
+}
+
+/// `repair.repair` on a part: regenerates it and applies the repair the values name.
+pub fn repair_part(path: &str, text: &str, values: &Values) -> Result<(SourceChange, String), EditFailure> {
+    let (diagnostic, at, candidate) = found(path, text, values)?;
+    apply(text, path, &diagnostic, at, candidate)
 }
 
 #[cfg(test)]

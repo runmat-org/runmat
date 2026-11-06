@@ -12,6 +12,8 @@
 //! - `weldment.cut-list`: a weldment part's members grouped by profile, length and end angles.
 //! - `evaluate.draft`: each face's draft against a pull direction (`values.direction`, a pick;
 //!   `values.angle`, degrees), banded ([`crate::draft_analysis`]).
+//! - `evaluate.undercut`: faces the part blocks along every way they can release from a
+//!   two-part mould along the pull (`values.direction`), by rays along it ([`crate::undercut`]).
 //! - `simulate.check`: the fit and mass checks a study runs before it meshes
 //!   ([`crate::study_checks`]; `values.gap`, mm, for open contacts).
 //!
@@ -40,6 +42,14 @@ pub struct Row {
     pub items: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub severity: Option<&'static str>,
+    /// The row's entry in the result's color legend: the row's marker takes that color, as the
+    /// model does (draft bands). Rows without one show their severity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legend: Option<usize>,
+    /// The canonical reference the row is about, when it names one entity (a face): shown on
+    /// hover and copied from the row, while the first cell reads as a label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -54,6 +64,23 @@ pub struct Analysis {
     /// Colors the model takes while the results are open (draft bands), with their legend.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colors: Option<FaceColors>,
+    /// The settings the result was computed with (`Pull: Top plane (+Z)`, `Draft angle: 2°`),
+    /// shown in the results header.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<String>,
+    /// A direction to draw on the model while the results are open (the pull).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arrow: Option<ModelArrow>,
+}
+
+/// An arrow on the model: from `origin` along the unit `direction`, `length` long (model
+/// units, metres), with a short label at its tip.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ModelArrow {
+    pub origin: [f64; 3],
+    pub direction: [f64; 3],
+    pub length: f64,
+    pub label: String,
 }
 
 /// An analysis's colors on the model: a legend, and each face's entry in it. Faces are named as
@@ -78,21 +105,63 @@ pub struct FaceColor {
     pub entry: usize,
 }
 
-/// Draft bands on the model: positive green, negative blue, needs draft red, straddles amber.
-fn draft_colors(faces: &[crate::draft_analysis::FaceDraft]) -> FaceColors {
+/// Draft bands on the model, in legend order: positive green, negative blue, needs draft red,
+/// straddles amber.
+const DRAFT_BANDS: [(crate::draft_analysis::DraftBand, &str, [f32; 4]); 4] = {
     use crate::draft_analysis::DraftBand;
-    let bands = [
+    [
         (DraftBand::Positive, "Positive", [0.22, 0.66, 0.36, 1.0]),
         (DraftBand::Negative, "Negative", [0.24, 0.48, 0.86, 1.0]),
         (DraftBand::NeedsDraft, "Needs draft", [0.86, 0.24, 0.22, 1.0]),
         (DraftBand::Straddle, "Straddles", [0.93, 0.66, 0.16, 1.0]),
-    ];
+    ]
+};
+
+/// A band's entry in [`DRAFT_BANDS`].
+fn draft_entry(band: crate::draft_analysis::DraftBand) -> usize {
+    DRAFT_BANDS.iter().position(|(b, ..)| *b == band).unwrap_or(0)
+}
+
+fn draft_colors(faces: &[crate::draft_analysis::FaceDraft]) -> FaceColors {
     FaceColors {
-        legend: bands.iter().map(|(_, label, color)| LegendEntry { label: (*label).into(), color: *color }).collect(),
-        faces: faces
-            .iter()
-            .filter_map(|f| bands.iter().position(|(b, ..)| *b == f.band).map(|entry| FaceColor { item: f.face.clone(), entry }))
-            .collect(),
+        legend: DRAFT_BANDS.iter().map(|(_, label, color)| LegendEntry { label: (*label).into(), color: *color }).collect(),
+        faces: faces.iter().map(|f| FaceColor { item: f.face.clone(), entry: draft_entry(f.band) }).collect(),
+    }
+}
+
+/// The pull drawn on the model: from the top of the part's bounds along the pull, a third of
+/// its size long.
+fn pull_arrow(display: &runmat_cad::display::PartDisplay, pull: [f64; 3]) -> Option<ModelArrow> {
+    display.bounds.as_ref().map(|b| {
+        let lo = b.min.map(f64::from);
+        let hi = b.max.map(f64::from);
+        let centre = [0, 1, 2].map(|i| (lo[i] + hi[i]) / 2.0);
+        let size = (0..3).map(|i| hi[i] - lo[i]).fold(0.0, f64::max);
+        let reach = (0..3).map(|i| (hi[i] - lo[i]) / 2.0 * pull[i].abs()).sum::<f64>();
+        ModelArrow { origin: [0, 1, 2].map(|i| centre[i] + pull[i] * reach), direction: pull, length: size / 3.0, label: "Pull".into() }
+    })
+}
+
+/// The pull pick as the results header names it.
+fn pull_label(pick: &str, pull: [f64; 3], label: Option<String>) -> String {
+    let axis = match pull.map(|c| (c * 1e6).round() / 1e6) {
+        [x, y, z] if (x.abs() - 1.0).abs() < 1e-6 && y == 0.0 && z == 0.0 => Some(if x > 0.0 { "+X" } else { "−X" }),
+        [x, y, z] if (y.abs() - 1.0).abs() < 1e-6 && x == 0.0 && z == 0.0 => Some(if y > 0.0 { "+Y" } else { "−Y" }),
+        [x, y, z] if (z.abs() - 1.0).abs() < 1e-6 && x == 0.0 && y == 0.0 => Some(if z > 0.0 { "+Z" } else { "−Z" }),
+        _ => None,
+    };
+    let what = match pick {
+        "origin:top" | "origin.xy" => "Top plane".to_string(),
+        "origin:front" | "origin.zx" => "Front plane".to_string(),
+        "origin:right" | "origin.yz" => "Right plane".to_string(),
+        "origin:x" | "origin.x" => "X axis".to_string(),
+        "origin:y" | "origin.y" => "Y axis".to_string(),
+        "origin:z" | "origin.z" => "Z axis".to_string(),
+        _ => label.unwrap_or_else(|| "a face".into()),
+    };
+    match axis {
+        Some(axis) => format!("{what} ({axis})"),
+        None => format!("{what} ({:.2}, {:.2}, {:.2})", pull[0], pull[1], pull[2]),
     }
 }
 
@@ -146,6 +215,8 @@ fn mass_analysis(report: &MassReport) -> Analysis {
             ],
             items: p.item.iter().cloned().collect(),
             severity: p.mass.is_none().then_some("warning"),
+            legend: None,
+            reference: None,
         })
         .collect();
     Analysis {
@@ -165,6 +236,8 @@ fn mass_analysis(report: &MassReport) -> Analysis {
         problems: report.problems.clone(),
         data: serde_json::to_value(report).unwrap_or(Value::Null),
         colors: None,
+        settings: Vec::new(),
+        arrow: None,
     }
 }
 
@@ -215,6 +288,8 @@ pub fn analyze(
                     ],
                     items: o.items.to_vec(),
                     severity: Some("error"),
+                    legend: None,
+                    reference: None,
                 })
                 .collect();
             rows.extend(found.near.iter().map(|n| Row {
@@ -225,6 +300,8 @@ pub fn analyze(
                 ],
                 items: n.items.to_vec(),
                 severity: Some("warning"),
+                legend: None,
+                reference: None,
             }));
             let plural = |n: usize| if n == 1 { "" } else { "s" };
             let mut summary = format!(
@@ -255,6 +332,8 @@ pub fn analyze(
                 problems: found.errors.clone(),
                 data: serde_json::to_value(&found).unwrap_or(Value::Null),
                 colors: None,
+                settings: Vec::new(),
+                arrow: None,
             })
         }
         "evaluate.interference" | "evaluate.clearance" | "assembly.interference" | "assembly.clearance" => {
@@ -287,6 +366,8 @@ pub fn analyze(
                         ],
                         items: vec![format!("feature:{feature}")],
                         severity: None,
+                        legend: None,
+                        reference: None,
                     });
                 }
             }
@@ -303,6 +384,8 @@ pub fn analyze(
                 problems: Vec::new(),
                 data: Value::Null,
                 colors: None,
+                settings: Vec::new(),
+                arrow: None,
             })
         }
         "evaluate.draft" if !assembly => {
@@ -315,11 +398,15 @@ pub fn analyze(
                 .ok_or("pick the pull direction: an origin plane or axis, or a face")?;
             let pull = pull_direction(&part.display, &pick)?;
             let angle = request.values.get("angle").and_then(Value::as_f64).unwrap_or(1.0);
-            let faces = draft_faces(&part.display, pull, angle);
+            let label = crate::face_labels::labeller(&part);
+            let faces = draft_faces(&part.display, pull, angle, &label);
+            let picked = part.display.bodies.iter().find_map(|b| b.faces.iter().find(|f| f.reference.as_deref() == Some(pick.as_str())).map(|f| label(b.index, f)));
+            let pull_text = pull_label(&pick, pull, picked);
+            let arrow = pull_arrow(&part.display, pull);
             let count = |b: DraftBand| faces.iter().filter(|f| f.band == b).count();
             let (needs, straddle) = (count(DraftBand::NeedsDraft), count(DraftBand::Straddle));
             let summary = format!(
-                "{} faces at {angle}° · {} positive · {} negative · {needs} need draft · {straddle} straddle the parting line",
+                "{} faces · {} positive · {} negative · {needs} need draft · {straddle} straddle the parting line",
                 faces.len(),
                 count(DraftBand::Positive),
                 count(DraftBand::Negative),
@@ -328,7 +415,7 @@ pub fn analyze(
                 .iter()
                 .map(|f| Row {
                     cells: vec![
-                        f.face.clone(),
+                        f.label.clone(),
                         format!("{:.1}°", f.min),
                         format!("{:.1}°", f.max),
                         match f.band {
@@ -345,6 +432,8 @@ pub fn analyze(
                         DraftBand::Straddle => Some("info"),
                         _ => None,
                     },
+                    legend: Some(draft_entry(f.band)),
+                    reference: Some(f.face.clone()),
                 })
                 .collect();
             Ok(Analysis {
@@ -355,6 +444,61 @@ pub fn analyze(
                 problems: Vec::new(),
                 data: serde_json::json!({ "pull": pull, "angle": angle, "faces": faces }),
                 colors: Some(draft_colors(&faces)),
+                settings: vec![format!("Pull: {pull_text}"), format!("Draft angle: {angle}°")],
+                arrow,
+            })
+        }
+        "evaluate.undercut" if !assembly => {
+            use crate::draft_analysis::pull_direction;
+            use crate::undercut::{undercut_faces, UndercutBand};
+            let part = crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
+                .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
+            let pick = crate::features::picks_of(&request.values, "direction")
+                .into_iter()
+                .next()
+                .ok_or("pick the pull direction: an origin plane or axis, or a face")?;
+            let pull = pull_direction(&part.display, &pick)?;
+            let label = crate::face_labels::labeller(&part);
+            let faces = undercut_faces(&part.display, pull, &label);
+            let picked = part.display.bodies.iter().find_map(|b| b.faces.iter().find(|f| f.reference.as_deref() == Some(pick.as_str())).map(|f| label(b.index, f)));
+            let bands = [
+                (UndercutBand::Cavity, "Releases with the cavity", [0.22, 0.66, 0.36, 1.0]),
+                (UndercutBand::Core, "Releases with the core", [0.24, 0.48, 0.86, 1.0]),
+                (UndercutBand::Undercut, "Undercut", [0.86, 0.24, 0.22, 1.0]),
+            ];
+            let entry = |b: UndercutBand| bands.iter().position(|(x, ..)| *x == b).unwrap_or(0);
+            let count = |b: UndercutBand| faces.iter().filter(|f| f.band == b).count();
+            let undercut = count(UndercutBand::Undercut);
+            let summary = format!(
+                "{} faces · {} release with the cavity · {} with the core · {undercut} undercut{}",
+                faces.len(),
+                count(UndercutBand::Cavity),
+                count(UndercutBand::Core),
+                if undercut > 0 { " (a side action, a lifter or a part change)" } else { "" }
+            );
+            let rows = faces
+                .iter()
+                .map(|f| Row {
+                    cells: vec![f.label.clone(), format!("{:.0} %", f.share * 100.0), bands[entry(f.band)].1.into()],
+                    items: vec![f.face.clone()],
+                    severity: (f.band == UndercutBand::Undercut).then_some("warning"),
+                    legend: Some(entry(f.band)),
+                    reference: Some(f.face.clone()),
+                })
+                .collect();
+            Ok(Analysis {
+                title: "Undercut".into(),
+                summary,
+                columns: ["Face", "Undercut area", "Release"].map(String::from).to_vec(),
+                rows,
+                problems: Vec::new(),
+                data: serde_json::json!({ "pull": pull, "faces": faces }),
+                colors: Some(FaceColors {
+                    legend: bands.iter().map(|(_, l, c)| LegendEntry { label: (*l).into(), color: *c }).collect(),
+                    faces: faces.iter().map(|f| FaceColor { item: f.face.clone(), entry: entry(f.band) }).collect(),
+                }),
+                settings: vec![format!("Pull: {}", pull_label(&pick, pull, picked))],
+                arrow: pull_arrow(&part.display, pull),
             })
         }
         "simulate.check" => {
@@ -377,6 +521,8 @@ pub fn analyze(
                     cells: vec![if c.check == "fit" { "Fit" } else { "Mass" }.into(), c.message.clone()],
                     items: c.items.clone(),
                     severity: Some(c.severity),
+                    legend: None,
+                    reference: None,
                 })
                 .collect();
             Ok(Analysis {
@@ -387,6 +533,8 @@ pub fn analyze(
                 problems: Vec::new(),
                 data: serde_json::to_value(&found).unwrap_or(Value::Null),
                 colors: None,
+                settings: Vec::new(),
+                arrow: None,
             })
         }
         other => Err(format!(
@@ -499,11 +647,24 @@ pub(crate) mod tests {
         ))
         .unwrap();
         assert_eq!(out["ok"], true, "{out}");
-        assert_eq!(out["summary"], "6 faces at 2° · 1 positive · 1 negative · 4 need draft · 0 straddle the parting line", "{out}");
-        let top = out["rows"].as_array().unwrap().iter().find(|r| r["cells"][0] == "feature.body.face.end").expect("the top face by name");
+        assert_eq!(out["summary"], "6 faces · 1 positive · 1 negative · 4 need draft · 0 straddle the parting line", "{out}");
+        assert_eq!(out["settings"], json!(["Pull: Top plane (+Z)", "Draft angle: 2°"]), "{out}");
+        // The pull arrow stands on the block's top, along +Z.
+        assert_eq!(out["arrow"]["direction"], json!([0.0, 0.0, 1.0]), "{out}");
+        assert!((out["arrow"]["origin"][2].as_f64().unwrap() - 0.01).abs() < 1e-6, "{out}");
+        // Faces read as labels; the canonical reference rides along for the tooltip and copy.
+        let top = out["rows"].as_array().unwrap().iter().find(|r| r["reference"] == "feature.body.face.end").expect("the top face by name");
+        assert_eq!(top["cells"][0], "Body end face");
         assert_eq!(top["cells"][1], "90.0°");
-        let wall = out["rows"].as_array().unwrap().iter().find(|r| r["cells"][3] == "Needs draft").unwrap();
+        let wall = out["rows"].as_array().unwrap().iter().find(|r| r["reference"] == "feature.body.face.side(s1.l2)").unwrap();
+        assert_eq!(wall["cells"][0], "Body side 2");
+        assert_eq!(wall["cells"][3], "Needs draft");
         assert_eq!(wall["severity"], "warning");
+        // Each row's marker takes its band's legend entry, as the model does.
+        for row in out["rows"].as_array().unwrap() {
+            let entry = row["legend"].as_u64().unwrap() as usize;
+            assert_eq!(out["colors"]["legend"][entry]["label"], row["cells"][3], "{row}");
+        }
         // The model takes the band colors: every face, the top green, with a four-entry legend.
         let colors = &out["colors"];
         assert_eq!(colors["legend"].as_array().map(Vec::len), Some(4), "{colors}");
