@@ -336,6 +336,16 @@ fn a_plan_answers_one_layer_drawn_as_its_gerber() {
     let paste = with("F.Paste");
     assert!(paste["fabrication"]["preview"]["svg"].as_str().unwrap().contains(r#"data-layer="Paste,Top""#));
     assert!(names(&paste).is_empty(), "a preview writes no files");
+    // The fabrication drawing previews with the revision its title block names.
+    let mut o = off.clone();
+    o["previewLayer"] = json!("Fabrication drawing");
+    o["revision"] = json!("C");
+    let drawing = export(json!({ "fabrication": o }));
+    let svg = drawing["fabrication"]["preview"]["svg"].as_str().unwrap();
+    assert!(svg.contains(r#"data-layer="flight_controller fabrication drawing, revision C""#), "{}", &svg[..svg.len().min(300)]);
+    assert!(svg.matches("<polyline").count() > 200, "the tables, drill map and text draw as strokes");
+    assert_eq!(drawing["fabrication"]["preview"]["layer"], "Fabrication drawing");
+    assert!(names(&drawing).is_empty(), "a preview writes no files");
     let bad = call("design.export", json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication", "fabrication": { "previewLayer": "F.Nowhere" } }), &files());
     assert!(format!("{:?}", bad.unwrap_err()).contains("the board has no layer F.Nowhere"));
 }

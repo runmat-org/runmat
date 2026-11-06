@@ -92,10 +92,15 @@ pub struct FabricationSummary {
     /// The board's layout with the settings saved into it (`remember`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<LayoutUpdate>,
-    /// The layer `previewLayer` named, drawn as SVG.
+    /// The layer `previewLayer` named, drawn as SVG (or the fabrication drawing, for
+    /// [`FABRICATION_DRAWING`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<LayerPreview>,
 }
+
+/// The `previewLayer` that draws the fabrication drawing (its layer and stackup table, drill
+/// map, notes and title block with the revision) in place of a layer.
+pub const FABRICATION_DRAWING: &str = "Fabrication drawing";
 
 /// One layer drawn as its Gerber makes it: the image in `currentColor`, mm with y up.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -231,6 +236,11 @@ pub fn fabrication(
         })
         .transpose()?;
     let preview = match &opts.preview_layer {
+        // The fabrication drawing, with the revision its title block names.
+        Some(name) if name == FABRICATION_DRAWING => {
+            let drawing = fabrication_drawing(board, request.revision.as_deref());
+            Some(LayerPreview { layer: name.clone(), svg: runmat_circuit::fab::preview::drawing_svg(&drawing) })
+        }
         Some(name) => {
             let row = rows.iter().find(|r| &r.name == name).ok_or_else(|| ToolError::invalid(format!("the board has no layer {name}")))?;
             let layer = row.gerber.ok_or_else(|| ToolError::invalid(format!("{name} makes no Gerber")))?;

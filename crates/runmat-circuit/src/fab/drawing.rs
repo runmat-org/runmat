@@ -12,7 +12,6 @@
 //!   fabrication notes from the board's limits.
 
 use super::drill::{drill_table, holes, DrillRow};
-use super::Sink as _;
 use crate::geom::{mm, to_mm, Coord, Point, Rect};
 use crate::layout::{copper_name, Board, StackKind};
 use std::fmt::Write as _;
@@ -93,29 +92,31 @@ impl Drawing {
     /// [`Self::gerber`] in `format`.
     pub fn gerber_in(&self, board: &Board, function: &str, format: super::GerberFormat, revision: Option<&str>) -> String {
         let mut w = super::Writer::new(format);
+        self.emit(&mut w);
+        w.finish(&super::header(board, function, "Positive", revision))
+    }
+
+    /// Draws every mark into `sink`: lines as strokes, text in the stroke font.
+    pub(crate) fn emit(&self, sink: &mut impl super::Sink) {
         for m in &self.marks {
             match m {
                 Mark::Line { points, width } => {
-                    let ap = w.aperture(super::Aperture::Circle(*width), "Other,Drawing");
-                    w.draw(ap, points);
+                    let ap = sink.aperture(super::Aperture::Circle(*width), "Other,Drawing");
+                    sink.draw(ap, points);
                 }
                 Mark::Text { at, size, text } => {
-                    let ap = w.aperture(
-                        super::Aperture::Circle(crate::font::default_thickness(*size)),
-                        "Other,Drawing",
-                    );
+                    let ap = sink.aperture(super::Aperture::Circle(crate::font::default_thickness(*size)), "Other,Drawing");
                     let c = Point::new(at.x + text_width(text, *size) / 2, at.y + size / 2);
                     for pl in crate::font::strokes(text, c, *size, 0.0, false) {
                         if pl.len() == 1 {
-                            w.flash(ap, pl[0]);
+                            sink.flash(ap, pl[0]);
                         } else {
-                            w.draw(ap, &pl);
+                            sink.draw(ap, &pl);
                         }
                     }
                 }
             }
         }
-        w.finish(&super::header(board, function, "Positive", revision))
     }
 }
 

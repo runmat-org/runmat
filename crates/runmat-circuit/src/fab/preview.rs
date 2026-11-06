@@ -100,3 +100,26 @@ pub fn layer_svg(board: &Board, layer: GerberLayer) -> String {
         svg.body,
     )
 }
+
+/// A fabrication or drill drawing as SVG, drawn as its Gerber draws it (strokes, and text in
+/// the stroke font) in `currentColor`, framed by the drawing's extent with a small margin. The
+/// fabrication drawing's title block names the board revision.
+pub fn drawing_svg(drawing: &super::drawing::Drawing) -> String {
+    let mut svg = Svg { apertures: Vec::new(), body: String::new() };
+    drawing.emit(&mut svg);
+    let b = drawing.extent();
+    let (x0, y0, x1, y1) = (to_mm(b.min.x), to_mm(b.min.y), to_mm(b.max.x), to_mm(b.max.y));
+    let margin = ((x1 - x0).max(y1 - y0) * 0.02).max(0.5);
+    format!(
+        concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{} {} {} {}" data-layer="{}">"#,
+            r#"<g transform="scale(1,-1)"><g data-role="layer-image" fill="currentColor">{}</g></g></svg>"#
+        ),
+        n(x0 - margin),
+        n(-(y1 + margin)),
+        n(x1 - x0 + 2.0 * margin),
+        n(y1 - y0 + 2.0 * margin),
+        drawing.title.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;"),
+        svg.body,
+    )
+}
