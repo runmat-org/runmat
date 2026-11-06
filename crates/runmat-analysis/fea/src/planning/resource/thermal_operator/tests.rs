@@ -289,3 +289,61 @@ fn thermal_admission_reserves_the_proving_factor_and_no_energy_budget() {
         assert!(admission.resident_bytes_upper_bound.0 >= envelope.factor_resident_limit());
     }
 }
+
+// witness: FEA-THERMAL-SOLVER-001/conduction_multigrid_plan @ thermal_steady/tet4/resource_plan;
+//   coverage: partial;
+//   boundary: On a 12x12x12-cell box the conduction multigrid reservation fits a budget the
+//   proving factor exceeds, the plan selects it, and a budget below both is refused naming both.
+#[test]
+fn large_steady_conduction_selects_the_multigrid_within_the_budget() {
+    let mesh = runmat_meshing_core::fixtures::layered_box_mesh(
+        [12, 12, 12],
+        [1.0, 1.0, 1.0],
+        &[(2.0, "body")],
+    );
+    let mut model = workload().model;
+    model.sequence =
+        AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_steady("heat")]);
+    let step = model.sequence.steps[0].clone();
+    let schedule = crate::execution::ThermalSolveSchedule::derive(
+        &model,
+        &step,
+        crate::ThermalProcedureControl::Steady,
+    )
+    .unwrap();
+    let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule, &[]).unwrap();
+    let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
+    let factor = facts.numerical_reservation_bytes(&history).unwrap().0;
+    let multigrid = facts
+        .clone()
+        .on_path(ThermalSolvePath::ConductionMultigrid)
+        .numerical_reservation_bytes(&history)
+        .unwrap()
+        .0;
+    assert!(3 * multigrid < factor, "multigrid {multigrid} vs factor {factor}");
+    let select = |budget: u64| {
+        let mut step = step.clone();
+        step.accuracy.resources.set_resident_byte_budget(budget);
+        super::super::thermal_preassembly::select_thermal_solve_path(
+            facts.clone(),
+            &history,
+            &model,
+            &step,
+        )
+    };
+    assert_eq!(
+        select(factor).unwrap().path(),
+        ThermalSolvePath::ProvingFactorization
+    );
+    let selected = select(factor - 1).unwrap();
+    assert_eq!(selected.path(), ThermalSolvePath::ConductionMultigrid);
+    assert_eq!(selected.solver_admission().factor_nonzero_upper_bound, Count(0));
+    assert_eq!(
+        select(multigrid - 1).unwrap_err(),
+        ResourcePlanningError::ThermalSolveCeiling {
+            factorization_resident_bytes: factor,
+            multigrid_resident_bytes: Some(multigrid),
+            maximum: multigrid - 1,
+        }
+    );
+}

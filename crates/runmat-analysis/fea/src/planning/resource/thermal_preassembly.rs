@@ -128,8 +128,12 @@ impl ThermalPreassemblyResourceFacts {
             before_projection,
             step.accuracy.resources.resident_byte_budget(),
         )?;
-        let operators = ThermalOperatorResourceFacts::derive(mesh, &model.interfaces)?;
-        operators.require_fits(&history, step.accuracy.resources.resident_byte_budget())?;
+        let operators = select_thermal_solve_path(
+            ThermalOperatorResourceFacts::derive(mesh, &model.interfaces)?,
+            &history,
+            model,
+            step,
+        )?;
         let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
         let observations = match observations {
             crate::pipeline::thermal::ThermalObservationExecution::Inline => {
@@ -253,6 +257,49 @@ impl ThermalPreassemblyResourceFacts {
     pub(crate) fn require_fits(&self, maximum: u64) -> Result<(), ResourcePlanningError> {
         require_ceiling(self.reservation_bytes()?.0, maximum)
     }
+}
+
+/// The proving factorization when its reservation fits the run's resident budget; otherwise the
+/// conduction multigrid path for steady linear conduction (no radiation), whose reservation must
+/// fit the same budget. The budget is the step's resident ceiling, which a study run sets to
+/// min(authored, the memory the run is admitted to use), so the plan and every re-derivation
+/// select the same path.
+pub(crate) fn select_thermal_solve_path(
+    operators: ThermalOperatorResourceFacts,
+    history: &ThermalHistoryResourceFacts,
+    model: &AnalysisModel,
+    step: &ProcedureStep,
+) -> Result<ThermalOperatorResourceFacts, ResourcePlanningError> {
+    let maximum = step.accuracy.resources.resident_byte_budget();
+    let factorization = operators.numerical_reservation_bytes(history)?.0;
+    if factorization <= maximum {
+        return Ok(operators);
+    }
+    // A steady thermal step is static; transient conduction keeps the factor its time steps reuse.
+    let multigrid_admitted = step.procedure == runmat_analysis_core::AnalysisProcedure::Static
+        && !model.boundaries.iter().any(|boundary| {
+            matches!(
+                boundary.operator,
+                runmat_analysis_core::BoundaryOperator::ThermalRadiation { .. }
+            )
+        });
+    if !multigrid_admitted {
+        return Err(ResourcePlanningError::ThermalSolveCeiling {
+            factorization_resident_bytes: factorization,
+            multigrid_resident_bytes: None,
+            maximum,
+        });
+    }
+    let multigrid = operators.on_path(super::ThermalSolvePath::ConductionMultigrid);
+    let multigrid_bytes = multigrid.numerical_reservation_bytes(history)?.0;
+    if multigrid_bytes > maximum {
+        return Err(ResourcePlanningError::ThermalSolveCeiling {
+            factorization_resident_bytes: factorization,
+            multigrid_resident_bytes: Some(multigrid_bytes),
+            maximum,
+        });
+    }
+    Ok(multigrid)
 }
 
 fn component_bytes(

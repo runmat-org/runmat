@@ -32,6 +32,21 @@ pub enum ResourcePlanningError {
         multigrid_scratch_bytes: Option<u64>,
         maximum: u64,
     },
+    /// Neither thermal solve path fits the run's resident budget, min(authored, the memory the
+    /// run is admitted to use). The proving factor and the conduction multigrid requirements are
+    /// both named; the multigrid one is absent when the model is outside that path.
+    #[error(
+        "no thermal solve path fits the resident budget of {maximum} bytes: the proving factorization requires {factorization_resident_bytes} bytes; the conduction multigrid {}",
+        match .multigrid_resident_bytes {
+            Some(bytes) => format!("requires {bytes} bytes"),
+            None => "does not apply (it solves steady linear conduction without radiation)".to_string(),
+        }
+    )]
+    ThermalSolveCeiling {
+        factorization_resident_bytes: u64,
+        multigrid_resident_bytes: Option<u64>,
+        maximum: u64,
+    },
     #[error("worker inventory is insufficient: {0}")]
     Inventory(&'static str),
     #[error("worker lacks required capability `{0:?}`")]

@@ -163,7 +163,7 @@ pub use thermal_metadata::ThermalMetadataResourceFacts;
 mod thermal_observations;
 pub use thermal_observations::ThermalObservationResourceFacts;
 mod thermal_operator;
-pub use thermal_operator::ThermalOperatorResourceFacts;
+pub use thermal_operator::{ThermalOperatorResourceFacts, ThermalSolvePath};
 mod thermal_preassembly;
 mod thermal_realization;
 pub use thermal_realization::ThermalRealizationResourceFacts;

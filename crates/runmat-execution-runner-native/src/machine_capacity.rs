@@ -34,8 +34,10 @@ pub fn meshing_execution_ceilings(
     meshing_execution_ceilings_for(memory_bytes().unwrap_or(0), limits)
 }
 
-/// Ceilings for a pool that admits `capacity_bytes` of memory: use the pool's own admitted
-/// capacity (one snapshot) so every task the run submits fits the pool.
+/// Ceilings for a run admitted `capacity_bytes` of memory: the pool's own admitted capacity,
+/// lowered to the run's authored per-worker memory when one is set, so every task the run submits
+/// fits what the run is admitted to use. The run carries no wall-time budget for meshing, so the
+/// wall-time ceiling is unbounded.
 pub fn meshing_execution_ceilings_for(
     capacity_bytes: u64,
     limits: &runmat_meshing_core::MeshingSizeLimits,

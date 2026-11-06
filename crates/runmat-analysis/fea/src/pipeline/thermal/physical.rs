@@ -26,6 +26,7 @@ type ThermalSolveResult = LinearSolveResult<ThermalDeparture>;
 type ThermalSystem =
     crate::algebra::PhysicalScalarSystem<runmat_types::physical::kind::TemperatureDifference>;
 mod backend_evidence;
+mod conduction;
 mod residual;
 use residual::linear_residual;
 mod diagnostics;
@@ -36,6 +37,8 @@ mod transient;
 mod relation_tests;
 #[cfg(test)]
 mod interface_tests;
+#[cfg(test)]
+mod conduction_tests;
 use diagnostics::{diagnostics, ThermalDiagnosticsInput};
 use snapshots::snapshots;
 use transient::{solve_transient, TransientSolveInput};
@@ -363,6 +366,9 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         &assembly.relations,
         &reference_temperature_k,
     );
+    // The conduction multigrid path proves the operator from the assembly's structure; the
+    // proof is the only one tried, and it serves the refinement re-solve of the same operator.
+    let mut conduction = conduction::preparation(&facts.operators, assembly, model, &operator)?;
     let mut solve = solve_checked(
         &operator,
         requested_solver_backend,
@@ -372,7 +378,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
             .map(runmat_types::physical::Quantity::new),
         &facts.operators,
         residual_target,
-        None,
+        conduction.as_mut(),
         &relations,
     )?;
     drop(initial_increment);
@@ -406,7 +412,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
             &solve.solution,
             &facts.operators,
             target,
-            None,
+            conduction.as_mut(),
             &relations,
         )?;
         backend_evidence::retain(
@@ -616,21 +622,39 @@ fn solve_unchecked(
             .admit_solution(related)
             .map_err(|error| FeaRunError::Solve(error.into()));
     }
-    // Reused preparation keeps the proving Cholesky factor across solves with an unchanged
-    // operator (fixed-step transients, refinement re-solves).
+    // Reused preparation keeps the proving Cholesky factor (or the conduction proof) across
+    // solves with an unchanged operator (fixed-step transients, refinement re-solves).
+    let multigrid =
+        facts.path() == crate::planning::resource::ThermalSolvePath::ConductionMultigrid;
+    if multigrid && preparation.is_none() {
+        return Err(FeaRunError::Solve(
+            "the thermal conduction multigrid path requires its structural conduction proof".into(),
+        ));
+    }
+    let tolerance = settings.relative_tolerance;
     settings.preparation = preparation;
-    let solve = operator
-        .with_canonical_system(|numerical| {
-            solve_operator_system_scoped(
-                numerical,
-                SpdPreconditionerKind::Auto,
-                requested_solver_backend,
-                algebra,
-                initial_guess.map(|quantity| quantity.canonical_value()),
-                settings,
-            )
-        })
-        .map_err(|error| FeaRunError::Solve(error.to_string()))?;
+    let solve = operator.with_canonical_system(|numerical| {
+        let solve = solve_operator_system_scoped(
+            numerical,
+            if multigrid {
+                SpdPreconditionerKind::Amg
+            } else {
+                SpdPreconditionerKind::Auto
+            },
+            requested_solver_backend,
+            algebra,
+            initial_guess.map(|quantity| quantity.canonical_value()),
+            settings,
+        )
+        .map_err(|error| match error {
+            crate::algebra::ScopedSpmvError::Usage(cause) => FeaRunError::Usage(cause),
+            other => FeaRunError::Solve(other.to_string()),
+        })?;
+        if multigrid && solve.converged {
+            conduction::require_backward_error(numerical, &solve.solution, tolerance)?;
+        }
+        Ok::<_, FeaRunError>(solve)
+    })?;
     operator
         .admit_solution(solve)
         .map_err(|error| FeaRunError::Solve(error.into()))

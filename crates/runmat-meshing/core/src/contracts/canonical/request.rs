@@ -268,10 +268,28 @@ impl MeshingExecutionCeilings {
         maximum_iterations: 1_000_000_000,
     };
 
-    /// Ceilings sized to a host that admits `memory_bytes` for work and to the requested mesh:
-    /// memory, scratch and artifact bytes from the host; search work and iterations
-    /// proportional to the requested element count (honest accounting charges per element).
+    /// A wall-time ceiling for a run admitted no wall-time budget: the largest wire integer.
+    /// The run's own deadline, the caller's timeout and cancellation bound such a run.
+    pub const UNBOUNDED_WALL_TIME_MS: u64 = runmat_types::wire_integer::MAX_WIRE_INTEGER;
+
+    /// Ceilings for a run admitted `memory_bytes` of resident memory and the requested mesh:
+    /// memory, scratch and artifact bytes from that budget; search work and iterations
+    /// proportional to the requested element count (honest accounting charges per element). The
+    /// run is admitted no wall-time budget, so the wall-time ceiling is unbounded; see
+    /// [`Self::for_run_budget`].
     pub fn for_host(memory_bytes: u64, limits: &MeshingSizeLimits) -> Self {
+        Self::for_run_budget(memory_bytes, None, limits)
+    }
+
+    /// Ceilings from the run's admitted budget: `memory_bytes` of resident memory and
+    /// `wall_time_ms` of wall time (`None` when the run is admitted no wall-time budget). A
+    /// fixed hour or a host-load snapshot is not a budget: a finished mesh on a loaded host must
+    /// not be rejected for taking longer than an unrelated constant.
+    pub fn for_run_budget(
+        memory_bytes: u64,
+        wall_time_ms: Option<u64>,
+        limits: &MeshingSizeLimits,
+    ) -> Self {
         const WORK_PER_ELEMENT: u64 = 100_000;
         let memory = memory_bytes.max(Self::PORTABLE_DEFAULT.maximum_memory_bytes);
         let work = limits
@@ -281,7 +299,9 @@ impl MeshingExecutionCeilings {
         Self {
             maximum_memory_bytes: memory,
             maximum_scratch_bytes: memory,
-            maximum_wall_time_ms: Self::PORTABLE_DEFAULT.maximum_wall_time_ms,
+            maximum_wall_time_ms: wall_time_ms
+                .unwrap_or(Self::UNBOUNDED_WALL_TIME_MS)
+                .clamp(1, Self::UNBOUNDED_WALL_TIME_MS),
             maximum_artifact_bytes: memory,
             maximum_search_work: work,
             maximum_iterations: work,
