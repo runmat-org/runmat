@@ -419,8 +419,10 @@ pub(super) struct InstancePlan {
     pub owner: NodeId,
     pub instance: NodeId,
     pub seed: NodeId,
-    /// `local(instance) = left ∘ local(seed) ∘ right`, with `left` conjugated by the host's
-    /// chain (`H ∘ left ∘ H⁻¹`) when `host` is set.
+    /// `local(instance) = outer ∘ left ∘ local(seed) ∘ right`, with `left` conjugated by the
+    /// host's chain (`H ∘ left ∘ H⁻¹`) when `host` is set. `outer` is a mirror's reflection
+    /// when the mirror repeats a pattern instance, and the identity otherwise.
+    pub outer: Transform,
     pub left: Transform,
     pub right: Transform,
     pub host: Option<NodeId>,

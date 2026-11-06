@@ -20,7 +20,7 @@ use crate::assembly::resolve::option_code;
 use crate::assembly::source::DesignSource;
 use crate::diagnostics::{Cause, DiagCode, DiagnosticReport, Repair, Severity, Site, Subject};
 use crate::ids::{FilePath, RevisionId};
-use crate::refs::XrefContext;
+use crate::refs::{InstanceKey, XrefContext};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -181,6 +181,18 @@ impl V<'_> {
                     acc = self.and(&acc, &r, &site);
                 }
                 None => acc = Region::default(),
+            }
+            // A mirror's image of a pattern instance also needs that pattern active.
+            if inst.key != InstanceKey::Mirror {
+                if let Some(m) = doc.mirrors.iter().find(|m| m.name == inst.by) {
+                    let pattern = doc.patterns.iter().find(|p| {
+                        m.seeds.contains(&p.name) && p.seeds.contains(&seg.name)
+                    });
+                    if let Some(p) = pattern {
+                        let r = self.region(p.when.as_ref(), &doc.path, &site);
+                        acc = self.and(&acc, &r, &site);
+                    }
+                }
             }
         }
         acc

@@ -336,7 +336,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             let seed = &self.nodes[p.seed as usize];
             let (sl, pose, dof) = (seed.local, seed.pose, seed.dof);
             let n = &mut self.nodes[p.instance as usize];
-            n.local = left.compose(&sl).compose(&p.right);
+            n.local = p.outer.compose(&left).compose(&sl).compose(&p.right);
             n.pose = pose;
             n.dof = dof;
             n.fixed = true;

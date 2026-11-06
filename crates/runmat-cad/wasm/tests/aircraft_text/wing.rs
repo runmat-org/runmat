@@ -256,29 +256,27 @@ pub fn wing() -> String {
             ],
         );
     }
-    // Rivet rows on the spar caps: straight lines root to tip, one rivet each rivet pitch, on
-    // both wings (a mirror repeats occurrences, not patterns, so each side has its rows).
-    for (side, suffix) in [(1.0, ""), (-1.0, "_port")] {
+    // Rivet rows on the spar caps: straight lines root to tip, one rivet each rivet pitch. The
+    // port rows are the mirror of these patterns (below).
     for (k, (at, up)) in [(FRONT + 0.012, true), (FRONT + 0.012, false), (REAR - 0.012, true), (REAR - 0.012, false)].into_iter().enumerate() {
         let point = |y: f64| {
             let p = section(y).at(at, up);
             let c = chord(y);
-            [x_le(y) + p.0 * c, side * y, z_le(y) + p.1 * c]
+            [x_le(y) + p.0 * c, y, z_le(y) + p.1 * c]
         };
         let (a, b) = (point(ROOT_STATION + 60.0), point(SEMISPAN - 150.0));
         let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         let count = (len / super::RIVET_PITCH) as usize + 1;
         let place = if up { offset(a[0], a[1], a[2]) } else { super::text::offset_rot(a[0], a[1], a[2], [1.0, 0.0, 0.0], 180.0) };
-        s += &use_("part", "rivet", &format!("rivet{k}{suffix}"), &[place]);
+        s += &use_("part", "rivet", &format!("rivet{k}"), &[place]);
         s += &format!(
-            "    pattern rivets{k}{suffix} = linear(seeds = [rivet{k}{suffix}], direction = [{}, {}, {}], spacing = {}, count = {count})\n",
+            "    pattern rivets{k} = linear(seeds = [rivet{k}], direction = [{}, {}, {}], spacing = {}, count = {count})\n",
             num(d[0] / len),
             num(d[1] / len),
             num(d[2] / len),
             mm(super::RIVET_PITCH)
         );
-    }
     }
     let ye = 5_800.0;
     s += &use_("assembly", "nacelle", "engine", &[offset(x_le(ye) - 2_700.0, ye, z_le(ye) - 1_550.0)]);
@@ -294,6 +292,9 @@ pub fn wing() -> String {
         "    mirror ribs_port = {{\n        seeds = [{}],\n        plane = {{ plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] }},\n        hand = symmetric(point = [0 mm, 10 mm, 0 mm], normal = [0, 1, 0])\n    }}\n",
         rib_seeds.join(", ")
     );
+    // A mirror of a pattern reflects its seed and every instance; the rivet is symmetric about
+    // its own y = 0.
+    s += "    mirror rivets_port = {\n        seeds = [rivets0, rivets1, rivets2, rivets3],\n        plane = { plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] },\n        hand = symmetric(point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0])\n    }\n";
     s += "    mirror engine_port = {\n        seeds = [engine],\n        plane = { plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] },\n        hand = symmetric(point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0])\n    }\n";
     s += "}\n";
     s

@@ -2,6 +2,16 @@
 
 use super::*;
 
+/// What a mirror reflects for one entry of its seed list: an authored occurrence, or each seed
+/// and instance of a pattern (`(seed, key, the pattern's transform)`, the seed itself keyed
+/// `mirror`).
+struct MirrorImage {
+    seed: String,
+    key: InstanceKey,
+    left: Transform,
+    host: Option<NodeId>,
+}
+
 impl<'a, 'b> Resolver<'a, 'b> {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn compose_instances(
@@ -16,6 +26,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
     ) -> Vec<InstancePlan> {
         let file = doc.path.clone();
         let mut plans = Vec::new();
+        // Each active pattern's instances, for the mirrors that repeat it.
+        let mut laid: BTreeMap<String, (Vec<(InstanceKey, Transform)>, Option<NodeId>)> =
+            BTreeMap::new();
         for p in &doc.patterns {
             let site = Site::with_param(
                 Subject::Pattern {
@@ -39,6 +52,10 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     continue;
                 }
             };
+            let kept: Vec<(InstanceKey, Transform)> = transforms
+                .into_iter()
+                .filter(|(k, _)| !p.skip.contains(k))
+                .collect();
             for seed_name in &p.seeds {
                 let Some(seed) = self.child(node, &PathSegment::named(seed_name)) else {
                     self.diag(
@@ -56,10 +73,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 let Some(occ) = self.active_occurrence(doc, seed_name) else {
                     continue;
                 };
-                for (key, t) in &transforms {
-                    if p.skip.contains(key) {
-                        continue;
-                    }
+                for (key, t) in &kept {
                     let seg = PathSegment::instance(seed_name, &p.name, key.clone());
                     present.insert(seg.clone());
                     if let Some(inst) = self.compose_occurrence(
@@ -79,6 +93,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                             owner: node,
                             instance: inst,
                             seed,
+                            outer: Transform::IDENTITY,
                             left: *t,
                             right: Transform::IDENTITY,
                             host,
@@ -86,6 +101,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     }
                 }
             }
+            laid.insert(p.name.clone(), (kept, host));
         }
         for m in &doc.mirrors {
             let site = Site::with_param(
@@ -110,37 +126,12 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     continue;
                 }
             };
-            for seed_name in &m.seeds {
-                let Some(seed) = self.child(node, &PathSegment::named(seed_name)) else {
-                    self.diag(
-                        DiagCode::AsmUnknownOccurrence,
-                        Severity::Error,
-                        site.clone(),
-                        format!(
-                            "mirror `{}` reflects `{}`, which is not active here",
-                            m.name, seed_name
-                        ),
-                        Vec::new(),
-                    );
-                    continue;
-                };
-                let Some(mut occ) = self.active_occurrence(doc, seed_name) else {
-                    continue;
-                };
+            let local = {
                 let (pt, n) = match &m.hand {
-                    MirrorHand::Symmetric { point, normal } => (point, normal),
-                    MirrorHand::Opposite {
-                        source,
-                        configuration,
-                        point,
-                        normal,
-                    } => {
-                        occ.source = source.clone();
-                        occ.configuration = configuration.clone();
-                        (point, normal)
-                    }
+                    MirrorHand::Symmetric { point, normal }
+                    | MirrorHand::Opposite { point, normal, .. } => (point, normal),
                 };
-                let local = match self.vec3(pt, env) {
+                match self.vec3(pt, env) {
                     Ok(p) => Transform::reflection(p, normalize(*n)),
                     Err(msg) => {
                         self.diag(
@@ -152,8 +143,35 @@ impl<'a, 'b> Resolver<'a, 'b> {
                         );
                         continue;
                     }
+                }
+            };
+            for image in self.mirror_images(doc, m, &laid, &site) {
+                let Some(seed) = self.child(node, &PathSegment::named(&image.seed)) else {
+                    self.diag(
+                        DiagCode::AsmUnknownOccurrence,
+                        Severity::Error,
+                        site.clone(),
+                        format!(
+                            "mirror `{}` reflects `{}`, which is not active here",
+                            m.name, image.seed
+                        ),
+                        Vec::new(),
+                    );
+                    continue;
                 };
-                let seg = PathSegment::instance(seed_name, &m.name, InstanceKey::Mirror);
+                let Some(mut occ) = self.active_occurrence(doc, &image.seed) else {
+                    continue;
+                };
+                if let MirrorHand::Opposite {
+                    source,
+                    configuration,
+                    ..
+                } = &m.hand
+                {
+                    occ.source = source.clone();
+                    occ.configuration = configuration.clone();
+                }
+                let seg = PathSegment::instance(&image.seed, &m.name, image.key);
                 present.insert(seg.clone());
                 if let Some(inst) = self.compose_occurrence(
                     node,
@@ -172,14 +190,83 @@ impl<'a, 'b> Resolver<'a, 'b> {
                         owner: node,
                         instance: inst,
                         seed,
-                        left: world,
+                        outer: world,
+                        left: image.left,
                         right: local,
-                        host: None,
+                        host: image.host,
                     });
                 }
             }
         }
         plans
+    }
+
+    /// The occurrences a mirror reflects. A seed that names a pattern of this assembly brings
+    /// the pattern's seeds and every instance it lays out here, so a mirrored pattern needs no
+    /// second pattern. An image named twice (a seed listed directly and through a pattern, or
+    /// two patterns sharing a seed) is an error.
+    fn mirror_images(
+        &mut self,
+        doc: &AssemblyDocument,
+        m: &OccurrenceMirror,
+        laid: &BTreeMap<String, (Vec<(InstanceKey, Transform)>, Option<NodeId>)>,
+        site: &Site,
+    ) -> Vec<MirrorImage> {
+        let mut out: Vec<MirrorImage> = Vec::new();
+        let mut seen: BTreeMap<(String, InstanceKey), String> = BTreeMap::new();
+        let mut push = |this: &mut Self, via: &str, image: MirrorImage| {
+            let key = (image.seed.clone(), image.key.clone());
+            if let Some(first) = seen.get(&key) {
+                this.diag(
+                    DiagCode::AsmBadPattern,
+                    Severity::Error,
+                    site.clone(),
+                    format!(
+                        "mirror `{}` reflects `{}[{}]` twice, through {} and {}",
+                        m.name, image.seed, image.key, first, via
+                    ),
+                    Vec::new(),
+                );
+                return;
+            }
+            seen.insert(key, via.to_string());
+            out.push(image);
+        };
+        for name in &m.seeds {
+            let Some(p) = doc.patterns.iter().find(|p| &p.name == name) else {
+                let image = MirrorImage {
+                    seed: name.clone(),
+                    key: InstanceKey::Mirror,
+                    left: Transform::IDENTITY,
+                    host: None,
+                };
+                push(self, &format!("`{}`", name), image);
+                continue;
+            };
+            let via = format!("pattern `{}`", p.name);
+            for seed in &p.seeds {
+                let image = MirrorImage {
+                    seed: seed.clone(),
+                    key: InstanceKey::Mirror,
+                    left: Transform::IDENTITY,
+                    host: None,
+                };
+                push(self, &via, image);
+                // An inactive or failed pattern has no instances to reflect; its seeds still do.
+                if let Some((kept, host)) = laid.get(&p.name) {
+                    for (key, t) in kept {
+                        let image = MirrorImage {
+                            seed: seed.clone(),
+                            key: key.clone(),
+                            left: *t,
+                            host: *host,
+                        };
+                        push(self, &via, image);
+                    }
+                }
+            }
+        }
+        out
     }
 
     pub(super) fn declare_envelopes(

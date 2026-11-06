@@ -1053,6 +1053,72 @@ fn a11_patterns_and_mirrors_keep_semantic_keys() {
     assert!(r2.find_display("rib@ribs[7]").is_some());
 }
 
+#[test]
+fn a11b_a_mirror_of_a_pattern_reflects_its_seed_and_every_instance() {
+    let mut src = MemorySource::default();
+    add_part(&mut src, "rivet.part", "RV", unit_box(), vec![]);
+    let mut top = AssemblyDocument::new("w.assembly", "w");
+    let mut rivet = Occurrence::new("rivet", DefinitionRef::part("rivet.part", None));
+    rivet.placement = at(100.0, 400.0, 0.0);
+    top.occurrences.push(rivet);
+    top.patterns.push(OccurrencePattern {
+        name: "row".into(),
+        seeds: vec!["rivet".into()],
+        layout: OccurrenceLayout::Linear {
+            direction: [0.6, 0.8, 0.0],
+            spacing: mm(50.0),
+            count: ValueExpr::number(4.0),
+        },
+        skip: vec![InstanceKey::Linear { step: 2 }],
+        when: None,
+    });
+    let mirror = |seeds: Vec<String>| OccurrenceMirror {
+        name: "port".into(),
+        seeds,
+        plane: PlaneSpec::Explicit {
+            point: [mm(0.0), mm(0.0), mm(0.0)],
+            normal: [0.0, 1.0, 0.0],
+        },
+        hand: MirrorHand::Symmetric {
+            point: [mm(0.0), mm(0.0), mm(0.0)],
+            normal: [0.0, 1.0, 0.0],
+        },
+        when: None,
+    };
+    top.mirrors.push(mirror(vec!["row".into()]));
+    src.add_assembly(top.clone());
+    let r = run(&src, "w.assembly", &ResolveRequest::default());
+    assert!(errors(&r).is_empty(), "{:?}", errors(&r));
+    let seed = r.node(r.find_display("rivet@port[mirror]").expect("the seed's image"));
+    assert!(close(seed.world.translation, [0.1, -0.4, 0.0]), "{:?}", seed.world.translation);
+    // Step 3 sits 150 mm along (0.6, 0.8); its image runs along (0.6, -0.8).
+    let s3 = r.node(r.find_display("rivet@port[3]").expect("an instance's image"));
+    assert!(
+        close(s3.world.translation, [0.19, -0.52, 0.0]),
+        "{:?}",
+        s3.world.translation
+    );
+    assert!((s3.world.determinant() - 1.0).abs() < 1e-12, "images are proper");
+    assert!(r.find_display("rivet@port[1]").is_some());
+    assert!(r.find_display("rivet@port[2]").is_none(), "the pattern's skip carries over");
+    // Each image is the reflection of its source instance.
+    let src3 = r.node(r.find_display("rivet@row[3]").unwrap());
+    let t = src3.world.translation;
+    assert!(close(s3.world.translation, [t[0], -t[1], t[2]]));
+
+    // Naming the seed both directly and through its pattern is an error naming both.
+    top.mirrors[0] = mirror(vec!["rivet".into(), "row".into()]);
+    src.add_assembly(top);
+    let r = run(&src, "w.assembly", &ResolveRequest::default());
+    let e = errors(&r);
+    assert!(
+        e.iter()
+            .any(|d| d.contains("reflects `rivet[mirror]` twice") && d.contains("pattern `row`")),
+        "{:?}",
+        e
+    );
+}
+
 // ------------------------------------------------------------------------------ fasteners
 
 fn fastener_project(
