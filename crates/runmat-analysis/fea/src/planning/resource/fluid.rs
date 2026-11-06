@@ -132,6 +132,18 @@ fn derive_projection(
         result.encoded_bytes_upper_bound,
         result.materialization_resident_bytes_estimate,
     )?;
+    tracing::debug!(
+        cells = numerical.cells,
+        faces = numerical.faces,
+        numerical = numerical.resident_bytes_upper_bound,
+        verification = numerical.verification_resident_bytes_upper_bound,
+        preparation = source_preparation_resident_bytes,
+        decoded_inputs,
+        result_encoded = result.encoded_bytes_upper_bound,
+        result_materialization = result.materialization_resident_bytes_estimate,
+        phase_resident,
+        "steady fluid phase residency terms"
+    );
     admission::require_ceiling(
         phase_resident,
         workload.resident_ceiling().map_err(invalid)?,
