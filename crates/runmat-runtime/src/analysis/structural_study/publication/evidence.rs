@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 mod access;
-pub(in crate::analysis) use access::StudyEvidenceAccess;
+pub(in crate::analysis) use access::{immutable_batch_workspace, StudyEvidenceAccess};
 
 use crate::analysis::{current_fea_runtime_config, default_fea_artifact_root, storage};
 
