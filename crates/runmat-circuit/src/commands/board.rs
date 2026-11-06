@@ -159,21 +159,15 @@ pub(super) fn add(c: &mut Catalog) {
         brd("board.test-points", "Test points", "test-point", "Add test points on nets.")
             .inputs(vec![picks("nets", "Nets", &[K::Net]), choice("side", "Side", &[("bottom", "Bottom"), ("top", "Top")]), qty("diameter", "Pad diameter", "length", Some(1.0))])
             .edit(add_to("test_point", Section::Components)),
-        brd("board.fab-outputs", "Fabrication outputs", "export", "Write the fabrication and assembly outputs into a folder.")
-            .kw(&["gerber", "odb++", "ipc-2581", "drill", "pick and place", "manufacturing"])
-            .inputs(vec![
-                flag("gerber", "Gerber X2 and job file", true),
-                flag("drill", "Excellon drill", true),
-                flag("drill_map", "Drill map", true),
-                flag("drawing", "Fabrication drawing", true),
-                flag("pick_place", "Pick and place", true),
-                flag("bom", "BOM per variant", true),
-                flag("ipc2581", "IPC-2581", true),
-                flag("odb", "ODB++", true),
-                flag("ipc356", "IPC-D-356A netlist", true),
-                flag("include_through_hole", "Through-hole parts in pick and place", false),
-                text("folder", "Folder", Some("fab")),
-            ])
+        brd("board.fab-outputs", "Fabrication outputs", "export", "Make the fabrication and assembly files for the board.")
+            .kw(&["gerber", "odb++", "ipc-2581", "drill", "pick and place", "bom", "assembly drawing", "manufacturing", "fab house"])
+            // The Desktop's panel holds the rest (outputs, layers, variants, folder, zip) from the
+            // board's saved settings; the preset is the command's one input.
+            .inputs(vec![choice(
+                "preset",
+                "Package",
+                &[("fab_house", "Fab house"), ("assembly", "Assembly"), ("full", "Full package"), ("custom", "Custom")],
+            )])
             .edit(export("fabrication")),
         brd("board.to-enclosure", "To enclosure", "to-enclosure", "Place the board in an assembly and check its clearance.")
             .inputs(vec![text("assembly", "Assembly", Some("enclosure.assembly")), qty("clearance", "Minimum clearance", "length", Some(1.0))])
