@@ -10,6 +10,11 @@
 //!   ([`crate::evaluate::assembly_clearance`]).
 //!
 //! - `weldment.cut-list`: a weldment part's members grouped by profile, length and end angles.
+//! - `simulate.check`: the fit and mass checks a study runs before it meshes
+//!   ([`crate::study_checks`]; `values.gap`, mm, for open contacts).
+//!
+//! The assembly Evaluate tab's `assembly.mass-properties`, `assembly.interference` and
+//! `assembly.clearance` run the same checks.
 //!
 //! `values.configuration` names the active configuration. Rows name occurrences by path in
 //! `items`, so selecting a row selects them.
@@ -135,7 +140,7 @@ pub fn analyze(
         .filter(|c| !c.is_empty() && *c != "default");
     let assembly = path.ends_with(".assembly");
     match request.command.as_str() {
-        "evaluate.mass-properties" => {
+        "evaluate.mass-properties" | "assembly.mass-properties" => {
             let report = if assembly {
                 assembly_mass(path, text, files, configuration)?
             } else {
@@ -143,8 +148,8 @@ pub fn analyze(
             };
             Ok(mass_analysis(&report, assembly))
         }
-        "evaluate.interference" | "evaluate.clearance" if assembly => {
-            let clearance = if request.command == "evaluate.clearance" {
+        "evaluate.interference" | "evaluate.clearance" | "assembly.interference" | "assembly.clearance" if assembly => {
+            let clearance = if request.command.ends_with(".clearance") {
                 // The catalog field is in millimetres.
                 request
                     .values
@@ -209,7 +214,7 @@ pub fn analyze(
                 data: serde_json::to_value(&found).unwrap_or(Value::Null),
             })
         }
-        "evaluate.interference" | "evaluate.clearance" => {
+        "evaluate.interference" | "evaluate.clearance" | "assembly.interference" | "assembly.clearance" => {
             Err("interference and clearance are checked between an assembly's parts".into())
         }
         "weldment.cut-list" if !assembly => {
@@ -256,6 +261,37 @@ pub fn analyze(
                 data: Value::Null,
             })
         }
+        "simulate.check" => {
+            // values.gap: the open-contact gap in mm.
+            let gap = request.values.get("gap").and_then(Value::as_f64).map(|mm| mm / 1000.0);
+            let found = crate::study_checks::study_checks(path, text, files, configuration, gap)?;
+            let errors = found.checks.iter().filter(|c| c.severity == "error").count();
+            let warnings = found.checks.len() - errors;
+            let plural = |n: usize| if n == 1 { "" } else { "s" };
+            let mut summary = format!("{} · {} part{}", g(found.mass.total.mass), found.mass.parts.len(), plural(found.mass.parts.len()));
+            summary += &if found.ready() {
+                format!(" · ready to mesh · {warnings} warning{}", plural(warnings))
+            } else {
+                format!(" · {errors} error{} to fix before the study meshes · {warnings} warning{}", plural(errors), plural(warnings))
+            };
+            let rows = found
+                .checks
+                .iter()
+                .map(|c| Row {
+                    cells: vec![if c.check == "fit" { "Fit" } else { "Mass" }.into(), c.message.clone()],
+                    items: c.items.clone(),
+                    severity: Some(c.severity),
+                })
+                .collect();
+            Ok(Analysis {
+                title: "Study checks".into(),
+                summary,
+                columns: ["Check", "Finding"].map(String::from).to_vec(),
+                rows,
+                problems: Vec::new(),
+                data: serde_json::to_value(&found).unwrap_or(Value::Null),
+            })
+        }
         other => Err(format!(
             "`{other}` runs from the agent or the CLI in this build"
         )),
@@ -282,7 +318,7 @@ pub fn analyze_json(path: &str, text: &str, files: &Files, request: &str) -> Str
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -312,7 +348,7 @@ mod tests {
     }
 
     /// A 200 × 100 mm frame of 20 mm square tube, mitred, written by the printer.
-    fn frame() -> String {
+    pub(crate) fn frame() -> String {
         use runmat_cad::ids::{FeatureId, SketchEntityId};
         use runmat_cad::model::weldment::*;
         use runmat_cad::model::*;

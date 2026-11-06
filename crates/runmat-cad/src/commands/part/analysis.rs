@@ -397,6 +397,11 @@ pub(super) fn simulate() -> Vec<CommandDescriptor> {
             .when(bodies_exist())
             .preview()
             .edit(add_feature_variant("direct", "direct", "delete_faces")),
+        cmd("simulate.check", "Study checks", "check", &[EditorKind::Part, EditorKind::Assembly])
+            .desc("Check fit and mass before a study meshes the design: overlapping parts, open contacts and parts without a material.")
+            .kw(&["preflight", "fit check", "mass check", "before simulation"])
+            .inputs(vec![length("gap", "Contact gap", 0.1)])
+            .edit(analyze("study_check")),
         cmd("simulate.studies", "Studies", "study", P)
             .desc("Open a study that uses this part.")
             .inputs(vec![text("study", "Study", None)])

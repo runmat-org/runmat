@@ -565,6 +565,7 @@ pub(super) fn rows(catalog: &Catalog) -> EditorRows {
                         "studies",
                         "Studies",
                         vec![
+                            c("simulate.check"),
                             c("study.new"),
                             menu(
                                 "simulate.studies.menu",

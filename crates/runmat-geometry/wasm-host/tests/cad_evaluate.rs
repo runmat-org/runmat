@@ -110,3 +110,28 @@ fn interference_and_clearance_between_placed_blocks() {
         "{clearance}"
     );
 }
+
+#[test]
+fn study_checks_stop_on_overlaps_and_missing_densities_and_warn_on_open_contacts() {
+    // `near` stands 0.05 mm off `a`, inside the 0.1 mm contact gap; `into` overlaps `a`.
+    let assembly = |into: bool| {
+        let third = if into { "    use part block as into {\n        placement = { placement = offset, offset = { translation = [0 mm, -10 mm, 0 mm] } }\n    }\n" } else { "" };
+        format!("runmat 0.7\nstd 1\n\nassembly row {{\n    use part block as a\n    use part block as near {{\n        placement = {{ placement = offset, offset = {{ translation = [0 mm, 20.05 mm, 0 mm] }} }}\n    }}\n{third}}}\n")
+    };
+    let run = |text: &str, block: &str| {
+        let files = json!({ "/p/block.part": block }).to_string();
+        let request = json!({ "command": "simulate.check" }).to_string();
+        let out = call("analyze", &["/p/row.assembly", text, &files, &request]);
+        assert_eq!(out["ok"], true, "{out}");
+        out
+    };
+    let checks = |out: &Value| out["data"]["checks"].as_array().unwrap().iter().map(|c| (c["check"].as_str().unwrap().to_owned(), c["severity"].as_str().unwrap().to_owned())).collect::<Vec<_>>();
+    let open = run(&assembly(false), BLOCK);
+    assert_eq!(checks(&open), [("fit".to_owned(), "warning".to_owned())], "{open}");
+    assert!(open["summary"].as_str().unwrap().contains("ready to mesh"), "{open}");
+    let overlapping = run(&assembly(true), BLOCK);
+    assert!(checks(&overlapping).contains(&("fit".to_owned(), "error".to_owned())), "{overlapping}");
+    assert!(overlapping["summary"].as_str().unwrap().contains("to fix before the study meshes"), "{overlapping}");
+    let bare = run(&assembly(false), &BLOCK.replace(", material = \"material.aluminum_6061\"", ""));
+    assert_eq!(checks(&bare).iter().filter(|c| c.0 == "mass").count(), 2, "{bare}");
+}

@@ -239,6 +239,7 @@ pub(super) fn add_rows(catalog: &mut Catalog) {
                     vec![
                         c("assembly.contacts"),
                         c("assembly.representation"),
+                        c("simulate.check"),
                         c("study.new"),
                     ],
                 )],
