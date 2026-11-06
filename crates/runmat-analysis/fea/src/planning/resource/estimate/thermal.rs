@@ -21,10 +21,12 @@ pub(super) fn build_thermal_plan(
     if !input.worker.accelerators.is_empty() {
         return invalid(format!("{} accelerators requested", input.worker.accelerators.len()));
     }
-    if demand.inputs.transport_closure_bytes < demand.inputs.encoded_payload_bytes {
+    // Content-addressed repeated chunks can make unique transport smaller than the logical
+    // payload (a large mesh repeats region and provenance runs); decoded residency is separate.
+    if demand.inputs.transport_closure_bytes.0 == 0 && demand.inputs.encoded_payload_bytes.0 > 0 {
         return invalid(format!(
-            "input transport closure {} B is below the encoded payload {} B",
-            demand.inputs.transport_closure_bytes.0, demand.inputs.encoded_payload_bytes.0
+            "input transport closure is empty for an encoded payload of {} B",
+            demand.inputs.encoded_payload_bytes.0
         ));
     }
     if demand.inputs.decoded_resident_bytes_admission_budget < demand.inputs.encoded_payload_bytes {

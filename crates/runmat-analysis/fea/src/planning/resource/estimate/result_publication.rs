@@ -26,7 +26,8 @@ pub(super) fn build_result_publication_plan(
         || demand.accounting_interval_workspace_bytes.0 == 0
         || demand.nested_plan_workspace_bytes.0 == 0
         || demand.source_validation_workspace_bytes.0 != validation
-        || demand.inputs.transport_closure_bytes < demand.inputs.encoded_payload_bytes
+        // Content-addressed repeated chunks can make unique transport smaller than the payload.
+        || demand.inputs.transport_closure_bytes.0 == 0
         || demand.inputs.decoded_resident_bytes_admission_budget
             < demand.inputs.encoded_payload_bytes
         || demand.output.encoded_payload_bytes_upper_bound

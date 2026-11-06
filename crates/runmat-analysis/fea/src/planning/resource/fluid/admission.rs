@@ -39,7 +39,8 @@ pub(super) fn validate_prepared(
     if input_bytes == 0
         || result_bytes == 0
         || prepared.inputs.encoded_payload_bytes.0 != input_bytes
-        || prepared.inputs.transport_closure_bytes.0 < input_bytes
+        // Content-addressed repeated chunks can make unique transport smaller than the payload.
+        || prepared.inputs.transport_closure_bytes.0 == 0
         || prepared.inputs.decoded_resident_bytes_admission_budget.0 < decode_bytes
         || prepared.output.encoded_payload_bytes_upper_bound.0 != result_bytes
         || prepared.output.transport_closure_bytes_upper_bound.0 < result_bytes
