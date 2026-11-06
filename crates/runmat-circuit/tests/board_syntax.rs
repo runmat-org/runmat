@@ -846,6 +846,7 @@ fn catalog_edits_run_through_the_minimal_diff() {
         &BoardEdit::LayerStack {
             layers: 6,
             thickness: mm(1.6),
+            dielectric: None,
         },
     )
     .unwrap();

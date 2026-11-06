@@ -339,3 +339,80 @@ fn the_3d_board_references_each_component_by_its_selection_id() {
         assert!(copper.contains(net), "{net} has no copper face in 3D: {copper:?}");
     }
 }
+
+/// `board.stitch` on the showcase board: stitching vias through the top GND pour, and a shield
+/// row beside a signal net's tracks in the GND pours. Each run places vias, and the board stays
+/// DRC-clean and fully routed with them.
+#[test]
+fn stitching_and_shield_vias_land_where_drc_passes() {
+    use runmat_circuit::runtime::{compile, edit, CompileOptions, EditRequest};
+    let files = files();
+    let layout = "/p/daq.circuit.layout";
+    let board = runmat_circuit::syntax::board::parse_board(layout, &files[layout]).board.unwrap();
+    let top = 0u8;
+    let pour = board.zones.values().find(|z| z.layers == [top] && board.nets[z.net.unwrap().0 as usize].name == "GND").unwrap();
+    // A signal net with routed tracks.
+    let signal = board
+        .tracks
+        .values()
+        .filter_map(|t| t.net)
+        .map(|n| board.nets[n.0 as usize].name.clone())
+        .find(|n| n.starts_with("SPI") || n.contains("SCK") || n.contains("SCLK"))
+        .unwrap_or_else(|| board.nets[board.tracks.values().find_map(|t| t.net).unwrap().0 as usize].name.clone());
+    let vias = board.vias.len();
+    for (values, label) in [
+        (serde_json::json!({ "mode": "stitch", "target": format!("zone:{}", pour.id.0), "pitch": 2.5, "via": "0.3/0.6" }), "stitch"),
+        (serde_json::json!({ "mode": "shield", "target": format!("net:{signal}"), "shield_net": "GND", "pitch": 2.0, "via": "0.3/0.6" }), "shield"),
+    ] {
+        let request: EditRequest = serde_json::from_value(serde_json::json!({ "command": "board.stitch", "values": values })).unwrap();
+        let out = edit(layout, &files[layout], &files, &request).unwrap_or_else(|e| panic!("{label}: {}", e.message));
+        eprintln!("{label}: {}", out.summary);
+        let mut edited = files.clone();
+        let text = out.files.iter().find(|f| f.path == layout).unwrap().text.clone();
+        edited.insert(layout.into(), text.clone());
+        let after = runmat_circuit::syntax::board::parse_board(layout, &text).board.unwrap();
+        let placed = after.vias.len() - vias;
+        assert!(placed >= 4, "{label}: {placed} via(s): {}", out.summary);
+        assert!(out.summary.contains(&format!("Placed {placed} GND via(s)")), "{}", out.summary);
+        let index = compile(layout, &text, &edited, &CompileOptions::default()).index.expect("compiles");
+        let b = index.board.as_ref().unwrap();
+        let drc: Vec<String> = b.drc.iter().map(|r| format!("{} {} {:?}", r.code, r.message, r.items)).collect();
+        assert!(drc.is_empty(), "{label} DRC: {drc:#?}");
+        assert!(b.unrouted.is_empty(), "{label}: {} unrouted", b.unrouted.len());
+    }
+}
+
+/// `board.teardrops` on the showcase board adds a teardrop pour at track ends on pads and vias,
+/// the board stays DRC-clean and routed, and Remove takes every one out again.
+#[test]
+fn teardrops_are_added_where_drc_passes_and_removed_again() {
+    use runmat_circuit::runtime::{compile, edit, CompileOptions, EditRequest};
+    let files = files();
+    let layout = "/p/daq.circuit.layout";
+    let zones = runmat_circuit::syntax::board::parse_board(layout, &files[layout]).board.unwrap().zones.len();
+    let run = |text: &str, action: &str| {
+        let request: EditRequest =
+            serde_json::from_value(serde_json::json!({ "command": "board.teardrops", "values": { "action": action, "all": true } })).unwrap();
+        let mut f = files.clone();
+        f.insert(layout.into(), text.to_owned());
+        let out = edit(layout, text, &f, &request).unwrap_or_else(|e| panic!("{action}: {}", e.message));
+        eprintln!("{action}: {}", out.summary);
+        (out.files.iter().find(|c| c.path == layout).unwrap().text.clone(), out.summary)
+    };
+    let (added, summary) = run(&files[layout], "add");
+    let board = runmat_circuit::syntax::board::parse_board(layout, &added).board.unwrap();
+    let drops = board.zones.values().filter(|z| z.name == "teardrop").count();
+    assert!(drops >= 20 && board.zones.len() == zones + drops, "{drops} teardrops: {summary}");
+    assert!(summary.starts_with(&format!("Added {drops} teardrop(s)")), "{summary}");
+    let mut edited = files.clone();
+    edited.insert(layout.into(), added.clone());
+    let index = compile(layout, &added, &edited, &CompileOptions::default()).index.expect("compiles");
+    let b = index.board.as_ref().unwrap();
+    let drc: Vec<String> = b.drc.iter().map(|r| format!("{} {} {:?}", r.code, r.message, r.items)).collect();
+    assert!(drc.is_empty(), "DRC: {drc:#?}");
+    assert!(b.unrouted.is_empty());
+    let (removed, summary) = run(&added, "remove");
+    assert_eq!(summary, format!("Removed {drops} teardrop(s)"));
+    let board = runmat_circuit::syntax::board::parse_board(layout, &removed).board.unwrap();
+    assert_eq!(board.zones.len(), zones);
+}

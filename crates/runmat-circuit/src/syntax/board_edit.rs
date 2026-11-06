@@ -696,8 +696,9 @@ pub enum BoardEdit {
     },
     /// `board.rules`: adds a rule, or replaces the rule with the same id.
     Rule(crate::board_rules::RuleSpec),
-    /// `board.layer-stack`: a standard stackup of `layers` copper layers and `thickness`.
-    LayerStack { layers: u8, thickness: Coord },
+    /// `board.layer-stack`: a standard stackup of `layers` copper layers and `thickness`, its
+    /// dielectric layers in `dielectric` when given (else FR-4 cores and prepreg).
+    LayerStack { layers: u8, thickness: Coord, dielectric: Option<Material> },
     /// `board.outline` (draw).
     Outline { outline: Polygon },
     /// `board.test-points`: a test point footprint on each net.
@@ -985,7 +986,7 @@ pub fn apply_board_edit(
             Some(r) => *r = spec.clone(),
             None => board.rules.push(spec.clone()),
         },
-        BoardEdit::LayerStack { layers, thickness } => {
+        BoardEdit::LayerStack { layers, thickness, dielectric } => {
             if *layers < 2 || layers % 2 != 0 {
                 return Err(
                     "a standard stackup has an even number of copper layers, 2 or more".into(),
@@ -1001,7 +1002,7 @@ pub fn apply_board_edit(
             if *layers < before && used.is_some_and(|l| l > 0 && l + 1 != before) {
                 return Err("inner layers carry copper; move it before removing layers".into());
             }
-            let mut s = Stackup::standard(*layers, *thickness, 1.0, 0.5);
+            let mut s = standard_stackup(*layers, *thickness, dielectric.as_ref());
             s.name = board.stackup.name.clone();
             s.finish = board.stackup.finish.clone();
             let last = |l: u8| if l + 1 == before { layers - 1 } else { l };
@@ -1088,4 +1089,18 @@ pub fn board_command_parsed(
         apply_board_edit(board, &parsed.sites, edit)
     })
     .map(|(c, ())| c)
+}
+
+/// The standard stackup `board.layer-stack` writes: `layers` copper layers in `thickness`, with
+/// every dielectric layer in `dielectric` when given, else FR-4 cores and prepreg.
+pub fn standard_stackup(layers: u8, thickness: Coord, dielectric: Option<&Material>) -> Stackup {
+    let mut s = Stackup::standard(layers, thickness, 1.0, 0.5);
+    if let Some(m) = dielectric {
+        for l in &mut s.layers {
+            if matches!(l.kind, StackKind::Dielectric { .. }) {
+                l.material = m.clone();
+            }
+        }
+    }
+    s
 }

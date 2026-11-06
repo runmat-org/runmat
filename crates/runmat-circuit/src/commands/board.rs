@@ -91,7 +91,7 @@ pub(super) fn add(c: &mut Catalog) {
             .preview()
             .edit(add_to("via", Section::Copper)),
         brd("board.stitch", "Stitch/shield", "stitch", "Stitch a pour with vias, or shield a net with a row of them.")
-            .inputs(vec![radio("mode", "Mode", &[("stitch", "Stitch a pour"), ("shield", "Shield a net")]), pick("target", "Pour or net", &[K::Zone, K::Net]), qty("pitch", "Pitch", "length", Some(1.5)), text("via", "Via", Some("0.3/0.6"))])
+            .inputs(vec![radio("mode", "Mode", &[("stitch", "Stitch a pour"), ("shield", "Shield a net")]), pick("target", "Pour or net", &[K::Zone, K::Net]), text("shield_net", "Shield net", Some("GND")).shown("mode", &["shield"]), qty("pitch", "Pitch", "length", Some(1.5)), text("via", "Via", Some("0.3/0.6"))])
             .preview()
             .edit(add_to("via_array", Section::Copper)),
         brd("board.fanout", "BGA fanout", "fanout", "Fan out a component's pads to vias: BGA balls to the diagonals, other pads past their outer end.")

@@ -72,6 +72,8 @@ pub fn edit(
         "board.update-schematic" => update_schematic(&project, request),
         "board.copy-room-formats" => room_formats(&project, request),
         "board.fanout" | "board.autoroute" => super::autoroute::run(&project, request),
+        "board.stitch" => super::stitch::run(&project, request),
+        "board.teardrops" => super::teardrops::run(&project, request),
         "schematic.annotate" => super::annotate::run(&project, request),
         "schematic.move" => super::annotate::move_items(&project, request),
         "library.place" => super::library_edit::place(&project, request),
@@ -83,8 +85,15 @@ pub fn edit(
             let edit = board_edit(board, &layout.parsed.sites, command, request)?;
             let change =
                 board_edit::board_command(&layout.path, &layout.text, &edit).map_err(failure)?;
+            let mut summary = format!("{} on {}", edit.command(), layout.path);
+            if let (BoardEdit::LayerStack { layers, thickness, dielectric }, Some(target)) =
+                (&edit, number(&request.values, "target_z"))
+            {
+                let stackup = board_edit::standard_stackup(*layers, *thickness, dielectric.as_ref());
+                summary.push_str(&format!("; {}", widths_for(&stackup, target)));
+            }
             Ok(EditOutput {
-                summary: format!("{} on {}", edit.command(), layout.path),
+                summary,
                 files: vec![file_change(&layout.path, &layout.text, change)],
             })
         }
@@ -420,6 +429,45 @@ fn site_of(board: &Board, sites: &BTreeMap<ItemId, String>, id: &str) -> Result<
 
 const MM: f64 = 1_000_000.0;
 
+/// The `material` input of `board.layer-stack`: FR-4 (the standard cores and prepreg, `None`)
+/// or polyimide for every dielectric layer.
+fn dielectric(name: Option<&str>) -> Result<Option<crate::layout::Material>, EditError> {
+    let Some(name) = name.map(str::trim).filter(|n| !n.is_empty()) else { return Ok(None) };
+    let key: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
+    match key.as_str() {
+        "fr4" => Ok(None),
+        "polyimide" => Ok(Some(crate::layout::Material::polyimide())),
+        _ => Err(EditError::new(format!(
+            "`{name}` is not a dielectric the layer stack knows; use FR-4 or Polyimide, or write the material in the stackup"
+        ))),
+    }
+}
+
+/// The track width that meets `target` Ω on each copper layer of `stackup`, as one line:
+/// `50 Ω: F.Cu 0.294 mm (microstrip), In1.Cu 0.127 mm (stripline), …`.
+fn widths_for(stackup: &crate::layout::Stackup, target: f64) -> String {
+    use crate::impedance::TraceGeometry;
+    let names = stackup.copper_names();
+    let rows: Vec<String> = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| match TraceGeometry::of(stackup, i as u8) {
+            Some(g) => {
+                let kind = match g {
+                    TraceGeometry::Microstrip { .. } => "microstrip",
+                    TraceGeometry::Stripline { .. } => "stripline",
+                };
+                match g.width_for(target) {
+                    Some(w) => format!("{name} {:.3} mm ({kind})", w as f64 / MM),
+                    None => format!("{name} no width meets it ({kind})"),
+                }
+            }
+            None => format!("{name} has no reference plane"),
+        })
+        .collect();
+    format!("{target} Ω: {}", rows.join(", "))
+}
+
 fn mm_value(values: &serde_json::Map<String, Value>, id: &str) -> Option<crate::geom::Coord> {
     number(values, id).map(|v| (v * MM).round() as crate::geom::Coord)
 }
@@ -476,6 +524,7 @@ pub(super) fn board_edit(
         "board.layer-stack" => Ok(BoardEdit::LayerStack {
             layers: number(values, "layers").map_or(board.copper_count(), |n| n as u8),
             thickness: mm_value(values, "thickness").unwrap_or_else(|| board.stackup.thickness()),
+            dielectric: dielectric(values.get("material").and_then(Value::as_str))?,
         }),
         "board.test-points" => {
             let nets = strings(values.get("nets"));

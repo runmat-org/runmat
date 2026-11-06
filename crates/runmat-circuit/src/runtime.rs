@@ -52,6 +52,8 @@ mod rules;
 mod schematic_edit;
 mod session;
 mod sim_edit;
+mod stitch;
+mod teardrops;
 pub use edit::*;
 pub use fabrication::*;
 use edit::{board_edit, failure};

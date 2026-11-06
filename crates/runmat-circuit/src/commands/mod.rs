@@ -18,9 +18,25 @@ pub fn catalog() -> Catalog {
     items::add(&mut c);
     context::add(&mut c);
     rows(&mut c);
+    c.withdraw(UNBUILT);
     c.finish();
     c
 }
+
+/// Circuit commands described here whose appliers aren't built yet. They stay out of the
+/// catalog, so no toolbar, menu or search offers a button that does nothing; an id leaves this
+/// list in the commit that builds its applier, with its test.
+pub const UNBUILT: &[&str] = &[
+    // Board: panels, coupled and tuned routing.
+    "board.panelize",
+    "board.diff-pair",
+    "board.tune-length",
+    "board.multi-route",
+    // Board in its enclosure: an assembly's Insert places the board as an occurrence, and its
+    // Evaluate checks interference and clearance against the board's solid.
+    "board.to-enclosure",
+    "board.clearance-3d",
+];
 
 pub(crate) const CIRCUIT: &[EditorKind] = &[EditorKind::Circuit, EditorKind::CircuitLayout];
 

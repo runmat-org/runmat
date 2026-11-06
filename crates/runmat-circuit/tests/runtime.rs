@@ -536,3 +536,32 @@ fn drawn_board_commands_take_canvas_points() {
     let err = runtime::edit(LAYOUT, &files[LAYOUT], &files, &r).unwrap_err();
     assert!(err.message.contains("three points"), "{}", err.message);
 }
+
+/// `board.layer-stack` writes its dielectric and reports the width that meets its target
+/// impedance on each copper layer, from the stackup it writes; an unknown dielectric is refused.
+#[test]
+fn the_layer_stack_takes_its_dielectric_and_reports_widths_for_its_target_impedance() {
+    let files = files();
+    let out = runtime::edit(
+        LAYOUT,
+        &files[LAYOUT],
+        &files,
+        &request("board.layer-stack", json!({ "layers": 4, "material": "Polyimide", "thickness": 1.0, "target_z": 50 })),
+    )
+    .unwrap_or_else(|e| panic!("{}", e.message));
+    let text = &changed(&out, LAYOUT).text;
+    let board = parse_board(LAYOUT, text).board.unwrap();
+    assert_eq!(board.copper_count(), 4);
+    let dielectrics: Vec<_> =
+        board.stackup.layers.iter().filter(|l| matches!(l.kind, runmat_circuit::layout::StackKind::Dielectric { .. })).collect();
+    assert!(dielectrics.iter().all(|l| l.material.name == "Polyimide"), "{dielectrics:?}");
+    // Each width is the one the stackup's closed form gives for 50 Ω.
+    for (i, name) in board.stackup.copper_names().iter().enumerate() {
+        let g = runmat_circuit::impedance::TraceGeometry::of(&board.stackup, i as u8).unwrap();
+        let w = g.width_for(50.0).unwrap() as f64 / 1e6;
+        assert!(out.summary.contains(&format!("{name} {w:.3} mm")), "{name}: {}", out.summary);
+    }
+    assert!(out.summary.contains("50 Ω: F.Cu") && out.summary.contains("(microstrip)") && out.summary.contains("(stripline)"), "{}", out.summary);
+    let refused = runtime::edit(LAYOUT, &files[LAYOUT], &files, &request("board.layer-stack", json!({ "material": "balsa" })));
+    assert!(refused.is_err_and(|e| e.message.contains("balsa")));
+}
