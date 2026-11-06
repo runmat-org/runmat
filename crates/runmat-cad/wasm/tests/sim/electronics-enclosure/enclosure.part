@@ -92,7 +92,7 @@ part enclosure {
         label = "Outer wall"
     }
 
-    output enclosure = { body = feature.case.body, label = "Enclosure", part_number = "EN-1208", material = "aluminum_a380", color = "#B9BFC7" }
+    output enclosure = { body = feature.case.body, label = "Enclosure", part_number = "EN-1208", material = "aluminum_a380", color = "#B9BFC766" }
     output board = { body = feature.board.body, label = "Board", material = "fr4", color = "#2F6B3A" }
-    output air = { body = feature.cavity.body, label = "Air", color = "#CFE3F5" }
+    output air = { body = feature.cavity.body, label = "Air", color = "#CFE3F533" }
 }

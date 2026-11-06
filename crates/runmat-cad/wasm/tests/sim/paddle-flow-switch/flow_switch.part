@@ -96,7 +96,7 @@ part flow_switch {
     // The run's two pipe ends, where the line holds the tee.
     region tee_ends : face = { select = [feature.tee.face.start, feature.tee.face.end], expect = at_least_one, body = feature.tee.body, label = "Tee ends" }
 
-    output tee = { body = feature.tee.body, label = "Tee", part_number = "FS-50-T", material = "steel_a106b", color = "#7C8288" }
-    output oil = { body = feature.oil.body, label = "Oil", color = "#D08A1E" }
+    output tee = { body = feature.tee.body, label = "Tee", part_number = "FS-50-T", material = "steel_a106b", color = "#7C828859" }
+    output oil = { body = feature.oil.body, label = "Oil", color = "#D08A1E40" }
     output paddle = { body = feature.paddle.body, label = "Paddle", part_number = "FS-50-P", material = "stainless_1_4310", color = "#D9DDE1" }
 }

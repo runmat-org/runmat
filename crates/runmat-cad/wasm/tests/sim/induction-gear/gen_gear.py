@@ -96,7 +96,7 @@ part gear {{
 
     output gear = {{ body = feature.gear.body, label = "Gear", part_number = "SG-M4-24", material = "steel_42crmo4", color = "#9AA3AD" }}
     output coil = {{ body = feature.coil.body, label = "Coil", material = "copper_c11000", color = "#C8794A" }}
-    output air = {{ body = feature.air.body, label = "Air", color = "#CFE3F5" }}
+    output air = {{ body = feature.air.body, label = "Air", color = "#CFE3F533" }}
 }}
 '''
 open(sys.argv[1] if len(sys.argv) > 1 else "gear.part", "w").write(text)

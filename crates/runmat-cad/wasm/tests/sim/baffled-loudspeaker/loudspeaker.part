@@ -50,5 +50,5 @@ part loudspeaker {
         label = "Outer boundary"
     }
 
-    output air = { body = feature.air.body, label = "Air", color = "#CFE3F5" }
+    output air = { body = feature.air.body, label = "Air", color = "#CFE3F566" }
 }
