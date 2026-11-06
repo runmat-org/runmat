@@ -74,6 +74,8 @@ pub fn edit(
         "board.fanout" | "board.autoroute" => super::autoroute::run(&project, request),
         "board.stitch" => super::stitch::run(&project, request),
         "board.teardrops" => super::teardrops::run(&project, request),
+        "board.diff-pair" => super::coupled::diff_pair(&project, request),
+        "board.tune-length" => super::coupled::tune_length(&project, request),
         "schematic.annotate" => super::annotate::run(&project, request),
         "schematic.move" => super::annotate::move_items(&project, request),
         "library.place" => super::library_edit::place(&project, request),

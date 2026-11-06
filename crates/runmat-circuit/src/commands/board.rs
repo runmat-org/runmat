@@ -81,7 +81,7 @@ pub(super) fn add(c: &mut Catalog) {
             ])
             .preview()
             .edit(add_to("track", Section::Copper)),
-        brd("board.diff-pair", "Diff pair", "diff-pair", "Route a differential pair together.")
+        brd("board.diff-pair", "Diff pair", "diff-pair", "Route a differential pair together, at its gap from pad to pad.")
             .inputs(vec![pick("pair", "Pair", &[K::Net]), qty("width", "Width", "length", Some(0.12)), qty("gap", "Gap", "length", Some(0.15)), layer()])
             .preview()
             .edit(add_to("track_pair", Section::Copper)),
@@ -89,8 +89,8 @@ pub(super) fn add(c: &mut Catalog) {
             .inputs(vec![picks("nets", "Nets", &[K::Net, K::Pad]), qty("width", "Width", "length", Some(0.15)), qty("spacing", "Spacing", "length", Some(0.15)), layer()])
             .preview()
             .edit(add_to("track_bus", Section::Copper)),
-        brd("board.tune-length", "Tune length", "tune-length", "Add meanders until a net or pair meets its target length.")
-            .inputs(vec![pick("net", "Net or pair", &[K::Net, K::Track]), qty("target", "Target length", "length", Some(50.0)), qty("tolerance", "Tolerance", "length", Some(0.1)), choice("style", "Style", &[("trombone", "Trombone"), ("sawtooth", "Sawtooth"), ("arc", "Rounded")])])
+        brd("board.tune-length", "Tune length", "tune-length", "Add trombone meanders to a net's longest straight track until it meets its target length.")
+            .inputs(vec![pick("net", "Net", &[K::Net, K::Track]), qty("target", "Target length", "length", Some(50.0)), qty("tolerance", "Tolerance", "length", Some(0.1))])
             .preview()
             .edit(edit(EditOp::Edit, Section::Copper).item("tuning")),
         brd("board.place-via", "Via", "via", "Place a via.")

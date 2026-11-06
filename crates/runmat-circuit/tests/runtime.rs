@@ -610,3 +610,37 @@ fn the_layer_stack_takes_its_dielectric_and_reports_widths_for_its_target_impeda
     let refused = runtime::edit(LAYOUT, &files[LAYOUT], &files, &request("board.layer-stack", json!({ "material": "balsa" })));
     assert!(refused.is_err_and(|e| e.message.contains("balsa")));
 }
+
+/// `board.diff-pair` routes a declared pair or says why not, and refuses a net in no pair;
+/// `board.tune-length` meanders a net to its target and refuses to shorten one.
+#[test]
+fn the_pair_and_tuning_commands_run_on_the_layout() {
+    let files = files();
+    let refused = runtime::edit(LAYOUT, &files[LAYOUT], &files, &request("board.diff-pair", json!({ "pair": "net:GND" })));
+    assert!(refused.is_err_and(|e| e.message.contains("no differential pair")));
+    // The io board's AIN01 pair: routed, or refused by DRC or the router with nothing written.
+    match runtime::edit(LAYOUT, &files[LAYOUT], &files, &request("board.diff-pair", json!({ "pair": "net:AIN0", "width": 0.15, "gap": 0.15 }))) {
+        Ok(out) => assert!(out.summary.starts_with("Routed AIN01 on F.Cu"), "{}", out.summary),
+        Err(e) => assert!(e.message.contains("DRC") || e.message.contains("no path"), "{}", e.message),
+    }
+    // The net with the longest straight track gets 1 mm more.
+    let board = parse_board(LAYOUT, &files[LAYOUT]).board.unwrap();
+    let net = board
+        .tracks
+        .values()
+        .filter(|t| t.net.is_some())
+        .max_by_key(|t| { let (a, b) = t.endpoints(); a.dist(b) as i64 })
+        .and_then(|t| t.net)
+        .unwrap();
+    let name = board.nets[net.0 as usize].name.clone();
+    let before = runmat_circuit::pair::net_track_length(&board, net);
+    let target = before + 1.0;
+    let out = runtime::edit(LAYOUT, &files[LAYOUT], &files, &request("board.tune-length", json!({ "net": format!("net:{name}"), "target": target, "tolerance": 0.05 })))
+        .unwrap_or_else(|e| panic!("{name}: {}", e.message));
+    let tuned = parse_board(LAYOUT, &changed(&out, LAYOUT).text).board.unwrap();
+    let after = runmat_circuit::pair::net_track_length(&tuned, tuned.net(&name).unwrap());
+    assert!((after - target).abs() < 0.05, "{name}: {before} → {after}, target {target}; {}", out.summary);
+    assert!(out.summary.starts_with(&format!("Tuned {name}")), "{}", out.summary);
+    let shorter = runtime::edit(LAYOUT, &files[LAYOUT], &files, &request("board.tune-length", json!({ "net": format!("net:{name}"), "target": 1.0 })));
+    assert!(shorter.is_err_and(|e| e.message.contains("longer than")));
+}

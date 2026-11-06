@@ -107,7 +107,10 @@ via GND = { at = [13, 5], size = 0.6, drill = 0.3 }
 pour GND = { name = gnd_bottom, layers = [B.Cu], outline = [[0.5, 0.5], [19.5, 0.5], [19.5, 14.5], [0.5, 14.5]], priority = 1 }
 ```
 
-- Route net routes one net, and Differential pair and Tune length route pairs and length-matched groups to their rules.
+- Route net routes one net.
+- Diff pair routes a pair declared with `diff_pair` in the circuit. Each net needs one pad at each end. The two tracks leave their pads, merge to the gap you give, and run together at that gap around the board's copper. The summary gives each net's length and the skew between them.
+- Tune length adds trombone meanders to a net's longest straight track until the net reaches the target length within the tolerance. Tune the shorter net of a pair to the longer one's length to remove the skew. Meanders only add length, so a net longer than its target needs a shorter route.
+- Each of these keeps only copper that passes DRC. When none passes, the command says which finding stopped it and the board is left as it was.
 - `pour GND` fills the bottom layer with ground around everything else; Fill refills pours after an edit.
 - Vias in the ground pour next to each ground pad (stitching) give the top-layer pads a short path to the plane.
 
