@@ -83,7 +83,7 @@ pub struct Material {
 impl Material {
     pub fn copper() -> Self {
         Material {
-            name: "copper".into(),
+            name: "Copper".into(),
             dk: 1.0,
             df: 0.0,
             conductivity: 5.8e7,
@@ -109,7 +109,7 @@ impl Material {
     }
     pub fn polyimide() -> Self {
         Material {
-            name: "polyimide".into(),
+            name: "Polyimide".into(),
             dk: 3.4,
             df: 0.004,
             conductivity: 0.0,
