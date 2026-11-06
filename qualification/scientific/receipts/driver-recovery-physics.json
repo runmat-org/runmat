@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "cohort": "driver-recovery-physics",
+  "policy_sha256": "e703044e0eead41dd417ea3c7718bfd9346fa8583b659663b71258d1dac085a1",
+  "measured": {
+    "source_revision": "c816a5927360e6355120f4de1c3690a4d914fb99",
+    "target": "linux-x86_64",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "command": ["cargo", "test", "--locked", "--offline", "--release", "--all-features", "-p", "runmat-execution-runner-native", "--lib", "remote::driver_replacement_tests::", "--", "--test-threads=1"],
+    "log_sha256": "d46e7fbd8266e267e3570f248a2c59f9b56874de9e5d388f0ce987fb46f6fba7",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/settings-linux-r1055-scientific.driver.log",
+    "passed": 18,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 464,
+    "exit_code": 0,
+    "case_names": [
+      "remote::driver_replacement_tests::active_analysis_attempt_retries_after_actual_driver_replacement",
+      "remote::driver_replacement_tests::actual_driver_restarts_from_server_checkpoint_on_a_different_worker",
+      "remote::driver_replacement_tests::authored_thermal_outer_root_matrix_replays_after_preexecution_driver_replacement",
+      "remote::driver_replacement_tests::authored_thermal_prefix_survives_driver_loss_after_its_commit",
+      "remote::driver_replacement_tests::authored_thermal_prefix_survives_lost_checkpoint_acknowledgement",
+      "remote::driver_replacement_tests::committed_structural_and_modal_work_survives_checkpoint_acknowledgement_loss",
+      "remote::driver_replacement_tests::exact_meshing_admission_deadline_expires_before_replacement_dispatch",
+      "remote::driver_replacement_tests::exact_meshing_admission_exhausts_retry_budget_after_two_driver_losses",
+      "remote::driver_replacement_tests::exact_meshing_admission_retries_and_cancels_after_encrypted_driver_replacement",
+      "remote::driver_replacement_tests::exact_meshing_root_preserves_committed_pool_task_after_encrypted_driver_replacement",
+      "remote::driver_replacement_tests::observer::lost_original_parent_cannot_supply_a_replacement_clock_end",
+      "remote::driver_replacement_tests::observer::original_parent_observer_survives_actual_worker_loss_and_driver_replacement",
+      "remote::driver_replacement_tests::random_response_driver_replacement_replays_on_a_different_worker",
+      "remote::driver_replacement_tests::rejected_structural_and_modal_checkpoint_does_not_grant_commit_authority",
+      "remote::driver_replacement_tests::rejected_thermal_checkpoint_cannot_be_restored_as_a_committed_prefix",
+      "remote::driver_replacement_tests::response_spectrum_driver_replacement_replays_on_a_different_worker",
+      "remote::driver_replacement_tests::restored_analysis_retry_observes_cancellation_before_publication",
+      "remote::driver_replacement_tests::thermal::authored_matrix_variants_typecheck_with_explicit_physical_loads"
+    ],
+    "selected_filter": "remote::driver_replacement_tests::",
+    "inputs": {
+      "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
+      "files": 24826,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "artifacts": [
+      {
+        "sha256": "c8bf184f2c4ecd71f89268862b2e336c3af96251d09cac2f740c144899799fa6",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/settings-linux-r1055-scientific-artifacts/recovery-harness"
+      }
+    ]
+  },
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
+      "files": 24826,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "abc8087169bc2ae14057475076e798603786432e39ea2813a9132fbaff678068",
+      "files": 24826,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "Only three cfg(windows) scientific inputs changed. Linux numerical/runtime/recovery code, fixtures, dependencies and assertions are identical. The Windows boundary has focused passing execution evidence. This review conserves Linux measurements and does not qualify the Windows product candidate.",
+    "review": {
+      "path": "qualification/scientific/reviews/windows-private-path-r1056.json",
+      "sha256": "157854feeb78c201d366db47cf553c2fda5c2f859782d7c08cb4419a7b5d5208"
+    }
+  }
+}
