@@ -337,6 +337,7 @@ fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
                 &model,
                 &fitting,
                 0,
+                0,
             )
             .unwrap()
             .path(),
@@ -352,6 +353,7 @@ fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
                 &history,
                 &model,
                 &small,
+                0,
                 0,
             ),
             Err(ResourcePlanningError::ThermalSolveCeiling { .. })

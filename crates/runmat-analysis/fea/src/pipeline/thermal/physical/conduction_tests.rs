@@ -201,17 +201,25 @@ fn split_interface_support_derivation_fits_the_planning_law() {
 fn run_peak(input: &ThermalWorkload, mesh: &runmat_meshing_core::SolverMeshArtifact) -> usize {
     let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
     pool.install(|| {
-        let (result, _, peak) =
-            crate::topology::measure_test_allocations(|| input.execute(mesh));
-        result.unwrap();
+        // The whole run: preassembly, the solve, then the publication phase (field and
+        // partition identities, the manifest and its canonical header encoding).
+        let (published, _, peak) = crate::topology::measure_test_allocations(|| {
+            let result = input.execute(mesh).unwrap();
+            let manifest =
+                crate::execution::ThermalSolverResultManifest::from_result(&result).unwrap();
+            let header = manifest.canonical_bytes().unwrap();
+            (result, manifest, header)
+        });
+        drop(published);
         peak
     })
 }
 
 // witness: FEA-THERMAL-SOLVER-001/steady_reservation @ thermal_steady/tet4/numerical_kernel;
 //   coverage: partial;
-//   boundary: The measured requested-heap peak of a whole steady linear run, on both solve paths,
-//   fits the preassembly reservation the run admits.
+//   boundary: The measured requested-heap peak of a whole steady linear run (preassembly, solve,
+//   then manifest construction and header encoding), on both solve paths, fits the preassembly
+//   reservation the run admits.
 #[test]
 fn steady_run_peak_fits_the_preassembly_reservation() {
     for cells in [[5, 14, 5], [8, 22, 8]] {

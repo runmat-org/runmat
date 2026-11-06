@@ -170,8 +170,9 @@ impl ThermalPreassemblyResourceFacts {
             history.interface_nodes,
         )?;
         let retained_bytes = manifest_retained.reservation_bytes()?.0;
-        // Every preassembly component except the numerical operator reservation and the
-        // compiled properties.
+        // Every preassembly component that stays resident across all phases: everything except
+        // the numerical operator reservation, the compiled properties and the post-solve
+        // field-construction and manifest-encoding scratch.
         let components = component_bytes_besides_operators(
             &sources,
             &observations,
@@ -179,13 +180,12 @@ impl ThermalPreassemblyResourceFacts {
             model_materialization_bytes,
             &metadata,
         )?
-        .checked_add(field_construction.reservation_bytes().0)
-        .and_then(|bytes| bytes.checked_add(catalog_bytes))
-        .and_then(|bytes| bytes.checked_add(manifest_metadata.reservation_bytes().0))
+        .checked_add(catalog_bytes)
         .and_then(|bytes| bytes.checked_add(retained_bytes))
         .ok_or(ResourcePlanningError::Overflow(
-            "thermal field construction reservation",
+            "thermal preassembly components",
         ))?;
+        let post_solve = post_solve_bytes(&history, &field_construction, &manifest_metadata)?;
         let maximum = step.accuracy.resources.resident_byte_budget();
         // The least numerical reservation any admitted path needs is admitted with the other
         // components before property compilation validates the mesh or profiles metadata.
@@ -200,12 +200,11 @@ impl ThermalPreassemblyResourceFacts {
         } else {
             factor_numerical
         };
-        let before_properties =
-            components
-                .checked_add(least_numerical)
-                .ok_or(ResourcePlanningError::Overflow(
-                    "thermal property compilation",
-                ))?;
+        let before_properties = components
+            .checked_add(least_numerical.max(post_solve))
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal property compilation",
+            ))?;
         require_ceiling(before_properties, maximum)?;
         // Admit actual selected metadata before owned constitutive/section/audit cloning.
         // The compiler owns selection for both the profile and materialization passes.
@@ -235,15 +234,27 @@ impl ThermalPreassemblyResourceFacts {
                 "thermal property compilation",
             ))?;
         require_ceiling(alongside, maximum)?;
-        let operators = select_thermal_solve_path(operators, &history, model, step, alongside)?;
+        let operators =
+            select_thermal_solve_path(operators, &history, model, step, alongside, post_solve)?;
         let base = operators
             .numerical_reservation_bytes(&history)?
             .0
+            .max(post_solve)
             .checked_add(alongside)
             .ok_or(ResourcePlanningError::Overflow(
-                "thermal field construction reservation",
+                "thermal preassembly reservation",
             ))?;
         require_ceiling(base, maximum)?;
+        tracing::info!(
+            resident_components_bytes = components,
+            property_compilation_bytes = prepared.estimated_resident_bytes,
+            numerical_bytes = operators.numerical_reservation_bytes(&history)?.0,
+            post_solve_bytes = post_solve,
+            field_construction_bytes = field_construction.reservation_bytes().0,
+            manifest_metadata_bytes = manifest_metadata.reservation_bytes().0,
+            total_bytes = base,
+            "thermal preassembly reservation phases"
+        );
         let property_compilation_bytes = ByteCount(prepared.estimated_resident_bytes);
         let properties = prepared
             .materialize()
@@ -269,22 +280,39 @@ impl ThermalPreassemblyResourceFacts {
         })
     }
 
+    /// Components resident in every phase, plus the compiled properties, plus the larger of the
+    /// numerical phase and the post-solve phase.
+    ///
+    /// The phases run in this order and never overlap:
+    /// 1. Planning and property compilation (`derive`): support derivation scratch, then the
+    ///    compiler's peak. `numerical_reservation_bytes` already takes the maximum of planning
+    ///    and the numerical terms; the property estimate is the compiler's peak, which bounds the
+    ///    retained `CompiledPropertyMap` too, so it is charged once beside every phase.
+    /// 2. The solve (`PreparedThermalSolve::execute_primary_fields` → `physical::run`): the
+    ///    assembly, CSR copies, solver storage and workspace. `run` owns the assembly and the
+    ///    solver locals, so they are freed when it returns, and `execute_primary_fields` consumes
+    ///    the prepared solve, so the compiled properties and support are freed with it.
+    /// 3. Publication (`prepare_thermal_solver_result_objects`, the receipt): field identity and
+    ///    partition construction, then manifest encoding, beside the retained histories.
+    ///
+    /// Phase 3 begins only after phase 2's storage is released, so its scratch is charged inside
+    /// the numerical maximum, not added to it.
     pub fn reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
         let catalog_bytes = self.manifest_catalog.reservation_bytes()?.0;
         let retained_bytes = self.manifest_retained.reservation_bytes()?.0;
-        component_bytes(
-            &self.history,
-            &self.operators,
+        let post_solve =
+            post_solve_bytes(&self.history, &self.field_construction, &self.manifest_metadata)?;
+        let numerical = self.operators.numerical_reservation_bytes(&self.history)?.0;
+        component_bytes_besides_operators(
             &self.sources,
             &self.observations,
             &self.realization,
             self.model_materialization_bytes,
             &self.metadata,
         )?
-        .checked_add(self.property_compilation_bytes.0)
-        .and_then(|bytes| bytes.checked_add(self.field_construction.reservation_bytes().0))
+        .checked_add(numerical.max(post_solve))
+        .and_then(|bytes| bytes.checked_add(self.property_compilation_bytes.0))
         .and_then(|bytes| bytes.checked_add(catalog_bytes))
-        .and_then(|bytes| bytes.checked_add(self.manifest_metadata.reservation_bytes().0))
         .and_then(|bytes| bytes.checked_add(retained_bytes))
         .map(ByteCount)
         .ok_or(ResourcePlanningError::Overflow(
@@ -310,10 +338,12 @@ pub(crate) fn select_thermal_solve_path(
     model: &AnalysisModel,
     step: &ProcedureStep,
     alongside: u64,
+    post_solve: u64,
 ) -> Result<ThermalOperatorResourceFacts, ResourcePlanningError> {
     let maximum = step.accuracy.resources.resident_byte_budget();
     let total = |bytes: u64| {
         bytes
+            .max(post_solve)
             .checked_add(alongside)
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal solve path selection",
@@ -360,27 +390,20 @@ fn multigrid_admitted(model: &AnalysisModel, step: &ProcedureStep) -> bool {
         })
 }
 
-fn component_bytes(
+/// Publication-phase residency: the retained histories plus field construction and manifest
+/// encoding scratch. It never coexists with the solve's operators (see `reservation_bytes`).
+fn post_solve_bytes(
     history: &ThermalHistoryResourceFacts,
-    operators: &ThermalOperatorResourceFacts,
-    sources: &ThermalSourceEvidenceResourceFacts,
-    observations: &ThermalObservationResourceFacts,
-    realization: &ThermalRealizationResourceFacts,
-    model: ByteCount,
-    metadata: &ThermalMetadataResourceFacts,
+    field_construction: &ThermalFieldConstructionResourceFacts,
+    manifest_metadata: &ThermalManifestMetadataResourceFacts,
 ) -> Result<u64, ResourcePlanningError> {
-    operators
-        .numerical_reservation_bytes(history)?
+    history
+        .reservation_bytes()?
         .0
-        .checked_add(component_bytes_besides_operators(
-            sources,
-            observations,
-            realization,
-            model,
-            metadata,
-        )?)
+        .checked_add(field_construction.reservation_bytes().0)
+        .and_then(|bytes| bytes.checked_add(manifest_metadata.reservation_bytes().0))
         .ok_or(ResourcePlanningError::Overflow(
-            "thermal preassembly components",
+            "thermal post-solve reservation",
         ))
 }
 
