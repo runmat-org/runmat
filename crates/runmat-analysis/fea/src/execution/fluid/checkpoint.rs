@@ -33,8 +33,8 @@ impl Scope {
         let required = initial
             .materialization_resident_bytes_estimate
             .checked_mul(2)
-            .and_then(|v| v.checked_add(p.source.preparation_resident_bytes))
-            .ok_or_else(|| invalid("fluid checkpoint scope initial heap overflow"))?;
+            .ok_or_else(|| invalid("fluid checkpoint scope initial heap overflow"))
+            .and_then(|later| p.source.resident_with(later))?;
         super::source::require_bytes(required, p.workload.resident_ceiling()?)?;
         Ok(Self {
             workload: p.workload.identity()?,

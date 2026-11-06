@@ -36,12 +36,12 @@ impl PreparedFluidTransient<'_> {
     pub fn execute(&self) -> AnalysisExecutionResult<FluidTransientSolverResult> {
         let profile = self.result_encoding_profile()?;
         let block = self.block()?;
-        let required = self
-            .source
-            .preparation_resident_bytes
-            .checked_add(block.reservation().resident_bytes_upper_bound)
-            .and_then(|v| v.checked_add(profile.materialization_resident_bytes_estimate))
-            .ok_or_else(|| invalid("transient full payload bound overflow"))?;
+        let required = block
+            .reservation()
+            .resident_bytes_upper_bound
+            .checked_add(profile.materialization_resident_bytes_estimate)
+            .ok_or_else(|| invalid("transient full payload bound overflow"))
+            .and_then(|later| self.source.resident_with(later))?;
         super::super::source::require_bytes(required, self.workload.resident_ceiling()?)?;
         FluidTransientSolverResult::from_original(self, block.execute()?)
     }
