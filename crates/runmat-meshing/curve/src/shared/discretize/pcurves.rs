@@ -1,4 +1,4 @@
-use runmat_geometry_core::{ExactEdge, ParameterRange};
+use runmat_geometry_core::{ExactEdge, ExactPcurveEvaluator, ParameterRange};
 
 use crate::shared::{SharedCurveError, SharedCurveErrorKind, SharedCurveFaceUse};
 
@@ -26,7 +26,6 @@ pub(crate) fn face_uses_for_parameters(
     let vertex_uv = VertexUvContext {
         topology,
         pcurves,
-        surfaces: context.surfaces,
         control,
         geometry_absolute_error_m: options.geometry_absolute_error_m.canonical_value(),
     };
@@ -52,12 +51,16 @@ pub(crate) fn face_uses_for_parameters(
         let mut node_uv = parameters
             .iter()
             .map(|parameter| {
-                pcurves
-                    .point(&coedge.pcurve_evaluator_id, *parameter, control)
-                    .map(|uv| {
-                        uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value))
-                    })
-                    .map_err(|error| geometry_error(edge, error))
+                ExactPcurveEvaluator::point(
+                    pcurves,
+                    &coedge.pcurve_evaluator_id,
+                    *parameter,
+                    control,
+                )
+                .map(|uv| {
+                    uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value))
+                })
+                .map_err(|error| geometry_error(edge, error))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let face = topology

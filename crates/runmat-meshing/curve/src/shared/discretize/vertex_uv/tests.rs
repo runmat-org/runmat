@@ -168,15 +168,13 @@ fn context<'a>(topology: &'a ExactBRepTopology, pcurves: &'a Pcurves) -> VertexU
     VertexUvContext {
         topology,
         pcurves,
-        surfaces: pcurves,
         control: &Control,
         geometry_absolute_error_m: 1.0e-12,
     }
 }
 
 fn endpoint(pcurves: &Pcurves, coedge: &ExactCoedge) -> [f64; 2] {
-    pcurves
-        .point(&coedge.pcurve_evaluator_id, 0.0, &Control)
+    ExactPcurveEvaluator::point(pcurves, &coedge.pcurve_evaluator_id, 0.0, &Control)
         .unwrap()
         .each_ref()
         .map(|coordinate| coordinate.with_native_coordinate(|value, _frame| value))

@@ -8,6 +8,7 @@
 //! endpoint is admitted when its image on the face lies within the vertex tolerance of the
 //! vertex point, plus the numerical geometry error the request admits.
 use super::error::{edge_error, geometry_error};
+use super::types::ExactFacePcurveEvaluator;
 use crate::shared::{SharedCurveError, SharedCurveErrorKind};
 use runmat_geometry_core::{
     ExactBRepTopology, ExactCoedge, ExactEdge, ExactPcurveEvaluator, ExactSurfaceEvaluator,
@@ -16,8 +17,7 @@ use runmat_geometry_core::{
 
 pub(super) struct VertexUvContext<'a> {
     pub topology: &'a ExactBRepTopology,
-    pub pcurves: &'a dyn ExactPcurveEvaluator,
-    pub surfaces: &'a dyn ExactSurfaceEvaluator,
+    pub pcurves: &'a dyn ExactFacePcurveEvaluator,
     pub control: &'a dyn GeometryEvaluationControl,
     /// Numerical geometry error the request admits, in meters, added to the vertex tolerance.
     pub geometry_absolute_error_m: f64,
@@ -83,14 +83,14 @@ impl VertexUvContext<'_> {
         let range = pcurves
             .parameter_range(&representative.pcurve_evaluator_id)
             .map_err(|error| geometry_error(edge, error))?;
-        let uv = pcurves
-            .point(
-                &representative.pcurve_evaluator_id,
-                if at_start { range.start } else { range.end },
-                control,
-            )
-            .map(|uv| uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value)))
-            .map_err(|error| geometry_error(edge, error))?;
+        let uv = ExactPcurveEvaluator::point(
+            pcurves,
+            &representative.pcurve_evaluator_id,
+            if at_start { range.start } else { range.end },
+            control,
+        )
+        .map(|uv| uv.map(|coordinate| coordinate.with_native_coordinate(|value, _axis| value)))
+        .map_err(|error| geometry_error(edge, error))?;
         for endpoint in [original, uv] {
             self.require_within_vertex_tolerance(edge, &coedge.face_id, vertex, endpoint)?;
         }
@@ -185,8 +185,7 @@ impl VertexUvContext<'_> {
                     "coedge references an absent exact face",
                 )
             })?;
-        self.surfaces
-            .point(&face.surface_evaluator_id, uv, self.control)
+        ExactSurfaceEvaluator::point(self.pcurves, &face.surface_evaluator_id, uv, self.control)
             .map(|point| point.canonical_value())
             .map_err(|error| geometry_error(edge, error))
     }

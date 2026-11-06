@@ -51,8 +51,8 @@ impl<T> ExactFacePcurveEvaluator for T where T: ExactPcurveEvaluator + ExactSurf
 pub struct SharedCurveEvaluationContext<'a> {
     pub topology: &'a ExactBRepTopology,
     pub curves: &'a dyn ExactCurveEvaluator,
-    pub pcurves: &'a dyn ExactPcurveEvaluator,
-    pub surfaces: &'a dyn ExactSurfaceEvaluator,
+    /// Pcurves and the face surfaces they lie on, from one evaluator.
+    pub pcurves: &'a dyn ExactFacePcurveEvaluator,
     pub metric_field: &'a dyn CurveMetricField,
     pub control: &'a dyn GeometryEvaluationControl,
 }
@@ -69,7 +69,6 @@ impl<'a> SharedCurveEvaluationContext<'a> {
             topology,
             curves,
             pcurves,
-            surfaces: pcurves,
             metric_field,
             control,
         }
