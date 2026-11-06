@@ -203,7 +203,6 @@ impl PreparedFluidSource {
             geometry_scratch = geometry.scratch_bytes,
             selected_scratch,
             metadata,
-            properties = prepared.estimated_resident_bytes,
             cells = geometry.cell_count,
             "steady fluid source preparation terms"
         );
