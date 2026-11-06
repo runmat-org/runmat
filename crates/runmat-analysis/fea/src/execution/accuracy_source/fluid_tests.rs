@@ -40,16 +40,28 @@ fn original_fluid_closure_cannot_manufacture_mandatory_spatial_accuracy() {
     })
     .collect();
     w.model.sequence.steps[0].accuracy = plan.clone();
-    assert!(crate::planning::resource::preflight_fluid_accuracy_source(&w, &m, 1).is_err());
-    let source_bound = crate::planning::resource::preflight_fluid_accuracy_source(
+    // The requirement and the carried ceiling are one law: admission at exactly the
+    // derived workspace succeeds, one byte less refuses.
+    let source_bound = crate::planning::resource::fluid_accuracy_source_workspace(
         &w,
         &m,
         w.policy.resident_byte_budget(),
     )
     .unwrap();
     assert_eq!(
-        crate::planning::resource::preflight_fluid_accuracy_source(&w, &m, source_bound).unwrap(),
+        source_bound,
+        crate::planning::resource::derive_fluid_steady_resource_projection(&w, &m)
+            .unwrap()
+            .phase_resident_bytes_upper_bound
+            .0
+    );
+    assert_eq!(
+        crate::planning::resource::fluid_accuracy_source_workspace(&w, &m, source_bound).unwrap(),
         source_bound
+    );
+    assert!(
+        crate::planning::resource::fluid_accuracy_source_workspace(&w, &m, source_bound - 1)
+            .is_err()
     );
     let result = w.execute(&m).unwrap();
     let receipt = FluidNumericalReceiptArtifact::new(&w, &result, &m).unwrap();
