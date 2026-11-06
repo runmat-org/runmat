@@ -420,3 +420,27 @@ fn the_default_folder_names_the_revision() {
     s.folder = Some("out".into());
     assert_eq!(s.folder_or_default("fc"), "out");
 }
+
+#[test]
+fn the_fab_drawing_names_the_revision_and_its_dimensions_have_arrowheads() {
+    use runmat_circuit::fab::drawing::{fabrication_drawing, Mark};
+    let board = flight_controller().filled;
+    let texts = |rev: Option<&str>| -> Vec<String> {
+        fabrication_drawing(&board, rev).marks.iter().filter_map(|m| match m {
+            Mark::Text { text, .. } => Some(text.clone()),
+            _ => None,
+        }).collect()
+    };
+    let title = texts(Some("b")).into_iter().find(|t| t.contains("FABRICATION DRAWING")).unwrap();
+    assert!(title.ends_with("REV B"), "{title}");
+    assert!(!texts(None).iter().any(|t| t.contains("REV")));
+    // Each end of the two overall-size dimension lines: a V of two strokes whose tip is the
+    // line's end on the board's extent.
+    let bb = board.outline.bbox();
+    let tips: Vec<_> = fabrication_drawing(&board, None).marks.iter().filter_map(|m| match m {
+        Mark::Line { points, .. } if points.len() == 3 => Some(points[1]),
+        _ => None,
+    }).collect();
+    let on_extent = tips.iter().filter(|p| p.x == bb.min.x || p.x == bb.max.x || p.y == bb.min.y || p.y == bb.max.y).count();
+    assert!(on_extent >= 4, "{tips:?}");
+}

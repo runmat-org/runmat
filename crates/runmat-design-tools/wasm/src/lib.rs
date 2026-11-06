@@ -4,6 +4,8 @@
 //!
 //! - `design_tool(name, input, files)` → `{ data }` or `{ error: { code, message } }`, the shape
 //!   the server's `POST /v1/projects/{id}/design-tools/{tool}` route answers.
+//! - `design_tool_progress(name, input, files, onProgress)`: the same, calling `onProgress(step)`
+//!   as each stage of a fabrication export starts.
 //! - `dependencies(path, text)` → `["/p/daq.circuit.lock", …]`: the files `path` needs, which the
 //!   page reads (and what they need) into `files`.
 //! - `related(path, project)` → the project files an overview of `path` reads to find what uses
@@ -30,6 +32,24 @@ const TOOLS: &[&str] = &["design.overview", "design.check", "design.inspect", "d
 #[wasm_bindgen]
 pub fn design_tool(name: &str, input: &str, files: &str) -> String {
     answer(name, input, files).to_string()
+}
+
+#[wasm_bindgen]
+extern "C" {
+    /// A JavaScript function the page passes for progress.
+    #[derive(Clone)]
+    #[wasm_bindgen(js_name = Function)]
+    pub type ProgressCallback;
+    #[wasm_bindgen(method, js_name = call)]
+    fn call1(this: &ProgressCallback, context: &JsValue, step: &str);
+}
+
+/// [`design_tool`], calling `on_progress(step)` as each stage of a fabrication export starts
+/// (`board`, each output's id, `preflight`; see `runmat_circuit::fab::progress`).
+#[wasm_bindgen]
+pub fn design_tool_progress(name: &str, input: &str, files: &str, on_progress: &ProgressCallback) -> String {
+    let callback = on_progress.clone();
+    runmat_design_tools::progress::reporting(move |step| callback.call1(&JsValue::NULL, step), || answer(name, input, files)).to_string()
 }
 
 #[wasm_bindgen]

@@ -339,3 +339,31 @@ fn a_plan_answers_one_layer_drawn_as_its_gerber() {
     let bad = call("design.export", json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication", "fabrication": { "previewLayer": "F.Nowhere" } }), &files());
     assert!(format!("{:?}", bad.unwrap_err()).contains("the board has no layer F.Nowhere"));
 }
+
+#[test]
+fn an_export_reports_each_output_as_it_starts() {
+    use std::{cell::RefCell, rc::Rc};
+    let steps = Rc::new(RefCell::new(Vec::<String>::new()));
+    let into = steps.clone();
+    let fab = json!({ "gerber": true, "drill": true, "drillMap": false, "drawing": true, "pickPlace": true, "bom": true, "assemblyDrawing": false, "ipc2581": false, "odb": false, "ipc356": true, "preflight": true });
+    let out = runmat_design_tools::progress::reporting(move |s| into.borrow_mut().push(s.to_owned()), || export(json!({ "fabrication": fab })));
+    assert!(!names(&out).is_empty());
+    assert_eq!(*steps.borrow(), ["board", "gerber", "drill", "drawing", "pick_place", "bom", "ipc356", "preflight"]);
+}
+
+#[test]
+fn the_job_file_carries_the_date_it_is_given() {
+    let fab = json!({ "gerber": true, "drill": false, "drillMap": false, "drawing": false, "pickPlace": false, "bom": false, "assemblyDrawing": false, "ipc2581": false, "odb": false, "ipc356": false, "zip": false });
+    let job = |extra: Value| {
+        let mut f = fab.clone();
+        f.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let out = export(json!({ "fabrication": f }));
+        String::from_utf8(bytes(&out, "gerber/flight_controller.gbrjob")).unwrap()
+    };
+    let dated = job(json!({ "date": "2026-11-06T09:30:00Z" }));
+    assert!(dated.contains(r#""CreationDate": "2026-11-06T09:30:00Z""#), "{dated}");
+    // Without a date the job file has none, so the same board makes the same files.
+    assert!(!job(json!({})).contains("CreationDate"));
+    let bad = call("design.export", json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication", "fabrication": { "date": "yesterday" } }), &files());
+    assert!(format!("{:?}", bad.unwrap_err()).contains("isn't ISO 8601"));
+}

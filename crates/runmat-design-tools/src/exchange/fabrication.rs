@@ -160,6 +160,12 @@ pub fn fabrication(
     let saved = layout_text.and_then(|t| runmat_circuit::syntax::board::parse_board(&layout, t).board).and_then(|b| b.fabrication);
     let settings = opts.settings(saved.as_ref())?;
     let mut request: FabRequest = settings.request();
+    if let Some(date) = &opts.date {
+        if !is_iso_date(date) {
+            return Err(ToolError::invalid(format!("the date {date} isn't ISO 8601 (2026-11-06T09:30:00Z)")));
+        }
+        request.date = Some(date.clone());
+    }
     if opts.plan_only() {
         request = FabRequest { gerber: false, drill: false, drill_map: false, drawing: false, pick_place: false, bom: false, assembly_drawing: false, ipc2581: false, odb: false, ipc356: false, ..request };
     }
@@ -196,7 +202,7 @@ pub fn fabrication(
         result.push(binary_file(format!("drill/{}-drill-map.pdf", out.board), "application/pdf", &crate::formats::pdf::write(&sheet)));
     }
     if request.drawing {
-        let sheet = drawing_sheet(&fabrication_drawing(board));
+        let sheet = drawing_sheet(&fabrication_drawing(board, request.revision.as_deref()));
         result.push(binary_file(format!("drawing/{}-fab-drawing.pdf", out.board), "application/pdf", &crate::formats::pdf::write(&sheet)));
     }
     if request.assembly_drawing {
@@ -217,7 +223,13 @@ pub fn fabrication(
     }
     let rows = runmat_circuit::fab::plan::layer_rows(board);
     let chosen: Vec<String> = runmat_circuit::fab::plan::included(&rows, settings.layers.as_ref()).into_iter().map(|(f, _)| f).collect();
-    let preflight = opts.preflight.then(|| preflight(path, files)).transpose()?;
+    let preflight = opts
+        .preflight
+        .then(|| {
+            runmat_circuit::fab::progress::step("preflight");
+            preflight(path, files)
+        })
+        .transpose()?;
     let preview = match &opts.preview_layer {
         Some(name) => {
             let row = rows.iter().find(|r| &r.name == name).ok_or_else(|| ToolError::invalid(format!("the board has no layer {name}")))?;
@@ -253,6 +265,13 @@ pub fn fabrication(
         preview,
     };
     Ok((result, summary))
+}
+
+/// `YYYY-MM-DD`, optionally followed by `T` and a time.
+fn is_iso_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    let digits = |r: std::ops::Range<usize>| r.into_iter().all(|i| b.get(i).is_some_and(u8::is_ascii_digit));
+    digits(0..4) && b.get(4) == Some(&b'-') && digits(5..7) && b.get(7) == Some(&b'-') && digits(8..10) && (b.len() == 10 || (b.get(10) == Some(&b'T') && digits(11..13) && b.get(13) == Some(&b':')))
 }
 
 fn file_bytes(f: &ExportedFile) -> Vec<u8> {

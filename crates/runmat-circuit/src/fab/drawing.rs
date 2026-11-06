@@ -384,11 +384,23 @@ pub fn stackup_rows(board: &Board) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// An arrowhead at `tip` pointing along (`dx`, `dy`) (a unit axis direction): two strokes.
+fn arrowhead(d: &mut Drawing, tip: Point, dx: Coord, dy: Coord) {
+    let (len, half) = (mm(1.0), mm(0.35));
+    let back = Point::new(tip.x - dx * len, tip.y - dy * len);
+    let side = Point::new(-dy * half, dx * half);
+    d.line(vec![Point::new(back.x + side.x, back.y + side.y), tip, Point::new(back.x - side.x, back.y - side.y)], THIN);
+}
+
 /// The fabrication drawing: the drill map, the overall size, the layer and stackup table and
-/// the fabrication notes.
-pub fn fabrication_drawing(board: &Board) -> Drawing {
+/// the fabrication notes. The title names the board's `revision` when it has one.
+pub fn fabrication_drawing(board: &Board, revision: Option<&str>) -> Drawing {
+    let rev = revision.map(str::trim).filter(|r| !r.is_empty());
     let mut d = Drawing {
-        title: format!("{} fabrication drawing", board.name),
+        title: match rev {
+            Some(r) => format!("{} fabrication drawing, revision {r}", board.name),
+            None => format!("{} fabrication drawing", board.name),
+        },
         marks: Vec::new(),
     };
     let rows = drill_table(board);
@@ -398,6 +410,8 @@ pub fn fabrication_drawing(board: &Board) -> Drawing {
     // Overall size: a dimension line under the board and one to its left.
     let y = bb.min.y - mm(5.0);
     d.line(vec![Point::new(bb.min.x, y), Point::new(bb.max.x, y)], THIN);
+    arrowhead(&mut d, Point::new(bb.min.x, y), -1, 0);
+    arrowhead(&mut d, Point::new(bb.max.x, y), 1, 0);
     for x in [bb.min.x, bb.max.x] {
         d.line(
             vec![
@@ -415,6 +429,8 @@ pub fn fabrication_drawing(board: &Board) -> Drawing {
     );
     let x = bb.min.x - mm(5.0);
     d.line(vec![Point::new(x, bb.min.y), Point::new(x, bb.max.y)], THIN);
+    arrowhead(&mut d, Point::new(x, bb.min.y), 0, -1);
+    arrowhead(&mut d, Point::new(x, bb.max.y), 0, 1);
     for yy in [bb.min.y, bb.max.y] {
         d.line(
             vec![
@@ -439,7 +455,10 @@ pub fn fabrication_drawing(board: &Board) -> Drawing {
     d.text(
         Point::new(left, top + mm(6.0)),
         mm(2.0),
-        format!("{} FABRICATION DRAWING", board.name.to_uppercase()),
+        match rev {
+            Some(r) => format!("{} FABRICATION DRAWING  REV {}", board.name.to_uppercase(), r.to_uppercase()),
+            None => format!("{} FABRICATION DRAWING", board.name.to_uppercase()),
+        },
     );
     top = drill_rows(&mut d, board, &rows, Point::new(left, top)) - mm(6.0);
     let stack = stackup_rows(board);

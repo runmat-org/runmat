@@ -43,6 +43,8 @@ pub mod scene;
 pub mod simulate;
 
 pub use locate::{Locator, Range};
+/// Progress while a board's fabrication set is made ([`runmat_circuit::fab::progress`]).
+pub use runmat_circuit::fab::progress;
 
 /// Workspace path → file text.
 pub type Files = BTreeMap<String, String>;
@@ -229,7 +231,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         definition::<exchange::ImportInput, edit::StagedChange>(
             "design.import",
             "Import into design",
-            "Use this to bring a KiCad project (.kicad_sch, .kicad_pcb) or a STEP file into the project as RunMat sources. Returns a staged change: the new files, their diagnostics, and the project calls that keep it.",
+            "Use this to bring a KiCad project (.kicad_sch, .kicad_pcb), an EAGLE XML schematic or board (.sch, .brd; format `eagle`) or a STEP file into the project as RunMat sources. Returns a staged change: the new files, their diagnostics, the project calls that keep it and, for EAGLE, a report of what was carried over, approximated or left out.",
         ),
         definition::<simulate::SimulateInput, simulate::SimulateOutput>(
             "design.simulate",

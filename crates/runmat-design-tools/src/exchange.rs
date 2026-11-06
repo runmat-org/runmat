@@ -127,6 +127,10 @@ pub struct FabricationOptions {
     /// Answer the board's layout with these settings saved into it, for the caller to write.
     #[serde(default)]
     pub remember: bool,
+    /// The Gerber job file's creation date, ISO 8601 (`2026-11-06T09:30:00Z`). Without one the
+    /// job file has no date, so the same board makes the same files.
+    #[serde(default)]
+    pub date: Option<String>,
 }
 
 impl FabricationOptions {
@@ -502,6 +506,8 @@ fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, Tool
 #[serde(rename_all = "snake_case")]
 pub enum ImportFormat {
     Kicad,
+    /// An EAGLE XML schematic (`.sch`) and/or board (`.brd`), version 6 or later.
+    Eagle,
     Step,
 }
 
@@ -522,8 +528,8 @@ pub struct ImportFile {
 pub struct ImportInput {
     pub format: ImportFormat,
     pub files: Vec<ImportFile>,
-    /// KiCad: the target stem (`boards/io` writes `boards/io.circuit`, `.circuit.layout` and
-    /// `.circuit.lock`). STEP: the `.part` to write (`parts/housing.part`); the STEP file goes
+    /// KiCad and EAGLE: the target stem (`boards/io` writes `boards/io.circuit`, `.circuit.layout` and,
+    /// from KiCad, `.circuit.lock`; EAGLE packages go in `boards/io-footprints/`). STEP: the `.part` to write (`parts/housing.part`); the STEP file goes
     /// beside it.
     pub target: String,
     /// KiCad: the root schematic's file name (default: the schematic no other sheet names).
@@ -576,6 +582,19 @@ pub fn import(input: &ImportInput, files: &Files) -> Result<StagedChange, ToolEr
             );
             let mut change = stage(summary, read.files.into_iter().collect(), files, &primary);
             change.notes.extend(read.warnings);
+            Ok(change)
+        }
+        ImportFormat::Eagle => {
+            let mut eagle = BTreeMap::new();
+            for f in &input.files {
+                eagle.insert(f.name.clone(), decode(f)?);
+            }
+            let stem = target.strip_suffix(".circuit.layout").or_else(|| target.strip_suffix(".circuit")).unwrap_or(&target).to_owned();
+            let read = runmat_circuit::import::eagle::import(&eagle, &stem).map_err(ToolError::invalid)?;
+            let primary = read.files.keys().find(|k| k.ends_with(".circuit")).or_else(|| read.files.keys().find(|k| k.ends_with(".circuit.layout"))).cloned().unwrap_or_default();
+            let summary = format!("Import EAGLE project as {}", read.files.keys().filter(|k| !k.ends_with(".kicad_mod")).cloned().collect::<Vec<_>>().join(", "));
+            let mut change = stage(summary, read.files.into_iter().collect(), files, &primary);
+            change.notes.extend(read.report.lines());
             Ok(change)
         }
         ImportFormat::Step => {

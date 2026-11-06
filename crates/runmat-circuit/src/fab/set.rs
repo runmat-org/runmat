@@ -146,7 +146,7 @@ pub fn fabrication(
         step("drawing");
         out.insert(
             format!("drawing/{name}-fab-drawing.gbr"),
-            drawing::fabrication_drawing(board).gerber_in(board, "FabricationDrawing", req.gerber_format, rev),
+            drawing::fabrication_drawing(board, rev).gerber_in(board, "FabricationDrawing", req.gerber_format, rev),
         );
     }
     if req.assembly_drawing {
