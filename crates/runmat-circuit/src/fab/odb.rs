@@ -10,6 +10,9 @@
 //!   Gerber file of that layer ([`super::image`]): flashed pads as `P` records on standard
 //!   symbols (`r`, `rect`, `oval`, sizes in microns), strokes as `L`, regions as `S` surfaces.
 //!   Drill layers flash the finished hole size; slots are `L` records.
+//!   Text (legend and copper) is carried only as those stroke-font `L` records, the same
+//!   strokes the Gerber files hold and board houses fabricate from. No `T` records or
+//!   `fonts/standard` are written, so no reader draws a text twice.
 //! - `steps/pcb/layers/comp_+_top|comp_+_bot/components`: `CMP` per fitted footprint
 //!   (position, rotation clockwise as the format counts it, mirror for the bottom), with its
 //!   value and part number as `PRP` and a `TOP` record per pad.

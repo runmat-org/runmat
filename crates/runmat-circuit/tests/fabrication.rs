@@ -444,3 +444,44 @@ fn the_fab_drawing_names_the_revision_and_its_dimensions_have_arrowheads() {
     let on_extent = tips.iter().filter(|p| p.x == bb.min.x || p.x == bb.max.x || p.y == bb.min.y || p.y == bb.max.y).count();
     assert!(on_extent >= 4, "{tips:?}");
 }
+
+#[test]
+fn odb_legend_carries_silk_text_once_as_the_gerber_strokes() {
+    use runmat_circuit::fab::{gerber, odb::odb, GerberLayer};
+    use runmat_circuit::geom::{mm, Point};
+    use runmat_circuit::layout::{BoardText, ItemId, Layer, Side};
+    let plain = flight_controller().filled;
+    let mut lettered = plain.clone();
+    let id = ItemId(u64::MAX);
+    lettered.texts.insert(
+        id,
+        BoardText {
+            id,
+            layer: Layer::Silk(Side::Top),
+            at: Point::new(mm(2.0), mm(2.0)),
+            text: "RUNMAT FC".into(),
+            size: mm(1.0),
+            thickness: 0,
+            angle: 0.0,
+            mirrored: false,
+        },
+    );
+    // Strokes drawn outside regions: D01 in the Gerber, L records in ODB++.
+    let gerber_draws = |b| {
+        let mut region = false;
+        gerber(b, GerberLayer::Legend(Side::Top))
+            .lines()
+            .filter(|l| {
+                region = (region || l.starts_with("G36")) && !l.starts_with("G37");
+                !region && l.ends_with("D01*")
+            })
+            .count()
+    };
+    let odb_legend = |b| odb(b, &BTreeMap::new())["flight_controller/steps/pcb/layers/top_legend/features"].clone();
+    let lines = |t: &str| t.lines().filter(|l| l.starts_with("L ")).count();
+    let added = gerber_draws(&lettered) - gerber_draws(&plain);
+    assert!(added > 0);
+    let legend = odb_legend(&lettered);
+    assert_eq!(lines(&legend) - lines(&odb_legend(&plain)), added);
+    assert!(!legend.lines().any(|l| l.starts_with("T ")), "text drawn twice");
+}
