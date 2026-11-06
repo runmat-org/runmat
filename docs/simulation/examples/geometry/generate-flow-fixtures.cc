@@ -82,6 +82,12 @@ int main(int argc, char** argv) {
              {"Inlet", "Outlet", "Lower wall", "Upper wall", "Back", "Front"},
              dir + "plane-channel.step"))
     return 3;
+  // Long plane channel: 3 m long (L/h = 30), same section. The uniform-inlet entrance adds about
+  // 0.8 h of equivalent length to the developed drop, under 3% of the drop at this length.
+  if (!write(BRepPrimAPI_MakeBox(3.0, 0.1, 0.02).Shape(), "Channel",
+             {"Inlet", "Outlet", "Lower wall", "Upper wall", "Back", "Front"},
+             dir + "plane-channel-long.step"))
+    return 6;
   // Round pipe: 0.05 m radius, 0.5 m long along +x.
   const gp_Ax2 axis(gp_Pnt(0, 0, 0), gp_Dir(1, 0, 0));
   if (!write(BRepPrimAPI_MakeCylinder(axis, 0.05, 0.5).Shape(), "Pipe", {"Wall", "Outlet", "Inlet"},
