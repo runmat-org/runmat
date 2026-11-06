@@ -202,9 +202,11 @@ fn part_edit(
             {
                 return result;
             }
-            let Some((stem, kind)) =
-                crate::features::feature_kind(command, &request.values, &picks)?
-            else {
+            let lowered = match crate::direct_edits::direct_kind(command, &request.values, &picks)? {
+                Some(kind) => Some(kind),
+                None => crate::features::feature_kind(command, &request.values, &picks)?,
+            };
+            let Some((stem, kind)) = lowered else {
                 return Err(model(format!(
                     "`{command}` edits parts through the source editor in this build"
                 )));
