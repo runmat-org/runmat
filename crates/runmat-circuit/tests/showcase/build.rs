@@ -275,6 +275,23 @@ fn route(b: &mut Build) {
         })
         .map(|f| format!("component:{}", f.reference))
         .collect();
+    // USB-C VBUS (J1.2 and J1.11) sits between GND and a CC pin on a 0.5 mm pitch, where the
+    // power class's 0.2 mm clearance leaves no room for a dog-bone via: each leaves along its
+    // pad at 0.25 mm and turns outward under the pad row to a via into the +5V plane, clear of
+    // the CC pull-downs (R102, R103), as a designer routes it, before the CC lines take the space
+    // below the pads.
+    for (pad, out) in [([69.75, 52.75], 68.3), ([74.25, 52.75], 75.7)] {
+        b.run(
+            "board.place-via",
+            json!({ "points": [[out, 51.75]], "net": "net:+5V", "size": "0.2/0.45" }),
+            &[],
+        );
+        b.run(
+            "board.route",
+            json!({ "net": "net:+5V", "points": [pad, [pad[0], 51.75], [out, 51.75]], "width": 0.25, "layer": "Top", "mode": "stop", "corner": "any" }),
+            &[],
+        );
+    }
     b.run("board.fanout", json!({ "component": smd }), &[]);
     b.run("board.autoroute", json!({}), &[]);
 }

@@ -142,6 +142,14 @@ impl<'a> Search<'a> {
         1u64 << self.q.layers[l as usize]
     }
 
+    /// Whether the straight stub from node `n` to the anchor `p`, at the width the route draws
+    /// there, keeps the clearance to other nets' copper on the node's layer.
+    pub fn stub_free(&self, n: Node, p: Point) -> bool {
+        let at = point(&self.q, n);
+        at == p
+            || self.space.free(Some(self.q.net), self.mask(n.2), &Prim::segment(at, p, self.q.width_at(p)), 0)
+    }
+
     /// Whether net copper covers the node (sources and targets).
     pub fn own(&self, n: Node) -> bool {
         self.space

@@ -220,6 +220,10 @@ layout daq {
     track "/ch[2]/FB" = { layer = F.Cu, width = 0.2, from = [20.5725, 10.55], to = [19.0725, 10.55] }
     track "/ch[2]/FB" = { layer = F.Cu, width = 0.2, from = [19.0725, 10.55], to = [17.3225, 12.3] }
     track "/ch[2]/FB" = { layer = F.Cu, width = 0.2, from = [17.3225, 12.3], to = [17.05, 12.315] }
+    track "+5V" = { layer = F.Cu, width = 0.25, from = [69.75, 52.75], to = [69.75, 51.75] }
+    track "+5V" = { layer = F.Cu, width = 0.25, from = [69.75, 51.75], to = [68.3, 51.75] }
+    track "+5V" = { layer = F.Cu, width = 0.25, from = [74.25, 52.75], to = [74.25, 51.75] }
+    track "+5V" = { layer = F.Cu, width = 0.25, from = [74.25, 51.75], to = [75.7, 51.75] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [20.5225, 48.3], to = [19.94, 48.3] }
     track GND = { layer = F.Cu, width = 0.4, from = [21.2775, 48.3], to = [21.2775, 48.91] }
     track "+3V3" = { layer = F.Cu, width = 0.4, from = [33.2225, 51.9], to = [32.64, 51.9] }
@@ -274,11 +278,11 @@ layout daq {
     track "+1V2" = { layer = F.Cu, width = 0.4, from = [65.6, 40.175], to = [65.6, 39.22] }
     track GND = { layer = F.Cu, width = 0.4, from = [65.6, 41.825], to = [65.6, 42.78] }
     track "+3V3" = { layer = F.Cu, width = 0.4, from = [66.8, 22.6225], to = [66.8, 22.04] }
-    track GND = { layer = F.Cu, width = 0.4, from = [66.8, 23.3775], to = [66.8, 23.96] }
+    track GND = { layer = F.Cu, width = 0.4, from = [66.8, 23.3775], to = [67.41, 23.3775] }
     track "+3V3" = { layer = F.Cu, width = 0.4, from = [66.8, 24.6225], to = [67.41, 24.6225] }
-    track GND = { layer = F.Cu, width = 0.4, from = [66.8, 25.3775], to = [66.8, 25.96] }
+    track GND = { layer = F.Cu, width = 0.4, from = [66.8, 25.3775], to = [67.41, 25.3775] }
     track "+3V3" = { layer = F.Cu, width = 0.4, from = [66.8, 26.6225], to = [67.41, 26.6225] }
-    track GND = { layer = F.Cu, width = 0.4, from = [66.8, 27.3775], to = [66.8, 27.96] }
+    track GND = { layer = F.Cu, width = 0.4, from = [66.8, 27.3775], to = [67.41, 27.3775] }
     track "+3V3" = { layer = F.Cu, width = 0.4, from = [66.8, 28.6225], to = [67.41, 28.6225] }
     track GND = { layer = F.Cu, width = 0.4, from = [66.8, 29.3775], to = [66.8, 29.96] }
     track "+3V3" = { layer = F.Cu, width = 0.4, from = [69.4, 25.175], to = [69.4, 24.22] }
@@ -289,8 +293,8 @@ layout daq {
     track GND = { layer = F.Cu, width = 0.4, from = [15.2225, 28.6], to = [14.64, 28.6] }
     track GND = { layer = F.Cu, width = 0.4, from = [15.2225, 10.6], to = [14.64, 10.6] }
     track "+3V3" = { layer = F.Cu, width = 0.4, from = [83.6225, 27.2], to = [83.04, 27.2] }
-    track GND = { layer = F.Cu, width = 0.4, from = [69.2, 50.7775], to = [69.2, 51.36] }
-    track GND = { layer = F.Cu, width = 0.4, from = [74.8, 50.7775], to = [74.8, 51.36] }
+    track GND = { layer = F.Cu, width = 0.4, from = [69.2, 50.7775], to = [69.81, 50.7775] }
+    track GND = { layer = F.Cu, width = 0.4, from = [74.8, 50.7775], to = [75.41, 50.7775] }
     track "+3V3" = { layer = F.Cu, width = 0.4, from = [80.3225, 18.3], to = [80.3225, 18.91] }
     track GND = { layer = F.Cu, width = 0.4, from = [79.2775, 18.3], to = [79.2775, 18.91] }
     track "+1V2" = { layer = F.Cu, width = 0.4, from = [78.3225, 44.3], to = [78.3225, 44.91] }
@@ -352,35 +356,22 @@ layout daq {
     track "+1V2" = { layer = F.Cu, width = 0.4, from = [56.5, 29.5], to = [57, 29] }
     track GND = { layer = F.Cu, width = 0.4, from = [56.5, 30.5], to = [57, 31] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [74.5975, 20.75], to = [73.84, 20.75] }
-    track GND = { layer = F.Cu, width = 0.19, from = [77.4025, 19.25], to = [76.65, 19.35] }
+    track GND = { layer = F.Cu, width = 0.4, from = [77.4025, 19.25], to = [78.16, 19.25] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [74.5975, 20.25], to = [73.84, 20.25] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [74.5975, 19.75], to = [73.84, 19.75] }
     track GND = { layer = F.Cu, width = 0.19, from = [77.4025, 19.75], to = [76.65, 19.75] }
     track "+3V3" = { layer = F.Cu, width = 0.4, from = [77.4025, 20.25], to = [78.16, 20.25] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [72.5975, 46.75], to = [71.84, 46.75] }
-    track GND = { layer = F.Cu, width = 0.19, from = [75.4025, 45.25], to = [74.65, 45.35] }
+    track GND = { layer = F.Cu, width = 0.4, from = [75.4025, 45.25], to = [76.16, 45.25] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [72.5975, 46.25], to = [71.84, 46.25] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [72.5975, 45.75], to = [71.84, 45.75] }
     track GND = { layer = F.Cu, width = 0.19, from = [75.4025, 45.75], to = [74.65, 45.75] }
     track "+1V2" = { layer = F.Cu, width = 0.4, from = [75.4025, 46.25], to = [76.16, 46.25] }
     track GND = { layer = F.Cu, width = 0.4, from = [40.135, 46.095], to = [38.72, 46.095] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [40.135, 48.635], to = [38.72, 48.635] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [31.1, 50], to = [32.205, 50] }
-    track GND = { layer = F.Cu, width = 0.4, from = [26.9, 48.5], to = [25.795, 48.5] }
-    track GND = { layer = F.Cu, width = 0.4, from = [26.9, 49], to = [26.9, 48.55] }
-    track "+3V3" = { layer = F.Cu, width = 0.4, from = [31.1, 49], to = [32.205, 49] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [18.95, 48.315], to = [20.41, 48.315] }
     track GND = { layer = F.Cu, width = 0.4, from = [18, 50.085], to = [18, 51.2] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [31.1, 32], to = [32.205, 32] }
-    track GND = { layer = F.Cu, width = 0.4, from = [26.9, 30.5], to = [25.795, 30.5] }
-    track GND = { layer = F.Cu, width = 0.4, from = [26.9, 31], to = [26.9, 30.55] }
-    track "+3V3" = { layer = F.Cu, width = 0.4, from = [31.1, 31], to = [32.205, 31] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [18.95, 30.315], to = [20.41, 30.315] }
     track GND = { layer = F.Cu, width = 0.4, from = [18, 32.085], to = [18, 33.2] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [31.1, 14], to = [32.205, 14] }
-    track GND = { layer = F.Cu, width = 0.4, from = [26.9, 12.5], to = [25.795, 12.5] }
-    track GND = { layer = F.Cu, width = 0.4, from = [26.9, 13], to = [26.9, 12.55] }
-    track "+3V3" = { layer = F.Cu, width = 0.4, from = [31.1, 13], to = [32.205, 13] }
     track "+5V" = { layer = F.Cu, width = 0.4, from = [18.95, 12.315], to = [20.41, 12.315] }
     track GND = { layer = F.Cu, width = 0.4, from = [18, 14.085], to = [18, 15.2] }
     track "+3V3" = { layer = F.Cu, width = 0.25, from = [31.1, 13], to = [31.1, 13.5] }
@@ -390,6 +381,12 @@ layout daq {
     track SW2 = { layer = F.Cu, width = 0.19, from = [73.25, 44.5975], to = [73.75, 44.5975] }
     track SW1 = { layer = F.Cu, width = 0.19, from = [74.5975, 19.25], to = [75.25, 18.5975] }
     track SW2 = { layer = F.Cu, width = 0.19, from = [72.5975, 45.25], to = [73.25, 44.5975] }
+    track "+5V" = { layer = F.Cu, width = 0.25, from = [31.1, 14], to = [31.85, 14.1] }
+    track "+5V" = { layer = F.Cu, width = 0.25, from = [31.85, 14.1], to = [32.64, 14.4] }
+    track "+5V" = { layer = F.Cu, width = 0.25, from = [31.1, 32], to = [31.85, 32.1] }
+    track "+5V" = { layer = F.Cu, width = 0.25, from = [31.85, 32.1], to = [32.64, 32.4] }
+    track "+5V" = { layer = F.Cu, width = 0.25, from = [31.1, 50], to = [31.85, 50.1] }
+    track "+5V" = { layer = F.Cu, width = 0.25, from = [31.85, 50.1], to = [32.64, 50.4] }
     track VREF = { layer = F.Cu, width = 0.25, from = [26.4, 15.775], to = [26.9, 15.175] }
     track VREF = { layer = F.Cu, width = 0.25, from = [26.9, 15.175], to = [26.9, 14] }
     track VREF = { layer = F.Cu, width = 0.25, from = [26.4, 33.775], to = [26.9, 33.175] }
@@ -409,92 +406,109 @@ layout daq {
     track SS2 = { layer = F.Cu, width = 0.19, from = [76.1225, 47.1], to = [75.8225, 46.8] }
     track SS2 = { layer = F.Cu, width = 0.19, from = [75.8225, 46.8], to = [75.4025, 46.75] }
     track FB1 = { layer = F.Cu, width = 0.19, from = [78.5225, 18.3], to = [78.2725, 18.15] }
-    track FB1 = { layer = F.Cu, width = 0.19, from = [78.2725, 18.15], to = [77.9725, 17.85] }
-    track FB1 = { layer = F.Cu, width = 0.19, from = [77.9725, 17.85], to = [77.8225, 17.85] }
-    track FB1 = { layer = F.Cu, width = 0.2, from = [77.8225, 17.85], to = [76.5725, 17.85] }
-    track FB1 = { layer = F.Cu, width = 0.19, from = [76.5725, 17.85], to = [76.2225, 18.2] }
-    track FB1 = { layer = F.Cu, width = 0.19, from = [76.2225, 18.2], to = [76.25, 18.5975] }
+    track FB1 = { layer = F.Cu, width = 0.19, from = [78.2725, 18.15], to = [77.9225, 17.8] }
+    track FB1 = { layer = F.Cu, width = 0.19, from = [77.9225, 17.8], to = [77.8725, 17.8] }
+    track FB1 = { layer = F.Cu, width = 0.2, from = [77.8725, 17.8], to = [76.5725, 17.8] }
+    track FB1 = { layer = F.Cu, width = 0.19, from = [76.5725, 17.8], to = [76.2725, 18.1] }
+    track FB1 = { layer = F.Cu, width = 0.19, from = [76.2725, 18.1], to = [76.2725, 18.2] }
+    track FB1 = { layer = F.Cu, width = 0.19, from = [76.2725, 18.2], to = [76.25, 18.5975] }
     track FB2 = { layer = F.Cu, width = 0.19, from = [76.5225, 44.3], to = [76.2725, 44.15] }
-    track FB2 = { layer = F.Cu, width = 0.19, from = [76.2725, 44.15], to = [75.9725, 43.85] }
-    track FB2 = { layer = F.Cu, width = 0.19, from = [75.9725, 43.85], to = [75.8225, 43.85] }
-    track FB2 = { layer = F.Cu, width = 0.2, from = [75.8225, 43.85], to = [74.5725, 43.85] }
-    track FB2 = { layer = F.Cu, width = 0.19, from = [74.5725, 43.85], to = [74.2225, 44.2] }
-    track FB2 = { layer = F.Cu, width = 0.19, from = [74.2225, 44.2], to = [74.25, 44.5975] }
+    track FB2 = { layer = F.Cu, width = 0.19, from = [76.2725, 44.15], to = [75.9225, 43.8] }
+    track FB2 = { layer = F.Cu, width = 0.19, from = [75.9225, 43.8], to = [75.8725, 43.8] }
+    track FB2 = { layer = F.Cu, width = 0.2, from = [75.8725, 43.8], to = [74.5725, 43.8] }
+    track FB2 = { layer = F.Cu, width = 0.19, from = [74.5725, 43.8], to = [74.2725, 44.1] }
+    track FB2 = { layer = F.Cu, width = 0.19, from = [74.2725, 44.1], to = [74.2725, 44.2] }
+    track FB2 = { layer = F.Cu, width = 0.19, from = [74.2725, 44.2], to = [74.25, 44.5975] }
     track LED = { layer = F.Cu, width = 0.2, from = [83.25, 25], to = [83.6, 25.45] }
     track LED = { layer = F.Cu, width = 0.2, from = [83.6, 25.45], to = [84.35, 26.2] }
     track LED = { layer = F.Cu, width = 0.2, from = [84.35, 26.2], to = [84.35, 26.95] }
     track LED = { layer = F.Cu, width = 0.2, from = [84.35, 26.95], to = [84.3775, 27.2] }
-    track FB1 = { layer = F.Cu, width = 0.2, from = [81.0775, 18.3], to = [80.8775, 18.55] }
-    track FB1 = { layer = F.Cu, width = 0.2, from = [80.8775, 18.55], to = [80.8775, 19.1] }
-    track FB1 = { layer = F.Cu, width = 0.2, from = [80.8775, 19.1], to = [80.5275, 19.45] }
-    track FB1 = { layer = F.Cu, width = 0.2, from = [80.5275, 19.45], to = [79.0775, 19.45] }
-    track FB1 = { layer = F.Cu, width = 0.2, from = [79.0775, 19.45], to = [78.5775, 18.95] }
-    track FB1 = { layer = F.Cu, width = 0.2, from = [78.5775, 18.95], to = [78.5775, 18.55] }
-    track FB1 = { layer = F.Cu, width = 0.2, from = [78.5775, 18.55], to = [78.5225, 18.3] }
-    track FB2 = { layer = F.Cu, width = 0.2, from = [79.0775, 44.3], to = [78.8775, 44.55] }
-    track FB2 = { layer = F.Cu, width = 0.2, from = [78.8775, 44.55], to = [78.8775, 45.1] }
-    track FB2 = { layer = F.Cu, width = 0.2, from = [78.8775, 45.1], to = [78.5275, 45.45] }
-    track FB2 = { layer = F.Cu, width = 0.2, from = [78.5275, 45.45], to = [77.0775, 45.45] }
-    track FB2 = { layer = F.Cu, width = 0.2, from = [77.0775, 45.45], to = [76.5775, 44.95] }
-    track FB2 = { layer = F.Cu, width = 0.2, from = [76.5775, 44.95], to = [76.5775, 44.55] }
-    track FB2 = { layer = F.Cu, width = 0.2, from = [76.5775, 44.55], to = [76.5225, 44.3] }
-    track CC1 = { layer = F.Cu, width = 0.2, from = [70.25, 52.75], to = [70.2, 52.25] }
-    track CC1 = { layer = F.Cu, width = 0.2, from = [70.2, 52.25], to = [70.2, 50.85] }
-    track CC1 = { layer = F.Cu, width = 0.2, from = [70.2, 50.85], to = [69.45, 50.1] }
-    track CC1 = { layer = F.Cu, width = 0.2, from = [69.45, 50.1], to = [69.2, 50.0225] }
+    track FB1 = { layer = F.Cu, width = 0.2, from = [81.0775, 18.3], to = [80.9275, 18.55] }
+    track FB1 = { layer = F.Cu, width = 0.2, from = [80.9275, 18.55], to = [80.9275, 19.15] }
+    track FB1 = { layer = F.Cu, width = 0.2, from = [80.9275, 19.15], to = [80.5775, 19.5] }
+    track FB1 = { layer = F.Cu, width = 0.2, from = [80.5775, 19.5], to = [79.0275, 19.5] }
+    track FB1 = { layer = F.Cu, width = 0.2, from = [79.0275, 19.5], to = [78.7275, 19.2] }
+    track FB1 = { layer = F.Cu, width = 0.2, from = [78.7275, 19.2], to = [78.7275, 19.05] }
+    track FB1 = { layer = F.Cu, width = 0.2, from = [78.7275, 19.05], to = [78.6775, 19] }
+    track FB1 = { layer = F.Cu, width = 0.2, from = [78.6775, 19], to = [78.6775, 18.55] }
+    track FB1 = { layer = F.Cu, width = 0.2, from = [78.6775, 18.55], to = [78.5225, 18.3] }
+    track FB2 = { layer = F.Cu, width = 0.2, from = [79.0775, 44.3], to = [78.9275, 44.55] }
+    track FB2 = { layer = F.Cu, width = 0.2, from = [78.9275, 44.55], to = [78.9275, 45.15] }
+    track FB2 = { layer = F.Cu, width = 0.2, from = [78.9275, 45.15], to = [78.5775, 45.5] }
+    track FB2 = { layer = F.Cu, width = 0.2, from = [78.5775, 45.5], to = [77.0275, 45.5] }
+    track FB2 = { layer = F.Cu, width = 0.2, from = [77.0275, 45.5], to = [76.7275, 45.2] }
+    track FB2 = { layer = F.Cu, width = 0.2, from = [76.7275, 45.2], to = [76.7275, 45.05] }
+    track FB2 = { layer = F.Cu, width = 0.2, from = [76.7275, 45.05], to = [76.6775, 45] }
+    track FB2 = { layer = F.Cu, width = 0.2, from = [76.6775, 45], to = [76.6775, 44.55] }
+    track FB2 = { layer = F.Cu, width = 0.2, from = [76.6775, 44.55], to = [76.5225, 44.3] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [31.1, 13.5], to = [30.35, 13.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [30.35, 13.4], to = [30.3, 13.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [30.3, 13.4], to = [30.2, 13.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [30.2, 13.4], to = [29.85, 13.75] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [29.85, 13.75], to = [29.85, 14.25] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [29.85, 14.25], to = [31.5, 15.9] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [31.5, 15.9], to = [31.8, 15.9] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [31.8, 15.9], to = [32.64, 15.9] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [31.1, 31.5], to = [30.35, 31.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [30.35, 31.4], to = [30.3, 31.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [30.3, 31.4], to = [30.2, 31.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [30.2, 31.4], to = [29.85, 31.75] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [29.85, 31.75], to = [29.85, 32.25] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [29.85, 32.25], to = [31.5, 33.9] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [31.5, 33.9], to = [31.8, 33.9] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [31.8, 33.9], to = [32.64, 33.9] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [31.1, 49.5], to = [30.35, 49.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [30.35, 49.4], to = [30.3, 49.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [30.3, 49.4], to = [30.2, 49.4] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [30.2, 49.4], to = [29.85, 49.75] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [29.85, 49.75], to = [29.85, 50.25] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [29.85, 50.25], to = [31.5, 51.9] }
+    track "+3V3" = { layer = F.Cu, width = 0.4, from = [31.5, 51.9], to = [31.8, 51.9] }
+    track "+3V3" = { layer = F.Cu, width = 0.25, from = [31.8, 51.9], to = [32.64, 51.9] }
+    track CC1 = { layer = F.Cu, width = 0.2, from = [70.25, 52.75], to = [70.25, 51.6] }
+    track CC1 = { layer = F.Cu, width = 0.2, from = [70.25, 51.6], to = [70.4, 51.45] }
+    track CC1 = { layer = F.Cu, width = 0.2, from = [70.4, 51.45], to = [70.4, 50.55] }
+    track CC1 = { layer = F.Cu, width = 0.2, from = [70.4, 50.55], to = [70, 50.15] }
+    track CC1 = { layer = F.Cu, width = 0.2, from = [70, 50.15], to = [69.45, 50.15] }
+    track CC1 = { layer = F.Cu, width = 0.2, from = [69.45, 50.15], to = [69.2, 50.0225] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [37.6, 47.175], to = [38.3, 47.575] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [38.3, 47.575], to = [39.15, 48.425] }
+    track "+5V" = { layer = F.Cu, width = 0.4, from = [39.15, 48.425], to = [40.135, 48.635] }
     track VREF = { layer = F.Cu, width = 0.4, from = [47.8, 46.775], to = [47.1, 47.175] }
     track VREF = { layer = F.Cu, width = 0.4, from = [47.1, 47.175], to = [45.9, 47.175] }
     track VREF = { layer = F.Cu, width = 0.4, from = [45.9, 47.175], to = [44.865, 47.365] }
-    track SW1 = { layer = F.Cu, width = 0.2, from = [74.575, 15.6], to = [75.175, 16.75] }
+    track SW1 = { layer = F.Cu, width = 0.19, from = [74.575, 15.6], to = [75.175, 16.75] }
     track SW1 = { layer = F.Cu, width = 0.2, from = [75.175, 16.75], to = [75.175, 17.8] }
     track SW1 = { layer = F.Cu, width = 0.19, from = [75.175, 17.8], to = [75.175, 18.2] }
     track SW1 = { layer = F.Cu, width = 0.19, from = [75.175, 18.2], to = [75.25, 18.5975] }
-    track SW2 = { layer = F.Cu, width = 0.2, from = [72.575, 41.6], to = [73.175, 42.75] }
+    track SW2 = { layer = F.Cu, width = 0.19, from = [72.575, 41.6], to = [73.175, 42.75] }
     track SW2 = { layer = F.Cu, width = 0.2, from = [73.175, 42.75], to = [73.175, 43.8] }
     track SW2 = { layer = F.Cu, width = 0.19, from = [73.175, 43.8], to = [73.175, 44.2] }
     track SW2 = { layer = F.Cu, width = 0.19, from = [73.175, 44.2], to = [73.25, 44.5975] }
-    track CC2 = { layer = F.Cu, width = 0.2, from = [73.25, 52.75], to = [73.3, 52.25] }
-    track CC2 = { layer = F.Cu, width = 0.2, from = [73.3, 52.25], to = [73.3, 51.35] }
-    track CC2 = { layer = F.Cu, width = 0.2, from = [73.3, 51.35], to = [74.55, 50.1] }
-    track CC2 = { layer = F.Cu, width = 0.2, from = [74.55, 50.1], to = [74.8, 50.0225] }
-    track "+1V2" = { layer = F.Cu, width = 0.4, from = [62.2225, 40.4], to = [62.4225, 41.1] }
-    track "+1V2" = { layer = F.Cu, width = 0.4, from = [62.4225, 41.1], to = [64.2725, 41.1] }
-    track "+1V2" = { layer = F.Cu, width = 0.4, from = [64.2725, 41.1], to = [64.8725, 40.5] }
-    track "+1V2" = { layer = F.Cu, width = 0.4, from = [64.8725, 40.5], to = [65.6, 40.175] }
+    track CC2 = { layer = F.Cu, width = 0.2, from = [73.25, 52.75], to = [73.25, 51.35] }
+    track CC2 = { layer = F.Cu, width = 0.2, from = [73.25, 51.35], to = [74.55, 50.05] }
+    track CC2 = { layer = F.Cu, width = 0.2, from = [74.55, 50.05], to = [74.8, 50.0225] }
+    track "+1V2" = { layer = F.Cu, width = 0.4, from = [62.2225, 40.4], to = [62.3725, 41.15] }
+    track "+1V2" = { layer = F.Cu, width = 0.4, from = [62.3725, 41.15], to = [64.4725, 41.15] }
+    track "+1V2" = { layer = F.Cu, width = 0.4, from = [64.4725, 41.15], to = [64.9725, 40.65] }
+    track "+1V2" = { layer = F.Cu, width = 0.4, from = [64.9725, 40.65], to = [65.6, 40.175] }
     track NR = { layer = F.Cu, width = 0.2, from = [47.8, 43.175], to = [47.2, 43.725] }
     track NR = { layer = F.Cu, width = 0.2, from = [47.2, 43.725], to = [45.1, 45.825] }
     track NR = { layer = F.Cu, width = 0.2, from = [45.1, 45.825], to = [44.865, 46.095] }
-    track "+5V" = { layer = F.Cu, width = 0.3, from = [69.75, 52.75], to = [69.75, 53.45] }
-    track "+5V" = { layer = F.Cu, width = 0.3, from = [69.75, 53.45], to = [69.85, 53.55] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [69.85, 53.55], to = [69.95, 53.65] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [69.95, 53.65], to = [74.05, 53.65] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [74.05, 53.65], to = [74.15, 53.55] }
-    track "+5V" = { layer = F.Cu, width = 0.3, from = [74.15, 53.55], to = [74.25, 53.45] }
-    track "+5V" = { layer = F.Cu, width = 0.3, from = [74.25, 53.45], to = [74.25, 52.75] }
-    track "+5V" = { layer = F.Cu, width = 0.19, from = [74.25, 52.75], to = [74.2, 52.25] }
-    track "+5V" = { layer = F.Cu, width = 0.19, from = [74.2, 52.25], to = [74.2, 51.95] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [74.2, 51.95], to = [74.2, 51.55] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [74.2, 51.55], to = [74, 51.35] }
-    track "+5V" = { layer = B.Cu, width = 0.4, from = [74, 51.35], to = [73.3, 50.65] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [73.3, 50.65], to = [72.7, 50.05] }
-    track "+5V" = { layer = F.Cu, width = 0.4, from = [72.7, 50.05], to = [72.7, 47.55] }
-    track "+5V" = { layer = F.Cu, width = 0.19, from = [72.7, 47.55], to = [72.7, 46.9] }
-    track "+5V" = { layer = F.Cu, width = 0.19, from = [72.7, 46.9], to = [72.5975, 46.75] }
     track AIN1 = { layer = F.Cu, width = 0.2, from = [3.73, 32.54], to = [4.48, 32.14] }
-    track AIN1 = { layer = F.Cu, width = 0.2, from = [4.48, 32.14], to = [5.23, 31.39] }
-    track AIN1 = { layer = F.Cu, width = 0.2, from = [5.23, 31.39], to = [11.48, 31.39] }
-    track AIN1 = { layer = F.Cu, width = 0.2, from = [11.48, 31.39], to = [12.38, 32.29] }
+    track AIN1 = { layer = F.Cu, width = 0.2, from = [4.48, 32.14], to = [5.28, 31.34] }
+    track AIN1 = { layer = F.Cu, width = 0.2, from = [5.28, 31.34], to = [11.43, 31.34] }
+    track AIN1 = { layer = F.Cu, width = 0.2, from = [11.43, 31.34], to = [12.38, 32.29] }
     track AIN1 = { layer = F.Cu, width = 0.2, from = [12.38, 32.29], to = [12.6225, 32.5] }
-    track PG1 = { layer = F.Cu, width = 0.19, from = [84.75, 25], to = [84.45, 24.55] }
-    track PG1 = { layer = F.Cu, width = 0.19, from = [84.45, 24.55], to = [84.25, 24.35] }
-    track PG1 = { layer = F.Cu, width = 0.2, from = [84.25, 24.35], to = [79.75, 19.85] }
-    track PG1 = { layer = F.Cu, width = 0.2, from = [79.75, 19.85], to = [78.9, 19.85] }
-    track PG1 = { layer = F.Cu, width = 0.2, from = [78.9, 19.85], to = [78.1, 19.05] }
-    track PG1 = { layer = F.Cu, width = 0.2, from = [78.1, 19.05], to = [78.1, 19] }
-    track PG1 = { layer = F.Cu, width = 0.2, from = [78.1, 19], to = [77.7, 18.6] }
-    track PG1 = { layer = F.Cu, width = 0.2, from = [77.7, 18.6], to = [77.55, 18.6] }
-    track PG1 = { layer = F.Cu, width = 0.19, from = [77.55, 18.6], to = [76.8, 18.6] }
-    track PG1 = { layer = F.Cu, width = 0.19, from = [76.8, 18.6], to = [76.75, 18.5975] }
+    track PG1 = { layer = F.Cu, width = 0.19, from = [84.75, 25], to = [84.3, 24.65] }
+    track PG1 = { layer = F.Cu, width = 0.19, from = [84.3, 24.65], to = [84.1, 24.45] }
+    track PG1 = { layer = F.Cu, width = 0.2, from = [84.1, 24.45], to = [81.8, 22.15] }
+    track PG1 = { layer = F.Cu, width = 0.2, from = [81.8, 22.15], to = [79.25, 22.15] }
+    track PG1 = { layer = B.Cu, width = 0.2, from = [79.25, 22.15], to = [76.85, 19.75] }
+    track PG1 = { layer = B.Cu, width = 0.2, from = [76.85, 19.75], to = [76.85, 19.4] }
+    track PG1 = { layer = B.Cu, width = 0.19, from = [76.85, 19.4], to = [76.85, 18.75] }
+    track PG1 = { layer = F.Cu, width = 0.19, from = [76.85, 18.75], to = [76.8, 18.7] }
+    track PG1 = { layer = F.Cu, width = 0.19, from = [76.8, 18.7], to = [76.75, 18.5975] }
     track AIN0 = { layer = F.Cu, width = 0.2, from = [3.73, 35.08], to = [4.58, 35.93] }
     track AIN0 = { layer = F.Cu, width = 0.2, from = [4.58, 35.93], to = [4.58, 42.58] }
     track AIN0 = { layer = F.Cu, width = 0.2, from = [4.58, 42.58], to = [12.38, 50.38] }
@@ -506,37 +520,34 @@ layout daq {
     track AIN2 = { layer = F.Cu, width = 0.2, from = [12.53, 16.95], to = [12.53, 14.75] }
     track AIN2 = { layer = F.Cu, width = 0.2, from = [12.53, 14.75], to = [12.6225, 14.5] }
     track SDO1 = { layer = F.Cu, width = 0.2, from = [48.5, 25.5], to = [48.3, 25.5] }
-    track SDO1 = { layer = F.Cu, width = 0.2, from = [48.3, 25.5], to = [43.35, 30.45] }
-    track SDO1 = { layer = F.Cu, width = 0.2, from = [43.35, 30.45], to = [31.85, 30.45] }
-    track SDO1 = { layer = F.Cu, width = 0.2, from = [31.85, 30.45], to = [31.1, 30.5] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [44.865, 47.365], to = [43.865, 47.615] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [43.865, 47.615], to = [43.365, 48.115] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [43.365, 48.115], to = [43.365, 48.615] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [43.365, 48.615], to = [36.965, 55.015] }
+    track SDO1 = { layer = F.Cu, width = 0.2, from = [48.3, 25.5], to = [43.3, 30.5] }
+    track SDO1 = { layer = F.Cu, width = 0.2, from = [43.3, 30.5], to = [31.1, 30.5] }
+    track VREF = { layer = F.Cu, width = 0.25, from = [44.865, 47.365], to = [43.865, 47.615] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [43.865, 47.615], to = [43.065, 48.415] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [43.065, 48.415], to = [43.065, 48.915] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [43.065, 48.915], to = [36.965, 55.015] }
     track VREF = { layer = F.Cu, width = 0.4, from = [36.965, 55.015], to = [29.215, 55.015] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [29.215, 55.015], to = [27.565, 53.365] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [27.565, 53.365], to = [27.565, 51.715] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [27.565, 51.715], to = [27.015, 51.165] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [27.015, 51.165], to = [26.9, 50] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [29.215, 55.015], to = [27.615, 53.415] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [27.615, 53.415], to = [27.615, 51.765] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [27.615, 51.765], to = [27.015, 51.165] }
+    track VREF = { layer = F.Cu, width = 0.25, from = [27.015, 51.165], to = [26.9, 50] }
     track SCLK = { layer = F.Cu, width = 0.2, from = [48.5, 23.5], to = [48.3, 23.5] }
     track SCLK = { layer = F.Cu, width = 0.2, from = [48.3, 23.5], to = [41.8, 30] }
     track SCLK = { layer = F.Cu, width = 0.2, from = [41.8, 30], to = [31.1, 30] }
     track SCLK = { layer = F.Cu, width = 0.2, from = [48.5, 23.5], to = [48, 23.7] }
     track SCLK = { layer = F.Cu, width = 0.2, from = [48, 23.7], to = [37.05, 12.75] }
     track SCLK = { layer = F.Cu, width = 0.2, from = [37.05, 12.75], to = [36.1, 12.75] }
-    track SCLK = { layer = F.Cu, width = 0.2, from = [36.1, 12.75], to = [35.4, 12.05] }
-    track SCLK = { layer = F.Cu, width = 0.2, from = [35.4, 12.05], to = [31.85, 12.05] }
-    track SCLK = { layer = F.Cu, width = 0.2, from = [31.85, 12.05], to = [31.1, 12] }
-    track SDO2 = { layer = F.Cu, width = 0.2, from = [48.5, 26.5], to = [48.5, 26.3] }
-    track SDO2 = { layer = F.Cu, width = 0.2, from = [48.5, 26.3], to = [48.35, 26.15] }
-    track SDO2 = { layer = B.Cu, width = 0.2, from = [48.35, 26.15], to = [46.65, 24.45] }
-    track SDO2 = { layer = F.Cu, width = 0.2, from = [46.65, 24.45], to = [36.7, 14.5] }
-    track SDO2 = { layer = F.Cu, width = 0.2, from = [36.7, 14.5], to = [35.75, 14.5] }
-    track SDO2 = { layer = F.Cu, width = 0.2, from = [35.75, 14.5], to = [33.7, 12.45] }
-    track SDO2 = { layer = F.Cu, width = 0.2, from = [33.7, 12.45], to = [31.85, 12.45] }
-    track SDO2 = { layer = F.Cu, width = 0.2, from = [31.85, 12.45], to = [31.1, 12.5] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [48.5, 22.5], to = [47.5, 22.5] }
-    track CONVST = { layer = B.Cu, width = 0.2, from = [47.5, 22.5], to = [44.9, 22.5] }
+    track SCLK = { layer = F.Cu, width = 0.2, from = [36.1, 12.75], to = [35.35, 12] }
+    track SCLK = { layer = F.Cu, width = 0.2, from = [35.35, 12], to = [31.1, 12] }
+    track SDO2 = { layer = F.Cu, width = 0.2, from = [48.5, 26.5], to = [48.4, 26.35] }
+    track SDO2 = { layer = F.Cu, width = 0.2, from = [48.4, 26.35], to = [48.4, 26.15] }
+    track SDO2 = { layer = B.Cu, width = 0.2, from = [48.4, 26.15], to = [46.65, 24.4] }
+    track SDO2 = { layer = F.Cu, width = 0.2, from = [46.65, 24.4], to = [36.75, 14.5] }
+    track SDO2 = { layer = F.Cu, width = 0.2, from = [36.75, 14.5], to = [35.75, 14.5] }
+    track SDO2 = { layer = F.Cu, width = 0.2, from = [35.75, 14.5], to = [33.75, 12.5] }
+    track SDO2 = { layer = F.Cu, width = 0.2, from = [33.75, 12.5], to = [31.1, 12.5] }
+    track CONVST = { layer = F.Cu, width = 0.2, from = [48.5, 22.5], to = [47.55, 22.5] }
+    track CONVST = { layer = B.Cu, width = 0.2, from = [47.55, 22.5], to = [44.9, 22.5] }
     track CONVST = { layer = B.Cu, width = 0.2, from = [44.9, 22.5], to = [44.45, 22.95] }
     track CONVST = { layer = F.Cu, width = 0.2, from = [44.45, 22.95], to = [28.65, 22.95] }
     track CONVST = { layer = F.Cu, width = 0.2, from = [28.65, 22.95], to = [28.6, 23] }
@@ -547,22 +558,19 @@ layout daq {
     track VREF = { layer = F.Cu, width = 0.4, from = [34.865, 38.215], to = [31.015, 38.215] }
     track VREF = { layer = F.Cu, width = 0.4, from = [31.015, 38.215], to = [27.065, 34.265] }
     track VREF = { layer = F.Cu, width = 0.4, from = [27.065, 34.265], to = [26.4, 33.775] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [48.5, 22.5], to = [47.4, 22.3] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [47.4, 22.3], to = [36.65, 11.55] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [36.65, 11.55], to = [28.1, 11.55] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [28.1, 11.55], to = [27.65, 12] }
+    track CONVST = { layer = F.Cu, width = 0.2, from = [48.5, 22.5], to = [47.45, 22.3] }
+    track CONVST = { layer = F.Cu, width = 0.2, from = [47.45, 22.3], to = [36.65, 11.5] }
+    track CONVST = { layer = F.Cu, width = 0.2, from = [36.65, 11.5], to = [28.15, 11.5] }
+    track CONVST = { layer = F.Cu, width = 0.2, from = [28.15, 11.5], to = [27.65, 12] }
     track CONVST = { layer = F.Cu, width = 0.2, from = [27.65, 12], to = [26.9, 12] }
-    track SDO0 = { layer = F.Cu, width = 0.2, from = [48.5, 24.5], to = [48.5, 24.7] }
-    track SDO0 = { layer = F.Cu, width = 0.2, from = [48.5, 24.7], to = [49, 25.2] }
-    track SDO0 = { layer = F.Cu, width = 0.2, from = [49, 25.2], to = [49, 26.7] }
-    track SDO0 = { layer = F.Cu, width = 0.2, from = [49, 26.7], to = [48.7, 27] }
-    track SDO0 = { layer = F.Cu, width = 0.2, from = [48.7, 27], to = [48.3, 27] }
-    track SDO0 = { layer = F.Cu, width = 0.2, from = [48.3, 27], to = [40.05, 35.25] }
-    track SDO0 = { layer = F.Cu, width = 0.2, from = [40.05, 35.25], to = [40.05, 42.55] }
-    track SDO0 = { layer = B.Cu, width = 0.2, from = [40.05, 42.55], to = [39.2, 43.4] }
-    track SDO0 = { layer = F.Cu, width = 0.2, from = [39.2, 43.4], to = [34.15, 48.45] }
-    track SDO0 = { layer = F.Cu, width = 0.2, from = [34.15, 48.45], to = [31.85, 48.45] }
-    track SDO0 = { layer = F.Cu, width = 0.2, from = [31.85, 48.45], to = [31.1, 48.5] }
+    track SDO0 = { layer = F.Cu, width = 0.2, from = [48.5, 24.5], to = [48.4, 24.65] }
+    track SDO0 = { layer = F.Cu, width = 0.2, from = [48.4, 24.65], to = [43.1, 29.95] }
+    track SDO0 = { layer = B.Cu, width = 0.2, from = [43.1, 29.95], to = [43.1, 31.05] }
+    track SDO0 = { layer = F.Cu, width = 0.2, from = [43.1, 31.05], to = [39.9, 34.25] }
+    track SDO0 = { layer = F.Cu, width = 0.2, from = [39.9, 34.25], to = [39.9, 42.35] }
+    track SDO0 = { layer = B.Cu, width = 0.2, from = [39.9, 42.35], to = [39, 43.25] }
+    track SDO0 = { layer = F.Cu, width = 0.2, from = [39, 43.25], to = [33.75, 48.5] }
+    track SDO0 = { layer = F.Cu, width = 0.2, from = [33.75, 48.5], to = [31.1, 48.5] }
     track SCLK = { layer = F.Cu, width = 0.2, from = [48.5, 23.5], to = [47.3, 24.6] }
     track SCLK = { layer = F.Cu, width = 0.2, from = [47.3, 24.6], to = [41.95, 29.95] }
     track SCLK = { layer = B.Cu, width = 0.2, from = [41.95, 29.95], to = [41.95, 32.1] }
@@ -572,30 +580,25 @@ layout daq {
     track SCLK = { layer = F.Cu, width = 0.2, from = [33.1, 43.35], to = [31.2, 45.25] }
     track SCLK = { layer = F.Cu, width = 0.2, from = [31.2, 45.25], to = [31.2, 47.9] }
     track SCLK = { layer = F.Cu, width = 0.2, from = [31.2, 47.9], to = [31.1, 48] }
-    track CONVST = { layer = B.Cu, width = 0.2, from = [48.5, 22.5], to = [47.4, 22.7] }
-    track CONVST = { layer = B.Cu, width = 0.2, from = [47.4, 22.7], to = [46.1, 24] }
-    track CONVST = { layer = B.Cu, width = 0.2, from = [46.1, 24], to = [46.1, 28.4] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [46.1, 28.4], to = [36.65, 37.85] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [36.65, 37.85], to = [35.35, 37.85] }
-    track CONVST = { layer = B.Cu, width = 0.2, from = [35.35, 37.85], to = [34.4, 38.8] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [34.4, 38.8], to = [30.75, 38.8] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [30.75, 38.8], to = [28.6, 40.95] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [28.6, 40.95], to = [28.6, 46.3] }
-    track CONVST = { layer = F.Cu, width = 0.2, from = [28.6, 46.3], to = [26.9, 48] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [44.865, 47.365], to = [43.665, 46.765] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [43.665, 46.765], to = [43.365, 46.465] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [43.365, 46.465], to = [43.365, 32.665] }
-    track VREF = { layer = B.Cu, width = 0.4, from = [43.365, 32.665], to = [43.365, 29.365] }
-    track VREF = { layer = B.Cu, width = 0.4, from = [43.365, 29.365], to = [36.415, 22.415] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [36.415, 22.415], to = [33.365, 22.415] }
-    track VREF = { layer = F.Cu, width = 0.4, from = [33.365, 22.415], to = [27.115, 16.165] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [44.865, 47.365], to = [43.665, 46.815] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [43.665, 46.815], to = [43.315, 46.465] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [43.315, 46.465], to = [43.315, 41.365] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [43.315, 41.365], to = [43.815, 40.865] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [43.815, 40.865], to = [43.815, 30.765] }
+    track VREF = { layer = B.Cu, width = 0.4, from = [43.815, 30.765], to = [43.815, 29.715] }
+    track VREF = { layer = B.Cu, width = 0.4, from = [43.815, 29.715], to = [36.465, 22.365] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [36.465, 22.365], to = [33.315, 22.365] }
+    track VREF = { layer = F.Cu, width = 0.4, from = [33.315, 22.365], to = [27.115, 16.165] }
     track VREF = { layer = F.Cu, width = 0.4, from = [27.115, 16.165], to = [26.4, 15.775] }
-    track GND = { layer = F.Cu, width = 0.19, from = [77.4025, 19.25], to = [77.6525, 19.25] }
-    track GND = { layer = B.Cu, width = 0.19, from = [77.6525, 19.25], to = [77.8525, 19.05] }
-    track GND = { layer = B.Cu, width = 0.19, from = [77.8525, 19.05], to = [78.2025, 19.05] }
-    track GND = { layer = B.Cu, width = 0.4, from = [78.2025, 19.05], to = [78.4525, 19.05] }
-    track GND = { layer = B.Cu, width = 0.19, from = [78.4525, 19.05], to = [79.1025, 19.05] }
-    track GND = { layer = B.Cu, width = 0.19, from = [79.1025, 19.05], to = [79.2775, 18.91] }
+    track CONVST = { layer = F.Cu, width = 0.2, from = [26.9, 48], to = [27.6, 47.9] }
+    track CONVST = { layer = F.Cu, width = 0.2, from = [27.6, 47.9], to = [27.6, 35.7] }
+    track CONVST = { layer = B.Cu, width = 0.2, from = [27.6, 35.7], to = [27.6, 34.8] }
+    track CONVST = { layer = B.Cu, width = 0.2, from = [27.6, 34.8], to = [28.05, 34.35] }
+    track CONVST = { layer = F.Cu, width = 0.2, from = [28.05, 34.35], to = [28.05, 30.3] }
+    track CONVST = { layer = F.Cu, width = 0.2, from = [28.05, 30.3], to = [27.75, 30] }
+    track CONVST = { layer = F.Cu, width = 0.2, from = [27.75, 30], to = [26.9, 30] }
+    via "+5V" = { at = [68.3, 51.75], size = 0.45, drill = 0.2 }
+    via "+5V" = { at = [75.7, 51.75], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [19.94, 48.3], size = 0.45, drill = 0.2 }
     via GND = { at = [21.2775, 48.91], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [32.64, 51.9], size = 0.45, drill = 0.2 }
@@ -650,11 +653,11 @@ layout daq {
     via "+1V2" = { at = [65.6, 39.22], size = 0.45, drill = 0.2 }
     via GND = { at = [65.6, 42.78], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [66.8, 22.04], size = 0.45, drill = 0.2 }
-    via GND = { at = [66.8, 23.96], size = 0.45, drill = 0.2 }
+    via GND = { at = [67.41, 23.3775], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [67.41, 24.6225], size = 0.45, drill = 0.2 }
-    via GND = { at = [66.8, 25.96], size = 0.45, drill = 0.2 }
+    via GND = { at = [67.41, 25.3775], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [67.41, 26.6225], size = 0.45, drill = 0.2 }
-    via GND = { at = [66.8, 27.96], size = 0.45, drill = 0.2 }
+    via GND = { at = [67.41, 27.3775], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [67.41, 28.6225], size = 0.45, drill = 0.2 }
     via GND = { at = [66.8, 29.96], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [69.4, 24.22], size = 0.45, drill = 0.2 }
@@ -665,8 +668,8 @@ layout daq {
     via GND = { at = [14.64, 28.6], size = 0.45, drill = 0.2 }
     via GND = { at = [14.64, 10.6], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [83.04, 27.2], size = 0.45, drill = 0.2 }
-    via GND = { at = [69.2, 51.36], size = 0.45, drill = 0.2 }
-    via GND = { at = [74.8, 51.36], size = 0.45, drill = 0.2 }
+    via GND = { at = [69.81, 50.7775], size = 0.45, drill = 0.2 }
+    via GND = { at = [75.41, 50.7775], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [80.3225, 18.91], size = 0.45, drill = 0.2 }
     via GND = { at = [79.2775, 18.91], size = 0.45, drill = 0.2 }
     via "+1V2" = { at = [78.3225, 44.91], size = 0.45, drill = 0.2 }
@@ -728,49 +731,38 @@ layout daq {
     via "+1V2" = { at = [57, 29], size = 0.45, drill = 0.2 }
     via GND = { at = [57, 31], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [73.84, 20.75], size = 0.45, drill = 0.2 }
+    via GND = { at = [78.16, 19.25], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [73.84, 20.25], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [73.84, 19.75], size = 0.45, drill = 0.2 }
     via "+3V3" = { at = [78.16, 20.25], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [71.84, 46.75], size = 0.45, drill = 0.2 }
+    via GND = { at = [76.16, 45.25], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [71.84, 46.25], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [71.84, 45.75], size = 0.45, drill = 0.2 }
     via "+1V2" = { at = [76.16, 46.25], size = 0.45, drill = 0.2 }
     via GND = { at = [38.72, 46.095], size = 0.45, drill = 0.2 }
-    via "+5V" = { at = [38.72, 48.635], size = 0.45, drill = 0.2 }
-    via "+5V" = { at = [32.205, 50], size = 0.45, drill = 0.2 }
-    via GND = { at = [25.795, 48.5], size = 0.45, drill = 0.2 }
-    via GND = { at = [26.9, 48.55], size = 0.45, drill = 0.2 }
-    via "+3V3" = { at = [32.205, 49], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [20.41, 48.315], size = 0.45, drill = 0.2 }
     via GND = { at = [18, 51.2], size = 0.45, drill = 0.2 }
-    via "+5V" = { at = [32.205, 32], size = 0.45, drill = 0.2 }
-    via GND = { at = [25.795, 30.5], size = 0.45, drill = 0.2 }
-    via GND = { at = [26.9, 30.55], size = 0.45, drill = 0.2 }
-    via "+3V3" = { at = [32.205, 31], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [20.41, 30.315], size = 0.45, drill = 0.2 }
     via GND = { at = [18, 33.2], size = 0.45, drill = 0.2 }
-    via "+5V" = { at = [32.205, 14], size = 0.45, drill = 0.2 }
-    via GND = { at = [25.795, 12.5], size = 0.45, drill = 0.2 }
-    via GND = { at = [26.9, 12.55], size = 0.45, drill = 0.2 }
-    via "+3V3" = { at = [32.205, 13], size = 0.45, drill = 0.2 }
     via "+5V" = { at = [20.41, 12.315], size = 0.45, drill = 0.2 }
     via GND = { at = [18, 15.2], size = 0.45, drill = 0.2 }
-    via "+5V" = { at = [74, 51.35], size = 0.45, drill = 0.2 }
-    via "+5V" = { at = [73.3, 50.65], size = 0.45, drill = 0.2 }
-    via SDO2 = { at = [48.35, 26.15], size = 0.45, drill = 0.2 }
-    via SDO2 = { at = [46.65, 24.45], size = 0.45, drill = 0.2 }
-    via CONVST = { at = [47.5, 22.5], size = 0.45, drill = 0.2 }
+    via PG1 = { at = [79.25, 22.15], size = 0.45, drill = 0.2 }
+    via PG1 = { at = [76.85, 18.75], size = 0.45, drill = 0.2 }
+    via SDO2 = { at = [48.4, 26.15], size = 0.45, drill = 0.2 }
+    via SDO2 = { at = [46.65, 24.4], size = 0.45, drill = 0.2 }
+    via CONVST = { at = [47.55, 22.5], size = 0.45, drill = 0.2 }
     via CONVST = { at = [44.45, 22.95], size = 0.45, drill = 0.2 }
-    via SDO0 = { at = [40.05, 42.55], size = 0.45, drill = 0.2 }
-    via SDO0 = { at = [39.2, 43.4], size = 0.45, drill = 0.2 }
+    via SDO0 = { at = [43.1, 29.95], size = 0.45, drill = 0.2 }
+    via SDO0 = { at = [43.1, 31.05], size = 0.45, drill = 0.2 }
+    via SDO0 = { at = [39.9, 42.35], size = 0.45, drill = 0.2 }
+    via SDO0 = { at = [39, 43.25], size = 0.45, drill = 0.2 }
     via SCLK = { at = [41.95, 29.95], size = 0.45, drill = 0.2 }
     via SCLK = { at = [34.9, 39.15], size = 0.45, drill = 0.2 }
-    via CONVST = { at = [46.1, 28.4], size = 0.45, drill = 0.2 }
-    via CONVST = { at = [35.35, 37.85], size = 0.45, drill = 0.2 }
-    via CONVST = { at = [34.4, 38.8], size = 0.45, drill = 0.2 }
-    via VREF = { at = [43.365, 32.665], size = 0.45, drill = 0.2 }
-    via VREF = { at = [36.415, 22.415], size = 0.45, drill = 0.2 }
-    via GND = { at = [77.6525, 19.25], size = 0.45, drill = 0.2 }
+    via VREF = { at = [43.815, 30.765], size = 0.45, drill = 0.2 }
+    via VREF = { at = [36.465, 22.365], size = 0.45, drill = 0.2 }
+    via CONVST = { at = [27.6, 35.7], size = 0.45, drill = 0.2 }
+    via CONVST = { at = [28.05, 34.35], size = 0.45, drill = 0.2 }
     pour GND = { layers = [In1.Cu], outline = [[0.5, 0.5], [89.5, 0.5], [89.5, 59.5], [0.5, 59.5]] }
     pour "+5V" = { layers = [In2.Cu], outline = [[0.5, 0.5], [89.5, 0.5], [89.5, 59.5], [0.5, 59.5]] }
     pour "+3V3" = { layers = [In3.Cu], outline = [[0.5, 0.5], [89.5, 0.5], [89.5, 59.5], [0.5, 59.5]] }

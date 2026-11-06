@@ -259,6 +259,10 @@ fn copper_ends(s: &mut Search, p: Point) -> Vec<Node> {
     let o = s.q.origin;
     let (cx, cy) = ((p.x - o.x) / g, (p.y - o.y) / g);
     let r = (mm(1.2) / g).max(1);
+    // Nodes whose straight stub to `p` keeps the clearance first: the stub is drawn without the
+    // search's checks, so a node on the net's copper beside another net's pad would run it past
+    // that pad.
+    let mut clear = Vec::new();
     let mut out = Vec::new();
     let mut any_own = Vec::new();
     for l in 0..s.q.layers.len() as u8 {
@@ -268,13 +272,18 @@ fn copper_ends(s: &mut Search, p: Point) -> Vec<Node> {
                 if s.own(n) {
                     any_own.push(n);
                     if s.open_node(n) {
+                        if s.stub_free(n, p) {
+                            clear.push(n);
+                        }
                         out.push(n);
                     }
                 }
             }
         }
     }
-    if out.is_empty() {
+    if !clear.is_empty() {
+        clear
+    } else if out.is_empty() {
         any_own
     } else {
         out
@@ -335,9 +344,23 @@ fn geometry(s: &Search, space: &Space, nodes: &[Node], a: Point, b: Point) -> Ro
             None => runs.push((n.2, w, vec![p])),
         }
     }
+    // The stubs to the anchors are drawn at the anchor's width (the neck on a pad), as the
+    // ends were checked.
+    let (wa, wb) = (q.width_at(a), q.width_at(b));
+    if wa < runs[0].1 {
+        let (l, start) = (runs[0].0, runs[0].2[0]);
+        runs.insert(0, (l, wa, vec![a, start]));
+    } else {
+        runs[0].2.insert(0, a);
+    }
     let last = runs.len() - 1;
-    runs[0].2.insert(0, a);
-    runs[last].2.push(b);
+    if wb < runs[last].1 {
+        let (l, end) = (runs[last].0, *runs[last].2.last().expect("a run has a point"));
+        runs.push((l, wb, vec![end, b]));
+    } else {
+        runs[last].2.push(b);
+    }
+    let last = runs.len() - 1;
     let mut tracks = Vec::new();
     for (i, (l, width, pts)) in runs.into_iter().enumerate() {
         let layer = q.layers[l as usize];
