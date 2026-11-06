@@ -1,0 +1,43 @@
+runmat 0.7
+std 1
+
+// A high-voltage test piece: a 10 mm brass electrode cast 30 mm deep into an epoxy cylinder,
+// 60 mm across and 50 mm tall, over a 50 mm grounded disc at its base. The electrode's end
+// stands 17 mm above the ground. Its end edge is rounded (`tip_radius`); the `sharp`
+// configuration leaves the edge square, so a study can compare the field at the two.
+// Hand check: a uniform field across the 17 mm at 20 kV is 1.2 kV/mm; at a square edge the
+// field rises well above that, and a 4 mm round brings the peak down toward it.
+part electrode {
+    input epoxy_diameter : length = 60 mm
+    input epoxy_height : length = 50 mm
+    input rod_diameter : length = 10 mm
+    input rod_depth : length = 30 mm
+    input tip_radius : length = 4 mm
+    input ground_diameter : length = 50 mm
+    input ground_thickness : length = 3 mm
+
+    sketch epoxy_s on origin.xy {
+        rim = circle(center = [0 mm, 0 mm], radius = input.epoxy_diameter / 2)
+    }
+    feature epoxy = extrude(profile = sketch.epoxy_s, distance = input.epoxy_height)
+
+    feature rod_plane = plane.offset(base = origin.xy, distance = input.epoxy_height - input.rod_depth)
+    sketch rod_s on plane.rod_plane {
+        rod = circle(center = [0 mm, 0 mm], radius = input.rod_diameter / 2)
+    }
+    feature rod = extrude(profile = sketch.rod_s, distance = input.rod_depth)
+    feature tip = fillet(edges = [edges_between(feature.rod.face.side(rod_s.rod), feature.rod.face.start)], radius = input.tip_radius)
+
+    sketch ground_s on origin.xy {
+        disc = circle(center = [0 mm, 0 mm], radius = input.ground_diameter / 2)
+    }
+    feature ground = extrude(profile = sketch.ground_s, distance = input.ground_thickness)
+
+    feature cast = boolean.subtract(target = feature.epoxy.body, tools = [feature.rod.body, feature.ground.body], keep_tools = true)
+
+    configuration sharp = { suppress = [feature.tip] }
+
+    output epoxy = { body = feature.epoxy.body, label = "Epoxy", material = "epoxy_cast", color = "#D9C27A" }
+    output electrode = { body = feature.rod.body, label = "Electrode", material = "brass_cw614n", color = "#B5A642" }
+    output ground = { body = feature.ground.body, label = "Ground", material = "aluminum_6061", color = "#9AA3AD" }
+}

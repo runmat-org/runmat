@@ -1,11 +1,11 @@
-//! The simulation-page hero parts (`runmat-cad/wasm/tests/sim/<example id>/`) on OCCT: each
+//! The simulation-page hero parts and study-type card parts (`runmat-cad/wasm/tests/sim/<id>/`) on OCCT: each
 //! part compiles with no error and every feature regenerates, and its STEP export carries the
 //! exact product (body) and face names its study selects, one solid per body.
 //!
 //! - `RUNMAT_SIM_STEP_DIR=<folder>` writes each export to `<folder>/<id>.step`.
 //! - `RUNMAT_SIM_EXAMPLES=<runmat-examples>/fea` also checks that each example folder's design
-//!   source is the same text as the copy here.
-//! - `RUNMAT_SIM_ONLY=<id>` runs one part; `RUNMAT_SIM_SRC=<folder>` reads the parts from another
+//!   source is the same text as the copy here (heroes only: the cards have no example yet).
+//! - `RUNMAT_SIM_ONLY=<id>[,<id>...]` runs those parts; `RUNMAT_SIM_SRC=<folder>` reads the parts from another
 //!   copy of `sim/` (a variant under study).
 
 use serde_json::Value;
@@ -92,6 +92,79 @@ const HEROES: &[Hero] = &[Hero {
     study: None,
 }];
 
+/// The study-type card parts: the same checks, with no example folder yet.
+const CARDS: &[Hero] = &[Hero {
+    id: "restrained-rail",
+    file: "rail.part",
+    products: &[("Rail", 1)],
+    solids: 1,
+    faces: &[("End A", 1), ("End B", 1)],
+    study: None,
+}, Hero {
+    id: "blade-fuse",
+    file: "fuse_element.part",
+    products: &[("Fuse link", 1)],
+    solids: 1,
+    faces: &[("Terminal A", 1), ("Terminal B", 1)],
+    study: None,
+}, Hero {
+    id: "hv-electrode",
+    file: "electrode.part",
+    products: &[("Epoxy", 1), ("Electrode", 1), ("Ground", 1)],
+    solids: 3,
+    faces: &[],
+    study: Some(("sharp", &[])),
+}, Hero {
+    id: "electronics-enclosure",
+    file: "enclosure.part",
+    products: &[("Enclosure", 1), ("Board", 1), ("Air", 1)],
+    solids: 3,
+    faces: &[("Inner wall", 6), ("Outer wall", 6)],
+    study: None,
+}, Hero {
+    id: "journal-bearing",
+    file: "bearing.part",
+    products: &[("Film", 1), ("Shaft", 1), ("Bush", 1)],
+    solids: 3,
+    faces: &[("Shaft surface", 1), ("Bush surface", 1), ("Feed hole", 1)],
+    study: None,
+}, Hero {
+    id: "baffled-loudspeaker",
+    file: "loudspeaker.part",
+    products: &[("Air", 1)],
+    solids: 1,
+    faces: &[("Diaphragm", 2), ("Baffle", 1), ("Outer boundary", 5)],
+    study: None,
+}, Hero {
+    id: "car-cabin",
+    file: "cabin.part",
+    products: &[("Cabin air", 1)],
+    solids: 1,
+    faces: &[("Headliner", 1), ("Glazing", 4), ("Floor", 1), ("Trim", 7)],
+    study: None,
+}, Hero {
+    id: "induction-gear",
+    file: "gear.part",
+    products: &[("Gear", 1), ("Coil", 1), ("Air", 1)],
+    solids: 3,
+    faces: &[("Coil in", 1), ("Coil out", 1), ("Outer boundary", 6)],
+    study: None,
+}, Hero {
+    id: "filter-housing",
+    file: "filter.part",
+    products: &[("Fluid", 2), ("Media", 1)],
+    solids: 3,
+    faces: &[("Inlet", 1), ("Outlet", 1), ("Wall", 7)],
+    study: None,
+}, Hero {
+    id: "static-mixer",
+    file: "mixer.part",
+    products: &[("Fluid", 1), ("Mixer", 1)],
+    solids: 2,
+    faces: &[("Inlet A", 1), ("Inlet B", 1), ("Outlet", 1), ("Wall", 3)],
+    study: None,
+}];
+
 fn root() -> PathBuf {
     std::env::var("RUNMAT_SIM_SRC")
         .map(PathBuf::from)
@@ -127,13 +200,13 @@ fn the_hero_parts_compile_and_export_their_study_names() {
     runmat_geometry_wasm_host::cad::install_occt();
     let only = std::env::var("RUNMAT_SIM_ONLY").ok();
     let mut failures = Vec::new();
-    for hero in HEROES {
-        if only.as_ref().is_some_and(|o| o != hero.id) {
+    for (hero, example) in HEROES.iter().map(|h| (h, true)).chain(CARDS.iter().map(|h| (h, false))) {
+        if only.as_ref().is_some_and(|o| !o.split(',').any(|id| id == hero.id)) {
             continue;
         }
         let source = root().join(hero.id).join(hero.file);
         let text = std::fs::read_to_string(&source).unwrap_or_else(|e| panic!("{}: {e}", source.display()));
-        if let Ok(examples) = std::env::var("RUNMAT_SIM_EXAMPLES") {
+        if let (true, Ok(examples)) = (example, std::env::var("RUNMAT_SIM_EXAMPLES")) {
             let copy = PathBuf::from(examples).join(hero.id).join(hero.file);
             match std::fs::read_to_string(&copy) {
                 Ok(t) if t == text => {}

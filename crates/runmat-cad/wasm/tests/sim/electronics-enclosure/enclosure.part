@@ -1,0 +1,98 @@
+runmat 0.7
+std 1
+
+// A sealed die-cast aluminium electronics enclosure, 120 x 80 x 40 mm with 2.5 mm walls, and
+// the 100 x 60 x 1.6 mm FR-4 board it carries on four 6 mm bosses 8 mm above the floor. The
+// air is the sealed volume inside, less the board and the bosses: it shares its faces with
+// both, and the enclosure's outer wall meets the room.
+// Hand check, 5 W on the board: the outer wall's 0.035 m^2 at about 8 W/m^2/K (natural
+// convection and radiation) gives 18 K case over room; the still inside air adds about as
+// much again between the board and the inner wall.
+part enclosure {
+    input length : length = 120 mm
+    input width : length = 80 mm
+    input height : length = 40 mm
+    input wall : length = 2.5 mm
+    input board_length : length = 100 mm
+    input board_width : length = 60 mm
+    input board_thickness : length = 1.6 mm
+    input standoff : length = 8 mm
+    input boss : length = 6 mm
+    input boss_inset : length = 5 mm
+
+    let w = input.wall
+    let bx = (input.length - input.board_length) / 2
+    let by = (input.width - input.board_width) / 2
+    let i = input.boss_inset
+    let board_z = input.wall + input.standoff
+
+    sketch outer_s on origin.xy {
+        front = line(start = [0 mm, 0 mm], end = [input.length, 0 mm])
+        right = line(start = [input.length, 0 mm], end = [input.length, input.width])
+        back = line(start = [input.length, input.width], end = [0 mm, input.width])
+        left = line(start = [0 mm, input.width], end = [0 mm, 0 mm])
+    }
+    feature case = extrude(profile = sketch.outer_s, distance = input.height)
+
+    feature floor_plane = plane.offset(base = origin.xy, distance = input.wall)
+    sketch cavity_s on plane.floor_plane {
+        front = line(start = [let.w, let.w], end = [input.length - let.w, let.w])
+        right = line(start = [input.length - let.w, let.w], end = [input.length - let.w, input.width - let.w])
+        back = line(start = [input.length - let.w, input.width - let.w], end = [let.w, input.width - let.w])
+        left = line(start = [let.w, input.width - let.w], end = [let.w, let.w])
+    }
+    feature cavity = extrude(profile = sketch.cavity_s, distance = input.height - input.wall * 2)
+
+    sketch boss_s on plane.floor_plane {
+        b1 = circle(center = [let.bx + let.i, let.by + let.i], radius = input.boss / 2)
+        b2 = circle(center = [input.length - let.bx - let.i, let.by + let.i], radius = input.boss / 2)
+        b3 = circle(center = [input.length - let.bx - let.i, input.width - let.by - let.i], radius = input.boss / 2)
+        b4 = circle(center = [let.bx + let.i, input.width - let.by - let.i], radius = input.boss / 2)
+    }
+    feature bosses = extrude(profile = sketch.boss_s, distance = input.standoff)
+
+    feature board_plane = plane.offset(base = origin.xy, distance = let.board_z)
+    sketch board_s on plane.board_plane {
+        front = line(start = [let.bx, let.by], end = [input.length - let.bx, let.by])
+        right = line(start = [input.length - let.bx, let.by], end = [input.length - let.bx, input.width - let.by])
+        back = line(start = [input.length - let.bx, input.width - let.by], end = [let.bx, input.width - let.by])
+        left = line(start = [let.bx, input.width - let.by], end = [let.bx, let.by])
+    }
+    feature board = extrude(profile = sketch.board_s, distance = input.board_thickness)
+
+    // The air: the sealed cavity less the board and the bosses. Then the case: the outer box
+    // less the air and the board, which leaves the walls with the bosses standing on the floor.
+    feature boss_cut = boolean.subtract(target = feature.cavity.body, tools = [feature.bosses.body])
+    feature air = boolean.subtract(target = feature.cavity.body, tools = [feature.board.body], keep_tools = true)
+    feature shell = boolean.subtract(target = feature.case.body, tools = [feature.cavity.body, feature.board.body], keep_tools = true)
+
+    region inner_wall : face = {
+        select = [
+            feature.cavity.face.start,
+            feature.cavity.face.end,
+            feature.cavity.face.side(cavity_s.front),
+            feature.cavity.face.side(cavity_s.right),
+            feature.cavity.face.side(cavity_s.back),
+            feature.cavity.face.side(cavity_s.left)
+        ],
+        expect = at_least_one,
+        body = feature.case.body,
+        label = "Inner wall"
+    }
+    region outer_wall : face = {
+        select = [
+            feature.case.face.start,
+            feature.case.face.end,
+            feature.case.face.side(outer_s.front),
+            feature.case.face.side(outer_s.right),
+            feature.case.face.side(outer_s.back),
+            feature.case.face.side(outer_s.left)
+        ],
+        expect = at_least_one,
+        label = "Outer wall"
+    }
+
+    output enclosure = { body = feature.case.body, label = "Enclosure", part_number = "EN-1208", material = "aluminum_a380", color = "#B9BFC7" }
+    output board = { body = feature.board.body, label = "Board", material = "fr4", color = "#2F6B3A" }
+    output air = { body = feature.cavity.body, label = "Air", color = "#CFE3F5" }
+}
