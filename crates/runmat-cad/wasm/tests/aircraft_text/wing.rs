@@ -258,7 +258,10 @@ pub fn wing() -> String {
     }
     // Rivet rows on the spar caps: straight lines root to tip, one rivet each rivet pitch. The
     // port rows are the mirror of these patterns (below).
-    for (k, (at, up)) in [(FRONT + 0.012, true), (FRONT + 0.012, false), (REAR - 0.012, true), (REAR - 0.012, false)].into_iter().enumerate() {
+    // Each row is named for its cap (`front_upper_cap`), so the Outline's `rivet × 114` rows say
+    // which row they are.
+    let rows = [("front_upper", FRONT + 0.012, true), ("front_lower", FRONT + 0.012, false), ("rear_upper", REAR - 0.012, true), ("rear_lower", REAR - 0.012, false)];
+    for (row, at, up) in rows {
         let point = |y: f64| {
             let p = section(y).at(at, up);
             let c = chord(y);
@@ -269,9 +272,9 @@ pub fn wing() -> String {
         let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         let count = (len / super::RIVET_PITCH) as usize + 1;
         let place = if up { offset(a[0], a[1], a[2]) } else { super::text::offset_rot(a[0], a[1], a[2], [1.0, 0.0, 0.0], 180.0) };
-        s += &use_("part", "rivet", &format!("rivet{k}"), &[place]);
+        s += &use_("part", "rivet", &format!("rivet_{row}"), &[place]);
         s += &format!(
-            "    pattern rivets{k} = linear(seeds = [rivet{k}], direction = [{}, {}, {}], spacing = {}, count = {count})\n",
+            "    pattern {row}_cap = linear(seeds = [rivet_{row}], direction = [{}, {}, {}], spacing = {}, count = {count})\n",
             num(d[0] / len),
             num(d[1] / len),
             num(d[2] / len),
@@ -294,7 +297,7 @@ pub fn wing() -> String {
     );
     // A mirror of a pattern reflects its seed and every instance; the rivet is symmetric about
     // its own y = 0.
-    s += "    mirror rivets_port = {\n        seeds = [rivets0, rivets1, rivets2, rivets3],\n        plane = { plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] },\n        hand = symmetric(point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0])\n    }\n";
+    s += "    mirror rivets_port = {\n        seeds = [front_upper_cap, front_lower_cap, rear_upper_cap, rear_lower_cap],\n        plane = { plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] },\n        hand = symmetric(point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0])\n    }\n";
     s += "    mirror engine_port = {\n        seeds = [engine],\n        plane = { plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] },\n        hand = symmetric(point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0])\n    }\n";
     s += "}\n";
     s
