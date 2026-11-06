@@ -329,3 +329,9 @@ pub fn leader_target(
         _ => None,
     }
 }
+
+/// A cylindrical reference's radius (mm), or none for other surfaces.
+pub fn radius_of(display: &Value, reference: &Reference) -> Option<f64> {
+    let (_, surface) = face(display, &print_reference(reference)?)?;
+    cylinder(surface).map(|(_, _, r)| r)
+}

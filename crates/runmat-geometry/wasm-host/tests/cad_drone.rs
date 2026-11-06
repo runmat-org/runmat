@@ -151,6 +151,9 @@ fn the_arm_drawing_dimensions_read_the_part() {
     for name in ["bore_square", "motor_position", "datum_a", "datum_b", "datum_c", "seat_finish"] {
         assert!(v["projection"]["data"]["anchors"][name].is_array(), "{name} has no leader anchor");
     }
+    // The bore's frame leader ends on the R2.05 bore, not the R7 knuckle round it.
+    let r = v["projection"]["data"]["radii"]["bore_square"].as_f64().unwrap_or(0.0);
+    assert!((r - 2.05).abs() < 1e-6, "bore_square radius {r}");
 }
 
 /// The hinge mount's lug profiles are fully defined before they extrude (the Desktop's sketch

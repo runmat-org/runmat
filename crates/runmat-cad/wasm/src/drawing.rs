@@ -380,6 +380,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
     // feature's end nearest the dimension line. Holes and edges have none: their extension
     // lines leave the anchor (a hole's centre line).
     let mut extents = serde_json::Map::new();
+    let mut radii = serde_json::Map::new();
     for a in &document.annotations {
         let Some(view) = document.views.iter().find(|v| v.name == a.view) else {
             continue;
@@ -392,6 +393,10 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             if let Some(p) = point_of(display, &target) {
                 anchors.insert(a.id.clone(), json!([p]));
                 extents.insert(a.id.clone(), json!([extent_of(display, &target)]));
+                // A cylinder's radius (mm), so the leader ends on the bore, not its boss.
+                if let Some(r) = values::radius_of(display, &target) {
+                    radii.insert(a.id.clone(), json!(r));
+                }
             }
             continue;
         }
@@ -410,6 +415,7 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
         o.insert("hlr".into(), Value::Object(hlr));
         o.insert("anchors".into(), Value::Object(anchors));
         o.insert("extents".into(), Value::Object(extents));
+        o.insert("radii".into(), Value::Object(radii));
     }
     json!({
         "projection": { "kind": "drawing", "data": data },
