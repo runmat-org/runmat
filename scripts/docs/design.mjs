@@ -51,9 +51,16 @@ export function designStatusPage(ledger) {
         const rows = ledger.capabilities.filter(row => row.area === area && row.status === "pending");
         if (!rows.length) continue;
         lines.push("", `## ${AREA_TITLES[area]}`);
-        for (const row of rows) lines.push("", `### ${row.id}`, "", `**${row.title}.** ${row.acceptance}`);
+        for (const row of rows) lines.push("", `### ${row.id}`, "", `**${mdxText(row.title)}.** ${mdxText(row.acceptance)}`);
     }
     return lines.join("\n") + "\n";
+}
+
+/** Ledger prose as MDX-safe Markdown: `<`, `>`, `{` and `}` outside code spans become entities, so a
+ * placeholder such as `part = <name>` renders as text instead of being read as JSX. */
+export function mdxText(text) {
+    return text.split(/(`[^`]*`)/).map((piece, index) => index % 2 ? piece
+        : piece.replace(/[<>{}]/g, ch => ({ "<": "&lt;", ">": "&gt;", "{": "&#123;", "}": "&#125;" })[ch])).join("");
 }
 
 const isDesignRoute = route => DESIGN_PREFIXES.some(prefix => route === prefix || route.startsWith(prefix + "/"));

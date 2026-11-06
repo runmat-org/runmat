@@ -16,13 +16,13 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 ### design.language.m-quantities
 
-**Values with units across the .m boundary.** A design value function receives quantities for parameters declared quantity.<Kind> in its arguments block and may return a quantity, which the call converts and checks without `as`.
+**Values with units across the .m boundary.** A design value function receives quantities for parameters declared quantity.&lt;Kind&gt; in its arguments block and may return a quantity, which the call converts and checks without `as`.
 
 ## MCAD
 
 ### design.mcad.mate.cam
 
-**Cam mates.** An assembly writes kind = { mate = cam, profile = <published profile> }; the solver keeps the follower point on the cam's profile path as the cam turns (a path-tangent residual), with its Jacobian checked.
+**Cam mates.** An assembly writes kind = &#123; mate = cam, profile = &lt;published profile&gt; &#125;; the solver keeps the follower point on the cam's profile path as the cam turns (a path-tangent residual), with its Jacobian checked.
 
 ### design.mcad.drawing.auto
 
@@ -38,7 +38,7 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 ### design.fea.part-geometry
 
-**Studies that name a design.** A .fea geometry block takes part = <name> or assembly = <name> with inputs, resolved through the folder scope, and the study regenerates the design at those inputs without a STEP export.
+**Studies that name a design.** A .fea geometry block takes part = &lt;name&gt; or assembly = &lt;name&gt; with inputs, resolved through the folder scope, and the study regenerates the design at those inputs without a STEP export.
 
 ## ECAD
 
@@ -68,7 +68,7 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 ### design.ecad.use-library
 
-**Shared part libraries.** A circuit writes use library <name> to read part declarations from a shared library package, and part declarations propagate through circuits it uses.
+**Shared part libraries.** A circuit writes use library &lt;name&gt; to read part declarations from a shared library package, and part declarations propagate through circuits it uses.
 
 ## Tools
 

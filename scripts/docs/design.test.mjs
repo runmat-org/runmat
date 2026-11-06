@@ -68,3 +68,12 @@ test("the status page lists every pending feature under its id", () => {
     const page = designStatusPage(ledger);
     for (const row of ledger.capabilities.filter(row => row.status === "pending")) assert.ok(page.includes(`### ${row.id}\n`), row.id);
 });
+
+test("ledger prose renders as MDX-safe text on the status page", async () => {
+    const { mdxText } = await import("./design.mjs");
+    assert.equal(mdxText("part = <name> with { inputs }"), "part = &lt;name&gt; with &#123; inputs &#125;");
+    assert.equal(mdxText("keep `quantity.<Kind>` and {x}"), "keep `quantity.<Kind>` and &#123;x&#125;");
+    const page = designStatusPage(loadDesign(resolve(import.meta.dirname, "../..")).ledger).split("\n").filter(line => !line.startsWith("---") && !/^(description|keywords):/.test(line)).join("\n");
+    const outsideCode = page.replace(/`[^`]*`/g, "");
+    assert.doesNotMatch(outsideCode, /[<{}]/);
+});
