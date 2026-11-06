@@ -40,8 +40,9 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
     if let Ok(dir) = std::env::var("RUNMAT_AIRCRAFT_DIR") {
         std::fs::create_dir_all(&dir).unwrap();
         for (path, text) in &all {
-            let name = path.rsplit('/').next().unwrap();
-            std::fs::write(format!("{dir}/{name}"), text).unwrap();
+            let file = std::path::Path::new(&dir).join(path.strip_prefix("/p/aircraft/").unwrap());
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, text).unwrap();
         }
     }
     let mut failures = Vec::new();
@@ -105,7 +106,7 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
             .unwrap_or_else(|| panic!("no occurrence {path} in {:?}", rows.iter().take(12).map(|o| o["path"].clone()).collect::<Vec<_>>()))
     };
     assert_eq!(state("skeleton"), "fixed");
-    assert_eq!(state("wing_starboard"), "fully_defined");
+    assert_eq!(state("wing"), "fully_defined");
     assert_eq!(state("fuselage/forward/frame@frames[2]"), "fully_defined");
     let fixed: Vec<&str> = rows.iter().filter(|o| o["state"] == "fixed").filter_map(|o| o["path"].as_str()).collect();
     assert!(fixed.len() * 10 < rows.len(), "{} of {} occurrences fixed: {:?}", fixed.len(), rows.len(), fixed.iter().step_by(fixed.len() / 40 + 1).collect::<Vec<_>>());
@@ -154,6 +155,74 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
     let skin = appearance("skin_panel.part");
     let wing = appearance("wing_box_skin_upper.part");
     assert!(skin[0] > 0.85 && wing[0] < skin[0] - 0.08, "fuselage {skin:?}, wing {wing:?}");
+    the_parts_sit_where_they_did(&rows);
+}
+
+/// Each part occurrence of the airliner, grouped by its design and hand (`frame`,
+/// `wing_slat|port`), with its world transform: the rotation's rows, then the translation (mm).
+/// A port part is `<name>|port`, whether it is its own file (`wing_slat_port.part`) or the
+/// starboard part in its `side = -1` configuration (`wing_slat.part`, placed by a mirror).
+fn part_placements(rows: &[Value]) -> BTreeMap<String, Vec<[f64; 12]>> {
+    let mut out: BTreeMap<String, Vec<[f64; 12]>> = BTreeMap::new();
+    for row in rows {
+        let def = &row["definition"];
+        if def["kind"] != "part" {
+            continue;
+        }
+        let file = def["file"].as_str().unwrap_or("");
+        let stem = file.rsplit('/').next().unwrap_or(file);
+        let mut name = def["part"].as_str().unwrap_or(stem.split('.').next().unwrap_or(stem)).to_string();
+        let config = row["configuration"].to_string();
+        let mut hand = "";
+        if let Some(n) = name.strip_suffix("_port") {
+            name = n.to_string();
+            hand = "|port";
+        } else if config.contains("side") && config.contains("-1") {
+            hand = "|port";
+        }
+        let w = &row["world"];
+        let r = |i: usize, j: usize| w["rotation"][i][j].as_f64().unwrap();
+        let t = |i: usize| w["translation"][i].as_f64().unwrap();
+        out.entry(format!("{name}{hand}")).or_default().push([
+            r(0, 0), r(0, 1), r(0, 2), r(1, 0), r(1, 1), r(1, 2), r(2, 0), r(2, 1), r(2, 2), t(0), t(1), t(2),
+        ]);
+    }
+    for list in out.values_mut() {
+        // Rounded to a micrometre for the order only; equality is checked at 1e-9 below.
+        let key = |m: &[f64; 12]| m.iter().map(|v| (v * 1e3).round() as i64).collect::<Vec<_>>();
+        list.sort_by_key(key);
+    }
+    out
+}
+
+/// The airliner resolves to the same parts in the same places as the flat project it was made
+/// from: the same occurrences of each design and hand, with world transforms equal within
+/// 1e-9 (`occurrences.json`, written by the flat generator with
+/// `RUNMAT_AIRCRAFT_OCCURRENCES_WRITE=1`). The folders, the mirrored port side and the patterns
+/// are a different way to write the same aircraft.
+fn the_parts_sit_where_they_did(rows: &[Value]) {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../runmat-cad/wasm/tests/aircraft/occurrences.json");
+    let now = part_placements(rows);
+    if std::env::var("RUNMAT_AIRCRAFT_OCCURRENCES_WRITE").is_ok() {
+        std::fs::write(path, serde_json::to_string(&now).unwrap() + "\n").unwrap();
+        return;
+    }
+    let before: BTreeMap<String, Vec<[f64; 12]>> =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("occurrences.json")).unwrap();
+    let names = |m: &BTreeMap<String, Vec<[f64; 12]>>| m.iter().map(|(k, v)| format!("{k} × {}", v.len())).collect::<Vec<_>>();
+    assert_eq!(names(&now), names(&before), "the designs placed, and how often");
+    let mut worst = (0.0f64, String::new());
+    for (name, list) in &before {
+        for (a, b) in list.iter().zip(&now[name]) {
+            for (x, y) in a.iter().zip(b) {
+                let d = (x - y).abs() / if x.abs() > 1.0 { x.abs() } else { 1.0 };
+                if d > worst.0 {
+                    worst = (d, format!("{name}: {a:?} became {b:?}"));
+                }
+            }
+        }
+    }
+    assert!(worst.0 <= 1e-9, "a part moved by {:e}: {}", worst.0, worst.1);
 }
 
 /// The airliner example in runmat-examples (`aerospace/airliner`) holds exactly the files this
@@ -169,12 +238,23 @@ fn the_runmat_examples_airliner_holds_the_generated_files() {
         return;
     }
     let generated: BTreeMap<String, String> = files().into_iter().collect();
-    let mut on_disk: Vec<String> = std::fs::read_dir(&dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.ends_with(".part") || n.ends_with(".assembly"))
-        .collect();
+    // Every design file in the example's folders, by its path in the project.
+    fn designs(root: &std::path::Path, at: &std::path::Path, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(at).unwrap().filter_map(|e| e.ok()) {
+            let path = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            if path.is_dir() {
+                designs(root, &path, out);
+            } else if name.ends_with(".part") || name.ends_with(".assembly") {
+                out.push(path.strip_prefix(root).unwrap().to_string_lossy().into_owned());
+            }
+        }
+    }
+    let mut on_disk = Vec::new();
+    designs(&dir, &dir, &mut on_disk);
     on_disk.sort();
     assert_eq!(on_disk, generated.keys().cloned().collect::<Vec<_>>(), "the example's design files");
     for (name, text) in &generated {

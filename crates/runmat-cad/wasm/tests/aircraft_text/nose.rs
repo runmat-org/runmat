@@ -163,16 +163,18 @@ fn panes() -> Vec<Pane> {
     ]
 }
 
-/// The prism along a pane's outline, cutting or intersecting (`mode`).
-fn prism(pane: &Pane, sketch: &str, feature: &str, mode: &str) -> String {
+/// The prism along a pane's outline, cutting or intersecting (`mode`). A `handed` prism is a
+/// starboard pane's, written so the part's `side` input of -1 builds the port pane's.
+fn prism(pane: &Pane, sketch: &str, feature: &str, mode: &str, handed: bool) -> String {
     match pane.plane {
         Plane::Front => format!(
             "    feature {sketch}_at = plane.offset(base = origin.yz, distance = 300 mm)\n{}    feature {feature} = extrude(profile = sketch.{sketch}, distance = 2200 mm, mode = {mode})\n",
-            outline(sketch, &format!("plane.{sketch}_at"), &pane.corners, 70.0)
+            // The front view's u is y: it changes sign with the hand.
+            super::text::with_sided(handed, false, || outline(sketch, &format!("plane.{sketch}_at"), &pane.corners, 70.0))
         ),
         Plane::Side { port } => format!(
             "    feature {sketch}_at = plane.offset(base = origin.zx, distance = {})\n{}    feature {feature} = extrude(profile = sketch.{sketch}, distance = 2200 mm, mode = {mode})\n",
-            if port { "-2200 mm" } else { "0 mm" },
+            if handed { "(input.side - 1) * 1100 mm" } else if port { "-2200 mm" } else { "0 mm" },
             outline(sketch, &format!("plane.{sketch}_at"), &pane.corners, 70.0)
         ),
     }
@@ -184,7 +186,7 @@ fn nose() -> String {
     // at least the skin's thickness where the nose turns towards the tip.
     body += &loft("hollow", &STATIONS[1..], 8.0, SKIN, ", mode = cut");
     for (k, pane) in panes().iter().enumerate() {
-        body += &prism(pane, &format!("o{k}"), &format!("opening{k}"), "cut");
+        body += &prism(pane, &format!("o{k}"), &format!("opening{k}"), "cut", false);
     }
     part(
         "nose",
@@ -199,9 +201,10 @@ fn nose() -> String {
 fn pane(p: &Pane) -> String {
     let stations: Vec<f64> = STATIONS.iter().copied().filter(|x| *x >= p.span.0 && *x <= p.span.1).collect();
     // 1 mm inside the skin's outer surface; the inner face 10 mm further aft and 18 mm in.
-    let mut body = loft("glass", &stations, 0.0, 1.0, "");
+    let mut body = super::text::SIDE_INPUT.to_string();
+    body += &loft("glass", &stations, 0.0, 1.0, "");
     body += &loft("inside", &stations, 10.0, 18.0, ", mode = cut");
-    body += &prism(p, "o", "pane", "intersect");
+    body += &prism(p, "o", "pane", "intersect", true);
     // The intersect trims the glass body in place.
     part(p.name, p.number, "glass", p.comment, &body, "glass")
 }
@@ -217,7 +220,7 @@ fn nose_lining() -> String {
     let mut body = loft("lining", &stations, 0.0, 60.0, "");
     body += &loft("lining_in", &stations, 0.0, 68.0, ", mode = cut");
     for (k, pane) in panes().iter().enumerate().filter(|(_, p)| matches!(p.plane, Plane::Side { .. })) {
-        body += &prism(pane, &format!("r{k}"), &format!("reveal{k}"), "cut");
+        body += &prism(pane, &format!("r{k}"), &format!("reveal{k}"), "cut", false);
     }
     body += &format!(
         "{}    feature below = extrude(profile = sketch.below_s, distance = 5000 mm, symmetric, mode = cut)\n",
@@ -235,19 +238,25 @@ fn nose_lining() -> String {
 
 pub fn parts() -> Vec<(String, String)> {
     let mut out = vec![("nose.part".to_string(), nose()), ("nose_lining.part".to_string(), nose_lining())];
-    for p in panes() {
-        out.push((format!("{}.part", p.name), pane(&p)));
+    // The starboard panes; each part's `side = -1` is its port pane.
+    for p in panes().iter().filter(|p| !p.name.ends_with("_port")) {
+        out.push((format!("{}.part", p.name), pane(p)));
     }
     out
 }
 
-/// The nose's occurrences in `fuselage.assembly`: the shell, its lining and its six panes.
+/// The nose's occurrences in `fuselage.assembly`: the shell, its lining and its six panes, the
+/// port panes as mirror images of the starboard ones.
 pub fn uses() -> String {
     let mut s = use_("part", "nose", "nose", &[]);
     s += &use_("part", "nose_lining", "nose_lining", &[]);
-    for p in panes() {
-        let alias = p.name.trim_start_matches("cockpit_");
-        s += &use_("part", p.name, alias, &[]);
+    let starboard: Vec<&'static str> = panes().iter().map(|p| p.name).filter(|n| !n.ends_with("_port")).collect();
+    for name in &starboard {
+        s += &use_("part", name, name.trim_start_matches("cockpit_"), &[]);
+    }
+    for name in &starboard {
+        let alias = name.trim_start_matches("cockpit_");
+        s += &super::text::mirror_port(&format!("{alias}_port"), "part", name, &[alias], &[]);
     }
     s
 }

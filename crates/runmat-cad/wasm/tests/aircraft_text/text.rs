@@ -18,7 +18,22 @@ pub fn num(v: f64) -> String {
 }
 
 pub fn pt(u: f64, v: f64) -> String {
-    format!("[{}, {}]", mm(u), mm(v))
+    let (su, sv) = SIDED.with(|s| s.get());
+    let c = |x: f64, sided_: bool| if sided_ { sided(x) } else { mm(x) };
+    format!("[{}, {}]", c(u, su), c(v, sv))
+}
+
+thread_local! {
+    static SIDED: std::cell::Cell<(bool, bool)> = const { std::cell::Cell::new((false, false)) };
+}
+
+/// Sketch text written by `f` with its points' u and/or v coordinates [`sided`]: a handed part's
+/// sketch in a plane the centre plane crosses.
+pub fn with_sided<R>(u: bool, v: bool, f: impl FnOnce() -> R) -> R {
+    let was = SIDED.with(|s| s.replace((u, v)));
+    let out = f();
+    SIDED.with(|s| s.set(was));
+    out
 }
 
 /// A closed polygon sketch: `l1 … ln` through the points.
@@ -201,21 +216,45 @@ pub fn offset_rot(x: f64, y: f64, z: f64, axis: [f64; 3], deg: f64) -> String {
 
 pub fn attach(frame: &str) -> String {
     format!(
-        "placement = {{ placement = attach, own = {{ anchor = origin }}, to = {{ frame = interface, file = \"airliner_skeleton.part\", name = {frame} }} }}"
+        "placement = {{ placement = attach, own = {{ anchor = origin }}, to = {{ frame = interface, part = airliner_skeleton, name = {frame} }} }}"
     )
 }
 
-/// An occurrence: `use <kind> <name> from "<name>.<kind>" as <alias> { lines }`.
+/// An occurrence of a design in this folder: `use <kind> <name> as <alias> { lines }`.
+/// [`super::modules`] adds `from "<folder>"` (or `from hardware`) where the design lives in
+/// another folder.
 pub fn use_(kind: &str, name: &str, alias: &str, lines: &[String]) -> String {
     if lines.is_empty() {
-        return format!("    use {kind} {name} from \"{name}.{kind}\" as {alias}\n");
+        return format!("    use {kind} {name} as {alias}\n");
     }
-    let mut s = format!("    use {kind} {name} from \"{name}.{kind}\" as {alias} {{\n");
+    let mut s = format!("    use {kind} {name} as {alias} {{\n");
     for l in lines {
         s += &format!("        {l}\n");
     }
     s += "    }\n";
     s
+}
+
+/// The port side as a mirror of starboard occurrences: each seed's image about the aircraft's
+/// centre plane (y = 0) is the same design in its opposite-hand configuration (`side = -1`).
+pub fn mirror_port(name: &str, kind: &str, design: &str, seeds: &[&str], extra: &[(&str, String)]) -> String {
+    let mut values = vec![("side".to_string(), "-1".to_string())];
+    values.extend(extra.iter().map(|(k, v)| (k.to_string(), v.clone())));
+    let values: Vec<String> = values.iter().map(|(k, v)| format!("{k} = {v}")).collect();
+    format!(
+        "    mirror {name} = {{\n        seeds = [{}],\n        plane = {{ plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] }},\n        hand = opposite(source = {{ definition = {{ kind = {kind}, name = {design} }} }}, configuration = {{ select = inputs, values = {{ {} }} }}, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0])\n    }}\n",
+        seeds.join(", "),
+        values.join(", ")
+    )
+}
+
+/// The input a handed part or assembly takes: 1 builds it to starboard, -1 its mirror image to
+/// port (the opposite hand a mirror places).
+pub const SIDE_INPUT: &str = "    input side : real = 1\n\n";
+
+/// `input.side * <v>`: a coordinate that changes sign with the hand.
+pub fn sided(v: f64) -> String {
+    if v == 0.0 { mm(0.0) } else { format!("input.side * {}", mm(v)) }
 }
 
 /// `configuration = { select = inputs, values = { k = v, … } }`.

@@ -3,7 +3,7 @@
 //! at the tail cone's front on the fuselage axis, x aft, y to starboard, z up.
 
 use super::airfoil::{run, Naca, Placed};
-use super::text::{loop_sketch, mm, part, use_, Curve, HEADER};
+use super::text::{loop_sketch, mirror_port, mm, part, sided, use_, Curve, HEADER, SIDE_INPUT};
 
 /// Hinge line, fraction of chord: fixed surface ahead, control surface aft.
 const HINGE: f64 = 0.70;
@@ -21,7 +21,7 @@ struct Surface {
 
 impl Surface {
     /// The section `t` of the way from root (0) to tip (1): its plane and placement.
-    fn section_at(&self, t: f64, side: f64) -> (String, Placed) {
+    fn section_at(&self, t: f64) -> (String, Placed) {
         let lerp = |a: f64, b: f64| a + (b - a) * t;
         let le = (lerp(self.root_le.0, self.tip_le.0), lerp(self.root_le.1, self.tip_le.1), lerp(self.root_le.2, self.tip_le.2));
         let c = lerp(self.root_chord, self.tip_chord);
@@ -29,8 +29,9 @@ impl Surface {
             // Horizontal planes at z: u = x, v = y.
             (format!("plane.offset(base = origin.xy, distance = {})", mm(le.2)), Placed { chord: c, le: (le.0, le.1), chord_along_v: false, flip: false })
         } else {
-            // Vertical planes at y: u = z, v = x.
-            (format!("plane.offset(base = origin.zx, distance = {})", mm(side * le.1)), Placed { chord: c, le: (le.2, le.0), chord_along_v: true, flip: false })
+            // Vertical planes at y: u = z, v = x; a stabilizer is handed, so y changes sign with
+            // its `side` input.
+            (format!("plane.offset(base = origin.zx, distance = {})", sided(le.1)), Placed { chord: c, le: (le.2, le.0), chord_along_v: true, flip: false })
         }
     }
 
@@ -39,12 +40,12 @@ impl Surface {
         if self.vertical { self.tip_le.2 - self.root_le.2 } else { self.tip_le.1 - self.root_le.1 }
     }
 
-    fn piece(&self, name: &str, number: &str, comment: &str, control: bool, side: f64) -> String {
+    fn piece(&self, name: &str, number: &str, comment: &str, control: bool) -> String {
         let f = Naca::symmetric(self.thickness);
-        let mut body = String::new();
+        let mut body = if self.vertical { String::new() } else { SIDE_INPUT.to_string() };
         let sketches = |body: &mut String, tag: &str, ts: [f64; 2], skin: f64| {
             for (k, t) in ts.into_iter().enumerate() {
-                let (plane, at) = self.section_at(t, side);
+                let (plane, at) = self.section_at(t);
                 let m = |v: Vec<(f64, f64)>| v.into_iter().map(|p| at.map(p)).collect::<Vec<_>>();
                 let curves = if control {
                     vec![
@@ -106,31 +107,22 @@ fn stabilizer() -> Surface {
 }
 
 pub fn parts() -> Vec<(String, String)> {
-    let mut out = vec![
-        ("fin.part".into(), fin().piece("fin", "EMP-VT-700", "The vertical fin ahead of the rudder hinge: NACA 0011, swept 38°.", false, 1.0)),
-        ("rudder.part".into(), fin().piece("rudder", "EMP-RD-705", "The rudder, aft of the hinge line at 70 % chord.", true, 1.0)),
-    ];
-    for (side, suffix) in [(1.0, ""), (-1.0, "_port")] {
-        let s = format!("stabilizer{suffix}");
-        let e = format!("elevator{suffix}");
-        out.push((format!("{s}.part"), stabilizer().piece(&s, "EMP-HT-710", "A horizontal stabilizer ahead of the elevator hinge: NACA 0010, swept 33° with 7° dihedral.", false, side)));
-        out.push((format!("{e}.part"), stabilizer().piece(&e, "EMP-EL-715", "An elevator, aft of the hinge line at 70 % chord.", true, side)));
-    }
-    out
+    vec![
+        ("fin.part".into(), fin().piece("fin", "EMP-VT-700", "The vertical fin ahead of the rudder hinge: NACA 0011, swept 38°.", false)),
+        ("rudder.part".into(), fin().piece("rudder", "EMP-RD-705", "The rudder, aft of the hinge line at 70 % chord.", true)),
+        ("stabilizer.part".into(), stabilizer().piece("stabilizer", "EMP-HT-710", "A horizontal stabilizer ahead of the elevator hinge: NACA 0010, swept 33° with 7° dihedral.", false)),
+        ("elevator.part".into(), stabilizer().piece("elevator", "EMP-EL-715", "An elevator, aft of the hinge line at 70 % chord.", true)),
+    ]
 }
 
 pub fn empennage() -> String {
-    let mut s = format!("{HEADER}// The empennage: fin and rudder, both stabilizers and their elevators, on the tail frame.\nassembly empennage {{\n");
-    for (name, alias) in [
-        ("fin", "fin"),
-        ("rudder", "rudder"),
-        ("stabilizer", "stabilizer_starboard"),
-        ("elevator", "elevator_starboard"),
-        ("stabilizer_port", "stabilizer_port"),
-        ("elevator_port", "elevator_port"),
-    ] {
+    let mut s = format!("{HEADER}// The empennage: fin and rudder, the starboard stabilizer and elevator and their mirror images to\n// port, on the tail frame.\nassembly empennage {{\n");
+    for (name, alias) in [("fin", "fin"), ("rudder", "rudder"), ("stabilizer", "stabilizer_starboard"), ("elevator", "elevator_starboard")] {
         s += &use_("part", name, alias, &[]);
     }
+    s += "\n";
+    s += &mirror_port("stabilizer_port", "part", "stabilizer", &["stabilizer_starboard"], &[]);
+    s += &mirror_port("elevator_port", "part", "elevator", &["elevator_starboard"], &[]);
     s += "}\n";
     s
 }

@@ -218,22 +218,31 @@ fn monument(name: &str, number: &str, comment: &str, depth: f64, galley: bool) -
     part(name, number, "polycarbonate", comment, &body, "box")
 }
 
-/// A door: the outer skin of the door, 6 mm proud of the fuselage skin, cut to a rounded outline
-/// on both sides (or to starboard only).
-fn door(name: &str, number: &str, width: f64, sill: f64, height: f64, port: bool) -> String {
+/// A door: the outer skin of the door, 6 mm proud of the fuselage skin, cut to a rounded outline.
+/// A door on both sides is handed: its `side` input of -1 builds the port door.
+fn door(name: &str, number: &str, width: f64, sill: f64, height: f64, both: bool) -> String {
     let corners = [(sill, 0.0), (sill, width), (sill + height, width), (sill + height, 0.0)];
-    let side = if port { "port" } else { "starboard" };
-    let comment = format!("A door to {side}, {} wide and {} tall: its outer skin, 6 mm proud of the fuselage.", mm(width), mm(height));
-    let from = if port { -(RADIUS + 200.0) } else { 0.0 };
+    let comment = if both {
+        format!("A door, {} wide and {} tall: its outer skin, 6 mm proud of the fuselage; to starboard, or to port in the opposite hand.", mm(width), mm(height))
+    } else {
+        format!("A door to starboard, {} wide and {} tall: its outer skin, 6 mm proud of the fuselage.", mm(width), mm(height))
+    };
+    // The cutting prism runs from the centre plane out to starboard, or from outside the port
+    // skin in to the centre plane.
+    let (input, from) = if both {
+        (super::text::SIDE_INPUT, format!("(input.side - 1) * {}", mm((RADIUS + 200.0) / 2.0)))
+    } else {
+        ("", mm(0.0))
+    };
     part(
         name,
         number,
         "aluminum_2024",
         &comment,
         &format!(
-            "{}    feature side = plane.offset(base = origin.zx, distance = {})\n{}    feature cut = extrude(profile = sketch.o, distance = {}, mode = intersect)\n",
+            "{input}{}    feature side = plane.offset(base = origin.zx, distance = {})\n{}    feature cut = extrude(profile = sketch.o, distance = {}, mode = intersect)\n",
             rect("s", "origin.xy", 0.0, RADIUS + 6.0, width, RADIUS + 9.0) + "    feature skin = revolve(profile = sketch.s, axis = origin.x, angle = 360 deg)\n",
-            mm(from),
+            from,
             outline("o", "plane.side", &corners, 120.0),
             mm(RADIUS + 200.0)
         ),
@@ -254,10 +263,7 @@ pub fn parts() -> Vec<(String, String)> {
     ];
     let numbers = ["FUS-DR-700", "FUS-DR-710", "FUS-DR-720", "FUS-DR-730", "FUS-DR-740"];
     for ((name, _, width, sill, height, both), number) in DOORS.iter().zip(numbers) {
-        out.push((format!("{name}.part"), door(name, number, *width, *sill, *height, false)));
-        if *both {
-            out.push((format!("{name}_port.part"), door(&format!("{name}_port"), number, *width, *sill, *height, true)));
-        }
+        out.push((format!("{name}.part"), door(name, number, *width, *sill, *height, *both)));
     }
     out
 }
@@ -331,10 +337,13 @@ pub fn cabin() -> String {
     s += &use_("part", "lavatory", "lavatory_aft_port", &[turn(28_000.0)]);
     s += &use_("part", "galley", "galley_aft", &[offset(29_000.0, 0.0, 0.0)]);
     s += &use_("part", "galley", "galley_aft_port", &[turn(29_860.0)]);
-    for (name, x, .., both) in DOORS {
+    for (name, x, ..) in DOORS {
         s += &use_("part", name, name, &[offset(x, 0.0, 0.0)]);
+    }
+    // The port doors: mirror images of the starboard ones, in their opposite hand.
+    for (name, .., both) in DOORS {
         if both {
-            s += &use_("part", &format!("{name}_port"), &format!("{name}_port"), &[offset(x, 0.0, 0.0)]);
+            s += &super::text::mirror_port(&format!("{name}_port"), "part", name, &[name], &[]);
         }
     }
     s += "\n";
