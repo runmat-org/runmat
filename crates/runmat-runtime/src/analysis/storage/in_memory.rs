@@ -170,6 +170,9 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             Some(PersistedAnalysisArtifact::StructuralFrequency(artifact)) => {
                 artifact.render_tiles.clone()
             }
+            Some(PersistedAnalysisArtifact::AcousticFrequency(artifact)) => {
+                artifact.render_tiles.clone()
+            }
             _ => None,
         })
     }
@@ -383,15 +386,17 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
         step: &AnalysisStudyStepRunData,
         object_catalog: &runmat_execution::value::PublishedObjectCatalog,
         artifact_roots: &crate::analysis::FrequencySampleArtifactRootInventory,
+        render_topology: Option<&crate::analysis::AnalysisRenderTopology>,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, String> {
-        let prepared = frequency_sample::prepare_artifact(
+        let (prepared, tile_objects) = frequency_sample::prepare_artifact(
             step,
             object_catalog,
             artifact_roots,
+            render_topology,
             Utc::now().to_rfc3339(),
         )?;
-        let objects = frequency_sample::ingest_objects(&prepared, source)?;
+        let objects = frequency_sample::ingest_objects(&prepared, tile_objects, source)?;
         let mut record = frequency_sample::artifact_record(&prepared);
         record.created_at = self.install_standalone(
             &step.run_id,

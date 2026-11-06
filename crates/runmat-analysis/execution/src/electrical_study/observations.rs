@@ -153,15 +153,7 @@ impl ElectricalStudyCoordinator {
         self.observation_state.reduced.push(reduced);
         self.usage = Some(usage);
         self.closures.push(closure);
-        let count = self
-            .observation_state
-            .fanout
-            .as_ref()
-            .expect("fanout")
-            .source_request
-            .plan
-            .observations
-            .len();
+        let count = self.observation_state.reduction_count();
         self.phase = if self.observation_state.reduced.len() == count {
             ElectricalStudyPhase::ReadyForObservationAssembly
         } else {

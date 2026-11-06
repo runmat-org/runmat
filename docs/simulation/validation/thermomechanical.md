@@ -45,3 +45,4 @@ Each requirement lists acceptance obligations, and each obligation must hold in 
 | FEA-SCALE-SIZE-001 | Millions of degrees of freedom at stated time and memory | 5 | 0 | 0 | 0 | 94 |
 | FEA-NONLINEAR-GOVERNANCE-001 | Converged nonlinear states, supported laws and independent qualification | 5 | 0 | 2 | 0 | 48 |
 | FEA-STRUCTURAL-PUBLIC-001 | Structural capabilities the page claims | 10 | 0 | 0 | 0 | 100 |
+| FEA-COUPLING-THERMOELASTIC-002 | Thermal stress over a time history (thermomechanical transient) | 3 | — | — | — | — |

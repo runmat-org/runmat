@@ -244,15 +244,7 @@ impl AcousticStudyEntryCoordinator {
         self.usage = Some(usage);
         self.closures.push(closure);
         self.attempts.extend(task_attempts);
-        let count = self
-            .observation_state
-            .fanout
-            .as_ref()
-            .expect("fanout")
-            .source_request
-            .plan
-            .observations
-            .len();
+        let count = self.observation_state.reduction_count();
         self.phase = if self.observation_state.reduced.len() == count {
             AcousticStudyPhase::ReadyForObservationAssembly
         } else {

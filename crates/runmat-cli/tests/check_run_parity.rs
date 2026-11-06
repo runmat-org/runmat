@@ -183,7 +183,7 @@ fn pending_family_procedures_are_refused_by_check_and_run_alike() {
             "analysis flow { fluid harmonic { frequencies = [10] Hz } }",
         )
         .lines()
-        .filter(|line| !line.contains("= max("))
+        .filter(|line| !line.contains("= max(") && !line.contains("= pressure_drop("))
         .collect::<Vec<_>>()
         .join("\n");
     assert_check_and_run_agree(

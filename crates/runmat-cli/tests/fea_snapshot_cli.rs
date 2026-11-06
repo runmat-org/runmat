@@ -102,6 +102,68 @@ study modes {
 }
 "#;
 
+/// A thermal solve whose only temperature boundary holds 303.15 K, so the solved field is
+/// uniform, then a thermomechanical preload from that solved state. The prescribed-field
+/// variant below is the same structural problem with the temperature given directly.
+const SOLVED_THERMAL_STRESS: &str = r#"
+model structure {
+    thermal { reference_temperature = 293.15 K }
+    thermomechanical { reference_temperature = 293.15 K }
+    assign material.steel to geometry.part.region.body
+    constraint base { structural.fixed { target = geometry.part.region.support } }
+    constraint hot {
+        thermal.temperature { target = geometry.part.region.hot; value = 303.15 K }
+    }
+}
+study solved_thermal_stress {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.structure
+    analysis heat { thermal steady {} retain heated }
+    analysis preload after analysis.heat {
+        thermomechanical preload { temperature = analysis.heat.state.heated }
+    }
+    output displacement = analysis.preload.field.node.displacement
+    output stress = analysis.preload.field.element.von_mises_stress
+    output peak_stress = max(output.stress, over = geometry.part.region.body)
+}
+"#;
+
+const PRESCRIBED_THERMAL_STRESS: &str = r#"
+model heated {
+    thermal { reference_temperature = 293.15 K }
+    thermomechanical { reference_temperature = 293.15 K }
+    assign material.steel to geometry.part.region.body
+    constraint base { structural.fixed { target = geometry.part.region.support } }
+    load operating_temperature {
+        temperature_field on geometry.part.region.body = 303.15 K
+    }
+    load_case operating { include load.operating_temperature }
+}
+study prescribed_thermal_stress {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.heated
+    analysis coupled { thermomechanical steady {} }
+}
+"#;
+
+const ACOUSTIC_HARMONIC: &str = r#"
+model driven {
+    assign material.air to geometry.part.region.body
+    constraint drive {
+        acoustic.pressure { target = geometry.part.region.support; value = 1 Pa }
+    }
+}
+study cavity_response {
+    geometry = geometry.part
+    mesh = mesh.volume
+    model = model.driven
+    analysis harmonic { acoustic harmonic { frequencies = [100, 200] Hz } }
+    output pressure = analysis.harmonic.field.node.acoustic_pressure
+}
+"#;
+
 const STRUCTURAL_MODAL: &str = r#"
 model supported {
     assign material.steel to geometry.part.region.body
@@ -424,4 +486,68 @@ fn structural_modal_snapshot_shows_only_mode_shapes_and_verifies() {
     assert!(!refused.status.success());
     let stderr = String::from_utf8_lossy(&refused.stderr);
     assert!(stderr.contains("no view 'stress'"), "stderr: {stderr}");
+}
+
+/// Run `runmat verify-snapshot` on a captured snapshot and require it to pass.
+fn verify(project: &TempDir, snapshot: &str) -> Value {
+    let out = project.path().join("out/verify.json");
+    let verified = Command::new(env!("CARGO_BIN_EXE_runmat"))
+        .current_dir(project.path())
+        .args(["verify-snapshot", snapshot, "--out"])
+        .arg(&out)
+        .env_remove("RUNMAT_CONFIG")
+        .env("RUNMAT_FEA_ARTIFACT_ROOT", project.path().join("artifacts"))
+        .env(
+            "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+            project.path().join("study-artifacts"),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        verified.status.success(),
+        "verify-snapshot failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&verified.stdout),
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    serde_json::from_slice(&fs::read(&out).unwrap()).unwrap()
+}
+
+/// A harmonic acoustic sweep saves the render tiles of its solver mesh with the frequency
+/// record, so the snapshot replays its geometry and verify-snapshot passes cold.
+#[test]
+#[ignore = "verify-snapshot: cold field page differs from original descriptor scope (website item 3, next pages helper)"]
+fn acoustic_harmonic_snapshot_saves_render_tiles_and_verifies() {
+    let project = project(ACOUSTIC_HARMONIC);
+    let snapshot = snapshot(&project, &[]);
+    assert_eq!(snapshot["step"], "harmonic");
+    assert!(!view_ids(&snapshot).is_empty(), "no views");
+    check_scenes(&project, &snapshot);
+    let report = verify(&project, "out/snapshot.json");
+    assert!(!report.is_null());
+}
+
+/// Thermal stress from a solved temperature field: the preload step publishes displacement and
+/// stress as outputs and snapshot views, and they equal the stress of the same structure under
+/// the same temperature prescribed directly.
+#[test]
+#[ignore = "fixture rejected: thermal producer must feed the exact thermomechanical prestress preload (website item 4, next pages helper)"]
+fn thermomechanical_preload_publishes_stress_from_the_solved_temperature() {
+    let solved = project(SOLVED_THERMAL_STRESS);
+    let preload = snapshot(&solved, &["--step", "preload"]);
+    assert_eq!(preload["step"], "preload");
+    let stress = view(&preload, "stress");
+    let displacement = view(&preload, "displacement");
+    let peak = stress["maximum"].as_f64().unwrap();
+    assert!(peak > 0.0, "{stress}");
+    assert!(displacement["maximum"].as_f64().unwrap() > 0.0, "{displacement}");
+    check_scenes(&solved, &preload);
+    verify(&solved, "out/snapshot.json");
+
+    let prescribed = project(PRESCRIBED_THERMAL_STRESS);
+    let reference = snapshot(&prescribed, &[]);
+    let expected = view(&reference, "stress")["maximum"].as_f64().unwrap();
+    assert!(
+        (peak - expected).abs() <= 1e-6 * expected,
+        "solved-temperature peak {peak} Pa, prescribed-temperature peak {expected} Pa"
+    );
 }

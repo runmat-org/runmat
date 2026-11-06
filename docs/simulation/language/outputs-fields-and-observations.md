@@ -41,7 +41,7 @@ A field reference has four parts, `analysis.<step>.field.<location>.<quantity>`:
 | Thermal | `temperature`, `temperature_gradient`, `heat_flux`, `heat_rate`, `thermal_energy_storage_rate_density` |
 | Electric | `electric_potential`, `electric_field`, `electric_displacement`, `electric_energy_density`, `electric_current`, `electric_current_density`, `electric_charge`, `joule_power_density`, `electric_edge_circulation` |
 | Magnetic | `magnetic_vector_potential`, `magnetic_flux_density`, `magnetic_field_intensity`, `magnetic_edge_circulation` |
-| Acoustic | `acoustic_pressure`, `acoustic_particle_velocity`, `acoustic_intensity`, `sound_pressure_level` |
+| Acoustic | `acoustic_pressure`, `acoustic_particle_velocity`, `acoustic_intensity`, `acoustic_port_intensity` (plane-wave power density through an incident or radiation port face), `sound_pressure_level` |
 | Fluid | `fluid_pressure`, `fluid_velocity`, `vorticity`, `wall_shear_stress`, `mass_flow_rate`, `volume_flow_rate` |
 | Modal | `modal_frequency`, `modal_participation`, `eigenvalue` |
 | Solver checks | `residual`, `balance`, `constraint_violation` |
@@ -63,6 +63,8 @@ Output operations are typed: each one accepts certain field locations, quantitie
 | `real`, `imag`, `phase`, `level` | Read a complex (harmonic) result; `level` gives a decibel level. |
 | `flux(field, through = region)` | $\int_\Gamma \mathbf v\cdot\mathbf n\,dA$ of a vector field over a face region. |
 | `sound_power(step, through = region)` | The flux of active acoustic intensity $\tfrac12\mathrm{Re}(p\,\mathbf v^*)$: mean power leaving through the faces. |
+| `pressure_drop(step, from = region, to = region)` | Area-weighted mean fluid pressure on the `from` faces minus the mean on the `to` faces, in Pa, on a fluid step. |
+| `transmission_loss(step, incident = region, transmitted = region)` | $10\log_{10}(W_\mathrm{inc}/W_\mathrm{tr})$ in dB per frequency on an acoustic harmonic step, from the incident and transmitted port powers. |
 | `interpolate(field, at = point)`, `interpolate(field, at = [point, …])` | Sample a field at a point, or at an ordered list of points along a path. |
 | `sample`, `envelope`, `absmax`, `variance` over `time` or `frequency` | Histories and spectra of a quantity. |
 | `recover(field, to = <location>, using = <method>)` | Move a field to another location. |

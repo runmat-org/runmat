@@ -44,7 +44,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: A study whose nonlinear step follows or precedes other steps (`after`) passes `runmat check` and runs to completion; state transfers into and out of the nonlinear step are tested.
-- Described in: [Procedure reference](../language/reference/procedures.md), [Studies, analyses and state](../language/studies-analyses-and-state.md).
+- Described in: [Procedures](../language/reference/procedures.md), [Studies, analyses and state](../language/studies-analyses-and-state.md).
 
 ### Heat transfer
 
@@ -63,7 +63,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electromagnetic nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 #### electromagnetic.transient
 
@@ -71,7 +71,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electromagnetic transient` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Finite-element analysis](../index.md), [Procedure reference](../language/reference/procedures.md).
+- Described in: [Finite-element analysis](../index.md), [Procedures](../language/reference/procedures.md).
 
 #### magnetic.harmonic.vector-potential
 
@@ -79,7 +79,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: constraint.
 - Ships when: A nonzero `magnetic.vector_potential` boundary value runs in magnetostatic and harmonic studies and matches a closed-form field.
-- Described in: [Electrical and magnetic constraints](../constraints/electromagnetic.md).
+- Described in: [Electromagnetic constraints](../constraints/electromagnetic.md).
 
 #### magnetic.periodic
 
@@ -87,7 +87,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: constraint.
 - Ships when: `magnetic.periodic` and `magnetic.phase_shifted_periodic` run in magnetostatic and harmonic studies; a sector model matches the full model.
-- Described in: [Electrical and magnetic constraints](../constraints/electromagnetic.md).
+- Described in: [Electromagnetic constraints](../constraints/electromagnetic.md).
 
 ### Acoustics
 
@@ -97,7 +97,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `acoustic nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 #### acoustic.periodic.rotational
 
@@ -114,7 +114,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `acoustic static` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
 - Scope: awaiting a product decision on whether this belongs in the final system.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 #### output.transmission_loss
 
@@ -132,7 +132,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
 - Scope: awaiting a product decision on whether this belongs in the final system.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 #### fluid.non-newtonian
 
@@ -147,7 +147,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 #### fluid.periodic
 
@@ -208,15 +208,15 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `thermomechanical harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 #### thermomechanical.transient
 
 **Thermomechanical transient with two-way coupling.**
 
 - Kind: procedure.
-- Ships when: `runmat check` and `runmat run` admit `thermomechanical transient` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Ships when: `runmat check` and `runmat run` admit `thermomechanical transient` through ANALYSIS_IDENTITIES; thermal stress publishes over the time history of a transient thermal analysis (FEA-COUPLING-THERMOELASTIC-002), and a canonical example (one braking stop) runs on the release CLI with a receipt compared to a reference.
+- Described in: [Procedures](../language/reference/procedures.md), [Thermal stress](../physics/thermomechanical.md).
 
 ### Electrothermal
 
@@ -226,7 +226,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electrothermal harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 #### electrothermal.nonlinear
 
@@ -234,7 +234,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `electrothermal nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 ### Conjugate heat transfer
 
@@ -251,7 +251,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `conjugate_heat_transfer harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 #### conjugate-heat-transfer.nonlinear
 
@@ -259,7 +259,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `conjugate_heat_transfer nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 ### Fluid–structure interaction
 
@@ -269,7 +269,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid_structure_interaction harmonic` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
 
 #### fluid-structure-interaction.nonlinear
 
@@ -277,7 +277,23 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: procedure.
 - Ships when: `runmat check` and `runmat run` admit `fluid_structure_interaction nonlinear` through ANALYSIS_IDENTITIES; a canonical example runs to completion on the release CLI with a receipt compared to a reference.
-- Described in: [Procedure reference](../language/reference/procedures.md).
+- Described in: [Procedures](../language/reference/procedures.md).
+
+#### fluid-structure-interaction.one-way-fluid-loads
+
+**One-way fluid loads into a structural study (`pressure` and wall shear from a solved flow).**
+
+- Kind: load.
+- Ships when: A structural static or transient analysis takes the pressure and wall shear stress of an earlier fluid analysis as a load on the wetted faces (`after analysis.<flow>`); the mapped total force and moment equal the fluid resultant, and a study checks and runs.
+- Described in: [Fluid–structure](../physics/fluid-structure-interaction.md).
+
+#### fluid-structure-interaction.solid-stress
+
+**Structural stress on the solid of an FSI study (`von_mises_stress`, `stress`).**
+
+- Kind: output.
+- Ships when: A fluid_structure_interaction steady or transient analysis publishes element stress and von Mises stress on the solid region from the converged displacement; outputs and snapshot views read them, and a cantilever paddle in channel flow matches the beam root stress of its fluid force resultant.
+- Described in: [Fluid–structure](../physics/fluid-structure-interaction.md).
 
 ### The `.fea` language
 
@@ -287,7 +303,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: language.
 - Ships when: `include model.<m>(<name> = <value>, …)` checks, binds typed region, material and quantity inputs, and a study using it runs.
-- Described in: [Declaration reference](../language/reference/declarations.md).
+- Described in: [Declarations](../language/reference/declarations.md).
 
 #### language.keyword-names
 
@@ -295,7 +311,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: language.
 - Ships when: Declared input, let and output names may be keywords; `input load : force = 1.5 kN` checks clean and resolves as `input.load`.
-- Described in: [Grammar reference](../language/reference/grammar.md), [Types, units and expressions](../language/types-units-and-expressions.md).
+- Described in: [Grammar](../language/reference/grammar.md), [Types, units and expressions](../language/types-units-and-expressions.md).
 
 #### language.plastic-law-identifier
 
@@ -303,7 +319,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: language.
 - Ships when: `plastic { law = j2_isotropic_linear_hardening }` checks; one form for every material `law` member.
-- Described in: [Declaration reference](../language/reference/declarations.md).
+- Described in: [Declarations](../language/reference/declarations.md).
 
 #### language.unit.siemens
 
@@ -343,7 +359,7 @@ Modal superposition reuses a retained modal basis; every other entry solves the 
 
 - Kind: geometry.
 - Ships when: A region selected by a bounded geometric predicate checks with cardinality evidence, resolves to canonical ids, and stays stable across re-import of the same CAD revision.
-- Described in: [Geometry, models and assignments](../language/geometry-models-and-assignments.md), [Declaration reference](../language/reference/declarations.md).
+- Described in: [Geometry, models and assignments](../language/geometry-models-and-assignments.md), [Declarations](../language/reference/declarations.md).
 
 ### Results
 

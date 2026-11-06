@@ -1,0 +1,80 @@
+// The eddy-current field of a steel spur gear by a single-turn copper coil, at three frequencies.
+// The harmonic analysis solves the eddy-current field in the gear and the coil at 3, 10 and 30 kHz
+// (one case per frequency) and publishes the current density of each case.
+geometry cell {
+    file = "./geometry/em/induction-gear.step"
+    units = mm
+    interfaces = shared
+    region gear : solid { select name "Gear"; expect exactly_one }
+    region coil : solid { select name "Coil"; expect exactly_one }
+    region air : solid { select name "Air"; expect exactly_one }
+    region coil_in : face { select name "Coil terminal in"; expect exactly_one }
+    region coil_out : face { select name "Coil terminal out"; expect exactly_one }
+    region outer_boundary : face { select name "Outer boundary"; expect one_or_more }
+}
+
+mesh cell on geometry.cell {
+    tetrahedra {
+        order = linear
+        target_size = 8 mm
+        maximum_deviation = 0.5 mm
+    }
+}
+
+material steel_4140 {
+    mass_density = 7850 kg/m^3
+    electrical {
+        reference_temperature = 293.15 K
+        conductivity = 4.6e6 A/V/m
+        resistive_heating_coefficient = 0 K^-1
+        relative_permittivity = 1
+        relative_permeability = 100
+    }
+}
+
+material copper {
+    mass_density = 8960 kg/m^3
+    electrical {
+        reference_temperature = 293.15 K
+        conductivity = 5.8e7 A/V/m
+        resistive_heating_coefficient = 0 K^-1
+        relative_permittivity = 1
+        relative_permeability = 1
+    }
+}
+
+material air {
+    mass_density = 1.2 kg/m^3
+    electrical {
+        reference_temperature = 293.15 K
+        conductivity = 0 A/V/m
+        resistive_heating_coefficient = 0 K^-1
+        relative_permittivity = 1
+        relative_permeability = 1
+    }
+}
+
+model hardening_cell {
+    assign material.steel_4140 to geometry.cell.region.gear
+    assign material.copper to geometry.cell.region.coil
+    assign material.air to geometry.cell.region.air
+    constraint coil_return {
+        electrical.potential { target = geometry.cell.region.coil_out; value = 0 V }
+    }
+    constraint far_field {
+        magnetic.vector_potential_ground { target = geometry.cell.region.outer_boundary }
+    }
+    load coil_drive {
+        electric_current on geometry.cell.region.coil_in = 2000 A
+    }
+}
+
+study gear_hardening {
+    geometry = geometry.cell
+    mesh = mesh.cell
+    model = model.hardening_cell
+    analysis field {
+        electromagnetic harmonic { frequencies = [3, 10, 30] kHz }
+    }
+    output current_density = analysis.field.field.integration_point.electric_current_density
+}
