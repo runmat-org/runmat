@@ -49,7 +49,7 @@ structural step or feeds deformation back into temperature.
 | --- | --- | --- |
 | `thermomechanical steady` | Coupled static thermal/structural state | Prescribed profile, or retained solved temperature on Tet4/Tet10 through the Rust library |
 | `thermomechanical preload` | Named retained thermal state to structural and geometric-stiffness states | Same-mesh Tet4/Tet10 static solid path; authored modal CAD replay verified, broader qualification open |
-| `thermomechanical transient` | Time samples and coupled evolving state | Not currently admitted as a coupled transient solve |
+| `thermomechanical transient` | Time samples and coupled evolving state | [not yet in the current release](pending:thermomechanical.transient) |
 | `thermomechanical nonlinear` | Load-factor domain and coupled nonlinear state | Same profile family with the nonlinear structural policy |
 
 These are not bidirectional thermal solves. The transient/nonlinear coupling helpers adjust bounded
