@@ -219,13 +219,17 @@ fn fill_nonzero(segments: &[Segment]) -> Vec<(Vec<Vec2>, [f32; 4])> {
                 if let Some(l) = open.take() {
                     let (l0, l1) = (x_at(&edges[l], y0), x_at(&edges[l], y1));
                     let (r0, r1) = (x_at(&edges[i], y0), x_at(&edges[i], y1));
+                    // Clockwise in (u, v), whose u × v is the plane's normal: each triangle
+                    // faces the removed side, toward the viewer, as its vertex normal does. The
+                    // shader lights a back face from behind, so a cap wound the other way
+                    // reads dark.
                     let quad = [
                         Vec2::new(l0, y0),
+                        Vec2::new(r1, y1),
                         Vec2::new(r0, y0),
-                        Vec2::new(r1, y1),
                         Vec2::new(l0, y0),
-                        Vec2::new(r1, y1),
                         Vec2::new(l1, y1),
+                        Vec2::new(r1, y1),
                     ];
                     out.push((quad.to_vec(), edges[l].3));
                 }
@@ -273,6 +277,13 @@ mod tests {
             assert!((vertex.position[2] - 1.5).abs() < 1e-5);
             assert_eq!(vertex.normal, [0.0, 0.0, -1.0]);
             assert_ne!(vertex.color, [0.5, 0.5, 0.5, 1.0], "the cut face is tinted");
+        }
+        // Each triangle's winding faces where its normal points (the removed side), so the
+        // viewer sees its front face.
+        for t in cap.chunks(3) {
+            let p = t.iter().map(|v| Vec3::from_array(v.position)).collect::<Vec<_>>();
+            let facing = (p[1] - p[0]).cross(p[2] - p[0]);
+            assert!(facing.dot(Vec3::from_array(t[0].normal)) > 0.0, "cap triangle faces {facing:?}");
         }
     }
 
