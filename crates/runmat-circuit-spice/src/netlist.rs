@@ -2,8 +2,9 @@
 //!
 //! Each fitted component of the netlist becomes one element:
 //!
-//! - its part's [`SpiceModel`] subcircuit: `X<designator> <nodes in pin_order> <model>`, with
-//!   the model library `.include`d once;
+//! - its [`SpiceModel`] subcircuit: `X<designator> <nodes in pin_order> <model>`, with the
+//!   model library `.include`d once. The model is the run's own ([`EmitOptions::part_models`])
+//!   when it names one for the component, else the part's;
 //! - or, with `device` set, that primitive with the part's nodes in `pin_order`;
 //! - or, without a model, a primitive inferred from the entity prefix and the component's
 //!   (or part's) parameters: `R` from `resistance`, `C` from `capacitance`, `L` from
@@ -34,7 +35,8 @@ pub struct EmitOptions {
     pub stimuli: Vec<Stimulus>,
     /// Extra lines (models, options) placed before `.end`.
     pub extra: Vec<String>,
-    /// Models for parts that carry none, by part number or designator (designator wins).
+    /// The run's models, by part number or designator (designator wins). They take precedence
+    /// over a part's own model, which is used when the run names none.
     pub part_models: BTreeMap<String, SpiceModel>,
 }
 
@@ -354,12 +356,15 @@ pub fn emit(nl: &Netlist, pool: &Pool, opts: &EmitOptions) -> Result<Deck, Vec<E
         };
         // (pin label, net) in element order, plus the element's model text.
         let (letter, pins, value): (char, Vec<(String, Option<String>)>, String) =
-            match part.as_ref().and_then(|p| p.spice.clone()).or_else(|| {
-                opts.part_models
-                    .get(&c.designator)
-                    .or_else(|| part.as_ref().and_then(|p| opts.part_models.get(&p.mpn)))
-                    .cloned()
-            }) {
+            // A simulation's own `model` (by designator, then MPN) wins over the part's model,
+            // so one section can swap in a switching or an averaged model of the same part.
+            match opts
+                .part_models
+                .get(&c.designator)
+                .or_else(|| part.as_ref().and_then(|p| opts.part_models.get(&p.mpn)))
+                .cloned()
+                .or_else(|| part.as_ref().and_then(|p| p.spice.clone()))
+            {
                 Some(SpiceModel {
                     model,
                     library,
