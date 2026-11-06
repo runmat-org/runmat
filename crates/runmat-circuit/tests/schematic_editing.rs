@@ -232,3 +232,17 @@ fn wiring_keeps_every_recorded_place() {
         std::fs::write(format!("{dir}/pins.json"), serde_json::to_string_pretty(&pins).unwrap()).unwrap();
     }
 }
+
+/// The Desktop's circuit worker edits through a kept `Session`: schematic commands reach the
+/// circuit file there too, with or without a board beside it.
+#[test]
+fn a_session_runs_the_schematic_tools() {
+    let mut session = runtime::Session::new();
+    let request = EditRequest {
+        command: "schematic.place-wire".into(),
+        values: json!({ "from": ["pin:J1.1"], "to": ["pin:U1.VIN"] }).as_object().cloned().unwrap(),
+        ..Default::default()
+    };
+    let out = session.edit(PATH, BLANK, &files(BLANK), &request).expect("wires");
+    assert!(out.files[0].text.contains(r#"connect = ["J1.1", U1.VIN]"#));
+}
