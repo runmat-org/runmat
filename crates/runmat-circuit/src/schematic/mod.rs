@@ -495,12 +495,14 @@ fn page(
         .iter()
         .enumerate()
         .map(|(k, n)| {
-            let on_page_only = net_sheets[k].iter().all(|s| s.starts_with(path));
-            // A rail by name (GND, +5V, VBAT) is drawn with ports on its own page too; the
-            // power net class alone makes a rail only of a global net, so a local power node
-            // (a regulator's switch node) is drawn as the wire it is.
+            // A rail by name (GND, +5V, VBAT) is drawn with ports on a page that holds all of
+            // its pins too; one that runs into child sheets (VBAT_SENSE between the power and
+            // MCU sheets) is a signal between them. The power net class alone makes a rail only
+            // of a global net, so a local power node (a regulator's switch node) is drawn as the
+            // wire it is.
+            let here_only = net_sheets[k].iter().all(|s| *s == path);
             let rail = if is_rail(&n.name, None) {
-                n.global || on_page_only
+                n.global || here_only
             } else {
                 is_rail(&n.name, n.class.as_deref()) && n.global
             };

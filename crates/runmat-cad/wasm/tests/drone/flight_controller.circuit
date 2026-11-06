@@ -75,7 +75,29 @@ circuit flight_controller {
         no_erc = [U4.INT2, U4.NC]
     }
 
-    sheet main {
+    // The MCU with its crystal, decoupling, reset and boot straps and status LEDs. Every signal
+    // it shares with the sensors, the power sheet and the connectors leaves through a port.
+    sheet mcu {
+        port SPI_SCK : out
+        port SPI_MISO : in
+        port SPI_MOSI : out
+        port IMU_CS : out
+        port IMU_INT : in
+        port I2C_SCL : out
+        port I2C_SDA : inout
+        port VBAT_SENSE : in
+        port USB_DP : inout
+        port USB_DN : inout
+        port RC_RX : in
+        port RC_TX : out
+        port CURR : in
+        port TLM : in
+        port M1 : out
+        port M2 : out
+        port M3 : out
+        port M4 : out
+        port VTX_TX : out
+        port VTX_RX : in
         component U1 = { part = "MCU-M4-LQFP48" }
         component Y1 = { part = "XTAL-3225" }
         component C1 = { part = "C0402-12P" }
@@ -93,35 +115,34 @@ circuit flight_controller {
         // NRST: 10 kOhm pull-up to 3V3 with the 100 nF filter cap (C11), per the MCU's
         // reference design, so reset holds high against noise and releases cleanly at power-up.
         component R13 = { part = "R0402-10K" }
-        component R2 = { part = "R0402-5K1" }
-        component R3 = { part = "R0402-5K1" }
         component R4 = { part = "R0402-1K" }
         component R5 = { part = "R0402-1K" }
         component D1 = { part = "LED0603-G" }
         component D2 = { part = "LED0603-G" }
-        component D3 = { part = "D-SCHOTTKY-1A" }
-        component J1 = { part = "USBC-RCPT-16P" }
-        component J2 = { part = "CONN-SH-4P" }
-        component J3 = { part = "CONN-SH-8P" }
-        component J4 = { part = "CONN-SH-4P" }
-        component H1 = { part = "MH-M3-GROMMET" }
-        component H2 = { part = "MH-M3-GROMMET" }
-        component H3 = { part = "MH-M3-GROMMET" }
-        component H4 = { part = "MH-M3-GROMMET" }
-        net GND = { class = supply, global = true, power_flag = true }
-        net VBAT = { class = power, global = true, power_flag = true }
-        net "+5V" = { class = power, global = true, power_flag = true }
-        net "+3V3" = { class = supply, global = true, power_flag = true }
-        instance pwr = { sheet = power, bind = { VBAT_SENSE = net.VBAT_SENSE } }
-        instance sens = { sheet = sensors, bind = { SCK = net.SPI_SCK, MISO = net.SPI_MISO, MOSI = net.SPI_MOSI, CS = net.IMU_CS, INT = net.IMU_INT, SCL = net.I2C_SCL, SDA = net.I2C_SDA } }
-        connect = [net.SPI_SCK, U1.PA5]
-        connect = [net.SPI_MISO, U1.PA6]
-        connect = [net.SPI_MOSI, U1.PA7]
-        connect = [net.IMU_CS, U1.PA4]
-        connect = [net.IMU_INT, U1.PA1]
-        connect = [net.I2C_SCL, U1.PB8]
-        connect = [net.I2C_SDA, U1.PB9]
-        connect = [net.VBAT_SENSE, U1.PA0]
+        net GND = { class = supply, global = true }
+        net "+3V3" = { class = supply, global = true }
+        connect = [net.SPI_SCK, port.SPI_SCK, U1.PA5]
+        connect = [net.SPI_MISO, port.SPI_MISO, U1.PA6]
+        connect = [net.SPI_MOSI, port.SPI_MOSI, U1.PA7]
+        connect = [net.IMU_CS, port.IMU_CS, U1.PA4]
+        connect = [net.IMU_INT, port.IMU_INT, U1.PA1]
+        connect = [net.I2C_SCL, port.I2C_SCL, U1.PB8]
+        connect = [net.I2C_SDA, port.I2C_SDA, U1.PB9]
+        connect = [net.VBAT_SENSE, port.VBAT_SENSE, U1.PA0]
+        connect = [net.USB_DP, port.USB_DP, U1.PA12]
+        connect = [net.USB_DN, port.USB_DN, U1.PA11]
+        // Receiver on UART2, video transmitter on UART1, the ESC's current and telemetry inputs
+        // and the four motor signals.
+        connect = [net.RC_RX, port.RC_RX, U1.PA3]
+        connect = [net.RC_TX, port.RC_TX, U1.PA2]
+        connect = [net.CURR, port.CURR, U1.PB1]
+        connect = [net.TLM, port.TLM, U1.PB10]
+        connect = [net.M1, port.M1, U1.PB6]
+        connect = [net.M2, port.M2, U1.PB7]
+        connect = [net.M3, port.M3, U1.PB4]
+        connect = [net.M4, port.M4, U1.PB5]
+        connect = [net.VTX_TX, port.VTX_TX, U1.PA9]
+        connect = [net.VTX_RX, port.VTX_RX, U1.PA10]
         connect = ["net.+3V3", U1.VDD, U1.VDDA, "R13.2", "C3.1", "C4.1", "C5.1", "C6.1", "C7.1", "C8.1", "C9.1"]
         connect = [net.GND, U1.VSS, U1.VSSA, "C3.2", "C4.2", "C5.2", "C6.2", "C7.2", "C8.2", "C9.2", "C10.2", "C11.2", "C1.2", "C2.2", "R1.2"]
         connect = [net.VCAP, U1.VCAP, "C10.1"]
@@ -129,41 +150,85 @@ circuit flight_controller {
         connect = [net.BOOT0, U1.BOOT0, "R1.1"]
         connect = [net.OSC_IN, U1.OSC_IN, "Y1.1", "C1.1"]
         connect = [net.OSC_OUT, U1.OSC_OUT, "Y1.2", "C2.1"]
-        // USB-C: device, powered from VBUS through the Schottky when the battery is off.
-        connect = [net.VBUS, J1.VBUS, D3.A]
-        connect = ["net.+5V", D3.K]
-        connect = [net.USB_DP, J1.DP, U1.PA12]
-        connect = [net.USB_DN, J1.DN, U1.PA11]
-        connect = [net.CC1, J1.CC1, "R2.1"]
-        connect = [net.CC2, J1.CC2, "R3.1"]
-        connect = [net.GND, J1.GND, J1.SHIELD, "R2.2", "R3.2"]
         // Status LEDs.
         connect = [net.LED1, U1.PC13, "R4.1"]
         connect = [net.LED1_K, "R4.2", D1.A]
         connect = [net.LED2, U1.PC14, "R5.1"]
         connect = [net.LED2_K, "R5.2", D2.A]
         connect = [net.GND, D1.K, D2.K]
-        // Receiver (UART2, on the MCU's side facing it): 5 V, GND, RX, TX.
+        no_erc = [U1.PC15, U1.PA8, U1.PA13, U1.PA14, U1.PA15, U1.PB0, U1.PB2, U1.PB3, U1.PB12, U1.PB13, U1.PB14, U1.PB15]
+    }
+
+    // The board's connectors: USB-C, the receiver, the 4-in-1 ESC harness and the video
+    // transmitter, with the stack's four mounting holes.
+    sheet connectors {
+        port USB_DP : inout
+        port USB_DN : inout
+        port RC_RX : out
+        port RC_TX : in
+        port CURR : out
+        port TLM : out
+        port M1 : in
+        port M2 : in
+        port M3 : in
+        port M4 : in
+        port VTX_TX : in
+        port VTX_RX : out
+        component J1 = { part = "USBC-RCPT-16P" }
+        component D3 = { part = "D-SCHOTTKY-1A" }
+        component R2 = { part = "R0402-5K1" }
+        component R3 = { part = "R0402-5K1" }
+        component J2 = { part = "CONN-SH-4P" }
+        component J3 = { part = "CONN-SH-8P" }
+        component J4 = { part = "CONN-SH-4P" }
+        component H1 = { part = "MH-M3-GROMMET" }
+        component H2 = { part = "MH-M3-GROMMET" }
+        component H3 = { part = "MH-M3-GROMMET" }
+        component H4 = { part = "MH-M3-GROMMET" }
+        net GND = { class = supply, global = true }
+        net VBAT = { class = power, global = true }
+        net "+5V" = { class = power, global = true }
+        // USB-C: device, powered from VBUS through the Schottky when the battery is off.
+        connect = [net.VBUS, J1.VBUS, D3.A]
+        connect = ["net.+5V", D3.K]
+        connect = [net.USB_DP, port.USB_DP, J1.DP]
+        connect = [net.USB_DN, port.USB_DN, J1.DN]
+        connect = [net.CC1, J1.CC1, "R2.1"]
+        connect = [net.CC2, J1.CC2, "R3.1"]
+        connect = [net.GND, J1.GND, J1.SHIELD, "R2.2", "R3.2"]
+        // Receiver: 5 V, GND, RX, TX.
         connect = ["net.+5V", "J2.1"]
         connect = [net.GND, "J2.2"]
-        connect = [net.RC_RX, "J2.3", U1.PA3]
-        connect = [net.RC_TX, "J2.4", U1.PA2]
+        connect = [net.RC_RX, port.RC_RX, "J2.3"]
+        connect = [net.RC_TX, port.RC_TX, "J2.4"]
         // ESC harness: battery, ground, current, telemetry, four motor signals.
         connect = [net.VBAT, "J3.1"]
         connect = [net.GND, "J3.2"]
-        connect = [net.CURR, "J3.3", U1.PB1]
-        connect = [net.TLM, "J3.4", U1.PB10]
-        connect = [net.M1, "J3.5", U1.PB6]
-        connect = [net.M2, "J3.6", U1.PB7]
-        connect = [net.M3, "J3.7", U1.PB4]
-        connect = [net.M4, "J3.8", U1.PB5]
-        // Video transmitter control and telemetry (UART1): 5 V, GND, TX, RX.
+        connect = [net.CURR, port.CURR, "J3.3"]
+        connect = [net.TLM, port.TLM, "J3.4"]
+        connect = [net.M1, port.M1, "J3.5"]
+        connect = [net.M2, port.M2, "J3.6"]
+        connect = [net.M3, port.M3, "J3.7"]
+        connect = [net.M4, port.M4, "J3.8"]
+        // Video transmitter control and telemetry: 5 V, GND, TX, RX.
         connect = ["net.+5V", "J4.1"]
         connect = [net.GND, "J4.2"]
-        connect = [net.VTX_TX, "J4.3", U1.PA9]
-        connect = [net.VTX_RX, "J4.4", U1.PA10]
-        no_erc = [U1.PC15, U1.PA8, U1.PA13, U1.PA14, U1.PA15, U1.PB0, U1.PB2, U1.PB3, U1.PB12, U1.PB13, U1.PB14, U1.PB15, J1.SBU1, J1.SBU2]
+        connect = [net.VTX_TX, port.VTX_TX, "J4.3"]
+        connect = [net.VTX_RX, port.VTX_RX, "J4.4"]
+        no_erc = [J1.SBU1, J1.SBU2]
         no_erc = ["H1.1", "H2.1", "H3.1", "H4.1"]
+    }
+
+    // The top sheet: the power, MCU, sensor and connector sheets, wired by their ports.
+    sheet main {
+        net GND = { class = supply, global = true, power_flag = true }
+        net VBAT = { class = power, global = true, power_flag = true }
+        net "+5V" = { class = power, global = true, power_flag = true }
+        net "+3V3" = { class = supply, global = true, power_flag = true }
+        instance pwr = { sheet = power, bind = { VBAT_SENSE = net.VBAT_SENSE } }
+        instance mcu = { sheet = mcu, bind = { SPI_SCK = net.SPI_SCK, SPI_MISO = net.SPI_MISO, SPI_MOSI = net.SPI_MOSI, IMU_CS = net.IMU_CS, IMU_INT = net.IMU_INT, I2C_SCL = net.I2C_SCL, I2C_SDA = net.I2C_SDA, VBAT_SENSE = net.VBAT_SENSE, USB_DP = net.USB_DP, USB_DN = net.USB_DN, RC_RX = net.RC_RX, RC_TX = net.RC_TX, CURR = net.CURR, TLM = net.TLM, M1 = net.M1, M2 = net.M2, M3 = net.M3, M4 = net.M4, VTX_TX = net.VTX_TX, VTX_RX = net.VTX_RX } }
+        instance sens = { sheet = sensors, bind = { SCK = net.SPI_SCK, MISO = net.SPI_MISO, MOSI = net.SPI_MOSI, CS = net.IMU_CS, INT = net.IMU_INT, SCL = net.I2C_SCL, SDA = net.I2C_SDA } }
+        instance conn = { sheet = connectors, bind = { USB_DP = net.USB_DP, USB_DN = net.USB_DN, RC_RX = net.RC_RX, RC_TX = net.RC_TX, CURR = net.CURR, TLM = net.TLM, M1 = net.M1, M2 = net.M2, M3 = net.M3, M4 = net.M4, VTX_TX = net.VTX_TX, VTX_RX = net.VTX_RX } }
     }
 
     // The 5 V buck's start-up from a 6S battery into a 1.5 A load: the soft-start ramp, the

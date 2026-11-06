@@ -86,6 +86,58 @@ fn number(designator: &str) -> Option<i64> {
 /// Places every cell of a page: origins relative to the page's top-left content corner (y
 /// up, so items go negative), and each sheet symbol's pin sides. Returns one place per cell.
 pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
+    let first = place_once(cells, nets);
+    if face_partners(cells, &first) {
+        place_once(cells, nets)
+    } else {
+        first
+    }
+}
+
+/// Orders each side of the sheet symbol with the most entries by where its nets' other ends
+/// sit, top down, so the wires to it run straight across instead of crossing. Returns whether
+/// any order changed.
+fn face_partners(cells: &mut [Cell], places: &[Place]) -> bool {
+    let Some(hub) = (0..cells.len())
+        .filter(|&i| matches!(cells[i].kind, CellKind::Sheet { .. }))
+        .max_by_key(|&i| (cells[i].lay.pins.len(), std::cmp::Reverse(i)))
+    else {
+        return false;
+    };
+    let tip = |c: &Cell, p: usize, at: &Place| at.apply(c.lay.tip(c.lay.pins[p].side, c.lay.pins[p].at));
+    let height = |net: Option<usize>, cells: &[Cell]| -> Option<Coord> {
+        let ys: Vec<Coord> = (0..cells.len())
+            .filter(|&j| j != hub)
+            .flat_map(|j| {
+                (0..cells[j].nets.len())
+                    .filter(move |&p| net.is_some() && cells[j].nets[p] == net)
+                    .map(move |p| (j, p))
+            })
+            .map(|(j, p)| tip(&cells[j], p, &places[j]).y)
+            .collect();
+        (!ys.is_empty()).then(|| ys.iter().sum::<Coord>() / ys.len() as Coord)
+    };
+    let c = &cells[hub];
+    let mut order: Vec<usize> = (0..c.lay.pins.len()).collect();
+    let key: Vec<(u8, Coord)> = (0..c.lay.pins.len())
+        .map(|p| {
+            let side = u8::from(c.lay.pins[p].side == PinSide::Right);
+            (side, -height(c.nets[p], cells).unwrap_or(tip(c, p, &places[hub]).y))
+        })
+        .collect();
+    order.sort_by_key(|&p| (key[p], p));
+    if order.iter().enumerate().all(|(k, &p)| k == p) {
+        return false;
+    }
+    let c = &mut cells[hub];
+    c.lay.pins = order.iter().map(|&p| c.lay.pins[p].clone()).collect();
+    c.nets = order.iter().map(|&p| c.nets[p]).collect();
+    c.sheet_out = order.iter().map(|&p| c.sheet_out[p]).collect();
+    super::restack_sheet(&mut c.lay);
+    true
+}
+
+fn place_once(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
     let n = cells.len();
     let rail = |net: Option<usize>| net.is_some_and(|k| nets[k].rail);
     let signal = |net: Option<usize>| net.is_some_and(|k| !nets[k].rail);
@@ -192,6 +244,12 @@ pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
     // Directed signal edges with a strength: driver to input 4, driver to passive 3, passive
     // to input 2, passive to passive (right pin to left pin) 1.
     let mut edges: BTreeSet<(std::cmp::Reverse<u8>, usize, usize)> = BTreeSet::new();
+    let sheet_pair = |a: usize, b: usize| {
+        let pins = |i: usize| cells[i].lay.pins.len();
+        matches!(cells[a].kind, CellKind::Sheet { .. })
+            && matches!(cells[b].kind, CellKind::Sheet { .. })
+            && (pins(a), a) < (pins(b), b)
+    };
     let mut joined: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); n];
     for ts in terms.values() {
         if ts.len() > 24 {
@@ -213,6 +271,9 @@ pub(super) fn place(cells: &mut [Cell], nets: &[NetInfo]) -> Vec<Place> {
                     {
                         1
                     }
+                    // Two sheets on a net neither drives: the smaller feeds the larger, so a
+                    // top sheet's peripherals stand left of the block they serve.
+                    (Class::Sink, Class::Sink) if sheet_pair(a.cell, b.cell) => 1,
                     _ => 0,
                 };
                 if strength > 0 {
