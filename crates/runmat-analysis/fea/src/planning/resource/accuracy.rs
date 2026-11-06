@@ -12,71 +12,26 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-/// Borrowed original count/profile admission before finite-volume projections or
-/// numerical stencils expand. Uses the same source/property estimators as prepare;
-/// validity and the complete authority reservation are still independently rederived.
-pub fn preflight_fluid_accuracy_source(
+/// Original-source workspace of a fluid accuracy evaluation: the steady fluid phase
+/// residency that `derive_fluid_steady_resource_projection` derives for the original
+/// workload and mesh. The plan stage carries this value as the evaluator workspace and
+/// admission compares it against that carried value, so both read this one law.
+pub fn fluid_accuracy_source_workspace(
     workload: &crate::execution::FluidSteadyWorkload,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     maximum: u64,
 ) -> Result<u64, ResourcePlanningError> {
-    let invalid = |e: &dyn std::fmt::Display| ResourcePlanningError::Invalid(e.to_string());
-    let geometry =
-        crate::topology::FiniteVolumeTopology::reserve_mesh(mesh, workload.geometry_policy)
-            .map_err(|e| invalid(&e))?;
-    let numerical = crate::physics::cfd::canonical::CanonicalFluidReservation::for_counts(
-        &geometry,
-        geometry.face_incidence_count,
-        workload.policy,
-    )
-    .map_err(|e| invalid(&e))?;
-    let projection = crate::topology::AnalysisProjection::derivation_resident_bytes_estimate(mesh)
-        .map_err(|e| invalid(&e))?;
-    let metadata = runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(
-        workload,
-        runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 2_000_000, 65_536, 64),
-    )
-    .map_err(|e| invalid(&e))?;
-    let add = |a: u64, b: u64| {
-        a.checked_add(b).ok_or(ResourcePlanningError::Overflow(
-            "fluid accuracy source preflight",
-        ))
-    };
-    let preliminary = add(
-        add(projection, geometry.scratch_bytes as u64)?,
-        add(
-            add(metadata, metadata)?,
-            numerical.resident_bytes_upper_bound,
-        )?,
-    )?;
-    if preliminary > maximum {
+    let required = super::derive_fluid_steady_resource_projection(workload, mesh)?
+        .phase_resident_bytes_upper_bound
+        .0;
+    if required > maximum {
         return Err(ResourcePlanningError::AccuracyCeiling {
-            resource: "fluid accuracy borrowed source expansion",
-            required: preliminary,
+            resource: "fluid accuracy original source workspace",
+            required,
             maximum,
         });
     }
-    let properties = crate::properties::PreparedProperties::prepare(
-        &workload.model,
-        Some(mesh),
-        maximum - preliminary,
-    )
-    .map_err(|e| invalid(&e))?;
-    let full = add(
-        preliminary,
-        add(
-            properties.estimated_resident_bytes,
-            properties.estimated_resident_bytes,
-        )?,
-    )?;
-    if full > maximum {
-        return Err(ResourcePlanningError::AccuracyCeiling {
-            resource: "fluid accuracy borrowed source expansion",
-            required: full,
-            maximum,
-        });
-    }
-    Ok(full)
+    Ok(required)
 }
 
 pub fn build_accuracy_resource_plan(

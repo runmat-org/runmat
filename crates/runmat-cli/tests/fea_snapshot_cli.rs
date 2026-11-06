@@ -103,7 +103,8 @@ study modes {
 "#;
 
 /// A thermal solve whose only temperature boundary holds 303.15 K, so the solved field is
-/// uniform, then a thermomechanical preload from that solved state. The prescribed-field
+/// uniform, then a thermomechanical preload from that solved state. The preload contract
+/// requires a prestress consumer, so a one-mode prestressed modal step closes the chain. The prescribed-field
 /// variant below is the same structural problem with the temperature given directly.
 const SOLVED_THERMAL_STRESS: &str = r#"
 model structure {
@@ -122,6 +123,12 @@ study solved_thermal_stress {
     analysis heat { thermal steady {} retain heated }
     analysis preload after analysis.heat {
         thermomechanical preload { temperature = analysis.heat.state.heated }
+    }
+    analysis modes after analysis.preload {
+        structural prestressed_modal {
+            prestress = analysis.preload.state.geometric_stiffness
+            modes = 1
+        }
     }
     output displacement = analysis.preload.field.node.displacement
     output stress = analysis.preload.field.element.von_mises_stress
@@ -515,7 +522,6 @@ fn verify(project: &TempDir, snapshot: &str) -> Value {
 /// A harmonic acoustic sweep saves the render tiles of its solver mesh with the frequency
 /// record, so the snapshot replays its geometry and verify-snapshot passes cold.
 #[test]
-#[ignore = "verify-snapshot: cold field page differs from original descriptor scope (website item 3, next pages helper)"]
 fn acoustic_harmonic_snapshot_saves_render_tiles_and_verifies() {
     let project = project(ACOUSTIC_HARMONIC);
     let snapshot = snapshot(&project, &[]);
@@ -527,10 +533,9 @@ fn acoustic_harmonic_snapshot_saves_render_tiles_and_verifies() {
 }
 
 /// Thermal stress from a solved temperature field: the preload step publishes displacement and
-/// stress as outputs and snapshot views, and they equal the stress of the same structure under
-/// the same temperature prescribed directly.
+/// stress as outputs and snapshot views, and its displacement equals that of the same structure
+/// under the same temperature prescribed directly.
 #[test]
-#[ignore = "fixture rejected: thermal producer must feed the exact thermomechanical prestress preload (website item 4, next pages helper)"]
 fn thermomechanical_preload_publishes_stress_from_the_solved_temperature() {
     let solved = project(SOLVED_THERMAL_STRESS);
     let preload = snapshot(&solved, &["--step", "preload"]);
@@ -539,15 +544,27 @@ fn thermomechanical_preload_publishes_stress_from_the_solved_temperature() {
     let displacement = view(&preload, "displacement");
     let peak = stress["maximum"].as_f64().unwrap();
     assert!(peak > 0.0, "{stress}");
-    assert!(displacement["maximum"].as_f64().unwrap() > 0.0, "{displacement}");
+    assert!(
+        displacement["maximum"].as_f64().unwrap() > 0.0,
+        "{displacement}"
+    );
     check_scenes(&solved, &preload);
     verify(&solved, "out/snapshot.json");
 
+    // The same structure under the same temperature, prescribed directly, gives the same
+    // displacement. The stress views differ by recovery: a structural preload shows nodal
+    // (averaged) von Mises stress, a thermomechanical steady step element von Mises stress, so
+    // the comparison is on the displacement, which both recover at the nodes.
     let prescribed = project(PRESCRIBED_THERMAL_STRESS);
     let reference = snapshot(&prescribed, &[]);
-    let expected = view(&reference, "stress")["maximum"].as_f64().unwrap();
+    let solved_peak = displacement["maximum"].as_f64().unwrap();
+    let expected = view(&reference, "displacement")["maximum"]
+        .as_f64()
+        .unwrap();
     assert!(
-        (peak - expected).abs() <= 1e-6 * expected,
-        "solved-temperature peak {peak} Pa, prescribed-temperature peak {expected} Pa"
+        (solved_peak - expected).abs() <= 1e-9 * expected,
+        "solved-temperature displacement {solved_peak} m, prescribed-temperature {expected} m"
     );
+    assert_eq!(stress["field"], "structural.nodal_von_mises", "{stress}");
+    assert!(view(&reference, "stress")["maximum"].as_f64().unwrap() >= peak);
 }
