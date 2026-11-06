@@ -8,7 +8,7 @@ use runmat_runtime::analysis::fea_run_admission::{
     FeaLocalOrganization, FeaRunAdmission, FeaRunBudget, FeaRunDenied, FeaRunKind, FeaRunOutcome,
     FeaRunPermit, FeaRunRequest, FeaRunUsage,
 };
-use runmat_server_client::ids::{ExecutionDriverLeaseId, OrgId};
+use runmat_server_client::ids::{ExecutionDriverLeaseId, OrgId, SimulationLeaseId};
 use runmat_server_client::{auth, simulation::*};
 use runmat_simulation_usage::{MeasurementVersion, OperationCount};
 use uuid::Uuid;
@@ -386,7 +386,7 @@ impl LeaseSession {
             token: String::new(),
             client: SimulationLeaseClient::for_driver(
                 &driver.server,
-                driver.lease,
+                driver.lease.clone(),
                 driver.fencing_token,
                 &driver.credential,
             )
