@@ -10,7 +10,7 @@
     },
     {
       "id": "mcad/extrude",
-      "alt": "The sketch on the hinge mount is extruded: the preview shows a 10 mm boss, the depth on the model is set to 4 mm, and the boss joins the part.",
+      "alt": "The 8 by 5 mm sketch centred between the hinge mount's screw bores and pin bore is extruded: the preview shows a 10 mm boss, the depth on the model is set to 4 mm, and the boss joins the part.",
       "width": 1664,
       "height": 1180,
       "seconds": 7.4,
@@ -18,11 +18,27 @@
     },
     {
       "id": "mcad/fillet",
-      "alt": "On the hinge mount, Fillet picks three edges at the back block's top front corner, the preview rounds them at 2 mm, the radius on the model is set to 3 mm, and the rounded edges join the part.",
+      "alt": "On the hinge mount, Fillet picks three edges at the back block's top corner, the preview rounds them at 2 mm, the radius on the model is set to 1 mm, and the rounds join the part, carried around the lug's top edge.",
       "width": 1664,
       "height": 1180,
-      "seconds": 8.8,
+      "seconds": 9.1,
       "base": "/design-assets/flow-clips/mcad/fillet/fillet"
+    },
+    {
+      "id": "mcad/chamfer",
+      "alt": "On the hinge mount, Chamfer picks the back block's front corner between the two lugs, the preview shows the 1 mm bevel, the distance on the model is set to 2 mm, and the bevel joins the part.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 8.1,
+      "base": "/design-assets/flow-clips/mcad/chamfer/chamfer"
+    },
+    {
+      "id": "mcad/pattern",
+      "alt": "On the hinge mount, Pattern takes a 2 mm locating post and the back top edge as the direction, the copies preview at 10 mm, the spacing is set to 5 mm, and a row of three posts joins the part.",
+      "width": 1664,
+      "height": 1180,
+      "seconds": 9.6,
+      "base": "/design-assets/flow-clips/mcad/pattern/pattern"
     }
   ]
 }

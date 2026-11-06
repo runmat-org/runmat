@@ -89,6 +89,10 @@ In the Desktop, Fillet takes the edges you pick on the model and previews the ro
 
 <!-- design:clip:mcad/fillet -->
 
+Chamfer works the same way: pick the edges, then set the distance on the model:
+
+<!-- design:clip:mcad/chamfer -->
+
 This tray drafts its walls 2° and shells itself open at the top, then adds a post and mirrors it about a datum plane:
 
 ```part
@@ -122,6 +126,10 @@ part tray {
 ## Patterns and mirrors
 
 `pattern` repeats features (`features = […]`) or bodies (`bodies = […]`); `mirror` reflects features about a plane. Each copy is keyed, so a later feature can name one copy's faces.
+
+In the Desktop, select the feature to repeat, start Pattern and pick an edge for the direction. The copies preview along it; set the spacing and confirm:
+
+<!-- design:clip:mcad/pattern -->
 
 | Layout | Parameters |
 |---|---|
