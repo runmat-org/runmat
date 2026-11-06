@@ -93,3 +93,134 @@ pub fn resolve_uses(
     }
     out
 }
+
+/// The span of `name` in a `use <kind> <name> …` line (or a `<alias>.<kind>.<name>` one).
+fn name_span(u: &UseDeclaration, source: &str, kind: &str, name: &str) -> Option<(usize, usize)> {
+    let span = u.syntax().trimmed_span();
+    let line = source.get(span.start..span.end)?;
+    for pattern in [format!("{kind} {name}"), format!(".{kind}.{name}")] {
+        if let Some(i) = line.find(&pattern) {
+            let start = span.start + i + pattern.len() - name.len();
+            return Some((start, start + name.len()));
+        }
+    }
+    None
+}
+
+/// Each design file's spans naming the design `kind name` that `file` declares: its declaration
+/// in `file`, and every `use` line of the other files that resolves to it, through their folder
+/// scopes (report 12 §3.8: a rename follows the resolver, across folders).
+pub fn design_references(
+    kind: &str,
+    name: &str,
+    file: &str,
+    files: &DesignFiles,
+) -> BTreeMap<String, Vec<(usize, usize)>> {
+    let mut out: BTreeMap<String, Vec<(usize, usize)>> = BTreeMap::new();
+    if let Some(text) = files.get(file) {
+        if let Some(at) = declaration_at(text, kind, name) {
+            out.entry(file.to_string()).or_default().push(at);
+        }
+    }
+    let scope = runmat_cad::modules::ModuleScope::from_files(files.iter().map(|(p, t)| (p.as_str(), t.as_str())));
+    for (path, text) in files {
+        let Some(dialect) = runmat_design_syntax::Dialect::for_path(path) else { continue };
+        let syntax = runmat_design_syntax::parse_source(dialect, text);
+        for node in syntax.syntax().descendants() {
+            if node.kind() != NodeKind::UseDeclaration {
+                continue;
+            }
+            let Some(u) = UseDeclaration::cast(node.clone()) else { continue };
+            let Some((k, n, from)) = named(&u) else { continue };
+            if k != kind || n != name || scope.locate(path, &k, &n, from.as_deref()).as_deref() != Ok(file) {
+                continue;
+            }
+            if let Some(at) = name_span(&u, text, &k, &n) {
+                out.entry(path.clone()).or_default().push(at);
+            }
+        }
+    }
+    out
+}
+
+/// The design `(kind, name, file)` the cursor at `offset` names: the design name on a `use`
+/// line, or this file's own declaration name.
+pub fn design_at(
+    syntax: &SourceSyntax,
+    path: &str,
+    text: &str,
+    files: &DesignFiles,
+    offset: usize,
+) -> Option<(String, String, String)> {
+    for node in syntax.syntax().descendants() {
+        if node.kind() != NodeKind::UseDeclaration {
+            continue;
+        }
+        let span = node.trimmed_span();
+        if offset < span.start || offset > span.end {
+            continue;
+        }
+        let u = UseDeclaration::cast(node.clone())?;
+        let (kind, name, from) = named(&u)?;
+        let (start, end) = name_span(&u, text, &kind, &name)?;
+        if offset < start || offset > end {
+            return None;
+        }
+        let scope = super::compile::module_scope(path, text, files);
+        let file = scope.locate(path, &kind, &name, from.as_deref()).ok()?;
+        return Some((kind, name, file));
+    }
+    let kind = runmat_cad::modules::kind_of_file(path)?;
+    for (k, n) in runmat_cad::modules::scan(path, text).declarations {
+        if let Some((start, end)) = declaration_at(text, &k, &n) {
+            if k == kind && start <= offset && offset <= end {
+                return Some((k, n, path.to_string()));
+            }
+        }
+    }
+    None
+}
+
+/// Completions on a `use` line: after `use <kind> `, the designs of that kind in this folder;
+/// after `from "`, the other folders as this file names them; after `from `, the packages.
+pub fn use_completions(before: &str, path: &str, text: &str, files: &DesignFiles) -> Option<Vec<lsp_types::CompletionItem>> {
+    let t = before.trim_start();
+    let rest = t.strip_prefix("use ")?;
+    let scope = super::compile::module_scope(path, text, files);
+    let folder = runmat_cad::modules::folder_of(path).to_string();
+    let item = |label: String, detail: String, kind| lsp_types::CompletionItem {
+        label,
+        detail: Some(detail),
+        kind: Some(kind),
+        ..Default::default()
+    };
+    let words: Vec<&str> = rest.split(' ').collect();
+    match words.as_slice() {
+        [kind, partial] if runmat_cad::modules::DESIGN_KINDS.iter().any(|(k, _)| k == kind) => {
+            let row = scope.scope.folders.get(&folder)?;
+            Some(
+                row.declarations
+                    .iter()
+                    .filter(|((k, n), _)| k == kind && n.starts_with(partial))
+                    .map(|((_, n), files)| item(n.clone(), files.first().map(|f| f.0.clone()).unwrap_or_default(), lsp_types::CompletionItemKind::MODULE))
+                    .collect(),
+            )
+        }
+        [_, _, "from", partial] => {
+            let quoted = partial.starts_with('"');
+            let mut out = Vec::new();
+            for (f, row) in &scope.scope.folders {
+                if *f == folder || row.declarations.is_empty() {
+                    continue;
+                }
+                let Some(module) = runmat_cad::modules::module_text(path, &format!("{f}/_")) else { continue };
+                let is_path = module.starts_with('.');
+                if is_path == quoted {
+                    out.push(item(module, f.clone(), lsp_types::CompletionItemKind::FOLDER));
+                }
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}

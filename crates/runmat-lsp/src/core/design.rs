@@ -88,6 +88,8 @@ pub struct DesignDocumentAnalysis {
     projection: Option<Value>,
     /// `use` lines naming designs by symbol, by symbol index, with where each resolved.
     uses: std::collections::BTreeMap<usize, modules::Resolved>,
+    /// The files the host supplied: the folders this file can name designs in.
+    files: DesignFiles,
 }
 
 impl DesignDocumentAnalysis {
@@ -122,6 +124,7 @@ impl DesignDocumentAnalysis {
             problems,
             projection,
             uses,
+            files: files.clone(),
         }
     }
 
@@ -255,6 +258,40 @@ impl DesignDocumentAnalysis {
         build(self, None)
     }
 
+    /// The design the cursor names: a `use` line's design name or this file's declaration.
+    fn design_at(&self, offset: usize) -> Option<(String, String, String)> {
+        modules::design_at(&self.syntax, self.uri.path(), self.source(), &self.files, offset)
+    }
+
+    /// Renames the design under the cursor in every file the host supplied: its declaration
+    /// and each `use` line that resolves to it.
+    fn rename_design(&self, offset: usize, new_name: &str) -> Result<Option<WorkspaceEdit>, String> {
+        let Some((kind, name, file)) = self.design_at(offset) else {
+            return Ok(None);
+        };
+        if !is_identifier(new_name) {
+            return Err(format!("`{new_name}` isn't a design name"));
+        }
+        let path = self.uri.path().to_string();
+        let mut files = self.files.clone();
+        files.insert(path.clone(), self.source().to_string());
+        let mut changes = std::collections::HashMap::new();
+        for (at, spans) in modules::design_references(&kind, &name, &file, &files) {
+            let text = &files[&at];
+            let mut uri = self.uri.clone();
+            uri.set_path(&at);
+            let edits = spans
+                .into_iter()
+                .map(|(start, end)| TextEdit {
+                    range: Range::new(offset_to_position(text, start), offset_to_position(text, end)),
+                    new_text: new_name.to_string(),
+                })
+                .collect();
+            changes.insert(uri, edits);
+        }
+        Ok(Some(WorkspaceEdit { changes: Some(changes), ..WorkspaceEdit::default() }))
+    }
+
     fn symbol_at(&self, position: &Position) -> Option<(usize, Span)> {
         let offset = position_to_offset(self.source(), position);
         self.symbols.at(offset)
@@ -330,6 +367,13 @@ impl DesignDocumentAnalysis {
 
     /// The range and current text of a renamable name under the cursor.
     pub fn prepare_rename(&self, position: &Position) -> Option<(Range, String)> {
+        let offset = position_to_offset(self.source(), position);
+        if let Some((_, name, _)) = self.design_at(offset) {
+            // The design name the cursor is in.
+            let source = self.source();
+            let start = source[..offset].rfind(|c: char| !(c.is_alphanumeric() || c == '_')).map_or(0, |i| i + 1);
+            return Some((self.range(Span { start, end: start + name.len() }), name));
+        }
         let (symbol, span) = self.symbol_at(position)?;
         Some((self.range(span), self.symbols.symbols[symbol].name.clone()))
     }
@@ -341,12 +385,16 @@ impl DesignDocumentAnalysis {
         position: &Position,
         new_name: &str,
     ) -> Result<Option<WorkspaceEdit>, String> {
-        let Some((symbol, _)) = self.symbol_at(position) else {
-            return Ok(None);
-        };
         if new_name.is_empty() || new_name.contains(['"', '\\', '\n', '.']) {
             return Err(format!("`{new_name}` isn't a valid name"));
         }
+        // A design's name: its declaration and every `use` that resolves to it, in any folder.
+        if let Some(edit) = self.rename_design(position_to_offset(self.source(), position), new_name)? {
+            return Ok(Some(edit));
+        }
+        let Some((symbol, _)) = self.symbol_at(position) else {
+            return Ok(None);
+        };
         let s = &self.symbols.symbols[symbol];
         if let Some(clash) = self.symbols.symbols.iter().find(|other| {
             other.name == new_name && other.kind == s.kind && other.parent == s.parent
@@ -658,6 +706,9 @@ impl DesignDocumentAnalysis {
         let offset = position_to_offset(source, position);
         let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
         let before = &source[line_start..offset];
+        if let Some(items) = modules::use_completions(before, self.uri.path(), source, &self.files) {
+            return items;
+        }
         let scope = self.symbols.scope_at(offset);
         if let Some(path) = dotted_prefix(before) {
             return self.member_completions(&path, scope);

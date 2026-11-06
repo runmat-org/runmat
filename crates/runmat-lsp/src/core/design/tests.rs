@@ -312,3 +312,52 @@ fn designs_named_by_symbol_go_to_their_declaration_across_folders() {
     assert!(hover.value.contains("resolved from `hardware`"), "{}", hover.value);
     assert!(hover.value.contains("/p/+hardware/rivet.part"), "{}", hover.value);
 }
+
+/// Renaming a design renames its declaration and every `use` that resolves to it, in any
+/// folder; a `use` of another folder's design of the same name is left alone.
+#[test]
+fn renaming_a_design_follows_the_resolver_across_folders() {
+    let cabin = "runmat 0.7\nstd 1\n\nassembly cabin {\n    use part seat_frame as seat\n}\n";
+    let top = "runmat 0.7\nstd 1\n\nassembly airliner {\n    use part seat_frame from \"./cabin\" as seat\n    use part seat_frame from \"./cockpit\" as pilot_seat\n}\n";
+    let part = "runmat 0.7\nstd 1\n\npart seat_frame {\n}\n";
+    let files = DesignFiles::from([
+        ("/p/cabin/seat_frame.part".to_string(), part.to_string()),
+        ("/p/cockpit/seat_frame.part".to_string(), part.to_string()),
+        ("/p/cabin/cabin.assembly".to_string(), cabin.to_string()),
+        ("/p/airliner.assembly".to_string(), top.to_string()),
+    ]);
+    let analysis = analyze("/p/cabin/cabin.assembly", cabin, &files);
+    let at_name = at(cabin, "seat_frame", 0, 3);
+    let (_, current) = analysis.prepare_rename(&at_name).expect("renamable");
+    assert_eq!(current, "seat_frame");
+    let edit = analysis.rename(&at_name, "seat_base").unwrap().expect("an edit");
+    let changes = edit.changes.unwrap();
+    let mut by_file: Vec<(String, usize)> = changes.iter().map(|(u, e)| (u.path().to_string(), e.len())).collect();
+    by_file.sort();
+    assert_eq!(
+        by_file,
+        [("/p/airliner.assembly".to_string(), 1), ("/p/cabin/cabin.assembly".to_string(), 1), ("/p/cabin/seat_frame.part".to_string(), 1)],
+        "the cockpit's seat_frame is another design"
+    );
+    let top_edit = &changes.iter().find(|(u, _)| u.path() == "/p/airliner.assembly").unwrap().1[0];
+    assert_eq!(top_edit.range.start, Position::new(4, 13), "the first use, of ./cabin");
+}
+
+/// On a `use` line, completion offers this folder's designs of the kind, and after `from "`
+/// the other folders.
+#[test]
+fn use_lines_complete_designs_and_folders() {
+    let files = DesignFiles::from([
+        ("/p/cabin/seat_frame.part".to_string(), "runmat 0.7\nstd 1\n\npart seat_frame {\n}\n".to_string()),
+        ("/p/cabin/galley.part".to_string(), "runmat 0.7\nstd 1\n\npart galley {\n}\n".to_string()),
+        ("/p/wing/rib.part".to_string(), "runmat 0.7\nstd 1\n\npart rib {\n}\n".to_string()),
+    ]);
+    let text = "runmat 0.7\nstd 1\n\nassembly cabin {\n    use part se\n}\n";
+    let analysis = analyze("/p/cabin/cabin.assembly", text, &files);
+    let labels: Vec<String> = analysis.completion_items(&at(text, "use part se", 0, 11)).into_iter().map(|c| c.label).collect();
+    assert_eq!(labels, ["seat_frame"]);
+    let text = "runmat 0.7\nstd 1\n\nassembly cabin {\n    use part rib from \"\n}\n";
+    let analysis = analyze("/p/cabin/cabin.assembly", text, &files);
+    let labels: Vec<String> = analysis.completion_items(&at(text, "from \"", 0, 6)).into_iter().map(|c| c.label).collect();
+    assert_eq!(labels, ["../wing"]);
+}
