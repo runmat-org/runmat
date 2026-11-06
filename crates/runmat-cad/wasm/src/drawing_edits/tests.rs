@@ -134,7 +134,13 @@ fn a_drawing_is_built_by_hand_from_an_empty_sheet() {
     assert_eq!(b.document().sheets.len(), 2);
     assert!(b.text.contains("standard = asme"), "{}", b.text);
 
-    // The finished drawing compiles clean and shows what was measured.
+    // The finished drawing compiles clean and shows what was measured. With
+    // `RUNMAT_HAND_DRAWING_OUT` set to a folder, the drawing and its part are written there (the
+    // sheet's pictures paste them).
+    if let Ok(dir) = std::env::var("RUNMAT_HAND_DRAWING_OUT") {
+        std::fs::write(format!("{dir}/hand.drawing"), &b.text).unwrap();
+        std::fs::write(format!("{dir}/bracket.part"), &b.files[PART]).unwrap();
+    }
     let out = b.compiled();
     assert_eq!(out["diagnostics"], json!([]), "{}", b.text);
     let text = &out["projection"]["data"]["text"];
