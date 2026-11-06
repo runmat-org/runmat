@@ -305,7 +305,7 @@ pub(super) fn turn(
 /// A direction pick for a pattern, in assembly coordinates: a face's normal, a cylinder's or
 /// circle's axis or an edge's direction on a component, or an origin axis (`origin:x`).
 /// Answers the direction and a point on it (mm).
-fn direction(compiled: &Compiled, id: &str) -> Result<(V3, V3), EditFailure> {
+pub(super) fn direction(compiled: &Compiled, id: &str) -> Result<(V3, V3), EditFailure> {
     match id {
         "origin:x" | "axis:x" => return Ok(([1.0, 0.0, 0.0], [0.0; 3])),
         "origin:y" | "axis:y" => return Ok(([0.0, 1.0, 0.0], [0.0; 3])),

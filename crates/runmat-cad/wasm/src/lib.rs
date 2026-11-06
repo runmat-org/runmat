@@ -10,7 +10,9 @@
 //!   configuration) → `{ projection?, display?, diagnostics }`, where
 //!   `projection` is `{ kind: "part", data: { document, index } }` or
 //!   `{ kind: "assembly", data: <assembly index> }` and `display` is `{ kind, data }` with the
-//!   part display (`part_display` with `sketch_display`) or the assembly display.
+//!   part display (`part_display` with `sketch_display`) or the assembly display. An
+//!   assembly's projection also carries `exploded`: each saved exploded view evaluated
+//!   ([`exploded`]).
 //!   A `.drawing` compiles to `{ kind: "drawing", data: <drawing index> }` with `models`: the
 //!   display of each part or assembly its views show, by the file name the view wrote
 //!   ([`drawing`]).
@@ -34,6 +36,7 @@ mod configured;
 pub mod drawing;
 pub mod edit;
 pub mod evaluate;
+pub mod exploded;
 pub mod exchange;
 pub mod features;
 pub mod hlr;

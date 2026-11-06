@@ -592,8 +592,12 @@ pub fn compile_assembly(
     let index = build_assembly_index(&resolved, Some(&source));
     let configured = crate::configured::configured_displays(&resolved, &documents);
     let display = assembly_display_configured(&resolved, &source, &displays, &configured);
+    let mut index = serde_json::to_value(&index).unwrap_or(Value::Null);
+    if let Some(row) = index.as_object_mut() {
+        row.insert("exploded".into(), crate::exploded::exploded_views(&resolved, &source));
+    }
     Ok((
-        serde_json::to_value(&index).unwrap_or(Value::Null),
+        index,
         serde_json::to_value(&display).unwrap_or(Value::Null),
         problems,
     ))

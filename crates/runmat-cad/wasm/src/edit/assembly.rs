@@ -8,14 +8,19 @@
 //! - `assembly.mate`: coincident, concentric, distance, angle, parallel, perpendicular and
 //!   tangent mates (and the connector-based joints) between faces, edges or whole components,
 //!   each pick becoming a mate connector on its component ([`mate`], [`frames`]).
+//! - `explode.new`, `explode.step`, `explode.radial`, `explode.lines`: exploded views, their
+//!   steps and trail lines ([`explode`]).
 //!
 //! Picks are Outline IDs: `occurrence:<uuid>` for a component, and
 //! `occurrence:<uuid>/face:<body>:<face>` or `occurrence:<uuid>/edge:<body>:<edge>` for a face
 //! or edge of one, indexed into the compiled display of its definition.
 
+mod explode;
 mod frames;
 mod mate;
 mod place;
+#[cfg(test)]
+mod explode_tests;
 #[cfg(test)]
 mod tests;
 
@@ -243,6 +248,13 @@ pub(super) fn edit(
         }
         "assembly.mate" => mate::mate(&mut document, &compiled, &request.values)?,
         "repair.repair" => repair(path, text, files, &mut document, &request.values)?,
+        "explode.new" => explode::new_view(&mut document, &request.values)?,
+        "explode.step" | "explode.radial" => {
+            let names = selected_names(&compiled, request)?;
+            let radial = request.command == "explode.radial";
+            explode::step(&mut document, &compiled, &names, &request.values, &request.selection, radial)?
+        }
+        "explode.lines" => explode::lines(&mut document, &request.values, &request.selection)?,
         other => {
             return Err(model(format!(
                 "`{other}` edits assemblies through the source editor in this build"
