@@ -18,6 +18,7 @@ Each case below compares a RunMat result with an independent reference: a closed
 | Fluid–structure interaction transient | yes | — |
 | Fluid–structure interaction harmonic procedure | [not yet in the current release](pending:fluid-structure-interaction.harmonic) | — |
 | Fluid–structure interaction nonlinear procedure | [not yet in the current release](pending:fluid-structure-interaction.nonlinear) | — |
+| Structural stress on the solid of an FSI study (`von_mises_stress`, `stress`) | [not yet in the current release](pending:fluid-structure-interaction.solid-stress) | — |
 
 ## Reference cases
 
