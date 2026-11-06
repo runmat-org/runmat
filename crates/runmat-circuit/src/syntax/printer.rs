@@ -24,7 +24,7 @@ pub(super) fn name(text: &str) -> String {
     }
 }
 
-pub(super) fn endpoint(endpoint: &Endpoint) -> Print {
+pub(crate) fn endpoint(endpoint: &Endpoint) -> Print {
     let text = endpoint_text(endpoint);
     if endpoint_from_text(&text).as_ref() != Some(endpoint) {
         return Err(PrintError(format!(
@@ -355,114 +355,149 @@ pub(crate) fn connection_statement(connection: &Connection) -> Print {
     Ok(format!("connect = {}", list(&ends?)))
 }
 
+/// One `port` statement.
+pub(crate) fn port_statement(port: &PortDecl) -> Print {
+    let dir = DIRECTIONS
+        .iter()
+        .find(|(_, d)| *d == port.dir)
+        .map(|(w, _)| *w)
+        .unwrap_or("passive");
+    let kind = match &port.kind {
+        PortKind::Signal => String::new(),
+        PortKind::Bus(members) => format!(" = bus {}", names(members)),
+        PortKind::Interface(interface) => format!(" = interface {}", name(interface)),
+    };
+    Ok(format!("port {} : {dir}{kind}", name(&port.name)))
+}
+
+/// One `net` statement.
+pub(crate) fn net_statement(net: &NetDecl) -> Print {
+    let mut entries = Vec::new();
+    if let Some(class) = &net.class {
+        entries.push(("class".to_string(), name(class)));
+    }
+    if net.global {
+        entries.push(("global".into(), "true".into()));
+    }
+    if let Some(renamed) = &net.renamed_from {
+        entries.push(("renamed_from".into(), name(renamed)));
+    }
+    entries.extend(params_entries(
+        &net.params,
+        &["class", "global", "renamed_from"],
+    )?);
+    Ok(if entries.is_empty() {
+        format!("net {}", name(&net.name))
+    } else {
+        format!("net {} = {}", name(&net.name), record(&entries))
+    })
+}
+
+/// One `bus` statement.
+pub(crate) fn bus_statement(bus: &BusDecl) -> Print {
+    Ok(format!("bus {} = {}", name(&bus.name), names(&bus.members)))
+}
+
+/// One `harness` statement.
+pub(crate) fn harness_statement(harness: &HarnessDecl) -> Print {
+    Ok(format!(
+        "harness {} = {}",
+        name(&harness.name),
+        name(&harness.interface)
+    ))
+}
+
+/// One `instance` statement.
+pub(crate) fn instance_statement(instance: &SheetInstance) -> Print {
+    let mut entries = vec![("sheet".to_string(), name(&instance.sheet))];
+    if let Some(repeat) = instance.repeat {
+        entries.push(("repeat".into(), repeat.to_string()));
+    }
+    if let Some(renamed) = &instance.renamed_from {
+        entries.push(("renamed_from".into(), name(renamed)));
+    }
+    if !instance.bindings.is_empty() {
+        let mut bind = Vec::new();
+        for (port, binding) in &instance.bindings {
+            if bind.iter().any(|(k, _): &(String, String)| k == port) {
+                return Err(PrintError(format!(
+                    "instance `{}` binds `{port}` twice",
+                    instance.name
+                )));
+            }
+            let text = match binding {
+                Binding::Shared(end) => endpoint(end)?,
+                Binding::BusIndexed { bus, offset } => {
+                    format!("{{ bus = {}, offset = {offset} }}", name(bus))
+                }
+                Binding::NetIndexed { prefix, offset } => {
+                    format!("{{ net_prefix = {}, offset = {offset} }}", name(prefix))
+                }
+            };
+            bind.push((port.clone(), text));
+        }
+        entries.push(("bind".into(), record(&bind)));
+    }
+    Ok(format!(
+        "instance {} = {}",
+        name(&instance.name),
+        record(&entries)
+    ))
+}
+
+/// The `no_erc = [...]` statement of these endpoints.
+pub(crate) fn no_erc_statement(ends: &[Endpoint]) -> Print {
+    let ends: Result<Vec<String>, _> = ends.iter().map(endpoint).collect();
+    Ok(format!("no_erc = {}", list(&ends?)))
+}
+
+/// One `diff_pair` statement.
+pub(crate) fn diff_pair_statement(pair: &DiffPairDecl) -> Print {
+    let mut entries = vec![
+        ("p".to_string(), name(&pair.p)),
+        ("n".to_string(), name(&pair.n)),
+    ];
+    if let Some(class) = &pair.class {
+        entries.push(("class".into(), name(class)));
+    }
+    Ok(format!(
+        "diff_pair {} = {}",
+        name(&pair.name),
+        record(&entries)
+    ))
+}
+
 pub(super) fn print_sheet(sheet: &SheetDef) -> Print {
     let mut lines = Vec::new();
     for (k, param) in &sheet.params {
         lines.push(format!("param {} = {}", name(k), param_written(param)?));
     }
     for port in &sheet.ports {
-        let dir = DIRECTIONS
-            .iter()
-            .find(|(_, d)| *d == port.dir)
-            .map(|(w, _)| *w)
-            .unwrap_or("passive");
-        let kind = match &port.kind {
-            PortKind::Signal => String::new(),
-            PortKind::Bus(members) => format!(" = bus {}", names(members)),
-            PortKind::Interface(interface) => format!(" = interface {}", name(interface)),
-        };
-        lines.push(format!("port {} : {dir}{kind}", name(&port.name)));
+        lines.push(port_statement(port)?);
     }
     for component in &sheet.components {
         lines.push(component_statement(component)?);
     }
     for net in &sheet.nets {
-        let mut entries = Vec::new();
-        if let Some(class) = &net.class {
-            entries.push(("class".to_string(), name(class)));
-        }
-        if net.global {
-            entries.push(("global".into(), "true".into()));
-        }
-        if let Some(renamed) = &net.renamed_from {
-            entries.push(("renamed_from".into(), name(renamed)));
-        }
-        entries.extend(params_entries(
-            &net.params,
-            &["class", "global", "renamed_from"],
-        )?);
-        lines.push(if entries.is_empty() {
-            format!("net {}", name(&net.name))
-        } else {
-            format!("net {} = {}", name(&net.name), record(&entries))
-        });
+        lines.push(net_statement(net)?);
     }
     for bus in &sheet.buses {
-        lines.push(format!("bus {} = {}", name(&bus.name), names(&bus.members)));
+        lines.push(bus_statement(bus)?);
     }
     for harness in &sheet.harnesses {
-        lines.push(format!(
-            "harness {} = {}",
-            name(&harness.name),
-            name(&harness.interface)
-        ));
+        lines.push(harness_statement(harness)?);
     }
     for instance in &sheet.instances {
-        let mut entries = vec![("sheet".to_string(), name(&instance.sheet))];
-        if let Some(repeat) = instance.repeat {
-            entries.push(("repeat".into(), repeat.to_string()));
-        }
-        if let Some(renamed) = &instance.renamed_from {
-            entries.push(("renamed_from".into(), name(renamed)));
-        }
-        if !instance.bindings.is_empty() {
-            let mut bind = Vec::new();
-            for (port, binding) in &instance.bindings {
-                if bind.iter().any(|(k, _): &(String, String)| k == port) {
-                    return Err(PrintError(format!(
-                        "instance `{}` binds `{port}` twice",
-                        instance.name
-                    )));
-                }
-                let text = match binding {
-                    Binding::Shared(end) => endpoint(end)?,
-                    Binding::BusIndexed { bus, offset } => {
-                        format!("{{ bus = {}, offset = {offset} }}", name(bus))
-                    }
-                    Binding::NetIndexed { prefix, offset } => {
-                        format!("{{ net_prefix = {}, offset = {offset} }}", name(prefix))
-                    }
-                };
-                bind.push((port.clone(), text));
-            }
-            entries.push(("bind".into(), record(&bind)));
-        }
-        lines.push(format!(
-            "instance {} = {}",
-            name(&instance.name),
-            record(&entries)
-        ));
+        lines.push(instance_statement(instance)?);
     }
     for connection in &sheet.connections {
         lines.push(connection_statement(connection)?);
     }
     if !sheet.no_erc.is_empty() {
-        let ends: Result<Vec<String>, _> = sheet.no_erc.iter().map(endpoint).collect();
-        lines.push(format!("no_erc = {}", list(&ends?)));
+        lines.push(no_erc_statement(&sheet.no_erc)?);
     }
     for pair in &sheet.diff_pairs {
-        let mut entries = vec![
-            ("p".to_string(), name(&pair.p)),
-            ("n".to_string(), name(&pair.n)),
-        ];
-        if let Some(class) = &pair.class {
-            entries.push(("class".into(), name(class)));
-        }
-        lines.push(format!(
-            "diff_pair {} = {}",
-            name(&pair.name),
-            record(&entries)
-        ));
+        lines.push(diff_pair_statement(pair)?);
     }
     let mut out = format!("sheet {} {{\n", name(&sheet.name));
     for line in lines {

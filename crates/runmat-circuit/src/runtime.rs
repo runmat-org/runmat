@@ -49,6 +49,7 @@ mod library_edit;
 pub mod modules;
 pub mod values;
 mod rules;
+mod schematic_edit;
 mod session;
 mod sim_edit;
 pub use edit::*;

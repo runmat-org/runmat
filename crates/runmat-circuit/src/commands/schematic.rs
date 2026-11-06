@@ -44,7 +44,7 @@ fn place(item: &str, section: Section) -> ModelEdit {
 
 pub(super) fn add(c: &mut Catalog) {
     let point = |id: &str, label: &str| {
-        pick(id, label, &[K::Pin, K::Wire, K::Port]).drag(Manipulator::Point)
+        pick(id, label, &[K::Pin, K::Wire, K::Net, K::Port]).drag(Manipulator::Point)
     };
     c.add_commands(vec![
         sch(
@@ -105,6 +105,16 @@ pub(super) fn add(c: &mut Catalog) {
         .preview()
         .edit(place("wire", Section::Wires)),
         sch(
+            "schematic.disconnect",
+            "Disconnect",
+            "disconnect",
+            "Take a pin off its net: its wire to the rest of the net goes.",
+        )
+        .kw(&["unwire", "delete wire"])
+        .inputs(vec![pick("pin", "Pin", &[K::Pin])])
+        .on(&[K::Pin])
+        .edit(edit(EditOp::Remove, Section::Wires).item("wire")),
+        sch(
             "schematic.place-bus",
             "Bus",
             "bus",
@@ -112,8 +122,8 @@ pub(super) fn add(c: &mut Catalog) {
         )
         .inputs(vec![
             text("name", "Bus", Some("D[0..7]")),
-            point("from", "From"),
-            point("to", "To"),
+            point("from", "From").optional(),
+            point("to", "To").optional(),
         ])
         .preview()
         .edit(place("bus", Section::Wires)),
@@ -139,7 +149,7 @@ pub(super) fn add(c: &mut Catalog) {
         )
         .inputs(vec![
             text("name", "Net", Some("SENSE_A")),
-            pick("on", "On wire", &[K::Wire, K::Pin]),
+            pick("on", "On wire or pin", &[K::Wire, K::Net, K::Pin]),
         ])
         .edit(place("label", Section::Nets)),
         sch(
@@ -149,18 +159,10 @@ pub(super) fn add(c: &mut Catalog) {
             "Place a power or ground symbol.",
         )
         .inputs(vec![
-            text("net", "Net", Some("3V3")),
-            choice(
-                "style",
-                "Style",
-                &[
-                    ("bar", "Bar"),
-                    ("arrow", "Arrow"),
-                    ("ground", "Ground"),
-                    ("earth", "Earth"),
-                    ("signal_ground", "Signal ground"),
-                ],
-            ),
+            text("net", "Rail", Some("GND")).help("A global net: an existing rail, or a new one declared here."),
+            pick("on", "On pin or wire", &[K::Pin, K::Wire, K::Net]),
+            flag("power_flag", "Power flag", false)
+                .help("The rail enters the board here (a connector or a test supply), so ERC sees it driven."),
         ])
         .edit(place("power", Section::Nets)),
         sch(
@@ -182,6 +184,7 @@ pub(super) fn add(c: &mut Catalog) {
                     ("passive", "Passive"),
                 ],
             ),
+            pick("on", "On pin or wire", &[K::Pin, K::Wire, K::Net]).optional(),
         ])
         .edit(place("port", Section::Nets)),
         sch(
