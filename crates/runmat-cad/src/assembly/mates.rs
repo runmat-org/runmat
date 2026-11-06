@@ -307,7 +307,11 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 ends.push(sys.connector(e, to_frame(&local)).expect("a body"));
             }
             let (a, b) = (ends[0], ends[1]);
-            let built = self.mate_constraints(&m.def.kind, a, b, &m.env);
+            let cam = match (&m.def.kind, &m.a) {
+                (MateKind::Cam { profile }, Ok((host, f))) => Some(self.cam_stations(*host, f, &profile.profile)),
+                _ => None,
+            };
+            let built = self.mate_constraints(&m.def.kind, a, b, &m.env, cam);
             match built {
                 Ok(list) => {
                     for c in list {
@@ -572,12 +576,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
         touched
     }
 
+    /// `cam`: a cam mate's station radii, sampled from its profile by [`Self::cam_stations`].
     fn mate_constraints(
         &self,
         kind: &MateKind,
         a: rc::EntityId,
         b: rc::EntityId,
         env: &ValueEnv,
+        cam: Option<Result<Vec<f64>, String>>,
     ) -> Result<Vec<rc::Constraint>, String> {
         let target = |t: &TargetExpr, angle: bool| -> Result<rc::Target, String> {
             let v = |e| {
@@ -683,6 +689,10 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 b,
                 travel: self.length(travel, env)?,
             })],
+            MateKind::Cam { profile } => {
+                let radii = cam.unwrap_or_else(|| Err(format!("the cam publishes no `{}`", profile.profile)))?;
+                vec![m(rc::Mate::Cam { a, b, radii: radii.into() })]
+            }
             MateKind::Angle { measure, target: t } => vec![m(rc::Mate::Angle {
                 a,
                 b,

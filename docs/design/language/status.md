@@ -20,10 +20,6 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 ## MCAD
 
-### design.mcad.mate.cam
-
-**Cam mates.** An assembly writes kind = &#123; mate = cam, profile = &lt;published profile&gt; &#125;; the solver keeps the follower point on the cam's profile path as the cam turns (a path-tangent residual), with its Jacobian checked.
-
 ### design.mcad.drawing.standards
 
 **Drawing standards.** A sheet format selects an ISO or ASME standard that sets line weights, text, arrowheads and tolerance display in the Desktop sheet and the DXF, DWG and PDF exports.

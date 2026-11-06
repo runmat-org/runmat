@@ -923,6 +923,71 @@ fn a08b_gear_rack_screw_and_pin_slot_mates_couple_their_motions() {
     assert_eq!(r.node(r.find_display("link").unwrap()).dof, Some(2));
 }
 
+/// A disc cam turning on a pin, and a translating follower on a guide along X whose tip (20 mm
+/// out from its own origin) rides the cam's published `lobe`: the closed pitch curve through
+/// `radii` (mm), 30° apart, drawn as 5° chords.
+fn cam_follower(turn: f64, radii: &[f64; 12]) -> MemorySource {
+    let up = |x: f64, y: f64| axes([x, y, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+    let along_x = axes([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let mut src = mechanism(
+        &[
+            ("base", vec![("pin", up(0.0, 0.0)), ("guide", along_x)]),
+            ("cam", vec![("axis", up(0.0, 0.0))]),
+            ("follower", vec![("rail", along_x), ("tip", up(0.02, 0.0))]),
+        ],
+        vec![
+            ("turn", driven(turn), "base.pin", "cam.axis"),
+            ("guide", MateKind::Slider { distance: None }, "base.guide", "follower.rail"),
+            ("follow", MateKind::Cam { profile: CamProfile { profile: PublishName::new("lobe") } }, "cam.axis", "follower.tip"),
+        ],
+    );
+    // The pitch curve, piecewise linear in angle between stations, as the cam publishes it.
+    let points = (0..72)
+        .map(|k| {
+            let (s, t) = (k / 6, (k % 6) as f64 / 6.0);
+            let r = (radii[s] + (radii[(s + 1) % 12] - radii[s]) * t) * 1e-3;
+            let phi = (k as f64 * 5.0).to_radians();
+            [r * phi.cos(), r * phi.sin(), 0.005]
+        })
+        .collect();
+    let chains = vec![PathChain { key: "lobe".into(), points, normals: Vec::new() }];
+    add_part(
+        &mut src,
+        "cam.part",
+        "cam",
+        unit_box(),
+        vec![("axis", PublishedGeometry::Frame { frame: up(0.0, 0.0) }), ("lobe", PublishedGeometry::Path { chains })],
+    );
+    src
+}
+
+#[test]
+fn a08c_a_cam_mate_keeps_its_follower_on_the_cams_profile() {
+    // Twelve stations 30° apart: a base circle of 30 mm and a lobe of up to 12 mm.
+    let radii = [30.0, 31.0, 34.0, 38.0, 41.0, 42.0, 42.0, 40.0, 36.0, 33.0, 31.0, 30.0];
+    // Turned by θ, the cam shows the follower (on the world X axis) its station at -θ.
+    for (turn, station) in [(0.0, 0), (90.0, 9), (-60.0, 2), (-150.0, 5)] {
+        let r = run(&cam_follower(turn, &radii), "m.assembly", &ResolveRequest::default());
+        assert!(errors(&r).is_empty(), "{turn}°: {:?}", errors(&r));
+        let follower = r.node(r.find_display("follower").unwrap());
+        let tip = follower.world.apply([0.02, 0.0, 0.0]);
+        assert!(close(tip, [radii[station] * 1e-3, 0.0, 0.0]), "{turn}°: tip {tip:?}, station {station}");
+        assert_eq!(follower.dof, Some(0), "the cam takes the follower's slide");
+    }
+    // Between stations the follower rides the profile: turned -45°, it reads the cam at 45°,
+    // halfway between the 31 and 34 mm stations on the published curve.
+    let r = run(&cam_follower(-45.0, &radii), "m.assembly", &ResolveRequest::default());
+    let x = r.node(r.find_display("follower").unwrap()).world.apply([0.02, 0.0, 0.0])[0] * 1e3;
+    assert!((x - 32.5).abs() < 0.05, "at 45° the follower is at the profile's 32.5 mm: {x}");
+    // A cam whose profile is missing says so.
+    let mut src = cam_follower(0.0, &radii);
+    let mut top = (*src.assemblies[&(FilePath::new("m.assembly"), None)]).clone();
+    top.mates[2].kind = MateKind::Cam { profile: CamProfile { profile: PublishName::new("rim") } };
+    src.add_assembly(top);
+    let r = run(&src, "m.assembly", &ResolveRequest::default());
+    assert!(errors(&r).iter().any(|e| e.contains("publishes no `rim`")), "{:?}", errors(&r));
+}
+
 #[test]
 fn a09_conflicting_and_redundant_mates_are_named() {
     let mut src = hinge_project(None, Some(90.0));

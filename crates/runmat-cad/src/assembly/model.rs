@@ -540,6 +540,17 @@ pub enum MateKind {
     /// A pinion (`a`, turning about its Z) and a rack (`b`, moving along its X) that moves
     /// `travel` per turn of the pinion (π × the pitch diameter).
     RackPinion { travel: ValueExpr },
+    /// A cam (`a`, turning about its Z) and its follower (`b`): the follower's origin stays on
+    /// `profile`, a closed path the cam's design publishes, seen along the connector's Z (the
+    /// follower may sit anywhere along it, as on the cam's extruded face).
+    Cam { profile: CamProfile },
+}
+
+/// A cam mate's profile: the name the cam's design publishes it under. `profile` is a tagged
+/// field in the design language, so `profile = lobe` reads as `{ "profile": "lobe" }`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CamProfile {
+    pub profile: PublishName,
 }
 
 impl MateKind {
@@ -559,6 +570,7 @@ impl MateKind {
             MateKind::Screw { .. } => "screw",
             MateKind::Gear { .. } => "gear",
             MateKind::RackPinion { .. } => "rack_pinion",
+            MateKind::Cam { .. } => "cam",
         }
     }
 }

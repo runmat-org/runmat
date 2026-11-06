@@ -20,6 +20,7 @@ pub mod explode;
 pub mod fasteners;
 pub mod index;
 pub mod interference;
+mod cam;
 mod mates;
 pub mod model;
 pub mod options;

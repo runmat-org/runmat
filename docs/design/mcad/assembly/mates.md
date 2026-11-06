@@ -112,7 +112,7 @@ Publishing frames from the parts (`mate_connector` features) keeps an assembly's
 | `screw` | `b` turns about `a`'s Z and advances `lead` per turn | `lead` |
 | `gear` | `b` turns −1/`ratio` of `a`'s turn about its own axis | `ratio` (`b`'s teeth over `a`'s) |
 | `rack_pinion` | a rack (`b`, along its X) moves `travel` per turn of the pinion (`a`) | `travel` (π × the pitch diameter) |
-| `cam` | a follower point (`b`) stays on a cam's published profile (`a`) as the cam turns [not yet in the current release](pending:design.mcad.mate.cam) | `profile` |
+| `cam` | a follower point (`b`) stays on a cam's published profile (`a`, the closed path seen along its Z) as the cam turns; the follower may sit anywhere along the cam's Z | `profile` |
 
 Gear and rack-and-pinion mates couple motion measured from the pose where the solve starts, so the authored placements set the phase.
 
@@ -126,7 +126,7 @@ mate follower = { kind = { mate = pin_slot }, a = link_pin, b = base_slot }
 mate gap = { kind = { mate = distance, measure = plane_point, target = { target = exact, value = 5 mm } }, a = face_c, b = tip_c }
 ```
 
-```assembly fragment pending=design.mcad.mate.cam
+```assembly fragment
 mate lift = { kind = { mate = cam, profile = lobe }, a = cam_frame, b = follower_tip }
 ```
 

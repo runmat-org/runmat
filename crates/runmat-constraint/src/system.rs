@@ -216,7 +216,7 @@ pub enum TangentKind {
 }
 
 /// 3D mates between two connectors.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Mate {
     /// Both frames coincide (0 DOF left between the bodies).
     Fasten { a: EntityId, b: EntityId },
@@ -262,6 +262,11 @@ pub enum Mate {
     /// Rack and pinion: rack B moves along its X by `travel` for each turn of pinion A about its
     /// Z, measured in the assembly from where the solve starts.
     RackPinion { a: EntityId, b: EntityId, travel: f64 },
+    /// A cam (A, turning about its Z) and its follower (B): B's origin stays on the cam's pitch
+    /// curve, at `radii[k]` from A's Z axis at `k · 360°/n` from A's X towards its Y
+    /// (`n = radii.len()`, at least 3), with a periodic cubic between stations. B may sit
+    /// anywhere along A's Z, as on an extruded profile (1 row: the radial distance).
+    Cam { a: EntityId, b: EntityId, radii: std::sync::Arc<[f64]> },
 }
 
 /// An ellipse dimension.
@@ -1402,6 +1407,17 @@ impl System {
                 }
             }
             Mate::Screw { lead: v, .. } | Mate::RackPinion { travel: v, .. } => finite(*v)?,
+            Mate::Cam { radii, .. } => {
+                if radii.len() < 3 {
+                    return Err(BuildError::BadValue("a cam takes at least three station radii"));
+                }
+                for r in radii.iter() {
+                    finite(*r)?;
+                    if *r <= 0.0 {
+                        return Err(BuildError::BadValue("a cam's station radii must be positive"));
+                    }
+                }
+            }
             Mate::Gear { ratio, .. } => {
                 finite(*ratio)?;
                 if *ratio == 0.0 {
@@ -1439,6 +1455,7 @@ pub(crate) fn mate_connectors(m: &Mate) -> (EntityId, EntityId) {
         | Mate::PinSlot { a, b }
         | Mate::Screw { a, b, .. }
         | Mate::Gear { a, b, .. }
+        | Mate::Cam { a, b, .. }
         | Mate::RackPinion { a, b, .. } => (a, b),
     }
 }

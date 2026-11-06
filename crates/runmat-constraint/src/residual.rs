@@ -197,7 +197,7 @@ pub(crate) enum Op {
 }
 
 /// Mate residual kinds (connector frames are applied in [`Op::Mate`]).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MateOp {
     Fasten,
     Revolute,
@@ -218,6 +218,8 @@ pub(crate) enum MateOp {
     Gear { ratio: f64, xa0: [f64; 3], za0: [f64; 3], xb0: [f64; 3], zb0: [f64; 3] },
     /// `ob0`/`xb0`: the rack connector's world origin and X where the solve starts.
     RackPinion { travel: f64, xa0: [f64; 3], za0: [f64; 3], ob0: [f64; 3], xb0: [f64; 3] },
+    /// The cam's station radii, evenly spaced from its X.
+    Cam { radii: std::sync::Arc<[f64]> },
 }
 
 impl Op {
@@ -490,7 +492,7 @@ impl Op {
                 out[0] = ell_implicit(e, (x[5], x[6]));
                 out[1] = ell_implicit(e, (x[7], x[8]));
             }
-            Op::Mate { kind, la, lb } => eval_mate(*kind, la, lb, x, out),
+            Op::Mate { kind, la, lb } => eval_mate(kind, la, lb, x, out),
         }
     }
 
@@ -1112,11 +1114,11 @@ fn connector_world<S: Real>(x: &[S], local: &Frame) -> ([S; 3], [S; 4], [[S; 3];
     (origin, q, [xa, ya, za])
 }
 
-fn eval_mate<S: Real>(kind: MateOp, la: &Frame, lb: &Frame, x: &[S], out: &mut [S]) {
+fn eval_mate<S: Real>(kind: &MateOp, la: &Frame, lb: &Frame, x: &[S], out: &mut [S]) {
     let (oa, qa, [xa, ya, za]) = connector_world(&x[0..7], la);
     let (ob, qb, [xb, yb, zb]) = connector_world(&x[7..14], lb);
     let d = sub3(ob, oa);
-    match kind {
+    match *kind {
         MateOp::Fasten => {
             out[..3].copy_from_slice(&d);
             let v = rel_vec(&qa, &qb);
@@ -1190,7 +1192,29 @@ fn eval_mate<S: Real>(kind: MateOp, la: &Frame, lb: &Frame, x: &[S], out: &mut [
             let moved = dot3(sub3(ob, ob0.map(S::cst)), xb0.map(S::cst));
             out[0] = moved - ta * (travel / std::f64::consts::TAU);
         }
+        MateOp::Cam { ref radii } => {
+            // The follower in the cam's plane: its distance from the cam's axis meets the pitch
+            // curve's radius at its angle.
+            let (px, py) = (dot3(d, xa), dot3(d, ya));
+            out[0] = px.hypot(py) - cam_radius(radii, py.atan2(px));
+        }
     }
+}
+
+/// The cam's pitch radius at angle `phi` from its X: a periodic cubic (Catmull-Rom) through
+/// the station radii, evenly spaced from 0, continuous in slope all the way round.
+fn cam_radius<S: Real>(radii: &[f64], phi: S) -> S {
+    let n = radii.len();
+    let step = std::f64::consts::TAU / n as f64;
+    let u = phi.val().rem_euclid(std::f64::consts::TAU) / step;
+    let k = (u.floor() as usize).min(n - 1);
+    // `t` runs 0..1 between stations k and k + 1, carrying phi's derivative.
+    let t = (phi - (phi.val() - (u - k as f64) * step)) / step;
+    let at = |i: usize| radii[(k + n + i - 1) % n];
+    let (p0, p1, p2, p3) = (at(0), at(1), at(2), at(3));
+    let (m1, m2) = ((p2 - p0) / 2.0, (p3 - p1) / 2.0);
+    let (t2, t3) = (t * t, t * t * t);
+    (t3 * 2.0 - t2 * 3.0 + 1.0) * p1 + (t3 - t2 * 2.0 + t) * m1 + (t2 * 3.0 - t3 * 2.0) * p2 + (t3 - t2) * m2
 }
 
 /// How far `x` has turned about the fixed axis `z0` from the fixed direction `x0` (radians).
@@ -1463,7 +1487,7 @@ fn row_units(op: &Op, vars: &[VarId], sys: &System) -> Vec<Unit> {
             MateOp::PinSlot => vec![L, L, A, A],
             MateOp::Screw { .. } => vec![A, A, L, L, L],
             MateOp::Gear { .. } => vec![A],
-            MateOp::RackPinion { .. } => vec![L],
+            MateOp::RackPinion { .. } | MateOp::Cam { .. } => vec![L],
         },
         other => vec![L; other.rows()],
     }
@@ -1947,6 +1971,7 @@ fn lower_user(
                 } => MateOp::AngleBetweenZ { theta: target(t) },
                 Mate::PinSlot { .. } => MateOp::PinSlot,
                 Mate::Screw { lead, .. } => MateOp::Screw { lead: *lead },
+                Mate::Cam { radii, .. } => MateOp::Cam { radii: radii.clone() },
                 Mate::Gear { ratio, .. } | Mate::RackPinion { travel: ratio, .. } => {
                     // The couplings measure turns from where this solve starts.
                     let x: Vec<f64> = l.vars.iter().map(|v| l.v(*v)).collect();
@@ -2046,6 +2071,7 @@ mod tests {
                 ob0: [0.1, 0.2, 0.3],
                 xb0: [0.0, 1.0, 0.0],
             },
+            MateOp::Cam { radii: std::sync::Arc::from([0.6, 0.7, 1.1, 1.4, 1.2, 0.8, 0.6, 0.6]) },
         ];
         let knots = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
         let mut cases: Vec<(Op, usize)> = vec![

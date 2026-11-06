@@ -66,8 +66,9 @@
       "title": "Cam mates",
       "kind": "feature",
       "area": "mcad",
-      "status": "pending",
-      "acceptance": "An assembly writes kind = { mate = cam, profile = <published profile> }; the solver keeps the follower point on the cam's profile path as the cam turns (a path-tangent residual), with its Jacobian checked."
+      "status": "release",
+      "acceptance": "An assembly writes kind = { mate = cam, profile = <published profile> }; the solver keeps the follower point on the cam's profile path as the cam turns (a path-tangent residual), with its Jacobian checked.",
+      "landed_in": "0.7.1"
     },
     {
       "id": "design.mcad.drawing.auto",
