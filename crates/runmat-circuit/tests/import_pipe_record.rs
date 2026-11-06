@@ -77,6 +77,12 @@ fn an_ascii_schematic_and_board_import_to_a_circuit_that_compiles() {
     assert_eq!(board.outline.bbox().width(), 25_400_000);
     assert_eq!(board.outline.bbox().min.x, 0);
     assert_eq!(board.limits.min_clearance, runmat_circuit::geom::mm(0.2032));
+    // The pour cutout inside the bottom GND pour: a keepout for pours on the bottom layer.
+    assert_eq!(r.carried["pour cutouts"], 1, "{:?}", r.lines());
+    let cut = board.keepouts.values().next().expect("the pour cutout is a keepout");
+    assert_eq!(cut.layers, [1]);
+    assert!(cut.rules.pours && !cut.rules.tracks && !cut.rules.vias && !cut.rules.pads, "{:?}", cut.rules);
+    assert_eq!(cut.outline.bbox().width(), runmat_circuit::geom::mm(1.27));
     // Pour connect rules: GND joins solid; through-hole and SMD pads elsewhere by thermal
     // relief with their spoke width and gap; vias solid. The rule on a footprint is reported.
     use runmat_circuit::board_rules::{props, RuleValue};
@@ -183,7 +189,7 @@ fn the_binary_files_import_the_same_board_as_the_ascii_ones() {
     let out = binary::import(&files, "boards/blinky").unwrap();
     let r = &out.report;
     assert_eq!(r.format, ".SchDoc / .PcbDoc (binary)");
-    for (kind, n) in [("components", 3), ("nets", 3), ("footprints placed", 3), ("tracks", 7), ("vias", 1), ("zones", 2), ("board texts", 1), ("net classes", 1)] {
+    for (kind, n) in [("components", 3), ("nets", 3), ("footprints placed", 3), ("tracks", 7), ("vias", 1), ("zones", 2), ("pour cutouts", 1), ("board texts", 1), ("net classes", 1)] {
         assert_eq!(r.carried.get(kind), Some(&n), "{kind}: {:?}", r.lines());
     }
     assert_eq!(r.not_carried["3D bodies of components (binary structures)"], 1, "{:?}", r.lines());

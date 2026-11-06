@@ -9,12 +9,14 @@
 //! - Tracks, arcs, vias, polygons and fills carry their nets; `Class` records give the nets'
 //!   classes; `Clearance`, `Width` and `HoleSize` rules give the board limits (scope `All`) or
 //!   a net class's parameters (scope `InNetClass('<name>')`).
+//! - Regions: solid copper becomes a pour of its net that keeps its shape; a pour cutout (a
+//!   copper or multi-layer region of kind 1) becomes a keepout for pours on its layer.
 
 use super::Record;
 use crate::geom::poly::{Polygon, Ring};
 use crate::geom::{Coord, Point, Transform};
 use crate::import::{file_safe, Report};
-use crate::layout::{Board, BoardGraphic, BoardText, Footprint, IslandPolicy, Layer, NetClassRules, NetId, PadConnect, Side, Stackup, Track, TrackGeom, Via, Zone};
+use crate::layout::{Board, BoardGraphic, BoardText, Footprint, IslandPolicy, Keepout, KeepoutRules, Layer, NetClassRules, NetId, PadConnect, Side, Stackup, Track, TrackGeom, Via, Zone};
 use crate::library::{CopperSpan, Drill, Graphic, PadDef, PadShape, Package};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -519,8 +521,16 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
                     board.zones.insert(id, z);
                     zones += 1;
                     report.approximated("solid copper regions are carried as pours of their net");
+                } else if r.num("KIND") as i64 == 1 && (index(&l).is_some() || l == "MULTILAYER") {
+                    // A pour cutout: no pour fills inside it, on its layer (every copper layer
+                    // for a multi-layer one).
+                    let id = board.alloc();
+                    let layers = index(&l).map(|li| vec![li]).unwrap_or_default();
+                    let rules = KeepoutRules { pours: true, ..KeepoutRules::default() };
+                    board.keepouts.insert(id, Keepout { id, name: format!("pour cutout {}", board.keepouts.len() + 1), outline: Polygon::from_ring(Ring::from(ring)), layers, rules });
+                    report.count("pour cutouts", 1);
                 } else if index(&l).is_some() {
-                    report.not_carried("pour cutouts");
+                    report.not_carried(format!("copper regions of kind {}", r.num("KIND") as i64));
                 } else {
                     report.not_carried(format!("regions on layer {l}"));
                 }
