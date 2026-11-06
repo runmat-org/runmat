@@ -77,6 +77,9 @@ pub struct DrawingIndex {
     /// BOM table name → its rows as the sheet draws them (cell text, item numbers, the
     /// occurrence paths each row stands for), from the drawn assembly's BOM.
     pub bom_tables: BTreeMap<String, super::bom_table::BomTableData>,
+    /// Cut-list table name → its rows as the sheet draws them, from the drawn weldment.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cut_list_tables: BTreeMap<String, super::cut_list_table::CutListTableData>,
     /// Annotation id → whether it resolved to model entities.
     pub resolved: BTreeMap<String, bool>,
     /// Annotation id → its text as the sheet shows it (`40 mm`, `Balloon 3`, a note with its
@@ -150,6 +153,7 @@ pub fn build_drawing_index(
         title_blocks: report.title_blocks.clone(),
         balloons: report.balloons.clone(),
         bom_tables: report.bom_tables.clone(),
+        cut_list_tables: report.cut_list_tables.clone(),
         resolved: doc
             .annotations
             .iter()

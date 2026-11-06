@@ -20,6 +20,7 @@
 //! than dropped.
 
 pub mod bom_table;
+pub mod cut_list_table;
 pub mod flat_pattern;
 pub mod hole_table;
 pub mod index;
@@ -494,6 +495,11 @@ pub trait ModelReferences {
     ) -> Option<crate::model::sheet_metal::FlatLayout> {
         None
     }
+    /// The cut lists of the model's structural-member features, each with its feature id (a
+    /// weldment part's; `None` when the model has none).
+    fn cut_lists(&self, _model: &ModelRef) -> Option<Vec<(String, Vec<crate::model::weldment::CutListRow>)>> {
+        None
+    }
     /// The indented BOM of the model, for indented BOM tables.
     fn indented_bom(&self, _model: &ModelRef) -> Option<Vec<IndentedRow>> {
         None
@@ -545,6 +551,8 @@ pub struct DrawingReport {
     pub bom_tables: BTreeMap<String, BomTableData>,
     /// Rows per hole table (when hole geometry is available).
     pub hole_tables: BTreeMap<String, HoleTableData>,
+    /// Rows per weldment cut-list table.
+    pub cut_list_tables: BTreeMap<String, cut_list_table::CutListTableData>,
 }
 
 fn dsite(subject: &str, param: &str) -> Site {
@@ -783,6 +791,21 @@ pub fn check_drawing_with(
                     rep.hole_tables.insert(t.name.clone(), data);
                 }
             }
+            TableKind::CutList { .. } => match model.cut_lists(&v.model).filter(|l| !l.is_empty()) {
+                Some(lists) => {
+                    rep.cut_list_tables
+                        .insert(t.name.clone(), cut_list_table::cut_list_table(&t.name, &lists));
+                }
+                None => err(
+                    &mut rep,
+                    DiagCode::DrawingReference,
+                    s("view"),
+                    format!(
+                        "table `{}`: `{}` has no structural members to list",
+                        t.name, v.model.file
+                    ),
+                ),
+            },
             _ => {}
         }
     }

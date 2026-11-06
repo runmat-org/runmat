@@ -54,6 +54,8 @@ pub struct CompiledModels {
     item_properties: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
     /// Part file → flat pattern or unfold feature → its layout, the outline as cut.
     flats: BTreeMap<String, BTreeMap<FeatureId, FlatLayout>>,
+    /// Part file → each structural-member feature's cut list, in feature order.
+    cut_lists: BTreeMap<String, Vec<(String, Vec<runmat_cad::model::weldment::CutListRow>)>>,
 }
 
 fn names_in(reference: &Value, out: &mut Vec<Value>) {
@@ -121,6 +123,9 @@ impl ModelReferences for CompiledModels {
     }
     fn flat_layout(&self, model: &ModelRef, feature: &FeatureId) -> Option<FlatLayout> {
         self.flats.get(model.file.as_str())?.get(feature).cloned()
+    }
+    fn cut_lists(&self, model: &ModelRef) -> Option<Vec<(String, Vec<runmat_cad::model::weldment::CutListRow>)>> {
+        self.cut_lists.get(model.file.as_str()).cloned()
     }
     fn item_property(
         &self,
@@ -263,6 +268,18 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
                     .filter_map(|f| Some((f.id.clone(), crate::exchange::flat::flat_layout_of(&part, &f.id)?)))
                     .collect();
                 models.flats.insert(file.clone(), flats);
+                let cut_lists: Vec<_> = part
+                    .document
+                    .features
+                    .iter()
+                    .filter_map(|f| match part.result.state.records.get(&f.id)? {
+                        runmat_cad::regen::records::FeatureRecord::Weldment { cut_list, .. } if !cut_list.is_empty() => {
+                            Some((f.id.to_string(), cut_list.clone()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                models.cut_lists.insert(file.clone(), cut_lists);
                 documents.insert(file.clone(), part.document.clone());
                 displays.insert(
                     file.clone(),
@@ -772,6 +789,9 @@ fn without_occurrences(display: &Value, paths: &[String]) -> Option<Value> {
     });
     Some(out)
 }
+
+#[cfg(test)]
+mod cut_list_tests;
 
 #[cfg(test)]
 mod exclude_tests {

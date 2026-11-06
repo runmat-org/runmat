@@ -263,6 +263,23 @@ pub(super) fn drawing_sheet(
         let corner = if at.len() == 2 && (at[0] != 0.0 || at[1] != 0.0) { [at[0], at[1]] } else { [w - 10.0, h - 10.0] };
         revision_table(&mut out, &rows, corner);
     }
+    // Cut-list tables: where the drawing puts them, else on the title block's top edge,
+    // right-aligned, as the Desktop's sheet places a parts list.
+    let block_h = rows.len() as f64 * 7.0;
+    for table in doc["tables"].as_array().into_iter().flatten() {
+        if table["sheet"].as_str() != Some(sheet_name.as_str()) || table["kind"]["table"] != "cut_list" {
+            continue;
+        }
+        let data = &data["cut_list_tables"][table["name"].as_str().unwrap_or("")];
+        let Some(body) = data["rows"].as_array() else { continue };
+        let columns: Vec<(String, bool)> = data["columns"].as_array().into_iter().flatten().map(|c| (c["title"].as_str().unwrap_or("").to_uppercase(), c["align"] == "right")).collect();
+        let cells: Vec<Vec<String>> = body.iter().map(|r| r["cells"].as_array().into_iter().flatten().map(|c| c.as_str().unwrap_or("").to_owned()).collect()).collect();
+        let at = floats(&table["at"]);
+        let placed = at.len() == 2 && (at[0] != 0.0 || at[1] != 0.0);
+        let (tw, th) = grid_size(&columns, &cells);
+        let top_left = if placed { [at[0], at[1]] } else { [w - 10.0 - tw, 10.0 + block_h + th] };
+        grid_table(&mut out, &columns, &cells, top_left);
+    }
     Ok((sheet_name, out, notes))
 }
 
@@ -476,6 +493,55 @@ fn revision_table(out: &mut Sheet, rows: &[Value], top_right: [f64; 2]) {
             let tx = if c == 0 { x + (widths[c] - text_width(cell, size)) / 2.0 } else { x + pad };
             out.text("FRAME", [tx, y + (row - size) / 2.0], size, cell);
             x += widths[c];
+        }
+    }
+}
+
+/// Parts-list proportions, as the Desktop's sheet draws them: 2.5 mm text in 7 mm rows.
+const GRID: (f64, f64, f64) = (2.5, 7.0, 1.5);
+
+fn grid_widths(columns: &[(String, bool)], cells: &[Vec<String>]) -> Vec<f64> {
+    let (size, _, pad) = GRID;
+    columns
+        .iter()
+        .enumerate()
+        .map(|(i, (title, _))| {
+            let longest = cells.iter().map(|r| r.get(i).map_or(0, |c| c.chars().count())).chain([title.chars().count()]).max().unwrap_or(0);
+            longest as f64 * size * 0.6 + 2.0 * pad
+        })
+        .collect()
+}
+
+/// A table's [width, height] (mm): a header row and one row per line.
+fn grid_size(columns: &[(String, bool)], cells: &[Vec<String>]) -> (f64, f64) {
+    (grid_widths(columns, cells).iter().sum(), (cells.len() + 1) as f64 * GRID.1)
+}
+
+/// A header row over one row per line, with its top-left corner at `top_left`; right-aligned
+/// columns (numbers) end a pad inside their rule.
+fn grid_table(out: &mut Sheet, columns: &[(String, bool)], cells: &[Vec<String>], top_left: [f64; 2]) {
+    let (size, row, pad) = GRID;
+    let widths = grid_widths(columns, cells);
+    let (width, height) = grid_size(columns, cells);
+    let [x0, y0] = top_left;
+    out.rect("FRAME", x0, y0 - height, width, height);
+    let header: Vec<String> = columns.iter().map(|(t, _)| t.clone()).collect();
+    for (n, line) in std::iter::once(&header).chain(cells.iter()).enumerate() {
+        let top = y0 - n as f64 * row;
+        if n > 0 {
+            out.line("FRAME", [x0, top], [x0 + width, top]);
+        }
+        let mut x = x0;
+        for (i, w) in widths.iter().enumerate() {
+            let text = line.get(i).map(String::as_str).unwrap_or("");
+            if !text.is_empty() {
+                let tx = if columns[i].1 { x + w - pad - text_width(text, size) } else { x + pad };
+                out.text("FRAME", [tx, top - row / 2.0 - size / 2.0], size, text);
+            }
+            x += w;
+            if i + 1 < widths.len() {
+                out.line("FRAME", [x, y0], [x, y0 - height]);
+            }
         }
     }
 }

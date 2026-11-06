@@ -215,3 +215,29 @@ fn a_part_without_a_flat_pattern_says_so() {
     let err = call("design.export", json!({ "path": "/p/bracket.part", "format": "dwg" }), &files()).unwrap_err().to_string();
     assert!(err.contains("flat pattern"), "{err}");
 }
+
+/// A weldment's drawing exports its cut list where the drawing places it: the header and one
+/// row per member group, with the cut length and end angles.
+#[test]
+fn a_weldment_drawing_exports_its_cut_list() {
+    let frame = include_str!("../../runmat-cad/tests/corpus/documents/part07.part");
+    let drawing = r#"runmat 0.7
+std 1
+
+drawing frame {
+    format a3 = { size = { size = iso, name = A3 }, title_block = [] }
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+    view top = standard(orientation = top, sheet = "1", model = { file = "frame.part" }, at = [150, 180], display = visible_lines)
+    table cuts = cut_list(view = top, sheet = "1", at = [20, 100])
+}
+"#;
+    let files: Files = [("/p/frame.part", frame), ("/p/frame.drawing", drawing)].into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
+    let out = call("design.export", json!({ "path": "/p/frame.drawing", "format": "dxf" }), &files).unwrap_or_else(|e| panic!("{e}"));
+    let sheet = dxf::read(out["files"][0]["content"].as_str().unwrap()).unwrap();
+    let texts: Vec<&str> = sheet.entities.iter().filter_map(|e| if let Shape::Text { text, .. } = &e.shape { Some(text.as_str()) } else { None }).collect();
+    for want in ["ITEM", "QTY", "LENGTH", "ANGLE 1", "220.0", "120.0", "45.0°"] {
+        assert!(texts.contains(&want), "no {want:?} in {texts:?}");
+    }
+    let corner = sheet.entities.iter().any(|e| matches!(&e.shape, Shape::Polyline { points, closed: true } if points.iter().any(|p| (p[0] - 20.0).abs() < 1e-6 && (p[1] - 100.0).abs() < 1e-6)));
+    assert!(corner, "the cut list's frame at its top-left corner");
+}
