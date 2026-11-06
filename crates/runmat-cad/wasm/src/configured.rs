@@ -80,7 +80,36 @@ pub fn configured_displays(
         let (result, kernel) = regenerate_configured(document, &node.configuration);
         let mut display = part_display(&result, kernel.as_ref(), &crate::runtime::ASSEMBLY_TESSELLATION);
         display.levels = runmat_cad::display::display_levels(&result, kernel.as_ref(), &crate::runtime::ASSEMBLY_TESSELLATION);
+        // A configured occurrence draws in the part's own colors, as its default does.
+        runmat_cad::appearance::apply_document_appearance(&configured_document(document, &node.configuration), &result, &mut display);
         out.insert(key, display);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::runtime::{compile_json, Files};
+    use serde_json::Value;
+
+    /// An occurrence configured by input draws in the part's own color, as the default one does
+    /// (it had drawn in its material's appearance, so a glass-filled nylon cowl drew see-through).
+    #[test]
+    fn a_configured_occurrence_draws_in_the_parts_color() {
+        let block = "runmat 0.7\nstd 1\n\npart block {\n    input width : length = 20 mm\n    sketch s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])\n        l2 = line(start = l1.end, end = [input.width, 10 mm])\n        l3 = line(start = l2.end, end = [0 mm, 10 mm])\n        l4 = line(start = l3.end, end = l1.start)\n    }\n    feature box = extrude(profile = sketch.s, distance = 5 mm)\n    output block = { body = feature.box.body, material = \"glass_filled_nylon\", color = \"#4A4F57\" }\n}\n";
+        let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part block as plain\n    use part block as wide {\n        configuration = { select = inputs, values = { width = 40 mm } }\n        placement = { placement = offset, offset = { translation = [0 mm, 50 mm, 0 mm] } }\n    }\n}\n";
+        let files: Files = [
+            ("/p/block.part".to_owned(), block.to_owned()),
+            ("/p/rig.assembly".to_owned(), rig.to_owned()),
+        ]
+        .into();
+        let out: Value = serde_json::from_str(&compile_json("/p/rig.assembly", rig, &files)).unwrap();
+        let protos = out["display"]["data"]["prototypes"].as_array().expect("prototypes");
+        assert_eq!(protos.len(), 2, "{}", out["diagnostics"]);
+        let want = runmat_cad::appearance::parse_srgb_hex("#4A4F57").unwrap();
+        for p in protos {
+            let got: Vec<f32> = p["appearance"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap() as f32).collect();
+            assert_eq!(got, want.to_vec(), "{}", p["configuration"]);
+        }
+    }
 }

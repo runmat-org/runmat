@@ -9,6 +9,8 @@ pub const CAD_FACE_RGBA: [f32; 4] = [0.8, 0.82, 0.85, 1.0];
 
 /// Families in match order: the first whose words appear in the material name wins.
 const FAMILIES: &[(&str, &[&str], [f32; 4])] = &[
+    // Glass-filled polymers (PA6/PA66 GF30) are opaque plastics: matched before plain glass.
+    ("plastic", &["glass_filled", "glass_fibre_filled", "glass_fiber_filled", "nylon_gf", "pa6_gf", "pa66_gf", "gf30"], [0.9, 0.9, 0.88, 1.0]),
     ("glass", &["glass", "glazing", "acrylic", "pmma", "polycarbonate_clear", "clear", "sapphire", "quartz"], [0.55, 0.68, 0.78, 0.35]),
     ("rubber", &["rubber", "elastomer", "silicone", "neoprene", "epdm", "nitrile", "viton", "tyre", "tire", "urethane_rubber"], [0.14, 0.14, 0.15, 1.0]),
     ("copper", &["copper", "c110", "c101"], [0.78, 0.5, 0.36, 1.0]),
@@ -73,6 +75,26 @@ pub fn part_appearance(material: Option<&str>, color: Option<&str>) -> [f32; 4] 
         .unwrap_or_else(|| material_appearance(material).1)
 }
 
+/// Sets `display`'s appearance from the part document: its first output's color, else that
+/// output's material appearance, the CAD grey without either; and colors each output's body
+/// when the part has several ([`color_output_bodies`]). Every regeneration that draws a part,
+/// in its default or any other configuration, takes its colors from here.
+pub fn apply_document_appearance(
+    doc: &crate::model::PartDocument,
+    result: &crate::regen::engine::RegenResult,
+    display: &mut crate::display::PartDisplay,
+) {
+    let output = doc.parts.first();
+    let material = output
+        .and_then(|p| p.material.as_ref())
+        .or_else(|| doc.parts.iter().find_map(|p| p.material.as_ref()));
+    display.appearance = Some(part_appearance(
+        material.map(|m| m.0.as_str()),
+        output.and_then(|p| p.color.as_deref()),
+    ));
+    color_output_bodies(doc, result, display);
+}
+
 /// Gives each output's body its own color (the output's `color`, else its material's
 /// appearance) when the part has more than one output, so a study part's solid, fluid and air
 /// bodies read apart. A body that already carries a color keeps it; a one-output part draws in
@@ -122,6 +144,10 @@ mod tests {
         assert_eq!(material_appearance(None).1, CAD_FACE_RGBA);
         assert_eq!(material_appearance(Some("material.epoxy")).0, "epoxy");
         assert!(material_appearance(Some("glass")).1[3] < 0.5, "glass is see-through");
+        // Glass-filled nylon is an opaque plastic, not glass.
+        assert_eq!(material_appearance(Some("glass_filled_nylon")).0, "plastic");
+        assert_eq!(material_appearance(Some("PA66-GF30")).0, "plastic");
+        assert_eq!(material_appearance(Some("glass_filled_nylon")).1[3], 1.0);
         assert_eq!(srgb_hex([1.0, 0.0, 0.0, 1.0]), "#FF0000FF");
     }
 

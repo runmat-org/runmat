@@ -47,6 +47,9 @@ pub struct PartMass {
     pub density_source: Option<DensitySource>,
     pub mass: Option<f64>,
     pub volume: f64,
+    /// The occurrence's centre of mass in the assembly's frame (m), so a balance check can
+    /// read which parts move the CG.
+    pub center: [f64; 3],
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -187,7 +190,7 @@ pub fn combine(parts: &[Mass]) -> Mass {
     }
 }
 
-fn share(path: String, file: String, configuration: String, part: &Integrated) -> PartMass {
+fn share(path: String, file: String, configuration: String, part: &Integrated, center: [f64; 3]) -> PartMass {
     PartMass {
         path,
         file,
@@ -197,6 +200,7 @@ fn share(path: String, file: String, configuration: String, part: &Integrated) -
         density_source: part.density.map(|d| d.1),
         mass: part.density.map(|d| part.unit.volume * d.0),
         volume: part.unit.volume,
+        center,
     }
 }
 
@@ -236,6 +240,7 @@ pub fn part_mass(
         path.to_owned(),
         configuration,
         &integrated,
+        integrated.unit.center,
     ));
     Ok(report)
 }
@@ -284,6 +289,7 @@ pub fn assembly_mass(
                         node.configuration.label()
                     },
                     part,
+                    node.world.apply(part.unit.center),
                 ));
                 match part.density {
                     Some((d, _)) => placed_masses.push(placed(&scaled(&part.unit, d), &node.world)),
