@@ -27,6 +27,7 @@ pub mod fabrication;
 pub mod family;
 pub mod netlist;
 mod mesh;
+pub mod schematic_pdf;
 pub mod sheet;
 mod step;
 mod three_mf;
@@ -48,7 +49,8 @@ pub enum ExportFormat {
     Dxf,
     /// DWG (R2018 format) of a drawing sheet or a part's flat pattern.
     Dwg,
-    /// A drawing sheet as a one-page vector PDF at true size.
+    /// A drawing sheet as a one-page vector PDF at true size, or a circuit's schematic as a
+    /// PDF set: every page, with its title block, in one file.
     Pdf,
     /// An assembly's flat bill of materials as CSV.
     Bom,
@@ -435,10 +437,26 @@ fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, Tool
                 notes.extend(n);
                 vec![binary_file(format!("{name}-{sheet_name}.pdf"), "application/pdf", &crate::formats::pdf::write(&sheet))]
             }
+            k if k.is_circuit() => {
+                let options = crate::circuit_values::circuit_options(&input.path, text, files);
+                let out = runmat_circuit::runtime::compile(&input.path, text, files, &options);
+                let index = out.index.ok_or_else(|| {
+                    ToolError::new(
+                        "not_compiled",
+                        format!("{} doesn't compile (design.check lists why): {}", input.path, out.diagnostics.first().map(|d| d.message.as_str()).unwrap_or("")),
+                    )
+                })?;
+                let pages: Vec<_> = index.schematic.sheets.iter().map(schematic_pdf::page_sheet).collect();
+                if pages.is_empty() {
+                    return Err(ToolError::new("unsupported", format!("{} has no schematic pages", input.path)));
+                }
+                notes.push(format!("{} schematic page(s)", pages.len()));
+                vec![binary_file(format!("{name}-schematic.pdf"), "application/pdf", &crate::formats::pdf::write_pages(&pages))]
+            }
             other => {
                 return Err(ToolError::new(
                     "unsupported",
-                    format!("PDF exports drawing sheets; {} is a {other:?} file", input.path),
+                    format!("PDF exports drawing sheets and circuit schematics; {} is a {other:?} file", input.path),
                 ))
             }
         },

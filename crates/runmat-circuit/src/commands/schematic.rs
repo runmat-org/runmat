@@ -298,6 +298,14 @@ pub(super) fn add(c: &mut Catalog) {
         .when(selected_one(&[K::SheetSymbol]))
         .edit(edit(EditOp::Set, Section::Components).item("channels")),
         sch(
+            "schematic.export-pdf",
+            "Export PDF",
+            "export",
+            "Export every schematic page, each with its title block, as one PDF.",
+        )
+        .kw(&["print", "pdf set", "plot"])
+        .edit(export("schematic_pdf")),
+        sch(
             "schematic.compile",
             "Compile",
             "compile",
@@ -639,6 +647,7 @@ pub(super) fn tab() -> DomainTab {
             ],
         ),
         group("sync", "Sync", vec![c("schematic.update-board")]),
+        group("output", "Output", vec![c("schematic.export-pdf")]),
         group(
             "library",
             "Library",

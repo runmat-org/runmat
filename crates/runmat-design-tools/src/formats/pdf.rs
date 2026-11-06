@@ -18,22 +18,34 @@ const PT: f64 = 72.0 / 25.4;
 
 /// One PDF file of the sheet.
 pub fn write(sheet: &Sheet) -> Vec<u8> {
-    let mut page = Page { out: String::new(), sheet };
-    page.out.push_str("1 J 1 j 0 0 0 RG 0 0 0 rg\n");
-    // Page space in millimetres.
-    let _ = writeln!(page.out, "{PT:.6} 0 0 {PT:.6} 0 0 cm");
-    for e in &sheet.entities {
-        page.entity(e, &Transform::IDENTITY, 0);
-    }
-    let content = page.out;
-    let [w, h] = sheet.paper.map(|v| v * PT);
-    let objects = [
+    write_pages(std::slice::from_ref(sheet))
+}
+
+/// One PDF file with a page per sheet, in order, each at its own paper size.
+pub fn write_pages(sheets: &[Sheet]) -> Vec<u8> {
+    // Objects: 1 catalog, 2 pages, 3 font, then a page and its content stream per sheet.
+    let mut objects = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
-        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.3} {h:.3}] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"),
-        format!("<< /Length {} >>\nstream\n{content}endstream", content.len()),
+        String::new(),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>".to_owned(),
     ];
+    let mut kids = Vec::new();
+    for sheet in sheets {
+        let mut page = Page { out: String::new(), sheet };
+        page.out.push_str("1 J 1 j 0 0 0 RG 0 0 0 rg\n");
+        // Page space in millimetres.
+        let _ = writeln!(page.out, "{PT:.6} 0 0 {PT:.6} 0 0 cm");
+        for e in &sheet.entities {
+            page.entity(e, &Transform::IDENTITY, 0);
+        }
+        let content = page.out;
+        let [w, h] = sheet.paper.map(|v| v * PT);
+        let (page_id, content_id) = (objects.len() + 1, objects.len() + 2);
+        kids.push(format!("{page_id} 0 R"));
+        objects.push(format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.3} {h:.3}] /Resources << /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >>"));
+        objects.push(format!("<< /Length {} >>\nstream\n{content}endstream", content.len()));
+    }
+    objects[1] = format!("<< /Type /Pages /Kids [{}] /Count {} >>", kids.join(" "), kids.len());
     let mut pdf = b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n".to_vec();
     let mut offsets = Vec::new();
     for (i, o) in objects.iter().enumerate() {
