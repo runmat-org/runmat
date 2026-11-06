@@ -180,7 +180,17 @@ where
                 work.cancellation,
             )
         }
-        .map_err(|insertion| insertion_error(insertion, context.constraint_index))?;
+        .map_err(|insertion| {
+            let mut failure = insertion_error(insertion, context.constraint_index);
+            failure.reason = format!(
+                "inserting segment point {coordinates:?} on {:?}-{:?} ({} barrier faces): {}",
+                context.first_coordinates,
+                context.last_coordinates,
+                recovery.protected_faces.len(),
+                failure.reason
+            );
+            failure
+        })?;
         derived_identity
     };
     let midpoint = midpoint.with_identity(identity);
