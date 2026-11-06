@@ -119,6 +119,27 @@ fn inspect_finds_faces_by_name_and_mass_properties() {
     assert!(mass["mass_kg"].as_f64().unwrap() > 0.2);
 }
 
+/// `set` regenerates the part with those inputs for this run: a plate's volume follows
+/// w · d · t for each thickness, and the file is unchanged.
+#[test]
+fn inspect_set_regenerates_with_input_values_for_one_run() {
+    let plate = "part plate {\n    input width : length = 80 mm\n    input depth : length = 50 mm\n    input thickness : length = 10 mm\n\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [input.width, 0 mm])\n        l2 = line(start = [input.width, 0 mm], end = [input.width, input.depth])\n        l3 = line(start = [input.width, input.depth], end = [0 mm, input.depth])\n        l4 = line(start = [0 mm, input.depth], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = input.thickness)\n}\n";
+    let files: Files = [("/p/plate.part".to_string(), plate.to_string())].into_iter().collect();
+    for t in [4.0, 6.5, 10.0] {
+        let out = ok(
+            "design.inspect",
+            json!({ "path": "/p/plate.part", "sections": ["mass"], "set": { "thickness": format!("{t} mm") } }),
+            &files,
+        );
+        let v = out["sections"]["mass"]["volume_mm3"].as_f64().unwrap();
+        assert!((v - 80.0 * 50.0 * t).abs() < 1e-6 * v, "t = {t}: {v}");
+    }
+    assert_eq!(files["/p/plate.part"], plate);
+    let e = call("design.inspect", json!({ "path": "/p/plate.part", "set": { "length": "1 mm" } }), &files).unwrap_err();
+    assert_eq!(e.code, "unknown_input");
+    assert!(e.message.contains("width, depth, thickness"), "{}", e.message);
+}
+
 #[test]
 fn propose_edit_stages_text_with_the_dimension_diff_and_a_patch_that_keeps_and_undoes_it() {
     let files = part_files();

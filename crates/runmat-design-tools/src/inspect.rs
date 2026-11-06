@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
+/// A run's input values (`set`), shared with the other tools that regenerate a design.
+#[path = "run_set.rs"]
+pub mod run_set;
+
 /// What to read. Parts: `faces`, `regions`, `published`, `inputs`, `features`, `bodies`,
 /// `mass`. Assemblies: `occurrences`, `mates`, `bom`, `mass`. Circuits: `components`, `nets`,
 /// `net_classes`, `bom`, `sheets`, `erc_power`, and with a board `rooms`, `footprints`, `layers`,
@@ -29,6 +33,11 @@ pub struct InspectInput {
     /// Density for mass properties, kg/m³ (default 7850, steel).
     #[serde(default)]
     pub density: Option<f64>,
+    /// Input values for this run, by input name (`{"thickness": "3.5 mm"}`): the part or
+    /// assembly regenerates with them; the file is not changed. An unknown name is an
+    /// `unknown_input` error listing the declared inputs.
+    #[serde(default)]
+    pub set: Option<BTreeMap<String, String>>,
     /// At most this many rows per section (default 200).
     #[serde(default)]
     pub limit: Option<usize>,
@@ -96,6 +105,13 @@ impl Sections<'_> {
 }
 
 pub fn inspect(input: &InspectInput, files: &Files) -> Result<InspectOutput, ToolError> {
+    match input.set.as_ref().filter(|set| !set.is_empty()) {
+        Some(set) => inspect_files(input, &run_set::with_inputs(&input.path, files, set)?),
+        None => inspect_files(input, files),
+    }
+}
+
+fn inspect_files(input: &InspectInput, files: &Files) -> Result<InspectOutput, ToolError> {
     let kind = kind_of(&input.path)?;
     let text = text_of(files, &input.path)?;
     let mut s = Sections {
@@ -451,6 +467,7 @@ fn drawing(s: &mut Sections, path: &str, text: &str, files: &Files) {
                 sections: Some(vec!["inputs".into()]),
                 filter: None,
                 density: None,
+                set: None,
                 limit: None,
             };
             if let Ok(out) = inspect(&input, files) {

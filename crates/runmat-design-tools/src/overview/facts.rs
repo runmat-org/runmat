@@ -258,6 +258,7 @@ fn board(path: &str, files: &Files, out: &mut Vec<Fact>, ran: &mut Ran) -> bool 
         sections: Some(vec!["eco".into(), "unplaced".into()]),
         filter: None,
         density: None,
+        set: None,
         limit: Some(0),
     };
     let Ok(seen) = inspect(&input, files) else {

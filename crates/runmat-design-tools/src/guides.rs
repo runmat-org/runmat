@@ -302,6 +302,7 @@ pub fn status(guide: &Guide, path: &str, files: &Files) -> Result<GuideStatus, T
             sections: None,
             filter: None,
             density: None,
+            set: None,
             limit: Some(1),
         };
         if let Ok(seen) = inspect(&input, files) {
