@@ -221,6 +221,7 @@ pub(super) async fn capture(
                                 .map(|extrema| (extrema.minimum.value, extrema.maximum.value)),
                             legend: spec.legend.clone(),
                             unit: spec.unit.clone(),
+                            plane: presentation.section,
                             cap_triangle_budget: detail.cap_triangle_budget,
                         };
                     let (scene, error) =

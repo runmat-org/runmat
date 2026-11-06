@@ -112,7 +112,7 @@ pub(crate) async fn execute_local_study_geometry(
     let analysis_config = config.clone();
     let meshing_ceilings = match config.local_memory_capacity_bytes {
         Some(capacity) => crate::machine_capacity::meshing_execution_ceilings_for(
-            capacity,
+            capacity.min(config.authored_worker_memory_bytes.unwrap_or(u64::MAX)),
             &meshing_request.limits,
         ),
         None => crate::machine_capacity::meshing_execution_ceilings(&meshing_request.limits),

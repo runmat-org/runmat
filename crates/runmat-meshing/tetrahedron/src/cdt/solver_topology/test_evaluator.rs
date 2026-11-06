@@ -18,14 +18,24 @@ const FACETS: [[usize; 3]; 4] = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
 
 pub(super) static EVALUATOR: LinearTetrahedronEvaluator = LinearTetrahedronEvaluator {
     warped_curve_parameter: false,
+    boundary_outside_trim: false,
 };
 pub(super) static WARPED_EVALUATOR: LinearTetrahedronEvaluator = LinearTetrahedronEvaluator {
     warped_curve_parameter: true,
+    boundary_outside_trim: false,
 };
+/// Classifies points on a face's boundary edges as outside its trim, as a STEP trim loop that
+/// lies a hair inside its pcurves does.
+pub(super) static BOUNDARY_OUTSIDE_EVALUATOR: LinearTetrahedronEvaluator =
+    LinearTetrahedronEvaluator {
+        warped_curve_parameter: false,
+        boundary_outside_trim: true,
+    };
 pub(super) static CONTROL: UnlimitedControl = UnlimitedControl;
 
 pub(super) struct LinearTetrahedronEvaluator {
     warped_curve_parameter: bool,
+    boundary_outside_trim: bool,
 }
 
 impl ExactCurveEvaluator for LinearTetrahedronEvaluator {
@@ -326,10 +336,13 @@ impl ExactTrimClassifier for LinearTetrahedronEvaluator {
     fn classify(
         &self,
         _id: &TrimClassifierId,
-        _uv: [f64; 2],
+        uv: [f64; 2],
         _boundary_tolerance_uv: f64,
         _control: &dyn GeometryEvaluationControl,
     ) -> Result<TrimDomainLocation, GeometryEvaluationError> {
+        if self.boundary_outside_trim && uv[0].min(uv[1]).min(1.0 - uv[0] - uv[1]) < 1.0e-12 {
+            return Ok(TrimDomainLocation::Outside);
+        }
         Ok(TrimDomainLocation::Inside)
     }
 }

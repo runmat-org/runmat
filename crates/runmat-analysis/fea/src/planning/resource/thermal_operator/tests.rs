@@ -1,4 +1,5 @@
 use super::*;
+use crate::planning::resource::Count;
 use crate::{
     algebra::{MatrixProperties, OperatorRole, RealSparseAssembler},
     execution::ThermalWorkload,
@@ -265,4 +266,160 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
     workload.execute(&mesh).unwrap();
     assert!(csr_bytes(u64::MAX, 1).is_err());
     assert!(csr_bytes(1, u64::MAX).is_err());
+}
+
+#[test]
+fn thermal_admission_reserves_the_proving_factor_and_no_energy_budget() {
+    // Thermal assembly captures no local-energy source: the Cholesky proof always runs, and its
+    // factor serves the solve. The admission is the structural factor law; the graph-count
+    // local-energy storage (192 B per stored entry) is never reserved.
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
+        let envelope = crate::algebra::CoercivityWorkEnvelope::derive(facts.support()).unwrap();
+        let admission = facts.solver_admission();
+        assert_eq!(
+            *admission,
+            crate::planning::resource::preflight::factor_admission(facts.support()).unwrap()
+        );
+        assert_eq!(
+            admission.update_count_upper_bound.0,
+            envelope.factor_flop_limit()
+        );
+        assert!(admission.resident_bytes_upper_bound.0 >= envelope.factor_resident_limit());
+    }
+}
+
+// witness: FEA-THERMAL-SOLVER-001/conduction_multigrid_plan @ thermal_steady/tet4/resource_plan;
+//   coverage: partial;
+//   boundary: The conduction multigrid solver term (AMG, PCG vectors, proof inventory) is below
+//   the proving factor's on box meshes and the gap grows with the mesh; on these sizes the
+//   planning-derivation estimate dominates both totals, so the plan keeps the factor.
+#[test]
+fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
+    let mut model = workload().model;
+    model.sequence =
+        AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_steady("heat")]);
+    let step = model.sequence.steps[0].clone();
+    let schedule = crate::execution::ThermalSolveSchedule::derive(
+        &model,
+        &step,
+        crate::ThermalProcedureControl::Steady,
+    )
+    .unwrap();
+    let mut ratios = Vec::new();
+    for cells in [12, 24] {
+        let mesh = runmat_meshing_core::fixtures::layered_box_mesh(
+            [cells, cells, cells],
+            [1.0, 1.0, 1.0],
+            &[(2.0, "body")],
+        );
+        let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule, &[]).unwrap();
+        let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
+        let factor = facts.solver_resident_bytes().unwrap().0;
+        let multigrid = facts.clone().on_path(ThermalSolvePath::ConductionMultigrid);
+        assert_eq!(multigrid.solver_admission().factor_nonzero_upper_bound, Count(0));
+        let multigrid_bytes = multigrid.solver_resident_bytes().unwrap().0;
+        assert!(multigrid_bytes < factor, "{multigrid_bytes} vs {factor}");
+        // Within the budget the factor needs, the plan keeps the factor.
+        let mut fitting = step.clone();
+        fitting
+            .accuracy
+            .resources
+            .set_resident_byte_budget(facts.numerical_reservation_bytes(&history).unwrap().0);
+        assert_eq!(
+            super::super::thermal_preassembly::select_thermal_solve_path(
+                facts.clone(),
+                &history,
+                &model,
+                &fitting,
+                0,
+            )
+            .unwrap()
+            .path(),
+            ThermalSolvePath::ProvingFactorization
+        );
+        // Below both totals the refusal names both requirements and the budget.
+        let total = multigrid.numerical_reservation_bytes(&history).unwrap().0;
+        let mut small = step.clone();
+        small.accuracy.resources.set_resident_byte_budget(total - 1);
+        assert!(matches!(
+            super::super::thermal_preassembly::select_thermal_solve_path(
+                facts.clone(), &history, &model, &small, 0,
+            ),
+            Err(ResourcePlanningError::ThermalSolveCeiling { .. })
+        ));
+        ratios.push(factor as f64 / multigrid_bytes as f64);
+    }
+    assert!(ratios[1] > ratios[0], "{ratios:?}");
+}
+
+/// Measured requested-heap peak of `derive` on `mesh` with `interfaces`, checked against the
+/// count-only estimate and the exact-entry bound the facts retain.
+pub(crate) fn derivation_peak_fits_the_planning_law(
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    interfaces: &[runmat_analysis_core::AnalysisInterface],
+) {
+    let estimate = ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(mesh)
+        .unwrap()
+        .0;
+    let (facts, _, peak) = crate::topology::measure_test_allocations(|| {
+        ThermalOperatorResourceFacts::derive(mesh, interfaces)
+    });
+    let facts = facts.unwrap();
+    let exact = facts.planning_resident_bytes().0;
+    let rows = facts.support().rows() as u64;
+    println!(
+        "thermal derivation nodes={} rows={rows} entries={} peak={peak} ({} B/row) exact={exact} ({} B/row) estimate={estimate} ({} B/row) workspace={} ({} B/row)",
+        mesh.topology.nodes.len(),
+        facts.support().column_indices().len(),
+        peak as u64 / rows,
+        exact / rows,
+        estimate / rows,
+        facts.workspace().reservation_bytes().unwrap().0,
+        facts.workspace().reservation_bytes().unwrap().0 / rows,
+    );
+    let projection_estimate =
+        crate::topology::AnalysisProjection::derivation_resident_bytes_estimate(mesh).unwrap();
+    let (_, _, projection_peak) =
+        crate::topology::measure_test_allocations(|| crate::topology::AnalysisProjection::derive(mesh));
+    let (_, _, symbolic_peak) = crate::topology::measure_test_allocations(|| {
+        super::super::preflight::factor_admission(facts.support())
+    });
+    println!(
+        "  projection estimate={projection_estimate} ({} B/row) peak={projection_peak} ({} B/row); symbolic peak={symbolic_peak} ({} B/row, {} B/entry)",
+        projection_estimate / rows,
+        projection_peak as u64 / rows,
+        symbolic_peak as u64 / rows,
+        symbolic_peak as u64 / facts.support().column_indices().len() as u64,
+    );
+    assert!(peak as u64 <= exact, "derivation peak {peak} exceeds {exact}");
+    assert!(exact <= estimate, "exact bound {exact} exceeds the estimate {estimate}");
+}
+
+// witness: FEA-THERMAL-SOLVER-001/support_derivation_memory @ thermal_steady/tet4/numerical_kernel;
+//   coverage: partial;
+//   boundary: The thermal support derivation (projection, clique support, symbolic factor
+//   analysis) never requests more heap than the planning law at the exact support size, and the
+//   count-only estimate is at or above that bound, on Tet4 and Tet10 meshes up to 15,625 nodes.
+#[test]
+fn thermal_support_derivation_peak_fits_the_planning_law() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        derivation_peak_fits_the_planning_law(&canonical_tetrahedron_solver_mesh(order), &[]);
+    }
+    derivation_peak_fits_the_planning_law(&three_region_tetrahedron_solver_mesh(), &[]);
+    derivation_peak_fits_the_planning_law(
+        &runmat_meshing_core::fixtures::quadratic_slab_mesh(3),
+        &[],
+    );
+    for cells in [8, 16, 24] {
+        derivation_peak_fits_the_planning_law(
+            &runmat_meshing_core::fixtures::layered_box_mesh(
+                [cells, cells, cells],
+                [1.0, 1.0, 1.0],
+                &[(2.0, "body")],
+            ),
+            &[],
+        );
+    }
 }

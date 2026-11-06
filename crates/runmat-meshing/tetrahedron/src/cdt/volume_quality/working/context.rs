@@ -17,6 +17,7 @@ pub(in crate::cdt) struct PreparedLocalQuality<'a> {
     boundary_nodes: BTreeSet<StableDigest>,
     protected_facets: super::super::ProtectedFacets,
     protected_segments: BTreeSet<[StableDigest; 2]>,
+    node_size: super::super::node_size::NodeSizeField,
 }
 
 impl<'a> PreparedLocalQuality<'a> {
@@ -33,7 +34,9 @@ impl<'a> PreparedLocalQuality<'a> {
     ) -> Result<Self, DelaunayVolumeQualityError> {
         let field = ResolvedMetricField::new(request).map_err(metric_error)?;
         let metric = field.uniform_evaluation().map_err(metric_error)?;
+        let node_size = super::super::node_size::NodeSizeField::new(request, provenance)?;
         Ok(Self {
+            node_size,
             request,
             #[cfg(test)]
             cell_evaluations: std::cell::Cell::new(0),
@@ -198,17 +201,22 @@ impl<'a> PreparedLocalQuality<'a> {
         let cell = topology.cell(index);
         let nodes = cell.vertex_indices.map(|vertex| topology.node(vertex));
         let identities = nodes.map(|node| node.identity);
+        let region_id = cell.region_id.clone().ok_or_else(|| {
+            error(
+                DelaunayVolumeQualityErrorKind::InvalidTopology,
+                Some(index as usize),
+                "working cell lacks a region",
+            )
+        })?;
+        let corner_metrics = self
+            .node_size
+            .corner_metrics(topology.nodes(), nodes, &region_id)?;
         evaluation::evaluate_tetrahedron_nodes(
             nodes,
             index as usize,
             evaluation::TetrahedronEvaluationContext {
-                region_id: cell.region_id.clone().ok_or_else(|| {
-                    error(
-                        DelaunayVolumeQualityErrorKind::InvalidTopology,
-                        Some(index as usize),
-                        "working cell lacks a region",
-                    )
-                })?,
+                corner_metrics,
+                region_id,
                 incident_metric_entity_ids: entities,
                 metric,
                 boundary_node_count: identities

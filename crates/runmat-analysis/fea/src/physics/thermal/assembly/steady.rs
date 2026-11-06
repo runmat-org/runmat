@@ -131,7 +131,7 @@ impl ThermalOperatorAssembly {
                             rhs[node] += shape * power;
                         }
                     })
-                    .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+                    .map_err(ThermalAssemblyError::from)?;
             }
         }
         Ok(rhs)

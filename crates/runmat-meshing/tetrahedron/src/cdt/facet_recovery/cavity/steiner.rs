@@ -14,7 +14,7 @@ pub(in crate::cdt::facet_recovery) use candidate::{
     candidate_node, try_insert_candidate, try_insert_candidate_with_conflicts, CandidateInsertion,
     CandidateInsertionResult,
 };
-use candidate::{
+pub(in crate::cdt::facet_recovery) use candidate::{
     candidate_refills_cavity, facet_edges_exist, steiner_candidate_groups, SteinerCandidateGroup,
 };
 
@@ -57,7 +57,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
             FacetCavityAttempt::Unavailable => return Ok(None),
             FacetCavityAttempt::NeedsSteiner(cavities) => {
                 let candidate_groups =
-                    steiner_candidate_groups(&current, &cavities, constraint_index, work)?;
+                    steiner_candidate_groups(&current.topology, &cavities, constraint_index, work)?;
                 let protected = protected_facets
                     .iter()
                     .map(|triangle| {
@@ -76,7 +76,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                     {
                         if !candidate_refills_cavity(
                             &cavities[0],
-                            &original,
+                            &original.topology,
                             first_coordinates,
                             constraint_index,
                             work,
@@ -84,7 +84,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                             continue;
                         }
                         let Some(first_node) = candidate_node(
-                            &original,
+                            &original.topology,
                             CandidateInsertion {
                                 coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(first_coordinates),
                                 construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
@@ -106,7 +106,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                                 None => {
                                     let refillable = candidate_refills_cavity(
                                         &cavities[1],
-                                        &original,
+                                        &original.topology,
                                         second_coordinates,
                                         constraint_index,
                                         work,
@@ -119,7 +119,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                                 continue;
                             }
                             let Some(second_node) = candidate_node(
-                                &original,
+                                &original.topology,
                                 CandidateInsertion {
                                     coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(second_coordinates),
                                     construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
@@ -186,7 +186,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                 for (candidate_rank, coordinates_m) in progressive.into_iter().enumerate() {
                     let candidate_rank = candidate_rank as u64;
                     let Some(node) = candidate_node(
-                        &current,
+                        &current.topology,
                         CandidateInsertion {
                             coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(coordinates_m),
                             construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,
@@ -253,7 +253,7 @@ pub(in crate::cdt::facet_recovery) fn try_recover_facet_with_cavity(
                 for (candidate_rank, coordinates_m) in exact.into_iter().enumerate() {
                     let candidate_rank = exact_rank_offset + candidate_rank as u64;
                     let Some(node) = candidate_node(
-                        &current,
+                        &current.topology,
                         CandidateInsertion {
                             coordinates_m: runmat_types::physical::Quantity::<runmat_types::physical::kind::Position,_>::new(coordinates_m),
                             construction: runmat_meshing_core::quality::predicate::Point3Construction::Explicit,

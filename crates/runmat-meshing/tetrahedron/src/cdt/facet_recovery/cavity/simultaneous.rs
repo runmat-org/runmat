@@ -322,13 +322,17 @@ fn canonical_node_inventory(
     let mut nodes = original.topology.nodes.clone();
     nodes.extend_from_slice(inserted);
     nodes.sort_by_key(|node| node.identity);
+    // Exact coordinate equality (with 0.0 == -0.0) through one ordered set, not a pairwise scan.
+    let mut positions = std::collections::BTreeSet::new();
     if nodes
         .windows(2)
         .any(|pair| pair[0].identity == pair[1].identity)
-        || nodes.iter().enumerate().any(|(index, node)| {
-            nodes[..index].iter().any(|existing| {
-                existing.coordinates_m.canonical_value() == node.coordinates_m.canonical_value()
-            })
+        || !nodes.iter().all(|node| {
+            positions.insert(
+                node.coordinates_m
+                    .canonical_value()
+                    .map(|value| (value + 0.0).to_bits()),
+            )
         })
     {
         return None;

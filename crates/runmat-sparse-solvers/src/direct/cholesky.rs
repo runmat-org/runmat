@@ -435,3 +435,104 @@ pub(super) fn pivots<T: FactorScalar>(
     }
     Some(pivots)
 }
+
+/// The [`FactorEstimate`] the simplicial analysis of [`analyze`] reports, from the elimination
+/// tree and column counts alone: no factor structure is built. Requested heap is the permuted
+/// upper triangle (one word per stored entry and per column) and four words per row.
+pub(super) fn simplicial_estimate<T: FactorScalar>(
+    matrix: SparseInput<'_, T>,
+    kind: FactorKind,
+    permutation: &Permutation,
+) -> SolverResult<FactorEstimate> {
+    let (columns, _) = matrix.as_columns();
+    let n = columns.ncols();
+    let a = columns.faer_symbolic();
+    let inverse = &permutation.inverse;
+    // Upper triangle of P A Pᵀ from the input's lower triangle, as `analyze` reads it.
+    let mut col_ptr = try_vec(n + 1, 0usize)?;
+    for j in 0..n {
+        for &i in a.row_idx_of_col_raw(j) {
+            if i >= j {
+                col_ptr[inverse[i].max(inverse[j]) + 1] += 1;
+            }
+        }
+    }
+    for j in 0..n {
+        col_ptr[j + 1] += col_ptr[j];
+    }
+    let mut row_idx = try_vec(col_ptr[n], 0usize)?;
+    {
+        let mut next = try_vec(n, 0usize)?;
+        next.copy_from_slice(&col_ptr[..n]);
+        for j in 0..n {
+            for &i in a.row_idx_of_col_raw(j) {
+                if i >= j {
+                    let (row, column) = (
+                        inverse[i].min(inverse[j]),
+                        inverse[i].max(inverse[j]),
+                    );
+                    row_idx[next[column]] = row;
+                    next[column] += 1;
+                }
+            }
+        }
+    }
+    let upper =
+        faer::sparse::SymbolicSparseColMatRef::new_unsorted_checked(n, n, &col_ptr, None, &row_idx);
+    let mut etree = try_vec(n, 0isize)?;
+    let mut col_counts = try_vec(n, 0usize)?;
+    let mut buffer = faer::dyn_stack::MemBuffer::try_new(
+        faer::sparse::linalg::cholesky::simplicial::prefactorize_symbolic_cholesky_scratch::<usize>(
+            n,
+            row_idx.len(),
+        ),
+    )
+    .map_err(|_| SolverError::OutOfMemory {
+        bytes: (n * std::mem::size_of::<usize>()) as u64,
+    })?;
+    faer::sparse::linalg::cholesky::simplicial::prefactorize_symbolic_cholesky::<usize>(
+        &mut etree,
+        &mut col_counts,
+        upper,
+        faer::dyn_stack::MemStack::new(&mut buffer),
+    );
+    let entries: u64 = col_counts.iter().map(|&c| c as u64).sum();
+    let flops: f64 = col_counts.iter().map(|&c| (c as f64) * (c as f64)).sum();
+    let structure = ((2 * n + 1) as u64 + entries) * 8;
+    // The layout of `SymbolicCholesky::factorize_numeric_{llt,ldlt}_scratch` for a simplicial
+    // factor: the permuted input copy, then the permutation or the factorization scratch.
+    use faer::dyn_stack::StackReq;
+    let a_nnz = a.compute_nnz();
+    let factor = match kind {
+        FactorKind::Ldlt => faer::sparse::linalg::cholesky::simplicial::factorize_simplicial_numeric_ldlt_scratch::<usize, T>(n),
+        _ => faer::sparse::linalg::cholesky::simplicial::factorize_simplicial_numeric_llt_scratch::<usize, T>(n),
+    };
+    let signs = if kind == FactorKind::Ldlt {
+        StackReq::new::<i8>(n)
+    } else {
+        StackReq::empty()
+    };
+    let workspace = StackReq::all_of(&[
+        signs,
+        StackReq::all_of(&[
+            faer::linalg::temp_mat_scratch::<T>(a_nnz, 1),
+            StackReq::new::<usize>(n + 1),
+            StackReq::new::<usize>(a_nnz),
+        ]),
+        StackReq::or(StackReq::new::<usize>(n), factor),
+    ]);
+    let scalar = std::mem::size_of::<T>() as u64;
+    Ok(FactorEstimate {
+        dimension: n,
+        factor_entries: entries,
+        factor_bytes: entries * scalar + structure + n as u64 * 16,
+        workspace_bytes: stack_bytes(workspace)
+            + if kind == FactorKind::Ldlt {
+                n as u64 * scalar
+            } else {
+                0
+            },
+        flops: flops * if T::IS_COMPLEX { 4.0 } else { 1.0 },
+        nominal: false,
+    })
+}

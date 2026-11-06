@@ -243,7 +243,7 @@ impl ResolvedMetricField {
 
 /// Upper bound on the coarsest directional length of a tensor: its smallest eigenvalue is at
 /// least `det / lambda_max^2`, and a row-sum bound dominates `lambda_max`.
-fn coarsest_length_bound(metric: MetricTensor3) -> Result<f64, MetricContractError> {
+pub(super) fn coarsest_length_bound(metric: MetricTensor3) -> Result<f64, MetricContractError> {
     metric.validate()?;
     let maximum = metric.maximum_row_density();
     let determinant = metric.xx * metric.yy * metric.zz + 2.0 * metric.xy * metric.xz * metric.yz
@@ -259,7 +259,7 @@ fn coarsest_length_bound(metric: MetricTensor3) -> Result<f64, MetricContractErr
     }
 }
 
-fn scaled(metric: MetricTensor3, size_scale: f64) -> Result<MetricTensor3, MetricContractError> {
+pub(super) fn scaled(metric: MetricTensor3, size_scale: f64) -> Result<MetricTensor3, MetricContractError> {
     let factor = (size_scale * size_scale).recip();
     let result = MetricTensor3 {
         xx: metric.xx * factor,
@@ -273,7 +273,7 @@ fn scaled(metric: MetricTensor3, size_scale: f64) -> Result<MetricTensor3, Metri
     Ok(result)
 }
 
-fn bounds_distance(bounds: ([f64; 3], [f64; 3]), point: [f64; 3]) -> f64 {
+pub(super) fn bounds_distance(bounds: ([f64; 3], [f64; 3]), point: [f64; 3]) -> f64 {
     (0..3)
         .map(|axis| {
             let below = bounds.0[axis] - point[axis];

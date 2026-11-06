@@ -75,6 +75,27 @@ impl TopologyMutation {
         }
     }
 }
+impl TopologyMutation {
+    /// Opens a trial that no borrow holds, for an owner that edits through its own API while the
+    /// trial is open. Every path must close it with [`Self::finish_detached_trial`]; trials opened
+    /// inside it nest as usual. Whole-owner adoption must not happen while it is open.
+    pub(in crate::cdt) fn begin_detached_trial(&mut self) {
+        std::mem::forget(self.cavity_trial());
+    }
+
+    /// Closes the innermost trial opened by [`Self::begin_detached_trial`]: commits it, or rolls
+    /// back every edit made since it opened.
+    pub(in crate::cdt) fn finish_detached_trial(&mut self, commit: bool) {
+        let trial = CavityTrial {
+            topology: self,
+            committed: false,
+        };
+        if commit {
+            trial.commit();
+        }
+    }
+}
+
 impl CavityTrial<'_> {
     pub(in crate::cdt) fn commit(mut self) {
         let journal = self

@@ -61,6 +61,11 @@ pub struct SnapshotPresentationArgs {
     /// grid, text, legend and triad. Scenes are the same in both; only the posters differ.
     #[arg(long, default_value = "dark", value_name = "dark|light")]
     pub theme: String,
+    /// Cut section views normal to this axis at this fraction of the result's extent along it
+    /// (0 at its minimum, 1 at its maximum; default 0.5). Default: through the center, across
+    /// the result's thinnest axis
+    #[arg(long, value_name = "x|y|z[@FRACTION]")]
+    pub section: Option<String>,
     /// Largest scene file a view may write, in bytes (default 16 MiB, the app's scene file
     /// limit). A larger view is drawn lighter until it fits: corner triangles for a quadratic
     /// surface, a coarser section cap. Each view records what that leaves out.

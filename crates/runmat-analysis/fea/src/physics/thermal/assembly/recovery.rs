@@ -28,7 +28,7 @@ impl ThermalOperatorAssembly {
                     }
                     volume += point.volume_weight_m3;
                 })
-                .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+                .map_err(ThermalAssemblyError::from)?;
             Ok::<_, ThermalAssemblyError>(integrated.map(|component| component / volume))
         })
         .into_iter()
@@ -76,7 +76,7 @@ impl ThermalOperatorAssembly {
                         * point.volume_weight_m3;
                     volume += point.volume_weight_m3;
                 })
-                .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+                .map_err(ThermalAssemblyError::from)?;
             Ok::<_, ThermalAssemblyError>(integrated_rate / volume)
         })
         .into_iter()

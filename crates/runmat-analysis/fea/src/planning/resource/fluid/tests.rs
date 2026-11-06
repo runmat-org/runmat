@@ -40,8 +40,12 @@ fn original_wire_requires_exact_bytes_and_actual_decode_not_maximum_width() {
 #[test]
 fn incomplete_transport_or_construction_never_grants_admission() {
     let mut facts = prepared();
-    facts.inputs.transport_closure_bytes = ByteCount(99);
+    facts.inputs.transport_closure_bytes = ByteCount(0);
     assert!(admission::validate_prepared(100, 300, 200, 500, &facts).is_err());
+    // Repeated content-addressed chunks transport once, so the unique closure may be smaller.
+    let mut facts = prepared();
+    facts.inputs.transport_closure_bytes = ByteCount(99);
+    assert!(admission::validate_prepared(100, 300, 200, 500, &facts).is_ok());
     let mut facts = prepared();
     facts.output.transport_closure_bytes_upper_bound = ByteCount(199);
     assert!(admission::validate_prepared(100, 300, 200, 500, &facts).is_err());

@@ -210,8 +210,13 @@ fn validate_boundary_and_spheres(
                     format!(
                         "tetrahedron {tetrahedron_index} has neighbor {neighbor_index} across face \
                          {face_indices:?} strictly inside its circumsphere; tetrahedra are {:?} \
-                         and {:?}",
-                        tetrahedron.vertex_indices, neighbor.vertex_indices
+                         and {:?}; coordinates {:?} and opposite {:?}",
+                        tetrahedron.vertex_indices,
+                        neighbor.vertex_indices,
+                        tetrahedron
+                            .vertex_indices
+                            .map(|index| topology.nodes[index as usize].coordinates_m.canonical_value()),
+                        topology.nodes[opposite as usize].coordinates_m.canonical_value(),
                     ),
                 ));
             }

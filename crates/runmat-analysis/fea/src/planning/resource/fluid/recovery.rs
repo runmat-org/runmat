@@ -156,7 +156,8 @@ pub fn build_fluid_field_recovery_resource_plan_on(
         ))
     })?;
     if facts.inputs.encoded_payload_bytes.0 != encoded
-        || facts.inputs.transport_closure_bytes.0 < encoded
+        // Content-addressed repeated chunks can make unique transport smaller than the payload.
+        || facts.inputs.transport_closure_bytes.0 == 0
         || facts.inputs.decoded_resident_bytes_admission_budget.0 < decoded
         || facts.output.encoded_payload_bytes_upper_bound.0 != output_bytes
         || facts.output.transport_closure_bytes_upper_bound.0 < output_bytes

@@ -1,14 +1,26 @@
-//! Count-only admission of thermal support construction before geometry/index materialization.
+//! Admission of thermal support construction before and after the support is built.
 use super::{AnalysisProjection, ByteCount, ResourcePlanningError, ThermalOperatorResourceFacts};
 use runmat_meshing_core::SolverMeshArtifact;
-use std::{collections::BTreeSet, mem::size_of};
 
 impl ThermalOperatorResourceFacts {
     /// Additional requested-heap estimate for support derivation, including projection and mesh
-    /// validation. Excludes borrowed input, allocator/native/RSS overhead. Exact factorization
-    /// work is reserved separately after support; no factorization is run by this estimator.
+    /// validation, before the support exists. Excludes borrowed input, allocator/native/RSS
+    /// overhead. The distinct support entries are bounded by the repeated clique couplings; once
+    /// the support is built, [`ThermalOperatorResourceFacts::derive`] retains the same law at the
+    /// exact entry count.
     pub fn derivation_resident_bytes_estimate(
         mesh: &SolverMeshArtifact,
+    ) -> Result<ByteCount, ResourcePlanningError> {
+        Self::derivation_resident_bytes(mesh, None)
+    }
+
+    /// The support-derivation law: the projection (twice when a conformal interface may split it),
+    /// then the larger of the support builder (with its finished pattern) and the finished pattern
+    /// plus the symbolic factor analysis that sizes the proving factor. `entries` is the support's
+    /// distinct entry count when known; otherwise the repeated clique couplings bound it.
+    pub(crate) fn derivation_resident_bytes(
+        mesh: &SolverMeshArtifact,
+        entries: Option<u64>,
     ) -> Result<ByteCount, ResourcePlanningError> {
         let projection = AnalysisProjection::derivation_resident_bytes_estimate(mesh)
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
@@ -20,70 +32,74 @@ impl ThermalOperatorResourceFacts {
             .iter()
             .filter(|f| f.role == runmat_meshing_core::BoundaryFaceRole::ConformalInterface)
             .map(|f| f.node_ids.len());
+        let interface_faces = count(interface_widths.clone().count())?;
         let interface_nodes = interface_widths
             .clone()
             .try_fold(0, |total, width| add(total, count(width)?))?;
-        let interface_entries = interface_widths.clone().try_fold(0, |total, width| {
-            let width = count(width)?;
-            add(total, mul(mul(2, width)?, mul(2, width)?)?)
-        })?;
         let projection = if interface_nodes > 0 {
             mul(projection, 2)?
         } else {
             projection
         };
         let nodes = add(count(mesh.topology.nodes.len())?, interface_nodes)?;
-        // Every row has a diagonal. Shared couplings may be counted repeatedly; do not allocate
-        // a deduplication graph just to estimate the cost of constructing that graph.
-        let entries = mesh
-            .topology
-            .volume_elements
-            .iter()
-            .map(|e| e.node_ids.len())
-            .chain(
-                mesh.topology
-                    .boundary_faces
-                    .iter()
-                    .map(|f| f.node_ids.len()),
-            )
-            .try_fold(add(nodes, interface_entries)?, |total, width| {
-                let width = count(width)?;
-                add(total, mul(width, width)?)
-            })?;
-        let rows = mul(nodes, size_of::<BTreeSet<usize>>() as u64)?;
-        let row_trees = tree::<usize>(entries)?;
-        let offsets = mul(add(nodes, 1)?, size_of::<u64>() as u64)?;
-        let columns = mul(entries.max(4), 2 * size_of::<u64>() as u64)?;
-        // The shared CoercivityWorkEnvelope counts undirected edges in place; its symbolic
-        // analysis (ordering, elimination tree, column counts) holds a few index words per
-        // stored entry of the support.
-        let coercivity_graph = mul(entries, 4 * size_of::<u64>() as u64)?;
-        [
-            projection,
-            rows,
-            row_trees,
-            offsets,
-            columns,
-            coercivity_graph,
-            64 * 1024,
-        ]
-        .into_iter()
-        .try_fold(0, add)
-        .map(ByteCount)
+        let widths = || {
+            mesh.topology
+                .volume_elements
+                .iter()
+                .map(|e| e.node_ids.len())
+                .chain(mesh.topology.boundary_faces.iter().map(|f| f.node_ids.len()))
+        };
+        let extra_incidences = mul(interface_nodes, 2)?;
+        let incidences = add(
+            widths().try_fold(0, |total, width| add(total, count(width)?))?,
+            extra_incidences,
+        )?;
+        let entries = match entries {
+            Some(entries) => entries,
+            // Every row has a diagonal; each clique couples its dofs pairwise. Repeated
+            // couplings are counted repeatedly, which bounds the distinct entries from above.
+            None => widths()
+                .map(|width| count(width).and_then(|width| mul(width, width)))
+                .chain(interface_widths.map(|width| {
+                    count(width).and_then(|width| mul(mul(2, width)?, mul(2, width)?))
+                }))
+                .try_fold(nodes, |total, square| add(total, square?))?
+                .min(mul(nodes, nodes)?),
+        };
+        let builder = super::support::construction_bytes(
+            super::support::SupportCounts {
+                rows: nodes,
+                incidences,
+                extra_cliques: interface_faces,
+                extra_incidences,
+            },
+            entries,
+        )?;
+        let pattern = add(mul(add(nodes, 1)?, 8)?, mul(entries, 8)?)?;
+        let symbolic = add(pattern, symbolic_analysis_bytes(nodes, entries)?)?;
+        [projection, builder.max(symbolic), 64 * 1024]
+            .into_iter()
+            .try_fold(0, add)
+            .map(ByteCount)
     }
 }
+
+/// Requested heap of the symbolic Cholesky analysis behind the proving factor's admission
+/// (`CoercivityWorkEnvelope::derive`) on a support of `rows` rows and `entries` stored entries:
+/// its usize copy of the pattern and zero values (three words per entry, one per row), and the
+/// ordering and elimination-tree analysis of `A + Aᵀ`, which holds the symmetric adjacency and a
+/// fixed number of row-length index arrays.
+fn symbolic_analysis_bytes(rows: u64, entries: u64) -> Result<u64, ResourcePlanningError> {
+    let word = std::mem::size_of::<usize>() as u64;
+    add(
+        mul(entries, SYMBOLIC_WORDS_PER_ENTRY * word)?,
+        mul(add(rows, 1)?, SYMBOLIC_WORDS_PER_ROW * word)?,
+    )
+}
+const SYMBOLIC_WORDS_PER_ENTRY: u64 = 6;
+const SYMBOLIC_WORDS_PER_ROW: u64 = 24;
 fn count(value: usize) -> Result<u64, ResourcePlanningError> {
     u64::try_from(value).map_err(|_| overflow())
-}
-fn tree<T>(entries: u64) -> Result<u64, ResourcePlanningError> {
-    // A B-tree node holds up to eleven keys and never fewer than five outside the root; a key
-    // therefore costs at most a fifth of a leaf (eleven slots, parent link and lengths) plus its
-    // share of internal-node edges: under two key widths plus two words. Repeated entries are
-    // counted, so unique keys are bounded from above.
-    mul(
-        entries,
-        2 * (size_of::<T>() + 2 * size_of::<usize>()) as u64,
-    )
 }
 fn add(left: u64, right: u64) -> Result<u64, ResourcePlanningError> {
     left.checked_add(right).ok_or_else(overflow)

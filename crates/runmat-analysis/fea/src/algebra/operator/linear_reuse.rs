@@ -12,6 +12,9 @@ pub(crate) struct LinearPreparationReuse {
     /// Elastic rigidity proof from the assembly that built the operator. It is the only proof
     /// tried: a refusal is final, never a fallback to factorization.
     elastic: Option<crate::algebra::elastic_rigidity::ElasticRigidityProof>,
+    /// Structural steady-conduction proof from the assembly that built the operator. Like the
+    /// elastic proof it is the only proof tried; a refusal never falls back to factorization.
+    conduction: Option<crate::algebra::ScalarConductionProof>,
 }
 
 enum LocalEnergySource {
@@ -39,6 +42,14 @@ impl LinearPreparationReuse {
         self.factor = None;
         self.local_energy = None;
         self.elastic = None;
+        self.conduction = None;
+    }
+
+    pub(crate) fn with_scalar_conduction(proof: crate::algebra::ScalarConductionProof) -> Self {
+        Self {
+            conduction: Some(proof),
+            ..Self::default()
+        }
     }
 
     pub(crate) fn with_elastic_rigidity(
@@ -65,6 +76,7 @@ impl LinearPreparationReuse {
                 normalization,
             )),
             elastic: None,
+            conduction: None,
         }
     }
 
@@ -77,6 +89,7 @@ impl LinearPreparationReuse {
             factor: None,
             local_energy: Some(LocalEnergySource::Selection(source, rows)),
             elastic: None,
+            conduction: None,
         }
     }
 
@@ -117,8 +130,17 @@ impl LinearPreparationReuse {
         // A failed replacement cannot leave a stale proof available for later work.
         let local_energy = self.local_energy.take();
         let elastic = self.elastic.take();
+        let conduction = self.conduction.take();
         self.clear();
-        let evidence = if let Some(proof) = elastic {
+        let evidence = if let Some(proof) = conduction {
+            PreparedSolverAdmissibility::bind_existing_with_source(
+                CoercivityCertificate::from_scalar_conduction(matrix, &proof)?,
+                None,
+                matrix,
+                rhs,
+                source,
+            )?
+        } else if let Some(proof) = elastic {
             PreparedSolverAdmissibility::bind_existing_with_source(
                 CoercivityCertificate::from_elastic_rigidity(matrix, &proof)?,
                 None,

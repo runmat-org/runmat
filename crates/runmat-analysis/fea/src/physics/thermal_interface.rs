@@ -285,6 +285,27 @@ impl InterfaceDofs {
         Ok(values)
     }
 
+    /// The dof cliques of every conductance coupling: for each finite-conductance interface
+    /// face, its first-side and second-side dofs together.
+    pub(crate) fn support_cliques(
+        &self,
+        projection: &AnalysisProjection,
+        plans: &[InterfacePlan],
+    ) -> Vec<Vec<usize>> {
+        let coupled = || plans.iter().filter(|plan| plan.law != InterfaceLaw::Perfect);
+        let mut cliques = Vec::with_capacity(coupled().map(|plan| plan.faces.len()).sum());
+        for plan in coupled() {
+            for &(face, first, second) in &plan.faces {
+                let face = &projection.boundary_faces[face];
+                let mut dofs = Vec::with_capacity(2 * face.node_indices.len());
+                dofs.extend(face.node_indices.iter().map(|&node| self.dof(first, node)));
+                dofs.extend(face.node_indices.iter().map(|&node| self.dof(second, node)));
+                cliques.push(dofs);
+            }
+        }
+        cliques
+    }
+
     /// Adds the conductance couplings of every interface to the rows of a sparse support.
     pub(crate) fn extend_support(
         &self,

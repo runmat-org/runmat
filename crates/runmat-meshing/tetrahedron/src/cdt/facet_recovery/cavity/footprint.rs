@@ -1,19 +1,20 @@
 //! Exact-sign tests that keep a facet cavity bounded to the authored triangular footprint.
+use crate::cdt::insertion::topology_access::TetrahedralTopology;
 
 use runmat_meshing_core::quality::predicate::{orient2d, orient3d, PredicateSign};
 
 use super::{super::FacetRecoveryWork, invalid_topology};
-use crate::cdt::{DelaunayFacetRecoveryError, DelaunayVolumeTopology};
+use crate::cdt::DelaunayFacetRecoveryError;
 
 pub(super) fn facet_footprint_crosses_face(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     facet: [u32; 3],
     face: [u32; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
     let coordinates = |node: u32| {
-        topology.nodes[node as usize]
+        topology.nodes()[node as usize]
             .coordinates_m
             .canonical_value()
     };
@@ -141,14 +142,14 @@ fn triangles_overlap_across_every_edge(
 }
 
 pub(in crate::cdt::facet_recovery) fn segment_hits_triangle_interior(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     segment: [u32; 2],
     triangle: [u32; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
     let point = |node: u32| {
-        topology.nodes[node as usize]
+        topology.nodes()[node as usize]
             .coordinates_m
             .canonical_value()
     };
@@ -222,14 +223,14 @@ pub(in crate::cdt::facet_recovery) fn segment_hits_triangle_interior(
 }
 
 fn point_strictly_inside_triangle(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     node: u32,
     triangle: [u32; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
     let coordinates = |node: u32| {
-        topology.nodes[node as usize]
+        topology.nodes()[node as usize]
             .coordinates_m
             .canonical_value()
     };

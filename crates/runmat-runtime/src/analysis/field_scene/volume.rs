@@ -52,9 +52,19 @@ pub struct VolumeViewRequest {
     pub range: Option<(f64, f64)>,
     pub legend: String,
     pub unit: String,
+    /// The section or glyph plane; the default plane when absent.
+    pub plane: Option<SectionPlaneChoice>,
     /// Triangles the section cap may hold; its refinement is reduced until it fits (down to one
     /// polygon per cut element). A consumer with a payload budget passes a smaller number.
     pub cap_triangle_budget: usize,
+}
+
+/// An axis-aligned section plane: normal to `axis` (0 = x, 1 = y, 2 = z), at `fraction` of the
+/// mesh bounds along that axis (0 at the minimum, 1 at the maximum).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SectionPlaneChoice {
+    pub axis: usize,
+    pub fraction: f64,
 }
 
 /// What a volume view leaves out of the solution, stated with the view.
@@ -98,7 +108,7 @@ pub fn build_volume_scene(
         .ok_or_else(|| format!("FEA run '{run_id}' has no boundary to draw"))?;
     drop(artifact);
     let field = load_solved_field(run_id, &request.field, &mesh)?;
-    let (origin, normal) = section_plane(&mesh);
+    let (origin, normal) = section_plane(&mesh, request.plane);
     let mut error = VolumeViewError::default();
     let mut chunks = Vec::new();
     let mut drawn = Vec::new();
@@ -354,12 +364,20 @@ fn load_solved_field(
 /// The plane through the centre of the bounds across the part's thinnest axis: along a pipe,
 /// duct or busbar it shows the profile over the length. Its normal points away from the
 /// viewer, so the removed half is the one in front.
-fn section_plane(mesh: &TetMesh) -> ([f64; 3], [f64; 3]) {
+/// A chosen plane replaces the axis and its position along it.
+fn section_plane(mesh: &TetMesh, choice: Option<SectionPlaneChoice>) -> ([f64; 3], [f64; 3]) {
     let (min, max) = mesh.bounds();
-    let origin = [0, 1, 2].map(|axis| 0.5 * (min[axis] + max[axis]));
-    let axis = (0..3)
-        .min_by(|a, b| (max[*a] - min[*a]).total_cmp(&(max[*b] - min[*b])))
-        .unwrap_or(2);
+    let mut origin = [0, 1, 2].map(|axis| 0.5 * (min[axis] + max[axis]));
+    let axis = match choice {
+        Some(choice) => {
+            let axis = choice.axis.min(2);
+            origin[axis] = min[axis] + choice.fraction.clamp(0.0, 1.0) * (max[axis] - min[axis]);
+            axis
+        }
+        None => (0..3)
+            .min_by(|a, b| (max[*a] - min[*a]).total_cmp(&(max[*b] - min[*b])))
+            .unwrap_or(2),
+    };
     let mut normal = [0.0; 3];
     normal[axis] = if VIEW_DIRECTION[axis] > 0.0 {
         -1.0

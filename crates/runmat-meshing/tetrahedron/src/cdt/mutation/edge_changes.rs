@@ -18,7 +18,48 @@ impl TopologyMutation {
     }
 }
 
+/// Net cell change since an observer started: the corners of every observed slot whose
+/// content changed, and the active slots that now hold a different cell.
+pub(in crate::cdt) struct ObservedCellChanges {
+    pub(in crate::cdt) removed: Vec<[u32; 4]>,
+    pub(in crate::cdt) created: Vec<u32>,
+}
+
 impl EdgeChangeObserver<'_> {
+    pub(in crate::cdt) fn changed_cells(&self) -> ObservedCellChanges {
+        let observer = self
+            .topology
+            .edge_observers
+            .last()
+            .expect("live edge observer");
+        let sorted = |mut vertices: [u32; 4]| {
+            vertices.sort_unstable();
+            vertices
+        };
+        let mut changes = ObservedCellChanges {
+            removed: Vec::new(),
+            created: Vec::new(),
+        };
+        for (&index, previous) in observer {
+            let current = self
+                .topology
+                .tetrahedra
+                .get(index as usize)
+                .and_then(Option::as_ref)
+                .map(|cell| cell.vertex_indices);
+            if previous.map(sorted) == current.map(sorted) {
+                continue;
+            }
+            if let Some(previous) = previous {
+                changes.removed.push(*previous);
+            }
+            if current.is_some() {
+                changes.created.push(index);
+            }
+        }
+        changes
+    }
+
     pub(in crate::cdt) fn removed_edge_candidates<E>(
         &self,
         checkpoint: &mut impl FnMut() -> Result<(), E>,

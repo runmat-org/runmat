@@ -7,6 +7,7 @@ use super::super::{
     facet_recovery_refill_options, invalid_topology, progressive_facet_recovery_refill_options,
     recovered_segments_exist, resource_or_cancelled,
 };
+use crate::cdt::insertion::topology_access::TetrahedralTopology;
 use crate::cdt::segment_recovery::coordinates_share_representable_location;
 use crate::cdt::segment_recovery::try_restore_delaunay_edges_with_local_flips;
 use crate::{
@@ -43,13 +44,13 @@ pub(in crate::cdt::facet_recovery) enum CandidateInsertionResult {
 }
 
 #[derive(Default)]
-pub(super) struct SteinerCandidateGroup {
-    pub(super) progressive: Vec<[f64; 3]>,
-    pub(super) exact: Vec<[f64; 3]>,
+pub(in crate::cdt::facet_recovery) struct SteinerCandidateGroup {
+    pub(in crate::cdt::facet_recovery) progressive: Vec<[f64; 3]>,
+    pub(in crate::cdt::facet_recovery) exact: Vec<[f64; 3]>,
 }
 
 impl SteinerCandidateGroup {
-    pub(super) fn ordered(&self) -> Vec<[f64; 3]> {
+    pub(in crate::cdt::facet_recovery) fn ordered(&self) -> Vec<[f64; 3]> {
         self.progressive
             .iter()
             .chain(&self.exact)
@@ -58,8 +59,8 @@ impl SteinerCandidateGroup {
     }
 }
 
-pub(super) fn facet_edges_exist(
-    topology: &crate::cdt::DelaunayVolumeTopology,
+pub(in crate::cdt::facet_recovery) fn facet_edges_exist(
+    topology: &impl TetrahedralTopology,
     facet: [StableDigest; 3],
 ) -> bool {
     [
@@ -69,30 +70,16 @@ pub(super) fn facet_edges_exist(
     ]
     .into_iter()
     .all(|edge| {
-        let Ok(first) = topology
-            .nodes
-            .binary_search_by_key(&edge[0], |node| node.identity)
+        let [Some(first), Some(second)] = edge.map(|identity| topology.node_index(identity))
         else {
             return false;
         };
-        let Ok(second) = topology
-            .nodes
-            .binary_search_by_key(&edge[1], |node| node.identity)
-        else {
-            return false;
-        };
-        topology.incidence.vertex_stars[first]
-            .iter()
-            .any(|tetrahedron| {
-                topology.tetrahedra[*tetrahedron as usize]
-                    .vertex_indices
-                    .contains(&(second as u32))
-            })
+        topology.has_edge([first, second])
     })
 }
 
 pub(in crate::cdt::facet_recovery) fn candidate_node(
-    current: &DelaunaySegmentRecovery,
+    current: &impl TetrahedralTopology,
     insertion: CandidateInsertion,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
@@ -111,10 +98,8 @@ pub(in crate::cdt::facet_recovery) fn candidate_node(
         construction: insertion.construction,
     };
     if let Some(existing) = current
-        .topology
-        .nodes
-        .iter()
-        .find(|existing| existing.identity == node.identity)
+        .node_index(node.identity)
+        .map(|index| current.nodes()[index as usize])
     {
         if existing.coordinates_m.canonical_value() != node.coordinates_m.canonical_value() {
             return Err(invalid_topology(
@@ -125,7 +110,7 @@ pub(in crate::cdt::facet_recovery) fn candidate_node(
         work.reject("facet cavity Steiner candidate identity already exists");
         return Ok(None);
     }
-    if current.topology.nodes.iter().any(|existing| {
+    if current.nodes().iter().any(|existing| {
         coordinates_share_representable_location(
             existing.coordinates_m.canonical_value(),
             node.coordinates_m.canonical_value(),
@@ -343,15 +328,14 @@ fn missing_recovered_segment_edges(
         .collect()
 }
 
-pub(super) fn steiner_candidate_groups(
-    recovery: &DelaunaySegmentRecovery,
+pub(in crate::cdt::facet_recovery) fn steiner_candidate_groups(
+    topology: &impl TetrahedralTopology,
     cavities: &[ConstrainedCavity],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Vec<SteinerCandidateGroup>, DelaunayFacetRecoveryError> {
-    let nodes = recovery
-        .topology
-        .nodes
+    let nodes = topology
+        .nodes()
         .iter()
         .enumerate()
         .map(|(node_id, node)| ConstrainedCavityNode {
@@ -423,16 +407,16 @@ pub(super) fn steiner_candidate_groups(
     Ok(groups)
 }
 
-pub(super) fn candidate_refills_cavity(
+pub(in crate::cdt::facet_recovery) fn candidate_refills_cavity(
     cavity: &ConstrainedCavity,
-    recovery: &DelaunaySegmentRecovery,
+    topology: &impl TetrahedralTopology,
     coordinates_m: [f64; 3],
     constraint_index: u32,
     work: &FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
     candidate_refills_cavity_with_options(
         cavity,
-        recovery,
+        topology,
         coordinates_m,
         facet_recovery_refill_options(),
         constraint_index,
@@ -442,15 +426,14 @@ pub(super) fn candidate_refills_cavity(
 
 fn candidate_refills_cavity_with_options(
     cavity: &ConstrainedCavity,
-    recovery: &DelaunaySegmentRecovery,
+    topology: &impl TetrahedralTopology,
     coordinates_m: [f64; 3],
     options: crate::cavity::constrained::ConstrainedCavityRefillOptions,
     constraint_index: u32,
     work: &FacetRecoveryWork<'_>,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
-    let mut nodes = recovery
-        .topology
-        .nodes
+    let mut nodes = topology
+        .nodes()
         .iter()
         .enumerate()
         .map(|(node_id, node)| ConstrainedCavityNode {

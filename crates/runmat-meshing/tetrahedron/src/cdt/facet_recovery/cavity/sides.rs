@@ -1,4 +1,5 @@
 //! Construction of the closed cavity side or sides bounded by one exact recovered facet.
+use crate::cdt::insertion::topology_access::TetrahedralTopology;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -9,7 +10,7 @@ use crate::{
     cavity::constrained::{
         validate_constrained_cavity, ConstrainedCavity, ConstrainedCavityBoundaryFace,
     },
-    cdt::{DelaunayFacetRecoveryError, DelaunayVolumeTopology},
+    cdt::DelaunayFacetRecoveryError,
 };
 
 pub(super) enum SideCavityConstruction {
@@ -21,7 +22,7 @@ pub(super) enum SideCavityConstruction {
 }
 
 pub(super) fn side_cavities(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     cap: &[[u32; 3]],
     removed: &BTreeSet<u32>,
     boundary: &[BoundaryFace],
@@ -232,13 +233,13 @@ fn sorted_edge(mut edge: [u32; 2]) -> [u32; 2] {
 }
 
 fn oriented_external_face(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     face: &BoundaryFace,
     constraint_index: u32,
 ) -> Result<ConstrainedCavityBoundaryFace, DelaunayFacetRecoveryError> {
     let mut nodes = face.nodes;
     let coordinates = |node: u32| {
-        topology.nodes[node as usize]
+        topology.nodes()[node as usize]
             .coordinates_m
             .canonical_value()
     };
@@ -277,7 +278,7 @@ fn boundary_contract(node_ids: [u32; 3]) -> ConstrainedCavityBoundaryFace {
 }
 
 fn closed_surface_volume(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     faces: &[ConstrainedCavityBoundaryFace],
 ) -> f64 {
     // Translating to a boundary-derived reference reduces cancellation without changing the
@@ -286,7 +287,7 @@ fn closed_surface_volume(
         .iter()
         .flat_map(|face| face.node_ids)
         .fold([0.0; 3], |mut sum, node| {
-            for (axis, value) in topology.nodes[node as usize]
+            for (axis, value) in topology.nodes()[node as usize]
                 .coordinates_m
                 .canonical_value()
                 .iter()
@@ -302,7 +303,7 @@ fn closed_surface_volume(
         .iter()
         .map(|face| {
             let points = face.node_ids.map(|node| {
-                let point = topology.nodes[node as usize]
+                let point = topology.nodes()[node as usize]
                     .coordinates_m
                     .canonical_value();
                 std::array::from_fn(|axis| point[axis] - reference[axis])
