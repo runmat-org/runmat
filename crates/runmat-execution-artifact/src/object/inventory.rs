@@ -20,6 +20,72 @@ pub struct ObjectInventoryLimits {
     pub max_total_bytes: u64,
 }
 
+/// Largest single object one process can materialize: an object is read into one Rust
+/// allocation, bounded by `isize::MAX` bytes (2 GiB - 1 on wasm32).
+pub const PLATFORM_MAXIMUM_OBJECT_BYTES: u64 = isize::MAX as u64;
+/// Bytes one process can address: 4 GiB on wasm32; 64-bit address space binds no machine.
+pub const PLATFORM_ADDRESS_SPACE_BYTES: u64 = if usize::BITS < 64 {
+    1_u64 << usize::BITS
+} else {
+    u64::MAX
+};
+/// Object slots are addressed by u32 indices in transport manifests.
+const PLATFORM_MAXIMUM_OBJECTS: u64 = u32::MAX as u64;
+
+/// A run-data inventory needs more than its admitted budget allows. Names the bound and both
+/// byte or object counts so the run can be resized.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("{subject} requires {required} {resource}, the admitted inventory allows {maximum}")]
+pub struct InventoryCapacityError {
+    pub subject: &'static str,
+    pub resource: &'static str,
+    pub required: u64,
+    pub maximum: u64,
+}
+
+impl ObjectInventoryLimits {
+    /// The single law for run-data inventories: a run may hold the bytes its admitted budget
+    /// allows, within the platform ceilings. Objects occupy at least one byte, so the budget
+    /// also bounds the object count.
+    pub fn admitted(budget_bytes: u64) -> Self {
+        let total = budget_bytes.clamp(1, PLATFORM_ADDRESS_SPACE_BYTES);
+        Self {
+            max_objects: usize::try_from(total.min(PLATFORM_MAXIMUM_OBJECTS))
+                .unwrap_or(usize::MAX),
+            max_object_bytes: total.min(PLATFORM_MAXIMUM_OBJECT_BYTES),
+            max_total_bytes: total,
+        }
+    }
+
+    /// Admits a projected producer inventory before its construction. `objects` counts every
+    /// object, root included.
+    pub fn require_projection(
+        self,
+        subject: &'static str,
+        objects: u64,
+        largest_object_bytes: u64,
+        total_bytes: u64,
+    ) -> Result<(), InventoryCapacityError> {
+        let check = |resource, required: u64, maximum: u64| {
+            if required > maximum {
+                Err(InventoryCapacityError {
+                    subject,
+                    resource,
+                    required,
+                    maximum,
+                })
+            } else {
+                Ok(())
+            }
+        };
+        check("output bytes", total_bytes, self.max_total_bytes)?;
+        check("bytes in one object", largest_object_bytes, self.max_object_bytes)?;
+        check("objects", objects, self.max_objects as u64)
+    }
+}
+
+/// Default for hostile imports and tests that name no budget. Run producers derive their limits
+/// with [`ObjectInventoryLimits::admitted`].
 impl Default for ObjectInventoryLimits {
     fn default() -> Self {
         Self {

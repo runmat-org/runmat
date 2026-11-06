@@ -99,3 +99,46 @@ fn scratch_slots_are_checked_and_empty_inventory_allocates_no_slots() {
         Err(ArtifactError::Limit(_))
     ));
 }
+
+#[test]
+fn admitted_inventory_follows_the_run_budget_within_platform_ceilings() {
+    let budget = 14 * 1024 * 1024 * 1024_u64;
+    let limits = ObjectInventoryLimits::admitted(budget);
+    assert_eq!(limits.max_total_bytes, budget.min(super::PLATFORM_ADDRESS_SPACE_BYTES));
+    assert_eq!(
+        limits.max_object_bytes,
+        limits.max_total_bytes.min(super::PLATFORM_MAXIMUM_OBJECT_BYTES)
+    );
+    // A thermal projection past the former fixed 4 GiB / 512 MiB ceilings fits a 14 GiB run.
+    #[cfg(target_pointer_width = "64")]
+    limits
+        .require_projection("projection", 2_000, 1024 * 1024 * 1024, 6 * 1024 * 1024 * 1024)
+        .unwrap();
+    let small = ObjectInventoryLimits::admitted(1024);
+    assert_eq!(small.max_objects, 1024);
+    assert_eq!(ObjectInventoryLimits::admitted(0).max_total_bytes, 1);
+}
+
+#[test]
+fn projection_beyond_the_admitted_budget_is_a_typed_refusal_naming_both_sizes() {
+    let limits = ObjectInventoryLimits::admitted(1_000);
+    let error = limits
+        .require_projection("canonical payload projection", 2, 100, 1_001)
+        .unwrap_err();
+    assert_eq!(
+        error,
+        super::InventoryCapacityError {
+            subject: "canonical payload projection",
+            resource: "output bytes",
+            required: 1_001,
+            maximum: 1_000,
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "canonical payload projection requires 1001 output bytes, the admitted inventory allows 1000"
+    );
+    let objects = limits.require_projection("p", 1_001, 1, 1_000).unwrap_err();
+    assert_eq!(objects.resource, "objects");
+    limits.require_projection("p", 1_000, 1_000, 1_000).unwrap();
+}

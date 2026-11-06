@@ -295,3 +295,101 @@ fn sealing_inventory_profiles_the_exact_borrowed_identity_without_copying_topolo
             .is_err());
     }
 }
+
+#[test]
+fn run_data_limits_are_platform_bounded_and_control_documents_stay_small() {
+    let artifact = SolverMeshProjection::LIMITS;
+    assert_eq!(
+        artifact.maximum_encoded_bytes,
+        runmat_canonical_codec::PLATFORM_MAXIMUM_ENCODED_BYTES
+    );
+    // Every collection item takes at least one byte, so the byte ceiling bounds collections.
+    assert_eq!(artifact.maximum_collection_items, artifact.maximum_encoded_bytes);
+    assert_eq!(
+        <crate::SolverMeshArtifact as CanonicalMeshingContract>::LIMITS,
+        artifact
+    );
+    #[cfg(target_pointer_width = "64")]
+    assert!(artifact.maximum_encoded_bytes as u64 > 2 * 1024 * 1024 * 1024);
+    #[cfg(target_pointer_width = "32")]
+    assert_eq!(artifact.maximum_encoded_bytes, i32::MAX as usize);
+    assert_eq!(MeshingCanonicalLimits::MANIFEST.maximum_encoded_bytes, 64 * 1024 * 1024);
+    assert_eq!(MeshingCanonicalLimits::REQUEST.maximum_encoded_bytes, 32 * 1024 * 1024);
+    assert_eq!(MeshingCanonicalLimits::IDENTITY.maximum_encoded_bytes, 4 * 1024 * 1024);
+}
+
+/// A budget the run admitted: each allocation request draws from what remains, and a refusal
+/// names the requirement and the budget.
+fn budget(remaining: &mut u64) -> impl FnMut(u64) -> Result<(), MeshingContractError> + '_ {
+    move |requested| {
+        if requested > *remaining {
+            return Err(MeshingContractError::invalid(
+                "run budget",
+                format!("requires {requested} bytes, {} bytes admitted", *remaining),
+            ));
+        }
+        *remaining -= requested;
+        Ok(())
+    }
+}
+
+#[test]
+fn run_budget_admits_the_artifact_when_it_fits_and_refuses_it_with_both_sizes_when_not() {
+    let original = projection(ElementOrder::Tet10);
+    let bytes = original.canonical_encode().unwrap();
+    let control = crate::MeshingCanonicalCodecControl::new(&NeverCancelled);
+    let mut requirement = 0_u64;
+    SolverMeshProjection::canonical_decode_with_resource_admission(
+        &bytes,
+        &control,
+        &NeverCancelled,
+        |requested| {
+            requirement += requested;
+            Ok(())
+        },
+    )
+    .unwrap();
+    let mut remaining = requirement;
+    let decoded = SolverMeshProjection::canonical_decode_with_resource_admission(
+        &bytes,
+        &control,
+        &NeverCancelled,
+        budget(&mut remaining),
+    )
+    .unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(remaining, 0);
+
+    let mut remaining = requirement - 1;
+    let refused = SolverMeshProjection::canonical_decode_with_resource_admission(
+        &bytes,
+        &control,
+        &NeverCancelled,
+        budget(&mut remaining),
+    )
+    .unwrap_err();
+    assert_eq!(refused.field, "run budget");
+    assert!(refused.reason.contains("bytes admitted"), "{}", refused.reason);
+}
+
+#[test]
+fn platform_bounded_run_data_still_refuses_malformed_and_noncanonical_input() {
+    let bytes = projection(ElementOrder::Tet4).canonical_encode().unwrap();
+    let control = crate::MeshingCanonicalCodecControl::new(&NeverCancelled);
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    let truncated = &bytes[..bytes.len() - 1];
+    let mut wrong_domain = bytes.clone();
+    let at = wrong_domain.len() / 2;
+    wrong_domain[at] ^= 0xff;
+    for hostile in [trailing.as_slice(), truncated, wrong_domain.as_slice()] {
+        assert!(SolverMeshProjection::canonical_decode(hostile).is_err());
+        assert!(SolverMeshProjection::canonical_decode_with_resource_admission(
+            hostile,
+            &control,
+            &NeverCancelled,
+            |_| Ok(()),
+        )
+        .is_err());
+    }
+}

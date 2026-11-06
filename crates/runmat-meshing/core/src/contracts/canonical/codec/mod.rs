@@ -39,10 +39,23 @@ impl From<MeshingCanonicalLimits> for CanonicalLimits {
 }
 
 impl MeshingCanonicalLimits {
+    /// Control documents: identities, requests and manifests. Their size does not grow with
+    /// the mesh, so these small fixed bounds refuse hostile input early.
     pub const IDENTITY: Self = Self::new(4 * 1024 * 1024, 65_536, 1024 * 1024, 64);
     pub const REQUEST: Self = Self::new(32 * 1024 * 1024, 100_000, 1024 * 1024, 64);
     pub const MANIFEST: Self = Self::new(64 * 1024 * 1024, 100_000, 1024 * 1024, 64);
-    pub const ARTIFACT: Self = Self::new(512 * 1024 * 1024, 20_000_000, 8 * 1024 * 1024, 64);
+    /// Run data: solver artifacts, projections, transfer maps and lineage grow with the mesh.
+    /// The codec keeps only the platform allocation ceiling; each collection item occupies at
+    /// least one encoded byte, so the byte ceiling also bounds every collection. The run's
+    /// admitted budget gates the actual size where the bytes are produced or materialized
+    /// (`canonical_decode_with_admission`, the execution budget scope). Grammar, canonical
+    /// form, string and nesting bounds still refuse malformed input.
+    pub const ARTIFACT: Self = Self::new(
+        runmat_canonical_codec::PLATFORM_MAXIMUM_ENCODED_BYTES,
+        runmat_canonical_codec::PLATFORM_MAXIMUM_ENCODED_BYTES,
+        8 * 1024 * 1024,
+        64,
+    );
 
     pub const fn new(
         maximum_encoded_bytes: usize,

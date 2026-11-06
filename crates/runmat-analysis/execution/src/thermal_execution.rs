@@ -26,14 +26,18 @@ pub(crate) fn require_inventory(
     transport: &AnalysisTransportProfile,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<()> {
-    if transport.total_bytes_upper_bound > limits.max_total_bytes
-        || transport.chunk_count_upper_bound >= limits.max_objects as u64
-        || transport.largest_chunk_bytes_upper_bound > limits.max_object_bytes
-        || transport.root.encoded_bytes_upper_bound > limits.max_object_bytes
-    {
-        return Err(AnalysisBridgeError::Invalid(
-            "thermal canonical payload projection exceeds output inventory limits".into(),
-        ));
-    }
+    let objects = transport
+        .chunk_count_upper_bound
+        .checked_add(1)
+        .ok_or_else(|| AnalysisBridgeError::Invalid("output object count overflow".into()))?;
+    let largest = transport
+        .largest_chunk_bytes_upper_bound
+        .max(transport.root.encoded_bytes_upper_bound);
+    limits.require_projection(
+        "canonical payload projection",
+        objects,
+        largest,
+        transport.total_bytes_upper_bound,
+    )?;
     Ok(())
 }

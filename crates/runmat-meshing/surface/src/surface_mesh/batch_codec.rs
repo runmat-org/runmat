@@ -9,7 +9,7 @@ use super::{
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-face-batch-canonical-cbor/v1\0";
 const CONTRACT_DOMAIN: &str = "exact-face-mesh-batch/v1";
 const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(256 * 1024 * 1024, 10_000_000, 1024 * 1024, 64);
+    CanonicalLimits::platform_content(1024 * 1024, 64);
 
 pub fn encode_exact_face_mesh_batch(
     batch: &ExactFaceMeshBatch,
@@ -48,7 +48,7 @@ pub(crate) fn decode_with_byte_limit(
     decode_with_limits(
         bytes,
         topology,
-        CanonicalLimits::new(maximum_encoded_bytes, 10_000_000, 1024 * 1024, 64),
+        CanonicalLimits::content_bounded(maximum_encoded_bytes, 1024 * 1024, 64),
     )
 }
 

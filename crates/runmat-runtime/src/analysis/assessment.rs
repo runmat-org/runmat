@@ -259,7 +259,7 @@ pub(in crate::analysis) fn evaluate_with_source(
                 let loaded = source
                     .load_scalar_evidence(
                         &step.run_id,
-                        limits.maximum_run_artifact_bytes,
+                        workspace.run_artifact_bytes(limits.maximum_run_artifact_bytes),
                         retained_workspace,
                     )
                     .map_err(|error| match error {

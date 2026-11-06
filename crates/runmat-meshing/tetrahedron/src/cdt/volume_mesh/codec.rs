@@ -18,7 +18,7 @@ const CONTRACT_DOMAIN: &str = "delaunay-volume-mesh/v4";
 const LEGACY_PREFIX: &[u8] = b"runmat-meshing-delaunay-volume-canonical-cbor/v3\0";
 const LEGACY_DOMAIN: &str = "delaunay-volume-mesh/v3";
 const CONTRACT_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(1024 * 1024 * 1024, 50_000_000, 1024 * 1024, 64);
+    CanonicalLimits::platform_content(1024 * 1024, 64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DelaunayVolumeMeshCodecErrorKind {
@@ -233,7 +233,7 @@ pub(super) fn decode_delaunay_volume_mesh_with_byte_limit(
         metric_request,
         options,
         cancellation,
-        CanonicalLimits::new(maximum_encoded_bytes, 50_000_000, 1024 * 1024, 64).into(),
+        CanonicalLimits::content_bounded(maximum_encoded_bytes, 1024 * 1024, 64).into(),
     )
 }
 
