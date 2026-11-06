@@ -7,8 +7,9 @@
 //! positions and triangles), one body per material with its colour, so the renderer needs no
 //! board-specific path. Within a material, each component's pads, body, terminals and leads are
 //! their own face referenced `component:<designator>`, the ID the schematic and board tabs
-//! select it by, so a selection highlights the part in 3D and a pick in 3D selects it; the rest
-//! of a material is one face referenced by the material's name. Millimetres; z = 0 is the
+//! select it by, so a selection highlights the part in 3D and a pick in 3D selects it. Outer-layer
+//! tracks and vias are a face per net, referenced `net:<name>`, so a selected net lights in 3D;
+//! the rest of a material is one face referenced by the material's name. Millimetres; z = 0 is the
 //! board's bottom surface.
 
 use crate::geom::shape::Prim;
@@ -266,6 +267,7 @@ pub fn board_model(board: &Board) -> BoardModel {
             None
         };
         let Some(up) = outer else { continue };
+        m.owner = net_owner(board, t.net);
         for prim in t.prims() {
             for r in prim.outline(0, TOL) {
                 let z = lift(up, MASK_T * 0.5);
@@ -274,6 +276,7 @@ pub fn board_model(board: &Board) -> BoardModel {
         }
     }
     for v in board.vias.values() {
+        m.owner = net_owner(board, v.net);
         for up in [true, false] {
             let ring = Prim::circle(v.at, v.diameter / 2).outline(0, TOL);
             m.mesh("Copper", colors::COPPER_UNDER_MASK)
@@ -283,9 +286,10 @@ pub fn board_model(board: &Board) -> BoardModel {
                 .cap(&ring_mm(&hole[0]), lift(up, MASK_T * 0.7), !up);
         }
     }
+    m.owner.clear();
     // Pads in the finish; through holes on both sides with their drill.
     for f in board.footprints.values() {
-        m.owner = f.reference.clone();
+        m.owner = format!("component:{}", f.reference);
         for p in f.pads(n) {
             let both = p.layers.len() > 1;
             let sides: Vec<bool> = if both {
@@ -323,7 +327,7 @@ pub fn board_model(board: &Board) -> BoardModel {
                 stroke(m.mesh("Silkscreen", colors::SILK), &pts, width, silk_z(f.side), !up);
             }
         }
-        m.owner = f.reference.clone();
+        m.owner = format!("component:{}", f.reference);
         component(&mut m, f, n, top);
         m.owner.clear();
     }
@@ -359,7 +363,7 @@ pub fn board_model(board: &Board) -> BoardModel {
                     .enumerate()
                     .map(|(i, (owner, mesh))| Face3d {
                         index: i,
-                        reference: Some(if owner.is_empty() { name.to_owned() } else { format!("component:{owner}") }),
+                        reference: Some(if owner.is_empty() { name.to_owned() } else { owner }),
                         features: Vec::new(),
                         positions: mesh.positions.iter().map(|v| (v * 1e4).round() / 1e4).collect(),
                         triangles: mesh.triangles,
@@ -378,6 +382,11 @@ pub fn board_model(board: &Board) -> BoardModel {
             max: [to_mm(bb.max.x), to_mm(bb.max.y), top + tallest.max(0.1)],
         },
     }
+}
+
+/// The face owner of a net's copper (`net:GND`), so selecting the net lights its tracks and vias.
+fn net_owner(board: &Board, net: Option<crate::layout::NetId>) -> String {
+    net.and_then(|n| board.nets.get(n.0 as usize)).map(|n| format!("net:{}", n.name)).unwrap_or_default()
 }
 
 /// A stroked polyline as capsules at height `z`.

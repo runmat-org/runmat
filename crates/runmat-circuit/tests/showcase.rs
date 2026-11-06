@@ -298,7 +298,8 @@ fn the_eco_variant_stages_value_changes_that_keep_the_board_clean() {
     assert_eq!(index.eco.total, 0, "the board is in sync after the update");
 }
 
-/// The 3D board keeps each component as its own face referenced `component:<designator>`, the
+/// The 3D board keeps each component as its own face referenced `component:<designator>`, and
+/// each net's outer copper as `net:<name>`, the
 /// ID the schematic and board tabs select it by, so selections cross-probe into 3D.
 #[test]
 fn the_3d_board_references_each_component_by_its_selection_id() {
@@ -325,4 +326,16 @@ fn the_3d_board_references_each_component_by_its_selection_id() {
     assert_eq!(refs("Silkscreen"), ["Silkscreen"]);
     assert!(model.bodies.iter().all(|b| b.faces.iter().enumerate().all(|(i, f)| f.index == i)));
     assert!(refs("Pads").iter().filter(|r| r.starts_with("component:")).count() >= board.footprints.len() / 2);
+    // Outer-layer copper is a face per net, so a selected net lights in 3D.
+    let copper = refs("Copper");
+    let routed: std::collections::BTreeSet<String> = board
+        .tracks
+        .values()
+        .filter(|t| t.layer == 0 || t.layer + 1 == board.copper_count())
+        .filter_map(|t| t.net.map(|n| format!("net:{}", board.nets[n.0 as usize].name)))
+        .collect();
+    assert!(!routed.is_empty());
+    for net in &routed {
+        assert!(copper.contains(net), "{net} has no copper face in 3D: {copper:?}");
+    }
 }
