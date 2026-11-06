@@ -29,6 +29,14 @@ class ReleaseEvidenceValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ReleaseEvidenceError, "contains bypass"):
             validate_workflow(path)
 
+    def test_rejects_scoping_required_receipts_to_the_deferred_meshing_cohort(self):
+        path = self.mutated_workflow(
+            "run: python3 scripts/qualification/scientific.py verify\n",
+            "run: python3 scripts/qualification/scientific.py verify --cohort meshing-release\n",
+        )
+        with self.assertRaisesRegex(ReleaseEvidenceError, "all required scientific receipts"):
+            validate_workflow(path)
+
     def test_rejects_missing_attestation(self):
         path = self.mutated_workflow("        uses: actions/attest@v4", "        uses: actions/checkout@v4")
         with self.assertRaisesRegex(ReleaseEvidenceError, "actions/attest"):

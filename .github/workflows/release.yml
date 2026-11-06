@@ -49,7 +49,7 @@ jobs:
       source_ref: ${{ github.event.inputs.ref || github.ref_name }}
 
   meshing-release-evidence:
-    name: Verify measured meshing release evidence
+    name: Verify meshing catalogs and scientific release evidence
     needs: [validate-release-state]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -68,8 +68,8 @@ jobs:
           python3 scripts/meshing/validate_reliability.py
           python3 scripts/meshing/validate_release_evidence.py
           python3 -m unittest discover -s scripts/meshing/tests -p 'test_*.py'
-      - name: Verify previously measured scientific inputs and results
-        run: python3 scripts/qualification/scientific.py verify --cohort meshing-release
+      - name: Verify required scientific receipts and approved dispositions
+        run: python3 scripts/qualification/scientific.py verify
       - name: Stage committed qualification evidence
         run: |
           mkdir -p target/runmat-meshing-release-evidence
