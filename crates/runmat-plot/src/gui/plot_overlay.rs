@@ -205,8 +205,8 @@ impl PlotOverlay {
         color: Color32,
         bold: bool,
     ) {
-        // One fill per glyph: a drop shadow doubles text on a light page, and MATLAB, Cadence and
-        // Ansys draw plot text without one.
+        // One fill per glyph: a drop shadow doubles text on a light page, so plot
+        // text draws without one.
         let font = FontId::proportional(font_size);
         painter.text(pos, align, text, font.clone(), color);
         if bold {

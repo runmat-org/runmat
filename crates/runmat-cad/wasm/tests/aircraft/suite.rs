@@ -96,7 +96,7 @@ fn the_aircraft_compiles_part_by_part_and_as_one_assembly() {
         .map(|o| o["path"].as_str().unwrap_or("").to_string())
         .collect();
     assert!(failed.is_empty(), "unplaced occurrences: {failed:?}");
-    // The Outline's markers follow SolidWorks: `(f)` only on an occurrence fixed in space by its
+    // The Outline's markers: `(f)` only on an occurrence fixed in space by its
     // own placement; attached ones and pattern copies are fully defined.
     let rows = top["projection"]["data"]["occurrences"].as_array().cloned().unwrap_or_default();
     let state = |path: &str| {

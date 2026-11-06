@@ -3,7 +3,7 @@
 //!
 //! One table lists every variable R2018 stores, its bit code and its value; the writer writes
 //! it and the reader walks the same table, so the two can't disagree about the order. The
-//! values are AutoCAD's metric defaults, apart from the handles of the drawing's database,
+//! values are the format's metric defaults, apart from the handles of the drawing's database,
 //! the extents, the dates, INSUNITS (millimetres) and the handle seed.
 
 use super::bits::{BitReader, BitWriter, Color, Handle};

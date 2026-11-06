@@ -11,8 +11,8 @@
 //!   reaches the configurations that do not override it, a changed row reaches its own
 //!   configuration, a changed feature reaches every configuration that does not suppress it.
 //!   [`affected_by_published`] does the same when only values published by other files moved.
-//! - **Verify.** [`verify`] regenerates only those configurations (Creo's instance verify,
-//!   limited to affected instances) and reports each one's errors and final key.
+//! - **Verify.** [`verify`] regenerates only those configurations (an instance verify
+//!   limited to the affected instances) and reports each one's errors and final key.
 
 use crate::assembly::fasteners::{load_table, ColumnData, ColumnarTable, TableSource};
 use crate::ids::{ConfigurationName, FeatureId, InputName};

@@ -1,7 +1,7 @@
 //! An over-defined sketch stays visible. When the solver reports a conflict the sketch feature
 //! fails as before (its `SketchSolveFailed` error, and every feature that reads it), but sketch
-//! mode still draws it from its written coordinates with the conflict set marked, as SolidWorks
-//! shows an over-defined sketch in red. The entry lives apart from the solved sketches, so no
+//! mode still draws it from its written coordinates with the conflict set marked in the
+//! over-defined color. The entry lives apart from the solved sketches, so no
 //! feature builds on it.
 
 use super::*;

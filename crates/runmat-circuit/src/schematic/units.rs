@@ -1,5 +1,5 @@
 //! Units: how a component splits into schematic symbols, one per gate, and a large gate by bank,
-//! port prefix or power, as KiCad and Altium draw it.
+//! port prefix or power.
 
 use crate::library::PinType;
 

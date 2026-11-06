@@ -47,7 +47,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) const GRID: Coord = 1_270_000;
 pub(crate) const PIN_PITCH: Coord = 2_540_000;
 pub(crate) const PIN_LEN: Coord = 2_540_000;
-/// Pin name and number text height: 50 mil, half the pin pitch, as KiCad and Altium draw it.
+/// Pin name and number text height: 50 mil, half the pin pitch, the schematic convention.
 pub const PIN_TEXT: Coord = 1_270_000;
 /// The designator's and the value's text heights.
 pub const DESIGNATOR_TEXT: Coord = 1_524_000;

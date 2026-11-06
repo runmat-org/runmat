@@ -1,7 +1,7 @@
 //! A sheet instance's second page: the unused units of its large parts.
 //!
 //! An FPGA's unused IO banks are as tall as the used ones, so on the instance's own page they
-//! push the frame up a size or two and shrink everything at fit. Altium and OrCAD designs keep
+//! push the frame up a size or two and shrink everything at fit. Hand-drawn schematics keep
 //! them on a page of their own, and so does the layout:
 //!
 //! - A unit is **unused** when it is one of a split gate's units ([`super::units`]) and every

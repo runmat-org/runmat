@@ -6,7 +6,7 @@
 //!   and GND ports point down. The top-left and bottom-left corners stay clear for the
 //!   designator and the value.
 //! - **Two-pin parts** (R, C, L, D) are drawn with their standard art, 7.62 mm tip to tip, pin
-//!   names and numbers hidden, as KiCad and Altium draw them. They turn a quarter for shunts
+//!   names and numbers hidden, as schematics conventionally draw them. They turn a quarter for shunts
 //!   and decoupling.
 //! - **Mounting holes and other one-pin parts:** a circle with its pin below.
 

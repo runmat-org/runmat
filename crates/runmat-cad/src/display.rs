@@ -89,7 +89,7 @@ pub struct BodyDisplay {
     /// absent: the part's appearance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 4]>,
-    /// The sheet metal's flat pattern (`sheet_metal.flat_pattern`), as SolidWorks keeps it: the
+    /// The sheet metal's flat pattern (`sheet_metal.flat_pattern`), kept apart from the model: the
     /// folded model hides it, its bounds leave it out and an assembly never draws it; the flat
     /// pattern drawing and an on-demand show draw it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

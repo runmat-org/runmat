@@ -2,7 +2,7 @@
 //! and flat patterns are laid out into one [`Sheet`]; the DXF and DWG writers write the same
 //! sheet, and their readers give it back, so the two files carry the same content.
 
-/// A layer: name, AutoCAD color index and line type name.
+/// A layer: name, DXF color index and line type name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Layer {
     pub name: String,

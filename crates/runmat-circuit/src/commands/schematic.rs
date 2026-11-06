@@ -9,7 +9,7 @@ fn sch(id: &str, label: &str, icon: &str, desc: &str) -> CommandDescriptor {
 }
 
 /// Update board's inputs: the change list, the comparator's ignore setting per difference type
-/// (Altium's *Ignore Differences*; saved with the board when the update is applied) and orphan
+/// (saved with the board when the update is applied) and orphan
 /// copper removal.
 pub(super) fn eco_inputs() -> Vec<Field> {
     let mut inputs = vec![checklist("changes", "Changes to apply", &[K::EcoChange])];

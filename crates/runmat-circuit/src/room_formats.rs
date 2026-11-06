@@ -1,6 +1,6 @@
 //! Copy Room Formats: one channel's finished placement and routing, replicated into the rooms
-//! of the other channels of the same repeated sheet (Altium's *Copy Room Formats*, the
-//! multi-channel step after rooms per channel).
+//! of the other channels of the same repeated sheet (the multi-channel step after rooms per
+//! channel).
 //!
 //! Channels match by identity. A room per channel is named for the channel's path (`ch[0]`),
 //! and its parts' component paths sit under it (`/ch[0]/R1`). The part `/ch[1]/R1` is the

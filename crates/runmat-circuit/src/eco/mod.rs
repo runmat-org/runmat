@@ -8,20 +8,19 @@
 //! footprint changes) as the same change list, and [`agent_change_set`] turns an agent's model
 //! edits into a plan, so agent ECOs are reviewed the same way.
 //!
-//! The flow follows Altium's Engineering Change Order dialog, with what other tools do better:
+//! The flow is an engineering change order: validate the listed changes, then execute them.
 //!
 //! - **Validate, then execute.** [`validate`] gives each selected change ok, warning or error with
 //!   a reason (a footprint missing from the library, pads the new footprint lacks, a change that
 //!   needs another one that isn't selected, a designator already taken). [`apply`] executes a
 //!   selected subset *atomically* as one undoable edit: nothing changes if any selected change
-//!   fails validation (Altium executes the valid lines and skips the rest).
+//!   fails validation. The valid lines never run alone while the rest are skipped.
 //! - **Identity, not names.** Footprints link to components by path through the lock section, so
 //!   a renamed component is a designator change, never delete plus add; nets with the same pins
 //!   under a new name are a rename, so their routing stays.
 //! - **Three-way.** The board records what it last took from the schematic ([`BoardSync`]). A
 //!   difference the board made (a swap, a renumber) is flagged instead of silently reverted, and
-//!   a field both sides changed is a conflict to resolve (Xpedition and Allegro keep this state;
-//!   Altium and KiCad overwrite).
+//!   a field both sides changed is a conflict to resolve, never an overwrite.
 //! - **Placement and routing survive.** Only what a change touches moves; new parts land in their
 //!   channel's room or a staging area beside the board, grouped by sheet. Copper a change orphans
 //!   is kept with no net unless [`ApplyOptions::remove_orphaned_copper`] is set.
@@ -536,8 +535,7 @@ impl EcoPlan {
     }
 }
 
-/// A type of difference the comparator can ignore (Altium's Comparator tab: *Find
-/// Differences* or *Ignore Differences* per type). An ignored type produces no ECO lines in
+/// A type of difference the comparator can ignore (find or ignore differences, per type). An ignored type produces no ECO lines in
 /// either direction, and [`apply`] leaves what it covers on the board as it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Difference {
@@ -620,8 +618,8 @@ impl Difference {
     }
 }
 
-/// What the compare ignores and how it maps the schematic (Altium's Comparator and Class
-/// Generation tabs; KiCad's Update PCB options).
+/// What the compare ignores and how it maps the schematic (ignored difference types, and the
+/// classes and rooms it generates).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ComparatorOptions {
     pub ignore_parameters: bool,
@@ -640,7 +638,7 @@ pub struct ComparatorOptions {
     pub remove_unlinked_footprints: bool,
     /// Link footprints with no component link by designator (KiCad's re-link option).
     pub relink_by_designator: bool,
-    /// A room per channel of a repeated sheet (Altium's room generation for multi-channel).
+    /// A room per channel of a repeated sheet (room generation for multi-channel designs).
     pub rooms_per_channel: bool,
     /// A component class per channel.
     pub classes_per_channel: bool,

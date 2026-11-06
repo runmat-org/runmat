@@ -22,7 +22,7 @@ use std::fmt::Write as _;
 
 pub const ASSEMBLY_INDEX_FORMAT_VERSION: u32 = 2;
 
-/// How an occurrence is positioned, as the tree prefixes it (SolidWorks' `(f)`, `(-)`, `(+)`).
+/// How an occurrence is positioned, as the tree prefixes it (`(f)`, `(-)`, `(+)`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DefinitionState {
@@ -221,7 +221,7 @@ pub fn build_assembly_index(
         } else if n.pose == PoseStatus::Failed {
             DefinitionState::Failed
         } else if n.fixed && !n.attached && n.origin == NodeOrigin::Authored {
-            // SolidWorks's `(f)`: fixed in space by its own placement. A pattern or mirror
+            // `(f)`: fixed in space by its own placement. A pattern or mirror
             // instance is driven by its pattern, and an attached occurrence by its frame, so
             // both are fully defined.
             DefinitionState::Fixed

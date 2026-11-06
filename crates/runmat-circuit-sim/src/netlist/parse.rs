@@ -135,7 +135,7 @@ pub fn parse(text: &str, resolve: Resolver<'_>) -> Result<Parsed, ParseError> {
         match head.as_str() {
             ".model" => {
                 let mut m = model(&rest).map_err(err)?;
-                // PSpice `AKO:<base>` ("a kind of"): the base model's type and parameters, with
+                // `AKO:<base>` ("a kind of"), a vendor model dialect: the base model's type and parameters, with
                 // this card's parameters over them. The base is defined above, here or outside.
                 if let Some(base) = m.kind.strip_prefix("ako:") {
                     let base = if base.is_empty() { rest.get(2).and_then(|t| t.word()).unwrap_or_default().to_string() } else { base.to_string() };

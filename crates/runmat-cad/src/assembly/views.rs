@@ -1,4 +1,4 @@
-//! Saved model views of an assembly, as SolidWorks' named views and CATIA's cameras keep them:
+//! Saved model views of an assembly, each a named view with its camera:
 //! `view hero = { from = [-0.62, 0.7, -0.36], up = [0, 0, 1], default = true }`. `from` points
 //! from the model toward the eye (any length); the canvas frames the model along it with `up`
 //! kept upright, and opens on the `default` view.

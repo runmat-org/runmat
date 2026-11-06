@@ -5,7 +5,7 @@ use super::{GeometrySceneChunk, GEOMETRY_HOVER_REGION_COLOR, GEOMETRY_SELECTED_R
 use crate::core::{PipelineType, RenderData, Vertex};
 
 /// Selection keeps the face's shading: the face color moves this far toward the selection color,
-/// and the face's boundary edges draw in the full selection color (as SolidWorks shows it).
+/// and the face's boundary edges draw in the full selection color.
 pub(super) const GEOMETRY_SELECTED_TINT: f32 = 0.4;
 /// The color a selected face is tinted toward: a lighter orange than its edges, so the face
 /// reads as the base material under a highlight.
@@ -68,7 +68,7 @@ impl RegionPaint {
     }
 
     /// How much wider a painted segment draws than the scene's edge width: selected edges
-    /// stand out by weight as well as color, as SolidWorks draws them; hover a little less.
+    /// stand out by weight as well as color; hover a little less.
     pub(super) fn edge_weight(self) -> f32 {
         match self {
             Self::Fill(_) | Self::Face(_) => 1.0,

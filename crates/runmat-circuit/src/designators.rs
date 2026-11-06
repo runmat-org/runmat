@@ -1,6 +1,6 @@
 //! Silkscreen reference designators for footprints whose package carries none on the silkscreen.
 //!
-//! A designator is placed as Altium's autoposition places it: beside the part's body (above,
+//! A designator is placed automatically beside the part's body (above,
 //! below, right, then left), clear of every pad and body and of the designators already placed.
 //! Large parts are placed first, so they take the obvious spots and small parts fit around them.
 //! The text height follows the part: 1 mm for an IC down to 0.6 mm for an 0402.

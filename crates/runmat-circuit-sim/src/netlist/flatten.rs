@@ -333,7 +333,7 @@ fn expand<'a>(
     Ok(())
 }
 
-/// A capacitor's or inductor's written parasitics as their own elements, as LTspice reads them:
+/// A capacitor's or inductor's written parasitics as their own elements:
 /// on a capacitor `Rser` and `Lser` in series and `Rpar` and `Cpar` across it; on an inductor
 /// `Rser` in series and `Rpar` and `Cpar` across it. The series parts sit on internal nodes
 /// `<name>#1`, `<name>#2` between the first node and the element, which keeps its own name, so

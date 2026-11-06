@@ -1,5 +1,5 @@
 //! Right-click menus for part, assembly and drawing items (UI target decision 12), and the
-//! commands only those menus reach: the best of SolidWorks, Onshape and Altium per item kind.
+//! commands only those menus reach, chosen per item kind.
 //! Each menu is quick icon actions, grouped commands with `▸` submenus, then Agent ▸.
 
 use super::*;
@@ -67,11 +67,11 @@ pub(super) fn add(catalog: &mut Catalog) {
             .when(selected_one(&[K::Body, K::Face, K::Plane]))
             .edit(view_action("section")),
         cmd("part.export-body", "Export body", "export", P)
-            .desc("Write the selected bodies to a STEP, Parasolid or STL file.")
+            .desc("Write the selected bodies to a STEP, X_T or STL file.")
             .inputs(vec![choice(
                 "format",
                 "Format",
-                &[("step", "STEP"), ("x_t", "Parasolid"), ("stl", "STL")],
+                &[("step", "STEP"), ("x_t", "X_T"), ("stl", "STL")],
             )])
             .when(selected(&[K::Body]))
             .edit(export("body")),

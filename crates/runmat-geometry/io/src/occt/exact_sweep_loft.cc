@@ -504,7 +504,7 @@ Tracked build_loft(const std::vector<const Profile*>& sections, std::uint32_t st
                    std::uint32_t end_label) {
   if (sections.size() < 2) fail("a loft needs two sections");
   if (!sections.front()->closed) return build_sheet_loft(sections);
-  // Three or more sections: one smooth surface through them all (as SolidWorks and CATIA loft),
+  // Three or more sections: one smooth surface through them all,
   // so the loft has no crease or edge at its inner sections.
   if (sections.size() > 2) {
     std::vector<std::vector<TopoDS_Wire>> wires(sections.size());

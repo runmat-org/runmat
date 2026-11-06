@@ -193,7 +193,7 @@ pub(super) fn mate(
         return Err(model("pick faces or edges on two different components"));
     }
     // The second pick's component moves and the first stays, unless the second is the
-    // assembly's first component (its ground, as SolidWorks fixes it).
+    // assembly's first component, which is fixed as the ground.
     let ground = document.occurrences.first().map(|o| o.name.clone());
     let moving = if ground.as_deref() == Some(b.occurrence.as_str()) {
         a.occurrence.clone()

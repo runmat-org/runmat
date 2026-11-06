@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
  * Report
  * --------------------------------------------------------------------------------------------- */
 
-/// A plain-text ECO report (Altium's Report Changes): every line grouped by type, with status.
+/// A plain-text ECO report: every line grouped by type, with status.
 pub fn report(plan: &EcoPlan, checks: &BTreeMap<String, Check>, design: &str) -> String {
     let mut out = String::new();
     let title = match plan.direction {

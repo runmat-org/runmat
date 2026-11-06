@@ -26,7 +26,7 @@ impl Check {
     }
 }
 
-/// Status of each selected change, given the whole selection (Altium's Validate Changes).
+/// Status of each selected change, given the whole selection.
 pub fn validate(
     plan: &EcoPlan,
     board: &Board,

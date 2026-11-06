@@ -55,12 +55,12 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @l
 
     let normal = normalize(input.normal);
     if uniforms.cad_lighting.x != 0u {
-        // Camera-relative studio lighting, as SolidWorks and CATIA light a part: a headlight
+        // Camera-relative studio lighting for a part: a headlight
         // along the view makes a face seen straight on (a sketch plane in Normal to, a face in
         // a standard view) read at nearly its full colour; a key up and left of the eye
         // separates the faces of a box seen in an iso view; a dim fill and a floor keep
         // away-facing faces and recesses legible.
-        // High key, as CATIA and SolidWorks show a light part: face on reads at the full colour; an
+        // High key for a light part: face on reads at the full colour; an
         // iso box reads ~ 0.88 / 0.77 / 0.71 on its three faces, and a side face at 70 degrees
         // ~ 0.54 to 0.74, so a white fuselage's flank still reads white rather than grey.
         let world_normal = select(-normal, normal, front_facing);
@@ -79,7 +79,7 @@ fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @l
         let lighting = clamp(0.32 + 0.37 * diffuse + 0.30 * head + 0.08 * fill_diffuse + 0.04 * hemisphere + bounce, 0.32, 1.0);
         var lit = input.color.rgb * lighting + vec3<f32>(highlight);
         if uniforms.cad_lighting.y != 0u {
-            // Over a dark viewport, as SolidWorks and Onshape light black parts there: a cool rim
+            // Over a dark viewport, black parts get a rim light: a cool rim
             // light from behind catches faces turning away from the eye, so a carbon arm or a
             // black prop keeps its outline, and a sharper key highlight shows its form. The rim
             // weighs by how dark the material is, so light parts keep their shading.

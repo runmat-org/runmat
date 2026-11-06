@@ -1,4 +1,4 @@
-//! Trim and Extend from the canvas, as SolidWorks' power trim and extend take them: the picked
+//! Trim and Extend from the canvas, each taking the picked
 //! curve and the click on it (`at`, sketch millimetres).
 //!
 //! - **Trim** removes the piece of the curve between the intersections either side of the
@@ -9,7 +9,7 @@
 //!   meets.
 //!
 //! The moved ends are written as coordinates. Relations and dimensions that named the removed
-//! piece go with it (as SolidWorks deletes them); a point other curves shared stays where it
+//! piece are deleted with it; a point other curves shared stays where it
 //! was, written out for them.
 
 use super::{coords, mm, model, picks, target, EditFailure};

@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 /// The bodies a drawing and the 3D view outline: the substrate and its mask (the board
 /// outline and cutouts), drills (holes) and the component bodies. Copper, pads and silkscreen
 /// are surface art, and terminals, leads and pins sit inside their package's outline at
-/// drawing scale: outlining them would bury the drawing in strokes, as SolidWorks' simplified
-/// PCB representation leaves them out.
+/// drawing scale: outlining them would bury the drawing in strokes, so a simplified
+/// board representation leaves them out.
 fn outlined(body: &str) -> bool {
     !matches!(body, "Copper" | "Pads" | "Silkscreen" | "Terminals" | "Leads" | "Pins")
 }
@@ -69,7 +69,7 @@ pub fn layout_path(file: &str) -> String {
 }
 
 /// The board's layout compiled in a circuit session, or why it doesn't compile to a board.
-fn compiled_board(file: &str, files: &Files) -> Result<runmat_circuit::runtime::Session, String> {
+pub(crate) fn compiled_board(file: &str, files: &Files) -> Result<runmat_circuit::runtime::Session, String> {
     let layout = layout_path(file);
     let text = files
         .get(&layout)

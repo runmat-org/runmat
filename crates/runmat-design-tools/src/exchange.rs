@@ -46,7 +46,7 @@ pub enum ExportFormat {
     ThreeMf,
     Gltf,
     Dxf,
-    /// AutoCAD R2018 DWG of a drawing sheet or a part's flat pattern.
+    /// DWG (R2018 format) of a drawing sheet or a part's flat pattern.
     Dwg,
     /// A drawing sheet as a one-page vector PDF at true size.
     Pdf,

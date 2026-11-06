@@ -1,5 +1,5 @@
-//! Section caps: the solid's cut face where a section plane crosses a closed mesh, as CATIA and
-//! SolidWorks draw a section view. Without caps a cut model shows its hollow inside, and edges
+//! Section caps: the solid's cut face where a section plane crosses a closed mesh, drawn as a
+//! section view shows it. Without caps a cut model shows its hollow inside, and edges
 //! behind the cut read as if they were in front.
 //!
 //! Each triangle that crosses the plane gives one segment of the cut. The segment is oriented

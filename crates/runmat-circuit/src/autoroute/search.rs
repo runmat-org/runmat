@@ -32,8 +32,8 @@ pub(super) struct Query<'a> {
     /// Search bound: nodes expanded before giving up.
     pub budget: usize,
     /// Neck-down: within `neck_reach` of an end that is a pad narrower than the track, the
-    /// track narrows to `neck` (the pad's width, at least the board's minimum track), as
-    /// Altium's neck-down rule does, so a wide power track can enter a fine-pitch pad.
+    /// track narrows to `neck` (the pad's width, at least the board's minimum track), so a
+    /// wide power track can enter a fine-pitch pad.
     pub neck: Coord,
     pub anchors: [Point; 2],
     pub neck_reach: Coord,

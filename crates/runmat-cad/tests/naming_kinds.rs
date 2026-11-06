@@ -2446,7 +2446,7 @@ fn specials() -> Vec<Outcome> {
     }
 
     // Loft: a third section keeps one smooth side face per profile curve through all three
-    // sections (as CATIA and SolidWorks loft); a span-numbered reference is not generated.
+    // sections; a span-numbered reference is not generated.
     {
         let f = loft();
         let p = f.defaults();
