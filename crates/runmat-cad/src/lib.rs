@@ -44,6 +44,7 @@ pub mod pmi;
 pub mod props;
 pub mod refs;
 pub mod regen;
+pub mod run_inputs;
 pub mod scope;
 mod serde_rows;
 pub mod sketch_solver;
