@@ -295,6 +295,8 @@ pub(super) fn add(catalog: &mut Catalog) {
                     "Component",
                     vec![
                         shown(text("definition", "File", None), "definition"),
+                        // The folder or package the design comes from, when not this one.
+                        shown(text("from", "From", None), "from"),
                         prop(
                             text("configuration", "Configuration", Some("default")).optional(),
                             Section::Occurrences,
