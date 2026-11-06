@@ -149,6 +149,8 @@ pub struct Netlist {
     pub sch_places: BTreeMap<String, crate::ids::SchPlace>,
     /// Hand-drawn schematic wires recorded in the lock (see [`crate::ids::SchWire`]).
     pub sch_wires: BTreeMap<crate::ids::WireKey, crate::ids::SchWire>,
+    /// Each sheet definition's notes (`text` statements): name and words, in source order.
+    pub sheet_texts: BTreeMap<String, Vec<(String, String)>>,
 }
 
 impl Netlist {
@@ -1303,6 +1305,12 @@ pub fn elaborate(
         diagnostics: diags,
         sch_places: lock.map(|l| l.places.clone()).unwrap_or_default(),
         sch_wires: lock.map(|l| l.wires.clone()).unwrap_or_default(),
+        sheet_texts: design
+            .sheets
+            .iter()
+            .filter(|(_, s)| !s.texts.is_empty())
+            .map(|(n, s)| (n.clone(), s.texts.iter().map(|t| (t.name.clone(), t.text.clone())).collect()))
+            .collect(),
     }
 }
 

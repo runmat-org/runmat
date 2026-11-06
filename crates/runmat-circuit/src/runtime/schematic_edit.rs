@@ -51,6 +51,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "schematic.place-harness",
     "schematic.place-part",
     "schematic.paste",
+    "schematic.text",
 ];
 
 pub(super) fn run(
@@ -61,6 +62,7 @@ pub(super) fn run(
     match request.command.as_str() {
         "schematic.place-part" => return part::place_part(project, files, request),
         "schematic.paste" => return part::paste(project, files, request),
+        "schematic.text" => return part::place_text(project, files, request),
         _ => {}
     }
     let mut e = Editor::new(project, request);

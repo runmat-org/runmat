@@ -153,6 +153,22 @@ pub(super) fn page(
     if bbox[0] > bbox[2] {
         bbox = [0, -GRID, GRID, 0];
     }
+    // Notes: at their recorded places (the lock's frame), else stacked above the drawing.
+    let mut stack = bbox[3] + 2 * GRID;
+    for (name, text) in nl.sheet_texts.get(sheet_name).map(Vec::as_slice).unwrap_or(&[]) {
+        let at = match nl.sch_places.get(&text_key(sheet_name, name)).filter(|p| p.page == 1 && !centre) {
+            Some(s) => Point::new(s.x - MARGIN, MARGIN - s.y),
+            None => {
+                let p = Point::new(bbox[0], stack);
+                stack += 2 * GRID;
+                p
+            }
+        };
+        let b = text_box(text, NOTE_TEXT, at.x, at.y, "start");
+        walls.texts.push(b);
+        bbox = grow(bbox, b);
+        page.texts.push(SheetText { name: name.clone(), text: text.clone(), x_mm: mm(at.x), y_mm: mm(at.y), size_mm: mm(NOTE_TEXT) });
+    }
     // Hand-drawn wires apply on a page whose symbols the lock places (its frame is the lock's).
     let hands: Vec<super::hand::Hand> = if centre {
         Vec::new()
@@ -353,6 +369,11 @@ pub fn page_boxes(page: &SchematicSheet) -> Vec<[f64; 4]> {
         }
         out.extend(symbol_texts(s));
     }
+    for t in &page.texts {
+        let n = mm_to_nm;
+        let b = text_box(&t.text, n(t.size_mm), n(t.x_mm), n(t.y_mm), "start");
+        out.push([mm(b[0]), mm(b[1]), mm(b[2]), mm(b[3])]);
+    }
     for s in &page.sheet_symbols {
         out.push([s.x_mm, s.y_mm - 3.5, s.x_mm + s.w_mm, s.y_mm + s.h_mm + 2.5]);
     }
@@ -468,6 +489,10 @@ pub(super) fn shift(page: &mut SchematicSheet, dx: f64, dy: f64) {
     }
     page.junctions.iter_mut().for_each(m);
     page.no_connects.iter_mut().for_each(m);
+    for t in &mut page.texts {
+        t.x_mm = r(t.x_mm + dx);
+        t.y_mm = r(t.y_mm + dy);
+    }
     for l in &mut page.labels {
         l.x_mm = r(l.x_mm + dx);
         l.y_mm = r(l.y_mm + dy);

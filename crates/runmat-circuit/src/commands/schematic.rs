@@ -272,8 +272,12 @@ pub(super) fn add(c: &mut Catalog) {
             text("value", "Class or parameters", Some("power")).optional(),
         ])
         .edit(place("directive", Section::Directives)),
-        sch("schematic.text", "Text", "text", "Place text on the sheet.")
-            .inputs(vec![text("text", "Text", None)])
+        sch("schematic.text", "Text", "text", "Place a note on the sheet.")
+            .kw(&["note", "annotation", "comment"])
+            .inputs(vec![
+                text("text", "Text", None),
+                pick("at", "Place at", &[K::Point]).optional(),
+            ])
             .edit(place("text", Section::Components)),
         sch(
             "schematic.repeat-channel",

@@ -334,7 +334,18 @@ pub struct SheetDef {
     pub diff_pairs: Vec<DiffPairDecl>,
     /// Pins marked "no connect" / no-ERC.
     pub no_erc: Vec<Endpoint>,
+    /// Notes drawn on the sheet (`text note1 = "…"`).
+    pub texts: Vec<TextDecl>,
     pub params: BTreeMap<String, Param>,
+}
+
+/// A note on a sheet: words drawn on the schematic, with no electrical meaning. Its place is
+/// recorded in the lock (`place <sheet>/text:<name> …`), as a symbol's is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextDecl {
+    pub name: String,
+    pub text: String,
+    pub source: SourceKey,
 }
 
 /// Net class: electrical and board-rule defaults for a group of nets.

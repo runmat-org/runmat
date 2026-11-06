@@ -146,6 +146,28 @@ pub struct SchematicSheet {
     pub labels: Vec<NetLabel>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub no_connects: Vec<Xy>,
+    /// The sheet's notes (`text` statements), at their recorded places or, unrecorded, in a
+    /// column above the drawing's top-left corner.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub texts: Vec<SheetText>,
+}
+
+/// A note drawn on a sheet: its baseline's start (mm) and text height.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetText {
+    pub name: String,
+    pub text: String,
+    pub x_mm: f64,
+    pub y_mm: f64,
+    pub size_mm: f64,
+}
+
+/// A note's text height (mm): 70 mil, a schematic's usual note size.
+pub const NOTE_TEXT: Coord = 1_778_000;
+
+/// The lock key of a note's place (`main/text:note1`).
+pub fn text_key(sheet: &str, name: &str) -> String {
+    format!("{sheet}/text:{name}")
 }
 
 /// One placed gate of a component.
@@ -462,6 +484,15 @@ pub fn places(index: &SchematicIndex) -> BTreeMap<String, SchPlace> {
                 y: down(sym.y_mm),
                 rotation: sym.rotation as u16,
                 mirror: sym.mirror,
+                page: s.page as u16,
+            });
+        }
+        for t in &s.texts {
+            out.entry(text_key(&s.sheet, &t.name)).or_insert(SchPlace {
+                x: mm_to_nm(t.x_mm),
+                y: down(t.y_mm),
+                rotation: 0,
+                mirror: false,
                 page: s.page as u16,
             });
         }

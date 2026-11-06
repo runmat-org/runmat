@@ -296,6 +296,31 @@ pub(super) fn place_part(project: &Project, files: &Files, request: &EditRequest
     Ok(out)
 }
 
+/// `schematic.text`: a note on the sheet (`text note1 = "…"` after the sheet's last
+/// statement), at the clicked point or, with none, above the drawing.
+pub(super) fn place_text(project: &Project, files: &Files, request: &EditRequest) -> Result<EditOutput, EditError> {
+    let v = &request.values;
+    let words_in = v.get("text").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).ok_or_else(|| EditError::new("type the text to place"))?;
+    let text = &project.circuit_text;
+    let sheet_name = target_sheet(project, request);
+    let sheet = project.own.sheets.get(&sheet_name).ok_or_else(|| EditError::new(format!("sheet `{sheet_name}` comes from another file; open that file to edit it")))?;
+    let used: BTreeSet<&str> = sheet.texts.iter().map(|t| t.name.as_str()).collect();
+    let name = (1..).map(|n| format!("note{n}")).find(|n| !used.contains(n.as_str())).expect("a free name");
+    let block = super::blocks(text).and_then(|b| b.sheets.into_iter().find(|s| s.name == sheet_name)).ok_or_else(|| EditError::new(format!("{} has no sheet `{sheet_name}`", project.circuit_path)))?;
+    let line = format!("{} {name} = {}", words::TEXT, quote(words_in));
+    let edit = match block.statements.last() {
+        Some(last) => TextEdit::replace(Span { start: last.end, end: last.end }, format!("\n{}{line}", super::indent_at(text, last.end))),
+        None => {
+            let outer = super::indent_at(text, block.close);
+            TextEdit::replace(Span { start: block.open, end: block.close }, format!("\n{outer}{INDENT}{line}\n{outer}"))
+        }
+    };
+    let places = point(v.get("at"))
+        .map(|(x, y)| vec![(sheet_name.clone(), format!("text:{name}"), Placed { at: At::PageMm(x, y), rotation: 0, mirror: false })])
+        .unwrap_or_default();
+    finish(project, files, request, vec![edit], places, format!("placed {name} on sheet {sheet_name}"))
+}
+
 /// `schematic.paste` (see the module docs).
 pub(super) fn paste(project: &Project, files: &Files, request: &EditRequest) -> Result<EditOutput, EditError> {
     let v = &request.values;

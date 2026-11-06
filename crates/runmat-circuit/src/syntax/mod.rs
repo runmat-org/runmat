@@ -81,6 +81,8 @@ pub mod words {
     pub const CONNECT: &str = "connect";
     pub const NO_ERC: &str = "no_erc";
     pub const DIFF_PAIR: &str = "diff_pair";
+    /// A note on a sheet (`text note1 = "5 V in from J1"`); its place is in the lock.
+    pub const TEXT: &str = "text";
     pub const SIMULATION: &str = "simulation";
     /// Statements inside a `simulation` section.
     pub const SOURCE: &str = "source";
@@ -95,7 +97,7 @@ pub mod words {
     /// Every statement word, for completion and the highlighter.
     pub const ALL: &[&str] = &[
         CIRCUIT, SHEET, ROOT, PARAM, NET_CLASS, INTERFACE, VARIANT, PORT, COMPONENT, NET, BUS,
-        HARNESS, INSTANCE, CONNECT, NO_ERC, DIFF_PAIR, SIMULATION, SOURCE, MODEL, TOLERANCE,
+        HARNESS, INSTANCE, CONNECT, NO_ERC, DIFF_PAIR, TEXT, SIMULATION, SOURCE, MODEL, TOLERANCE,
         ANALYSIS, PROBE, MEASURE, OPTION, PART,
     ];
 }
@@ -501,6 +503,10 @@ fn read_sheet_statement(reader: &mut Reader<'_>, sheet: &mut SheetDef, statement
                         members: words_of(value.value(), span)?,
                         source: key,
                     }),
+                    words::TEXT => match value.value() {
+                        Some(Expr::String(s)) => sheet.texts.push(crate::ir::TextDecl { name, text: s.value(), source: key }),
+                        _ => return Err(diagnostic(span, "a text is `text <name> = \"…\"`")),
+                    },
                     words::HARNESS => sheet.harnesses.push(HarnessDecl {
                         name,
                         interface: word_of(value.value(), span)?,

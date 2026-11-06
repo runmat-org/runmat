@@ -451,6 +451,11 @@ pub(crate) fn no_erc_statement(ends: &[Endpoint]) -> Print {
     Ok(format!("no_erc = {}", list(&ends?)))
 }
 
+/// One `text` statement.
+pub(crate) fn text_statement(t: &crate::ir::TextDecl) -> String {
+    format!("text {} = {}", name(&t.name), quote(&t.text))
+}
+
 /// One `diff_pair` statement.
 pub(crate) fn diff_pair_statement(pair: &DiffPairDecl) -> Print {
     let mut entries = vec![
@@ -498,6 +503,9 @@ pub(super) fn print_sheet(sheet: &SheetDef) -> Print {
     }
     for pair in &sheet.diff_pairs {
         lines.push(diff_pair_statement(pair)?);
+    }
+    for t in &sheet.texts {
+        lines.push(text_statement(t));
     }
     let mut out = format!("sheet {} {{\n", name(&sheet.name));
     for line in lines {

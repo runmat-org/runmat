@@ -26,6 +26,10 @@ A part the built-in library doesn't have is written into the circuit as a `part 
 
 A `connect` list joins every endpoint it names into one net. A wire drawn on the canvas between two pins adds them to a list. Pins are `U1.VIN` by name or `"J1.1"` by number; `net.SDA` names the net, which needs no declaration unless it has settings.
 
+The canvas routes each wire for you. To route one by hand, click its corners on the empty sheet between the two pins; the Angle setting draws the segments at 90°, at 45° or at any angle. The corners are kept in the circuit's lock file, beside the places of the symbols, so the `.circuit` file still lists only the connection. Moving a part keeps the corners and turns the wire's end once to reach the pin. Removing the connection removes its corners.
+
+A `text` statement puts a note on the sheet, such as `text note1 = "5 V in from J1"`. The Text tool writes one where you click.
+
 Settings go on a `net` statement:
 
 - `global = true` joins nets of the same name on every sheet, as ground and supply rails do.

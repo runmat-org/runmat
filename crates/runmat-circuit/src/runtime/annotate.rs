@@ -144,6 +144,14 @@ pub(super) fn move_items(project: &Project, request: &EditRequest) -> Result<Edi
                 keys.insert(s.key.clone(), s.art != "box");
             }
         }
+        for t in &page.texts {
+            if ids.iter().any(|id| *id == format!("text:{}/{}", page.sheet, t.name)) {
+                // A note moves like a symbol and doesn't turn or mirror.
+                let key = crate::schematic::text_key(&page.sheet, &t.name);
+                sheet_symbols.insert(key.clone());
+                keys.insert(key, false);
+            }
+        }
         for s in &page.sheet_symbols {
             if ids.iter().any(|id| *id == format!("sheet:{}", s.path)) {
                 sheet_symbols.insert(s.key.clone());

@@ -100,6 +100,7 @@ Inside a sheet:
 | `connect = [<endpoints>]` | joins every endpoint listed into one net |
 | `no_erc = [<pins>]` | pins the electrical rules leave alone |
 | `diff_pair <name> = { p, n }` | a differential pair |
+| `text <name> = "<words>"` | a note drawn on the sheet, such as `text note1 = "5 V in from J1"`; it has no electrical meaning |
 
 Endpoints are `U1.VIN`, `"C1.1"`, `net.GND`, `"net.+3V3"`, `port.IN`, `bus.D.D0`, `harness.USB.DP` and `instance.pwr.VIN`; see [Names and selectors](/docs/design-language/names-and-selectors#pins-nets-and-designators).
 
