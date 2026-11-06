@@ -18,6 +18,7 @@
 
 pub mod auto;
 pub(crate) mod props;
+pub mod title;
 mod values;
 
 use crate::runtime::{compile_assembly, regenerate_part_in, resolve_path, Diagnostic, Files, RegeneratedPart};
@@ -156,9 +157,17 @@ fn model_files(path: &str, text: &str, files: &Files) -> Vec<String> {
         .collect()
 }
 
-/// The folders and model files a drawing's views can name (`runmat_cad::modules::dependencies`).
+/// The folders and model files a drawing's views can name (`runmat_cad::modules::dependencies`),
+/// and the SVG files its title-block logos read.
 pub fn dependencies(path: &str, text: &str) -> Vec<String> {
-    runmat_cad::modules::dependencies(path, text)
+    let mut out = runmat_cad::modules::dependencies(path, text);
+    // The SVG files its title-block logos draw.
+    for file in title::image_files(path, text) {
+        if !out.contains(&file) {
+            out.push(file);
+        }
+    }
+    out
 }
 
 /// `compile` for a `.drawing`, as JSON.
@@ -429,7 +438,9 @@ pub fn compile_json_in(path: &str, text: &str, files: &Files, configuration: Opt
             extents.insert(a.id.clone(), Value::Array(boxes));
         }
     }
+    let titles = title::title_layouts(path, &document, &index.title_blocks, files, &mut problems);
     if let Value::Object(o) = &mut data {
+        o.insert("title_layouts".into(), titles);
         o.insert("hlr".into(), Value::Object(hlr));
         o.insert("anchors".into(), Value::Object(anchors));
         o.insert("extents".into(), Value::Object(extents));

@@ -17,20 +17,6 @@ use serde_json::Value;
 
 use super::floats;
 
-/// Sheet sizes in millimetres, landscape.
-fn sheet_size(name: &str) -> [f64; 2] {
-    match name.to_ascii_uppercase().as_str() {
-        "A0" => [1189.0, 841.0],
-        "A1" => [841.0, 594.0],
-        "A2" => [594.0, 420.0],
-        "A4" => [297.0, 210.0],
-        "B" => [431.8, 279.4],
-        "C" => [558.8, 431.8],
-        "D" => [863.6, 558.8],
-        _ => [420.0, 297.0],
-    }
-}
-
 fn layer(name: &str, color: i16, linetype: &str) -> Layer {
     Layer { name: name.into(), color, linetype: linetype.into() }
 }
@@ -89,7 +75,7 @@ pub(super) fn drawing_sheet(
         .and_then(|f| f.iter().find(|f| f["name"] == sheet["format"]))
         .cloned()
         .unwrap_or(Value::Null);
-    let [w, h] = sheet_size(format["size"]["name"].as_str().unwrap_or("A3"));
+    let [w, h] = runmat_cad::drawing::title_layout::sheet_size(format["size"]["name"].as_str().unwrap_or("A3"));
     let ratio = floats(&sheet["scale"]);
     let scale = if ratio.len() == 2 && ratio[1] != 0.0 { ratio[0] / ratio[1] } else { 1.0 };
     let mut out = Sheet {
@@ -108,18 +94,39 @@ pub(super) fn drawing_sheet(
     };
     let mut notes = Vec::new();
     out.rect("FRAME", 10.0, 10.0, w - 20.0, h - 20.0);
-    // The title block: one block, inserted at the frame's lower right corner.
-    let rows = data["title_blocks"][&sheet_name].as_array().cloned().unwrap_or_default();
-    if !rows.is_empty() {
+    // The title block as the compile laid it out (`title_layouts`, the layout the Desktop's sheet
+    // draws): one block of cells, label and value text, and logo outlines, inserted at the
+    // sheet origin so its coordinates stay the sheet's.
+    let layout = &data["title_layouts"][&sheet_name];
+    let cells = layout["cells"].as_array().cloned().unwrap_or_default();
+    if !cells.is_empty() {
         let mut block = Sheet::default();
-        for (i, row) in rows.iter().enumerate() {
-            let y = i as f64 * 7.0;
-            block.rect("FRAME", -120.0, y, 120.0, 7.0);
-            block.text("FRAME", [-118.0, y + 2.2], 2.2, row[0].as_str().unwrap_or(""));
-            block.text("FRAME", [-80.0, y + 2.2], 2.6, row[1].as_str().unwrap_or(""));
+        let pair = |v: &Value| { let f = floats(v); [f.first().copied().unwrap_or(0.0), f.get(1).copied().unwrap_or(0.0)] };
+        let mut cell_rects = cells.iter().map(|c| (pair(&c["at"]), pair(&c["size"]))).collect::<Vec<_>>();
+        if let Some(p) = layout["projection_cell"].as_array() {
+            if p.len() == 2 {
+                cell_rects.push((pair(&p[0]), pair(&p[1])));
+            }
+        }
+        for (at, size) in cell_rects {
+            block.rect("FRAME", at[0], at[1], size[0], size[1]);
+        }
+        for cell in &cells {
+            for key in ["label", "value"] {
+                let t = &cell[key];
+                if let Some(text) = t["text"].as_str().filter(|t| !t.is_empty()) {
+                    block.text("FRAME", pair(&t["at"]), t["height"].as_f64().unwrap_or(2.5), text);
+                }
+            }
+            for l in cell["logo"].as_array().into_iter().flatten() {
+                let points: Vec<[f64; 2]> = l.as_array().into_iter().flatten().map(pair).collect();
+                if points.len() >= 3 {
+                    block.add("FRAME", Shape::Polyline { points, closed: true });
+                }
+            }
         }
         out.blocks.push(Block { name: "TITLE_BLOCK".into(), base: [0.0, 0.0], entities: block.entities });
-        out.add("FRAME", Shape::Insert { block: "TITLE_BLOCK".into(), at: [w - 10.0, 10.0], scale: 1.0, rotation: 0.0 });
+        out.add("FRAME", Shape::Insert { block: "TITLE_BLOCK".into(), at: [0.0, 0.0], scale: 1.0, rotation: 0.0 });
     }
     let all_views = doc["views"].as_array().cloned().unwrap_or_default();
     let views: Vec<&Value> = all_views.iter().filter(|v| v["sheet"].as_str() == Some(sheet_name.as_str())).collect();
@@ -265,7 +272,7 @@ pub(super) fn drawing_sheet(
     }
     // Cut-list tables: where the drawing puts them, else on the title block's top edge,
     // right-aligned, as the Desktop's sheet places a parts list.
-    let block_h = rows.len() as f64 * 7.0;
+    let block_h = floats(&data["title_layouts"][&sheet_name]["projection_cell"][1]).get(1).copied().unwrap_or(0.0);
     for table in doc["tables"].as_array().into_iter().flatten() {
         if table["sheet"].as_str() != Some(sheet_name.as_str()) || table["kind"]["table"] != "cut_list" {
             continue;

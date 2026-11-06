@@ -24,8 +24,10 @@ pub mod cut_list_table;
 pub mod flat_pattern;
 pub mod hole_table;
 pub mod index;
+pub mod logo;
 pub mod merge;
 pub mod revision_table;
+pub mod title_layout;
 
 use crate::assembly::bom::{Bom, BomItem, BomKind, IndentedRow};
 use crate::assembly::model::RelPath;
@@ -69,6 +71,12 @@ pub enum FieldSource {
     SheetNumber,
     SheetCount,
     Scale,
+    /// A logo: the outline of an SVG file, by path from the drawing's folder
+    /// (`{ source = image, file = "logo.svg" }`). The sheet and every export draw it in the
+    /// field's cell ([`title_layout`]).
+    Image {
+        file: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1018,6 +1026,7 @@ pub fn check_drawing_with(
                 FieldSource::SheetNumber => (i + 1).to_string(),
                 FieldSource::SheetCount => count.to_string(),
                 FieldSource::Scale => format!("{}:{}", sh.scale.0, sh.scale.1),
+                FieldSource::Image { .. } => String::new(),
                 FieldSource::Revision => model_of
                     .and_then(|m| model.property(m, &PropertyName::new("revision")))
                     .or_else(|| revision_table::latest(&doc.tables).map(str::to_owned))

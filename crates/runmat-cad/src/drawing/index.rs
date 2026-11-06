@@ -72,6 +72,10 @@ pub struct DrawingIndex {
     pub diagnostics: Vec<Diagnostic>,
     /// Sheet → title-block rows (label, text).
     pub title_blocks: BTreeMap<String, Vec<(String, String)>>,
+    /// Sheet → its title block as drawn ([`super::title_layout`]); logo cells are empty here and
+    /// filled by a compile that reads the logo files.
+    #[serde(default)]
+    pub title_layouts: BTreeMap<String, super::title_layout::TitleLayout>,
     /// Balloon id → item number as shown.
     pub balloons: BTreeMap<String, String>,
     /// BOM table name → its rows as the sheet draws them (cell text, item numbers, the
@@ -151,6 +155,7 @@ pub fn build_drawing_index(
         document: doc.clone(),
         diagnostics: report.diagnostics.diagnostics.clone(),
         title_blocks: report.title_blocks.clone(),
+        title_layouts: super::title_layout::sheet_layouts(doc, &report.title_blocks, |_, _| None),
         balloons: report.balloons.clone(),
         bom_tables: report.bom_tables.clone(),
         cut_list_tables: report.cut_list_tables.clone(),
