@@ -8,6 +8,15 @@ use super::{LinkerDriver, LinkerFamily};
 
 pub const NATIVE_LINK_PLAN_SCHEMA_VERSION: u16 = 3;
 
+// Match the CLI execution stack for nested native callbacks and async runtime
+// entry. Windows otherwise reserves only 1 MiB for the generated C main thread.
+// The linker reserves virtual address space; committed pages grow on demand.
+pub(super) const WINDOWS_STACK_RESERVE_BYTES: u64 = 64 * 1024 * 1024;
+
+pub(super) fn windows_stack_argument() -> String {
+    format!("/STACK:{WINDOWS_STACK_RESERVE_BYTES}")
+}
+
 /// Exact authored object and runtime bytes, independent of the shared pack
 /// selection/tool qualification. Different programs cannot share this record.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -155,6 +164,7 @@ pub fn build_link_plan(
             response_tokens.push(output.display().to_string());
         }
         LinkerFamily::Msvc => {
+            response_tokens.push(windows_stack_argument());
             response_tokens.push(object.display().to_string());
             if closed_world {
                 response_tokens.push(archive.display().to_string());
@@ -411,6 +421,18 @@ mod tests {
                 "program".as_ref(),
             )
             .unwrap();
+            assert_eq!(
+                plan.response_tokens
+                    .iter()
+                    .filter(|token| token.starts_with("/STACK:"))
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                if family == LinkerFamily::Msvc {
+                    vec!["/STACK:67108864"]
+                } else {
+                    Vec::new()
+                }
+            );
             assert!(plan
                 .response_tokens
                 .iter()
@@ -450,6 +472,10 @@ mod tests {
             "program.exe".as_ref(),
         )
         .unwrap();
+        assert!(plan
+            .response_tokens
+            .iter()
+            .any(|token| token == "/STACK:67108864"));
         assert!(plan
             .response_tokens
             .iter()

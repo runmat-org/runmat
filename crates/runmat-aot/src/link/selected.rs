@@ -100,7 +100,11 @@ fn plan(
                 NativeArchitecture::X86_64 => "X64",
                 NativeArchitecture::Aarch64 => "ARM64",
             };
-            tokens.extend([format!("/MACHINE:{machine}"), "/NODEFAULTLIB".into()]);
+            tokens.extend([
+                format!("/MACHINE:{machine}"),
+                "/NODEFAULTLIB".into(),
+                super::plan::windows_stack_argument(),
+            ]);
         }
     }
     tokens.push(inputs.object.display().to_string());
