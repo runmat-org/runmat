@@ -25,6 +25,7 @@
 //! Lengths are millimetres on the page (origin bottom left, y up); every list is sorted by
 //! placement, so identical designs give identical bytes.
 
+pub(crate) mod hand;
 mod pages;
 mod place;
 pub mod route;

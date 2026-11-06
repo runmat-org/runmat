@@ -69,6 +69,7 @@ pub(super) fn add(c: &mut Catalog) {
             offset("dx", "Delta X", 0.0).drag(Manipulator::Point),
             offset("dy", "Delta Y", 0.0),
             angle("rotation", "Rotation", 0.0),
+            flag("mirror", "Mirror", false),
             flag("drag_wires", "Keep wires attached", true),
         ])
         .when(selected(&[K::Component, K::Wire, K::Port, K::SheetSymbol]))
@@ -82,13 +83,37 @@ pub(super) fn add(c: &mut Catalog) {
         )
         .kw(&["component", "symbol", "place"])
         .inputs(vec![
-            text("part", "Part", Some("RC0603FR-0710KL")),
+            text("part", "Part", Some("R0402-10K")),
             text("designator", "Designator", Some("R?")),
-            text("value", "Value", Some("10 kOhm 1%")).optional(),
+            text("value", "Value", Some("10 kohm ± 1 %")).optional(),
+            pick("at", "Place at", &[K::Point]).optional(),
             angle("rotation", "Rotation", 0.0),
             flag("mirror", "Mirror", false),
         ])
         .preview()
+        .edit(place("component", Section::Components)),
+        sch(
+            "schematic.copy",
+            "Copy parts",
+            "copy",
+            "Copy the selected parts, to paste copies with their own designators.",
+        )
+        .kw(&["clipboard"])
+        .when(selected(&[K::Component]))
+        .on(&[K::Component])
+        .edit(view_action("copy_parts")),
+        sch(
+            "schematic.paste",
+            "Paste parts",
+            "copy",
+            "Paste copies of the copied parts under the next free designators.",
+        )
+        .kw(&["duplicate", "clipboard"])
+        .inputs(vec![
+            picks("items", "Parts", &[K::Component]).optional(),
+            offset("dx", "Delta X", 5.08).drag(Manipulator::Point),
+            offset("dy", "Delta Y", -5.08),
+        ])
         .edit(place("component", Section::Components)),
         sch(
             "schematic.place-wire",
@@ -100,6 +125,12 @@ pub(super) fn add(c: &mut Catalog) {
         .inputs(vec![
             point("from", "From"),
             point("to", "To"),
+            picks("path", "Corners", &[K::Point]).optional(),
+            choice(
+                "mode",
+                "Angle",
+                &[("ortho", "90°"), ("diagonal", "45°"), ("any", "Any angle")],
+            ),
             text("net", "Net", None).optional(),
         ])
         .preview()

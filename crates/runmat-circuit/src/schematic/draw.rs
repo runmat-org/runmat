@@ -74,6 +74,8 @@ pub(super) fn page(
         ..Default::default()
     };
     let mut terms: Vec<Term> = Vec::new();
+    // Each term's pin as the lock's `wire` records name it (units only).
+    let mut refs: Vec<Option<String>> = Vec::new();
     let mut walls = Walls {
         bodies: Vec::new(),
         pin_lines: Vec::new(),
@@ -100,6 +102,10 @@ pub(super) fn page(
                     .push((root, Point::new(tip.x - dx * GRID, tip.y - dy * GRID)));
             }
             side_terms.entry(side).or_default().push(terms.len());
+            refs.push(match cell.kind {
+                CellKind::Unit { comp, .. } => cell.pins.get(k).map(|&p| super::hand::pin_ref(&nl.components[comp], p)),
+                CellKind::Sheet { .. } => None,
+            });
             terms.push(Term {
                 net: cell.nets[k],
                 tip,
@@ -147,7 +153,25 @@ pub(super) fn page(
     if bbox[0] > bbox[2] {
         bbox = [0, -GRID, GRID, 0];
     }
-    let drawn = route::connect(&terms, infos, &walls, bbox);
+    // Hand-drawn wires apply on a page whose symbols the lock places (its frame is the lock's).
+    let hands: Vec<super::hand::Hand> = if centre {
+        Vec::new()
+    } else {
+        let find = |r: &str| refs.iter().position(|x| x.as_deref() == Some(r));
+        nl.sch_wires
+            .iter()
+            .filter(|(k, _)| k.sheet == sheet_name)
+            .filter_map(|(k, w)| {
+                Some(super::hand::Hand {
+                    a: find(&k.a)?,
+                    b: find(&k.b)?,
+                    mode: w.mode,
+                    points: w.points.iter().map(|&(x, y)| Point::new(x - MARGIN, MARGIN - y)).collect(),
+                })
+            })
+            .collect()
+    };
+    let drawn = route::connect(&terms, infos, &walls, bbox, &hands);
     for (n, pts) in &drawn.wires {
         page.wires.push(SchematicWire {
             net: nl.nets[*n].name.clone(),

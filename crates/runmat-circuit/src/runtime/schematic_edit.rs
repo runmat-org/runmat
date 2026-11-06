@@ -11,18 +11,20 @@
 //! - **Net label, power port, port** ([`wire`]): a name on a pin or wire names the net; a power
 //!   port joins a global rail; a port joins the sheet to its parent.
 //! - **Sheet symbol, sheet entry, repeat channel, no-ERC, directive, bus, harness** ([`sheet`]).
+//! - **Place part, paste** ([`part`]): a component and its place in the lock.
 //!
 //! Each edit replaces or inserts whole statements and keeps every other byte, comments
 //! included. The edited source is compiled before it's returned, so a wire that would join two
 //! differently named nets is refused with the compiler's message.
 
+mod part;
 mod sheet;
 mod wire;
 
-use super::edit::{EditError, EditOutput, EditRequest};
+use super::edit::{lock_change, EditError, EditOutput, EditRequest};
 use super::{file_change, load_with, Files, Project};
 use crate::elab::find_pins;
-use crate::ids::NamePath;
+use crate::ids::{NamePath, SchWire, WireKey, WireMode};
 use crate::ir::{Connection, Endpoint, SheetDef};
 use crate::syntax::board_edit::SourceChange;
 use crate::syntax::{connection_statement, endpoint, parse_circuit, words};
@@ -47,6 +49,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "schematic.directive",
     "schematic.place-bus",
     "schematic.place-harness",
+    "schematic.place-part",
+    "schematic.paste",
 ];
 
 pub(super) fn run(
@@ -54,6 +58,11 @@ pub(super) fn run(
     files: &Files,
     request: &EditRequest,
 ) -> Result<EditOutput, EditError> {
+    match request.command.as_str() {
+        "schematic.place-part" => return part::place_part(project, files, request),
+        "schematic.paste" => return part::paste(project, files, request),
+        _ => {}
+    }
     let mut e = Editor::new(project, request);
     let summary = match request.command.as_str() {
         "schematic.place-wire" => wire::place_wire(&mut e)?,
@@ -173,16 +182,41 @@ pub(super) enum End {
     Net(usize),
 }
 
+/// A hand-drawn wire's path to record: its two pins (as the lock names them), the waypoints in
+/// page millimetres (y up, as the canvas gives them, in order from `a`) and its mode.
+pub(super) struct WireRequest {
+    pub sheet: String,
+    pub a: String,
+    pub b: String,
+    pub points: Vec<(f64, f64)>,
+    pub mode: WireMode,
+}
+
 /// The edit under construction: the project, the request and the text edits so far.
 pub(super) struct Editor<'a> {
     pub project: &'a Project,
     pub request: &'a EditRequest,
     pub edits: Vec<TextEdit>,
+    /// A hand-drawn wire's path, recorded in the lock with the edit.
+    pub wire: Option<WireRequest>,
 }
 
 impl<'a> Editor<'a> {
     fn new(project: &'a Project, request: &'a EditRequest) -> Self {
-        Editor { project, request, edits: Vec::new() }
+        Editor { project, request, edits: Vec::new(), wire: None }
+    }
+
+    /// The clicked points in field `id` (`point:x,y`, page mm, y up), in order.
+    pub fn points(&self, id: &str) -> Vec<(f64, f64)> {
+        let one = |s: &str| -> Option<(f64, f64)> {
+            let (x, y) = s.strip_prefix("point:")?.split_once(',')?;
+            Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+        };
+        match self.request.values.get(id) {
+            Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().and_then(one)).collect(),
+            Some(Value::String(s)) => s.split(';').filter_map(|p| one(p.trim())).collect(),
+            _ => Vec::new(),
+        }
     }
 
     pub fn text(&self) -> &'a str {
@@ -415,11 +449,13 @@ impl<'a> Editor<'a> {
         endpoint(ep).map_err(|e| EditError::new(e.0))
     }
 
-    /// Applies the edits, checks the file compiles, and returns the change.
+    /// Applies the edits, checks the file compiles, and returns the change: the `.circuit`
+    /// file's, and the lock's when the edit records a hand-drawn wire or leaves a recorded one
+    /// without its connection (that record goes).
     fn finish(self, files: &Files, summary: String) -> Result<EditOutput, EditError> {
         let project = self.project;
         let path = &project.circuit_path;
-        if self.edits.is_empty() {
+        if self.edits.is_empty() && self.wire.is_none() {
             return Ok(EditOutput { files: Vec::new(), summary });
         }
         let source = apply_edits(&project.circuit_text, &self.edits).map_err(|e| EditError::new(format!("{e:?}")))?;
@@ -427,13 +463,49 @@ impl<'a> Editor<'a> {
         if let Some(d) = read.diagnostics.first() {
             return Err(EditError::new(format!("the edit would not read back: {}", d.message)));
         }
-        if let Err(diagnostics) = load_with(path, &source, files, &self.request.options, false) {
+        let next = load_with(path, &source, files, &self.request.options, false).map_err(|diagnostics| {
             let first = diagnostics.first().map(|d| d.message.clone()).unwrap_or_default();
-            return Err(EditError { message: format!("the edit wasn't made: {first}"), diagnostics });
+            EditError { message: format!("the edit wasn't made: {first}"), diagnostics }
+        })?;
+        let mut out = Vec::new();
+        if !self.edits.is_empty() {
+            out.push(file_change(path, &project.circuit_text, SourceChange { edits: self.edits, source, reprinted: false }));
         }
-        Ok(EditOutput {
-            summary,
-            files: vec![file_change(path, &project.circuit_text, SourceChange { edits: self.edits, source, reprinted: false })],
-        })
+        if let Some(lock) = hand_wires(&next, self.wire) {
+            out.extend(lock_change(&next, &lock, true));
+        }
+        Ok(EditOutput { summary, files: out })
     }
+}
+
+/// The lock with `wire` recorded and every hand-drawn wire whose pins left one net dropped,
+/// when either changes it. Recording a wire records every symbol's place too: the waypoints
+/// are in the frame the recorded places fix.
+fn hand_wires(next: &Project, wire: Option<WireRequest>) -> Option<crate::ids::LockSection> {
+    let mut lock = next.lock.clone();
+    let stale = crate::schematic::hand::stale(&next.netlist, &lock.wires);
+    for k in &stale {
+        lock.wires.remove(k);
+    }
+    let Some(w) = wire else {
+        return (!stale.is_empty()).then_some(lock);
+    };
+    let drawn = crate::schematic::layout(&next.netlist);
+    for (k, p) in crate::schematic::places(&drawn) {
+        lock.places.entry(k).or_insert(p);
+    }
+    let height = drawn.sheets.iter().find(|p| p.sheet == w.sheet && p.page == 1).map(|p| p.height_mm).unwrap_or(0.0);
+    let snap = |v: f64| (v / 1.27).round() * 1.27;
+    let mut points: Vec<(i64, i64)> = w
+        .points
+        .iter()
+        // The grid is the lock's: y counted down from the paper's top edge.
+        .map(|&(x, y)| ((snap(x) * 1.0e6).round() as i64, (snap(height - y) * 1.0e6).round() as i64))
+        .collect();
+    let key = WireKey::new(&w.sheet, &w.a, &w.b);
+    if key.a != w.a {
+        points.reverse();
+    }
+    lock.wires.insert(key, SchWire { mode: w.mode, points });
+    Some(lock)
 }

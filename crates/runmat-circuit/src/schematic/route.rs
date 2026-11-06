@@ -159,7 +159,7 @@ pub(super) struct Walls {
 }
 
 /// Connects a page's pins. `bbox` bounds everything placed.
-pub(super) fn connect(terms: &[Term], nets: &[NetInfo], walls: &Walls, bbox: [Coord; 4]) -> Drawn {
+pub(super) fn connect(terms: &[Term], nets: &[NetInfo], walls: &Walls, bbox: [Coord; 4], hands: &[super::hand::Hand]) -> Drawn {
     let mut g = Grid::new(bbox);
     for b in &walls.bodies {
         g.block(*b, 0);
@@ -195,6 +195,35 @@ pub(super) fn connect(terms: &[Term], nets: &[NetInfo], walls: &Walls, bbox: [Co
             }
         }
     }
+    // Hand-drawn wires first, as stored: their pins count as joined, and their straight runs
+    // are the net's wire on the grid (other nets cross them at right angles).
+    let mut group: Vec<usize> = (0..terms.len()).collect();
+    fn root(group: &mut [usize], k: usize) -> usize {
+        let mut r = k;
+        while group[r] != r {
+            r = group[r];
+        }
+        group[k] = r;
+        r
+    }
+    // Per net: each stored wire's first pin and its straight runs of grid cells.
+    let mut hand_cells: BTreeMap<usize, Vec<(usize, Vec<Vec<usize>>)>> = BTreeMap::new();
+    for h in hands {
+        let (ta, tb) = (&terms[h.a], &terms[h.b]);
+        let Some(n) = ta.net.filter(|n| tb.net == Some(*n)) else { continue };
+        let pts = super::hand::path((ta.tip, ta.side), &h.points, (tb.tip, tb.side), h.mode);
+        let runs = runs_of(&g, &pts);
+        for run in &runs {
+            mark_wire(&mut g, run, n);
+        }
+        hand_cells.entry(n).or_default().push((h.a, runs));
+        out.wires.push((n, pts));
+        let (ra, rb) = (root(&mut group, h.a), root(&mut group, h.b));
+        group[ra] = rb;
+    }
+    for k in 0..group.len() {
+        root(&mut group, k);
+    }
     let mut by_net: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     for (k, t) in terms.iter().enumerate() {
         if let Some(n) = t.net {
@@ -221,15 +250,19 @@ pub(super) fn connect(terms: &[Term], nets: &[NetInfo], walls: &Walls, bbox: [Co
     wired.sort();
     for (_, n) in wired {
         let ks = &by_net[&n];
-        match route_net(&g, terms, ks, n) {
+        let hand = hand_cells.get(&n).map(Vec::as_slice).unwrap_or(&[]);
+        match route_net(&g, terms, ks, n, &group, hand) {
             Some(paths) => {
                 commit(&mut g, &paths, n);
                 let mut deg: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
-                for path in &paths {
+                // The stored wires count toward junctions; they're drawn already.
+                for path in paths.iter().chain(hand.iter().flat_map(|(_, runs)| runs)) {
                     for w in path.windows(2) {
                         deg.entry(w[0]).or_default().insert(w[1]);
                         deg.entry(w[1]).or_default().insert(w[0]);
                     }
+                }
+                for path in &paths {
                     out.wires.push((n, corners(&g, path)));
                 }
                 for (cell, near) in deg {
@@ -314,7 +347,7 @@ fn corners(g: &Grid, path: &[usize]) -> Vec<Point> {
 
 /// Wires one net: each pin joins the tree, nearest first. `None` when a branch can't be found
 /// or would be long.
-fn route_net(g: &Grid, terms: &[Term], ks: &[usize], n: usize) -> Option<Vec<Vec<usize>>> {
+fn route_net(g: &Grid, terms: &[Term], ks: &[usize], n: usize, group: &[usize], hand: &[(usize, Vec<Vec<usize>>)]) -> Option<Vec<Vec<usize>>> {
     let mut order: Vec<usize> = ks.to_vec();
     order.sort_by_key(|k| (terms[*k].tip.x, Reverse(terms[*k].tip.y)));
     let first = order.remove(0);
@@ -323,6 +356,29 @@ fn route_net(g: &Grid, terms: &[Term], ks: &[usize], n: usize) -> Option<Vec<Vec
     tree.insert(start, 0);
     // A tip in the tree with no wire yet is entered only straight in.
     let mut bare: BTreeMap<usize, usize> = BTreeMap::from([(start, dir_of(terms[first].side))]);
+    // A pin joined by hand-drawn wires brings its whole group: the stored wires join the tree,
+    // and the group's other pins need no branch of their own.
+    let joins = |k: usize, order: &mut Vec<usize>, tree: &mut BTreeMap<usize, usize>, bare: &mut BTreeMap<usize, usize>| {
+        let mine: Vec<usize> = ks.iter().copied().filter(|&j| group[j] == group[k]).collect();
+        if mine.len() < 2 {
+            return;
+        }
+        order.retain(|j| !mine.contains(j));
+        for j in &mine {
+            if let Some(c) = g.at(terms[*j].tip) {
+                bare.remove(&c);
+            }
+        }
+        for (a, runs) in hand {
+            if mine.contains(a) {
+                for w in runs.iter().flat_map(|run| run.windows(2)) {
+                    *tree.entry(w[0]).or_default() += 1;
+                    *tree.entry(w[1]).or_default() += 1;
+                }
+            }
+        }
+    };
+    joins(first, &mut order, &mut tree, &mut bare);
     let mut paths = Vec::new();
     while !order.is_empty() {
         let bb = tree.keys().fold([Coord::MAX, Coord::MAX, Coord::MIN, Coord::MIN], |b, &c| {
@@ -344,8 +400,39 @@ fn route_net(g: &Grid, terms: &[Term], ks: &[usize], n: usize) -> Option<Vec<Vec
         }
         bare.remove(path.last().unwrap());
         paths.push(path);
+        joins(k, &mut order, &mut tree, &mut bare);
     }
     Some(paths)
+}
+
+/// The grid cells along a polyline's straight runs: one list per run of across and up or down
+/// segments, in order (a diagonal segment ends a run and has no cells).
+fn runs_of(g: &Grid, pts: &[Point]) -> Vec<Vec<usize>> {
+    let mut runs: Vec<Vec<usize>> = Vec::new();
+    let mut out: Vec<usize> = Vec::new();
+    for w in pts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        if a.x != b.x && a.y != b.y {
+            if out.len() > 1 {
+                runs.push(std::mem::take(&mut out));
+            }
+            out.clear();
+            continue;
+        }
+        let steps = ((b.x - a.x).abs() + (b.y - a.y).abs()) / GRID;
+        let (sx, sy) = ((b.x - a.x).signum() * GRID, (b.y - a.y).signum() * GRID);
+        for k in 0..=steps {
+            if let Some(c) = g.at(Point::new(a.x + sx * k, a.y + sy * k)) {
+                if out.last() != Some(&c) {
+                    out.push(c);
+                }
+            }
+        }
+    }
+    if out.len() > 1 {
+        runs.push(out);
+    }
+    runs
 }
 
 /// A* from a pin tip (first step straight out) to any cell of the tree.

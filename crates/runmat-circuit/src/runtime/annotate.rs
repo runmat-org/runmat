@@ -114,7 +114,8 @@ fn number(designator: &str) -> u64 {
 
 /// `schematic.move`: `items` (or the selection) as the schematic canvas names them
 /// (`component:U1`, `sheet:/ch[0]`), moved by `dx`, `dy` (mm, y up) and turned by `rotation`
-/// (degrees, in quarter turns; two-pin parts and holes only).
+/// (degrees, in quarter turns; two-pin parts and holes only); `mirror` flips each symbol left
+/// to right (its pins swap sides).
 pub(super) fn move_items(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
     let values = &request.values;
     let mut ids: Vec<String> = match values.get("items") {
@@ -131,9 +132,12 @@ pub(super) fn move_items(project: &Project, request: &EditRequest) -> Result<Edi
     let num = |k: &str| values.get(k).and_then(Value::as_f64).unwrap_or(0.0);
     let (dx, dy) = ((num("dx") * 1.0e6).round() as i64, (num("dy") * 1.0e6).round() as i64);
     let turn = ((num("rotation") / 90.0).round() as i64).rem_euclid(4) as u16 * 90;
+    let mirror = matches!(values.get("mirror"), Some(Value::Bool(true)));
     let drawn = crate::schematic::layout(&project.netlist);
     let mut places = crate::schematic::places(&drawn);
     let mut keys: BTreeMap<String, bool> = BTreeMap::new();
+    // A sheet symbol is a box with its entries on its sides; it doesn't mirror.
+    let mut sheet_symbols = std::collections::BTreeSet::new();
     for page in &drawn.sheets {
         for s in &page.symbols {
             if ids.iter().any(|id| *id == format!("component:{}", s.designator)) {
@@ -142,6 +146,7 @@ pub(super) fn move_items(project: &Project, request: &EditRequest) -> Result<Edi
         }
         for s in &page.sheet_symbols {
             if ids.iter().any(|id| *id == format!("sheet:{}", s.path)) {
+                sheet_symbols.insert(s.key.clone());
                 keys.insert(s.key.clone(), false);
             }
         }
@@ -157,6 +162,9 @@ pub(super) fn move_items(project: &Project, request: &EditRequest) -> Result<Edi
             p.y = snap(p.y - dy);
             if *turns {
                 p.rotation = (p.rotation + turn) % 360;
+            }
+            if mirror && !sheet_symbols.contains(key) {
+                p.mirror = !p.mirror;
             }
         }
     }

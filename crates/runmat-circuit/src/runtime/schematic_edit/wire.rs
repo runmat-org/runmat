@@ -2,7 +2,8 @@
 //! writing its sheet's `connect` statements.
 
 use super::{Editor, End};
-use crate::ids::NamePath;
+use crate::ids::{NamePath, WireMode};
+use crate::schematic::hand::pin_ref;
 use crate::ir::{Endpoint, NetDecl, Param, ParamValue, PortDecl, PortDir, PortKind, SheetDef};
 use crate::syntax::{net_statement, port_statement};
 use super::super::edit::EditError;
@@ -145,8 +146,26 @@ pub(super) fn place_wire(e: &mut Editor) -> Result<String, EditError> {
         return Err(EditError::new("a wire joins two different pins"));
     }
     let at = place(e, &[&a, &b])?;
+    // A wire drawn by hand between two pins keeps its path: its waypoints go in the lock.
+    if let (End::Pin { comp: ca, pin: pa }, End::Pin { comp: cb, pin: pb }) = (&a, &b) {
+        let points = e.points("path");
+        if !points.is_empty() {
+            let nl = &e.project.netlist;
+            let mode = e.value_str("mode").and_then(|m| WireMode::from_word(&m)).unwrap_or_default();
+            e.wire = Some(super::WireRequest {
+                sheet: at.sheet.name.clone(),
+                a: pin_ref(&nl.components[*ca], *pa),
+                b: pin_ref(&nl.components[*cb], *pb),
+                points,
+                mode,
+            });
+        }
+    }
     let (na, nb) = (e.net_of(&a), e.net_of(&b));
     if na.is_some() && na == nb {
+        if e.wire.is_some() {
+            return Ok(format!("Drew the wire from {} to {} by hand", describe(e, &a), describe(e, &b)));
+        }
         return Ok(format!("{} and {} are already on {}", describe(e, &a), describe(e, &b), net_name(e, &a)));
     }
     // Two named nets don't join by a wire: the drawing would carry two names for one net.

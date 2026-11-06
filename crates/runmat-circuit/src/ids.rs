@@ -274,11 +274,70 @@ impl Default for SchPlace {
     }
 }
 
+/// How a hand-drawn wire's segments run between its waypoints: across and up or down
+/// (`ortho`), also at 45° (`diagonal`), or straight from point to point at any angle (`any`).
+/// When a pin moves, the segment from the pin to the first waypoint keeps to the wire's mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum WireMode {
+    #[default]
+    Orthogonal,
+    Diagonal,
+    Any,
+}
+
+impl WireMode {
+    pub fn word(self) -> &'static str {
+        match self {
+            WireMode::Orthogonal => "ortho",
+            WireMode::Diagonal => "diagonal",
+            WireMode::Any => "any",
+        }
+    }
+
+    pub fn from_word(w: &str) -> Option<WireMode> {
+        match w {
+            "ortho" => Some(WireMode::Orthogonal),
+            "diagonal" => Some(WireMode::Diagonal),
+            "any" => Some(WireMode::Any),
+            _ => None,
+        }
+    }
+}
+
+/// A hand-drawn schematic wire between two pins of one sheet definition (`U1.VIN`, `C1.1`;
+/// the pin as the sheet's `connect` statements name it, `a` before `b`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct WireKey {
+    pub sheet: String,
+    pub a: String,
+    pub b: String,
+}
+
+impl WireKey {
+    /// The key with its ends in order.
+    pub fn new(sheet: &str, a: &str, b: &str) -> WireKey {
+        let (a, b) = if a <= b { (a, b) } else { (b, a) };
+        WireKey { sheet: sheet.to_owned(), a: a.to_owned(), b: b.to_owned() }
+    }
+}
+
+/// A hand-drawn wire's path: its waypoints between the two pins (paper nm, y down, as
+/// [`SchPlace`] counts) in order from `a` to `b`, and its drawing mode. The pins' tips are the
+/// ends, so a moved part keeps the waypoints and its end segment follows the pin.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SchWire {
+    pub mode: WireMode,
+    pub points: Vec<(i64, i64)>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LockSection {
     pub entries: BTreeMap<NamePath, LockEntry>,
     /// Schematic places by key (`place` records).
     pub places: BTreeMap<String, SchPlace>,
+    /// Hand-drawn schematic wires (`wire` records): the router draws these as stored and
+    /// routes the rest.
+    pub wires: BTreeMap<WireKey, SchWire>,
     /// Rename history: old path → new path. Followed transitively by `reconcile`.
     pub aliases: BTreeMap<NamePath, NamePath>,
     /// Fingerprints recorded at the last reconcile, for inferred renames.
@@ -510,6 +569,13 @@ impl LockSection {
             }
             s.push('\n');
         }
+        for (k, w) in &self.wires {
+            s.push_str(&format!("wire {} {} {} {}", k.sheet, k.a, k.b, w.mode.word()));
+            for (x, y) in &w.points {
+                s.push_str(&format!(" {},{}", mm(*x), mm(*y)));
+            }
+            s.push('\n');
+        }
         s
     }
 
@@ -578,6 +644,19 @@ impl LockSection {
                             page,
                         },
                     );
+                }
+                Some("wire") => {
+                    let bad = || format!("line {}: bad wire", n + 1);
+                    let (sheet, a, b) = (parts.next().ok_or_else(bad)?, parts.next().ok_or_else(bad)?, parts.next().ok_or_else(bad)?);
+                    let mode = parts.next().and_then(WireMode::from_word).ok_or_else(bad)?;
+                    let points = parts
+                        .map(|p| {
+                            let (x, y) = p.split_once(',').ok_or_else(bad)?;
+                            let v = |t: &str| t.parse::<f64>().map(|v| (v * 1.0e6).round() as i64).map_err(|_| bad());
+                            Ok((v(x)?, v(y)?))
+                        })
+                        .collect::<Result<Vec<_>, String>>()?;
+                    l.wires.insert(WireKey::new(sheet, a, b), SchWire { mode, points });
                 }
                 Some(other) => return Err(format!("line {}: unknown record `{other}`", n + 1)),
                 None => {}
@@ -703,5 +782,13 @@ mod tests {
         assert_eq!(l.to_text(), text);
         assert!(LockSection::from_text("place main/U1:B 1 2 0 page=x").is_err());
         assert!(LockSection::from_text("place main/U1:B 1 2 0 sideways").is_err());
+        // A hand-drawn wire: its sheet, two pins in order, mode and waypoints.
+        let text = "wire main C1.1 U1.VIN diagonal 10.16,20.32 12.7,22.86\n";
+        let lock = LockSection::from_text(text).unwrap();
+        let w = &lock.wires[&WireKey::new("main", "U1.VIN", "C1.1")];
+        assert_eq!((w.mode, w.points.clone()), (WireMode::Diagonal, vec![(10_160_000, 20_320_000), (12_700_000, 22_860_000)]));
+        assert_eq!(lock.to_text(), text);
+        assert!(LockSection::from_text("wire main C1.1 U1.VIN curvy").is_err());
+        assert!(LockSection::from_text("wire main C1.1 U1.VIN ortho 1;2").is_err());
     }
 }
