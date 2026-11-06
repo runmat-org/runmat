@@ -9,7 +9,7 @@
 //! do not fail it.
 
 use crate::{kind_of, text_of, Files, ToolError};
-use runmat_circuit::runtime::{compile, CompileOptions};
+use runmat_circuit::runtime::compile;
 use serde::Serialize;
 
 /// One finding of a check.
@@ -62,7 +62,7 @@ pub fn check_circuit(path: &str, files: &Files, simulate: bool) -> Result<Circui
         )));
     }
     let text = text_of(files, path)?;
-    let out = compile(path, text, files, &CompileOptions::default());
+    let out = compile(path, text, files, &crate::circuit_values::circuit_options(path, text, files));
     let mut findings: Vec<Finding> = out
         .diagnostics
         .iter()

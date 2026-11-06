@@ -482,7 +482,7 @@ fn drawing(s: &mut Sections, path: &str, text: &str, files: &Files) {
 }
 
 fn circuit(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(), ToolError> {
-    let out = runmat_circuit::runtime::compile(path, text, files, &Default::default());
+    let out = runmat_circuit::runtime::compile(path, text, files, &crate::circuit_values::circuit_options(path, text, files));
     let Some(index) = out.index else {
         return Err(ToolError::new(
             "not_compiled",

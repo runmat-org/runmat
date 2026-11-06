@@ -76,7 +76,7 @@ fn check(args: &[String]) -> ExitCode {
         };
         let base = root.clone().and_then(|r| std::fs::canonicalize(r).ok()).unwrap_or_else(|| file.parent().unwrap_or(Path::new("/")).to_path_buf());
         let files = runmat_design_tools::workspace::read_workspace(&base);
-        match runmat_design_tools::ci::check_circuit(&file.to_string_lossy(), &files, simulate) {
+        match runmat_design_tools::circuit_values::with_native_values(&files, || runmat_design_tools::ci::check_circuit(&file.to_string_lossy(), &files, simulate)) {
             Ok(r) => {
                 failed |= !r.passed;
                 if !json_out {
@@ -205,7 +205,7 @@ fn main() -> ExitCode {
         fab.insert("remember".into(), Value::Bool(remember));
         input["fabrication"] = Value::Object(fab);
     }
-    let result: Value = match call("design.export", input, &files) {
+    let result: Value = match runmat_design_tools::circuit_values::with_native_values(&files, || call("design.export", input, &files)) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("{e}");

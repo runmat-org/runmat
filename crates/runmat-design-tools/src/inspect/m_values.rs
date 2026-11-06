@@ -64,11 +64,18 @@ fn numbers(value: Option<&Value>) -> Result<Vec<f64>, String> {
     }
 }
 
-/// [`call`] with `.m` design values served from `files` by a [`SessionRunner`].
-pub fn call_with_m_values(tool: &str, input: Json, files: &Files) -> Result<Json, ToolError> {
+/// Runs `f` with `.m` design values served from `files` by a [`SessionRunner`]: parts regenerate
+/// with their computed values, and circuits compile with theirs
+/// ([`crate::circuit_values::circuit_options`]).
+pub fn with_m_values<R>(files: &Files, f: impl FnOnce() -> R) -> R {
     let host = ValueHost {
         files: files.clone(),
         runner: Box::new(SessionRunner),
     };
-    with_value_host(host, || call(tool, input, files))
+    with_value_host(host, f)
+}
+
+/// [`call`] with `.m` design values served from `files` by a [`SessionRunner`].
+pub fn call_with_m_values(tool: &str, input: Json, files: &Files) -> Result<Json, ToolError> {
+    with_m_values(files, || call(tool, input, files))
 }

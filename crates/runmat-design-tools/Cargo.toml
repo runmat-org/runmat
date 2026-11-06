@@ -36,7 +36,9 @@ runmat-value = { workspace = true, optional = true }
 futures = { version = "0.3", optional = true }
 
 [features]
-default = []
+# The command line and the MCP tools run `.m` design values (parts and circuits) in a RunMat
+# session by default; the language server opts out (default-features = false).
+default = ["m-values"]
 # `design.render` through the Desktop's renderer (runmat-plot on wgpu, headless), with its
 # overlay: without `egui-overlay` a 2D figure exports with no axes, ticks, labels, title or legend.
 render = ["dep:runmat-plot", "runmat-plot/egui-overlay", "dep:pollster", "dep:glam"]

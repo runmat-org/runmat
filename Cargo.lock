@@ -8229,6 +8229,7 @@ name = "runmat-design-tools"
 version = "0.6.2"
 dependencies = [
  "base64 0.22.1",
+ "futures",
  "glam",
  "hex",
  "miniz_oxide",
@@ -8238,11 +8239,13 @@ dependencies = [
  "runmat-circuit",
  "runmat-circuit-sim",
  "runmat-circuit-spice",
+ "runmat-core",
  "runmat-design-commands",
  "runmat-design-syntax",
  "runmat-geometry-io",
  "runmat-plot",
  "runmat-rules",
+ "runmat-value",
  "schemars",
  "serde",
  "serde_json",

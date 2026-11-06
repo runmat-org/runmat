@@ -61,3 +61,73 @@ fn the_disc_cam_regenerates_from_its_motion_law() {
     }
     assert!(volumes[1] > volumes[0]);
 }
+
+/// The io circuit with one component's value from `rcResistor.m` (PCB-38).
+fn circuit_files() -> Files {
+    const CALL: &str = "rcResistor(fc = 160 Hz, c = 100 nF) as ohm";
+    let projects = concat!(env!("CARGO_MANIFEST_DIR"), "/../runmat-circuit/tests/projects/io");
+    let read = |name: &str| std::fs::read_to_string(format!("{projects}/{name}")).expect(name);
+    let circuit = read("io.circuit").replacen(
+        "component RS = { part = \"R0402-10K\" }",
+        &format!("component RS = {{ part = \"R0402-10K\", value = {CALL} }}"),
+        1,
+    );
+    assert!(circuit.contains(CALL), "the fixture has component RS");
+    [
+        ("io.circuit", circuit),
+        ("io.circuit.layout", read("io.circuit.layout")),
+        ("io.circuit.lock", read("io.circuit.lock")),
+        ("rcResistor.m", "function r = rcResistor(fc, c)\n    r = 1 / (2 * pi * fc * c);\nend\n".to_owned()),
+    ]
+    .into_iter()
+    .map(|(p, t)| (format!("/p/{p}"), t))
+    .collect()
+}
+
+#[test]
+fn the_circuit_checks_run_a_components_m_value_natively() {
+    use runmat_circuit::runtime::values::PENDING_VALUES;
+    use runmat_design_tools::ci::check_circuit;
+    use runmat_design_tools::circuit_values::circuit_options;
+    use runmat_design_tools::inspect::m_values::with_m_values;
+    use runmat_design_syntax::m_calls::TableResult;
+    let files = circuit_files();
+    let pending = |c: &runmat_design_tools::ci::CircuitCheck| c.findings.iter().any(|f| f.message.contains(PENDING_VALUES));
+    // Without a runtime the value waits for one.
+    let bare = check_circuit("/p/io.circuit", &files, false).expect("check");
+    assert!(pending(&bare), "{:?}", bare.findings);
+    // With one, the call runs and the checks see the value.
+    let ran = with_m_values(&files, || check_circuit("/p/io.circuit", &files, false)).expect("check");
+    assert!(!pending(&ran), "{:?}", ran.findings);
+    assert!(ran.findings.iter().all(|f| f.check != "compile" || f.severity != "error"), "{:?}", ran.findings);
+    let options = with_m_values(&files, || circuit_options("/p/io.circuit", &files["/p/io.circuit"], &files));
+    let r = 1.0 / (2.0 * std::f64::consts::PI * 160.0 * 100e-9);
+    let values: Vec<&TableResult> = options.values.values().collect();
+    assert_eq!(values.len(), 1);
+    match values[0] {
+        TableResult::Values(v) => assert!((v[0] - r).abs() < 1e-6 * r, "{v:?}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// `runmat-design check` on a circuit whose component value calls `.m` code: the call runs,
+/// so the check goes on past the compile (ERC and design review run) with no value waiting.
+#[test]
+fn runmat_design_check_runs_a_circuits_m_values() {
+    let dir = std::env::temp_dir().join(format!("runmat-design-circuit-m-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (path, text) in circuit_files() {
+        std::fs::write(dir.join(path.trim_start_matches("/p/")), text).unwrap();
+    }
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_runmat-design"))
+        .args(["check", "--json", "--no-simulate"])
+        .arg(dir.join("io.circuit"))
+        .output()
+        .unwrap();
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert!(!report.contains(runmat_circuit::runtime::values::PENDING_VALUES), "{report}");
+    let reports: serde_json::Value = serde_json::from_str(&report).unwrap_or_else(|e| panic!("{e}: {report}"));
+    let ran = reports[0]["ran"].as_array().cloned().unwrap_or_default();
+    assert!(ran.iter().any(|r| r == "erc"), "the checks past the compile ran: {ran:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

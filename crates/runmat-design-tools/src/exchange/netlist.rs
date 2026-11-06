@@ -23,7 +23,7 @@ pub fn netlist(
     stem: &str,
     notes: &mut Vec<String>,
 ) -> Result<Vec<ExportedFile>, ToolError> {
-    let options = runmat_circuit::runtime::CompileOptions::default();
+    let options = crate::circuit_values::circuit_options(path, text, files);
     if format == ExportFormat::Ipc356 {
         let request = runmat_circuit::fab::set::FabRequest {
             gerber: false,

@@ -2,7 +2,7 @@
 //! returns the probed waveforms, the measurements and the measured operations.
 
 use crate::{kind_of, text_of, Files, ToolError};
-use runmat_circuit::runtime::{design_and_pool, CompileOptions};
+use runmat_circuit::runtime::design_and_pool;
 use runmat_circuit_spice::{report, study};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -36,7 +36,7 @@ pub fn simulate(input: &SimulateInput, files: &Files) -> Result<SimulateOutput, 
         return Err(ToolError::invalid(format!("design.simulate runs on a .circuit; {} is a {kind:?} file", input.path)));
     }
     let text = text_of(files, &input.path)?;
-    let (design, pool) = design_and_pool(&input.path, text, files, &CompileOptions::default()).map_err(|d| {
+    let (design, pool) = design_and_pool(&input.path, text, files, &crate::circuit_values::circuit_options(&input.path, text, files)).map_err(|d| {
         ToolError::new("design_invalid", d.iter().map(|x| x.message.clone()).collect::<Vec<_>>().join("; "))
     })?;
     let name = match &input.simulation {

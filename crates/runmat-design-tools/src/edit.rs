@@ -387,7 +387,7 @@ fn circuit_rows(path: &str, files: &Files) -> Vec<Value> {
     let Some(text) = files.get(path) else {
         return Vec::new();
     };
-    let out = runmat_circuit::runtime::compile(path, text, files, &Default::default());
+    let out = runmat_circuit::runtime::compile(path, text, files, &crate::circuit_values::circuit_options(path, text, files));
     out.index
         .map(|i| {
             i.eco

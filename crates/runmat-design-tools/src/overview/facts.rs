@@ -304,7 +304,7 @@ fn board(path: &str, files: &Files, out: &mut Vec<Fact>, ran: &mut Ran) -> bool 
 /// The design's `simulation` sections and what each probes, from the circuit compiler.
 fn simulations(path: &str, files: &Files, out: &mut Vec<Fact>, ran: &mut Ran) {
     let Some(text) = files.get(path) else { return };
-    let compiled = runmat_circuit::runtime::compile(path, text, files, &Default::default());
+    let compiled = runmat_circuit::runtime::compile(path, text, files, &crate::circuit_values::circuit_options(path, text, files));
     let Some(index) = compiled.index else { return };
     ran.note("circuit.simulations");
     let value = if index.simulations.is_empty() {

@@ -37,6 +37,28 @@ pub fn with_value_host<R>(host: ValueHost, f: impl FnOnce() -> R) -> R {
     f()
 }
 
+/// Runs `calls` through the thread's host runner: each call's result (or the error it raised)
+/// by its key, for a compile that lists its calls instead of running them (a circuit's
+/// `pending_values`). `None` without a host.
+pub fn run_calls(
+    calls: &[runmat_design_syntax::m_calls::PendingCall],
+) -> Option<BTreeMap<String, runmat_design_syntax::m_calls::TableResult>> {
+    use runmat_design_syntax::m_calls::TableResult;
+    let host = HOST.with(|h| h.borrow().clone())?;
+    Some(
+        calls
+            .iter()
+            .map(|call| {
+                let result = match host.runner.call(&call.sources, &call.function, &call.arguments) {
+                    Ok(values) => TableResult::Values(values),
+                    Err(error) => TableResult::Error { error },
+                };
+                (call.key.clone(), result)
+            })
+            .collect(),
+    )
+}
+
 /// The evaluator for the document at `path`: `.m` calls through the thread's host, if any.
 pub(crate) fn with_evaluator<R>(path: &str, f: impl FnOnce(&dyn DynamicValueEvaluator) -> R) -> R {
     match HOST.with(|h| h.borrow().clone()) {

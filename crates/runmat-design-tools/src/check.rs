@@ -415,7 +415,7 @@ fn check_drawing(path: &str, text: &str, files: &Files, out: &mut CheckOutput) {
 }
 
 fn check_circuit(path: &str, text: &str, files: &Files, out: &mut CheckOutput) {
-    let result = runmat_circuit::runtime::check(path, text, files, &Default::default());
+    let result = runmat_circuit::runtime::check(path, text, files, &crate::circuit_values::circuit_options(path, text, files));
     for d in &result.diagnostics {
         let file_text = if d.path == path {
             text
