@@ -37,6 +37,30 @@ impl Span {
     }
 }
 
+/// Every footprint's drilled hole (round or slotted) with whether it is plated. Footprint holes
+/// run through the board; vias are not included.
+pub fn footprint_holes(board: &Board) -> Vec<(bool, Hole)> {
+    let n = board.copper_count();
+    let mut out = Vec::new();
+    for f in board.footprints.values() {
+        let t = f.transform();
+        for (pd, pp) in f.package.pads.iter().zip(f.pads(n)) {
+            let Some(d) = &pd.drill else { continue };
+            let slot = d.slot.map(|len| {
+                let half = (len - d.diameter).max(0) / 2;
+                let local = crate::geom::Transform::new(pd.at, pd.rotation, false);
+                let tt = t.compose(&local);
+                (
+                    tt.apply(Point::new(-half, 0)),
+                    tt.apply(Point::new(half, 0)),
+                )
+            });
+            out.push((d.plated, Hole { at: pp.center, dia: d.diameter, slot }));
+        }
+    }
+    out
+}
+
 /// Every hole of the board by span, sorted by diameter then position.
 pub fn holes(board: &Board) -> BTreeMap<Span, Vec<Hole>> {
     let n = board.copper_count();
@@ -53,30 +77,13 @@ pub fn holes(board: &Board) -> BTreeMap<Span, Vec<Hole>> {
             slot: None,
         });
     }
-    for f in board.footprints.values() {
-        let t = f.transform();
-        for (pd, pp) in f.package.pads.iter().zip(f.pads(n)) {
-            let Some(d) = &pd.drill else { continue };
-            let slot = d.slot.map(|len| {
-                let half = (len - d.diameter).max(0) / 2;
-                let local = crate::geom::Transform::new(pd.at, pd.rotation, false);
-                let tt = t.compose(&local);
-                (
-                    tt.apply(Point::new(-half, 0)),
-                    tt.apply(Point::new(half, 0)),
-                )
-            });
-            let span = Span {
-                from: 0,
-                to: n - 1,
-                plated: d.plated,
-            };
-            spans.entry(span).or_default().push(Hole {
-                at: pp.center,
-                dia: d.diameter,
-                slot,
-            });
-        }
+    for (plated, hole) in footprint_holes(board) {
+        let span = Span {
+            from: 0,
+            to: n - 1,
+            plated,
+        };
+        spans.entry(span).or_default().push(hole);
     }
     for hs in spans.values_mut() {
         hs.sort_by_key(|h| (h.dia, h.at));

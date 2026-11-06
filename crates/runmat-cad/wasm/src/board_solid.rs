@@ -1,6 +1,6 @@
 //! A circuit board as an exact solid, so interference and clearance checks in an assembly
-//! treat it as they treat a part: the outline (with its cut-outs) extruded to the board's
-//! thickness, joined with each fitted component's body as a prism of its outline and height
+//! treat it as they treat a part: the outline (with its cut-outs and drilled holes) extruded to
+//! the board's thickness, joined with each fitted component's body as a prism of its outline and height
 //! (`runmat_circuit::board3d::board_solid`). Copper, mask and silkscreen are surface art and
 //! add no volume. The solid is in the board's 3D frame, in metres, z = 0 at the bottom face.
 
@@ -56,10 +56,22 @@ pub(crate) fn board_body(file: &str, files: &Files) -> Result<BoardBody, String>
     let session = crate::board::compiled_board(file, files)?;
     let solid = session.board_solid().ok_or("no board")?;
     let kernel = crate::kernel::make();
-    let loops = solid.outline.iter().enumerate().map(|(i, r)| ring_loop(r, &format!("outline{i}"))).collect();
+    let outline: Vec<Vec<ProfileSegment>> =
+        solid.outline.iter().enumerate().map(|(i, r)| ring_loop(r, &format!("outline{i}"))).collect();
+    let mut loops = outline.clone();
+    loops.extend(solid.holes.iter().enumerate().map(|(i, r)| ring_loop(r, &format!("hole{i}"))));
     let thickness = solid.thickness * 1e-3;
-    let mut body = prism(kernel.as_ref(), loops, 0.0, thickness, Combine::New, &[])
-        .map_err(|e| format!("the board outline doesn't extrude: {e}"))?;
+    let mut problems = Vec::new();
+    // Holes are inner loops of the one outline profile: a single extrusion, no boolean per hole.
+    let mut body = match prism(kernel.as_ref(), loops, 0.0, thickness, Combine::New, &[]) {
+        Ok(b) => b,
+        Err(e) if !solid.holes.is_empty() => {
+            problems.push(format!("the board's {} drilled holes don't cut: {e}", solid.holes.len()));
+            prism(kernel.as_ref(), outline, 0.0, thickness, Combine::New, &[])
+                .map_err(|e| format!("the board outline doesn't extrude: {e}"))?
+        }
+        Err(e) => return Err(format!("the board outline doesn't extrude: {e}")),
+    };
     let mut min = [f64::INFINITY; 3];
     let mut max = [f64::NEG_INFINITY; 3];
     let mut grow = |x: f64, y: f64, z: f64| {
@@ -72,7 +84,6 @@ pub(crate) fn board_body(file: &str, files: &Files) -> Result<BoardBody, String>
         grow(x * 1e-3, y * 1e-3, 0.0);
         grow(x * 1e-3, y * 1e-3, thickness);
     }
-    let mut problems = Vec::new();
     for b in &solid.bodies {
         // From the board face it sits on, so the body joins the board as one solid.
         let (z0, z1) = if b.z0 >= solid.thickness { (thickness, b.z1 * 1e-3) } else { (b.z0 * 1e-3, 0.0) };

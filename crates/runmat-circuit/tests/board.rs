@@ -789,3 +789,38 @@ fn an_impedance_target_is_checked_against_the_stackup() {
     assert!(f.message.contains("F.Cu at 0.150 mm") && f.message.contains("gives 50 Ω"), "{}", f.message);
     assert_eq!(drc.impedance_targets.get("RF"), Some(&50.0));
 }
+
+/// The board solid has its footprints' drilled holes as inner loops: a round non-plated
+/// mounting hole and a plated slot (its stadium, the slot's length along the turned pad). A hole
+/// that breaks the board edge and one overlapping a kept hole are left out; vias stay solid.
+#[test]
+fn the_board_solid_is_drilled_with_its_footprint_holes_and_slots() {
+    use runmat_circuit::library::{Drill, PadDef, PadShape};
+    let mut b = small_board();
+    let mut p = footprint::from_string("R0603").unwrap();
+    p.name = "holes".into();
+    p.smd = false;
+    let mut slot = PadDef::tht("S", Point::mm(0.0, 0.0), PadShape::Oval { w: mm(2.4), h: mm(1.4) }, mm(0.8));
+    slot.drill = Some(Drill { diameter: mm(0.8), slot: Some(mm(1.8)), plated: true });
+    p.pads = vec![
+        PadDef::npth("MH", Point::mm(-5.0, 0.0), mm(3.2)),
+        slot,
+        // Overlaps MH.
+        PadDef::npth("X", Point::mm(-4.0, 0.0), mm(1.0)),
+        // Breaks the board's left edge (x = 0) when placed at x = 10.
+        PadDef::npth("E", Point::mm(-10.0, 0.0), mm(1.0)),
+    ];
+    b.place("H1", p, Point::mm(10.0, 15.0), 0.0, Side::Top);
+    b.add_via(None, Point::mm(30.0, 15.0), mm(0.6), mm(0.3));
+    let solid = runmat_circuit::board3d::board_solid(&b);
+    assert_eq!(solid.holes.len(), 2, "{:?}", solid.holes);
+    let span = |r: &[(f64, f64)], k: usize| {
+        let v: Vec<f64> = r.iter().map(|p| if k == 0 { p.0 } else { p.1 }).collect();
+        (v.iter().cloned().fold(f64::INFINITY, f64::min), v.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+    };
+    let (mh, sl) = (&solid.holes[0], &solid.holes[1]);
+    let (x0, x1) = span(mh, 0);
+    assert!((x0 - 3.4).abs() < 0.05 && (x1 - 6.6).abs() < 0.05, "MH spans {x0}..{x1}");
+    let ((sx0, sx1), (sy0, sy1)) = (span(sl, 0), span(sl, 1));
+    assert!((sx1 - sx0 - 1.8).abs() < 0.05 && (sy1 - sy0 - 0.8).abs() < 0.05, "slot {sx0}..{sx1} × {sy0}..{sy1}");
+}
