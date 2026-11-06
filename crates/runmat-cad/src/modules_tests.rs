@@ -231,3 +231,24 @@ fn a_replacement_names_its_design_by_symbol() {
     let again = parse_assembly_in("/p/cabin/cabin.assembly", &printed, &scope);
     assert_eq!(again.document.unwrap().occurrences, doc.occurrences, "{printed}");
 }
+
+/// The sandbox puts a launched project at the workspace root (`/cabin/cabin.assembly`,
+/// `/skeleton.part`): the root is the folder `/`, and the dependencies a host lists are
+/// absolute.
+#[test]
+fn a_project_at_the_workspace_root_resolves_and_lists_absolute_folders() {
+    let at_root = |p: &str| p.strip_prefix("/p").unwrap().to_string();
+    let mut all: Vec<(String, String)> = files().into_iter().map(|(p, t)| (at_root(&p), t)).collect();
+    all.push(("/cabin/cabin.assembly".into(), CABIN.into()));
+    let scope = ModuleScope::from_files(all.iter().map(|(p, t)| (p.as_str(), t.as_str())));
+    assert_eq!(folder_of("/skeleton.part"), "/");
+    assert_eq!(scope.root.as_deref(), Some("/"));
+    let parsed = parse_assembly_in("/cabin/cabin.assembly", CABIN, &scope);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let files: Vec<String> = parsed.document.unwrap().occurrences.iter().map(|o| o.source.definition.file.as_str().to_string()).collect();
+    assert_eq!(files, ["/cabin/seat_frame.part", "/cabin/galley.part", "/+hardware/rivet.part", "/+hardware/+fasteners/nut.part", "/skeleton.part", "/+hardware/rivet.part"]);
+    let top = "runmat 0.7\nstd 1\n\nassembly top {\n    use assembly cabin from \"./cabin\" as cabin\n    use part skeleton as skeleton\n}\n";
+    assert_eq!(dependencies("/top.assembly", top), ["/", "/cabin/"]);
+    assert_eq!(module_text("/top.assembly", "/+hardware/rivet.part").as_deref(), Some("hardware"));
+    assert_eq!(module_text("/top.assembly", "/cabin/galley.part").as_deref(), Some("./cabin"));
+}

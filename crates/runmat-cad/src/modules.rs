@@ -49,8 +49,14 @@ pub fn is_file_path(from: &str) -> bool {
     kind_of_file(from).is_some() || from.ends_with(".circuit.layout")
 }
 
+/// The folder holding `path`: `""` for a relative top-level file, `"/"` for a file at the root
+/// of an absolute workspace (`/airliner.assembly`).
 pub fn folder_of(path: &str) -> &str {
-    path.rsplit_once('/').map_or("", |(d, _)| d)
+    match path.rsplit_once('/') {
+        Some(("", _)) if path.starts_with('/') => "/",
+        Some((d, _)) => d,
+        None => "",
+    }
 }
 
 /// `a/./b/../c` → `a/c`, keeping a leading `/`.
@@ -595,7 +601,7 @@ pub fn module_text(doc: &str, file: &str) -> Option<String> {
     let first_pkg = segs.iter().position(|s| s.starts_with('+'));
     if let Some(i) = first_pkg {
         if segs[i..].iter().all(|s| s.starts_with('+')) {
-            let base = segs[..i].join("/");
+            let base = if i == 1 && there.starts_with('/') { "/".to_string() } else { segs[..i].join("/") };
             if ancestors(here).iter().any(|a| *a == base) {
                 return Some(
                     segs[i..]
@@ -678,7 +684,7 @@ pub fn unbound_tree(key: &str, value: &Json, doc: &str) -> Json {
 pub fn dependencies(path: &str, text: &str) -> Vec<String> {
     let mut out: BTreeSet<String> = BTreeSet::new();
     let folder = folder_of(path).to_string();
-    let listing = |f: &str| format!("{f}/");
+    let listing = |f: &str| if f.ends_with('/') { f.to_string() } else { format!("{f}/") };
     let header = scan(path, text);
     let Some(dialect) = Dialect::for_path(path) else { return Vec::new() };
     let syntax = parse_source(dialect, text);
