@@ -15,7 +15,7 @@ use super::{arc_mid, attributes, length, pairs, path, Document, Fields, Frame, P
 use crate::geom::poly::{Polygon, Ring};
 use crate::geom::{Point, Transform};
 use crate::import::{file_safe, Report};
-use crate::layout::{Board, BoardGraphic, BoardText, Footprint, Layer, NetId, Side, Stackup, Track, TrackGeom, Via, Zone};
+use crate::layout::{Board, BoardGraphic, BoardText, Dimension, Footprint, Layer, NetId, Side, Stackup, Track, TrackGeom, Via, Zone};
 use crate::library::{CopperSpan, Drill, Graphic, PadDef, PadShape, Package};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -259,7 +259,7 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
     let mut packages: BTreeMap<String, Package> = BTreeMap::new();
     let mut footprints = BTreeMap::new();
     let (mut segments, mut rings) = (Vec::new(), Vec::new());
-    let (mut tracks, mut vias, mut zones, mut texts) = (0, 0, 0, 0);
+    let (mut tracks, mut vias, mut zones, mut texts, mut dimensions) = (0, 0, 0, 0, 0);
     let mut unnamed = 0;
     let mut holes = 0;
     for s in shapes {
@@ -450,7 +450,22 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
                 zones += 1;
                 report.approximated("solid copper regions are carried as zones of their net");
             }
-            "DIMENSION" => report.not_carried("dimensions"),
+            "DIMENSION" => {
+                // `DIMENSION~layer~path~id`: the path draws the dimension line first (one move
+                // and one line between the measured points), then its arrows and its text.
+                let first = path(f.str(2)).and_then(|steps| match steps.as_slice() {
+                    [PathStep::Move(x0, y0), PathStep::Line(x1, y1), ..] => Some((frame.point(*x0, *y0), frame.point(*x1, *y1))),
+                    _ => None,
+                });
+                let Some((a, b)) = first.filter(|(a, b)| a != b) else {
+                    report.not_carried("dimensions whose path doesn't start with their line");
+                    continue;
+                };
+                let id = board.alloc();
+                board.dimensions.insert(id, Dimension { id, layer: Layer::User(0), a, b, offset: 0, precision: 2 });
+                dimensions += 1;
+                report.approximated("dimensions are carried as their measured line on the drawing layer; RunMat draws their arrows and text");
+            }
             "" => {}
             other => report.not_carried(format!("{other} items")),
         }
@@ -462,6 +477,9 @@ pub fn read(doc: &Document, name: &str, report: &mut Report) -> Result<BoardRead
     report.count("footprints placed", board.footprints.len() - holes);
     report.count("board holes", holes);
     report.count("tracks", tracks);
+    if dimensions > 0 {
+        report.count("dimensions", dimensions);
+    }
     report.count("vias", vias);
     report.count("zones", zones);
     report.count("board texts", texts);

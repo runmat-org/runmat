@@ -41,6 +41,7 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
     assert_eq!(r.carried["zones"], 2);
     assert_eq!(r.carried["board texts"], 1);
     assert_eq!(r.carried["board holes"], 1);
+    assert_eq!(r.carried["dimensions"], 1, "{:?}", r.lines());
     assert_eq!(r.approximated["solid copper regions are carried as zones of their net"], 1);
     assert_eq!(r.not_carried["solid regions of kind solid on layer 3"], 1, "{:?}", r.lines());
 
@@ -60,6 +61,9 @@ fn a_schematic_and_board_import_to_a_circuit_that_compiles() {
     assert_eq!(led.rotation, 90.0);
     let hole = parsed.footprints.values().find(|f| f.reference == "H901").expect("the board hole is a footprint");
     assert_eq!(hole.package.pads[0].kind, runmat_circuit::library::PadKind::Npth);
+    // The dimension measures its line: 40 canvas units along the bottom edge.
+    let dim = parsed.dimensions.values().next().expect("the dimension is carried");
+    assert_eq!(((dim.b.x - dim.a.x).abs(), dim.b.y - dim.a.y), (10_160_000, 0));
     // 80 × 40 canvas units of 10 mil.
     assert_eq!(parsed.outline.bbox().width(), 20_320_000);
     assert_eq!(parsed.outline.bbox().min.x, 0);

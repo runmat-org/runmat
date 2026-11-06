@@ -235,6 +235,10 @@ fn pad(r: &Record, frame: &Frame, local: &Local, side: Side, report: &mut Report
     p
 }
 
+fn empty_package() -> Package {
+    Package { name: String::new(), uuid: crate::library::make::uuid("package", ""), description: String::new(), pads: vec![], courtyard: vec![], silk: vec![], fab: vec![], model: None, body: None, smd: false }
+}
+
 /// The rule scope's net class (`InNetClass('Power')` → `Power`).
 fn net_class_scope(expr: &str) -> Option<String> {
     let e = expr.trim();
@@ -346,7 +350,7 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
             unnamed += 1;
             format!("U{}", 900 + unnamed)
         });
-        let pkg = Package { name: String::new(), uuid: crate::library::make::uuid("package", ""), description: String::new(), pads: vec![], courtyard: vec![], silk: vec![], fab: vec![], model: None, body: None, smd: false };
+        let pkg = empty_package();
         places.push(Place { reference, value: c.str("COMMENT").trim().to_owned(), pattern: c.str("PATTERN").trim().to_owned(), at, rotation, side, locked: c.flag("LOCKED"), local: Local { at, rotation, mirror: side == Side::Bottom }, pkg, pad_nets: BTreeMap::new() });
     }
     let silk_side = |l: &str| match l {
@@ -354,7 +358,7 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
         "BOTTOMOVERLAY" => Some(Side::Bottom),
         _ => None,
     };
-    let (mut segments, mut tracks, mut vias, mut zones, mut texts) = (Vec::new(), 0, 0, 0, 0);
+    let (mut segments, mut tracks, mut vias, mut zones, mut texts, mut free) = (Vec::new(), 0, 0, 0, 0, 0);
     let mut cutouts: Vec<Ring> = Vec::new();
     if !outline_pts.is_empty() {
         let pts: Vec<Point> = outline_pts.iter().map(|p| frame.at(p.0, p.1)).collect();
@@ -365,11 +369,23 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
     }
     for r in records {
         let l = layer(r);
-        let owner = r.index("COMPONENT").filter(|i| *i < places.len());
+        let owner = r.index("COMPONENT").filter(|i| *i < comps.len());
         match r.kind() {
             "Pad" => {
                 let Some(i) = owner else {
-                    report.not_carried("free pads outside a component");
+                    // A pad outside any component (a mounting hole, a test pad): a board-only
+                    // footprint of that one pad, as the board places it.
+                    free += 1;
+                    let at = frame.point(r, "X", "Y");
+                    let local = Local { at, rotation: 0.0, mirror: false };
+                    let p = pad(r, &frame, &local, Side::Top, report);
+                    let mut pad_nets = BTreeMap::new();
+                    if let Some(n) = net(&mut board, r) {
+                        pad_nets.insert(p.name.clone(), n);
+                    }
+                    let mut pkg = empty_package();
+                    pkg.pads.push(p);
+                    places.push(Place { reference: format!("H{}", 900 + free), value: String::new(), pattern: "free_pad".into(), at, rotation: 0.0, side: Side::Top, locked: true, local, pkg, pad_nets });
                     continue;
                 };
                 let side = places[i].side;
@@ -552,6 +568,9 @@ pub fn read(records: &[Record], name: &str, report: &mut Report) -> Result<Board
         planes += 1;
     }
     report.count("footprints placed", board.footprints.len());
+    if free > 0 {
+        report.count("board-only pads (mounting holes, test pads)", free);
+    }
     report.count("tracks", tracks);
     report.count("vias", vias);
     report.count("zones", zones);
