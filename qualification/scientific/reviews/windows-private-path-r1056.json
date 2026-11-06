@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
+    "files": 24826,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "abc8087169bc2ae14057475076e798603786432e39ea2813a9132fbaff678068",
+    "files": 24826,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "authored-cli-physics",
+    "driver-recovery-physics"
+  ],
+  "changed_inputs": [
+    {
+      "path": "crates/runmat-filesystem/src/native/private_windows.rs",
+      "before": [
+        "100644",
+        "blob",
+        "759278f039c5be230240ad3f4e61953fe174c400"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "1a202c9f903b48f4fdc622e8f2025868ede68075"
+      ],
+      "reason": "Windows-only private filesystem module is excluded by cfg(windows) from the measured Linux target. Extended-length disk/UNC encoding preserves identity; ACL, reparse and no-replace rules remain unchanged."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/native/private_windows/directory.rs",
+      "before": [
+        "100644",
+        "blob",
+        "35bb7a89e2471be8f93ac9cae4f99f0a8b561866"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "dc320ba33fa932ce82aad0ee26ba09c26d477f8b"
+      ],
+      "reason": "Windows-only private filesystem module is excluded by cfg(windows) from the measured Linux target. Extended-length disk/UNC encoding preserves identity; ACL, reparse and no-replace rules remain unchanged."
+    },
+    {
+      "path": "crates/runmat-filesystem/src/native/private_windows/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "f67e8814b51e07aa4508817998a050919d4d5025"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "64271da928cf481eb3203bcc574758cbb9aa4d7f"
+      ],
+      "reason": "Windows-only private filesystem module is excluded by cfg(windows) from the measured Linux target. Extended-length disk/UNC encoding preserves identity; ACL, reparse and no-replace rules remain unchanged."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/windows-private-path-r1056.json",
+      "sha256": "e1ddce3db2aafa79944170959f2ab9b94ea12c0bd27ba11fa60b81b8477fbc80"
+    }
+  ],
+  "reason": "Only three cfg(windows) scientific inputs changed. Linux numerical/runtime/recovery code, fixtures, dependencies and assertions are identical. The Windows boundary has focused passing execution evidence. This review conserves Linux measurements and does not qualify the Windows product candidate."
+}

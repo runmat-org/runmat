@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "cohort": "authored-cli-physics",
+  "policy_sha256": "e703044e0eead41dd417ea3c7718bfd9346fa8583b659663b71258d1dac085a1",
+  "measured": {
+    "source_revision": "c816a5927360e6355120f4de1c3690a4d914fb99",
+    "target": "linux-x86_64",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--release",
+      "--all-features",
+      "-p",
+      "runmat",
+      "--test",
+      "typed_fea_geometry_cli",
+      "--",
+      "--test-threads=1"
+    ],
+    "log_sha256": "7f794c3f2af01a1d36d1ed5b7629b29a4f52b1517195f6371205091ace87a694",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/settings-linux-r1055-scientific.authored.log",
+    "passed": 12,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 0,
+    "exit_code": 0,
+    "case_names": [
+      "acoustic::authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog",
+      "acoustic::duct::authored_incident_duct_refines_and_reopens_full_partial_complex_components",
+      "acoustic::duct::authored_matched_duct_refines_and_reopens_full_partial_complex_components",
+      "acoustic::duct::authored_volume_velocity_duct_refines_and_reopens_full_partial_complex_components",
+      "acoustic::response::pressure_transient_publishes_its_complete_time_history",
+      "acoustic::response::rigid_cube_cavity_modes_match_rectangular_room_frequencies",
+      "assessments::authored_transient_and_frequency_assessments_reopen_without_re_solving_the_numerical_run",
+      "authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium",
+      "electrical::authored_charged_poisson_tet10_signed_gauge_and_cold_publication",
+      "electrical::authored_electrical_prism_both_equations_orders_sign_and_gauge_reopen_cold",
+      "generated_and_derived_geometry_complete_the_typed_study_pipeline",
+      "harmonic::authored_harmonic_generated_and_explicit_sources_preserve_rod_response_and_phase"
+    ],
+    "selected_filter": null,
+    "inputs": {
+      "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
+      "files": 24826,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "artifacts": [
+      {
+        "sha256": "a1733e75dd02788d8128bb09cd44d3cd33edfa51933de09a8b3dc132c4dd0071",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/settings-linux-r1055-scientific-artifacts/authored-harness"
+      },
+      {
+        "sha256": "ba61610dd032814f55a1f3105aa1af7aaeeeb6ea45a3816e74a3876b8e247eff",
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/settings-linux-r1055-scientific-artifacts/runmat"
+      }
+    ]
+  },
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "210f03d420683aafe040e28a895fc300e40d56b0dcdc847a0798aabab63d9ff1",
+      "files": 24826,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "abc8087169bc2ae14057475076e798603786432e39ea2813a9132fbaff678068",
+      "files": 24826,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "Only three cfg(windows) scientific inputs changed. Linux numerical/runtime/recovery code, fixtures, dependencies and assertions are identical. The Windows boundary has focused passing execution evidence. This review conserves Linux measurements and does not qualify the Windows product candidate.",
+    "review": {
+      "path": "qualification/scientific/reviews/windows-private-path-r1056.json",
+      "sha256": "157854feeb78c201d366db47cf553c2fda5c2f859782d7c08cb4419a7b5d5208"
+    }
+  }
+}
