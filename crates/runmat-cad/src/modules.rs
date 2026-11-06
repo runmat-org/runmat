@@ -427,6 +427,12 @@ pub struct SymbolRef {
     pub at: String,
 }
 
+/// The keys whose value is a design reference `{kind, name, from?}`: an occurrence's
+/// `definition` and a fastener rule's `family`.
+fn is_definition_key(key: &str) -> bool {
+    key == "definition" || key == "family"
+}
+
 enum Site {
     /// `{kind, name, from?}` → `{kind, file, part?}`.
     Definition,
@@ -442,7 +448,7 @@ fn site(key: &str, obj: &[(String, Json)]) -> Option<(Site, String, String)> {
         return None;
     }
     let text = |v: Option<&Json>| v.and_then(Json::as_str).map(str::to_string);
-    if key == "definition" {
+    if is_definition_key(key) {
         if let (Some(k), Some(n)) = (text(get("kind")), text(get("name"))) {
             return Some((Site::Definition, k, n));
         }
@@ -515,7 +521,7 @@ pub fn references(json: &Json) -> Vec<SymbolRef> {
 fn canonical_files(json: &mut Json, key: &str, folder: &str, scope: &ModuleScope) {
     match json {
         Json::Object(obj) => {
-            let named = key == "definition"
+            let named = is_definition_key(key)
                 || key == "model"
                 || obj.iter().any(|(k, v)| k == "frame" && v.as_str() == Some("interface"));
             if named {
@@ -629,7 +635,7 @@ pub fn unbound(key: &str, value: &Json, doc: &str) -> Option<Json> {
     let kind = kind_of_file(&file)?;
     let mut obj = obj.clone();
     let interface = obj.iter().any(|(k, v)| k == "frame" && v.as_str() == Some("interface"));
-    let (name_key, after, name) = if key == "definition" {
+    let (name_key, after, name) = if is_definition_key(key) {
         let name = take(&mut obj, "part")
             .and_then(|p| p.as_str().map(str::to_string))
             .unwrap_or_else(|| stem_name(&file));

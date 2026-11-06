@@ -29,7 +29,7 @@ assembly section {
             rows = [{ key = r0, offset = 0 mm }, { key = r1, offset = 25 mm }]
         ),
         fastener = {
-            family = { kind = part, file = "library/fasteners/hi-lok.part" },
+            family = { kind = part, name = hi_lok, from = "../library/fasteners" },
             diameter = 4.8 mm,
             grip = { grip = auto }
         },

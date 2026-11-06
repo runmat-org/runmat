@@ -329,6 +329,33 @@ fn occurrences_are_use_statements_with_overrides() {
     assert!(back.spans.spans.contains_key("occurrence.left"));
 }
 
+/// A fastener rule's family names its design as an occurrence does (`{ kind = part, name,
+/// from }`), resolves to the declaring file, and prints back by name.
+#[test]
+fn a_fastener_family_names_its_design() {
+    let source = std::fs::read_to_string(corpus().join("documents/synth2.assembly")).unwrap();
+    assert!(
+        source.contains("family = { kind = part, name = hi_lok, from = \"../library/fasteners\" }"),
+        "{source}"
+    );
+    let model: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(corpus().join("documents/synth2.assembly.json")).unwrap(),
+    )
+    .unwrap();
+    let parsed = reparse_assembly("fuselage/section.assembly", &source, &model);
+    assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+    let document = parsed.document.unwrap();
+    assert_eq!(
+        document.fasteners[0].fastener.family.file.0,
+        "library/fasteners/hi-lok.part"
+    );
+    let printed = syntax::print_assembly(&document, &parsed.uses).unwrap();
+    assert!(
+        printed.contains("family = { kind = part, name = hi_lok, from = \"../library/fasteners\" }"),
+        "{printed}"
+    );
+}
+
 /// The document corpus: parts, assemblies and a drawing in the final forms. Each reads as
 /// its model (`<file>.json`) and prints back to the same text.
 #[test]
