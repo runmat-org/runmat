@@ -20,6 +20,17 @@
 //   named_cavity_part.step        One product: a 20 mm block ("Insulator") with a closed 6 mm cavity
 //                                 (BREP_WITH_VOIDS); the 6 cavity faces are named "Electrode" and
 //                                 the bottom face "Ground plane".
+//   pocket_coolant_assembly.step  A 30 x 30 x 10 mm plate ("Plate") with a 10 x 10 x 5 mm pocket
+//                                 open at its top, and the coolant ("Coolant") filling the pocket,
+//                                 as two products: the coolant's floor and walls coincide with the
+//                                 pocket's faces and its top ("Coolant top") is flush with the
+//                                 plate's top face, which surrounds it.
+//   channel_coolant_assembly.step A 40 x 20 x 10 mm plate ("Plate") with a 10 x 4 mm channel along
+//                                 x, and the coolant ("Coolant") filling the channel, as two
+//                                 products: the coolant's ends ("Inlet", "Outlet") are flush with
+//                                 the plate's end faces, which surround them. The channel faces
+//                                 are "Channel wall" on the coolant and "Plate wall" on the plate;
+//                                 the plate's top is "Heater".
 //   fused_compound.step           One product whose shape is the General Fuse of a cube and its
 //                                 air box: two solids that already share the cavity faces, named by
 //                                 their solid entities ("Part", "Air").
@@ -32,6 +43,7 @@
 // Run: ./generate_shared_interface_fixtures <out-dir/>
 #include <BRepAlgoAPI_BuilderAlgo.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
@@ -135,6 +147,10 @@ TopoDS_Shape box(double x, double y, double z, double dx, double dy, double dz) 
   return BRepPrimAPI_MakeBox(gp_Pnt(x, y, z), dx, dy, dz).Shape();
 }
 
+// A standalone copy of a shape, as a CAD tool writes each part: a boolean result reuses its tool's
+// faces, which would otherwise make two parts share one STEP face.
+TopoDS_Shape own(const TopoDS_Shape& shape) { return BRepBuilderAPI_Copy(shape).Shape(); }
+
 bool on_air_boundary(const gp_Pnt& c) {
   return std::abs(c.X()) > 14.9 || std::abs(c.Y()) > 14.9 || std::abs(c.Z()) > 14.9;
 }
@@ -181,6 +197,27 @@ int main(int argc, char** argv) {
   ok = ok && write_assembly(dir + "overlapping_parts_assembly.step", "Clash",
                             {{"First", box(0, 0, 0, 10, 10, 10), {}},
                              {"Second", box(5, 0, 0, 10, 10, 10), {}}});
+
+  {
+    const TopoDS_Shape pocket = box(-5, -5, 0, 10, 10, 5);
+    ok = ok && write_assembly(
+        dir + "pocket_coolant_assembly.step", "Cold plate",
+        {{"Plate", own(BRepAlgoAPI_Cut(box(-15, -15, -5, 30, 30, 10), pocket).Shape()),
+          {{"Plate base", [](const gp_Pnt& c) { return c.Z() < -4.9; }}}},
+         {"Coolant", own(pocket), {{"Coolant top", [](const gp_Pnt& c) { return c.Z() > 4.9; }}}}});
+    const TopoDS_Shape channel = box(0, 5, 3, 40, 10, 4);
+    auto in_channel = [](const gp_Pnt& c) {
+      return c.X() > 0.1 && c.X() < 39.9 && c.Y() > 4.9 && c.Y() < 15.1 && c.Z() > 2.9 && c.Z() < 7.1;
+    };
+    ok = ok && write_assembly(
+        dir + "channel_coolant_assembly.step", "Cold plate",
+        {{"Plate", own(BRepAlgoAPI_Cut(box(0, 0, 0, 40, 20, 10), channel).Shape()),
+          {{"Heater", [](const gp_Pnt& c) { return c.Z() > 9.9; }}, {"Plate wall", in_channel}}},
+         {"Coolant", own(channel),
+          {{"Inlet", [](const gp_Pnt& c) { return c.X() < 0.1; }},
+           {"Outlet", [](const gp_Pnt& c) { return c.X() > 39.9; }},
+           {"Channel wall", in_channel}}}});
+  }
 
   {
     BRep_Builder builder;

@@ -24,7 +24,8 @@ pub use codec::{
 };
 pub use discretize::{
     discretize_shared_curves, CurveMetricEvaluation, CurveMetricField, CurveMetricQuery,
-    SharedCurveDiscretizationOptions, SharedCurveEvaluationContext, UniformCurveMetric,
+    ExactFacePcurveEvaluator, SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
+    UniformCurveMetric,
 };
 pub use error::{SharedCurveError, SharedCurveErrorKind};
 pub use geometric_validation::{

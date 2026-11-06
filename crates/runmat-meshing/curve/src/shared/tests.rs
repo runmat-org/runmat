@@ -187,8 +187,10 @@ fn nonperiodic_closed_face_rejects_distinct_pcurve_endpoints() {
     )
     .unwrap_err();
 
+    // The circle's seam vertex closes the edge, so the pcurve end at (2*pi, 0) is checked against
+    // that vertex: its image on the face lies far outside the vertex tolerance.
     assert_eq!(error.kind, SharedCurveErrorKind::GeometricMismatch);
-    assert_eq!(error.field, "closed pcurve endpoint");
+    assert_eq!(error.field, "vertex pcurve coordinate");
 }
 
 #[test]

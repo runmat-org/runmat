@@ -5,7 +5,10 @@ use runmat_meshing_tetrahedron::cdt::DelaunayExactEvaluator;
 
 use crate::PreparedExactGeometryObjects;
 
-pub trait ExactMeshingGeometryEvaluation: DelaunayExactEvaluator {}
+pub trait ExactMeshingGeometryEvaluation:
+    DelaunayExactEvaluator + runmat_meshing_curve::ExactFacePcurveEvaluator
+{
+}
 
 impl<T> ExactMeshingGeometryEvaluation for T where T: DelaunayExactEvaluator {}
 

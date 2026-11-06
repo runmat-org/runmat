@@ -13,8 +13,7 @@ use runmat_runtime::analysis::{
     analysis_study_content_digest, AnalysisStudySpec, PreparedStructuralStudy,
     StructuralStudyBucklingNumericalResult, StructuralStudyExecutionFailure,
     StructuralStudyFrequencyNumericalResult, StructuralStudyModalFrequencyNumericalResult,
-    StructuralStudyModalNumericalResult,
-    StructuralStudyModalResponseSpectrumNumericalResult,
+    StructuralStudyModalNumericalResult, StructuralStudyModalResponseSpectrumNumericalResult,
     StructuralStudyModalTransientNumericalResult, StructuralStudyNumericalResult,
     StructuralStudyPlacementEntry, StructuralStudyPlacementExecutor,
     StructuralStudyPlacementFuture, StructuralStudyPlacementResult,
@@ -25,9 +24,8 @@ use runmat_runtime::analysis::{
 
 use crate::{
     execute_structural_buckling_study_locally, execute_structural_frequency_locally_with_source,
-    execute_structural_modal_locally, execute_structural_modal_response_spectrum_locally,
-    execute_structural_modal_transient_locally,
-    execute_structural_modal_frequency_study_locally_with_source,
+    execute_structural_modal_frequency_study_locally_with_source, execute_structural_modal_locally,
+    execute_structural_modal_response_spectrum_locally, execute_structural_modal_transient_locally,
     execute_structural_prestressed_frequency_study_locally_with_source,
     execute_structural_prestressed_modal_frequency_study_locally_with_source,
     execute_structural_prestressed_modal_study_locally, execute_structural_random_response_locally,
