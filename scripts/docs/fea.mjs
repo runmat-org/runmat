@@ -49,10 +49,21 @@ export function collectFea(source, output, register, examples, evidence, validat
     if (existsSync(join(source, COMMITTED_GRAMMAR))) copyFileSync(join(source, COMMITTED_GRAMMAR), join(output, "fea/fea.tmLanguage.json"));
     // The design formats' grammars beside it (`design/part.tmLanguage.json`, …), the same copies
     // the language server and the Desktop color with.
+    const grammars = [];
+    if (existsSync(join(source, COMMITTED_GRAMMAR))) grammars.push({ extension: "fea", scopeName: "source.fea", path: "fea/fea.tmLanguage.json" });
     for (const entry of DESIGN_DIALECTS) {
         const committed = join(source, committedDesignGrammar(entry));
         if (!existsSync(committed)) continue;
         mkdirSync(join(output, "design"), { recursive: true });
-        copyFileSync(committed, join(output, `design/${entry.extension}.tmLanguage.json`));
+        const path = `design/${entry.extension}.tmLanguage.json`;
+        copyFileSync(committed, join(output, path));
+        grammars.push({ extension: entry.extension, scopeName: readJson(committed).scopeName, path });
+    }
+    // The site picks a code window's grammar by its file extension. The longest extension wins,
+    // so `.circuit.layout` is matched before `.circuit`.
+    if (grammars.length > 0) {
+        mkdirSync(join(output, "design"), { recursive: true });
+        grammars.sort((a, b) => b.extension.length - a.extension.length || a.extension.localeCompare(b.extension));
+        writeFileSync(join(output, "design/grammars.json"), JSON.stringify({ schema_version: 1, grammars }, null, 2) + "\n");
     }
 }
