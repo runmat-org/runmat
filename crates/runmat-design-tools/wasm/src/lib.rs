@@ -25,9 +25,10 @@ use wasm_bindgen::prelude::*;
 
 /// The tools this host runs on ECAD files: the read-only ones, and `design.export`, which
 /// answers the exported files for the page to write (the Desktop's Fabrication outputs).
-/// `design.render` draws through the server, and `design.propose_edit` and import stay with the
-/// project.
-const TOOLS: &[&str] = &["design.overview", "design.check", "design.inspect", "design.erc", "design.drc", "design.simulate", "design.export"];
+/// `design.import` reads KiCad and EAGLE projects into staged circuit sources here (the Desktop's
+/// Import dialog); STEP import stays with the project. `design.render` draws through the
+/// server, and `design.propose_edit` stays with the project.
+const TOOLS: &[&str] = &["design.overview", "design.check", "design.inspect", "design.erc", "design.drc", "design.simulate", "design.export", "design.import"];
 
 #[wasm_bindgen]
 pub fn design_tool(name: &str, input: &str, files: &str) -> String {
@@ -77,6 +78,12 @@ fn run(name: &str, input: &str, files: &str) -> Result<Value, (String, String)> 
     }
     let input: Value = serde_json::from_str(input).map_err(|e| ("invalid_arguments".to_owned(), format!("the input isn't valid JSON: {e}")))?;
     let files: Files = serde_json::from_str(files).map_err(|e| ("invalid_arguments".to_owned(), format!("the files aren't a JSON object of path to text: {e}")))?;
+    if name == "design.import" {
+        return match input.get("format").and_then(Value::as_str) {
+            Some("step") => Err(("kernel_unavailable".into(), "STEP files import with a server project, where OCCT reads them".into())),
+            _ => call(name, input, &files).map_err(|e| (e.code, e.message)),
+        };
+    }
     let path = input.get("path").and_then(Value::as_str).unwrap_or_default();
     match DesignKind::of(path) {
         Some(DesignKind::Circuit | DesignKind::Layout) => {}
@@ -121,6 +128,20 @@ mod tests {
         assert!(needs.iter().all(|p| p.starts_with("/p/")), "{needs:?}");
         let related: Vec<String> = serde_json::from_str(&related("/p/daq.circuit", r#"["/p/daq.circuit","/p/daq.circuit.layout","/p/notes.md","/p/arm.fea"]"#)).unwrap();
         assert_eq!(related, ["/p/arm.fea", "/p/daq.circuit.layout"]);
+    }
+
+    #[test]
+    fn an_eagle_project_imports_here_with_its_report_and_step_waits_for_a_project() {
+        let dir = format!("{}/../../runmat-circuit/tests/import/eagle", env!("CARGO_MANIFEST_DIR"));
+        let file = |n: &str| json!({ "name": n, "content": std::fs::read_to_string(format!("{dir}/{n}")).unwrap() });
+        let input = json!({ "format": "eagle", "target": "/p/blinky", "files": [file("blinky.sch"), file("blinky.brd")] });
+        let out = answer("design.import", &input.to_string(), "{}");
+        let data = out.get("data").unwrap_or_else(|| panic!("a staged change, not {out}"));
+        assert!(data["files"].as_array().unwrap().iter().any(|f| f["path"] == "/p/blinky.circuit.layout"));
+        assert_eq!(data["report"]["format"], "EAGLE XML");
+        assert_eq!(data["report"]["carried"]["components"], 3);
+        let step = answer("design.import", r#"{"format":"step","target":"/p/a.part","files":[]}"#, "{}");
+        assert_eq!(step["error"]["code"], "kernel_unavailable");
     }
 
     #[test]

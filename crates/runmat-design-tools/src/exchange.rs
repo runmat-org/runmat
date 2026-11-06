@@ -508,6 +508,8 @@ pub enum ImportFormat {
     Kicad,
     /// An EAGLE XML schematic (`.sch`) and/or board (`.brd`), version 6 or later.
     Eagle,
+    /// A shape-string JSON schematic and/or board (standard edition, `.json`).
+    ShapeJson,
     Step,
 }
 
@@ -528,7 +530,7 @@ pub struct ImportFile {
 pub struct ImportInput {
     pub format: ImportFormat,
     pub files: Vec<ImportFile>,
-    /// KiCad and EAGLE: the target stem (`boards/io` writes `boards/io.circuit`, `.circuit.layout` and,
+    /// KiCad, EAGLE and shape-string JSON: the target stem (`boards/io` writes `boards/io.circuit`, `.circuit.layout` and,
     /// from KiCad, `.circuit.lock`; EAGLE packages go in `boards/io-footprints/`). STEP: the `.part` to write (`parts/housing.part`); the STEP file goes
     /// beside it.
     pub target: String,
@@ -554,7 +556,22 @@ fn decode(file: &ImportFile) -> Result<String, ToolError> {
     }
 }
 
-pub fn import(input: &ImportInput, files: &Files) -> Result<StagedChange, ToolError> {
+/// What `design.import` answers: the staged change and, from a PCB-tool import, the report of
+/// what it carried over, approximated and left out.
+#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportChange {
+    #[serde(flatten)]
+    pub change: StagedChange,
+    /// Counts carried over by kind (`carried`), and each approximation (`approximated`) and
+    /// omission (`notCarried`) with how often it occurred; `format` names the format read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    pub report: Option<runmat_circuit::import::Report>,
+}
+
+pub fn import(input: &ImportInput, files: &Files) -> Result<ImportChange, ToolError> {
+    let plain = |change| Ok(ImportChange { change, report: None });
     let target = input.target.trim_start_matches("./").to_owned();
     match input.format {
         ImportFormat::Kicad => {
@@ -582,20 +599,24 @@ pub fn import(input: &ImportInput, files: &Files) -> Result<StagedChange, ToolEr
             );
             let mut change = stage(summary, read.files.into_iter().collect(), files, &primary);
             change.notes.extend(read.warnings);
-            Ok(change)
+            plain(change)
         }
-        ImportFormat::Eagle => {
-            let mut eagle = BTreeMap::new();
+        ImportFormat::Eagle | ImportFormat::ShapeJson => {
+            let mut given = BTreeMap::new();
             for f in &input.files {
-                eagle.insert(f.name.clone(), decode(f)?);
+                given.insert(f.name.clone(), decode(f)?);
             }
             let stem = target.strip_suffix(".circuit.layout").or_else(|| target.strip_suffix(".circuit")).unwrap_or(&target).to_owned();
-            let read = runmat_circuit::import::eagle::import(&eagle, &stem).map_err(ToolError::invalid)?;
+            let (read, label) = match input.format {
+                ImportFormat::Eagle => (runmat_circuit::import::eagle::import(&given, &stem), "EAGLE project"),
+                _ => (runmat_circuit::import::shape_json::import(&given, &stem), "shape-string JSON project"),
+            };
+            let read = read.map_err(ToolError::invalid)?;
             let primary = read.files.keys().find(|k| k.ends_with(".circuit")).or_else(|| read.files.keys().find(|k| k.ends_with(".circuit.layout"))).cloned().unwrap_or_default();
-            let summary = format!("Import EAGLE project as {}", read.files.keys().filter(|k| !k.ends_with(".kicad_mod")).cloned().collect::<Vec<_>>().join(", "));
+            let summary = format!("Import {label} as {}", read.files.keys().filter(|k| !k.ends_with(".kicad_mod")).cloned().collect::<Vec<_>>().join(", "));
             let mut change = stage(summary, read.files.into_iter().collect(), files, &primary);
             change.notes.extend(read.report.lines());
-            Ok(change)
+            Ok(ImportChange { change, report: Some(read.report) })
         }
         ImportFormat::Step => {
             let Some(file) = input.files.first() else {
@@ -654,7 +675,7 @@ pub fn import(input: &ImportInput, files: &Files) -> Result<StagedChange, ToolEr
                 "the STEP file is the source of truth: its solid and face names become the part's (feature.step.face(\"<name>\"))"
                     .into(),
             );
-            Ok(change)
+            plain(change)
         }
     }
 }

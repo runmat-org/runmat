@@ -69,11 +69,29 @@
 </deviceset>
 </devicesets>
 </library>
+<library name="marks">
+<packages>
+<package name="FID1">
+<smd name="1" x="0" y="0" dx="1" dy="1" layer="1" roundness="100" cream="no"/>
+<circle x="0" y="0" radius="1" width="0.1" layer="51"/>
+</package>
+</packages>
+<symbols>
+<symbol name="FID"><circle x="0" y="0" radius="1.27" width="0.254" layer="94"/></symbol>
+</symbols>
+<devicesets>
+<deviceset name="FIDUCIAL" prefix="FD">
+<gates><gate name="G$1" symbol="FID" x="0" y="0"/></gates>
+<devices><device name="1X2" package="FID1"><technologies><technology name=""/></technologies></device></devices>
+</deviceset>
+</devicesets>
+</library>
 <library name="connectors">
 <packages>
 <package name="HDR2">
 <pad name="1" x="-1.27" y="0" drill="1" diameter="1.7" shape="square"/>
 <pad name="2" x="1.27" y="0" drill="1"/>
+<polygon width="0.1" layer="16"><vertex x="1" y="-0.4"/><vertex x="2.6" y="-0.4"/><vertex x="2.6" y="0.4"/><vertex x="1" y="0.4"/></polygon>
 <wire x1="-2.54" y1="1.27" x2="2.54" y2="1.27" width="0.15" layer="21"/>
 </package>
 </packages>
@@ -113,6 +131,7 @@
 </classes>
 <parts>
 <part name="J1" library="connectors" deviceset="HDR2" device=""/>
+<part name="FD1" library="marks" deviceset="FIDUCIAL" device="1X2"/>
 <part name="R1" library="passives" deviceset="R" device="0603" value="1k"/>
 <part name="D1" library="leds" deviceset="LED" device="0603" technology="RED" value="red"><variant name="lite" populate="no"/></part>
 <part name="SUP1" library="supply" deviceset="VCC" device=""/>
@@ -122,6 +141,7 @@
 <sheet>
 <instances>
 <instance part="J1" gate="G$1" x="10" y="20"/>
+<instance part="FD1" gate="G$1" x="40" y="40"/>
 <instance part="R1" gate="G$1" x="30" y="25"/>
 <instance part="D1" gate="G$1" x="45" y="25"/>
 <instance part="SUP1" gate="G$1" x="20" y="30"/>

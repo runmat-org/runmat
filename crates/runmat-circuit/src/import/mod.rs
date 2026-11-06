@@ -5,8 +5,10 @@
 //! it approximated and what it left out.
 //!
 //! - [`eagle`]: EAGLE XML schematics (`.sch`) and boards (`.brd`).
+//! - [`shape_json`]: shape-string JSON schematics and boards (standard edition).
 
 pub mod eagle;
+pub mod shape_json;
 pub mod xml;
 
 use serde::Serialize;

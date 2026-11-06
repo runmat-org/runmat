@@ -158,7 +158,10 @@ pub fn read(drawing: &Element, name: &str, report: &mut Report) -> Result<Board,
             };
             packages.insert(key.clone(), package(&key, p, report));
         }
+        // The file rotates a mirrored element, then mirrors it in x; RunMat mirrors, then
+        // rotates, so the same placement turns the other way.
         let (deg, mirror) = rotation(e.attr("rot"));
+        let deg = if mirror { (360.0 - deg).rem_euclid(360.0) } else { deg };
         let id = board.alloc();
         board.footprints.insert(
             id,

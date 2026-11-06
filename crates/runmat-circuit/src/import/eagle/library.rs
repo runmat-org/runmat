@@ -77,6 +77,7 @@ fn no(e: &Element, name: &str) -> bool {
 pub fn package(key: &str, p: &Element, report: &mut Report) -> Package {
     let mut pads = Vec::new();
     let (mut silk, mut fab) = (Vec::new(), Vec::new());
+    let mut copper: Vec<&Element> = Vec::new();
     for item in &p.children {
         match item.name.as_str() {
             "smd" => {
@@ -131,15 +132,36 @@ pub fn package(key: &str, p: &Element, report: &mut Report) -> Package {
                     B_PLACE | B_DOCU => {
                         report.not_carried(format!("package {key}: bottom-side graphics in a top-side package"));
                     }
-                    TOP if item.name == "polygon" => {
-                        report.not_carried(format!("package {key}: a copper polygon outside a pad"));
-                    }
+                    TOP | BOTTOM if item.name == "polygon" => copper.push(item),
                     _ => {}
                 }
             }
             // `>NAME` and `>VALUE` texts: the board places the designator and value itself.
             "text" | "description" => {}
             other => report.not_carried(format!("package {key}: <{other}>")),
+        }
+    }
+    // A copper polygon in a package (a castellation's half pad, a pad's extension) is more
+    // copper of the pad whose centre it covers: a pad of the same name, so it carries that
+    // pad's net.
+    for poly in copper {
+        let points: Vec<Point> = poly.all("vertex").map(|v| point(v, "x", "y")).collect();
+        let host = pads.iter().find(|p| p.kind != PadKind::Npth && !p.name.is_empty() && crate::geom::poly::ring_contains(&points, p.at) != Some(false)).map(|p| (p.name.clone(), p.at));
+        match host {
+            Some((name, at)) if points.len() >= 3 => {
+                if poly.all("vertex").any(|v| v.num("curve").is_some_and(|c| c.abs() > 1e-9)) {
+                    report.approximated(format!("package {key}: curved copper polygon edges are carried as straight ones"));
+                }
+                let mut outline: Vec<Point> = points.iter().map(|q| *q - at).collect();
+                if crate::geom::poly::area2(&outline) < 0 {
+                    outline.reverse();
+                }
+                let mut pad = PadDef::smd(&name, at, PadShape::Custom { points: outline, holes: vec![] });
+                pad.copper = if layer(poly) == BOTTOM { CopperSpan::Back } else { CopperSpan::Front };
+                pad.paste = false;
+                pads.push(pad);
+            }
+            _ => report.not_carried(format!("package {key}: a copper polygon that covers no pad")),
         }
     }
     let smd = !pads.is_empty() && pads.iter().all(|p| p.kind == PadKind::Smd);

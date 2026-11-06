@@ -228,10 +228,10 @@ pub fn catalog() -> Vec<ToolDefinition> {
             "Export design",
             "Use this to hand a design to another tool: parts and assemblies as STEP, STL, 3MF or glTF; drawing sheets and sheet-metal flat patterns as DXF or DWG, drawing sheets as PDF; circuits and boards as a KiCad project; a board's fabrication set (format `fabrication`: Gerber X2, Excellon drill and drill map, fabrication drawing, pick-and-place and BOM per variant, IPC-2581, ODB++, IPC-D-356A); a circuit's netlist as `kicad_netlist`, `spice`, `edif` or `ipc356`. Returns the files' bytes (base64 for binary formats).",
         ),
-        definition::<exchange::ImportInput, edit::StagedChange>(
+        definition::<exchange::ImportInput, exchange::ImportChange>(
             "design.import",
             "Import into design",
-            "Use this to bring a KiCad project (.kicad_sch, .kicad_pcb), an EAGLE XML schematic or board (.sch, .brd; format `eagle`) or a STEP file into the project as RunMat sources. Returns a staged change: the new files, their diagnostics, the project calls that keep it and, for EAGLE, a report of what was carried over, approximated or left out.",
+            "Use this to bring a KiCad project (.kicad_sch, .kicad_pcb), an EAGLE XML schematic or board (.sch, .brd; format `eagle`), a shape-string JSON schematic or board (standard edition; format `shape_json`) or a STEP file into the project as RunMat sources. Returns a staged change: the new files, their diagnostics, the project calls that keep it and, for EAGLE and shape-string JSON, a report of what was carried over, approximated or left out.",
         ),
         definition::<simulate::SimulateInput, simulate::SimulateOutput>(
             "design.simulate",

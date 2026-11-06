@@ -125,6 +125,12 @@ pub fn read(drawing: &Element, name: &str, footprint_dir: &str, report: &mut Rep
             supplies.insert(designator);
             continue;
         };
+        // A package without pins (a fiducial, a logo) has nothing to connect: the board
+        // places it as a footprint, and the circuit leaves it out.
+        if device.list("connects", "connect").next().is_none() {
+            report.approximated("parts without pins (fiducials, logos) are footprints on the board only");
+            continue;
+        }
         let key = footprint_key(lib_name, pkg_name);
         if !packages.contains_key(&key) {
             let Some(pkg) = by_name(lib, "packages", "package", pkg_name) else {
