@@ -510,6 +510,9 @@ pub enum ImportFormat {
     Eagle,
     /// A shape-string JSON schematic and/or board (standard edition, `.json`).
     ShapeJson,
+    /// Pipe-record schematics and/or a board (`.SchDoc`, `.PcbDoc`): `|RECORD=…|` text, or
+    /// the binary compound files (give those as `base64`).
+    PipeRecord,
     Step,
 }
 
@@ -537,6 +540,35 @@ pub struct ImportInput {
     /// KiCad: the root schematic's file name (default: the schematic no other sheet names).
     #[serde(default)]
     pub root: Option<String>,
+}
+
+fn decode_bytes(file: &ImportFile) -> Result<Vec<u8>, ToolError> {
+    match file.encoding.as_deref() {
+        Some("base64") => base64::engine::general_purpose::STANDARD
+            .decode(file.content.as_bytes())
+            .map_err(|e| ToolError::invalid(format!("{}: not base64: {e}", file.name))),
+        _ => Ok(file.content.clone().into_bytes()),
+    }
+}
+
+/// Pipe-record files: ASCII ones as text, binary ones (compound files) as bytes.
+fn import_pipe_record(input: &ImportInput, stem: &str) -> Result<runmat_circuit::import::Imported, String> {
+    let mut text = BTreeMap::new();
+    let mut binary = BTreeMap::new();
+    for f in &input.files {
+        let bytes = decode_bytes(f).map_err(|e| e.message)?;
+        if bytes.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]) {
+            binary.insert(f.name.clone(), bytes);
+        } else {
+            let t = String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
+            text.insert(f.name.clone(), t);
+        }
+    }
+    match (text.is_empty(), binary.is_empty()) {
+        (false, false) => Err("give ASCII or binary pipe-record files, not both".into()),
+        (_, false) => runmat_circuit::import::pipe_record::binary::import(&binary, stem),
+        _ => runmat_circuit::import::pipe_record::import(&text, stem),
+    }
 }
 
 fn decode(file: &ImportFile) -> Result<String, ToolError> {
@@ -599,17 +631,21 @@ pub fn import(input: &ImportInput, files: &Files) -> Result<ImportChange, ToolEr
             );
             let mut change = stage(summary, read.files.into_iter().collect(), files, &primary);
             change.notes.extend(read.warnings);
-            plain(change)
+            Ok(ImportChange { change, report: Some(read.report) })
         }
-        ImportFormat::Eagle | ImportFormat::ShapeJson => {
-            let mut given = BTreeMap::new();
-            for f in &input.files {
-                given.insert(f.name.clone(), decode(f)?);
-            }
+        ImportFormat::Eagle | ImportFormat::ShapeJson | ImportFormat::PipeRecord => {
             let stem = target.strip_suffix(".circuit.layout").or_else(|| target.strip_suffix(".circuit")).unwrap_or(&target).to_owned();
-            let (read, label) = match input.format {
-                ImportFormat::Eagle => (runmat_circuit::import::eagle::import(&given, &stem), "EAGLE project"),
-                _ => (runmat_circuit::import::shape_json::import(&given, &stem), "shape-string JSON project"),
+            let (read, label) = if input.format == ImportFormat::PipeRecord {
+                (import_pipe_record(input, &stem), "pipe-record project")
+            } else {
+                let mut given = BTreeMap::new();
+                for f in &input.files {
+                    given.insert(f.name.clone(), decode(f)?);
+                }
+                match input.format {
+                    ImportFormat::Eagle => (runmat_circuit::import::eagle::import(&given, &stem), "EAGLE project"),
+                    _ => (runmat_circuit::import::shape_json::import(&given, &stem), "shape-string JSON project"),
+                }
             };
             let read = read.map_err(ToolError::invalid)?;
             let primary = read.files.keys().find(|k| k.ends_with(".circuit")).or_else(|| read.files.keys().find(|k| k.ends_with(".circuit.layout"))).cloned().unwrap_or_default();
