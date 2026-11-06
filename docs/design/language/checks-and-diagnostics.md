@@ -63,7 +63,7 @@ The check reports *`body` ran but no longer makes `body.side(l9)`* as a root cau
 | `cad.property.*` | Missing or invalid properties |
 | `design.value.*` | Values from `.m` functions: unit mismatches, nondeterminism, failures |
 
-A circuit check reports ERC findings (unconnected pins, outputs driven together, missing power flags), and a board check adds DRC findings, unrouted connections and schematic changes the board has not taken yet. See [Rules and checks](/docs/ecad/files#rules-and-checks).
+A circuit check reports ERC findings (unconnected pins, outputs driven together, missing power flags), and a board check adds DRC findings, unrouted connections and schematic changes the board has not taken yet. See [Rules and checks](/docs/ecad/circuit/rules-and-checks).
 
 ## Checking from the command line
 
@@ -80,4 +80,6 @@ runmat-design check board/*.circuit --json
 | `--no-simulate` | Skip the simulation sections' measures. |
 | `--root <dir>` | The workspace root, when it is not the file's folder. |
 
-The same command checks `.part`, `.assembly` and `.drawing` files with the editor's check [not yet in the current release](pending:design.tools.cli-check-mcad), and `runmat check` and `runmat test` take design files beside `.m` and `.fea` files [not yet in the current release](pending:design.tools.runmat-check-design).
+`runmat check <file>.circuit` and `runmat test` run the same circuit checks beside `.m` and `.fea` files, with the same `--no-simulate` option.
+
+`runmat-design check` checks `.part`, `.assembly` and `.drawing` files with the editor's check [not yet in the current release](pending:design.tools.cli-check-mcad), and `runmat check` and `runmat test` take those files too [not yet in the current release](pending:design.tools.runmat-check-design).

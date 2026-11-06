@@ -24,8 +24,9 @@
       "title": "Circuit component values from .m functions",
       "kind": "language",
       "area": "ecad",
-      "status": "pending",
-      "acceptance": "A .circuit component value or param may call a .m function in the circuit's folder, with the same resolution, units, determinism and cache rules as a .part value."
+      "status": "release",
+      "acceptance": "A .circuit component value or param may call a .m function in the circuit's folder, with the same resolution, units, determinism and cache rules as a .part value.",
+      "landed_in": "0.7.1"
     },
     {
       "id": "design.tools.cli-check-mcad",
@@ -37,19 +38,28 @@
     },
     {
       "id": "design.tools.runmat-check-design",
-      "title": "runmat check and runmat test on design files",
+      "title": "runmat check and runmat test on parts, assemblies and drawings",
       "kind": "tooling",
       "area": "tooling",
       "status": "pending",
-      "acceptance": "runmat check and runmat test delegate .part, .assembly, .drawing, .circuit and .circuit.layout files to the design checks, beside .m and .fea files."
+      "acceptance": "runmat check and runmat test delegate .part, .assembly and .drawing files to the design checks, as they do .circuit and .circuit.layout files, beside .m and .fea files."
     },
     {
       "id": "design.tools.export-set",
       "title": "Input values for one export",
       "kind": "tooling",
       "area": "tooling",
+      "status": "release",
+      "acceptance": "design.export takes set (input values for one run), with minimum and maximum range checks, so a study's geometry can come from a part at chosen inputs.",
+      "landed_in": "0.7.1"
+    },
+    {
+      "id": "design.tools.cad-matlab-api",
+      "title": "cad.evaluate, cad.study, cad.check and cad.inputs in MATLAB-language code",
+      "kind": "tooling",
+      "area": "tooling",
       "status": "pending",
-      "acceptance": "design.export takes set (input values for one run), with minimum and maximum range checks, so a study's geometry can come from a part at chosen inputs."
+      "acceptance": "A .m script regenerates a part or an assembly at input values with cad.evaluate and reads its mass properties, bounding box and published values; cad.study runs a .fea study at its inputs; cad.check judges limits and throws cad:limitFailed, which runmat test reports as a failure; cad.inputs lists the inputs; parfor runs one regeneration per worker."
     },
     {
       "id": "design.mcad.mate.cam",
@@ -64,8 +74,9 @@
       "title": "Drawings laid out automatically",
       "kind": "feature",
       "area": "mcad",
-      "status": "pending",
-      "acceptance": "A command writes a .drawing for a part or an assembly with standard views, dimensions from its PMI and a title block, and the result checks clean."
+      "status": "release",
+      "acceptance": "A command writes a .drawing for a part or an assembly with standard views, dimensions from its PMI and a title block, and the result checks clean.",
+      "landed_in": "0.7.1"
     },
     {
       "id": "design.mcad.drawing.standards",
@@ -81,7 +92,7 @@
       "kind": "feature",
       "area": "mcad",
       "status": "pending",
-      "acceptance": "Evaluate runs section, thickness, draft and undercut, curvature, zebra and deviation analyses on a part in the Desktop and through design.inspect."
+      "acceptance": "Evaluate runs section, thickness, undercut, curvature, zebra and deviation analyses on a part in the Desktop and through design.inspect, coloring the model by result as draft analysis does."
     },
     {
       "id": "design.fea.part-geometry",
@@ -109,11 +120,11 @@
     },
     {
       "id": "design.ecad.fab.assembly-drawing",
-      "title": "Assembly drawings in the fabrication set",
+      "title": "Polarity marks on assembly drawings",
       "kind": "exchange",
       "area": "ecad",
       "status": "pending",
-      "acceptance": "The fabrication set writes an assembly drawing per side with outlines, designators and polarity marks, as Gerber and PDF."
+      "acceptance": "The assembly drawing of each side marks pin 1 and the polarity of polarized parts (diodes, LEDs, polarized capacitors, ICs) beside their outlines and designators, in the Gerber and PDF."
     },
     {
       "id": "design.ecad.import.other-tools",
@@ -121,7 +132,7 @@
       "kind": "exchange",
       "area": "ecad",
       "status": "pending",
-      "acceptance": "Clean-room readers for the other common tools' binary and text schematic and board formats, EAGLE XML and EasyEDA JSON write circuits and boards with part declarations and a report of what did not carry over, tested on an openly licensed corpus."
+      "acceptance": "Clean-room readers for the other common tools' binary, text and JSON schematic and board formats write circuits and boards with part declarations and a report of what did not carry over, tested on an openly licensed corpus."
     },
     {
       "id": "design.ecad.import.kicad-roundtrip",

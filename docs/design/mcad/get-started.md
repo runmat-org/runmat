@@ -104,6 +104,7 @@ The agent runs the same tools: ask it to check the assembly, change an input, or
 
 ## Next
 
+- Guides: [Model a part](/docs/mcad/guides/model-a-part), [Build an assembly](/docs/mcad/guides/build-an-assembly), [Make a drawing](/docs/mcad/guides/make-a-drawing), [Sheet metal](/docs/mcad/guides/sheet-metal) and [Product families and configurations](/docs/mcad/guides/configurations).
 - [MCAD file reference](/docs/mcad/files): every statement in `.part`, `.assembly` and `.drawing` files.
 - [Features](/docs/mcad/part/features): every modeling operation.
 - [Drawing views and annotations](/docs/mcad/drawing/views-and-annotations): drawings that follow the model.

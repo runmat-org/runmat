@@ -69,7 +69,7 @@ circuit sensor {
 runmat-design check sensor.circuit
 ```
 
-The check runs the electrical rules, the design-review suites and every simulation's measures, prints each finding, and exits with status 1 on an error. See [Rules and checks](/docs/ecad/files#rules-and-checks).
+The check runs the electrical rules, the design-review suites and every simulation's measures, prints each finding, and exits with status 1 on an error. See [Rules and checks](/docs/ecad/circuit/rules-and-checks).
 
 ## 3. Start the board
 
@@ -100,6 +100,7 @@ This writes Gerber, drill, the fabrication drawing, IPC-2581, ODB++, the IPC-D-3
 
 ## Next
 
+- Guides: [Draw a schematic](/docs/ecad/guides/draw-a-schematic), [Lay out a board](/docs/ecad/guides/lay-out-a-board), [Run a circuit simulation](/docs/ecad/guides/run-a-simulation) and [Make fabrication outputs](/docs/ecad/guides/make-fabrication-outputs).
 - [ECAD file reference](/docs/ecad/files): every statement in `.circuit` files.
 - [Simulation sections and measures](/docs/ecad/circuit/simulation): analyses, measures and limits.
 - [The parts library](/docs/ecad/parts-library): parts, declarations and models.

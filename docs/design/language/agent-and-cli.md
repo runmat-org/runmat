@@ -15,7 +15,7 @@ One set of design tools works on every design file kind. The in-app agent calls 
 | `design.render` | A PNG of a view, by named view or camera, in a display mode. |
 | `design.drc`, `design.erc` | A board's and a circuit's rule violations: rule, objects, location and source range. |
 | `design.simulate` | Runs a circuit's simulation section and returns its measures against their limits. |
-| `design.import` | KiCad projects and STEP files in, as RunMat sources staged for review. |
+| `design.import` | KiCad projects, XML schematics and boards, and STEP files in, as RunMat sources staged for review, with a report of what did not carry over. |
 | `design.export` | STEP, STL, 3MF, glTF, DXF and DWG, PDF drawing sheets, KiCad out, a board's fabrication set, and KiCad, SPICE, EDIF and IPC-D-356A netlists. |
 | `design.overview` | What a file is, its state, the files linked to it, the decisions its guides still need, and next steps. |
 | `design.propose_edit` | A source change or an editor command with its values, staged as a diff with the diagnostics after it. Nothing is written until the change is kept. |
@@ -24,7 +24,7 @@ An agent works in three steps: read with `design.inspect` and `design.check`, ch
 
 ## Inputs for one run
 
-`design.inspect` with `set` answers a what-if without editing the design: the part regenerates with the given input values, and the rest of the file stays as written. An unknown name is an `unknown_input` error that lists the declared inputs. `design.export` takes `set` the same way, so a study's geometry can come from a part at chosen input values [not yet in the current release](pending:design.tools.export-set).
+`design.inspect` with `set` answers a what-if without editing the design: the part regenerates with the given input values, and the rest of the file stays as written. An unknown name is an `unknown_input` error that lists the declared inputs. `design.export` takes `set` the same way, so a study's geometry can come from a part at chosen input values.
 
 ## The command line
 

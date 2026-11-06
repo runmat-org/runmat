@@ -85,7 +85,18 @@ assembly frame {
 `mirror <name> = { seeds = […], plane = …, hand = … }` reflects occurrences about a plane:
 
 - `plane = { plane = explicit, point = […], normal = […] }` gives the plane.
-- `hand = symmetric(point, normal)` places the seed's own design reflected, for a part that is its own mirror image. A part with a left- and a right-hand version carries the other hand as a configuration with its own part number, and the mirror places that configuration, so the BOM lists both part numbers.
+- `hand = symmetric(point, normal)` places the seed's own design reflected, for a part that is its own mirror image about that plane (in the part's own coordinates).
+- `hand = opposite(source, configuration, point, normal)` places the opposite-hand design: `source = { definition = { kind = part, name = <design> } }` names it, `configuration` selects the member that is the seed's mirror image about the plane `point`, `normal` (in the part's own coordinates), and the BOM lists both part numbers. A part with a left- and a right-hand version usually carries the other hand as a configuration with its own part number:
+
+```assembly fragment
+mirror ribs_port = {
+    seeds = [rib],
+    plane = { plane = explicit, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0] },
+    hand = opposite(source = { definition = { kind = part, name = rib } }, configuration = { select = named, name = port }, point = [0 mm, 0 mm, 0 mm], normal = [0, 1, 0])
+}
+```
+
+See [Product families and configurations](/docs/mcad/guides/configurations) for a handed part built this way.
 - A seed may be a pattern of the same assembly. The mirror then reflects the pattern's seeds and every copy, keeping their keys and skips: `rib@ribs_far[3]` is the image of `rib@ribs[3]`. A copy reached twice, such as a seed listed directly and through its pattern, is an error that names both routes.
 
 ## Fasteners

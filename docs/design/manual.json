@@ -348,6 +348,191 @@
       ]
     },
     {
+      "id": "mcad-guide-part",
+      "route": "/docs/mcad/guides/model-a-part",
+      "title": "Model a part",
+      "summary": "Model a parametric part in RunMat MCAD. Sketch a constrained profile, extrude it, add holes and rounds, drive the sizes from inputs, name the faces other files use, give it a material and part number, then check and weigh it.",
+      "keywords": [
+        "model a part",
+        "CAD tutorial",
+        "parametric part",
+        "sketch constraints",
+        "extrude",
+        "hole",
+        "fillet",
+        "inputs",
+        "named faces",
+        "mass properties",
+        "text CAD"
+      ],
+      "group": "MCAD guides",
+      "order": 0,
+      "narrative": "docs/design/mcad/guides/model-a-part.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-guide-assembly",
+      "route": "/docs/mcad/guides/build-an-assembly",
+      "title": "Build an assembly",
+      "summary": "Build an assembly in RunMat MCAD. Place parts by name, set an occurrence's size, join moving parts with mates, repeat parts with patterns, drive the motion from an input, and check fit, interference and the bill of materials.",
+      "keywords": [
+        "build an assembly",
+        "CAD assembly tutorial",
+        "mates",
+        "revolute joint",
+        "place parts",
+        "pattern",
+        "bill of materials",
+        "interference check",
+        "clearance check",
+        "motion"
+      ],
+      "group": "MCAD guides",
+      "order": 1,
+      "narrative": "docs/design/mcad/guides/build-an-assembly.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-guide-drawing",
+      "route": "/docs/mcad/guides/make-a-drawing",
+      "title": "Make a drawing",
+      "summary": "Make an engineering drawing in RunMat MCAD. Lay out a sheet and title block, place standard, projected, section and isometric views, dimension the part from its faces, show its holes and tolerances from the part's PMI, and export PDF and DXF.",
+      "keywords": [
+        "make a drawing",
+        "engineering drawing tutorial",
+        "2D drawing",
+        "title block",
+        "section view",
+        "dimensions",
+        "hole callout",
+        "GD&T",
+        "PDF export",
+        "DXF export",
+        "auto drawing"
+      ],
+      "group": "MCAD guides",
+      "order": 2,
+      "narrative": "docs/design/mcad/guides/make-a-drawing.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-guide-sheet-metal",
+      "route": "/docs/mcad/guides/sheet-metal",
+      "title": "Sheet metal",
+      "summary": "Design a sheet-metal part in RunMat MCAD. Start from a base flange with its thickness, bend radius and K-factor, add edge flanges, corner reliefs and formed features, unfold it to a flat pattern, and draw the flat pattern with its bend table for the shop.",
+      "keywords": [
+        "sheet metal",
+        "sheet metal tutorial",
+        "base flange",
+        "edge flange",
+        "bend radius",
+        "K-factor",
+        "bend allowance",
+        "corner relief",
+        "louver",
+        "flat pattern",
+        "bend table",
+        "DXF flat pattern"
+      ],
+      "group": "MCAD guides",
+      "order": 3,
+      "narrative": "docs/design/mcad/guides/sheet-metal.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
+      "id": "mcad-guide-configurations",
+      "route": "/docs/mcad/guides/configurations",
+      "title": "Product families and configurations",
+      "summary": "Build a product family in RunMat MCAD. Give one part several configurations with their own sizes, suppressed features and part numbers, make left- and right-hand versions, place each configuration in an assembly, and export and draw every member of the family.",
+      "keywords": [
+        "product family",
+        "configurations",
+        "design table",
+        "dash numbers",
+        "part numbers",
+        "suppress feature",
+        "left hand",
+        "right hand",
+        "opposite hand",
+        "mirror",
+        "family of parts"
+      ],
+      "group": "MCAD guides",
+      "order": 4,
+      "narrative": "docs/design/mcad/guides/configurations.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
       "id": "mcad-sketches",
       "route": "/docs/mcad/part/sketches",
       "title": "Sketches and constraints",
@@ -702,6 +887,46 @@
       ]
     },
     {
+      "id": "mcad-scripting",
+      "route": "/docs/mcad/scripting",
+      "title": "Scripting and sweeps",
+      "summary": "Drive RunMat MCAD designs from MATLAB-language code. Compute design values in .m functions, regenerate a part at chosen input values for one run, and sweep inputs from a script with cad.evaluate, cad.study and cad.check, under runmat test.",
+      "keywords": [
+        "scripting",
+        "sweeps",
+        "parameter sweep",
+        "design of experiments",
+        "MATLAB",
+        ".m script",
+        "cad.evaluate",
+        "cad.study",
+        "cad.check",
+        "cad.inputs",
+        "parfor",
+        "runmat test",
+        "design automation",
+        "what-if"
+      ],
+      "group": "MCAD reference",
+      "order": 9,
+      "narrative": "docs/design/mcad/scripting.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Names and selectors",
+          "href": "/docs/design-language/names-and-selectors"
+        }
+      ]
+    },
+    {
       "id": "ecad-start",
       "route": "/docs/ecad",
       "title": "Get started with ECAD",
@@ -768,6 +993,334 @@
       ]
     },
     {
+      "id": "ecad-guide-schematic",
+      "route": "/docs/ecad/guides/draw-a-schematic",
+      "title": "Draw a schematic",
+      "summary": "Draw a schematic in RunMat ECAD. Place library parts, connect pins into nets, mark power rails and net classes, split the design into sheets, compute a component value in a .m function, and check it with the electrical rules and design-review suites.",
+      "keywords": [
+        "draw a schematic",
+        "schematic tutorial",
+        "schematic capture",
+        "place parts",
+        "nets",
+        "power flag",
+        "net class",
+        "hierarchical sheets",
+        "ERC",
+        "design review",
+        "I2C pull-ups",
+        "decoupling"
+      ],
+      "group": "ECAD guides",
+      "order": 0,
+      "narrative": "docs/design/ecad/guides/draw-a-schematic.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-guide-board",
+      "route": "/docs/ecad/guides/lay-out-a-board",
+      "title": "Lay out a board",
+      "summary": "Lay out a printed circuit board in RunMat ECAD. Start a board for a schematic, set its outline, stackup and fabricator limits, take the schematic's components with Update board, place footprints, route tracks and vias, pour ground, and clear the design-rule check.",
+      "keywords": [
+        "lay out a board",
+        "PCB layout tutorial",
+        "PCB design",
+        "board outline",
+        "stackup",
+        "design rules",
+        "update board",
+        "place footprints",
+        "route tracks",
+        "vias",
+        "ground pour",
+        "DRC"
+      ],
+      "group": "ECAD guides",
+      "order": 1,
+      "narrative": "docs/design/ecad/guides/lay-out-a-board.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-guide-simulation",
+      "route": "/docs/ecad/guides/run-a-simulation",
+      "title": "Run a circuit simulation",
+      "summary": "Run a circuit simulation in RunMat ECAD. Add a simulation section to a schematic, drive it with sources, run transient, AC and Monte Carlo analyses, measure bandwidth, rise time and settled value against limits, and run the same checks in CI.",
+      "keywords": [
+        "circuit simulation tutorial",
+        "SPICE simulation",
+        "RC filter",
+        "transient analysis",
+        "AC analysis",
+        "Monte Carlo",
+        "tolerance analysis",
+        "bandwidth",
+        "rise time",
+        "measures",
+        "simulation in CI"
+      ],
+      "group": "ECAD guides",
+      "order": 2,
+      "narrative": "docs/design/ecad/guides/run-a-simulation.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-guide-fabrication",
+      "route": "/docs/ecad/guides/make-fabrication-outputs",
+      "title": "Make fabrication outputs",
+      "summary": "Make fabrication outputs for a RunMat ECAD board. Choose a preset for the board house or the assembly house, pick the layers, set Gerber units and the BOM columns, run the pre-flight checks, and generate Gerber, drill, drawings, pick-and-place and BOM files, from the Desktop or the command line.",
+      "keywords": [
+        "fabrication outputs tutorial",
+        "Gerber",
+        "drill files",
+        "pick and place",
+        "BOM",
+        "assembly drawing",
+        "board house",
+        "assembly house",
+        "pre-flight check",
+        "PCB manufacturing files",
+        "zip"
+      ],
+      "group": "ECAD guides",
+      "order": 3,
+      "narrative": "docs/design/ecad/guides/make-fabrication-outputs.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-sheets",
+      "route": "/docs/ecad/circuit/sheets-and-channels",
+      "title": "Sheets, hierarchy and channels",
+      "summary": "Reference for sheets in a RunMat circuit. The root sheet, sheet ports and their directions, sheets placed as blocks with instance, channels repeated with repeat and bound to buses, and how designators and nets are named in each copy.",
+      "keywords": [
+        "schematic sheets",
+        "hierarchical schematic",
+        "sheet ports",
+        "sheet symbol",
+        "multi-channel design",
+        "repeat",
+        "channels",
+        "bus binding",
+        "hierarchy"
+      ],
+      "group": "ECAD reference",
+      "order": 0,
+      "narrative": "docs/design/ecad/circuit/sheets-and-channels.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-components",
+      "route": "/docs/ecad/circuit/components-and-parts",
+      "title": "Components and library parts",
+      "summary": "Reference for components in a RunMat circuit. Placing library parts by MPN, values with tolerances, values computed in .m functions, component classes and properties, power for the thermal map, automatic designators and renames, and parts declared in the file.",
+      "keywords": [
+        "schematic components",
+        "library parts",
+        "MPN",
+        "component value",
+        "tolerance",
+        "designators",
+        "annotate",
+        "renamed_from",
+        "part declaration",
+        "component properties"
+      ],
+      "group": "ECAD reference",
+      "order": 1,
+      "narrative": "docs/design/ecad/circuit/components-and-parts.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-nets",
+      "route": "/docs/ecad/circuit/nets-and-classes",
+      "title": "Nets and net classes",
+      "summary": "Reference for nets in a RunMat circuit. Connect lists and endpoints, net settings (global, power flag, class), buses, interfaces and harnesses, differential pairs, and net classes whose track width and clearance the board's design rules use.",
+      "keywords": [
+        "nets",
+        "connect",
+        "net class",
+        "power flag",
+        "global net",
+        "bus",
+        "harness",
+        "interface",
+        "differential pair",
+        "track width",
+        "clearance"
+      ],
+      "group": "ECAD reference",
+      "order": 2,
+      "narrative": "docs/design/ecad/circuit/nets-and-classes.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-variants",
+      "route": "/docs/ecad/circuit/variants",
+      "title": "Variants",
+      "summary": "Reference for build variants in a RunMat circuit. Fitted and not-fitted components, alternate parts and values, variants built on other variants, components in channels, and how ERC, the BOM and the assembly outputs follow each variant.",
+      "keywords": [
+        "variants",
+        "assembly variants",
+        "not fitted",
+        "DNP",
+        "do not populate",
+        "alternate parts",
+        "BOM variants",
+        "build options"
+      ],
+      "group": "ECAD reference",
+      "order": 3,
+      "narrative": "docs/design/ecad/circuit/variants.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
+      "id": "ecad-rules",
+      "route": "/docs/ecad/circuit/rules-and-checks",
+      "title": "Rules and checks",
+      "summary": "Reference for the checks on a RunMat circuit and board. The electrical rules and their pin-type matrix, the design-review suites for decoupling, I2C, crystals, straps, USB-C and switching regulators, the board checks, and running them all from the command line and in CI.",
+      "keywords": [
+        "ERC",
+        "electrical rules check",
+        "design review",
+        "decoupling check",
+        "I2C pull-up check",
+        "crystal load capacitance",
+        "USB-C",
+        "DRC",
+        "circuit check",
+        "CI"
+      ],
+      "group": "ECAD reference",
+      "order": 4,
+      "narrative": "docs/design/ecad/circuit/rules-and-checks.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "ECAD file reference",
+          "href": "/docs/ecad/files"
+        },
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        },
+        {
+          "title": "Values, units and expressions",
+          "href": "/docs/design-language/values-and-units"
+        }
+      ]
+    },
+    {
       "id": "ecad-simulation",
       "route": "/docs/ecad/circuit/simulation",
       "title": "Simulation sections and measures",
@@ -787,7 +1340,7 @@
         "simulation in CI"
       ],
       "group": "ECAD reference",
-      "order": 0,
+      "order": 5,
       "narrative": "docs/design/ecad/circuit/simulation.md",
       "examples": [],
       "related_topics": [
@@ -827,7 +1380,7 @@
         "length matching"
       ],
       "group": "ECAD reference",
-      "order": 1,
+      "order": 6,
       "narrative": "docs/design/ecad/layout.md",
       "examples": [],
       "related_topics": [
@@ -849,7 +1402,7 @@
       "id": "ecad-fabrication",
       "route": "/docs/ecad/fabrication",
       "title": "Fabrication outputs and netlists",
-      "summary": "Fabrication outputs and netlists from a RunMat board. Gerber X2 with a job file, Excellon drill files and drill map, the fabrication drawing, BOM and pick-and-place per variant, IPC-2581, ODB++, and KiCad, SPICE, EDIF and IPC-D-356A netlists.",
+      "summary": "Fabrication outputs and netlists from a RunMat board. Presets, the layer table, settings saved with the board, Gerber X2 with a job file, Excellon drill files and drill map, fabrication and assembly drawings, BOM and pick-and-place per variant, IPC-2581, ODB++, the pre-flight checks, and KiCad, SPICE, EDIF and IPC-D-356A netlists.",
       "keywords": [
         "Gerber",
         "Gerber X2",
@@ -857,15 +1410,17 @@
         "drill files",
         "pick and place",
         "BOM",
+        "assembly drawing",
         "IPC-2581",
         "ODB++",
         "IPC-D-356",
         "netlist",
         "fabrication outputs",
-        "PCB manufacturing files"
+        "PCB manufacturing files",
+        "fabrication presets"
       ],
       "group": "ECAD reference",
-      "order": 2,
+      "order": 7,
       "narrative": "docs/design/ecad/fabrication.md",
       "examples": [],
       "related_topics": [
@@ -898,7 +1453,7 @@
         "migrate PCB design"
       ],
       "group": "ECAD reference",
-      "order": 3,
+      "order": 8,
       "narrative": "docs/design/ecad/import.md",
       "examples": [],
       "related_topics": [
@@ -933,7 +1488,7 @@
         "embedded part definitions"
       ],
       "group": "ECAD reference",
-      "order": 4,
+      "order": 9,
       "narrative": "docs/design/ecad/parts-library.md",
       "examples": [],
       "related_topics": [

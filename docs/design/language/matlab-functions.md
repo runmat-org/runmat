@@ -115,4 +115,33 @@ A function can also take and return values with units: an `arguments` block that
 
 ## Circuit values
 
-A `.circuit` component value can come from a function the same way, such as a feedback resistor sized from the output voltage: `component R2 = { part = "R0402", value = feedbackResistor(vout = 3.3 V, vref = 0.8 V, r1 = 10 kohm) as ohm }` [not yet in the current release](pending:design.ecad.m-values).
+A `.circuit` component value or `param` can call a function the same way, with the same resolution through the circuit's folder, `private/` and `+package` folders, the same SI arguments and `as` unit, and the same refusal of functions with side effects. This filter's resistor comes from its corner frequency and its capacitor:
+
+```matlab file=rcResistor.m
+function r = rcResistor(fc, c)
+% The resistor that puts an RC low-pass corner at fc (SI: Hz, F, ohm).
+r = 1 / (2 * pi * fc * c);
+end
+```
+
+```circuit file=lowpass.circuit
+runmat 0.7
+std 1
+
+circuit lowpass {
+    root = main
+    sheet main {
+        component R1 = { part = "R0402-10K", value = rcResistor(fc = 160 Hz, c = 100 nF) as ohm }
+        component C1 = { part = "C0402-1U", value = 100 nF }
+        component P1 = { part = "PAD-WIRE-20AWG" }
+        component P2 = { part = "PAD-WIRE-20AWG" }
+        component P3 = { part = "PAD-WIRE-20AWG" }
+        net GND = { global = true, power_flag = true }
+        connect = [net.IN, "P1.1", "R1.1"]
+        connect = [net.OUT, "R1.2", "C1.1", "P3.1"]
+        connect = [net.GND, "C1.2", "P2.1"]
+    }
+}
+```
+
+R1 is $1/(2\pi \cdot 160\ \text{Hz} \cdot 100\ \text{nF}) \approx 9.95\ \text{k}\Omega$. The circuit keeps the call, so the schematic, the BOM and the simulation read the computed value, and changing the corner recomputes it. While the runtime hasn't answered a call yet, the check reports the value as pending, with no error on what depends on it.

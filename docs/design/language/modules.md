@@ -120,6 +120,31 @@ Subfolders are not in scope until a `use` names them. A `.m` function outside th
 | The design is not in the folder | *no `part platter` in this folder (did you mean part.plate?)*, at the `use` line |
 | Two designs of one kind and name in one folder | an error naming both files |
 | Folders that `use` each other in a cycle | an error at the `use` that closes the cycle. Shared and skeleton folders must flow one way. |
+| A design named by its file path (`from "plate.part"`, `file = "arm.part"`, `model = { file = … }`) | an error at the reference that gives the symbol to write, such as `use part plate as …`, with `from "./folder"` for another folder. STEP sources keep their file paths. |
+
+This assembly names its part by file, so the check stops at the `use` line:
+
+```part file=plate.part
+runmat 0.7
+std 1
+
+part plate {
+    sketch s on origin.xy {
+        c = circle(center = [0 mm, 0 mm], radius = 10 mm)
+    }
+    feature body = extrude(profile = sketch.s, distance = 2 mm)
+    output plate = { body = feature.body.body }
+}
+```
+
+```assembly file=by_file.assembly fails
+runmat 0.7
+std 1
+
+assembly by_file {
+    use part plate from "plate.part" as base
+}
+```
 
 ## Printing and edits
 

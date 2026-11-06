@@ -4,8 +4,9 @@
 use crate::Files;
 use std::path::Path;
 
-/// The extensions read: design files, the circuit lock, STEP inputs and the model libraries
-/// (`.lib`, `.cir`, `.sp`) that simulation sections include.
+/// The extensions read: design files, the circuit lock, STEP inputs, the model libraries
+/// (`.lib`, `.cir`, `.sp`) that simulation sections include, the `.m` functions design values
+/// call, and the SVG logos title blocks draw.
 pub const DESIGN_EXTENSIONS: &[&str] = &[
     ".part",
     ".assembly",
@@ -18,6 +19,8 @@ pub const DESIGN_EXTENSIONS: &[&str] = &[
     ".lib",
     ".cir",
     ".sp",
+    ".m",
+    ".svg",
 ];
 
 /// Every design file under `dir` (hidden folders, `target` and `node_modules` skipped), keyed by

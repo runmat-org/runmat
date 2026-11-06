@@ -87,7 +87,8 @@ drawing bracket {
 `format <name> = { size, title_block }` defines a sheet format:
 
 - `size = { size = iso, name = A3 }` for an ISO size, `size = ansi` for an ANSI size, or `custom` dimensions.
-- `title_block` lists fields, each a label and a source: `literal` text, a `property` of the model (`part_number`, `material`, `description`, `drawn_by`), the `revision`, the `sheet_number`, the `sheet_count` or the `scale`. A property reads the active configuration's value, so each configuration's drawing carries its own part number.
+- `title_block` lists fields, each a label and a source: `literal` text, a `property` of the model (`part_number`, `material`, `description`, `drawn_by`), the `revision`, the `sheet_number`, the `sheet_count`, the `scale`, or an `image`: `{ label = "", source = { source = image, file = "logo.svg" } }` draws an SVG logo's outlines in its cell. A property reads the active configuration's value, so each configuration's drawing carries its own part number.
+- The title block is laid out once (ISO 7200: 180 mm wide with 10 mm rows, a second column once it has more than four fields, and the projection symbol beside it) and drawn the same way on the sheet and in every export.
 
 `sheet "<name>" = { format, scale = [1, 2], projection = third_angle }` adds a sheet; `projection` is `first_angle` or `third_angle`.
 
@@ -145,11 +146,14 @@ table bom = bom(view = front, include_fasteners, sheet = "1", at = [0, 0])
 table revs = revision(rows = [{ rev = "A", description = "First release", date = "2026-11-05", by = "NA" }], sheet = "1", at = [300, 280])
 ```
 
+## Laid out for you
+
+The Auto-drawing command (`drawing.auto`) writes a drawing for a part or an assembly: three orthographic views, a section through the first hole, overall dimensions, hole callouts and tables, at the largest scale that fits the chosen sheet (A4 to A2, ANSI B or D). Fasteners are left out of assembly views. Auto-balloon numbers an assembly view's occurrences against its BOM table. The result is an ordinary `.drawing` to edit.
+
 ## Exports
 
 `runmat-design export bracket.drawing --format pdf` writes the sheets as PDF, and `--format dxf` or `dwg` as CAD drawings, one file per sheet (`--sheet <name>` for one). See [Import and export](/docs/mcad/import-export).
 
 ## Not yet built
 
-- **Drawings made for you:** a drawing laid out from a part's PMI and standard views in one step [not yet in the current release](pending:design.mcad.drawing.auto).
 - **Drawing standards:** ISO and ASME presets for line weights, text, arrowheads and tolerance display [not yet in the current release](pending:design.mcad.drawing.standards).
