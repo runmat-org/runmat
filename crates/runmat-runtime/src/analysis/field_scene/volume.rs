@@ -232,6 +232,8 @@ pub fn build_volume_scene(
             unit: request.unit.clone(),
             minimum: range.0,
             maximum: range.1,
+            limit: None,
+            note: None,
         }),
         region_count: 0,
         mapped_region_count: 0,

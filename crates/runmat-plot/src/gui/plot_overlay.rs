@@ -5,6 +5,7 @@
 
 use crate::core::{plot_utils, PlotRenderer};
 use crate::geometry_scene::GeometrySceneScalarLegend;
+use crate::legend_text::{with_unit, LegendPrecision};
 use crate::overlay::cad_overlay::{CadOverlayActions, CadOverlayRenderInput, CadOverlayState};
 use crate::plots::TextStyle;
 use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
@@ -13,21 +14,6 @@ use glam::{Vec3, Vec4};
 
 fn transparent_frame() -> egui::Frame {
     egui::Frame::NONE
-}
-
-fn format_scalar_legend_value(value: f64, unit: &str) -> String {
-    let number = if value == 0.0 {
-        "0".to_string()
-    } else if value.abs() < 0.001 || value.abs() >= 10_000.0 {
-        format!("{value:.2e}")
-    } else {
-        format!("{value:.3}")
-    };
-    if unit.is_empty() {
-        number
-    } else {
-        format!("{number} {unit}")
-    }
 }
 
 /// GUI overlay manager for plot annotations and controls
@@ -3173,9 +3159,10 @@ impl PlotOverlay {
         let width = (plot_rect.width() * 0.34).clamp(190.0, 300.0);
         let pad = 12.0 * scale;
         let bar_height = 7.0 * scale;
+        let note_height = if legend.note.is_some() { 16.0 * scale } else { 0.0 };
         let rect = Rect::from_min_size(
             egui::pos2(plot_rect.max.x - width - pad, plot_rect.min.y + pad),
-            egui::vec2(width, 56.0 * scale),
+            egui::vec2(width, 56.0 * scale + note_height),
         );
         // Keep the figure-owned scale legible over scene annotations and mesh
         // imagery; the mesh counts belong in the viewport information control.
@@ -3242,20 +3229,44 @@ impl PlotOverlay {
                 color,
             );
         }
+        let precision = LegendPrecision::for_range(legend.minimum, legend.maximum);
         ui.painter().text(
             bar_rect.left_bottom() + egui::vec2(0.0, 3.0 * scale),
             Align2::LEFT_TOP,
-            format_scalar_legend_value(legend.minimum, &legend.unit),
+            with_unit(precision.format(legend.minimum), &legend.unit),
             detail_font.clone(),
             muted,
         );
         ui.painter().text(
             bar_rect.right_bottom() + egui::vec2(0.0, 3.0 * scale),
             Align2::RIGHT_TOP,
-            format_scalar_legend_value(legend.maximum, &legend.unit),
-            detail_font,
+            with_unit(precision.format(legend.maximum), &legend.unit),
+            detail_font.clone(),
             muted,
         );
+        // A limit inside the range is marked across the bar where it falls.
+        if let Some(limit) = legend.limit.filter(|limit| {
+            legend.maximum > legend.minimum && (legend.minimum..=legend.maximum).contains(limit)
+        }) {
+            let t = ((limit - legend.minimum) / (legend.maximum - legend.minimum)) as f32;
+            let x = bar_rect.min.x + bar_rect.width() * t;
+            ui.painter().line_segment(
+                [
+                    egui::pos2(x, bar_rect.min.y - 3.0 * scale),
+                    egui::pos2(x, bar_rect.max.y + 3.0 * scale),
+                ],
+                Stroke::new(2.0 * scale, text_color),
+            );
+        }
+        if let Some(note) = &legend.note {
+            ui.painter().text(
+                rect.right_bottom(),
+                Align2::RIGHT_BOTTOM,
+                note,
+                detail_font,
+                text_color,
+            );
+        }
     }
 
     fn draw_x_label_in_rect(&self, ui: &mut egui::Ui, rect: Rect, label: &str, scale: f32) {

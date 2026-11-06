@@ -44,20 +44,26 @@ pub(super) fn results_op(
             )
         })?;
     // Authored outputs evaluated at each frequency are small inline results, one per sample.
-    let mut observation_fields = Vec::new();
-    for entry in &result.entries {
-        for observation in &entry.observations {
-            let mut descriptor = AnalysisFieldDescriptor::from_field(&observation.field);
-            descriptor.sample = Some(observation.sample);
-            descriptors.push(descriptor);
-            observation_fields.push(observation.field.clone());
-        }
-    }
+    // They are returned inline in `fields`; `field_descriptors` lists only the recovered field
+    // artifacts the field-page reader serves, as for structural frequency runs.
+    let observation_fields = result
+        .entries
+        .iter()
+        .flat_map(|entry| entry.observations.iter())
+        .map(|observation| observation.field.clone())
+        .collect::<Vec<_>>();
     if !query.include_fields.is_empty() {
         for requested in &query.include_fields {
-            if !descriptors.iter().any(|descriptor| {
-                crate::analysis::field_selection::field_id_matches(&descriptor.field_id, requested)
-            }) {
+            let matches = |field_id: &str| {
+                crate::analysis::field_selection::field_id_matches(field_id, requested)
+            };
+            if !descriptors
+                .iter()
+                .any(|descriptor| matches(&descriptor.field_id))
+                && !observation_fields
+                    .iter()
+                    .any(|field| matches(&field.field_id))
+            {
                 return Err(operation_error(
                     ANALYSIS_RESULTS_OPERATION,
                     ANALYSIS_RESULTS_OP_VERSION,

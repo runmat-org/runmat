@@ -14,6 +14,7 @@ pub mod event;
 pub mod field_volume;
 pub mod geometry;
 pub mod geometry_scene;
+pub mod legend_text;
 pub mod geometry_observation;
 pub mod gpu;
 pub(crate) mod wgpu_compat;
