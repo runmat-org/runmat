@@ -198,6 +198,15 @@ impl PreparedFluidSource {
             FiniteVolumeTopology::reserve(&source, geometry_policy, &cells.selection)
                 .map_err(invalid)?
                 .scratch_bytes as u64;
+        tracing::debug!(
+            projection,
+            geometry_scratch = geometry.scratch_bytes,
+            selected_scratch,
+            metadata,
+            properties = prepared.estimated_resident_bytes,
+            cells = geometry.cell_count,
+            "steady fluid source preparation terms"
+        );
         let preparation_resident_bytes = preparation_resident_bytes
             .checked_sub(geometry.scratch_bytes as u64)
             .and_then(|bytes| bytes.checked_add(selected_scratch))

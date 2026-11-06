@@ -95,6 +95,11 @@ pub(super) fn within_admission(
     planned: &PreconditionerEnvelope,
 ) -> Result<(), SolverError> {
     let required = amg.resident_bytes();
+    tracing::debug!(
+        required,
+        envelope = planned.resident_bytes_upper_bound,
+        "fluid AMG hierarchy resident bytes"
+    );
     if required > planned.resident_bytes_upper_bound {
         return Err(SolverError::OverBudget {
             required,
