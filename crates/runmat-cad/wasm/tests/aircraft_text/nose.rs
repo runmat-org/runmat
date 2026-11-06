@@ -18,10 +18,12 @@ use super::{NOSE, RADIUS};
 const TIP_Z: f64 = -420.0;
 /// The nose skin's thickness, measured across each section.
 const SKIN: f64 = 4.0;
-/// Loft stations, aft of the tip: close together at the tip, where the sections grow fastest.
-const STATIONS: [f64; 16] = [
+/// Loft stations, aft of the tip: close together at the tip, where the sections grow fastest,
+/// and no more than 700 mm apart aft, so the smooth skin and hollow lofts (which interpolate
+/// their own sections) stay a skin's thickness apart where the nose meets the barrel.
+const STATIONS: [f64; 17] = [
     2.0, 10.0, 30.0, 70.0, 140.0, 250.0, 400.0, 600.0, 900.0, 1_300.0, 1_800.0, 2_400.0, 3_000.0,
-    3_700.0, 4_400.0, NOSE,
+    3_700.0, 4_400.0, 4_800.0, NOSE,
 ];
 /// Points on each section's closed spline.
 const SECTION_POINTS: usize = 24;

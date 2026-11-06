@@ -113,6 +113,38 @@ fn tail_cone() -> String {
     part("tail_cone", "FUS-TC-020", "aluminum_2024", "The tail cone: a 5 mm skin lofted aft through circles from the barrel, closing and sweeping up to the APU exhaust.", &body, "cone")
 }
 
+/// Where the aft pressure bulkhead's rim sits, aft of the barrel's end (behind the aft galleys),
+/// and its rim radius, inside the tail cone's skin there.
+const BULKHEAD_AT: f64 = 700.0;
+const BULKHEAD_RIM: f64 = RADIUS - 30.0;
+
+/// The aft pressure bulkhead: a 4 mm spherical dome, convex aft, 800 mm deep, closing the
+/// pressurized cabin inside the tail cone, with a small fitting hole at its apex.
+fn aft_pressure_bulkhead() -> String {
+    let (depth, wall, apex) = (800.0, 4.0, 40.0);
+    let rho = (depth * depth + BULKHEAD_RIM * BULKHEAD_RIM) / (2.0 * depth);
+    let c = depth - rho;
+    // Points on the sphere of radius `r` about (c, 0), from the rim plane x = 0 to the apex hole.
+    let arc = |r: f64| -> Vec<(f64, f64)> {
+        let (t0, t1) = ((r * r - c * c).sqrt().atan2(-c), (apex / r).asin());
+        (0..=12).map(|k| t0 + (t1 - t0) * k as f64 / 12.0).map(|t| (c + r * t.cos(), r * t.sin())).collect()
+    };
+    let outer = arc(rho);
+    let mut inner = arc(rho - wall);
+    inner.reverse();
+    part(
+        "aft_pressure_bulkhead",
+        "FUS-PB-060",
+        "aluminum_2024",
+        "The aft pressure bulkhead: a 4 mm spherical dome, convex aft, closing the cabin inside the tail cone.",
+        &format!(
+            "{}    feature dome = revolve(profile = sketch.s, axis = origin.x, angle = 360 deg)\n",
+            loop_sketch("s", "origin.xy", &[Curve::Spline(outer), Curve::Line(vec![]), Curve::Spline(inner), Curve::Line(vec![])])
+        ),
+        "dome",
+    )
+}
+
 /// The wing-to-body fairing: a long flattened blister under the wing box, a 20 mm shell, cut
 /// back to the fuselage skin so nothing of it stands inside the cabin or the hold.
 fn fairing() -> String {
@@ -148,6 +180,7 @@ pub fn parts() -> Vec<(String, String)> {
         ("rivet.part".into(), rivet()),
         ("tail_cone.part".into(), tail_cone()),
         ("fairing.part".into(), fairing()),
+        ("aft_pressure_bulkhead.part".into(), aft_pressure_bulkhead()),
     ]
 }
 
@@ -246,6 +279,7 @@ pub fn fuselage() -> String {
     s += &use_("assembly", "cabin", "cabin", &[]);
     s += &use_("assembly", "hold", "hold", &[]);
     s += &use_("part", "tail_cone", "tail_cone", &[offset(NOSE + 3.0 * SECTION, 0.0, 0.0)]);
+    s += &use_("part", "aft_pressure_bulkhead", "aft_pressure_bulkhead", &[offset(NOSE + 3.0 * SECTION + BULKHEAD_AT, 0.0, 0.0)]);
     s += &use_("part", "fairing", "fairing", &[offset(super::wing::ROOT_X - 1_200.0, 0.0, -1_250.0)]);
     s += "}\n";
     s

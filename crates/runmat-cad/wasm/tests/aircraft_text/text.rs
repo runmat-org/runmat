@@ -160,7 +160,7 @@ fn paint(name: &str) -> Option<&'static str> {
         "seat_frame" | "seat_track" => "#8C9299",
         "seat_armrest" => "#4C535B",
         "floor_panel" | "cockpit_floor" => "#6A7078",
-        "floor_beam" | "centre_wing_box" | "gear_bay" => "#A7B596",
+        "floor_beam" | "centre_wing_box" | "gear_bay" | "aft_pressure_bulkhead" => "#A7B596",
         "sidewall_lining" | "ceiling_panel" | "nose_lining" => "#ECEDEF",
         "hold_liner" | "hold_liner_aft" => "#C9CDD2",
         "overhead_bin" => "#E1E4E8",
