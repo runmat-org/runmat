@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "source_commit": "c7a12b7b9f050f6789dda56a1024636243b7a63e",
+  "target": "aarch64-apple-darwin",
+  "toolchain": "rustc 1.90.0",
+  "command": ["cargo", "build", "-p", "runmat", "--profile", "release", "--target", "aarch64-apple-darwin", "--locked", "--offline", "--bin", "runmat", "--features", "blas-lapack,vendored-openssl,occt-native"],
+  "build_exit": 0,
+  "build_log_sha256": "22b5c381e17cbf623e7c31ed1611f99c7c69ba9ed0c167eb974438b49e886287",
+  "build_log_location": "Main:.tmp-rm1064/settings-main-cli-suite-r1057.build.log",
+  "cli_sha256": "e0252f6fcc8fcd93364079352acfe43c84ad13d9c0b03c1bc64448d6d3594268",
+  "source_guards": {
+    "matched_each": 25871,
+    "differences": 0,
+    "postbuild_sha256": "cd1e4c1278631f3b457739557122fc332839bb561705ab3b26d2e72e25e41119",
+    "postsource_sha256": "1c65db8e9b263956642b5d3b8d0f5781f9e74262abe22de50cf233b2827c8060"
+  },
+  "review": "The only additional scientific input is commands/job/submit.rs. It replaces an upload request's duplicated encryption-suite spelling with the existing constant. Local authored-script execution and the recovery harness do not use that upload producer. There are no changes to either cohort, its assertions, numerical code, worker code, dependencies or compiler settings.",
+  "remote_execution_qualified": false,
+  "scope": "Compiler acceptance and reviewed source conservation for unchanged Linux scientific cohorts. The preserved original remote fixture still fails at its memory:// transfer URL; the repaired HTTP fixture and final platform products require separate acceptance."
+}

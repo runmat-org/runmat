@@ -65,14 +65,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "abc8087169bc2ae14057475076e798603786432e39ea2813a9132fbaff678068",
+      "sha256": "51d1c9812c4397e06f28fa087fd7c5b227a4365a62c2105d44b57270a76519c6",
       "files": 24826,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Only three cfg(windows) scientific inputs changed. Linux numerical/runtime/recovery code, fixtures, dependencies and assertions are identical. The Windows boundary has focused passing execution evidence. This review conserves Linux measurements and does not qualify the Windows product candidate.",
+    "reason": "Three Windows-only private-filesystem inputs are excluded from the measured Linux target. The fourth input changes only the CLI remote-upload metadata producer, outside both measured scientific routes. Exact inverse edits reconstruct the original measured inventory. Preserve original measured counts, commands, artifacts and logs. This conservation does not qualify the corrected remote flow or final platform products.",
     "review": {
-      "path": "qualification/scientific/reviews/windows-private-path-r1056.json",
-      "sha256": "157854feeb78c201d366db47cf553c2fda5c2f859782d7c08cb4419a7b5d5208"
+      "path": "qualification/scientific/reviews/windows-path-and-cli-suite-r1057.json",
+      "sha256": "1b4d046016c01290d9f5b5d34986388b1ff4edcbd57056b13bc74ec00b78464c"
     }
   }
 }
