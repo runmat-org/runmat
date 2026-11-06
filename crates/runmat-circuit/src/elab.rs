@@ -1406,5 +1406,7 @@ fn primary_value(params: &mut BTreeMap<String, Param>) {
         d if d == Dim::INDUCTANCE => "inductance",
         _ => return,
     };
-    params.insert(key.to_owned(), value);
+    // The written `value` stays the one that records how it was computed (the index's
+    // `computed` rows, the hover); the primary parameter is its number.
+    params.insert(key.to_owned(), Param { call: None, ..value });
 }
