@@ -259,6 +259,9 @@ pub fn add_board_reusing(
         Some(format!("{label} {value}{}", origin_text(&rule, &source)))
     };
     let layer_name = |l: u8| crate::layout::copper_name(l, copper);
+    // Each copper layer's transmission-line geometry, for a track's impedance in Properties.
+    let lines: Vec<Option<crate::impedance::TraceGeometry>> =
+        (0..copper).map(|l| crate::impedance::TraceGeometry::of(&board.stackup, l)).collect();
     let tracks = board
         .tracks
         .values()
@@ -277,6 +280,11 @@ pub fn add_board_reusing(
             let mut explain_map = BTreeMap::new();
             if let Some(line) = explain(it, props::TRACK_WIDTH, "width", required) {
                 explain_map.insert("width".to_owned(), line);
+            }
+            if let Some(line) = lines.get(t.layer as usize).copied().flatten() {
+                let z = line.single_ended(t.width as f64 * 1e-9);
+                values.insert("impedance".to_owned(), (z * 10.0).round() / 10.0);
+                explain_map.insert("impedance".to_owned(), impedance_text(&line, z));
             }
             let (points, arc) = crate::display::track_points(&t.geom);
             CopperRow {
@@ -693,5 +701,14 @@ pub fn item_label(board: &Board, it: &BItem) -> String {
             .get(id)
             .map(|z| format!("pour {}", z.name))
             .unwrap_or_default(),
+    }
+}
+
+/// `impedance 50.3 Ω, microstrip 0.36 mm over its plane, εr 4.1 (closed form)`.
+fn impedance_text(line: &crate::impedance::TraceGeometry, z: f64) -> String {
+    use crate::impedance::TraceGeometry::*;
+    match *line {
+        Microstrip { h, er, .. } => format!("impedance {z:.1} Ω, microstrip {:.3} mm over its plane, εr {er:.2} (closed form)", h * 1e3),
+        Stripline { h1, h2, er, .. } => format!("impedance {z:.1} Ω, stripline {:.3} / {:.3} mm between its planes, εr {er:.2} (closed form)", h1 * 1e3, h2 * 1e3),
     }
 }

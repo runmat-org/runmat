@@ -27,7 +27,8 @@
 //! | `diff-pair-uncoupled` | uncoupled length above `diff_uncoupled_max` |
 //! | `min-spokes` | a thermal-relief pad with fewer connected spokes than `spoke_min` |
 //!
-//! Impedance targets (`impedance`) are recorded in [`Drc::impedance_targets`], not checked.
+//! Impedance targets (`impedance`) are recorded in [`Drc::impedance_targets`] and checked track
+//! by track against the stackup's closed forms ([`crate::impedance`], `code = impedance`).
 
 use crate::board_rules::{BItem, BoardGraph, BoardRules};
 use crate::connectivity::layer_mask;

@@ -68,6 +68,7 @@ pub mod fixture;
 pub mod font;
 pub mod geom;
 pub mod ids;
+pub mod impedance;
 pub mod index;
 pub mod ipc2581;
 pub mod import;

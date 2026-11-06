@@ -761,3 +761,31 @@ fn a_gap_equal_to_its_rule_passes_and_one_nanometre_under_fails() {
     // The message never reads the gap equal to its limit.
     assert_eq!(gaps[0].message, "clearance 0.177799 mm < 0.177800 mm");
 }
+
+/// A net's impedance target is checked against the stackup's closed forms: on the 4-layer
+/// 1.6 mm stack, a 0.15 mm top track is far above 50 Ω (one finding naming the width that hits
+/// it), and a track of that width passes.
+#[test]
+fn an_impedance_target_is_checked_against_the_stackup() {
+    use runmat_circuit::impedance::TraceGeometry;
+    let mut b = small_board();
+    let rf = Some(b.add_net("RF", Some("rf")));
+    b.net_class_rules.insert(
+        "rf".into(),
+        NetClassRules { decls: vec![(props::IMPEDANCE.into(), RuleValue::Num(50.0))], ..Default::default() },
+    );
+    let fit = TraceGeometry::of(&b.stackup, 0).unwrap().width_for(50.0).expect("a 50 ohm width");
+    b.add_track(rf, 0, mm(0.15), Point::mm(5.0, 10.0), Point::mm(15.0, 10.0));
+    b.add_track(rf, 0, fit, Point::mm(5.0, 20.0), Point::mm(15.0, 20.0));
+    let (mut r, errs) = BoardRules::for_board(&b);
+    assert!(errs.is_empty(), "{errs:?}");
+    r.rebuild(&BoardGraph::new(&b, &[]));
+    let drc = Drc::run(&b, &r, &[], &[]);
+    let found: Vec<_> = drc.findings().into_iter().filter(|f| f.code == "impedance").collect();
+    assert_eq!(found.len(), 1, "{found:#?}");
+    let f = &found[0];
+    assert_eq!(f.rule, "net_class.rf");
+    assert!(f.actual.unwrap() > 55.0 && f.required == Some(50.0), "{f:?}");
+    assert!(f.message.contains("F.Cu at 0.150 mm") && f.message.contains("gives 50 Ω"), "{}", f.message);
+    assert_eq!(drc.impedance_targets.get("RF"), Some(&50.0));
+}

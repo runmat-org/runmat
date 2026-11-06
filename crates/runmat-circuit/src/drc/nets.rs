@@ -95,6 +95,7 @@ impl Drc {
             if let Some(RuleValue::Num(z)) = rules.value(g, net_item, props::IMPEDANCE) {
                 self.impedance_targets
                     .insert(board.net_name(n).to_string(), z);
+                self.check_impedance(board, rules, g, n, z);
             }
         }
         // Match groups.
@@ -307,6 +308,56 @@ impl Drc {
                     message: format!("pair skew {:.3} mm", (lp - ln).abs() * 1e-6),
                 });
             }
+        }
+    }
+}
+
+/// How far a track's impedance may sit from its net's target: the ±10 % a board house holds
+/// controlled impedance to (IPC-6012).
+pub const IMPEDANCE_TOLERANCE: f64 = 0.10;
+
+impl Drc {
+    /// The net's tracks against its impedance target, by the closed forms of
+    /// [`crate::impedance`] on each track's layer: one finding per layer and width off by more
+    /// than [`IMPEDANCE_TOLERANCE`].
+    fn check_impedance(&mut self, board: &Board, rules: &BoardRules, g: &BoardGraph, n: NetId, target: f64) {
+        let mut runs: BTreeMap<(u8, crate::geom::Coord), Vec<&crate::layout::Track>> = BTreeMap::new();
+        for t in board.tracks.values().filter(|t| t.net == Some(n)) {
+            runs.entry((t.layer, t.width)).or_default().push(t);
+        }
+        let (rule, source) = rules.single_origin(g, BItem::Net(n.0), props::IMPEDANCE);
+        for ((layer, width), tracks) in runs {
+            let Some(geometry) = crate::impedance::TraceGeometry::of(&board.stackup, layer) else { continue };
+            let z = geometry.single_ended(width as f64 * 1e-9);
+            if (z - target).abs() <= IMPEDANCE_TOLERANCE * target {
+                continue;
+            }
+            let fit = geometry
+                .width_for(target)
+                .map(|w| format!("; {:.3} mm gives {target:.0} Ω", w as f64 * 1e-6))
+                .unwrap_or_default();
+            let mut items: Vec<BItem> = tracks.iter().map(|t| BItem::Track(t.id)).collect();
+            items.push(BItem::Net(n.0));
+            items.sort();
+            let (a, _) = tracks[0].endpoints();
+            self.put(DrcFinding {
+                code: "impedance".into(),
+                severity: Severity::Error,
+                items,
+                layer: Some(layer),
+                at: a,
+                actual: Some(z),
+                required: Some(target),
+                rule: rule.clone(),
+                source: source.clone(),
+                message: format!(
+                    "net `{}` impedance {z:.1} Ω on {} at {:.3} mm, target {target:.0} Ω ±{:.0} %{fit}",
+                    board.net_name(n),
+                    crate::layout::copper_name(layer, board.copper_count()),
+                    width as f64 * 1e-6,
+                    IMPEDANCE_TOLERANCE * 100.0
+                ),
+            });
         }
     }
 }
