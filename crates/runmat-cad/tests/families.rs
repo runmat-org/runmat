@@ -253,7 +253,11 @@ fn the_flat_pattern_body_is_marked_and_kept_out_of_the_folded_display() {
     let levels = display_levels(&r, &env.kernel, &TessellationOptions::default());
     let mut unflattened = d.clone();
     unflattened.features.pop();
-    let folded_levels = display_levels(&env.regen(&unflattened), &env.kernel, &TessellationOptions::default());
+    let folded_levels = display_levels(
+        &env.regen(&unflattened),
+        &env.kernel,
+        &TessellationOptions::default(),
+    );
     assert_eq!(levels[0].positions.len(), folded_levels[0].positions.len());
     let json = serde_json::to_value(&shown).unwrap();
     assert!(json["bodies"][0].get("flat_pattern").is_none());
@@ -1363,6 +1367,11 @@ fn a_mitred_frame_makes_four_members_and_a_two_row_cut_list() {
     for row in cut_list {
         assert_eq!(row.quantity, 2);
         assert!(close(row.start_angle, PI / 4.0, 1e-12) && close(row.end_angle, PI / 4.0, 1e-12));
+        // The stock as a fabricator orders it, and each member's mass from S235's 7850 kg/m³
+        // over the 20 x 20 x 2 mm section's 144 mm².
+        assert_eq!(row.description, "Square tube 20 × 20 × 2");
+        let mass = row.mass_per_member.expect("S235 has a density");
+        assert!(close(mass, 7850.0 * 144e-6 * row.length, 1e-9), "{mass}");
     }
     // Member faces by member and profile curve.
     let side = Reference::face(EntityName::Generated(GenerationName {

@@ -18,7 +18,8 @@ const DENSITIES: &[(&[&str], f64)] = &[
     (&["titanium"], 4500.0),
     (&["stainless", "304", "316", "17_4"], 7950.0),
     (&["inconel"], 8190.0),
-    (&["steel", "iron"], 7850.0),
+    // Structural steel grades by name (EN 10025, ASTM A36).
+    (&["steel", "iron", "s235", "s275", "s355", "a36"], 7850.0),
     (&["nickel"], 8900.0),
     (&["copper", "c110", "c101"], 8940.0),
     (&["brass"], 8500.0),

@@ -87,6 +87,63 @@ impl MemberProfile {
         }
     }
 
+    /// The cut list's description: the family and its sizes in millimetres, as a fabricator
+    /// orders the stock (`Square tube 20 × 20 × 2`, `Pipe ⌀21.3 × 2.6`).
+    pub fn description(&self) -> String {
+        fn mm(v: f64) -> String {
+            let s = format!("{:.2}", v * 1000.0);
+            s.trim_end_matches('0').trim_end_matches('.').to_string()
+        }
+        match *self {
+            MemberProfile::RectTube {
+                width,
+                height,
+                wall,
+            } => {
+                let family = if (width - height).abs() < 1e-12 {
+                    "Square tube"
+                } else {
+                    "Rect tube"
+                };
+                format!("{family} {} × {} × {}", mm(width), mm(height), mm(wall))
+            }
+            MemberProfile::Pipe { diameter, wall } => {
+                format!("Pipe ⌀{} × {}", mm(diameter), mm(wall))
+            }
+            MemberProfile::Angle { a, b, thickness } => {
+                format!("Angle {} × {} × {}", mm(a), mm(b), mm(thickness))
+            }
+            MemberProfile::Channel {
+                depth,
+                flange,
+                web,
+                flange_thickness,
+            } => format!(
+                "Channel {} × {} × {} × {}",
+                mm(depth),
+                mm(flange),
+                mm(web),
+                mm(flange_thickness)
+            ),
+            MemberProfile::IBeam {
+                depth,
+                flange,
+                web,
+                flange_thickness,
+            } => format!(
+                "I-beam {} × {} × {} × {}",
+                mm(depth),
+                mm(flange),
+                mm(web),
+                mm(flange_thickness)
+            ),
+            MemberProfile::FlatBar { width, thickness } => {
+                format!("Flat bar {} × {}", mm(width), mm(thickness))
+            }
+            MemberProfile::RoundBar { diameter } => format!("Round bar ⌀{}", mm(diameter)),
+        }
+    }
+
     /// The outline as polygons; round profiles are sampled with `segments` sides.
     pub fn outline(&self, segments: usize) -> ProfileOutline {
         let id = |s: &str| SketchEntityId::new(s);

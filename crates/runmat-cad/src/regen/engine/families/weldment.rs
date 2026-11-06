@@ -146,10 +146,16 @@ impl<'a, 'b> Run<'a, 'b> {
                         tool.clip = clip;
                         tools.push(tool);
                     }
+                    // Mass per metre from the material's density (kg/m³) and the section (m²).
+                    let per_metre = g
+                        .material
+                        .as_deref()
+                        .and_then(crate::model::materials::material_density)
+                        .map(|density| density * g.profile.area());
                     rows_in.push((
-                        format!("{:?}", g.profile),
+                        g.profile.description(),
                         g.material.clone(),
-                        None,
+                        per_metre,
                         cuts.clone(),
                     ));
                     cuts_all.extend(cuts);
