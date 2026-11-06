@@ -29,11 +29,12 @@ pub(crate) struct PreparedFluidSource {
     pub constraints: Vec<FluidConstraint>,
     pub boundaries: Vec<AnalysisBoundary>,
     pub excitations: Vec<ExcitationAction>,
-    /// Bytes this source retains: the projection, the authored metadata profiles and both
-    /// compiled property maps.
+    /// Bytes this source retains: the projection, the authored metadata profiles and the
+    /// compiled property map.
     pub preparation_resident_bytes: u64,
-    /// Finite-volume derivation scratch of the selected cells. It is released when the
-    /// topology exists, before any numerical storage: see [`Self::resident_with`].
+    /// The larger of two sequential preparation scratches: the material authentication's
+    /// recompiled property map and the finite-volume derivation of the selected cells. Both
+    /// are released before any numerical storage exists: see [`Self::resident_with`].
     pub preparation_scratch_bytes: u64,
     /// Canonical plans derived from this source; every recovery, accuracy and publication
     /// consumer of the source shares them instead of re-deriving stencils and patterns.
@@ -167,18 +168,15 @@ impl PreparedFluidSource {
         })?;
         let prepared = PreparedProperties::prepare(model, Some(mesh), ceiling - preliminary)
             .map_err(invalid)?;
-        // Material source authentication independently recompiles: both maps can coexist.
-        let preparation_resident_bytes = add_bytes(
-            base,
-            add_bytes(
-                prepared.estimated_resident_bytes,
-                prepared.estimated_resident_bytes,
-            )?,
-        )?;
+        // The source retains one compiled map. Material source authentication
+        // (`derive_fluid_cells`) recompiles a second map and drops it before the finite-volume
+        // derivation starts, so that copy is scratch, sequential with the derivation scratch.
+        let preparation_resident_bytes = add_bytes(base, prepared.estimated_resident_bytes)?;
+        let authentication_scratch = prepared.estimated_resident_bytes;
         require_bytes(
             resident_with(
                 preparation_resident_bytes,
-                geometry.scratch_bytes as u64,
+                authentication_scratch.max(geometry.scratch_bytes as u64),
                 numerical.resident_bytes_upper_bound,
             )?,
             ceiling,
@@ -271,7 +269,7 @@ impl PreparedFluidSource {
             boundaries,
             excitations,
             preparation_resident_bytes,
-            preparation_scratch_bytes: selected_scratch,
+            preparation_scratch_bytes: authentication_scratch.max(selected_scratch),
             plans: Default::default(),
         })
     }
