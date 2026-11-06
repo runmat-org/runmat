@@ -2,13 +2,13 @@
 # filter's oil and its pleated cartridge, 24 pleats of 1.5 mm media from 22 to 45 mm radius.
 import math, sys
 N, r_o, r_i, t = 24, 45.0, 22.0, 1.5
-# The pleat's centre line: a closed zigzag between the two radii.
-centre = []
+# The pleat's center line: a closed zigzag between the two radii.
+center = []
 for k in range(N):
     a = 2 * math.pi * k / N
-    centre.append((r_o * math.cos(a), r_o * math.sin(a)))
+    center.append((r_o * math.cos(a), r_o * math.sin(a)))
     b = a + math.pi / N
-    centre.append((r_i * math.cos(b), r_i * math.sin(b)))
+    center.append((r_i * math.cos(b), r_i * math.sin(b)))
 
 def offset(points, d):
     """The closed polyline offset by d to its left, with mitred corners."""
@@ -29,7 +29,7 @@ def offset(points, d):
     return out
 
 # The zigzag runs anticlockwise, so its left is inward.
-inner, outer = offset(centre, t / 2), offset(centre, -t / 2)
+inner, outer = offset(center, t / 2), offset(center, -t / 2)
 f = lambda p: f"[{p[0]:.4f} mm, {p[1]:.4f} mm]"
 def loop(name, pts):
     return "\n".join(f"        {name}{i} = line(start = {f(pts[i])}, end = {f(pts[(i + 1) % len(pts)])})" for i in range(len(pts)))
@@ -104,7 +104,7 @@ part filter {{
 
     output oil = {{ body = feature.bowl.body, label = "Fluid", color = "#D08A1E" }}
     output core_oil = {{ body = feature.core.body, label = "Fluid", color = "#D08A1E" }}
-    output media = {{ body = feature.media.body, label = "Media", material = "glass_fibre_media", color = "#E8E2CF" }}
+    output media = {{ body = feature.media.body, label = "Media", material = "glass_fiber_media", color = "#E8E2CF" }}
 }}
 '''
 open(sys.argv[1] if len(sys.argv) > 1 else "filter.part", "w").write(text)

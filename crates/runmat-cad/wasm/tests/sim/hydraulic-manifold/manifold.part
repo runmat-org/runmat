@@ -1,7 +1,7 @@
 runmat 0.7
 std 1
 
-// A crossover manifold block in 6061-T6 aluminium, 90 x 80 x 50 mm, with its oil. Two drilled
+// A crossover manifold block in 6061-T6 aluminum, 90 x 80 x 50 mm, with its oil. Two drilled
 // lines cross the block:
 // - P to A: the supply gallery is drilled 12 mm from the left face (port P) to a flat bottom
 //   60 mm in; the 10 mm work port A drops into it from the top face.

@@ -43,7 +43,7 @@ std 1
 
 // A helical static mixer in a 20 mm tube: {E} elements, each a {t} mm plate twisted 180 degrees over
 // {L_el:.0f} mm (1.5 diameters), alternately right- and left-handed and turned 90 degrees to the one
-// before, so each element splits the stream its neighbour delivers. A straight splitter
+// before, so each element splits the stream its neighbor delivers. A straight splitter
 // plate ahead of the first element keeps the two feeds apart until they reach it: stream A
 // enters through an 8 mm side port above it ("Inlet A") and stream B through one below
 // ("Inlet B").

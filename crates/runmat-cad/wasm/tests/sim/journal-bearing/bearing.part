@@ -4,7 +4,7 @@ std 1
 // A plain journal bearing: a 50 mm steel shaft running in a 40 mm long bronze bush, and the oil
 // film between them, fed through a 4 mm hole at the top of the bush. The radial clearance is
 // 50 um (c / R = 0.002, a usual figure for a 50 mm journal); under load the shaft sits
-// `eccentricity` below the bush's centre, so the film runs from 20 um at the bottom to 80 um at
+// `eccentricity` below the bush's center, so the film runs from 20 um at the bottom to 80 um at
 // the top, where the feed hole is.
 // Hand check, short-bearing theory at 0.6 eccentricity: Sommerfeld number about 0.12; with ISO
 // VG 46 at 40 degC and 3000 rpm that carries about 6 kN.
@@ -23,7 +23,7 @@ part bearing {
     let rb = input.shaft_diameter / 2 + input.clearance
     let ro = input.bush_outer / 2
 
-    // The shaft, run through the bush with an overhang each side; its centre sits low by the
+    // The shaft, run through the bush with an overhang each side; its center sits low by the
     // eccentricity.
     feature shaft_plane = plane.offset(base = origin.xy, distance = -input.shaft_overhang)
     sketch shaft_s on plane.shaft_plane {

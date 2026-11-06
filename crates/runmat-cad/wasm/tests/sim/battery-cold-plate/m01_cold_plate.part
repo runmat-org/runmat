@@ -3,9 +3,9 @@ std 1
 
 // Module M01 of an EV battery pack on its liquid cold plate: the eight 34 x 500 x 95 mm prismatic
 // cells at a 36 mm pitch (the module of runmat-examples/fea/battery-module-cells), a 3 mm
-// gap-filler strip under each cell, and a 296 x 520 x 8 mm brazed aluminium cold plate whose top
+// gap-filler strip under each cell, and a 296 x 520 x 8 mm brazed aluminum cold plate whose top
 // carries a 1 mm land under each strip. The coolant (50/50 water-glycol) runs in a four-pass
-// serpentine channel, 14 x 4 mm, under the cells' centre lines: in at one corner of the plate's
+// serpentine channel, 14 x 4 mm, under the cells' center lines: in at one corner of the plate's
 // rear edge, out at the other. The coolant is its own body: the plate is cut by it, so each
 // channel wall is one surface with a fluid side ("Channel wall") and a plate side ("Plate
 // channel wall").

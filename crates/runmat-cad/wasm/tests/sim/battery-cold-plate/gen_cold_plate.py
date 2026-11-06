@@ -2,7 +2,7 @@
 # M01's eight cells on their gap-filler strips, the cold plate under them and its coolant.
 import sys
 pitch, cell_w, cell_l, cell_h = 36.0, 34.0, 500.0, 95.0
-centres = [286 / 8 * k for k in (1, 3, 5, 7)]
+centers = [286 / 8 * k for k in (1, 3, 5, 7)]
 
 def rect(prefix, x0, x1, y0, y1):
     p = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
@@ -26,7 +26,7 @@ pads = "\n".join(f'''    sketch pad_{k + 1}_s on plane.pad_plane {{
 pad_outputs = "\n".join(
     f'    output pad_{k + 1} = {{ body = feature.pad_{k + 1}.body, label = "Gap filler", material = "gap_filler_3w", color = "#E0B43C" }}'
     for k in range(8))
-c = centres
+c = centers
 w = "let.half_w"
 # The serpentine's outline, starting at the inlet's left corner (see the part's comment).
 pts = [
@@ -55,9 +55,9 @@ std 1
 
 // Module M01 of an EV battery pack on its liquid cold plate: the eight 34 x 500 x 95 mm prismatic
 // cells at a 36 mm pitch (the module of runmat-examples/fea/battery-module-cells), a 3 mm
-// gap-filler strip under each cell, and a 296 x 520 x 8 mm brazed aluminium cold plate whose top
+// gap-filler strip under each cell, and a 296 x 520 x 8 mm brazed aluminum cold plate whose top
 // carries a 1 mm land under each strip. The coolant (50/50 water-glycol) runs in a four-pass
-// serpentine channel, 14 x 4 mm, under the cells' centre lines: in at one corner of the plate's
+// serpentine channel, 14 x 4 mm, under the cells' center lines: in at one corner of the plate's
 // rear edge, out at the other. The coolant is its own body: the plate is cut by it, so each
 // channel wall is one surface with a fluid side ("Channel wall") and a plate side ("Plate
 // channel wall").

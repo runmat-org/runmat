@@ -9,7 +9,7 @@ std 1
 // Sizing at 500 A: one primary turn drives B = mu0 N I / (g + l_core / mu_r) =
 // 4 pi e-7 x 500 / (3 mm + 126 mm / 2200) = 0.206 T across the gap, about 42 % of N87's
 // 490 mT saturation at 25 degC (TDK N87 datasheet). Change `gap` and re-run the study.
-// The core's axis (the primary's) is z; the core's centre is the origin.
+// The core's axis (the primary's) is z; the core's center is the origin.
 part sensor {
     input outer : length = 44 mm
     input window : length = 26 mm

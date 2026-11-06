@@ -1,7 +1,7 @@
 runmat 0.7
 std 1
 
-// A sealed die-cast aluminium electronics enclosure, 120 x 80 x 40 mm with 2.5 mm walls, and
+// A sealed die-cast aluminum electronics enclosure, 120 x 80 x 40 mm with 2.5 mm walls, and
 // the 100 x 60 x 1.6 mm FR-4 board it carries on four 6 mm bosses 8 mm above the floor. The
 // air is the sealed volume inside, less the board and the bosses: it shares its faces with
 // both, and the enclosure's outer wall meets the room.
