@@ -6,7 +6,7 @@ std 1
 // flat along the sides, the rear arms fold forward and down under the body on tilted hinges),
 // cowled motor pods with folding two-blade props, a 3-axis gimbal under the nose, a flush rear
 // battery, downward and forward vision sensors, and the 4-in-1 ESC and flight controller inside
-// on the lower shell's bosses. The fold inputs stow it: drone_folded.assembly sets them.
+// on the ESC heatsink's standoffs. The fold inputs stow it: drone_folded.assembly sets them.
 assembly drone {
     input fold_front : angle = 0 deg
     input fold_rear : angle = 0 deg
@@ -53,14 +53,21 @@ assembly drone {
         placement = { placement = offset, offset = { translation = [97 mm, -6 mm, 31 mm], rotation = { rotation = axis_angle, axis = [0, 1, 0], angle = 90 deg } } }
     }
     use part vision_sensor from "vision_sensor.part" as vision_down_left {
-        placement = { placement = offset, offset = { translation = [-4 mm, 11 mm, 2.6 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg } } }
+        placement = { placement = offset, offset = { translation = [-28 mm, 11 mm, 2.6 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg } } }
     }
     use part vision_sensor from "vision_sensor.part" as vision_down_right {
-        placement = { placement = offset, offset = { translation = [-4 mm, -11 mm, 2.6 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg } } }
+        placement = { placement = offset, offset = { translation = [-28 mm, -11 mm, 2.6 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = 180 deg } } }
     }
 
-    // The boards on the lower shell's bosses: the 4-in-1 ESC on the bosses' tops, the flight
-    // controller 10 mm above it on nylon spacers, both held by four M3 screws into the bosses.
+    // The ESC's heatsink in the belly window (its fins in the downwash) and the gap pad on its
+    // pedestal. The boards stand on the heatsink's standoffs: the 4-in-1 ESC on their tops, the
+    // flight controller 10 mm above it on nylon spacers, both held by four M3 screws into them.
+    use part esc_heatsink from "esc_heatsink.part" as esc_heatsink {
+        placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 0 mm] } }
+    }
+    use part thermal_pad from "thermal_pad.part" as thermal_pad {
+        placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 9.5 mm] } }
+    }
     use circuit esc from "esc.circuit" as esc {
         placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 10 mm] } }
     }
