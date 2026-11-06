@@ -237,6 +237,10 @@ pub struct GeometryScenePresentation {
     #[serde(default)]
     pub selected_topology: Vec<GeometrySceneTopologySelection>,
     pub hovered_region_id: Option<String>,
+    /// Analysis colors (draft, thickness, curvature): each listed region's faces fill with
+    /// its color while its edges keep theirs. Highlights, hover and selection paint over them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub region_colors: Vec<GeometrySceneRegionColor>,
     #[serde(default)]
     pub region_highlights: Vec<GeometrySceneRegionHighlight>,
     #[serde(default)]
@@ -284,6 +288,7 @@ impl Default for GeometryScenePresentation {
             selected_region_ids: Vec::new(),
             selected_topology: Vec::new(),
             hovered_region_id: None,
+            region_colors: Vec::new(),
             region_highlights: Vec::new(),
             region_annotations: Vec::new(),
             display_mode: GeometrySceneDisplayMode::Shaded,
@@ -308,6 +313,7 @@ impl GeometryScenePresentation {
                 .selected_topology
                 .iter()
                 .any(|selection| matches!(selection, GeometrySceneTopologySelection::Face { .. }))
+            || !self.region_colors.is_empty()
             || !self.region_highlights.is_empty()
             || self.active_section().is_some()
     }
@@ -406,6 +412,14 @@ pub enum GeometrySceneViewPreset {
     Right,
     Top,
     Bottom,
+}
+
+/// One region's analysis color: its faces fill with `color` and its edges keep theirs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometrySceneRegionColor {
+    pub region_id: String,
+    pub color: [f32; 4],
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -898,6 +912,9 @@ impl GeometrySceneChunk {
             render_data.pipeline_type = PipelineType::LinesNoDepth;
         }
 
+        for region in &presentation.region_colors {
+            self.apply_region_color(&mut render_data, &region.region_id, RegionPaint::Face(region.color));
+        }
         for highlight in &presentation.region_highlights {
             self.apply_region_color(
                 &mut render_data,

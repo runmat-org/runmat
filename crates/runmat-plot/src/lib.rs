@@ -59,7 +59,7 @@ pub use geometry_scene::{
     GeometrySceneChunk, GeometrySceneCompleteness, GeometrySceneDisplayMode, GeometrySceneOverlay,
     GeometryScenePickIndex, GeometryScenePickMode, GeometryScenePickRequest,
     GeometryScenePickResult, GeometryScenePresentation, GeometrySceneProjection, GeometrySceneRegion,
-    GeometrySceneRegionAnnotation, GeometrySceneRegionSummary, GeometrySceneTopologySelection,
+    GeometrySceneRegionAnnotation, GeometrySceneRegionColor, GeometrySceneRegionSummary, GeometrySceneTopologySelection,
     GeometrySceneTriangleRange,
 };
 pub use plots::{

@@ -93,7 +93,8 @@ impl GeometrySceneChunk {
             };
             let r = &mut raw[n];
             match (edges, paint) {
-                (_, RegionPaint::Fill(c)) => r.tint = [c[0], c[1], c[2], 1.0],
+                (_, RegionPaint::Fill(c)) | (false, RegionPaint::Face(c)) => r.tint = [c[0], c[1], c[2], 1.0],
+                (true, RegionPaint::Face(_)) => {}
                 (false, RegionPaint::Tint { face, amount, .. }) => r.tint = [face[0], face[1], face[2], amount],
                 (true, RegionPaint::Tint { edge, .. }) => {
                     r.tint = [edge[0], edge[1], edge[2], 1.0];
@@ -101,6 +102,9 @@ impl GeometrySceneChunk {
                 }
             }
         };
+        for region in &presentation.region_colors {
+            paint(&region.region_id, RegionPaint::Face(region.color));
+        }
         for highlight in &presentation.region_highlights {
             let color = highlight
                 .color

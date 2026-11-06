@@ -873,6 +873,66 @@ fn selection_tints_the_face_and_draws_its_boundary_edges_in_the_selection_color(
 }
 
 #[test]
+fn region_colors_fill_faces_keep_edges_and_sit_under_selection() {
+    let grey = [0.66, 0.72, 0.8, 0.9];
+    let face = GeometrySceneChunk::indexed_triangles(
+        "faces",
+        vec![
+            vertex([0.0, 0.0, 0.0], grey, [0.0, 0.0, 1.0]),
+            vertex([1.0, 0.0, 0.0], grey, [0.0, 0.0, 1.0]),
+            vertex([0.0, 1.0, 0.0], grey, [0.0, 0.0, 1.0]),
+            vertex([1.0, 1.0, 0.0], grey, [0.0, 0.0, 1.0]),
+        ],
+        vec![0, 1, 2, 1, 3, 2],
+        cad_default_material(),
+    )
+    .with_regions(vec![
+        GeometrySceneRegion::new("face:0:0", None, None, vec![GeometrySceneTriangleRange::new(0, 1)]),
+        GeometrySceneRegion::new("face:0:1", None, None, vec![GeometrySceneTriangleRange::new(1, 1)]),
+    ]);
+    let green = [0.2, 0.7, 0.3, 1.0];
+    let colored = GeometryScenePresentation {
+        region_colors: vec![GeometrySceneRegionColor { region_id: "face:0:0".into(), color: green }],
+        ..Default::default()
+    };
+    let out = face.render_data_with_presentation(&colored);
+    let idx = out.indices.clone().unwrap();
+    // The face takes the color at its own alpha; the other face keeps its shade.
+    assert_eq!(out.vertices[idx[0] as usize].color, [0.2, 0.7, 0.3, 0.9]);
+    assert_eq!(out.vertices[idx[3] as usize].color, grey);
+    // Selection tints over the analysis color.
+    let both = face.render_data_with_presentation(&GeometryScenePresentation {
+        selected_region_ids: vec!["face:0:0".into()],
+        ..colored.clone()
+    });
+    let bi = both.indices.clone().unwrap();
+    assert_eq!(both.vertices[bi[0] as usize].color, SELECTED_PAINT.face([0.2, 0.7, 0.3, 0.9]));
+
+    let black = [0.07, 0.08, 0.1, 1.0];
+    let mut edges = GeometrySceneChunk::from_render_data(
+        "lines",
+        RenderData {
+            pipeline_type: PipelineType::Lines,
+            vertices: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]].map(|p| vertex(p, black, [0.0, 0.0, 1.0])).to_vec(),
+            indices: Some(vec![0, 1]),
+            gpu_vertices: None,
+            bounds: None,
+            material: Material::default(),
+            draw_calls: vec![DrawCall { vertex_offset: 0, vertex_count: 2, index_offset: Some(0), index_count: Some(2), instance_count: 1 }],
+            image: None,
+        },
+    );
+    edges.segment_regions = vec![GeometrySceneRegion::new("face:0:0", None, None, vec![GeometrySceneTriangleRange::new(0, 1)])];
+    let lines = edges.render_data_with_presentation(&colored);
+    assert!(lines.vertices.iter().all(|v| v.color == black), "edges keep their color");
+    // The presentation round-trips through its camelCase JSON form.
+    let json = serde_json::to_value(&colored).unwrap();
+    assert_eq!(json["regionColors"][0]["regionId"], "face:0:0");
+    let back: GeometryScenePresentation = serde_json::from_value(json).unwrap();
+    assert_eq!(back, colored);
+}
+
+#[test]
 fn saved_line_segment_regions_round_trip_and_reject_overruns() {
     let lines: crate::event::GeometryLines = serde_json::from_value(serde_json::json!({
         "positions": [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],

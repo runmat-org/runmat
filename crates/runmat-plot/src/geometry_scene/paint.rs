@@ -29,6 +29,9 @@ pub(super) const HOVER_PAINT: RegionPaint = RegionPaint::Tint {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum RegionPaint {
     Fill([f32; 4]),
+    /// An analysis color: the faces take it at their own alpha (so display modes still apply)
+    /// and the edges stay as drawn.
+    Face([f32; 4]),
     Tint {
         face: [f32; 4],
         amount: f32,
@@ -40,6 +43,7 @@ impl RegionPaint {
     pub(super) fn face(self, base: [f32; 4]) -> [f32; 4] {
         match self {
             Self::Fill(color) => color,
+            Self::Face(color) => [color[0], color[1], color[2], base[3].min(color[3])],
             Self::Tint { face, amount, .. } => [
                 base[0] + (face[0] - base[0]) * amount,
                 base[1] + (face[1] - base[1]) * amount,
@@ -54,6 +58,7 @@ impl RegionPaint {
     pub(super) fn edge(self, base: [f32; 4]) -> [f32; 4] {
         let color = match self {
             Self::Fill(color) => color,
+            Self::Face(_) => return base,
             Self::Tint { edge, .. } => edge,
         };
         [color[0], color[1], color[2], base[3].min(color[3])]
@@ -63,7 +68,7 @@ impl RegionPaint {
     /// stand out by weight as well as color, as SolidWorks draws them; hover a little less.
     pub(super) fn edge_weight(self) -> f32 {
         match self {
-            Self::Fill(_) => 1.0,
+            Self::Fill(_) | Self::Face(_) => 1.0,
             Self::Tint { amount, .. } if amount >= GEOMETRY_SELECTED_TINT => SELECTED_EDGE_WEIGHT,
             Self::Tint { .. } => HOVER_EDGE_WEIGHT,
         }
@@ -86,6 +91,9 @@ impl GeometrySceneChunk {
             self.render_data.pipeline_type,
             PipelineType::Lines | PipelineType::LinesNoDepth
         ) {
+            if matches!(paint, RegionPaint::Face(_)) {
+                return 0;
+            }
             return self.apply_segment_region_color(render_data, region_id, paint);
         }
         if self.render_data.pipeline_type != PipelineType::Triangles {
@@ -201,14 +209,17 @@ fn recolor_primitive(
         }
         return true;
     };
-    let (Some(source), Some(target)) = (
-        source_indices.get(base..base + corners),
-        render_indices.get_mut(base..base + corners),
-    ) else {
+    // The primitive's current corners: an earlier paint (an analysis color under a selection)
+    // may already have isolated them, and this paint composes over its result.
+    if source_indices.get(base..base + corners).is_none() {
+        return false;
+    }
+    let Some(target) = render_indices.get_mut(base..base + corners) else {
         return false;
     };
+    let current: [u32; 3] = std::array::from_fn(|k| target.get(k).copied().unwrap_or(0));
     let mut isolated = [0_u32; 3];
-    for (slot, index) in source.iter().copied().enumerate() {
+    for (slot, index) in current[..corners].iter().copied().enumerate() {
         let Some(mut vertex) = render_data.vertices.get(index as usize).copied() else {
             return false;
         };
