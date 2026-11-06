@@ -3078,7 +3078,9 @@ mod tests {
         let mut limited = figure.clone();
         limited.set_axes_limits(0, None, Some((-130.0, -66.0)));
         assert_eq!(
-            limited.auto_axes_bounds_2d(0, (1.0, 2.0), (-123.0, -66.0)).1,
+            limited
+                .auto_axes_bounds_2d(0, (1.0, 2.0), (-123.0, -66.0))
+                .1,
             (-123.0, -66.0)
         );
         let mut equal = figure.clone();
