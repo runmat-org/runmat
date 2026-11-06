@@ -4,7 +4,7 @@ std 1
 // The ESC's heatsink and stack mount, machined from 6061-T6: a 56 x 56 x 2 mm belly plate that
 // closes a window in the lower shell, a 38 x 38 mm pedestal (wide enough to hold the standoffs
 // whole) that rises to the ESC's underside through a 0.5 mm gap pad, four standoffs that carry
-// the stack on the 30.5 mm pattern (M3 tap drills, 5 mm deep), and fourteen 0.8 mm fins, 10 mm
+// the stack on the 30.5 mm pattern (tapped M3, 7.5 mm deep with 6 mm of thread), and fourteen 0.8 mm fins, 10 mm
 // deep, below the belly in the propellers' downwash. The fins run fore and aft, so forward flight
 // blows along them too. Its origin is the stack's centre on the shell's base plane (z = 0),
 // where drone.assembly places it.
@@ -51,8 +51,9 @@ part esc_heatsink {
             t2 = point(-15.25 mm, -15.25 mm, 10 mm),
             t3 = point(15.25 mm, -15.25 mm, 10 mm)
         },
-        diameter = 2.5 mm,
-        depth = 5 mm
+        depth = 7.5 mm,
+        spec = { standard = iso, size = M3 },
+        form = { hole = tapped, thread_depth = 6 mm }
     )
     feature fin_plane = plane.offset(base = origin.xy, distance = -8.5 mm)
     sketch fins_s on plane.fin_plane {

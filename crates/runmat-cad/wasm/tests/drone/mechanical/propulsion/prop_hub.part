@@ -4,15 +4,16 @@ std 1
 // The folding propeller's hub: two plates on the motor's shaft that clamp the blades' root
 // tabs (0.1 mm clear above and below) on 2 mm pivot pins at 9 mm radius, under a domed cap.
 // The plates' 12.6 mm radius covers the tabs' rounded ends, and each blade's airfoil starts
-// outside it, so the blades fold back along the arm clear of the hub. Its origin is the motor
-// axis at the pod's origin.
+// outside it, so the blades fold back along the arm clear of the hub. Between the plates the boss
+// is R3.5 (a 1 mm wall round the 5 mm shaft): a tab folded 125 deg comes to 3.97 mm from the
+// axis. Its origin is the motor axis at the pod's origin.
 part prop_hub {
     sketch prof on origin.zx {
         l0 = line(start = [17.5 mm, 1.2 mm], end = [17.5 mm, 12.6 mm])
         l1 = line(start = [17.5 mm, 12.6 mm], end = [18.5 mm, 12.6 mm])
-        l2 = line(start = [18.5 mm, 12.6 mm], end = [18.5 mm, 5 mm])
-        l3 = line(start = [18.5 mm, 5 mm], end = [20.9 mm, 5 mm])
-        l4 = line(start = [20.9 mm, 5 mm], end = [20.9 mm, 12.6 mm])
+        l2 = line(start = [18.5 mm, 12.6 mm], end = [18.5 mm, 3.5 mm])
+        l3 = line(start = [18.5 mm, 3.5 mm], end = [20.9 mm, 3.5 mm])
+        l4 = line(start = [20.9 mm, 3.5 mm], end = [20.9 mm, 12.6 mm])
         l5 = line(start = [20.9 mm, 12.6 mm], end = [22 mm, 12.6 mm])
         l6 = line(start = [22 mm, 12.6 mm], end = [22 mm, 8 mm])
         l7 = line(start = [22 mm, 8 mm], end = [23.3 mm, 6 mm])

@@ -244,12 +244,14 @@ fn the_study_assemblies_export_with_their_region_names() {
 /// battery's notched case in its bay, the skids on the belly, the sensors and the gimbal's yaw
 /// motor in their openings, each pod on its arm's pad; folded, the front arms ride over the rear
 /// arms and every blade lies clear along its arm. Screws in their tapped holes overlap the
-/// thread's depth by design and are left out.
+/// thread's depth by design and are left out of the clash list; each stack screw's overlap with
+/// the heatsink is read as its engaged thread length, which must reach 1.5 × D = 4.5 mm.
 #[test]
 fn the_drone_has_no_interference_in_flight_or_folded() {
     runmat_geometry_wasm_host::cad::install_occt();
     let all = project();
     let mut problems = Vec::new();
+    let mut engagements = 0;
     for file in ["drone", "drone_folded"] {
         let path = format!("/p/drone/{file}.assembly");
         let started = std::time::Instant::now();
@@ -259,17 +261,34 @@ fn the_drone_has_no_interference_in_flight_or_folded() {
         assert!(r.errors.is_empty(), "{file}: {:?}", r.errors);
         for o in &r.overlaps {
             eprintln!("  {} / {}: {:.3} mm^3", o.a, o.b, o.volume * 1e9);
-            if !(o.a.contains("screw") || o.b.contains("screw")) {
+            let screw = o.a.contains("screw") || o.b.contains("screw");
+            if !screw {
                 problems.push(format!("{file}: {} / {} share {:.3} mm^3", o.a, o.b, o.volume * 1e9));
+            } else if o.a.contains("heatsink") || o.b.contains("heatsink") {
+                // A stack screw in its tapped standoff overlaps the thread: the Ø3 shank in the
+                // Ø2.5 tap drill, 2.16 mm² over the engaged length. M3 into 6061 needs at least
+                // 1.5 × D = 4.5 mm of thread.
+                let engaged = o.volume * 1e9 / THREAD_ANNULUS_MM2;
+                eprintln!("    engaged {engaged:.2} mm");
+                if engaged < 4.5 {
+                    problems.push(format!("{file}: {} / {} engage {engaged:.2} mm of thread (needs 4.5 mm)", o.a, o.b));
+                }
+                engagements += 1;
             }
         }
     }
+    // Four stack screws, in flight and folded.
+    assert_eq!(engagements, 8, "stack screws in the heatsink's standoffs");
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
+/// The Ø3 M3 shank inside the Ø2.5 tap drill: π (1.5² − 1.25²) mm².
+const THREAD_ANNULUS_MM2: f64 = std::f64::consts::PI * (1.5 * 1.5 - 1.25 * 1.25);
+
 /// The drone hovers level on equal thrust: its centre of gravity sits within 3 mm of the four
 /// props' thrust centre (the motor axes' centroid in plan), so no motor runs a large differential
-/// to hold it. Prints each part's mass and CG for the balance notes.
+/// to hold it, and neighbouring props keep a tip gap of 10 % of their radius. Prints each part's
+/// mass and CG for the balance notes.
 #[test]
 fn the_cg_sits_over_the_thrust_centre() {
     runmat_geometry_wasm_host::cad::install_occt();
@@ -290,6 +309,16 @@ fn the_cg_sits_over_the_thrust_centre() {
     let motors: Vec<[f64; 3]> = r.parts.iter().filter(|p| p.path.ends_with("/motor/motor")).map(|p| p.center).collect();
     assert_eq!(motors.len(), 4, "four motors");
     let thrust = [0, 1].map(|k| motors.iter().map(|c| c[k]).sum::<f64>() / 4.0);
+    // Neighbouring props clear each other in flight by at least 10 % of their radius: the closest
+    // two motor axes less one 174 mm prop diameter (tips at 9 mm pivot + 78 mm blade = 87 mm).
+    let radius = 87.0;
+    let closest = motors
+        .iter()
+        .enumerate()
+        .flat_map(|(i, a)| motors[i + 1..].iter().map(move |b| mm(((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt())))
+        .fold(f64::MAX, f64::min);
+    eprintln!("closest motor axes {closest:.1} mm, tip gap {:.1} mm", closest - 2.0 * radius);
+    assert!(closest - 2.0 * radius >= 0.1 * radius, "prop tips {:.1} mm apart", closest - 2.0 * radius);
     let cg = r.total.center;
     eprintln!(
         "total {:.1} g, CG ({:.1}, {:.1}, {:.1}) mm, thrust centre ({:.1}, {:.1}) mm",
