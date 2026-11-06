@@ -197,3 +197,38 @@ fn buses_expand_their_members() {
     index(&t);
     assert!(run(&t, "schematic.place-bus", json!({ "name": "D[0..7" })).is_err());
 }
+
+/// Symbols stay where the lock holds them while the sheet is wired: the drawing re-routes and
+/// nothing moves. With `SCHEMATIC_SHOTS_OUT` set, the blank regulator, its lock and every pin's
+/// page position are written there for the canvas pictures.
+#[test]
+fn wiring_keeps_every_recorded_place() {
+    let lock_path = "/p/reg.circuit.lock";
+    let compile = |text: &str, lock: &str| {
+        let files: Files = [(PATH.to_owned(), text.to_owned()), (lock_path.to_owned(), lock.to_owned())].into_iter().collect();
+        let out = runtime::compile(PATH, text, &files, &CompileOptions::default());
+        assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+        out.index.expect("compiles")
+    };
+    let request = EditRequest { command: "schematic.annotate".into(), ..Default::default() };
+    let out = runtime::edit(PATH, BLANK, &files(BLANK), &request).expect("annotates");
+    let lock = out.files.iter().find(|f| f.path == lock_path).expect("a lock").text.clone();
+    let places = |index: &runmat_circuit::index::CircuitIndex| -> Vec<(String, f64, f64)> {
+        index.schematic.sheets[0].symbols.iter().map(|s| (s.designator.clone(), s.x_mm, s.y_mm)).collect()
+    };
+    let blank = compile(BLANK, &lock);
+    let wired = compile(&wired_regulator(), &lock);
+    assert_eq!(places(&blank), places(&wired));
+    if let Ok(dir) = std::env::var("SCHEMATIC_SHOTS_OUT") {
+        let pins: serde_json::Map<String, Value> = blank.schematic.sheets[0]
+            .symbols
+            .iter()
+            .flat_map(|s| s.pins.iter().map(move |p| (format!("{}.{}", s.designator, p.name), json!([p.x_mm, p.y_mm]))))
+            .collect();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(format!("{dir}/reg.circuit"), BLANK).unwrap();
+        std::fs::write(format!("{dir}/reg.circuit.lock"), &lock).unwrap();
+        std::fs::write(format!("{dir}/reg-wired.circuit"), wired_regulator()).unwrap();
+        std::fs::write(format!("{dir}/pins.json"), serde_json::to_string_pretty(&pins).unwrap()).unwrap();
+    }
+}
