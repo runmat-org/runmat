@@ -48,7 +48,14 @@ pub fn simulate(input: &SimulateInput, files: &Files) -> Result<SimulateOutput, 
         },
     };
     let dir = input.path.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
-    let resolve = |lib: &str| files.get(lib).or_else(|| files.get(&format!("{dir}/{lib}"))).cloned();
+    // A model library by its workspace path, beside the circuit, or relative to it (`../models/x.lib`).
+    let resolve = |lib: &str| {
+        files
+            .get(lib)
+            .or_else(|| files.get(&format!("{dir}/{lib}")))
+            .or_else(|| files.get(&runmat_circuit::runtime::resolve_path(&input.path, lib)))
+            .cloned()
+    };
     let limit = match &input.limit_ops {
         Some(t) => Some(t.parse::<u64>().map_err(|_| ToolError::invalid(format!("limitOps is a decimal count of operations, not `{t}`")))?),
         None => None,

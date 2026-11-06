@@ -50,11 +50,20 @@ fn declarations(buck_model: &str) -> String {
 /// The flight controller with its regulators declared as `buck_model` parts; `section_models`
 /// keeps the tolerance study's own `model` lines. The study runs 40 Monte Carlo runs.
 fn circuit(buck_model: &str, section_models: bool) -> String {
-    let mut text = FC.replace("    root = main\n", &format!("    root = main\n{}", declarations(buck_model)));
-    assert!(text.contains("part \"BUCK-36V-2A\" = {"), "the flight controller's root line changed");
+    let mut text = FC.replace(
+        "    root = main\n",
+        &format!("    root = main\n{}", declarations(buck_model)),
+    );
+    assert!(
+        text.contains("part \"BUCK-36V-2A\" = {"),
+        "the flight controller's root line changed"
+    );
     if !section_models {
         text = text.replace(SECTION_BUCK, "").replace(SECTION_LDO, "");
-        assert!(!text.contains("subckt = BUCK36V_AVG"), "the tolerance study's model lines changed");
+        assert!(
+            !text.contains("subckt = BUCK36V_AVG"),
+            "the tolerance study's model lines changed"
+        );
     }
     text.replace("runs = 2000, seed = 11", "runs = 40, seed = 11")
 }
@@ -65,26 +74,65 @@ fn run(text: String) -> Value {
         ("/fc/drone_models.lib".to_string(), MODELS.to_string()),
     ]
     .into();
-    call("design.simulate", json!({ "path": "/fc/flight_controller.circuit", "simulation": "buck_tolerance" }), &files)
-        .unwrap_or_else(|e| panic!("design.simulate: {e:?}"))
+    call(
+        "design.simulate",
+        json!({ "path": "/fc/flight_controller.circuit", "simulation": "buck_tolerance" }),
+        &files,
+    )
+    .unwrap_or_else(|e| panic!("design.simulate: {e:?}"))
 }
 
 fn v5(out: &Value) -> f64 {
-    let m = out["measures"].as_array().unwrap().iter().find(|m| m["name"] == "v5").expect("the v5 measure");
-    m["value"].as_f64().unwrap_or_else(|| panic!("v5 has a value: {m}"))
+    let m = out["measures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["name"] == "v5")
+        .expect("the v5 measure");
+    m["value"]
+        .as_f64()
+        .unwrap_or_else(|| panic!("v5 has a value: {m}"))
 }
 
 #[test]
 fn a_part_with_a_spice_model_simulates_with_no_model_in_the_section() {
     let out = run(circuit("BUCK36V_AVG", false));
     let v = v5(&out);
-    assert!((4.9..5.1).contains(&v), "the averaged buck regulates 5 V from the part's own model: {v}");
+    assert!(
+        (4.9..5.1).contains(&v),
+        "the averaged buck regulates 5 V from the part's own model: {v}"
+    );
 }
 
 #[test]
 fn a_sections_model_takes_precedence_over_the_parts() {
     // The part names a subcircuit the library lacks; the section's own model is the one used.
     let out = run(circuit("NO_SUCH_BUCK", true));
+    let v = v5(&out);
+    assert!((4.9..5.1).contains(&v), "{v}");
+}
+
+#[test]
+fn a_parts_model_library_resolves_relative_to_the_circuit() {
+    // A KiCad library's model file, rebased from the symbol library's folder: ../models/….
+    let text = circuit("BUCK36V_AVG", false).replace(
+        "library = \"drone_models.lib\"",
+        "library = \"../models/drone_models.lib\"",
+    );
+    let files: Files = [
+        ("/fc/boards/flight_controller.circuit".to_string(), text),
+        (
+            "/fc/models/drone_models.lib".to_string(),
+            MODELS.to_string(),
+        ),
+    ]
+    .into();
+    let out = call(
+        "design.simulate",
+        json!({ "path": "/fc/boards/flight_controller.circuit", "simulation": "buck_tolerance" }),
+        &files,
+    )
+    .unwrap_or_else(|e| panic!("design.simulate: {e:?}"));
     let v = v5(&out);
     assert!((4.9..5.1).contains(&v), "{v}");
 }
