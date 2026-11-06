@@ -76,6 +76,7 @@ pub mod import;
 pub mod ir;
 pub mod kicad;
 pub mod netlists;
+pub mod pair;
 pub mod layout;
 pub mod library;
 pub mod mass;
