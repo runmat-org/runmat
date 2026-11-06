@@ -318,3 +318,24 @@ fn output_formats_and_the_revision_are_saved_and_made_again() {
     let bad = call("design.export", json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication", "fabrication": { "gerberUnits": "furlong" } }), &files());
     assert!(format!("{:?}", bad.unwrap_err()).contains("expected mm or inch"));
 }
+
+#[test]
+fn a_plan_answers_one_layer_drawn_as_its_gerber() {
+    let off = json!({ "gerber": false, "drill": false, "drillMap": false, "drawing": false, "pickPlace": false, "bom": false, "assemblyDrawing": false, "ipc2581": false, "odb": false, "ipc356": false });
+    let with = |layer: &str| {
+        let mut o = off.clone();
+        o["previewLayer"] = json!(layer);
+        export(json!({ "fabrication": o }))
+    };
+    let mask = with("F.Mask");
+    let svg = mask["fabrication"]["preview"]["svg"].as_str().unwrap();
+    assert!(svg.starts_with("<svg") && svg.contains(r#"data-layer="Soldermask,Top""#));
+    // One mask opening per top pad at least: the MCU alone has dozens.
+    let openings = svg.matches("<rect").count() + svg.matches("<circle").count() + svg.matches("<path").count();
+    assert!(openings > 50, "{openings} openings");
+    let paste = with("F.Paste");
+    assert!(paste["fabrication"]["preview"]["svg"].as_str().unwrap().contains(r#"data-layer="Paste,Top""#));
+    assert!(names(&paste).is_empty(), "a preview writes no files");
+    let bad = call("design.export", json!({ "path": "/p/flight_controller.circuit.layout", "format": "fabrication", "fabrication": { "previewLayer": "F.Nowhere" } }), &files());
+    assert!(format!("{:?}", bad.unwrap_err()).contains("the board has no layer F.Nowhere"));
+}

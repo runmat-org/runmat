@@ -118,6 +118,9 @@ pub struct FabricationOptions {
     pub bom_columns: Option<Vec<String>>,
     /// Parts with the same part number, value and package share a BOM line (else a line per designator).
     pub bom_group_by_value: Option<bool>,
+    /// Also answer this layer of the table (`F.Mask`, `B.Paste`) drawn as SVG, as its Gerber
+    /// makes it, for a preview.
+    pub preview_layer: Option<String>,
     /// Report the pre-flight checks (DRC, ERC, unrouted connections, pending schematic changes).
     #[serde(default)]
     pub preflight: bool,

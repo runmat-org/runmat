@@ -92,6 +92,17 @@ pub struct FabricationSummary {
     /// The board's layout with the settings saved into it (`remember`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<LayoutUpdate>,
+    /// The layer `previewLayer` named, drawn as SVG.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<LayerPreview>,
+}
+
+/// One layer drawn as its Gerber makes it: the image in `currentColor`, mm with y up.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerPreview {
+    pub layer: String,
+    pub svg: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -207,6 +218,14 @@ pub fn fabrication(
     let rows = runmat_circuit::fab::plan::layer_rows(board);
     let chosen: Vec<String> = runmat_circuit::fab::plan::included(&rows, settings.layers.as_ref()).into_iter().map(|(f, _)| f).collect();
     let preflight = opts.preflight.then(|| preflight(path, files)).transpose()?;
+    let preview = match &opts.preview_layer {
+        Some(name) => {
+            let row = rows.iter().find(|r| &r.name == name).ok_or_else(|| ToolError::invalid(format!("the board has no layer {name}")))?;
+            let layer = row.gerber.ok_or_else(|| ToolError::invalid(format!("{name} makes no Gerber")))?;
+            Some(LayerPreview { layer: name.clone(), svg: runmat_circuit::fab::preview::layer_svg(board, layer) })
+        }
+        None => None,
+    };
     let layout_update = match (opts.remember, layout_text) {
         (true, Some(t)) => Some(LayoutUpdate { path: layout.clone(), text: runmat_circuit::syntax::board::with_fabrication_settings(t, &settings).map_err(ToolError::invalid)? }),
         _ => None,
@@ -231,6 +250,7 @@ pub fn fabrication(
         settings: serde_json::to_value(&settings).unwrap_or_default(),
         preflight,
         layout: layout_update,
+        preview,
     };
     Ok((result, summary))
 }
