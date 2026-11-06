@@ -46,13 +46,15 @@ pub(super) fn add(c: &mut Catalog) {
                 section(
                     "Component",
                     vec![
+                        // No example placeholders: on a part with no value an example
+                        // reads as the part's own value.
                         prop(
-                            text("designator", "Designator", Some("R1")),
+                            text("designator", "Designator", None),
                             Section::Components,
                             "designator",
                         ),
                         prop(
-                            text("value", "Value", Some("10 kOhm 1%")),
+                            text("value", "Value", None),
                             Section::Components,
                             "value",
                         ),
