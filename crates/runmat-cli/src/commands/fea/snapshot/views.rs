@@ -75,6 +75,54 @@ struct Encoded {
     volume: Option<runmat_runtime::analysis::field_scene::volume::VolumeViewError>,
 }
 
+/// How finely one view is drawn.
+#[derive(Clone, Copy)]
+struct Detail {
+    surface: runmat_runtime::analysis::SurfaceDetail,
+    cap_triangle_budget: usize,
+}
+
+enum Attempt {
+    Fits(Encoded),
+    /// The encoded scene is `required` bytes and the consumer accepts `maximum`; `cap` is the
+    /// section cap drawn (triangles, evaluation grid) for a section view.
+    TooLarge {
+        required: usize,
+        maximum: usize,
+        cap: Option<(usize, usize)>,
+    },
+}
+
+/// The next lighter drawing of a view whose scene is `required` bytes against a `maximum`
+/// budget, or `None` when the view is already at its lightest. A surface view drops to corner
+/// triangles. A section view scales its cap's triangle budget by the share of the payload that
+/// must go (with a 10% margin); bytes outside the cap stay, so the loop repeats until the cap is
+/// one polygon per cut element.
+fn lighter(
+    detail: Detail,
+    volume: bool,
+    required: usize,
+    maximum: usize,
+    cap: Option<(usize, usize)>,
+) -> Option<Detail> {
+    use runmat_runtime::analysis::SurfaceDetail;
+    if !volume {
+        return (detail.surface == SurfaceDetail::Full).then_some(Detail {
+            surface: SurfaceDetail::Corners,
+            ..detail
+        });
+    }
+    let (triangles, subdivisions) = cap?;
+    if subdivisions <= 1 {
+        return None;
+    }
+    let scale = 0.9 * maximum as f64 / required as f64;
+    Some(Detail {
+        cap_triangle_budget: ((triangles as f64 * scale) as usize).min(triangles.saturating_sub(1)),
+        ..detail
+    })
+}
+
 struct Written {
     view: View,
     /// The whole scene, context geometry included.
@@ -133,7 +181,7 @@ pub(super) async fn capture(
             })
             .transpose()
             .map_err(anyhow::Error::msg)?;
-        let encode = |detail| -> Result<Encoded> {
+        let encode = |detail: Detail| -> Result<Attempt> {
             let (mut scene, deformation_scale, surface, volume) = match spec.volume {
                 Some(volume) => {
                     let solver_mesh = mesh_path.as_deref().ok_or_else(|| {
@@ -154,6 +202,7 @@ pub(super) async fn capture(
                                 .map(|extrema| (extrema.minimum.value, extrema.maximum.value)),
                             legend: spec.legend.clone(),
                             unit: spec.unit.clone(),
+                            cap_triangle_budget: detail.cap_triangle_budget,
                         };
                     let (scene, error) =
                         runmat_runtime::analysis::field_scene::volume::build_volume_scene(
@@ -179,7 +228,7 @@ pub(super) async fn capture(
                             // Posters show the deformed body alone; an undeformed overlay drawn
                             // over a shape a few micrometres away only fights it for depth.
                             false,
-                            detail,
+                            detail.surface,
                         )
                         .map_err(anyhow::Error::msg)?;
                     (scene, deformation_scale, Some(surface), None)
@@ -206,7 +255,23 @@ pub(super) async fn capture(
                 .overlay
                 .as_ref()
                 .and_then(|overlay| overlay.scalar_legend.as_ref());
-            Ok(Encoded {
+            let bytes = match plotting::encode_geometry_figure_scene_within(
+                &runmat_plot::event::FigureScene::from_geometry_scene(&scene),
+                presentation.max_scene_bytes,
+            ) {
+                Ok(bytes) => bytes,
+                Err(plotting::GeometrySceneEncodeError::PayloadTooLarge { required, maximum }) => {
+                    return Ok(Attempt::TooLarge {
+                        required,
+                        maximum,
+                        cap: volume
+                            .as_ref()
+                            .and_then(|volume| volume.cap_triangles.zip(volume.cap_subdivisions)),
+                    })
+                }
+                Err(error) => return Err(anyhow::Error::msg(error.to_string())),
+            };
+            Ok(Attempt::Fits(Encoded {
                 minimum: legend.map(|legend| legend.minimum),
                 maximum: legend.map(|legend| legend.maximum),
                 position_error_m: runmat_plot::event::FigureScene::geometry_position_error_m(
@@ -214,18 +279,17 @@ pub(super) async fn capture(
                 ),
                 bounds: scene.bounds,
                 result_bounds,
-                bytes: plotting::encode_geometry_figure_scene(
-                    &runmat_plot::event::FigureScene::from_geometry_scene(&scene),
-                )?,
+                bytes,
                 deformation_scale,
                 scalar_scale,
                 surface,
                 volume,
-            })
+            }))
         };
-        // A dense quadratic surface can exceed the scene payload limit; it is then drawn with one
-        // triangle per quadratic face, and the view states what that leaves out. Values, legend
-        // and extrema stay those of the full solution.
+        // A scene larger than the consumer's budget (`--max-scene-bytes`) is drawn lighter until
+        // it fits: a dense quadratic surface with one triangle per quadratic face, a section cap
+        // on a coarser evaluation grid (down to one polygon per cut element). The view states
+        // what that leaves out; values, legend and extrema stay those of the full solution.
         use runmat_runtime::analysis::SurfaceDetail;
         let Encoded {
             minimum,
@@ -238,16 +302,38 @@ pub(super) async fn capture(
             scalar_scale,
             surface,
             volume,
-        } = match encode(SurfaceDetail::Full) {
-            Ok(encoded) => encoded,
-            Err(error) if error.to_string().contains("exceeding limit") => {
+        } = {
+            let mut detail = Detail {
+                surface: SurfaceDetail::Full,
+                cap_triangle_budget:
+                    runmat_runtime::analysis::field_scene::volume::DEFAULT_CAP_TRIANGLE_BUDGET,
+            };
+            loop {
+                let (required, maximum, cap) = match encode(detail)? {
+                    Attempt::Fits(encoded) => break encoded,
+                    Attempt::TooLarge {
+                        required,
+                        maximum,
+                        cap,
+                    } => (required, maximum, cap),
+                };
+                detail = match lighter(detail, spec.volume.is_some(), required, maximum, cap) {
+                    Some(lighter) => lighter,
+                    None => anyhow::bail!(
+                        "snapshot view '{}': its lightest scene is {required} bytes and the \
+                         scene budget is {maximum} bytes; raise --max-scene-bytes or select \
+                         other views with --view",
+                        spec.id
+                    ),
+                };
                 log::info!(
-                    "snapshot view '{}': {error}; drawing corner triangles",
-                    spec.id
+                    "snapshot view '{}': scene is {required} bytes, budget {maximum}; drawing \
+                     {:?} surface, section cap of at most {} triangles",
+                    spec.id,
+                    detail.surface,
+                    detail.cap_triangle_budget
                 );
-                encode(SurfaceDetail::Corners)?
             }
-            Err(error) => return Err(error),
         };
         let id = spec.id;
         let scene_path = format!("{id}.scene.json");
@@ -359,5 +445,35 @@ pub(super) fn peak_resident_mib() -> u64 {
         maximum / (1024 * 1024)
     } else {
         maximum / 1024
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{lighter, Detail};
+    use runmat_runtime::analysis::SurfaceDetail;
+
+    const FULL: Detail = Detail {
+        surface: SurfaceDetail::Full,
+        cap_triangle_budget: 600_000,
+    };
+
+    #[test]
+    fn a_surface_view_drops_to_corner_triangles_once() {
+        let corners = lighter(FULL, false, 30, 16, None).unwrap();
+        assert_eq!(corners.surface, SurfaceDetail::Corners);
+        assert!(lighter(corners, false, 20, 16, None).is_none());
+    }
+
+    #[test]
+    fn a_section_view_scales_its_cap_to_the_budget_until_one_polygon_per_element() {
+        // The six-bolt busbar section: 29.7 MB against the 16 MiB app limit.
+        let next = lighter(FULL, true, 29_675_503, 16_777_216, Some((500_000, 2))).unwrap();
+        assert!(next.cap_triangle_budget < 500_000 * 16_777_216 / 29_675_503);
+        // A cap already one polygon per cut element is the lightest section.
+        assert!(lighter(next, true, 20_000_000, 16_777_216, Some((120_000, 1))).is_none());
+        // The budget always shrinks, even when the payload is barely over.
+        let barely = lighter(FULL, true, 101, 100, Some((1_000, 4))).unwrap();
+        assert!(barely.cap_triangle_budget < 1_000);
     }
 }

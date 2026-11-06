@@ -57,4 +57,9 @@ pub struct SnapshotPresentationArgs {
     /// shown small, such as a website hero on a phone, uses about 2
     #[arg(long, default_value_t = 1.0, value_name = "FACTOR")]
     pub text_scale: f32,
+    /// Largest scene file a view may write, in bytes (default 16 MiB, the app's scene file
+    /// limit). A larger view is drawn lighter until it fits: corner triangles for a quadratic
+    /// surface, a coarser section cap. Each view records what that leaves out.
+    #[arg(long, default_value_t = 16 * 1024 * 1024, value_name = "BYTES")]
+    pub max_scene_bytes: usize,
 }

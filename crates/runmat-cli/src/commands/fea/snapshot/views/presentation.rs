@@ -58,6 +58,8 @@ pub(in crate::commands::fea) struct Presentation {
     pub show_triad: bool,
     /// Text and overlay size relative to the standard poster.
     pub text_scale: f32,
+    /// Largest scene file one view may write, in bytes.
+    pub max_scene_bytes: usize,
 }
 
 impl Default for Presentation {
@@ -73,6 +75,7 @@ impl Default for Presentation {
             show_grid: true,
             show_triad: true,
             text_scale: 1.0,
+            max_scene_bytes: 16 * 1024 * 1024,
         }
     }
 }
@@ -102,6 +105,7 @@ impl Presentation {
             show_grid: !args.no_grid,
             show_triad: !args.no_triad,
             text_scale: parse_text_scale(args.text_scale)?,
+            max_scene_bytes: parse_scene_budget(args.max_scene_bytes)?,
         })
     }
 
@@ -301,6 +305,11 @@ fn parse_padding(padding: f32) -> Result<f32> {
         "frame padding must be 1 to 50, got {padding}"
     );
     Ok(padding)
+}
+
+fn parse_scene_budget(bytes: usize) -> Result<usize> {
+    anyhow::ensure!(bytes > 0, "--max-scene-bytes must be positive");
+    Ok(bytes)
 }
 
 fn parse_text_scale(scale: f32) -> Result<f32> {
