@@ -269,7 +269,8 @@ fn a_plan_writes_nothing_and_reports_the_preflight() {
     let out = export(json!({ "fabrication": off }));
     assert!(names(&out).is_empty(), "{:?}", names(&out));
     let summary = &out["fabrication"];
-    assert_eq!(summary["settings"]["preset"], "fab_house", "a plan leaves the saved preset alone");
+    assert_eq!(summary["settings"]["preset"], "fab_house", "a plan leaves the saved settings alone");
+    assert_eq!(summary["settings"]["outputs"], json!(["gerber", "drill", "drill_map", "drawing", "ipc356"]));
     assert!(summary["layers"].as_array().unwrap().len() > 10);
     let pre = &summary["preflight"];
     for k in ["drcErrors", "ercErrors", "unrouted", "pendingChanges"] {

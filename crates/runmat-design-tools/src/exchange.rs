@@ -144,14 +144,15 @@ impl FabricationOptions {
             (self.ipc356, FabOutput::Ipc356),
         ];
         let mut changed = false;
-        for (flag, output) in flags {
+        // A plan's flags only stop the export; the settings stay as saved.
+        for (flag, output) in flags.into_iter().filter(|_| !self.plan_only()) {
             match flag {
                 Some(true) => changed |= s.outputs.insert(output),
                 Some(false) => changed |= s.outputs.remove(&output),
                 None => {}
             }
         }
-        if changed && !self.plan_only() {
+        if changed {
             s.preset = FabPreset::of(&s.outputs);
         }
         if let Some(v) = self.include_through_hole {
