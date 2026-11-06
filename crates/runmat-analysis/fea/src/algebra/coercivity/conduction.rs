@@ -39,6 +39,9 @@ pub enum ScalarConductionError {
     Shape(&'static str),
 }
 
+// Values are reported, never compared numerically; NaN inputs are refused before any compare.
+impl Eq for ScalarConductionError {}
+
 /// A completed structural conduction proof for one assembled operator.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScalarConductionProof {
@@ -173,10 +176,6 @@ impl ScalarConductionProof {
             resident_bytes: Self::resident_bytes_for(n as u64),
         })
     }
-
-    pub(crate) fn scalar_operations(&self) -> u64 {
-        self.scalar_operations
-    }
 }
 
 impl CoercivityCertificate {
@@ -222,6 +221,7 @@ impl CoercivityCertificate {
     }
 
     /// Whether the structural conduction proof (no eigenvalue bound) certified this operator.
+    #[cfg(test)]
     pub(crate) fn proved_by_scalar_conduction(&self) -> bool {
         matches!(self.proof, CoercivityProof::ScalarConduction { .. })
     }

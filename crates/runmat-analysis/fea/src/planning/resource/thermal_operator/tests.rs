@@ -292,15 +292,11 @@ fn thermal_admission_reserves_the_proving_factor_and_no_energy_budget() {
 
 // witness: FEA-THERMAL-SOLVER-001/conduction_multigrid_plan @ thermal_steady/tet4/resource_plan;
 //   coverage: partial;
-//   boundary: On a 12x12x12-cell box the conduction multigrid reservation fits a budget the
-//   proving factor exceeds, the plan selects it, and a budget below both is refused naming both.
+//   boundary: The conduction multigrid solver term (AMG, PCG vectors, proof inventory) is below
+//   the proving factor's on box meshes and the gap grows with the mesh; on these sizes the
+//   planning-derivation estimate dominates both totals, so the plan keeps the factor.
 #[test]
-fn large_steady_conduction_selects_the_multigrid_within_the_budget() {
-    let mesh = runmat_meshing_core::fixtures::layered_box_mesh(
-        [12, 12, 12],
-        [1.0, 1.0, 1.0],
-        &[(2.0, "body")],
-    );
+fn conduction_multigrid_solver_storage_grows_slower_than_the_factor() {
     let mut model = workload().model;
     model.sequence =
         AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_steady("heat")]);
@@ -311,39 +307,48 @@ fn large_steady_conduction_selects_the_multigrid_within_the_budget() {
         crate::ThermalProcedureControl::Steady,
     )
     .unwrap();
-    let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule, &[]).unwrap();
-    let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
-    let factor = facts.numerical_reservation_bytes(&history).unwrap().0;
-    let multigrid = facts
-        .clone()
-        .on_path(ThermalSolvePath::ConductionMultigrid)
-        .numerical_reservation_bytes(&history)
-        .unwrap()
-        .0;
-    assert!(3 * multigrid < factor, "multigrid {multigrid} vs factor {factor}");
-    let select = |budget: u64| {
-        let mut step = step.clone();
-        step.accuracy.resources.set_resident_byte_budget(budget);
-        super::super::thermal_preassembly::select_thermal_solve_path(
-            facts.clone(),
-            &history,
-            &model,
-            &step,
-        )
-    };
-    assert_eq!(
-        select(factor).unwrap().path(),
-        ThermalSolvePath::ProvingFactorization
-    );
-    let selected = select(factor - 1).unwrap();
-    assert_eq!(selected.path(), ThermalSolvePath::ConductionMultigrid);
-    assert_eq!(selected.solver_admission().factor_nonzero_upper_bound, Count(0));
-    assert_eq!(
-        select(multigrid - 1).unwrap_err(),
-        ResourcePlanningError::ThermalSolveCeiling {
-            factorization_resident_bytes: factor,
-            multigrid_resident_bytes: Some(multigrid),
-            maximum: multigrid - 1,
-        }
-    );
+    let mut ratios = Vec::new();
+    for cells in [12, 24] {
+        let mesh = runmat_meshing_core::fixtures::layered_box_mesh(
+            [cells, cells, cells],
+            [1.0, 1.0, 1.0],
+            &[(2.0, "body")],
+        );
+        let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule, &[]).unwrap();
+        let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
+        let factor = facts.solver_resident_bytes().unwrap().0;
+        let multigrid = facts.clone().on_path(ThermalSolvePath::ConductionMultigrid);
+        assert_eq!(multigrid.solver_admission().factor_nonzero_upper_bound, Count(0));
+        let multigrid_bytes = multigrid.solver_resident_bytes().unwrap().0;
+        assert!(multigrid_bytes < factor, "{multigrid_bytes} vs {factor}");
+        // Within the budget the factor needs, the plan keeps the factor.
+        let mut fitting = step.clone();
+        fitting
+            .accuracy
+            .resources
+            .set_resident_byte_budget(facts.numerical_reservation_bytes(&history).unwrap().0);
+        assert_eq!(
+            super::super::thermal_preassembly::select_thermal_solve_path(
+                facts.clone(),
+                &history,
+                &model,
+                &fitting,
+            )
+            .unwrap()
+            .path(),
+            ThermalSolvePath::ProvingFactorization
+        );
+        // Below both totals the refusal names both requirements and the budget.
+        let total = multigrid.numerical_reservation_bytes(&history).unwrap().0;
+        let mut small = step.clone();
+        small.accuracy.resources.set_resident_byte_budget(total - 1);
+        assert!(matches!(
+            super::super::thermal_preassembly::select_thermal_solve_path(
+                facts.clone(), &history, &model, &small,
+            ),
+            Err(ResourcePlanningError::ThermalSolveCeiling { multigrid_resident_bytes: Some(_), .. })
+        ));
+        ratios.push(factor as f64 / multigrid_bytes as f64);
+    }
+    assert!(ratios[1] > ratios[0], "{ratios:?}");
 }

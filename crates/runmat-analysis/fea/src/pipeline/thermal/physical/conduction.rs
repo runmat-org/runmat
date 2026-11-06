@@ -74,8 +74,8 @@ pub(super) fn preparation(
             ScalarConductionProof::prove(
                 stiffness,
                 numerical.constrained_dofs(),
-                assembly.positive_robin_weight.canonical_value(),
-                assembly.element_conductivity_w_per_mk.canonical_value(),
+                assembly.positive_robin_weight.canonical_values(),
+                assembly.element_conductivity_w_per_mk.canonical_values(),
             )
             .map_err(refused)
         })

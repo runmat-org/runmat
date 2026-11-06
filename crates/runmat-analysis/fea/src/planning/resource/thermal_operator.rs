@@ -217,22 +217,6 @@ impl ThermalOperatorResourceFacts {
             ))
     }
 
-    pub(crate) fn require_fits(
-        &self,
-        history: &ThermalHistoryResourceFacts,
-        maximum: u64,
-    ) -> Result<(), ResourcePlanningError> {
-        let required = self.numerical_reservation_bytes(history)?.0;
-        if required > maximum {
-            return Err(ResourcePlanningError::AccuracyCeiling {
-                resource: "thermal numerical and topology reservation",
-                required,
-                maximum,
-            });
-        }
-        Ok(())
-    }
-
     pub(crate) fn verify_matrix(
         &self,
         matrix: &RealSparseMatrix,
