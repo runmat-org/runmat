@@ -51,6 +51,49 @@ pub struct Analysis {
     pub problems: Vec<String>,
     /// The typed result (the mass report, the interference list), for agents and exports.
     pub data: Value,
+    /// Colors the model takes while the results are open (draft bands), with their legend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colors: Option<FaceColors>,
+}
+
+/// An analysis's colors on the model: a legend, and each face's entry in it. Faces are named as
+/// the rows name them (canonical references).
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct FaceColors {
+    pub legend: Vec<LegendEntry>,
+    pub faces: Vec<FaceColor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct LegendEntry {
+    pub label: String,
+    /// Linear RGBA, 0 to 1.
+    pub color: [f32; 4],
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct FaceColor {
+    pub item: String,
+    /// The index of the face's legend entry.
+    pub entry: usize,
+}
+
+/// Draft bands on the model: positive green, negative blue, needs draft red, straddles amber.
+fn draft_colors(faces: &[crate::draft_analysis::FaceDraft]) -> FaceColors {
+    use crate::draft_analysis::DraftBand;
+    let bands = [
+        (DraftBand::Positive, "Positive", [0.22, 0.66, 0.36, 1.0]),
+        (DraftBand::Negative, "Negative", [0.24, 0.48, 0.86, 1.0]),
+        (DraftBand::NeedsDraft, "Needs draft", [0.86, 0.24, 0.22, 1.0]),
+        (DraftBand::Straddle, "Straddles", [0.93, 0.66, 0.16, 1.0]),
+    ];
+    FaceColors {
+        legend: bands.iter().map(|(_, label, color)| LegendEntry { label: (*label).into(), color: *color }).collect(),
+        faces: faces
+            .iter()
+            .filter_map(|f| bands.iter().position(|(b, ..)| *b == f.band).map(|entry| FaceColor { item: f.face.clone(), entry }))
+            .collect(),
+    }
 }
 
 fn g(kg: f64) -> String {
@@ -125,6 +168,7 @@ fn mass_analysis(report: &MassReport, assembly: bool) -> Analysis {
         rows,
         problems: report.problems.clone(),
         data: serde_json::to_value(report).unwrap_or(Value::Null),
+        colors: None,
     }
 }
 
@@ -214,6 +258,7 @@ pub fn analyze(
                 rows,
                 problems: found.errors.clone(),
                 data: serde_json::to_value(&found).unwrap_or(Value::Null),
+                colors: None,
             })
         }
         "evaluate.interference" | "evaluate.clearance" | "assembly.interference" | "assembly.clearance" => {
@@ -261,6 +306,7 @@ pub fn analyze(
                 rows,
                 problems: Vec::new(),
                 data: Value::Null,
+                colors: None,
             })
         }
         "evaluate.draft" if !assembly => {
@@ -312,6 +358,7 @@ pub fn analyze(
                 rows,
                 problems: Vec::new(),
                 data: serde_json::json!({ "pull": pull, "angle": angle, "faces": faces }),
+                colors: Some(draft_colors(&faces)),
             })
         }
         "simulate.check" => {
@@ -343,6 +390,7 @@ pub fn analyze(
                 rows,
                 problems: Vec::new(),
                 data: serde_json::to_value(&found).unwrap_or(Value::Null),
+                colors: None,
             })
         }
         other => Err(format!(
@@ -460,6 +508,12 @@ pub(crate) mod tests {
         assert_eq!(top["cells"][1], "90.0°");
         let wall = out["rows"].as_array().unwrap().iter().find(|r| r["cells"][3] == "Needs draft").unwrap();
         assert_eq!(wall["severity"], "warning");
+        // The model takes the band colors: every face, the top green, with a four-entry legend.
+        let colors = &out["colors"];
+        assert_eq!(colors["legend"].as_array().map(Vec::len), Some(4), "{colors}");
+        assert_eq!(colors["faces"].as_array().map(Vec::len), Some(6), "{colors}");
+        let entry = colors["faces"].as_array().unwrap().iter().find(|f| f["item"] == "feature.body.face.end").unwrap()["entry"].as_u64().unwrap();
+        assert_eq!(colors["legend"][entry as usize]["label"], "Positive");
         // A face picks the pull too: the top's normal is +Z.
         let by_face: Value = serde_json::from_str(&analyze_json(
             "/p/block.part",
