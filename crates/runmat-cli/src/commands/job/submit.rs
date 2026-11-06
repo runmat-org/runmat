@@ -13,6 +13,7 @@ use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::encryption::{
     encode_encrypted_run_object, encode_run_key_envelope, EncryptionContext, EncryptionPurpose,
     ExecutionRecipientKey, PortableExecutionEncryption, RunKeyMaterial, RunObjectEncryption,
+    TRANSFER_FRAME_ENCRYPTION_SUITE,
 };
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundleBuilder, ProgramBuildRecipe, ProgramExecutionDescriptor,
@@ -31,7 +32,6 @@ use crate::commands::session::create_session;
 
 const RETENTION_SECONDS: u64 = 7 * 24 * 60 * 60;
 const MEDIA_TYPE: &str = "application/vnd.runmat.execution+ciphertext";
-const ENCRYPTION_SUITE: &str = "hkdf-sha256-aes256gcm-v1";
 const DRIVER_MEMORY_BYTES: i64 = 1024 * 1024 * 1024;
 
 pub(crate) struct PreparedRemoteExecution {
@@ -731,7 +731,7 @@ async fn upload(
                 kind,
                 ciphertext,
                 media_type: MEDIA_TYPE.into(),
-                encryption_suite: ENCRYPTION_SUITE.into(),
+                encryption_suite: TRANSFER_FRAME_ENCRYPTION_SUITE.into(),
                 retain_for_seconds: RETENTION_SECONDS,
             },
         )
