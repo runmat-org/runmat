@@ -311,7 +311,7 @@ fn the_io_schematic_is_drawn_to_the_bar() {
 /// The quadcopter's flight controller (`runmat-cad/wasm/tests/drone`) as the automatic layout
 /// draws it, with the lock's recorded places dropped.
 fn flight_controller() -> SchematicIndex {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone/electrical/flight_controller");
     let files: Files = ["circuit", "circuit.lock"]
         .iter()
         .map(|ext| {

@@ -13,13 +13,24 @@ fn project() -> Files {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone")
     });
     let mut files = Files::new();
-    for e in std::fs::read_dir(&dir).expect("the drone project is checked in").flatten() {
+    read_tree(&dir, "/p/drone", &mut files);
+    assert!(files.contains_key("/p/drone/drone.assembly"), "the drone project is checked in at {dir:?}");
+    files
+}
+
+/// Every file under `dir`, keyed `<at>/<relative path>` (the drone's folders are its modules).
+fn read_tree(dir: &std::path::Path, at: &str, files: &mut Files) {
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if let Ok(text) = std::fs::read_to_string(e.path()) {
-            files.insert(format!("/p/drone/{name}"), text);
+        if name.starts_with('.') {
+            continue;
+        }
+        if e.path().is_dir() {
+            read_tree(&e.path(), &format!("{at}/{name}"), files);
+        } else if let Ok(text) = std::fs::read_to_string(e.path()) {
+            files.insert(format!("{at}/{name}"), text);
         }
     }
-    files
 }
 
 fn run(files: &Files, path: &str, simulation: &str) -> Value {
@@ -57,7 +68,7 @@ fn measure(out: &Value, name: &str) -> f64 {
 #[test]
 fn the_buck_starts_up_and_regulates_5v() {
     let files = project();
-    let out = run(&files, "/p/drone/flight_controller.circuit", "buck_startup");
+    let out = run(&files, "/p/drone/electrical/flight_controller/flight_controller.circuit", "buck_startup");
     // Closed form: FB at 0.8 V through 52.3 k over 10 k gives 0.8 x 6.23 = 4.984 V; peak-to-peak
     // ripple of an LC filter is dI / (8 f C) with dI = Vo (1 - D) / (L f) = 0.776 A, so about
     // 4.4 mV on 44 uF at 500 kHz.
@@ -68,7 +79,7 @@ fn the_buck_starts_up_and_regulates_5v() {
 #[test]
 fn the_5v_setpoint_holds_over_tolerance() {
     let files = project();
-    let out = run(&files, "/p/drone/flight_controller.circuit", "buck_tolerance");
+    let out = run(&files, "/p/drone/electrical/flight_controller/flight_controller.circuit", "buck_tolerance");
     let v5 = measure(&out, "v5");
     assert!((v5 - 4.984).abs() < 0.01, "{v5}");
 }
@@ -76,7 +87,7 @@ fn the_5v_setpoint_holds_over_tolerance() {
 #[test]
 fn the_esc_phase_switches_cleanly_into_the_motor() {
     let files = project();
-    let out = run(&files, "/p/drone/esc.circuit", "gate_drive");
+    let out = run(&files, "/p/drone/electrical/esc/esc.circuit", "gate_drive");
     // Phase A's high side carries the 20 A winding current when on: the phase node swings to the
     // 22.2 V battery less I x R_DS(on) (20 A x 1.6 mOhm = 32 mV), and the bootstrapped gate sits
     // about 10 V above it.

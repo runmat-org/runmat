@@ -1,52 +1,6 @@
-* Behavioural models for the quadcopter boards' circuit simulations. Each is written from the
+* Behavioural models for the ESC's circuit simulations. Each is written from the
 * part type's published behaviour (reference, switching frequency, drive strength), not from a
 * vendor netlist.
-
-* 36 V 2 A synchronous buck, 500 kHz, 0.8 V reference, 1 ms internal soft start, voltage mode
-* with input feedforward and an internal type-II compensator. Under-voltage lockout at 4.5 V:
-* until VIN and EN are up, the low-side switch holds SW at ground and COMP is held at 0 V (no
-* windup from a load on a dead output); COMP clamps at 2.4 V. Pins: VIN EN BST SW FB GND.
-.subckt BUCK36V vin en bst sw fb gnd
-Bok ok gnd V = {0.5*(1+tanh((V(vin,gnd)-4.5)*10))*0.5*(1+tanh((V(en,gnd)-1.2)*20))}
-Bref ref gnd V = {0.8*min(1, time/1m)*V(ok,gnd)}
-Gea gnd comp VALUE = {300u*(V(ref,gnd)-V(fb,gnd))*V(ok,gnd)}
-Gdis comp gnd VALUE = {10m*V(comp,gnd)*(1-V(ok,gnd))}
-Rea comp gnd 5Meg
-Dclh comp clh DCLAMP
-Vclh clh gnd 2.4
-Dcll ncl comp DCLAMP
-Vcll ncl gnd -0.2
-.model DCLAMP D(is=1e-12 n=0.05)
-Rc comp cz 22k
-Cc cz gnd 4.7n
-Cp comp gnd 47p
-Vramp ramp gnd PULSE(0 1 0 1.96u 20n 20n 2u)
-Bpwm ctl gnd V = {V(ok,gnd)*0.5*(1+tanh((limit(V(comp,gnd)*10/max(V(vin,gnd),5), 0, 0.95) - V(ramp,gnd))*60))}
-Bctlb ctlb gnd V = {1 - V(ctl,gnd)}
-S1 vin sw ctl gnd SWHS
-S2 sw gnd ctlb gnd SWLS
-.model SWHS SW(vt=0.5 vh=0 ron=0.09 roff=10Meg)
-.model SWLS SW(vt=0.5 vh=0 ron=0.05 roff=10Meg)
-Rbst bst sw 1Meg
-Ren en gnd 10Meg
-Rfb fb gnd 100Meg
-.ends BUCK36V
-
-* The same buck averaged over a switching period: its error amplifier holds FB at the 0.8 V
-* reference, so the operating point gives the set output voltage. Pins as BUCK36V.
-.subckt BUCK36V_AVG vin en bst sw fb gnd
-Eout sw gnd VALUE = {limit(2e4*(0.8 - V(fb,gnd)), 0, V(vin,gnd))}
-Rbst bst sw 1Meg
-Ren en gnd 10Meg
-Rfb fb gnd 100Meg
-.ends BUCK36V_AVG
-
-* 3.3 V 300 mA LDO, 250 mV dropout. Pins: VIN EN VOUT GND.
-.subckt LDO33 vin en vout gnd
-Bldo vout gnd V = {min(3.3, max(V(vin,gnd)-0.25, 0))*0.5*(1+tanh((V(en,gnd)-1)*20))}
-Rq vin gnd 50k
-Ren en gnd 10Meg
-.ends LDO33
 
 * 40 V N-channel power MOSFET, 1.6 mOhm at VGS = 10 V, 3.3 x 3.3 mm package: a level-1 channel
 * with its gate charge (Ciss 2.4 nF, Crss 0.25 nF), internal gate resistance and body diode.

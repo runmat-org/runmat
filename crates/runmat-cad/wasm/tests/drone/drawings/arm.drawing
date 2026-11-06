@@ -24,15 +24,15 @@ drawing arm {
 
     sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
 
-    view front = standard(orientation = front, sheet = "1", model = { part = arm }, at = [150, 165], display = hidden_lines)
-    view top = projected(from = front, direction = up, sheet = "1", model = { part = arm }, at = [150, 235], display = hidden_lines)
-    view right = projected(from = front, direction = right, sheet = "1", model = { part = arm }, at = [290, 165], display = hidden_lines)
+    view front = standard(orientation = front, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [150, 165], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [150, 235], display = hidden_lines)
+    view right = projected(from = front, direction = right, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [290, 165], display = hidden_lines)
     view a_a = section(
         from = top,
         plane = feature.pad.face.side(pad_s.c),
         label = A,
         sheet = "1",
-        model = { part = arm },
+        model = { part = arm, from = "../mechanical/arm" },
         at = [150, 88],
         display = hidden_lines
     )
@@ -42,12 +42,12 @@ drawing arm {
         radius = 9 mm,
         label = B,
         sheet = "1",
-        model = { part = arm },
+        model = { part = arm, from = "../mechanical/arm" },
         at = [360, 190],
         scale = [4, 1],
         display = hidden_lines
     )
-    view iso = standard(orientation = isometric, sheet = "1", model = { part = arm }, at = [340, 105], scale = [1, 1], display = visible_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { part = arm, from = "../mechanical/arm" }, at = [340, 105], scale = [1, 1], display = visible_lines)
 
     annotation knuckle_height = dimension(style = linear, references = [feature.knuckle.face.start, feature.knuckle.face.end], view = front)
     annotation pad_thickness = dimension(style = linear, references = [feature.pad.face.start, feature.pad.face.end], view = front)

@@ -237,8 +237,8 @@ circuit flight_controller {
         sheet = power
         source VB = { p = net.VBAT, pwl = [[0 s, 0 V], [20 us, 22.2 V], [3 ms, 22.2 V]] }
         source ILOAD = { p = "net.+5V", dc = 1.5 A, current = true }
-        model "BUCK-36V-2A" = { library = "drone_models.lib", subckt = BUCK36V, pins = [VIN, EN, BST, SW, FB, GND] }
-        model "LDO-3V3-SOT23" = { library = "drone_models.lib", subckt = LDO33, pins = [VIN, EN, VOUT, GND] }
+        model "BUCK-36V-2A" = { library = "fc_models.lib", subckt = BUCK36V, pins = [VIN, EN, BST, SW, FB, GND] }
+        model "LDO-3V3-SOT23" = { library = "fc_models.lib", subckt = LDO33, pins = [VIN, EN, VOUT, GND] }
         analysis startup = tran { stop = 1.6 ms, step = 20 ns }
         probe = [net.VBAT, "net.+5V", net.SW, "net.+3V3", "L1.1"]
         measure v5 = { of = startup, average = "net.+5V", from = 1.4 ms, to = 1.6 ms, spec = { min = 4.85 V, max = 5.15 V } }
@@ -254,8 +254,8 @@ circuit flight_controller {
         sheet = power
         source VB = { p = net.VBAT, dc = 22.2 V }
         source ILOAD = { p = "net.+5V", dc = 1.5 A, current = true }
-        model "BUCK-36V-2A" = { library = "drone_models.lib", subckt = BUCK36V_AVG, pins = [VIN, EN, BST, SW, FB, GND] }
-        model "LDO-3V3-SOT23" = { library = "drone_models.lib", subckt = LDO33, pins = [VIN, EN, VOUT, GND] }
+        model "BUCK-36V-2A" = { library = "fc_models.lib", subckt = BUCK36V_AVG, pins = [VIN, EN, BST, SW, FB, GND] }
+        model "LDO-3V3-SOT23" = { library = "fc_models.lib", subckt = LDO33, pins = [VIN, EN, VOUT, GND] }
         tolerance resistors = { match = "R*", value = 1 % }
         analysis point = op {}
         analysis spread = monte_carlo { of = point, runs = 2000, seed = 11 }

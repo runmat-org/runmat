@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 fn load() -> (runmat_circuit::elab::Netlist, runmat_circuit::library::Pool) {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone/electrical/flight_controller");
     let files: Files = [".circuit", ".circuit.layout", ".circuit.lock"]
         .iter()
         .filter_map(|x| {

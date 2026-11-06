@@ -19,7 +19,7 @@ fn budget() -> Duration {
 }
 
 fn drone_files(name: &str) -> (Files, String) {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../runmat-cad/wasm/tests/drone/electrical/{name}"));
     let files: Files = [".circuit", ".circuit.layout", ".circuit.lock"]
         .iter()
         .filter_map(|x| {

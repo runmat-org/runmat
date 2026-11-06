@@ -5,10 +5,10 @@ std 1
 // pad on its pedestal and the ESC board (as its thermal plate) on its standoffs' tops. Exported
 // to geometry/esc_thermal.step for esc_thermal.fea.
 assembly esc_thermal {
-    use part esc_heatsink as esc_heatsink {
+    use part esc_heatsink from "../electrical/esc" as esc_heatsink {
         placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 0 mm] } }
     }
-    use part thermal_pad as thermal_pad {
+    use part thermal_pad from "../electrical/esc" as thermal_pad {
         placement = { placement = offset, offset = { translation = [10 mm, 0 mm, 9.5 mm] } }
     }
     use part esc_board_thermal as esc_board {

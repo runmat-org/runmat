@@ -8,12 +8,12 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 fn files() -> Files {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone/electrical/flight_controller");
     [
         "flight_controller.circuit",
         "flight_controller.circuit.layout",
         "flight_controller.circuit.lock",
-        "drone_models.lib",
+        "fc_models.lib",
     ]
     .iter()
     .filter_map(|x| {

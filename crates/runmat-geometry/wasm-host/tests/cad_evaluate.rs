@@ -41,19 +41,24 @@ fn a_block_weighs_its_volume_at_its_materials_density_in_each_configuration() {
 fn drone() -> BTreeMap<String, String> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runmat-cad/wasm/tests/drone");
     let mut all = BTreeMap::new();
-    for e in std::fs::read_dir(&dir)
-        .expect("the drone project")
-        .flatten()
-    {
+    read_tree(&dir, "/p/drone", &mut all);
+    assert!(all.contains_key("/p/drone/drone.assembly"), "the drone project");
+    all
+}
+
+/// Every file under `dir`, keyed `<at>/<relative path>` (the drone's folders are its modules).
+fn read_tree(dir: &std::path::Path, at: &str, all: &mut BTreeMap<String, String>) {
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || e.path().is_dir() {
+        if name.starts_with('.') {
             continue;
         }
-        if let Ok(text) = std::fs::read_to_string(e.path()) {
-            all.insert(format!("/p/drone/{name}"), text);
+        if e.path().is_dir() {
+            read_tree(&e.path(), &format!("{at}/{name}"), all);
+        } else if let Ok(text) = std::fs::read_to_string(e.path()) {
+            all.insert(format!("{at}/{name}"), text);
         }
     }
-    all
 }
 
 #[test]

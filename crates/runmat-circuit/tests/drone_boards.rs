@@ -1,4 +1,4 @@
-//! The quadcopter showcase's boards (`runmat-cad/wasm/tests/drone`): the flight controller and
+//! The quadcopter showcase's boards (`runmat-cad/wasm/tests/drone/electrical`): the flight controller and
 //! the 4-in-1 ESC, built with the product's board commands. `RUNMAT_DRONE_BUILD=1` rebuilds both
 //! layouts from their start files with the scripts in `drone/` (run in release); the checks run
 //! on the checked-in files.
@@ -11,28 +11,29 @@ mod drone {
 
 use std::path::PathBuf;
 
-fn here() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone")
+/// A board's folder in the drone project (`electrical/flight_controller`, `electrical/esc`).
+fn here(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone/electrical").join(name)
 }
 
 #[test]
 fn rebuild_when_asked() {
     let Ok(which) = std::env::var("RUNMAT_DRONE_BUILD") else { return };
     if which.contains("fc") || which == "1" {
-        let b = drone::fc::build(&here());
+        let b = drone::fc::build(&here("flight_controller"));
         b.report();
-        b.write(&here(), "flight_controller");
+        b.write(&here("flight_controller"), "flight_controller");
     }
     if which.contains("esc") || which == "1" {
-        let b = drone::esc::build(&here());
+        let b = drone::esc::build(&here("esc"));
         b.report();
-        b.write(&here(), "esc");
+        b.write(&here("esc"), "esc");
     }
 }
 
 fn check(name: &str) {
     use runmat_circuit::runtime::{compile, CompileOptions};
-    let dir = here();
+    let dir = here(name);
     let files: runmat_circuit::runtime::Files = [".circuit", ".circuit.layout", ".circuit.lock"]
         .iter()
         .filter_map(|x| Some((format!("/p/{name}{x}"), std::fs::read_to_string(dir.join(format!("{name}{x}"))).ok()?)))

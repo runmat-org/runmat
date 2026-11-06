@@ -50,7 +50,7 @@ mod tests {
     #[test]
     fn checks_the_flight_controller() {
         let file = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../runmat-cad/wasm/tests/drone/flight_controller.circuit.layout");
+            .join("../runmat-cad/wasm/tests/drone/electrical/flight_controller/flight_controller.circuit.layout");
         assert!(is_circuit(&file));
         assert!(!is_circuit(Path::new("model.fea")));
         let (report, base) = check_file(&file, false).expect("checks run");

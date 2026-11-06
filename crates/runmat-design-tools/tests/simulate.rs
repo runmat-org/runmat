@@ -140,7 +140,7 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
 /// fail. With RUNMAT_SIMULATION_SCENE_ESC_OUT set, the report is written there for the Desktop.
 #[test]
 fn the_desktop_simulation_scene_reads_the_esc_current_sense() {
-    const ESC: &str = include_str!("../../runmat-cad/wasm/tests/drone/esc.circuit");
+    const ESC: &str = include_str!("../../runmat-cad/wasm/tests/drone/electrical/esc/esc.circuit");
     let files: Files = [("/p/esc.circuit".to_owned(), ESC.to_owned())].into();
     let out = call("design.simulate", json!({ "path": "/p/esc.circuit", "simulation": "current_sense", "maxPoints": 160 }), &files).unwrap();
     assert_eq!(out["probes"], json!(["ISENSE", "SRC"]));

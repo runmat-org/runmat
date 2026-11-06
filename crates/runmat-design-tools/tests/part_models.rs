@@ -5,11 +5,11 @@
 use runmat_design_tools::{call, Files};
 use serde_json::{json, Value};
 
-const FC: &str = include_str!("../../runmat-cad/wasm/tests/drone/flight_controller.circuit");
-const MODELS: &str = include_str!("../../runmat-cad/wasm/tests/drone/drone_models.lib");
+const FC: &str = include_str!("../../runmat-cad/wasm/tests/drone/electrical/flight_controller/flight_controller.circuit");
+const MODELS: &str = include_str!("../../runmat-cad/wasm/tests/drone/electrical/flight_controller/fc_models.lib");
 
-const SECTION_BUCK: &str = "        model \"BUCK-36V-2A\" = { library = \"drone_models.lib\", subckt = BUCK36V_AVG, pins = [VIN, EN, BST, SW, FB, GND] }\n";
-const SECTION_LDO: &str = "        model \"LDO-3V3-SOT23\" = { library = \"drone_models.lib\", subckt = LDO33, pins = [VIN, EN, VOUT, GND] }\n";
+const SECTION_BUCK: &str = "        model \"BUCK-36V-2A\" = { library = \"fc_models.lib\", subckt = BUCK36V_AVG, pins = [VIN, EN, BST, SW, FB, GND] }\n";
+const SECTION_LDO: &str = "        model \"LDO-3V3-SOT23\" = { library = \"fc_models.lib\", subckt = LDO33, pins = [VIN, EN, VOUT, GND] }\n";
 
 /// The regulators as catalog parts that carry their SPICE models.
 fn declarations(buck_model: &str) -> String {
@@ -27,7 +27,7 @@ fn declarations(buck_model: &str) -> String {
             {{ name = VIN, pad = "5", type = power_in }},
             {{ name = SW, pad = "6", type = power_out }}
         ],
-        spice = {{ model = {buck_model}, library = "drone_models.lib", nodes = [VIN, EN, BST, SW, FB, GND] }}
+        spice = {{ model = {buck_model}, library = "fc_models.lib", nodes = [VIN, EN, BST, SW, FB, GND] }}
     }}
     part "LDO-3V3-SOT23" = {{
         manufacturer = Generic,
@@ -41,7 +41,7 @@ fn declarations(buck_model: &str) -> String {
             {{ name = NC, pad = "4", type = no_connect }},
             {{ name = VOUT, pad = "5", type = power_out }}
         ],
-        spice = {{ model = LDO33, library = "drone_models.lib", nodes = [VIN, EN, VOUT, GND] }}
+        spice = {{ model = LDO33, library = "fc_models.lib", nodes = [VIN, EN, VOUT, GND] }}
     }}
 "#
     )
@@ -71,7 +71,7 @@ fn circuit(buck_model: &str, section_models: bool) -> String {
 fn run(text: String) -> Value {
     let files: Files = [
         ("/fc/flight_controller.circuit".to_string(), text),
-        ("/fc/drone_models.lib".to_string(), MODELS.to_string()),
+        ("/fc/fc_models.lib".to_string(), MODELS.to_string()),
     ]
     .into();
     call(
@@ -116,13 +116,13 @@ fn a_sections_model_takes_precedence_over_the_parts() {
 fn a_parts_model_library_resolves_relative_to_the_circuit() {
     // A KiCad library's model file, rebased from the symbol library's folder: ../models/….
     let text = circuit("BUCK36V_AVG", false).replace(
-        "library = \"drone_models.lib\"",
-        "library = \"../models/drone_models.lib\"",
+        "library = \"fc_models.lib\"",
+        "library = \"../models/fc_models.lib\"",
     );
     let files: Files = [
         ("/fc/boards/flight_controller.circuit".to_string(), text),
         (
-            "/fc/models/drone_models.lib".to_string(),
+            "/fc/models/fc_models.lib".to_string(),
             MODELS.to_string(),
         ),
     ]

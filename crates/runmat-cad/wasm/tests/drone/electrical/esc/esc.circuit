@@ -132,8 +132,8 @@ circuit esc {
         source LC = { p = net.INLC, dc = 3.3 V }
         source EN = { p = net.DRV_EN, dc = 3.3 V }
         source IMOT = { p = net.PHA, n = net.PHB, dc = 20 A, current = true }
-        model "GATEDRV-3PH-QFN24" = { library = "drone_models.lib", subckt = GATEDRV3, pins = [INHA, INLA, INHB, INLB, INHC, INLC, EN, GND, VCC, VDRV, BSTA, GHA, SHA, GLA, BSTB, GHB, SHB, GLB, BSTC, GHC, SHC, GLC, FAULT] }
-        model "NMOS-40V-DFN8" = { library = "drone_models.lib", subckt = NMOS40, pins = [D, G, S] }
+        model "GATEDRV-3PH-QFN24" = { library = "esc_models.lib", subckt = GATEDRV3, pins = [INHA, INLA, INHB, INLB, INHC, INLC, EN, GND, VCC, VDRV, BSTA, GHA, SHA, GLA, BSTB, GHB, SHB, GLB, BSTC, GHC, SHC, GLC, FAULT] }
+        model "NMOS-40V-DFN8" = { library = "esc_models.lib", subckt = NMOS40, pins = [D, G, S] }
         analysis edges = tran { stop = 14 us, step = 2 ns }
         probe = [net.INHA, net.GHA, net.GLA, net.PHA, "QHA.D"]
         measure rise = { of = edges, rise_time = net.PHA, from = 0.9 us, to = 4 us, spec = { max = 40 ns } }

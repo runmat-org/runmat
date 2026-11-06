@@ -14,7 +14,7 @@ assembly arm_unit {
     use part arm as arm {
         configuration = { select = inputs, values = { length = input.length, rise = input.rise, pad_tilt = input.pod_tilt } }
     }
-    use assembly motor_station as motor {
+    use assembly motor_station from "../propulsion" as motor {
         configuration = { select = inputs, values = { blade_a = input.blade_a, blade_b = input.blade_b, arm_roll = -input.pod_tilt } }
         placement = { placement = offset, offset = { translation = [input.length, 0 mm, input.rise + 4 mm], rotation = { rotation = axis_angle, axis = [1, 0, 0], angle = input.pod_tilt } } }
     }

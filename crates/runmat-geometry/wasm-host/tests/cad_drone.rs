@@ -1,4 +1,4 @@
-//! The camera drone showcase (`runmat-cad/wasm/tests/drone/`) on OCCT, through `runmat_cad_call`
+//! The camera drone showcase (`runmat-cad/wasm/tests/drone/`, in module folders) on OCCT, through `runmat_cad_call`
 //! (the Desktop and browser worker's entry): every part, assembly and drawing compiles with no
 //! error, every part has a body and every feature regenerates, and the top assembly places every
 //! occurrence. `RUNMAT_DRONE_SRC=<folder>` compiles another copy of the project instead.
@@ -17,16 +17,24 @@ fn project() -> BTreeMap<String, String> {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runmat-cad/wasm/tests/drone")
     });
     let mut all = BTreeMap::new();
-    for e in std::fs::read_dir(&dir).expect("the drone project is checked in").flatten() {
+    read_tree(&dir, "/p/drone", &mut all);
+    assert!(all.contains_key("/p/drone/drone.assembly"), "the drone project is checked in at {dir:?}");
+    all
+}
+
+/// Every file under `dir`, keyed `<at>/<relative path>`: the project's folders are its modules.
+fn read_tree(dir: &std::path::Path, at: &str, all: &mut BTreeMap<String, String>) {
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || e.path().is_dir() {
+        if name.starts_with('.') {
             continue;
         }
-        if let Ok(text) = std::fs::read_to_string(e.path()) {
-            all.insert(format!("/p/drone/{name}"), text);
+        if e.path().is_dir() {
+            read_tree(&e.path(), &format!("{at}/{name}"), all);
+        } else if let Ok(text) = std::fs::read_to_string(e.path()) {
+            all.insert(format!("{at}/{name}"), text);
         }
     }
-    all
 }
 
 fn errors(v: &Value) -> Vec<String> {
@@ -122,7 +130,7 @@ fn the_drone_compiles_part_by_part_and_as_one_assembly() {
 fn the_arm_drawing_dimensions_read_the_part() {
     let all = project();
     let files_json = serde_json::to_string(&all).unwrap();
-    let path = "/p/drone/arm.drawing";
+    let path = "/p/drone/drawings/arm.drawing";
     let v = entry(path, &all[path], &files_json);
     assert!(errors(&v).is_empty(), "{:?}", errors(&v));
     let text = &v["projection"]["data"]["text"];
@@ -171,7 +179,7 @@ fn the_arm_drawing_dimensions_read_the_part() {
 fn the_hinge_lug_sketches_are_fully_defined() {
     let all = project();
     let files_json = serde_json::to_string(&all).unwrap();
-    let path = "/p/drone/hinge_mount.part";
+    let path = "/p/drone/mechanical/arm/hinge_mount.part";
     let v = entry(path, &all[path], &files_json);
     assert!(errors(&v).is_empty(), "{:?}", errors(&v));
     let sketches = v["display"]["data"]["sketches"].as_array().cloned().unwrap_or_default();
@@ -190,7 +198,7 @@ fn the_hinge_lug_sketches_are_fully_defined() {
 fn the_motor_mount_sketch_is_fully_defined() {
     let all = project();
     let files_json = serde_json::to_string(&all).unwrap();
-    let path = "/p/drone/motor_pod.part";
+    let path = "/p/drone/mechanical/propulsion/motor_pod.part";
     let v = entry(path, &all[path], &files_json);
     assert!(errors(&v).is_empty(), "{:?}", errors(&v));
     let sketches = v["display"]["data"]["sketches"].as_array().cloned().unwrap_or_default();
@@ -212,7 +220,7 @@ fn the_study_assemblies_export_with_their_region_names() {
         ("arm_study", &["'arm'", "'motor_pod'"][..], &["ADVANCED_FACE('root'", "ADVANCED_FACE('motor_seat'"][..]),
         ("esc_thermal", &["'esc_heatsink'", "'thermal_pad'", "'esc_board_thermal'"][..], &["ADVANCED_FACE('fins'", "ADVANCED_FACE('pad_seat'"][..]),
     ] {
-        let path = format!("/p/drone/{file}.assembly");
+        let path = format!("/p/drone/simulation/{file}.assembly");
         let step = runmat_cad_wasm::exchange::assembly_step(&path, &all[&path], &all)
             .unwrap_or_else(|e| panic!("{file}: {e}"))
             .expect("OCCT writes STEP");
