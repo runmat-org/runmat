@@ -140,6 +140,27 @@ fn inspect_set_regenerates_with_input_values_for_one_run() {
     assert!(e.message.contains("width, depth, thickness"), "{}", e.message);
 }
 
+/// `design.export` takes `set` as `design.inspect` does: the exported model regenerates with
+/// those inputs (an STL's top sits at each thickness), and the file is unchanged.
+#[test]
+fn export_set_regenerates_with_input_values_for_one_export() {
+    let plate = "part plate {\n    input thickness : length = 10 mm\n\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 50 mm])\n        l3 = line(start = [80 mm, 50 mm], end = [0 mm, 50 mm])\n        l4 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = input.thickness)\n}\n";
+    let files: Files = [("/p/plate.part".to_string(), plate.to_string())].into_iter().collect();
+    for t in [4.0_f32, 6.5] {
+        let stl = ok("design.export", json!({ "path": "/p/plate.part", "format": "stl", "set": { "thickness": format!("{t} mm") } }), &files);
+        let b = bytes(&stl["files"][0]);
+        let n = u32::from_le_bytes([b[80], b[81], b[82], b[83]]) as usize;
+        let top = (0..n)
+            .flat_map(|i| (0..3).map(move |v| 84 + i * 50 + 12 + v * 12 + 8))
+            .map(|at| f32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]]))
+            .fold(f32::MIN, f32::max);
+        assert!((top - t).abs() < 1e-3, "t = {t}: top at {top}");
+    }
+    assert_eq!(files["/p/plate.part"], plate);
+    let e = call("design.export", json!({ "path": "/p/plate.part", "format": "stl", "set": { "width": "1 mm" } }), &files).unwrap_err();
+    assert_eq!(e.code, "unknown_input");
+}
+
 #[test]
 fn propose_edit_stages_text_with_the_dimension_diff_and_a_patch_that_keeps_and_undoes_it() {
     let files = part_files();

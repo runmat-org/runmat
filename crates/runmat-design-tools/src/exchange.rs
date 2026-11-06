@@ -195,6 +195,11 @@ pub struct ExportInput {
     /// drawing's part).
     #[serde(default)]
     pub configuration: Option<String>,
+    /// Input values for this export, by input name (`{"thickness": "3.5 mm"}`): the part or
+    /// assembly regenerates with them before it is written; the file is not changed. An unknown
+    /// name is an `unknown_input` error listing the declared inputs.
+    #[serde(default)]
+    pub set: Option<BTreeMap<String, String>>,
     /// Fabrication: which outputs to make (all by default).
     #[serde(default)]
     pub fabrication: Option<FabricationOptions>,
@@ -304,6 +309,13 @@ pub(crate) fn model_export(
 }
 
 pub fn export(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolError> {
+    match input.set.as_ref().filter(|set| !set.is_empty()) {
+        Some(set) => export_files(input, &crate::inspect::run_set::with_inputs(&input.path, files, set)?),
+        None => export_files(input, files),
+    }
+}
+
+fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, ToolError> {
     let kind = kind_of(&input.path)?;
     let text = text_of(files, &input.path)?;
     let name = stem(&input.path);
