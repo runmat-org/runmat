@@ -144,7 +144,7 @@ pub fn import_records(files: &BTreeMap<String, Vec<Record>>, target_stem: &str, 
         let design = schematic::read(&sheets, &name, &footprint_dir, &packages, &footprints, &mut report)?;
         out.insert(format!("{target_stem}{CIRCUIT_SUFFIX}"), crate::syntax::print_circuit(&design).map_err(|e| format!("{e:?}"))?);
     } else {
-        report.not_carried("the schematic: only the board was given, so the circuit has no parts");
+        out.insert(format!("{target_stem}{CIRCUIT_SUFFIX}"), crate::import::circuit_stub(&name, &mut report)?);
     }
     if let Some(b) = board {
         let uses = [runmat_design_syntax::document::UseItem {

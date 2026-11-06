@@ -69,6 +69,16 @@ pub struct Imported {
     pub report: Report,
 }
 
+/// The circuit written for a board imported alone: an empty circuit, so the layout's
+/// `use circuit` resolves and the board compiles as written. Its parts stay board-only until a
+/// schematic is given, which the report says.
+pub fn circuit_stub(name: &str, report: &mut Report) -> Result<String, String> {
+    let mut stub = crate::ir::Design::new(name);
+    stub.sheet_mut("main");
+    report.not_carried("the schematic: only the board was given, so the circuit has no parts");
+    crate::syntax::print_circuit(&stub).map_err(|e| format!("{e:?}"))
+}
+
 /// A file name made from a library item's name (`passives:0603` → `passives_0603`).
 pub fn file_safe(name: &str) -> String {
     let s: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' }).collect();

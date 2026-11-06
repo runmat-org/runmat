@@ -225,12 +225,7 @@ pub fn import(files: &BTreeMap<String, String>, target_stem: &str) -> Result<Imp
         let design = schematic::read(doc, &name, &footprint_dir, &packages, &footprints, &mut report)?;
         out.insert(format!("{target_stem}{CIRCUIT_SUFFIX}"), crate::syntax::print_circuit(&design).map_err(|e| format!("{e:?}"))?);
     } else {
-        // A board alone: an empty circuit stub, so the layout's `use circuit` resolves and the
-        // board compiles as written; its parts stay board-only until a schematic is given.
-        let mut stub = crate::ir::Design::new(&name);
-        stub.sheet_mut("main");
-        out.insert(format!("{target_stem}{CIRCUIT_SUFFIX}"), crate::syntax::print_circuit(&stub).map_err(|e| format!("{e:?}"))?);
-        report.not_carried("the schematic: only the board was given, so the circuit has no parts");
+        out.insert(format!("{target_stem}{CIRCUIT_SUFFIX}"), crate::import::circuit_stub(&name, &mut report)?);
     }
     if let Some(b) = board {
         let uses = [runmat_design_syntax::document::UseItem {

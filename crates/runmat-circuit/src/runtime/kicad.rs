@@ -132,6 +132,8 @@ pub fn import_kicad(
         let text = crate::syntax::print_circuit(&design).map_err(|e| format!("{e:?}"))?;
         out.insert(circuit_path.clone(), text);
         out.insert(lock_path_for(&circuit_path), imp.lock.to_text());
+    } else if board_read.is_some() {
+        out.insert(circuit_path.clone(), crate::import::circuit_stub(&circuit_name, &mut report)?);
     }
     if out.is_empty() {
         return Err("give a .kicad_sch or .kicad_pcb file".into());

@@ -208,3 +208,13 @@ fn a_document_without_records_is_refused_by_the_import() {
     let err = pipe_record::import(&files, "x").unwrap_err();
     assert!(err.contains("isn't an ASCII .SchDoc or .PcbDoc document"), "{err}");
 }
+
+/// A board alone imports with an empty circuit stub, so its layout passes the design check;
+/// the missing schematic is reported.
+#[test]
+fn a_board_alone_imports_to_a_layout_that_compiles() {
+    let files: BTreeMap<String, String> = [("blinky.PcbDoc".to_owned(), fixture("blinky.PcbDoc"))].into_iter().collect();
+    let out = pipe_record::import(&files, "boards/blinky").unwrap();
+    assert!(out.report.not_carried.keys().any(|k| k.starts_with("the schematic")), "{:?}", out.report.lines());
+    compiles(&out);
+}

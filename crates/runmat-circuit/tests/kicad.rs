@@ -949,3 +949,16 @@ fn an_imported_project_keeps_its_net_classes_and_rules() {
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
 }
+
+/// A board alone imports with an empty circuit stub, so its layout passes the design check;
+/// the missing schematic is reported.
+#[test]
+fn a_board_alone_imports_to_a_layout_that_compiles() {
+    use runmat_circuit::runtime::import_kicad;
+    let files: BTreeMap<String, String> = [("root.kicad_pcb".to_string(), BOARD.to_string())].into_iter().collect();
+    let out = import_kicad(&files, None, "boards/io").unwrap();
+    assert!(out.report.not_carried.keys().any(|k| k.starts_with("the schematic")), "{:?}", out.report.lines());
+    let fs: runmat_circuit::runtime::Files = out.files.iter().map(|(k, v)| (format!("/p/{k}"), v.clone())).collect();
+    let errors = import_check::design_errors(&fs, "/p/boards/io.circuit", Some("/p/boards/io.circuit.layout"));
+    assert!(errors.is_empty(), "{errors:#?}");
+}
