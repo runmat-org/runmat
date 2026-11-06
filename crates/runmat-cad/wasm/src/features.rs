@@ -746,9 +746,11 @@ pub fn feature_kind(
                 )
             }
         }
-        _ => return Ok(None),
+        _ => return details::feature_kind(command, values, picks),
     }))
 }
+
+mod details;
 
 #[cfg(test)]
 mod tests {

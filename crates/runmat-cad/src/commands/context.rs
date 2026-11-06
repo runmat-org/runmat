@@ -67,11 +67,11 @@ pub(super) fn add(catalog: &mut Catalog) {
             .when(selected_one(&[K::Body, K::Face, K::Plane]))
             .edit(view_action("section")),
         cmd("part.export-body", "Export body", "export", P)
-            .desc("Write the selected bodies to a STEP, X_T or STL file.")
+            .desc("Write the selected bodies to a STEP or STL file.")
             .inputs(vec![choice(
                 "format",
                 "Format",
-                &[("step", "STEP"), ("x_t", "X_T"), ("stl", "STL")],
+                &[("step", "STEP"), ("stl", "STL")],
             )])
             .when(selected(&[K::Body]))
             .edit(export("body")),
@@ -132,8 +132,6 @@ pub(super) fn add(catalog: &mut Catalog) {
                 &[
                     ("hidden_removed", "Hidden lines removed"),
                     ("hidden_visible", "Hidden lines visible"),
-                    ("wireframe", "Wireframe"),
-                    ("shaded_edges", "Shaded with edges"),
                     ("shaded", "Shaded"),
                 ],
             )])
@@ -381,10 +379,12 @@ pub(super) fn add(catalog: &mut Catalog) {
                 "drawing.reattach",
                 "drawing.show-in-model",
                 "design.show-source",
+                "design.copy-reference",
+                "drawing.delete",
             ],
             vec![
                 vec![c("drawing.edit-annotation"), c("drawing.reattach")],
-                vec![c("drawing.show-in-model"), c("design.show-source")],
+                vec![c("drawing.show-in-model"), c("design.show-source"), c("design.copy-reference")],
                 vec![c("drawing.delete")],
             ],
         ),

@@ -25,9 +25,51 @@ pub fn catalog() -> Catalog {
     drawing::add(&mut c);
     items::add(&mut c);
     context::add(&mut c);
+    c.withdraw(UNBUILT);
     c.finish();
     c
 }
+
+/// Commands described here whose appliers aren't built yet. They stay out of the catalog, so
+/// no toolbar, menu or search offers a button that does nothing; an id leaves this list in the
+/// commit that builds its applier, with its test.
+pub const UNBUILT: &[&str] = &[
+    // Sketch.
+    "sketch.fully-define",
+    "sketch.use-edges",
+    "sketch.stretch",
+    "sketch.block",
+    "sketch.image",
+    "sketch.dxf-import",
+    "sketch.repair",
+    // Part: reference curves, wrap, bodies to parts and where-used.
+    "part.curve-helix",
+    "part.curve-projected",
+    "part.curve-composite",
+    "part.curve-split-line",
+    "part.curve-intersection",
+    "part.curve-through-points",
+    "part.curve-equation",
+    "part.wrap",
+    "part.body-promote",
+    "part.where-used",
+    // Manage.
+    "manage.equations",
+    "manage.find-references",
+    "manage.freeze-bar",
+    "manage.material",
+    "manage.appearance",
+    "manage.decal",
+    "manage.import",
+    "manage.heal",
+    "manage.split-to-files",
+    "manage.pack-and-share",
+    // Drawing.
+    "drawing.hide-view",
+    "drawing.edit-annotation",
+    "drawing.reattach",
+    "drawing.print",
+];
 
 #[cfg(test)]
 mod tests {
@@ -143,6 +185,16 @@ mod tests {
                 command.id,
                 edit.variant
             );
+        }
+    }
+
+    #[test]
+    fn unbuilt_commands_are_offered_nowhere() {
+        let c = catalog();
+        let json = c.to_json();
+        for id in UNBUILT {
+            assert!(c.command(id).is_none(), "{id}");
+            assert!(!json.contains(&format!("\"{id}\"")), "{id} is still named in the catalog");
         }
     }
 

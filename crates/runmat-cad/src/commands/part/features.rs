@@ -214,11 +214,8 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
             .inputs(vec![
                 pick("profile", "Profile", &[K::Sketch]),
                 length("thickness", "Thickness", 2.0),
-                choice("side", "Thickness side", &[("mid", "Both sides"), ("one", "One side"), ("other", "Other side")]),
-                choice("direction", "Extrude", &[("parallel", "Parallel to sketch"), ("normal", "Normal to sketch")]),
+                length("depth", "Depth", 10.0),
                 flag("reverse", "Flip material side", false),
-                flag("draft", "Draft", false),
-                angle("draft_angle", "Draft angle", 1.0).if_checked("draft"),
             ])
             .when(all(vec![bodies_exist(), has(Facet::Sketches)]))
             .preview()
@@ -376,17 +373,19 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 offset("x", "X", 0.0).shown("type", &["coordinates"]),
                 offset("y", "Y", 0.0).shown("type", &["coordinates"]),
                 offset("z", "Z", 0.0).shown("type", &["coordinates"]),
-                length("distance", "Distance along", 0.0).shown("type", &["along_curve"]),
+                qty("parameter", "Fraction along", "ratio", Some(0.5)).shown("type", &["along_curve"]),
             ])
             .preview()
             .edit(add_feature("point")),
         cmd("part.coordinate-system", "Coordinate system", "csys", P)
-            .desc("Add a coordinate system from an origin and axes.")
+            .desc("Add a coordinate system from an origin and axes, or on a planar face.")
             .kw(&["frame", "csys"])
             .inputs(vec![
-                pick("origin", "Origin", &[K::Vertex, K::Point]),
-                pick("x", "X axis", &[K::Edge, K::Axis]).optional(),
-                pick("y", "Y axis", &[K::Edge, K::Axis]).optional(),
+                radio("type", "Type", &[("axes", "Origin and axes"), ("face", "On a face")]),
+                pick("origin", "Origin", &[K::Vertex, K::Point]).shown("type", &["axes"]),
+                pick("z", "Z axis", &[K::Edge, K::Axis]).shown("type", &["axes"]),
+                pick("x", "X axis", &[K::Edge, K::Axis]).optional().shown("type", &["axes"]),
+                pick("face", "Face", &[K::Face]).shown("type", &["face"]),
             ])
             .preview()
             .edit(add_feature("frame")),
