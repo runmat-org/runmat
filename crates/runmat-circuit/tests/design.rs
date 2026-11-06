@@ -245,6 +245,8 @@ fn erc_matrix_drivers_and_unconnected() {
         "NC pins may stay unconnected"
     );
     assert!(has("pin-unconnected", "U2.OC (4)"));
+    let open = f.iter().find(|d| d.code == "pin-unconnected" && d.item == "U2.OC (4)").unwrap();
+    assert_eq!(open.message, "open_collector pin U2.OC (4) is unconnected; mark it no-connect if intended");
     let md = f.iter().find(|d| d.code == "multiple-drivers").unwrap();
     assert_eq!(md.related, vec!["U1.O (1)", "U2.O (1)"]);
 }

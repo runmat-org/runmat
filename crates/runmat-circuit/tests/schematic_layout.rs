@@ -1,7 +1,7 @@
 //! The schematic auto-layout on the showcase (`tests/projects/daq`) and the small io board:
-//! wires never cross a symbol, texts never overlap, every pin is wired, labelled, given a
-//! power port or marked no-connect, signal flows left to right, and recorded places stick
-//! through an edit. Set `RUNMAT_SCHEMATIC_SVG` to a folder to write each page as SVG.
+//! wires never cross a symbol, texts never overlap, every pin is wired, labelled or given a
+//! power port, crosses mark only no-connect pins, signal flows left to right, and recorded
+//! places stick through an edit. Set `RUNMAT_SCHEMATIC_SVG` to a folder to write each page as SVG.
 
 use runmat_circuit::runtime::{compile, edit, CompileOptions, EditRequest, Files};
 use runmat_circuit::schematic::{SchematicIndex, SchematicSheet};
@@ -120,7 +120,8 @@ fn check_page(page: &SchematicSheet) {
                     p.name
                 );
             } else {
-                assert!(ncs.contains(&k), "{}: {}.{} has no no-connect mark", page.path, s.designator, p.name);
+                // Crossed only when marked no-connect; other open pins are left for ERC.
+                assert_eq!(ncs.contains(&k), p.no_connect, "{}: {}.{} no-connect cross", page.path, s.designator, p.name);
             }
         }
         assert!((s.pin_text_mm - 1.27).abs() < EPS && (s.designator_text_mm - 1.524).abs() < EPS);

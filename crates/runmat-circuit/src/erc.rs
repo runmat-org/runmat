@@ -314,7 +314,11 @@ pub fn run(nl: &Netlist, opts: &ErcOptions) -> Vec<Diagnostic> {
                         Severity::Warning,
                         "pin-unconnected",
                         pin_ref(nl, ci, pi),
-                        format!("{} pin is not connected", p.kind.name()),
+                        format!(
+                            "{} pin {} is unconnected; mark it no-connect if intended",
+                            p.kind.name(),
+                            pin_ref(nl, ci, pi)
+                        ),
                     )
                     .at(&c.source),
                 );

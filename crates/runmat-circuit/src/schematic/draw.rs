@@ -106,8 +106,13 @@ pub(super) fn page(
                 CellKind::Unit { comp, .. } => cell.pins.get(k).map(|&p| super::hand::pin_ref(&nl.components[comp], p)),
                 CellKind::Sheet { .. } => None,
             });
+            let marked = match cell.kind {
+                CellKind::Unit { comp, .. } => cell.pins.get(k).is_some_and(|&p| marked_no_connect(nl, comp, p)),
+                CellKind::Sheet { .. } => false,
+            };
             terms.push(Term {
                 net: cell.nets[k],
+                no_connect: marked,
                 tip,
                 side,
                 first_on_side: false,
@@ -262,6 +267,7 @@ fn symbol(
             hidden: small,
             kind: pin_kind(lp.kind).to_owned(),
             net: net.map(|n| nl.nets[n].name.clone()),
+            no_connect: marked_no_connect(nl, comp, cell.pins[k]),
         });
     }
     let r = pl.rect([-hw, -hh, hw, hh]);

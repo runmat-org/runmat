@@ -32,6 +32,8 @@ const NONE: u32 = u32::MAX;
 #[derive(Clone, Debug)]
 pub(super) struct Term {
     pub net: Option<usize>,
+    /// Marked no-connect on purpose (a `no_erc` mark or a not-connected pin type).
+    pub no_connect: bool,
     pub tip: Point,
     pub side: PinSide,
     /// The pin's index on its side, counted from the top (left and right pins) and whether it
@@ -171,13 +173,16 @@ pub(super) fn connect(terms: &[Term], nets: &[NetInfo], walls: &Walls, bbox: [Co
         g.block([a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)], 0);
     }
     let mut out = Drawn::default();
-    // Tips and their stubs are kept for their own nets; a tip with no net gets a cross.
+    // Tips and their stubs are kept for their own nets. A tip with no net is a wall; it gets a
+    // no-connect cross only when marked no-connect, and is otherwise drawn open (ERC warns).
     for t in terms {
         let Some(i) = g.at(t.tip) else { continue };
         match t.net {
             None => {
                 g.c[i].block = true;
-                out.no_connects.push(t.tip);
+                if t.no_connect {
+                    out.no_connects.push(t.tip);
+                }
             }
             Some(n) => {
                 g.c[i] = G {

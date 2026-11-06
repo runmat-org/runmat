@@ -17,7 +17,8 @@
 //!   above its amplifier, each net's groups packed in rows.
 //! - **Connections** ([`route`]): orthogonal wires with junction dots that never cross a
 //!   symbol, power ports (VCC up, GND down) instead of rail wires, labels where a wire would be
-//!   long or a net leaves the sheet, no-connect markers on unused pins.
+//!   long or a net leaves the sheet, no-connect crosses on pins marked no-connect (a `no_erc`
+//!   mark or a not-connected pin type); other pins on no net are drawn open for ERC to flag.
 //! - **Places stick.** A symbol whose place is recorded in the lock (`schematic.annotate` and
 //!   `schematic.move` record them) stays exactly there; new symbols go to the nearest free
 //!   spot, so one edit never reshuffles the sheet.
@@ -232,6 +233,16 @@ pub struct SchematicPin {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net: Option<String>,
+    /// Marked no-connect on purpose: a `no_erc` mark or a not-connected pin type. Such a pin on
+    /// no net gets a no-connect cross at its tip; any other pin on no net is drawn open, and
+    /// ERC warns about it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_connect: bool,
+}
+
+/// Whether a component's pin is marked no-connect on purpose (see [`SchematicPin::no_connect`]).
+pub(super) fn marked_no_connect(nl: &Netlist, comp: usize, pin: usize) -> bool {
+    nl.no_erc.contains(&(comp, pin)) || nl.components[comp].pins[pin].kind == PinType::NotConnected
 }
 
 /// A child sheet instance drawn on its parent: a box with a pin per net that crosses it.

@@ -176,7 +176,10 @@ fn schematic_has_a_page_per_sheet_with_every_pin_connected() {
                     "the pin line ends at the tip"
                 );
                 let Some(net) = &pin.net else {
-                    assert!(page.no_connects.contains(&[pin.x_mm, pin.y_mm]));
+                    // A cross only where the design marks the pin no-connect; any other pin on
+                    // no net is drawn open.
+                    let crossed = page.no_connects.contains(&[pin.x_mm, pin.y_mm]);
+                    assert_eq!(crossed, pin.no_connect, "{}.{} cross", s.designator, pin.name);
                     continue;
                 };
                 // A connected pin ends a wire of its net, or carries its net's port or label.

@@ -33,6 +33,8 @@ A board check adds DRC (see [Board layout](/docs/ecad/layout#design-rules)), unr
 
 `no_erc = [U1.NC, "J1.5"]` on a sheet tells the rules those pins are meant as they are, such as a no-connect pin left open.
 
+The schematic draws a no-connect cross only on a pin the design marks: a pin in `no_erc`, or a pin whose type is not-connected. Any other pin on no net is drawn open, and the check warns about it, for example `passive pin J1.5 is unconnected; mark it no-connect if intended`. To accept an open pin, add it to `no_erc` (the No-ERC tool on the canvas writes the same statement). The cross then appears and the warning goes away.
+
 ## Running the checks
 
 ```sh
