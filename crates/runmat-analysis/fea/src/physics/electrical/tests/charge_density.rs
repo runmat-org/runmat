@@ -110,7 +110,7 @@ fn tet10_charged_slab_matches_potential_field_charge_and_energy_with_both_signs_
 }
 
 // witness: FEA-EM-QUALIFICATION-001/references @ electrostatic/tet4/numerical_kernel;
-//   boundary: Uniform-charge Tet4 slab on three meshes: independent quadratic potential, linear
+//   check: charged-slab; boundary: Uniform-charge Tet4 slab on three meshes: independent quadratic potential, linear
 //   field, charge conservation and energy convergence; no Tet10 or nonlinear dielectric claim.
 #[test]
 fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {

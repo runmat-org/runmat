@@ -247,7 +247,7 @@ fn solve_line(line: &Line, frequency: f64, drive: Drive, cells: usize) -> Maxwel
 //   at three frequencies.
 // witness: FEA-EM-MAXWELL-001/frequency @ harmonic_maxwell/edge_elements/numerical_kernel;
 //   coverage: partial;
-//   boundary: Three frequencies are solved with complex coefficients and each matches its closed
+//   check: skin-effect; boundary: Three frequencies are solved with complex coefficients and each matches its closed
 //   form; composition of several frequencies in one study is not asserted.
 #[test]
 fn current_driven_strip_impedance_converges_to_the_skin_effect_solution() {
@@ -296,7 +296,7 @@ fn current_driven_strip_impedance_converges_to_the_skin_effect_solution() {
 
 // witness: FEA-EM-QUALIFICATION-001/references @ harmonic_maxwell/edge_elements/numerical_kernel;
 //   coverage: partial;
-//   boundary: A voltage-driven strip at 1 Hz matches the DC resistance and the low-frequency
+//   check: low-frequency-strip; boundary: A voltage-driven strip at 1 Hz matches the DC resistance and the low-frequency
 //   inductance.
 #[test]
 fn voltage_drive_and_low_frequency_limit_match_dc_resistance_and_inductance() {

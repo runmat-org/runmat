@@ -13,7 +13,7 @@ const FINAL_TIME: f64 = 0.1;
 const RESIDUAL: f64 = 1e-12;
 
 // witness: FEA-THERMAL-ACCURACY-001/time @ thermal_transient/tet4|tet10/public_study;
-//   boundary: Both-order uniform ramp heating, independent continuum error and energy law; no
+//   check: ramp-heating; boundary: Both-order uniform ramp heating, independent continuum error and energy law; no
 //   nonuniform mesh convergence credit.
 #[test]
 fn uniform_ramp_heating_has_continuum_backward_euler_time_convergence() {

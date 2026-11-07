@@ -201,7 +201,7 @@ fn reference(frequency: f64) -> f64 {
 }
 
 // witness: FEA-ACOUSTIC-OUTPUTS-001/intensity_and_sound_power @ acoustic_harmonic/tet10/numerical_kernel;
-//   coverage: partial; boundary: transmission loss through a plane layer between an incident and
+//   coverage: partial; check: layer-transmission-loss; boundary: transmission loss through a plane layer between an incident and
 //   an anechoic port matches the closed-form plane-wave result per frequency and converges under
 //   refinement; three-dimensional chamber modes are not exercised.
 #[test]

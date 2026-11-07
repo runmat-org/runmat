@@ -39,7 +39,7 @@ analysis modes {
 }
 ```
 
-The family and procedure names are a closed set, and their fields are typed: a transient step needs a time range and step, a harmonic step an increasing list of frequencies, a modal step a positive mode count. `runmat check` also verifies that the family runs the procedure, using the same registry the solver uses ([family and procedure matrix](../validation/status.md#families-and-procedures)). Every procedure and its fields are in the [procedure reference](./reference/procedures.md).
+The family and procedure names are a closed set, and their fields are typed: a transient step needs a time range and step, a harmonic step an increasing list of frequencies, a modal step a positive mode count. `runmat check` also verifies that the family runs the procedure, using the same registry the solver uses ([family and procedure matrix](./reference/procedures.md#families-and-procedures)). Every procedure and its fields are in the [procedure reference](./reference/procedures.md).
 
 ## Order steps and pass state
 

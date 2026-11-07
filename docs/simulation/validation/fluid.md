@@ -1,6 +1,6 @@
 ---
-description: How RunMat checks its fluid flow results: reference cases with their errors and receipts, and the tests behind each requirement, generated from the capability ledger.
-keywords: [fluid flow validation, verification, reference cases, convergence, FEA accuracy]
+description: Reference checks for RunMat fluid flow analyses: each problem, its closed-form, manufactured or published reference, the compared quantity, the tolerance and the latest result.
+keywords: [fluid flow validation, verification, reference solution, mesh convergence, FEA accuracy]
 doc_type: validation
 generated: node scripts/docs/generate-pages.mjs
 ---
@@ -8,48 +8,92 @@ generated: node scripts/docs/generate-pages.mjs
 
 <!-- Generated from docs/simulation/ledger.json by scripts/docs/generate-pages.mjs; do not edit by hand. -->
 
-Each case below compares a RunMat result with an independent reference: a closed-form solution, a manufactured solution or a published benchmark. Values link to their run receipts. The [validation methodology](./methodology.md) explains how to read them, and [Status](./status.md) lists what the release runs.
+Each check compares a RunMat result with an independent reference: a closed-form solution, a manufactured solution or a published benchmark. The tests listed under a check run on every change and in the evidence report; receipts record a public study run with its build, commit and mesh. The [validation methodology](./methodology.md) explains how checks are built and how tolerances are set, and [Status](./status.md) summarizes every family.
 
-## Capabilities
+## Steady
 
-| Capability | In this release | Cases |
-| --- | --- | --- |
-| Fluid static | yes | — |
-| Fluid transient | yes | — |
-| Fluid harmonic (linearized flow about a base state) procedure | [not yet in the current release](pending:fluid.harmonic) | — |
-| Fluid nonlinear procedure | [not yet in the current release](pending:fluid.nonlinear) | — |
-| Pressure drop output (`pressure_drop`) between two face regions | [not yet in the current release](pending:output.pressure_drop) | — |
-| Darcy–Forchheimer porous regions in incompressible flow, in the page's material form | [not yet in the current release](pending:fluid.porous) | — |
-| Generalized-Newtonian fluid laws (`carreau`, `power_law`) in the page's unit form | [not yet in the current release](pending:fluid.non-newtonian) | — |
-| Wall shear stress output over a wall region in transient flow | [not yet in the current release](pending:output.wall-shear-stress) | — |
-| Oscillatory shear index output (`oscillatory_shear_index`) over a cardiac cycle | [not yet in the current release](pending:output.oscillatory-shear-index) | — |
-| Species transport in flow: species declarations, advection–diffusion, concentration constraints and fields | [not yet in the current release](pending:fluid.species-transport) | — |
-| Hydrodynamic lubrication: journal bearings with `rpm` speed, film pressure, Elrod cavitation and friction torque | [not yet in the current release](pending:lubrication.family) | — |
+### Plane Poiseuille pressure drop
 
-## Reference cases
+**Problem.** Fully developed laminar flow between parallel plates, refined in the kernel test. The public example has L/h = 30 at Re = 1.
 
-No fluid flow reference case is published on this page yet; the requirement tests below cover the formulation.
+**Reference.** Fully developed pressure drop $\Delta p = 12\mu\bar UL/h^2$; 36 Pa for the public example.
 
-## Test evidence by requirement
+**Compared.** Difference of the face-mean pressure between inlet and outlet.
 
-Each requirement lists acceptance obligations, and each obligation must hold in stated envelopes: formulation, element order and execution provider. Tests declare the obligation and envelope they support at the test; the counts are envelope cells from the latest evidence run. PASS covers the obligation fully, PARTIAL passes with a narrower boundary than the criterion, and OPEN has no supporting test yet.
+**Tolerance.** Kernel: relative error below 5 % and decreasing with refinement. Public example: between 34.2 and 37.8 Pa (5 %), which contains the uniform inlet's entrance loss of about +3 %.
 
-| Requirement | Title | Obligations | PASS | PARTIAL | FAIL | OPEN |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| FEA-FLUID-TOPOLOGY-001 | Canonical conservative finite-volume projection | 4 | 0 | 4 | 0 | 28 |
-| FEA-FLUID-EQUATIONS-001 | Original incompressible laminar mass and momentum equations | 3 | 0 | 4 | 0 | 20 |
-| FEA-FLUID-INPUTS-001 | Exact typed fluid boundaries, sources and initial conditions | 4 | 0 | 4 | 0 | 24 |
-| FEA-FLUID-RECOVERY-001 | Original fluid fields and physical conservation recovery | 2 | 0 | 2 | 0 | 14 |
-| FEA-FLUID-ACCURACY-001 | Independent flow benchmark and convergence acceptance | 3 | 0 | 2 | 0 | 6 |
-| FEA-FLUID-EXECUTION-001 | Governed fluid execution and semantic publication | 3 | 0 | 1 | 1 | 36 |
-| FEA-FLUID-SOLVERS-001 | Robust, scalable and accurate laminar flow solvers | 5 | 0 | 0 | 0 | 36 |
-| FEA-FLUID-BOUNDARY-002 | Complete fluid boundary and excitation set | 5 | 0 | 0 | 0 | 36 |
-| FEA-FLUID-PHYSICS-001 | Free surface, rotating frames, lubrication, electrokinetics, particles, compressibility and reduced dimensions | 7 | 0 | 0 | 0 | 26 |
-| FEA-FLUID-OUTPUTS-001 | Flow outputs engineers ask for | 5 | 0 | 0 | 0 | 52 |
-| FEA-FLUID-VERIFICATION-001 | Published flow verification suite | 1 | 0 | 0 | 0 | 8 |
-| FEA-PUBLIC-STUDIES-001 | Published studies run from the public command | 9 | 0 | 0 | 1 | 68 |
-| FEA-SCALE-PARALLEL-001 | Every family saturates the machine through one thread plan | 6 | 0 | 2 | 0 | 114 |
-| FEA-SCALE-DISTRIBUTED-001 | Remote and cooperative execution for every family | 5 | 0 | 0 | 0 | 118 |
-| FEA-SCALE-SIZE-001 | Millions of degrees of freedom at stated time and memory | 5 | 0 | 0 | 0 | 94 |
-| FEA-FLUID-TRANSIENT-001 | Physical transient integration and original cold chronology | 4 | 0 | 4 | 0 | 9 |
-| FEA-FLUID-MATERIALS-001 | Rheology, porous media and species transport | 4 | 0 | 0 | 0 | 16 |
+**Result.** 
+
+### Couette flow
+
+**Problem.** Flow between a moving and a fixed wall on canonical tetrahedra.
+
+**Reference.** The linear Couette profile, its uniform vorticity and its wall shear stress $\mu U/h$.
+
+**Compared.** Velocity field, wall shear on both walls, vorticity, global momentum.
+
+**Tolerance.** Velocity relative L2 error below 0.25; wall shear within 0.25; global momentum below 1e-6. For the exact linear field, vorticity and wall shear within 1e-6.
+
+**Result.** 
+
+### Fully developed flow in a rectangular duct
+
+**Problem.** Pressure-driven laminar flow in a rectangular duct, three refinements.
+
+**Reference.** Fourier-series solution for the velocity, flow rate and wall shear; the series tail is below 1e-5 at 255 terms.
+
+**Compared.** Velocity L2 error, flow rate, wall shear.
+
+**Tolerance.** Each error decreases with refinement; finest velocity error below 0.35 and flow-rate error below 0.25; boundary flux below 1e-8.
+
+**Result.** 
+
+### Uniform flow through a porous zone
+
+**Problem.** Uniform flow through a porous slab.
+
+**Reference.** Darcy–Forchheimer pressure gradient $\mu U/K + \tfrac12\rho C_2U^2$.
+
+**Compared.** Velocity and pressure gradient.
+
+**Tolerance.** Relative 1e-6.
+
+**Result.** 
+
+### Shear-thinning channel flow
+
+**Problem.** Pressure-driven channel flow of a power-law fluid with n = 0.5, three refinements.
+
+**Reference.** The closed-form power-law channel velocity profile.
+
+**Compared.** Velocity profile error.
+
+**Tolerance.** Error decreases with refinement and is below 5 % on the finest mesh.
+
+**Result.** 
+
+## Transient
+
+### Uniformly accelerating flow
+
+**Problem.** A uniform flow accelerated at a constant rate, at two reference pressures.
+
+**Reference.** The exact inertia-driven pressure gradient $-\rho\,dU/dt$.
+
+**Compared.** Velocity and pressure gradient.
+
+**Tolerance.** Velocity within 1e-8; pressure gradient within 1e-6.
+
+**Result.** 
+
+### Exponentially decaying translation
+
+**Problem.** A uniform translation decaying as $e^{-t}$, solved with three time steps.
+
+**Reference.** The exact pressure gradient of the decaying translation.
+
+**Compared.** Volume-weighted pressure-gradient error.
+
+**Tolerance.** Error falls below 0.6 of its previous value at each halving of the step (first order) and is below 0.02 at the finest step.
+
+**Result.** 

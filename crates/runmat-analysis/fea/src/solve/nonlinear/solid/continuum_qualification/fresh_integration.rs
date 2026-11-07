@@ -6,7 +6,7 @@ use crate::topology::CanonicalSolidIntegrationRule;
 
 // witness: FEA-NONLINEAR-OPERATOR-001/references @ small_strain_j2/tet10/numerical_kernel;
 //   coverage: partial;
-//   boundary: fresh trajectories under Keast15, Duffy5 and Duffy8 are exact in one increment and
+//   check: j2-manufactured-cube; boundary: fresh trajectories under Keast15, Duffy5 and Duffy8 are exact in one increment and
 //   their eight-increment path error (the force-controlled yield front crossing elements mid-step,
 //   see the cube test) converges at order >= 1.5 under every rule.
 #[test]

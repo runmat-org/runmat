@@ -4,7 +4,7 @@ use super::*;
 use runmat_analysis_core::*;
 
 // witness: FEA-FLUID-MATERIALS-001/porous_zones @ porous_media_flow/tet4/numerical_kernel;
-//   coverage: partial; boundary: uniform flow through a porous slab has the pressure gradient
+//   coverage: partial; check: darcy-forchheimer; boundary: uniform flow through a porous slab has the pressure gradient
 //   μU/K + ½ρC₂U² (Darcy and Forchheimer terms); Brinkman layers, anisotropy, local thermal
 //   equilibrium and the Ergun packed bed are not covered.
 #[test]

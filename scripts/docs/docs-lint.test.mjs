@@ -19,7 +19,7 @@ function fixture(pages, capabilities, code = {}) {
     mkdirSync(join(docs, "examples"), { recursive: true });
     writeFileSync(join(docs, "examples/catalog.json"), JSON.stringify({ examples: [{ id: "cantilever-static" }] }));
     writeFileSync(join(docs, "manual.json"), JSON.stringify({ schema_version: 1, topics: [] }));
-    writeFileSync(join(docs, "ledger.json"), JSON.stringify({ schema_version: 1, release: "0.7.0", about: "fixture", capabilities, cases: [], claims: [], requirements: [] }));
+    writeFileSync(join(docs, "ledger.json"), JSON.stringify({ schema_version: 1, release: "0.7.0", about: "fixture", capabilities, checks: [], claims: [], requirements: [] }));
     for (const [path, text] of Object.entries(code)) {
         mkdirSync(dirname(join(root, path)), { recursive: true });
         writeFileSync(join(root, path), text);
@@ -31,7 +31,7 @@ function fixture(pages, capabilities, code = {}) {
     return root;
 }
 
-const feature = (id, extra = {}) => ({ id, title: "A feature", area: "acoustic", kind: "procedure", status: "pending", acceptance: "It runs.", owner: "q-fluid", requirements: [], verification: [], docs: [], ...extra });
+const feature = (id, extra = {}) => ({ id, title: "A feature", area: "acoustic", kind: "procedure", status: "pending", acceptance: "It runs.", owner: "q-fluid", requirements: [], docs: [], ...extra });
 const rules = report => report.errors.map(error => error.rule).sort();
 
 test("the docs tree passes the lint", () => {

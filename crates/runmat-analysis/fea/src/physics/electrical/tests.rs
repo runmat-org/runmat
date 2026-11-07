@@ -87,7 +87,7 @@ fn assert_relative(actual: f64, expected: f64, tolerance: f64) {
 //   flux, energy and Joule power; not arbitrary geometry or nonlinear material.
 // witness: FEA-EM-SCALAR-001/recovery @ electrostatic/tet4|tet10/numerical_kernel,
 //   electrical_conduction/tet4|tet10/numerical_kernel;
-//   boundary: Same slab constitutive vectors and global terminal/energy identities; no general
+//   check: slab-capacitor-conductor; boundary: Same slab constitutive vectors and global terminal/energy identities; no general
 //   charge-density reconstruction claim.
 #[test]
 fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_and_energy() {
@@ -170,7 +170,7 @@ fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_an
 
 // witness: FEA-EM-SCALAR-001/operator @ electrostatic/tet4|tet10/numerical_kernel,
 //   electrical_conduction/tet4|tet10/numerical_kernel;
-//   boundary: Both orders, aligned two-material slab series capacitance/resistance and interface
+//   check: layered-slab; boundary: Both orders, aligned two-material slab series capacitance/resistance and interface
 //   flux; no curved interface claim.
 #[test]
 fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux_continuity() {
@@ -331,7 +331,7 @@ fn constant_gauge_potential_produces_exactly_zero_field_and_power() {
 
 // witness: FEA-EM-QUALIFICATION-001/references @ electrostatic/tet4|tet10/numerical_kernel,
 //   electrical_conduction/tet4|tet10/numerical_kernel;
-//   boundary: Static harmonic polynomial potential x²-y² for both scalar equations: Tet10 exact
+//   check: harmonic-polynomial-potential; boundary: Static harmonic polynomial potential x²-y² for both scalar equations: Tet10 exact
 //   field/energy and Tet4 refinement across three meshes; harmonic polynomial is not harmonic
 //   Maxwell.
 #[test]
@@ -870,7 +870,7 @@ fn periodic_faces_share_their_potential_on(order: ElementOrder) {
 }
 
 // witness: FEA-EM-QUALIFICATION-001/references @ electrical_conduction/tet10/numerical_kernel; coverage: partial;
-//   boundary: The validation table's steady-current check: copper (59.6 MS/m) with 1 mV across a
+//   check: copper-bar-current; boundary: The validation table's steady-current check: copper (59.6 MS/m) with 1 mV across a
 //   1 m bar gives the uniform current density sigma V / L, the Joule power V^2 / R from the loss
 //   density and the terminal current, on a Tet10 slab; one geometry, no curved conductors.
 #[test]

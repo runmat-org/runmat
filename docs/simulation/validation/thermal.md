@@ -1,6 +1,6 @@
 ---
-description: How RunMat checks its heat transfer results: reference cases with their errors and receipts, and the tests behind each requirement, generated from the capability ledger.
-keywords: [heat transfer validation, verification, reference cases, convergence, FEA accuracy]
+description: Reference checks for RunMat heat transfer analyses: each problem, its closed-form, manufactured or published reference, the compared quantity, the tolerance and the latest result.
+keywords: [heat transfer validation, verification, reference solution, mesh convergence, FEA accuracy]
 doc_type: validation
 generated: node scripts/docs/generate-pages.mjs
 ---
@@ -8,44 +8,92 @@ generated: node scripts/docs/generate-pages.mjs
 
 <!-- Generated from docs/simulation/ledger.json by scripts/docs/generate-pages.mjs; do not edit by hand. -->
 
-Each case below compares a RunMat result with an independent reference: a closed-form solution, a manufactured solution or a published benchmark. Values link to their run receipts. The [validation methodology](./methodology.md) explains how to read them, and [Status](./status.md) lists what the release runs.
+Each check compares a RunMat result with an independent reference: a closed-form solution, a manufactured solution or a published benchmark. The tests listed under a check run on every change and in the evidence report; receipts record a public study run with its build, commit and mesh. The [validation methodology](./methodology.md) explains how checks are built and how tolerances are set, and [Status](./status.md) summarizes every family.
 
-## Capabilities
+## Steady
 
-| Capability | In this release | Cases |
-| --- | --- | --- |
-| Thermal static | yes | [Radiating bar](#radiating-bar) |
-| Thermal transient | yes | — |
+### Two-layer slab in series
 
-## Reference cases
+**Problem.** A slab of two half-meter layers with k = 1 and 4 W/(m·K), held at fixed temperatures on its outer faces; Tet4.
+
+**Reference.** One-dimensional series thermal resistance: piecewise-linear temperature and a uniform flux of 160 W/m².
+
+**Compared.** Nodal temperature; element heat flux; dependence on the order in which the materials are authored.
+
+**Tolerance.** Temperature within 1e-7 K; flux within 1e-6 W/m²; reordering the materials changes the result by less than 1e-10.
+
+**Result.** 
+
+### Bar between two fixed temperatures
+
+**Problem.** A bar held at a hot and a cold end temperature with insulated sides.
+
+**Reference.** Fourier's law through the bar, $Q = kA\,\Delta T/L$.
+
+**Compared.** Heat entering and leaving through the prescribed ends; net prescribed reaction.
+
+**Tolerance.** Heat flow within relative 1e-8 of $kA\,\Delta T/L$; the net reaction cancels to 1e-8 of it.
+
+**Result.** 
+
+### Tet10 conduction patch test
+
+**Problem.** A single quadratic tetrahedron under a linear temperature field.
+
+**Reference.** Constant-gradient patch: conductivity rows sum to zero, the gradient is exactly (2, 3, −1), the flux is $-k\nabla T$, and the integrated capacity equals $\rho c_p V$.
+
+**Compared.** Conductivity row sums, temperature gradient, heat flux, integrated capacity.
+
+**Tolerance.** Relative 1e-12.
+
+**Result.** 
 
 ### Radiating bar
 
-[radiating-bar.fea](../examples/radiating-bar.fea): a 1 m steel bar ($k$ = 45 W/m/K) takes
-1000 W/m² on one end and radiates from the other ($\varepsilon$ = 0.8, 300 K surroundings). The
-radiating end satisfies $q=\varepsilon\sigma_{SB}(T^4-T_\infty^4)$, and the heated end is $qL/k$
-hotter. RunMat gives 416.6790 K and 438.9013 K; the closed form gives 416.6790 K and 438.9013 K
-(agreement to 1e-12). The published energy balance closes: 10 W applied, 10 W radiated. The same
-check runs as a test on Tet4 and Tet10 meshes
-(`radiating_bar_matches_the_gray_surface_closed_form_and_balances_power`).
+**Problem.** A 1 m steel bar ($k$ = 45 W/m/K) takes 1000 W/m² on one end and radiates from the other ($\varepsilon$ = 0.8, 300 K surroundings). The public example is [radiating-bar.fea](../examples/radiating-bar.fea); the test runs the same bar on Tet4 and Tet10 meshes.
 
-- References: Gray-surface radiation q = εσ(T⁴ − T∞⁴) with conduction qL/k.
-- Held in CI by: `radiating_bar_matches_the_gray_surface_closed_form_and_balances_power`.
+**Reference.** Gray-surface radiation at the radiating end, $q = \varepsilon\sigma_{SB}(T^4 - T_\infty^4)$, and conduction $qL/k$ across the bar.
 
-## Test evidence by requirement
+**Compared.** Temperatures at both ends and along the bar; applied and radiated power.
 
-Each requirement lists acceptance obligations, and each obligation must hold in stated envelopes: formulation, element order and execution provider. Tests declare the obligation and envelope they support at the test; the counts are envelope cells from the latest evidence run. PASS covers the obligation fully, PARTIAL passes with a narrower boundary than the criterion, and OPEN has no supporting test yet.
+**Tolerance.** Nodal temperature within relative 1e-8 of the closed form; applied power equals radiated power.
 
-| Requirement | Title | Obligations | PASS | PARTIAL | FAIL | OPEN |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| FEA-THERMAL-DOMAIN-001 | Independent thermal domain and regional heat-equation assembly | 3 | 0 | 5 | 0 | 7 |
-| FEA-THERMAL-INPUT-001 | Exact thermal boundaries and shared excitation realization | 3 | 0 | 4 | 0 | 8 |
-| FEA-THERMAL-SOLVE-001 | Distinct steady and transient solves with nonlinear closure | 3 | 0 | 4 | 0 | 4 |
-| FEA-THERMAL-FIELDS-001 | Physical thermal recovery and energy accounting | 3 | 0 | 4 | 0 | 8 |
-| FEA-THERMAL-ACCURACY-001 | Independent thermal references and refinement qualification | 4 | 0 | 2 | 1 | 11 |
-| FEA-THERMAL-EXECUTION-001 | Governed thermal studies, persistence and execution evidence | 4 | 0 | 4 | 0 | 84 |
-| FEA-PUBLIC-STUDIES-001 | Published studies run from the public command | 9 | 0 | 0 | 1 | 68 |
-| FEA-SCALE-PARALLEL-001 | Every family saturates the machine through one thread plan | 6 | 0 | 2 | 0 | 114 |
-| FEA-SCALE-DISTRIBUTED-001 | Remote and cooperative execution for every family | 5 | 0 | 0 | 0 | 118 |
-| FEA-SCALE-SIZE-001 | Millions of degrees of freedom at stated time and memory | 5 | 0 | 0 | 0 | 94 |
-| FEA-THERMAL-PUBLIC-001 | Thermal studies the pages run | 5 | 0 | 3 | 0 | 21 |
+**Result.** RunMat gives 416.6790 K at the radiating end and 438.9013 K at the heated end; the closed form gives the same values to 1e-12. 10 W applied, 10 W radiated.
+
+### Slab radiating from a fixed hot face
+
+**Problem.** A slab held at 400 K on one face radiates from the opposite face; Tet4 and Tet10.
+
+**Reference.** The scalar gray-surface equilibrium of the slab, solved independently by bisection.
+
+**Compared.** Nodal temperature, gradient and flux; radiated power against conducted power.
+
+**Tolerance.** Temperature, gradient and flux within relative 1e-8; radiated power equals the prescribed-face power within 1e-8.
+
+**Result.** 
+
+## Transient
+
+### Uniformly heated insulated body
+
+**Problem.** An insulated body with uniform volumetric heating, integrated with backward Euler on Tet4 and Tet10 meshes.
+
+**Reference.** The continuum temperature history of the heated body and its stored-energy law: storage rate equals applied power.
+
+**Compared.** Temperature at every step; applied, stored and boundary power.
+
+**Tolerance.** Discrete solution within 1e-8; error equals the backward-Euler term $B\,t_f\,\Delta t$ within 1e-8 and falls at first order (ratio below 0.56 per halving); storage rate equals applied power within 1e-8; energy residual below 1e-10.
+
+**Result.** 
+
+### Manufactured radiative cooling
+
+**Problem.** A body cooling by surface radiation under a manufactured solution, on Tet4 and Tet10 meshes with 8, 16 and 32 backward-Euler steps.
+
+**Reference.** The manufactured temperature history and its gradient, flux and stored heat.
+
+**Compared.** Temperature, gradient, heat flux and storage; power closure.
+
+**Tolerance.** Every error falls by more than 1.8× per halving of the step (first order); power closes.
+
+**Result.** 

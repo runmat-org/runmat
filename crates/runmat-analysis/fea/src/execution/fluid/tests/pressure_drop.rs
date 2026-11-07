@@ -173,7 +173,7 @@ fn pressure_drop(n: usize) -> (f64, f64) {
 }
 
 // witness: FEA-FLUID-OUTPUTS-001/pressure_drop_and_flow_rate @ incompressible_laminar_steady/tet4/numerical_kernel;
-//   coverage: partial; boundary: the face-pressure mean difference between the inlet and outlet
+//   coverage: partial; check: plane-poiseuille; boundary: the face-pressure mean difference between the inlet and outlet
 //   of plane Poiseuille flow approaches (−dp/dx)·L = 12 µ Ū L / h² under refinement; developing
 //   and three-dimensional flows are not referenced.
 #[test]
