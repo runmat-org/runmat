@@ -34,10 +34,10 @@ async fn mixed_recovery_uses_exact_encryption_purposes_and_reencrypts_alias_chan
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run.into(),
-        org_id: "org".into(),
+        org_id: super::test_org_id(),
         project_id: "project".into(),
         allocation_lease_id: "allocation".into(),
-        driver_lease_id: "driver".into(),
+        driver_lease_id: super::test_driver_lease_id(7),
         fencing_token: 7,
         credential: "credential".into(),
     };
@@ -180,10 +180,10 @@ async fn scheduler_and_physical_roots_survive_one_serialized_publication_sequenc
     let authority = DriverAuthority {
         server_url: "https://control.invalid".into(),
         run_id: run.into(),
-        org_id: "org".into(),
+        org_id: super::test_org_id(),
         project_id: "project".into(),
         allocation_lease_id: "allocation".into(),
-        driver_lease_id: "driver".into(),
+        driver_lease_id: super::test_driver_lease_id(7),
         fencing_token: 7,
         credential: "credential".into(),
     };
