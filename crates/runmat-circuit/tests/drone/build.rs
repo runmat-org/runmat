@@ -49,11 +49,14 @@ impl Build {
         parse_board(&self.layout, &self.files[&self.layout]).board.expect("the layout reads")
     }
 
-    /// Annotate, set the stack-up and bring every component onto the board.
-    pub fn start(&mut self, layers: u32) {
+    /// Annotate, set a standard 1.6 mm stack-up of `layers` copper layers (none: keep the start
+    /// file's own stack-up) and bring every component onto the board.
+    pub fn start(&mut self, layers: Option<u32>) {
         let circuit = self.circuit.clone();
         self.run_on(&circuit, "schematic.annotate", json!({}), &[]);
-        self.run("board.layer-stack", json!({ "layers": layers, "thickness": 1.6 }), &[]);
+        if let Some(layers) = layers {
+            self.run("board.layer-stack", json!({ "layers": layers, "thickness": 1.6 }), &[]);
+        }
         let index = runtime::compile(&self.layout, &self.files[&self.layout], &self.files, &CompileOptions::default());
         let eco = &index.index.as_ref().expect("compiles").eco;
         let changes: Vec<String> = eco
@@ -91,12 +94,18 @@ impl Build {
         self.run("board.move", json!({ "dx": round(x - fx), "dy": round(y - fy), "rotation": turn }), &[&format!("component:{reference}")]);
     }
 
+    /// Puts the component at schematic path `path` on the bottom side, where it stands.
+    pub fn flip(&mut self, path: &str) {
+        let reference = self.designator(path);
+        self.run("board.flip", json!({}), &[&format!("component:{reference}")]);
+    }
+
     pub fn pour(&mut self, net: &str, layer: &str, points: &[[f64; 2]], connect: &str) {
         self.run("board.pour", json!({ "net": format!("net:{net}"), "layer": layer, "points": points, "connect": connect }), &[]);
     }
 
-    /// Fans out every SMD part, then autoroutes what is left.
-    pub fn finish(&mut self) {
+    /// Fans out every SMD part, then autoroutes what is left, apart from the nets in `skip`.
+    pub fn finish(&mut self, skip: &[&str]) {
         let board = self.board();
         let smd: Vec<String> = board
             .footprints
@@ -107,7 +116,8 @@ impl Build {
             .map(|f| format!("component:{}", f.reference))
             .collect();
         self.run("board.fanout", json!({ "component": smd }), &[]);
-        self.run("board.autoroute", json!({}), &[]);
+        let nets: Vec<String> = board.nets.iter().filter(|n| !skip.contains(&n.name.as_str())).map(|n| format!("net:{}", n.name)).collect();
+        self.run("board.autoroute", json!({ "nets": if skip.is_empty() { Vec::new() } else { nets } }), &[]);
     }
 
     /// The compile's findings: DRC by code, airwires left, ECO rows and ERC.
@@ -123,11 +133,26 @@ impl Build {
             *codes.entry(r.code.as_str()).or_default() += 1;
         }
         eprintln!("drc {codes:?}");
-        for r in board.drc.iter().take(40) {
-            eprintln!("  {} {} {:?} {:?}", r.code, r.message, r.items, r.at);
+        let mut drc: Vec<_> = board.drc.iter().collect();
+        drc.sort_by_key(|r| r.code == "edge-clearance");
+        let parsed = self.board();
+        let describe = |item: &str| -> String {
+            let Some(id) = item.strip_prefix("track ").and_then(|n| n.parse::<u64>().ok()) else { return item.to_owned() };
+            let Some(t) = parsed.tracks.get(&runmat_circuit::layout::ItemId(id)) else { return item.to_owned() };
+            let (a, b) = t.endpoints();
+            let net = t.net.map(|n| parsed.net_name(n).to_owned()).unwrap_or_default();
+            format!("{item} {net} L{} w{:.2} ({:.3},{:.3})-({:.3},{:.3})", t.layer, to_mm(t.width), to_mm(a.x), to_mm(a.y), to_mm(b.x), to_mm(b.y))
+        };
+        for r in drc.into_iter().take(40) {
+            let items: Vec<String> = r.items.iter().map(|i| describe(i)).collect();
+            eprintln!("  {} {} {:?} {:?}", r.code, r.message, items, r.at);
         }
         eprintln!("unrouted {}", board.unrouted.len());
-        for a in board.unrouted.iter().take(40) {
+        // Channel 0 and the center column first: the copied channels repeat what they show.
+        let copied = |n: &str| ["/ch[1]/", "/ch[2]/", "/ch[3]/"].iter().any(|c| n.starts_with(c));
+        let mut wires: Vec<_> = board.unrouted.iter().collect();
+        wires.sort_by_key(|a| copied(&a.net));
+        for a in wires.into_iter().take(40) {
             eprintln!("  {} {:?} {:?}", a.net, a.from, a.to);
         }
         eprintln!("eco {} erc {}", index.eco.total as usize, index.erc.len());
@@ -135,6 +160,26 @@ impl Build {
             eprintln!("  {} {} {:?}", r.code, r.message, r.items);
         }
         (board.drc.len(), board.unrouted.len(), index.eco.total as usize, index.erc.len())
+    }
+
+    /// Each footprint's courtyard box in board millimetres and its side, for checking a placement.
+    pub fn courtyards(&self) {
+        let board = self.board();
+        for f in board.footprints.values() {
+            let t = f.transform();
+            let pts: Vec<_> = f.package.courtyard.iter().flatten().map(|p| t.apply(*p)).collect();
+            if pts.is_empty() {
+                continue;
+            }
+            let (x0, x1) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(to_mm(p.x)), a.1.max(to_mm(p.x))));
+            let (y0, y1) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(to_mm(p.y)), a.1.max(to_mm(p.y))));
+            eprintln!("courtyard {} {:?} {x0:.2} {y0:.2} {x1:.2} {y1:.2}", f.reference, f.side);
+            for pad in f.pads(board.copper_count()) {
+                let r = pad.prim.bbox();
+                let net = pad.net.map(|n| board.net_name(n).to_owned()).unwrap_or_default();
+                eprintln!("pad {}.{} {:?} {:.3} {:.3} {:.3} {:.3} {net}", f.reference, pad.name, pad.layers, to_mm(r.min.x), to_mm(r.min.y), to_mm(r.max.x), to_mm(r.max.y));
+            }
+        }
     }
 
     pub fn write(&self, dir: &Path, name: &str) {

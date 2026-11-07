@@ -2,15 +2,19 @@ runmat 0.7
 std 1
 
 // The 4-in-1 ESC: four identical motor channels, each a small MCU that reads its motor signal
-// and runs six-step commutation, a three-phase gate driver with bootstrap high sides, three
-// half bridges of 40 V N-channel MOSFETs and a low-side current shunt. The battery comes in on
+// and runs field-oriented control, a three-phase gate driver with bootstrap high sides, and three
+// half bridges of 40 V N-channel MOSFETs, each with its own low-side current shunt and filter. The battery comes in on
 // two 12 AWG pads with bulk capacitance; a 3.3 V LDO feeds the channel MCUs; the 8-pin harness
 // carries the battery, the four motor signals and telemetry to the flight controller. The board
 // is 52 x 52 mm on the 30.5 mm stack pattern, its channels set around the center.
 circuit esc {
     root = main
     net_class power = { track_width = "1.00 mm", clearance = "0.20 mm" }
+    // Phase and source nets carry the motor current in their copper pours; their tracks carry
+    // only gate charge, bootstrap and sense current.
+    net_class phase = { track_width = "0.30 mm", clearance = "0.20 mm" }
     net_class gate = { track_width = "0.25 mm" }
+    net_class logic_supply = { track_width = "0.30 mm" }
 
     sheet channel {
         port SIG : in
@@ -36,20 +40,32 @@ circuit esc {
         component CDRV = { part = "C0603-1U-50V" }
         component CMCU = { part = "C0402-100N" }
         component RBOOT = { part = "R0402-10K" }
-        component RSH = { part = "R2512-0M5" }
-        component RIS = { part = "R0402-1K" }
-        component CIS = { part = "C0402-10N" }
+        // NRST: 10 kOhm pull-up to 3V3 with a 100 nF filter cap, so the switching noise on the
+        // board can't reset the MCU.
+        component RRST = { part = "R0402-10K" }
+        component CRST = { part = "C0402-100N" }
+        component RSHA = { part = "R1206-0M5" }
+        component RSHB = { part = "R1206-0M5" }
+        component RSHC = { part = "R1206-0M5" }
+        component RISA = { part = "R0402-1K" }
+        component RISB = { part = "R0402-1K" }
+        component RISC = { part = "R0402-1K" }
+        component CISA = { part = "C0402-10N" }
+        component CISB = { part = "C0402-10N" }
+        component CISC = { part = "C0402-10N" }
         component CB1 = { part = "C1206-10U-50V" }
         component PA = { part = "PAD-WIRE-20AWG" }
         component PB = { part = "PAD-WIRE-20AWG" }
         component PC = { part = "PAD-WIRE-20AWG" }
         net GND = { class = power, global = true }
         net VBAT = { class = power, global = true }
-        net "+3V3" = { class = power, global = true }
-        net PHA = { class = power }
-        net PHB = { class = power }
-        net PHC = { class = power }
-        net SRC = { class = power }
+        net "+3V3" = { class = logic_supply, global = true }
+        net PHA = { class = phase }
+        net PHB = { class = phase }
+        net PHC = { class = phase }
+        net SRCA = { class = phase }
+        net SRCB = { class = phase }
+        net SRCC = { class = phase }
         connect = [port.SIG, net.SIG, MCU.PA0]
         connect = [port.TLM, net.TLM, MCU.PA10]
         connect = [net.INHA, MCU.PA1, DRV.INHA]
@@ -60,8 +76,11 @@ circuit esc {
         connect = [net.INLC, MCU.PA6, DRV.INLC]
         connect = [net.DRV_EN, MCU.PA7, DRV.EN]
         connect = [net.FAULT, MCU.PA8, DRV.FAULT]
-        connect = [net.ISENSE, MCU.PA9, "RIS.2", "CIS.1"]
-        connect = ["net.+3V3", MCU.VDD, "CMCU.1"]
+        connect = [net.ISENSE_A, MCU.PA9, "RISA.2", "CISA.1"]
+        connect = [net.ISENSE_B, MCU.PA11, "RISB.2", "CISB.1"]
+        connect = [net.ISENSE_C, MCU.PA12, "RISC.2", "CISC.1"]
+        connect = ["net.+3V3", MCU.VDD, "CMCU.1", "RRST.2"]
+        connect = [net.NRST, MCU.NRST, "RRST.1", "CRST.1"]
         connect = [net.BOOT0, MCU.BOOT0, "RBOOT.1"]
         connect = [net.VBAT, DRV.VCC, "CVCC.1", QHA.D, QHB.D, QHC.D, "CB1.1"]
         connect = [net.VDRV, DRV.VDRV, "CDRV.1"]
@@ -83,9 +102,11 @@ circuit esc {
         connect = [net.PHA, DRV.SHA, "CBA.2", QHA.S, QLA.D, "PA.1"]
         connect = [net.PHB, DRV.SHB, "CBB.2", QHB.S, QLB.D, "PB.1"]
         connect = [net.PHC, DRV.SHC, "CBC.2", QHC.S, QLC.D, "PC.1"]
-        connect = [net.SRC, QLA.S, QLB.S, QLC.S, "RSH.1", "RIS.1"]
-        connect = [net.GND, "RSH.2", DRV.GND, "CVCC.2", "CDRV.2", MCU.VSS, "CMCU.2", "RBOOT.2", "CIS.2", "CB1.2"]
-        no_erc = [MCU.NRST, MCU.OSC_IN, MCU.OSC_OUT, MCU.SCL, MCU.SDA, MCU.USB_DP, MCU.USB_DN, MCU.PA11, MCU.PA12, MCU.PA13, MCU.PA14, MCU.PA15, MCU.PA16, MCU.PA17, MCU.PA18, MCU.PA19]
+        connect = [net.SRCA, QLA.S, "RSHA.1", "RISA.1"]
+        connect = [net.SRCB, QLB.S, "RSHB.1", "RISB.1"]
+        connect = [net.SRCC, QLC.S, "RSHC.1", "RISC.1"]
+        connect = [net.GND, "RSHA.2", "RSHB.2", "RSHC.2", DRV.GND, "CVCC.2", "CDRV.2", MCU.VSS, "CMCU.2", "RBOOT.2", "CRST.2", "CISA.2", "CISB.2", "CISC.2", "CB1.2"]
+        no_erc = [MCU.OSC_IN, MCU.OSC_OUT, MCU.SCL, MCU.SDA, MCU.USB_DP, MCU.USB_DN, MCU.PA13, MCU.PA14, MCU.PA15, MCU.PA16, MCU.PA17, MCU.PA18, MCU.PA19]
     }
 
     sheet main {
@@ -103,7 +124,7 @@ circuit esc {
         component H4 = { part = "MH-M3-GROMMET" }
         net GND = { class = power, global = true, power_flag = true }
         net VBAT = { class = power, global = true, power_flag = true }
-        net "+3V3" = { class = power, global = true, power_flag = true }
+        net "+3V3" = { class = logic_supply, global = true, power_flag = true }
         bus SIG = [M1, M2, M3, M4]
         instance ch = { sheet = channel, repeat = 4, bind = { SIG = { bus = SIG, offset = 0 }, TLM = net.TLM } }
         connect = [net.VBAT, "P1.1", "C1.1", "C2.1", U1.VIN, U1.EN, "C3.1", "J1.1"]
@@ -142,22 +163,29 @@ circuit esc {
         measure on_current = { of = edges, rms = "QHA.D", from = 2 us, to = 10 us }
     }
 
-    // The phase current read through a channel's low-side shunt: 0.5 mOhm into the 1 k / 10 nF
-    // filter ahead of the channel MCU's ADC (ISENSE). The corner sits near a third of the 48 kHz
-    // PWM, so the commutation ripple reads 10 dB down while a 20 A step settles to 1 % inside 60 us.
+    // The phase currents read through the channel's three low-side shunts, one per half bridge:
+    // each 0.5 mOhm into its own 1 k / 10 nF filter ahead of an ADC input of the channel MCU
+    // (ISENSE_A, ISENSE_B, ISENSE_C). The corner sits near a third of the 48 kHz PWM, so the
+    // commutation ripple reads 10 dB down while a 20 A step settles to 1 % inside 60 us. The
+    // motor current enters phase A and returns half through B and half through C, so phase A
+    // reads +20 A and B and C read -10 A each.
     simulation current_sense {
         sheet = channel
-        source IPH = { p = net.GND, n = net.SRC, current = true, ac = 1 A, pulse = { from = 0 A, to = 20 A, delay = 20 us, rise = 1 us, fall = 1 us, width = 200 us, period = 400 us } }
+        source IPA = { p = net.GND, n = net.SRCA, current = true, ac = 1 A, pulse = { from = 0 A, to = 20 A, delay = 20 us, rise = 1 us, fall = 1 us, width = 200 us, period = 400 us } }
+        source IPB = { p = net.GND, n = net.SRCB, current = true, pulse = { from = 0 A, to = -10 A, delay = 20 us, rise = 1 us, fall = 1 us, width = 200 us, period = 400 us } }
+        source IPC = { p = net.GND, n = net.SRCC, current = true, pulse = { from = 0 A, to = -10 A, delay = 20 us, rise = 1 us, fall = 1 us, width = 200 us, period = 400 us } }
         tolerance resistors = { match = "R*", value = 1 % }
         tolerance capacitors = { match = "C*", value = 10 % }
         analysis step = tran { stop = 120 us, step = 100 ns }
         analysis response = ac { from = 100 Hz, to = 10 MHz, points = 100 }
         analysis spread = monte_carlo { of = response, runs = 1000, seed = 7 }
-        probe = [net.ISENSE, net.SRC]
-        measure f3db = { of = response, bandwidth = net.ISENSE, spec = { min = 14 kHz, max = 18 kHz } }
-        measure sense = { of = step, average = net.ISENSE, from = 100 us, to = 120 us, spec = { min = 9.5 mV, max = 10.5 mV } }
-        measure rise = { of = step, rise_time = net.ISENSE, from = 10 us, to = 120 us, spec = { max = 30 us } }
-        measure settle = { of = step, settling = net.ISENSE, band = 0.01, from = 20 us, to = 120 us, spec = { max = 60 us } }
-        measure f3db_spread = { of = spread, bandwidth = net.ISENSE, spec = { min = 14 kHz, max = 18 kHz } }
+        probe = [net.ISENSE_A, net.ISENSE_B, net.ISENSE_C, net.SRCA]
+        measure f3db = { of = response, bandwidth = net.ISENSE_A, spec = { min = 14 kHz, max = 18 kHz } }
+        measure sense = { of = step, average = net.ISENSE_A, from = 100 us, to = 120 us, spec = { min = 9.5 mV, max = 10.5 mV } }
+        measure sense_b = { of = step, average = net.ISENSE_B, from = 100 us, to = 120 us, spec = { min = -5.25 mV, max = -4.75 mV } }
+        measure sense_c = { of = step, average = net.ISENSE_C, from = 100 us, to = 120 us, spec = { min = -5.25 mV, max = -4.75 mV } }
+        measure rise = { of = step, rise_time = net.ISENSE_A, from = 10 us, to = 120 us, spec = { max = 30 us } }
+        measure settle = { of = step, settling = net.ISENSE_A, band = 0.01, from = 20 us, to = 120 us, spec = { max = 60 us } }
+        measure f3db_spread = { of = spread, bandwidth = net.ISENSE_A, spec = { min = 14 kHz, max = 18 kHz } }
     }
 }

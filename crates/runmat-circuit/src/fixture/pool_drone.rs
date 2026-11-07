@@ -1,7 +1,7 @@
 //! Parts of the quadcopter showcase's two boards (`runmat-cad/wasm/tests/drone`): the flight
 //! controller (a Cortex-M4-class MCU in LQFP-48, a six-axis IMU, a barometer, a 36 V buck to
 //! 5 V and a 3.3 V LDO, USB-C and JST-SH connectors) and the 4-in-1 ESC (per channel a small
-//! MCU, a three-phase gate driver, six 40 V N-channel MOSFETs and a current shunt; wire pads for
+//! MCU, a three-phase gate driver, six 40 V N-channel MOSFETs and a current shunt per phase; wire pads for
 //! the battery and the motor phases). Every part is a generic type with its own footprint; no
 //! part names a vendor.
 
@@ -59,6 +59,7 @@ pub(super) fn add(p: &mut Pool) {
     let c1206 = p.add_package(footprint::from_string("C1206").unwrap());
     let c2512 = p.add_package(footprint::from_string("C2512").unwrap());
     let r2512 = p.add_package(footprint::from_string("R2512").unwrap());
+    let r1206 = p.add_package(footprint::from_string("R1206").unwrap());
     let l1210 = p.add_package(footprint::from_string("L1210").unwrap());
 
     for (mpn, ohms, tol, watts) in [
@@ -81,6 +82,11 @@ pub(super) fn add(p: &mut Pool) {
     quantity(p, shunt, "resistance", 0.5e-3, Dim::RESISTANCE, 1.0);
     quantity(p, shunt, "power_rating", 3.0, Dim::POWER, 0.0);
     describe(p, shunt, "Current shunt, 0.5 mOhm 1 %, 3 W, 2512");
+    // The ESC's per-phase shunts: one at each low-side source, small enough to sit beside it.
+    let phase_shunt = make::part_by_name(p, "R1206-0M5", "Generic", r, r1206);
+    quantity(p, phase_shunt, "resistance", 0.5e-3, Dim::RESISTANCE, 1.0);
+    quantity(p, phase_shunt, "power_rating", 1.0, Dim::POWER, 0.0);
+    describe(p, phase_shunt, "Current shunt, 0.5 mOhm 1 %, 1 W, 1206 metal element");
     for (mpn, pkg, farads, tol, volts) in [
         ("C0402-12P", c0402, 12e-12, 5.0, 50.0),
         ("C0402-220P", c0402, 220e-12, 5.0, 50.0),
@@ -263,10 +269,13 @@ pub(super) fn add(p: &mut Pool) {
         "Generic",
         drv,
         qfn24,
-        &[("INHA", &["1"]), ("INLA", &["2"]), ("INHB", &["3"]), ("INLB", &["4"]), ("INHC", &["5"]), ("INLC", &["6"]),
-          ("EN", &["7"]), ("GND", &["8", "23", "25"]), ("VCC", &["9"]), ("VDRV", &["10"]), ("BSTC", &["11"]), ("GHC", &["12"]),
-          ("SHC", &["13"]), ("GLC", &["14"]), ("BSTB", &["15"]), ("GHB", &["16"]), ("SHB", &["17"]), ("GLB", &["18"]),
-          ("BSTA", &["19"]), ("GHA", &["20"]), ("SHA", &["21"]), ("GLA", &["22"]), ("FAULT", &["24"])],
+        // Each side of the package faces what its pins drive: the logic inputs leave one side
+        // together, enable, fault and phase C's drive the next, phases A and B the third, and the
+        // supplies the fourth.
+        &[("EN", &["1"]), ("FAULT", &["2"]), ("SHC", &["3"]), ("GHC", &["4"]), ("GLC", &["5"]), ("BSTC", &["6"]),
+          ("VCC", &["7"]), ("GND", &["8", "9", "25"]), ("VDRV", &["10"]), ("GLA", &["11"]), ("GHA", &["12"]),
+          ("SHB", &["13"]), ("GHB", &["14"]), ("BSTB", &["15"]), ("SHA", &["16"]), ("BSTA", &["17"]), ("GLB", &["18"]),
+          ("INHA", &["19"]), ("INLA", &["20"]), ("INHB", &["21"]), ("INLB", &["22"]), ("INHC", &["23"]), ("INLC", &["24"])],
     );
     describe(p, dp, "Three-phase half-bridge gate driver, 40 V, 1 A/1.5 A, bootstrap, QFN-24");
 

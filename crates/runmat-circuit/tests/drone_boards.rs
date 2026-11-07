@@ -11,9 +11,18 @@ mod drone {
 
 use std::path::PathBuf;
 
-/// A board's folder in the drone project (`electrical/flight_controller`, `electrical/esc`).
+/// A board's folder in the drone project (`electrical/flight_controller`, `electrical/esc`), or
+/// under `RUNMAT_DRONE_BOARDS_SRC` to rebuild from a working copy.
 fn here(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone/electrical").join(name)
+    std::env::var_os("RUNMAT_DRONE_BOARDS_SRC")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runmat-cad/wasm/tests/drone/electrical"))
+        .join(name)
+}
+
+/// Where a rebuild writes: `RUNMAT_DRONE_OUT`, else the board's checked-in folder.
+fn out_dir(name: &str) -> PathBuf {
+    std::env::var_os("RUNMAT_DRONE_OUT").map(PathBuf::from).unwrap_or_else(|| here(name))
 }
 
 #[test]
@@ -22,12 +31,29 @@ fn rebuild_when_asked() {
     if which.contains("fc") || which == "1" {
         let b = drone::fc::build(&here("flight_controller"));
         b.report();
-        b.write(&here("flight_controller"), "flight_controller");
+        b.write(&out_dir("flight_controller"), "flight_controller");
+    }
+    if which == "esc-report" {
+        // The checked-in (or RUNMAT_DRONE_BOARDS_SRC) layout's findings, without rebuilding it.
+        let dir = here("esc");
+        let mut b = drone::build::Build::new(&dir, "esc", &std::fs::read_to_string(dir.join("esc.circuit.layout")).unwrap());
+        if let Ok(lock) = std::fs::read_to_string(dir.join("esc.circuit.lock")) {
+            b.files.insert("/p/esc.circuit.lock".into(), lock);
+        }
+        b.report();
+        return;
     }
     if which.contains("esc") || which == "1" {
-        let b = drone::esc::build(&here("esc"));
+        // `esc-place` stops after placement and prints the courtyards; `esc-channel` after
+        // routing channel 0.
+        use drone::esc::Stage;
+        let stage = if which.contains("place") { Stage::Place } else if which.contains("channel") { Stage::Channel } else { Stage::Board };
+        let b = drone::esc::build(&here("esc"), stage);
+        if stage != Stage::Board {
+            b.courtyards();
+        }
         b.report();
-        b.write(&here("esc"), "esc");
+        b.write(&out_dir("esc"), "esc");
     }
 }
 
@@ -59,3 +85,23 @@ fn the_flight_controller_is_placed_routed_and_clean() {
     check("flight_controller");
 }
 
+#[test]
+fn the_esc_is_placed_routed_and_clean() {
+    check("esc");
+    // Six copper layers in 1.6 mm, 2 oz outside for the phase current.
+    let dir = here("esc");
+    let text = std::fs::read_to_string(dir.join("esc.circuit.layout")).unwrap();
+    let board = runmat_circuit::syntax::board::parse_board("/p/esc.circuit.layout", &text).board.expect("the layout reads");
+    assert_eq!(board.copper_count(), 6);
+    let weights: Vec<f64> = board
+        .stackup
+        .layers
+        .iter()
+        .filter_map(|l| match l.kind {
+            runmat_circuit::layout::StackKind::Copper { weight_oz } => Some(weight_oz),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(weights, [2.0, 1.0, 1.0, 1.0, 1.0, 2.0]);
+    assert!((runmat_circuit::geom::to_mm(board.stackup.thickness()) - 1.6).abs() < 0.01);
+}

@@ -28,9 +28,12 @@ entry 6d6a3221-d939-8b63-b52b-816e58071cd4 component /ch[0]/CBA designator=C6
 entry 5030b68d-3c39-8c22-8695-dcc96505c8be component /ch[0]/CBB designator=C7
 entry da3288ea-40be-8f3d-ae3d-439ac4e01a08 component /ch[0]/CBC designator=C8
 entry a9a2a6af-9381-8c99-9b67-f1d7b8d69c62 component /ch[0]/CDRV designator=C9
-entry 132b689b-222d-8e32-b2a8-0a180ad573fc component /ch[0]/CIS designator=C10
-entry c8423949-9ac6-8f1d-9040-c6816f14643f component /ch[0]/CMCU designator=C11
-entry d776d902-8842-89c7-98d5-d52bee9b0b79 component /ch[0]/CVCC designator=C12
+entry 92c75042-8f95-87e1-a588-74614a5e97e3 component /ch[0]/CISA designator=C10
+entry a37fbccb-4eac-8b48-832f-276fb18c16bc component /ch[0]/CISB designator=C11
+entry 0c5fa9e3-4c9b-8349-84e1-09b9a95da10f component /ch[0]/CISC designator=C12
+entry c8423949-9ac6-8f1d-9040-c6816f14643f component /ch[0]/CMCU designator=C13
+entry 2be6fe92-22ed-8c21-ad8c-ddc461e9c404 component /ch[0]/CRST designator=C14
+entry d776d902-8842-89c7-98d5-d52bee9b0b79 component /ch[0]/CVCC designator=C15
 entry 1958e568-6737-83cf-bcd9-5f20e2775921 component /ch[0]/DRV designator=U2
 entry 33ee3ec0-b7b4-8717-b7c5-2cf949d69086 net /ch[0]/DRV_EN
 entry 55a2e133-ee75-8e1c-b927-74abc03978c3 net /ch[0]/FAULT
@@ -52,8 +55,11 @@ entry f4a7a079-51ca-84ac-926c-bcdc71629f49 net /ch[0]/INHC
 entry ab83e68c-8dfb-89be-920b-04638a83228b net /ch[0]/INLA
 entry dc638d04-c2b8-84ac-b229-4eb7069522ad net /ch[0]/INLB
 entry 1069805b-aa47-8676-a7d2-63748f6631d8 net /ch[0]/INLC
-entry 19c6105e-4acb-800e-9824-66dba591650e net /ch[0]/ISENSE
+entry 89539c25-a9cc-8024-9f59-6daf34fe028f net /ch[0]/ISENSE_A
+entry 9f75ebee-0339-86fa-a72b-016bf6382e59 net /ch[0]/ISENSE_B
+entry 08034a4c-e646-8ae2-9127-9f6077cf939d net /ch[0]/ISENSE_C
 entry 8cb26d75-0de7-8fec-9b61-49cec8891cd5 component /ch[0]/MCU designator=U3
+entry 50f41dd6-91e7-8556-abc9-9dece0e535d6 net /ch[0]/NRST
 entry 08cd793e-c9f5-8a74-82d4-81bf0c3307c0 component /ch[0]/PA designator=P3
 entry 72b9ffa5-a297-86c3-ab4e-bb7ebbc72b8d component /ch[0]/PB designator=P4
 entry 2c4ee5a7-3393-8cdf-bbef-23b74c25de43 component /ch[0]/PC designator=P5
@@ -73,23 +79,33 @@ entry 0d588a1d-60d0-840f-9727-dedd7b663345 component /ch[0]/RGHC designator=R4
 entry 91be13bf-9453-8ccd-ad82-744cd234684f component /ch[0]/RGLA designator=R5
 entry 234ddd92-9d6f-8788-a010-a7ec02c356d0 component /ch[0]/RGLB designator=R6
 entry 5368fe9e-4faf-8934-baa1-f594f1934844 component /ch[0]/RGLC designator=R7
-entry 31e60105-3f05-813a-ad0f-65819da31f0b component /ch[0]/RIS designator=R8
-entry bc81fc8e-34b9-8c72-88bf-ee7f7e0a921d component /ch[0]/RSH designator=R9
-entry 4208dadc-fc3a-829e-b66e-a400bff245c2 net /ch[0]/SRC
+entry ae3e8ec0-2a33-8b9f-ba81-2242bbec5bae component /ch[0]/RISA designator=R8
+entry 2f264f98-659f-80f5-910a-8e0cf6d60922 component /ch[0]/RISB designator=R9
+entry 026411ef-9081-8acc-b0eb-7f73de10f1c0 component /ch[0]/RISC designator=R10
+entry af769af6-2bf0-8eab-a187-5a42a682b326 component /ch[0]/RRST designator=R11
+entry 91155e04-3ffe-89e1-b67c-28eae39733fe component /ch[0]/RSHA designator=R12
+entry 6925dd5b-3327-87ed-875d-a7c05adb3d35 component /ch[0]/RSHB designator=R13
+entry ca5be0d7-a31c-8594-9520-0a2ec77968dd component /ch[0]/RSHC designator=R14
+entry 54e5c4ff-0b5f-8122-8f78-8ec571a817c4 net /ch[0]/SRCA
+entry 1f675c2d-b037-83c8-a3d7-dd7ea70aef02 net /ch[0]/SRCB
+entry 992ba7bd-b9b1-86e5-b165-c9e555395c0a net /ch[0]/SRCC
 entry e402aed5-4cbe-8968-b2bd-bf938b59fa37 net /ch[0]/VDRV
 entry bbf92d32-617b-8e0f-9be6-1b4a52609bcc sheet /ch[1]
 entry da6ff20e-ed3c-8bd6-80e1-084158da07d6 net /ch[1]/BOOT0
 entry e9a2ad68-8a40-8ece-be29-5cf81607a481 net /ch[1]/BSTA
 entry e6d2aab4-96d8-80dc-93a5-0a422f0198a0 net /ch[1]/BSTB
 entry 02fff3bc-4b53-8e47-815f-8cc3848e040d net /ch[1]/BSTC
-entry c0927be4-da14-8ff0-ae53-6823d269c67d component /ch[1]/CB1 designator=C13
-entry 8f2388cf-bbb3-8770-9758-709b7000b36c component /ch[1]/CBA designator=C14
-entry 0521b672-b72e-8463-af76-d65ef0a6225a component /ch[1]/CBB designator=C15
-entry dbda7c83-6a22-8072-b8c8-2ddba324dca4 component /ch[1]/CBC designator=C16
-entry 0e5ddb8f-5cca-87b8-83fc-30f41613be15 component /ch[1]/CDRV designator=C17
-entry c09a9c96-dda8-8c6b-890f-1d6447a55a6c component /ch[1]/CIS designator=C18
-entry a260d1af-a4c4-8729-a60c-249bd5e9daae component /ch[1]/CMCU designator=C19
-entry c51e0821-c051-89a1-ae87-d6faaa372be1 component /ch[1]/CVCC designator=C20
+entry c0927be4-da14-8ff0-ae53-6823d269c67d component /ch[1]/CB1 designator=C16
+entry 8f2388cf-bbb3-8770-9758-709b7000b36c component /ch[1]/CBA designator=C17
+entry 0521b672-b72e-8463-af76-d65ef0a6225a component /ch[1]/CBB designator=C18
+entry dbda7c83-6a22-8072-b8c8-2ddba324dca4 component /ch[1]/CBC designator=C19
+entry 0e5ddb8f-5cca-87b8-83fc-30f41613be15 component /ch[1]/CDRV designator=C20
+entry 29483ce1-6713-8364-819d-daa864ab2276 component /ch[1]/CISA designator=C21
+entry 6acac3a5-60ff-8cb0-9ee5-22f93d867532 component /ch[1]/CISB designator=C22
+entry eaf327c0-226f-8fdc-b87c-91277f083209 component /ch[1]/CISC designator=C23
+entry a260d1af-a4c4-8729-a60c-249bd5e9daae component /ch[1]/CMCU designator=C24
+entry a94b5b9b-f29f-83c0-8ad4-bf03b356d649 component /ch[1]/CRST designator=C25
+entry c51e0821-c051-89a1-ae87-d6faaa372be1 component /ch[1]/CVCC designator=C26
 entry e87b5a6e-a769-8ab1-8def-fd44e53a4bae component /ch[1]/DRV designator=U4
 entry d1a3586c-9796-8a70-b0eb-71d73f414ca9 net /ch[1]/DRV_EN
 entry 5c1ae974-5b00-8cf4-84f1-2eb7f2b07843 net /ch[1]/FAULT
@@ -111,8 +127,11 @@ entry 267bacae-af1a-86cc-9224-2402d4200f65 net /ch[1]/INHC
 entry 9e388221-ea10-8465-93dc-7ebd7fc506d6 net /ch[1]/INLA
 entry b3876efa-563f-84f4-a691-fa154e23b76f net /ch[1]/INLB
 entry dfddc12f-1156-8fbb-b6dd-6691c0d39b7b net /ch[1]/INLC
-entry da1499c6-d7b2-8a36-8c44-6dbf2b962d89 net /ch[1]/ISENSE
+entry 977dae49-fb47-8f1f-b27e-ef2a37c1703c net /ch[1]/ISENSE_A
+entry aa2e24b6-6a9c-857e-b4d4-6a0987a35cb4 net /ch[1]/ISENSE_B
+entry a0848ce4-1510-8782-b81e-7e06295cb148 net /ch[1]/ISENSE_C
 entry 1d33e0c0-7ec4-8346-bbcf-58c081e4a3c6 component /ch[1]/MCU designator=U5
+entry 10c5f7fc-5680-8a53-beaa-89c8996d6fb7 net /ch[1]/NRST
 entry 21779992-7f38-83d1-b284-5dc9efd0df17 component /ch[1]/PA designator=P6
 entry 982e7271-fc52-8c4e-b475-9cdf68afb1b7 component /ch[1]/PB designator=P7
 entry df2d2ccf-fad1-8b1c-b8c6-895d061b31cd component /ch[1]/PC designator=P8
@@ -125,30 +144,40 @@ entry aaeb1e61-5e83-8435-acb1-ee6c3da5b31a component /ch[1]/QHC designator=Q9
 entry 7173324a-d114-858a-b551-dc4c3f263425 component /ch[1]/QLA designator=Q10
 entry 482bf85b-8408-8183-9600-31b46ea8995d component /ch[1]/QLB designator=Q11
 entry a462ab71-bb4b-8d7d-85ce-c5c2818d4b31 component /ch[1]/QLC designator=Q12
-entry 44455c3a-6fc1-8a33-8089-9ce0e06ffb76 component /ch[1]/RBOOT designator=R10
-entry efe9938e-7aac-8bb8-bdda-d6a4145f1fdb component /ch[1]/RGHA designator=R11
-entry f85b5182-5de9-87a0-98c9-f30cc606f1a0 component /ch[1]/RGHB designator=R12
-entry 8e5423ab-4102-8674-a411-358628382bc0 component /ch[1]/RGHC designator=R13
-entry 8ff28f87-e671-8d97-91e7-9fab534dee2a component /ch[1]/RGLA designator=R14
-entry 06c4201a-cf2a-80d0-820c-c5fc014de3dd component /ch[1]/RGLB designator=R15
-entry 2e5d1fa4-acc7-8843-96c0-fc4ffcefd212 component /ch[1]/RGLC designator=R16
-entry da0679c9-c8ee-81df-a4f8-08bc2ef3f9e8 component /ch[1]/RIS designator=R17
-entry 98f3f59b-df4f-8dad-9385-a1dc2e4e81c2 component /ch[1]/RSH designator=R18
-entry ef5c4e71-73a6-8430-9cf1-ca1c9007a503 net /ch[1]/SRC
+entry 44455c3a-6fc1-8a33-8089-9ce0e06ffb76 component /ch[1]/RBOOT designator=R15
+entry efe9938e-7aac-8bb8-bdda-d6a4145f1fdb component /ch[1]/RGHA designator=R16
+entry f85b5182-5de9-87a0-98c9-f30cc606f1a0 component /ch[1]/RGHB designator=R17
+entry 8e5423ab-4102-8674-a411-358628382bc0 component /ch[1]/RGHC designator=R18
+entry 8ff28f87-e671-8d97-91e7-9fab534dee2a component /ch[1]/RGLA designator=R19
+entry 06c4201a-cf2a-80d0-820c-c5fc014de3dd component /ch[1]/RGLB designator=R20
+entry 2e5d1fa4-acc7-8843-96c0-fc4ffcefd212 component /ch[1]/RGLC designator=R21
+entry 64792c3c-1baa-8d88-91d7-1902b29e060d component /ch[1]/RISA designator=R22
+entry 5d2eaf07-5764-8ad3-aadf-6ddfc793b4ae component /ch[1]/RISB designator=R23
+entry 80b5275a-8a3e-88e2-82d1-1607951910c6 component /ch[1]/RISC designator=R24
+entry d750ba72-59d3-8849-8b65-fa09beea3bb8 component /ch[1]/RRST designator=R25
+entry 66e2b4c3-56a4-80c7-af8e-cdb9a85b22c1 component /ch[1]/RSHA designator=R26
+entry 19d1f4c5-682e-85de-bdb5-72c0274e093e component /ch[1]/RSHB designator=R27
+entry 04e2a9e5-27a7-872f-847b-9fba74dd8ba2 component /ch[1]/RSHC designator=R28
+entry a397531f-5c2e-8fdf-bf50-8e711ebe08c4 net /ch[1]/SRCA
+entry 210fd467-0978-8199-973c-5d39f1d5113a net /ch[1]/SRCB
+entry 631954d1-53de-8e1c-b4de-751cf0321c35 net /ch[1]/SRCC
 entry 71c4cb8b-d63d-83aa-978c-40f64c8361d7 net /ch[1]/VDRV
 entry 49324828-518c-85be-a5b3-f101876366c7 sheet /ch[2]
 entry e6cf1d91-25e7-8dcd-aea3-076fc527eb53 net /ch[2]/BOOT0
 entry 4e531f82-90de-81e3-8742-b020f59bed8c net /ch[2]/BSTA
 entry 16eb18a7-4e9f-894f-a311-c3ee8ab4280b net /ch[2]/BSTB
 entry b38adb84-f64a-866d-a6c6-91032a07b7b5 net /ch[2]/BSTC
-entry aa97a78b-bc04-8bf8-af82-609cd798569e component /ch[2]/CB1 designator=C21
-entry 10f8f186-dab9-8ac3-86e2-c8ad79df5a92 component /ch[2]/CBA designator=C22
-entry 5025880a-e159-8ac2-b5b2-23c27395ebf2 component /ch[2]/CBB designator=C23
-entry 5dafe53a-8928-83c2-9fa7-eb902aee0dd6 component /ch[2]/CBC designator=C24
-entry aa187140-214a-8296-a822-dc5c64ed9f7c component /ch[2]/CDRV designator=C25
-entry d6735816-7525-80b3-9504-5eb4ddc80ab3 component /ch[2]/CIS designator=C26
-entry d3cfbe0c-3a86-88ed-850a-2af5512f022d component /ch[2]/CMCU designator=C27
-entry aba55ce4-334d-863a-b87e-546d709d8dbc component /ch[2]/CVCC designator=C28
+entry aa97a78b-bc04-8bf8-af82-609cd798569e component /ch[2]/CB1 designator=C27
+entry 10f8f186-dab9-8ac3-86e2-c8ad79df5a92 component /ch[2]/CBA designator=C28
+entry 5025880a-e159-8ac2-b5b2-23c27395ebf2 component /ch[2]/CBB designator=C29
+entry 5dafe53a-8928-83c2-9fa7-eb902aee0dd6 component /ch[2]/CBC designator=C30
+entry aa187140-214a-8296-a822-dc5c64ed9f7c component /ch[2]/CDRV designator=C31
+entry 66ad6a9f-2fe5-8018-8e39-2f6a9bb034b9 component /ch[2]/CISA designator=C32
+entry 94b1f739-5a6c-8744-8165-55eb38cc9f29 component /ch[2]/CISB designator=C33
+entry 5e81ca3c-8a7c-807f-ae4a-0029a067b4df component /ch[2]/CISC designator=C34
+entry d3cfbe0c-3a86-88ed-850a-2af5512f022d component /ch[2]/CMCU designator=C35
+entry 4a1347f2-3fdf-806e-bfc6-f5e80cdeaa7f component /ch[2]/CRST designator=C36
+entry aba55ce4-334d-863a-b87e-546d709d8dbc component /ch[2]/CVCC designator=C37
 entry 3f6642d0-8607-8b5f-aee9-648271d938dd component /ch[2]/DRV designator=U6
 entry 6bd303e4-33ab-8c29-82d8-f9a858b31e71 net /ch[2]/DRV_EN
 entry c22c5075-e653-8709-a808-161e2a23f658 net /ch[2]/FAULT
@@ -170,8 +199,11 @@ entry 360d137a-f1d7-8f34-ad0c-3f06f25cdcb6 net /ch[2]/INHC
 entry cf44dcd8-921c-837f-bfe0-9c5dc67a0737 net /ch[2]/INLA
 entry 97dcd5fd-4fdd-8adb-b356-224a0aa6c5ed net /ch[2]/INLB
 entry a4974c98-ab76-8d59-8ca2-e0d69dfcf84c net /ch[2]/INLC
-entry a846cf1d-b66b-8d49-860a-8c6eb608babe net /ch[2]/ISENSE
+entry e1cbb781-46f9-8f9a-93b0-65d177a8af02 net /ch[2]/ISENSE_A
+entry 3b3e2649-f2a8-8175-b3f3-7ec8ae49f548 net /ch[2]/ISENSE_B
+entry 17cd680b-ef9f-8606-be50-c7572b4a31e9 net /ch[2]/ISENSE_C
 entry 4eb02a82-06e5-81bb-9935-871216042113 component /ch[2]/MCU designator=U7
+entry af7681f4-d407-844a-92c6-73b6d28bad71 net /ch[2]/NRST
 entry 1eb4cac5-616a-8b55-9bcf-17142a1a1bd0 component /ch[2]/PA designator=P9
 entry 199031cf-40f6-85b3-b80e-879e730dc9ed component /ch[2]/PB designator=P10
 entry fc5a9f1c-16c2-827f-b222-8ade40740568 component /ch[2]/PC designator=P11
@@ -184,30 +216,40 @@ entry bdf91c9f-2083-80fb-a9ba-9a59ef3fe0b5 component /ch[2]/QHC designator=Q15
 entry 7e6dfd10-eb58-83ca-ac37-b15754da9efd component /ch[2]/QLA designator=Q16
 entry e85e6c59-36c6-8c0f-821c-945d650efe4d component /ch[2]/QLB designator=Q17
 entry 11a5a648-83d3-800e-a53d-b0dc91bf5901 component /ch[2]/QLC designator=Q18
-entry 89504df0-3e98-8184-9b8d-ef61e2cf1683 component /ch[2]/RBOOT designator=R19
-entry f2029c1a-2c9d-8deb-9c51-721f2eb89a1d component /ch[2]/RGHA designator=R20
-entry 5917f184-6dd4-8272-86cc-2b0d971a12fb component /ch[2]/RGHB designator=R21
-entry 46281f49-92eb-8d3f-9e18-d0a6d0dc04cf component /ch[2]/RGHC designator=R22
-entry 25a9d91f-9409-8810-b6ea-3ebb43b6b342 component /ch[2]/RGLA designator=R23
-entry c1378623-bb0c-85b8-9ec6-bfc392300ee4 component /ch[2]/RGLB designator=R24
-entry ae47b3e8-e023-804b-a7e9-e4d557a9f4f5 component /ch[2]/RGLC designator=R25
-entry 1471cfc1-cd46-85f0-a164-0d96a7a9b74e component /ch[2]/RIS designator=R26
-entry 6922933c-34b8-8462-b5e4-9c814766c39a component /ch[2]/RSH designator=R27
-entry ae1b5a40-98a6-8ea6-85af-281ba77c30d2 net /ch[2]/SRC
+entry 89504df0-3e98-8184-9b8d-ef61e2cf1683 component /ch[2]/RBOOT designator=R29
+entry f2029c1a-2c9d-8deb-9c51-721f2eb89a1d component /ch[2]/RGHA designator=R30
+entry 5917f184-6dd4-8272-86cc-2b0d971a12fb component /ch[2]/RGHB designator=R31
+entry 46281f49-92eb-8d3f-9e18-d0a6d0dc04cf component /ch[2]/RGHC designator=R32
+entry 25a9d91f-9409-8810-b6ea-3ebb43b6b342 component /ch[2]/RGLA designator=R33
+entry c1378623-bb0c-85b8-9ec6-bfc392300ee4 component /ch[2]/RGLB designator=R34
+entry ae47b3e8-e023-804b-a7e9-e4d557a9f4f5 component /ch[2]/RGLC designator=R35
+entry c46b0017-54f7-8d45-b007-818f2ebdee70 component /ch[2]/RISA designator=R36
+entry eef5d80e-0e43-81b4-839a-1c0ffafd3995 component /ch[2]/RISB designator=R37
+entry a95645b8-0559-8b49-a07f-9820eacfaa50 component /ch[2]/RISC designator=R38
+entry 0bdae0f7-b016-8754-83be-2a7552c576ee component /ch[2]/RRST designator=R39
+entry ecafd687-212d-84aa-a24c-8c30e327e72c component /ch[2]/RSHA designator=R40
+entry ab2d4fc3-2740-8b4e-bd3a-b560c2d5b6e0 component /ch[2]/RSHB designator=R41
+entry 07c490e6-70ca-86b8-92f4-add42db822ed component /ch[2]/RSHC designator=R42
+entry 321be2d3-744a-8e28-a736-60f8b96b6288 net /ch[2]/SRCA
+entry 685ca8ef-9792-8d51-bbb0-8480da2309fb net /ch[2]/SRCB
+entry 26e6c8e4-dca8-85a5-acb8-1dc7dcace48c net /ch[2]/SRCC
 entry c6386cb9-44f0-8761-b9a5-2cbaebacfd38 net /ch[2]/VDRV
 entry d4dddaa2-63fd-8c63-af01-1156ee24a198 sheet /ch[3]
 entry a88088d9-d2c6-82f1-a1b4-151e60e08c2e net /ch[3]/BOOT0
 entry b2b777a2-69ce-8dac-b2d2-1109b641a276 net /ch[3]/BSTA
 entry 59f8b40f-19a0-8eb5-b0f1-222e05a5af06 net /ch[3]/BSTB
 entry 2bb8c3d0-7772-88c5-b9cb-aea65b5519b5 net /ch[3]/BSTC
-entry c5e1caa3-a705-8158-9f67-d6abf6b52ea0 component /ch[3]/CB1 designator=C29
-entry 4e869cd8-df78-8a53-a049-683141fff342 component /ch[3]/CBA designator=C30
-entry a3f208dc-799b-8d25-8132-f300a88fe456 component /ch[3]/CBB designator=C31
-entry 576a742b-3787-879d-8aa4-804478a29726 component /ch[3]/CBC designator=C32
-entry 3aa621c3-3b4b-8988-834a-932221d96d74 component /ch[3]/CDRV designator=C33
-entry 85210b85-02f7-800e-9c48-a665907cef9e component /ch[3]/CIS designator=C34
-entry 16371ac4-92ad-8557-9b3a-6d0cd1b8808a component /ch[3]/CMCU designator=C35
-entry 5289e59a-84c3-8314-a820-c2c3876a6061 component /ch[3]/CVCC designator=C36
+entry c5e1caa3-a705-8158-9f67-d6abf6b52ea0 component /ch[3]/CB1 designator=C38
+entry 4e869cd8-df78-8a53-a049-683141fff342 component /ch[3]/CBA designator=C39
+entry a3f208dc-799b-8d25-8132-f300a88fe456 component /ch[3]/CBB designator=C40
+entry 576a742b-3787-879d-8aa4-804478a29726 component /ch[3]/CBC designator=C41
+entry 3aa621c3-3b4b-8988-834a-932221d96d74 component /ch[3]/CDRV designator=C42
+entry 3fb8f52d-f9da-8d01-934c-1b18634b418d component /ch[3]/CISA designator=C43
+entry 25c4c34f-987f-8197-b875-db87d24a4fc4 component /ch[3]/CISB designator=C44
+entry 5acdaf8d-4978-8f0c-8eb6-e345e97d8585 component /ch[3]/CISC designator=C45
+entry 16371ac4-92ad-8557-9b3a-6d0cd1b8808a component /ch[3]/CMCU designator=C46
+entry 40665dfc-cb73-8e0c-a112-6e5707027b0a component /ch[3]/CRST designator=C47
+entry 5289e59a-84c3-8314-a820-c2c3876a6061 component /ch[3]/CVCC designator=C48
 entry 2f074bd9-0445-891f-a6a5-071609b55b80 component /ch[3]/DRV designator=U8
 entry 054a03ee-8ae7-844a-bcbd-782de6b11689 net /ch[3]/DRV_EN
 entry e9b01fed-da50-8b5a-8642-16f60420c9e2 net /ch[3]/FAULT
@@ -229,8 +271,11 @@ entry cbfa935f-4ffc-879c-ab0e-aa313703f60a net /ch[3]/INHC
 entry 4bd1aad7-87df-86a2-83fe-64f85d84e0a5 net /ch[3]/INLA
 entry 16534206-2cb7-894c-bf2f-c568b8e7b0a9 net /ch[3]/INLB
 entry 433d349a-7749-88cb-aa3c-ba47b5bd5fc5 net /ch[3]/INLC
-entry eef759cd-b60d-8bdf-adf1-9c33ab6f70b8 net /ch[3]/ISENSE
+entry 8aa0bd70-09ca-88c6-911b-dd516b5d26d8 net /ch[3]/ISENSE_A
+entry 747e6da7-b05d-822d-bf6d-6b48c5dd096f net /ch[3]/ISENSE_B
+entry 321b7ad9-69ba-8fd0-9e23-5a995827f9d1 net /ch[3]/ISENSE_C
 entry 97a408fc-8802-8f6f-ada8-4a203cf0c728 component /ch[3]/MCU designator=U9
+entry bb3f318a-723a-8472-89f2-dcd079de2884 net /ch[3]/NRST
 entry 2578f82a-b170-8ff0-8fa7-e38d13d4d486 component /ch[3]/PA designator=P12
 entry 07d32a60-083b-829a-b0be-b65d4cf6061a component /ch[3]/PB designator=P13
 entry 60443593-a4cf-8f3d-b06a-ee3d5fb055a7 component /ch[3]/PC designator=P14
@@ -243,23 +288,30 @@ entry c55c83b3-90cb-8422-97e4-881c6c19ed1d component /ch[3]/QHC designator=Q21
 entry e0b10329-2b96-861f-a4db-e1aa0deea3f6 component /ch[3]/QLA designator=Q22
 entry 72b64c55-fa9e-8048-812b-8cb0c1175397 component /ch[3]/QLB designator=Q23
 entry 3ac2f50a-1578-849a-9b83-335de6e09196 component /ch[3]/QLC designator=Q24
-entry 371dc491-bfe1-868d-9be7-ea17e184ee9f component /ch[3]/RBOOT designator=R28
-entry 0b44a7a7-6181-8e95-90d0-d0d5fc4f9d46 component /ch[3]/RGHA designator=R29
-entry bf0c933c-78ea-8136-a9c0-c38fa4f73c0d component /ch[3]/RGHB designator=R30
-entry 1d1bdd54-644a-8bf0-bad4-92ce086aada4 component /ch[3]/RGHC designator=R31
-entry 734c8dc6-daca-875b-9621-605274d26262 component /ch[3]/RGLA designator=R32
-entry eaf88949-73f2-84af-9b25-b9cadbb4b360 component /ch[3]/RGLB designator=R33
-entry 4907d361-5f52-8f8d-b56b-490d87351079 component /ch[3]/RGLC designator=R34
-entry c9db09d7-964b-8ac0-b1c4-78edec1fd547 component /ch[3]/RIS designator=R35
-entry dbce4cc7-93d5-89e6-9e0b-a91c8692bba1 component /ch[3]/RSH designator=R36
-entry 6ff9d35b-9474-8db6-991f-6d019bbaa5f7 net /ch[3]/SRC
+entry 371dc491-bfe1-868d-9be7-ea17e184ee9f component /ch[3]/RBOOT designator=R43
+entry 0b44a7a7-6181-8e95-90d0-d0d5fc4f9d46 component /ch[3]/RGHA designator=R44
+entry bf0c933c-78ea-8136-a9c0-c38fa4f73c0d component /ch[3]/RGHB designator=R45
+entry 1d1bdd54-644a-8bf0-bad4-92ce086aada4 component /ch[3]/RGHC designator=R46
+entry 734c8dc6-daca-875b-9621-605274d26262 component /ch[3]/RGLA designator=R47
+entry eaf88949-73f2-84af-9b25-b9cadbb4b360 component /ch[3]/RGLB designator=R48
+entry 4907d361-5f52-8f8d-b56b-490d87351079 component /ch[3]/RGLC designator=R49
+entry 4fc40a07-eab8-82d3-8d14-69ea6aa8343a component /ch[3]/RISA designator=R50
+entry a6fd2c14-93db-8997-9b0b-ffb6c8a6b349 component /ch[3]/RISB designator=R51
+entry 03946d37-dd65-84df-a40c-47c11167009c component /ch[3]/RISC designator=R52
+entry 1a680516-5a68-8ccc-a686-d4510cfa7e63 component /ch[3]/RRST designator=R53
+entry 6bfda7d9-0550-89f1-b2af-69220ad99e94 component /ch[3]/RSHA designator=R54
+entry 2a2a58df-8884-8a9c-b409-4764f4af6e4e component /ch[3]/RSHB designator=R55
+entry aa52bcfa-49f4-8d88-85ca-f02aca3996ba component /ch[3]/RSHC designator=R56
+entry fcc41b73-8b8e-87a0-a00b-7089f5de117c net /ch[3]/SRCA
+entry 9b6ff42b-364e-8557-a6e8-6839175ab07f net /ch[3]/SRCB
+entry 380fb708-ddf9-8275-a5b7-16edd7a8c1a5 net /ch[3]/SRCC
 entry b728359a-050c-8c6c-9019-12462236ec56 net /ch[3]/VDRV
-fp /+3V3 /C4.1,/U1.VOUT,/ch[0]/CMCU.1,/ch[0]/MCU.VDD,/ch[1]/CMCU.1,/ch[1]/MCU.VDD,/ch[2]/CMCU.1,/ch[2]/MCU.VDD,/ch[3]/CMCU.1,/ch[3]/MCU.VDD
+fp /+3V3 /C4.1,/U1.VOUT,/ch[0]/CMCU.1,/ch[0]/MCU.VDD,/ch[0]/RRST.2,/ch[1]/CMCU.1,/ch[1]/MCU.VDD,/ch[1]/RRST.2,/ch[2]/CMCU.1,/ch[2]/MCU.VDD,/ch[2]/RRST.2,/ch[3]/CMCU.1,/ch[3]/MCU.VDD,/ch[3]/RRST.2
 fp /C1 58e7a1ce-e9ff-818a-b644-2e0cf9d23e20|GND,VBAT
 fp /C2 58e7a1ce-e9ff-818a-b644-2e0cf9d23e20|GND,VBAT
 fp /C3 432d8561-454e-8b35-a38e-5e0ca3336d7e|GND,VBAT
 fp /C4 5884b3d6-4fd9-87f3-a37a-bfdf5d04441d|+3V3,GND
-fp /GND /C1.2,/C2.2,/C3.2,/C4.2,/J1.2,/P2.1,/U1.GND,/ch[0]/CB1.2,/ch[0]/CDRV.2,/ch[0]/CIS.2,/ch[0]/CMCU.2,/ch[0]/CVCC.2,/ch[0]/DRV.GND,/ch[0]/MCU.VSS,/ch[0]/RBOOT.2,/ch[0]/RSH.2,/ch[1]/CB1.2,/ch[1]/CDRV.2,/ch[1]/CIS.2,/ch[1]/CMCU.2,/ch[1]/CVCC.2,/ch[1]/DRV.GND,/ch[1]/MCU.VSS,/ch[1]/RBOOT.2,/ch[1]/RSH.2,/ch[2]/CB1.2,/ch[2]/CDRV.2,/ch[2]/CIS.2,/ch[2]/CMCU.2,/ch[2]/CVCC.2,/ch[2]/DRV.GND,/ch[2]/MCU.VSS,/ch[2]/RBOOT.2,/ch[2]/RSH.2,/ch[3]/CB1.2,/ch[3]/CDRV.2,/ch[3]/CIS.2,/ch[3]/CMCU.2,/ch[3]/CVCC.2,/ch[3]/DRV.GND,/ch[3]/MCU.VSS,/ch[3]/RBOOT.2,/ch[3]/RSH.2
+fp /GND /C1.2,/C2.2,/C3.2,/C4.2,/J1.2,/P2.1,/U1.GND,/ch[0]/CB1.2,/ch[0]/CDRV.2,/ch[0]/CISA.2,/ch[0]/CISB.2,/ch[0]/CISC.2,/ch[0]/CMCU.2,/ch[0]/CRST.2,/ch[0]/CVCC.2,/ch[0]/DRV.GND,/ch[0]/MCU.VSS,/ch[0]/RBOOT.2,/ch[0]/RSHA.2,/ch[0]/RSHB.2,/ch[0]/RSHC.2,/ch[1]/CB1.2,/ch[1]/CDRV.2,/ch[1]/CISA.2,/ch[1]/CISB.2,/ch[1]/CISC.2,/ch[1]/CMCU.2,/ch[1]/CRST.2,/ch[1]/CVCC.2,/ch[1]/DRV.GND,/ch[1]/MCU.VSS,/ch[1]/RBOOT.2,/ch[1]/RSHA.2,/ch[1]/RSHB.2,/ch[1]/RSHC.2,/ch[2]/CB1.2,/ch[2]/CDRV.2,/ch[2]/CISA.2,/ch[2]/CISB.2,/ch[2]/CISC.2,/ch[2]/CMCU.2,/ch[2]/CRST.2,/ch[2]/CVCC.2,/ch[2]/DRV.GND,/ch[2]/MCU.VSS,/ch[2]/RBOOT.2,/ch[2]/RSHA.2,/ch[2]/RSHB.2,/ch[2]/RSHC.2,/ch[3]/CB1.2,/ch[3]/CDRV.2,/ch[3]/CISA.2,/ch[3]/CISB.2,/ch[3]/CISC.2,/ch[3]/CMCU.2,/ch[3]/CRST.2,/ch[3]/CVCC.2,/ch[3]/DRV.GND,/ch[3]/MCU.VSS,/ch[3]/RBOOT.2,/ch[3]/RSHA.2,/ch[3]/RSHB.2,/ch[3]/RSHC.2
 fp /H1 e62c74e7-20a6-8538-bc85-5a35dc091f12|
 fp /H2 e62c74e7-20a6-8538-bc85-5a35dc091f12|
 fp /H3 e62c74e7-20a6-8538-bc85-5a35dc091f12|
@@ -284,8 +336,11 @@ fp /ch[0]/CBA ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[0]/BSTA,/ch[0]/PHA
 fp /ch[0]/CBB ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[0]/BSTB,/ch[0]/PHB
 fp /ch[0]/CBC ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[0]/BSTC,/ch[0]/PHC
 fp /ch[0]/CDRV 432d8561-454e-8b35-a38e-5e0ca3336d7e|/ch[0]/VDRV,GND
-fp /ch[0]/CIS 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[0]/ISENSE,GND
+fp /ch[0]/CISA 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[0]/ISENSE_A,GND
+fp /ch[0]/CISB 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[0]/ISENSE_B,GND
+fp /ch[0]/CISC 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[0]/ISENSE_C,GND
 fp /ch[0]/CMCU ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /ch[0]/CRST ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[0]/NRST,GND
 fp /ch[0]/CVCC 432d8561-454e-8b35-a38e-5e0ca3336d7e|GND,VBAT
 fp /ch[0]/DRV 0b4c22df-5301-8935-be9b-53b6873dfc6b|/ch[0]/BSTA,/ch[0]/BSTB,/ch[0]/BSTC,/ch[0]/DRV_EN,/ch[0]/FAULT,/ch[0]/GHA_D,/ch[0]/GHB_D,/ch[0]/GHC_D,/ch[0]/GLA_D,/ch[0]/GLB_D,/ch[0]/GLC_D,/ch[0]/INHA,/ch[0]/INHB,/ch[0]/INHC,/ch[0]/INLA,/ch[0]/INLB,/ch[0]/INLC,/ch[0]/PHA,/ch[0]/PHB,/ch[0]/PHC,/ch[0]/VDRV,GND,VBAT
 fp /ch[0]/DRV_EN /ch[0]/DRV.EN,/ch[0]/MCU.PA7
@@ -308,8 +363,11 @@ fp /ch[0]/INHC /ch[0]/DRV.INHC,/ch[0]/MCU.PA5
 fp /ch[0]/INLA /ch[0]/DRV.INLA,/ch[0]/MCU.PA2
 fp /ch[0]/INLB /ch[0]/DRV.INLB,/ch[0]/MCU.PA4
 fp /ch[0]/INLC /ch[0]/DRV.INLC,/ch[0]/MCU.PA6
-fp /ch[0]/ISENSE /ch[0]/CIS.1,/ch[0]/MCU.PA9,/ch[0]/RIS.2
-fp /ch[0]/MCU a478ac4c-1210-8e6d-a04d-0ad00cb30ffa|+3V3,/ch[0]/BOOT0,/ch[0]/DRV_EN,/ch[0]/FAULT,/ch[0]/INHA,/ch[0]/INHB,/ch[0]/INHC,/ch[0]/INLA,/ch[0]/INLB,/ch[0]/INLC,/ch[0]/ISENSE,GND,M1,TLM
+fp /ch[0]/ISENSE_A /ch[0]/CISA.1,/ch[0]/MCU.PA9,/ch[0]/RISA.2
+fp /ch[0]/ISENSE_B /ch[0]/CISB.1,/ch[0]/MCU.PA11,/ch[0]/RISB.2
+fp /ch[0]/ISENSE_C /ch[0]/CISC.1,/ch[0]/MCU.PA12,/ch[0]/RISC.2
+fp /ch[0]/MCU a478ac4c-1210-8e6d-a04d-0ad00cb30ffa|+3V3,/ch[0]/BOOT0,/ch[0]/DRV_EN,/ch[0]/FAULT,/ch[0]/INHA,/ch[0]/INHB,/ch[0]/INHC,/ch[0]/INLA,/ch[0]/INLB,/ch[0]/INLC,/ch[0]/ISENSE_A,/ch[0]/ISENSE_B,/ch[0]/ISENSE_C,/ch[0]/NRST,GND,M1,TLM
+fp /ch[0]/NRST /ch[0]/CRST.1,/ch[0]/MCU.NRST,/ch[0]/RRST.1
 fp /ch[0]/PA b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[0]/PHA
 fp /ch[0]/PB b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[0]/PHB
 fp /ch[0]/PC b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[0]/PHC
@@ -319,9 +377,9 @@ fp /ch[0]/PHC /ch[0]/CBC.2,/ch[0]/DRV.SHC,/ch[0]/PC.1,/ch[0]/QHC.S,/ch[0]/QLC.D
 fp /ch[0]/QHA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[0]/GHA,/ch[0]/PHA,VBAT
 fp /ch[0]/QHB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[0]/GHB,/ch[0]/PHB,VBAT
 fp /ch[0]/QHC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[0]/GHC,/ch[0]/PHC,VBAT
-fp /ch[0]/QLA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[0]/GLA,/ch[0]/PHA,/ch[0]/SRC
-fp /ch[0]/QLB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[0]/GLB,/ch[0]/PHB,/ch[0]/SRC
-fp /ch[0]/QLC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[0]/GLC,/ch[0]/PHC,/ch[0]/SRC
+fp /ch[0]/QLA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[0]/GLA,/ch[0]/PHA,/ch[0]/SRCA
+fp /ch[0]/QLB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[0]/GLB,/ch[0]/PHB,/ch[0]/SRCB
+fp /ch[0]/QLC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[0]/GLC,/ch[0]/PHC,/ch[0]/SRCC
 fp /ch[0]/RBOOT f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[0]/BOOT0,GND
 fp /ch[0]/RGHA 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[0]/GHA,/ch[0]/GHA_D
 fp /ch[0]/RGHB 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[0]/GHB,/ch[0]/GHB_D
@@ -329,9 +387,16 @@ fp /ch[0]/RGHC 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[0]/GHC,/ch[0]/GHC_D
 fp /ch[0]/RGLA 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[0]/GLA,/ch[0]/GLA_D
 fp /ch[0]/RGLB 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[0]/GLB,/ch[0]/GLB_D
 fp /ch[0]/RGLC 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[0]/GLC,/ch[0]/GLC_D
-fp /ch[0]/RIS 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[0]/ISENSE,/ch[0]/SRC
-fp /ch[0]/RSH 4202b363-d628-895a-8d64-be8058e65cb2|/ch[0]/SRC,GND
-fp /ch[0]/SRC /ch[0]/QLA.S,/ch[0]/QLB.S,/ch[0]/QLC.S,/ch[0]/RIS.1,/ch[0]/RSH.1
+fp /ch[0]/RISA 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[0]/ISENSE_A,/ch[0]/SRCA
+fp /ch[0]/RISB 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[0]/ISENSE_B,/ch[0]/SRCB
+fp /ch[0]/RISC 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[0]/ISENSE_C,/ch[0]/SRCC
+fp /ch[0]/RRST f0b7343f-4c49-88f7-8a3b-7c46bf087762|+3V3,/ch[0]/NRST
+fp /ch[0]/RSHA d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[0]/SRCA,GND
+fp /ch[0]/RSHB d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[0]/SRCB,GND
+fp /ch[0]/RSHC d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[0]/SRCC,GND
+fp /ch[0]/SRCA /ch[0]/QLA.S,/ch[0]/RISA.1,/ch[0]/RSHA.1
+fp /ch[0]/SRCB /ch[0]/QLB.S,/ch[0]/RISB.1,/ch[0]/RSHB.1
+fp /ch[0]/SRCC /ch[0]/QLC.S,/ch[0]/RISC.1,/ch[0]/RSHC.1
 fp /ch[0]/VDRV /ch[0]/CDRV.1,/ch[0]/DRV.VDRV
 fp /ch[1] channel
 fp /ch[1]/BOOT0 /ch[1]/MCU.BOOT0,/ch[1]/RBOOT.1
@@ -343,8 +408,11 @@ fp /ch[1]/CBA ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[1]/BSTA,/ch[1]/PHA
 fp /ch[1]/CBB ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[1]/BSTB,/ch[1]/PHB
 fp /ch[1]/CBC ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[1]/BSTC,/ch[1]/PHC
 fp /ch[1]/CDRV 432d8561-454e-8b35-a38e-5e0ca3336d7e|/ch[1]/VDRV,GND
-fp /ch[1]/CIS 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[1]/ISENSE,GND
+fp /ch[1]/CISA 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[1]/ISENSE_A,GND
+fp /ch[1]/CISB 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[1]/ISENSE_B,GND
+fp /ch[1]/CISC 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[1]/ISENSE_C,GND
 fp /ch[1]/CMCU ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /ch[1]/CRST ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[1]/NRST,GND
 fp /ch[1]/CVCC 432d8561-454e-8b35-a38e-5e0ca3336d7e|GND,VBAT
 fp /ch[1]/DRV 0b4c22df-5301-8935-be9b-53b6873dfc6b|/ch[1]/BSTA,/ch[1]/BSTB,/ch[1]/BSTC,/ch[1]/DRV_EN,/ch[1]/FAULT,/ch[1]/GHA_D,/ch[1]/GHB_D,/ch[1]/GHC_D,/ch[1]/GLA_D,/ch[1]/GLB_D,/ch[1]/GLC_D,/ch[1]/INHA,/ch[1]/INHB,/ch[1]/INHC,/ch[1]/INLA,/ch[1]/INLB,/ch[1]/INLC,/ch[1]/PHA,/ch[1]/PHB,/ch[1]/PHC,/ch[1]/VDRV,GND,VBAT
 fp /ch[1]/DRV_EN /ch[1]/DRV.EN,/ch[1]/MCU.PA7
@@ -367,8 +435,11 @@ fp /ch[1]/INHC /ch[1]/DRV.INHC,/ch[1]/MCU.PA5
 fp /ch[1]/INLA /ch[1]/DRV.INLA,/ch[1]/MCU.PA2
 fp /ch[1]/INLB /ch[1]/DRV.INLB,/ch[1]/MCU.PA4
 fp /ch[1]/INLC /ch[1]/DRV.INLC,/ch[1]/MCU.PA6
-fp /ch[1]/ISENSE /ch[1]/CIS.1,/ch[1]/MCU.PA9,/ch[1]/RIS.2
-fp /ch[1]/MCU a478ac4c-1210-8e6d-a04d-0ad00cb30ffa|+3V3,/ch[1]/BOOT0,/ch[1]/DRV_EN,/ch[1]/FAULT,/ch[1]/INHA,/ch[1]/INHB,/ch[1]/INHC,/ch[1]/INLA,/ch[1]/INLB,/ch[1]/INLC,/ch[1]/ISENSE,GND,M2,TLM
+fp /ch[1]/ISENSE_A /ch[1]/CISA.1,/ch[1]/MCU.PA9,/ch[1]/RISA.2
+fp /ch[1]/ISENSE_B /ch[1]/CISB.1,/ch[1]/MCU.PA11,/ch[1]/RISB.2
+fp /ch[1]/ISENSE_C /ch[1]/CISC.1,/ch[1]/MCU.PA12,/ch[1]/RISC.2
+fp /ch[1]/MCU a478ac4c-1210-8e6d-a04d-0ad00cb30ffa|+3V3,/ch[1]/BOOT0,/ch[1]/DRV_EN,/ch[1]/FAULT,/ch[1]/INHA,/ch[1]/INHB,/ch[1]/INHC,/ch[1]/INLA,/ch[1]/INLB,/ch[1]/INLC,/ch[1]/ISENSE_A,/ch[1]/ISENSE_B,/ch[1]/ISENSE_C,/ch[1]/NRST,GND,M2,TLM
+fp /ch[1]/NRST /ch[1]/CRST.1,/ch[1]/MCU.NRST,/ch[1]/RRST.1
 fp /ch[1]/PA b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[1]/PHA
 fp /ch[1]/PB b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[1]/PHB
 fp /ch[1]/PC b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[1]/PHC
@@ -378,9 +449,9 @@ fp /ch[1]/PHC /ch[1]/CBC.2,/ch[1]/DRV.SHC,/ch[1]/PC.1,/ch[1]/QHC.S,/ch[1]/QLC.D
 fp /ch[1]/QHA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[1]/GHA,/ch[1]/PHA,VBAT
 fp /ch[1]/QHB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[1]/GHB,/ch[1]/PHB,VBAT
 fp /ch[1]/QHC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[1]/GHC,/ch[1]/PHC,VBAT
-fp /ch[1]/QLA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[1]/GLA,/ch[1]/PHA,/ch[1]/SRC
-fp /ch[1]/QLB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[1]/GLB,/ch[1]/PHB,/ch[1]/SRC
-fp /ch[1]/QLC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[1]/GLC,/ch[1]/PHC,/ch[1]/SRC
+fp /ch[1]/QLA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[1]/GLA,/ch[1]/PHA,/ch[1]/SRCA
+fp /ch[1]/QLB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[1]/GLB,/ch[1]/PHB,/ch[1]/SRCB
+fp /ch[1]/QLC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[1]/GLC,/ch[1]/PHC,/ch[1]/SRCC
 fp /ch[1]/RBOOT f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[1]/BOOT0,GND
 fp /ch[1]/RGHA 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[1]/GHA,/ch[1]/GHA_D
 fp /ch[1]/RGHB 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[1]/GHB,/ch[1]/GHB_D
@@ -388,9 +459,16 @@ fp /ch[1]/RGHC 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[1]/GHC,/ch[1]/GHC_D
 fp /ch[1]/RGLA 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[1]/GLA,/ch[1]/GLA_D
 fp /ch[1]/RGLB 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[1]/GLB,/ch[1]/GLB_D
 fp /ch[1]/RGLC 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[1]/GLC,/ch[1]/GLC_D
-fp /ch[1]/RIS 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[1]/ISENSE,/ch[1]/SRC
-fp /ch[1]/RSH 4202b363-d628-895a-8d64-be8058e65cb2|/ch[1]/SRC,GND
-fp /ch[1]/SRC /ch[1]/QLA.S,/ch[1]/QLB.S,/ch[1]/QLC.S,/ch[1]/RIS.1,/ch[1]/RSH.1
+fp /ch[1]/RISA 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[1]/ISENSE_A,/ch[1]/SRCA
+fp /ch[1]/RISB 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[1]/ISENSE_B,/ch[1]/SRCB
+fp /ch[1]/RISC 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[1]/ISENSE_C,/ch[1]/SRCC
+fp /ch[1]/RRST f0b7343f-4c49-88f7-8a3b-7c46bf087762|+3V3,/ch[1]/NRST
+fp /ch[1]/RSHA d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[1]/SRCA,GND
+fp /ch[1]/RSHB d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[1]/SRCB,GND
+fp /ch[1]/RSHC d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[1]/SRCC,GND
+fp /ch[1]/SRCA /ch[1]/QLA.S,/ch[1]/RISA.1,/ch[1]/RSHA.1
+fp /ch[1]/SRCB /ch[1]/QLB.S,/ch[1]/RISB.1,/ch[1]/RSHB.1
+fp /ch[1]/SRCC /ch[1]/QLC.S,/ch[1]/RISC.1,/ch[1]/RSHC.1
 fp /ch[1]/VDRV /ch[1]/CDRV.1,/ch[1]/DRV.VDRV
 fp /ch[2] channel
 fp /ch[2]/BOOT0 /ch[2]/MCU.BOOT0,/ch[2]/RBOOT.1
@@ -402,8 +480,11 @@ fp /ch[2]/CBA ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[2]/BSTA,/ch[2]/PHA
 fp /ch[2]/CBB ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[2]/BSTB,/ch[2]/PHB
 fp /ch[2]/CBC ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[2]/BSTC,/ch[2]/PHC
 fp /ch[2]/CDRV 432d8561-454e-8b35-a38e-5e0ca3336d7e|/ch[2]/VDRV,GND
-fp /ch[2]/CIS 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[2]/ISENSE,GND
+fp /ch[2]/CISA 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[2]/ISENSE_A,GND
+fp /ch[2]/CISB 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[2]/ISENSE_B,GND
+fp /ch[2]/CISC 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[2]/ISENSE_C,GND
 fp /ch[2]/CMCU ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /ch[2]/CRST ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[2]/NRST,GND
 fp /ch[2]/CVCC 432d8561-454e-8b35-a38e-5e0ca3336d7e|GND,VBAT
 fp /ch[2]/DRV 0b4c22df-5301-8935-be9b-53b6873dfc6b|/ch[2]/BSTA,/ch[2]/BSTB,/ch[2]/BSTC,/ch[2]/DRV_EN,/ch[2]/FAULT,/ch[2]/GHA_D,/ch[2]/GHB_D,/ch[2]/GHC_D,/ch[2]/GLA_D,/ch[2]/GLB_D,/ch[2]/GLC_D,/ch[2]/INHA,/ch[2]/INHB,/ch[2]/INHC,/ch[2]/INLA,/ch[2]/INLB,/ch[2]/INLC,/ch[2]/PHA,/ch[2]/PHB,/ch[2]/PHC,/ch[2]/VDRV,GND,VBAT
 fp /ch[2]/DRV_EN /ch[2]/DRV.EN,/ch[2]/MCU.PA7
@@ -426,8 +507,11 @@ fp /ch[2]/INHC /ch[2]/DRV.INHC,/ch[2]/MCU.PA5
 fp /ch[2]/INLA /ch[2]/DRV.INLA,/ch[2]/MCU.PA2
 fp /ch[2]/INLB /ch[2]/DRV.INLB,/ch[2]/MCU.PA4
 fp /ch[2]/INLC /ch[2]/DRV.INLC,/ch[2]/MCU.PA6
-fp /ch[2]/ISENSE /ch[2]/CIS.1,/ch[2]/MCU.PA9,/ch[2]/RIS.2
-fp /ch[2]/MCU a478ac4c-1210-8e6d-a04d-0ad00cb30ffa|+3V3,/ch[2]/BOOT0,/ch[2]/DRV_EN,/ch[2]/FAULT,/ch[2]/INHA,/ch[2]/INHB,/ch[2]/INHC,/ch[2]/INLA,/ch[2]/INLB,/ch[2]/INLC,/ch[2]/ISENSE,GND,M3,TLM
+fp /ch[2]/ISENSE_A /ch[2]/CISA.1,/ch[2]/MCU.PA9,/ch[2]/RISA.2
+fp /ch[2]/ISENSE_B /ch[2]/CISB.1,/ch[2]/MCU.PA11,/ch[2]/RISB.2
+fp /ch[2]/ISENSE_C /ch[2]/CISC.1,/ch[2]/MCU.PA12,/ch[2]/RISC.2
+fp /ch[2]/MCU a478ac4c-1210-8e6d-a04d-0ad00cb30ffa|+3V3,/ch[2]/BOOT0,/ch[2]/DRV_EN,/ch[2]/FAULT,/ch[2]/INHA,/ch[2]/INHB,/ch[2]/INHC,/ch[2]/INLA,/ch[2]/INLB,/ch[2]/INLC,/ch[2]/ISENSE_A,/ch[2]/ISENSE_B,/ch[2]/ISENSE_C,/ch[2]/NRST,GND,M3,TLM
+fp /ch[2]/NRST /ch[2]/CRST.1,/ch[2]/MCU.NRST,/ch[2]/RRST.1
 fp /ch[2]/PA b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[2]/PHA
 fp /ch[2]/PB b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[2]/PHB
 fp /ch[2]/PC b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[2]/PHC
@@ -437,9 +521,9 @@ fp /ch[2]/PHC /ch[2]/CBC.2,/ch[2]/DRV.SHC,/ch[2]/PC.1,/ch[2]/QHC.S,/ch[2]/QLC.D
 fp /ch[2]/QHA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[2]/GHA,/ch[2]/PHA,VBAT
 fp /ch[2]/QHB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[2]/GHB,/ch[2]/PHB,VBAT
 fp /ch[2]/QHC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[2]/GHC,/ch[2]/PHC,VBAT
-fp /ch[2]/QLA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[2]/GLA,/ch[2]/PHA,/ch[2]/SRC
-fp /ch[2]/QLB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[2]/GLB,/ch[2]/PHB,/ch[2]/SRC
-fp /ch[2]/QLC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[2]/GLC,/ch[2]/PHC,/ch[2]/SRC
+fp /ch[2]/QLA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[2]/GLA,/ch[2]/PHA,/ch[2]/SRCA
+fp /ch[2]/QLB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[2]/GLB,/ch[2]/PHB,/ch[2]/SRCB
+fp /ch[2]/QLC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[2]/GLC,/ch[2]/PHC,/ch[2]/SRCC
 fp /ch[2]/RBOOT f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[2]/BOOT0,GND
 fp /ch[2]/RGHA 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[2]/GHA,/ch[2]/GHA_D
 fp /ch[2]/RGHB 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[2]/GHB,/ch[2]/GHB_D
@@ -447,9 +531,16 @@ fp /ch[2]/RGHC 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[2]/GHC,/ch[2]/GHC_D
 fp /ch[2]/RGLA 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[2]/GLA,/ch[2]/GLA_D
 fp /ch[2]/RGLB 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[2]/GLB,/ch[2]/GLB_D
 fp /ch[2]/RGLC 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[2]/GLC,/ch[2]/GLC_D
-fp /ch[2]/RIS 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[2]/ISENSE,/ch[2]/SRC
-fp /ch[2]/RSH 4202b363-d628-895a-8d64-be8058e65cb2|/ch[2]/SRC,GND
-fp /ch[2]/SRC /ch[2]/QLA.S,/ch[2]/QLB.S,/ch[2]/QLC.S,/ch[2]/RIS.1,/ch[2]/RSH.1
+fp /ch[2]/RISA 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[2]/ISENSE_A,/ch[2]/SRCA
+fp /ch[2]/RISB 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[2]/ISENSE_B,/ch[2]/SRCB
+fp /ch[2]/RISC 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[2]/ISENSE_C,/ch[2]/SRCC
+fp /ch[2]/RRST f0b7343f-4c49-88f7-8a3b-7c46bf087762|+3V3,/ch[2]/NRST
+fp /ch[2]/RSHA d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[2]/SRCA,GND
+fp /ch[2]/RSHB d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[2]/SRCB,GND
+fp /ch[2]/RSHC d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[2]/SRCC,GND
+fp /ch[2]/SRCA /ch[2]/QLA.S,/ch[2]/RISA.1,/ch[2]/RSHA.1
+fp /ch[2]/SRCB /ch[2]/QLB.S,/ch[2]/RISB.1,/ch[2]/RSHB.1
+fp /ch[2]/SRCC /ch[2]/QLC.S,/ch[2]/RISC.1,/ch[2]/RSHC.1
 fp /ch[2]/VDRV /ch[2]/CDRV.1,/ch[2]/DRV.VDRV
 fp /ch[3] channel
 fp /ch[3]/BOOT0 /ch[3]/MCU.BOOT0,/ch[3]/RBOOT.1
@@ -461,8 +552,11 @@ fp /ch[3]/CBA ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[3]/BSTA,/ch[3]/PHA
 fp /ch[3]/CBB ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[3]/BSTB,/ch[3]/PHB
 fp /ch[3]/CBC ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[3]/BSTC,/ch[3]/PHC
 fp /ch[3]/CDRV 432d8561-454e-8b35-a38e-5e0ca3336d7e|/ch[3]/VDRV,GND
-fp /ch[3]/CIS 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[3]/ISENSE,GND
+fp /ch[3]/CISA 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[3]/ISENSE_A,GND
+fp /ch[3]/CISB 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[3]/ISENSE_B,GND
+fp /ch[3]/CISC 093ea587-6f23-8d53-9aeb-764edf458f9d|/ch[3]/ISENSE_C,GND
 fp /ch[3]/CMCU ddc2db39-4d38-8b30-ba86-5795b4cdc95d|+3V3,GND
+fp /ch[3]/CRST ddc2db39-4d38-8b30-ba86-5795b4cdc95d|/ch[3]/NRST,GND
 fp /ch[3]/CVCC 432d8561-454e-8b35-a38e-5e0ca3336d7e|GND,VBAT
 fp /ch[3]/DRV 0b4c22df-5301-8935-be9b-53b6873dfc6b|/ch[3]/BSTA,/ch[3]/BSTB,/ch[3]/BSTC,/ch[3]/DRV_EN,/ch[3]/FAULT,/ch[3]/GHA_D,/ch[3]/GHB_D,/ch[3]/GHC_D,/ch[3]/GLA_D,/ch[3]/GLB_D,/ch[3]/GLC_D,/ch[3]/INHA,/ch[3]/INHB,/ch[3]/INHC,/ch[3]/INLA,/ch[3]/INLB,/ch[3]/INLC,/ch[3]/PHA,/ch[3]/PHB,/ch[3]/PHC,/ch[3]/VDRV,GND,VBAT
 fp /ch[3]/DRV_EN /ch[3]/DRV.EN,/ch[3]/MCU.PA7
@@ -485,8 +579,11 @@ fp /ch[3]/INHC /ch[3]/DRV.INHC,/ch[3]/MCU.PA5
 fp /ch[3]/INLA /ch[3]/DRV.INLA,/ch[3]/MCU.PA2
 fp /ch[3]/INLB /ch[3]/DRV.INLB,/ch[3]/MCU.PA4
 fp /ch[3]/INLC /ch[3]/DRV.INLC,/ch[3]/MCU.PA6
-fp /ch[3]/ISENSE /ch[3]/CIS.1,/ch[3]/MCU.PA9,/ch[3]/RIS.2
-fp /ch[3]/MCU a478ac4c-1210-8e6d-a04d-0ad00cb30ffa|+3V3,/ch[3]/BOOT0,/ch[3]/DRV_EN,/ch[3]/FAULT,/ch[3]/INHA,/ch[3]/INHB,/ch[3]/INHC,/ch[3]/INLA,/ch[3]/INLB,/ch[3]/INLC,/ch[3]/ISENSE,GND,M4,TLM
+fp /ch[3]/ISENSE_A /ch[3]/CISA.1,/ch[3]/MCU.PA9,/ch[3]/RISA.2
+fp /ch[3]/ISENSE_B /ch[3]/CISB.1,/ch[3]/MCU.PA11,/ch[3]/RISB.2
+fp /ch[3]/ISENSE_C /ch[3]/CISC.1,/ch[3]/MCU.PA12,/ch[3]/RISC.2
+fp /ch[3]/MCU a478ac4c-1210-8e6d-a04d-0ad00cb30ffa|+3V3,/ch[3]/BOOT0,/ch[3]/DRV_EN,/ch[3]/FAULT,/ch[3]/INHA,/ch[3]/INHB,/ch[3]/INHC,/ch[3]/INLA,/ch[3]/INLB,/ch[3]/INLC,/ch[3]/ISENSE_A,/ch[3]/ISENSE_B,/ch[3]/ISENSE_C,/ch[3]/NRST,GND,M4,TLM
+fp /ch[3]/NRST /ch[3]/CRST.1,/ch[3]/MCU.NRST,/ch[3]/RRST.1
 fp /ch[3]/PA b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[3]/PHA
 fp /ch[3]/PB b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[3]/PHB
 fp /ch[3]/PC b69b6f06-84de-8bc8-96e3-ec2c46e4ba7d|/ch[3]/PHC
@@ -496,9 +593,9 @@ fp /ch[3]/PHC /ch[3]/CBC.2,/ch[3]/DRV.SHC,/ch[3]/PC.1,/ch[3]/QHC.S,/ch[3]/QLC.D
 fp /ch[3]/QHA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[3]/GHA,/ch[3]/PHA,VBAT
 fp /ch[3]/QHB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[3]/GHB,/ch[3]/PHB,VBAT
 fp /ch[3]/QHC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[3]/GHC,/ch[3]/PHC,VBAT
-fp /ch[3]/QLA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[3]/GLA,/ch[3]/PHA,/ch[3]/SRC
-fp /ch[3]/QLB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[3]/GLB,/ch[3]/PHB,/ch[3]/SRC
-fp /ch[3]/QLC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[3]/GLC,/ch[3]/PHC,/ch[3]/SRC
+fp /ch[3]/QLA 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[3]/GLA,/ch[3]/PHA,/ch[3]/SRCA
+fp /ch[3]/QLB 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[3]/GLB,/ch[3]/PHB,/ch[3]/SRCB
+fp /ch[3]/QLC 6deaafc4-af1c-8fda-b927-f0a17ac95ef0|/ch[3]/GLC,/ch[3]/PHC,/ch[3]/SRCC
 fp /ch[3]/RBOOT f0b7343f-4c49-88f7-8a3b-7c46bf087762|/ch[3]/BOOT0,GND
 fp /ch[3]/RGHA 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[3]/GHA,/ch[3]/GHA_D
 fp /ch[3]/RGHB 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[3]/GHB,/ch[3]/GHB_D
@@ -506,51 +603,66 @@ fp /ch[3]/RGHC 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[3]/GHC,/ch[3]/GHC_D
 fp /ch[3]/RGLA 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[3]/GLA,/ch[3]/GLA_D
 fp /ch[3]/RGLB 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[3]/GLB,/ch[3]/GLB_D
 fp /ch[3]/RGLC 33d35937-bef6-83ce-97cb-3e9315f8c7cb|/ch[3]/GLC,/ch[3]/GLC_D
-fp /ch[3]/RIS 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[3]/ISENSE,/ch[3]/SRC
-fp /ch[3]/RSH 4202b363-d628-895a-8d64-be8058e65cb2|/ch[3]/SRC,GND
-fp /ch[3]/SRC /ch[3]/QLA.S,/ch[3]/QLB.S,/ch[3]/QLC.S,/ch[3]/RIS.1,/ch[3]/RSH.1
+fp /ch[3]/RISA 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[3]/ISENSE_A,/ch[3]/SRCA
+fp /ch[3]/RISB 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[3]/ISENSE_B,/ch[3]/SRCB
+fp /ch[3]/RISC 5cad3456-7f51-8bcd-9bf4-5cf482812887|/ch[3]/ISENSE_C,/ch[3]/SRCC
+fp /ch[3]/RRST f0b7343f-4c49-88f7-8a3b-7c46bf087762|+3V3,/ch[3]/NRST
+fp /ch[3]/RSHA d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[3]/SRCA,GND
+fp /ch[3]/RSHB d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[3]/SRCB,GND
+fp /ch[3]/RSHC d96e3f8f-3e2d-8bf0-9a27-e1a0aba96f1c|/ch[3]/SRCC,GND
+fp /ch[3]/SRCA /ch[3]/QLA.S,/ch[3]/RISA.1,/ch[3]/RSHA.1
+fp /ch[3]/SRCB /ch[3]/QLB.S,/ch[3]/RISB.1,/ch[3]/RSHB.1
+fp /ch[3]/SRCC /ch[3]/QLC.S,/ch[3]/RISC.1,/ch[3]/RSHC.1
 fp /ch[3]/VDRV /ch[3]/CDRV.1,/ch[3]/DRV.VDRV
-place channel/CB1 74.93 115.57 270
-place channel/CBA 38.1 72.39 90
-place channel/CBB 25.4 77.47 90
-place channel/CBC 118.11 68.58 90
-place channel/CDRV 105.41 71.12 270
-place channel/CIS 208.28 64.77 270
-place channel/CMCU 153.67 110.49 270
-place channel/CVCC 62.23 115.57 270
-place channel/DRV 68.58 74.93 0
-place channel/MCU 153.67 64.77 0 mirror
-place channel/PA 283.21 30.48 0
-place channel/PB 292.1 30.48 0
-place channel/PC 300.99 30.48 0
-place channel/QHA 248.92 132.08 0
-place channel/QHB 248.92 177.8 0
-place channel/QHC 248.92 223.52 0
-place channel/QLA 248.92 154.94 0
-place channel/QLB 248.92 200.66 0
-place channel/QLC 248.92 246.38 0
-place channel/RBOOT 195.58 59.69 270
-place channel/RGHA 153.67 133.35 0
-place channel/RGHB 153.67 166.37 0
-place channel/RGHC 153.67 199.39 0
-place channel/RGLA 153.67 149.86 0
-place channel/RGLB 153.67 182.88 0
-place channel/RGLC 153.67 215.9 0
-place channel/RIS 220.98 46.99 270
-place channel/RSH 248.92 260.35 270
-place main/C1 127 104.14 270
-place main/C2 139.7 104.14 270
-place main/C3 152.4 104.14 270
-place main/C4 165.1 104.14 270
-place main/H1 212.09 62.23 0
-place main/H2 220.98 62.23 0
-place main/H3 229.87 62.23 0
-place main/H4 238.76 62.23 0
-place main/J1 69.85 68.58 0
-place main/P1 194.31 62.23 0
-place main/P2 203.2 62.23 0
-place main/U1 146.05 77.47 0
-place main/ch[0] 93.98 60.96 0
-place main/ch[1] 93.98 86.36 0
-place main/ch[2] 93.98 111.76 0
-place main/ch[3] 93.98 137.16 0
+place channel/CB1 149.86 214.63 270
+place channel/CBA 109.22 180.34 0
+place channel/CBB 142.24 134.62 0
+place channel/CBC 195.58 264.16 0
+place channel/CDRV 179.07 170.18 270
+place channel/CISA 364.49 193.04 270
+place channel/CISB 377.19 215.9 270
+place channel/CISC 389.89 238.76 270
+place channel/CMCU 425.45 209.55 270
+place channel/CRST 467.36 156.21 270
+place channel/CVCC 134.62 214.63 270
+place channel/DRV 142.24 173.99 0
+place channel/MCU 425.45 163.83 0 mirror
+place channel/PA 105.41 287.02 0
+place channel/PB 114.3 287.02 0
+place channel/PC 123.19 287.02 0
+place channel/QHA 229.87 162.56 0
+place channel/QHB 229.87 195.58 0
+place channel/QHC 229.87 228.6 0
+place channel/QLA 267.97 184.15 0
+place channel/QLB 267.97 207.01 0
+place channel/QLC 267.97 229.87 0
+place channel/RBOOT 480.06 158.75 270
+place channel/RGHA 195.58 163.83 0
+place channel/RGHB 195.58 196.85 0
+place channel/RGHC 195.58 229.87 0
+place channel/RGLA 195.58 180.34 0
+place channel/RGLB 195.58 213.36 0
+place channel/RGLC 195.58 246.38 0
+place channel/RISA 341.63 184.15 0
+place channel/RISB 341.63 207.01 0
+place channel/RISC 341.63 229.87 0
+place channel/RRST 467.36 138.43 90
+place channel/RSHA 299.72 193.04 270
+place channel/RSHB 312.42 215.9 270
+place channel/RSHC 325.12 238.76 270
+place main/C1 52.07 146.05 270
+place main/C2 67.31 146.05 270
+place main/C3 82.55 146.05 270
+place main/C4 97.79 146.05 270
+place main/H1 144.78 104.14 0
+place main/H2 153.67 104.14 0
+place main/H3 162.56 104.14 0
+place main/H4 171.45 104.14 0
+place main/J1 67.31 67.31 0
+place main/P1 127 104.14 0
+place main/P2 135.89 104.14 0
+place main/U1 74.93 119.38 0
+place main/ch[0] 96.52 59.69 0
+place main/ch[1] 144.78 62.23 0
+place main/ch[2] 184.15 64.77 0
+place main/ch[3] 224.79 67.31 0

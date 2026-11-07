@@ -135,17 +135,17 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
     }
 }
 
-/// The Desktop's simulation scene on the camera drone: the ESC's current sense, the drone's
-/// esc.circuit's second simulation. Every measurement carries a spec, so each row reads pass or
-/// fail. With RUNMAT_SIMULATION_SCENE_ESC_OUT set, the report is written there for the Desktop.
+/// The Desktop's simulation scene on the camera drone: the ESC's current sense on all three
+/// phases, the drone's esc.circuit's second simulation. Every measurement carries a spec, so each
+/// row reads pass or fail. With RUNMAT_SIMULATION_SCENE_ESC_OUT set, the report is written there for the Desktop.
 #[test]
 fn the_desktop_simulation_scene_reads_the_esc_current_sense() {
     const ESC: &str = include_str!("../../runmat-cad/wasm/tests/drone/electrical/esc/esc.circuit");
     let files: Files = [("/p/esc.circuit".to_owned(), ESC.to_owned())].into();
     let out = call("design.simulate", json!({ "path": "/p/esc.circuit", "simulation": "current_sense", "maxPoints": 160 }), &files).unwrap();
-    assert_eq!(out["probes"], json!(["ISENSE", "SRC"]));
+    assert_eq!(out["probes"], json!(["ISENSE_A", "ISENSE_B", "ISENSE_C", "SRCA"]));
     let m = |name: &str| out["measures"].as_array().unwrap().iter().find(|m| m["name"] == name).unwrap().clone();
-    for name in ["f3db", "sense", "rise", "settle"] {
+    for name in ["f3db", "sense", "sense_b", "sense_c", "rise", "settle"] {
         assert_eq!(m(name)["pass"], json!(true), "{name}: {}", m(name));
     }
     // Closed form: the corner is 1 / (2 pi R C) = 1 / (2 pi x 1 k x 10 nF) = 15.92 kHz; 20 A
@@ -154,6 +154,12 @@ fn the_desktop_simulation_scene_reads_the_esc_current_sense() {
     assert!((f / 15_915.5 - 1.0).abs() < 0.01, "f3db {f}");
     let v = m("sense")["value"].as_f64().unwrap();
     assert!((v / 10e-3 - 1.0).abs() < 0.01, "sense {v}");
+    // Phase A's 20 A returns half through B and half through C: -10 A through each 0.5 mOhm
+    // shunt reads -5 mV.
+    for name in ["sense_b", "sense_c"] {
+        let v = m(name)["value"].as_f64().unwrap();
+        assert!((v / -5e-3 - 1.0).abs() < 0.01, "{name} {v}");
+    }
     let r = m("rise")["value"].as_f64().unwrap();
     assert!((r / (10e-6 * 9f64.ln()) - 1.0).abs() < 0.03, "rise {r}");
     // Settling to 1 % takes tau ln 100 = 46.05 us from the step (at 20 us, the window start).

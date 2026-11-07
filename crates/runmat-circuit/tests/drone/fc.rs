@@ -68,7 +68,7 @@ const PLACE: &[(&str, f64, f64, f64)] = &[
 pub fn build(dir: &Path) -> Build {
     let start = &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/drone/flight_controller.start.circuit.layout")).unwrap();
     let mut b = Build::new(dir, "flight_controller", start);
-    b.start(4);
+    b.start(Some(4));
     for (path, x, y, r) in PLACE {
         b.place(path, *x, *y, *r);
     }
@@ -84,7 +84,7 @@ pub fn build(dir: &Path) -> Build {
     b.run("board.place-via", serde_json::json!({ "points": [[-4.6, 0.75]], "net": "net:+3V3", "size": "0.2/0.45" }), &[]);
     // The USB pair first, while the way to the MCU's USB pins is open.
     b.run("board.autoroute", serde_json::json!({ "nets": ["net:USB_DP", "net:USB_DN"] }), &[]);
-    b.finish();
+    b.finish(&[]);
     b
 }
 
