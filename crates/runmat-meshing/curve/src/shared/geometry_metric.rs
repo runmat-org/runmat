@@ -20,7 +20,7 @@ use relations::TopologyRelations;
 
 use proximity::{
     derive_face_proximity_contributions, derive_proximity_contributions, ordered_pair,
-    ContactProximityPairs, EdgeWitness, FaceWitness,
+    ContactProximityPairs, EdgeWitness, FaceBoundary, FaceWitness,
 };
 
 const CURVATURE_SAMPLES_PER_EDGE: u32 = 9;
@@ -73,6 +73,7 @@ pub fn derive_curve_geometry_metric(
             }
         }
     }
+    let face_sides = face_material_sides(topology, &relations, &shell_solids)?;
     let mut edge_witnesses = Vec::new();
     let mut face_witnesses =
         BTreeMap::<runmat_geometry_core::PersistentEntityId, FaceWitness>::new();
@@ -176,7 +177,10 @@ pub fn derive_curve_geometry_metric(
                 .entry(face_id.clone())
                 .or_insert_with(|| FaceWitness::new(face_id))
                 .boundaries
-                .push(boundary);
+                .push(FaceBoundary {
+                    edge_id: edge.id.clone(),
+                    samples: boundary,
+                });
         }
         if has_curvature {
             contributions.push(MetricContribution {
@@ -222,6 +226,7 @@ pub fn derive_curve_geometry_metric(
                 .chain(&edge.end_vertex_id)
                 .cloned()
                 .collect(),
+            endpoint_vertices: [edge.start_vertex_id.clone(), edge.end_vertex_id.clone()],
             face_ids: relations
                 .edge_coedges(&edge.id)
                 .map(|coedge| coedge.face_id.clone())
@@ -246,13 +251,27 @@ pub fn derive_curve_geometry_metric(
         * f64::from(request.resolved_cells_across_gap());
     // Exact edge samples locate edge-local sizing; consumers grade it by distance from the
     // edge instead of applying it across each face the edge bounds.
-    let supports = edge_witnesses
+    let mut supports = edge_witnesses
         .iter()
         .map(|witness| runmat_meshing_size::metric::MetricEntitySupport {
             entity_id: witness.edge_id.clone(),
             points_m: witness.points_m.clone(),
         })
         .collect::<Vec<_>>();
+    // A gap that closes at an edge's endpoint is sized from that vertex (see
+    // `closing_endpoint`); the vertex's exact point is its support.
+    let vertex_points = edge_witnesses
+        .iter()
+        .flat_map(|witness| {
+            let first = witness.points_m.first().copied();
+            let last = witness.points_m.last().copied();
+            [
+                witness.endpoint_vertices[0].clone().zip(first),
+                witness.endpoint_vertices[1].clone().zip(last),
+            ]
+        })
+        .flatten()
+        .collect::<BTreeMap<_, _>>();
     for edge in &topology.edges {
         for coedge in relations.edge_coedges(&edge.id) {
             if let Some(witness) = face_witnesses.get_mut(&coedge.face_id) {
@@ -271,6 +290,9 @@ pub fn derive_curve_geometry_metric(
         if let Some(solids) = face_solids.get(face_id) {
             witness.solid_ids = solids.clone();
         }
+        if let Some(sides) = face_sides.get(face_id) {
+            witness.material_sides = sides.clone();
+        }
     }
     contributions.extend(derive_face_proximity_contributions(
         face_witnesses.into_values().collect(),
@@ -279,14 +301,26 @@ pub fn derive_curve_geometry_metric(
         request.resolved_cells_across_face_gap(),
         control,
     )?);
-    contributions.extend(derive_proximity_contributions(
+    let proximity = derive_proximity_contributions(
         edge_witnesses,
         &contact_pairs,
         request.global_metric,
         search_radius_m,
         request.resolved_cells_across_gap(),
+        request.maximum_grading_ratio,
         control,
-    )?);
+    )?;
+    for contribution in &proximity {
+        if let MetricContributionScope::Entity { entity_id } = &contribution.scope {
+            if let Some(point) = vertex_points.get(entity_id) {
+                supports.push(runmat_meshing_size::metric::MetricEntitySupport {
+                    entity_id: entity_id.clone(),
+                    points_m: vec![*point],
+                });
+            }
+        }
+    }
+    contributions.extend(proximity);
     let mut resolved = request
         .intersect_contributions(contributions)
         .map_err(|error| {
@@ -303,6 +337,62 @@ pub fn derive_curve_geometry_metric(
         SharedCurveError::invalid_request("curve geometry metric supports", error.to_string())
     })?;
     Ok(resolved)
+}
+
+/// The side of each solid face away from each solid it bounds, as a sign on the sampled surface
+/// normal (the evaluator's `du x dv` in world space): the face orientation composed with the
+/// shell use and the shell's orientation, and flipped under a mirroring occurrence transform.
+/// Every shell use follows one convention, so the product of two faces' signs for one solid
+/// compares their sides. A shared interface has one entry per solid, with opposite signs.
+fn face_material_sides(
+    topology: &ExactBRepTopology,
+    relations: &TopologyRelations<'_>,
+    shell_solids: &BTreeMap<
+        runmat_geometry_core::PersistentEntityId,
+        runmat_geometry_core::PersistentEntityId,
+    >,
+) -> Result<
+    BTreeMap<
+        runmat_geometry_core::PersistentEntityId,
+        BTreeMap<runmat_geometry_core::PersistentEntityId, f64>,
+    >,
+    SharedCurveError,
+> {
+    use runmat_geometry_core::TopologicalOrientation;
+    let sign = |orientation: TopologicalOrientation| match orientation {
+        TopologicalOrientation::Forward => 1.0,
+        TopologicalOrientation::Reversed => -1.0,
+    };
+    let mut sides = BTreeMap::<_, BTreeMap<_, f64>>::new();
+    for shell in &topology.shells {
+        let Some(solid) = shell_solids.get(&shell.id) else {
+            continue;
+        };
+        for face_use in &shell.face_uses {
+            let face = relations.face(&face_use.entity_id);
+            let transform = relations.world_transform_for(&face.id).map_err(|error| {
+                SharedCurveError::invalid_request(
+                    "face proximity occurrence transform",
+                    error.to_string(),
+                )
+            })?;
+            let [x, y, z] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+                .map(|axis| transform.transform_vector(axis));
+            let cross_yz = cross(y, z);
+            let handedness = (0..3)
+                .map(|axis| x[axis] * cross_yz[axis])
+                .sum::<f64>()
+                .signum();
+            sides.entry(face.id.clone()).or_default().insert(
+                solid.clone(),
+                sign(shell.orientation)
+                    * sign(face_use.orientation)
+                    * sign(face.orientation)
+                    * handedness,
+            );
+        }
+    }
+    Ok(sides)
 }
 
 fn contact_proximity_pairs(

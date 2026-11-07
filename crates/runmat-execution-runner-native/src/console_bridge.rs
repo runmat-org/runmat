@@ -18,6 +18,16 @@ pub fn console_admission_from_subgrant(
     Ok(crate::console_retention::ConsoleRetentionOwner::from_subgrant(budget)?)
 }
 
+/// The console subtree grant a placed worker receives with its console controls:
+/// the quote the native provider sends in its launch envelope. It derives from the
+/// task's reserved memory and fits within the task's reserved artifact bytes.
+pub fn console_source_subgrant(
+    resources: &runmat_execution::resource::ResourceRequest,
+    controls: runmat_execution::console::ConsoleLimits,
+) -> crate::NativeExecutionResult<ConsoleBudget> {
+    crate::console_retention::ConsoleRetentionOwner::reserved_source_subgrant(resources, controls)
+}
+
 /// Root capture plus original child-driver owners. Moving this value transfers
 /// handles and the original root prefix, never a transcript-sized copy.
 pub(crate) struct NativeCapturedConsole {

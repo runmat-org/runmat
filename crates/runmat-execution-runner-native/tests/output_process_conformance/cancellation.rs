@@ -27,8 +27,9 @@ pub(super) async fn blocked_worker() {
     let reference = launch["staged_graph_v10"]
         .as_object()
         .expect("actual parent-issued staged graph reference");
-    assert_eq!(reference.len(), 8);
+    assert_eq!(reference.len(), 10);
     for field in [
+        "fea_parent_admission",
         "artifact_id",
         "stored_digest",
         "stored_length",
@@ -43,6 +44,8 @@ pub(super) async fn blocked_worker() {
             "missing launch reference {field}"
         );
     }
+    // A non-FEA program carries an explicit null FEA grant.
+    assert!(reference["fea_grant"].is_null() && reference.contains_key("fea_grant"));
     let resources: runmat_execution::resource::ResourceRequest =
         serde_json::from_value(reference["resources"].clone()).unwrap();
     resources.validate().unwrap();

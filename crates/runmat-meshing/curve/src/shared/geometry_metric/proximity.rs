@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::{
     GeometryAllocationReservation, GeometryEvaluationControl, PersistentEntityId,
@@ -17,6 +17,8 @@ pub(super) struct EdgeWitness {
     /// tolerance are the same location.
     pub tolerance_m: f64,
     pub endpoint_ids: BTreeSet<PersistentEntityId>,
+    /// Vertices at the first and last witness point, when the edge has them.
+    pub endpoint_vertices: [Option<PersistentEntityId>; 2],
     pub face_ids: BTreeSet<PersistentEntityId>,
     /// Solids bounded by the edge's faces; empty for sheet geometry.
     pub solid_ids: BTreeSet<PersistentEntityId>,
@@ -51,6 +53,7 @@ pub(super) fn derive_proximity_contributions(
     base_metric: MetricTensor3,
     search_radius_m: f64,
     cells_across_gap: u32,
+    maximum_grading_ratio: f64,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<Vec<MetricContribution>, SharedCurveError> {
     if !search_radius_m.is_finite() || search_radius_m <= 0.0 {
@@ -100,6 +103,8 @@ pub(super) fn derive_proximity_contributions(
         SharedCurveError::invalid_request("proximity metric baseline", error.to_string())
     })?;
     let mut metrics = vec![[None; 2]; witnesses.len()];
+    let mut vertex_metrics =
+        std::collections::BTreeMap::<PersistentEntityId, [Option<DirectionalMetricEnvelope>; 2]>::new();
     for left_index in 0..witnesses.len() {
         let left = &witnesses[left_index];
         let left_bounds = bounds(left);
@@ -127,17 +132,24 @@ pub(super) fn derive_proximity_contributions(
             }
             let mut minimum = f64::INFINITY;
             let mut separation_direction = [0.0; 3];
-            for left_point in &left.points_m {
+            // Each sample's own separation from the other edge, to tell a gap that spans the
+            // edge from one that closes only at an endpoint.
+            let mut left_separations = vec![f64::INFINITY; left.points_m.len()];
+            let mut right_separations = vec![f64::INFINITY; right.points_m.len()];
+            for (left_sample, left_point) in left.points_m.iter().enumerate() {
                 // The pair search is quadratic in the sample counts: probe responsiveness per
                 // row so the work between checkpoints is one row, not one whole pair.
                 control
                     .checkpoint()
                     .map_err(|error| geometry_error(&left.edge_id, error))?;
-                for right_point in &right.points_m {
+                for (right_sample, right_point) in right.points_m.iter().enumerate() {
                     control
                         .consume_search_work(1)
                         .map_err(|error| geometry_error(&left.edge_id, error))?;
                     let separation = distance(*left_point, *right_point);
+                    left_separations[left_sample] = left_separations[left_sample].min(separation);
+                    right_separations[right_sample] =
+                        right_separations[right_sample].min(separation);
                     if separation < minimum {
                         minimum = separation;
                         separation_direction =
@@ -163,10 +175,23 @@ pub(super) fn derive_proximity_contributions(
             }
             if minimum < search_radius_m {
                 let source_index = usize::from(source == MetricSourceKind::Contact);
-                for index in [left_index, right_index] {
-                    let current = metrics[index][source_index].get_or_insert(base);
+                let size_m = minimum / f64::from(cells_across_gap);
+                for (index, separations) in
+                    [(left_index, &left_separations), (right_index, &right_separations)]
+                {
+                    let slot = match closing_endpoint(
+                        &witnesses[index],
+                        separations,
+                        size_m,
+                        f64::from(cells_across_gap),
+                        maximum_grading_ratio,
+                    ) {
+                        Some(vertex) => vertex_metrics.entry(vertex).or_insert([None; 2]),
+                        None => &mut metrics[index],
+                    };
+                    let current = slot[source_index].get_or_insert(base);
                     current
-                        .include(separation_direction, minimum / f64::from(cells_across_gap))
+                        .include(separation_direction, size_m)
                         .map_err(|error| {
                             SharedCurveError::invalid_request(
                                 "directional proximity metric",
@@ -179,24 +204,29 @@ pub(super) fn derive_proximity_contributions(
         }
     }
     let mut contributions = Vec::new();
-    for (witness, metrics) in witnesses.into_iter().zip(metrics) {
+    let scoped = witnesses
+        .iter()
+        .map(|witness| witness.edge_id.clone())
+        .zip(metrics)
+        .chain(vertex_metrics);
+    for (entity_id, metrics) in scoped {
         for (metric, source) in metrics
             .into_iter()
             .zip([MetricSourceKind::Proximity, MetricSourceKind::Contact])
         {
             if let Some(metric) = metric {
+                let metric = metric.metric().map_err(|error| {
+                    SharedCurveError::invalid_request(
+                        "proximity metric envelope",
+                        format!("{error} on {entity_id:?}"),
+                    )
+                })?;
                 contributions.push(MetricContribution {
                     source,
                     scope: MetricContributionScope::Entity {
-                        entity_id: witness.edge_id.clone(),
+                        entity_id: entity_id.clone(),
                     },
-                    metric: metric.metric().map_err(|error| {
-                        SharedCurveError::invalid_request(
-                            "proximity metric envelope",
-                            error.to_string(),
-                        )
-                        .for_edge(&witness.edge_id)
-                    })?,
+                    metric,
                 });
             }
         }
@@ -215,9 +245,19 @@ pub(super) struct FaceWitness {
     pub vertex_ids: BTreeSet<PersistentEntityId>,
     /// Solids the face bounds (both sides of a shared face); empty for sheet geometry.
     pub solid_ids: BTreeSet<PersistentEntityId>,
+    /// Per solid the face bounds, the sign that turns each sampled normal away from that solid,
+    /// in a convention shared by every shell use. Empty for sheet geometry.
+    pub material_sides: BTreeMap<PersistentEntityId, f64>,
     /// One polyline per bounding edge: world-space points where that edge lands on the face, in
     /// edge parameter order, with the unit surface normal there.
-    pub boundaries: Vec<Vec<([f64; 3], [f64; 3])>>,
+    pub boundaries: Vec<FaceBoundary>,
+}
+
+/// The samples of one bounding edge on a face.
+#[derive(Clone, Debug)]
+pub(super) struct FaceBoundary {
+    pub edge_id: PersistentEntityId,
+    pub samples: Vec<([f64; 3], [f64; 3])>,
 }
 
 impl FaceWitness {
@@ -227,6 +267,7 @@ impl FaceWitness {
             tolerance_m: 0.0,
             vertex_ids: BTreeSet::new(),
             solid_ids: BTreeSet::new(),
+            material_sides: BTreeMap::new(),
             boundaries: Vec::new(),
         }
     }
@@ -238,18 +279,47 @@ impl FaceWitness {
 /// through a blend or a chamfer separate obliquely and are not a gap.
 const FACING_COSINE: f64 = 0.9;
 
-/// Gaps between facing surfaces: each pair of faces that share no vertex and whose boundaries
-/// face each other across a separation `g` below the search radius receives an isotropic size
-/// `g / cells_across_gap` over both faces, so the surface mesh and every volume cell touching
-/// either face resolve the gap with that many cells (the volume grades from there). Edges alone
-/// measure the gap only along the faces' boundaries, and only in the direction across it; this
-/// is the same proximity source applied to the surfaces between them, in every direction. The
-/// separation runs from each boundary sample of one face to the closest point of the other
-/// face's boundary polylines, so the two faces' edges need not be sampled at matching points:
-/// the top and bottom faces of a thin layer meet its side faces along the same outline, and each
-/// sample on one outline finds the point straight across on the other. Contact pairs, coincident
-/// faces, and faces of separate bodies with no region in common (the space between them is
-/// unmeshed) have no gap to resolve.
+/// Two faces of one solid bound a gap only when their sides oppose: across a thin layer of
+/// material both face away from it, and across a slot or a tube wall's void both face into it.
+/// Two faces whose sides point the same way (the top of a beam and the top of a pad 73 um above
+/// it at a step) have another boundary between them, and the separation runs along that
+/// boundary instead of across a gap. Faces with no solid in common keep the facing test alone.
+fn sides_oppose(
+    left: &BTreeMap<PersistentEntityId, f64>,
+    left_normal: &[f64; 3],
+    right: &BTreeMap<PersistentEntityId, f64>,
+    right_normal: &[f64; 3],
+) -> bool {
+    let normals = (0..3)
+        .map(|axis| left_normal[axis] * right_normal[axis])
+        .sum::<f64>();
+    let mut shared = left
+        .iter()
+        .filter_map(|(solid, left)| right.get(solid).map(|right| left * right))
+        .peekable();
+    shared.peek().is_none() || shared.any(|sides| sides * normals < 0.0)
+}
+
+/// Gaps between facing surfaces: each pair of faces that share no vertex, whose sides oppose
+/// (see `sides_oppose`), and whose boundaries face each other across a separation `g` below the
+/// search radius is resolved with `cells_across_gap` cells across `g`. The separation runs from
+/// each boundary sample of one face to the closest point of the other face's boundary
+/// polylines, so the two faces' edges need not be sampled at matching points: the top and
+/// bottom faces of a thin layer meet its side faces along the same outline, and each sample on
+/// one outline finds the point straight across on the other.
+///
+/// Where the gap is measured decides where it is sized. When every bounding edge of a face
+/// faces another face across a gap (the two sides of a thin wall or layer, the inner and outer
+/// surfaces of a tube, the walls of a slot), the face lies across the gap everywhere, and it
+/// receives the isotropic size `g / cells_across_gap` over its whole area; the volume grades
+/// from there. When only some of its edges do (a beam whose underside passes 0.3 mm above a
+/// hinge lug along one trim edge), the gap exists only along those edges, and each of them
+/// receives the size of its own gap as an edge-local source: consumers grade it by distance from
+/// the edge, as for any other edge-local sizing. Sizing the whole face there would refine an
+/// 80 mm beam to the 0.3 mm of one corner.
+///
+/// Contact pairs, coincident faces, and faces of separate bodies with no region in common (the
+/// space between them is unmeshed) have no gap to resolve.
 pub(super) fn derive_face_proximity_contributions(
     mut witnesses: Vec<FaceWitness>,
     contact_pairs: &ContactProximityPairs,
@@ -263,11 +333,20 @@ pub(super) fn derive_face_proximity_contributions(
             "must be finite and greater than zero",
         ));
     }
-    witnesses.retain(|witness| witness.boundaries.iter().any(|boundary| !boundary.is_empty()));
+    witnesses.retain(|witness| {
+        witness
+            .boundaries
+            .iter()
+            .any(|boundary| !boundary.samples.is_empty())
+    });
     let face_bounds = |witness: &FaceWitness| {
         let mut minimum = [f64::INFINITY; 3];
         let mut maximum = [f64::NEG_INFINITY; 3];
-        for (point, _) in witness.boundaries.iter().flatten() {
+        for (point, _) in witness
+            .boundaries
+            .iter()
+            .flat_map(|boundary| &boundary.samples)
+        {
             for axis in 0..3 {
                 minimum[axis] = minimum[axis].min(point[axis]);
                 maximum[axis] = maximum[axis].max(point[axis]);
@@ -280,7 +359,12 @@ pub(super) fn derive_face_proximity_contributions(
             .total_cmp(&face_bounds(right).0[0])
             .then_with(|| left.face_id.cmp(&right.face_id))
     });
-    let mut gaps = vec![f64::INFINITY; witnesses.len()];
+    // Per face, per bounding edge: the narrowest gap that edge's samples face, or that a sample of
+    // the other face finds on it.
+    let mut gaps = witnesses
+        .iter()
+        .map(|witness| vec![f64::INFINITY; witness.boundaries.len()])
+        .collect::<Vec<_>>();
     for left_index in 0..witnesses.len() {
         let left = &witnesses[left_index];
         let left_bounds = face_bounds(left);
@@ -308,81 +392,120 @@ pub(super) fn derive_face_proximity_contributions(
                         .chain(&right_bounds.1)
                         .fold(0.0_f64, |largest, value| largest.max(value.abs())),
             );
-            let mut minimum = f64::INFINITY;
-            for (points, polylines) in [(left, right), (right, left)] {
-                for (point, point_normal) in points.boundaries.iter().flatten() {
-                    control.checkpoint().map_err(|error| {
-                        SharedCurveError::new(
-                            SharedCurveErrorKind::GeometryEvaluation(error.kind),
-                            "surface proximity search",
-                            error.reason,
-                        )
-                    })?;
-                    for (start, end) in polylines.boundaries.iter().flat_map(|boundary| {
-                        // A one-sample boundary is a point; otherwise consecutive samples.
-                        boundary
-                            .iter()
-                            .zip(boundary.iter().skip(1))
-                            .chain((boundary.len() == 1).then(|| (&boundary[0], &boundary[0])))
-                    }) {
-                        control.consume_search_work(1).map_err(|error| {
-                            SharedCurveError::new(
-                                SharedCurveErrorKind::GeometryEvaluation(error.kind),
-                                "surface proximity search",
-                                error.reason,
-                            )
-                        })?;
-                        let (closest, closest_normal) = closest_boundary_point(*point, start, end);
-                        let separation = distance(*point, closest);
-                        if separation >= minimum || separation >= search_radius_m {
-                            continue;
+            let mut found = Vec::new();
+            for (points, polylines, points_index, polylines_index) in [
+                (left, right, left_index, right_index),
+                (right, left, right_index, left_index),
+            ] {
+                for (point_boundary, boundary) in points.boundaries.iter().enumerate() {
+                    for (point, point_normal) in &boundary.samples {
+                        control.checkpoint().map_err(search_error)?;
+                        let mut nearest = f64::INFINITY;
+                        let mut nearest_boundary = 0;
+                        for (other_boundary, other) in polylines.boundaries.iter().enumerate() {
+                            let samples = &other.samples;
+                            // A one-sample boundary is a point; otherwise consecutive samples.
+                            for (start, end) in samples
+                                .iter()
+                                .zip(samples.iter().skip(1))
+                                .chain((samples.len() == 1).then(|| (&samples[0], &samples[0])))
+                            {
+                                control.consume_search_work(1).map_err(search_error)?;
+                                let (closest, closest_normal) =
+                                    closest_boundary_point(*point, start, end);
+                                let separation = distance(*point, closest);
+                                if separation >= nearest || separation >= search_radius_m {
+                                    continue;
+                                }
+                                if separation <= tolerance {
+                                    // Touching faces (separate bodies seated together) have no
+                                    // gap here; edge proximity reports coincidence defects within
+                                    // one body.
+                                    continue;
+                                }
+                                let direction: [f64; 3] = std::array::from_fn(|axis| {
+                                    (closest[axis] - point[axis]) / separation
+                                });
+                                let facing = |normal: &[f64; 3]| {
+                                    (0..3)
+                                        .map(|axis| normal[axis] * direction[axis])
+                                        .sum::<f64>()
+                                        .abs()
+                                        >= FACING_COSINE
+                                };
+                                if facing(point_normal)
+                                    && facing(&closest_normal)
+                                    && sides_oppose(
+                                        &points.material_sides,
+                                        point_normal,
+                                        &polylines.material_sides,
+                                        &closest_normal,
+                                    )
+                                {
+                                    nearest = separation;
+                                    nearest_boundary = other_boundary;
+                                }
+                            }
                         }
-                        if separation <= tolerance {
-                            // Touching faces (separate bodies seated together) have no gap
-                            // here; edge proximity reports coincidence defects within one body.
-                            continue;
-                        }
-                        let direction: [f64; 3] = std::array::from_fn(|axis| {
-                            (closest[axis] - point[axis]) / separation
-                        });
-                        let facing = |normal: &[f64; 3]| {
-                            (0..3)
-                                .map(|axis| normal[axis] * direction[axis])
-                                .sum::<f64>()
-                                .abs()
-                                >= FACING_COSINE
-                        };
-                        if facing(point_normal) && facing(&closest_normal) {
-                            minimum = separation;
+                        if nearest.is_finite() {
+                            found.push((points_index, point_boundary, nearest));
+                            found.push((polylines_index, nearest_boundary, nearest));
                         }
                     }
                 }
             }
-            if minimum.is_finite() {
-                gaps[left_index] = gaps[left_index].min(minimum);
-                gaps[right_index] = gaps[right_index].min(minimum);
+            for (face, boundary, gap) in found {
+                gaps[face][boundary] = gaps[face][boundary].min(gap);
             }
         }
     }
     let mut contributions = Vec::new();
-    for (witness, gap) in witnesses.into_iter().zip(gaps) {
-        if !gap.is_finite() {
+    let size = |gap: f64| {
+        MetricTensor3::isotropic_length_m(gap / f64::from(cells_across_gap)).map_err(|error| {
+            SharedCurveError::invalid_request("surface proximity metric", error.to_string())
+        })
+    };
+    for (witness, gaps) in witnesses.into_iter().zip(gaps) {
+        let narrowest = gaps.iter().copied().fold(f64::INFINITY, f64::min);
+        if !narrowest.is_finite() {
             continue;
         }
-        let metric = MetricTensor3::isotropic_length_m(gap / f64::from(cells_across_gap)).map_err(
-            |error| {
-                SharedCurveError::invalid_request("surface proximity metric", error.to_string())
-            },
-        )?;
-        contributions.push(MetricContribution {
-            source: MetricSourceKind::Proximity,
-            scope: MetricContributionScope::Entity {
-                entity_id: witness.face_id,
-            },
-            metric,
-        });
+        let across_whole_face = witness
+            .boundaries
+            .iter()
+            .zip(&gaps)
+            .all(|(boundary, gap)| boundary.samples.is_empty() || gap.is_finite());
+        if across_whole_face {
+            contributions.push(MetricContribution {
+                source: MetricSourceKind::Proximity,
+                scope: MetricContributionScope::Entity {
+                    entity_id: witness.face_id,
+                },
+                metric: size(narrowest)?,
+            });
+            continue;
+        }
+        for (boundary, gap) in witness.boundaries.into_iter().zip(gaps) {
+            if gap.is_finite() {
+                contributions.push(MetricContribution {
+                    source: MetricSourceKind::Proximity,
+                    scope: MetricContributionScope::Entity {
+                        entity_id: boundary.edge_id,
+                    },
+                    metric: size(gap)?,
+                });
+            }
+        }
     }
     Ok(contributions)
+}
+
+fn search_error(error: runmat_geometry_core::GeometryEvaluationError) -> SharedCurveError {
+    SharedCurveError::new(
+        SharedCurveErrorKind::GeometryEvaluation(error.kind),
+        "surface proximity search",
+        error.reason,
+    )
 }
 
 /// The point of the boundary piece `start`-`end` closest to `point`, with the surface normal of
@@ -411,6 +534,49 @@ fn closest_boundary_point(
 
 /// Separations at or below this are one location: the edges' combined geometric tolerance,
 /// and never less than the roundoff of their coordinates.
+/// The vertex at which a gap closes, when sizing from that vertex alone covers the whole edge.
+///
+/// `separations` holds each witness sample's distance to the other edge. Sizing scoped to the
+/// edge applies `size_m` along all of it, so a long edge that approaches another only at one
+/// end would be refined over its whole length. When the closest sample is an endpoint with a
+/// vertex, and every sample's own gap size (`separation / cells`) is at least the size graded
+/// from that vertex (`size_m + (ratio - 1) * max(0, d - size_m)`, the rule every consumer
+/// applies to a local source), the vertex carries the sizing instead. Otherwise the gap spans
+/// the edge and the edge keeps it.
+fn closing_endpoint(
+    witness: &EdgeWitness,
+    separations: &[f64],
+    size_m: f64,
+    cells: f64,
+    maximum_grading_ratio: f64,
+) -> Option<PersistentEntityId> {
+    let slope = maximum_grading_ratio - 1.0;
+    if !(slope > 0.0) || separations.len() < 2 || !(size_m > 0.0) {
+        return None;
+    }
+    let closest = separations
+        .iter()
+        .enumerate()
+        .min_by(|left, right| left.1.total_cmp(right.1))?
+        .0;
+    let end = separations.len() - 1;
+    let vertex = match closest {
+        0 => witness.endpoint_vertices[0].clone()?,
+        index if index == end => witness.endpoint_vertices[1].clone()?,
+        _ => return None,
+    };
+    let anchor = witness.points_m[closest];
+    let covered = witness
+        .points_m
+        .iter()
+        .zip(separations)
+        .all(|(point, separation)| {
+            let graded = size_m + slope * (distance(*point, anchor) - size_m).max(0.0);
+            separation / cells >= graded
+        });
+    covered.then_some(vertex)
+}
+
 fn coincidence_tolerance_m(left: &EdgeWitness, right: &EdgeWitness) -> f64 {
     let magnitude = left
         .points_m
@@ -517,7 +683,14 @@ mod tests {
             .map(|vertex| id(PersistentEntityKind::Vertex, *vertex))
             .collect();
         // Each sample its own boundary: the original pointwise witnesses.
-        witness.boundaries = samples.into_iter().map(|sample| vec![sample]).collect();
+        witness.boundaries = samples
+            .into_iter()
+            .enumerate()
+            .map(|(index, sample)| FaceBoundary {
+                edge_id: edge_id(seed, index),
+                samples: vec![sample],
+            })
+            .collect();
         witness
     }
 
@@ -584,15 +757,18 @@ mod tests {
     /// as their size; a face beside the layer and inclined to it does not.
     #[test]
     fn thin_layer_faces_with_unmatched_outline_samples_face_each_other() {
-        let outline = |z: f64, xs: &[f64], normal: [f64; 3]| {
-            vec![xs.iter().map(|x| ([*x, 0.0, z], normal)).collect::<Vec<_>>()]
+        let outline = |face: u8, z: f64, xs: &[f64], normal: [f64; 3]| {
+            vec![FaceBoundary {
+                edge_id: edge_id(face, 0),
+                samples: xs.iter().map(|x| ([*x, 0.0, z], normal)).collect(),
+            }]
         };
         let mut top = face(1, &[1, 2], Vec::new());
-        top.boundaries = outline(0.003, &[0.03, 0.04, 0.05], [0.0, 0.0, 1.0]);
+        top.boundaries = outline(1, 0.003, &[0.03, 0.04, 0.05], [0.0, 0.0, 1.0]);
         let mut bottom = face(2, &[3, 4], Vec::new());
-        bottom.boundaries = outline(0.0, &[-0.1, 0.0, 0.1, 0.2], [0.0, 0.0, -1.0]);
+        bottom.boundaries = outline(2, 0.0, &[-0.1, 0.0, 0.1, 0.2], [0.0, 0.0, -1.0]);
         let mut inclined = face(3, &[5, 6], Vec::new());
-        inclined.boundaries = outline(0.006, &[0.3, 0.31], [0.0, 0.6, 0.8]);
+        inclined.boundaries = outline(3, 0.006, &[0.3, 0.31], [0.0, 0.6, 0.8]);
         let layer = BTreeSet::from([id(PersistentEntityKind::Solid, 30)]);
         for witness in [&mut top, &mut bottom, &mut inclined] {
             witness.solid_ids = layer.clone();
@@ -628,6 +804,110 @@ mod tests {
         }
     }
 
+    /// The drone arm's beam top meets its pad 73 um below the pad's top face. Both faces' solid
+    /// lies below them, so their sides point the same way: the 73 um is a step, not a layer, and
+    /// neither face is sized from it. A thin layer whose bottom face is parameterized with its
+    /// normal up (the side sign turns it down) still gets one layer across.
+    #[test]
+    fn faces_whose_sides_point_the_same_way_across_a_step_are_not_a_gap() {
+        let outline = |face: u8, z: f64, xs: &[f64], normal: [f64; 3]| {
+            vec![FaceBoundary {
+                edge_id: edge_id(face, 0),
+                samples: xs.iter().map(|x| ([*x, 0.0, z], normal)).collect(),
+            }]
+        };
+        let solid = BTreeSet::from([id(PersistentEntityKind::Solid, 30)]);
+        let arm = id(PersistentEntityKind::Solid, 30);
+        let pod = id(PersistentEntityKind::Solid, 31);
+        let sized_with = |upper_sides: BTreeMap<PersistentEntityId, f64>,
+                          lower_normal: [f64; 3],
+                          lower_side: f64| {
+            let mut upper = face(1, &[1, 2], Vec::new());
+            upper.boundaries = outline(1, 73.0e-6, &[0.0, 0.004, 0.008], [0.0, 0.0, 1.0]);
+            upper.solid_ids = upper_sides.keys().cloned().collect();
+            upper.material_sides = upper_sides;
+            let mut lower = face(2, &[3, 4], Vec::new());
+            lower.boundaries = outline(2, 0.0, &[-0.08, 0.0, 0.008], lower_normal);
+            lower.material_sides = BTreeMap::from([(arm.clone(), lower_side)]);
+            lower.solid_ids = solid.clone();
+            derive_face_proximity_contributions(
+                vec![upper, lower],
+                &ContactProximityPairs::default(),
+                0.016,
+                1,
+                &Control,
+            )
+            .unwrap()
+        };
+        let sized = |lower_normal: [f64; 3], lower_side: f64| {
+            sized_with(BTreeMap::from([(arm.clone(), 1.0)]), lower_normal, lower_side)
+        };
+        // Step: both sides up.
+        assert!(sized([0.0, 0.0, 1.0], 1.0).is_empty());
+        // The pad's top is the interface the motor pod sits on: away from the arm it points up,
+        // away from the pod down. Against the beam (an arm face) only the arm's side counts.
+        let interface = BTreeMap::from([(arm.clone(), 1.0), (pod.clone(), -1.0)]);
+        assert!(sized_with(interface, [0.0, 0.0, 1.0], 1.0).is_empty());
+        assert!(sized([0.0, 0.0, -1.0], -1.0).is_empty());
+        // Layer: the lower face's side points down, whichever way its parameterization runs.
+        let layer = MetricTensor3::isotropic_length_m(73.0e-6).unwrap();
+        for (normal, side) in [([0.0, 0.0, -1.0], 1.0), ([0.0, 0.0, 1.0], -1.0)] {
+            let contributions = sized(normal, side);
+            assert_eq!(contributions.len(), 2);
+            assert!(contributions
+                .iter()
+                .all(|contribution| contribution.metric == layer));
+        }
+    }
+
+    /// The beam's underside passes 0.3 mm above a hinge lug's top along one trim edge, and its
+    /// other edges face nothing. The lug's only edge faces the beam, so the lug lies across the
+    /// gap and is sized as a whole; the beam is sized only from the trim edge that faces the
+    /// lug, graded from there by its consumers.
+    #[test]
+    fn a_gap_along_some_edges_of_a_face_sizes_those_edges() {
+        let arm = BTreeMap::from([(id(PersistentEntityKind::Solid, 30), 1.0)]);
+        let line = |face: u8, index: usize, z: f64, xs: &[f64], normal: [f64; 3]| FaceBoundary {
+            edge_id: edge_id(face, index),
+            samples: xs.iter().map(|x| ([*x, 0.0, z], normal)).collect(),
+        };
+        let mut beam = face(1, &[1, 2, 3], Vec::new());
+        beam.boundaries = vec![
+            line(1, 0, 0.0003, &[0.0, 0.002, 0.004], [0.0, 0.0, -1.0]),
+            line(1, 1, 0.0003, &[0.05, 0.06], [0.0, 0.0, -1.0]),
+        ];
+        beam.material_sides = arm.clone();
+        let mut lug = face(2, &[4, 5], Vec::new());
+        lug.boundaries = vec![line(2, 0, 0.0, &[0.0, 0.002, 0.004], [0.0, 0.0, 1.0])];
+        lug.material_sides = arm;
+        for witness in [&mut beam, &mut lug] {
+            witness.solid_ids = BTreeSet::from([id(PersistentEntityKind::Solid, 30)]);
+        }
+        let contributions = derive_face_proximity_contributions(
+            vec![beam, lug],
+            &ContactProximityPairs::default(),
+            0.016,
+            1,
+            &Control,
+        )
+        .unwrap();
+        let size = MetricTensor3::isotropic_length_m(0.0003).unwrap();
+        let scopes = contributions
+            .iter()
+            .map(|contribution| {
+                assert_eq!(contribution.metric, size);
+                match &contribution.scope {
+                    MetricContributionScope::Entity { entity_id } => entity_id.clone(),
+                    other => panic!("unexpected scope {other:?}"),
+                }
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            scopes,
+            BTreeSet::from([edge_id(1, 0), id(PersistentEntityKind::Face, 2)])
+        );
+    }
+
     #[test]
     fn unrequested_cells_across_a_face_gap_are_one_layer() {
         let request = runmat_meshing_core::MetricFieldRequest {
@@ -656,6 +936,7 @@ mod tests {
                 MetricTensor3::isotropic_length_m(1.0).unwrap(),
                 1.0,
                 cells,
+                1.3,
                 &Control,
             )
             .unwrap();
@@ -679,6 +960,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             2,
+            1.3,
             &Control,
         )
         .unwrap();
@@ -697,6 +979,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             2,
+            1.3,
             &ExhaustedControl,
         )
         .unwrap_err();
@@ -724,6 +1007,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             2,
+            1.3,
             &control,
         )
         .unwrap();
@@ -777,6 +1061,7 @@ mod tests {
                 MetricTensor3::isotropic_length_m(1.0).unwrap(),
                 1.0,
                 2,
+                1.3,
                 &Control,
             )
         };
@@ -818,6 +1103,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             2,
+            1.3,
             &Control,
         )
         .unwrap();
@@ -846,6 +1132,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             2,
+            1.3,
             &Control,
         )
         .unwrap();
@@ -886,6 +1173,7 @@ mod tests {
                 base,
                 0.02,
                 2,
+                1.3,
                 &Control,
             )
             .unwrap();
@@ -952,6 +1240,7 @@ mod tests {
             MetricTensor3::isotropic_length_m(0.012).unwrap(),
             0.024,
             2,
+            1.3,
             &Control,
         )
         .unwrap();
@@ -1012,15 +1301,94 @@ mod tests {
         assert_eq!(proximity_sizing(facing_pair(0.002, &[], &[22])).len(), 4);
     }
 
+    /// A long edge that approaches another only at its end is sized from its end vertex, so
+    /// the gap does not refine the rest of its length. Parallel edges keep edge scope.
+    #[test]
+    fn a_gap_closing_at_an_endpoint_is_sized_from_that_vertex() {
+        let polyline = |seed: u8, points: Vec<[f64; 3]>| EdgeWitness {
+            edge_id: id(PersistentEntityKind::Edge, seed),
+            endpoint_vertices: [
+                Some(id(PersistentEntityKind::Vertex, 2 * seed)),
+                Some(id(PersistentEntityKind::Vertex, 2 * seed + 1)),
+            ],
+            endpoint_ids: BTreeSet::from([
+                id(PersistentEntityKind::Vertex, 2 * seed),
+                id(PersistentEntityKind::Vertex, 2 * seed + 1),
+            ]),
+            points_m: points,
+            ..witness(seed, 0.0)
+        };
+        let gap = 7.0e-5;
+        // A 75 mm edge running away from a short edge that sits `gap` above its start.
+        let long = polyline(
+            10,
+            (0..9).map(|i| [0.075 * f64::from(i) / 8.0, 0.0, 0.0]).collect(),
+        );
+        let short = polyline(
+            20,
+            (0..9)
+                .map(|i| [0.0, -0.009 + 0.018 * f64::from(i) / 8.0, gap])
+                .collect(),
+        );
+        let scopes = |witnesses: Vec<EdgeWitness>| {
+            derive_proximity_contributions(
+                witnesses,
+                &ContactProximityPairs::default(),
+                MetricTensor3::isotropic_length_m(3.0e-3).unwrap(),
+                6.0e-3,
+                2,
+                1.3,
+                &Control,
+            )
+            .unwrap()
+            .into_iter()
+            .map(|contribution| match contribution.scope {
+                MetricContributionScope::Entity { entity_id } => entity_id,
+                MetricContributionScope::Region { .. } => panic!("entity scope"),
+            })
+            .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(
+            scopes(vec![long.clone(), short.clone()]),
+            BTreeSet::from([
+                id(PersistentEntityKind::Vertex, 20),
+                id(PersistentEntityKind::Edge, 20),
+            ])
+        );
+        // Shifted parallel to the long edge, the short edge's gap spans the long edge.
+        let parallel = polyline(
+            20,
+            (0..9)
+                .map(|i| [0.075 * f64::from(i) / 8.0, 0.0, gap])
+                .collect(),
+        );
+        assert_eq!(
+            scopes(vec![long, parallel]),
+            BTreeSet::from([
+                id(PersistentEntityKind::Edge, 10),
+                id(PersistentEntityKind::Edge, 20),
+            ])
+        );
+    }
+
     fn witness(seed: u8, x: f64) -> EdgeWitness {
         EdgeWitness {
             edge_id: id(PersistentEntityKind::Edge, seed),
             tolerance_m: 0.0,
             endpoint_ids: BTreeSet::from([id(PersistentEntityKind::Vertex, seed)]),
+            endpoint_vertices: [None, None],
             face_ids: BTreeSet::new(),
             solid_ids: BTreeSet::new(),
             points_m: vec![[x, 0.0, 0.0]],
         }
+    }
+
+    fn edge_id(face: u8, index: usize) -> PersistentEntityId {
+        PersistentEntityId::new(
+            PersistentEntityKind::Edge,
+            format!("face-{face}-edge-{index}"),
+            Vec::new(),
+        )
     }
 
     fn id(kind: PersistentEntityKind, seed: u8) -> PersistentEntityId {
