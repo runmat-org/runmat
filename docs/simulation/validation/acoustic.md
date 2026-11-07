@@ -22,7 +22,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Quadratic: error ratio above 2.5 per refinement and below 4e-3 at 4 cells, residuals at most 1e-8, mass orthogonality below 1e-8. Linear: error ratio above 3 from 2 to 4 cells. Command line: uniform mode below 1e-3 Hz and the three axial modes within 2 % of 171.5 Hz.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Open–open duct modes
 
@@ -34,7 +34,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Relative 4e-3; released-node pressure exactly zero.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ## Harmonic
 
@@ -48,7 +48,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Relative 1e-3 (0.1 %).
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Transmission loss of a plane layer
 
@@ -60,7 +60,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Below 0.05 dB on the finer mesh at every frequency, and no larger than on the coarse mesh.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Plane wave across a two-fluid interface
 
@@ -72,7 +72,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Kernel: power residual below 1e-8; finest-mesh pressure error below 0.004 of the incident amplitude and velocity error below 0.01. Public example: within 0.1 dB of 1.938 dB.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Lossy duct standing wave
 
@@ -84,7 +84,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Pressure error ratio above 3 per refinement and below 0.004 on the finest mesh; power error below 1e-9.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Duct with a complex impedance termination
 
@@ -96,7 +96,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Pressure error ratio above 3 per refinement and below 0.004 on the finest mesh; power error below 1e-9.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Plane traveling wave
 
@@ -108,7 +108,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Pressure error below 0.004; velocity RMS error below 0.01; intensity and energy RMS errors below 0.005; residual below 1e-10 and power error below 1e-8.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Forced axial cavity near resonance
 
@@ -120,7 +120,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Finest-mesh pressure error below 0.10; energy RMS error below 0.15; power error below 1e-8.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Incident wave on an impedance boundary
 
@@ -132,7 +132,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Pressure error below 0.004 of the incident amplitude; velocity below 0.01; intensity terms below 0.005; power error below 1e-8.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Plane wave across periodic boundaries
 
@@ -144,7 +144,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Pressure error below 0.004; velocity below 0.01; intensity below 0.005.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Plane-wave radiation boundary
 
@@ -156,7 +156,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Power within 0.005; velocity error below 0.01; residual below 1e-10 and power error below 1e-8.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Volume-velocity source
 
@@ -168,4 +168,4 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Pressure error below 0.004·√1.16/A; velocity below 0.01/A; power error below 1e-8.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.

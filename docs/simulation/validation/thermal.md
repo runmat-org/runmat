@@ -22,7 +22,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Temperature within 1e-7 K; flux within 1e-6 W/m²; reordering the materials changes the result by less than 1e-10.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Bar between two fixed temperatures
 
@@ -34,7 +34,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Heat flow within relative 1e-8 of $kA\,\Delta T/L$; the net reaction cancels to 1e-8 of it.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Tet10 conduction patch test
 
@@ -46,7 +46,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Relative 1e-12.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Radiating bar
 
@@ -58,7 +58,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Nodal temperature within relative 1e-8 of the closed form; applied power equals radiated power.
 
-**Result.** RunMat gives 416.6790 K at the radiating end and 438.9013 K at the heated end; the closed form gives the same values to 1e-12. 10 W applied, 10 W radiated.
+**Result.** Not yet in the evidence catalog; run `evidence_report`. RunMat gives 416.6790 K at the radiating end and 438.9013 K at the heated end; the closed form gives the same values to 1e-12. 10 W applied, 10 W radiated.
 
 ### Slab radiating from a fixed hot face
 
@@ -70,7 +70,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Temperature, gradient and flux within relative 1e-8; radiated power equals the prescribed-face power within 1e-8.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ## Transient
 
@@ -84,7 +84,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Discrete solution within 1e-8; error equals the backward-Euler term $B\,t_f\,\Delta t$ within 1e-8 and falls at first order (ratio below 0.56 per halving); storage rate equals applied power within 1e-8; energy residual below 1e-10.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Manufactured radiative cooling
 
@@ -96,4 +96,4 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Every error falls by more than 1.8× per halving of the step (first order); power closes.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.

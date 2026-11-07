@@ -61,7 +61,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Absolute 1e-12 on strain and 1e-11 on stress and energy; relative 1e-12 on nodal forces and energy.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Tet10 nodal stress recovery under a linear stress field
 
@@ -73,7 +73,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Absolute error at most 1e-12 × (1 + |σ|) per component.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Shell membrane patch under biaxial plane stress
 
@@ -85,7 +85,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Relative 1e-11 on resultants; bending and shear resultants below 1e-12.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Simply supported plate under sinusoidal load
 
@@ -97,7 +97,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** The center displacement approaches the Navier value with refinement; the finest-mesh error is below 8 %.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ## Modal
 
@@ -111,7 +111,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Frequency error falls by more than 3× (Tet4) or 6× (Tet10) per refinement; finest-mesh error below 2e-3 (Tet4) and 2e-4 (Tet10).
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ## Harmonic
 
@@ -125,7 +125,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Displacement and reaction errors fall by more than 2.5× per refinement and are below 2e-2 on the finest mesh; mean input power below 1e-9.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ## Transient
 
@@ -139,7 +139,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Error ratio above 3.8 per halving of the time step (second order) on both paths; finest direct Newmark error below 2e-3; modal relative residuals at most 2e-15.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Rod under affine forcing in time
 
@@ -151,7 +151,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Spatially exact quantities below 1e-12; time-discretization errors fall by more than 3× per halving and are below 2e-4 at 80 intervals.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ## Buckling
 
@@ -165,7 +165,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** First load factor within 1 % of $P_{cr}$/250 kN; eigenpairs converged to a relative tolerance of 1e-8.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ## Response spectrum
 
@@ -179,7 +179,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Relative 2e-13.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ## Nonlinear (plasticity)
 
@@ -193,7 +193,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Axial stress within 2e-10 of the closed form.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Manufactured fully yielded cube
 
@@ -205,4 +205,4 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Tet10 in one increment: displacement, stress, hardening variable and energy errors below 1e-7 under the Keast15, Duffy5 and Duffy8 rules. In eight increments the yield front crosses elements mid-step; that path error falls at order 1.5 or better with refinement. Tet4: every quantity refines.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.

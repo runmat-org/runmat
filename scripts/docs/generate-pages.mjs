@@ -73,7 +73,7 @@ function resultLine(evidence) {
         else parts.push(`Passed (${count}) in the evidence run of ${evidence.last}.`);
     }
     if (evidence.receipts.length) parts.push(`Run receipts dated ${[...new Set(evidence.receipts.map(receipt => receipt.run.date))].sort().join(", ")}.`);
-    return parts.join(" ");
+    return parts.join(" ") || "Not yet in the evidence catalog; run `evidence_report`.";
 }
 
 export function familyPage(source, area) {

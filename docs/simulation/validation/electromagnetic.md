@@ -22,7 +22,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Potential and field within 1e-8; flux imbalance and energy identity below 1e-8; energy and displacement field within relative 1e-8.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Two-material slab in series
 
@@ -34,7 +34,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Relative 1e-8.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Harmonic polynomial potential
 
@@ -46,7 +46,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Tet10: field and energy exact to relative 1e-8. Tet4: field error falls below 0.6 of the previous mesh at each refinement.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Uniformly charged dielectric slab
 
@@ -58,7 +58,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Per refinement: potential error order above 1.7, field order above 0.8, energy error below 0.35 of the previous mesh. Finest mesh: potential below 0.005, field below 0.1, energy below 0.025. Flux imbalance below 1e-9.
 
-**Result.** Potential error 4.6e-2, 1.1e-2, 2.9e-3; field error 0.29, 0.14, 0.072; energy error 0.25, 0.063, 0.016.
+**Result.** Not yet in the evidence catalog; run `evidence_report`. Potential error 4.6e-2, 1.1e-2, 2.9e-3; field error 0.29, 0.14, 0.072; energy error 0.25, 0.063, 0.016.
 
 ### Steady current in a copper bar
 
@@ -70,7 +70,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Relative 1e-9.
 
-**Result.** Peak current density 59 600.000 A/m² against 59 600 A/m² (relative difference 1e-13); Joule power 0.596000 W against 0.596 W (1e-14).
+**Result.** Not yet in the evidence catalog; run `evidence_report`. Peak current density 59 600.000 A/m² against 59 600 A/m² (relative difference 1e-13); Joule power 0.596000 W against 0.596 W (1e-14).
 
 ## Magnetostatics
 
@@ -84,7 +84,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Each error falls by more than 1.4× per refinement. Finest mesh: potential below 0.02, flux density below 0.10, energy below 0.25. Physical and gauge residuals below 8e-10.
 
-**Result.** Flux-density error 0.166, 0.116, 0.064 and energy error 0.80, 0.39, 0.12 on 1, 2 and 4 cells.
+**Result.** Not yet in the evidence catalog; run `evidence_report`. Flux-density error 0.166, 0.116, 0.064 and energy error 0.80, 0.39, 0.12 on 1, 2 and 4 cells.
 
 ## Harmonic
 
@@ -98,7 +98,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Impedance error below 2e-3 at 32 cells and reduced by more than 3× from 8 to 32 cells; Joule loss equals $\tfrac12\mathrm{Re}(U\bar I)$ within 1e-8; Poynting and charge-continuity residuals below 1e-8.
 
-**Result.** Relative impedance error at 8, 16 and 32 cells: 4.2e-4, 1.0e-4, 2.6e-5 at $t/\delta$ = 0.5; 7.3e-3, 1.8e-3, 4.5e-4 at 2; 1.6e-2, 3.9e-3, 9.8e-4 at 4. The error falls fourfold per refinement.
+**Result.** Not yet in the evidence catalog; run `evidence_report`. Relative impedance error at 8, 16 and 32 cells: 4.2e-4, 1.0e-4, 2.6e-5 at $t/\delta$ = 0.5; 7.3e-3, 1.8e-3, 4.5e-4 at 2; 1.6e-2, 3.9e-3, 9.8e-4 at 4. The error falls fourfold per refinement.
 
 ### Low-frequency limit of a driven strip
 
@@ -110,4 +110,4 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Resistance within relative 1e-6; reactance within relative 2e-2.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.

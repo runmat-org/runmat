@@ -22,7 +22,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Kernel: relative error below 5 % and decreasing with refinement. Public example: between 34.2 and 37.8 Pa (5 %), which contains the uniform inlet's entrance loss of about +3 %.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Couette flow
 
@@ -34,7 +34,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Velocity relative L2 error below 0.25; wall shear within 0.25; global momentum below 1e-6. For the exact linear field, vorticity and wall shear within 1e-6.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Fully developed flow in a rectangular duct
 
@@ -46,7 +46,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Each error decreases with refinement; finest velocity error below 0.35 and flow-rate error below 0.25; boundary flux below 1e-8.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Uniform flow through a porous zone
 
@@ -58,7 +58,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Relative 1e-6.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Shear-thinning channel flow
 
@@ -70,7 +70,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Error decreases with refinement and is below 5 % on the finest mesh.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ## Transient
 
@@ -84,7 +84,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Velocity within 1e-8; pressure gradient within 1e-6.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
 
 ### Exponentially decaying translation
 
@@ -96,4 +96,4 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 **Tolerance.** Error falls below 0.6 of its previous value at each halving of the step (first order) and is below 0.02 at the finest step.
 
-**Result.** 
+**Result.** Not yet in the evidence catalog; run `evidence_report`.
