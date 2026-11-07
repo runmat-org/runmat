@@ -6,6 +6,8 @@
 #include <IntCurveSurface_TransitionOnCurve.hxx>
 #include <TColgp_Array1OfPnt2d.hxx>
 #include <TopTools_MapOfShape.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
+#include <NCollection_DataMap.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -552,6 +554,58 @@ void push_origins(rust::Vec<KOrigin>& v, const Origins& o) {
   }
 }
 
+// A face's surface kind and geometry (normal or axis, centroid, area, exact bounding box) by
+// the face (its shape and location) and orientation. A boolean keeps the faces it doesn't touch
+// as they were, so a face's payload is computed once per feature that changes it, not once per
+// feature: a cut through a lofted shell otherwise recomputed the exact box and area of every
+// face it left alone. An entry also records the face's surface and the edges of its wires, and
+// is used only while both are the same, so a face edited in place is computed afresh. The
+// entries hold their faces, so a face's shape is never freed and reused while its entry stands;
+// the memo empties itself past kFaceMemoLimit faces. Callers hold kernel_lock().
+constexpr int kFaceMemoLimit = 20000;
+
+struct FaceMemoEntry {
+  KFace payload;
+  Handle(Geom_Surface) surface;
+  std::vector<const void*> edges;
+};
+using FaceMemo = NCollection_DataMap<TopoDS_Shape, FaceMemoEntry, TopTools_ShapeMapHasher>;
+
+FaceMemo& face_memo(TopAbs_Orientation o) {
+  static FaceMemo forward, reversed;
+  return o == TopAbs_REVERSED ? reversed : forward;
+}
+
+KFace copy_geometry(const KFace& from) {
+  KFace k;
+  k.kept = false;
+  k.surface = from.surface;
+  for (double x : from.geom) k.geom.push_back(x);
+  return k;
+}
+
+std::vector<const void*> face_edges(const TopoDS_Face& f) {
+  std::vector<const void*> out;
+  for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) out.push_back(ex.Current().TShape().get());
+  return out;
+}
+
+KFace face_payload_memo(const TopoDS_Face& f) {
+  const TopAbs_Orientation o = f.Orientation();
+  if (o != TopAbs_FORWARD && o != TopAbs_REVERSED) return face_payload(f);
+  FaceMemo& memo = face_memo(o);
+  TopLoc_Location loc;
+  const Handle(Geom_Surface) surface = BRep_Tool::Surface(f, loc);
+  std::vector<const void*> edges = face_edges(f);
+  if (const FaceMemoEntry* held = memo.Seek(f)) {
+    if (held->surface == surface && held->edges == edges) return copy_geometry(held->payload);
+  }
+  KFace k = face_payload(f);
+  if (memo.Extent() >= kFaceMemoLimit) memo.Clear();
+  memo.Bind(f, FaceMemoEntry{copy_geometry(k), surface, std::move(edges)});
+  return k;
+}
+
 KBody body_payload(const Tracked& t, const TopoDS_Shape& piece, bool sheet) {
   auto body = summarize(piece, sheet);
   KBody k;
@@ -559,7 +613,7 @@ KBody body_payload(const Tracked& t, const TopoDS_Shape& piece, bool sheet) {
   TopTools_IndexedMapOfShape face_index;
   for (const TopoDS_Face& f : body->faces) face_index.Add(f);
   for (const TopoDS_Face& f : body->faces) {
-    KFace kf = face_payload(f);
+    KFace kf = face_payload_memo(f);
     const Origins& o = origins_of(t.faces, f);
     if (o.empty()) incomplete("an output face has no recorded origin");
     push_origins(kf.origins, o);

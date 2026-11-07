@@ -9,6 +9,9 @@
 //! dynamic value (an `.m` function, a published value of another file, a snapshot) depends on
 //! more than its key says, so it is never kept.
 //!
+//! Circuit boards' 3D models are kept the same way, keyed on the layout and every circuit file
+//! it reads ([`board_key`]).
+//!
 //! The cache holds at most [`BUDGET_BYTES`] of display meshes; the least recently used entries
 //! go first.
 
@@ -49,6 +52,7 @@ pub struct ConfiguredPart {
 enum Entry {
     Assembly(Rc<AssemblyPart>),
     Configured(Rc<ConfiguredPart>),
+    Board(Rc<PartDisplay>),
 }
 
 struct Slot {
@@ -138,6 +142,19 @@ pub fn configured_key(path: &str, document: &PartDocument, key: &ConfigKey) -> S
     format!("configured\0{path}\0{config}\0{document}")
 }
 
+/// The key of circuit board `file`'s 3D model: its layout's text and every circuit file the
+/// layout reads, by path. A board's compile reads nothing else.
+pub fn board_key(file: &str, layout: &str, text: &str, circuit_files: &BTreeMap<String, String>) -> String {
+    let mut key = format!("board\0{file}\0{layout}\0{text}");
+    for (path, content) in circuit_files {
+        key.push('\0');
+        key.push_str(path);
+        key.push('\0');
+        key.push_str(content);
+    }
+    key
+}
+
 fn get(key: &str) -> Option<Entry> {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
@@ -148,6 +165,7 @@ fn get(key: &str) -> Option<Entry> {
             match &slot.entry {
                 Entry::Assembly(p) => Entry::Assembly(Rc::clone(p)),
                 Entry::Configured(p) => Entry::Configured(Rc::clone(p)),
+                Entry::Board(p) => Entry::Board(Rc::clone(p)),
             }
         });
         if found.is_some() {
@@ -211,6 +229,17 @@ pub fn configured_part(key: String, make: impl FnOnce() -> (ConfiguredPart, bool
         put(key, Entry::Configured(Rc::clone(&part)), bytes);
     }
     part
+}
+
+/// Circuit board `key`'s 3D model, made by `make` when the cache doesn't hold it.
+pub fn board_part<E>(key: String, make: impl FnOnce() -> Result<PartDisplay, E>) -> Result<PartDisplay, E> {
+    if let Some(Entry::Board(p)) = get(&key) {
+        return Ok((*p).clone());
+    }
+    let display = make()?;
+    let bytes = display_bytes(&display);
+    put(key, Entry::Board(Rc::new(display.clone())), bytes);
+    Ok(display)
 }
 
 /// An evaluator that notes whether the regeneration asked it for anything.

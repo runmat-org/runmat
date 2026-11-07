@@ -4,7 +4,8 @@
 //!
 //! `cargo run --release -p runmat-design-tools --features occt --example drone_timing -- [project dir] [top file] [edited part]`
 //! (defaults: runmat-cad-wasm's tests/drone, /drone.assembly, /mechanical/body/battery.part). `FOCUS=a,b` limits the
-//! per-part pass to parts whose path contains one of the words. Prints one JSON object.
+//! per-part pass to parts whose path contains one of the words; `REPEAT=n` adds n more unchanged
+//! compiles (for a profiler). Prints one JSON object.
 
 use runmat_cad::metering::{MeterClock, UsageEvent, UsageMeter};
 use runmat_cad::regen::{regenerate_metered, RegenCache, RegenContext, RegenRequest};
@@ -140,6 +141,10 @@ fn main() {
         let cold = run("cold", &files);
         let warm = run("unchanged", &files);
         assert_eq!(cold, warm, "an unchanged recompile gives the same output");
+        // REPEAT=n: n more unchanged compiles, for a profiler to sample the cached path.
+        for _ in 0..std::env::var("REPEAT").ok().and_then(|n| n.parse::<usize>().ok()).unwrap_or(0) {
+            run("unchanged again", &files);
+        }
         let mut changed = files.clone();
         if let Some(t) = changed.get_mut(&edited) {
             // One dimension changes: the first `mm` value gains 0.5 mm.

@@ -68,8 +68,16 @@ pub fn layout_path(file: &str) -> String {
     }
 }
 
-/// The board's layout compiled in a circuit session, or why it doesn't compile to a board.
-pub(crate) fn compiled_board(file: &str, files: &Files) -> Result<runmat_circuit::runtime::Session, String> {
+/// What a board's compile reads: its layout's path and text, and the circuit files the layout
+/// names (the circuit, its lock, and what they name), by path.
+pub(crate) struct BoardInputs {
+    pub layout: String,
+    pub text: String,
+    pub circuit_files: runmat_circuit::runtime::Files,
+}
+
+/// The files board `file` compiles from, or why its layout isn't there.
+pub(crate) fn board_inputs(file: &str, files: &Files) -> Result<BoardInputs, String> {
     let layout = layout_path(file);
     let text = files
         .get(&layout)
@@ -101,8 +109,18 @@ pub(crate) fn compiled_board(file: &str, files: &Files) -> Result<runmat_circuit
         }
     }
     circuit_files.remove(&layout);
+    Ok(BoardInputs { layout, text: text.clone(), circuit_files })
+}
+
+/// The board's layout compiled in a circuit session, or why it doesn't compile to a board.
+pub(crate) fn compiled_board(file: &str, files: &Files) -> Result<runmat_circuit::runtime::Session, String> {
+    compile_inputs(&board_inputs(file, files)?)
+}
+
+fn compile_inputs(inputs: &BoardInputs) -> Result<runmat_circuit::runtime::Session, String> {
+    let BoardInputs { layout, text, circuit_files } = inputs;
     let mut session = runmat_circuit::runtime::Session::new();
-    let out = session.compile(&layout, text, &circuit_files, &Default::default());
+    let out = session.compile(layout, text, circuit_files, &Default::default());
     if session.board_model().is_none() {
         let first = out
             .diagnostics
@@ -113,9 +131,17 @@ pub(crate) fn compiled_board(file: &str, files: &Files) -> Result<runmat_circuit
     Ok(session)
 }
 
-/// The board's 3D model as a part display (metres), or why there is none.
+/// The board's 3D model as a part display (metres), or why there is none. Kept across compiles
+/// by everything its compile reads ([`crate::runtime::part_cache::board_key`]), so an assembly
+/// recompile reuses an unchanged board.
 pub fn board_display(file: &str, files: &Files) -> Result<PartDisplay, String> {
-    let model = compiled_board(file, files)?.board_model().ok_or("no board")?;
+    let inputs = board_inputs(file, files)?;
+    let key = crate::runtime::part_cache::board_key(file, &inputs.layout, &inputs.text, &inputs.circuit_files);
+    crate::runtime::part_cache::board_part(key, || board_display_of(&inputs))
+}
+
+fn board_display_of(inputs: &BoardInputs) -> Result<PartDisplay, String> {
+    let model = compile_inputs(inputs)?.board_model().ok_or("no board")?;
     let mm = |v: f64| (v * 1e-3) as f32;
     let bodies = model
         .bodies
@@ -231,6 +257,25 @@ mod tests {
         assert_eq!(edges("Silkscreen"), 0);
         assert_eq!(edges("Copper"), 0);
         assert_eq!(edges("Terminals"), 0);
+    }
+
+    /// A board recompiles only when a file its compile reads changes: an unchanged one is reused,
+    /// a file outside its folder changes nothing (the layout reads its circuit's folder), and an
+    /// edit to its layout compiles it again.
+    #[test]
+    fn an_unchanged_board_is_reused_and_an_edited_one_compiles_again() {
+        use crate::runtime::part_cache::{clear, stats};
+        clear();
+        let mut files = daq_files();
+        let first = board_display("/p/daq.circuit", &files).expect("the daq board");
+        files.insert("/q/arm.part".into(), "part arm {}".into());
+        let again = board_display("/p/daq.circuit", &files).expect("the daq board");
+        assert_eq!(first, again);
+        assert_eq!((stats().hits, stats().misses), (1, 1));
+        let layout = files.get_mut("/p/daq.circuit.layout").unwrap();
+        layout.push_str("\n// edited\n");
+        board_display("/p/daq.circuit", &files).expect("the edited board");
+        assert_eq!((stats().hits, stats().misses), (1, 2));
     }
 
     #[test]
